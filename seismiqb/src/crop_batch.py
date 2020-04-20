@@ -41,6 +41,25 @@ class SeismicCropBatch(Batch):
                 self.add_components(comp, np.array([np.nan] * len(self.index)))
         return self.indices
 
+    @action
+    def add_components(self, components, init=None):
+        """ !!. """
+        if isinstance(components, str):
+            components = (components,)
+            init = (init,)
+        elif isinstance(components, (tuple, list)):
+            components = tuple(components)
+            if init is None:
+                init = (None,) * len(components)
+            else:
+                init = tuple(init)
+
+        for comp, value in zip(components, init):
+            if hasattr(self, comp):
+                setattr(self, comp, value)
+            else:
+                super().add_components(comp, value)
+
 
     @staticmethod
     def salt(path):
@@ -393,7 +412,7 @@ class SeismicCropBatch(Batch):
 
 
     @action
-    @inbatch_parallel(init='_init_component', target='threads')
+    @inbatch_parallel(init='_init_component', post='_assemble', target='threads')
     def filter_out(self, ix, src=None, dst=None, mode=None, expr=None, low=None, high=None, length=None):
         """ Cut mask for horizont extension task.
 
@@ -452,11 +471,7 @@ class SeismicCropBatch(Batch):
             coords = np.round(coords).astype(np.int32)[cond]
             new_mask[coords[:, 0], coords[:, 1], coords[:, 2]] = mask[coords[:, 0], coords[:, 1], coords[:, 2]]
             mask = new_mask
-
-        pos = self.get_pos(None, dst, ix)
-        getattr(self, dst)[pos] = mask
-        return self
-
+        return mask
 
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='threads')
