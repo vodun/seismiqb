@@ -41,11 +41,7 @@ def channelize_image(image, total_channels, n_channel=0, greyscale=False, opacit
 def filter_kwargs(kwargs, keys):
     """ Filter the dict of kwargs leaving only supplied keys.
     """
-    kwargs_ = {}
-    for key in keys:
-        if key in kwargs:
-            kwargs_.update({key: kwargs[key]})
-    return kwargs_
+    return {key: value for key, value in kwargs.items() if key in keys}
 
 def plot_image(image, mode, backend, **kwargs):
     """ Overall plotter function, redirecting plotting task to one of the methods of backend-classes.
@@ -585,7 +581,7 @@ class MatplotlibPlotter:
         histo_kwargs = filter_kwargs(updated, ['bins', 'density', 'alpha', 'facecolor'])
         label_kwargs = filter_kwargs(updated, ['label', 'fontsize', 'family', 'color'])
         xlabel_kwargs = filter_kwargs(updated, ['xlabel', 'fontsize', 'family', 'color'])
-        ylabel_kwargs = filter_kwargs(updated, ['ylabel', 'fontsize', 'family', 'color', 'ylim'])
+        ylabel_kwargs = filter_kwargs(updated, ['ylabel', 'fontsize', 'family', 'color'])
         xaxis_kwargs = filter_kwargs(updated, ['xlim'])
         yaxis_kwargs = filter_kwargs(updated, ['ylim'])
 
@@ -595,5 +591,46 @@ class MatplotlibPlotter:
         plt.title(**label_kwargs)
         plt.xlim(xaxis_kwargs.get('xlim'))  # these are positional ones
         plt.ylim(yaxis_kwargs.get('ylim'))
+
+        return plt
+
+    def curve(self, *args, **kwargs):
+        """ Plot a curve.
+
+        Parameters
+        ----------
+        args : tuple
+            a sequence containing curves for plotting along with, possibly, specification of
+            plot formats. Must at least contain an array of ys, but may also be comprised of
+            triples of (xs, ys, fmt) for an arbitrary number of curves.
+        kwargs : dict
+            label : str
+                title of rendered image.
+            xlabel : str
+                xaxis-label.
+            ylabel : str
+                yaxis-label.
+            fontsize : int
+                fontsize of labels and titles.
+            other
+        """
+        # defaults
+        defaults = {'figsize': (12, 7),
+                    'label': 'Loss plot',
+                    'xlabel': 'Iteration number',
+                    'ylabel': 'Loss',
+                    'fontsize': 20}
+        updated = {**defaults, **filter_kwargs(kwargs, list(defaults.keys()) + ['family', 'color'])}
+
+        # form groups of kwargs
+        label_kwargs = filter_kwargs(updated, ['label', 'fontsize', 'family', 'color'])
+        xlabel_kwargs = filter_kwargs(updated, ['xlabel', 'fontsize', 'family', 'color'])
+        ylabel_kwargs = filter_kwargs(updated, ['ylabel', 'fontsize', 'family', 'color'])
+
+        # plot the curve and labels
+        plt.plot(*args)
+        plt.xlabel(**xlabel_kwargs)
+        plt.ylabel(**ylabel_kwargs)
+        plt.title(**label_kwargs)
 
         return plt
