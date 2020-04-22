@@ -379,7 +379,7 @@ class MatplotlibPlotter:
             plt.colorbar(**colorbar_kwargs)
         plt.tick_params(**tick_params)
 
-        save_and_show(plt, **updated)
+        self.save_and_show(plt, **updated)
 
     def overlap(self, images, **kwargs):
         """ Plot several images on one canvas using matplotlib: render the first one in greyscale
@@ -436,7 +436,7 @@ class MatplotlibPlotter:
                                        **render_kwargs)
         plt.title(**label_kwargs)
 
-        save_and_show(plt, **updated)
+        self.save_and_show(plt, **updated)
 
 
     def rgb(self, image, **kwargs):
@@ -485,7 +485,7 @@ class MatplotlibPlotter:
         plt.ylabel(**yaxis_kwargs)
         plt.tick_params(**tick_params)
 
-        save_and_show(plt, **updated)
+        self.save_and_show(plt, **updated)
 
     def separate(self, images, **kwargs):
         """ Plot several images on a row of canvases using matplotlib.
@@ -541,7 +541,7 @@ class MatplotlibPlotter:
 
         fig.suptitle(y=1.1, **label_kwargs)
 
-        save_and_show(plt, **updated)
+        self.save_and_show(plt, **updated)
 
     def histogram(self, image, **kwargs):
         """ Plot histogram using matplotlib.
