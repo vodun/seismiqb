@@ -4,7 +4,7 @@ from glob import glob
 
 import numpy as np
 
-from ..batchflow import Dataset, Sampler, DatasetIndex
+from ..batchflow import Dataset, Sampler, DatasetIndex, Pipeline
 from ..batchflow import NumpySampler, ConstantSampler
 
 from .geometry import SeismicGeometry
