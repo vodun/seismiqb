@@ -300,7 +300,7 @@ class PlotlyPlotter:
 
         self.save_and_show(fig, **updated)
 
-@matplotlib_dec
+
 class MatplotlibPlotter:
     """ Plotting backend for matplotlib.
     """
