@@ -18,7 +18,6 @@ from skimage.measure import label
 from ..batchflow import HistoSampler
 
 from .utils import round_to_array, groupby_mean
-# from .plot_utils import show_sampler # consider redirecting everyhting on plot_image
 from .plotters import plot_image
 
 

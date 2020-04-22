@@ -12,6 +12,7 @@ from .crop_batch import SeismicCropBatch
 
 from .horizon import Horizon, UnstructuredHorizon
 from .metrics import HorizonMetrics
+from .plotters import plot_image
 from .utils import IndexedDict, round_to_array
 
 
@@ -577,6 +578,8 @@ class SeismicCubeset(Dataset):
         batch = (pipeline << self).next_batch(len(self), n_epochs=None)
 
         imgs = [np.squeeze(getattr(batch, comp)) for comp in components]
+        if mode in ['x', 'xl', 'xline']:
+            imgs = [img.T for img in imgs]
         title = kwargs.get('title', 'iline {} out of {} on {}'.format(n_line, geom.ilines_len, cube_name))
 
         plot_image(imgs, backend=backend, title=title, mode=plot_mode, **kwargs)
