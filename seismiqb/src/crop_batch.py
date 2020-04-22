@@ -12,7 +12,7 @@ from ..batchflow.batch_image import transform_actions # pylint: disable=no-name-
 
 from .horizon import Horizon
 from .utils import aggregate
-from .plot_utils import plot_batch_components
+# from .plot_utils import plot_batch_components
 
 
 

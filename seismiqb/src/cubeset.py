@@ -13,8 +13,6 @@ from .crop_batch import SeismicCropBatch
 from .horizon import Horizon, UnstructuredHorizon
 from .metrics import HorizonMetrics
 from .utils import IndexedDict, round_to_array
-from .plot_utils import show_sampler, plot_slide, plot_image
-
 
 
 class SeismicCubeset(Dataset):
@@ -550,8 +548,8 @@ class SeismicCubeset(Dataset):
             Way of showing results. Can be either `overlap` or `separate`.
         """
         components = ('images', 'masks') if list(self.labels.values())[0] else ('images',)
-        cube_name = dataset.indices[idx]
-        geom = dataset.geometries[cube_name]
+        cube_name = self.indices[idx]
+        geom = self.geometries[cube_name]
         crop_shape = np.array(geom.cube_shape)
 
         if mode in ['i', 'il', 'iline']:
@@ -576,7 +574,7 @@ class SeismicCubeset(Dataset):
 
             pipeline = pipeline + labels_pipeline
 
-        batch = (pipeline << dataset).next_batch(len(dataset), n_epochs=None)
+        batch = (pipeline << self).next_batch(len(self), n_epochs=None)
 
         imgs = [np.squeeze(getattr(batch, comp)) for comp in components]
         title = kwargs.get('title', 'iline {} out of {} on {}'.format(n_line, geom.ilines_len, cube_name))

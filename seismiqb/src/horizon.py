@@ -18,7 +18,7 @@ from skimage.measure import label
 from ..batchflow import HistoSampler
 
 from .utils import round_to_array, groupby_mean
-from .plot_utils import show_sampler # consider redirecting everyhting on plot_image
+# from .plot_utils import show_sampler # consider redirecting everyhting on plot_image
 from .plotters import plot_image
 
 
@@ -830,18 +830,6 @@ class Horizon(BaseLabel):
             points = self.points
 
         self.sampler = HistoSampler(np.histogramdd(points/self.cube_shape, bins=bins))
-
-    def show_sampler(self, n=100000, eps=3, show_unique=False, **kwargs):
-        """ Generate a lot of points and look at their (iline, xline) positions.
-
-        Parameters
-        ----------
-        n : int
-            Number of points to generate.
-        eps : int
-            Window of painting.
-        """
-        show_sampler(self.sampler, None, self.geometry, n=n, eps=eps, show_unique=show_unique, **kwargs)
 
 
     def add_to_mask(self, mask, locations=None, width=3, alpha=1, **kwargs):
