@@ -421,13 +421,11 @@ class SeismicCropBatch(Batch):
 
         pos = self.get_pos(None, src, ix)
         mask = getattr(self, src)[pos]
-        if np.random.binomial(1, 1 - p):
+        coords = np.where(mask > 0)
+
+        if np.random.binomial(1, 1 - p) or len(coords[0]) == 0:
             return mask
         else:
-            coords = np.where(mask > 0)
-            if len(coords[0]) == 0:
-                getattr(self, dst)[pos] = mask
-                return self
             if mode is not None:
                 new_mask = np.zeros_like(mask)
                 point = np.random.randint(len(coords))
@@ -439,7 +437,6 @@ class SeismicCropBatch(Batch):
                     new_mask[:, coords[1][point], :] = mask[:, coords[1][point], :]
                 else:
                     raise ValueError('Mode should be either `point`, `iline`, `xline` or `line')
-                mask = new_mask
             if expr is not None:
                 coords = np.where(mask > 0)
                 new_mask = np.zeros_like(mask)
@@ -459,8 +456,9 @@ class SeismicCropBatch(Batch):
                 new_mask[coords[:, 0], coords[:, 1], coords[:, 2]] = mask[coords[:, 0],
                                                                           coords[:, 1],
                                                                           coords[:, 2]]
-                mask = new_mask
-            return mask
+            else:
+                new_mask = mask
+            return new_mask
 
 
     @action
