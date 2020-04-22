@@ -43,9 +43,29 @@ def filter_kwargs(kwargs, keys):
     """
     return {key: value for key, value in kwargs.items() if key in keys}
 
-def plot_image(image, mode, backend, **kwargs):
-    """ Overall plotter function, redirecting plotting task to one of the methods of backend-classes.
+def plot_image(image, mode='single', backend='matplotlib', **kwargs):
+    """ Overall plotter function, converting kwarg-names to match chosen backend and redirecting
+    plotting task to one of the methods of backend-classes.
     """
+    def _convert_kwargs_keys(mode, backend, kwargs):
+        """ Update kwargs-dict for keys to match chosen backend.
+        """
+        # make conversion dict
+        if backend == 'matplotlib':
+            if mode in ['single', 'rgb', 'overlap', 'histogram']:
+                converter = {'title': 'label', 't':'label'}
+            elif mode in ['separate']:
+                converter = {'title': 't', 'label': 't'}
+        else:
+            converter = {'label': 'title', 't': 'title'}
+
+        # perform conversion inplace
+        for key in converter:
+            if key in kwargs:
+                value = kwargs.pop(key)
+                kwargs[converter[key]] = value
+
+    _convert_kwargs_keys(mode, backend, kwargs)
     if backend in ('matplotlib', 'plt'):
         getattr(MatplotlibPlotter(), mode)(image, **kwargs)
     elif backend in ('plotly', 'go'):
@@ -53,59 +73,25 @@ def plot_image(image, mode, backend, **kwargs):
     else:
         raise ValueError('{} backend is not supported!'.format(backend))
 
-def matplotlib_dec(cls):
-    """ Decorator adding savefigure-capabilities into MatplotlibPlotter.
-    """
-    names=['rgb', 'overlap', 'single', 'separate', 'histogram']
-    # update each method
-    for name in names:
-        old_ = getattr(cls, name)
-        def updated(self, *args, old_=old_, **kwargs):
-            # pop savefig-kwarg and show-kwarg
-            show = kwargs.pop('show', True)
-            save = kwargs.pop('save', None)
-            plt_ = old_(self, *args, **kwargs)
-            # save if necessary and render
-            if save is not None:
-                plt_.savefig(**save)
-            if show:
-                plt_.show()
-            else:
-                plt_.close()
 
-        # change the class-method
-        setattr(cls, name, updated)
-
-    return cls
-
-def plotly_dec(cls):
-    """ Decorator adding savefigure-capabilities into PlotlyPlotter.
-    """
-    names=['rgb', 'overlap', 'single', 'separate']
-
-    # update each method
-    for name in names:
-        old_ = getattr(cls, name)
-        def updated(self, *args, old_=old_, **kwargs):
-            # pop savefig-kwarg and show-kwarg
-            show = kwargs.pop('show', True)
-            save = kwargs.pop('save', None)
-            fig = old_(self, *args, **kwargs)
-            # save if necessary and render
-            if save is not None:
-                fig.write_image(**save)
-            if show:
-                fig.show()
-
-        # change the class-method
-        setattr(cls, name, updated)
-
-    return cls
-
-@plotly_dec
 class PlotlyPlotter:
     """ Plotting backend for plotly.
     """
+    @staticmethod
+    def save_and_show(fig, **kwargs):
+        # fetch savefig, show-kwarg and possibly additional kwargs for saving
+        show = kwargs.get('show', True)
+        savepath = kwargs.get('savepath', None)
+        save_kwargs = kwargs.get('save', dict())
+
+        # save if necessary and render
+        if savepath is not None:
+            fig.write_image(savepath, **save_kwargs)
+        if show:
+            fig.show()
+        else:
+            fig.close()
+
     def single(self, image, **kwargs):
         """ Plot single image/heatmap using plotly.
 
@@ -142,8 +128,7 @@ class PlotlyPlotter:
                     'title': 'Depth map',
                     'max_size' : 600,
                     'slice': (slice(None, None), slice(None, None))}
-        for_update = filter_kwargs(kwargs, list(defaults.keys()) + ['opacity', 'zmin', 'zmax', 'showscale']) # TODO: more args to add in here
-        updated = {**defaults, **for_update}
+        updated = {**defaults, **kwargs}
 
         # form different groups of kwargs
         render_kwargs = filter_kwargs(updated, ['reversescale', 'colorscale', 'opacity', 'showscale'])
@@ -161,7 +146,7 @@ class PlotlyPlotter:
         fig = go.Figure(data=plot_data)
         fig.update_layout(width=width, height=height, **label_kwargs)
 
-        return fig
+        self.save_and_show(fig, **updated)
 
     def overlap(self, images, **kwargs):
         """ Plot several images on one canvas using plotly: render the first one in greyscale
@@ -195,8 +180,7 @@ class PlotlyPlotter:
                     'title': 'Seismic inline',
                     'max_size' : 600,
                     'slice': (slice(None, None), slice(None, None))}
-        for_update = filter_kwargs(kwargs, list(defaults.keys()) + ['opacity', 'zmin', 'zmax']) # TODO: more args to add in here
-        updated = {**defaults, **for_update}
+        updated = {**defaults, **kwargs}
 
         # form different groups of kwargs
         render_kwargs = filter_kwargs(updated, ['zmin', 'zmax'])
@@ -219,7 +203,7 @@ class PlotlyPlotter:
         fig = go.Figure(data=plot_data)
         fig.update_layout(width=width, height=height, **label_kwargs)
 
-        return fig
+        self.save_and_show(fig, **updated)
 
     def rgb(self, image, **kwargs):
         """ Plot one image in 'rgb' using plotly.
@@ -248,7 +232,7 @@ class PlotlyPlotter:
                     'title': 'RGB amplitudes',
                     'max_size' : 600,
                     'slice': (slice(None, None), slice(None, None))}
-        updated = {**defaults, **filter_kwargs(kwargs, list(defaults.keys()))} # TODO: more args to add in here
+        updated = {**defaults, **kwargs}
 
         # form different groups of kwargs
         render_kwargs = filter_kwargs(updated, [])
@@ -266,7 +250,7 @@ class PlotlyPlotter:
         fig = go.Figure(data=plot_data)
         fig.update_layout(width=width, height=height, **label_kwargs)
 
-        return fig
+        self.save_and_show(fig, **updated)
 
     def separate(self, images, **kwargs):
         """ Plot several images on a row of canvases using plotly.
@@ -296,7 +280,7 @@ class PlotlyPlotter:
                     'title': 'Seismic inline',
                     'max_size' : 600}
         grid = (1, len(images))
-        updated = {**defaults, **filter_kwargs(kwargs, list(defaults.keys()))} # TODO: more args to add in here
+        updated = {**defaults, **kwargs}
 
         # form different groups of kwargs
         render_kwargs = filter_kwargs(updated, [])
@@ -314,12 +298,27 @@ class PlotlyPlotter:
             fig.update_yaxes(row=1, col=i + 1, **yaxis_kwargs['yaxis'])
         fig.update_layout(**label_kwargs)
 
-        return fig
+        self.save_and_show(fig, **updated)
 
 @matplotlib_dec
 class MatplotlibPlotter:
     """ Plotting backend for matplotlib.
     """
+    @staticmethod
+    def save_and_show(fig, **kwargs):
+        # fetch savefig, show-kwarg and possibly additional kwargs for saving
+        show = kwargs.get('show', True)
+        savepath = kwargs.get('savepath', None)
+        save_kwargs = kwargs.get('save', dict())
+
+        # save if necessary and render
+        if savepath is not None:
+            fig.savefig(savepath, **save_kwargs)
+        if show:
+            fig.show()
+        else:
+            fig.close()
+
     def single(self, image, **kwargs):
         """ Plot single image/heatmap using matplotlib.
 
@@ -358,7 +357,7 @@ class MatplotlibPlotter:
                     'pad': 0.07,
                     'labeltop': True,
                     'labelright': True}
-        updated = {**defaults, **filter_kwargs(kwargs, list(defaults.keys()) + ['family', 'color'])} # TODO: more args to add in here
+        updated = {**defaults, **kwargs}
 
         # form different groups of kwargs
         render_kwargs = filter_kwargs(updated, ['cmap', 'vmin', 'vmax', 'alpha'])
@@ -380,7 +379,7 @@ class MatplotlibPlotter:
             plt.colorbar(**colorbar_kwargs)
         plt.tick_params(**tick_params)
 
-        return plt
+        save_and_show(plt, **updated)
 
     def overlap(self, images, **kwargs):
         """ Plot several images on one canvas using matplotlib: render the first one in greyscale
@@ -418,8 +417,7 @@ class MatplotlibPlotter:
                     'cmap': 'gray',
                     'fontsize': 20,
                     'opacity': 1.0}
-        updated = {**defaults, **filter_kwargs(kwargs, list(defaults.keys()) + ['vmin', 'vmax',
-                                                                                'family', 'color'])} # TODO: more args to add in here
+        updated = {**defaults, **kwargs}
 
         # form different groups of kwargs
         render_kwargs = filter_kwargs(updated, ['cmap', 'vmin', 'vmax'])
@@ -438,7 +436,7 @@ class MatplotlibPlotter:
                                        **render_kwargs)
         plt.title(**label_kwargs)
 
-        return plt
+        save_and_show(plt, **updated)
 
 
     def rgb(self, image, **kwargs):
@@ -459,7 +457,6 @@ class MatplotlibPlotter:
                 yaxis-label.
             other
         """
-
         # update defaults
         defaults = {'figsize': (12, 7),
                     'label': 'RGB amplitudes',
@@ -468,7 +465,7 @@ class MatplotlibPlotter:
                     'fontsize': 20,
                     'labeltop': True,
                     'labelright': True}
-        updated = {**defaults, **filter_kwargs(kwargs, list(defaults.keys()) + ['family', 'color'])} # TODO: more args to add in here
+        updated = {**defaults, **kwargs}
 
         # form different groups of kwargs
         render_kwargs = filter_kwargs(updated, [])
@@ -476,7 +473,6 @@ class MatplotlibPlotter:
         xaxis_kwargs = filter_kwargs(updated, ['xlabel', 'fontsize', 'family', 'color'])
         yaxis_kwargs = filter_kwargs(updated, ['ylabel', 'fontsize', 'family', 'color'])
         tick_params = filter_kwargs(updated, ['labeltop', 'labelright'])
-
 
         # channelize and plot the image
         image = channelize_image(image, total_channels=3)
@@ -489,7 +485,7 @@ class MatplotlibPlotter:
         plt.ylabel(**yaxis_kwargs)
         plt.tick_params(**tick_params)
 
-        return plt
+        save_and_show(plt, **updated)
 
     def separate(self, images, **kwargs):
         """ Plot several images on a row of canvases using matplotlib.
@@ -521,8 +517,7 @@ class MatplotlibPlotter:
                     'ylabel': 'ilines',
                     'cmap': 'gray',
                     'fontsize': 20}
-        updated = {**defaults, **filter_kwargs(kwargs, list(defaults.keys()) + ['vmin', 'vmax',
-                                                                                'family', 'color'])} # TODO: more args to add in here
+        updated = {**defaults, **kwargs}
 
         # form different groups of kwargs
         render_kwargs = filter_kwargs(updated, ['cmap', 'vmin', 'vmax'])
@@ -546,7 +541,7 @@ class MatplotlibPlotter:
 
         fig.suptitle(y=1.1, **label_kwargs)
 
-        return fig
+        save_and_show(plt, **updated)
 
     def histogram(self, image, **kwargs):
         """ Plot histogram using matplotlib.
@@ -575,7 +570,7 @@ class MatplotlibPlotter:
                     'xlabel': 'xlines',
                     'ylabel': 'density',
                     'fontsize': 20}
-        updated = {**defaults, **filter_kwargs(kwargs, list(defaults.keys()) + ['family', 'color', 'xlim', 'ylim'])} # TODO: more args to add in here
+        updated = {**defaults, **kwargs}
 
         # form different groups of kwargs
         histo_kwargs = filter_kwargs(updated, ['bins', 'density', 'alpha', 'facecolor'])
@@ -592,7 +587,7 @@ class MatplotlibPlotter:
         plt.xlim(xaxis_kwargs.get('xlim'))  # these are positional ones
         plt.ylim(yaxis_kwargs.get('ylim'))
 
-        return plt
+        self.save_and_show(plt, **updated)
 
     def curve(self, *args, **kwargs):
         """ Plot a curve.
@@ -620,7 +615,7 @@ class MatplotlibPlotter:
                     'xlabel': 'Iteration number',
                     'ylabel': 'Loss',
                     'fontsize': 20}
-        updated = {**defaults, **filter_kwargs(kwargs, list(defaults.keys()) + ['family', 'color'])}
+        updated = {**defaults, **kwargs}
 
         # form groups of kwargs
         label_kwargs = filter_kwargs(updated, ['label', 'fontsize', 'family', 'color'])
@@ -633,4 +628,4 @@ class MatplotlibPlotter:
         plt.ylabel(**ylabel_kwargs)
         plt.title(**label_kwargs)
 
-        return plt
+        self.save_and_show(plt, **updated)

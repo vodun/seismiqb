@@ -15,7 +15,7 @@ from ..batchflow.models.metrics import Metrics
 
 from .horizon import Horizon
 from .utils import compute_running_mean
-from .plot_utils import plot_image
+from .plotters import plot_image
 
 
 
@@ -92,7 +92,7 @@ class BaseSeismicMetric(Metrics):
             # Actual plot
             if plot:
                 if spatial:
-                    plot_image(copy_metric, savefig=savepath, show_plot=show_plot, **plot_dict)
+                    plot_image(copy_metric, savepath=savepath, show=show_plot, **plot_dict)
                 else:
                     pass
             if scalar:
