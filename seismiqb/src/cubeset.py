@@ -535,7 +535,7 @@ class SeismicCubeset(Dataset):
                                                                 printer=printer, hist=hist, plot=plot)
 
 
-    def show_slide(self, idx=0, n_line=0, plot_mode='overlap', mode='iline', **kwargs):
+    def show_slide(self, idx=0, n_line=0, plot_mode='overlap', mode='iline', backend='matplotlib', **kwargs):
         """ Show full slide of the given cube on the given line.
 
         Parameters
@@ -547,7 +547,38 @@ class SeismicCubeset(Dataset):
         n_line : int
             Number of line to show.
         plot_mode : str
-            Way of showing results. Can be either `overlap`, `separate`, `facies`.
+            Way of showing results. Can be either `overlap` or `separate`.
         """
         components = ('images', 'masks') if list(self.labels.values())[0] else ('images',)
-        plot_slide(self, *components, idx=idx, n_line=n_line, plot_mode=plot_mode, mode=mode, **kwargs)
+        cube_name = dataset.indices[idx]
+        geom = dataset.geometries[cube_name]
+        crop_shape = np.array(geom.cube_shape)
+
+        if mode in ['i', 'il', 'iline']:
+            point = np.array([[cube_name, n_line, 0, 0]], dtype=object)
+            crop_shape[0] = 1
+        elif mode in ['x', 'xl', 'xline']:
+            point = np.array([[cube_name, 0, n_line, 0]], dtype=object)
+            crop_shape[1] = 1
+
+        pipeline = (Pipeline()
+                    .crop(points=point, shape=crop_shape)
+                    .load_cubes(dst='images')
+                    .scale(mode='normalize', src='images')
+                    .rotate_axes(src='images'))
+
+        if 'masks' in components:
+            horizons = kwargs.pop('horizons', -1)
+            width = kwargs.pop('width', 4)
+            labels_pipeline = (Pipeline()
+                               .create_masks(dst='masks', width=width, horizons=horizons)
+                               .rotate_axes(src='masks'))
+
+            pipeline = pipeline + labels_pipeline
+
+        batch = (pipeline << dataset).next_batch(len(dataset), n_epochs=None)
+
+        imgs = [np.squeeze(getattr(batch, comp)) for comp in components]
+        title = kwargs.get('title', 'iline {} out of {} on {}'.format(n_line, geom.ilines_len, cube_name))
+
+        plot_image(imgs, backend=backend, title=title, mode=plot_mode, **kwargs)
