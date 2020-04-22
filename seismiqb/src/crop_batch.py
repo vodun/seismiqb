@@ -425,40 +425,39 @@ class SeismicCropBatch(Batch):
 
         if np.random.binomial(1, 1 - p) or len(coords[0]) == 0:
             return mask
-        else:
-            if mode is not None:
-                new_mask = np.zeros_like(mask)
-                point = np.random.randint(len(coords))
-                if mode == 'point':
-                    new_mask[coords[0][point], coords[1][point], :] = mask[coords[0][point], coords[1][point], :]
-                elif mode == 'iline' or (mode == 'line' and np.random.binomial(1, 0.5)) == 1:
-                    new_mask[coords[0][point], :, :] = mask[coords[0][point], :, :]
-                elif mode in ['xline', 'line']:
-                    new_mask[:, coords[1][point], :] = mask[:, coords[1][point], :]
-                else:
-                    raise ValueError('Mode should be either `point`, `iline`, `xline` or `line')
-            if expr is not None:
-                coords = np.where(mask > 0)
-                new_mask = np.zeros_like(mask)
-
-                coords = np.array(coords).astype(np.float).T
-                cond = np.ones(shape=coords.shape[0]).astype(bool)
-                coords /= np.reshape(mask.shape, newshape=(1, 3))
-                if low is not None:
-                    cond &= np.greater_equal(expr(coords), low)
-                if high is not None:
-                    cond &= np.less_equal(expr(coords), high)
-                if length is not None:
-                    low = 0 if not low else low
-                    cond &= np.less_equal(expr(coords), low + length)
-                coords *= np.reshape(mask.shape, newshape=(1, 3))
-                coords = np.round(coords).astype(np.int32)[cond]
-                new_mask[coords[:, 0], coords[:, 1], coords[:, 2]] = mask[coords[:, 0],
-                                                                          coords[:, 1],
-                                                                          coords[:, 2]]
+        if mode is not None:
+            new_mask = np.zeros_like(mask)
+            point = np.random.randint(len(coords))
+            if mode == 'point':
+                new_mask[coords[0][point], coords[1][point], :] = mask[coords[0][point], coords[1][point], :]
+            elif mode == 'iline' or (mode == 'line' and np.random.binomial(1, 0.5)) == 1:
+                new_mask[coords[0][point], :, :] = mask[coords[0][point], :, :]
+            elif mode in ['xline', 'line']:
+                new_mask[:, coords[1][point], :] = mask[:, coords[1][point], :]
             else:
-                new_mask = mask
-            return new_mask
+                raise ValueError('Mode should be either `point`, `iline`, `xline` or `line')
+        if expr is not None:
+            coords = np.where(mask > 0)
+            new_mask = np.zeros_like(mask)
+
+            coords = np.array(coords).astype(np.float).T
+            cond = np.ones(shape=coords.shape[0]).astype(bool)
+            coords /= np.reshape(mask.shape, newshape=(1, 3))
+            if low is not None:
+                cond &= np.greater_equal(expr(coords), low)
+            if high is not None:
+                cond &= np.less_equal(expr(coords), high)
+            if length is not None:
+                low = 0 if not low else low
+                cond &= np.less_equal(expr(coords), low + length)
+            coords *= np.reshape(mask.shape, newshape=(1, 3))
+            coords = np.round(coords).astype(np.int32)[cond]
+            new_mask[coords[:, 0], coords[:, 1], coords[:, 2]] = mask[coords[:, 0],
+                                                                      coords[:, 1],
+                                                                      coords[:, 2]]
+        else:
+            new_mask = mask
+        return new_mask
 
 
     @action
