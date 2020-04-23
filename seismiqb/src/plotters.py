@@ -286,7 +286,8 @@ class PlotlyPlotter:
                     'coloraxis_colorbar': {'title': 'depth'},
                     'title': 'Seismic inline',
                     'max_size' : 600,
-                    'order_axes': (1, 0)}
+                    'order_axes': (1, 0),
+                    'slice': (slice(None, None), slice(None, None))}
         grid = (1, len(images))
         updated = {**defaults, **kwargs}
 
@@ -526,7 +527,7 @@ class MatplotlibPlotter:
             other
         """
         # embedded params
-        defaults = {'figsize': (6 * len(images), 15),
+        defaults = {'figsize': (6 * len(images), 7),
                     't': 'Seismic inline',
                     'xlabel': 'xlines',
                     'ylabel': 'ilines',
