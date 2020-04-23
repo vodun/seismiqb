@@ -282,10 +282,10 @@ class UnstructuredHorizon(BaseLabel):
         mask = self.add_to_mask(mask, locations, width=width, iterator=iterator if stable else None)
         seismic_slide, mask = np.squeeze(seismic_slide), np.squeeze(mask)
 
-        # Display everything
-        title = f'{self.geometry.index_headers[axis]} {loc} out of {self.geometry.lens[axis]}'
-        meta_title = f'U-horizon {self.name} on {self.geometry.name}'
-        plot_image([seismic_slide, mask], mode='overlap', title=title, meta_title=meta_title, **kwargs)  # is meta_title really needed in here?
+        # set defaults if needed and plot the slide
+        title = kwargs.pop('title', (f'U-horizon {self.name} on {self.geometry.name}' + '\n ' +
+                                     f'{self.geometry.index_headers[axis]} {loc} out of {self.geometry.lens[axis]}'))
+        plot_image([seismic_slide, mask], mode='overlap', title=title, **kwargs)
 
 
 
@@ -1560,7 +1560,7 @@ class Horizon(BaseLabel):
     def show_slide(self, loc, width=3, axis='i', order_axes=None, heights=None, **kwargs):
         """ Show slide with horizon on it.
 
-        TODO: add support of meta_title and order_axes into plotters
+        TODO: add support of order_axes into plotters
 
         Parameters
         ----------

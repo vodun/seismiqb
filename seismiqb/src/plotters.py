@@ -79,6 +79,8 @@ class PlotlyPlotter:
     """
     @staticmethod
     def save_and_show(fig, **kwargs):
+        """ Save and show plot if needed.
+        """
         # fetch savefig, show-kwarg and possibly additional kwargs for saving
         show = kwargs.get('show', True)
         savepath = kwargs.get('savepath', None)
@@ -127,6 +129,7 @@ class PlotlyPlotter:
                     'opacity' : 1.0,
                     'title': 'Depth map',
                     'max_size' : 600,
+                    'order_axes': (1, 0),
                     'slice': (slice(None, None), slice(None, None))}
         updated = {**defaults, **kwargs}
 
@@ -142,7 +145,7 @@ class PlotlyPlotter:
         height = coeff * height
 
         # plot the image and set titles
-        plot_data = go.Heatmap(z=image.T[slc], **render_kwargs) # note the usage of Heatmap here
+        plot_data = go.Heatmap(z=np.transpose(image, axes=updated['order_axes'])[slc], **render_kwargs) # note the usage of Heatmap here
         fig = go.Figure(data=plot_data)
         fig.update_layout(width=width, height=height, **label_kwargs)
 
@@ -179,6 +182,7 @@ class PlotlyPlotter:
                     'opacity' : 1.0,
                     'title': 'Seismic inline',
                     'max_size' : 600,
+                    'order_axes': (1, 0),
                     'slice': (slice(None, None), slice(None, None))}
         updated = {**defaults, **kwargs}
 
@@ -194,9 +198,11 @@ class PlotlyPlotter:
         height = coeff * height
 
         # manually combine first image in greyscale and the rest ones colored differently
-        combined = channelize_image(255 * images[0].T, total_channels=4, greyscale=True)
+        combined = channelize_image(255 * np.transpose(images[0], axes=updated['order_axes']),
+                                    total_channels=4, greyscale=True)
         for img, n_channel in zip(images[1:], (0, 1, 2)):
-            combined += channelize_image(255 * img.T, total_channels=4, n_channel=n_channel, opacity=updated['opacity'])
+            combined += channelize_image(255 * np.transpose(img, axes=updated['order_axes']),
+                                         total_channels=4, n_channel=n_channel, opacity=updated['opacity'])
         plot_data = go.Image(z=combined[slc], **render_kwargs) # plot manually combined image
 
         # plot the figure
@@ -231,6 +237,7 @@ class PlotlyPlotter:
                     'coloraxis_colorbar': {'title': 'depth'},
                     'title': 'RGB amplitudes',
                     'max_size' : 600,
+                    'order_axes': (1, 0, 2),
                     'slice': (slice(None, None), slice(None, None))}
         updated = {**defaults, **kwargs}
 
@@ -246,7 +253,7 @@ class PlotlyPlotter:
         height = coeff * height
 
         # plot the image and set titles
-        plot_data = go.Image(z=np.swapaxes(image, 0, 1)[slc], **render_kwargs)
+        plot_data = go.Image(z=np.transpose(image, axes=updated['order_axes'])[slc], **render_kwargs)
         fig = go.Figure(data=plot_data)
         fig.update_layout(width=width, height=height, **label_kwargs)
 
@@ -278,7 +285,8 @@ class PlotlyPlotter:
                     'yaxis': {'title_text': 'height', 'titlefont': {'size': 30}, 'autorange': 'reversed'},
                     'coloraxis_colorbar': {'title': 'depth'},
                     'title': 'Seismic inline',
-                    'max_size' : 600}
+                    'max_size' : 600,
+                    'order_axes': (1, 0)}
         grid = (1, len(images))
         updated = {**defaults, **kwargs}
 
@@ -292,7 +300,8 @@ class PlotlyPlotter:
         # make sure that the images are greyscale and put them each on separate canvas
         fig = make_subplots(rows=grid[0], cols=grid[1])
         for i in range(grid[1]):
-            img = channelize_image(255 * images[i].T, total_channels=4, greyscale=True, opacity=1)
+            img = channelize_image(255 * np.transpose(images[i], axes=updated['order_axes']),
+                                   total_channels=4, greyscale=True, opacity=1)
             fig.add_trace(go.Image(z=img[slc], **render_kwargs), row=1, col=i + 1)
             fig.update_xaxes(row=1, col=i + 1, **xaxis_kwargs['xaxis'])
             fig.update_yaxes(row=1, col=i + 1, **yaxis_kwargs['yaxis'])
@@ -306,6 +315,8 @@ class MatplotlibPlotter:
     """
     @staticmethod
     def save_and_show(fig, **kwargs):
+        """ Save and show plot if needed.
+        """
         # fetch savefig, show-kwarg and possibly additional kwargs for saving
         show = kwargs.get('show', True)
         savepath = kwargs.get('savepath', None)
@@ -356,7 +367,8 @@ class MatplotlibPlotter:
                     'fraction': 0.022,
                     'pad': 0.07,
                     'labeltop': True,
-                    'labelright': True}
+                    'labelright': True,
+                    'order_axes': (1, 0)}
         updated = {**defaults, **kwargs}
 
         # form different groups of kwargs
@@ -369,7 +381,7 @@ class MatplotlibPlotter:
 
         # channelize and plot the image
         plt.figure(figsize=updated['figsize'])
-        _ = plt.imshow(image.T, **render_kwargs)
+        _ = plt.imshow(np.transpose(image, axes=updated['order_axes']), **render_kwargs)
 
         # add titles and labels
         plt.title(y=1.1, **label_kwargs)
@@ -416,7 +428,8 @@ class MatplotlibPlotter:
                     'ylabel': 'ilines',
                     'cmap': 'gray',
                     'fontsize': 20,
-                    'opacity': 1.0}
+                    'opacity': 1.0,
+                    'order_axes': (1, 0)}
         updated = {**defaults, **kwargs}
 
         # form different groups of kwargs
@@ -426,14 +439,15 @@ class MatplotlibPlotter:
         yaxis_kwargs = filter_kwargs(updated, ['ylabel', 'fontsize', 'family', 'color'])
 
         # channelize images and put them on a canvas
-        fig, ax = plt.subplots(figsize=updated['figsize'])
-        ax.imshow(images[0].T, **render_kwargs) # note transposition in here
+        _, ax = plt.subplots(figsize=updated['figsize'])
+        ax.imshow(np.transpose(images[0], axes=updated['order_axes']), **render_kwargs)
         ax.set_xlabel(**xaxis_kwargs)
         ax.set_ylabel(**yaxis_kwargs)
 
         for img, n_channel in zip(images[1:], (0, 1, 2)):
-            ax.imshow(channelize_image(img.T, total_channels=4, n_channel=n_channel, opacity=updated['opacity']),
-                                       **render_kwargs)
+            ax.imshow(channelize_image(np.transpose(img, axes=updated['order_axes']), total_channels=4,
+                                       n_channel=n_channel, opacity=updated['opacity']),
+                      **render_kwargs)
         plt.title(**label_kwargs)
 
         self.save_and_show(plt, **updated)
@@ -464,7 +478,8 @@ class MatplotlibPlotter:
                     'ylabel': 'ilines',
                     'fontsize': 20,
                     'labeltop': True,
-                    'labelright': True}
+                    'labelright': True,
+                    'order_axes': (1, 0, 2)}
         updated = {**defaults, **kwargs}
 
         # form different groups of kwargs
@@ -477,7 +492,7 @@ class MatplotlibPlotter:
         # channelize and plot the image
         image = channelize_image(image, total_channels=3)
         plt.figure(figsize=updated['figsize'])
-        _ = plt.imshow(np.swapaxes(image, 0, 1), **render_kwargs)
+        _ = plt.imshow(np.transpose(image, axes=updated['order_axes']), **render_kwargs)
 
         # add titles and labels
         plt.title(y=1.1, **label_kwargs)
@@ -516,7 +531,8 @@ class MatplotlibPlotter:
                     'xlabel': 'xlines',
                     'ylabel': 'ilines',
                     'cmap': 'gray',
-                    'fontsize': 20}
+                    'fontsize': 20,
+                    'order_axes': (1, 0)}
         updated = {**defaults, **kwargs}
 
         # form different groups of kwargs
@@ -530,9 +546,9 @@ class MatplotlibPlotter:
         fig, ax = plt.subplots(*grid, figsize=updated['figsize'])
 
         # plot image
-        ax[0].imshow(images[0].T, **render_kwargs)
+        ax[0].imshow(np.transpose(images[0], axes=updated['order_axes']), **render_kwargs)
         for i in range(1, len(images)):
-            ax[i].imshow(images[i].T, **render_kwargs) # grey colorschemes are embedded here
+            ax[i].imshow(np.transpose(images[i], axes=updated['order_axes']), **render_kwargs) # grey colorschemes are embedded here
                                                   # might be more beautiful if red-color is in here
                                                   # if so, param for colorscheme is to be added
             ax[i].set_xlabel(**xaxis_kwargs)
