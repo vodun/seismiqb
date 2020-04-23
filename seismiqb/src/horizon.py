@@ -285,7 +285,7 @@ class UnstructuredHorizon(BaseLabel):
         # set defaults if needed and plot the slide
         title = kwargs.pop('title', (f'U-horizon {self.name} on {self.geometry.name}' + '\n ' +
                                      f'{self.geometry.index_headers[axis]} {loc} out of {self.geometry.lens[axis]}'))
-        plot_image([seismic_slide, mask], mode='overlap', title=title, **kwargs)
+        plot_image([seismic_slide, mask], mode='overlap', title=title, order_axes=order_axes, **kwargs)
 
 
 

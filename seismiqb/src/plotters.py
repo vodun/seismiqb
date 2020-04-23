@@ -145,7 +145,7 @@ class PlotlyPlotter:
         height = coeff * height
 
         # plot the image and set titles
-        plot_data = go.Heatmap(z=np.transpose(image, axes=updated['order_axes'])[slc], **render_kwargs) # note the usage of Heatmap here
+        plot_data = go.Heatmap(z=np.transpose(image, axes=updated['order_axes'])[slc], **render_kwargs)
         fig = go.Figure(data=plot_data)
         fig.update_layout(width=width, height=height, **label_kwargs)
 
@@ -532,7 +532,8 @@ class MatplotlibPlotter:
                     'ylabel': 'ilines',
                     'cmap': 'gray',
                     'fontsize': 20,
-                    'order_axes': (1, 0)}
+                    'order_axes': (1, 0),
+                    'label': ['images', 'masks', 'predictions']}
         updated = {**defaults, **kwargs}
 
         # form different groups of kwargs
@@ -548,7 +549,7 @@ class MatplotlibPlotter:
         # plot image
         ax[0].imshow(np.transpose(images[0], axes=updated['order_axes']), **render_kwargs)
         for i in range(1, len(images)):
-            ax[i].imshow(np.transpose(images[i], axes=updated['order_axes']), **render_kwargs) # grey colorschemes are embedded here
+            ax[i].imshow(np.transpose(images[i], axes=updated['order_axes']), **render_kwargs)
                                                   # might be more beautiful if red-color is in here
                                                   # if so, param for colorscheme is to be added
             ax[i].set_xlabel(**xaxis_kwargs)
