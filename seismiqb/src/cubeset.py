@@ -582,7 +582,7 @@ class SeismicCubeset(Dataset):
         imgs = [np.squeeze(getattr(batch, comp)) for comp in components]
 
         # configure defaults
-        title = kwargs.get('title', 'iline {} out of {} on {}'.format(n_line, geom.ilines_len, cube_name))
-        order_axes = kwargs.get('order_axes', (1, 0) if mode in ['i', 'il', 'iline'] else (0, 1))
+        title = kwargs.pop('title', 'iline {} out of {} on {}'.format(n_line, geom.ilines_len, cube_name))
+        order_axes = kwargs.pop('order_axes', (1, 0) if mode in ['i', 'il', 'iline'] else (0, 1))
 
         plot_image(imgs, backend=backend, title=title, mode=plot_mode, order_axes=order_axes, **kwargs)
