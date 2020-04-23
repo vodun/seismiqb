@@ -534,7 +534,7 @@ class SeismicCubeset(Dataset):
                                                                 printer=printer, hist=hist, plot=plot)
 
 
-    def show_slide(self, idx=0, n_line=0, plot_mode='overlap', mode='iline', backend='matplotlib', **kwargs):
+    def show_slide(self, idx=0, n_line=0, mode='iline', plot_mode='overlap', backend='matplotlib', **kwargs):
         """ Show full slide of the given cube on the given line.
 
         Parameters
@@ -547,6 +547,9 @@ class SeismicCubeset(Dataset):
             Number of line to show.
         plot_mode : str
             Way of showing results. Can be either `overlap` or `separate`.
+        backend : str
+            Backend to use for render. Can be either 'plotly' or 'matplotlib'. Whenever
+            using 'plotly', also use slices to make the rendering take less time.
         """
         components = ('images', 'masks') if list(self.labels.values())[0] else ('images',)
         cube_name = self.indices[idx]
@@ -576,10 +579,10 @@ class SeismicCubeset(Dataset):
             pipeline = pipeline + labels_pipeline
 
         batch = (pipeline << self).next_batch(len(self), n_epochs=None)
-
         imgs = [np.squeeze(getattr(batch, comp)) for comp in components]
-        if mode in ['x', 'xl', 'xline']:
-            imgs = [img.T for img in imgs]
+
+        # configure defaults
         title = kwargs.get('title', 'iline {} out of {} on {}'.format(n_line, geom.ilines_len, cube_name))
+        order_axes = kwargs.get('order_axes', (1, 0) if mode in ['i', 'il', 'iline'] else (0, 1))
 
         plot_image(imgs, backend=backend, title=title, mode=plot_mode, **kwargs)
