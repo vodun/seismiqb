@@ -896,7 +896,12 @@ class SeismicCropBatch(Batch):
             Determines desired order of the axis. The first two are plotted.
         """
         if idx is not None:
-            imgs = [getattr(batch, comp)[idx] for comp in components]
+            imgs = [getattr(self, comp)[idx] for comp in components]
         else:
-            imgs = [getattr(batch, comp) for comp in components]
-        plot_image(imgs, mode=plot_mode, order_axes=order_axes, **kwargs)
+            imgs = [getattr(self, comp) for comp in components]
+
+        # set some defaults
+        xlabel = kwargs.pop('xlabel', 'xlines')
+        ylabel = kwargs.pop('ylabel', 'depth')
+
+        plot_image(imgs, mode=plot_mode, xlabel=xlabel, ylabel=ylabel, order_axes=order_axes, **kwargs)
