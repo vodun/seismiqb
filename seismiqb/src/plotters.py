@@ -580,14 +580,15 @@ class MatplotlibPlotter:
             other
         """
         # update defaults
-        defaults = {'bins': 50,
+        defaults = {'figsize': (8, 5),
+                    'bins': 50,
                     'density': True,
                     'alpha': 0.75,
                     'facecolor': 'b',
                     'label': 'Amplitudes histogram',
                     'xlabel': 'xlines',
                     'ylabel': 'density',
-                    'fontsize': 20}
+                    'fontsize': 15}
         updated = {**defaults, **kwargs}
 
         # form different groups of kwargs
@@ -598,6 +599,8 @@ class MatplotlibPlotter:
         xaxis_kwargs = filter_kwargs(updated, ['xlim'])
         yaxis_kwargs = filter_kwargs(updated, ['ylim'])
 
+        # plot the histo
+        plt.figure(figsize=updated['figsize'])
         _, _, _ = plt.hist(image.flatten(), **histo_kwargs)
         plt.xlabel(**xlabel_kwargs)
         plt.ylabel(**ylabel_kwargs)
@@ -625,14 +628,18 @@ class MatplotlibPlotter:
                 yaxis-label.
             fontsize : int
                 fontsize of labels and titles.
+            curve_labels : list or tuple
+                list/tuple of curve-labels
             other
         """
         # defaults
-        defaults = {'figsize': (12, 7),
+        defaults = {'figsize': (8, 5),
                     'label': 'Loss plot',
                     'xlabel': 'Iteration number',
                     'ylabel': 'Loss',
-                    'fontsize': 20}
+                    'fontsize': 15,
+                    'grid': True,
+                    'legend': True}
         updated = {**defaults, **kwargs}
 
         # form groups of kwargs
@@ -640,10 +647,15 @@ class MatplotlibPlotter:
         xlabel_kwargs = filter_kwargs(updated, ['xlabel', 'fontsize', 'family', 'color'])
         ylabel_kwargs = filter_kwargs(updated, ['ylabel', 'fontsize', 'family', 'color'])
 
-        # plot the curve and labels
-        plt.plot(*args)
+        # plot the curves
+        plt.figure(figsize=updated['figsize'])
+        curves = plt.plot(*args)
+        if updated['legend']:
+            plt.legend(curves, updated.get('curve_labels', ['Loss ' + str(i) for i in range(len(curves))]))
+                                            # unfortunately, it is not possible to set defaults sooner
         plt.xlabel(**xlabel_kwargs)
         plt.ylabel(**ylabel_kwargs)
         plt.title(**label_kwargs)
+        plt.grid(updated['grid'])
 
         self.save_and_show(plt, **updated)
