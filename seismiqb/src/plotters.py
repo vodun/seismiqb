@@ -52,7 +52,7 @@ def plot_image(image, mode='single', backend='matplotlib', **kwargs):
         """
         # make conversion dict
         if backend == 'matplotlib':
-            if mode in ['single', 'rgb', 'overlap', 'histogram']:
+            if mode in ['single', 'rgb', 'overlap', 'histogram', 'curve']:
                 converter = {'title': 'label', 't':'label'}
             elif mode in ['separate']:
                 converter = {'title': 't', 'label': 't'}
