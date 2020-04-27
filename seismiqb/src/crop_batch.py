@@ -901,7 +901,10 @@ class SeismicCropBatch(Batch):
             imgs = [getattr(self, comp) for comp in components]
 
         # set some defaults
-        xlabel = kwargs.pop('xlabel', 'xlines')
-        ylabel = kwargs.pop('ylabel', 'depth')
+        kwargs = {
+            'xlabel': 'xlines',
+            'ylabel': 'depth',
+            **kwargs
+        }
 
-        plot_image(imgs, mode=plot_mode, xlabel=xlabel, ylabel=ylabel, order_axes=order_axes, **kwargs)
+        plot_image(imgs, mode=plot_mode, order_axes=order_axes, **kwargs)

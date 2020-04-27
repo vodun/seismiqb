@@ -283,9 +283,10 @@ class UnstructuredHorizon(BaseLabel):
         seismic_slide, mask = np.squeeze(seismic_slide), np.squeeze(mask)
 
         # set defaults if needed and plot the slide
-        title = kwargs.pop('title', (f'U-horizon {self.name} on {self.geometry.name}' + '\n ' +
-                                     f'{self.geometry.index_headers[axis]} {loc} out of {self.geometry.lens[axis]}'))
-        plot_image([seismic_slide, mask], mode='overlap', title=title, order_axes=order_axes, **kwargs)
+        kwargs = {'title': (f'U-horizon {self.name} on {self.geometry.name}' + '\n ' +
+                            f'{self.geometry.index_headers[axis]} {loc} out of {self.geometry.lens[axis]}'),
+                  **kwargs}
+        plot_image([seismic_slide, mask], mode='overlap', order_axes=order_axes, **kwargs)
 
 
 
@@ -1515,12 +1516,13 @@ class Horizon(BaseLabel):
             matrix = copy(matrix).astype(np.float32)
 
         # defaults for plotting if not supplied in kwargs
-        cmap = kwargs.pop('cmap', 'viridis_r')
-        title = kwargs.pop('title', 'Depth map {} of `{}` on `{}`'.format('on full'*on_full,
-                                                                          self.name, self.cube_name))
-
+        kwargs = {
+            'cmap': 'viridis_r',
+            'title': 'Depth map {} of `{}` on `{}`'.format('on full'*on_full, self.name, self.cube_name),
+            **kwargs
+            }
         matrix[matrix == fill_value] = np.nan
-        plot_image(matrix, mode='single', title=title, cmap=cmap, **kwargs)
+        plot_image(matrix, mode='single', **kwargs)
 
 
     def show_amplitudes_rgb(self, width=3, channel_weights=(1, 0.5, 0.25), to_uint8=True, **kwargs):
@@ -1552,9 +1554,12 @@ class Horizon(BaseLabel):
             amplitudes = (amplitudes * 255).astype(np.uint8)
 
         # defaults for plotting if not supplied in kwargs
-        title = kwargs.pop('title', 'RGB amplitudes of {} on cube {}'.format(self.name, self.cube_name))
+        kwargs = {
+            'title': 'RGB amplitudes of {} on cube {}'.format(self.name, self.cube_name),
+            **kwargs
+            }
 
-        plot_image(amplitudes, title=title, mode='rgb', **kwargs)
+        plot_image(amplitudes, mode='rgb', **kwargs)
 
 
     def show_slide(self, loc, width=3, axis='i', order_axes=None, heights=None, **kwargs):
@@ -1588,10 +1593,13 @@ class Horizon(BaseLabel):
 
         # defaults for plotting if not supplied in kwargs
         header = self.geometry.index_headers[axis]
-        title = kwargs.pop('title', (f'Horizon `{self.name}` on `{self.geometry.name}`' +
-                                     f'\n {header} {loc} out of {self.geometry.lens[axis]}'))
+        kwargs = {
+            'title': (f'Horizon `{self.name}` on `{self.geometry.name}`' +
+                      f'\n {header} {loc} out of {self.geometry.lens[axis]}'),
+            **kwargs
+            }
 
-        plot_image([seismic_slide, mask], mode='overlap', title=title, order_axes=order_axes, **kwargs)
+        plot_image([seismic_slide, mask], mode='overlap', order_axes=order_axes, **kwargs)
 
 
 class StructuredHorizon(Horizon):

@@ -349,11 +349,13 @@ class SeismicGeometry:
         slide = self.load_slide(loc=loc, start=start, end=end, step=step, axis=axis, stable=stable)
 
         # set defaults
-        title = kwargs.pop('title', f'{self.index_headers[axis]} {loc} out of {self.lens[axis]}')
-        xlabel = kwargs.pop('xlabel', 'xlines' if axis == 0 else 'ilines')
-        ylabel = kwargs.pop('ylabel', 'depth')
-        plot_image(slide, mode='single', title=title, order_axes=order_axes, xlabel=xlabel,
-                   ylabel=ylabel, **kwargs)
+        kwargs = {
+            'title': f'{self.index_headers[axis]} {loc} out of {self.lens[axis]}',
+            'xlabel': 'xlines' if axis == 0 else 'ilines',
+            'ylabel': 'depth',
+            **kwargs
+        }
+        plot_image(slide, mode='single', order_axes=order_axes, **kwargs)
 
 
     def show_amplitude_hist(self, scaler=None, bins=50, **kwargs):
@@ -362,10 +364,12 @@ class SeismicGeometry:
         if scaler:
             data = self.scaler(data, mode=scaler)
 
-        title = kwargs.pop('title',
-                           (f'Amplitude distribution for {self.short_name}' +
-                            f'\n Mean/std: {np.mean(data):3.3}/{np.std(data):3.3}'))
-        plot_image(data, backend='matplotlib', bins=bins, mode='histogram', title=title, **kwargs)
+        kwargs = {
+            'title': (f'Amplitude distribution for {self.short_name}' +
+                      f'\n Mean/std: {np.mean(data):3.3}/{np.std(data):3.3}'),
+            **kwargs
+        }
+        plot_image(data, backend='matplotlib', bins=bins, mode='histogram', **kwargs)
 
 
 class SeismicGeometrySEGY(SeismicGeometry):
