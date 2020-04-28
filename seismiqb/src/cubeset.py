@@ -534,18 +534,18 @@ class SeismicCubeset(Dataset):
                                                                 printer=printer, hist=hist, plot=plot)
 
 
-    def show_slide(self, idx=0, n_line=0, mode='iline', plot_mode='overlap', backend='matplotlib', **kwargs):
+    def show_slide(self, idx=0, n_line=0, axis='iline', mode='overlap', backend='matplotlib', **kwargs):
         """ Show full slide of the given cube on the given line.
 
         Parameters
         ----------
         idx : str, int
             Number of cube in the index to use.
-        mode : str
+        axis : str
             Axis to cut along. Can be either `iline` or `xline`.
         n_line : int
             Number of line to show.
-        plot_mode : str
+        mode : str
             Way of showing results. Can be either `overlap` or `separate`.
         backend : str
             Backend to use for render. Can be either 'plotly' or 'matplotlib'. Whenever
@@ -556,12 +556,10 @@ class SeismicCubeset(Dataset):
         geom = self.geometries[cube_name]
         crop_shape = np.array(geom.cube_shape)
 
-        if mode in ['i', 'il', 'iline']:
-            point = np.array([[cube_name, n_line, 0, 0]], dtype=object)
-            crop_shape[0] = 1
-        elif mode in ['x', 'xl', 'xline']:
-            point = np.array([[cube_name, 0, n_line, 0]], dtype=object)
-            crop_shape[1] = 1
+        axis = geom.parse_axis(axis)
+        point = np.array([[cube_name, 0, 0, 0]], dtype=object)
+        point[axis + 1] = n_line
+        crop_shape[axis] = 1
 
         pipeline = (Pipeline()
                     .crop(points=point, shape=crop_shape)
@@ -584,7 +582,7 @@ class SeismicCubeset(Dataset):
         # configure defaults
         kwargs = {
             'title': 'iline {} out of {} on {}'.format(n_line, geom.ilines_len, cube_name),
-            'order_axes': (1, 0) if mode in ['i', 'il', 'iline'] else (0, 1),
+            'order_axes': (1, 0) if axis == 0 else (0, 1),
             **kwargs
         }
 

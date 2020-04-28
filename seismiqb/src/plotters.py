@@ -41,7 +41,7 @@ def channelize_image(image, total_channels, n_channel=0, greyscale=False, opacit
 def filter_kwargs(kwargs, keys):
     """ Filter the dict of kwargs leaving only supplied keys.
     """
-    return {key: value for key, value in kwargs.items() if key in keys}
+    return {key : kwargs[key] for key in keys if key in kwargs}
 
 def plot_image(image, mode='single', backend='matplotlib', **kwargs):
     """ Overall plotter function, converting kwarg-names to match chosen backend and redirecting
@@ -78,12 +78,9 @@ class PlotlyPlotter:
     """ Plotting backend for plotly.
     """
     @staticmethod
-    def save_and_show(fig, **kwargs):
+    def save_and_show(fig, show=True, savepath=None, **kwargs):
         """ Save and show plot if needed.
         """
-        # fetch savefig, show-kwarg and possibly additional kwargs for saving
-        show = kwargs.get('show', True)
-        savepath = kwargs.get('savepath', None)
         save_kwargs = kwargs.get('save', dict())
 
         # save if necessary and render
@@ -315,13 +312,11 @@ class MatplotlibPlotter:
     """ Plotting backend for matplotlib.
     """
     @staticmethod
-    def save_and_show(fig, **kwargs):
+    def save_and_show(fig, show=True, savepath=None, **kwargs):
         """ Save and show plot if needed.
         """
-        # fetch savefig, show-kwarg and possibly additional kwargs for saving
-        show = kwargs.get('show', True)
-        savepath = kwargs.get('savepath', None)
-        save_kwargs = kwargs.get('save', dict())
+        save_kwargs = dict(bbox_inches='tight', pad_inches=0)
+        save_kwargs.update(kwargs.get('save', dict()))
 
         # save if necessary and render
         if savepath is not None:
