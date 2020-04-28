@@ -115,6 +115,9 @@ class PlotlyPlotter:
                 controls the properties of yaxis-labels; uses plotly-format.
             slice : tuple
                 sequence of slice-objects for slicing the image to a lesser one.
+            order_axes : tuple
+                tuple of ints; defines the order of axes for transposition operation
+                applied to the image.
             other
         """
         # update defaults to make total dict of kwargs
@@ -170,6 +173,9 @@ class PlotlyPlotter:
                 controls the properties of yaxis-labels; uses plotly-format.
             slice : tuple
                 sequence of slice-objects for slicing the image to a lesser one.
+            order_axes : tuple
+                tuple of ints; defines the order of axes for transposition operation
+                applied to the image.
             other
         """
         # update defaults to make total dict of kwargs
@@ -226,6 +232,9 @@ class PlotlyPlotter:
                 controls the properties of yaxis-labels; uses plotly-format.
             slice : tuple
                 sequence of slice-objects for slicing the image to a lesser one.
+            order_axes : tuple
+                tuple of ints; defines the order of axes for transposition operation
+                applied to the image.
             other
         """
         # update defaults to make total dict of kwargs
@@ -275,6 +284,9 @@ class PlotlyPlotter:
                 controls the properties of yaxis-labels; uses plotly-format.
             slice : tuple
                 sequence of slice-objects for slicing the image to a lesser one.
+            order_axes : tuple
+                tuple of ints; defines the order of axes for transposition operation
+                applied to the image.
             other
         """
         # defaults
@@ -350,6 +362,9 @@ class MatplotlibPlotter:
                 yaxis-label.
             alpha : float
                 transparency-level of the rendered image
+            order_axes : tuple
+                tuple of ints; defines the order of axes for transposition operation
+                applied to the image.
             other
         """
         # update defaults
@@ -368,6 +383,7 @@ class MatplotlibPlotter:
         updated = {**defaults, **kwargs}
 
         # form different groups of kwargs
+        figure_kwargs = filter_kwargs(updated, ['figsize', 'facecolor', 'dpi')
         render_kwargs = filter_kwargs(updated, ['cmap', 'vmin', 'vmax', 'alpha'])
         label_kwargs = filter_kwargs(updated, ['label', 'fontsize', 'family', 'color'])
         xaxis_kwargs = filter_kwargs(updated, ['xlabel', 'fontsize', 'family', 'color'])
@@ -376,7 +392,7 @@ class MatplotlibPlotter:
         colorbar_kwargs = filter_kwargs(updated, ['fraction', 'pad'])
 
         # channelize and plot the image
-        plt.figure(figsize=updated['figsize'])
+        plt.figure(**figure_kwargs)
         _ = plt.imshow(np.transpose(image, axes=updated['order_axes']), **render_kwargs)
 
         # add titles and labels
@@ -415,6 +431,9 @@ class MatplotlibPlotter:
                 xaxis-label.
             ylabel : str
                 yaxis-label.
+            order_axes : tuple
+                tuple of ints; defines the order of axes for transposition operation
+                applied to the image.
             other
         """
         defaults = {'figsize': (12, 7),
@@ -429,13 +448,14 @@ class MatplotlibPlotter:
         updated = {**defaults, **kwargs}
 
         # form different groups of kwargs
+        figure_kwargs = filter_kwargs(updated, ['figsize', 'facecolor', 'dpi')
         render_kwargs = filter_kwargs(updated, ['cmap', 'vmin', 'vmax'])
         label_kwargs = filter_kwargs(updated, ['label', 'fontsize', 'family', 'color', 'y'])
         xaxis_kwargs = filter_kwargs(updated, ['xlabel', 'fontsize', 'family', 'color'])
         yaxis_kwargs = filter_kwargs(updated, ['ylabel', 'fontsize', 'family', 'color'])
 
         # channelize images and put them on a canvas
-        _, ax = plt.subplots(figsize=updated['figsize'])
+        _, ax = plt.subplots(**figure_kwargs)
         ax.imshow(np.transpose(images[0], axes=updated['order_axes']), **render_kwargs)
         ax.set_xlabel(**xaxis_kwargs)
         ax.set_ylabel(**yaxis_kwargs)
@@ -465,6 +485,9 @@ class MatplotlibPlotter:
                 xaxis-label.
             ylabel : str
                 yaxis-label.
+            order_axes : tuple
+                tuple of ints; defines the order of axes for transposition operation
+                applied to the image.
             other
         """
         # update defaults
@@ -480,6 +503,7 @@ class MatplotlibPlotter:
 
         # form different groups of kwargs
         render_kwargs = filter_kwargs(updated, [])
+        figure_kwargs = filter_kwargs(updated, ['figsize', 'facecolor', 'dpi')
         label_kwargs = filter_kwargs(updated, ['label', 'fontsize', 'family', 'color'])
         xaxis_kwargs = filter_kwargs(updated, ['xlabel', 'fontsize', 'family', 'color'])
         yaxis_kwargs = filter_kwargs(updated, ['ylabel', 'fontsize', 'family', 'color'])
@@ -487,7 +511,7 @@ class MatplotlibPlotter:
 
         # channelize and plot the image
         image = channelize_image(image, total_channels=3)
-        plt.figure(figsize=updated['figsize'])
+        plt.figure(**figure_kwargs)
         _ = plt.imshow(np.transpose(image, axes=updated['order_axes']), **render_kwargs)
 
         # add titles and labels
@@ -519,6 +543,9 @@ class MatplotlibPlotter:
                 xaxis-label.
             ylabel : str
                 yaxis-label.
+            order_axes : tuple
+                tuple of ints; defines the order of axes for transposition operation
+                applied to the image.
             other
         """
         # embedded params
@@ -533,6 +560,7 @@ class MatplotlibPlotter:
         updated = {**defaults, **kwargs}
 
         # form different groups of kwargs
+        figure_kwargs = filter_kwargs(updated, ['figsize', 'facecolor', 'dpi')
         render_kwargs = filter_kwargs(updated, ['cmap', 'vmin', 'vmax'])
         label_kwargs = filter_kwargs(updated, ['t', 'fontsize', 'family', 'color'])
         xaxis_kwargs = filter_kwargs(updated, ['xlabel', 'fontsize', 'family', 'color'])
@@ -540,7 +568,7 @@ class MatplotlibPlotter:
         titles_kwargs = filter_kwargs(updated, ['label', 'fontsize', 'family', 'color'])
 
         grid = (1, len(images))
-        fig, ax = plt.subplots(*grid, figsize=updated['figsize'])
+        fig, ax = plt.subplots(*grid, **figure_kwargs)
 
         # plot image
         ax[0].imshow(np.transpose(images[0], axes=updated['order_axes']), **render_kwargs)
@@ -587,6 +615,7 @@ class MatplotlibPlotter:
         updated = {**defaults, **kwargs}
 
         # form different groups of kwargs
+        figure_kwargs = filter_kwargs(updated, ['figsize', 'dpi')
         histo_kwargs = filter_kwargs(updated, ['bins', 'density', 'alpha', 'facecolor'])
         label_kwargs = filter_kwargs(updated, ['label', 'fontsize', 'family', 'color'])
         xlabel_kwargs = filter_kwargs(updated, ['xlabel', 'fontsize', 'family', 'color'])
@@ -595,7 +624,7 @@ class MatplotlibPlotter:
         yaxis_kwargs = filter_kwargs(updated, ['ylim'])
 
         # plot the histo
-        plt.figure(figsize=updated['figsize'])
+        plt.figure(**figure_kwargs)
         _, _, _ = plt.hist(image.flatten(), **histo_kwargs)
         plt.xlabel(**xlabel_kwargs)
         plt.ylabel(**ylabel_kwargs)
@@ -638,12 +667,13 @@ class MatplotlibPlotter:
         updated = {**defaults, **kwargs}
 
         # form groups of kwargs
+        figure_kwargs = filter_kwargs(updated, ['figsize', 'facecolor', 'dpi')
         label_kwargs = filter_kwargs(updated, ['label', 'fontsize', 'family', 'color'])
         xlabel_kwargs = filter_kwargs(updated, ['xlabel', 'fontsize', 'family', 'color'])
         ylabel_kwargs = filter_kwargs(updated, ['ylabel', 'fontsize', 'family', 'color'])
 
         # plot the curves
-        plt.figure(figsize=updated['figsize'])
+        plt.figure(**filter_kwargs)
         curves = plt.plot(*args)
         if updated['legend']:
             plt.legend(curves, updated.get('curve_labels', ['Loss ' + str(i) for i in range(len(curves))]))
