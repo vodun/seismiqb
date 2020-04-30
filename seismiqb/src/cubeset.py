@@ -558,7 +558,7 @@ class SeismicCubeset(Dataset):
 
         axis = geom.parse_axis(axis)
         point = np.array([[cube_name, 0, 0, 0]], dtype=object)
-        point[axis + 1] = n_line
+        point[0, axis + 1] = n_line
         crop_shape[axis] = 1
 
         pipeline = (Pipeline()
