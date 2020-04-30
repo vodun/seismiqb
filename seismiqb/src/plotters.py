@@ -144,11 +144,9 @@ class PlotlyPlotter:
             other
         """
         # update defaults to make total dict of kwargs
-        defaults = {'xaxis': {'title_text': 'xlines', 'titlefont': {'size': 30}},
-                    'yaxis': {'title_text': 'height', 'titlefont': {'size': 30}, 'autorange': 'reversed'},
-                    'reversescale': True,
+        defaults = {'reversescale': True,
                     'colorscale': 'viridis',
-                    'coloraxis_colorbar': {'title': 'amplitude'},
+                    'coloraxis_colorbar': {'title': 'amplitude'}, # TODO: remove later
                     'opacity' : 1.0,
                     'title': 'Depth map',
                     'max_size' : 600,
@@ -202,9 +200,7 @@ class PlotlyPlotter:
             other
         """
         # update defaults to make total dict of kwargs
-        defaults = {'xaxis': {'title_text': 'xlines', 'titlefont': {'size': 30}},
-                    'yaxis': {'title_text': 'height', 'titlefont': {'size': 30}, 'autorange': 'reversed'},
-                    'coloraxis_colorbar': {'title': 'amplitude'},
+        defaults = {'coloraxis_colorbar': {'title': 'amplitude'},
                     'opacity' : 1.0,
                     'title': 'Seismic inline',
                     'max_size' : 600,
@@ -261,10 +257,7 @@ class PlotlyPlotter:
             other
         """
         # update defaults to make total dict of kwargs
-        defaults = {'xaxis': {'title_text': 'xlines', 'titlefont': {'size': 30}},
-                    'yaxis': {'title_text': 'height', 'titlefont': {'size': 30}, 'autorange': 'reversed'},
-                    'coloraxis_colorbar': {'title': 'depth'},
-                    'title': 'RGB amplitudes',
+        defaults = {'coloraxis_colorbar': {'title': 'depth'},
                     'max_size' : 600,
                     'order_axes': (1, 0, 2),
                     'slice': (slice(None, None), slice(None, None))}
@@ -313,9 +306,7 @@ class PlotlyPlotter:
             other
         """
         # defaults
-        defaults = {'xaxis': {'title_text': 'xlines', 'titlefont': {'size': 30}},
-                    'yaxis': {'title_text': 'height', 'titlefont': {'size': 30}, 'autorange': 'reversed'},
-                    'coloraxis_colorbar': {'title': 'depth'},
+        defaults = {'coloraxis_colorbar': {'title': 'depth'},  # TODO: REMOVE LATER
                     'title': 'Seismic inline',
                     'max_size' : 600,
                     'order_axes': (1, 0),
@@ -392,11 +383,9 @@ class MatplotlibPlotter:
         """
         # update defaults
         defaults = {'figsize': (12, 7),
-                    'label': 'Depth map',
+                    'label': 'Depth map',   # TODO: REMOVE LATER
                     'cmap': 'viridis_r',
                     'colorbar': True,
-                    'xlabel': 'xlines',
-                    'ylabel': 'ilines',
                     'fontsize': 20,
                     'fraction': 0.022,
                     'pad': 0.07,
@@ -460,10 +449,8 @@ class MatplotlibPlotter:
             other
         """
         defaults = {'figsize': (12, 7),
-                    'label': 'Seismic inline',
+                    'label': 'Seismic inline',   # TODO: remove later
                     'y' : 1.1,
-                    'xlabel': 'xlines',
-                    'ylabel': 'ilines',
                     'cmap': 'gray',
                     'fontsize': 20,
                     'opacity': 1.0,
@@ -515,9 +502,6 @@ class MatplotlibPlotter:
         """
         # update defaults
         defaults = {'figsize': (12, 7),
-                    'label': 'RGB amplitudes',
-                    'xlabel': 'xlines',
-                    'ylabel': 'ilines',
                     'fontsize': 20,
                     'labeltop': True,
                     'labelright': True,
@@ -573,9 +557,6 @@ class MatplotlibPlotter:
         """
         # embedded params
         defaults = {'figsize': (6 * len(images), 7),
-                    't': 'Seismic inline',
-                    'xlabel': 'xlines',
-                    'ylabel': 'ilines',
                     'cmap': 'gray',
                     'fontsize': 20,
                     'order_axes': (1, 0),
@@ -631,7 +612,7 @@ class MatplotlibPlotter:
                     'density': True,
                     'alpha': 0.75,
                     'facecolor': 'b',
-                    'label': 'Amplitudes histogram',
+                    'label': 'Amplitudes histogram',  # TODO: remove later
                     'xlabel': 'xlines',
                     'ylabel': 'density',
                     'fontsize': 15}

@@ -579,11 +579,14 @@ class SeismicCubeset(Dataset):
         batch = (pipeline << self).next_batch(len(self), n_epochs=None)
         imgs = [np.squeeze(getattr(batch, comp)) for comp in components]
 
+        names = ['iline', 'xline', 'slice']
         # configure defaults
         kwargs = {
-            'title': 'iline {} out of {} on {}'.format(n_line, geom.ilines_len, cube_name),
+            'title': (names[axis] + ' {} out of {} on {}'.format(n_line, geom.cube_shape[axis], cube_name)),
             'order_axes': (1, 0) if axis == 0 else (0, 1),
+            'xlabel': 'xlines' if axis in (0, 2) else 'ilines',
+            'ylabel': 'height' if axis in (0, 1) else 'xlines',
             **kwargs
         }
 
-        plot_image(imgs, backend=backend, mode=plot_mode, **kwargs)
+        plot_image(imgs, backend=backend, mode=mode, **kwargs)

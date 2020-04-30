@@ -1519,6 +1519,8 @@ class Horizon(BaseLabel):
         kwargs = {
             'cmap': 'viridis_r',
             'title': 'Depth map {} of `{}` on `{}`'.format('on full'*on_full, self.name, self.cube_name),
+            'xlabel': 'xlines',
+            'ylabel': 'ilines',
             **kwargs
             }
         matrix[matrix == fill_value] = np.nan
@@ -1556,6 +1558,8 @@ class Horizon(BaseLabel):
         # defaults for plotting if not supplied in kwargs
         kwargs = {
             'title': 'RGB amplitudes of {} on cube {}'.format(self.name, self.cube_name),
+            'xlabel': 'xlines',
+            'ylabel': 'ilines',
             **kwargs
             }
 
@@ -1596,6 +1600,8 @@ class Horizon(BaseLabel):
         kwargs = {
             'title': (f'Horizon `{self.name}` on `{self.geometry.name}`' +
                       f'\n {header} {loc} out of {self.geometry.lens[axis]}'),
+            'xlabel': 'xlines' if axis in (0, 2) else 'ilines',
+            'ylabel': 'height' if axis in (0, 1) else 'xlines',
             **kwargs
             }
 
