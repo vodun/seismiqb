@@ -406,7 +406,7 @@ class MatplotlibPlotter:
         updated = {**defaults, **kwargs}
 
         # form different groups of kwargs
-        figure_kwargs = filter_kwargs(updated, ['figsize', 'facecolor', 'dpi')
+        figure_kwargs = filter_kwargs(updated, ['figsize', 'facecolor', 'dpi'])
         render_kwargs = filter_kwargs(updated, ['cmap', 'vmin', 'vmax', 'alpha'])
         label_kwargs = filter_kwargs(updated, ['label', 'fontsize', 'family', 'color'])
         xaxis_kwargs = filter_kwargs(updated, ['xlabel', 'fontsize', 'family', 'color'])
@@ -526,7 +526,7 @@ class MatplotlibPlotter:
 
         # form different groups of kwargs
         render_kwargs = filter_kwargs(updated, [])
-        figure_kwargs = filter_kwargs(updated, ['figsize', 'facecolor', 'dpi')
+        figure_kwargs = filter_kwargs(updated, ['figsize', 'facecolor', 'dpi'])
         label_kwargs = filter_kwargs(updated, ['label', 'fontsize', 'family', 'color'])
         xaxis_kwargs = filter_kwargs(updated, ['xlabel', 'fontsize', 'family', 'color'])
         yaxis_kwargs = filter_kwargs(updated, ['ylabel', 'fontsize', 'family', 'color'])
@@ -583,7 +583,7 @@ class MatplotlibPlotter:
         updated = {**defaults, **kwargs}
 
         # form different groups of kwargs
-        figure_kwargs = filter_kwargs(updated, ['figsize', 'facecolor', 'dpi')
+        figure_kwargs = filter_kwargs(updated, ['figsize', 'facecolor', 'dpi'])
         render_kwargs = filter_kwargs(updated, ['cmap', 'vmin', 'vmax'])
         label_kwargs = filter_kwargs(updated, ['t', 'fontsize', 'family', 'color'])
         xaxis_kwargs = filter_kwargs(updated, ['xlabel', 'fontsize', 'family', 'color'])
@@ -638,7 +638,7 @@ class MatplotlibPlotter:
         updated = {**defaults, **kwargs}
 
         # form different groups of kwargs
-        figure_kwargs = filter_kwargs(updated, ['figsize', 'dpi')
+        figure_kwargs = filter_kwargs(updated, ['figsize', 'dpi'])
         histo_kwargs = filter_kwargs(updated, ['bins', 'density', 'alpha', 'facecolor'])
         label_kwargs = filter_kwargs(updated, ['label', 'fontsize', 'family', 'color'])
         xlabel_kwargs = filter_kwargs(updated, ['xlabel', 'fontsize', 'family', 'color'])
@@ -690,7 +690,7 @@ class MatplotlibPlotter:
         updated = {**defaults, **kwargs}
 
         # form groups of kwargs
-        figure_kwargs = filter_kwargs(updated, ['figsize', 'facecolor', 'dpi')
+        figure_kwargs = filter_kwargs(updated, ['figsize', 'facecolor', 'dpi'])
         label_kwargs = filter_kwargs(updated, ['label', 'fontsize', 'family', 'color'])
         xlabel_kwargs = filter_kwargs(updated, ['xlabel', 'fontsize', 'family', 'color'])
         ylabel_kwargs = filter_kwargs(updated, ['ylabel', 'fontsize', 'family', 'color'])
