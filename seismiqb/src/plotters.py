@@ -41,29 +41,52 @@ def channelize_image(image, total_channels, n_channel=0, greyscale=False, opacit
 def filter_kwargs(kwargs, keys):
     """ Filter the dict of kwargs leaving only supplied keys.
     """
-    return {key : kwargs[key] for key in keys if key in kwargs}
+    return {key: kwargs[key] for key in keys if key in kwargs}
 
 def plot_image(image, mode='single', backend='matplotlib', **kwargs):
     """ Overall plotter function, converting kwarg-names to match chosen backend and redirecting
     plotting task to one of the methods of backend-classes.
     """
-    def _convert_kwargs_keys(mode, backend, kwargs):
-        """ Update kwargs-dict for keys to match chosen backend.
+    def _convert_kwargs(mode, backend, kwargs):
+        """ Update kwargs-dict to match chosen backend: update keys of the dict and
+        values in some cases.
         """
-        # make conversion dict
         if backend == 'matplotlib':
+            # make conversion-dict for kwargs-keys
             if mode in ['single', 'rgb', 'overlap', 'histogram', 'curve']:
-                converter = {'title': 'label', 't':'label'}
+                keys_converter = {'title': 'label', 't':'label', 'xaxis': 'xlabel', 'yaxis': 'ylabel'}
             elif mode in ['separate']:
-                converter = {'title': 't', 'label': 't'}
+                keys_converter = {'title': 't', 'label': 't', 'xaxis': 'xlabel', 'yaxis': 'ylabel'}
+
+            # make conversion-procedure for key-value pairs
+            def converter(k, v):
+                if k in ('xaxis', 'yaxis'):
+                    return keys_converter[k], v['title_text']
+                else:
+                    return keys_converter[k], v
         else:
-            converter = {'label': 'title', 't': 'title'}
+            # make conversion-dict for kwargs-keys
+            keys_converter = {'label': 'title', 't': 'title', 'xlabel': 'xaxis', 'ylabel': 'yaxis'}
+
+            # make conversion-procedure for key-value pairs
+            def converter(k, v):
+                if k  == 'xlabel':
+                    return keys_converter[k], {'title_text': v,
+                                               'titlefont': {'size': kwargs.get('fontsize', 30)}}
+                elif k == 'ylabel':
+                    return keys_converter[k], {'title_text': v,
+                                               'titlefont': {'size': kwargs.get('fontsize', 30)},
+                                               'autorange': 'reversed'}
+                else:
+                    return keys_converter[k], v
+
 
         # perform conversion inplace
-        for key in converter:
+        for key in keys_converter:
             if key in kwargs:
                 value = kwargs.pop(key)
-                kwargs[converter[key]] = value
+                new_k, new_v = converter(key, value)
+                kwargs[new_k] = new_v
 
     _convert_kwargs_keys(mode, backend, kwargs)
     if backend in ('matplotlib', 'plt'):
