@@ -388,7 +388,7 @@ class SeismicCropBatch(Batch):
 
         for compo in passdown:
             new_data = [getattr(self, compo)[i] for i, area in enumerate(areas) if area > threshold]
-            self.add_components(compo, np.array(new_data))
+            setattr(self, compo, np.array(new_data))
         return self
 
 

@@ -176,6 +176,35 @@ class BaseSeismicMetric(Metrics):
         return metric, plot_dict
 
 
+    def local_crosscorrs(self, kernel_size=3, reduce_func='nanmean', **kwargs):
+        """ Compute cross-correlation between each column in data and nearest traces. """
+        metric, title = compute_local_crosscorrs(data=self.data, bad_traces=self.bad_traces,
+                                                 kernel_size=kernel_size, reduce_func=reduce_func, **kwargs)
+        plot_dict = {
+            'spatial': self.spatial,
+            'title': f'{title} for {self.name} on cube {self.cube_name}, k={kernel_size}, reduce={reduce_func}',
+            'cmap': 'seismic_r',
+            'zmin': None, 'zmax': None,
+            'ignore_value': np.nan,
+            # **kwargs
+        }
+        return metric, plot_dict
+
+    def support_crosscorrs(self, supports=10, safe_strip=0, **kwargs):
+        """ Compute cross-correlation between each trace and support traces. """
+        metric, title = compute_support_crosscorrs(data=self.data, supports=supports, bad_traces=self.bad_traces,
+                                                   safe_strip=safe_strip, **kwargs)
+        plot_dict = {
+            'spatial': self.spatial,
+            'title': f'{title} for {self.name} on cube {self.cube_name}',
+            'cmap': 'seismic_r',
+            'zmin': None, 'zmax': None,
+            'ignore_value': np.nan,
+            # **kwargs
+        }
+        return metric, plot_dict
+
+
     def local_btch(self, kernel_size=3, reduce_func='nanmean', **kwargs):
         """ Compute Bhattacharyya distance between each column in data and nearest traces. """
         metric, title = compute_local_btch(data=self.probs, bad_traces=self.bad_traces,
@@ -1020,6 +1049,50 @@ def _compute_line_corrs(data, bad_traces, support_il=None, support_xl=None):
     corrs = cov / (support_stds * data_stds)
     corrs[bad_traces == 1] = 0
     return corrs
+
+
+def compute_local_crosscorrs(data, bad_traces, kernel_size=3, reduce_func='nanmean', **kwargs):
+    """ Compute cross-correlation between each column in data and nearest traces. """
+    return compute_local_func(_compute_local_crosscorrs, 'Cross-correlation',
+                              data=data, bad_traces=bad_traces,
+                              kernel_size=kernel_size, reduce_func=reduce_func, **kwargs)
+
+@njit
+def _compute_local_crosscorrs(array_1, array_2):
+    temp = np.zeros(len(array_1))
+    for k in range(len(array_1)):
+        temp[k] = np.sum(array_1[k:] * array_2[:len(array_1)-k])
+    return np.argmax(temp)
+
+
+def compute_support_crosscorrs(data, supports, bad_traces, safe_strip=0, **kwargs):
+    #pylint: disable=missing-function-docstring
+    return compute_support_func(function_ndarray=_compute_support_crosscorrs,
+                                function_str=None,
+                                name='Cross-correlation',
+                                data=data, supports=supports, bad_traces=bad_traces,
+                                safe_strip=safe_strip, **kwargs)
+
+def _compute_support_crosscorrs(data, supports, bad_traces):
+    n_supports = len(supports)
+    i_range, x_range, depth = data.shape
+
+    support_traces = np.zeros((n_supports, depth*2+1))
+    for i in range(n_supports):
+        coord = supports[i]
+        support_traces[i, :] = np.pad(data[coord[0], coord[1], :], pad_width=(0, depth+1))
+
+    divs = np.zeros((i_range, x_range, n_supports))
+    for i in range(n_supports):
+        supports_ = support_traces[i]
+        temp = np.zeros((i_range, x_range, depth))
+        for k in range(depth):
+            temp[:, :, k] = np.sum(supports_[k:k+depth] * data, axis=-1)
+        temp = np.argmax(temp, axis=-1).astype(float)
+        temp[bad_traces == 1] = np.nan
+        divs[:, :, i] = temp
+    return divs
+
 
 
 def compute_local_btch(data, bad_traces, kernel_size=3, reduce_func='nanmean', **kwargs):

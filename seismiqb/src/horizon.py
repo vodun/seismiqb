@@ -736,7 +736,8 @@ class Horizon(BaseLabel):
 
     def filter_points(self, filtering_matrix=None, **kwargs):
         """ Remove points that correspond to 1's in `filtering_matrix` from points storage."""
-        filtering_matrix = filtering_matrix or self.geometry.zero_traces
+        if filtering_matrix is None:
+            filtering_matrix = self.geometry.zero_traces
 
         def filtering_function(points, **kwds):
             _ = kwds
@@ -746,7 +747,9 @@ class Horizon(BaseLabel):
 
     def filter_matrix(self, filtering_matrix=None, **kwargs):
         """ Remove points that correspond to 1's in `filtering_matrix` from matrix storage."""
-        filtering_matrix = filtering_matrix or self.geometry.zero_traces
+        if filtering_matrix is None:
+            filtering_matrix = self.geometry.zero_traces
+
         idx_i, idx_x = np.asarray(filtering_matrix[self.i_min:self.i_max + 1,
                                                    self.x_min:self.x_max + 1] == 1).nonzero()
 
