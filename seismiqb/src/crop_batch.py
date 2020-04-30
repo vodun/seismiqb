@@ -393,9 +393,10 @@ class SeismicCropBatch(Batch):
 
 
     @action
-    @inbatch_parallel(init='_init_component', target='threads')
-    def filter_out(self, ix, src=None, dst=None, mode=None, expr=None, low=None, high=None, length=None):
-        """ Cut mask for horizont extension task.
+    @inbatch_parallel(init='_init_component', post='_assemble', target='threads')
+    def filter_out(self, ix, src=None, dst=None, mode=None, expr=None, low=None, high=None,
+                   length=None, p=1.0):
+        """ Zero out mask for horizon extension task.
 
         Parameters
         ----------
@@ -405,13 +406,15 @@ class SeismicCropBatch(Batch):
             Component of batch to put cut mask in.
         mode : str
             Either point, line, iline or xline.
-            If point, then only only one point per horizon will be labeled.
+            If point, then only one point per horizon will be labeled.
             If iline or xline then single iline or xline with labeled.
             If line then randomly either single iline or xline will be
             labeled.
         expr : callable, optional.
             Some vectorized function. Accepts points in cube, returns either float.
             If not None, low or high/length should also be supplied.
+        p : float
+            Probability of applying the transform. Default is 1.
         """
         if not (src and dst):
             raise ValueError('Src and dst must be provided')
@@ -419,9 +422,9 @@ class SeismicCropBatch(Batch):
         pos = self.get_pos(None, src, ix)
         mask = getattr(self, src)[pos]
         coords = np.where(mask > 0)
-        if len(coords[0]) == 0:
-            getattr(self, dst)[pos] = mask
-            return self
+
+        if np.random.binomial(1, 1 - p) or len(coords[0]) == 0:
+            return mask
         if mode is not None:
             new_mask = np.zeros_like(mask)
             point = np.random.randint(len(coords))
@@ -433,7 +436,6 @@ class SeismicCropBatch(Batch):
                 new_mask[:, coords[1][point], :] = mask[:, coords[1][point], :]
             else:
                 raise ValueError('Mode should be either `point`, `iline`, `xline` or `line')
-            mask = new_mask
         if expr is not None:
             coords = np.where(mask > 0)
             new_mask = np.zeros_like(mask)
@@ -450,12 +452,12 @@ class SeismicCropBatch(Batch):
                 cond &= np.less_equal(expr(coords), low + length)
             coords *= np.reshape(mask.shape, newshape=(1, 3))
             coords = np.round(coords).astype(np.int32)[cond]
-            new_mask[coords[:, 0], coords[:, 1], coords[:, 2]] = mask[coords[:, 0], coords[:, 1], coords[:, 2]]
-            mask = new_mask
-
-        pos = self.get_pos(None, dst, ix)
-        getattr(self, dst)[pos] = mask
-        return self
+            new_mask[coords[:, 0], coords[:, 1], coords[:, 2]] = mask[coords[:, 0],
+                                                                      coords[:, 1],
+                                                                      coords[:, 2]]
+        else:
+            new_mask = mask
+        return new_mask
 
 
     @action
