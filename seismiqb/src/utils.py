@@ -1,14 +1,194 @@
 """ Utility functions. """
+from collections import OrderedDict
+from threading import RLock
+from functools import wraps
+from hashlib import blake2b
+
 from tqdm import tqdm
 import numpy as np
+import pandas as pd
 import segyio
 
 from numba import njit
 
-from ._const import FILL_VALUE
+
+
+class SafeIO:
+    """ Opens the file handler with desired `open` function, closes it at destruction.
+    Can log open and close actions to the `log_file`.
+    getattr, getitem and `in` operator are directed to the `handler`.
+    """
+    def __init__(self, path, opener=open, log_file=None, **kwargs):
+        self.path = path
+        self.log_file = log_file # or '/notebooks/log_safeio.txt'
+        self.handler = opener(path, **kwargs)
+
+        if self.log_file:
+            self._info(self.log_file, f'Opened {self.path}')
+
+    def _info(self, log_file, msg):
+        with open(log_file, 'a') as f:
+            f.write('\n' + msg)
+
+    def __getattr__(self, key):
+        return getattr(self.handler, key)
+
+    def __getitem__(self, key):
+        return self.handler[key]
+
+    def __contains__(self, key):
+        return key in self.handler
+
+    def __del__(self):
+        if self.log_file:
+            self._info(self.log_file, f'Tried to close {self.path}')
+
+        self.handler.close()
+
+        if self.log_file:
+            self._info(self.log_file, f'Closed {self.path}')
+
+
+class IndexedDict(OrderedDict):
+    """ Allows to use both indices and keys to subscript. """
+    def __getitem__(self, key):
+        if isinstance(key, int):
+            key = list(self.keys())[key]
+        return super().__getitem__(key)
 
 
 
+def stable_hash(key):
+    """ Hash that stays the same between different runs of Python interpreter. """
+    if not isinstance(key, (str, bytes)):
+        key = ''.join(sorted(str(key)))
+    if not isinstance(key, bytes):
+        key = key.encode('ascii')
+    return str(blake2b(key).hexdigest())
+
+class Singleton:
+    """ There must be only one!"""
+    instance = None
+    def __init__(self):
+        if not Singleton.instance:
+            Singleton.instance = self
+
+class lru_cache:
+    """ Thread-safe least recent used cache. Must be applied to class methods.
+
+    Parameters
+    ----------
+    maxsize : int
+        Maximum amount of stored values.
+    storage : None, OrderedDict or PickleDict
+        Storage to use.
+        If None, then no caching is applied.
+    classwide : bool
+        If True, then first argument of a method (self) is changed to class name for the purposes on hashing.
+    anchor : bool
+        If True, then code of the whole directory this file is located is used to create a persistent hash
+        for the purposes of storing.
+    attributes: None, str or sequence of str
+        Attributes to get from object and use as additions to key.
+    pickle_module: str
+        Module to use to save/load files on disk. Used only if `storage` is :class:`.PickleDict`.
+
+    Examples
+    --------
+    Store loaded slides::
+
+    @lru_cache(maxsize=128)
+    def load_slide(cube_name, slide_no):
+        pass
+
+    Notes
+    -----
+    All arguments to the decorated method must be hashable.
+    """
+    #pylint: disable=invalid-name, attribute-defined-outside-init
+    def __init__(self, maxsize=None, classwide=False, attributes=None):
+        self.maxsize = maxsize
+        self.classwide = classwide
+
+        # Make `attributes` always a list
+        if isinstance(attributes, str):
+            self.attributes = [attributes]
+        elif isinstance(attributes, (tuple, list)):
+            self.attributes = attributes
+        else:
+            self.attributes = False
+
+        self.default = Singleton()
+        self.lock = RLock()
+        self.reset()
+
+
+    def reset(self):
+        """ Clear cache and stats. """
+        self.cache = OrderedDict()
+        self.is_full = False
+        self.stats = {'hit': 0, 'miss': 0}
+
+    def make_key(self, args, kwargs):
+        """ Create a key from a combination of instance reference or class reference,
+        method args, and instance attributes.
+        """
+        key = list(args)
+        # key[0] is `instance` if applied to a method
+        if kwargs:
+            for k, v in sorted(kwargs.items()):
+                key.append((k, v))
+
+        if self.attributes:
+            for attr in self.attributes:
+                attr_hash = stable_hash(getattr(key[0], attr))
+                key.append(attr_hash)
+
+        if self.classwide:
+            key[0] = key[0].__class__
+        return tuple(key)
+
+
+    def __call__(self, func):
+        """ Add the cache to the function. """
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            key = self.make_key(args, kwargs)
+
+            # If result is already in cache, just retrieve it and update its timings
+            with self.lock:
+                result = self.cache.get(key, self.default)
+                if result is not self.default:
+                    del self.cache[key]
+                    self.cache[key] = result
+                    self.stats['hit'] += 1
+                    return result
+
+            # The result was not found in cache: evaluate function
+            result = func(*args, **kwargs)
+
+            # Add the result to cache
+            with self.lock:
+                self.stats['miss'] += 1
+                if key in self.cache:
+                    pass
+                elif self.is_full:
+                    self.cache.popitem(last=False)
+                    self.cache[key] = result
+                else:
+                    self.cache[key] = result
+                    self.is_full = (len(self.cache) >= self.maxsize)
+            return result
+
+        wrapper.__name__ = func.__name__
+        wrapper.cache = lambda: self.cache
+        wrapper.stats = lambda: self.stats
+        wrapper.reset = self.reset
+        return wrapper
+
+
+
+#TODO: rethink
 def make_subcube(path, geometry, path_save, i_range, x_range):
     """ Make subcube from .sgy cube by removing some of its first and
     last ilines and xlines.
@@ -66,96 +246,42 @@ def make_subcube(path, geometry, path_save, i_range, x_range):
     with segyio.open(path_save, 'r', strict=True) as _:
         pass
 
+#TODO: rename, add some defaults
+def convert_point_cloud(path, path_save, names=None, order=None, transform=None):
+    """ Change set of columns in file with point cloud labels.
+    Usually is used to remove redundant columns.
 
-
-@njit
-def create_mask(ilines_, xlines_, hs_,
-                il_xl_h, ilines_offset, xlines_offset, geom_depth,
-                mode, width, horizons_idx, n_horizons=-1):
-    """ Jit-accelerated function for fast mask creation for seismic horizons.
-    This function is usually called inside SeismicCropBatch's method `create_masks`.
+    Parameters
+    ----------
+    path : str
+        Path to file to convert.
+    path_save : str
+        Path for the new file to be saved to.
+    names : str or sequence of str
+        Names of columns in the original file. Default is Petrel's export format, which is
+        ('_', '_', 'iline', '_', '_', 'xline', 'cdp_x', 'cdp_y', 'height'), where `_` symbol stands for
+        redundant keywords like `INLINE`.
+    order : str or sequence of str
+        Names and order of columns to keep. Default is ('iline', 'xline', 'height').
     """
-    #pylint: disable=line-too-long, too-many-nested-blocks, too-many-branches
-    mask = np.zeros((len(ilines_), len(xlines_), len(hs_)))
-    all_horizons = True
-    for i, iline_ in enumerate(ilines_):
-        for j, xline_ in enumerate(xlines_):
-            il_, xl_ = iline_ + ilines_offset, xline_ + xlines_offset
-            if il_xl_h.get((il_, xl_)) is None:
-                continue
-            m_temp = np.zeros(geom_depth)
-            if mode == 'horizon':
-                heights = il_xl_h[(il_, xl_)]
-                if all_horizons:
-                    filtered_idx = np.array([idx for idx, height_ in enumerate(heights)
-                                             if height_ != FILL_VALUE])
-                    filtered_idx = np.array([idx for idx in filtered_idx
-                                             if heights[idx] > hs_[0] and heights[idx] < hs_[-1]])
-                    if len(filtered_idx) == 0:
-                        continue
-                    if n_horizons != -1 and len(filtered_idx) >= n_horizons:
-                        filtered_idx = np.random.choice(filtered_idx, replace=False, size=n_horizons)
-                        all_horizons = False
-                    if horizons_idx[0] != -1:
-                        filtered_idx = np.array([idx for idx, height_ in enumerate(heights)
-                                                 if height_ != FILL_VALUE and idx in horizons_idx])
-                for idx in filtered_idx:
-                    _height = heights[idx]
-                    if _height != FILL_VALUE:
-                        if width == 0:
-                            m_temp[_height] = 1
-                        else:
-                            m_temp[max(0, _height - width):min(_height + width, geom_depth)] = 1
-            elif mode == 'stratum':
-                current_col = 1
-                start = 0
-                sorted_heights = sorted(il_xl_h[(il_, xl_)])
-                for height_ in sorted_heights:
-                    if height_ == FILL_VALUE:
-                        height_ = start
-                    if start > hs_[-1]:
-                        break
-                    m_temp[start:height_ + 1] = current_col
-                    start = height_ + 1
-                    current_col += 1
-                    m_temp[sorted_heights[-1] + 1:min(hs_[-1] + 1, geom_depth)] = current_col
-            else:
-                raise ValueError('Mode should be either `horizon` or `stratum`')
-            mask[i, j, :] = m_temp[hs_]
-    return mask
+    #pylint: disable=anomalous-backslash-in-string
+    names = names or ['_', '_', 'iline', '_', '_', 'xline',
+                      'cdp_x', 'cdp_y', 'height']
+    order = order or ['iline', 'xline', 'height']
 
+    names = [names] if isinstance(names, str) else names
+    order = [order] if isinstance(order, str) else order
 
-@njit
-def create_mask_f(ilines_, xlines_, hs_, il_xl_h, ilines_offset, xlines_offset, geom_depth):
-    """ Jit-accelerated function for fast mask creation for seismic facies.
-    This function is usually called inside SeismicCropBatch's method `create_masks`.
-    """
-    mask = np.zeros((len(ilines_), len(xlines_), len(hs_)))
+    df = pd.read_csv(path, sep='\s+', names=names, usecols=set(order))
+    df.dropna(inplace=True)
 
-    for i, iline_ in enumerate(ilines_):
-        for j, xline_ in enumerate(xlines_):
-            il_, xl_ = iline_ + ilines_offset, xline_ + xlines_offset
-            if il_xl_h.get((il_, xl_)) is None:
-                continue
+    if 'iline' in order and 'xline' in order:
+        df.sort_values(['iline', 'xline'], inplace=True)
 
-            m_temp = np.zeros(geom_depth)
-            value = il_xl_h.get((il_, xl_))
-            s_points, e_points, classes = value
-
-            for s_p, e_p, c in zip(s_points, e_points, classes):
-                m_temp[max(0, s_p):min(e_p+1, geom_depth)] = c+1
-            mask[i, j, :] = m_temp[hs_]
-    return mask
-
-
-@njit
-def count_nonfill(array):
-    """ Jit-accelerated function to count non-fill elements. """
-    count = 0
-    for i in array:
-        if i != FILL_VALUE:
-            count += 1
-    return count
+    data = df.loc[:, order]
+    if transform:
+        data = data.apply(transform)
+    data.to_csv(path_save, sep=' ', index=False, header=False)
 
 
 @njit
@@ -166,7 +292,7 @@ def aggregate(array_crops, array_grid, crop_shape, predict_shape, order):
     """
     #pylint: disable=assignment-from-no-return
     total = len(array_grid)
-    background = np.zeros(predict_shape)
+    background = np.full(predict_shape, np.min(array_crops))
 
     for i in range(total):
         il, xl, h = array_grid[i, :]
@@ -181,8 +307,42 @@ def aggregate(array_crops, array_grid, crop_shape, predict_shape, order):
     return background
 
 
+@njit
+def groupby_mean(array):
+    """ Faster version of mean-groupby of data along the first two columns.
+    Input array is supposed to have (N, 3) shape.
+    """
+    n = len(array)
 
-@njit(parallel=True)
+    output = np.zeros_like(array)
+    position = 0
+
+    prev = array[0, :2]
+    s, c = array[0, -1], 1
+
+    for i in range(1, n):
+        curr = array[i, :2]
+
+        if prev[0] == curr[0] and prev[1] == curr[1]:
+            s += array[i, -1]
+            c += 1
+        else:
+            output[position, :2] = prev
+            output[position, -1] = s / c
+            position += 1
+
+            prev = curr
+            s, c = array[i, -1], 1
+
+    output[position, :2] = prev
+    output[position, -1] = s / c
+    position += 1
+    return output[:position]
+
+
+
+
+@njit
 def round_to_array(values, ticks):
     """ Jit-accelerated function to round values from one array to the
     nearest value from the other in a vectorized fashion. Faster than numpy version.
@@ -200,44 +360,29 @@ def round_to_array(values, ticks):
         Array with values from `values` rounded to the nearest from corresponding entry of `ticks`.
     """
     for i, p in enumerate(values):
-        ticks_ = ticks[i]
-        if p <= ticks_[0]:
-            values[i] = ticks_[0]
-        elif p >= ticks_[-1]:
-            values[i] = ticks_[-1]
+        if p <= ticks[0]:
+            values[i] = ticks[0]
+        elif p >= ticks[-1]:
+            values[i] = ticks[-1]
         else:
-            ix = np.searchsorted(ticks_, p)
+            ix = np.searchsorted(ticks, p)
 
-            if abs(ticks_[ix] - p) <= abs(ticks_[ix-1] - p):
-                values[i] = ticks_[ix]
+            if abs(ticks[ix] - p) <= abs(ticks[ix-1] - p):
+                values[i] = ticks[ix]
             else:
-                values[i] = ticks_[ix-1]
+                values[i] = ticks[ix-1]
     return values
 
 
-
 @njit
-def update_minmax(array, val_min, val_max, matrix, il, xl, ilines_offset, xlines_offset):
-    """ Get both min and max values in just one pass through array.
-    Simultaneously updates (inplace) matrix if the trace is filled with zeros.
-    """
-    maximum = array[0]
-    minimum = array[0]
-    for i in array[1:]:
-        if i > maximum:
-            maximum = i
-        elif i < minimum:
-            minimum = i
-
-    if (minimum == 0) and (maximum == 0):
-        matrix[il - ilines_offset, xl - xlines_offset] = 1
-
-    if minimum < val_min:
-        val_min = minimum
-    if maximum > val_max:
-        val_max = maximum
-
-    return val_min, val_max, matrix
+def find_min_max(array):
+    """ Get both min and max values in just one pass through array."""
+    n = array.size
+    max_val = min_val = array[0]
+    for i in range(1, n):
+        min_val = min(array[i], min_val)
+        max_val = max(array[i], max_val)
+    return min_val, max_val
 
 
 
