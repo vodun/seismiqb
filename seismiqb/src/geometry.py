@@ -823,21 +823,18 @@ class SeismicGeometryHDF5(SeismicGeometry):
 
     def _load_i(self, ilines, xlines, heights):
         cube_hdf5 = self.file_hdf5['cube']
-        dtype = cube_hdf5.dtype
         return np.stack([self._cached_load(cube_hdf5, iline)[xlines, :][:, heights]
-                         for iline in ilines]).astype(dtype)
+                         for iline in ilines])
 
     def _load_x(self, ilines, xlines, heights):
         cube_hdf5 = self.file_hdf5['cube_x']
-        dtype = cube_hdf5.dtype
         return np.stack([self._cached_load(cube_hdf5, xline)[heights, :][:, ilines].transpose([1, 0])
-                         for xline in xlines], axis=1).astype(dtype)
+                         for xline in xlines], axis=1)
 
     def _load_h(self, ilines, xlines, heights):
         cube_hdf5 = self.file_hdf5['cube_h']
-        dtype = cube_hdf5.dtype
         return np.stack([self._cached_load(cube_hdf5, height)[ilines, :][:, xlines]
-                         for height in heights], axis=2).astype(dtype)
+                         for height in heights], axis=2)
 
     @lru_cache(128)
     def _cached_load(self, cube, loc):

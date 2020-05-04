@@ -853,7 +853,6 @@ class NumbaNumpy:
 
 
 
-
 # Functions to compute metric from data-array
 def compute_local_func(function, name, data, bad_traces, kernel_size=3, reduce_func='nanmean', **kwargs):
     """ Apply `function` in a `local` way: each entry in `data` is compared against its
@@ -1077,10 +1076,10 @@ def _compute_support_crosscorrs(data, supports, bad_traces):
     n_supports = len(supports)
     i_range, x_range, depth = data.shape
 
-    support_traces = np.zeros((n_supports, depth*2+1))
+    support_traces = np.zeros((n_supports, depth*2))
     for i in range(n_supports):
         coord = supports[i]
-        support_traces[i, :] = np.pad(data[coord[0], coord[1], :], pad_width=(0, depth+1))
+        support_traces[i, :] = np.pad(data[coord[0], coord[1], :], pad_width=(depth//2, depth - depth//2))
 
     divs = np.zeros((i_range, x_range, n_supports))
     for i in range(n_supports):
@@ -1088,7 +1087,7 @@ def _compute_support_crosscorrs(data, supports, bad_traces):
         temp = np.zeros((i_range, x_range, depth))
         for k in range(depth):
             temp[:, :, k] = np.sum(supports_[k:k+depth] * data, axis=-1)
-        temp = np.argmax(temp, axis=-1).astype(float)
+        temp = np.argmax(temp, axis=-1).astype(float) - depth//2
         temp[bad_traces == 1] = np.nan
         divs[:, :, i] = temp
     return divs
