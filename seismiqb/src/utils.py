@@ -284,7 +284,6 @@ def convert_point_cloud(path, path_save, names=None, order=None, transform=None)
     data.to_csv(path_save, sep=' ', index=False, header=False)
 
 
-
 @njit
 def aggregate(array_crops, array_grid, crop_shape, predict_shape, order):
     """ Jit-accelerated function to glue together crops according to grid.
