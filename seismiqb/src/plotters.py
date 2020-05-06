@@ -88,7 +88,7 @@ def plot_image(image, mode='single', backend='matplotlib', **kwargs):
                 new_k, new_v = converter(key, value)
                 kwargs[new_k] = new_v
 
-    _convert_kwargs_keys(mode, backend, kwargs)
+    _convert_kwargs(mode, backend, kwargs)
     if backend in ('matplotlib', 'plt'):
         getattr(MatplotlibPlotter(), mode)(image, **kwargs)
     elif backend in ('plotly', 'go'):
