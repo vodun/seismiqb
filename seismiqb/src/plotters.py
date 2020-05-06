@@ -26,7 +26,7 @@ def channelize_image(image, total_channels, n_channel=0, greyscale=False, opacit
     background = np.zeros((*image.shape, total_channels))
     background[:, :, n_channel] = image
 
-    # in case of grescale make all 3 channels equal to supplied image
+    # in case of greyscale make all 3 channels equal to supplied image
     if greyscale:
         for i in range(3):
             background[:, :, i] = image
@@ -146,9 +146,7 @@ class PlotlyPlotter:
         # update defaults to make total dict of kwargs
         defaults = {'reversescale': True,
                     'colorscale': 'viridis',
-                    'coloraxis_colorbar': {'title': 'amplitude'}, # TODO: remove later
                     'opacity' : 1.0,
-                    'title': 'Depth map',
                     'max_size' : 600,
                     'order_axes': (1, 0),
                     'slice': (slice(None, None), slice(None, None))}
@@ -306,9 +304,7 @@ class PlotlyPlotter:
             other
         """
         # defaults
-        defaults = {'coloraxis_colorbar': {'title': 'depth'},  # TODO: REMOVE LATER
-                    'title': 'Seismic inline',
-                    'max_size' : 600,
+        defaults = {'max_size' : 600,
                     'order_axes': (1, 0),
                     'slice': (slice(None, None), slice(None, None))}
         grid = (1, len(images))
@@ -383,7 +379,6 @@ class MatplotlibPlotter:
         """
         # update defaults
         defaults = {'figsize': (12, 7),
-                    'label': 'Depth map',   # TODO: REMOVE LATER
                     'cmap': 'viridis_r',
                     'colorbar': True,
                     'fontsize': 20,
@@ -449,7 +444,6 @@ class MatplotlibPlotter:
             other
         """
         defaults = {'figsize': (12, 7),
-                    'label': 'Seismic inline',   # TODO: remove later
                     'y' : 1.1,
                     'cmap': 'gray',
                     'fontsize': 20,
@@ -612,9 +606,6 @@ class MatplotlibPlotter:
                     'density': True,
                     'alpha': 0.75,
                     'facecolor': 'b',
-                    'label': 'Amplitudes histogram',  # TODO: remove later
-                    'xlabel': 'xlines',
-                    'ylabel': 'density',
                     'fontsize': 15}
         updated = {**defaults, **kwargs}
 
@@ -662,9 +653,9 @@ class MatplotlibPlotter:
         """
         # defaults
         defaults = {'figsize': (8, 5),
-                    'label': 'Loss plot',
-                    'xlabel': 'Iteration number',
-                    'ylabel': 'Loss',
+                    'label': 'Curve plot',
+                    'xlabel': 'x',
+                    'ylabel': 'y',
                     'fontsize': 15,
                     'grid': True,
                     'legend': True}
@@ -680,7 +671,7 @@ class MatplotlibPlotter:
         plt.figure(**filter_kwargs)
         curves = plt.plot(*args)
         if updated['legend']:
-            plt.legend(curves, updated.get('curve_labels', ['Loss ' + str(i) for i in range(len(curves))]))
+            plt.legend(curves, updated.get('curve_labels', ['Curve ' + str(i) for i in range(len(curves))]))
                                             # unfortunately, it is not possible to set defaults sooner
         plt.xlabel(**xlabel_kwargs)
         plt.ylabel(**ylabel_kwargs)
