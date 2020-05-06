@@ -1,5 +1,4 @@
-""" Plotters-class containing all plotting backend for seismic cubes - data.
-"""
+""" Plot functions. """
 import numpy as np
 
 import matplotlib.pyplot as plt
@@ -78,8 +77,7 @@ def convert_kwargs(mode, backend, kwargs):
                                            'titlefont': {'size': kwargs.get('fontsize', 30)},
                                            'automargin': True,
                                            'autorange': 'reversed'}
-            else:
-                return keys_converter[k], v
+            return keys_converter[k], v
 
     # perform conversion inplace
     for key in keys_converter:

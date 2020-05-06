@@ -18,7 +18,6 @@ from .plotters import plot_image
 
 
 
-
 class SpatialDescriptor:
     """ Allows to set names for parts of information about index.
     ilines_len = SpatialDescriptor('INLINE_3D', 'lens', 'ilines_len')
