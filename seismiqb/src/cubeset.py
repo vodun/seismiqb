@@ -692,34 +692,51 @@ class SeismicCubeset(Dataset):
         return self
 
     def make_expand_grid_v2(self, cube_name, crop_shape, labels_src='predicted_labels',
-                            stride=10, batch_size=16, **kwargs):
+                            stride=10, batch_size=16, coverage=None, **kwargs):
         """ Unordered crop generation
         """
         horizon = getattr(self, labels_src)[cube_name][0]
         border_points = np.array(list(zip(*np.where(horizon.boundaries_matrix == True))))
+        
+        overlap = crop_shape[1] - stride
+        hor_matrix = np.full((horizon.matrix.shape[0] + 2 * overlap,
+                              horizon.matrix.shape[1] + 2 * overlap),
+                              horizon.FILL_VALUE, dtype=np.int32)
+        hor_matrix[overlap:-overlap, overlap:-overlap] = horizon.matrix
 
-        border_points[:, 0] += horizon.i_min
-        border_points[:, 1] += horizon.x_min
+        border_points[:, 0] += overlap
+        border_points[:, 1] += overlap
+        i_min = horizon.i_min
+        x_min = horizon.x_min
+
+        xlines_len = horizon.geometry.xlines_len
+        ilines_len = horizon.geometry.ilines_len
+        fill_value = horizon.FILL_VALUE
+        coverage = np.zeros((ilines_len, xlines_len)) if not coverage else coverage
+        zero_traces = self.geometries[cube_name].zero_traces
 
         crops = []
         orders = []
         shapes = []
 
-        hor_matrix = horizon.full_matrix
-        xlines_len = horizon.geometry.xlines_len
-        ilines_len = horizon.geometry.ilines_len
-        fill_value = horizon.FILL_VALUE
         for point in border_points:
+            if coverage[point[0] + i_min - overlap,
+                        point[1] + x_min - overlap] == 1:
+                continue
 
-            result = find_max_overlap(point, hor_matrix,
+            result = find_max_overlap(point, hor_matrix, coverage,
+                                      zero_traces,
+                                      i_min, x_min,
                                       xlines_len, ilines_len,
-                                      stride, crop_shape, fill_value, **kwargs)
+                                      stride, crop_shape, fill_value,
+                                      overlap=overlap, **kwargs)
             if not result:
                 continue
             new_point, shape, order = result
             crops.extend(new_point)
             shapes.extend(shape)
             orders.extend(order)
+
 
         crops = np.array(crops, dtype=np.object).reshape(-1, 3)
         cube_names = np.array([cube_name] * len(crops), dtype=np.object).reshape(-1, 1)
@@ -736,8 +753,8 @@ class SeismicCubeset(Dataset):
         setattr(self, 'crops_gen', lambda: next(crops_gen))
         setattr(self, 'shapes_gen', lambda: next(shapes_gen))
         setattr(self, 'orders_gen', lambda: next(orders_gen))
-
         setattr(self, 'crops_iters', - (-len(crops) // batch_size))
+
         crops_info = {'cube_name': cube_name,
                       'geom': self.geometries[cube_name]}
         setattr(self, 'crops_info', crops_info)
