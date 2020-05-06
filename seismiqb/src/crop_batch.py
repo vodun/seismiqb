@@ -883,7 +883,7 @@ class SeismicCropBatch(Batch):
         raise ValueError('Unknown `mode` parameter.')
 
 
-    def plot_components(self, *components, idx=0, plot_mode='overlap', order_axes=None, **kwargs):
+    def plot_components(self, *components, idx=0, mode='overlap', order_axes=None, **kwargs):
         """ Plot components of batch.
 
         Parameters
@@ -907,9 +907,10 @@ class SeismicCropBatch(Batch):
         # set some defaults
         kwargs = {
             'label': 'Batch components',
+            'titles': components,
             'xlabel': 'xlines',
             'ylabel': 'depth',
             **kwargs
         }
 
-        plot_image(imgs, mode=plot_mode, order_axes=order_axes, **kwargs)
+        plot_image(imgs, mode=mode, order_axes=order_axes, **kwargs)

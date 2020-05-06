@@ -316,7 +316,13 @@ class SeismicCubeset(Dataset):
 
         if normalize:
             background = (background > 0).astype(int)
-        plot_image(background, f'Sampled slices on {self.indices[idx]}', rgb=normalize, **kwargs)
+
+        kwargs = {
+            'title': f'Sampled slices on {self.indices[idx]}',
+            'xlabel': 'ilines', 'ylabel': 'xlines',
+            **kwargs
+        }
+        plot_image(background, **kwargs)
         return batch
 
 
