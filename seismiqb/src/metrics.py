@@ -77,20 +77,20 @@ class BaseSeismicMetric(Metrics):
 
             # Get plot parameters
             # TODO: make plot functions use only needed parameters
-            plot_dict = {**plot_dict, **(plot_kwargs or {})}
-            ignore_value = plot_dict.pop('ignore_value', None)
-            spatial = plot_dict.pop('spatial', True)
-            _ = backend, plot_dict.pop('zmin', -1), plot_dict.pop('zmax', 1)
+            if plot:
+                plot_dict = {**plot_dict, **(plot_kwargs or {})}
+                ignore_value = plot_dict.pop('ignore_value', None)
+                spatial = plot_dict.pop('spatial', True)
+                _ = backend, plot_dict.pop('zmin', -1), plot_dict.pop('zmax', 1)
 
-            # np.nan allows to ignore values
-            if ignore_value is not None:
-                copy_metric = np.copy(metric_val)
-                copy_metric[copy_metric == ignore_value] = np.nan
-            else:
-                copy_metric = metric_val
+                # np.nan allows to ignore values
+                if ignore_value is not None:
+                    copy_metric = np.copy(metric_val)
+                    copy_metric[copy_metric == ignore_value] = np.nan
+                else:
+                    copy_metric = metric_val
 
             # Actual plot
-            if plot:
                 if spatial:
                     plot_image(copy_metric, savepath=savepath, show=show_plot, **plot_dict)
                 else:
@@ -171,6 +171,35 @@ class BaseSeismicMetric(Metrics):
             'cmap': 'seismic',
             'zmin': -1, 'zmax': 1,
             'ignore_value': 0.0,
+            # **kwargs
+        }
+        return metric, plot_dict
+
+
+    def local_crosscorrs(self, kernel_size=3, reduce_func='nanmean', **kwargs):
+        """ Compute cross-correlation between each column in data and nearest traces. """
+        metric, title = compute_local_crosscorrs(data=self.data, bad_traces=self.bad_traces,
+                                                 kernel_size=kernel_size, reduce_func=reduce_func, **kwargs)
+        plot_dict = {
+            'spatial': self.spatial,
+            'title': f'{title} for {self.name} on cube {self.cube_name}, k={kernel_size}, reduce={reduce_func}',
+            'cmap': 'seismic_r',
+            'zmin': None, 'zmax': None,
+            'ignore_value': np.nan,
+            # **kwargs
+        }
+        return metric, plot_dict
+
+    def support_crosscorrs(self, supports=10, safe_strip=0, **kwargs):
+        """ Compute cross-correlation between each trace and support traces. """
+        metric, title = compute_support_crosscorrs(data=self.data, supports=supports, bad_traces=self.bad_traces,
+                                                   safe_strip=safe_strip, **kwargs)
+        plot_dict = {
+            'spatial': self.spatial,
+            'title': f'{title} for {self.name} on cube {self.cube_name}',
+            'cmap': 'seismic_r',
+            'zmin': None, 'zmax': None,
+            'ignore_value': np.nan,
             # **kwargs
         }
         return metric, plot_dict
@@ -561,6 +590,22 @@ class HorizonMetrics(BaseSeismicMetric):
         return self._probs
 
 
+    def find_best_match(self, offset=0, **kwargs):
+        """ !!. """
+        _ = kwargs
+        if isinstance(self.horizons[1], Horizon):
+            self.horizons[1] = [self.horizons[1]]
+
+        lst = []
+        for hor in self.horizons[1]:
+            if hor.geometry.name == self.horizon.geometry.name:
+                overlap_info = Horizon.check_proximity(self.horizon, hor, offset=offset)
+                lst.append((hor, overlap_info))
+        lst.sort(key=lambda x: abs(x[1].get('mean', 999999)))
+        other, overlap_info = lst[0]
+        return (other, overlap_info), {} # actual return + fake plot dict
+
+
     def compare(self, offset=0, absolute=True, hist=True, printer=print, **kwargs):
         """ Compare horizons on against the best match from the list of horizons.
 
@@ -575,19 +620,10 @@ class HorizonMetrics(BaseSeismicMetric):
         printer : callable
             Function to print results, for example `print` or any other callable that can log data.
         """
-        _ = kwargs
         if len(self.horizons) != 2:
             raise ValueError('Can compare two horizons exactly or one to the best match from list of horizons. ')
-        if isinstance(self.horizons[1], Horizon):
-            self.horizons[1] = [self.horizons[1]]
-
-        lst = []
-        for hor in self.horizons[1]:
-            if hor.geometry.name == self.horizon.geometry.name:
-                overlap_info = Horizon.check_proximity(self.horizon, hor, offset=offset)
-                lst.append((hor, overlap_info))
-        lst.sort(key=lambda x: x[1].get('mean', 999999))
-        other, oinfo = lst[0] # the best match; `oinfo` stands for `overlap_info`
+        _ = kwargs
+        (other, oinfo), _ = self.find_best_match(offset=offset)
 
         self_full_matrix = self.horizon.full_matrix
         other_full_matrix = other.full_matrix
@@ -616,8 +652,8 @@ class HorizonMetrics(BaseSeismicMetric):
             Lengths of horizons:                 {len(self.horizon):8}
                                                  {len(other):8}
             {'—'*45}
-            Average heights of horizons:         {(offset + self.horizon.h_mean):8.4}
-                                                 {other.h_mean:8.4}
+            Average heights of horizons:         {(offset + self.horizon.h_mean):8}
+                                                 {other.h_mean:8}
             {'—'*45}
             Coverage of horizons:                {self.horizon.coverage:8.4}
                                                  {other.coverage:8.4}
@@ -636,6 +672,7 @@ class HorizonMetrics(BaseSeismicMetric):
 
         if hist:
             _ = plt.hist(metric.ravel(), bins=100)
+            plt.show()
 
         title = 'Height differences between {} and {}'.format(self.horizon.name, other.name)
         plot_dict = {
@@ -813,7 +850,6 @@ class NumbaNumpy:
     harmean = harmean
 
     histo_reduce = lambda data, bins: histo_reduce(data, bins)
-
 
 
 
@@ -1012,6 +1048,50 @@ def _compute_line_corrs(data, bad_traces, support_il=None, support_xl=None):
     corrs = cov / (support_stds * data_stds)
     corrs[bad_traces == 1] = 0
     return corrs
+
+
+def compute_local_crosscorrs(data, bad_traces, kernel_size=3, reduce_func='nanmean', **kwargs):
+    """ Compute cross-correlation between each column in data and nearest traces. """
+    return compute_local_func(_compute_local_crosscorrs, 'Cross-correlation',
+                              data=data, bad_traces=bad_traces,
+                              kernel_size=kernel_size, reduce_func=reduce_func, **kwargs)
+
+@njit
+def _compute_local_crosscorrs(array_1, array_2):
+    temp = np.zeros(len(array_1))
+    for k in range(len(array_1)):
+        temp[k] = np.sum(array_1[k:] * array_2[:len(array_1)-k])
+    return np.argmax(temp)
+
+
+def compute_support_crosscorrs(data, supports, bad_traces, safe_strip=0, **kwargs):
+    #pylint: disable=missing-function-docstring
+    return compute_support_func(function_ndarray=_compute_support_crosscorrs,
+                                function_str=None,
+                                name='Cross-correlation',
+                                data=data, supports=supports, bad_traces=bad_traces,
+                                safe_strip=safe_strip, **kwargs)
+
+def _compute_support_crosscorrs(data, supports, bad_traces):
+    n_supports = len(supports)
+    i_range, x_range, depth = data.shape
+
+    support_traces = np.zeros((n_supports, depth*2))
+    for i in range(n_supports):
+        coord = supports[i]
+        support_traces[i, :] = np.pad(data[coord[0], coord[1], :], pad_width=(depth//2, depth - depth//2))
+
+    divs = np.zeros((i_range, x_range, n_supports))
+    for i in range(n_supports):
+        supports_ = support_traces[i]
+        temp = np.zeros((i_range, x_range, depth))
+        for k in range(depth):
+            temp[:, :, k] = np.sum(supports_[k:k+depth] * data, axis=-1)
+        temp = np.argmax(temp, axis=-1).astype(float) - depth//2
+        temp[bad_traces == 1] = np.nan
+        divs[:, :, i] = temp
+    return divs
+
 
 
 def compute_local_btch(data, bad_traces, kernel_size=3, reduce_func='nanmean', **kwargs):

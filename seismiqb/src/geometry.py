@@ -33,7 +33,7 @@ class SpatialDescriptor:
     def __set_name__(self, owner, name):
         self.name = name
 
-    def __init__(self, header=None, attribute=None, name=None, ):
+    def __init__(self, header=None, attribute=None, name=None):
         self.header = header
         self.attribute = attribute
 
@@ -176,7 +176,9 @@ class SeismicGeometry:
             Crop of amplitudes.
         mode : str
             If `minmax`, then data is scaled to [0, 1] via minmax scaling.
-            If `q`, then data is clipped to 0.01 and 0.99 quantiles and then divided by the
+            If `q` or `normalize`, then data is divided by the maximum of absolute values of the
+            0.01 and 0.99 quantiles.
+            If `q_clip`, then data is clipped to 0.01 and 0.99 quantiles and then divided by the
             maximum of absolute values of the two.
         """
         if mode in ['q', 'normalize']:
@@ -597,7 +599,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
         stable : bool
             Whether or not to use the same sorting order as in the segyfile.
         return_iterator : bool
-            Whether to return the same iterator that is used to index current `dataframe`.
+            Whether to also return the same iterator that is used to index current `dataframe`.
             Can be useful for subsequent loads from the same place in various instances.
         """
         if self.index_len == 1:
@@ -805,7 +807,7 @@ class SeismicGeometryHDF5(SeismicGeometry):
             List of desired locations to load: along the first index, the second, and depth.
         axis : str or int
             Identificator of the axis to use to load data.
-            Can be `i`, `x`, `h`, 0, 1, 2.
+            Can be `iline`, `xline`, `height`, `depth`, `i`, `x`, `h`, 0, 1, 2.
         """
         _ = kwargs
 
@@ -828,21 +830,18 @@ class SeismicGeometryHDF5(SeismicGeometry):
 
     def _load_i(self, ilines, xlines, heights):
         cube_hdf5 = self.file_hdf5['cube']
-        dtype = cube_hdf5.dtype
         return np.stack([self._cached_load(cube_hdf5, iline)[xlines, :][:, heights]
-                         for iline in ilines]).astype(dtype)
+                         for iline in ilines])
 
     def _load_x(self, ilines, xlines, heights):
         cube_hdf5 = self.file_hdf5['cube_x']
-        dtype = cube_hdf5.dtype
         return np.stack([self._cached_load(cube_hdf5, xline)[heights, :][:, ilines].transpose([1, 0])
-                         for xline in xlines], axis=1).astype(dtype)
+                         for xline in xlines], axis=1)
 
     def _load_h(self, ilines, xlines, heights):
         cube_hdf5 = self.file_hdf5['cube_h']
-        dtype = cube_hdf5.dtype
         return np.stack([self._cached_load(cube_hdf5, height)[ilines, :][:, xlines]
-                         for height in heights], axis=2).astype(dtype)
+                         for height in heights], axis=2)
 
     @lru_cache(128)
     def _cached_load(self, cube, loc):
