@@ -369,6 +369,9 @@ class SeismicGeometry:
         kwargs = {
             'title': (f'Amplitude distribution for {self.short_name}' +
                       f'\n Mean/std: {np.mean(data):3.3}/{np.std(data):3.3}'),
+            'label': 'Amplitudes histogram',
+            'xlabel': 'xlines',
+            'ylabel': 'density',
             **kwargs
         }
         plot_image(data, backend='matplotlib', bins=bins, mode='histogram', **kwargs)

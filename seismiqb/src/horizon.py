@@ -1573,6 +1573,7 @@ class Horizon(BaseLabel):
             'title': 'Depth map {} of `{}` on `{}`'.format('on full'*on_full, self.name, self.cube_name),
             'xlabel': 'xlines',
             'ylabel': 'ilines',
+            'coloraxis_colorbar': {'title': 'amplitude'},
             **kwargs
             }
         matrix[matrix == fill_value] = np.nan
