@@ -902,7 +902,7 @@ class SeismicCropBatch(Batch):
 
         # set some defaults
         kwargs = {
-            'label': 'Batch components'
+            'label': 'Batch components',
             'xlabel': 'xlines',
             'ylabel': 'depth',
             **kwargs

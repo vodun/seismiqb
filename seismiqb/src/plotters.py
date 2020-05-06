@@ -668,7 +668,7 @@ class MatplotlibPlotter:
         ylabel_kwargs = filter_kwargs(updated, ['ylabel', 'fontsize', 'family', 'color'])
 
         # plot the curves
-        plt.figure(**filter_kwargs)
+        plt.figure(**figure_kwargs)
         curves = plt.plot(*args)
         if updated['legend']:
             plt.legend(curves, updated.get('curve_labels', ['Curve ' + str(i) for i in range(len(curves))]))
