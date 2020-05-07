@@ -532,33 +532,6 @@ class SeismicCubeset(Dataset):
         plot_slide(self, *components, idx=idx, n_line=n_line, plot_mode=plot_mode, mode=mode, **kwargs)
 
 
-    def subset_labels(self, idx=0, horizon_idx=0, src='labels', coords=None,
-                      dst='prior_mask'):
-        """Save prior mask to a cubeset attribute `prior_mask`.
-        Parameters
-        ----------
-        coords : tuple or list
-            upper left and lower right coordinates of the subset.
-        """
-
-        src_horizon = getattr(self, src)[self.indices[idx]][horizon_idx]
-        src_matrix = src_horizon.matrix
-        i_min, x_min = src_horizon.i_min, src_horizon.x_min
-
-        sbst_i_min, sbst_i_max = coords[0]
-        sbst_x_min, sbst_x_max = coords[1]
-
-        subset_mtrx = src_matrix[sbst_i_min - i_min: sbst_i_max - i_min,
-                                 sbst_x_min - x_min: sbst_x_max - x_min]
-        subset_horizon = Horizon(subset_mtrx, geometry=self.geometries[self.indices[idx]],
-                                 i_min=sbst_i_min, x_min=sbst_x_min)
-
-        if not hasattr(self, dst):
-            setattr(self, dst, IndexedDict({ix: list() for ix in self.indices}))
-
-        getattr(self, dst)[self.indices[0]] = [subset_horizon]
-        return self
-
     def make_expand_grid_v2(self, cube_name, crop_shape, labels_src='predicted_labels',
                             stride=10, batch_size=16, update_coverage=True, **kwargs):
         """ Define crops coordinates for one step of an extension step.
