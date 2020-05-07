@@ -82,7 +82,7 @@ def convert_kwargs(mode, backend, kwargs):
     # perform conversion inplace
     for key in keys_converter:
         if key in kwargs:
-            value = kwargs.pop(key)
+            value = kwargs.get(key)
             new_k, new_v = converter(key, value)
             kwargs[new_k] = new_v
 
@@ -105,6 +105,16 @@ def plot_image(image, mode='single', backend='matplotlib', **kwargs):
     else:
         raise ValueError('{} backend is not supported!'.format(backend))
 
+
+def plot_loss(*data, title=None, **kwargs):
+    """ Shorthand for loss plotting. """
+    kwargs = {
+        'xlabel': 'Iterations',
+        'ylabel': 'Loss',
+        'label': title or 'Loss graph',
+        **kwargs
+    }
+    plot_image(*data, mode='curve', backend='mpl', **kwargs)
 
 
 class MatplotlibPlotter:
@@ -168,7 +178,7 @@ class MatplotlibPlotter:
 
         # form different groups of kwargs
         figure_kwargs = filter_kwargs(updated, ['figsize', 'facecolor', 'dpi'])
-        render_kwargs = filter_kwargs(updated, ['cmap', 'vmin', 'vmax', 'alpha'])
+        render_kwargs = filter_kwargs(updated, ['cmap', 'vmin', 'vmax', 'alpha', 'interpolation'])
         label_kwargs = filter_kwargs(updated, ['label', 'y', 'fontsize', 'family', 'color'])
         xaxis_kwargs = filter_kwargs(updated, ['xlabel', 'fontsize', 'family', 'color'])
         yaxis_kwargs = filter_kwargs(updated, ['ylabel', 'fontsize', 'family', 'color'])
@@ -181,7 +191,7 @@ class MatplotlibPlotter:
 
         # channelize and plot the image
         fig, ax = plt.subplots(**figure_kwargs)
-        ax_img = ax.imshow(np.transpose(image, axes=updated['order_axes']), **render_kwargs)
+        ax_img = ax.imshow(np.transpose(image.squeeze(), axes=updated['order_axes']), **render_kwargs)
 
         # add titles and labels
         ax.set_title(**label_kwargs)
@@ -236,25 +246,24 @@ class MatplotlibPlotter:
 
         # form different groups of kwargs
         figure_kwargs = filter_kwargs(updated, ['figsize', 'facecolor', 'dpi'])
-        render_kwargs = filter_kwargs(updated, ['cmap', 'vmin', 'vmax'])
+        render_kwargs = filter_kwargs(updated, ['cmap', 'vmin', 'vmax', 'interpolation'])
         label_kwargs = filter_kwargs(updated, ['label', 'fontsize', 'family', 'color', 'y'])
         xaxis_kwargs = filter_kwargs(updated, ['xlabel', 'fontsize', 'family', 'color'])
         yaxis_kwargs = filter_kwargs(updated, ['ylabel', 'fontsize', 'family', 'color'])
 
         # channelize images and put them on a canvas
         _, ax = plt.subplots(**figure_kwargs)
-        ax.imshow(np.transpose(images[0], axes=updated['order_axes']), **render_kwargs)
+        ax.imshow(np.transpose(images[0].squeeze(), axes=updated['order_axes']), **render_kwargs)
         ax.set_xlabel(**xaxis_kwargs)
         ax.set_ylabel(**yaxis_kwargs)
 
         for img, n_channel in zip(images[1:], (0, 1, 2)):
-            ax.imshow(channelize_image(np.transpose(img, axes=updated['order_axes']), total_channels=4,
+            ax.imshow(channelize_image(np.transpose(img.squeeze(), axes=updated['order_axes']), total_channels=4,
                                        n_channel=n_channel, opacity=updated['opacity']),
                       **render_kwargs)
         plt.title(**label_kwargs)
 
         self.save_and_show(plt, **updated)
-
 
     def rgb(self, image, **kwargs):
         """ Plot one image in 'rgb' using matplotlib.
@@ -296,7 +305,7 @@ class MatplotlibPlotter:
         # channelize and plot the image
         image = channelize_image(image, total_channels=3)
         plt.figure(**figure_kwargs)
-        _ = plt.imshow(np.transpose(image, axes=updated['order_axes']), **render_kwargs)
+        _ = plt.imshow(np.transpose(image.squeeze(), axes=updated['order_axes']), **render_kwargs)
 
         # add titles and labels
         plt.title(y=1.1, **label_kwargs)
@@ -343,7 +352,7 @@ class MatplotlibPlotter:
 
         # form different groups of kwargs
         figure_kwargs = filter_kwargs(updated, ['figsize', 'facecolor', 'dpi'])
-        render_kwargs = filter_kwargs(updated, ['cmap', 'vmin', 'vmax'])
+        render_kwargs = filter_kwargs(updated, ['cmap', 'vmin', 'vmax', 'interpolation'])
         label_kwargs = filter_kwargs(updated, ['t', 'y', 'fontsize', 'family', 'color'])
         xaxis_kwargs = filter_kwargs(updated, ['xlabel', 'fontsize', 'family', 'color'])
         yaxis_kwargs = filter_kwargs(updated, ['ylabel', 'fontsize', 'family', 'color'])
@@ -354,7 +363,9 @@ class MatplotlibPlotter:
 
         # plot image
         for i, img in enumerate(images):
-            ax[i].imshow(np.transpose(img, axes=updated['order_axes']), **render_kwargs)
+            args = {key: (value[i] if isinstance(value, list) else value)
+                    for key, value in render_kwargs.items()}
+            ax[i].imshow(np.transpose(img.squeeze(), axes=updated['order_axes']), **args)
 
             ax[i].set_xlabel(**xaxis_kwargs)
             ax[i].set_ylabel(**yaxis_kwargs)
@@ -454,9 +465,9 @@ class MatplotlibPlotter:
         # plot the curves
         plt.figure(**figure_kwargs)
         curves = plt.plot(*args)
-        if updated['legend']:
-            plt.legend(curves, updated.get('curve_labels', ['Curve ' + str(i) for i in range(len(curves))]))
-                                            # unfortunately, it is not possible to set defaults sooner
+        if 'curve_labels' in updated:
+            plt.legend(curves, updated['curve_labels'])
+
         plt.xlabel(**xlabel_kwargs)
         plt.ylabel(**ylabel_kwargs)
         plt.title(**label_kwargs)
