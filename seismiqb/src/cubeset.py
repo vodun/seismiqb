@@ -45,7 +45,7 @@ class SeismicCubeset(Dataset):
         self._p, self._bins = None, None
 
         self.grid_gen, self.grid_info, self.grid_iters = None, None, None
-
+        self.shapes_gen, self.orders_gen = None, None
 
     def gen_batch(self, batch_size, shuffle=False, n_iters=None, n_epochs=None, drop_last=False,
                   bar=False, bar_desc=None, iter_params=None, sampler=None):
@@ -589,8 +589,6 @@ class SeismicCubeset(Dataset):
         xlines_len = horizon.geometry.xlines_len
         ilines_len = horizon.geometry.ilines_len
         fill_value = horizon.FILL_VALUE
-        i_min = horizon.i_min
-        x_min = horizon.x_min
 
         # get horizon boundary points in horizon.matrix coordinates
         border_points = np.array(list(zip(*np.where(horizon.boundaries_matrix))))
@@ -606,8 +604,8 @@ class SeismicCubeset(Dataset):
         coverage = np.zeros_like(zero_traces) if isinstance(update_coverage, bool) else update_coverage
 
         # shift border_points to global coordinates in the coverage matrix
-        border_points[:, 0] += i_min
-        border_points[:, 1] += x_min
+        border_points[:, 0] += horizon.i_min
+        border_points[:, 1] += horizon.x_min
 
         crops = []
         orders = []
@@ -619,12 +617,10 @@ class SeismicCubeset(Dataset):
                 continue
 
             result = find_max_overlap(point, border_points[i],
-                                      hor_matrix,
-                                      zero_traces,
-                                      i_min, x_min,
+                                      hor_matrix, zero_traces,
                                       xlines_len, ilines_len,
                                       stride, crop_shape, fill_value,
-                                      pad_size=crop_shape[1], **kwargs)
+                                      **kwargs)
             if not result:
                 continue
             new_point, shape, order = result
@@ -649,10 +645,9 @@ class SeismicCubeset(Dataset):
         orders_gen = (orders[i:i+batch_size]
                       for i in range(0, len(orders), batch_size))
 
-        self.crops_gen = lambda: next(crops_gen)
+        self.grid_gen = lambda: next(crops_gen)
         self.shapes_gen = lambda: next(shapes_gen)
         self.orders_gen = lambda: next(orders_gen)
-        self.crops_iters = - (-len(crops) // batch_size)
-        self.crops_info = {'cube_name': cube_name,
-                           'geom': horizon.geometry}
-        return self
+        self.grid_iters = - (-len(crops) // batch_size)
+        self.grid_info = {'cube_name': cube_name,
+                          'geom': horizon.geometry}
