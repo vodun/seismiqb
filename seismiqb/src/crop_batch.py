@@ -525,7 +525,7 @@ class SeismicCropBatch(Batch):
         SeismicCropBatch
             batch with fetched labels.
         """
-        _ = dst, mean_threshold, adjacency
+        _ = dst, mean_threshold, adjacency, skip_merge
 
         # threshold the mask, reshape and rotate the mask if needed
         pos = self.get_pos(None, src, ix)
@@ -902,4 +902,3 @@ class SeismicCropBatch(Batch):
             Opacity for showing images.
         """
         plot_batch_components(self, *components, idx=idx, plot_mode=plot_mode, order_axes=order_axes, **kwargs)
-
