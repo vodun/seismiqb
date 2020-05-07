@@ -41,25 +41,6 @@ class SeismicCropBatch(Batch):
                 self.add_components(comp, np.array([np.nan] * len(self.index)))
         return self.indices
 
-    @action
-    def add_components(self, components, init=None):
-        """ !!. """
-        if isinstance(components, str):
-            components = (components,)
-            init = (init,)
-        elif isinstance(components, (tuple, list)):
-            components = tuple(components)
-            if init is None:
-                init = (None,) * len(components)
-            else:
-                init = tuple(init)
-
-        for comp, value in zip(components, init):
-            if hasattr(self, comp):
-                setattr(self, comp, value)
-            else:
-                super().add_components(comp, value)
-
 
     @staticmethod
     def salt(path):
@@ -511,7 +492,7 @@ class SeismicCropBatch(Batch):
     @inbatch_parallel(init='indices', target='for', post='_masks_to_horizons_post')
     def masks_to_horizons(self, ix, src='masks', src_slices='slices', dst='predicted_labels', prefix='predict',
                           threshold=0.5, averaging='mean', minsize=0, order=(2, 0, 1), skip_merge=False,
-                          mean_threshold=2.0, q_threshold=2.0, q=0.9, adjacency=1):
+                          mean_threshold=2.0, adjacency=1):
         """ Convert labels from horizons-mask into point-cloud format. Fetches point-clouds from
         a batch of masks, then merges resulting clouds to those stored in `dst`, whenever possible.
 
@@ -971,7 +952,7 @@ class SeismicCropBatch(Batch):
                                flat_horizon[right_border] - height // 2]
                 points.append(right_point)
 
-        
+
         if len(points) == 0:
             raise StopIteration('Reached the end of the slide')
         else:

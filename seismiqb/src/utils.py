@@ -646,61 +646,59 @@ class file_cache:
         return wrapper
 
 @njit
-def find_max_overlap(point, horizon_matrix, coverage, zero_traces, i_min, x_min,
+def find_max_overlap(point, cubic_point, horizon_matrix, zero_traces, i_min, x_min,
                      xlines_len, ilines_len, stride, shape, fill_value, max_zeros=0,
-                     min_empty=5, border_gap=0, overlap=0, update_coverage=True):
+                     min_empty=5, safe_stripe=0, pad_size=0, num_points=2, max_overlap=True):
+    """ Generate crop coordinates next to the point with maximum horizon covered area.
+    """
     candidates, shapes = [], []
     orders, intersections = [], []
+    hor_height = horizon_matrix[point[0], point[1]]
 
-    hor_height = int(horizon_matrix[point[0], point[1]])
-
-    ils = [point[0] - stride, point[0] - shape[1] + stride]
-    for il in ils:
-        lines_il = il + i_min - overlap
-        lines_xl = point[1] + x_min - overlap
-        if lines_il > border_gap and lines_il + shape[1] < ilines_len - border_gap:
-            if np.sum(zero_traces[lines_il: lines_il + shape[1], lines_xl: lines_xl + shape[0]]) >= max_zeros:
-                empty_space = \
-                    np.nonzero(horizon_matrix[il: il + shape[1],
-                                            point[1]:point[1] + shape[0]] == fill_value)
-                if len(empty_space[0]) > min_empty:
-                    candidates.append([lines_il,
-                                    lines_xl,
-                                    hor_height - shape[2] // 2])
+    tested_iline_positions = np.array([point[0] - stride, point[0] - shape[1] + stride])
+    cubic_iline_positions = tested_iline_positions + i_min - pad_size
+    for il, cubic_il in zip(tested_iline_positions, cubic_iline_positions):
+        if cubic_il > safe_stripe and cubic_il + shape[1] < ilines_len - safe_stripe:
+            if np.sum(zero_traces[cubic_il: cubic_il + shape[1],
+                                  cubic_point[1]: cubic_point[1] + shape[0]]) <= max_zeros:
+                len_empty = \
+                    np.sum(horizon_matrix[il: il + shape[1],
+                                          point[1]:point[1] + shape[0]] == fill_value)
+                if len_empty > min_empty:
+                    candidates.append([cubic_il,
+                                       cubic_point[1],
+                                       hor_height - shape[2] // 2])
                     shapes.append([shape[1], shape[0], shape[2]])
                     orders.append([0, 2, 1])
-                    intersections.append(shape[1] - len(empty_space[0]))
+                    intersections.append(shape[1] - len_empty)
 
-    xls = [point[1] - stride, point[1] - shape[1] + stride]
-
-    for xl in xls:
-        lines_xl = xl + x_min - overlap
-        lines_il = point[0] + i_min - overlap
-        if lines_xl > border_gap and lines_xl + shape[1] < xlines_len - border_gap:
-            if np.sum(zero_traces[lines_il: lines_il + shape[0], lines_xl: lines_xl + shape[1]]) >= max_zeros:
-                empty_space = \
-                    np.nonzero(horizon_matrix[point[0]:point[0] + shape[0],
-                                            xl: xl + shape[1]] == fill_value)
-                if len(empty_space[0]) > min_empty:
-                    candidates.append([lines_il,
-                                    lines_xl,
-                                    hor_height - shape[2] // 2])
+    tested_xline_positions = np.array([point[1] - stride, point[1] - shape[1] + stride])
+    cubic_xline_positions = tested_xline_positions + x_min - pad_size
+    for xl, cubic_xl in zip(tested_xline_positions, cubic_xline_positions):
+        if cubic_xl > safe_stripe and cubic_xl + shape[1] < xlines_len - safe_stripe:
+            if np.sum(zero_traces[cubic_point[0]: cubic_point[0] + shape[0],
+                                  cubic_xl: cubic_xl + shape[1]]) <= max_zeros:
+                len_empty = \
+                    np.sum(horizon_matrix[point[0]:point[0] + shape[0],
+                                          xl: xl + shape[1]] == fill_value)
+                if len_empty > min_empty:
+                    candidates.append([cubic_point[0],
+                                       cubic_xl,
+                                       hor_height - shape[2] // 2])
                     shapes.append(shape)
                     orders.append([2, 0, 1])
-                    intersections.append(shape[1] - len(empty_space[0]))
+                    intersections.append(shape[1] - len_empty)
     if len(candidates) == 0:
         return None
 
     candidates_array = np.array(candidates)
     shapes_array = np.array(shapes)
     orders_array = np.array(orders)
-    top2 = np.argsort(np.array(intersections))[:2]
-    if update_coverage:
-        for i in range(len(top2)):
-            il, xl, h = candidates_array[top2][i]
-            _shape = shapes_array[top2][i]
-            coverage[il: il + _shape[0], xl: xl + _shape[1]] = 1
 
-    return (candidates_array[top2], \
-                shapes_array[top2], \
-                orders_array[top2])
+    if max_overlap:
+        top = np.argsort(np.array(intersections))[:num_points]
+    else:
+        top = np.argsort(np.array(intersections))[::-1][:num_points]
+    return (candidates_array[top], \
+                shapes_array[top], \
+                orders_array[top])

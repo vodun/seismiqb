@@ -476,7 +476,7 @@ class SeismicCubeset(Dataset):
         mask = getattr(self, src) if isinstance(src, str) else src
 
         grid_info = getattr(self, src_grid_info)
-        
+
         horizons = Horizon.from_mask(mask, grid_info,
                                      threshold=threshold, averaging=averaging, minsize=minsize, prefix=prefix)
         if not hasattr(self, dst):
@@ -513,6 +513,7 @@ class SeismicCubeset(Dataset):
                                                                 absolute=absolute, offset=offset,
                                                                 printer=printer, hist=hist, plot=plot)
 
+
     def show_slide(self, idx=0, n_line=0, plot_mode='overlap', mode='iline', **kwargs):
         """ Show full slide of the given cube on the given line.
 
@@ -530,149 +531,16 @@ class SeismicCubeset(Dataset):
         components = ('images', 'masks') if list(self.labels.values())[0] else ('images',)
         plot_slide(self, *components, idx=idx, n_line=n_line, plot_mode=plot_mode, mode=mode, **kwargs)
 
-    def make_expand_grid(self, cube_name, crop_shape, labels_img, labels_src='predicted_labels', stride=10, batch_size=16):
-        """ Define crops coordinates for one step of an extension step.
-        Parameters
-        ----------
-        cube_name : str
-            Reference to cube. Should be valid key for `geometries` attribute.
-        crop_shape : array-like
-            shape of the crop fed to the model.
-        labels_img : binary array of shape (ilines_len, xlines_len) with `1's` corresponding to known
-            labels.
-        labels_src : str
-            attribute name of known labels.
-        stride : int
-            stride size.
-        batch_size : int
-            batch size fed to the model.
-        """
-        borders_img = labels_img
-        border_coords = np.where(borders_img == 1)
-        il_min, il_max = np.min(border_coords[0]), np.max(border_coords[0])
-        x_min, x_max = np.min(border_coords[1]), np.max(border_coords[1])
-        width, line_shape, height = crop_shape
-        iline_crops = []
-
-        labels = getattr(self, labels_src)[cube_name][0]
-        labels_i_min, labels_x_min = labels.i_min, labels.x_min
-
-        zero_traces = self.geometries[cube_name].zero_traces
-
-        deb_h, deb_l = 0, 0
-        # sample horizontal border points
-        for xline in range(x_min, x_max, width):
-            non_zero = np.where(borders_img[il_min:il_max + 1, xline] == 1)[0]
-
-            if len(non_zero) == 0:
-                continue
-            _lower_il, _upper_il = np.min(non_zero) + il_min, np.max(non_zero) + il_min
-
-            _lower_h = labels.matrix[_lower_il, xline] - height // 2
-            _upper_h = labels.matrix[_upper_il, xline] - height // 2
-            _lower_il = _lower_il + stride - line_shape
-
-            _upper_il = _upper_il - stride
-
-            
-            if _lower_il + labels_i_min >= 0:
-                iline_crops.append([cube_name, _lower_il + labels_i_min, xline + labels_x_min, _lower_h])
-            if _upper_il + labels_i_min + line_shape <= self.geometries[cube_name].ilines_len:
-                deb_h += 1
-                iline_crops.append([cube_name, _upper_il + labels_i_min, xline + labels_x_min, _upper_h])
-        iline_crops = np.array(iline_crops, dtype=object)
-        iline_crops_gen = (iline_crops[i:i+batch_size]
-                               for i in range(0, len(iline_crops), batch_size))
-        self.iline_crops_gen = lambda: next(iline_crops_gen)
-        self.iline_crops_iters = - (-len(iline_crops) // batch_size)
-        offsets = np.array([np.min(iline_crops[:, 1]),
-                            np.min(iline_crops[:, 2]),
-                            np.min(iline_crops[:, 3])])
-
-        ilines_range = (np.min(iline_crops[:, 1]), np.max(iline_crops[:, 1]) + line_shape)
-        xlines_range = (np.min(iline_crops[:, 2]), np.max(iline_crops[:, 2]) + width)
-        h_range = (np.min(iline_crops[:, 3]), np.max(iline_crops[:, 3]) + height)
-        grid_array = iline_crops[:, 1:].astype(int) - offsets
-
-        predict_shape = (ilines_range[1] - ilines_range[0],
-                         xlines_range[1] - xlines_range[0],
-                         h_range[1] - h_range[0])
-
-        self.iline_crops_info = {'grid_array': grid_array,
-                                 'predict_shape': predict_shape,
-                                 'range': [ilines_range, xlines_range, h_range],
-                                 'crop_shape': (crop_shape[1], crop_shape[0], crop_shape[2]),
-                                 'cube_name': cube_name,
-                                 'geom': self.geometries[cube_name]}
-
-        xline_crops = []
-        # sample vertical border points
-        for iline in range(il_min, il_max, width):
-            non_zero = np.where(borders_img[iline, x_min:x_max + 1] == 1)[0]
-        
-            non_zero_traces = np.where(zero_traces[iline, :] == 0)[0]
-            if len(non_zero_traces) != 0:
-                min_non_zero_trace = np.min(non_zero_traces)
-                max_non_zero_trace = np.max(non_zero_traces)
-            else:
-                min_non_zero_trace = 0
-                max_non_zero_trace = self.geometries[cube_name].xlines_len
-
-            if len(non_zero) == 0:
-                continue
-            _lower_xl, _upper_xl = np.min(non_zero) + x_min, np.max(non_zero) + x_min
-            _lower_h = labels.matrix[iline, _lower_xl] - height // 2
-            _upper_h = labels.matrix[iline, _upper_xl] - height // 2
-
-            _lower_xl = _lower_xl + stride - line_shape
-            _upper_xl = _upper_xl - stride
-
-            if _lower_xl + labels_x_min >= min_non_zero_trace:
-                xline_crops.append([cube_name, iline + labels_i_min, _lower_xl + labels_x_min, _lower_h])
-            if _upper_xl + labels_x_min + line_shape <= max_non_zero_trace:
-                xline_crops.append([cube_name, iline + labels_i_min, _upper_xl + labels_x_min, _upper_h])
-
-        xline_crops = np.array(xline_crops, dtype=object)
-        xline_crops_gen = (xline_crops[i:i+batch_size]
-                               for i in range(0, len(xline_crops), batch_size))
-
-
-        x_offsets = np.array([np.min(xline_crops[:, 1]),
-                              np.min(xline_crops[:, 2]),
-                              np.min(xline_crops[:, 3])])
-
-        x_ilines_range = (np.min(xline_crops[:, 1]), np.max(xline_crops[:, 1]) + width)
-        x_xlines_range = (np.min(xline_crops[:, 2]), np.max(xline_crops[:, 2]) + line_shape)
-        x_h_range = (np.min(xline_crops[:, 3]), np.max(xline_crops[:, 3]) + height)
-
-        x_predict_shape = (x_ilines_range[1] - x_ilines_range[0],
-                           x_xlines_range[1] - x_xlines_range[0],
-                           x_h_range[1] - x_h_range[0])
-
-        x_grid_array = xline_crops[:, 1:].astype(int) - x_offsets
-
-        self.xline_crops_gen = lambda: next(xline_crops_gen)
-        self.xline_crops_iters = - (-len(xline_crops) // batch_size)
-        self.xline_crops_info = {'grid_array': x_grid_array,
-                                 'predict_shape': x_predict_shape,
-                                 'range': [x_ilines_range, x_xlines_range, x_h_range],
-                                 'crop_shape': crop_shape,
-                                 'cube_name': cube_name,
-                                 'geom': self.geometries[cube_name]}
-        return self
 
     def subset_labels(self, idx=0, horizon_idx=0, src='labels', coords=None,
-                      dst='prior_mask', mask=None):
+                      dst='prior_mask'):
         """Save prior mask to a cubeset attribute `prior_mask`.
         Parameters
         ----------
         coords : tuple or list
             upper left and lower right coordinates of the subset.
-        mask : array
-            optional if coords is not provided binary mask of the subset.
         """
 
-        FILL_VALUE = -999999
         src_horizon = getattr(self, src)[self.indices[idx]][horizon_idx]
         src_matrix = src_horizon.matrix
         i_min, x_min = src_horizon.i_min, src_horizon.x_min
@@ -692,44 +560,71 @@ class SeismicCubeset(Dataset):
         return self
 
     def make_expand_grid_v2(self, cube_name, crop_shape, labels_src='predicted_labels',
-                            stride=10, batch_size=16, coverage=None, **kwargs):
-        """ Unordered crop generation
+                            stride=10, batch_size=16, update_coverage=True, **kwargs):
+        """ Define crops coordinates for one step of an extension step.
+        Parameters
+        ----------
+        cube_name : str
+            Reference to cube. Should be valid key for `labels_src` attribute.
+        crop_shape : array-like
+            Shape of the crop fed to the model.
+            Assumed that channel shape is the smallest and is placed at the first axis.
+        labels_src : str
+            Attribute with known labels.
+        stride : int
+            Minimum length of area without horizon for every crop.
+        batch_size : int
+            Batch size fed to the model.
+        update_coverage : bool or array, optional
+            Boolean array of size (ilines_len, xlines_len) indicating points that will
+            not be used as new crops coordinates, e.g. already covered points.
+            If True then coverage array will be initialized with zeros and updated with
+            covered points.
+            If False then all points from horizon border will be used.
         """
         horizon = getattr(self, labels_src)[cube_name][0]
-        border_points = np.array(list(zip(*np.where(horizon.boundaries_matrix == True))))
-        
-        overlap = crop_shape[1] - stride
-        hor_matrix = np.full((horizon.matrix.shape[0] + 2 * overlap,
-                              horizon.matrix.shape[1] + 2 * overlap),
-                              horizon.FILL_VALUE, dtype=np.int32)
-        hor_matrix[overlap:-overlap, overlap:-overlap] = horizon.matrix
 
-        border_points[:, 0] += overlap
-        border_points[:, 1] += overlap
-        i_min = horizon.i_min
-        x_min = horizon.x_min
-
+        # get some horizon attributes
+        zero_traces = horizon.geometry.zero_traces
         xlines_len = horizon.geometry.xlines_len
         ilines_len = horizon.geometry.ilines_len
         fill_value = horizon.FILL_VALUE
-        coverage = np.zeros((ilines_len, xlines_len)) if not coverage else coverage
-        zero_traces = self.geometries[cube_name].zero_traces
+        i_min = horizon.i_min
+        x_min = horizon.x_min
+
+        # get horizon boundary points in horizon.matrix coordinates
+        border_points = np.array(list(zip(*np.where(horizon.boundaries_matrix))))
+
+        # pad horizon.matrix with fill_value to safely slice crops near horizon borders
+        hor_matrix = np.pad(horizon.matrix, crop_shape[1], constant_values=fill_value)
+
+        # shift border_points to coordinates in the padded matrix
+        _paded_border_points = np.copy(border_points)
+        _paded_border_points[:, 0] += crop_shape[1]
+        _paded_border_points[:, 1] += crop_shape[1]
+
+        coverage = np.zeros_like(zero_traces) if isinstance(update_coverage, bool) else update_coverage
+
+        # shift border_points to global coordinates in the coverage matrix
+        border_points[:, 0] += i_min
+        border_points[:, 1] += x_min
 
         crops = []
         orders = []
         shapes = []
 
-        for point in border_points:
-            if coverage[point[0] + i_min - overlap,
-                        point[1] + x_min - overlap] == 1:
+        for i, point in enumerate(_paded_border_points):
+            if coverage[border_points[i, 0],
+                        border_points[i, 1]] == 1:
                 continue
 
-            result = find_max_overlap(point, hor_matrix, coverage,
+            result = find_max_overlap(point, border_points[i],
+                                      hor_matrix,
                                       zero_traces,
                                       i_min, x_min,
                                       xlines_len, ilines_len,
                                       stride, crop_shape, fill_value,
-                                      overlap=overlap, **kwargs)
+                                      pad_size=crop_shape[1], **kwargs)
             if not result:
                 continue
             new_point, shape, order = result
@@ -737,25 +632,27 @@ class SeismicCubeset(Dataset):
             shapes.extend(shape)
             orders.extend(order)
 
+            if update_coverage is not False:
+                for _point, _shape in zip(new_point, shape):
+                    coverage[_point[0]: _point[0] + _shape[0],
+                             _point[1]: _point[1] + _shape[1]] = 1
 
         crops = np.array(crops, dtype=np.object).reshape(-1, 3)
         cube_names = np.array([cube_name] * len(crops), dtype=np.object).reshape(-1, 1)
         crops = np.concatenate([cube_names, crops], axis=1)
 
         crops_gen = (crops[i:i+batch_size]
-                                for i in range(0, len(crops), batch_size))
+                     for i in range(0, len(crops), batch_size))
         shapes = np.array(shapes)
         shapes_gen = (shapes[i:i+batch_size]
-                                for i in range(0, len(shapes), batch_size))
+                      for i in range(0, len(shapes), batch_size))
         orders_gen = (orders[i:i+batch_size]
-                                for i in range(0, len(orders), batch_size))
+                      for i in range(0, len(orders), batch_size))
 
-        setattr(self, 'crops_gen', lambda: next(crops_gen))
-        setattr(self, 'shapes_gen', lambda: next(shapes_gen))
-        setattr(self, 'orders_gen', lambda: next(orders_gen))
-        setattr(self, 'crops_iters', - (-len(crops) // batch_size))
-
-        crops_info = {'cube_name': cube_name,
-                      'geom': self.geometries[cube_name]}
-        setattr(self, 'crops_info', crops_info)
+        self.crops_gen = lambda: next(crops_gen)
+        self.shapes_gen = lambda: next(shapes_gen)
+        self.orders_gen = lambda: next(orders_gen)
+        self.crops_iters = - (-len(crops) // batch_size)
+        self.crops_info = {'cube_name': cube_name,
+                           'geom': horizon.geometry}
         return self
