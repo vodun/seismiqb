@@ -4,7 +4,7 @@ from glob import glob
 
 import numpy as np
 
-from ..batchflow import Dataset, Sampler, DatasetIndex
+from ..batchflow import Dataset, Sampler, DatasetIndex, Pipeline
 from ..batchflow import NumpySampler, ConstantSampler
 
 from .geometry import SeismicGeometry
@@ -12,9 +12,8 @@ from .crop_batch import SeismicCropBatch
 
 from .horizon import Horizon, UnstructuredHorizon
 from .metrics import HorizonMetrics
+from .plotters import plot_image
 from .utils import IndexedDict, round_to_array
-from .plot_utils import show_sampler, plot_slide, plot_image
-
 
 
 class SeismicCubeset(Dataset):
@@ -296,27 +295,6 @@ class SeismicCubeset(Dataset):
         else:
             setattr(self, dst, sampler)
 
-    def show_sampler(self, idx=0, src_sampler='sampler', n=100000, eps=3, show_unique=False, **kwargs):
-        """ Generate a lot of points and look at their (iline, xline) positions.
-
-        Parameters
-        ----------
-        idx : str, int
-            If str, then name of cube to use.
-            If int, then number of cube in the index to use.
-        src_sampler : str
-            Name of attribute with sampler in it.
-            Must generate points in cubic coordinates, which can be achieved by `modify_sampler` method.
-        n : int
-            Number of points to generate.
-        eps : int
-            Window of painting.
-        """
-        cube_name = idx if isinstance(idx, str) else self.indices[idx]
-        geom = self.geometries[cube_name]
-        sampler = getattr(self, src_sampler)
-        show_sampler(sampler, cube_name, geom, n=n, eps=eps, show_unique=show_unique, **kwargs)
-
     def show_slices(self, idx=0, src_sampler='sampler', n=10000, normalize=False, shape=None,
                     make_slices=True, side_view=False, **kwargs):
         """ Show actually sampled slices of desired shape. """
@@ -338,7 +316,13 @@ class SeismicCubeset(Dataset):
 
         if normalize:
             background = (background > 0).astype(int)
-        plot_image(background, f'Sampled slices on {self.indices[idx]}', rgb=normalize, **kwargs)
+
+        kwargs = {
+            'title': f'Sampled slices on {self.indices[idx]}',
+            'xlabel': 'ilines', 'ylabel': 'xlines',
+            **kwargs
+        }
+        plot_image(background, **kwargs)
         return batch
 
 
@@ -509,19 +493,59 @@ class SeismicCubeset(Dataset):
                                                                 printer=printer, hist=hist, plot=plot)
 
 
-    def show_slide(self, idx=0, n_line=0, plot_mode='overlap', mode='iline', **kwargs):
+    def show_slide(self, idx=0, n_line=0, axis='iline', mode='overlap', backend='matplotlib', **kwargs):
         """ Show full slide of the given cube on the given line.
 
         Parameters
         ----------
         idx : str, int
             Number of cube in the index to use.
-        mode : str
+        axis : str
             Axis to cut along. Can be either `iline` or `xline`.
         n_line : int
             Number of line to show.
-        plot_mode : str
-            Way of showing results. Can be either `overlap`, `separate`, `facies`.
+        mode : str
+            Way of showing results. Can be either `overlap` or `separate`.
+        backend : str
+            Backend to use for render. Can be either 'plotly' or 'matplotlib'. Whenever
+            using 'plotly', also use slices to make the rendering take less time.
         """
         components = ('images', 'masks') if list(self.labels.values())[0] else ('images',)
-        plot_slide(self, *components, idx=idx, n_line=n_line, plot_mode=plot_mode, mode=mode, **kwargs)
+        cube_name = self.indices[idx]
+        geom = self.geometries[cube_name]
+        crop_shape = np.array(geom.cube_shape)
+
+        axis = geom.parse_axis(axis)
+        point = np.array([[cube_name, 0, 0, 0]], dtype=object)
+        point[0, axis + 1] = n_line
+        crop_shape[axis] = 1
+
+        pipeline = (Pipeline()
+                    .crop(points=point, shape=crop_shape)
+                    .load_cubes(dst='images')
+                    .scale(mode='normalize', src='images')
+                    .rotate_axes(src='images'))
+
+        if 'masks' in components:
+            horizons = kwargs.pop('horizons', -1)
+            width = kwargs.pop('width', 4)
+            labels_pipeline = (Pipeline()
+                               .create_masks(dst='masks', width=width, horizons=horizons)
+                               .rotate_axes(src='masks'))
+
+            pipeline = pipeline + labels_pipeline
+
+        batch = (pipeline << self).next_batch(len(self), n_epochs=None)
+        imgs = [np.squeeze(getattr(batch, comp)) for comp in components]
+
+        names = ['iline', 'xline', 'slice']
+        # configure defaults
+        kwargs = {
+            'title': (names[axis] + ' {} out of {} on {}'.format(n_line, geom.cube_shape[axis], cube_name)),
+            'order_axes': (1, 0) if axis == 0 else (0, 1),
+            'xlabel': 'xlines' if axis in (0, 2) else 'ilines',
+            'ylabel': 'height' if axis in (0, 1) else 'xlines',
+            **kwargs
+        }
+
+        plot_image(imgs, backend=backend, mode=mode, **kwargs)

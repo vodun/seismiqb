@@ -14,7 +14,7 @@ import segyio
 import h5pickle
 
 from .utils import lru_cache, find_min_max #, SafeIO
-from .plot_utils import plot_images_overlap
+from .plotters import plot_image
 
 
 
@@ -349,22 +349,31 @@ class SeismicGeometry:
         axis = self.parse_axis(axis)
         slide = self.load_slide(loc=loc, start=start, end=end, step=step, axis=axis, stable=stable)
 
-        title = f'{self.index_headers[axis]} {loc} out of {self.lens[axis]}'
-        meta_title = ''
-        plot_images_overlap([slide], title=title, order_axes=order_axes, meta_title=meta_title, **kwargs)
+        # set defaults
+        kwargs = {
+            'title': f'{self.index_headers[axis]} {loc} out of {self.lens[axis]}',
+            'xlabel': 'xlines' if axis == 0 else 'ilines',
+            'ylabel': 'depth',
+            **kwargs
+        }
+        plot_image(slide, mode='single', order_axes=order_axes, **kwargs)
 
-    def show_amplitude_hist(self, scaler=None, bins=50):
+
+    def show_amplitude_hist(self, scaler=None, bins=50, **kwargs):
         """ Show distribution of amplitudes in `trace_container`. Optionally applies chosen `scaler`. """
-        import matplotlib.pyplot as plt #pylint: disable=import-outside-toplevel
         data = np.copy(self.trace_container)
         if scaler:
             data = self.scaler(data, mode=scaler)
 
-        title = f'Amplitude distribution for {self.short_name}\nMean/std: {np.mean(data):3.3}/{np.std(data):3.3}'
-        plt.figure()
-        _ = plt.hist(data.ravel(), bins=bins)
-        plt.title(title)
-        plt.show()
+        kwargs = {
+            'title': (f'Amplitude distribution for {self.short_name}' +
+                      f'\n Mean/std: {np.mean(data):3.3}/{np.std(data):3.3}'),
+            'label': 'Amplitudes histogram',
+            'xlabel': 'xlines',
+            'ylabel': 'density',
+            **kwargs
+        }
+        plot_image(data, backend='matplotlib', bins=bins, mode='histogram', **kwargs)
 
 
 class SeismicGeometrySEGY(SeismicGeometry):

@@ -6,7 +6,7 @@ from tqdm.auto import tqdm
 
 import numpy as np
 from numba import njit, prange
-import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
 
 import cv2
 from scipy.signal import hilbert, medfilt
@@ -15,7 +15,32 @@ from ..batchflow.models.metrics import Metrics
 
 from .horizon import Horizon
 from .utils import compute_running_mean
-from .plot_utils import plot_image
+from .plotters import plot_image
+
+
+
+CDICT = {
+    'red': [
+        [0.0, None, 1.0],
+        [0.33, 1.0, 1.0],
+        [0.66, 1.0, 1.0],
+        [1.0, 0.0, None]
+    ],
+    'green': [
+        [0.0, None, 0.0],
+        [0.33, 0.0, 0.0],
+        [0.66, 1.0, 1.0],
+        [1.0, 0.5019607843137255, None]
+    ],
+    'blue': [
+        [0.0, None, 0.0],
+        [0.33, 0.0, 0.0],
+        [0.66, 0.0, 0.0],
+        [1.0, 0.0, None]
+    ]
+}
+METRIC_CMAP = mcolors.LinearSegmentedColormap('CustomMap', CDICT)
+
 
 
 
@@ -41,15 +66,14 @@ class BaseSeismicMetric(Metrics):
 
     EPS = 0.00001
 
-    def evaluate(self, metrics, agg='mean', plot=False, show_plot=True, savepath=None, backend='matplotlib',
-                 plot_kwargs=None, scalar=False, **kwargs):
-        """ Calculate desired metrics.
+    def evaluate(self, metric, agg=None, plot=False, show_plot=True, savepath=None, backend='matplotlib', **kwargs):
+        """ Calculate desired metric, apply aggregation, then plot resulting metric-map.
         To plot the results, set `plot` argument to True.
 
         Parameters
         ----------
-        metrics : str or sequence of str
-            Names of metrics to evaluate.
+        metric : str or sequence of str
+            Name of metric to evaluate.
         agg : int, str or callable
             Function to transform metric from ndarray of (n_ilines, n_xlines, N) shape to (n_ilines, n_xlines) shape.
             If callable, then directly applied to the output of metric computation function.
@@ -59,48 +83,34 @@ class BaseSeismicMetric(Metrics):
             Parameters that are passed directly to plotting function, see :func:`.plot_image`.
         kwargs : dict
             Metric-specific parameters.
-
-        Returns
-        -------
-        If `metric` is str, then metric value
-        If `metric` is dict, than dict where keys are metric names and values are metric values.
         """
-        _metrics = [metrics] if isinstance(metrics, str) else metrics
-        _agg = [agg]*len(_metrics) if not isinstance(agg, (tuple, list)) else agg
+        if agg is None:
+            if 'support' in metric:
+                agg = 'nanmean'
 
-        res = {}
-        for name, agg_func in zip(_metrics, _agg):
-            # Get metric, then aggregate
-            metric_fn = getattr(self, name)
-            metric_val, plot_dict = metric_fn(**kwargs)
-            metric_val = self._aggregate(metric_val, agg_func)
+        # Get metric, then aggregate
+        metric_fn = getattr(self, metric)
+        metric_val, plot_dict = metric_fn(**kwargs)
+        metric_val = self._aggregate(metric_val, agg)
 
-            # Get plot parameters
-            # TODO: make plot functions use only needed parameters
-            if plot:
-                plot_dict = {**plot_dict, **(plot_kwargs or {})}
-                ignore_value = plot_dict.pop('ignore_value', None)
-                spatial = plot_dict.pop('spatial', True)
-                _ = backend, plot_dict.pop('zmin', -1), plot_dict.pop('zmax', 1)
+        # Get plot parameters
+        if plot:
+            spatial = plot_dict.pop('spatial', True)
+            ignore_value = plot_dict.pop('ignore_value', None)
 
-                # np.nan allows to ignore values
-                if ignore_value is not None:
-                    copy_metric = np.copy(metric_val)
-                    copy_metric[copy_metric == ignore_value] = np.nan
-                else:
-                    copy_metric = metric_val
+            # np.nan allows to ignore values
+            if ignore_value is not None:
+                copy_metric = np.copy(metric_val)
+                copy_metric[copy_metric == ignore_value] = np.nan
+            else:
+                copy_metric = metric_val
 
-            # Actual plot
-                if spatial:
-                    plot_image(copy_metric, savefig=savepath, show_plot=show_plot, **plot_dict)
-                else:
-                    pass
-            if scalar:
-                print('Scalar value of metric is {}'.format(np.nanmean(copy_metric)))
-            res[name] = metric_val
-
-        res = res[metrics] if isinstance(metrics, str) else res
-        return res
+        # Actual plot
+            if spatial:
+                plot_image(copy_metric, savepath=savepath, show=show_plot, backend=backend, **plot_dict)
+            else:
+                pass
+        return metric_val
 
     def _aggregate(self, metric, agg=None):
         if agg is not None:
@@ -133,10 +143,11 @@ class BaseSeismicMetric(Metrics):
         plot_dict = {
             'spatial': self.spatial,
             'title': f'{title} for {self.name} on cube {self.cube_name}, k={kernel_size}, reduce={reduce_func}',
-            'cmap': 'seismic',
+            'cmap': METRIC_CMAP,
             'zmin': -1, 'zmax': 1,
             'ignore_value': 0.0,
-            # **kwargs
+            'xlabel': 'ilines', 'ylabel': 'xlines',
+            **kwargs
         }
         return metric, plot_dict
 
@@ -168,10 +179,11 @@ class BaseSeismicMetric(Metrics):
         plot_dict = {
             'spatial': self.spatial,
             'title': f'{title} for {self.name} on cube {self.cube_name}',
-            'cmap': 'seismic',
-            'zmin': -1, 'zmax': 1,
+            'cmap': METRIC_CMAP,
+            'zmin': -1.0, 'zmax': 1.0,
             'ignore_value': 0.0,
-            # **kwargs
+            'xlabel': 'ilines', 'ylabel': 'xlines',
+            **kwargs
         }
         return metric, plot_dict
 
@@ -186,7 +198,8 @@ class BaseSeismicMetric(Metrics):
             'cmap': 'seismic_r',
             'zmin': None, 'zmax': None,
             'ignore_value': np.nan,
-            # **kwargs
+            'xlabel': 'ilines', 'ylabel': 'xlines',
+            **kwargs
         }
         return metric, plot_dict
 
@@ -200,7 +213,8 @@ class BaseSeismicMetric(Metrics):
             'cmap': 'seismic_r',
             'zmin': None, 'zmax': None,
             'ignore_value': np.nan,
-            # **kwargs
+            'xlabel': 'ilines', 'ylabel': 'xlines',
+            **kwargs
         }
         return metric, plot_dict
 
@@ -212,10 +226,11 @@ class BaseSeismicMetric(Metrics):
         plot_dict = {
             'spatial': self.spatial,
             'title': f'{title} for {self.name} on cube {self.cube_name}, k={kernel_size}, reduce={reduce_func}',
-            'cmap': 'seismic',
+            'cmap': METRIC_CMAP,
             'zmin': 0.0, 'zmax': 1.0,
             'ignore_value': np.nan,
-            # **kwargs
+            'xlabel': 'ilines', 'ylabel': 'xlines',
+            **kwargs
         }
         return metric, plot_dict
 
@@ -226,10 +241,11 @@ class BaseSeismicMetric(Metrics):
         plot_dict = {
             'spatial': self.spatial,
             'title': f'{title} for {self.name} on cube {self.cube_name}',
-            'cmap': 'seismic',
+            'cmap': METRIC_CMAP,
             'zmin': 0.0, 'zmax': 1.0,
             'ignore_value': np.nan,
-            # **kwargs
+            'xlabel': 'ilines', 'ylabel': 'xlines',
+            **kwargs
         }
         return metric, plot_dict
 
@@ -245,10 +261,11 @@ class BaseSeismicMetric(Metrics):
         plot_dict = {
             'spatial': self.spatial,
             'title': f'{title} for {self.name} on cube {self.cube_name}, k={kernel_size}, reduce={reduce_func}',
-            'cmap': 'seismic',
+            'cmap': METRIC_CMAP,
             'zmin': None, 'zmax': None,
             'ignore_value': np.nan,
-            # **kwargs
+            'xlabel': 'ilines', 'ylabel': 'xlines',
+            **kwargs
         }
         return metric, plot_dict
 
@@ -259,10 +276,11 @@ class BaseSeismicMetric(Metrics):
         plot_dict = {
             'spatial': self.spatial,
             'title': f'{title} for {self.name} on cube {self.cube_name}',
-            'cmap': 'seismic',
+            'cmap': METRIC_CMAP,
             'zmin': None, 'zmax': None,
             'ignore_value': np.nan,
-            # **kwargs
+            'xlabel': 'ilines', 'ylabel': 'xlines',
+            **kwargs
         }
         return metric, plot_dict
 
@@ -276,10 +294,11 @@ class BaseSeismicMetric(Metrics):
         plot_dict = {
             'spatial': self.spatial,
             'title': f'{title} for {self.name} on cube {self.cube_name}, k={kernel_size}, reduce={reduce_func}',
-            'cmap': 'seismic',
+            'cmap': METRIC_CMAP,
             'zmin': None, 'zmax': None,
             'ignore_value': np.nan,
-            # **kwargs
+            'xlabel': 'ilines', 'ylabel': 'xlines',
+            **kwargs
         }
         return metric, plot_dict
 
@@ -290,10 +309,11 @@ class BaseSeismicMetric(Metrics):
         plot_dict = {
             'spatial': self.spatial,
             'title': f'{title} for {self.name} on cube {self.cube_name}',
-            'cmap': 'seismic',
+            'cmap': METRIC_CMAP,
             'zmin': None, 'zmax': None,
             'ignore_value': np.nan,
-            # **kwargs
+            'xlabel': 'ilines', 'ylabel': 'xlines',
+            **kwargs
         }
         return metric, plot_dict
 
@@ -305,10 +325,11 @@ class BaseSeismicMetric(Metrics):
         plot_dict = {
             'spatial': self.spatial,
             'title': f'{title} for {self.name} on cube {self.cube_name}, k={kernel_size}, reduce={reduce_func}',
-            'cmap': 'seismic',
+            'cmap': METRIC_CMAP,
             'zmin': None, 'zmax': None,
             'ignore_value': np.nan,
-            # **kwargs
+            'xlabel': 'ilines', 'ylabel': 'xlines',
+            **kwargs
         }
         return metric, plot_dict
 
@@ -319,10 +340,11 @@ class BaseSeismicMetric(Metrics):
         plot_dict = {
             'spatial': self.spatial,
             'title': f'{title} for {self.name} on cube {self.cube_name}',
-            'cmap': 'seismic',
+            'cmap': METRIC_CMAP,
             'zmin': None, 'zmax': None,
             'ignore_value': np.nan,
-            # **kwargs
+            'xlabel': 'ilines', 'ylabel': 'xlines',
+            **kwargs
         }
         return metric, plot_dict
 
@@ -334,10 +356,11 @@ class BaseSeismicMetric(Metrics):
         plot_dict = {
             'spatial': self.spatial,
             'title': f'{title} for {self.name} on cube {self.cube_name}, k={kernel_size}, reduce={reduce_func}',
-            'cmap': 'seismic',
+            'cmap': METRIC_CMAP,
             'zmin': None, 'zmax': None,
             'ignore_value': np.nan,
-            # **kwargs
+            'xlabel': 'ilines', 'ylabel': 'xlines',
+            **kwargs
         }
         return metric, plot_dict
 
@@ -348,10 +371,11 @@ class BaseSeismicMetric(Metrics):
         plot_dict = {
             'spatial': self.spatial,
             'title': f'{title} for {self.name} on cube {self.cube_name}',
-            'cmap': 'seismic',
+            'cmap': METRIC_CMAP,
             'zmin': None, 'zmax': None,
             'ignore_value': np.nan,
-            # **kwargs
+            'xlabel': 'ilines', 'ylabel': 'xlines',
+            **kwargs
         }
         return metric, plot_dict
 
@@ -365,10 +389,11 @@ class BaseSeismicMetric(Metrics):
         plot_dict = {
             'spatial': self.spatial,
             'title': f'{title} for {self.name} on cube {self.cube_name}, k={kernel_size}, reduce={reduce_func}',
-            'cmap': 'seismic',
+            'cmap': METRIC_CMAP,
             'zmin': None, 'zmax': None,
             'ignore_value': np.nan,
-            # **kwargs
+            'xlabel': 'ilines', 'ylabel': 'xlines',
+            **kwargs
         }
         return metric, plot_dict
 
@@ -379,10 +404,11 @@ class BaseSeismicMetric(Metrics):
         plot_dict = {
             'spatial': self.spatial,
             'title': f'{title} for {self.name} on cube {self.cube_name}',
-            'cmap': 'seismic',
+            'cmap': METRIC_CMAP,
             'zmin': None, 'zmax': None,
             'ignore_value': np.nan,
-            # **kwargs
+            'xlabel': 'ilines', 'ylabel': 'xlines',
+            **kwargs
         }
         return metric, plot_dict
 
@@ -423,9 +449,10 @@ class BaseSeismicMetric(Metrics):
         plot_dict = {
             'spatial': self.spatial,
             'title': '{} for {} on cube {}'.format(title, self.name, self.cube_name),
-            'cmap': 'seismic',
+            'cmap': METRIC_CMAP,
             'zmin': -1, 'zmax': 1,
-            # **kwargs
+            'xlabel': 'ilines', 'ylabel': 'xlines',
+            **kwargs
         }
         return metric, plot_dict
 
@@ -482,7 +509,8 @@ class BaseSeismicMetric(Metrics):
             'cmap': 'Reds',
             'zmin': 0.0, 'zmax': np.max(quality_map),
             'ignore_value': np.nan,
-            # **kwargs
+            'xlabel': 'ilines', 'ylabel': 'xlines',
+            **kwargs
         }
         return quality_map, plot_dict
 
@@ -671,8 +699,13 @@ class HorizonMetrics(BaseSeismicMetric):
             printer(dedent(msg))
 
         if hist:
-            _ = plt.hist(metric.ravel(), bins=100)
-            plt.show()
+            hist_dict = {
+                'bins': 100,
+                'xlabel': 'l1-values',
+                'ylabel': 'N',
+                'label': 'Histogram of l1 differences',
+            }
+            plot_image(metric, mode='histogram', **hist_dict)
 
         title = 'Height differences between {} and {}'.format(self.horizon.name, other.name)
         plot_dict = {
@@ -681,7 +714,8 @@ class HorizonMetrics(BaseSeismicMetric):
             'cmap': 'seismic',
             'zmin': 0, 'zmax': np.max(metric),
             'ignore_value': np.nan,
-            # **kwargs
+            'xlabel': 'ilines', 'ylabel': 'xlines',
+            **kwargs
         }
         return metric, plot_dict
 
@@ -769,7 +803,8 @@ class GeometryMetrics(BaseSeismicMetric):
             'cmap': 'seismic',
             'zmin': None, 'zmax': None,
             'ignore_value': np.nan,
-            # **kwargs
+            'xlabel': 'ilines', 'ylabel': 'xlines',
+            **kwargs
         }
         return metric, plot_dict
 
@@ -799,7 +834,8 @@ class GeometryMetrics(BaseSeismicMetric):
             'cmap': 'seismic',
             'zmin': None, 'zmax': None,
             'ignore_value': np.nan,
-            # **kwargs
+            'xlabel': 'ilines', 'ylabel': 'xlines',
+            **kwargs
         }
         return metric, plot_dict
 

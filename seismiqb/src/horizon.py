@@ -18,8 +18,7 @@ from skimage.measure import label
 from ..batchflow import HistoSampler
 
 from .utils import round_to_array, groupby_mean
-from .plot_utils import plot_image, plot_images_overlap, show_sampler
-
+from .plotters import plot_image
 
 
 class BaseLabel(ABC):
@@ -283,11 +282,11 @@ class UnstructuredHorizon(BaseLabel):
         mask = self.add_to_mask(mask, locations, width=width, iterator=iterator if stable else None)
         seismic_slide, mask = np.squeeze(seismic_slide), np.squeeze(mask)
 
-        # Display everything
-        title = f'{self.geometry.index_headers[axis]} {loc} out of {self.geometry.lens[axis]}'
-        meta_title = f'U-horizon {self.name} on {self.geometry.name}'
-        plot_images_overlap([seismic_slide, mask], title=title, order_axes=order_axes, meta_title=meta_title, **kwargs)
-
+        # set defaults if needed and plot the slide
+        kwargs = {'title': (f'U-horizon {self.name} on {self.geometry.name}' + '\n ' +
+                            f'{self.geometry.index_headers[axis]} {loc} out of {self.geometry.lens[axis]}'),
+                  **kwargs}
+        plot_image([seismic_slide, mask], mode='overlap', order_axes=order_axes, **kwargs)
 
 
 
@@ -839,18 +838,6 @@ class Horizon(BaseLabel):
             points = self.points
 
         self.sampler = HistoSampler(np.histogramdd(points/self.cube_shape, bins=bins))
-
-    def show_sampler(self, n=100000, eps=3, show_unique=False, **kwargs):
-        """ Generate a lot of points and look at their (iline, xline) positions.
-
-        Parameters
-        ----------
-        n : int
-            Number of points to generate.
-        eps : int
-            Window of painting.
-        """
-        show_sampler(self.sampler, None, self.geometry, n=n, eps=eps, show_unique=show_unique, **kwargs)
 
 
     def add_to_mask(self, mask, locations=None, width=3, alpha=1, **kwargs):
@@ -1580,33 +1567,62 @@ class Horizon(BaseLabel):
         else:
             matrix = copy(matrix).astype(np.float32)
 
+        # defaults for plotting if not supplied in kwargs
+        kwargs = {
+            'cmap': 'viridis_r',
+            'title': 'Depth map {} of `{}` on `{}`'.format('on full'*on_full, self.name, self.cube_name),
+            'xlabel': 'xlines',
+            'ylabel': 'ilines',
+            'coloraxis_colorbar': {'title': 'amplitude'},
+            **kwargs
+            }
         matrix[matrix == fill_value] = np.nan
-        plot_image(matrix, 'Depth map {} of `{}` on `{}`'.format('on full'*on_full, self.name, self.cube_name),
-                   cmap='viridis_r', **kwargs)
+        plot_image(matrix, mode='single', **kwargs)
 
 
-    def show_amplitudes_rgb(self, width=3, **kwargs):
+    def show_amplitudes_rgb(self, width=3, channel_weights=(1, 0.5, 0.25), to_uint8=True, **kwargs):
         """ Show trace values on the horizon and surfaces directly under it.
+        TODO: check
 
         Parameters
         ----------
         width : int
             Space between surfaces to cut.
+        channel_weights : tuple
+            Weights applied to rgb-channels.
+        to_uint8 : bool
+            Determines whether the image should be cast to uint8.
+        backend : str
+            Can be either 'matplotlib' ('plt') or 'plotly' ('go')
         """
+        # get values along the horizon and cast them to [0, 1]
         amplitudes = self.get_cube_values(window=1 + width*2, offset=width)
-
         amplitudes = amplitudes[:, :, (0, width, -1)]
         amplitudes -= np.nanmin(amplitudes, axis=(0, 1)).reshape(1, 1, -1)
         amplitudes *= 1 / np.nanmax(amplitudes, axis=(0, 1)).reshape(1, 1, -1)
         amplitudes[self.full_matrix == self.FILL_VALUE, :] = np.nan
         amplitudes = amplitudes[:, :, ::-1]
-        amplitudes *= np.asarray([1, 0.5, 0.25]).reshape(1, 1, -1)
-        plot_image(amplitudes, 'RGB amplitudes of {} on cube {}'.format(self.name, self.cube_name),
-                   rgb=True, **kwargs)
+        amplitudes *= np.asarray(channel_weights).reshape(1, 1, -1)
+
+        # cast values to uint8 if needed
+        if to_uint8:
+            amplitudes = (amplitudes * 255).astype(np.uint8)
+
+        # defaults for plotting if not supplied in kwargs
+        kwargs = {
+            'title': 'RGB amplitudes of {} on cube {}'.format(self.name, self.cube_name),
+            'xlabel': 'xlines',
+            'ylabel': 'ilines',
+            **kwargs
+            }
+
+        plot_image(amplitudes, mode='rgb', **kwargs)
 
 
     def show_slide(self, loc, width=3, axis='i', order_axes=None, heights=None, **kwargs):
         """ Show slide with horizon on it.
+
+        TODO: add support of order_axes into plotters
 
         Parameters
         ----------
@@ -1632,12 +1648,17 @@ class Horizon(BaseLabel):
             seismic_slide = seismic_slide[:, heights]
             mask = mask[:, heights]
 
-        # Display everything
+        # defaults for plotting if not supplied in kwargs
         header = self.geometry.index_headers[axis]
-        title = f'{header} {loc} out of {self.geometry.lens[axis]}'
-        meta_title = f'Horizon `{self.name}` on `{self.geometry.name}`'
-        plot_images_overlap([seismic_slide, mask], title=title, order_axes=order_axes, meta_title=meta_title, **kwargs)
+        kwargs = {
+            'title': (f'Horizon `{self.name}` on `{self.geometry.name}`' +
+                      f'\n {header} {loc} out of {self.geometry.lens[axis]}'),
+            'xlabel': 'xlines' if axis in (0, 2) else 'ilines',
+            'ylabel': 'height' if axis in (0, 1) else 'xlines',
+            **kwargs
+            }
 
+        plot_image([seismic_slide, mask], mode='overlap', order_axes=order_axes, **kwargs)
 
 
 class StructuredHorizon(Horizon):
