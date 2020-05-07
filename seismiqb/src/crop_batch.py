@@ -910,6 +910,7 @@ class SeismicCropBatch(Batch):
             'titles': components,
             'xlabel': 'xlines',
             'ylabel': 'depth',
+            'cmap': ['gray'] + ['viridis']*len(components) if mode == 'separate' else 'gray',
             **kwargs
         }
 
