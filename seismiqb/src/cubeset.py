@@ -13,7 +13,7 @@ from .crop_batch import SeismicCropBatch
 from .horizon import Horizon, UnstructuredHorizon
 from .metrics import HorizonMetrics
 from .plotters import plot_image
-from .utils import IndexedDict, round_to_array
+from .utils import IndexedDict, round_to_array, find_max_overlap
 
 class SeismicCubeset(Dataset):
     """ Stores indexing structure for dataset of seismic cubes along with additional structures.
@@ -587,32 +587,25 @@ class SeismicCubeset(Dataset):
         # get some horizon attributes
         zero_traces = horizon.geometry.zero_traces
         fill_value = horizon.FILL_VALUE
+        hor_matrix = horizon.full_matrix.astype(np.int32)
+
+        coverage_matrix = np.zeros_like(zero_traces) if isinstance(coverage, bool) else coverage
+
 
         # get horizon boundary points in horizon.matrix coordinates
         border_points = np.array(list(zip(*np.where(horizon.boundaries_matrix))))
 
-        # pad horizon.matrix with fill_value to safely slice crops near horizon borders
-        hor_matrix = np.pad(horizon.matrix, crop_shape[1], constant_values=fill_value)
-
-        # shift border_points to coordinates in the padded matrix
-        paded_border_points = np.copy(border_points)
-        paded_border_points[:, 0] += crop_shape[1]
-        paded_border_points[:, 1] += crop_shape[1]
-
-        coverage_matrix = np.zeros_like(zero_traces) if isinstance(coverage, bool) else coverage
-
-        # shift border_points to global coordinates in the coverage matrix
+        # shift border_points to global coordinates
         border_points[:, 0] += horizon.i_min
         border_points[:, 1] += horizon.x_min
 
         crops, orders, shapes = [], [], []
 
-        for i, point in enumerate(paded_border_points):
-            if coverage_matrix[border_points[i, 0],
-                               border_points[i, 1]] == 1:
+        for i, point in enumerate(border_points):
+            if coverage_matrix[point[0], point[1]] == 1:
                 continue
 
-            result = find_max_overlap(point, border_points[i],
+            result = find_max_overlap(point,
                                       hor_matrix, zero_traces,
                                       horizon.geometry.xlines_len,
                                       horizon.geometry.ilines_len,
@@ -628,7 +621,7 @@ class SeismicCubeset(Dataset):
             if coverage is not False:
                 for _point, _shape in zip(new_point, shape):
                     coverage_matrix[_point[0]: _point[0] + _shape[0],
-                                     _point[1]: _point[1] + _shape[1]] = 1
+                                    _point[1]: _point[1] + _shape[1]] = 1
 
         crops = np.array(crops, dtype=np.object).reshape(-1, 3)
         cube_names = np.array([cube_name] * len(crops), dtype=np.object).reshape(-1, 1)
