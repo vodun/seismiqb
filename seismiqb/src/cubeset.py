@@ -557,34 +557,35 @@ class SeismicCubeset(Dataset):
 
 
     def make_expand_grid_v2(self, cube_name, crop_shape, labels_src='predicted_labels',
-                            stride=10, batch_size=16, update_coverage=True, **kwargs):
+                            stride=10, batch_size=16, coverage=True, **kwargs):
         """ Define crops coordinates for one step of an extension step.
+
         Parameters
         ----------
         cube_name : str
-            Reference to cube. Should be valid key for `labels_src` attribute.
+            Reference to the cube. Should be a valid key for the `labels_src` attribute.
         crop_shape : array-like
-            Shape of the crop fed to the model.
-            Assumed that channel shape is the smallest and is placed at the first axis.
+            The desired shape of the crops.
+            Note that final shapes are made in both xline and iline directions. So if
+            crop_shape is (1, 64, 64), crops of both (1, 64, 64) and (64, 1, 64) shape
+            will be defined.
         labels_src : str
-            Attribute with known labels.
+            Attribute with the horizon to be extended.
         stride : int
-            Minimum length of area without horizon for every crop.
+            A step made from the horizon border.
         batch_size : int
             Batch size fed to the model.
-        update_coverage : bool or array, optional
-            Boolean array of size (ilines_len, xlines_len) indicating points that will
-            not be used as new crops coordinates, e.g. already covered points.
+        coverage : bool or array, optional
+            A boolean array of size (ilines_len, xlines_len) indicating points that will
+            not be used as new crop coordinates, e.g. already covered points.
             If True then coverage array will be initialized with zeros and updated with
             covered points.
-            If False then all points from horizon border will be used.
+            If False then all points from the horizon border will be used.
         """
         horizon = getattr(self, labels_src)[cube_name][0]
 
         # get some horizon attributes
         zero_traces = horizon.geometry.zero_traces
-        xlines_len = horizon.geometry.xlines_len
-        ilines_len = horizon.geometry.ilines_len
         fill_value = horizon.FILL_VALUE
 
         # get horizon boundary points in horizon.matrix coordinates
@@ -594,28 +595,27 @@ class SeismicCubeset(Dataset):
         hor_matrix = np.pad(horizon.matrix, crop_shape[1], constant_values=fill_value)
 
         # shift border_points to coordinates in the padded matrix
-        _paded_border_points = np.copy(border_points)
-        _paded_border_points[:, 0] += crop_shape[1]
-        _paded_border_points[:, 1] += crop_shape[1]
+        paded_border_points = np.copy(border_points)
+        paded_border_points[:, 0] += crop_shape[1]
+        paded_border_points[:, 1] += crop_shape[1]
 
-        coverage = np.zeros_like(zero_traces) if isinstance(update_coverage, bool) else update_coverage
+        coverage_matrix = np.zeros_like(zero_traces) if isinstance(coverage, bool) else coverage
 
         # shift border_points to global coordinates in the coverage matrix
         border_points[:, 0] += horizon.i_min
         border_points[:, 1] += horizon.x_min
 
-        crops = []
-        orders = []
-        shapes = []
+        crops, orders, shapes = [], [], []
 
-        for i, point in enumerate(_paded_border_points):
-            if coverage[border_points[i, 0],
-                        border_points[i, 1]] == 1:
+        for i, point in enumerate(paded_border_points):
+            if coverage_matrix[border_points[i, 0],
+                               border_points[i, 1]] == 1:
                 continue
 
             result = find_max_overlap(point, border_points[i],
                                       hor_matrix, zero_traces,
-                                      xlines_len, ilines_len,
+                                      horizon.geometry.xlines_len,
+                                      horizon.geometry.ilines_len,
                                       stride, crop_shape, fill_value,
                                       **kwargs)
             if not result:
@@ -625,18 +625,18 @@ class SeismicCubeset(Dataset):
             shapes.extend(shape)
             orders.extend(order)
 
-            if update_coverage is not False:
+            if coverage is not False:
                 for _point, _shape in zip(new_point, shape):
-                    coverage[_point[0]: _point[0] + _shape[0],
-                             _point[1]: _point[1] + _shape[1]] = 1
+                    coverage_matrix[_point[0]: _point[0] + _shape[0],
+                                     _point[1]: _point[1] + _shape[1]] = 1
 
         crops = np.array(crops, dtype=np.object).reshape(-1, 3)
         cube_names = np.array([cube_name] * len(crops), dtype=np.object).reshape(-1, 1)
+        shapes = np.array(shapes)
         crops = np.concatenate([cube_names, crops], axis=1)
 
         crops_gen = (crops[i:i+batch_size]
                      for i in range(0, len(crops), batch_size))
-        shapes = np.array(shapes)
         shapes_gen = (shapes[i:i+batch_size]
                       for i in range(0, len(shapes), batch_size))
         orders_gen = (orders[i:i+batch_size]
