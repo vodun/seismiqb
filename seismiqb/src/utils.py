@@ -415,10 +415,9 @@ def _compute_running_mean_jit(x, kernel_size, cumsum):
     return result
 
 
-@njit
-def find_max_overlap(point, horizon_matrix, zero_traces,
-                     xlines_len, ilines_len, stride, shape, fill_value, zeros_threshold=0,
-                     empty_threshold=5, safe_stripe=0, num_points=2):
+def gen_crop_coordinates(point, horizon_matrix, zero_traces,
+                         xlines_len, ilines_len, stride, shape, fill_value, zeros_threshold=0,
+                         empty_threshold=5, safe_stripe=0, num_points=2):
     """ Generate crop coordinates next to the point with maximum horizon covered area.
     """
     candidates, shapes = [], []
@@ -456,6 +455,7 @@ def find_max_overlap(point, horizon_matrix, zero_traces,
                     shapes.append(shape)
                     orders.append([2, 0, 1])
                     intersections.append(shape[1] - len_empty)
+
     if len(candidates) == 0:
         return None
 

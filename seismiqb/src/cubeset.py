@@ -13,7 +13,7 @@ from .crop_batch import SeismicCropBatch
 from .horizon import Horizon, UnstructuredHorizon
 from .metrics import HorizonMetrics
 from .plotters import plot_image
-from .utils import IndexedDict, round_to_array, find_max_overlap
+from .utils import IndexedDict, round_to_array, gen_crop_coordinates
 
 class SeismicCubeset(Dataset):
     """ Stores indexing structure for dataset of seismic cubes along with additional structures.
@@ -556,8 +556,8 @@ class SeismicCubeset(Dataset):
         plot_image(imgs, backend=backend, mode=mode, **kwargs)
 
 
-    def make_expand_grid_v2(self, cube_name, crop_shape, labels_src='predicted_labels',
-                            stride=10, batch_size=16, coverage=True, **kwargs):
+    def make_expand_grid(self, cube_name, crop_shape, labels_src='predicted_labels',
+                         stride=10, batch_size=16, coverage=True, **kwargs):
         """ Define crops coordinates for one step of an extension step.
 
         Parameters
@@ -605,12 +605,12 @@ class SeismicCubeset(Dataset):
             if coverage_matrix[point[0], point[1]] == 1:
                 continue
 
-            result = find_max_overlap(point,
-                                      hor_matrix, zero_traces,
-                                      horizon.geometry.xlines_len,
-                                      horizon.geometry.ilines_len,
-                                      stride, crop_shape, fill_value,
-                                      **kwargs)
+            result = gen_crop_coordinates(point,
+                                          hor_matrix, zero_traces,
+                                          horizon.geometry.xlines_len,
+                                          horizon.geometry.ilines_len,
+                                          stride, crop_shape, fill_value,
+                                          **kwargs)
             if not result:
                 continue
             new_point, shape, order = result
