@@ -556,9 +556,11 @@ class SeismicCubeset(Dataset):
         plot_image(imgs, backend=backend, mode=mode, **kwargs)
 
 
-    def make_expand_grid(self, cube_name, crop_shape, labels_src='predicted_labels',
-                         stride=10, batch_size=16, coverage=True, **kwargs):
-        """ Define crops coordinates for one step of an extension step.
+    def make_extension_grid(self, cube_name, crop_shape, labels_src='predicted_labels',
+                            stride=10, batch_size=16, coverage=True, **kwargs):
+        """ Create a non-regular grid of points in a cube for extension procedure.
+        Each point defines an upper rightmost corner of a crop which contains a holey
+        horizon.
 
         Parameters
         ----------
@@ -572,7 +574,7 @@ class SeismicCubeset(Dataset):
         labels_src : str
             Attribute with the horizon to be extended.
         stride : int
-            A step made from the horizon border.
+            Distance between a horizon border and a corner of a crop.
         batch_size : int
             Batch size fed to the model.
         coverage : bool or array, optional
@@ -584,13 +586,9 @@ class SeismicCubeset(Dataset):
         """
         horizon = getattr(self, labels_src)[cube_name][0]
 
-        # get some horizon attributes
         zero_traces = horizon.geometry.zero_traces
-        fill_value = horizon.FILL_VALUE
         hor_matrix = horizon.full_matrix.astype(np.int32)
-
         coverage_matrix = np.zeros_like(zero_traces) if isinstance(coverage, bool) else coverage
-
 
         # get horizon boundary points in horizon.matrix coordinates
         border_points = np.array(list(zip(*np.where(horizon.boundaries_matrix))))
@@ -607,10 +605,8 @@ class SeismicCubeset(Dataset):
 
             result = gen_crop_coordinates(point,
                                           hor_matrix, zero_traces,
-                                          horizon.geometry.xlines_len,
-                                          horizon.geometry.ilines_len,
-                                          stride, crop_shape, fill_value,
-                                          **kwargs)
+                                          stride, crop_shape,
+                                          horizon.FILL_VALUE, **kwargs)
             if not result:
                 continue
             new_point, shape, order = result
