@@ -536,7 +536,7 @@ class SeismicCropBatch(Batch):
         # threshold the mask, reshape and rotate the mask if needed
         pos = self.get_pos(None, src, ix)
         mask = getattr(self, src)[pos]
-        if np.array(order).reshape(-1, 3).shape[0] > 1:
+        if np.array(order).reshape(-1, 3).shape[0] > 0:
             order = order[pos]
         mask = np.transpose(mask, axes=order)
 
