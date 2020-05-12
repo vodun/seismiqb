@@ -494,12 +494,10 @@ class SeismicCropBatch(Batch):
             result.append(getattr(self, component)[pos])
         return np.concatenate(result, axis=axis)
 
-
-
     @action
     @inbatch_parallel(init='indices', target='for', post='_masks_to_horizons_post')
     def masks_to_horizons(self, ix, src='masks', src_slices='slices', dst='predicted_labels', prefix='predict',
-                          threshold=0.5, averaging='mean', minsize=0, order=(2, 0, 1),
+                          threshold=0.5, averaging='mean', minsize=0, order=(2, 0, 1), skip_merge=False,
                           mean_threshold=2.0, adjacency=1):
         """ Convert labels from horizons-mask into point-cloud format. Fetches point-clouds from
         a batch of masks, then merges resulting clouds to those stored in `dst`, whenever possible.
@@ -533,11 +531,13 @@ class SeismicCropBatch(Batch):
         SeismicCropBatch
             batch with fetched labels.
         """
-        _ = dst, mean_threshold, adjacency
+        _ = dst, mean_threshold, adjacency, skip_merge
 
         # threshold the mask, reshape and rotate the mask if needed
         pos = self.get_pos(None, src, ix)
         mask = getattr(self, src)[pos]
+        if np.array(order).reshape(-1, 3).shape[0] > 0:
+            order = order[pos]
         mask = np.transpose(mask, axes=order)
 
         #
@@ -553,8 +553,7 @@ class SeismicCropBatch(Batch):
         return horizons
 
 
-
-    def _masks_to_horizons_post(self, horizons_lists, *args, dst=None,
+    def _masks_to_horizons_post(self, horizons_lists, *args, dst=None, skip_merge=False,
                                 mean_threshold=2.0, adjacency=1, **kwargs):
         """ Stitch a set of point-clouds to a point cloud form dst if possible.
         Post for `get_point_cloud`-action.
@@ -562,6 +561,10 @@ class SeismicCropBatch(Batch):
         _, _ = args, kwargs
         if dst is None:
             raise ValueError("dst should be initialized with empty list.")
+
+        if skip_merge:
+            setattr(self, dst, [hor for hor_list in horizons_lists for hor in hor_list])
+            return self
 
         # remember, horizons_lists contains lists of horizons
         for horizons in horizons_lists:
