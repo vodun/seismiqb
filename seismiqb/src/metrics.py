@@ -617,6 +617,25 @@ class HorizonMetrics(BaseSeismicMetric):
             self._probs = hist_matrix / np.sum(hist_matrix, axis=-1, keepdims=True) + self.EPS
         return self._probs
 
+    def instantaneous_phase(self, **kwargs):
+        """ Compute instantaneous phase via Hilbert transform. """
+        analytic = hilbert(self.data, axis=2)
+
+        phase = np.angle(analytic)
+        phase = phase % (2 * np.pi) - np.pi
+
+        phase_slice = phase[:, :, phase.shape[-1] // 2]
+
+        plot_dict = {
+            'spatial': self.spatial,
+            'title': 'Instantaneous phase for {} on cube {}'.format(self.name, self.cube_name),
+            'cmap': 'viridis_r',
+            'zmin': -np.pi, 'zmax': np.pi,
+            'xlabel': 'ilines', 'ylabel': 'xlines',
+            **kwargs
+        }
+        return correct_pi(phase_slice, 1e-5), plot_dict
+
 
     def find_best_match(self, offset=0, **kwargs):
         """ !!. """
@@ -712,7 +731,7 @@ class HorizonMetrics(BaseSeismicMetric):
             'spatial': True,
             'title': '{} on cube {}'.format(title, self.horizon.cube_name),
             'cmap': 'seismic',
-            'zmin': 0, 'zmax': np.max(metric),
+            'zmin': 0, 'zmax': np.nanmax(metric),
             'ignore_value': np.nan,
             'xlabel': 'ilines', 'ylabel': 'xlines',
             **kwargs

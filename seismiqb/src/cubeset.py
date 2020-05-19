@@ -16,6 +16,10 @@ from .plotters import plot_image
 from .utils import IndexedDict, round_to_array
 
 
+def astype_object(array):
+    return array.astype(np.object)
+
+
 class SeismicCubeset(Dataset):
     """ Stores indexing structure for dataset of seismic cubes along with additional structures.
 
@@ -194,7 +198,7 @@ class SeismicCubeset(Dataset):
         sampler = 0 & NumpySampler('n', dim=4)
         for i, ix in enumerate(self.indices):
             sampler_ = (ConstantSampler(ix)
-                        & samplers[ix].apply(lambda d: d.astype(np.object)))
+                        & samplers[ix].apply(astype_object))
             sampler = sampler | (p[i] & sampler_)
         setattr(self, dst, sampler)
         return self

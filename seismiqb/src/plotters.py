@@ -133,7 +133,7 @@ class MatplotlibPlotter:
         if show:
             fig.show()
         else:
-            fig.close()
+            plt.close()
 
     def single(self, image, **kwargs):
         """ Plot single image/heatmap using matplotlib.
@@ -172,7 +172,7 @@ class MatplotlibPlotter:
                     'fraction': 0.022, 'pad': 0.07,
                     'labeltop': True, 'labelright': True, 'direction': 'inout',
                     'facecolor': 'white',
-                    'xlabel': '', 'ylabel': '',
+                    'label': '', 'title': '', 'xlabel': '', 'ylabel': '',
                     'order_axes': (1, 0)}
         updated = {**defaults, **kwargs}
 
@@ -191,12 +191,22 @@ class MatplotlibPlotter:
 
         # channelize and plot the image
         fig, ax = plt.subplots(**figure_kwargs)
-        ax_img = ax.imshow(np.transpose(image.squeeze(), axes=updated['order_axes']), **render_kwargs)
+        img = np.transpose(image.squeeze(), axes=updated['order_axes'])
+        xticks, yticks = updated.get('xticks', [0, img.shape[1]]), updated.get('yticks', [img.shape[0], 0])
+        extent = [xticks[0], xticks[-1], yticks[0], yticks[-1]]
+
+        ax_img = ax.imshow(img, extent=extent, **render_kwargs)
 
         # add titles and labels
         ax.set_title(**label_kwargs)
         ax.set_xlabel(**xaxis_kwargs)
         ax.set_ylabel(**yaxis_kwargs)
+
+        if 'xticks' in updated:
+            ax.set_xticks(xticks)
+        if 'yticks' in updated:
+            ax.set_yticks(yticks)
+
         if updated['colorbar']:
             cb = fig.colorbar(ax_img, **colorbar_kwargs)
             cb.ax.yaxis.set_tick_params(color=yaxis_kwargs.get('color', 'black'))
@@ -253,14 +263,23 @@ class MatplotlibPlotter:
 
         # channelize images and put them on a canvas
         _, ax = plt.subplots(**figure_kwargs)
-        ax.imshow(np.transpose(images[0].squeeze(), axes=updated['order_axes']), **render_kwargs)
+        img = np.transpose(images[0].squeeze(), axes=updated['order_axes'])
+        xticks, yticks = updated.get('xticks', [0, img.shape[1]]), updated.get('yticks', [img.shape[0], 0])
+        extent = [xticks[0], xticks[-1], yticks[0], yticks[-1]]
+
+        ax.imshow(img, extent=extent, **render_kwargs)
         ax.set_xlabel(**xaxis_kwargs)
         ax.set_ylabel(**yaxis_kwargs)
+
+        if 'xticks' in updated:
+            ax.set_xticks(xticks)
+        if 'yticks' in updated:
+            ax.set_yticks(yticks)
 
         for img, n_channel in zip(images[1:], (0, 1, 2)):
             ax.imshow(channelize_image(np.transpose(img.squeeze(), axes=updated['order_axes']), total_channels=4,
                                        n_channel=n_channel, opacity=updated['opacity']),
-                      **render_kwargs)
+                      extent=extent, **render_kwargs)
         plt.title(**label_kwargs)
 
         self.save_and_show(plt, **updated)

@@ -253,6 +253,17 @@ class UnstructuredHorizon(BaseLabel):
     def dump(self, **kwargs):
         """ Save the horizon to the disk. """
 
+    def __str__(self):
+        msg = f"""
+        Horizon {self.name} for {self.cube_name}
+        Depths range:           {self.h_min} to {self.h_max}
+        Depths mean:            {self.h_mean:.6}
+        Depths std:             {self.h_std:.6}
+        Length:                 {len(self.dataframe)}
+        """
+        return dedent(msg)
+
+
     # Visualization
     def show_slide(self, loc, width=3, axis=0, stable=True, order_axes=None, **kwargs):
         """ Show slide with horizon on it.
@@ -283,8 +294,10 @@ class UnstructuredHorizon(BaseLabel):
         seismic_slide, mask = np.squeeze(seismic_slide), np.squeeze(mask)
 
         # set defaults if needed and plot the slide
-        kwargs = {'title': (f'U-horizon {self.name} on {self.geometry.name}' + '\n ' +
+        kwargs = {'title': (f'U-horizon `{self.name}` on `{self.geometry.name}`' + '\n ' +
                             f'{self.geometry.index_headers[axis]} {loc} out of {self.geometry.lens[axis]}'),
+                  'xlabel': self.geometry.index_headers[1 - axis],
+                  'ylabel': 'Depth', 'y': 1.015,
                   **kwargs}
         plot_image([seismic_slide, mask], mode='overlap', order_axes=order_axes, **kwargs)
 
@@ -381,6 +394,7 @@ class Horizon(BaseLabel):
         # Heights information
         self._h_min, self._h_max = None, None
         self._h_mean, self._h_std = None, None
+        self._horizon_metrics = None
 
         # Attributes from geometry
         self.geometry = geometry
@@ -759,6 +773,8 @@ class Horizon(BaseLabel):
 
         self.apply_to_matrix(filtering_function, **kwargs)
 
+    filter = filter_points
+
 
     def smooth_out(self, kernel_size=3, sigma=0.8, iters=1, preserve_borders=True, **kwargs):
         """ Convolve the horizon with gaussian kernel with special treatment to absent points:
@@ -1091,6 +1107,19 @@ class Horizon(BaseLabel):
         return hash(self.matrix.data.tobytes())
 
     @property
+    def horizon_metrics(self):
+        """ Create `HorizonMetrics` instance in a cached manner. """
+        if self._horizon_metrics is None:
+            from .metrics import HorizonMetrics
+            self._horizon_metrics = HorizonMetrics(self)
+        return self._horizon_metrics
+
+    @property
+    def instantaneous_phase(self):
+        """ Phase along the horizon. """
+        return self.horizon_metrics.evaluate('instantaneous_phase')
+
+    @property
     def number_of_holes(self):
         """ Number of holes inside horizon borders. """
         holes_array = self.filled_matrix != self.binary_matrix
@@ -1117,19 +1146,18 @@ class Horizon(BaseLabel):
 
 
     # Evaluate horizon on its own / against other(s)
-    def evaluate(self, supports=20, plot=True, savepath=None, printer=print, **kwargs):
+    def evaluate(self, supports=50, plot=True, savepath=None, printer=print, **kwargs):
         """ Compute crucial metrics of a horizon. """
         msg = f"""
-        Number of labeled points: {len(self)}
-        Number of points inside borders: {np.sum(self.filled_matrix)}
-        Perimeter (length of borders): {self.perimeter}
-        Percentage of labeled non-bad traces: {self.coverage}
-        Percentage of labeled traces inside borders: {self.solidity}
-        Number of holes inside borders: {self.number_of_holes}
+        Number of labeled points:                         {len(self)}
+        Number of points inside borders:                  {np.sum(self.filled_matrix)}
+        Perimeter (length of borders):                    {self.perimeter}
+        Percentage of labeled non-bad traces:             {self.coverage}
+        Percentage of labeled traces inside borders:      {self.solidity}
+        Number of holes inside borders:                   {self.number_of_holes}
         """
         printer(dedent(msg))
-        from .metrics import HorizonMetrics
-        return HorizonMetrics(self).evaluate('support_corrs', supports=supports, agg='nanmean',
+        return self.horizon_metrics.evaluate('support_corrs', supports=supports, agg='nanmean',
                                              plot=plot, savepath=savepath, **kwargs)
 
 
@@ -1534,9 +1562,9 @@ class Horizon(BaseLabel):
         Horizon {self.name} for {self.cube_name} loaded from {self.format}
         Ilines range:      {self.i_min} to {self.i_max}
         Xlines range:      {self.x_min} to {self.x_max}
-        Heights range:     {self.h_min} to {self.h_max}
-        Heights mean:      {self.h_mean:.6}
-        Heights std:       {self.h_std:.6}
+        Depth range:       {self.h_min} to {self.h_max}
+        Depth mean:        {self.h_mean:.6}
+        Depth std:         {self.h_std:.6}
 
         Length:            {len(self)}
         Perimeter:         {self.perimeter}
@@ -1570,10 +1598,10 @@ class Horizon(BaseLabel):
         # defaults for plotting if not supplied in kwargs
         kwargs = {
             'cmap': 'viridis_r',
-            'title': 'Depth map {} of `{}` on `{}`'.format('on full'*on_full, self.name, self.cube_name),
-            'xlabel': 'xlines',
-            'ylabel': 'ilines',
-            'coloraxis_colorbar': {'title': 'amplitude'},
+            'title': '{} {} of `{}` on `{}`'.format(src if isinstance(src, str) else '',
+                                                    'on full'*on_full, self.name, self.cube_name),
+            'xlabel': self.geometry.index_headers[0],
+            'ylabel': self.geometry.index_headers[1],
             **kwargs
             }
         matrix[matrix == fill_value] = np.nan
@@ -1582,7 +1610,6 @@ class Horizon(BaseLabel):
 
     def show_amplitudes_rgb(self, width=3, channel_weights=(1, 0.5, 0.25), to_uint8=True, **kwargs):
         """ Show trace values on the horizon and surfaces directly under it.
-        TODO: check
 
         Parameters
         ----------
@@ -1611,15 +1638,15 @@ class Horizon(BaseLabel):
         # defaults for plotting if not supplied in kwargs
         kwargs = {
             'title': 'RGB amplitudes of {} on cube {}'.format(self.name, self.cube_name),
-            'xlabel': 'xlines',
-            'ylabel': 'ilines',
+            'xlabel': self.geometry.index_headers[0],
+            'ylabel': self.geometry.index_headers[1],
             **kwargs
             }
 
         plot_image(amplitudes, mode='rgb', **kwargs)
 
 
-    def show_slide(self, loc, width=3, axis='i', order_axes=None, heights=None, **kwargs):
+    def show_slide(self, loc, width=3, axis='i', order_axes=None, zoom_slice=None, **kwargs):
         """ Show slide with horizon on it.
 
         TODO: add support of order_axes into plotters
@@ -1643,18 +1670,25 @@ class Horizon(BaseLabel):
         mask = np.zeros(shape)
         mask = self.add_to_mask(mask, locations=locations, width=width)
         seismic_slide, mask = np.squeeze(seismic_slide), np.squeeze(mask)
+        xticks = list(range(seismic_slide.shape[0]))
+        yticks = list(range(seismic_slide.shape[1]))
 
-        if heights:
-            seismic_slide = seismic_slide[:, heights]
-            mask = mask[:, heights]
+        if zoom_slice:
+            seismic_slide = seismic_slide[zoom_slice]
+            mask = mask[zoom_slice]
+            xticks = xticks[zoom_slice[0]]
+            yticks = yticks[zoom_slice[1]]
 
         # defaults for plotting if not supplied in kwargs
         header = self.geometry.index_headers[axis]
         kwargs = {
             'title': (f'Horizon `{self.name}` on `{self.geometry.name}`' +
                       f'\n {header} {loc} out of {self.geometry.lens[axis]}'),
-            'xlabel': 'xlines' if axis in (0, 2) else 'ilines',
-            'ylabel': 'height' if axis in (0, 1) else 'xlines',
+            'xlabel': self.geometry.index_headers[1 - axis],
+            'ylabel': 'height',
+            'xticks': xticks[::max(1, round(len(xticks)//8/100))*100],
+            'yticks': yticks[::max(1, round(len(yticks)//10/100))*100][::-1],
+            'y': 1.02,
             **kwargs
             }
 

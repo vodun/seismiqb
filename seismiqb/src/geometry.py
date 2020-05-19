@@ -318,9 +318,15 @@ class SeismicGeometry:
         Current index:                 {self.index_headers}
         Shape:                         {self.cube_shape}
         Time delay and sample rate:    {self.delay}, {self.sample_rate}
-        Depth of one trace is:         {self.depth}
+
+        Cube size:                     {os.path.getsize(self.path) / (1024**3):4.3} GB
         Size of the instance:          {self.ngbytes:4.3} GB
+
+        Number of traces:              {np.prod(self.cube_shape[:-1])}
         """
+        if hasattr(self, 'zero_traces'):
+            msg += f"""Number of non-zero traces:     {np.prod(self.cube_shape[:-1]) - np.sum(self.zero_traces)}
+            """
 
         if self.has_stats:
             msg += f"""
@@ -344,16 +350,44 @@ class SeismicGeometry:
             printer = logger.info
         printer(str(self))
 
-    def show_slide(self, loc=None, start=None, end=None, step=1, axis=0, stable=True, order_axes=None, **kwargs):
+    def show_psn(self, **kwargs):
+        """ Show signal-to-ratio map. """
+        kwargs = {
+            'cmap': 'viridis_r',
+            'title': f'PSN map of `{self.name}`',
+            'xlabel': self.index_headers[0],
+            'ylabel': self.index_headers[1],
+            **kwargs
+            }
+        matrix = np.log(self.mean_matrix**2 / self.std_matrix**2)
+        plot_image(matrix, mode='single', **kwargs)
+
+
+    def show_slide(self, loc=None, start=None, end=None, step=1, axis=0, zoom_slice=None,
+                   stable=True, order_axes=None, **kwargs):
         """ Load slide in `segy` or `hdf5` fashion and display it. """
         axis = self.parse_axis(axis)
         slide = self.load_slide(loc=loc, start=start, end=end, step=step, axis=axis, stable=stable)
+        xticks = list(range(slide.shape[0]))
+        yticks = list(range(slide.shape[1]))
 
-        # set defaults
+        if zoom_slice:
+            slide = slide[zoom_slice]
+            xticks = xticks[zoom_slice[0]]
+            yticks = yticks[zoom_slice[1]]
+
+        # Plot params
+        if len(self.index_headers) > 1:
+            title = f'{self.index_headers[axis]} {loc} out of {self.lens[axis]}'
+        else:
+            title = '2D seismic slide'
         kwargs = {
-            'title': f'{self.index_headers[axis]} {loc} out of {self.lens[axis]}',
-            'xlabel': 'xlines' if axis == 0 else 'ilines',
+            'title': title,
+            'xlabel': self.index_headers[1 - axis] if len(self.index_headers) > 1 else self.index_headers[0],
             'ylabel': 'depth',
+            'cmap': 'gray',
+            'xticks': xticks[::max(1, round(len(xticks)//10/100))*100],
+            'yticks': yticks[::max(1, round(len(yticks)//10/100))*100][::-1],
             **kwargs
         }
         plot_image(slide, mode='single', order_axes=order_axes, **kwargs)
@@ -369,7 +403,7 @@ class SeismicGeometry:
             'title': (f'Amplitude distribution for {self.short_name}' +
                       f'\n Mean/std: {np.mean(data):3.3}/{np.std(data):3.3}'),
             'label': 'Amplitudes histogram',
-            'xlabel': 'xlines',
+            'xlabel': 'amplitude',
             'ylabel': 'density',
             **kwargs
         }
@@ -855,5 +889,14 @@ class SeismicGeometryHDF5(SeismicGeometry):
     def load_slide(self, loc, axis='iline', **kwargs):
         """ Load desired slide along desired axis. """
         _ = kwargs
-        location = self.make_slide_locations(loc=loc, axis=axis)
-        return np.squeeze(self.load_crop(location))
+        axis = self.parse_axis(axis)
+        if axis == 0:
+            cube = self.file_hdf5['cube']
+            slide = self._cached_load(cube, loc)
+        elif axis == 1:
+            cube = self.file_hdf5['cube_x']
+            slide = self._cached_load(cube, loc).T
+        elif axis == 2:
+            cube = self.file_hdf5['cube_h']
+            slide = self._cached_load(cube, loc)
+        return slide
