@@ -350,11 +350,11 @@ class SeismicGeometry:
             printer = logger.info
         printer(str(self))
 
-    def show_psn(self, **kwargs):
-        """ Show signal-to-ratio map. """
+    def show_snr(self, **kwargs):
+        """ Show signal-to-noise map. """
         kwargs = {
             'cmap': 'viridis_r',
-            'title': f'PSN map of `{self.name}`',
+            'title': f'Signal-to-noise map of `{self.name}`',
             'xlabel': self.index_headers[0],
             'ylabel': self.index_headers[1],
             **kwargs

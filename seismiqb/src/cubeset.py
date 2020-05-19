@@ -17,6 +17,7 @@ from .utils import IndexedDict, round_to_array
 
 
 def astype_object(array):
+    """ Converts array to `object` dtype. Picklable, unlike inline lambda function. """
     return array.astype(np.object)
 
 
