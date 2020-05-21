@@ -1,4 +1,5 @@
 """ Utility functions. """
+from math import isnan
 from collections import OrderedDict
 from threading import RLock
 from functools import wraps
@@ -9,7 +10,7 @@ import numpy as np
 import pandas as pd
 import segyio
 
-from numba import njit
+from numba import njit, prange
 
 
 
@@ -413,3 +414,35 @@ def _compute_running_mean_jit(x, kernel_size, cumsum):
             c = cumsum[i + 1 + k, j - k]
             result[i - k, j - k] = float(d - b - c + a) /  float(kernel_size ** 2)
     return result
+
+
+def mode(array):
+    """ Compute mode of the array along the last axis. """
+    nan_mask = np.max(array, axis=-1)
+    return nb_mode(array, nan_mask)
+
+@njit
+def nb_mode(array, mask):
+    """ Compute mode of the array along the last axis. """
+    i_range, x_range = array.shape[:2]
+    temp = np.full((i_range, x_range), np.nan)
+
+    for il in prange(i_range):
+        for xl in prange(x_range):
+            if not isnan(mask[il, xl]):
+
+                current = array[il, xl, :]
+                counter = {}
+                frequency = 0
+                for i in current:
+                    if i in counter:
+                        counter[i] += 1
+                    else:
+                        counter[i] = 0
+
+                    if counter[i] > frequency:
+                        element = i
+                        frequency = counter[i]
+
+                temp[il, xl] = element
+    return temp

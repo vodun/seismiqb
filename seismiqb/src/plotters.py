@@ -388,7 +388,7 @@ class MatplotlibPlotter:
 
             ax[i].set_xlabel(**xaxis_kwargs)
             ax[i].set_ylabel(**yaxis_kwargs)
-            ax[i].set_title(**dict(titles_kwargs, **{'label': updated['titles'][i]}))
+            ax[i].set_title(**dict(titles_kwargs, **{'label': updated.get('titles', ' '*(len(images)+1))[i]}))
 
         fig.suptitle(**label_kwargs)
 

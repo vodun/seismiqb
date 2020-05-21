@@ -294,12 +294,15 @@ class UnstructuredHorizon(BaseLabel):
         seismic_slide, mask = np.squeeze(seismic_slide), np.squeeze(mask)
 
         # set defaults if needed and plot the slide
-        kwargs = {'title': (f'U-horizon `{self.name}` on `{self.geometry.name}`' + '\n ' +
-                            f'{self.geometry.index_headers[axis]} {loc} out of {self.geometry.lens[axis]}'),
-                  'xlabel': self.geometry.index_headers[1 - axis],
-                  'ylabel': 'Depth', 'y': 1.015,
-                  **kwargs}
-        plot_image([seismic_slide, mask], mode='overlap', order_axes=order_axes, **kwargs)
+        kwargs = {
+            'mode': 'overlap',
+            'title': (f'U-horizon `{self.name}` on `{self.geometry.name}`' + '\n ' +
+                      f'{self.geometry.index_headers[axis]} {loc} out of {self.geometry.lens[axis]}'),
+            'xlabel': self.geometry.index_headers[1 - axis],
+            'ylabel': 'Depth', 'y': 1.015,
+            **kwargs
+        }
+        plot_image([seismic_slide, mask], order_axes=order_axes, **kwargs)
 
 
 
@@ -1051,7 +1054,9 @@ class Horizon(BaseLabel):
     @property
     def amplitudes(self):
         """ Values from the cube along the horizon. """
-        return self.get_cube_values(window=1)
+        amplitudes = self.get_cube_values(window=1)
+        amplitudes[self.full_matrix == self.FILL_VALUE] = np.nan
+        return amplitudes
 
     @property
     def binary_matrix(self):
@@ -1692,6 +1697,7 @@ class Horizon(BaseLabel):
             total = self.geometry.depth
 
         kwargs = {
+            'mode': 'overlap',
             'title': (f'Horizon `{self.name}` on `{self.geometry.name}`' +
                       f'\n {header} {loc} out of {total}'),
             'xlabel': xlabel,
@@ -1702,7 +1708,7 @@ class Horizon(BaseLabel):
             **kwargs
             }
 
-        plot_image([seismic_slide, mask], mode='overlap', order_axes=order_axes, **kwargs)
+        plot_image([seismic_slide, mask], order_axes=order_axes, **kwargs)
 
 
 class StructuredHorizon(Horizon):
