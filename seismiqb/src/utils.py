@@ -424,6 +424,7 @@ def mode(array):
 @njit
 def nb_mode(array, mask):
     """ Compute mode of the array along the last axis. """
+    #pylint: disable=not-an-iterable
     i_range, x_range = array.shape[:2]
     temp = np.full((i_range, x_range), np.nan)
 
