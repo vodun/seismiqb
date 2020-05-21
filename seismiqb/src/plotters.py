@@ -186,7 +186,7 @@ class MatplotlibPlotter:
         colorbar_kwargs = filter_kwargs(updated, ['fraction', 'pad'])
 
         cm = plt.get_cmap(render_kwargs['cmap'])
-        cm.set_bad(color=updated.get('bad_color', 'white'))
+        cm.set_bad(color=updated.get('bad_color', updated.get('fill_color', 'white')))
         render_kwargs['cmap'] = cm
 
         # channelize and plot the image

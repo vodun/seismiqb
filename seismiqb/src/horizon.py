@@ -1680,12 +1680,22 @@ class Horizon(BaseLabel):
             yticks = yticks[zoom_slice[1]]
 
         # defaults for plotting if not supplied in kwargs
-        header = self.geometry.index_headers[axis]
+        if axis in [0, 1]:
+            header = self.geometry.index_headers[axis]
+            xlabel = self.geometry.index_headers[1 - axis]
+            ylabel = 'depth'
+            total = self.geometry.lens[axis]
+        if axis == 2:
+            header = 'Depth'
+            xlabel = self.geometry.index_headers[0]
+            ylabel = self.geometry.index_headers[1]
+            total = self.geometry.depth
+
         kwargs = {
             'title': (f'Horizon `{self.name}` on `{self.geometry.name}`' +
-                      f'\n {header} {loc} out of {self.geometry.lens[axis]}'),
-            'xlabel': self.geometry.index_headers[1 - axis],
-            'ylabel': 'height',
+                      f'\n {header} {loc} out of {total}'),
+            'xlabel': xlabel,
+            'ylabel': ylabel,
             'xticks': xticks[::max(1, round(len(xticks)//8/100))*100],
             'yticks': yticks[::max(1, round(len(yticks)//10/100))*100][::-1],
             'y': 1.02,
