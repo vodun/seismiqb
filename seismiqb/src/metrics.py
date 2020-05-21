@@ -14,7 +14,7 @@ from scipy.signal import hilbert, medfilt
 from ..batchflow.models.metrics import Metrics
 
 from .horizon import Horizon
-from .utils import compute_running_mean
+from .utils import mode, compute_running_mean
 from .plotters import plot_image
 
 
@@ -117,7 +117,10 @@ class BaseSeismicMetric(Metrics):
             if callable(agg):
                 metric = agg(metric)
             elif isinstance(agg, str):
-                metric = getattr(np, agg)(metric, axis=-1)
+                if agg == 'mode':
+                    metric = mode(metric)
+                else:
+                    metric = getattr(np, agg)(metric, axis=-1)
             elif isinstance(agg, (int, slice)):
                 metric = metric[..., agg]
         return metric
@@ -147,6 +150,7 @@ class BaseSeismicMetric(Metrics):
             'zmin': -1, 'zmax': 1,
             'ignore_value': 0.0,
             'xlabel': 'ilines', 'ylabel': 'xlines',
+            'fill_color': 'black',
             **kwargs
         }
         return metric, plot_dict
@@ -183,6 +187,7 @@ class BaseSeismicMetric(Metrics):
             'zmin': -1.0, 'zmax': 1.0,
             'ignore_value': 0.0,
             'xlabel': 'ilines', 'ylabel': 'xlines',
+            'fill_color': 'black',
             **kwargs
         }
         return metric, plot_dict
@@ -199,6 +204,7 @@ class BaseSeismicMetric(Metrics):
             'zmin': None, 'zmax': None,
             'ignore_value': np.nan,
             'xlabel': 'ilines', 'ylabel': 'xlines',
+            'fill_color': 'black',
             **kwargs
         }
         return metric, plot_dict
@@ -214,6 +220,7 @@ class BaseSeismicMetric(Metrics):
             'zmin': None, 'zmax': None,
             'ignore_value': np.nan,
             'xlabel': 'ilines', 'ylabel': 'xlines',
+            'fill_color': 'black',
             **kwargs
         }
         return metric, plot_dict
@@ -230,6 +237,7 @@ class BaseSeismicMetric(Metrics):
             'zmin': 0.0, 'zmax': 1.0,
             'ignore_value': np.nan,
             'xlabel': 'ilines', 'ylabel': 'xlines',
+            'fill_color': 'black',
             **kwargs
         }
         return metric, plot_dict
@@ -245,6 +253,7 @@ class BaseSeismicMetric(Metrics):
             'zmin': 0.0, 'zmax': 1.0,
             'ignore_value': np.nan,
             'xlabel': 'ilines', 'ylabel': 'xlines',
+            'fill_color': 'black',
             **kwargs
         }
         return metric, plot_dict
@@ -265,6 +274,7 @@ class BaseSeismicMetric(Metrics):
             'zmin': None, 'zmax': None,
             'ignore_value': np.nan,
             'xlabel': 'ilines', 'ylabel': 'xlines',
+            'fill_color': 'black',
             **kwargs
         }
         return metric, plot_dict
@@ -280,6 +290,7 @@ class BaseSeismicMetric(Metrics):
             'zmin': None, 'zmax': None,
             'ignore_value': np.nan,
             'xlabel': 'ilines', 'ylabel': 'xlines',
+            'fill_color': 'black',
             **kwargs
         }
         return metric, plot_dict
@@ -298,6 +309,7 @@ class BaseSeismicMetric(Metrics):
             'zmin': None, 'zmax': None,
             'ignore_value': np.nan,
             'xlabel': 'ilines', 'ylabel': 'xlines',
+            'fill_color': 'black',
             **kwargs
         }
         return metric, plot_dict
@@ -313,6 +325,7 @@ class BaseSeismicMetric(Metrics):
             'zmin': None, 'zmax': None,
             'ignore_value': np.nan,
             'xlabel': 'ilines', 'ylabel': 'xlines',
+            'fill_color': 'black',
             **kwargs
         }
         return metric, plot_dict
@@ -329,6 +342,7 @@ class BaseSeismicMetric(Metrics):
             'zmin': None, 'zmax': None,
             'ignore_value': np.nan,
             'xlabel': 'ilines', 'ylabel': 'xlines',
+            'fill_color': 'black',
             **kwargs
         }
         return metric, plot_dict
@@ -344,6 +358,7 @@ class BaseSeismicMetric(Metrics):
             'zmin': None, 'zmax': None,
             'ignore_value': np.nan,
             'xlabel': 'ilines', 'ylabel': 'xlines',
+            'fill_color': 'black',
             **kwargs
         }
         return metric, plot_dict
@@ -360,6 +375,7 @@ class BaseSeismicMetric(Metrics):
             'zmin': None, 'zmax': None,
             'ignore_value': np.nan,
             'xlabel': 'ilines', 'ylabel': 'xlines',
+            'fill_color': 'black',
             **kwargs
         }
         return metric, plot_dict
@@ -375,6 +391,7 @@ class BaseSeismicMetric(Metrics):
             'zmin': None, 'zmax': None,
             'ignore_value': np.nan,
             'xlabel': 'ilines', 'ylabel': 'xlines',
+            'fill_color': 'black',
             **kwargs
         }
         return metric, plot_dict
@@ -393,6 +410,7 @@ class BaseSeismicMetric(Metrics):
             'zmin': None, 'zmax': None,
             'ignore_value': np.nan,
             'xlabel': 'ilines', 'ylabel': 'xlines',
+            'fill_color': 'black',
             **kwargs
         }
         return metric, plot_dict
@@ -408,6 +426,7 @@ class BaseSeismicMetric(Metrics):
             'zmin': None, 'zmax': None,
             'ignore_value': np.nan,
             'xlabel': 'ilines', 'ylabel': 'xlines',
+            'fill_color': 'black',
             **kwargs
         }
         return metric, plot_dict
@@ -417,7 +436,7 @@ class BaseSeismicMetric(Metrics):
     support_emd = support_wasserstein
 
 
-    def hilbert(self, mode='median', kernel_size=3, eps=1e-5, **kwargs):
+    def hilbert(self, correction='median', kernel_size=3, eps=1e-5, **kwargs):
         """ Compute phase along the data. """
         _ = kwargs
         # full_matrix = self.horizon.full_matrix
@@ -430,7 +449,7 @@ class BaseSeismicMetric(Metrics):
         horizon_phase = phase[:, :, phase.shape[-1] // 2]
         horizon_phase = correct_pi(horizon_phase, eps)
 
-        if mode == 'mean':
+        if correction == 'mean':
             median_phase = compute_running_mean(horizon_phase, kernel_size)
         else:
             median_phase = medfilt(horizon_phase, kernel_size)
@@ -617,6 +636,28 @@ class HorizonMetrics(BaseSeismicMetric):
             self._probs = hist_matrix / np.sum(hist_matrix, axis=-1, keepdims=True) + self.EPS
         return self._probs
 
+    def instantaneous_phase(self, **kwargs):
+        """ Compute instantaneous phase via Hilbert transform. """
+        analytic = hilbert(self.data, axis=2)
+
+        phase = np.angle(analytic)
+        phase = phase % (2 * np.pi) - np.pi
+
+        phase_slice = phase[:, :, phase.shape[-1] // 2]
+        phase_slice = correct_pi(phase_slice, 1e-5)
+        phase_slice[self.horizon.full_matrix == self.horizon.FILL_VALUE] = np.nan
+
+        plot_dict = {
+            'spatial': self.spatial,
+            'title': 'Instantaneous phase for {} on cube {}'.format(self.name, self.cube_name),
+            'cmap': 'seismic',
+            'zmin': -np.pi, 'zmax': np.pi,
+            'xlabel': 'ilines', 'ylabel': 'xlines',
+            'fill_color': 'black',
+            **kwargs
+        }
+        return phase_slice, plot_dict
+
 
     def find_best_match(self, offset=0, **kwargs):
         """ !!. """
@@ -712,9 +753,10 @@ class HorizonMetrics(BaseSeismicMetric):
             'spatial': True,
             'title': '{} on cube {}'.format(title, self.horizon.cube_name),
             'cmap': 'seismic',
-            'zmin': 0, 'zmax': np.max(metric),
+            'zmin': 0, 'zmax': np.nanmax(metric),
             'ignore_value': np.nan,
             'xlabel': 'ilines', 'ylabel': 'xlines',
+            'fill_color': 'black',
             **kwargs
         }
         return metric, plot_dict

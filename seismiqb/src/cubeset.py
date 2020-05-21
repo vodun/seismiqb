@@ -15,6 +15,11 @@ from .metrics import HorizonMetrics
 from .plotters import plot_image
 from .utils import IndexedDict, round_to_array, gen_crop_coordinates
 
+def astype_object(array):
+    """ Converts array to `object` dtype. Picklable, unlike inline lambda function. """
+    return array.astype(np.object)
+
+
 class SeismicCubeset(Dataset):
     """ Stores indexing structure for dataset of seismic cubes along with additional structures.
 
@@ -45,6 +50,20 @@ class SeismicCubeset(Dataset):
 
         self.grid_gen, self.grid_info, self.grid_iters = None, None, None
         self.shapes_gen, self.orders_gen = None, None
+
+    def __str__(self):
+        msg = f'Seismic Cubeset with {len(self)} cube{"s" if len(self) > 1 else ""}:\n'
+        for idx in self.indices:
+            geometry = self.geometries[idx]
+            labels = self.labels.get(idx, [])
+
+            add = f'{repr(geometry)}' if hasattr(geometry, 'cube_shape') else f'{idx}'
+            msg += f'    {add}{":" if labels else ""}\n'
+
+            for horizon in labels:
+                msg += f'        {horizon.name}\n'
+        return msg
+
 
     def gen_batch(self, batch_size, shuffle=False, n_iters=None, n_epochs=None, drop_last=False,
                   bar=False, bar_desc=None, iter_params=None, sampler=None):
@@ -84,13 +103,11 @@ class SeismicCubeset(Dataset):
             self.geometries[ix].process(**kwargs)
             if logs:
                 self.geometries[ix].log()
-        return self
 
     def convert_to_hdf5(self, postfix=''):
         """ Converts every cube in dataset from `.segy` to `.hdf5`. """
         for ix in self.indices:
             self.geometries[ix].make_hdf5(postfix=postfix)
-        return self
 
 
     def create_labels(self, paths=None, filter_zeros=True, dst='labels', labels_class=None, **kwargs):
@@ -123,7 +140,6 @@ class SeismicCubeset(Dataset):
             if filter_zeros:
                 _ = [getattr(horizon, 'filter_points')() for horizon in horizon_list]
             getattr(self, dst)[ix] = horizon_list
-        return self
 
     @property
     def sampler(self):
@@ -193,10 +209,9 @@ class SeismicCubeset(Dataset):
         sampler = 0 & NumpySampler('n', dim=4)
         for i, ix in enumerate(self.indices):
             sampler_ = (ConstantSampler(ix)
-                        & samplers[ix].apply(lambda d: d.astype(np.object)))
+                        & samplers[ix].apply(astype_object))
             sampler = sampler | (p[i] & sampler_)
         setattr(self, dst, sampler)
-        return self
 
     def modify_sampler(self, dst, mode='iline', low=None, high=None,
                        each=None, each_start=None,
@@ -319,6 +334,7 @@ class SeismicCubeset(Dataset):
         kwargs = {
             'title': f'Sampled slices on {self.indices[idx]}',
             'xlabel': 'ilines', 'ylabel': 'xlines',
+            'cmap': 'Reds', 'interpolation': 'bilinear',
             **kwargs
         }
         plot_image(background, **kwargs)
@@ -349,7 +365,6 @@ class SeismicCubeset(Dataset):
         self.load_geometries(**kwargs)
         self.create_labels(paths=paths_txt, filter_zeros=filter_zeros, dst=dst_labels)
         self._p, self._bins = p, bins # stored for later sampler creation
-        return self
 
 
     def make_grid(self, cube_name, crop_shape, ilines_range, xlines_range, h_range, strides=None, batch_size=16):
@@ -433,7 +448,6 @@ class SeismicCubeset(Dataset):
             'geom': geom,
             'range': [ilines_range, xlines_range, h_range]
         }
-        return self
 
 
     def mask_to_horizons(self, src, cube_name, threshold=0.5, averaging='mean', minsize=0,
@@ -467,7 +481,6 @@ class SeismicCubeset(Dataset):
             setattr(self, dst, IndexedDict({ix: dict() for ix in self.indices}))
 
         getattr(self, dst)[cube_name] = horizons
-        return self
 
 
     def merge_horizons(self, src, mean_threshold=2.0, adjacency=3, minsize=50):
