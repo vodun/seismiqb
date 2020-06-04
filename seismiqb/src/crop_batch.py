@@ -725,7 +725,7 @@ class SeismicCropBatch(Batch):
         matrix = cv2.getRotationMatrix2D((shape[1]//2, shape[0]//2), angle, 1)
         return cv2.warpAffine(crop, matrix, (shape[1], shape[0])).reshape(shape)
 
-    def _flip_(self, crop, axis=0, threshold=0.5):
+    def _flip_(self, crop, axis=0, seed=0.1, threshold=0.5):
         """ Flip crop along the given axis.
 
         Parameters
@@ -733,7 +733,8 @@ class SeismicCropBatch(Batch):
         axis : int
             Axis to flip along
         """
-        if np.random.uniform() >= threshold:
+        rnd = np.random.RandomState(int(seed*100)).uniform
+        if rnd() >= threshold:
             return cv2.flip(crop, axis).reshape(crop.shape)
         return crop
 
