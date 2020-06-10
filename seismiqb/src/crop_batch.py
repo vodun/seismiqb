@@ -277,7 +277,7 @@ class SeismicCropBatch(Batch):
 
 
     @action
-    @inbatch_parallel(init='indices', post='_assemble', target='threads')
+    @inbatch_parallel(init='indices', post='_assemble', target='for')
     def load_cubes(self, ix, dst, src='slices', **kwargs):
         """ Load data from cube in given positions.
 
@@ -295,7 +295,7 @@ class SeismicCropBatch(Batch):
 
 
     @action
-    @inbatch_parallel(init='indices', post='_assemble', target='threads')
+    @inbatch_parallel(init='indices', post='_assemble', target='for')
     def create_masks(self, ix, dst, src='slices', mode='horizon', width=3, src_labels='labels', horizons=-1):
         """ Create masks from labels-dictionary in given positions.
 
@@ -348,7 +348,7 @@ class SeismicCropBatch(Batch):
 
         slice_ = self.get(ix, src)
         shape_ = self.get(ix, 'shapes')
-        mask = np.zeros((shape_))
+        mask = np.zeros((shape_), dtype='float32')
 
         for horizon in horizons:
             mask = horizon.add_to_mask(mask, locations=slice_, width=width)
@@ -356,7 +356,7 @@ class SeismicCropBatch(Batch):
 
 
     @action
-    @inbatch_parallel(init='indices', post='_post_mask_rebatch', target='threads',
+    @inbatch_parallel(init='indices', post='_post_mask_rebatch', target='for',
                       src='masks', threshold=0.8, passdown=None)
     def mask_rebatch(self, ix, src='masks', threshold=0.8, passdown=None):
         """ Remove elements with masks lesser than a threshold.
@@ -393,7 +393,7 @@ class SeismicCropBatch(Batch):
 
 
     @action
-    @inbatch_parallel(init='_init_component', post='_assemble', target='threads')
+    @inbatch_parallel(init='_init_component', post='_assemble', target='for')
     def filter_out(self, ix, src=None, dst=None, mode=None, expr=None, low=None, high=None,
                    length=None, p=1.0):
         """ Zero out mask for horizon extension task.
@@ -461,7 +461,7 @@ class SeismicCropBatch(Batch):
 
 
     @action
-    @inbatch_parallel(init='indices', post='_assemble', target='threads')
+    @inbatch_parallel(init='indices', post='_assemble', target='for')
     def scale(self, ix, mode, src=None, dst=None):
         """ Scale values in crop. """
         #pylint: disable=unused-argument
@@ -472,7 +472,7 @@ class SeismicCropBatch(Batch):
 
 
     @action
-    @inbatch_parallel(init='_init_component', post='_assemble', target='threads')
+    @inbatch_parallel(init='_init_component', post='_assemble', target='for')
     def concat_components(self, ix, src, dst, axis=-1):
         """ Concatenate a list of components and save results to `dst` component.
 
@@ -675,8 +675,11 @@ class SeismicCropBatch(Batch):
         Parameters
         ----------
         scale : float
-            Standart deviation of normal distribution."""
-        return crop + np.random.normal(loc=0, scale=scale, size=crop.shape)
+            Standart deviation of normal distribution.
+        """
+        rng = np.random.default_rng()
+        noise = scale * rng.standard_normal(dtype=np.float32, size=crop.shape)
+        return crop + noise
 
     def _multiplicative_noise_(self, crop, scale):
         """ Multiply each entry of crop by random value, centered at 1.
@@ -684,8 +687,11 @@ class SeismicCropBatch(Batch):
         Parameters
         ----------
         scale : float
-            Standart deviation of normal distribution."""
-        return crop * np.random.normal(loc=1, scale=scale, size=crop.shape)
+            Standart deviation of normal distribution.
+        """
+        rng = np.random.default_rng()
+        noise = 1 + scale * rng.standard_normal(dtype=np.float32, size=crop.shape)
+        return crop * noise
 
     def _cutout_2d_(self, crop, patch_shape, n):
         """ Change patches of data to zeros.
@@ -719,7 +725,7 @@ class SeismicCropBatch(Batch):
         matrix = cv2.getRotationMatrix2D((shape[1]//2, shape[0]//2), angle, 1)
         return cv2.warpAffine(crop, matrix, (shape[1], shape[0])).reshape(shape)
 
-    def _flip_(self, crop, axis=0, threshold=0.5):
+    def _flip_(self, crop, axis=0, seed=0.1, threshold=0.5):
         """ Flip crop along the given axis.
 
         Parameters
@@ -727,7 +733,8 @@ class SeismicCropBatch(Batch):
         axis : int
             Axis to flip along
         """
-        if np.random.uniform() >= threshold:
+        rnd = np.random.RandomState(int(seed*100)).uniform
+        if rnd() >= threshold:
             return cv2.flip(crop, axis).reshape(crop.shape)
         return crop
 
@@ -807,7 +814,7 @@ class SeismicCropBatch(Batch):
         sigma : float
             Smoothening factor.
         """
-        state = np.random.RandomState(int(alpha*100))
+        rng = np.random.default_rng(seed=int(alpha*100))
         shape_size = crop.shape[:2]
 
         grid_scale = 4
@@ -816,17 +823,17 @@ class SeismicCropBatch(Batch):
         grid_shape = (shape_size[0]//grid_scale, shape_size[1]//grid_scale)
 
         blur_size = int(4 * sigma) | 1
-        rand_x = cv2.GaussianBlur((state.rand(*grid_shape) * 2 - 1).astype(np.float32),
+        rand_x = cv2.GaussianBlur(rng.random(size=grid_shape, dtype=np.float32) * 2 - 1,
                                   ksize=(blur_size, blur_size), sigmaX=sigma) * alpha
-        rand_y = cv2.GaussianBlur((state.rand(*grid_shape) * 2 - 1).astype(np.float32),
+        rand_y = cv2.GaussianBlur(rng.random(size=grid_shape, dtype=np.float32) * 2 - 1,
                                   ksize=(blur_size, blur_size), sigmaX=sigma) * alpha
         if grid_scale > 1:
             rand_x = cv2.resize(rand_x, shape_size[::-1])
             rand_y = cv2.resize(rand_y, shape_size[::-1])
 
         grid_x, grid_y = np.meshgrid(np.arange(shape_size[1]), np.arange(shape_size[0]))
-        grid_x = (grid_x + rand_x).astype(np.float32)
-        grid_y = (grid_y + rand_y).astype(np.float32)
+        grid_x = (grid_x.astype(np.float32) + rand_x)
+        grid_y = (grid_y.astype(np.float32) + rand_y)
 
         distorted_img = cv2.remap(crop, grid_x, grid_y,
                                   borderMode=cv2.BORDER_REFLECT_101,
