@@ -584,8 +584,8 @@ class SeismicCubeset(Dataset):
             Note that final shapes are made in both xline and iline directions. So if
             crop_shape is (1, 64, 64), crops of both (1, 64, 64) and (64, 1, 64) shape
             will be defined.
-        labels_src : str
-            Attribute with the horizon to be extended.
+        labels_src : str or instance of :class:`.Horizon`
+            Horizon to be extended.
         stride : int
             Distance between a horizon border and a corner of a crop.
         batch_size : int
@@ -597,7 +597,7 @@ class SeismicCubeset(Dataset):
             covered points.
             If False then all points from the horizon border will be used.
         """
-        horizon = getattr(self, labels_src)[cube_name][0]
+        horizon = getattr(self, labels_src)[cube_name][0] if isinstance(labels_src, str) else labels_src
 
         zero_traces = horizon.geometry.zero_traces
         hor_matrix = horizon.full_matrix.astype(np.int32)
