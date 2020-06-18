@@ -841,7 +841,7 @@ class Horizon:
         _ = kwargs
         default_bins = self.cube_shape // np.array([5, 20, 20])
         bins = bins if bins is not None else default_bins
-        quality_grid = self.geometry.quality_grid if quality_grid is True else quality_grid or None
+        quality_grid = self.geometry.quality_grid if quality_grid is True else quality_grid
 
         if isinstance(quality_grid, np.ndarray):
             points = _filtering_function(np.copy(self.points), 1 - quality_grid)
