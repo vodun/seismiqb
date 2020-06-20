@@ -314,7 +314,7 @@ class GeoBody:
                 heights_1 -= mask_h_min
                 heights_2 -= mask_h_min
 
-                max_depth = mask.shape[-1]-1
+                max_depth = mask.shape[-1] - 1
                 heights_1[heights_1 < 0] = 0
                 heights_1[heights_1 > max_depth] = max_depth
                 heights_2[heights_2 < 0] = 0

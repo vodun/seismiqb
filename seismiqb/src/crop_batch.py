@@ -329,7 +329,8 @@ class SeismicCropBatch(Batch):
         Can be run only after labels-dict is loaded into labels-component.
         """
         #pylint: disable=unused-argument
-        labels = self.get(ix, src_labels)
+        labels = self.get(ix, src_labels) if isinstance(src_labels, str) else src_labels
+        labels = [labels] if not isinstance(labels, (tuple, list)) else labels
 
         if indices in [-1, 'all']:
             indices = np.arange(0, len(labels))
