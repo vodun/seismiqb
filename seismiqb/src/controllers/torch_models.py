@@ -63,7 +63,7 @@ MODEL_CONFIG = {
 
 class MyEncoderModule(nn.ModuleDict):
     """ Encoder: create compressed representation of an input by reducing its spatial dimensions. """
-    def __init__(self, inputs=None,return_all=True, **kwargs):
+    def __init__(self, inputs=None, return_all=True, **kwargs):
         super().__init__()
         self.return_all = return_all
         self._make_modules(inputs, **kwargs)
@@ -81,14 +81,14 @@ class MyEncoderModule(nn.ModuleDict):
                     if letter == 'b':
                         x = x + y
             elif letter in ['s']:
-                outputs.append(x)
+                if layer_name.endswith('x'):
+                    outputs.append(x)
         outputs.append(x)
         if self.return_all:
             return outputs
         return outputs[-1]
 
     def _make_modules(self, inputs, **kwargs):
-        x, y = inputs
         num_stages = kwargs.pop('num_stages')
         encoder_layout = ''.join([item[0] for item in kwargs.pop('order')])
 
