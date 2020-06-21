@@ -4,7 +4,6 @@ import os
 from copy import copy
 from itertools import product
 from textwrap import dedent
-from abc import ABC, abstractmethod
 
 import numpy as np
 import pandas as pd
@@ -17,27 +16,12 @@ from skimage.measure import label
 
 from ..batchflow import HistoSampler
 
-from .utils import round_to_array, groupby_mean
+from .utils import round_to_array, groupby_mean, groupby_min, groupby_max
 from .plotters import plot_image
 
 
-class BaseLabel(ABC):
-    """ Base class for labels. """
-    @abstractmethod
-    def from_file(self, path):
-        """ Labels must be loadable from file on disk. """
 
-    @abstractmethod
-    def from_points(self, array):
-        """ Labels must be loadable from array of needed format. """
-
-    @abstractmethod
-    def add_to_mask(self, mask, mask_bbox, **kwargs):
-        """ Labels must be able to create masks for training. """
-
-
-
-class UnstructuredHorizon(BaseLabel):
+class UnstructuredHorizon:
     """  Contains unstructured horizon.
 
     Initialized from `storage` and `geometry`, where `storage` is a csv-like file.
@@ -306,7 +290,7 @@ class UnstructuredHorizon(BaseLabel):
 
 
 
-class Horizon(BaseLabel):
+class Horizon:
     """ Contains spatially-structured horizon: each point describes a height on a particular (iline, xline).
 
     Initialized from `storage` and `geometry`.
@@ -473,7 +457,7 @@ class Horizon(BaseLabel):
 
     @staticmethod
     def points_to_matrix(points, i_min, x_min, i_length, x_length):
-        """ Convert array of (N, 3) shape to a depth map (matrix) """
+        """ Convert array of (N, 3) shape to a depth map (matrix). """
         matrix = np.full((i_length, x_length), Horizon.FILL_VALUE, np.int32)
         matrix[points[:, 0] - i_min, points[:, 1] - x_min] = points[:, 2]
         return matrix
@@ -567,6 +551,8 @@ class Horizon(BaseLabel):
             Array of points. Each row describes one point inside the cube: two spatial coordinates and depth.
         transform : bool
             Whether transform from line coordinates (ilines, xlines) to cubic system.
+        verify : bool
+            Whether to remove points outside of the cube range.
         """
         _ = kwargs
 
@@ -662,20 +648,19 @@ class Horizon(BaseLabel):
 
     @staticmethod
     def from_mask(mask, grid_info=None, geometry=None, shifts=None,
-                  threshold=0.5, minsize=0, prefix='predict', **kwargs):
+                  mode='mean', threshold=0.5, minsize=0, prefix='predict', **kwargs):
         """ Convert mask to a list of horizons.
         Returned list is sorted on length of horizons.
 
         Parameters
         ----------
         grid_info : dict
-            Information about mask creation parameters. For details, check :meth:`.SeismicCubeset.mask_to_horizons`.
-            Required keys are `geom` and `range` to infer geometry and leftmost upper point.
+            Information about mask creation parameters. Required keys are `geom` and `range`
+            to infer geometry and leftmost upper point, or they can be passed directly.
         threshold : float
             Parameter of mask-thresholding.
-        averaging : str
-            Method of pandas.groupby used for finding the center of a horizon
-            for each (iline, xline).
+        mode : str
+            Method used for finding the point of a horizon for each iline, xline.
         minsize : int
             Minimum length of a horizon to be saved.
         prefix : str
@@ -688,6 +673,13 @@ class Horizon(BaseLabel):
 
         if geometry is None or shifts is None:
             raise TypeError('Pass `grid_info` or `geometry` and `shifts` to `from_mask` method of Horizon creation.')
+
+        if mode in ['mean', 'avg']:
+            group_function = groupby_mean
+        elif mode in ['min']:
+            group_function = groupby_min
+        elif mode in ['max']:
+            group_function = groupby_max
 
         # Labeled connected regions with an integer
         labeled = label(mask >= threshold)
@@ -706,7 +698,7 @@ class Horizon(BaseLabel):
                 if len(indices[0]) >= minsize:
                     coords = np.vstack([indices[i] + sl[i].start for i in range(3)]).T
 
-                    points = groupby_mean(coords) + shifts
+                    points = group_function(coords) + shifts
                     horizons.append(Horizon(points, geometry, name=f'{prefix}_{i}'))
 
         horizons.sort(key=len)
@@ -849,7 +841,7 @@ class Horizon(BaseLabel):
         _ = kwargs
         default_bins = self.cube_shape // np.array([5, 20, 20])
         bins = bins if bins is not None else default_bins
-        quality_grid = self.geometry.quality_grid if quality_grid is True else quality_grid or None
+        quality_grid = self.geometry.quality_grid if quality_grid is True else quality_grid
 
         if isinstance(quality_grid, np.ndarray):
             points = _filtering_function(np.copy(self.points), 1 - quality_grid)
@@ -867,8 +859,8 @@ class Horizon(BaseLabel):
         ----------
         mask : ndarray
             Background to add horizon to.
-        mask_bbox : ndarray
-            Bounding box of a mask: minimum/maximum iline, xline and depth.
+        locations : ndarray
+            Where the mask is located.
         width : int
             Width of an added horizon.
         """
@@ -887,23 +879,25 @@ class Horizon(BaseLabel):
         #TODO: add clear explanation about usage of advanced index in Horizon
         i_min, i_max = max(self.i_min, mask_i_min), min(self.i_max + 1, mask_i_max)
         x_min, x_max = max(self.x_min, mask_x_min), min(self.x_max + 1, mask_x_max)
-        overlap = self.matrix[i_min - self.i_min:i_max - self.i_min,
-                              x_min - self.x_min:x_max - self.x_min]
 
-        # Coordinates of points to use in overlap local system
-        idx_i, idx_x = np.asarray((overlap != self.FILL_VALUE) &
-                                  (overlap >= mask_h_min + low) &
-                                  (overlap <= mask_h_max - high)).nonzero()
-        heights = overlap[idx_i, idx_x]
+        if i_max >= i_min and x_max >= x_min:
+            overlap = self.matrix[i_min - self.i_min:i_max - self.i_min,
+                                  x_min - self.x_min:x_max - self.x_min]
 
-        # Convert coordinates to mask local system
-        idx_i += i_min - mask_i_min
-        idx_x += x_min - mask_x_min
-        heights -= (mask_h_min + low)
+            # Coordinates of points to use in overlap local system
+            idx_i, idx_x = np.asarray((overlap != self.FILL_VALUE) &
+                                      (overlap >= mask_h_min + low) &
+                                      (overlap <= mask_h_max - high)).nonzero()
+            heights = overlap[idx_i, idx_x]
 
-        for _ in range(width):
-            mask[idx_i, idx_x, heights] = alpha
-            heights += 1
+            # Convert coordinates to mask local system
+            idx_i += i_min - mask_i_min
+            idx_x += x_min - mask_x_min
+            heights -= (mask_h_min + low)
+
+            for _ in range(width):
+                mask[idx_i, idx_x, heights] = alpha
+                heights += 1
         return mask
 
 
@@ -1653,8 +1647,6 @@ class Horizon(BaseLabel):
 
     def show_slide(self, loc, width=3, axis='i', order_axes=None, zoom_slice=None, **kwargs):
         """ Show slide with horizon on it.
-
-        TODO: add support of order_axes into plotters
 
         Parameters
         ----------

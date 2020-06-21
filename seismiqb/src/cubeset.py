@@ -15,9 +15,12 @@ from .metrics import HorizonMetrics
 from .plotters import plot_image
 from .utils import IndexedDict, round_to_array, gen_crop_coordinates
 
+
+
 def astype_object(array):
     """ Converts array to `object` dtype. Picklable, unlike inline lambda function. """
     return array.astype(np.object)
+
 
 
 class SeismicCubeset(Dataset):
@@ -135,11 +138,11 @@ class SeismicCubeset(Dataset):
                 else:
                     labels_class = UnstructuredHorizon
 
-            horizon_list = [labels_class(path, self.geometries[ix], **kwargs) for path in paths[ix]]
-            horizon_list.sort(key=lambda horizon: horizon.h_mean)
+            label_list = [labels_class(path, self.geometries[ix], **kwargs) for path in paths[ix]]
+            label_list.sort(key=lambda label: label.h_mean)
             if filter_zeros:
-                _ = [getattr(horizon, 'filter_points')() for horizon in horizon_list]
-            getattr(self, dst)[ix] = horizon_list
+                _ = [getattr(item, 'filter')() for item in label_list]
+            getattr(self, dst)[ix] = label_list
 
     @property
     def sampler(self):
@@ -193,9 +196,9 @@ class SeismicCubeset(Dataset):
 
             elif mode[ix] == 'hist' or mode[ix] == 'horizon':
                 sampler = 0 & NumpySampler('n', dim=3)
-                for i, horizon in enumerate(self.labels[ix]):
-                    horizon.create_sampler(**kwargs)
-                    sampler = sampler | horizon.sampler
+                for i, label in enumerate(self.labels[ix]):
+                    label.create_sampler(**kwargs)
+                    sampler = sampler | label.sampler
             else:
                 sampler = NumpySampler('u', low=0, high=1, dim=3)
 
@@ -310,7 +313,7 @@ class SeismicCubeset(Dataset):
             setattr(self, dst, sampler)
 
     def show_slices(self, idx=0, src_sampler='sampler', n=10000, normalize=False, shape=None,
-                    make_slices=True, side_view=False, **kwargs):
+                    adaptive_slices=False, grid_src='quality_grid', side_view=False, **kwargs):
         """ Show actually sampled slices of desired shape. """
         sampler = getattr(self, src_sampler)
         if callable(sampler):
@@ -318,7 +321,8 @@ class SeismicCubeset(Dataset):
             points = sampler(n)
         else:
             points = sampler.sample(n)
-        batch = (self.p.crop(points=points, shape=shape, make_slices=make_slices, side_view=side_view)
+        batch = (self.p.crop(points=points, shape=shape, side_view=side_view,
+                             adaptive_slices=adaptive_slices, grid_src=grid_src)
                  .next_batch(self.size))
 
         unsalted = np.array([batch.unsalt(item) for item in batch.indices])
@@ -341,25 +345,25 @@ class SeismicCubeset(Dataset):
         return batch
 
 
-    def load(self, horizon_dir=None, filter_zeros=True, dst_labels='labels', p=None, bins=None, **kwargs):
+    def load(self, label_dir=None, filter_zeros=True, dst_labels='labels', p=None, bins=None, **kwargs):
         """ Load everything: geometries, point clouds, labels, samplers.
 
         Parameters
         ----------
-        horizon_dir : str
-            Relative path from each cube to directory with horizons.
+        label_dir : str
+            Relative path from each cube to directory with labels.
         p : sequence of numbers
             Proportions of different cubes in sampler.
         filter_zeros : bool
             Whether to remove labels on zero-traces.
         """
         _ = kwargs
-        horizon_dir = horizon_dir or '/BEST_HORIZONS/*'
+        label_dir = label_dir or '/BEST_HORIZONS/*'
 
         paths_txt = {}
         for i in range(len(self)):
             dir_path = '/'.join(self.index.get_fullpath(self.indices[i]).split('/')[:-1])
-            dir_ = dir_path + horizon_dir
+            dir_ = dir_path + label_dir
             paths_txt[self.indices[i]] = glob(dir_)
 
         self.load_geometries(**kwargs)
