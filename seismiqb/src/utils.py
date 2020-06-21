@@ -425,6 +425,70 @@ def groupby_mean(array):
     return output[:position]
 
 
+@njit
+def groupby_min(array):
+    """ Faster version of min-groupby of data along the first two columns.
+    Input array is supposed to have (N, 3) shape.
+    """
+    n = len(array)
+
+    output = np.zeros_like(array)
+    position = 0
+
+    prev = array[0, :2]
+    s = array[0, -1]
+
+    for i in range(1, n):
+        curr = array[i, :2]
+
+        if prev[0] == curr[0] and prev[1] == curr[1]:
+            s = min(s, array[i, -1])
+        else:
+            output[position, :2] = prev
+            output[position, -1] = s
+            position += 1
+
+            prev = curr
+            s = array[i, -1]
+
+    output[position, :2] = prev
+    output[position, -1] = s
+    position += 1
+    return output[:position]
+
+
+@njit
+def groupby_max(array):
+    """ Faster version of min-groupby of data along the first two columns.
+    Input array is supposed to have (N, 3) shape.
+    """
+    n = len(array)
+
+    output = np.zeros_like(array)
+    position = 0
+
+    prev = array[0, :2]
+    s = array[0, -1]
+
+    for i in range(1, n):
+        curr = array[i, :2]
+
+        if prev[0] == curr[0] and prev[1] == curr[1]:
+            s = max(s, array[i, -1])
+        else:
+            output[position, :2] = prev
+            output[position, -1] = s
+            position += 1
+
+            prev = curr
+            s = array[i, -1]
+
+    output[position, :2] = prev
+    output[position, -1] = s
+    position += 1
+    return output[:position]
+
+
 
 
 @njit
