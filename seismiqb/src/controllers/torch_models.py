@@ -63,7 +63,7 @@ MODEL_CONFIG = {
 
 class MyEncoderModule(nn.ModuleDict):
     """ Encoder: create compressed representation of an input by reducing its spatial dimensions. """
-    def __init__(self, inputs=None, return_all=True, **kwargs):
+    def __init__(self, inputs=None,return_all=True, **kwargs):
         super().__init__()
         self.return_all = return_all
         self._make_modules(inputs, **kwargs)
@@ -71,12 +71,15 @@ class MyEncoderModule(nn.ModuleDict):
     def forward(self, inputs):
         x, y = inputs
         outputs = []
-        for letter, layer in zip(self.layout, self.values()):
+        for letter, (layer_name, layer) in zip(self.layout, self.items()):
+            # print('FW', letter, layer_name, x.shape, y.shape)
             if letter in ['b', 'd', 'p']:
-                x = layer(x)
-                y = layer(y)
-                if letter == 'b':
-                    x = x + y
+                if layer_name.endswith('x'):
+                    x = layer(x)
+                else:
+                    y = layer(y)
+                    if letter == 'b':
+                        x = x + y
             elif letter in ['s']:
                 outputs.append(x)
         outputs.append(x)
@@ -85,6 +88,7 @@ class MyEncoderModule(nn.ModuleDict):
         return outputs[-1]
 
     def _make_modules(self, inputs, **kwargs):
+        x, y = inputs
         num_stages = kwargs.pop('num_stages')
         encoder_layout = ''.join([item[0] for item in kwargs.pop('order')])
 
@@ -94,34 +98,35 @@ class MyEncoderModule(nn.ModuleDict):
 
         for i in range(num_stages):
             for letter in encoder_layout:
+                for j, prefix in zip([0, 1], 'xy'):
+                    # print('MM', i, letter, prefix, inputs[j].shape)
+                    if letter in ['b']:
+                        args = {**kwargs, **block_args, **unpack_args(block_args, i, num_stages)}
 
-                if letter in ['b']:
-                    args = {**kwargs, **block_args, **unpack_args(block_args, i, num_stages)}
+                        layer = ConvBlock(inputs=inputs[j], **args)
+                        inputs[j] = layer(inputs[j])
+                        layer_desc = 'block-{}'.format(i)
 
-                    layer = ConvBlock(inputs=inputs, **args)
-                    inputs = layer(inputs)
-                    layer_desc = 'block-{}'.format(i)
+                    elif letter in ['d', 'p']:
+                        args = {**kwargs, **downsample_args, **unpack_args(downsample_args, i, num_stages)}
 
-                elif letter in ['d', 'p']:
-                    args = {**kwargs, **downsample_args, **unpack_args(downsample_args, i, num_stages)}
+                        layer = ConvBlock(inputs=inputs[j], **args)
+                        inputs[j] = layer(inputs[j])
+                        layer_desc = 'downsample-{}'.format(i)
 
-                    layer = ConvBlock(inputs=inputs, **args)
-                    inputs = layer(inputs)
-                    layer_desc = 'downsample-{}'.format(i)
+                    elif letter in ['s']:
+                        layer = nn.Identity()
+                        layer_desc = 'skip-{}'.format(i)
+                    else:
+                        raise ValueError('Unknown letter in order {}, use one of "b", "d", "p", "s"'
+                                         .format(letter))
 
-                elif letter in ['s']:
-                    layer = nn.Identity()
-                    layer_desc = 'skip-{}'.format(i)
-                else:
-                    raise ValueError('Unknown letter in order {}, use one of "b", "d", "p", "s"'
-                                     .format(letter))
-
-                self.update([(layer_desc, layer)])
-                self.layout += letter
+                    self.update([(layer_desc + prefix, layer)])
+                    self.layout += letter
 
 
 class ExtensionModel(EncoderDecoder):
     @classmethod
     def encoder(cls, inputs, **kwargs):
         """ Create encoder either from base model or block args. """
-        return MyEncoderModule(inputs[0], inputs[1], **kwargs)
+        return MyEncoderModule([inputs[0], inputs[1]], **kwargs)
