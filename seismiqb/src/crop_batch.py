@@ -929,17 +929,18 @@ class SeismicCropBatch(Batch):
 
     def _shift_masks_(self, crop, n_segments=3, max_shift=4, max_len=10):
         def add_shifted_segment(x, max_shift=max_shift, max_len=max_len):
-            begin = np.random.randint(0, x.shape[0])
+            # i x h
+            begin = np.random.randint(0, x.shape[1])
             length = np.random.randint(5, max_len)
             shift = np.random.randint(-max_shift, max_shift)
-            segment = x[begin: begin+length]
+            segment = x[:, begin:begin+length, :]
             shifted_segment = np.zeros_like(segment)
             if shift > 0:
-                shifted_segment[:, shift:] = segment[:, :-shift]
+                shifted_segment[:, :, shift:] = segment[:, :, :-shift]
             elif shift < 0:
-                shifted_segment[:, :shift] = segment[:, -shift:]
+                shifted_segment[:, :, :shift] = segment[:, :, -shift:]
             res = np.copy(x)
-            res[begin: begin+length] = shifted_segment
+            res[:, begin: begin+length, :] = shifted_segment
             return res
         for _ in range(n_segments):
             crop = add_shifted_segment(crop)
