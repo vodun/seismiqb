@@ -103,7 +103,7 @@ class Detector:
     def log(self, msg):
         """ Log supplied message. """
         if self.logger is not None:
-            self.logger(msg)
+            self.logger(f'{self.__class__.__name__} ::: {msg}')
 
 
     # Dataset creation: geometries, labels, grids, samplers
@@ -435,7 +435,7 @@ class Detector:
         return Horizon.merge_list(horizons, mean_threshold=5.5, adjacency=3, minsize=500)
 
 
-    def evaluate(self, n=5, add_prefix=False, dump=False, supports=50):
+    def evaluate(self, n=5, add_prefix=False, dump=False, supports=50, name=''):
         """ Assess quality of predictions, created by :meth:`.inference`, against targets and seismic data.
 
         Parameters
@@ -468,15 +468,15 @@ class Detector:
 
             # Basic demo: depth map and properties
             horizon.show(show=self.show_plots,
-                         savepath=self.make_save_path(*prefix, 'horizon_img.png'))
+                         savepath=self.make_save_path(*prefix, name + 'horizon_img.png'))
 
             # Correlations
-            with open(self.make_save_path(*prefix, 'self_results.txt'), 'w') as result_txt:
+            with open(self.make_save_path(*prefix, name + 'self_results.txt'), 'w') as result_txt:
                 corrs = horizon.evaluate(
                     supports=supports,
                     printer=lambda msg: print(msg, file=result_txt),
                     plot=True, show_plot=self.show_plots,
-                    savepath=self.make_save_path(*prefix, 'corrs.png')
+                    savepath=self.make_save_path(*prefix, name + 'corrs.png')
                 )
 
             hm = HorizonMetrics((horizon, self.targets))
@@ -484,7 +484,7 @@ class Detector:
             phase = hm.evaluate(
                 'instantaneous_phase',
                 plot=True, show_plot=self.show_plots,
-                savepath=self.make_save_path(*prefix, 'phase.png')
+                savepath=self.make_save_path(*prefix, name + 'phase.png')
             )
 
             # Compare to targets
@@ -492,17 +492,17 @@ class Detector:
                 _, oinfo = hm.evaluate('find_best_match', agg=None)
                 info = {**info, **oinfo}
 
-                with open(self.make_save_path(*prefix, 'results.txt'), 'w') as result_txt:
+                with open(self.make_save_path(*prefix, name + 'results.txt'), 'w') as result_txt:
                     hm.evaluate(
                         'compare', agg=None, hist=False,
                         plot=True, show_plot=self.show_plots,
                         printer=lambda msg: print(msg, file=result_txt),
-                        savepath=self.make_save_path(*prefix, 'l1.png')
+                        savepath=self.make_save_path(*prefix, name + 'l1.png')
                     )
                 self.log(f'horizon {i}: wr {info["window_rate"]}, mean {info["mean"]}')
 
             if dump:
-                horizon.dump(path=self.make_save_path(*prefix, f'{i}_predicted_horizon'))
+                horizon.dump(path=self.make_save_path(*prefix, name + f'{i}_predicted_horizon'))
 
             info['corrs'] = np.nanmean(corrs)
             info['phase'] = np.nanmean(phase)
