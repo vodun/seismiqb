@@ -172,6 +172,7 @@ class Extender(Detector):
             .load_cubes(dst='images')
             .adaptive_reshape(src=['images', 'masks'],
                               shape=self.crop_shape)
+            .rotate_axes(src=['images', 'masks'])
             .scale(mode='q', src='images')
         )
 
@@ -245,15 +246,13 @@ class Extender(Detector):
         )
         return inference_template
 
-    # @staticmethod
-    # def enhance(horizon, n_steps=1, cube_path=None, model_config=None, crop_shape=(1, 64, 64),
-    #             batch_size=128, save_dir='.', device=None, stride=16, epochs=400):
-    #     model_config = MODEL_CONFIG if model_config is None else model_config
-    #     enhancer = Enhancer(save_dir=save_dir, model_config=model_config, device=device,
-    #                         crop_shape=crop_shape, batch_size=batch_size)
-    #     dataset = enhancer._make_dataset(horizon)
-    #     enhancer.make_sampler(dataset, use_grid=False, bins=np.array([500, 500, 100]))
-    #     enhancer.train(dataset, epochs, use_grid=False)
-    #     enhanced = enhancer.inference(dataset, n_steps=n_steps, horizon=horizon,
-    #                                   crop_shape=crop_shape, batch_size=batch_size, stride=stride)
-    #     return enhanced
+    @staticmethod
+    def enhance(horizon, n_steps=1, model_config=None, crop_shape=(1, 64, 64),
+                batch_size=128, save_dir='.', device=None, stride=16, epochs=400):
+        model_config = MODEL_CONFIG if model_config is None else model_config
+        enhancer = Enhancer(save_dir=save_dir, model_config=model_config, device=device,
+                            crop_shape=crop_shape, batch_size=batch_size)
+        enhancer.train(horizon, epochs, use_grid=False)
+        enhanced = enhancer.inference(horizon, n_steps=n_steps, crop_shape=crop_shape,
+                                      batch_size=batch_size, stride=stride)
+        return enhanced
