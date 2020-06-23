@@ -98,6 +98,13 @@ class Enhancer(Detector):
         super().train(dataset, **kwargs)
 
 
+
+    def inference(self, horizon, **kwargs):
+        """ !!. """
+        dataset = self._make_dataset(horizon)
+        super().inference(dataset, **kwargs)
+
+
     def get_train_template(self):
         """ Define training pipeline.
 
