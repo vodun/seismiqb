@@ -1,6 +1,6 @@
 """ A holder for horizon enhancement steps inherited from `.class:Detector` with the following functionality:
-    - training a model on a horizon area with a given percentage of holes.
-    - making inference of a Horizon Extension algorithm to cover the holes in a given horizon.
+    - training a model on a horizon with synthetic distortions.
+    - making inference on a selected data.
 """
 import numpy as np
 
@@ -178,9 +178,6 @@ class Enhancer(Detector):
         return inference_template
 
 
-
-
-
     @staticmethod
     def enhance(horizon, n_steps=1, cube_path=None, model_config=None, crop_shape=(1, 64, 64),
                 batch_size=128, save_dir='.', device=None, stride=16, n_iters=400):
@@ -190,7 +187,7 @@ class Enhancer(Detector):
                             crop_shape=crop_shape, batch_size=batch_size)
         dataset = enhancer._make_dataset(horizon)
         enhancer.make_sampler(dataset, use_grid=False, bins=np.array([500, 500, 100]))
-        enhancer.train(dataset, n_iters=n_iters, use_grid=False)
-        enhanced = enhancer.inference(dataset, n_steps=n_steps, horizon=horizon,
-                                      crop_shape=crop_shape, batch_size=batch_size, stride=stride)
+        enhancer.train(horizon, n_iters=n_iters, use_grid=False)
+        enhanced = enhancer.inference(dataset, n_steps=n_steps,
+                                      orientation='ix')
         return enhanced

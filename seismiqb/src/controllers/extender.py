@@ -8,7 +8,7 @@ import numpy as np
 from ...batchflow import Pipeline, FilesIndex
 from ...batchflow import B, V, C, D, P, R, L
 
-from ..cubeset import SeismicCubeset
+from ..cubeset import SeismicCubeset, Horizon
 
 from .torch_models import ExtensionModel, MODEL_CONFIG
 from .detector import Detector
@@ -111,6 +111,7 @@ class Extender(Detector):
             except TypeError:
                 # no additional predicts
                 break
+
             
             horizons = [*inference_pipeline.v('predicted_horizons')]
             for hor in horizons:
@@ -247,12 +248,13 @@ class Extender(Detector):
         return inference_template
 
     @staticmethod
-    def enhance(horizon, n_steps=1, model_config=None, crop_shape=(1, 64, 64),
-                batch_size=128, save_dir='.', device=None, stride=16, epochs=400):
+    def extend(horizon, n_steps=1, model_config=None, crop_shape=(1, 64, 64),
+                batch_size=128, save_dir='.', device=None, stride=16, n_iters=400):
         model_config = MODEL_CONFIG if model_config is None else model_config
-        enhancer = Enhancer(save_dir=save_dir, model_config=model_config, device=device,
+        extender = Extender(save_dir=save_dir, model_config=model_config, device=device,
                             crop_shape=crop_shape, batch_size=batch_size)
-        enhancer.train(horizon, epochs, use_grid=False)
-        enhanced = enhancer.inference(horizon, n_steps=n_steps, crop_shape=crop_shape,
+        extender.train(horizon, n_iters=n_iters, use_grid=False)
+        extended = extender.inference(horizon, n_steps=n_steps, crop_shape=crop_shape,
                                       batch_size=batch_size, stride=stride)
-        return enhanced
+        return extended
+
