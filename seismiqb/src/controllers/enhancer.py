@@ -4,7 +4,6 @@
 """
 import numpy as np
 
-
 from ...batchflow import Pipeline, FilesIndex
 from ...batchflow import B, V, C, D, P, R
 
@@ -12,6 +11,7 @@ from ..cubeset import SeismicCubeset
 
 from .torch_models import ExtensionModel, MODEL_CONFIG
 from .detector import Detector
+
 
 class Enhancer(Detector):
     """
@@ -68,22 +68,19 @@ class Enhancer(Detector):
         self.log(f'Created dataset from horizon {horizon.name}')
         return dataset
 
-
     def train(self, horizon, **kwargs):
-        """ Train model for horizon detection.
-        If `model_path` was supplied during instance initialization, model is loaded instead.
-
-        In order to change architecture of the model, pass different `model_config` to the instance initialization.
-        In order to change training procedure, re-define :meth:`.get_train_template`.
+        """ Train model for horizon extension.
+        Creates dataset and sampler for a given horizon and calls `meth:Detector.train`.
 
         Parameters
         ----------
         horizon : an instance of :class:`.Horizon`
             A horizon to be enhanced
-        mask_transform : an instance of :class:`batchflow.Pipeline`
-            Pipeline with pre-defined transformations performed with `masks` component.
-            If None, default filtering mask pipeline is used.
-            Default is defined in :meth:`.get_train_template`.
+        kwargs : see documentation of `.class:Detector`
+
+        Note
+        ----
+        In order to change training procedure, re-define :meth:`.get_train_template`.
 
         Logs
         ----
@@ -97,18 +94,23 @@ class Enhancer(Detector):
         self.make_sampler(dataset, use_grid=False, bins=np.array([500, 500, 100]))
         super().train(dataset, **kwargs)
 
-
-
     def inference(self, horizon, **kwargs):
-        """ !!. """
+        """ Runs enhancement procedure for a given horizon with trained/loaded model.
+        Creates dataset for a given horizon and calls `meth:Detector.inference.
+
+        Parameters
+        ----------
+        horizon : an instance of :class:`.Horizon`
+            A horizon to be enhanced
+        kwargs : see documentation of `.meth:Detector.train`
+        """
         dataset = self._make_dataset(horizon)
         super().inference(dataset, **kwargs)
-
 
     def get_train_template(self):
         """ Define training pipeline.
 
-        Following parameters are fetched from pipeline config: `model_config` and `crop_shape`.
+        Following parameters are fetched from pipeline config: `model_config`.
         """
         load = (
             Pipeline()
@@ -156,7 +158,6 @@ class Enhancer(Detector):
         )
         return load + distort + augment + train
 
-
     def get_inference_template(self):
         """ Define inference pipeline.
         """
@@ -184,17 +185,51 @@ class Enhancer(Detector):
         )
         return inference_template
 
-
     @staticmethod
-    def enhance(horizon, n_steps=1, cube_path=None, model_config=None, crop_shape=(1, 64, 64),
-                batch_size=128, save_dir='.', device=None, stride=16, n_iters=400):
-        """ !!. """
+    def enhance(horizon, n_steps=1, model_config=None, n_iters=400, crop_shape=(1, 64, 64),
+                batch_size=128, orientation='ix', device=None, save_dir='.', cube_path=None):
+        """ Run all steps of the Enhancement procedure including creating dataset for
+        the given horizon, creating instance of the class and running train and inference
+        methods.
+
+        Parameters
+        ----------
+        horizon : an instance of :class:`.Horizon`
+            A horizon to be extended
+        n_steps : int
+            Number of steps of the Extension algorithm.
+        model_config : dict
+            Neural network architecture.
+        n_iters : int
+            Number of iterations to train model for.
+        crop_shape : tuple of 3 ints
+            Size of sampled crops for train and inference.
+        batch_size : int
+            Size of batches for train and inference.
+        orientation : {'i', 'x', 'ix'}
+            Orientation of the inference:
+            If 'i', then cube is split into inline-oriented slices.
+            If 'x', then cube is split into crossline-oriented slices.
+            If 'ix', then both of previous approaches applied, and results are merged.
+        device : str or int
+            Device specification.
+        save_dir : str
+            Path to save images, logs, and other data.
+
+        Returns
+        -------
+        Extended horizon.
+        """
         model_config = MODEL_CONFIG if model_config is None else model_config
         enhancer = Enhancer(save_dir=save_dir, model_config=model_config, device=device,
                             crop_shape=crop_shape, batch_size=batch_size)
-        dataset = enhancer._make_dataset(horizon)
+        if isinstance(horizon, str):
+            if not cube_path:
+                raise ValueError('Cube path must be provided along with a path to horizon')
+            dataset = self.make_dataset(cube_path, horizon_paths=horizon)
+        else:
+            dataset = enhancer._make_dataset(horizon)
         enhancer.make_sampler(dataset, use_grid=False, bins=np.array([500, 500, 100]))
         enhancer.train(horizon, n_iters=n_iters, use_grid=False)
-        enhanced = enhancer.inference(dataset, n_steps=n_steps,
-                                      orientation='ix')
+        enhanced = enhancer.inference(horizon, n_steps=n_steps, orientation=orientation)
         return enhanced
