@@ -55,6 +55,7 @@ class Extractor(Detector):
                     thresholds=None, coverage_threshold=0.5, std_threshold=5., metric_threshold=0.5,
                     chunk_size=100, chunk_overlap=0.2, minsize=10000, **kwargs):
         """ Split area for inference into `big` chunks, inference on each of them, merge results. """
+        #pylint: disable=redefined-builtin, too-many-branches
         _ = kwargs
         thresholds = thresholds or np.arange(0.2, 1.0, 0.1)
 
@@ -137,8 +138,7 @@ class Extractor(Detector):
                         _ = horizons.pop(i)
                         horizons.append(horizon)
                         break
-                    else:
-                        break
+                    break
             else:
                 horizons.append(horizon)
 
