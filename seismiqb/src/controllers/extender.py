@@ -85,7 +85,7 @@ class Extender(Detector):
         horizon : an instance of :class:`.Horizon`
             A horizon to be extended
         """
-        self.logger('Enhancer inference started')
+        self.log('Inference started')
         dataset = self._make_dataset(horizon)
 
         config = {
@@ -112,7 +112,6 @@ class Extender(Detector):
                 # no additional predicts
                 break
 
-            
             horizons = [*inference_pipeline.v('predicted_horizons')]
             for hor in horizons:
                 merge_code, _ = Horizon.verify_merge(horizon, hor,
@@ -124,7 +123,7 @@ class Extender(Detector):
             curr_len = len(horizon)
             if (curr_len - prev_len) < 25:
                 break
-            self.log(f' Enhanced from {prev_len} to {curr_len}, + {curr_len - prev_len}')
+            self.log(f'Increased length from {prev_len} to {curr_len}, + {curr_len - prev_len}')
             prev_len = curr_len
 
         self.predictions = [horizon]
@@ -249,7 +248,8 @@ class Extender(Detector):
 
     @staticmethod
     def extend(horizon, n_steps=1, model_config=None, crop_shape=(1, 64, 64),
-                batch_size=128, save_dir='.', device=None, stride=16, n_iters=400):
+               batch_size=128, save_dir='.', device=None, stride=16, n_iters=400):
+        """ !!. """
         model_config = MODEL_CONFIG if model_config is None else model_config
         extender = Extender(save_dir=save_dir, model_config=model_config, device=device,
                             crop_shape=crop_shape, batch_size=batch_size)
@@ -257,4 +257,3 @@ class Extender(Detector):
         extended = extender.inference(horizon, n_steps=n_steps, crop_shape=crop_shape,
                                       batch_size=batch_size, stride=stride)
         return extended
-
