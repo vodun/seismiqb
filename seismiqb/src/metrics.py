@@ -822,7 +822,7 @@ class GeometryMetrics(BaseSeismicMetric):
 
         indices = [g.dataframe['trace_index'] for g in self.geometries]
 
-        for idx in pbar(np.arange(len(indices[0]))):
+        for idx, _ in pbar(indices[0].iteritems(), total=len(indices[0])):
             trace_indices = [ind[idx] for ind in indices]
 
             header = self.geometries[0].segyfile.header[trace_indices[0]]
