@@ -822,7 +822,7 @@ class GeometryMetrics(BaseSeismicMetric):
 
         indices = [g.dataframe['trace_index'] for g in self.geometries]
 
-        for idx, trace_index_1 in pbar(indices[0].iteritems(), total=len(indices[0])):
+        for idx in pbar(np.arange(len(indices[0]))):
             trace_indices = [ind[idx] for ind in indices]
 
             header = self.geometries[0].segyfile.header[trace_indices[0]]
@@ -876,42 +876,45 @@ class GeometryMetrics(BaseSeismicMetric):
         }
         return metric, plot_dict
 
-    
-    def blockwise(self, func, l=3, pbar=True, kernel=(5, 5), block_size=(1000, 1000), heights=None, prep_func=None, **kwargs):
+
+    def blockwise(self, func, l=3, pbar=True, kernel=(5, 5), block_size=(1000, 1000),
+                  heights=None, prep_func=None, **kwargs):
         """ Apply function to all traces in lateral window """
 
         window = np.array(kernel)
         low = window // 2
         high = window - low
-        
+
         total = np.product(self.geometries[0].ranges-window)
         prep_func = prep_func if prep_func else lambda x: x
 
         pbar = tqdm if pbar else lambda iterator, *args, **kwargs: iterator
         metric = np.full((*self.geometries[0].ranges, l), np.nan)
 
-        block_indices = [np.arange(0, self.geometries[0].cube_shape[0], block_size[0]-window[0]), 
+        block_indices = [np.arange(0, self.geometries[0].cube_shape[0], block_size[0]-window[0]),
                          np.arange(0, self.geometries[0].cube_shape[1], block_size[1]-window[1])]
         heights = np.arange(self.geometries[0].cube_shape[2]) if heights is None else np.arange(*heights)
 
-        with tqdm(total=total) as pbar:
-            for _il_block in block_indices[0]:
-                for _ix_block in block_indices[1]:
-                    locations = [np.arange(_il_block, _il_block + np.min((self.geometries[0].cube_shape[0] - _il_block, block_size[0]))),
-                                 np.arange(_ix_block, _ix_block + np.min((self.geometries[0].cube_shape[1] - _ix_block, block_size[1]))),
+        with pbar(total=total) as prog_bar:
+            for il_block in block_indices[0]:
+                for ix_block in block_indices[1]:
+                    block_len = np.min((np.array(self.geometries[0].ranges) - (il_block, ix_block),
+                                        block_size), axis=0)
+                    locations = [np.arange(il_block, il_block + block_len[0]),
+                                 np.arange(ix_block, ix_block + block_len[1]),
                                  heights]
 
                     blocks = [prep_func(g.load_crop(locations)) for g in self.geometries]
 
-                    for _il_kernel in range(low[0], blocks[0].shape[0] - high[0]):
-                        for _ix_kernel in range(low[1], blocks[0].shape[1] - high[1]):
+                    for il_kernel in range(low[0], blocks[0].shape[0] - high[0]):
+                        for ix_kernel in range(low[1], blocks[0].shape[1] - high[1]):
 
-                            il_from, il_to = _il_kernel - low[0], _il_kernel + high[0],
-                            ix_from, ix_to = _ix_kernel - low[1], _ix_kernel + high[1]
+                            il_from, il_to = il_kernel - low[0], il_kernel + high[0]
+                            ix_from, ix_to = ix_kernel - low[1], ix_kernel + high[1]
 
                             subsets = [b[il_from:il_to, ix_from:ix_to, :].reshape((-1, b.shape[-1])) for b in blocks]
-                            metric[_il_block + _il_kernel, _ix_block + _ix_kernel, :] = func(*subsets, **kwargs)
-                            pbar.update(1)
+                            metric[il_block + il_kernel, ix_block + ix_kernel, :] = func(*subsets, **kwargs)
+                            prog_bar.update(1)
 
         title = f"Blockwise {func}"
         plot_dict = {
