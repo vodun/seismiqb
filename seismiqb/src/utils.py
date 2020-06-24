@@ -1,42 +1,53 @@
 """ Utility functions. """
-import os
-from copy import copy
-from collections import OrderedDict, MutableMapping
+from math import isnan
+from collections import OrderedDict
 from threading import RLock
 from functools import wraps
-from glob import glob
 from hashlib import blake2b
 
-import dill
-import blosc
 from tqdm import tqdm
 import numpy as np
 import pandas as pd
 import segyio
 
-from numba import njit
+from numba import njit, prange
 
 
 
-def stable_hash(key):
-    """ Hash that stays the same between different runs of Python interpreter. """
-    if not isinstance(key, (str, bytes)):
-        key = ''.join(sorted(str(key)))
-    if not isinstance(key, bytes):
-        key = key.encode('ascii')
-    return str(blake2b(key).hexdigest())
+class SafeIO:
+    """ Opens the file handler with desired `open` function, closes it at destruction.
+    Can log open and close actions to the `log_file`.
+    getattr, getitem and `in` operator are directed to the `handler`.
+    """
+    def __init__(self, path, opener=open, log_file=None, **kwargs):
+        self.path = path
+        self.log_file = log_file # or '/notebooks/log_safeio.txt'
+        self.handler = opener(path, **kwargs)
 
+        if self.log_file:
+            self._info(self.log_file, f'Opened {self.path}')
 
+    def _info(self, log_file, msg):
+        with open(log_file, 'a') as f:
+            f.write('\n' + msg)
 
-class classproperty:
-    """ Adds property to the class, not to its instances. """
-    #pylint: disable=invalid-name
-    def __init__(self, prop):
-        self.prop = prop
+    def __getattr__(self, key):
+        return getattr(self.handler, key)
 
-    def __get__(self, obj, owner):
-        return self.prop(owner)
+    def __getitem__(self, key):
+        return self.handler[key]
 
+    def __contains__(self, key):
+        return key in self.handler
+
+    def __del__(self):
+        if self.log_file:
+            self._info(self.log_file, f'Tried to close {self.path}')
+
+        self.handler.close()
+
+        if self.log_file:
+            self._info(self.log_file, f'Closed {self.path}')
 
 
 class IndexedDict(OrderedDict):
@@ -47,6 +58,14 @@ class IndexedDict(OrderedDict):
         return super().__getitem__(key)
 
 
+
+def stable_hash(key):
+    """ Hash that stays the same between different runs of Python interpreter. """
+    if not isinstance(key, (str, bytes)):
+        key = ''.join(sorted(str(key)))
+    if not isinstance(key, bytes):
+        key = key.encode('ascii')
+    return str(blake2b(key).hexdigest())
 
 class Singleton:
     """ There must be only one!"""
@@ -137,7 +156,7 @@ class lru_cache:
         def wrapper(*args, **kwargs):
             key = self.make_key(args, kwargs)
 
-            #
+            # If result is already in cache, just retrieve it and update its timings
             with self.lock:
                 result = self.cache.get(key, self.default)
                 if result is not self.default:
@@ -146,10 +165,10 @@ class lru_cache:
                     self.stats['hit'] += 1
                     return result
 
-            #
+            # The result was not found in cache: evaluate function
             result = func(*args, **kwargs)
 
-            #
+            # Add the result to cache
             with self.lock:
                 self.stats['miss'] += 1
                 if key in self.cache:
@@ -168,229 +187,6 @@ class lru_cache:
         wrapper.reset = self.reset
         return wrapper
 
-
-
-class PickleDict(MutableMapping):
-    """ Persistent dictionary.
-    Keys are file names, and values are stored/loaded via pickle module of choice.
-    """
-    def __init__(self, dirname, maxsize, pickle_module='dill'):
-        self.dirname = dirname
-        self.maxsize = maxsize
-        self.pickle_module = pickle_module
-
-
-    @staticmethod
-    def load(path):
-        """ Load data from path. """
-        pickle_module = os.path.splitext(path)[1][1:]
-
-        if pickle_module == 'dill':
-            with open(path, 'rb') as dill_file:
-                restored = dill.load(dill_file)
-        elif pickle_module == 'blosc':
-            with open(path, 'rb') as blosc_file:
-                restored = dill.loads(blosc.decompress(blosc_file.read()))
-        return restored
-
-    @staticmethod
-    def dump(path, value):
-        """ Save data to path. """
-        pickle_module = os.path.splitext(path)[1][1:]
-
-        if pickle_module == 'dill':
-            with open(path, 'wb') as file:
-                dill.dump(value, file)
-        elif pickle_module == 'blosc':
-            with open(path, 'w+b') as file:
-                file.write(blosc.compress(dill.dumps(value)))
-
-
-    def __getitem__(self, key):
-        key = stable_hash(key)
-        path = os.path.join(self.dirname, str(key)[:10]) + '.{}'.format(self.pickle_module)
-
-        try:
-            return self.load(path)
-        except FileNotFoundError:
-            raise KeyError(key) from None
-
-    def __setitem__(self, key, value):
-        if len(self) > self.maxsize:
-            self.popitem(last=False)
-
-        key = stable_hash(key)
-        path = os.path.join(self.dirname, str(key)[:10]) + '.{}'.format(self.pickle_module)
-
-        if os.path.exists(path):
-            with open(path, 'a'):
-                os.utime(path, None)
-        else:
-            self.dump(path, value)
-
-    def __delitem__(self, key):
-        pass
-
-    def popitem(self, last=False):
-        """ Delete either the oldest or the newest file in the directory. """
-        lst = []
-        for path in os.listdir(self.dirname):
-            filepath = os.path.join(self.dirname, path)
-            if os.path.isfile(filepath):
-                lst.append((filepath, os.path.getmtime(filepath)))
-        lst.sort(key=lambda item: item[1])
-
-        if last is False:
-            os.remove(lst[0][0])
-        else:
-            os.remove(lst[-1][0])
-
-
-    def __len__(self):
-        return len(os.listdir(self.dirname))
-
-    def __iter__(self):
-        return iter(os.listdir(self.dirname))
-
-    def __repr__(self):
-        return 'PickleDict on {}'.format(self.dirname)
-
-
-class file_cache:
-    """ Thread-safe least recent used cache. Must be applied to class methods.
-
-    Parameters
-    ----------
-    maxsize : int
-        Maximum amount of stored values.
-    storage : None, OrderedDict or PickleDict
-        Storage to use.
-        If None, then no caching is applied.
-    classwide : bool
-        If True, then first argument of a method (self) is changed to class name for the purposes on hashing.
-    anchor : bool
-        If True, then code of the whole directory this file is located is used to create a persistent hash
-        for the purposes of storing.
-    attributes: None, str or sequence of str
-        Attributes to get from object and use as additions to key.
-    pickle_module: str
-        Module to use to save/load files on disk. Used only if `storage` is :class:`.PickleDict`.
-
-    Examples
-    --------
-    Store loaded slides::
-
-    @lru_cache(maxsize=128)
-    def load_slide(cube_name, slide_no):
-        pass
-
-    Notes
-    -----
-    All arguments to the decorated method must be hashable.
-    """
-    #pylint: disable=invalid-name
-    def __init__(self, maxsize=None, storage=OrderedDict(), classwide=True, anchor=None, attributes=None,
-                 pickle_module='dill'):
-        self.maxsize = maxsize
-        self.storage = storage
-        self.classwide = classwide
-        self.pickle_module = pickle_module
-
-        # Make attributes always a list
-        if isinstance(attributes, str):
-            self.attributes = [attributes]
-        elif isinstance(attributes, (tuple, list)):
-            self.attributes = attributes
-        else:
-            self.attributes = False
-
-        # Create one stable hash from every file in current (src) directory
-        if anchor is True:
-            src_dir = os.path.dirname(os.path.realpath(__file__))
-            code_lines = b''
-            for path in glob(src_dir + '/*'):
-                if os.path.isfile(path):
-                    with open(path, 'rb') as code_file:
-                        code_lines += code_file.read()
-            self.anchor = stable_hash(code_lines)
-        else:
-            self.anchor = False
-
-        self.is_full = False
-        self.default = Singleton()
-        self.lock = RLock()
-        self.reset()
-
-
-    def reset(self):
-        """ Clear cache and stats. """
-        if self.storage is None:
-            self.cache = None
-        elif isinstance(self.storage, str):
-            self.cache = PickleDict(self.storage, maxsize=self.maxsize, pickle_module=self.pickle_module)
-        else:
-            #TODO: add good explanation of this
-            self.cache = copy(self.storage)
-
-        self.is_full = False
-        self.stats = {'hit': 0, 'miss': 0}
-
-    def make_key(self, args, kwargs):
-        """ Create a key from a combination of instance reference, class reference, method args,
-        instance attributes or even current code state.
-        """
-        key = list(args)
-        if kwargs:
-            for k, v in kwargs.items():
-                key.append((k, v))
-
-        if self.attributes:
-            for attr in self.attributes:
-                attr_hash = stable_hash(getattr(key[0], attr))
-                key.append(attr_hash)
-
-        if self.classwide:
-            key[0] = key[0].__class__
-            if self.anchor:
-                key[0] = self.anchor
-        else:
-            if self.anchor:
-                key.append(self.anchor)
-        return tuple(key)
-
-
-    def __call__(self, func):
-        if self.cache is None:
-            return func
-
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            key = self.make_key(args, kwargs)
-            with self.lock:
-                result = self.cache.get(key, self.default)
-                if result is not self.default:
-                    del self.cache[key]
-                    self.cache[key] = result
-                    self.stats['hit'] += 1
-                    return result
-            result = func(*args, **kwargs)
-            with self.lock:
-                self.stats['miss'] += 1
-                if key in self.cache:
-                    pass
-                elif self.is_full:
-                    self.cache.popitem(last=False)
-                    self.cache[key] = result
-                else:
-                    self.cache[key] = result
-                    self.is_full = (len(self.cache) >= self.maxsize)
-            return result
-
-        wrapper.__name__ = func.__name__
-        wrapper.cache = lambda: self.cache
-        wrapper.reset = self.reset
-        wrapper.stats = lambda: self.stats
-        return wrapper
 
 
 #TODO: rethink
@@ -513,6 +309,123 @@ def aggregate(array_crops, array_grid, crop_shape, predict_shape, order):
     return background
 
 
+def gen_crop_coordinates(point, horizon_matrix, zero_traces,
+                         stride, shape, fill_value, zeros_threshold=0,
+                         empty_threshold=5, safe_stripe=0, num_points=2):
+    """ Generate crop coordinates next to the point with maximum horizon covered area.
+
+    Parameters
+    ----------
+    point : array-like
+        Coordinates of the point.
+    horizon_matrix : ndarray
+        `Full_matrix` attribute of the horizon.
+    zero_traces : ndarray
+        A boolean ndarray indicating zero traces in the cube.
+    stride : int
+        Distance between the point and a corner of a crop.
+    shape : array-like
+        The desired shape of the crops.
+        Note that final shapes are made in both xline and iline directions. So if
+        crop_shape is (1, 64, 64), crops of both (1, 64, 64) and (64, 1, 64) shape
+        will be defined.    fill_value : int
+    zeros_threshold : int
+        A maximum number of bad traces in a crop.
+    empty_threshold : int
+        A minimum number of points with unknown horizon per crop.
+    safe_stripe : int
+        Distance between a crop and the ends of the cube.
+    num_points : int
+        Returned number of crops. The maximum is four.
+    """
+    candidates, shapes = [], []
+    orders, intersections = [], []
+    hor_height = horizon_matrix[point[0], point[1]]
+    ilines_len, xlines_len = horizon_matrix.shape
+
+    tested_iline_positions = [max(0, point[0] - stride),
+                              min(point[0] - shape[1] + stride, ilines_len - shape[1])]
+
+    for il in tested_iline_positions:
+        if (il > safe_stripe) and (il + shape[1] < ilines_len - safe_stripe):
+            num_missing_traces = np.sum(zero_traces[il: il + shape[1],
+                                                    point[1]: point[1] + shape[0]])
+            if num_missing_traces <= zeros_threshold:
+                horizon_patch = horizon_matrix[il: il + shape[1],
+                                               point[1]:point[1] + shape[0]]
+                num_empty = np.sum(horizon_patch == fill_value)
+                if num_empty > empty_threshold:
+                    candidates.append([il, point[1],
+                                       hor_height - shape[2] // 2])
+                    shapes.append([shape[1], shape[0], shape[2]])
+                    orders.append([0, 2, 1])
+                    intersections.append(shape[1] - num_empty)
+
+    tested_xline_positions = [max(0, point[1] - stride),
+                              min(point[1] - shape[1] + stride, xlines_len - shape[1])]
+
+    for xl in tested_xline_positions:
+        if (xl > safe_stripe) and (xl + shape[1] < xlines_len - safe_stripe):
+            num_missing_traces = np.sum(zero_traces[point[0]: point[0] + shape[0],
+                                                    xl: xl + shape[1]])
+            if num_missing_traces <= zeros_threshold:
+                horizon_patch = horizon_matrix[point[0]:point[0] + shape[0],
+                                               xl: xl + shape[1]]
+                num_empty = np.sum(horizon_patch == fill_value)
+                if num_empty > empty_threshold:
+                    candidates.append([point[0], xl,
+                                       hor_height - shape[2] // 2])
+                    shapes.append(shape)
+                    orders.append([2, 0, 1])
+                    intersections.append(shape[1] - num_empty)
+
+    if len(candidates) == 0:
+        return None
+
+    candidates_array = np.array(candidates)
+    shapes_array = np.array(shapes)
+    orders_array = np.array(orders)
+
+    top = np.argsort(np.array(intersections))[:num_points]
+    return (candidates_array[top], \
+                shapes_array[top], \
+                orders_array[top])
+
+
+@njit
+def groupby_mean(array):
+    """ Faster version of mean-groupby of data along the first two columns.
+    Input array is supposed to have (N, 3) shape.
+    """
+    n = len(array)
+
+    output = np.zeros_like(array)
+    position = 0
+
+    prev = array[0, :2]
+    s, c = array[0, -1], 1
+
+    for i in range(1, n):
+        curr = array[i, :2]
+
+        if prev[0] == curr[0] and prev[1] == curr[1]:
+            s += array[i, -1]
+            c += 1
+        else:
+            output[position, :2] = prev
+            output[position, -1] = s / c
+            position += 1
+
+            prev = curr
+            s, c = array[i, -1], 1
+
+    output[position, :2] = prev
+    output[position, -1] = s / c
+    position += 1
+    return output[:position]
+
+
+
 
 @njit
 def round_to_array(values, ticks):
@@ -550,26 +463,11 @@ def round_to_array(values, ticks):
 def find_min_max(array):
     """ Get both min and max values in just one pass through array."""
     n = array.size
-    odd = n % 2
-    if not odd:
-        n -= 1
     max_val = min_val = array[0]
-
-    i = 1
-    while i < n:
-        x = array[i]
-        y = array[i + 1]
-        if x > y:
-            x, y = y, x
-        min_val = min(x, min_val)
-        max_val = max(y, max_val)
-        i += 2
-    if not odd:
-        x = array[n]
-        min_val = min(x, min_val)
-        max_val = max(y, max_val)
+    for i in range(1, n):
+        min_val = min(array[i], min_val)
+        max_val = max(array[i], max_val)
     return min_val, max_val
-
 
 
 
@@ -600,3 +498,36 @@ def _compute_running_mean_jit(x, kernel_size, cumsum):
             c = cumsum[i + 1 + k, j - k]
             result[i - k, j - k] = float(d - b - c + a) /  float(kernel_size ** 2)
     return result
+
+
+def mode(array):
+    """ Compute mode of the array along the last axis. """
+    nan_mask = np.max(array, axis=-1)
+    return nb_mode(array, nan_mask)
+
+@njit
+def nb_mode(array, mask):
+    """ Compute mode of the array along the last axis. """
+    #pylint: disable=not-an-iterable
+    i_range, x_range = array.shape[:2]
+    temp = np.full((i_range, x_range), np.nan)
+
+    for il in prange(i_range):
+        for xl in prange(x_range):
+            if not isnan(mask[il, xl]):
+
+                current = array[il, xl, :]
+                counter = {}
+                frequency = 0
+                for i in current:
+                    if i in counter:
+                        counter[i] += 1
+                    else:
+                        counter[i] = 0
+
+                    if counter[i] > frequency:
+                        element = i
+                        frequency = counter[i]
+
+                temp[il, xl] = element
+    return temp

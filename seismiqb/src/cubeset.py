@@ -4,7 +4,7 @@ from glob import glob
 
 import numpy as np
 
-from ..batchflow import Dataset, Sampler, DatasetIndex
+from ..batchflow import Dataset, Sampler, DatasetIndex, Pipeline
 from ..batchflow import NumpySampler, ConstantSampler
 
 from .geometry import SeismicGeometry
@@ -12,9 +12,12 @@ from .crop_batch import SeismicCropBatch
 
 from .horizon import Horizon, UnstructuredHorizon
 from .metrics import HorizonMetrics
-from .utils import IndexedDict, round_to_array
-from .plot_utils import show_sampler, plot_slide, plot_image
+from .plotters import plot_image
+from .utils import IndexedDict, round_to_array, gen_crop_coordinates
 
+def astype_object(array):
+    """ Converts array to `object` dtype. Picklable, unlike inline lambda function. """
+    return array.astype(np.object)
 
 
 class SeismicCubeset(Dataset):
@@ -46,6 +49,20 @@ class SeismicCubeset(Dataset):
         self._p, self._bins = None, None
 
         self.grid_gen, self.grid_info, self.grid_iters = None, None, None
+        self.shapes_gen, self.orders_gen = None, None
+
+    def __str__(self):
+        msg = f'Seismic Cubeset with {len(self)} cube{"s" if len(self) > 1 else ""}:\n'
+        for idx in self.indices:
+            geometry = self.geometries[idx]
+            labels = self.labels.get(idx, [])
+
+            add = f'{repr(geometry)}' if hasattr(geometry, 'cube_shape') else f'{idx}'
+            msg += f'    {add}{":" if labels else ""}\n'
+
+            for horizon in labels:
+                msg += f'        {horizon.name}\n'
+        return msg
 
 
     def gen_batch(self, batch_size, shuffle=False, n_iters=None, n_epochs=None, drop_last=False,
@@ -69,8 +86,7 @@ class SeismicCubeset(Dataset):
                                  drop_last=drop_last, bar=bar, bar_desc=bar_desc, iter_params=iter_params)
 
 
-
-    def load_geometries(self, logs=True):
+    def load_geometries(self, logs=True, **kwargs):
         """ Load geometries into dataset-attribute.
 
         Parameters
@@ -84,17 +100,14 @@ class SeismicCubeset(Dataset):
             Same instance with loaded geometries.
         """
         for ix in self.indices:
-            #TODO: pass kwargs from `load`
-            self.geometries[ix].process(collect_stats=True, spatial=False,)
+            self.geometries[ix].process(**kwargs)
             if logs:
                 self.geometries[ix].log()
-        return self
 
-    def convert_to_hdf5(self, postfix='', dtype=np.float32):
-        """ Converts every cube in dataset from `.sgy` to `.hdf5`. """
+    def convert_to_hdf5(self, postfix=''):
+        """ Converts every cube in dataset from `.segy` to `.hdf5`. """
         for ix in self.indices:
-            self.geometries[ix].make_hdf5(postfix=postfix, dtype=dtype)
-        return self
+            self.geometries[ix].make_hdf5(postfix=postfix)
 
 
     def create_labels(self, paths=None, filter_zeros=True, dst='labels', labels_class=None, **kwargs):
@@ -115,7 +128,6 @@ class SeismicCubeset(Dataset):
         if not hasattr(self, dst):
             setattr(self, dst, IndexedDict({ix: dict() for ix in self.indices}))
 
-
         for ix in self.indices:
             if labels_class is None:
                 if self.geometries[ix].structured:
@@ -128,7 +140,6 @@ class SeismicCubeset(Dataset):
             if filter_zeros:
                 _ = [getattr(horizon, 'filter_points')() for horizon in horizon_list]
             getattr(self, dst)[ix] = horizon_list
-        return self
 
     @property
     def sampler(self):
@@ -198,10 +209,9 @@ class SeismicCubeset(Dataset):
         sampler = 0 & NumpySampler('n', dim=4)
         for i, ix in enumerate(self.indices):
             sampler_ = (ConstantSampler(ix)
-                        & samplers[ix].apply(lambda d: d.astype(np.object)))
+                        & samplers[ix].apply(astype_object))
             sampler = sampler | (p[i] & sampler_)
         setattr(self, dst, sampler)
-        return self
 
     def modify_sampler(self, dst, mode='iline', low=None, high=None,
                        each=None, each_start=None,
@@ -299,27 +309,6 @@ class SeismicCubeset(Dataset):
         else:
             setattr(self, dst, sampler)
 
-    def show_sampler(self, idx=0, src_sampler='sampler', n=100000, eps=3, show_unique=False, **kwargs):
-        """ Generate a lot of points and look at their (iline, xline) positions.
-
-        Parameters
-        ----------
-        idx : str, int
-            If str, then name of cube to use.
-            If int, then number of cube in the index to use.
-        src_sampler : str
-            Name of attribute with sampler in it.
-            Must generate points in cubic coordinates, which can be achieved by `modify_sampler` method.
-        n : int
-            Number of points to generate.
-        eps : int
-            Window of painting.
-        """
-        cube_name = idx if isinstance(idx, str) else self.indices[idx]
-        geom = self.geometries[cube_name]
-        sampler = getattr(self, src_sampler)
-        show_sampler(sampler, cube_name, geom, n=n, eps=eps, show_unique=show_unique, **kwargs)
-
     def show_slices(self, idx=0, src_sampler='sampler', n=10000, normalize=False, shape=None,
                     make_slices=True, side_view=False, **kwargs):
         """ Show actually sampled slices of desired shape. """
@@ -341,7 +330,14 @@ class SeismicCubeset(Dataset):
 
         if normalize:
             background = (background > 0).astype(int)
-        plot_image(background, 'Sampled slices', **kwargs)
+
+        kwargs = {
+            'title': f'Sampled slices on {self.indices[idx]}',
+            'xlabel': 'ilines', 'ylabel': 'xlines',
+            'cmap': 'Reds', 'interpolation': 'bilinear',
+            **kwargs
+        }
+        plot_image(background, **kwargs)
         return batch
 
 
@@ -366,10 +362,9 @@ class SeismicCubeset(Dataset):
             dir_ = dir_path + horizon_dir
             paths_txt[self.indices[i]] = glob(dir_)
 
-        self.load_geometries()
+        self.load_geometries(**kwargs)
         self.create_labels(paths=paths_txt, filter_zeros=filter_zeros, dst=dst_labels)
         self._p, self._bins = p, bins # stored for later sampler creation
-        return self
 
 
     def make_grid(self, cube_name, crop_shape, ilines_range, xlines_range, h_range, strides=None, batch_size=16):
@@ -392,11 +387,6 @@ class SeismicCubeset(Dataset):
             Distance between grid points.
         batch_size : int
             Amount of returned points per generator call.
-
-        Returns
-        -------
-        SeismicCubeset
-            Same instance with grid generator and grid information in attributes.
         """
         geom = self.geometries[cube_name]
         strides = strides or crop_shape
@@ -458,11 +448,10 @@ class SeismicCubeset(Dataset):
             'geom': geom,
             'range': [ilines_range, xlines_range, h_range]
         }
-        return self
 
 
-    def mask_to_horizons(self, src, threshold=0.5, averaging='mean', minsize=0,
-                         dst='predicted_horizons', prefix='predict'):
+    def mask_to_horizons(self, src, cube_name, threshold=0.5, averaging='mean', minsize=0,
+                         dst='predicted_horizons', prefix='predict', src_grid_info='grid_info'):
         """ Convert mask to a list of horizons.
 
         Parameters
@@ -483,62 +472,23 @@ class SeismicCubeset(Dataset):
         """
         #TODO: add `chunks` mode
         mask = getattr(self, src) if isinstance(src, str) else src
-        horizons = Horizon.from_mask(mask, self.grid_info, threshold=threshold,
-                                     averaging=averaging, minsize=minsize, prefix=prefix)
-        setattr(self, dst, horizons)
-        return self
+
+        grid_info = getattr(self, src_grid_info)
+
+        horizons = Horizon.from_mask(mask, grid_info,
+                                     threshold=threshold, averaging=averaging, minsize=minsize, prefix=prefix)
+        if not hasattr(self, dst):
+            setattr(self, dst, IndexedDict({ix: dict() for ix in self.indices}))
+
+        getattr(self, dst)[cube_name] = horizons
 
 
-    def merge_horizons(self, src, mean_threshold=2.0, adjacency=3, ):
-        """ Iterate over a list of horizons and merge what can be merged. Can be called after
-        running a pipeline with `get_point_cloud`-action. Changes the list of horizons inplace.
-
-        Parameters
-        ----------
-        src : str or list
-            Source-horizons. Can be either a name of attribute or list itself.
-        height_margin : int
-            if adjacent horizons do not diverge for more than this distance, they can be merged together.
-        border_margin : int
-            max distance between a pair of horizon-borders when the horizons can be adjacent.
-        """
-        # fetch list of horizons
-        horizons = getattr(self, src) if isinstance(src, str) else src
-
-        # iterate over list of horizons to merge what can be merged
-        i = 0
-        flag = True
-        while flag:
-            # the procedure continues while at least a pair of horizons is mergeable
-            flag = False
-            while True:
-                if i >= len(horizons):
-                    break
-
-                j = i + 1
-                while True:
-                    # attempt to merge each horizon to i-th horizon with fixed i
-                    if j >= len(horizons):
-                        break
-
-                    merge_code, _ = Horizon.verify_merge(horizons[i], horizons[j],
-                                                         mean_threshold=mean_threshold,
-                                                         adjacency=adjacency)
-                    if merge_code == 3:
-                        merged = Horizon.overlap_merge(horizons[i], horizons[j], inplace=True)
-                    elif merge_code == 2:
-                        merged, _, _ = Horizon.adjacent_merge(horizons[i], horizons[j], inplace=True,
-                                                              adjacency=adjacency, mean_threshold=mean_threshold)
-                    else:
-                        merged = False
-
-                    if merged:
-                        _ = horizons.pop(j)
-                        flag = True
-                    else:
-                        j += 1
-                i += 1
-
+    def merge_horizons(self, src, mean_threshold=2.0, adjacency=3, minsize=50):
+        """ !!. """
+        horizons = getattr(self, src)
+        horizons = Horizon.merge_list(horizons, mean_threshold=mean_threshold, adjacency=adjacency, minsize=minsize)
+        if isinstance(src, str):
+            setattr(self, src, horizons)
 
 
     def compare_to_labels(self, horizon, src_labels='labels', offset=0, absolute=True,
@@ -561,19 +511,142 @@ class SeismicCubeset(Dataset):
                                                                 printer=printer, hist=hist, plot=plot)
 
 
-    def show_slide(self, idx=0, n_line=0, plot_mode='overlap', mode='iline', **kwargs):
+    def show_slide(self, idx=0, n_line=0, axis='iline', mode='overlap', backend='matplotlib', **kwargs):
         """ Show full slide of the given cube on the given line.
 
         Parameters
         ----------
         idx : str, int
             Number of cube in the index to use.
-        mode : str
+        axis : str
             Axis to cut along. Can be either `iline` or `xline`.
         n_line : int
             Number of line to show.
-        plot_mode : str
-            Way of showing results. Can be either `overlap`, `separate`, `facies`.
+        mode : str
+            Way of showing results. Can be either `overlap` or `separate`.
+        backend : str
+            Backend to use for render. Can be either 'plotly' or 'matplotlib'. Whenever
+            using 'plotly', also use slices to make the rendering take less time.
         """
         components = ('images', 'masks') if list(self.labels.values())[0] else ('images',)
-        plot_slide(self, *components, idx=idx, n_line=n_line, plot_mode=plot_mode, mode=mode, **kwargs)
+        cube_name = self.indices[idx]
+        geom = self.geometries[cube_name]
+        crop_shape = np.array(geom.cube_shape)
+
+        axis = geom.parse_axis(axis)
+        point = np.array([[cube_name, 0, 0, 0]], dtype=object)
+        point[0, axis + 1] = n_line
+        crop_shape[axis] = 1
+
+        pipeline = (Pipeline()
+                    .crop(points=point, shape=crop_shape)
+                    .load_cubes(dst='images')
+                    .scale(mode='normalize', src='images')
+                    .rotate_axes(src='images'))
+
+        if 'masks' in components:
+            horizons = kwargs.pop('horizons', -1)
+            width = kwargs.pop('width', 4)
+            labels_pipeline = (Pipeline()
+                               .create_masks(dst='masks', width=width, horizons=horizons)
+                               .rotate_axes(src='masks'))
+
+            pipeline = pipeline + labels_pipeline
+
+        batch = (pipeline << self).next_batch(len(self), n_epochs=None)
+        imgs = [np.squeeze(getattr(batch, comp)) for comp in components]
+
+        names = ['iline', 'xline', 'slice']
+        # configure defaults
+        kwargs = {
+            'title': (names[axis] + ' {} out of {} on {}'.format(n_line, geom.cube_shape[axis], cube_name)),
+            'order_axes': (1, 0) if axis == 0 else (0, 1),
+            'xlabel': 'xlines' if axis in (0, 2) else 'ilines',
+            'ylabel': 'height' if axis in (0, 1) else 'xlines',
+            **kwargs
+        }
+
+        plot_image(imgs, backend=backend, mode=mode, **kwargs)
+
+
+    def make_extension_grid(self, cube_name, crop_shape, labels_src='predicted_labels',
+                            stride=10, batch_size=16, coverage=True, **kwargs):
+        """ Create a non-regular grid of points in a cube for extension procedure.
+        Each point defines an upper rightmost corner of a crop which contains a holey
+        horizon.
+
+        Parameters
+        ----------
+        cube_name : str
+            Reference to the cube. Should be a valid key for the `labels_src` attribute.
+        crop_shape : array-like
+            The desired shape of the crops.
+            Note that final shapes are made in both xline and iline directions. So if
+            crop_shape is (1, 64, 64), crops of both (1, 64, 64) and (64, 1, 64) shape
+            will be defined.
+        labels_src : str
+            Attribute with the horizon to be extended.
+        stride : int
+            Distance between a horizon border and a corner of a crop.
+        batch_size : int
+            Batch size fed to the model.
+        coverage : bool or array, optional
+            A boolean array of size (ilines_len, xlines_len) indicating points that will
+            not be used as new crop coordinates, e.g. already covered points.
+            If True then coverage array will be initialized with zeros and updated with
+            covered points.
+            If False then all points from the horizon border will be used.
+        """
+        horizon = getattr(self, labels_src)[cube_name][0]
+
+        zero_traces = horizon.geometry.zero_traces
+        hor_matrix = horizon.full_matrix.astype(np.int32)
+        coverage_matrix = np.zeros_like(zero_traces) if isinstance(coverage, bool) else coverage
+
+        # get horizon boundary points in horizon.matrix coordinates
+        border_points = np.array(list(zip(*np.where(horizon.boundaries_matrix))))
+
+        # shift border_points to global coordinates
+        border_points[:, 0] += horizon.i_min
+        border_points[:, 1] += horizon.x_min
+
+        crops, orders, shapes = [], [], []
+
+        for i, point in enumerate(border_points):
+            if coverage_matrix[point[0], point[1]] == 1:
+                continue
+
+            result = gen_crop_coordinates(point,
+                                          hor_matrix, zero_traces,
+                                          stride, crop_shape,
+                                          horizon.FILL_VALUE, **kwargs)
+            if not result:
+                continue
+            new_point, shape, order = result
+            crops.extend(new_point)
+            shapes.extend(shape)
+            orders.extend(order)
+
+            if coverage is not False:
+                for _point, _shape in zip(new_point, shape):
+                    coverage_matrix[_point[0]: _point[0] + _shape[0],
+                                    _point[1]: _point[1] + _shape[1]] = 1
+
+        crops = np.array(crops, dtype=np.object).reshape(-1, 3)
+        cube_names = np.array([cube_name] * len(crops), dtype=np.object).reshape(-1, 1)
+        shapes = np.array(shapes)
+        crops = np.concatenate([cube_names, crops], axis=1)
+
+        crops_gen = (crops[i:i+batch_size]
+                     for i in range(0, len(crops), batch_size))
+        shapes_gen = (shapes[i:i+batch_size]
+                      for i in range(0, len(shapes), batch_size))
+        orders_gen = (orders[i:i+batch_size]
+                      for i in range(0, len(orders), batch_size))
+
+        self.grid_gen = lambda: next(crops_gen)
+        self.shapes_gen = lambda: next(shapes_gen)
+        self.orders_gen = lambda: next(orders_gen)
+        self.grid_iters = - (-len(crops) // batch_size)
+        self.grid_info = {'cube_name': cube_name,
+                          'geom': horizon.geometry}

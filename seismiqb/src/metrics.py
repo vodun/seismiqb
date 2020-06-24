@@ -6,7 +6,7 @@ from tqdm.auto import tqdm
 
 import numpy as np
 from numba import njit, prange
-import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
 
 import cv2
 from scipy.signal import hilbert, medfilt
@@ -14,8 +14,33 @@ from scipy.signal import hilbert, medfilt
 from ..batchflow.models.metrics import Metrics
 
 from .horizon import Horizon
-from .utils import compute_running_mean
-from .plot_utils import plot_image
+from .utils import mode, compute_running_mean
+from .plotters import plot_image
+
+
+
+CDICT = {
+    'red': [
+        [0.0, None, 1.0],
+        [0.33, 1.0, 1.0],
+        [0.66, 1.0, 1.0],
+        [1.0, 0.0, None]
+    ],
+    'green': [
+        [0.0, None, 0.0],
+        [0.33, 0.0, 0.0],
+        [0.66, 1.0, 1.0],
+        [1.0, 0.5019607843137255, None]
+    ],
+    'blue': [
+        [0.0, None, 0.0],
+        [0.33, 0.0, 0.0],
+        [0.66, 0.0, 0.0],
+        [1.0, 0.0, None]
+    ]
+}
+METRIC_CMAP = mcolors.LinearSegmentedColormap('CustomMap', CDICT)
+
 
 
 
@@ -41,44 +66,37 @@ class BaseSeismicMetric(Metrics):
 
     EPS = 0.00001
 
-    def evaluate(self, metrics, agg='mean', plot=False, show_plot=True, savepath=None, backend='matplotlib',
-                 plot_kwargs=None, scalar=False, **kwargs):
-        """ Calculate desired metrics.
+    def evaluate(self, metric, agg=None, plot=False, show_plot=True, savepath=None, backend='matplotlib', **kwargs):
+        """ Calculate desired metric, apply aggregation, then plot resulting metric-map.
         To plot the results, set `plot` argument to True.
 
         Parameters
         ----------
-        metrics : str or sequence of str
-            Names of metrics to evaluate.
+        metric : str or sequence of str
+            Name of metric to evaluate.
         agg : int, str or callable
             Function to transform metric from ndarray of (n_ilines, n_xlines, N) shape to (n_ilines, n_xlines) shape.
             If callable, then directly applied to the output of metric computation function.
             If str, then must be a function from `numpy` module. Applied along the last axis only.
             If int, then index of slice along the last axis to return.
+        plot, show_plot, savepath, backend, plot_kwargs
+            Parameters that are passed directly to plotting function, see :func:`.plot_image`.
         kwargs : dict
             Metric-specific parameters.
-
-        Returns
-        -------
-        If `metric` is str, then metric value
-        If `metric` is dict, than dict where keys are metric names and values are metric values.
         """
-        _metrics = [metrics] if isinstance(metrics, str) else metrics
-        _agg = [agg]*len(_metrics) if not isinstance(agg, (tuple, list)) else agg
+        if agg is None:
+            if 'support' in metric:
+                agg = 'nanmean'
 
-        res = {}
-        for name, agg_func in zip(_metrics, _agg):
-            # Get metric, then aggregate
-            metric_fn = getattr(self, name)
-            metric_val, plot_dict = metric_fn(**kwargs)
-            metric_val = self._aggregate(metric_val, agg_func)
+        # Get metric, then aggregate
+        metric_fn = getattr(self, metric)
+        metric_val, plot_dict = metric_fn(**kwargs)
+        metric_val = self._aggregate(metric_val, agg)
 
-            # Get plot parameters
-            # TODO: make plot functions use only needed parameters
-            plot_dict = {**plot_dict, **(plot_kwargs or {})}
-            ignore_value = plot_dict.pop('ignore_value', None)
+        # Get plot parameters
+        if plot:
             spatial = plot_dict.pop('spatial', True)
-            _ = backend, plot_dict.pop('zmin', -1), plot_dict.pop('zmax', 1)
+            ignore_value = plot_dict.pop('ignore_value', None)
 
             # np.nan allows to ignore values
             if ignore_value is not None:
@@ -87,25 +105,22 @@ class BaseSeismicMetric(Metrics):
             else:
                 copy_metric = metric_val
 
-            # Actual plot
-            if plot:
-                if spatial:
-                    plot_image(copy_metric, savefig=savepath, show_plot=show_plot, **plot_dict)
-                else:
-                    pass
-            if scalar:
-                print('Scalar value of metric is {}'.format(np.nanmean(copy_metric)))
-            res[name] = metric_val
-
-        res = res[metrics] if isinstance(metrics, str) else res
-        return res
+        # Actual plot
+            if spatial:
+                plot_image(copy_metric, savepath=savepath, show=show_plot, backend=backend, **plot_dict)
+            else:
+                pass
+        return metric_val
 
     def _aggregate(self, metric, agg=None):
         if agg is not None:
             if callable(agg):
                 metric = agg(metric)
             elif isinstance(agg, str):
-                metric = getattr(np, agg)(metric, axis=-1)
+                if agg == 'mode':
+                    metric = mode(metric)
+                else:
+                    metric = getattr(np, agg)(metric, axis=-1)
             elif isinstance(agg, (int, slice)):
                 metric = metric[..., agg]
         return metric
@@ -131,10 +146,12 @@ class BaseSeismicMetric(Metrics):
         plot_dict = {
             'spatial': self.spatial,
             'title': f'{title} for {self.name} on cube {self.cube_name}, k={kernel_size}, reduce={reduce_func}',
-            'cmap': 'seismic',
+            'cmap': METRIC_CMAP,
             'zmin': -1, 'zmax': 1,
             'ignore_value': 0.0,
-            # **kwargs
+            'xlabel': 'ilines', 'ylabel': 'xlines',
+            'fill_color': 'black',
+            **kwargs
         }
         return metric, plot_dict
 
@@ -166,12 +183,48 @@ class BaseSeismicMetric(Metrics):
         plot_dict = {
             'spatial': self.spatial,
             'title': f'{title} for {self.name} on cube {self.cube_name}',
-            'cmap': 'seismic',
-            'zmin': -1, 'zmax': 1,
+            'cmap': METRIC_CMAP,
+            'zmin': -1.0, 'zmax': 1.0,
             'ignore_value': 0.0,
-            # **kwargs
+            'xlabel': 'ilines', 'ylabel': 'xlines',
+            'fill_color': 'black',
+            **kwargs
         }
         return metric, plot_dict
+
+
+    def local_crosscorrs(self, kernel_size=3, reduce_func='nanmean', **kwargs):
+        """ Compute cross-correlation between each column in data and nearest traces. """
+        metric, title = compute_local_crosscorrs(data=self.data, bad_traces=self.bad_traces,
+                                                 kernel_size=kernel_size, reduce_func=reduce_func, **kwargs)
+        plot_dict = {
+            'spatial': self.spatial,
+            'title': f'{title} for {self.name} on cube {self.cube_name}, k={kernel_size}, reduce={reduce_func}',
+            'cmap': 'seismic_r',
+            'zmin': None, 'zmax': None,
+            'ignore_value': np.nan,
+            'xlabel': 'ilines', 'ylabel': 'xlines',
+            'fill_color': 'black',
+            **kwargs
+        }
+        return metric, plot_dict
+
+    def support_crosscorrs(self, supports=10, safe_strip=0, **kwargs):
+        """ Compute cross-correlation between each trace and support traces. """
+        metric, title = compute_support_crosscorrs(data=self.data, supports=supports, bad_traces=self.bad_traces,
+                                                   safe_strip=safe_strip, **kwargs)
+        plot_dict = {
+            'spatial': self.spatial,
+            'title': f'{title} for {self.name} on cube {self.cube_name}',
+            'cmap': 'seismic_r',
+            'zmin': None, 'zmax': None,
+            'ignore_value': np.nan,
+            'xlabel': 'ilines', 'ylabel': 'xlines',
+            'fill_color': 'black',
+            **kwargs
+        }
+        return metric, plot_dict
+
 
     def local_btch(self, kernel_size=3, reduce_func='nanmean', **kwargs):
         """ Compute Bhattacharyya distance between each column in data and nearest traces. """
@@ -180,26 +233,34 @@ class BaseSeismicMetric(Metrics):
         plot_dict = {
             'spatial': self.spatial,
             'title': f'{title} for {self.name} on cube {self.cube_name}, k={kernel_size}, reduce={reduce_func}',
-            'cmap': 'seismic',
+            'cmap': METRIC_CMAP,
             'zmin': 0.0, 'zmax': 1.0,
             'ignore_value': np.nan,
-            # **kwargs
+            'xlabel': 'ilines', 'ylabel': 'xlines',
+            'fill_color': 'black',
+            **kwargs
         }
         return metric, plot_dict
 
     def support_btch(self, supports=10, safe_strip=0, **kwargs):
-        """ Compute Bhattacharyya distance between each trace and support traces """
+        """ Compute Bhattacharyya distance between each trace and support traces. """
         metric, title = compute_support_btch(data=self.probs, supports=supports, bad_traces=self.bad_traces,
                                              safe_strip=safe_strip, **kwargs)
         plot_dict = {
             'spatial': self.spatial,
             'title': f'{title} for {self.name} on cube {self.cube_name}',
-            'cmap': 'seismic',
+            'cmap': METRIC_CMAP,
             'zmin': 0.0, 'zmax': 1.0,
             'ignore_value': np.nan,
-            # **kwargs
+            'xlabel': 'ilines', 'ylabel': 'xlines',
+            'fill_color': 'black',
+            **kwargs
         }
         return metric, plot_dict
+
+    # Aliases for Bhattacharyya distance
+    local_bt = local_btch
+    support_bt = support_btch
 
 
     def local_kl(self, kernel_size=3, reduce_func='nanmean', **kwargs):
@@ -209,24 +270,28 @@ class BaseSeismicMetric(Metrics):
         plot_dict = {
             'spatial': self.spatial,
             'title': f'{title} for {self.name} on cube {self.cube_name}, k={kernel_size}, reduce={reduce_func}',
-            'cmap': 'seismic',
+            'cmap': METRIC_CMAP,
             'zmin': None, 'zmax': None,
             'ignore_value': np.nan,
-            # **kwargs
+            'xlabel': 'ilines', 'ylabel': 'xlines',
+            'fill_color': 'black',
+            **kwargs
         }
         return metric, plot_dict
 
     def support_kl(self, supports=10, safe_strip=0, **kwargs):
-        """ Compute Kullback-Leibler divergence between each trace and support traces """
+        """ Compute Kullback-Leibler divergence between each trace and support traces. """
         metric, title = compute_support_kl(data=self.probs, supports=supports, bad_traces=self.bad_traces,
                                            safe_strip=safe_strip, **kwargs)
         plot_dict = {
             'spatial': self.spatial,
             'title': f'{title} for {self.name} on cube {self.cube_name}',
-            'cmap': 'seismic',
+            'cmap': METRIC_CMAP,
             'zmin': None, 'zmax': None,
             'ignore_value': np.nan,
-            # **kwargs
+            'xlabel': 'ilines', 'ylabel': 'xlines',
+            'fill_color': 'black',
+            **kwargs
         }
         return metric, plot_dict
 
@@ -240,24 +305,28 @@ class BaseSeismicMetric(Metrics):
         plot_dict = {
             'spatial': self.spatial,
             'title': f'{title} for {self.name} on cube {self.cube_name}, k={kernel_size}, reduce={reduce_func}',
-            'cmap': 'seismic',
+            'cmap': METRIC_CMAP,
             'zmin': None, 'zmax': None,
             'ignore_value': np.nan,
-            # **kwargs
+            'xlabel': 'ilines', 'ylabel': 'xlines',
+            'fill_color': 'black',
+            **kwargs
         }
         return metric, plot_dict
 
     def support_js(self, supports=10, safe_strip=0, **kwargs):
-        """ Compute Jensen-Shannon distance between each trace and support traces """
+        """ Compute Jensen-Shannon distance between each trace and support traces. """
         metric, title = compute_support_js(data=self.probs, supports=supports, bad_traces=self.bad_traces,
                                            safe_strip=safe_strip, **kwargs)
         plot_dict = {
             'spatial': self.spatial,
             'title': f'{title} for {self.name} on cube {self.cube_name}',
-            'cmap': 'seismic',
+            'cmap': METRIC_CMAP,
             'zmin': None, 'zmax': None,
             'ignore_value': np.nan,
-            # **kwargs
+            'xlabel': 'ilines', 'ylabel': 'xlines',
+            'fill_color': 'black',
+            **kwargs
         }
         return metric, plot_dict
 
@@ -269,24 +338,61 @@ class BaseSeismicMetric(Metrics):
         plot_dict = {
             'spatial': self.spatial,
             'title': f'{title} for {self.name} on cube {self.cube_name}, k={kernel_size}, reduce={reduce_func}',
-            'cmap': 'seismic',
+            'cmap': METRIC_CMAP,
             'zmin': None, 'zmax': None,
             'ignore_value': np.nan,
-            # **kwargs
+            'xlabel': 'ilines', 'ylabel': 'xlines',
+            'fill_color': 'black',
+            **kwargs
         }
         return metric, plot_dict
 
     def support_hellinger(self, supports=10, safe_strip=0, **kwargs):
-        """ Compute Hellinger distance between each trace and support traces """
+        """ Compute Hellinger distance between each trace and support traces. """
         metric, title = compute_support_hellinger(data=self.probs, supports=supports, bad_traces=self.bad_traces,
                                                   safe_strip=safe_strip, **kwargs)
         plot_dict = {
             'spatial': self.spatial,
             'title': f'{title} for {self.name} on cube {self.cube_name}',
-            'cmap': 'seismic',
+            'cmap': METRIC_CMAP,
             'zmin': None, 'zmax': None,
             'ignore_value': np.nan,
-            # **kwargs
+            'xlabel': 'ilines', 'ylabel': 'xlines',
+            'fill_color': 'black',
+            **kwargs
+        }
+        return metric, plot_dict
+
+
+    def local_tv(self, kernel_size=3, reduce_func='nanmean', **kwargs):
+        """ Compute total variation distance between each column in data and nearest traces. """
+        metric, title = compute_local_tv(data=self.probs, bad_traces=self.bad_traces,
+                                         kernel_size=kernel_size, reduce_func=reduce_func, **kwargs)
+        plot_dict = {
+            'spatial': self.spatial,
+            'title': f'{title} for {self.name} on cube {self.cube_name}, k={kernel_size}, reduce={reduce_func}',
+            'cmap': METRIC_CMAP,
+            'zmin': None, 'zmax': None,
+            'ignore_value': np.nan,
+            'xlabel': 'ilines', 'ylabel': 'xlines',
+            'fill_color': 'black',
+            **kwargs
+        }
+        return metric, plot_dict
+
+    def support_tv(self, supports=10, safe_strip=0, **kwargs):
+        """ Compute total variation distance between each trace and support traces. """
+        metric, title = compute_support_tv(data=self.probs, supports=supports, bad_traces=self.bad_traces,
+                                           safe_strip=safe_strip, **kwargs)
+        plot_dict = {
+            'spatial': self.spatial,
+            'title': f'{title} for {self.name} on cube {self.cube_name}',
+            'cmap': METRIC_CMAP,
+            'zmin': None, 'zmax': None,
+            'ignore_value': np.nan,
+            'xlabel': 'ilines', 'ylabel': 'xlines',
+            'fill_color': 'black',
+            **kwargs
         }
         return metric, plot_dict
 
@@ -300,24 +406,28 @@ class BaseSeismicMetric(Metrics):
         plot_dict = {
             'spatial': self.spatial,
             'title': f'{title} for {self.name} on cube {self.cube_name}, k={kernel_size}, reduce={reduce_func}',
-            'cmap': 'seismic',
+            'cmap': METRIC_CMAP,
             'zmin': None, 'zmax': None,
             'ignore_value': np.nan,
-            # **kwargs
+            'xlabel': 'ilines', 'ylabel': 'xlines',
+            'fill_color': 'black',
+            **kwargs
         }
         return metric, plot_dict
 
     def support_wasserstein(self, supports=10, safe_strip=0, **kwargs):
-        """ Compute Wasserstein distance between each trace and support traces """
+        """ Compute Wasserstein distance between each trace and support traces. """
         metric, title = compute_support_wasserstein(data=self.probs, supports=supports, bad_traces=self.bad_traces,
                                                     safe_strip=safe_strip, **kwargs)
         plot_dict = {
             'spatial': self.spatial,
             'title': f'{title} for {self.name} on cube {self.cube_name}',
-            'cmap': 'seismic',
+            'cmap': METRIC_CMAP,
             'zmin': None, 'zmax': None,
             'ignore_value': np.nan,
-            # **kwargs
+            'xlabel': 'ilines', 'ylabel': 'xlines',
+            'fill_color': 'black',
+            **kwargs
         }
         return metric, plot_dict
 
@@ -326,7 +436,7 @@ class BaseSeismicMetric(Metrics):
     support_emd = support_wasserstein
 
 
-    def hilbert(self, mode='median', kernel_size=3, eps=1e-5, **kwargs):
+    def hilbert(self, correction='median', kernel_size=3, eps=1e-5, **kwargs):
         """ Compute phase along the data. """
         _ = kwargs
         # full_matrix = self.horizon.full_matrix
@@ -339,7 +449,7 @@ class BaseSeismicMetric(Metrics):
         horizon_phase = phase[:, :, phase.shape[-1] // 2]
         horizon_phase = correct_pi(horizon_phase, eps)
 
-        if mode == 'mean':
+        if correction == 'mean':
             median_phase = compute_running_mean(horizon_phase, kernel_size)
         else:
             median_phase = medfilt(horizon_phase, kernel_size)
@@ -358,9 +468,10 @@ class BaseSeismicMetric(Metrics):
         plot_dict = {
             'spatial': self.spatial,
             'title': '{} for {} on cube {}'.format(title, self.name, self.cube_name),
-            'cmap': 'seismic',
+            'cmap': METRIC_CMAP,
             'zmin': -1, 'zmax': 1,
-            # **kwargs
+            'xlabel': 'ilines', 'ylabel': 'xlines',
+            **kwargs
         }
         return metric, plot_dict
 
@@ -390,14 +501,15 @@ class BaseSeismicMetric(Metrics):
         local_params = {**self.LOCAL_DEFAULTS, **local_params}
         support_params = {**self.SUPPORT_DEFAULTS, **support_params}
 
-        for metric_name in metric_names:
-            if metric_name.startswith('local'):
-                kwds = copy(local_params)
-            elif metric_name.startswith('supp'):
-                kwds = copy(support_params)
+        if metric_names:
+            for metric_name in metric_names:
+                if metric_name.startswith('local'):
+                    kwds = copy(local_params)
+                elif metric_name.startswith('supp'):
+                    kwds = copy(support_params)
 
-            metric = self.evaluate(metric_name, plot=False, **kwds)
-            computed_metrics.append(metric)
+                metric = self.evaluate(metric_name, plot=False, **kwds)
+                computed_metrics.append(metric)
 
         digitized_metrics = []
         for metric_matrix in computed_metrics:
@@ -416,10 +528,10 @@ class BaseSeismicMetric(Metrics):
             'cmap': 'Reds',
             'zmin': 0.0, 'zmax': np.max(quality_map),
             'ignore_value': np.nan,
-            # **kwargs
+            'xlabel': 'ilines', 'ylabel': 'xlines',
+            **kwargs
         }
         return quality_map, plot_dict
-
 
     def make_grid(self, quality_map, frequencies, iline=True, xline=True, margin=0, **kwargs):
         """ Create grid with various frequencies based on quality map. """
@@ -464,9 +576,12 @@ class HorizonMetrics(BaseSeismicMetric):
     """
     AVAILABLE_METRICS = [
         'local_corrs', 'support_corrs',
+        'local_btch', 'support_btch',
         'local_kl', 'support_kl',
+        'local_js', 'support_js',
         'local_hellinger', 'support_hellinger',
         'local_wasserstein', 'support_wasserstein',
+        'local_tv', 'support_tv',
         'hilbert',
     ]
 
@@ -521,6 +636,43 @@ class HorizonMetrics(BaseSeismicMetric):
             self._probs = hist_matrix / np.sum(hist_matrix, axis=-1, keepdims=True) + self.EPS
         return self._probs
 
+    def instantaneous_phase(self, **kwargs):
+        """ Compute instantaneous phase via Hilbert transform. """
+        analytic = hilbert(self.data, axis=2)
+
+        phase = np.angle(analytic)
+        phase = phase % (2 * np.pi) - np.pi
+
+        phase_slice = phase[:, :, phase.shape[-1] // 2]
+        phase_slice = correct_pi(phase_slice, 1e-5)
+        phase_slice[self.horizon.full_matrix == self.horizon.FILL_VALUE] = np.nan
+
+        plot_dict = {
+            'spatial': self.spatial,
+            'title': 'Instantaneous phase for {} on cube {}'.format(self.name, self.cube_name),
+            'cmap': 'seismic',
+            'zmin': -np.pi, 'zmax': np.pi,
+            'xlabel': 'ilines', 'ylabel': 'xlines',
+            'fill_color': 'black',
+            **kwargs
+        }
+        return phase_slice, plot_dict
+
+
+    def find_best_match(self, offset=0, **kwargs):
+        """ !!. """
+        _ = kwargs
+        if isinstance(self.horizons[1], Horizon):
+            self.horizons[1] = [self.horizons[1]]
+
+        lst = []
+        for hor in self.horizons[1]:
+            if hor.geometry.name == self.horizon.geometry.name:
+                overlap_info = Horizon.check_proximity(self.horizon, hor, offset=offset)
+                lst.append((hor, overlap_info))
+        lst.sort(key=lambda x: abs(x[1].get('mean', 999999)))
+        other, overlap_info = lst[0]
+        return (other, overlap_info), {} # actual return + fake plot dict
 
 
     def compare(self, offset=0, absolute=True, hist=True, printer=print, **kwargs):
@@ -537,19 +689,10 @@ class HorizonMetrics(BaseSeismicMetric):
         printer : callable
             Function to print results, for example `print` or any other callable that can log data.
         """
-        _ = kwargs
         if len(self.horizons) != 2:
             raise ValueError('Can compare two horizons exactly or one to the best match from list of horizons. ')
-        if isinstance(self.horizons[1], Horizon):
-            self.horizons[1] = [self.horizons[1]]
-
-        lst = []
-        for hor in self.horizons[1]:
-            if hor.geometry.name == self.horizon.geometry.name:
-                overlap_info = Horizon.verify_merge(self.horizon, hor, adjacency=3)[1]
-                lst.append((hor, overlap_info))
-        lst.sort(key=lambda x: x[1].get('mean', 999999))
-        other, overlap_info = lst[0] # the best match
+        _ = kwargs
+        (other, oinfo), _ = self.find_best_match(offset=offset)
 
         self_full_matrix = self.horizon.full_matrix
         other_full_matrix = other.full_matrix
@@ -558,9 +701,6 @@ class HorizonMetrics(BaseSeismicMetric):
         if absolute:
             metric = np.abs(metric)
 
-        window_rate = np.mean(np.abs(metric[~np.isnan(metric)]) < (5 / other.geometry.sample_rate))
-        max_abs_error = np.nanmax(np.abs(metric))
-        max_abs_error_count = np.sum(metric == max_abs_error) + np.sum(metric == -max_abs_error)
         at_1 = len(np.asarray((self_full_matrix != other.FILL_VALUE) &
                               (other_full_matrix == other.FILL_VALUE)).nonzero()[0])
         at_2 = len(np.asarray((self_full_matrix == other.FILL_VALUE) &
@@ -569,28 +709,29 @@ class HorizonMetrics(BaseSeismicMetric):
         if printer is not None:
             msg = f"""
             Comparing horizons:       {self.horizon.name}
-                                    {other.name}
+                                      {other.name}
             {'—'*45}
 
-            Rate in 5ms:                         {window_rate:8.4}
-            Mean/std of errors:       {np.nanmean(metric):8.4} / {np.nanstd(metric):8.4}
-            Max abs error/count:      {max_abs_error:8.4} / {max_abs_error_count:8}
+            Rate in 5ms:                         {oinfo['window_rate']:8.4}
+            Mean/std of errors:       {oinfo['mean']:8.4} / {oinfo['std']:8.4}
+            Mean/std of abs errors:   {oinfo['abs_mean']:8.4} / {oinfo['abs_std']:8.4}
+            Max error/abd error:      {oinfo['max']:8} / {oinfo['abs_max']:8}
             {'—'*45}
 
             Lengths of horizons:                 {len(self.horizon):8}
-                                                {len(other):8}
+                                                 {len(other):8}
             {'—'*45}
-            Average heights of horizons:         {(offset + self.horizon.h_mean):8.4}
-                                                {other.h_mean:8.4}
+            Average heights of horizons:         {(offset + self.horizon.h_mean):8}
+                                                 {other.h_mean:8}
             {'—'*45}
             Coverage of horizons:                {self.horizon.coverage:8.4}
-                                                {other.coverage:8.4}
+                                                 {other.coverage:8.4}
             {'—'*45}
             Solidity of horizons:                {self.horizon.solidity:8.4}
-                                                {other.solidity:8.4}
+                                                 {other.solidity:8.4}
             {'—'*45}
             Number of holes in horizons:         {self.horizon.number_of_holes:8}
-                                                {other.number_of_holes:8}
+                                                 {other.number_of_holes:8}
             {'—'*45}
             Additional traces labeled:           {at_1:8}
             (present in one, absent in other)    {at_2:8}
@@ -598,17 +739,25 @@ class HorizonMetrics(BaseSeismicMetric):
             """
             printer(dedent(msg))
 
-        if hist and not np.isnan(max_abs_error):
-            _ = plt.hist(metric.ravel(), bins=100)
+        if hist:
+            hist_dict = {
+                'bins': 100,
+                'xlabel': 'l1-values',
+                'ylabel': 'N',
+                'label': 'Histogram of l1 differences',
+            }
+            plot_image(metric, mode='histogram', **hist_dict)
 
         title = 'Height differences between {} and {}'.format(self.horizon.name, other.name)
         plot_dict = {
             'spatial': True,
             'title': '{} on cube {}'.format(title, self.horizon.cube_name),
             'cmap': 'seismic',
-            'zmin': 0, 'zmax': np.max(metric),
+            'zmin': 0, 'zmax': np.nanmax(metric),
             'ignore_value': np.nan,
-            # **kwargs
+            'xlabel': 'ilines', 'ylabel': 'xlines',
+            'fill_color': 'black',
+            **kwargs
         }
         return metric, plot_dict
 
@@ -619,9 +768,12 @@ class GeometryMetrics(BaseSeismicMetric):
     """ Metrics of cube quality. """
     AVAILABLE_METRICS = [
         'local_corrs', 'support_corrs',
+        'local_btch', 'support_btch',
         'local_kl', 'support_kl',
+        'local_js', 'support_js',
         'local_hellinger', 'support_hellinger',
         'local_wasserstein', 'support_wasserstein',
+        'local_tv', 'support_tv',
     ]
 
 
@@ -655,7 +807,6 @@ class GeometryMetrics(BaseSeismicMetric):
             self._bad_traces = self.geometry.zero_traces
         return self._bad_traces
 
-
     @property
     def probs(self):
         """ Probabilistic interpretation of `data`. """
@@ -666,66 +817,24 @@ class GeometryMetrics(BaseSeismicMetric):
 
     def tracewise(self, func, l=3, pbar=True, **kwargs):
         """ Apply `func` to compare two cubes tracewise. """
-        if len(self.geometries) != 2:
-            raise ValueError()
         pbar = tqdm if pbar else lambda iterator, *args, **kwargs: iterator
-        metric = np.full((*self.geometry.uniques, l), np.nan)
+        metric = np.full((*self.geometry.ranges, l), np.nan)
 
-        s_1 = self.geometries[0].dataframe['trace_index']
-        s_2 = self.geometries[1].dataframe['trace_index']
+        indices = [g.dataframe['trace_index'] for g in self.geometries]
 
-        for idx, trace_index_1 in pbar(s_1.iteritems(), total=len(s_1)):
-            trace_index_2 = s_2[idx]
+        for idx, trace_index_1 in pbar(indices[0].iteritems(), total=len(indices[0])):
+            trace_indices = [ind[idx] for ind in indices]
 
-            header = self.geometries[0].segyfile.header[trace_index_1]
-            keys = [header.get(field) for field in self.geometries[0].fields]
-            store_key = [self.geometries[0].vals_inversed[i][item] for i, item in enumerate(keys)]
+            header = self.geometries[0].segyfile.header[trace_indices[0]]
+            keys = [header.get(field) for field in self.geometries[0].byte_no]
+            store_key = [self.geometries[0].uniques_inversed[i][item] for i, item in enumerate(keys)]
             store_key = tuple(store_key)
 
-            trace_1 = self.geometries[0].load_trace_segy(trace_index_1)
-            trace_2 = self.geometries[1].load_trace_segy(trace_index_2)
+            traces = []
+            for geometry, trace_index in zip(self.geometries, trace_indices):
+                traces.append(geometry.load_trace(trace_index))
 
-            metric[store_key] = func(trace_1, trace_2, **kwargs)
-
-        title = f"tracewise {func}"
-        plot_dict = {
-            'spatial': self.spatial,
-            'title': f'{title} for {self.name} on cube {self.cube_name}',
-            'cmap': 'seismic',
-            'zmin': None, 'zmax': None,
-            'ignore_value': np.nan,
-            # **kwargs
-        }
-        return metric, plot_dict
-
-
-    def blockwise(self, func, l=3, pbar=True, window=(5, 5), strides=(1, 1), **kwargs):
-        """ Apply function to all traces in lateral window """
-        if len(self.geometries) != 2:
-            raise ValueError()
-
-        pbar = tqdm if pbar else lambda iterator, *args, **kwargs: iterator
-        metric_shape = list(map(lambda x: int((x[0]-x[1]) / x[2]) + 1,
-                                list(zip(self.geometry.uniques, window, strides))))
-        metric = np.full((*metric_shape, l), np.nan)
-
-        s_1 = self.geometries[0].dataframe[['trace_index']]
-        s_2 = self.geometries[1].dataframe[['trace_index']]
-
-        s_1_items = s_1.index.levels[0][:-window[0]:strides[0]]
-        s_2_items = s_2.index.levels[1][:-window[1]:strides[0]]
-
-        with pbar(total=len(s_1_items) * len(s_2_items)) as _bar:
-            for i, il in enumerate(s_1_items):
-                for j, ix in enumerate(s_2_items):
-                    idx = (list(range(il, il+window[0])), list(range(ix, ix+window[1])))
-                    trace_indices_1 = s_1.loc[idx, 'trace_index'].values
-                    trace_indices_2 = s_2.loc[idx, 'trace_index'].values
-
-                    trace_1 = self.geometries[0].load_traces_segy(trace_indices_1)
-                    trace_2 = self.geometries[1].load_traces_segy(trace_indices_2)
-                    metric[i, j] = func(trace_1, trace_2, **kwargs)
-                    _bar.update(1)
+            metric[store_key] = func(*traces, **kwargs)
 
         title = f"tracewise {func}"
         plot_dict = {
@@ -734,29 +843,26 @@ class GeometryMetrics(BaseSeismicMetric):
             'cmap': 'seismic',
             'zmin': None, 'zmax': None,
             'ignore_value': np.nan,
-            # **kwargs
+            'xlabel': 'ilines', 'ylabel': 'xlines',
+            **kwargs
         }
         return metric, plot_dict
-
 
     def tracewise_unsafe(self, func, l=3, pbar=True, **kwargs):
         """ Apply `func` to compare two cubes tracewise in an unsafe way:
         structure of cubes is assumed to be identical.
         """
-        if len(self.geometries) != 2:
-            raise ValueError()
         pbar = tqdm if pbar else lambda iterator, *args, **kwargs: iterator
-        metric = np.full((*self.geometry.uniques, l), np.nan)
+        metric = np.full((*self.geometry.ranges, l), np.nan)
 
         for idx in pbar(range(len(self.geometries[0].dataframe))):
             header = self.geometries[0].segyfile.header[idx]
-            keys = [header.get(field) for field in self.geometries[0].fields]
-            store_key = [self.geometries[0].vals_inversed[i][item] for i, item in enumerate(keys)]
+            keys = [header.get(field) for field in self.geometries[0].byte_no]
+            store_key = [self.geometries[0].uniques_inversed[i][item] for i, item in enumerate(keys)]
             store_key = tuple(store_key)
 
-            trace_1 = self.geometries[0].load_trace_segy(idx)
-            trace_2 = self.geometries[1].load_trace_segy(idx)
-            metric[store_key] = func(trace_1, trace_2, **kwargs)
+            traces = [g.load_trace(idx) for g in self.geometries]
+            metric[store_key] = func(*traces, **kwargs)
 
         title = f"tracewise unsafe {func}"
         plot_dict = {
@@ -765,6 +871,55 @@ class GeometryMetrics(BaseSeismicMetric):
             'cmap': 'seismic',
             'zmin': None, 'zmax': None,
             'ignore_value': np.nan,
+            'xlabel': 'ilines', 'ylabel': 'xlines',
+            **kwargs
+        }
+        return metric, plot_dict
+
+    
+    def blockwise(self, func, l=3, pbar=True, kernel=(5, 5), block_size=(1000, 1000), heights=None, prep_func=None, **kwargs):
+        """ Apply function to all traces in lateral window """
+
+        window = np.array(kernel)
+        low = window // 2
+        high = window - low
+        
+        total = np.product(self.geometries[0].ranges-window)
+        prep_func = prep_func if prep_func else lambda x: x
+
+        pbar = tqdm if pbar else lambda iterator, *args, **kwargs: iterator
+        metric = np.full((*self.geometries[0].ranges, l), np.nan)
+
+        block_indices = [np.arange(0, self.geometries[0].cube_shape[0], block_size[0]-window[0]), 
+                         np.arange(0, self.geometries[0].cube_shape[1], block_size[1]-window[1])]
+        heights = np.arange(self.geometries[0].cube_shape[2]) if heights is None else np.arange(*heights)
+
+        with tqdm(total=total) as pbar:
+            for _il_block in block_indices[0]:
+                for _ix_block in block_indices[1]:
+                    locations = [np.arange(_il_block, _il_block + np.min((self.geometries[0].cube_shape[0] - _il_block, block_size[0]))),
+                                 np.arange(_ix_block, _ix_block + np.min((self.geometries[0].cube_shape[1] - _ix_block, block_size[1]))),
+                                 heights]
+
+                    blocks = [prep_func(g.load_crop(locations)) for g in self.geometries]
+
+                    for _il_kernel in range(low[0], blocks[0].shape[0] - high[0]):
+                        for _ix_kernel in range(low[1], blocks[0].shape[1] - high[1]):
+
+                            il_from, il_to = _il_kernel - low[0], _il_kernel + high[0],
+                            ix_from, ix_to = _ix_kernel - low[1], _ix_kernel + high[1]
+
+                            subsets = [b[il_from:il_to, ix_from:ix_to, :].reshape((-1, b.shape[-1])) for b in blocks]
+                            metric[_il_block + _il_kernel, _ix_block + _ix_kernel, :] = func(*subsets, **kwargs)
+                            pbar.update(1)
+
+        title = f"Blockwise {func}"
+        plot_dict = {
+            'spatial': self.spatial,
+            'title': f'{title} for {self.name} on cube {self.cube_name}',
+            'cmap': 'seismic',
+            'zmin': None, 'zmax': None,
+            'ignore_value': np.nan,
             # **kwargs
         }
         return metric, plot_dict
@@ -772,7 +927,7 @@ class GeometryMetrics(BaseSeismicMetric):
 
 
 
-# Njitted NumPy funcions
+# Jit-accelerated NumPy funcions
 @njit
 def geomean(array):
     """ Geometric mean of an array. """
@@ -798,8 +953,8 @@ def histo_reduce(data, bins):
 
 
 class NumbaNumpy:
-    """ Holder for njitted functions.
-    Note: don't try to automate this with fancy decorators over function names.
+    """ Holder for jit-accelerated functions.
+    Note: don't try to automate this with fancy decorators over the function names.
     """
     #pylint: disable = unnecessary-lambda, undefined-variable
     nanmin = njit()(lambda array: np.nanmin(array))
@@ -816,7 +971,6 @@ class NumbaNumpy:
     harmean = harmean
 
     histo_reduce = lambda data, bins: histo_reduce(data, bins)
-
 
 
 
@@ -1015,6 +1169,50 @@ def _compute_line_corrs(data, bad_traces, support_il=None, support_xl=None):
     corrs = cov / (support_stds * data_stds)
     corrs[bad_traces == 1] = 0
     return corrs
+
+
+def compute_local_crosscorrs(data, bad_traces, kernel_size=3, reduce_func='nanmean', **kwargs):
+    """ Compute cross-correlation between each column in data and nearest traces. """
+    return compute_local_func(_compute_local_crosscorrs, 'Cross-correlation',
+                              data=data, bad_traces=bad_traces,
+                              kernel_size=kernel_size, reduce_func=reduce_func, **kwargs)
+
+@njit
+def _compute_local_crosscorrs(array_1, array_2):
+    temp = np.zeros(len(array_1))
+    for k in range(len(array_1)):
+        temp[k] = np.sum(array_1[k:] * array_2[:len(array_1)-k])
+    return np.argmax(temp)
+
+
+def compute_support_crosscorrs(data, supports, bad_traces, safe_strip=0, **kwargs):
+    #pylint: disable=missing-function-docstring
+    return compute_support_func(function_ndarray=_compute_support_crosscorrs,
+                                function_str=None,
+                                name='Cross-correlation',
+                                data=data, supports=supports, bad_traces=bad_traces,
+                                safe_strip=safe_strip, **kwargs)
+
+def _compute_support_crosscorrs(data, supports, bad_traces):
+    n_supports = len(supports)
+    i_range, x_range, depth = data.shape
+
+    support_traces = np.zeros((n_supports, depth*2))
+    for i in range(n_supports):
+        coord = supports[i]
+        support_traces[i, :] = np.pad(data[coord[0], coord[1], :], pad_width=(depth//2, depth - depth//2))
+
+    divs = np.zeros((i_range, x_range, n_supports))
+    for i in range(n_supports):
+        supports_ = support_traces[i]
+        temp = np.zeros((i_range, x_range, depth))
+        for k in range(depth):
+            temp[:, :, k] = np.sum(supports_[k:k+depth] * data, axis=-1)
+        temp = np.argmax(temp, axis=-1).astype(float) - depth//2
+        temp[bad_traces == 1] = np.nan
+        divs[:, :, i] = temp
+    return divs
+
 
 
 def compute_local_btch(data, bad_traces, kernel_size=3, reduce_func='nanmean', **kwargs):
@@ -1232,6 +1430,44 @@ def _emd_array(array_1d, array_3d):
         for j in range(array_3d.shape[1]):
             temp[i, j] = _compute_local_wasserstein(array_1d, array_3d[i, j, :])
     return temp
+
+
+
+def compute_local_tv(data, bad_traces, kernel_size=3, reduce_func='nanmean', **kwargs):
+    """ Compute Bhattacharyya distance between each column in data and nearest traces. """
+    return compute_local_func(_compute_local_tv, 'Total variation',
+                              data=data, bad_traces=bad_traces,
+                              kernel_size=kernel_size, reduce_func=reduce_func, **kwargs)
+
+@njit
+def _compute_local_tv(array_1, array_2):
+    return 1 - 0.5*np.sum(np.abs(array_1 - array_2))
+
+
+def compute_support_tv(data, supports, bad_traces, safe_strip=0, **kwargs):
+    #pylint: disable=missing-function-docstring
+    return compute_support_func(function_ndarray=_compute_support_tv,
+                                function_str=None,
+                                name='Total variation',
+                                data=data, supports=supports, bad_traces=bad_traces,
+                                safe_strip=safe_strip, **kwargs)
+
+def _compute_support_tv(data, supports, bad_traces):
+    n_supports = len(supports)
+    i_range, x_range, depth = data.shape
+
+    support_traces = np.zeros((n_supports, depth))
+    for i in range(n_supports):
+        coord = supports[i]
+        support_traces[i, :] = data[coord[0], coord[1], :]
+
+    divs = np.zeros((i_range, x_range, n_supports))
+    for i in range(n_supports):
+        supports_ = support_traces[i]
+        temp = 1 - 0.5*np.sum(np.abs(supports_ - data), axis=-1)
+        temp[bad_traces == 1] = np.nan
+        divs[:, :, i] = temp
+    return divs
 
 
 
