@@ -481,10 +481,10 @@ class Detector:
 
             hm = HorizonMetrics((horizon, self.targets))
             # Instantaneous phase
-            phase = hm.evaluate(
-                'instantaneous_phase',
-                plot=True, show_plot=self.show_plots,
-                savepath=self.make_save_path(*prefix, name + 'phase.png')
+            local_corrs = hm.evaluate(
+                'local_corrs',
+                plot=True, show_plot=self.show_plots, kernel_size=9,
+                savepath=self.make_save_path(*prefix, name + 'local_corrs.png')
             )
 
             # Compare to targets
@@ -505,11 +505,11 @@ class Detector:
                 horizon.dump(path=self.make_save_path(*prefix, name + f'{i}_predicted_horizon'))
 
             info['corrs'] = np.nanmean(corrs)
-            info['phase'] = np.nanmean(phase)
+            info['local_corrs'] = np.nanmean(local_corrs)
             results.append((info))
 
             self.log(f'horizon {i}: len {len(horizon)}, cov {horizon.coverage:4.4}, '
-                     f'corrs {info["corrs"]:4.4}, depth {horizon.h_mean}')
+                     f'corrs {info["corrs"]:4.4}, local corrs {info["local_corrs"]:4.4}, depth {horizon.h_mean}')
 
         return results
 
