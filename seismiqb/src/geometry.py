@@ -719,7 +719,8 @@ class SeismicGeometrySEGY(SeismicGeometry):
         """ Create indices for 3D crop loading. """
         iterator = list(product(*[[self.uniques[idx][i] for i in locations[idx]] for idx in range(2)]))
         indices = self.dataframe['trace_index'].get(list(iterator), np.nan).values
-        return np.unique(indices)
+        _, unique_ind = np.unique(indices, return_index=True)
+        return indices[np.sort(unique_ind, kind='stable')]
 
     def load_crop(self, locations, threshold=10, mode=None, **kwargs):
         """ Smart choice between using :meth:`._load_crop` and stacking multiple slides created by :meth:`.load_slide`.
