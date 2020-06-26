@@ -7,28 +7,27 @@
 """
 #pylint: disable=import-error, no-name-in-module, wrong-import-position
 import os
-import sys
 import logging
 import random
 from glob import glob
 from copy import copy
 
 import numpy as np
+import torch
 
 from tqdm.auto import tqdm
 
-sys.path.append('../seismiqb')
 from ...batchflow import Pipeline, FilesIndex
 from ...batchflow import B, V, C, D, P, R, W
 from ...batchflow.models.torch import EncoderDecoder
 
-from ...src.cubeset import SeismicCubeset, Horizon
-from ...src.metrics import HorizonMetrics
-from ...src.plotters import plot_loss, plot_image
+from ..cubeset import SeismicCubeset, Horizon
+from ..metrics import HorizonMetrics
+from ..plotters import plot_loss, plot_image
 
 
 
-class Detector:
+class BaseController:
     """ Provides interface for train, inference and quality assesment for the task of horizon detection.
 
     Parameters
@@ -146,6 +145,25 @@ class Detector:
         return dataset
 
 
+    def make_dataset_from_horizon(self, horizon):
+        """ Create an instance of :class:`.SeismicCubeset` from a given horizon.
+
+        Parameters
+        ----------
+        horizon : instance of :class:`.Horizon`
+            Horizon for the inferred cube.
+        """
+        cube_path = horizon.geometry.path
+
+        dsi = FilesIndex(path=[cube_path], no_ext=True)
+        dataset = SeismicCubeset(dsi)
+        dataset.load_geometries()
+        dataset.labels[dataset.indices[0]] = [horizon]
+
+        self.log(f'Created dataset from horizon {horizon.name}')
+        return dataset
+
+
     def make_grid(self, dataset, frequencies, **kwargs):
         """ Create a grid, based on quality map, for each of the cubes in supplied `dataset`.
         Works inplace.
@@ -219,7 +237,7 @@ class Detector:
     # Train model on a created dataset
     def train(self, dataset, model_config=None, device=None, n_iters=300,
               use_grid=False, grid_src='quality_grid', side_view=False,
-              width=3, batch_size_multiplier=1, rebatch_threshold=0.00):
+              width=3, batch_size_multiplier=1, rebatch_threshold=0.00, **kwargs):
         """ Train model for horizon detection.
         If `model_path` was supplied during instance initialization, model is loaded instead.
 
@@ -259,7 +277,7 @@ class Detector:
 
         bs = self.batch_size
         self.batch_size = int(self.batch_size * batch_size_multiplier)
-        model_pipeline = (self.get_train_template() << pipeline_config) << dataset
+        model_pipeline = (self.get_train_template(**kwargs) << pipeline_config) << dataset
         batch = model_pipeline.next_batch(D('size'))
         self.log(f'Used batch size is: {self.batch_size}; actual batch size is: {len(batch)}')
         self.batch_size = bs
@@ -274,6 +292,7 @@ class Detector:
 
         last_loss = np.mean(model_pipeline.v('loss_history')[-50:])
         self.log(f'Train finished; last loss is {last_loss}')
+        torch.cuda.empty_cache()
         return last_loss
 
     def load_model(self, path=None):
@@ -353,6 +372,7 @@ class Detector:
             self.log(f'Len max: {len(horizons[0])}')
         else:
             self.log('Zero horizons were predicted; possible problems..?')
+        torch.cuda.empty_cache()
 
     def make_inference_ranges(self, dataset, heights_range):
         """ Ranges of inference. """
@@ -514,20 +534,14 @@ class Detector:
         return results
 
 
+    # Pipelines
+    def load_pipeline(self):
+        """ Define data loading pipeline.
 
-    def get_train_template(self):
-        """ Defines training procedure.
-
-        Following parameters are fetched from pipeline config: `model_config`, `crop_shape`,
-        `adaptive_slices`, 'grid_src' and `rebatch_threshold`.
+        Following parameters are fetched from pipeline config: `adaptive_slices`, 'grid_src' and `rebatch_threshold`.
         """
-        train_template = (
+        return (
             Pipeline()
-            # Initialize pipeline variables and model
-            .init_variable('loss_history', [])
-            .init_model('dynamic', EncoderDecoder, 'model', C('model_config'))
-
-            # Load data/masks
             .crop(points=D('train_sampler')(self.batch_size),
                   shape=self.crop_shape,
                   side_view=C('side_view', default=False),
@@ -538,8 +552,12 @@ class Detector:
             .load_cubes(dst='images')
             .adaptive_reshape(src=['images', 'masks'], shape=self.crop_shape)
             .scale(mode='q', src='images')
+        )
 
-            # Augmentations
+    def augmentation_pipeline(self):
+        """ Define augmentation pipeline. """
+        return (
+            Pipeline()
             .transpose(src=['images', 'masks'], order=(1, 2, 0))
             .flip(axis=1, src=['images', 'masks'], seed=P(R('uniform', 0, 1)), p=0.3)
             .additive_noise(scale=0.005, src='images', dst='images', p=0.3)
@@ -550,15 +568,33 @@ class Detector:
             .elastic_transform(alpha=P(R('uniform', 35, 45)), sigma=P(R('uniform', 4, 4.5)),
                                src=['images', 'masks'], p=0.2)
             .transpose(src=['images', 'masks'], order=(2, 0, 1))
+        )
 
-            # Training
+    def train_pipeline(self):
+        """ Define model initialization and model training pipeline.
+
+        Following parameters are fetched from pipeline config: `model_config`.
+        """
+        return (
+            Pipeline()
+            .init_variable('loss_history', [])
+            .init_model('dynamic', EncoderDecoder, 'model', C('model_config'))
+
             .train_model('model',
                          fetches='loss',
                          images=B('images'),
                          masks=B('masks'),
                          save_to=V('loss_history', mode='a'))
         )
-        return train_template
+
+    def get_train_template(self, **kwargs):
+        """ Define the whole training procedure pipeline including data loading, augmentation and model training. """
+        _ = kwargs
+        return (
+            self.load_pipeline() +
+            self.augmentation_pipeline() +
+            self.train_pipeline()
+        )
 
 
     def get_inference_template(self):

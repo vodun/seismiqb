@@ -4,15 +4,15 @@
     - making inference of a Horizon Extension algorithm to cover the holes in a given horizon.
 """
 import numpy as np
+import torch
 
+from ...batchflow import Pipeline, B, V, C, D, P, R, L
 
-from ...batchflow import Pipeline, FilesIndex
-from ...batchflow import B, V, C, D, P, R, L
+from ..horizon import Horizon
 
-from ..cubeset import SeismicCubeset, Horizon
-
-from .torch_models import ExtensionModel, MODEL_CONFIG
+from .torch_models import MODEL_CONFIG
 from .enhancer import Enhancer
+
 
 
 class Extender(Enhancer):
@@ -43,29 +43,6 @@ class Extender(Enhancer):
     """
     #pylint: disable=unused-argument, logging-fstring-interpolation, no-member
 
-    def get_mask_transform_ppl(self):
-        """ Define transformations performed with `masks` component.
-        """
-        def functor(scale):
-            return lambda m: np.sin(m[:, 0] * scale)
-
-        filter_out = (
-            Pipeline()
-            .transpose(src='masks', order=(1, 2, 0))
-            .filter_out(src='masks', dst='prior_masks',
-                        expr=lambda m: m[:, 0],
-                        low=P(R('uniform', low=0.2, high=0.4)),
-                        length=P(R('uniform', low=0.30, high=0.5)))
-            .filter_out(src='masks', dst='prior_masks',
-                        expr=lambda m: m[:, 0],
-                        low=P(R('uniform', low=0.1, high=0.4)),
-                        length=P(R('uniform', low=0.10, high=0.4)), p=0.5)
-            .filter_out(src='masks', dst='prior_masks',
-                        expr=L(functor)(R('uniform', low=15, high=35)), low=0.0, p=0.7)
-            .transpose(src=['masks', 'prior_masks'], order=(2, 0, 1))
-        )
-        return filter_out
-
     def inference(self, horizon, n_steps=30, batch_size=128, stride=16):
         """Extend, i.e. fill the holes of the given horizon with the
         Horizon Extension algorithm using loaded/trained model.
@@ -93,7 +70,7 @@ class Extender(Enhancer):
         -------
         Extended horizon
         """
-        dataset = self._make_dataset(horizon)
+        dataset = self.make_dataset_from_horizon(horizon)
 
         config = {
             'batch_size': batch_size,
@@ -101,7 +78,7 @@ class Extender(Enhancer):
         }
         prev_len = len(horizon)
 
-        self.log('Extender inference started')
+        self.log(f'Inference started for {n_steps} with stride {stride}.')
         for _ in self.make_pbar(range(n_steps), desc=f'Extender inference on {horizon.name}'):
             dataset.make_extension_grid(dataset.indices[0],
                                         crop_shape=self.crop_shape,
@@ -120,12 +97,11 @@ class Extender(Enhancer):
                 # no additional predicts
                 break
 
-            
             horizons = [*inference_pipeline.v('predicted_horizons')]
             for hor in horizons:
                 merge_code, _ = Horizon.verify_merge(horizon, hor,
-                                                    mean_threshold=5.5,
-                                                    adjacency=5)
+                                                     mean_threshold=5.5,
+                                                     adjacency=5)
                 if merge_code == 3:
                     _ = horizon.overlap_merge(hor, inplace=True)
 
@@ -134,8 +110,34 @@ class Extender(Enhancer):
                 break
             self.log(f'Extended from {prev_len} to {curr_len}, + {curr_len - prev_len}')
             prev_len = curr_len
+
+        torch.cuda.empty_cache()
         self.predictions = [horizon]
         return horizon
+
+
+    def distortion_pipeline(self):
+        """ Define transformations performed with `masks` component.
+        """
+        def functor(scale):
+            return lambda m: np.sin(m[:, 0] * scale)
+
+        return (
+            Pipeline()
+            .transpose(src='masks', order=(1, 2, 0))
+            .filter_out(src='masks', dst='prior_masks',
+                        expr=lambda m: m[:, 0],
+                        low=P(R('uniform', low=0.2, high=0.4)),
+                        length=P(R('uniform', low=0.30, high=0.5)))
+            .filter_out(src='masks', dst='prior_masks',
+                        expr=lambda m: m[:, 0],
+                        low=P(R('uniform', low=0.1, high=0.4)),
+                        length=P(R('uniform', low=0.10, high=0.4)), p=0.5)
+            .filter_out(src='masks', dst='prior_masks',
+                        expr=L(functor)(R('uniform', low=15, high=35)), low=0.0, p=0.7)
+            .transpose(src=['masks', 'prior_masks'], order=(2, 0, 1))
+        )
+
 
     def get_inference_template(self):
         """ Define inference pipeline.
@@ -165,9 +167,12 @@ class Extender(Enhancer):
         )
         return inference_template
 
+
+
     @staticmethod
-    def run(horizon, n_steps=1, model_config=None, n_iters=400, crop_shape=(1, 64, 64),
-                batch_size=128, device=None, stride=16, save_dir='.'):
+    def run(horizon, cube_path=None, save_dir='.', crop_shape=(1, 64, 64),
+            model_config=None, n_iters=400, batch_size=128, device=None,
+            n_steps=10, stride=16, return_instance=False):
         """ Run all steps of the Extension procedure including creating dataset for
         the given horizon, creating instance of the class and running train and inference
         methods.

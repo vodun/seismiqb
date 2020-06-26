@@ -1,26 +1,25 @@
 """ !!. """
 #pylint: disable=import-error, no-name-in-module, wrong-import-position
-import sys
 from copy import copy
 from scipy.ndimage import sobel
 import numpy as np
 
 
-sys.path.append('../seismiqb')
-from seismiqb.batchflow import Pipeline, HistoSampler, NumpySampler
-from seismiqb.batchflow import B, V, C, D, P, R
-from seismiqb.batchflow.models.torch import EncoderDecoder
+from ...batchflow import Pipeline, HistoSampler, NumpySampler
+from ...batchflow import B, V, C, D, P, R
+from ...batchflow.models.torch import EncoderDecoder
 
-from seismiqb.src.cubeset import Horizon, HorizonMetrics
+from ..cubeset import Horizon, HorizonMetrics
 
-from .detector import Detector
-
+from .base import BaseController
 
 
-class Extractor(Detector):
+
+class Extractor(BaseController):
     """ !!. """
     #pylint: disable=unused-argument, logging-fstring-interpolation, no-member, protected-access
     #pylint: disable=access-member-before-definition, attribute-defined-outside-init
+
     def make_sampler(self, dataset, bins=50, side_view=False, **kwargs):
         _ = kwargs
         geometry = dataset.geometries[0]
@@ -47,7 +46,6 @@ class Extractor(Detector):
             cmap='Reds', interpolation='bilinear', show=self.show_plots, figsize=(15, 15),
             savepath=self.make_save_path(f'slices_n_{geometry.short_name}.png')
         )
-
 
 
     def inference_1(self, dataset, heights_range=None, orientation='i', overlap_factor=2,
@@ -145,27 +143,27 @@ class Extractor(Detector):
         return horizons
 
 
-    def get_train_template(self):
-        """ Defines training procedure.
 
-        Following parameters are fetched from pipeline config: `model_config`, `crop_shape`,
-        `adaptive_slices` and `rebatch_threshold`.
+    # Pipelines
+    def load_pipeline(self):
+        """ Define data loading pipeline.
+
+        Following parameters are fetched from pipeline config: `adaptive_slices`, 'grid_src' and `rebatch_threshold`.
         """
-        train_template = (
+        return (
             Pipeline()
-            # Initialize pipeline variables and model
-            .init_variable('loss_history', [])
-            .init_model('dynamic', EncoderDecoder, 'model', C('model_config'))
-
-            # Load data: images only!
             .crop(points=D('train_sampler')(self.batch_size),
                   shape=self.crop_shape, adaptive_slices=C('adaptive_slices'),
                   side_view=C('side_view', default=False))
             .load_cubes(dst='images')
             .adaptive_reshape(src='images', shape=self.crop_shape)
             .scale(mode='q', src='images')
+        )
 
-            # Augmentations
+    def augmentation_pipeline(self):
+        """ Define augmentation pipeline. """
+        return (
+            Pipeline()
             .transpose(src='images', order=(1, 2, 0))
             .additive_noise(scale=0.005, src='images', dst='images', p=0.3)
             .flip(axis=1, src='images', seed=P(R('uniform', 0, 1)), p=0.3)
@@ -179,12 +177,30 @@ class Extractor(Detector):
                                sigma=P(R('uniform', 4, 4.5)),
                                src='images', p=0.2)
             .transpose(src='images', order=(2, 0, 1))
+        )
 
-            # Training
+    def train_pipeline(self):
+        """ Define model initialization and model training pipeline.
+
+        Following parameters are fetched from pipeline config: `model_config`.
+        """
+        return (
+            Pipeline()
+            .init_variable('loss_history', [])
+            .init_model('dynamic', EncoderDecoder, 'model', C('model_config'))
+
             .train_model('model',
                          fetches='loss',
                          images=B('images'),
                          masks=B('images'),
                          save_to=V('loss_history', mode='a'))
         )
-        return train_template
+
+    def get_train_template(self, **kwargs):
+        """ Define the whole training procedure pipeline including data loading, augmentation and model training. """
+        _ = kwargs
+        return (
+            self.load_pipeline() +
+            self.augmentation_pipeline() +
+            self.train_pipeline()
+        )

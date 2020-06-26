@@ -4,69 +4,19 @@
 """
 import numpy as np
 
-from ...batchflow import Pipeline, FilesIndex
-from ...batchflow import B, V, C, D, P, R
+from ...batchflow import Pipeline, B, V, C, D, P, R
 
-from ..cubeset import SeismicCubeset
+from ..horizon import Horizon
 
 from .torch_models import ExtensionModel, MODEL_CONFIG
-from .detector import Detector
+from .base import BaseController
 
 
-class Enhancer(Detector):
+class Enhancer(BaseController):
     """
     Provides interface for train, inference and quality assesment for the task of horizon enhancement.
-
-    Parameters
-    ----------
-    batch_size : int
-        Size of batches for train and inference.
-    crop_shape : tuple of 3 ints
-        Size of sampled crops for train and inference.
-    model_config : dict
-        Neural network architecture.
-    model_path : str
-        Path for pre-trained model.
-    device : str or int
-        Device specification.
-    show_plots : bool
-        Whether to show plots to the current output stream.
-    save_dir : str
-        Path to save images, logs, and other data.
-    logger : None or callable
-        If None, then logger is created inside `save_dir`.
-        If callable, then it is used directly to log messages.
-    bar : bool
-        Whether to show progress bars for training and inference.
     """
     #pylint: disable=unused-argument, logging-fstring-interpolation, no-member
-
-    # Dataset creation: geometries, labels, grids, samplers
-    def _make_dataset(self, horizon):
-        """ Create an instance of :class:`.SeismicCubeset` for a given horizon.
-
-        Parameters
-        ----------
-        horizon : instance of :class:`.Horizon`
-            Horizon for the inferred cube.
-
-        Logs
-        ----
-        Inferred cube.
-
-        Returns
-        -------
-        Instance of dataset.
-        """
-        cube_path = horizon.geometry.path
-
-        dsi = FilesIndex(path=[cube_path], no_ext=True)
-        dataset = SeismicCubeset(dsi)
-        dataset.load_geometries()
-        dataset.labels[dataset.indices[0]] = [horizon]
-
-        self.log(f'Created dataset from horizon {horizon.name}')
-        return dataset
 
     def train(self, horizon, **kwargs):
         """ Train model for horizon extension.
@@ -81,18 +31,11 @@ class Enhancer(Detector):
         Note
         ----
         In order to change training procedure, re-define :meth:`.get_train_template`.
-
-        Logs
-        ----
-        Start of training; end of training; average loss at the last 50 iterations.
-
-        Plots
-        -----
-        Graph of loss over iterations.
         """
-        dataset = self._make_dataset(horizon)
+        dataset = self.make_dataset_from_horizon(horizon)
         self.make_sampler(dataset, use_grid=False, bins=np.array([500, 500, 100]))
         super().train(dataset, **kwargs)
+
 
     def inference(self, horizon, **kwargs):
         """ Runs enhancement procedure for a given horizon with trained/loaded model.
@@ -104,32 +47,30 @@ class Enhancer(Detector):
             A horizon to be enhanced
         kwargs : see documentation of `.meth:Detector.train`
         """
-        dataset = self._make_dataset(horizon)
+        dataset = self.make_dataset_from_horizon(horizon)
         super().inference(dataset, **kwargs)
 
-    def get_load_ppl(self):
-        """ Define data loading pipeline.
-        """
-        load = (
+
+    def load_pipeline(self):
+        """ Define data loading pipeline. """
+        return (
             Pipeline()
             .crop(points=D('train_sampler')(self.batch_size),
                   shape=self.crop_shape, side_view=True)
-            .create_masks(dst='masks', width=3)
-            .mask_rebatch(src='masks', threshold=0.99, passdown=None)
+            .create_masks(dst='masks', width=C('width', default=3))
+            .mask_rebatch(src='masks', threshold=C('rebatch_threshold', default=0.99))
             .load_cubes(dst='images')
             .adaptive_reshape(src=['images', 'masks'],
                               shape=self.crop_shape)
             .scale(mode='q', src='images')
         )
-        return load
 
-    def get_mask_transform_ppl(self):
-        """ Define transformations performed with `masks` component.
-        """
+    def distortion_pipeline(self):
+        """ Define transformations performed with `masks` component. """
         def binarize(batch):
             batch.prior_masks = (batch.prior_masks > 0).astype(int).astype(np.float32)
 
-        distort = (
+        return (
             Pipeline()
             .shift_masks(src='masks', dst='prior_masks')
             .transpose(src='prior_masks', order=(1, 2, 0))
@@ -138,12 +79,10 @@ class Enhancer(Detector):
             .call(binarize)
             .transpose(src='prior_masks', order=(2, 0, 1))
         )
-        return distort
 
-    def get_augmentation_ppl(self):
-        """ Define augmentation pipeline.
-        """
-        augment = (
+    def augmentation_pipeline(self):
+        """ Define augmentation pipeline. """
+        return (
             Pipeline()
             .transpose(src=['images', 'masks', 'prior_masks'], order=(1, 2, 0))
             .rotate(angle=P(R('uniform', -30, 30)),
@@ -151,16 +90,15 @@ class Enhancer(Detector):
             .flip(src=['images', 'masks', 'prior_masks'], axis=1, p=0.3)
             .transpose(src=['images', 'masks', 'prior_masks'], order=(2, 0, 1))
         )
-        return augment
 
-    def get_train_model_ppl(self):
+    def train_pipeline(self):
         """ Define model initialization and model training pipeline.
-    
+
         Note
         ----
-        Following parameters are fetched from pipeline config: `model_config` 
+        Following parameters are fetched from pipeline config: `model_config`.
         """
-        train = (
+        return (
             Pipeline()
             .init_variable('loss_history', default=[])
             .init_model('dynamic', ExtensionModel, 'base', C('model_config'))
@@ -169,15 +107,16 @@ class Enhancer(Detector):
                          prior_masks=B('prior_masks'),
                          masks=B('masks'))
         )
-        return train
 
-    def get_train_template(self):
-        """ Define whole training procedure pipeline including data loading,
-        mask transforms, augmentation and model training.
-        """
-        train = self.get_load_ppl() + self.get_mask_transform_ppl() + self.get_augmentation_ppl() + \
-                self.get_train_model_ppl()
-        return train
+    def get_train_template(self, distortion_pipeline=None, **kwargs):
+        """ Define the whole training procedure pipeline including data loading, augmentation and model training. """
+        _ = kwargs
+        return (
+            self.load_pipeline() +
+            (distortion_pipeline or self.distortion_pipeline()) +
+            self.augmentation_pipeline() +
+            self.train_pipeline()
+        )
 
     def get_inference_template(self):
         """ Define inference pipeline.
@@ -206,9 +145,12 @@ class Enhancer(Detector):
         )
         return inference_template
 
+
+
     @staticmethod
-    def run(horizon, n_steps=1, model_config=None, n_iters=400, crop_shape=(1, 64, 64),
-                batch_size=128, orientation='ix', device=None, save_dir='.', cube_path=None):
+    def run(horizon, cube_path=None, save_dir='.', crop_shape=(1, 64, 64),
+            model_config=None, n_iters=400, batch_size=128, device=None,
+            orientation='ix', return_instance=False):
         """ Run all steps of the Enhancement procedure including creating dataset for
         the given horizon, creating instance of the class and running train and inference
         methods.
@@ -236,21 +178,21 @@ class Enhancer(Detector):
             Device specification.
         save_dir : str
             Path to save images, logs, and other data.
-
-        Returns
-        -------
-        Extended horizon.
         """
         model_config = MODEL_CONFIG if model_config is None else model_config
         enhancer = Enhancer(save_dir=save_dir, model_config=model_config, device=device,
                             crop_shape=crop_shape, batch_size=batch_size)
-        if isinstance(horizon, str):
-            if not cube_path:
-                raise ValueError('Cube path must be provided along with a path to horizon')
-            dataset = self.make_dataset(cube_path, horizon_paths=horizon)
+        if isinstance(horizon, str) and isinstance(cube_path, str):
+            dataset = enhancer.make_dataset(cube_path, horizon_paths=horizon)
+        elif isinstance(horizon, Horizon):
+            dataset = enhancer.make_dataset_from_horizon(horizon)
         else:
-            dataset = enhancer._make_dataset(horizon)
+            raise TypeError('Pass either instance of Horizon or paths to both cube and horizon.')
+
         enhancer.make_sampler(dataset, use_grid=False, bins=np.array([500, 500, 100]))
         enhancer.train(horizon, n_iters=n_iters, use_grid=False)
-        enhanced = enhancer.inference(horizon, n_steps=n_steps, orientation=orientation)
-        return enhanced
+        enhancer.inference(horizon, orientation=orientation)
+
+        if return_instance:
+            return enhancer
+        return enhancer.predictions[0]
