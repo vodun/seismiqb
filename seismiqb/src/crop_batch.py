@@ -637,6 +637,39 @@ class SeismicCropBatch(Batch):
             return crop.transpose([1, 0, 2])
         return crop
 
+    def _shift_masks_(self, crop, n_segments=3, max_shift=4, max_len=10):
+        """ Randomly shift parts of the crop up or down.
+
+        Parameters
+        ----------
+        n_segments : int
+            Number of segments to shift.
+        max_shift : int
+            Size of shift along vertical axis.
+        max_len : int
+            Size of shift along horizontal axis.
+        """
+        start = 0
+
+        for _ in range(n_segments):
+            # Point of starting the distortion, its length and size
+            begin = np.random.randint(start, crop.shape[1])
+            length = np.random.randint(5, max_len)
+            shift = np.random.randint(-max_shift, max_shift)
+
+            # Apply shift
+            segment = crop[:, begin:min(begin + length, crop.shape[1]), :]
+            shifted_segment = np.zeros_like(segment)
+            if shift > 0:
+                shifted_segment[:, :, shift:] = segment[:, :, :-shift]
+            elif shift < 0:
+                shifted_segment[:, :, :shift] = segment[:, :, -shift:]
+            crop[:, begin:min(begin + length, crop.shape[1]), :] = shifted_segment
+
+            # No overlapping shifts
+            start += begin
+        return crop
+
     def _transpose_(self, crop, order):
         """ Change order of axis. """
         return np.transpose(crop, order)
@@ -925,23 +958,3 @@ class SeismicCropBatch(Batch):
         }
 
         plot_image(imgs, mode=mode, order_axes=order_axes, **kwargs)
-
-
-    def _shift_masks_(self, crop, n_segments=3, max_shift=4, max_len=10):
-        def add_shifted_segment(x, max_shift=max_shift, max_len=max_len):
-            # i x h
-            begin = np.random.randint(0, x.shape[1])
-            length = np.random.randint(5, max_len)
-            shift = np.random.randint(-max_shift, max_shift)
-            segment = x[:, begin:begin+length, :]
-            shifted_segment = np.zeros_like(segment)
-            if shift > 0:
-                shifted_segment[:, :, shift:] = segment[:, :, :-shift]
-            elif shift < 0:
-                shifted_segment[:, :, :shift] = segment[:, :, -shift:]
-            res = np.copy(x)
-            res[:, begin: begin+length, :] = shifted_segment
-            return res
-        for _ in range(n_segments):
-            crop = add_shifted_segment(crop)
-        return crop

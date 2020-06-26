@@ -10,8 +10,8 @@ from ...batchflow import Pipeline, B, V, C, D, P, R, L
 
 from ..horizon import Horizon
 
-from .best_practices import MODEL_CONFIG_EXTENSION
 from .enhancer import Enhancer
+from .best_practices import MODEL_CONFIG_EXTENSION
 
 
 
@@ -117,8 +117,7 @@ class Extender(Enhancer):
 
 
     def distortion_pipeline(self):
-        """ Define transformations performed with `masks` component.
-        """
+        """ Defines transformations performed with `masks` component. """
         def functor(scale):
             return lambda m: np.sin(m[:, 0] * scale)
 
@@ -140,8 +139,7 @@ class Extender(Enhancer):
 
 
     def get_inference_template(self):
-        """ Define inference pipeline.
-        """
+        """ Defines inference pipeline. """
         inference_template = (
             Pipeline()
             # Init everything

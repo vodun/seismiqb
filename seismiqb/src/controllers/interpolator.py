@@ -6,7 +6,7 @@ from .base import BaseController
 
 
 class CarcassInterpolator(BaseController):
-    """ Create a 2D surface from a sparce labeled carcass. """
+    """ Detector with convenient defaults to create a 2D surface from a sparce labeled carcass. """
 
     def train(self, dataset=None, horizon=None, **kwargs):
         """ Train model on a sparce labeled carcass. """
@@ -30,8 +30,8 @@ class CarcassInterpolator(BaseController):
 
 
 class GridInterpolator(BaseController):
-    """ Create a sparce carcass from a horizon by using a quality grid with supplied frequencies.
-    Then, spread it to the whole cube spatial range.
+    """ Detector with convenient defaults to create a sparce carcass from a horizon by using a quality
+    grid with supplied frequencies. Then, spread it to the whole cube spatial range.
     """
     def train(self, dataset=None, horizon=None, frequencies=(200, 200), **kwargs):
         """ Create a grid for a horizon, then train model on it. """

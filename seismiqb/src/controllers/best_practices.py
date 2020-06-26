@@ -15,6 +15,15 @@ class Dice(nn.Module):
 
 
 MODEL_CONFIG = {
+    # Model layout
+    'initial_block': {
+        'base_block': ResBlock,
+        'filters': 16,
+        'kernel_size': 5,
+        'downsample': False,
+        'attention': 'scse'
+    },
+
     'body/encoder': {
         'num_stages': 4,
         'order': 'sbd',
@@ -43,17 +52,25 @@ MODEL_CONFIG = {
             'attention': 'scse',
         },
     },
+
     'head': {
         'base_block': ResBlock,
         'filters': [16, 8],
         'attention': 'scse'
     },
+
     'output': 'sigmoid',
     # Train configuration
-    'loss': Dice,
+    'loss': Dice(),
     'optimizer': {'name': 'Adam', 'lr': 0.01,},
-    "decay": {'name': 'exp', 'gamma': 0.1},
+    'decay': {'name': 'exp', 'gamma': 0.1},
+    'n_iters': 150,
+    'microbatch': 4,
     }
 
-MODEL_CONFIG_EXTENSION = {**MODEL_CONFIG}
-MODEL_CONFIG_ENHANCE = {**MODEL_CONFIG}
+MODEL_CONFIG_DETECTION = {**MODEL_CONFIG}
+
+MODEL_CONFIG_EXTENSION = {key: value for key, value in MODEL_CONFIG.items()
+                          if key != 'initial_block'}
+MODEL_CONFIG_ENHANCE = {key: value for key, value in MODEL_CONFIG.items()
+                        if key != 'initial_block'}

@@ -5,8 +5,8 @@ from scipy.ndimage import sobel
 import numpy as np
 
 
-from ...batchflow import Pipeline, HistoSampler, NumpySampler
-from ...batchflow import B, V, C, D, P, R
+from ...batchflow import HistoSampler, NumpySampler
+from ...batchflow import Pipeline, B, V, C, D, P, R
 from ...batchflow.models.torch import EncoderDecoder
 
 from ..cubeset import Horizon, HorizonMetrics

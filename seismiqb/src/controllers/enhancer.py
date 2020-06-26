@@ -8,9 +8,9 @@ from ...batchflow import Pipeline, B, V, C, D, P, R
 
 from ..horizon import Horizon
 
+from .base import BaseController
 from .torch_models import ExtensionModel
 from .best_practices import MODEL_CONFIG_ENHANCE
-from .base import BaseController
 
 
 class Enhancer(BaseController):
@@ -26,8 +26,9 @@ class Enhancer(BaseController):
         Parameters
         ----------
         horizon : an instance of :class:`.Horizon`
-            A horizon to be enhanced
-        kwargs : see documentation of `.class:Detector`
+            A horizon to be enhanced.
+        kwargs : dict
+            Other arguments for `.meth:Detector.train`.
 
         Note
         ----
@@ -40,20 +41,20 @@ class Enhancer(BaseController):
 
     def inference(self, horizon, **kwargs):
         """ Runs enhancement procedure for a given horizon with trained/loaded model.
-        Creates dataset for a given horizon and calls `meth:Detector.inference.
 
         Parameters
         ----------
         horizon : an instance of :class:`.Horizon`
-            A horizon to be enhanced
-        kwargs : see documentation of `.meth:Detector.train`
+            A horizon to be enhanced.
+        kwargs : dict
+            Other arguments for `.meth:Detector.inference`.
         """
         dataset = self.make_dataset_from_horizon(horizon)
         super().inference(dataset, **kwargs)
 
 
     def load_pipeline(self):
-        """ Define data loading pipeline. """
+        """ Defines data loading procedure. """
         return (
             Pipeline()
             .crop(points=D('train_sampler')(self.batch_size),
@@ -67,7 +68,7 @@ class Enhancer(BaseController):
         )
 
     def distortion_pipeline(self):
-        """ Define transformations performed with `masks` component. """
+        """ Defines transformations performed with `masks` component. """
         def binarize(batch):
             batch.prior_masks = (batch.prior_masks > 0).astype(int).astype(np.float32)
 
@@ -82,7 +83,7 @@ class Enhancer(BaseController):
         )
 
     def augmentation_pipeline(self):
-        """ Define augmentation pipeline. """
+        """ Defines augmentation pipeline. """
         return (
             Pipeline()
             .transpose(src=['images', 'masks', 'prior_masks'], order=(1, 2, 0))
@@ -120,8 +121,7 @@ class Enhancer(BaseController):
         )
 
     def get_inference_template(self):
-        """ Define inference pipeline.
-        """
+        """ Defines inference pipeline. """
         inference_template = (
             Pipeline()
             # Init everything
