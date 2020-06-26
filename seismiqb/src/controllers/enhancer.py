@@ -107,10 +107,8 @@ class Enhancer(Detector):
         dataset = self._make_dataset(horizon)
         super().inference(dataset, **kwargs)
 
-    def get_train_template(self):
-        """ Define training pipeline.
-
-        Following parameters are fetched from pipeline config: `model_config`.
+    def get_load_ppl(self):
+        """ Define data loading pipeline.
         """
         load = (
             Pipeline()
@@ -123,10 +121,13 @@ class Enhancer(Detector):
                               shape=self.crop_shape)
             .scale(mode='q', src='images')
         )
+        return load
 
+    def get_mask_transform_ppl(self):
+        """ Define transformations performed with `masks` component.
+        """
         def binarize(batch):
             batch.prior_masks = (batch.prior_masks > 0).astype(int).astype(np.float32)
-
 
         distort = (
             Pipeline()
@@ -137,7 +138,11 @@ class Enhancer(Detector):
             .call(binarize)
             .transpose(src='prior_masks', order=(2, 0, 1))
         )
+        return distort
 
+    def get_augmentation_ppl(self):
+        """ Define augmentation pipeline.
+        """
         augment = (
             Pipeline()
             .transpose(src=['images', 'masks', 'prior_masks'], order=(1, 2, 0))
@@ -146,7 +151,15 @@ class Enhancer(Detector):
             .flip(src=['images', 'masks', 'prior_masks'], axis=1, p=0.3)
             .transpose(src=['images', 'masks', 'prior_masks'], order=(2, 0, 1))
         )
+        return augment
 
+    def get_train_model_ppl(self):
+        """ Define model initialization and model training pipeline.
+    
+        Note
+        ----
+        Following parameters are fetched from pipeline config: `model_config` 
+        """
         train = (
             Pipeline()
             .init_variable('loss_history', default=[])
@@ -156,7 +169,15 @@ class Enhancer(Detector):
                          prior_masks=B('prior_masks'),
                          masks=B('masks'))
         )
-        return load + distort + augment + train
+        return train
+
+    def get_train_template(self):
+        """ Define whole training procedure pipeline including data loading,
+        mask transforms, augmentation and model training.
+        """
+        train = self.get_load_ppl() + self.get_mask_transform_ppl() + self.get_augmentation_ppl() + \
+                self.get_train_model_ppl()
+        return train
 
     def get_inference_template(self):
         """ Define inference pipeline.
@@ -186,7 +207,7 @@ class Enhancer(Detector):
         return inference_template
 
     @staticmethod
-    def enhance(horizon, n_steps=1, model_config=None, n_iters=400, crop_shape=(1, 64, 64),
+    def run(horizon, n_steps=1, model_config=None, n_iters=400, crop_shape=(1, 64, 64),
                 batch_size=128, orientation='ix', device=None, save_dir='.', cube_path=None):
         """ Run all steps of the Enhancement procedure including creating dataset for
         the given horizon, creating instance of the class and running train and inference

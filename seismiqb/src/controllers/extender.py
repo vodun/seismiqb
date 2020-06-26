@@ -1,5 +1,6 @@
-""" A holder for horizon extension steps inherited from `.class:Detector` with the following functionality:
-    - training a model on a horizon area with a given percentage of holes.
+""" A holder for horizon extension steps inherited from `.class:Enhancer` with:
+    - redifined get_mask_transform_ppl to filter out a true mask to train an extension model
+      on a horizon area with a given percentage of holes.
     - making inference of a Horizon Extension algorithm to cover the holes in a given horizon.
 """
 import numpy as np
@@ -11,10 +12,10 @@ from ...batchflow import B, V, C, D, P, R, L
 from ..cubeset import SeismicCubeset, Horizon
 
 from .torch_models import ExtensionModel, MODEL_CONFIG
-from .detector import Detector
+from .enhancer import Enhancer
 
 
-class Extender(Detector):
+class Extender(Enhancer):
     """
     Provides interface for train, inference and quality assesment for the task of horizon extension.
 
@@ -42,76 +43,6 @@ class Extender(Detector):
     """
     #pylint: disable=unused-argument, logging-fstring-interpolation, no-member
 
-    # Dataset creation: geometries, labels, grids, samplers
-    def _make_dataset(self, horizon):
-        """ Create an instance of :class:`.SeismicCubeset` for a given horizon.
-
-        Parameters
-        ----------
-        horizon : instance of :class:`.Horizon`
-            Horizon for the inferred cube.
-
-        Logs
-        ----
-        Inferred cube.
-
-        Returns
-        -------
-        Instance of dataset.
-        """
-        cube_path = horizon.geometry.path
-
-        dsi = FilesIndex(path=[cube_path], no_ext=True)
-        dataset = SeismicCubeset(dsi)
-        dataset.load_geometries()
-        dataset.labels[dataset.indices[0]] = [horizon]
-
-        self.log(f'Created dataset from horizon {horizon.name}')
-        return dataset
-
-    def train(self, horizon, **kwargs):
-        """ Train model for horizon extension.
-        Creates dataset and sampler for a given horizon and calls `meth:Detector.train`.
-
-        Parameters
-        ----------
-        horizon : an instance of :class:`.Horizon`
-            A horizon to be extended
-        kwargs : see documentation of `.meth:Detector.train`
-
-        Note
-        ----
-        In order to change training procedure, re-define :meth:`.get_train_template`.
-
-        Logs
-        ----
-        Start of training; end of training; average loss at the last 50 iterations.
-
-        Plots
-        -----
-        Graph of loss over iterations.
-        """
-        dataset = self._make_dataset(horizon)
-        self.make_sampler(dataset, use_grid=False, bins=np.array([500, 500, 100]))
-        super().train(dataset, **kwargs)
-
-    def get_load_ppl(self):
-        """ Define data loading pipeline.
-        """
-        load = (
-            Pipeline()
-            .crop(points=D('train_sampler')(self.batch_size),
-                  shape=self.crop_shape, side_view=True)
-            .create_masks(dst='masks', width=3)
-            .mask_rebatch(src='masks', threshold=0.99, passdown=None)
-            .load_cubes(dst='images')
-            .adaptive_reshape(src=['images', 'masks'],
-                              shape=self.crop_shape)
-            .rotate_axes(src=['images', 'masks'])
-            .scale(mode='q', src='images')
-        )
-        return load
-
     def get_mask_transform_ppl(self):
         """ Define transformations performed with `masks` component.
         """
@@ -120,58 +51,20 @@ class Extender(Detector):
 
         filter_out = (
             Pipeline()
+            .transpose(src='masks', order=(1, 2, 0))
             .filter_out(src='masks', dst='prior_masks',
                         expr=lambda m: m[:, 0],
                         low=P(R('uniform', low=0.2, high=0.4)),
-                        length=P(R('uniform', low=0.30, high=0.5))) +
-            Pipeline()
+                        length=P(R('uniform', low=0.30, high=0.5)))
             .filter_out(src='masks', dst='prior_masks',
                         expr=lambda m: m[:, 0],
                         low=P(R('uniform', low=0.1, high=0.4)),
-                        length=P(R('uniform', low=0.10, high=0.4))) @ 0.5 +
-            Pipeline()
+                        length=P(R('uniform', low=0.10, high=0.4)), p=0.5)
             .filter_out(src='masks', dst='prior_masks',
-                        expr=L(functor)(R('uniform', low=15, high=35)), low=0.0) @ 0.7
+                        expr=L(functor)(R('uniform', low=15, high=35)), low=0.0, p=0.7)
+            .transpose(src=['masks', 'prior_masks'], order=(2, 0, 1))
         )
         return filter_out
-
-    def get_augmentation_ppl(self):
-        """ Define augmentation pipeline.
-        """
-        augment = (
-            Pipeline()
-            .rotate(angle=P(R('uniform', -30, 30)),
-                    src=['images', 'masks', 'prior_masks'], p=0.3)
-            .flip(src=['images', 'masks', 'prior_masks'], axis=1, p=0.3)
-        )
-        return augment
-
-    def get_train_model_ppl(self):
-        """ Define model initialization and model training pipeline.
-    
-        Note
-        ----
-        Following parameters are fetched from pipeline config: `model_config` 
-        """
-        train = (
-            Pipeline()
-            .transpose(src=['images', 'masks', 'prior_masks'], order=(2, 0, 1))
-            .init_variable('loss_history', default=[])
-            .init_model('dynamic', ExtensionModel, 'base', C('model_config'))
-            .train_model('base', fetches='loss', save_to=V('loss_history', mode='a'),
-                         images=B('images'),
-                         prior_masks=B('prior_masks'),
-                         masks=B('masks'))
-        )
-        return train
-
-    def get_train_template(self):
-        """ Define whole training procedure pipeline including data loading,
-        mask transforms, augmentation and model training.
-        """
-        train = self.get_load_ppl() + self.get_mask_transform_ppl() + self.get_augmentation_ppl() + \
-                self.get_train_model_ppl()
-        return train
 
     def inference(self, horizon, n_steps=30, batch_size=128, stride=16):
         """Extend, i.e. fill the holes of the given horizon with the
@@ -258,11 +151,8 @@ class Extender(Detector):
             .create_masks(dst='prior_masks', width=3)
             .adaptive_reshape(src=['images', 'prior_masks'],
                               shape=self.crop_shape)
-            .rotate_axes(src=['images', 'prior_masks'])
             .scale(mode='q', src='images')
             # Use model for prediction
-            .transpose(src=['images', 'prior_masks'], order=(2, 0, 1))
-            .concat_components(src=('images', 'prior_masks'), dst='model_inputs')
             .predict_model('base',
                            B('images'),
                            B('prior_masks'),
@@ -276,7 +166,7 @@ class Extender(Detector):
         return inference_template
 
     @staticmethod
-    def extend(horizon, n_steps=1, model_config=None, n_iters=400, crop_shape=(1, 64, 64),
+    def run(horizon, n_steps=1, model_config=None, n_iters=400, crop_shape=(1, 64, 64),
                 batch_size=128, device=None, stride=16, save_dir='.'):
         """ Run all steps of the Extension procedure including creating dataset for
         the given horizon, creating instance of the class and running train and inference
