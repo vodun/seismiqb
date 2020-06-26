@@ -7,7 +7,9 @@ from .base import BaseController
 
 class CarcassInterpolator(BaseController):
     """ Create a 2D surface from a sparce labeled carcass. """
+
     def train(self, dataset=None, horizon=None, **kwargs):
+        """ Train model on a sparce labeled carcass. """
         if dataset is None and horizon is not None:
             dataset = self.make_dataset_from_horizon(horizon)
 
@@ -32,6 +34,7 @@ class GridInterpolator(BaseController):
     Then, spread it to the whole cube spatial range.
     """
     def train(self, dataset=None, horizon=None, frequencies=(200, 200), **kwargs):
+        """ Create a grid for a horizon, then train model on it. """
         if dataset is None and horizon is not None:
             dataset = self.make_dataset_from_horizon(horizon)
 

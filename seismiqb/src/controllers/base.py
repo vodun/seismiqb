@@ -52,7 +52,7 @@ class BaseController:
     bar : bool
         Whether to show progress bars for training and inference.
     """
-    #pylint: disable=unused-argument, logging-fstring-interpolation, no-member
+    #pylint: disable=unused-argument, logging-fstring-interpolation, no-member, too-many-public-methods
     #pylint: disable=access-member-before-definition, attribute-defined-outside-init
     def __init__(self, batch_size=64, crop_shape=(1, 256, 256),
                  model_config=None, model_path=None, device=None,

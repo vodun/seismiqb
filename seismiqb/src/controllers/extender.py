@@ -10,7 +10,7 @@ from ...batchflow import Pipeline, B, V, C, D, P, R, L
 
 from ..horizon import Horizon
 
-from .torch_models import MODEL_CONFIG
+from .best_practices import MODEL_CONFIG_EXTENSION
 from .enhancer import Enhancer
 
 
@@ -41,7 +41,7 @@ class Extender(Enhancer):
     bar : bool
         Whether to show progress bars for training and inference.
     """
-    #pylint: disable=unused-argument, logging-fstring-interpolation, no-member
+    #pylint: disable=unused-argument, logging-fstring-interpolation, no-member, attribute-defined-outside-init
 
     def inference(self, horizon, n_steps=30, batch_size=128, stride=16):
         """Extend, i.e. fill the holes of the given horizon with the
@@ -202,7 +202,7 @@ class Extender(Enhancer):
         -------
         Extended horizon.
         """
-        model_config = MODEL_CONFIG if model_config is None else model_config
+        model_config = MODEL_CONFIG_EXTENSION if model_config is None else model_config
         extender = Extender(save_dir=save_dir, model_config=model_config, device=device,
                             crop_shape=crop_shape, batch_size=batch_size)
         extender.train(horizon, n_iters=n_iters, use_grid=False)

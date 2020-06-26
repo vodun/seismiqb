@@ -2,64 +2,12 @@
 TODO: make separate configs for branches
 TODO: make it work with N branches and N configs
 """
-import torch
 import torch.nn as nn
 
 from ...batchflow.batchflow.models.torch.layers import ConvBlock
-from ...batchflow.batchflow.models.torch import ResBlock, EncoderDecoder
+from ...batchflow.batchflow.models.torch import EncoderDecoder
 from ...batchflow.batchflow.models.utils import unpack_args
 
-
-
-class Dice(nn.Module):
-    """ !!. """
-    def forward(self, input, target):
-        input = torch.sigmoid(input)
-        dice_coeff = 2. * (input * target).sum() / (input.sum() + target.sum() + 1e-7)
-        return 1 - dice_coeff
-
-
-
-MODEL_CONFIG = {
-    'body/encoder': {
-        'num_stages': 4,
-        'order': 'sbd',
-        'blocks': {
-            'base': ResBlock,
-            'n_reps': 1,
-            'filters': [32, 64, 128, 256],
-            'attention': 'scse',
-        },
-    },
-    'body/embedding': {
-        'base': ResBlock,
-        'n_reps': 1,
-        'filters': 256,
-        'attention': 'scse',
-    },
-    'body/decoder': {
-        'num_stages': 4,
-        'upsample': {
-            'layout': 'tna',
-            'kernel_size': 2,
-        },
-        'blocks': {
-            'base': ResBlock,
-            'filters': [128, 64, 32, 16],
-            'attention': 'scse',
-        },
-    },
-    'head': {
-        'base_block': ResBlock,
-        'filters': [16, 8],
-        'attention': 'scse'
-    },
-    'output': 'sigmoid',
-    # Train configuration
-    'loss': Dice,
-    'optimizer': {'name': 'Adam', 'lr': 0.01,},
-    "decay": {'name': 'exp', 'gamma': 0.1},
-    }
 
 class MyEncoderModule(nn.ModuleDict):
     """ Encoder: create compressed representation of an input by reducing its spatial dimensions. """
@@ -72,7 +20,6 @@ class MyEncoderModule(nn.ModuleDict):
         x, y = inputs
         outputs = []
         for letter, (layer_name, layer) in zip(self.layout, self.items()):
-            # print('FW', letter, layer_name, x.shape, y.shape)
             if letter in ['b', 'd', 'p']:
                 if layer_name.endswith('x'):
                     x = layer(x)
@@ -99,7 +46,6 @@ class MyEncoderModule(nn.ModuleDict):
         for i in range(num_stages):
             for letter in encoder_layout:
                 for j, prefix in zip([0, 1], 'xy'):
-                    # print('MM', i, letter, prefix, inputs[j].shape)
                     if letter in ['b']:
                         args = {**kwargs, **block_args, **unpack_args(block_args, i, num_stages)}
 
@@ -126,6 +72,7 @@ class MyEncoderModule(nn.ModuleDict):
 
 
 class ExtensionModel(EncoderDecoder):
+    """ EncoderDecoder with multiple encoding branches. """
     @classmethod
     def encoder(cls, inputs, **kwargs):
         """ Create encoder either from base model or block args. """

@@ -1,4 +1,4 @@
-""" !!. """
+""" Extract multiple 2D surfaces from a cube by controllably removing non-crucial amplitude information. """
 #pylint: disable=import-error, no-name-in-module, wrong-import-position
 from copy import copy
 from scipy.ndimage import sobel
@@ -16,11 +16,21 @@ from .base import BaseController
 
 
 class Extractor(BaseController):
-    """ !!. """
+    """ Extract multiple 2D surfaces from a cube by controllably removing non-crucial amplitude information.
+    More specific, train an autoencoder that compresses seismic data and then restores it:
+    due to inherit loss of information during this procedure, only the most relevant amplitudes are correctly restored.
+    In the case of seismic data, that correspond to most distinct surfaces, which are, by definition, horizons.
+    """
     #pylint: disable=unused-argument, logging-fstring-interpolation, no-member, protected-access
     #pylint: disable=access-member-before-definition, attribute-defined-outside-init
 
     def make_sampler(self, dataset, bins=50, side_view=False, **kwargs):
+        """ Create uniform sampler over present traces. Works inplace.
+
+        Plots
+        -----
+        Maps with examples of sampled slices of `crop_shape` size, both normalized and not.
+        """
         _ = kwargs
         geometry = dataset.geometries[0]
         idx = np.nonzero(geometry.zero_traces != 1)

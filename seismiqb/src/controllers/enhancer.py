@@ -8,7 +8,8 @@ from ...batchflow import Pipeline, B, V, C, D, P, R
 
 from ..horizon import Horizon
 
-from .torch_models import ExtensionModel, MODEL_CONFIG
+from .torch_models import ExtensionModel
+from .best_practices import MODEL_CONFIG_ENHANCE
 from .base import BaseController
 
 
@@ -179,7 +180,7 @@ class Enhancer(BaseController):
         save_dir : str
             Path to save images, logs, and other data.
         """
-        model_config = MODEL_CONFIG if model_config is None else model_config
+        model_config = MODEL_CONFIG_ENHANCE if model_config is None else model_config
         enhancer = Enhancer(save_dir=save_dir, model_config=model_config, device=device,
                             crop_shape=crop_shape, batch_size=batch_size)
         if isinstance(horizon, str) and isinstance(cube_path, str):
