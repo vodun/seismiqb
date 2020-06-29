@@ -64,7 +64,7 @@ class Extender(Enhancer):
 
         Logs
         ----
-        Start of inference, increased horizon legth at each step of the procedure.
+        Start of inference, increased horizon length at each step of the procedure.
 
         Returns
         -------

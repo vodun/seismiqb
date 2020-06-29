@@ -649,11 +649,9 @@ class SeismicCropBatch(Batch):
         max_len : int
             Size of shift along horizontal axis.
         """
-        start = 0
-
         for _ in range(n_segments):
             # Point of starting the distortion, its length and size
-            begin = np.random.randint(start, crop.shape[1])
+            begin = np.random.randint(0, crop.shape[1])
             length = np.random.randint(5, max_len)
             shift = np.random.randint(-max_shift, max_shift)
 
@@ -665,9 +663,6 @@ class SeismicCropBatch(Batch):
             elif shift < 0:
                 shifted_segment[:, :, :shift] = segment[:, :, -shift:]
             crop[:, begin:min(begin + length, crop.shape[1]), :] = shifted_segment
-
-            # No overlapping shifts
-            start += begin
         return crop
 
     def _transpose_(self, crop, order):

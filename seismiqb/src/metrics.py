@@ -752,7 +752,7 @@ class HorizonMetrics(BaseSeismicMetric):
         plot_dict = {
             'spatial': True,
             'title': '{} on cube {}'.format(title, self.horizon.cube_name),
-            'cmap': 'seismic',
+            'cmap': 'Reds',
             'zmin': 0, 'zmax': np.nanmax(metric),
             'ignore_value': np.nan,
             'xlabel': 'ilines', 'ylabel': 'xlines',

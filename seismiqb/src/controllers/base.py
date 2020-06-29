@@ -479,11 +479,12 @@ class BaseController:
         Maps of computed metrics: correlation, Hellinger distance, argmax of cross-correlation.
         If targets are provided, also l1 differences.
         """
-        #pylint: disable=cell-var-from-loop, invalid-name
+        #pylint: disable=cell-var-from-loop, invalid-name, protected-access
         results = []
         for i in range(n):
             info = {}
             horizon = self.predictions[i]
+            horizon._horizon_metrics = None
             prefix = [horizon.geometry.short_name, f'{i}_horizon'] if add_prefix else []
 
             # Basic demo: depth map and properties

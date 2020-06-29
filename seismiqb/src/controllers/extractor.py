@@ -157,7 +157,6 @@ class Extractor(BaseController):
     # Pipelines
     def load_pipeline(self):
         """ Define data loading pipeline.
-
         Following parameters are fetched from pipeline config: `adaptive_slices`, 'grid_src' and `rebatch_threshold`.
         """
         return (

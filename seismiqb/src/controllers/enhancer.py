@@ -54,7 +54,9 @@ class Enhancer(BaseController):
 
 
     def load_pipeline(self):
-        """ Defines data loading procedure. """
+        """ Defines data loading procedure.
+        Following parameters are fetched from pipeline config: `width` and `rebatch_threshold`.
+        """
         return (
             Pipeline()
             .crop(points=D('train_sampler')(self.batch_size),
@@ -95,9 +97,6 @@ class Enhancer(BaseController):
 
     def train_pipeline(self):
         """ Define model initialization and model training pipeline.
-
-        Note
-        ----
         Following parameters are fetched from pipeline config: `model_config`.
         """
         return (
