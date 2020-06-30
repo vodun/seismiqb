@@ -649,6 +649,7 @@ class SeismicCropBatch(Batch):
         max_len : int
             Size of shift along horizontal axis.
         """
+        crop = np.copy(crop)
         for _ in range(n_segments):
             # Point of starting the distortion, its length and size
             begin = np.random.randint(0, crop.shape[1])
