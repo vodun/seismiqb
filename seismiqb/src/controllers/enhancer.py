@@ -79,7 +79,8 @@ class Enhancer(BaseController):
             .shift_masks(src='masks', dst='prior_masks')
             .transpose(src='prior_masks', order=(1, 2, 0))
             .elastic_transform(alpha=P(R('uniform', 30, 50)), sigma=P(R('uniform', 6, 7)),
-                               src='prior_masks')
+                               src='prior_masks', p=0.5)
+            .bend_masks(src='prior_masks', angle=P(R('uniform', -15, 15)))
             .call(binarize)
             .transpose(src='prior_masks', order=(2, 0, 1))
         )

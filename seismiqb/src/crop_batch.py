@@ -666,6 +666,41 @@ class SeismicCropBatch(Batch):
             crop[:, begin:min(begin + length, crop.shape[1]), :] = shifted_segment
         return crop
 
+    def _bend_masks_(self, crop, angle=10):
+        """ Rotate part of the mask on a given angle.
+        Must be used for crops in (xlines, heights, inlines) format.
+        """
+        shape = crop.shape
+
+        if np.random.random() >= 0.5:
+            point_x = np.random.randint(shape[0]//2, shape[0])
+            point_h = np.argmax(crop[point_x, :, :])
+
+            if np.sum(crop[point_x, point_h, :]) == 0.0:
+                return np.copy(crop)
+
+            matrix = cv2.getRotationMatrix2D((point_h, point_x), angle, 1)
+            rotated = cv2.warpAffine(crop, matrix, (shape[1], shape[0])).reshape(shape)
+
+            combined = np.zeros_like(crop)
+            combined[:point_x, :, :] = crop[:point_x, :, :]
+            combined[point_x:, :, :] = rotated[point_x:, :, :]
+        else:
+            point_x = np.random.randint(0, shape[0]//2)
+            point_h = np.argmax(crop[point_x, :, :])
+
+            if np.sum(crop[point_x, point_h, :]) == 0.0:
+                return np.copy(crop)
+
+            matrix = cv2.getRotationMatrix2D((point_h, point_x), angle, 1)
+            rotated = cv2.warpAffine(crop, matrix, (shape[1], shape[0])).reshape(shape)
+
+            combined = np.zeros_like(crop)
+            combined[point_x:, :, :] = crop[point_x:, :, :]
+            combined[:point_x, :, :] = rotated[:point_x, :, :]
+        return combined
+
+
     def _transpose_(self, crop, order):
         """ Change order of axis. """
         return np.transpose(crop, order)
