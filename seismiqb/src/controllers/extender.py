@@ -126,13 +126,9 @@ class Extender(Enhancer):
             .transpose(src='masks', order=(1, 2, 0))
             .filter_out(src='masks', dst='prior_masks',
                         expr=lambda m: m[:, 0],
-                        low=P(R('uniform', low=0.2, high=0.4)),
+                        low=P(R('uniform', low=0., high=0.4)),
                         length=P(R('uniform', low=0.30, high=0.5)))
-            .filter_out(src='masks', dst='prior_masks',
-                        expr=lambda m: m[:, 0],
-                        low=P(R('uniform', low=0.1, high=0.4)),
-                        length=P(R('uniform', low=0.10, high=0.4)), p=0.5)
-            .filter_out(src='masks', dst='prior_masks',
+            .filter_out(src='prior_masks', dst='prior_masks',
                         expr=L(functor)(R('uniform', low=15, high=35)), low=0.0, p=0.7)
             .transpose(src=['masks', 'prior_masks'], order=(2, 0, 1))
         )
