@@ -1,7 +1,6 @@
 """ A holder for horizon extension steps inherited from `.class:Enhancer` with:
-    - redifined get_mask_transform_ppl to filter out a true mask to train an extension model
-      on a horizon area with a given percentage of holes.
-    - making inference of a Horizon Extension algorithm to cover the holes in a given horizon.
+    - redifined get_mask_transform_ppl to thin out loaded mask
+    - making an iterative inference to cover the holes in a given horizon.
 """
 from copy import copy
 
