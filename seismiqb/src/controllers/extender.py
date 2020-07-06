@@ -76,18 +76,19 @@ class Extender(Enhancer):
             'batch_size': batch_size,
             'model_pipeline': self.model_pipeline
         }
-        prev_len = len(horizon)
+        pred_horizon = horizon.copy()
 
+        prev_len = len(pred_horizon)
         self.log(f'Inference started for {n_steps} with stride {stride}.')
         for _ in self.make_pbar(range(n_steps), desc=f'Extender inference on {horizon.name}'):
             dataset.make_extension_grid(dataset.indices[0],
                                         crop_shape=self.crop_shape,
                                         stride=stride,
-                                        labels_src=horizon,
+                                        labels_src=pred_horizon,
                                         batch_size=batch_size)
 
             # Add current horizon to dataset labels in order to make create_masks work
-            dataset.labels[dataset.indices[0]] = [horizon]
+            dataset.labels[dataset.indices[0]] = [pred_horizon]
 
             inference_pipeline = (self.get_inference_template() << config) << dataset
             try:
@@ -99,21 +100,21 @@ class Extender(Enhancer):
 
             horizons = [*inference_pipeline.v('predicted_horizons')]
             for hor in horizons:
-                merge_code, _ = Horizon.verify_merge(horizon, hor,
+                merge_code, _ = Horizon.verify_merge(pred_horizon, hor,
                                                      mean_threshold=5.5,
                                                      adjacency=5)
                 if merge_code == 3:
-                    _ = horizon.overlap_merge(hor, inplace=True)
+                    _ = pred_horizon.overlap_merge(hor, inplace=True)
 
-            curr_len = len(horizon)
+            curr_len = len(pred_horizon)
             if (curr_len - prev_len) < 25:
                 break
             self.log(f'Extended from {prev_len} to {curr_len}, + {curr_len - prev_len}')
             prev_len = curr_len
 
         torch.cuda.empty_cache()
-        self.predictions = [horizon]
-        return horizon
+        self.predictions = [pred_horizon]
+        return pred_horizon
 
 
     def distortion_pipeline(self):

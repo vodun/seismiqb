@@ -1703,6 +1703,16 @@ class Horizon:
         plot_image([seismic_slide, mask], order_axes=order_axes, **kwargs)
 
 
+    def copy(self):
+        """ Create a shallow copy of a horizon.
+
+        Returns
+        -------
+        A horizon object with new matrix object and a reference to the old geometry attribute.
+        """
+        return Horizon(np.copy(self.matrix), self.geometry, i_min=self.i_min, x_min=self.x_min)
+
+
 class StructuredHorizon(Horizon):
     """ Convenient alias for `Horizon` class. """
 
