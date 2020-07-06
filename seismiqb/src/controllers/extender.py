@@ -3,6 +3,8 @@
       on a horizon area with a given percentage of holes.
     - making inference of a Horizon Extension algorithm to cover the holes in a given horizon.
 """
+from copy import copy
+
 import numpy as np
 import torch
 
@@ -65,10 +67,6 @@ class Extender(Enhancer):
         Logs
         ----
         Start of inference, increased horizon length at each step of the procedure.
-
-        Returns
-        -------
-        Extended horizon
         """
         dataset = self.make_dataset_from_horizon(horizon)
 
@@ -76,19 +74,19 @@ class Extender(Enhancer):
             'batch_size': batch_size,
             'model_pipeline': self.model_pipeline
         }
-        pred_horizon = horizon.copy()
+        horizon = copy(horizon)
 
-        prev_len = len(pred_horizon)
+        prev_len = len(horizon)
         self.log(f'Inference started for {n_steps} with stride {stride}.')
         for _ in self.make_pbar(range(n_steps), desc=f'Extender inference on {horizon.name}'):
             dataset.make_extension_grid(dataset.indices[0],
                                         crop_shape=self.crop_shape,
                                         stride=stride,
-                                        labels_src=pred_horizon,
+                                        labels_src=horizon,
                                         batch_size=batch_size)
 
             # Add current horizon to dataset labels in order to make create_masks work
-            dataset.labels[dataset.indices[0]] = [pred_horizon]
+            dataset.labels[dataset.indices[0]] = [horizon]
 
             inference_pipeline = (self.get_inference_template() << config) << dataset
             try:
@@ -100,21 +98,20 @@ class Extender(Enhancer):
 
             horizons = [*inference_pipeline.v('predicted_horizons')]
             for hor in horizons:
-                merge_code, _ = Horizon.verify_merge(pred_horizon, hor,
+                merge_code, _ = Horizon.verify_merge(horizon, hor,
                                                      mean_threshold=5.5,
                                                      adjacency=5)
                 if merge_code == 3:
-                    _ = pred_horizon.overlap_merge(hor, inplace=True)
+                    _ = horizon.overlap_merge(hor, inplace=True)
 
-            curr_len = len(pred_horizon)
+            curr_len = len(horizon)
             if (curr_len - prev_len) < 25:
                 break
             self.log(f'Extended from {prev_len} to {curr_len}, + {curr_len - prev_len}')
             prev_len = curr_len
 
         torch.cuda.empty_cache()
-        self.predictions = [pred_horizon]
-        return pred_horizon
+        self.predictions = [horizon]
 
 
     def distortion_pipeline(self):
@@ -192,7 +189,8 @@ class Extender(Enhancer):
             Distance between a horizon border and a corner of sampled crop that is fed to the model.
         save_dir : str
             Path to save images, logs, and other data.
-
+        return_instance : bool
+            Whether to return created `.class:Extender` instance.
         Returns
         -------
         Extended horizon.
@@ -201,6 +199,8 @@ class Extender(Enhancer):
         extender = Extender(save_dir=save_dir, model_config=model_config, device=device,
                             crop_shape=crop_shape, batch_size=batch_size)
         extender.train(horizon, n_iters=n_iters, use_grid=False)
-        extended = extender.inference(horizon, n_steps=n_steps,
-                                      batch_size=batch_size, stride=stride)
-        return extended
+        extender.inference(horizon, n_steps=n_steps,
+                           batch_size=batch_size, stride=stride)
+        if return_instance:
+            return extender
+        return extender.predictions[0]

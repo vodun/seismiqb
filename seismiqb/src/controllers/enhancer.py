@@ -72,7 +72,7 @@ class Enhancer(BaseController):
     def distortion_pipeline(self):
         """ Defines transformations performed with `masks` component. """
         def binarize(batch):
-            batch.prior_masks = (batch.prior_masks > 0).astype(int).astype(np.float32)
+            batch.prior_masks = (batch.prior_masks > 0).astype(np.float32)
 
         return (
             Pipeline()
@@ -158,27 +158,29 @@ class Enhancer(BaseController):
 
         Parameters
         ----------
-        horizon : an instance of :class:`.Horizon`
-            A horizon to be extended
-        n_steps : int
-            Number of steps of the Extension algorithm.
+        horizon : an instance of :class:`.Horizon` or str
+            A horizon to be extended or a path to load horizon from.
+        cube_path : str, optional
+            Path to cube, used if horizon is str.
+        save_dir : str
+            Path to save images, logs, and other data.
+        crop_shape : tuple of 3 ints
+            Size of sampled crops for train and inference.
         model_config : dict
             Neural network architecture.
         n_iters : int
             Number of iterations to train model for.
-        crop_shape : tuple of 3 ints
-            Size of sampled crops for train and inference.
         batch_size : int
             Size of batches for train and inference.
+        device : str or int
+            Device specification.
         orientation : {'i', 'x', 'ix'}
             Orientation of the inference:
             If 'i', then cube is split into inline-oriented slices.
             If 'x', then cube is split into crossline-oriented slices.
             If 'ix', then both of previous approaches applied, and results are merged.
-        device : str or int
-            Device specification.
-        save_dir : str
-            Path to save images, logs, and other data.
+        return_instance : bool
+            Whether to return created `.class:Enhancer` instance.
         """
         model_config = MODEL_CONFIG_ENHANCE if model_config is None else model_config
         enhancer = Enhancer(save_dir=save_dir, model_config=model_config, device=device,
