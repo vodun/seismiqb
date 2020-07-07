@@ -752,7 +752,7 @@ class HorizonMetrics(BaseSeismicMetric):
         plot_dict = {
             'spatial': True,
             'title': '{} on cube {}'.format(title, self.horizon.cube_name),
-            'cmap': 'seismic',
+            'cmap': 'Reds',
             'zmin': 0, 'zmax': np.nanmax(metric),
             'ignore_value': np.nan,
             'xlabel': 'ilines', 'ylabel': 'xlines',
@@ -1028,6 +1028,7 @@ def compute_support_func(function_ndarray, function_str, name,
                 bad_traces[:, :safe_strip], bad_traces[:, -safe_strip:] = 1, 1
                 bad_traces[:safe_strip, :], bad_traces[-safe_strip:, :] = 1, 1
 
+            np.random.seed(0)
             non_zero_traces = np.where(bad_traces == 0)
             indices = np.random.choice(len(non_zero_traces[0]), supports)
             supports = np.array([non_zero_traces[0][indices], non_zero_traces[1][indices]]).T

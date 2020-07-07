@@ -1,4 +1,4 @@
-"""Init file"""
+"""Init file. """
 from .cubeset import SeismicCubeset
 from .crop_batch import SeismicCropBatch
 from .geometry import SeismicGeometry
@@ -7,3 +7,4 @@ from .facies import GeoBody
 from .metrics import HorizonMetrics, GeometryMetrics
 from .plotters import plot_image, plot_loss
 from .utils import * # pylint: disable=wildcard-import
+from .controllers import *

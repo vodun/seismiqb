@@ -637,6 +637,70 @@ class SeismicCropBatch(Batch):
             return crop.transpose([1, 0, 2])
         return crop
 
+    def _shift_masks_(self, crop, n_segments=3, max_shift=4, max_len=10):
+        """ Randomly shift parts of the crop up or down.
+
+        Parameters
+        ----------
+        n_segments : int
+            Number of segments to shift.
+        max_shift : int
+            Size of shift along vertical axis.
+        max_len : int
+            Size of shift along horizontal axis.
+        """
+        crop = np.copy(crop)
+        for _ in range(n_segments):
+            # Point of starting the distortion, its length and size
+            begin = np.random.randint(0, crop.shape[1])
+            length = np.random.randint(5, max_len)
+            shift = np.random.randint(-max_shift, max_shift)
+
+            # Apply shift
+            segment = crop[:, begin:min(begin + length, crop.shape[1]), :]
+            shifted_segment = np.zeros_like(segment)
+            if shift > 0:
+                shifted_segment[:, :, shift:] = segment[:, :, :-shift]
+            elif shift < 0:
+                shifted_segment[:, :, :shift] = segment[:, :, -shift:]
+            crop[:, begin:min(begin + length, crop.shape[1]), :] = shifted_segment
+        return crop
+
+    def _bend_masks_(self, crop, angle=10):
+        """ Rotate part of the mask on a given angle.
+        Must be used for crops in (xlines, heights, inlines) format.
+        """
+        shape = crop.shape
+
+        if np.random.random() >= 0.5:
+            point_x = np.random.randint(shape[0]//2, shape[0])
+            point_h = np.argmax(crop[point_x, :, :])
+
+            if np.sum(crop[point_x, point_h, :]) == 0.0:
+                return np.copy(crop)
+
+            matrix = cv2.getRotationMatrix2D((point_h, point_x), angle, 1)
+            rotated = cv2.warpAffine(crop, matrix, (shape[1], shape[0])).reshape(shape)
+
+            combined = np.zeros_like(crop)
+            combined[:point_x, :, :] = crop[:point_x, :, :]
+            combined[point_x:, :, :] = rotated[point_x:, :, :]
+        else:
+            point_x = np.random.randint(0, shape[0]//2)
+            point_h = np.argmax(crop[point_x, :, :])
+
+            if np.sum(crop[point_x, point_h, :]) == 0.0:
+                return np.copy(crop)
+
+            matrix = cv2.getRotationMatrix2D((point_h, point_x), angle, 1)
+            rotated = cv2.warpAffine(crop, matrix, (shape[1], shape[0])).reshape(shape)
+
+            combined = np.zeros_like(crop)
+            combined[point_x:, :, :] = crop[point_x:, :, :]
+            combined[:point_x, :, :] = rotated[:point_x, :, :]
+        return combined
+
+
     def _transpose_(self, crop, order):
         """ Change order of axis. """
         return np.transpose(crop, order)
