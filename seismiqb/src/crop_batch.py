@@ -312,7 +312,7 @@ class SeismicCropBatch(Batch):
         src_labels : str
             Component of batch with labels dict.
         indices : str, int or sequence of ints
-            Maximum number of used labels per crop. 
+            Maximum number of used labels per crop.
             If -1 or 'all', all possible labels will be added.
             If array-like then elements are interpreted as indices of the desired labels
             and must be ints in range [0, len(horizons) - 1].
