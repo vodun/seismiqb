@@ -19,28 +19,6 @@ from .best_practices import MODEL_CONFIG_EXTENSION
 class Extender(Enhancer):
     """
     Provides interface for train, inference and quality assesment for the task of horizon extension.
-
-    Parameters
-    ----------
-    batch_size : int
-        Size of batches for train and inference.
-    crop_shape : tuple of 3 ints
-        Size of sampled crops for train and inference.
-    model_config : dict
-        Neural network architecture.
-    model_path : str
-        Path for pre-trained model.
-    device : str or int
-        Device specification.
-    show_plots : bool
-        Whether to show plots to the current output stream.
-    save_dir : str
-        Path to save images, logs, and other data.
-    logger : None or callable
-        If None, then logger is created inside `save_dir`.
-        If callable, then it is used directly to log messages.
-    bar : bool
-        Whether to show progress bars for training and inference.
     """
     #pylint: disable=unused-argument, logging-fstring-interpolation, no-member, attribute-defined-outside-init
 
