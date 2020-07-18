@@ -124,7 +124,7 @@ class MatplotlibPlotter:
     def save_and_show(fig, show=True, savepath=None, **kwargs):
         """ Save and show plot if needed.
         """
-        save_kwargs = dict(bbox_inches='tight', pad_inches=0)
+        save_kwargs = dict(bbox_inches='tight', pad_inches=0, dpi=100)
         save_kwargs.update(kwargs.get('save', dict()))
 
         # save if necessary and render

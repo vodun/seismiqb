@@ -352,8 +352,8 @@ class SeismicCropBatch(Batch):
 
     @action
     @inbatch_parallel(init='indices', post='_post_mask_rebatch', target='for',
-                      src='masks', threshold=0.8, passdown=None)
-    def mask_rebatch(self, ix, src='masks', threshold=0.8, passdown=None):
+                      src='masks', threshold=0.8, passdown=None, axis=-1)
+    def mask_rebatch(self, ix, src='masks', threshold=0.8, passdown=None, axis=-1):
         """ Remove elements with masks lesser than a threshold.
 
         Parameters
@@ -367,7 +367,7 @@ class SeismicCropBatch(Batch):
         pos = self.get_pos(None, src, ix)
         mask = getattr(self, src)[pos]
 
-        reduced = np.max(mask, axis=-1) > 0.0
+        reduced = np.max(mask, axis=axis) > 0.0
         return np.sum(reduced) / np.prod(reduced.shape)
 
     def _post_mask_rebatch(self, areas, *args, src=None, passdown=None, threshold=None, **kwargs):

@@ -37,5 +37,5 @@ if __name__ == '__main__':
 
     if config['save-txt']:
         save_point_cloud(geometry.quality_map,
-                        os.path.join(config['savedir'], 'quality_map.txt'),
-                        geometry)
+                         os.path.join(config['savedir'], 'quality_map.txt'),
+                         geometry)

@@ -1548,7 +1548,7 @@ class Horizon:
         df = pd.DataFrame(values, columns=self.COLUMNS)
         df.sort_values(['iline', 'xline'], inplace=True)
 
-        path = path if not add_height else f'{path}_#{self.h_mean}'
+        path = path if not add_height else f'{path}_#{round(self.h_mean, 1)}'
         df.to_csv(path, sep=' ', columns=self.COLUMNS, index=False, header=False)
 
 
