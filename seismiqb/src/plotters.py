@@ -7,7 +7,7 @@ from plotly.subplots import make_subplots
 
 
 def channelize_image(image, total_channels, n_channel=0, greyscale=False, opacity=None):
-    """ Channelize an image. Can be used to make an opaque rgb or greyscale image.
+    """ Channelize an image. Can be used to make an opaque rgb or grayscale image.
     """
     # case of a partially channelized image
     if image.ndim == 3:
@@ -251,6 +251,7 @@ class MatplotlibPlotter:
                     'cmap': 'gray',
                     'fontsize': 20,
                     'opacity': 1.0,
+                    'label': '', 'title': '', 'xlabel': '', 'ylabel': '',
                     'order_axes': (1, 0)}
         updated = {**defaults, **kwargs}
 
@@ -365,8 +366,8 @@ class MatplotlibPlotter:
                     'cmap': 'gray',
                     'fontsize': 20,
                     'y': 0.9,
-                    'order_axes': (1, 0),
-                    'label': ''*len(images)}
+                    'label': ''*len(images), 'title': '', 'xlabel': '', 'ylabel': '',
+                    'order_axes': (1, 0)}
         updated = {**defaults, **kwargs}
 
         # form different groups of kwargs

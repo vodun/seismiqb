@@ -2,12 +2,15 @@
 import os
 import sys
 from copy import copy
-from glob import glob
+import warnings
+warnings.filterwarnings("ignore")
+
+import numpy as np
 
 from utils import make_config, save_point_cloud, safe_mkdir
 
 sys.path.append('..')
-from seismiqb import SeismicGeometry, Horizon, HorizonMetrics, plot_image
+from seismiqb import SeismicGeometry, Horizon, HorizonMetrics
 
 
 
@@ -53,19 +56,22 @@ if __name__ == '__main__':
     geometry = SeismicGeometry(config['cube-path'])
     safe_mkdir(config['savedir'])
 
-    for horizon_path in (config['horizon-path']):
+    for horizon_path in config['horizon-path']:
         horizon = Horizon(horizon_path, geometry=geometry)
         hm = HorizonMetrics(horizon)
 
         prefix = '' if config['add-prefix'] is False else horizon.name + '_'
+        with open(os.path.join(config['savedir'], f'{prefix}metrics_info.txt'), 'w') as result_txt:
+            _ = horizon.evaluate(compute_metric=False, printer=lambda msg: print(msg, file=result_txt))
 
-        for metric_name in config['metrics']:
-            kwargs = copy(LOCAL_KWARGS) if metric_name.startswith('local') else copy(SUPPORT_KWARGS)
-            kwargs = {} if metric_name.startswith('insta') else kwargs
-            savepath = os.path.join(config['savedir'], f'{prefix}{metric_name}')
+            for metric_name in config['metrics']:
+                kwargs = copy(LOCAL_KWARGS) if metric_name.startswith('local') else copy(SUPPORT_KWARGS)
+                kwargs = {} if metric_name.startswith('insta') else kwargs
+                savepath = os.path.join(config['savedir'], f'{prefix}{metric_name}')
 
-            metric = hm.evaluate(metric_name, **kwargs,
-                                 plot=True, show_plot=False, plot_kwargs={'figsize': (20, 20)},
-                                 savepath=savepath + '.png')
-            if config['save-txt']:
-                save_point_cloud(metric, savepath + '.txt', geometry)
+                metric = hm.evaluate(metric_name, **kwargs,
+                                     plot=True, show_plot=False, plot_kwargs={'figsize': (20, 20)},
+                                     savepath=savepath + '.png')
+                if config['save-txt']:
+                    save_point_cloud(metric, savepath + '.txt', geometry)
+                print(f'{metric_name} avg value: {""*20} {np.nanmean(metric):5.5}', file=result_txt)

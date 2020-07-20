@@ -488,7 +488,7 @@ class SeismicCubeset(Dataset):
 
 
     def merge_horizons(self, src, mean_threshold=2.0, adjacency=3, minsize=50):
-        """ !!. """
+        """ Iteratively try to merge every horizon in a list to every other, until there are no possible merges. """
         horizons = getattr(self, src)
         horizons = Horizon.merge_list(horizons, mean_threshold=mean_threshold, adjacency=adjacency, minsize=minsize)
         if isinstance(src, str):

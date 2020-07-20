@@ -1,6 +1,8 @@
 """ Compute fine map to show local geological hardness of the data. """
 import os
 import sys
+import warnings
+warnings.filterwarnings("ignore")
 
 from utils import make_config, save_point_cloud, safe_mkdir
 
@@ -21,6 +23,7 @@ ARGS = [
     ('cube-path', 'path to the seismic cube in HDF5 format', str, None),
     ('savedir', 'path to save files to', str, '_placeholder_'),
     ('metrics', 'metrics to compute for quality map creation', str, ['support_hellinger']),
+    ('add-prefix', 'whether to prepend cube name to the saved file names', bool, True),
     ('save-txt', 'whether to save point cloud quality map to disk', bool, False),
 ]
 
@@ -34,12 +37,13 @@ if __name__ == '__main__':
     geometry = SeismicGeometry(config['cube-path'])
     geometry.make_quality_map([0.1, 0.15, 0.2, 0.4, 0.5], config['metrics'])
 
+    prefix = '' if config['add-prefix'] is False else geometry.short_name + '_'
     safe_mkdir(config['savedir'])
     plot_image(geometry.quality_map, cmap='Reds',
-               xlabel='INLINE_3D', ylabel='CROSSLINE_3D',
-               savepath=os.path.join(config['savedir'], 'quality_map.png'))
+               xlabel='INLINE_3D', ylabel='CROSSLINE_3D', title='',
+               savepath=os.path.join(config['savedir'], f'{prefix}quality_map.png'))
 
     if config['save-txt']:
         save_point_cloud(geometry.quality_map,
-                         os.path.join(config['savedir'], 'quality_map.txt'),
+                         os.path.join(config['savedir'], f'{prefix}quality_map.txt'),
                          geometry)

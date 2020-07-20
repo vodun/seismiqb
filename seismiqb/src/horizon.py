@@ -1145,7 +1145,7 @@ class Horizon:
 
 
     # Evaluate horizon on its own / against other(s)
-    def evaluate(self, supports=50, plot=True, savepath=None, printer=print, **kwargs):
+    def evaluate(self, compute_metric=True, supports=50, plot=True, savepath=None, printer=print, **kwargs):
         """ Compute crucial metrics of a horizon. """
         msg = f"""
         Number of labeled points:                         {len(self)}
@@ -1156,8 +1156,10 @@ class Horizon:
         Number of holes inside borders:                   {self.number_of_holes}
         """
         printer(dedent(msg))
-        return self.horizon_metrics.evaluate('support_corrs', supports=supports, agg='nanmean',
-                                             plot=plot, savepath=savepath, **kwargs)
+        if compute_metric:
+            return self.horizon_metrics.evaluate('support_corrs', supports=supports, agg='nanmean',
+                                                 plot=plot, savepath=savepath, **kwargs)
+        return None
 
 
     def check_proximity(self, other, offset=0):
@@ -1385,7 +1387,7 @@ class Horizon:
 
     @staticmethod
     def merge_list(horizons, mean_threshold=2.0, adjacency=3, minsize=50):
-        """ !!. """
+        """ Iteratively try to merge every horizon in a list to every other, until there are no possible merges. """
         horizons = [horizon for horizon in horizons if len(horizon) >= minsize]
 
         # iterate over list of horizons to merge what can be merged

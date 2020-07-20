@@ -582,7 +582,7 @@ class HorizonMetrics(BaseSeismicMetric):
         'local_hellinger', 'support_hellinger',
         'local_wasserstein', 'support_wasserstein',
         'local_tv', 'support_tv',
-        'hilbert',
+        'hilbert', 'instantaneous_phase',
     ]
 
     def __init__(self, horizons, orientation=None, window=23, offset=0, scale=False, chunk_size=256, line=1):
@@ -660,7 +660,7 @@ class HorizonMetrics(BaseSeismicMetric):
 
 
     def find_best_match(self, offset=0, **kwargs):
-        """ !!. """
+        """ Find the closest horizon to the first one in the list of passed at initialization. """
         _ = kwargs
         if isinstance(self.horizons[1], Horizon):
             self.horizons[1] = [self.horizons[1]]
