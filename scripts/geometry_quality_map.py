@@ -1,4 +1,4 @@
-""" !!. """
+""" Compute fine map to show local geological hardness of the data. """
 import os
 import sys
 
@@ -6,6 +6,15 @@ from utils import make_config, save_point_cloud, safe_mkdir
 
 sys.path.append('..')
 from seismiqb import SeismicGeometry, plot_image
+
+
+
+# Help message
+MSG = """Compute map of local geological hardness for seismic cube.
+Passed cube must be in HDF5 format, e.g. created by `convert_to_hdf5.py` script.
+Under the hood, we compare each trace in the cube against 100 reference ones.
+As the traces are quite long (up to 3000 elements), we use their compressed representation.
+"""
 
 # Argname, description, dtype, default
 ARGS = [
@@ -17,15 +26,10 @@ ARGS = [
 
 
 if __name__ == '__main__':
-    config = make_config('Create quality map for seismic cube.', ARGS,
-                         os.path.basename(__file__).split('.')[0])
+    config = make_config(MSG, ARGS, os.path.basename(__file__).split('.')[0])
     if config['savedir'] == '_placeholder_':
         config['savedir'] = os.path.dirname(config['cube-path'])
 
-    print('\nPASSED ARGUMENTS:')
-    for argname, desc, _, _ in ARGS:
-        print(f'{argname.upper()} ({desc}) : {config[argname]}')
-    print('#'*110, '\n')
 
     geometry = SeismicGeometry(config['cube-path'])
     geometry.make_quality_map([0.1, 0.15, 0.2, 0.4, 0.5], config['metrics'])

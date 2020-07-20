@@ -1,4 +1,4 @@
-""" !!. """
+""" Compute quality map(s) for horizon(s). """
 import os
 import sys
 from copy import copy
@@ -10,6 +10,14 @@ sys.path.append('..')
 from seismiqb import SeismicGeometry, Horizon, HorizonMetrics, plot_image
 
 
+
+# Help message
+MSG = """Compute quality map(s) for a given horizon(s).
+Under the hood, an array of amplitudes is cut from the cube along the horizon in a fixed window.
+After that, `local` metrics are computed by comparing each trace to its neighbours in
+a square window (e.g. in a 9x9 square) by using a fixed function (e.g. correlation coefficient).
+`support` metrics use multiple reference traces to compare every other one to them.
+"""
 
 # Argname, description, dtype, default
 ARGS = [
@@ -37,15 +45,9 @@ SUPPORT_KWARGS = {
 
 
 if __name__ == '__main__':
-    config = make_config('Create quality map for seismic cube.', ARGS,
-                         os.path.basename(__file__).split('.')[0])
+    config = make_config(MSG, ARGS, os.path.basename(__file__).split('.')[0])
     if config['savedir'] == '_placeholder_':
         config['savedir'] = os.path.dirname(config['cube-path'])
-
-    print('\nPASSED ARGUMENTS:')
-    for argname, desc, _, _ in ARGS:
-        print(f'{argname.upper()} ({desc}) : {config[argname]}')
-    print('#'*110, '\n')
 
 
     geometry = SeismicGeometry(config['cube-path'])
