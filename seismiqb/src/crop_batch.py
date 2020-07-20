@@ -332,14 +332,14 @@ class SeismicCropBatch(Batch):
         #pylint: disable=unused-argument
         labels = self.get(ix, src_labels) if isinstance(src_labels, str) else src_labels
         labels = [labels] if not isinstance(labels, (tuple, list)) else labels
-        check_empty = False
+        check_sum = False
 
         if indices in [-1, 'all']:
             indices = np.arange(0, len(labels))
         elif indices in [1, 'single']:
             indices = np.arange(0, len(labels))
             np.random.shuffle(indices)
-            check_empty = True
+            check_sum = True
         elif isinstance(indices, int):
             raise ValueError('Inidices should be either -1, 1 or a sequence of ints.')
         elif isinstance(indices, (tuple, list, np.ndarray)):
@@ -352,7 +352,7 @@ class SeismicCropBatch(Batch):
 
         for label in labels:
             mask = label.add_to_mask(mask, locations=slice_, width=width)
-            if check_empty and np.sum(mask) > 0.0:
+            if check_sum and np.sum(mask) > 0.0:
                 break
         return mask
 
