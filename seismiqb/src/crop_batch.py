@@ -312,11 +312,12 @@ class SeismicCropBatch(Batch):
         src_labels : str
             Component of batch with labels dict.
         indices : str, int or sequence of ints
-            Maximum number of used labels per crop.
+            A choice scenario of used labels per crop.
             If -1 or 'all', all possible labels will be added.
+            If 1 or 'single', one random label will be added.
             If array-like then elements are interpreted as indices of the desired labels
             and must be ints in range [0, len(horizons) - 1].
-            Note if you want to pass an index of a single label it must a list with one
+            Note if you want to pass an index of a single label it must be a list with one
             element.
 
         Returns
@@ -331,12 +332,16 @@ class SeismicCropBatch(Batch):
         #pylint: disable=unused-argument
         labels = self.get(ix, src_labels) if isinstance(src_labels, str) else src_labels
         labels = [labels] if not isinstance(labels, (tuple, list)) else labels
+        check_sum = False
 
         if indices in [-1, 'all']:
             indices = np.arange(0, len(labels))
+        elif indices in [1, 'single']:
+            indices = np.arange(0, len(labels))
+            np.random.shuffle(indices)
+            check_sum = True
         elif isinstance(indices, int):
-            indices = np.random.choice(len(labels), size=indices, replace=False)
-            indices.sort()
+            raise ValueError('Inidices should be either -1, 1 or a sequence of ints.')
         elif isinstance(indices, (tuple, list, np.ndarray)):
             pass
         labels = [labels[idx] for idx in indices]
@@ -347,6 +352,8 @@ class SeismicCropBatch(Batch):
 
         for label in labels:
             mask = label.add_to_mask(mask, locations=slice_, width=width)
+            if check_sum and np.sum(mask) > 0.0:
+                break
         return mask
 
 
