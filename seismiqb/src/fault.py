@@ -1,12 +1,32 @@
 """ Horizon class and metrics. """
 
 import numpy as np
+import pandas as pd
 from PIL import ImageDraw, Image
 
 from .horizon import Horizon
 
 class Fault(Horizon):
     """ !! """
+    FAULT_STICKS = ['INLINE', 'iline', 'xline', 'cdp_x', 'cdp_y', 'height', 'name', 'number']
+    def file_to_points(self, path):
+        """ Get point cloud array from file values. """
+        #pylint: disable=anomalous-backslash-in-string
+        with open(path) as file:
+            line_len = len(file.readline().split(' '))
+        if line_len == 3:
+            names = Horizon.REDUCED_CHARISMA_SPEC
+        elif line_len == 8:
+            names = self.FAULT_STICKS
+        elif line_len >= 9:
+            names = Horizon.CHARISMA
+        else:
+            raise ValueError('Fault labels must be in FAULT_STICKS, CHARISMA or REDUCED_CHARISMA format.')
+
+        df = pd.read_csv(path, sep='\s+', names=names, usecols=Horizon.COLUMNS)
+        df.sort_values(Horizon.COLUMNS, inplace=True)
+        return df.values
+
     def add_to_mask(self, mask, locations=None, width=3, alpha=1, **kwargs):
         mask_bbox = np.array([[locations[0][0], locations[0][-1]+1],
                               [locations[1][0], locations[1][-1]+1],
