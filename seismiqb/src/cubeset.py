@@ -359,7 +359,6 @@ class SeismicCubeset(Dataset):
         """
         _ = kwargs
         label_dir = label_dir or '/BEST_HORIZONS/*'
-
         paths_txt = {}
         for i in range(len(self)):
             dir_path = '/'.join(self.index.get_fullpath(self.indices[i]).split('/')[:-1])
@@ -367,7 +366,7 @@ class SeismicCubeset(Dataset):
             paths_txt[self.indices[i]] = glob(dir_)
 
         self.load_geometries(**kwargs)
-        self.create_labels(paths=paths_txt, filter_zeros=filter_zeros, dst=dst_labels)
+        self.create_labels(paths=paths_txt, filter_zeros=filter_zeros, dst=dst_labels, **kwargs)
         self._p, self._bins = p, bins # stored for later sampler creation
 
 
