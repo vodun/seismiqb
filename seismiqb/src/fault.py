@@ -51,8 +51,8 @@ class Fault(Horizon):
             ImageDraw.Draw(img).line(list(line.ravel()), width=1, fill=1)
             slide_points = np.stack(np.where(np.array(img).T), axis=1) + np.array([x_min, h_min]).reshape(-1, 2)
             _points += [np.concatenate([np.ones((len(slide_points), 1)) * slide, slide_points], axis=1)]
-        return np.concatenate(_points, axis=0)
 
+        return np.concatenate(_points, axis=0)
 
     def add_to_mask(self, mask, locations=None, width=3, alpha=1, **kwargs):
         mask_bbox = np.array([[locations[0][0], locations[0][-1]+1],

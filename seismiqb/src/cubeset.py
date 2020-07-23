@@ -142,7 +142,7 @@ class SeismicCubeset(Dataset):
             label_list.sort(key=lambda label: label.h_mean)
             if filter_zeros:
                 _ = [getattr(item, 'filter')() for item in label_list]
-            getattr(self, dst)[ix] = label_list
+            getattr(self, dst)[ix] = [item for item in label_list if len(item.points) > 0]
 
     @property
     def sampler(self):
