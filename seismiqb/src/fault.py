@@ -13,7 +13,7 @@ class Fault(Horizon):
         """ Get point cloud array from file values. """
         #pylint: disable=anomalous-backslash-in-string
         with open(path) as file:
-            line_len = len(file.readline().split(' '))
+            line_len = len([item for item in file.readline().split(' ') if len(item) > 0])
         if line_len == 3:
             names = Horizon.REDUCED_CHARISMA_SPEC
         elif line_len == 8:

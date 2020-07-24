@@ -571,14 +571,15 @@ class Horizon:
 
         # Collect stats on separate axes. Note that depth stats are properties
         self.reset_storage('matrix')
-        self.i_min, self.x_min, self._h_min = np.min(self.points, axis=0).astype(np.int32)
-        self.i_max, self.x_max, self._h_max = np.max(self.points, axis=0).astype(np.int32)
+        if len(self.points) > 0:
+            self.i_min, self.x_min, self._h_min = np.min(self.points, axis=0).astype(np.int32)
+            self.i_max, self.x_max, self._h_max = np.max(self.points, axis=0).astype(np.int32)
 
-        self.i_length = (self.i_max - self.i_min) + 1
-        self.x_length = (self.x_max - self.x_min) + 1
-        self.bbox = np.array([[self.i_min, self.i_max],
-                              [self.x_min, self.x_max]],
-                             dtype=np.int32)
+            self.i_length = (self.i_max - self.i_min) + 1
+            self.x_length = (self.x_max - self.x_min) + 1
+            self.bbox = np.array([[self.i_min, self.i_max],
+                                [self.x_min, self.x_max]],
+                                dtype=np.int32)
 
 
     def from_file(self, path, transform=True, **kwargs):
