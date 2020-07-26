@@ -1700,7 +1700,7 @@ class Horizon:
             'yticks': yticks[::max(1, round(len(yticks)//10/100))*100][::-1],
             'y': 1.02,
             **kwargs
-            }
+        }
 
         plot_image([seismic_slide, mask], order_axes=order_axes, **kwargs)
 

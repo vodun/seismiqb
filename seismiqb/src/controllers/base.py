@@ -449,7 +449,7 @@ class BaseController:
                 batch = inference_pipeline.next_batch(D('size'))
 
             chunk_horizons = Horizon.from_mask(batch.assembled_pred,
-                                               dataset.grid_info, threshold=0.5, minsize=50)
+                                               dataset.grid_info, threshold=0.0, minsize=50)
             horizons.extend(chunk_horizons)
 
         return Horizon.merge_list(horizons, mean_threshold=5.5, adjacency=3, minsize=500)

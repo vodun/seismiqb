@@ -515,7 +515,7 @@ class SeismicCubeset(Dataset):
                                                                 printer=printer, hist=hist, plot=plot)
 
 
-    def show_slide(self, idx=0, n_line=0, axis='iline', mode='overlap', backend='matplotlib', **kwargs):
+    def show_slide(self, loc, idx=0, axis='iline', zoom_slice=None, mode='overlap', backend='matplotlib', **kwargs):
         """ Show full slide of the given cube on the given line.
 
         Parameters
@@ -534,43 +534,64 @@ class SeismicCubeset(Dataset):
         """
         components = ('images', 'masks') if list(self.labels.values())[0] else ('images',)
         cube_name = self.indices[idx]
-        geom = self.geometries[cube_name]
-        crop_shape = np.array(geom.cube_shape)
+        geometry = self.geometries[cube_name]
+        crop_shape = np.array(geometry.cube_shape)
 
-        axis = geom.parse_axis(axis)
+        axis = geometry.parse_axis(axis)
         point = np.array([[cube_name, 0, 0, 0]], dtype=object)
-        point[0, axis + 1] = n_line
+        point[0, axis + 1] = loc
         crop_shape[axis] = 1
 
         pipeline = (Pipeline()
                     .crop(points=point, shape=crop_shape)
                     .load_cubes(dst='images')
-                    .scale(mode='normalize', src='images')
-                    .rotate_axes(src='images'))
+                    .scale(mode='q', src='images'))
 
         if 'masks' in components:
-            horizons = kwargs.pop('horizons', -1)
-            width = kwargs.pop('width', 4)
+            indices = kwargs.pop('indices', -1)
+            width = kwargs.pop('width', 5)
             labels_pipeline = (Pipeline()
-                               .create_masks(dst='masks', width=width, horizons=horizons)
-                               .rotate_axes(src='masks'))
+                               .create_masks(dst='masks', width=width, indices=indices))
 
             pipeline = pipeline + labels_pipeline
 
         batch = (pipeline << self).next_batch(len(self), n_epochs=None)
         imgs = [np.squeeze(getattr(batch, comp)) for comp in components]
+        xticks = list(range(imgs[0].shape[0]))
+        yticks = list(range(imgs[0].shape[1]))
 
-        names = ['iline', 'xline', 'slice']
-        # configure defaults
+        if zoom_slice:
+            imgs = [img[zoom_slice] for img in imgs]
+            xticks = xticks[zoom_slice[0]]
+            yticks = yticks[zoom_slice[1]]
+
+        # Plotting defaults
+        if axis in [0, 1]:
+            header = geometry.index_headers[axis]
+            xlabel = geometry.index_headers[1 - axis]
+            ylabel = 'depth'
+            total = geometry.lens[axis]
+        if axis == 2:
+            header = 'Depth'
+            xlabel = geometry.index_headers[0]
+            ylabel = geometry.index_headers[1]
+            total = geometry.depth
+
         kwargs = {
-            'title': (names[axis] + ' {} out of {} on {}'.format(n_line, geom.cube_shape[axis], cube_name)),
-            'order_axes': (1, 0) if axis == 0 else (0, 1),
-            'xlabel': 'xlines' if axis in (0, 2) else 'ilines',
-            'ylabel': 'height' if axis in (0, 1) else 'xlines',
+            'mode': mode,
+            'backend': backend,
+            'title': (f'Data slice on `{geometry.name}`' +
+                      f'\n {header} {loc} out of {total}'),
+            'xlabel': xlabel,
+            'ylabel': ylabel,
+            'xticks': xticks[::max(1, round(len(xticks)//8/100))*100],
+            'yticks': yticks[::max(1, round(len(yticks)//10/100))*100][::-1],
+            'y': 1.02,
             **kwargs
         }
 
-        plot_image(imgs, backend=backend, mode=mode, **kwargs)
+        plot_image(imgs, **kwargs)
+        return batch
 
 
     def make_extension_grid(self, cube_name, crop_shape, labels_src='predicted_labels',
