@@ -382,6 +382,7 @@ class Horizon:
         self._h_min, self._h_max = None, None
         self._h_mean, self._h_std = None, None
         self._horizon_metrics = None
+        self.support_corrs = None
 
         # Attributes from geometry
         self.geometry = geometry
@@ -516,6 +517,8 @@ class Horizon:
         self._h_min, self._h_max = None, None
         self._h_mean, self._h_std = None, None
         self._len = None
+        self._horizon_metrics = None
+        self.support_corrs = None
 
         if storage == 'matrix':
             self._matrix = None
@@ -830,7 +833,7 @@ class Horizon:
 
 
     # Horizon usage: point/mask generation
-    def create_sampler(self, bins=None, quality_grid=None, **kwargs):
+    def create_sampler(self, bins=None, quality_grid=None, weights=None, threshold='q0.5', **kwargs):
         """ Create sampler based on horizon location.
 
         Parameters
@@ -847,8 +850,15 @@ class Horizon:
             points = _filtering_function(np.copy(self.points), 1 - quality_grid)
         else:
             points = self.points
-
-        self.sampler = HistoSampler(np.histogramdd(points/self.cube_shape, bins=bins))
+        if isinstance(weights, str):
+            weights = self.support_corrs[points[:, 0], points[:, 1]]
+            points = points[~np.isnan(weights)]
+            weights = weights[~np.isnan(weights)]
+            # q = float(q[1:]) if isinstance(q, str) else q
+            points = points[weights > 0]
+            weights = weights[weights > 0]
+            # weights = (weights - np.min(weights)) / (np.max(weights) - np.min(weights))
+        self.sampler = HistoSampler(np.histogramdd(points/self.cube_shape, bins=bins, weights=weights))
 
 
     def add_to_mask(self, mask, locations=None, width=3, alpha=1, **kwargs):
@@ -1157,8 +1167,10 @@ class Horizon:
         """
         printer(dedent(msg))
         if compute_metric:
-            return self.horizon_metrics.evaluate('support_corrs', supports=supports, agg='nanmean',
-                                                 plot=plot, savepath=savepath, **kwargs)
+            if self.support_corrs is None:
+                self.support_corrs = self.horizon_metrics.evaluate('support_corrs', supports=supports, agg='nanmean',
+                                                                   plot=plot, savepath=savepath, **kwargs)
+            return self.support_corrs
         return None
 
 
