@@ -361,7 +361,7 @@ class SeismicCropBatch(Batch):
     @inbatch_parallel(init='indices', post='_post_mask_rebatch', target='for',
                       src='masks', threshold=0.8, passdown=None, axis=-1)
     def mask_rebatch(self, ix, src='masks', threshold=0.8, passdown=None, axis=-1):
-        """ Remove elements with masks lesser than a threshold.
+        """ Remove elements with masks area lesser than a threshold.
 
         Parameters
         ----------
@@ -369,6 +369,8 @@ class SeismicCropBatch(Batch):
             Minimum percentage of covered area (spatial-wise) for a mask to be kept in the batch.
         passdown : sequence of str
             Components to filter.
+        axis : int
+            Axis to project horizon to before computing mask area.
         """
         _ = threshold, passdown
         pos = self.get_pos(None, src, ix)

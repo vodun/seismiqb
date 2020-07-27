@@ -1654,10 +1654,12 @@ class Horizon:
         ----------
         loc : int
             Number of slide to load.
+        width : int
+            Horizon thickness.
         axis : int
             Number of axis to load slide along.
-        stable : bool
-            Whether or not to use the same sorting order as in the segyfile.
+        zoom_slice : tuple
+            Tuple of slices to apply directly to 2d images.
         """
         # Make `locations` for slide loading
         axis = self.geometry.parse_axis(axis)

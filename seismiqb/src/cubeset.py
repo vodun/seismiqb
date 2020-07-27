@@ -520,12 +520,14 @@ class SeismicCubeset(Dataset):
 
         Parameters
         ----------
+        loc : int
+            Number of slide to load.
+        axis : int
+            Number of axis to load slide along.
+        zoom_slice : tuple
+            Tuple of slices to apply directly to 2d images.
         idx : str, int
             Number of cube in the index to use.
-        axis : str
-            Axis to cut along. Can be either `iline` or `xline`.
-        n_line : int
-            Number of line to show.
         mode : str
             Way of showing results. Can be either `overlap` or `separate`.
         backend : str
