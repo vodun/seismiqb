@@ -1165,7 +1165,7 @@ class Horizon:
     def check_proximity(self, other, offset=0):
         """ Shortcut for :meth:`.HorizonMetrics.evaluate` to compare against the best match of list of horizons. """
         _, overlap_info = self.verify_merge(other)
-        diffs = overlap_info['diffs'] + offset
+        diffs = overlap_info.get('diffs', 999) + offset
 
         overlap_info = {
             **overlap_info,

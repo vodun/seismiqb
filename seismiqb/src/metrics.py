@@ -1526,6 +1526,25 @@ def gridify(matrix, frequencies, iline=True, xline=True):
 
 
 
+def enlarge_carcass_metric(metric, geometry):
+    """ Increase visibility of a sparce metric grid. """
+    structure = np.ones((1, 3), dtype=np.uint8)
+    metric = np.copy(metric)
+    metric[np.isnan(metric)] = Horizon.FILL_VALUE
+    dilated_1 = cv2.dilate(metric, structure, iterations=15)
+    dilated_2 = cv2.dilate(metric, structure.T, iterations=15)
+
+    metric = np.full_like(metric, np.nan)
+    metric[dilated_1 > -999] = dilated_1[dilated_1 > -999]
+    metric[dilated_2 > -999] = dilated_2[dilated_2 > -999]
+    metric[(dilated_1 > -999) & (dilated_2 > -999)] = (dilated_1[[(dilated_1 > -999) & (dilated_2 > -999)]] + \
+                                                       dilated_2[[(dilated_1 > -999) & (dilated_2 > -999)]]) / 2
+
+    metric[np.isnan(geometry.std_matrix)] = np.nan
+    return metric
+
+
+
 @njit
 def correct_pi(horizon_phase, eps):
     """ Jit-accelerated function to <>. """

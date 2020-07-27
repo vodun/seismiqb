@@ -8,7 +8,7 @@ import pandas as pd
 
 def make_config(description, args, filename, show=True):
     """ Assemble script configuration from command line arguments, JSON file and inputs.
-    
+
     Parameters
     ----------
     description : str
@@ -30,8 +30,9 @@ def make_config(description, args, filename, show=True):
                                 default=default, help=desc)
         else:
             nargs = '*' if isinstance(default, list) else '?'
-            parser.add_argument(f'--{argname}', metavar=argname, nargs=nargs,
-                                default=default, type=dtype, help=desc)
+            dtype = dtype[0] if isinstance(dtype, list) else dtype
+            parser.add_argument(f'--{argname}', metavar=argname, nargs=nargs, type=dtype,
+                                default=default, help=desc)
 
     config_cl = parser.parse_args()
     config = {key.replace('_', '-') : value for key, value in vars(config_cl).items()}
