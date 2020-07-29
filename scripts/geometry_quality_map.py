@@ -24,7 +24,7 @@ ARGS = [
     ('savedir', 'path to save files to', str, '_placeholder_'),
     ('metrics', 'metrics to compute for quality map creation', str, ['support_hellinger']),
     ('add-prefix', 'whether to prepend cube name to the saved file names', bool, True),
-    ('save-txt', 'whether to save point cloud quality map to disk', bool, False),
+    ('save-txt', 'whether to save point cloud of quality map to disk', bool, False),
 ]
 
 

@@ -1,9 +1,11 @@
+""" Helper functions for scripts: mainly, parsing supplied CLI and JSON configurations. """
 import os
 import argparse
 import json
 
 import numpy as np
 import pandas as pd
+
 
 
 def make_config(description, args, filename, show=True):
@@ -21,7 +23,8 @@ def make_config(description, args, filename, show=True):
         Whether to print the resulting config.
     """
     # Parse the command line arguments and create convenient help (called by -h)
-    parser = argparse.ArgumentParser(description=description, formatter_class=argparse.RawTextHelpFormatter)
+    parser = argparse.ArgumentParser(description=description,
+                                     formatter_class=argparse.RawTextHelpFormatter)
     for argname, desc, dtype, default in args:
         if default is None:
             nargs = '*' if isinstance(dtype, list) else '?'
@@ -44,7 +47,7 @@ def make_config(description, args, filename, show=True):
             config_json = json.load(file)
         config = {**config_json, **config}
 
-    # Ask user to input unfilled required arguments 
+    # Ask user to input unfilled required arguments
     for argname, desc, dtype, default in args:
         if argname not in config or (default is None and config[argname] == default):
             config[argname] = input(f'Enter {dtype} value for {argname} ({desc}):')

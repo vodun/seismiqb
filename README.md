@@ -30,22 +30,22 @@ Working with SEG-Y cubes with various indexing headers (e.g. pre-stack and post-
 Our dedicated `Horizon` class is capable of loading data from multiple geological formats, computing a wealth of statistics of it, and a lot more. We also provide interfaces for other types of geological bodies like faults, facies and labels in pre-stack cubes.
 
 ### [Cubeset](tutorials/03_Cubeset.ipynb)
-A wrapper aroung `geometries` and `labels`, that can generate data from random labeled locations from multiple cube and apply both geological and computer vision augmentations.
+A wrapper aroung `geometries` and `labels`, that can generate data from random labeled locations from multiple cubes and apply both geological and computer vision augmentations.
 
 ### [Metrics](tutorials/04_Metrics.ipynb)
-In order to evaluate our results (particularly predicted horizons), we developed a few seismic attributes to assess quality of seismic cubes, sparce carcasses and labeled surfaces.
+In order to evaluate our results (particularly predicted horizons), we developed a few seismic attributes to assess quality of seismic cubes, sparse carcasses and labeled surfaces.
 
 
 ## Ready-to-use ML models
 
 ### [Carcass interpolation](models/Carcass_interpolation/01_Demo_E.ipynb)
-This model spreads a very sparce hand-labeled carcass of a horizon to the whole cube spatial area by solving a task of binary segmentation.
+This model spreads a very sparse hand-labeled carcass of a horizon to the whole cube spatial area by solving a task of binary segmentation.
 
 ### [Horizon extension](models/Horizon_extension/Demo_E.ipynb)
-Extending picked (possibly by other models) horizons to cover more area.
+Enlarge picked (possibly by other models) horizons to cover more area.
 
 ### [Interlayer segmentation](models/Interlayer_segmentation/Segmenting_interlayers.ipynb)
-Using the multi-class segmentation model to the task of horizon detection. Note that the model was developed with older `seismiQB` version and does not work anymore.
+Applying the multi-class segmentation model to the task of horizon detection. Note that the model was developed with older `seismiQB` versions and does not work anymore.
 
 ### [Inter-cube generalization](models/Intercube_generalization/01_Model.ipynb)
 Application of a model, trained on a set of cubes, to a completely unseen data.

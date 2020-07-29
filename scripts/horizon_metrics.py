@@ -29,7 +29,7 @@ ARGS = [
     ('savedir', 'path to save files to', str, '_placeholder_'),
     ('metrics', 'which metrics to compute', str, ['support_corrs', 'local_corrs']),
     ('add-prefix', 'whether to prepend horizon name to the saved file names', bool, True),
-    ('save-txt', 'whether to save point cloud metrics to disk', bool, False),
+    ('save-txt', 'whether to save point cloud of metrics to disk', bool, False),
 ]
 
 
