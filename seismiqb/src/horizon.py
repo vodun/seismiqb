@@ -1145,7 +1145,7 @@ class Horizon:
 
 
     # Evaluate horizon on its own / against other(s)
-    def evaluate(self, supports=50, plot=True, savepath=None, printer=print, **kwargs):
+    def evaluate(self, compute_metric=True, supports=50, plot=True, savepath=None, printer=print, **kwargs):
         """ Compute crucial metrics of a horizon. """
         msg = f"""
         Number of labeled points:                         {len(self)}
@@ -1156,14 +1156,16 @@ class Horizon:
         Number of holes inside borders:                   {self.number_of_holes}
         """
         printer(dedent(msg))
-        return self.horizon_metrics.evaluate('support_corrs', supports=supports, agg='nanmean',
-                                             plot=plot, savepath=savepath, **kwargs)
+        if compute_metric:
+            return self.horizon_metrics.evaluate('support_corrs', supports=supports, agg='nanmean',
+                                                 plot=plot, savepath=savepath, **kwargs)
+        return None
 
 
     def check_proximity(self, other, offset=0):
         """ Shortcut for :meth:`.HorizonMetrics.evaluate` to compare against the best match of list of horizons. """
         _, overlap_info = self.verify_merge(other)
-        diffs = overlap_info['diffs'] + offset
+        diffs = overlap_info.get('diffs', 999) + offset
 
         overlap_info = {
             **overlap_info,
@@ -1385,7 +1387,7 @@ class Horizon:
 
     @staticmethod
     def merge_list(horizons, mean_threshold=2.0, adjacency=3, minsize=50):
-        """ !!. """
+        """ Iteratively try to merge every horizon in a list to every other, until there are no possible merges. """
         horizons = [horizon for horizon in horizons if len(horizon) >= minsize]
 
         # iterate over list of horizons to merge what can be merged
@@ -1548,7 +1550,7 @@ class Horizon:
         df = pd.DataFrame(values, columns=self.COLUMNS)
         df.sort_values(['iline', 'xline'], inplace=True)
 
-        path = path if not add_height else f'{path}_#{self.h_mean}'
+        path = path if not add_height else f'{path}_#{round(self.h_mean, 1)}'
         df.to_csv(path, sep=' ', columns=self.COLUMNS, index=False, header=False)
 
 
@@ -1652,10 +1654,12 @@ class Horizon:
         ----------
         loc : int
             Number of slide to load.
+        width : int
+            Horizon thickness.
         axis : int
             Number of axis to load slide along.
-        stable : bool
-            Whether or not to use the same sorting order as in the segyfile.
+        zoom_slice : tuple
+            Tuple of slices to apply directly to 2d images.
         """
         # Make `locations` for slide loading
         axis = self.geometry.parse_axis(axis)
@@ -1698,7 +1702,7 @@ class Horizon:
             'yticks': yticks[::max(1, round(len(yticks)//10/100))*100][::-1],
             'y': 1.02,
             **kwargs
-            }
+        }
 
         plot_image([seismic_slide, mask], order_axes=order_axes, **kwargs)
 
