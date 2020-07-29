@@ -1496,6 +1496,7 @@ def digitize(matrix, quantiles):
 
     if len(bins) > 1:
         digitized = np.digitize(matrix, [*bins, np.nan]).astype(float)
+        digitized[digitized > 0] -= 1
     else:
         digitized = np.zeros_like(matrix, dtype=np.float64)
         digitized[matrix <= bins[0]] = 1.0
