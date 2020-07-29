@@ -1,4 +1,4 @@
-""" Compute quality map(s) for horizon(s). """
+""" Build a complete report on the results of carcass interpolation. """
 import os
 import sys
 from copy import copy
@@ -17,11 +17,12 @@ from seismiqb import METRIC_CMAP, enlarge_carcass_metric, plot_image
 
 
 # Help message
-MSG = """Compute quality map(s) for a given horizon(s).
-Under the hood, an array of amplitudes is cut from the cube along the horizon in a fixed window.
-After that, `local` metrics are computed by comparing each trace to its neighbours in
-a square window (e.g. in a 9x9 square) by using a fixed function (e.g. correlation coefficient).
-`support` metrics use multiple reference traces to compare every other one to them.
+MSG = """Compute a complete quality report on a set of horizons, and, if needed, set of carcasses.
+Each of the horizons is matched to exactly one carcass, if those provided.
+For each of the evaluated surfaces, a number of simple statistics like length and coverage are computed,
+as well as metric maps. For carcass-like surfaces, metrics are enlarged for visual clarity.
+The report is saved into passed directory and contains a CSV table with numeric results,
+metric images, and, if needed, horizons and metric point clouds.
 """
 
 # Argname, description, dtype, default
@@ -30,7 +31,7 @@ ARGS = [
     ('horizon-path', 'path to the horizon in a seismic cube in CHARISMA format', [str], None),
     ('carcass-path', 'path to the horizon in a seismic cube in CHARISMA format', [str], []),
     ('savedir', 'path to save files to', str, '_placeholder_'),
-    ('metrics', 'which metrics to compute', str, ['support_corrs', 'local_corrs']),
+    ('metrics', 'which metrics to compute', str, ['support_corrs']),
     ('add-prefix', 'whether to prepend horizon name to the saved file names', bool, True),
     ('save-files', 'whether to save horizons/carcasses to disk', bool, True),
     ('save-txt', 'whether to save point cloud metrics to disk', bool, False),
