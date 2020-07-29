@@ -639,6 +639,7 @@ class HorizonMetrics(BaseSeismicMetric):
 
     def instantaneous_phase(self, **kwargs):
         """ Compute instantaneous phase via Hilbert transform. """
+        #pylint: disable=unexpected-keyword-arg
         analytic = hilbert(self.data, axis=2)
 
         phase = np.angle(analytic)
