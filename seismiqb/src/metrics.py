@@ -10,6 +10,7 @@ import matplotlib.colors as mcolors
 
 import cv2
 from scipy.signal import hilbert, medfilt
+from scipy.stats import mode
 
 from ..batchflow.models.metrics import Metrics
 
@@ -582,7 +583,7 @@ class HorizonMetrics(BaseSeismicMetric):
         'local_hellinger', 'support_hellinger',
         'local_wasserstein', 'support_wasserstein',
         'local_tv', 'support_tv',
-        'hilbert',
+        'hilbert', 'instantaneous_phase',
     ]
 
     def __init__(self, horizons, orientation=None, window=23, offset=0, scale=False, chunk_size=256, line=1):
@@ -638,14 +639,19 @@ class HorizonMetrics(BaseSeismicMetric):
 
     def instantaneous_phase(self, **kwargs):
         """ Compute instantaneous phase via Hilbert transform. """
+        #pylint: disable=unexpected-keyword-arg
         analytic = hilbert(self.data, axis=2)
 
         phase = np.angle(analytic)
         phase = phase % (2 * np.pi) - np.pi
 
         phase_slice = phase[:, :, phase.shape[-1] // 2]
-        phase_slice = correct_pi(phase_slice, 1e-5)
-        phase_slice[self.horizon.full_matrix == self.horizon.FILL_VALUE] = np.nan
+        phase_slice[np.isnan(np.std(self.data, axis=-1))] = np.nan
+
+        avg = mode(phase_slice[~np.isnan(phase_slice)].round(2), axis=None)
+        phase_slice -= avg[0][0]
+        phase_slice[phase_slice >= np.pi] -= 2 * np.pi
+
 
         plot_dict = {
             'spatial': self.spatial,
@@ -660,7 +666,7 @@ class HorizonMetrics(BaseSeismicMetric):
 
 
     def find_best_match(self, offset=0, **kwargs):
-        """ !!. """
+        """ Find the closest horizon to the first one in the list of passed at initialization. """
         _ = kwargs
         if isinstance(self.horizons[1], Horizon):
             self.horizons[1] = [self.horizons[1]]
@@ -1490,6 +1496,7 @@ def digitize(matrix, quantiles):
 
     if len(bins) > 1:
         digitized = np.digitize(matrix, [*bins, np.nan]).astype(float)
+        digitized[digitized > 0] -= 1
     else:
         digitized = np.zeros_like(matrix, dtype=np.float64)
         digitized[matrix <= bins[0]] = 1.0
@@ -1523,6 +1530,25 @@ def gridify(matrix, frequencies, iline=True, xline=True):
 
     grid[np.isnan(matrix)] = np.nan
     return grid
+
+
+
+def enlarge_carcass_metric(metric, geometry):
+    """ Increase visibility of a sparce metric grid. """
+    structure = np.ones((1, 3), dtype=np.uint8)
+    metric = np.copy(metric)
+    metric[np.isnan(metric)] = Horizon.FILL_VALUE
+    dilated_1 = cv2.dilate(metric, structure, iterations=15)
+    dilated_2 = cv2.dilate(metric, structure.T, iterations=15)
+
+    metric = np.full_like(metric, np.nan)
+    metric[dilated_1 > -999] = dilated_1[dilated_1 > -999]
+    metric[dilated_2 > -999] = dilated_2[dilated_2 > -999]
+    metric[(dilated_1 > -999) & (dilated_2 > -999)] = (dilated_1[[(dilated_1 > -999) & (dilated_2 > -999)]] + \
+                                                       dilated_2[[(dilated_1 > -999) & (dilated_2 > -999)]]) / 2
+
+    metric[np.isnan(geometry.std_matrix)] = np.nan
+    return metric
 
 
 
