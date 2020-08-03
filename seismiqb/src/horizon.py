@@ -1715,7 +1715,7 @@ class Horizon:
         A horizon object with new matrix object and a reference to the old geometry attribute.
         """
         return Horizon(np.copy(self.matrix), self.geometry, i_min=self.i_min, x_min=self.x_min,
-                       name=f'Copy_of_{self.name}')
+                       name=f'copy_of_{self.name}')
 
 
 class StructuredHorizon(Horizon):
