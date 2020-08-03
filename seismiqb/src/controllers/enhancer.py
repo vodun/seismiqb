@@ -51,6 +51,8 @@ class Enhancer(BaseController):
         """
         dataset = self.make_dataset_from_horizon(horizon)
         super().inference(dataset, **kwargs)
+        self.predictions = [self.predictions[0]]
+        self.predictions[0].name = f'enhanced_{horizon.name}'
 
 
     def load_pipeline(self):
