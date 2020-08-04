@@ -1,4 +1,5 @@
 """ Interpolate horizon from a carcass. """
+#pylint: disable=attribute-defined-outside-init
 import numpy as np
 
 from .base import BaseController
@@ -27,6 +28,16 @@ class CarcassInterpolator(BaseController):
 
         return super().train(dataset, use_grid=True, grid_src=horizon_grid, **kwargs)
 
+    def inference(self, dataset, version=1, orientation='i', overlap_factor=2, heights_range=None,
+                  batch_size_multiplier=1, **kwargs):
+        """ Keep only the biggest horizon; name it after the carcass. """
+        super().inference(dataset=dataset, version=version, orientation=orientation,
+                          overlap_factor=overlap_factor, heights_range=heights_range,
+                          batch_size_multiplier=batch_size_multiplier, **kwargs)
+
+        self.predictions = [self.predictions[0]]
+        self.predictions[0].name = f'from_{dataset.labels[0][0].name}'
+
 
 
 class GridInterpolator(BaseController):
@@ -48,3 +59,14 @@ class GridInterpolator(BaseController):
                           use_grid=True)
 
         return super().train(dataset, use_grid=True, **kwargs)
+
+
+    def inference(self, dataset, version=1, orientation='i', overlap_factor=2, heights_range=None,
+                  batch_size_multiplier=1, **kwargs):
+        """ Keep only the biggest horizon; name it after the gridded horizon. """
+        super().inference(dataset=dataset, version=version, orientation=orientation,
+                          overlap_factor=overlap_factor, heights_range=heights_range,
+                          batch_size_multiplier=batch_size_multiplier, **kwargs)
+
+        self.predictions = [self.predictions[0]]
+        self.predictions[0].name = f'from_gridded_{dataset.labels[0][0].name}'
