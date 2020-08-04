@@ -392,7 +392,7 @@ def gen_crop_coordinates(point, horizon_matrix, zero_traces,
                 orders_array[top])
 
 
-@njit
+# @njit
 def groupby_mean(array, axis=-1):
     """ Faster version of mean-groupby of data along the first two columns.
     Input array is supposed to have (N, 3) shape.
@@ -430,7 +430,7 @@ def groupby_mean(array, axis=-1):
     return output[:position]
 
 
-@njit
+# @njit
 def groupby_min(array, axis=-1):
     """ Faster version of min-groupby of data along the first two columns.
     Input array is supposed to have (N, 3) shape.
@@ -467,7 +467,7 @@ def groupby_min(array, axis=-1):
     return output[:position]
 
 
-@njit
+# @njit
 def groupby_max(array, axis=-1):
     """ Faster version of min-groupby of data along the first two columns.
     Input array is supposed to have (N, 3) shape.
