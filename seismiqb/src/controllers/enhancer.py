@@ -49,6 +49,7 @@ class Enhancer(BaseController):
         kwargs : dict
             Other arguments for `.meth:Detector.inference`.
         """
+        #pylint: disable=attribute-defined-outside-init
         dataset = self.make_dataset_from_horizon(horizon)
         super().inference(dataset, **kwargs)
         self.predictions = [self.predictions[0]]

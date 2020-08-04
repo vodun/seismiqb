@@ -1,4 +1,5 @@
 """ Interpolate horizon from a carcass. """
+#pylint: disable=attribute-defined-outside-init
 import numpy as np
 
 from .base import BaseController

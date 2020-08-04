@@ -58,7 +58,7 @@ class BaseController:
     #pylint: disable=access-member-before-definition, attribute-defined-outside-init
     def __init__(self, batch_size=64, crop_shape=(1, 256, 256),
                  model_config=None, model_path=None, device=None,
-                 show_plots=False, save_dir=None, logger=None, bar=True):
+                 show_plots=False, save_dir=None, name=None, logger=None, bar=True):
         for key, value in locals().items():
             if key != 'self':
                 setattr(self, key, value)
@@ -108,7 +108,6 @@ class BaseController:
             uss = process.memory_full_info().uss / (1024 ** 3)
             self.logger(f'{self.__class__.__name__} ::: {uss:2.4} ::: {msg}')
 
-
     # Dataset creation: geometries, labels, grids, samplers
     def make_dataset(self, cube_paths, horizon_paths=None):
         """ Create an instance of :class:`.SeismicCubeset` with cubes and horizons.
@@ -147,7 +146,6 @@ class BaseController:
                 msg += f'    {hor.name}'
         self.log(f'Created dataset ::: {msg}')
         return dataset
-
 
     def make_dataset_from_horizon(self, horizon):
         """ Create an instance of :class:`.SeismicCubeset` from a given horizon.
@@ -221,6 +219,7 @@ class BaseController:
         dataset.create_sampler(quality_grid=grid, bins=bins)
         dataset.modify_sampler('train_sampler', finish=True, **kwargs)
         dataset.train_sampler(random.randint(0, 100000))
+        self.log('Created sampler')
 
         for i, idx in enumerate(dataset.indices):
             dataset.show_slices(
@@ -236,7 +235,6 @@ class BaseController:
                 cmap='Reds', interpolation='bilinear', show=self.show_plots, figsize=(15, 15),
                 savepath=self.make_save_path(f'slices_n_{idx}.png')
             )
-
 
     # Train model on a created dataset
     def train(self, dataset, model_config=None, device=None, n_iters=300,
@@ -308,8 +306,6 @@ class BaseController:
         """ Load pre-trained model from disk. """
         path = path or self.model_path
         raise NotImplementedError('Yet to be implemented!')
-
-
 
     # Inference on a chosen set of data
     def inference(self, dataset, version=1, orientation='i', overlap_factor=2, heights_range=None,
@@ -419,7 +415,6 @@ class BaseController:
                         for item in crop_shape_grid]
         return config, crop_shape_grid, strides_grid
 
-
     def inference_0(self, dataset, heights_range=None, orientation='i', overlap_factor=2, **kwargs):
         """ Inference on chunks, assemble into massive 3D array, extract horizon surface. """
         _ = kwargs
@@ -473,7 +468,6 @@ class BaseController:
             inference_pipeline.reset('variables')
             batch = None
             inference_pipeline = None
-            self.log('AFTER CLEANUP')
 
         return Horizon.merge_list(horizons, mean_threshold=5.5, adjacency=3, minsize=500)
 
@@ -553,6 +547,13 @@ class BaseController:
                 dump_name += horizon.name or 'predicted'
                 horizon.dump(path=self.make_save_path(*prefix, dump_name), add_height=False)
 
+                if self.name is not None:
+                    cube_dir = os.path.dirname(horizon.geometry.path)
+                    savepath = os.path.join(cube_dir, 'HORIZONS_DUMP', self.name)
+                    os.makedirs(savepath, exist_ok=True)
+                    horizon.dump(path=os.path.join(savepath, dump_name), add_height=False)
+                    self.log(f'Dumped horizon to {os.path.join(savepath, dump_name)}')
+
             info['corrs'] = np.nanmean(corrs)
             info['local_corrs'] = np.nanmean(local_corrs)
             results.append((info))
@@ -561,7 +562,6 @@ class BaseController:
                      f'corrs {info["corrs"]:4.4}, local corrs {info["local_corrs"]:4.4}, depth {horizon.h_mean}')
 
         return results
-
 
     # Pipelines
     def load_pipeline(self):
