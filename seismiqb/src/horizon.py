@@ -647,9 +647,9 @@ class Horizon:
         return points
 
 
-    @staticmethod
-    def from_mask(mask, grid_info=None, geometry=None, shifts=None,
-                  mode='mean', threshold=0.5, minsize=0, prefix='predict', **kwargs):
+    @classmethod
+    def from_mask(cls, mask, grid_info=None, geometry=None, shifts=None, mode='mean',
+                  threshold=0.5, minsize=0, prefix='predict', axis=-1, **kwargs):
         """ Convert mask to a list of horizons.
         Returned list is sorted on length of horizons.
 
@@ -667,6 +667,7 @@ class Horizon:
         prefix : str
             Name of horizon to use.
         """
+        print('in horizon')
         _ = kwargs
         if grid_info is not None:
             geometry = grid_info['geom']
@@ -699,8 +700,8 @@ class Horizon:
                 if len(indices[0]) >= minsize:
                     coords = np.vstack([indices[i] + sl[i].start for i in range(3)]).T
 
-                    points = group_function(coords) + shifts
-                    horizons.append(Horizon(points, geometry, name=f'{prefix}_{i}'))
+                    points = group_function(coords, axis=axis) + shifts
+                    horizons.append(cls(points, geometry, name=f'{prefix}_{i}'))
 
         horizons.sort(key=len)
         return horizons

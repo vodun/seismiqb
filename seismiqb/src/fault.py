@@ -2,13 +2,21 @@
 
 import numpy as np
 import pandas as pd
+from copy import copy
+
 from PIL import ImageDraw, Image
 
+from scipy.ndimage import find_objects
+from skimage.measure import label
+
 from .horizon import Horizon
+from .utils import groupby_mean, groupby_min, groupby_max
 
 class Fault(Horizon):
     """ !! """
     FAULT_STICKS = ['INLINE', 'iline', 'xline', 'cdp_x', 'cdp_y', 'height', 'name', 'number']
+    COLUMNS = ['iline', 'xline', 'height', 'name', 'number']
+
     def file_to_points(self, path):
         """ Get point cloud array from file values. """
         #pylint: disable=anomalous-backslash-in-string
@@ -82,3 +90,40 @@ class Fault(Horizon):
 
         mask[points[:, 0], points[:, 1], points[:, 2]] = 1
         return mask
+
+
+    def points_to_sticks(self, points, i_step=1, num=5):
+        """ !! """
+        ilines = np.unique(points[:, 0])
+        ilines = ilines[::i_step]
+        all_sticks = []
+        n_stick = 0
+        for il in ilines:
+            curr = points[points[:, 0] == il]
+            length = len(curr)
+            step = length // num
+            if step == 0:
+                continue
+            # print('-'*20)
+            # print('length', length)
+            # print('step', step)
+            # print('unique', len((points)), len(np.unique(points[:, 0])), len(np.unique(points[:, 1])))
+            selected = np.vstack([curr[::step], curr[-1].reshape(1, -1)])
+            sticks = np.hstack([selected, np.array([n_stick] * len(selected)).reshape(-1, 1)])
+            all_sticks.append(sticks)
+            n_stick += 1
+        # for x in all_sticks:
+        #     print(x.shape)
+        return np.vstack(all_sticks).reshape(-1, 4)
+
+
+    def dump(self, path, i_step=1, num=5):
+        """ Save Fault points to the disk in CHARISMA Fault Sticks format.
+        """
+        fault_sticks = self.points_to_sticks(copy(self.points), i_step, num)
+        fault_sticks = np.hstack([fault_sticks[:, :-1],
+                                  np.array([self.name] * len(fault_sticks)).reshape(-1, 1),
+                                  fault_sticks[:, -1:]])
+        df = pd.DataFrame(fault_sticks, columns=self.COLUMNS)
+        path = f'{path}_{self.name}'
+        df.to_csv(path, sep=' ', columns=self.COLUMNS, index=False, header=False)
