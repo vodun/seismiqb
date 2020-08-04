@@ -92,7 +92,7 @@ class Fault(Horizon):
         return mask
 
 
-    def points_to_sticks(self, points, i_step=1, num=5):
+    def points_to_sticks(self, points, i_step, num):
         """ !! """
         ilines = np.unique(points[:, 0])
         ilines = ilines[::i_step]
@@ -104,16 +104,10 @@ class Fault(Horizon):
             step = length // num
             if step == 0:
                 continue
-            # print('-'*20)
-            # print('length', length)
-            # print('step', step)
-            # print('unique', len((points)), len(np.unique(points[:, 0])), len(np.unique(points[:, 1])))
             selected = np.vstack([curr[::step], curr[-1].reshape(1, -1)])
             sticks = np.hstack([selected, np.array([n_stick] * len(selected)).reshape(-1, 1)])
             all_sticks.append(sticks)
             n_stick += 1
-        # for x in all_sticks:
-        #     print(x.shape)
         return np.vstack(all_sticks).reshape(-1, 4)
 
 
