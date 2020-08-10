@@ -192,7 +192,7 @@ class MatplotlibPlotter:
         # Create figure and axes
         if 'ax' in kwargs:
             ax = kwargs['ax']
-            fig = ax.fig
+            fig = ax.figure
         else:
             fig, ax = plt.subplots(**figure_kwargs)
 
@@ -271,7 +271,7 @@ class MatplotlibPlotter:
         # Create figure and axes
         if 'ax' in kwargs:
             ax = kwargs['ax']
-            fig = ax.fig
+            fig = ax.figure
         else:
             fig, ax = plt.subplots(**figure_kwargs)
 
