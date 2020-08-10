@@ -221,6 +221,9 @@ class BaseController:
         dataset.train_sampler(random.randint(0, 100000))
         self.log('Created sampler')
 
+        # Cleanup
+        dataset.sampler = None
+
         for i, idx in enumerate(dataset.indices):
             dataset.show_slices(
                 src_sampler='train_sampler', normalize=False, shape=self.crop_shape,
@@ -300,6 +303,7 @@ class BaseController:
         # Cleanup
         torch.cuda.empty_cache()
         self.model_pipeline.reset('variables')
+        batch.images, batch.masks = None, None
         return last_loss
 
     def load_model(self, path=None):
@@ -466,8 +470,10 @@ class BaseController:
 
             # Cleanup
             inference_pipeline.reset('variables')
+            batch.assembled_pred, batch.images, batch.masks = None, None, None
             batch = None
             inference_pipeline = None
+            gc.collect()
 
         return Horizon.merge_list(horizons, mean_threshold=5.5, adjacency=3, minsize=500)
 

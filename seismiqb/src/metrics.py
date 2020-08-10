@@ -10,7 +10,7 @@ import matplotlib.colors as mcolors
 
 import cv2
 from scipy.signal import hilbert, medfilt
-from scipy.stats import mode
+from scipy.stats import mode as mode_scipy
 
 from ..batchflow.models.metrics import Metrics
 
@@ -465,7 +465,7 @@ class BaseSeismicMetric(Metrics):
         metric[:, :, 1] = median_phase
         metric[:, :, 2:] = phase
 
-        title = 'phase by {}'.format(mode)
+        title = 'phase by {}'.format(correction)
         plot_dict = {
             'spatial': self.spatial,
             'title': '{} for {} on cube {}'.format(title, self.name, self.cube_name),
@@ -648,7 +648,7 @@ class HorizonMetrics(BaseSeismicMetric):
         phase_slice = phase[:, :, phase.shape[-1] // 2]
         phase_slice[np.isnan(np.std(self.data, axis=-1))] = np.nan
 
-        avg = mode(phase_slice[~np.isnan(phase_slice)].round(2), axis=None)
+        avg = mode_scipy(phase_slice[~np.isnan(phase_slice)].round(2), None)
         phase_slice -= avg[0][0]
         phase_slice[phase_slice >= np.pi] -= 2 * np.pi
 
