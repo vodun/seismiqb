@@ -820,7 +820,7 @@ class GeometryMetrics(BaseSeismicMetric):
         pbar = tqdm if pbar else lambda iterator, *args, **kwargs: iterator
         metric = np.full((*self.geometry.ranges, l), np.nan)
 
-        indices = [g.dataframe['trace_index'] for g in self.geometries]
+        indices = [geometry.dataframe['trace_index'] for geometry in self.geometries]
 
         for idx, _ in pbar(indices[0].iteritems(), total=len(indices[0])):
             trace_indices = [ind[idx] for ind in indices]
@@ -830,9 +830,8 @@ class GeometryMetrics(BaseSeismicMetric):
             store_key = [self.geometries[0].uniques_inversed[i][item] for i, item in enumerate(keys)]
             store_key = tuple(store_key)
 
-            traces = []
-            for geometry, trace_index in zip(self.geometries, trace_indices):
-                traces.append(geometry.load_trace(trace_index))
+            traces = [geometry.load_trace(trace_index) for
+                      geometry, trace_index in zip(self.geometries, trace_indices)]
 
             metric[store_key] = func(*traces, **kwargs)
 
@@ -861,7 +860,7 @@ class GeometryMetrics(BaseSeismicMetric):
             store_key = [self.geometries[0].uniques_inversed[i][item] for i, item in enumerate(keys)]
             store_key = tuple(store_key)
 
-            traces = [g.load_trace(idx) for g in self.geometries]
+            traces = [geometry.load_trace(idx) for geometry in self.geometries]
             metric[store_key] = func(*traces, **kwargs)
 
         title = f"tracewise unsafe {func}"
@@ -891,29 +890,27 @@ class GeometryMetrics(BaseSeismicMetric):
         pbar = tqdm if pbar else lambda iterator, *args, **kwargs: iterator
         metric = np.full((*self.geometries[0].ranges, l), np.nan)
 
-        block_indices = [np.arange(0, self.geometries[0].cube_shape[0], block_size[0]-window[0]),
-                         np.arange(0, self.geometries[0].cube_shape[1], block_size[1]-window[1])]
         heights = np.arange(self.geometries[0].cube_shape[2]) if heights is None else np.arange(*heights)
 
         with pbar(total=total) as prog_bar:
-            for il_block in block_indices[0]:
-                for ix_block in block_indices[1]:
-                    block_len = np.min((np.array(self.geometries[0].ranges) - (il_block, ix_block),
+            for il_block in np.arange(0, self.geometries[0].cube_shape[0], block_size[0]-window[0]):
+                for xl_block in np.arange(0, self.geometries[0].cube_shape[1], block_size[1]-window[1]):
+                    block_len = np.min((np.array(self.geometries[0].ranges) - (il_block, xl_block),
                                         block_size), axis=0)
                     locations = [np.arange(il_block, il_block + block_len[0]),
-                                 np.arange(ix_block, ix_block + block_len[1]),
+                                 np.arange(xl_block, xl_block + block_len[1]),
                                  heights]
 
-                    blocks = [prep_func(g.load_crop(locations)) for g in self.geometries]
+                    blocks = [prep_func(geometry.load_crop(locations)) for geometry in self.geometries]
 
                     for il_kernel in range(low[0], blocks[0].shape[0] - high[0]):
-                        for ix_kernel in range(low[1], blocks[0].shape[1] - high[1]):
+                        for xl_kernel in range(low[1], blocks[0].shape[1] - high[1]):
 
                             il_from, il_to = il_kernel - low[0], il_kernel + high[0]
-                            ix_from, ix_to = ix_kernel - low[1], ix_kernel + high[1]
+                            xl_from, xl_to = xl_kernel - low[1], xl_kernel + high[1]
 
-                            subsets = [b[il_from:il_to, ix_from:ix_to, :].reshape((-1, b.shape[-1])) for b in blocks]
-                            metric[il_block + il_kernel, ix_block + ix_kernel, :] = func(*subsets, **kwargs)
+                            subsets = [b[il_from:il_to, xl_from:xl_to, :].reshape((-1, b.shape[-1])) for b in blocks]
+                            metric[il_block + il_kernel, xl_block + xl_kernel, :] = func(*subsets, **kwargs)
                             prog_bar.update(1)
 
         title = f"Blockwise {func}"
@@ -923,7 +920,7 @@ class GeometryMetrics(BaseSeismicMetric):
             'cmap': 'seismic',
             'zmin': None, 'zmax': None,
             'ignore_value': np.nan,
-            # **kwargs
+            **kwargs
         }
         return metric, plot_dict
 
