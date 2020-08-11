@@ -16,7 +16,7 @@ from skimage.measure import label
 
 from ..batchflow import HistoSampler
 
-from .utils import round_to_array, groupby_mean, groupby_min, groupby_max
+from .utils import round_to_array, groupby_mean, groupby_min, groupby_max, cut_data_along_horizon
 from .plotters import plot_image
 
 
@@ -969,38 +969,26 @@ class Horizon:
         background[self.geometry.zero_traces == 1] = np.nan
         return background
 
-    def get_array_values(self, array, array_offset, width=5, fill_value=-999999, axes=(2, 1, 0)):
+    def get_array_values(self, array, array_offset, width=5, axes=(2, 1, 0)):
         """ Get values from an external array along the horizon.
+
+        Parameters
+        ----------
+        array : np.ndarray
+            A data-array to make a cut from.
+        array_offset : tuple
+            an offset defining the location of given array with respect to the horizon.
+        width : int
+            required width of the resulting cut.
+        axes : tuple
+            if not None, axes-transposition with the required axes-order is used.
         """
         horizon_offset = self.bbox[0, 0], self.bbox[1, 0]
 
         if axes is not None:
             array = np.transpose(array, axes=axes)
 
-        @njit
-        def make_cut(array, horizon_matrix, width, horizon_offset, array_offset):
-            # unpack offsets
-            i_hor_offset, x_hor_offset = horizon_offset
-            i_cube_offset, x_cube_offset, h_cube_offset = array_offset
-
-            # loop over elements of cube and fill the cut
-            cut_out = np.zeros(array.shape[:2] + (width, ))
-            for il in range(cut_out.shape[0]):
-                for xl in range(cut_out.shape[1]):
-                    il_, xl_ = il + i_cube_offset - i_hor_offset, xl + x_cube_offset - x_hor_offset
-                    if il_ < horizon_matrix.shape[0] and xl_ < horizon_matrix.shape[1]:
-                        if horizon_matrix[il_, xl_] != fill_value:
-                            if (horizon_matrix[il_, xl_] - h_cube_offset - width//2 >= 0 and
-                                    horizon_matrix[il_, xl_] - h_cube_offset + width//2 + 1 <= array.shape[-1]):
-                                cut_out[il, xl, :] = array[il, xl][horizon_matrix[il_, xl_] -
-                                                                   h_cube_offset - width//2:
-                                                                   horizon_matrix[il_, xl_] -
-                                                                   h_cube_offset + width//2 + 1]
-
-
-            return cut_out
-
-        cut_out = make_cut(array, self.matrix, width, horizon_offset, array_offset)
+        cut_out = cut_data_along_horizon(array, self.matrix, width, horizon_offset, array_offset, self.FILL_VALUE)
         return cut_out
 
     def get_cube_values_line(self, orientation='ilines', line=1, window=23, offset=0, scale=False):

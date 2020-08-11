@@ -285,6 +285,30 @@ def convert_point_cloud(path, path_save, names=None, order=None, transform=None)
     data.to_csv(path_save, sep=' ', index=False, header=False)
 
 
+@njit
+def cut_data_along_horizon(array, horizon_matrix, width, horizon_offset, array_offset, fill_value):
+    """ Jit-accelerated function for cutting out array-values along a horizon surface.
+    """
+    # unpack offsets
+    i_hor_offset, x_hor_offset = horizon_offset
+    i_cube_offset, x_cube_offset, h_cube_offset = array_offset
+
+    # loop over elements of cube and fill the cut
+    cut_out = np.zeros(array.shape[:2] + (width, ))
+    for il in range(cut_out.shape[0]):
+        for xl in range(cut_out.shape[1]):
+            il_, xl_ = il + i_cube_offset - i_hor_offset, xl + x_cube_offset - x_hor_offset
+            if il_ < horizon_matrix.shape[0] and xl_ < horizon_matrix.shape[1]:
+                if horizon_matrix[il_, xl_] != fill_value:
+                    if (horizon_matrix[il_, xl_] - h_cube_offset - width//2 >= 0 and
+                            horizon_matrix[il_, xl_] - h_cube_offset + width//2 + 1 <= array.shape[-1]):
+                        cut_out[il, xl, :] = array[il, xl][horizon_matrix[il_, xl_] -
+                                                           h_cube_offset - width//2:
+                                                           horizon_matrix[il_, xl_] -
+                                                           h_cube_offset + width//2 + 1]
+
+
+    return cut_out
 
 @njit
 def aggregate(array_crops, array_grid, crop_shape, predict_shape, order):
