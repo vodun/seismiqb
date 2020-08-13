@@ -58,7 +58,7 @@ class BaseController:
     #pylint: disable=access-member-before-definition, attribute-defined-outside-init
     def __init__(self, batch_size=64, crop_shape=(1, 256, 256),
                  model_config=None, model_path=None, device=None,
-                 show_plots=False, save_dir=None, name=None, logger=None, bar=True):
+                 show_plots=False, save_dir=None, logger=None, bar=True):
         for key, value in locals().items():
             if key != 'self':
                 setattr(self, key, value)
@@ -552,13 +552,6 @@ class BaseController:
                 dump_name += f'{i}_' if n > 1 else ''
                 dump_name += horizon.name or 'predicted'
                 horizon.dump(path=self.make_save_path(*prefix, dump_name), add_height=False)
-
-                if self.name is not None:
-                    cube_dir = os.path.dirname(horizon.geometry.path)
-                    savepath = os.path.join(cube_dir, 'HORIZONS_DUMP', self.name)
-                    os.makedirs(savepath, exist_ok=True)
-                    horizon.dump(path=os.path.join(savepath, dump_name), add_height=False)
-                    self.log(f'Dumped horizon to {os.path.join(savepath, dump_name)}')
 
             info['corrs'] = np.nanmean(corrs)
             info['local_corrs'] = np.nanmean(local_corrs)

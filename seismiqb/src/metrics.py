@@ -1533,13 +1533,13 @@ def gridify(matrix, frequencies, iline=True, xline=True):
 
 
 
-def enlarge_carcass_metric(metric, geometry):
+def enlarge_carcass_metric(metric, geometry, width=10):
     """ Increase visibility of a sparce metric grid. """
     structure = np.ones((1, 3), dtype=np.uint8)
     metric = np.copy(metric)
     metric[np.isnan(metric)] = Horizon.FILL_VALUE
-    dilated_1 = cv2.dilate(metric, structure, iterations=15)
-    dilated_2 = cv2.dilate(metric, structure.T, iterations=15)
+    dilated_1 = cv2.dilate(metric, structure, iterations=width)
+    dilated_2 = cv2.dilate(metric, structure.T, iterations=width)
 
     metric = np.full_like(metric, np.nan)
     metric[dilated_1 > -999] = dilated_1[dilated_1 > -999]
