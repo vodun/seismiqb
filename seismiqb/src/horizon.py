@@ -204,7 +204,7 @@ class UnstructuredHorizon:
             idx_2 = np.zeros_like(others_iterator) if axis == 1 else others_iterator
 
 
-        heights = self.dataframe[self.name].get(iterator, np.nan).values.astype(np.int32)
+        heights = self.dataframe[self.name].reindex(iterator, fill_value=np.nan).values.astype(np.int32)
 
         # Filter labels based on height
         heights_mask = np.asarray((np.isnan(heights) == False) & # pylint: disable=singleton-comparison

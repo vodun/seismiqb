@@ -663,7 +663,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
         else:
             iterator = np.arange(start, end+1, step)
 
-        indices = self.dataframe['trace_index'].get(iterator, np.nan).values
+        indices = self.dataframe['trace_index'].reindex(iterator, fill_value=np.nan).values
 
         if return_iterator:
             return indices, iterator
@@ -681,7 +681,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
             others = self.uniques[other_axis]
 
         iterator = list(zip([location] * len(others), others) if axis == 0 else zip(others, [location] * len(others)))
-        indices = self.dataframe['trace_index'].get(iterator, np.nan).values
+        indices = self.dataframe['trace_index'].reindex(iterator, fill_value=np.nan).values
 
         #TODO: keep only uniques, when needed, with `nan` filtering
         if stable:
@@ -718,8 +718,9 @@ class SeismicGeometrySEGY(SeismicGeometry):
     def make_crop_indices(self, locations):
         """ Create indices for 3D crop loading. """
         iterator = list(product(*[[self.uniques[idx][i] for i in locations[idx]] for idx in range(2)]))
-        indices = self.dataframe['trace_index'].get(list(iterator), np.nan).values
-        return np.unique(indices)
+        indices = self.dataframe['trace_index'].reindex(iterator, fill_value=np.nan).values
+        _, unique_ind = np.unique(indices, return_index=True)
+        return indices[np.sort(unique_ind, kind='stable')]
 
     def load_crop(self, locations, threshold=10, mode=None, **kwargs):
         """ Smart choice between using :meth:`._load_crop` and stacking multiple slides created by :meth:`.load_slide`.
