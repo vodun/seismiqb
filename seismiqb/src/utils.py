@@ -407,7 +407,7 @@ def groupby_mean(array, axis=-1):
     _axes.remove(axis)
     axes = np.array(_axes)
 
-    prev = array[0, :].take(_axes, 1)
+    prev = array[0, axes]
     s, c = array[0, axis], 1
 
     for i in range(1, n):
