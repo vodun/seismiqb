@@ -45,11 +45,12 @@ class Fault(Horizon):
 
         _points = []
         for slide in slides:
-            line = points[points[:, 0] == slide][:, 1:]
-            line = line - np.array([x_min, h_min]).reshape(-1, 2)
-            img = Image.new('L', (int(x_max - x_min), int(h_max - h_min)), 0)
-            ImageDraw.Draw(img).line(list(line.ravel()), width=1, fill=1)
-            slide_points = np.stack(np.where(np.array(img).T), axis=1) + np.array([x_min, h_min]).reshape(-1, 2)
+            slide_points = line(points[points[:, 0] == slide][:, 1:], width=1)
+            # line = points[points[:, 0] == slide][:, 1:]
+            # line = line - np.array([x_min, h_min]).reshape(-1, 2)
+            # img = Image.new('L', (int(x_max - x_min), int(h_max - h_min)), 0)
+            # ImageDraw.Draw(img).line(list(line.ravel()), width=1, fill=1)
+            # slide_points = np.stack(np.where(np.array(img).T), axis=1) + np.array([x_min, h_min]).reshape(-1, 2)
             _points += [np.concatenate([np.ones((len(slide_points), 1)) * slide, slide_points], axis=1)]
 
         return np.concatenate(_points, axis=0)
@@ -82,3 +83,39 @@ class Fault(Horizon):
 
         mask[points[:, 0], points[:, 1], points[:, 2]] = 1
         return mask
+
+def line(nodes, width=1):
+    nodes = np.array(nodes, dtype='int32')
+    a = nodes[0]
+    points = []
+    for b in nodes[1:]:
+        points += [segment(a, b, width)]
+        a = b
+    return np.concatenate(points)
+
+def segment(a, b, width=1):
+    dx = np.abs(a[0] - b[0])
+    dy = np.abs(a[1] - b[1])
+    sx = 2 * (a[0] < b[0]) - 1
+    sy = 2 * (a[1] < b[1]) - 1
+    err = dx - dy
+
+    points = []
+    while (a != b).any():
+        points += [a]
+        e2 = 2 * err
+        x = a[0]
+        y = a[1]
+        if e2 >= -dy:
+            err -= dy
+            x = x + sx
+        if e2 <= dx:
+            err += dx
+            y = y + sy
+        a = np.array([x, y])
+    points = np.array(points)
+    if dx > dy:
+        delta = np.array([1, 0])
+    else:
+        delta = np.array([0, 1])
+    return np.concatenate([points + delta * w for w in range(-width // 2 + 1, width // 2 + 1)])
