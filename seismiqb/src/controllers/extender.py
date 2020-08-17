@@ -19,28 +19,6 @@ from .best_practices import MODEL_CONFIG_EXTENSION
 class Extender(Enhancer):
     """
     Provides interface for train, inference and quality assesment for the task of horizon extension.
-
-    Parameters
-    ----------
-    batch_size : int
-        Size of batches for train and inference.
-    crop_shape : tuple of 3 ints
-        Size of sampled crops for train and inference.
-    model_config : dict
-        Neural network architecture.
-    model_path : str
-        Path for pre-trained model.
-    device : str or int
-        Device specification.
-    show_plots : bool
-        Whether to show plots to the current output stream.
-    save_dir : str
-        Path to save images, logs, and other data.
-    logger : None or callable
-        If None, then logger is created inside `save_dir`.
-        If callable, then it is used directly to log messages.
-    bar : bool
-        Whether to show progress bars for training and inference.
     """
     #pylint: disable=unused-argument, logging-fstring-interpolation, no-member, attribute-defined-outside-init
 
@@ -78,6 +56,7 @@ class Extender(Enhancer):
         prev_len = len(horizon)
         self.log(f'Inference started for {n_steps} with stride {stride}.')
         for _ in self.make_pbar(range(n_steps), desc=f'Extender inference on {horizon.name}'):
+            # Create grid of crops near horizon holes
             dataset.make_extension_grid(dataset.indices[0],
                                         crop_shape=self.crop_shape,
                                         stride=stride,
@@ -95,6 +74,7 @@ class Extender(Enhancer):
                 # no additional predicts
                 break
 
+            # Merge surfaces on crops to the horizon itself
             horizons = [*inference_pipeline.v('predicted_horizons')]
             for hor in horizons:
                 merge_code, _ = Horizon.verify_merge(horizon, hor,
@@ -103,13 +83,19 @@ class Extender(Enhancer):
                 if merge_code == 3:
                     _ = horizon.overlap_merge(hor, inplace=True)
 
+            # Log length increase
             curr_len = len(horizon)
             if (curr_len - prev_len) < 25:
                 break
             self.log(f'Extended from {prev_len} to {curr_len}, + {curr_len - prev_len}')
             prev_len = curr_len
 
+            # Cleanup
+            inference_pipeline.reset('variables')
+            inference_pipeline = None
+
         torch.cuda.empty_cache()
+        horizon.name = f'extended_{horizon.name[8:]}' # get rid of `copy_of_` postfix
         self.predictions = [horizon]
 
 
