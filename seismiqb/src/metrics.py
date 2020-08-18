@@ -10,7 +10,7 @@ import matplotlib.colors as mcolors
 
 import cv2
 from scipy.signal import hilbert, medfilt
-from scipy.stats import mode
+from scipy.stats import mode as mode_scipy
 
 from ..batchflow.models.metrics import Metrics
 
@@ -465,7 +465,7 @@ class BaseSeismicMetric(Metrics):
         metric[:, :, 1] = median_phase
         metric[:, :, 2:] = phase
 
-        title = 'phase by {}'.format(mode)
+        title = 'phase by {}'.format(correction)
         plot_dict = {
             'spatial': self.spatial,
             'title': '{} for {} on cube {}'.format(title, self.name, self.cube_name),
@@ -648,7 +648,7 @@ class HorizonMetrics(BaseSeismicMetric):
         phase_slice = phase[:, :, phase.shape[-1] // 2]
         phase_slice[np.isnan(np.std(self.data, axis=-1))] = np.nan
 
-        avg = mode(phase_slice[~np.isnan(phase_slice)].round(2), axis=None)
+        avg = mode_scipy(phase_slice[~np.isnan(phase_slice)].round(2), None)
         phase_slice -= avg[0][0]
         phase_slice[phase_slice >= np.pi] -= 2 * np.pi
 
@@ -1576,13 +1576,13 @@ def gridify(matrix, frequencies, iline=True, xline=True):
 
 
 
-def enlarge_carcass_metric(metric, geometry):
+def enlarge_carcass_metric(metric, geometry, width=10):
     """ Increase visibility of a sparce metric grid. """
     structure = np.ones((1, 3), dtype=np.uint8)
     metric = np.copy(metric)
     metric[np.isnan(metric)] = Horizon.FILL_VALUE
-    dilated_1 = cv2.dilate(metric, structure, iterations=15)
-    dilated_2 = cv2.dilate(metric, structure.T, iterations=15)
+    dilated_1 = cv2.dilate(metric, structure, iterations=width)
+    dilated_2 = cv2.dilate(metric, structure.T, iterations=width)
 
     metric = np.full_like(metric, np.nan)
     metric[dilated_1 > -999] = dilated_1[dilated_1 > -999]

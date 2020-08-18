@@ -7,7 +7,7 @@ warnings.filterwarnings("ignore")
 
 import numpy as np
 
-from utils import make_config, save_point_cloud, safe_mkdir
+from utils import str2bool, make_config, save_point_cloud, safe_mkdir
 
 sys.path.append('..')
 from seismiqb import SeismicGeometry, Horizon, HorizonMetrics
@@ -28,8 +28,8 @@ ARGS = [
     ('horizon-path', 'path to the horizon in a seismic cube in CHARISMA format', [str], None),
     ('savedir', 'path to save files to', str, '_placeholder_'),
     ('metrics', 'which metrics to compute', str, ['support_corrs', 'local_corrs']),
-    ('add-prefix', 'whether to prepend horizon name to the saved file names', bool, True),
-    ('save-txt', 'whether to save point cloud of metrics to disk', bool, False),
+    ('add-prefix', 'whether to prepend horizon name to the saved file names', str2bool, True),
+    ('save-txt', 'whether to save point cloud of metrics to disk', str2bool, False),
 ]
 
 

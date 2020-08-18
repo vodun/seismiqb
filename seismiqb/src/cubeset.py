@@ -4,7 +4,7 @@ from glob import glob
 
 import numpy as np
 
-from ..batchflow import Dataset, Sampler, DatasetIndex, Pipeline
+from ..batchflow import FilesIndex, DatasetIndex, Dataset, Sampler, Pipeline
 from ..batchflow import NumpySampler, ConstantSampler
 
 from .geometry import SeismicGeometry
@@ -41,18 +41,32 @@ class SeismicCubeset(Dataset):
     #pylint: disable=too-many-public-methods
     def __init__(self, index, batch_class=SeismicCropBatch, preloaded=None, *args, **kwargs):
         """ Initialize additional attributes. """
+        if not isinstance(index, FilesIndex):
+            index = [index] if isinstance(index, str) else index
+            index = FilesIndex(path=index, no_ext=True)
         super().__init__(index, batch_class=batch_class, preloaded=preloaded, *args, **kwargs)
         self.crop_index, self.crop_points = None, None
 
         self.geometries = IndexedDict({ix: SeismicGeometry(self.index.get_fullpath(ix), process=False)
                                        for ix in self.indices})
-        self.labels = IndexedDict({ix: dict() for ix in self.indices})
+        self.labels = IndexedDict({ix: [] for ix in self.indices})
         self.samplers = IndexedDict({ix: None for ix in self.indices})
         self._sampler = None
         self._p, self._bins = None, None
 
         self.grid_gen, self.grid_info, self.grid_iters = None, None, None
         self.shapes_gen, self.orders_gen = None, None
+
+
+    @classmethod
+    def from_horizon(cls, horizon):
+        """ Create dataset from an instance of Horizon. """
+        cube_path = horizon.geometry.path
+        dataset = SeismicCubeset(cube_path)
+        dataset.geometries[0] = horizon.geometry
+        dataset.labels[0] = [horizon]
+        return dataset
+
 
     def __str__(self):
         msg = f'Seismic Cubeset with {len(self)} cube{"s" if len(self) > 1 else ""}:\n'

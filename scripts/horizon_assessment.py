@@ -8,7 +8,7 @@ warnings.filterwarnings("ignore")
 import numpy as np
 import pandas as pd
 
-from utils import make_config, save_point_cloud, safe_mkdir
+from utils import str2bool, make_config, save_point_cloud, safe_mkdir
 
 sys.path.append('..')
 from seismiqb import SeismicGeometry, Horizon, HorizonMetrics
@@ -32,9 +32,9 @@ ARGS = [
     ('carcass-path', 'path to the horizon in a seismic cube in CHARISMA format', [str], []),
     ('savedir', 'path to save files to', str, '_placeholder_'),
     ('metrics', 'which metrics to compute', str, ['support_corrs']),
-    ('add-prefix', 'whether to prepend horizon name to the saved file names', bool, True),
-    ('save-files', 'whether to save horizons/carcasses to disk', bool, True),
-    ('save-txt', 'whether to save point cloud of metrics to disk', bool, False),
+    ('add-prefix', 'whether to prepend horizon name to the saved file names', str2bool, True),
+    ('save-files', 'whether to save horizons/carcasses to disk', str2bool, True),
+    ('save-txt', 'whether to save point cloud of metrics to disk', str2bool, False),
 ]
 
 
@@ -75,8 +75,10 @@ if __name__ == '__main__':
             'path': os.path.join(*horizon.path.split('/')[-2:]),
             'length': len(horizon),
             'coverage': horizon.coverage,
+            'average_depth': horizon.h_mean,
             'description': 'No description',
         }
+        horizon.show(savepath=os.path.join(config['savedir'], f'{prefix}depthmap.png'))
 
         # Evaluate the horizon
         for metric_name in config['metrics']:
@@ -106,8 +108,9 @@ if __name__ == '__main__':
                     **row_dict,
                     'carcass_name': carcass.name,
                     'carcass_path': os.path.join(*carcass.path.split('/')[-2:]),
+                    'average_l1': overlap_info['mean'],
                 }
-
+                horizon.show(savepath=os.path.join(config['savedir'], f'{prefix}carcass_depthmap.png'))
 
                 cm = HorizonMetrics(carcass)
                 for metric_name in config['metrics']:
@@ -116,7 +119,8 @@ if __name__ == '__main__':
                     savepath = os.path.join(config['savedir'], f'{prefix}carcass_{metric_name}')
 
                     metric = cm.evaluate(metric_name, **kwargs)
-                    plot_image(enlarge_carcass_metric(metric, geometry), figsize=(20, 20),
+                    metric = metric if len(carcass) > (len(horizon) // 10) else enlarge_carcass_metric(metric, geometry)
+                    plot_image(metric, figsize=(20, 20),
                             cmap=METRIC_CMAP, zmin=-1, zmax=1, fill_color='black',
                             savepath=savepath + '.png')
 
