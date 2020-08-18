@@ -3,6 +3,7 @@
 import numpy as np
 import pandas as pd
 from copy import copy
+from numba import njit, prange
 
 from PIL import ImageDraw, Image
 
@@ -53,7 +54,8 @@ class Fault(Horizon):
 
         _points = []
         for slide in slides:
-            slide_points = line(points[points[:, 0] == slide][:, 1:], width=1)
+            nodes = np.array(points[points[:, 0] == slide][:, 1:], dtype='int64')
+            slide_points = line(nodes, width=1)
             # line = points[points[:, 0] == slide][:, 1:]
             # line = line - np.array([x_min, h_min]).reshape(-1, 2)
             # img = Image.new('L', (int(x_max - x_min), int(h_max - h_min)), 0)
@@ -122,15 +124,16 @@ class Fault(Horizon):
         path = f'{path}_{self.name}'
         df.to_csv(path, sep=' ', columns=self.COLUMNS, index=False, header=False)
 
+@njit
 def line(nodes, width=1):
-    nodes = np.array(nodes, dtype='int32')
-    a = nodes[0]
-    points = []
-    for b in nodes[1:]:
-        points += [segment(a, b, width)]
-        a = b
-    return np.concatenate(points)
+    points = np.zeros((0, 2))
+    for i in prange(len(nodes)-1):
+        a = nodes[i]
+        b = nodes[i+1]
+        points = np.concatenate((points, segment(a, b, width)))
+    return points
 
+@njit
 def segment(a, b, width=1):
     dx = np.abs(a[0] - b[0])
     dy = np.abs(a[1] - b[1])
@@ -138,9 +141,10 @@ def segment(a, b, width=1):
     sy = 2 * (a[1] < b[1]) - 1
     err = dx - dy
 
-    points = []
-    while (a != b).any():
-        points += [a]
+    n_points = max(dx, dy)
+    points = np.zeros((n_points, 2))
+    for i in range(n_points):
+        points[i] = a
         e2 = 2 * err
         x = a[0]
         y = a[1]
@@ -151,9 +155,17 @@ def segment(a, b, width=1):
             err += dx
             y = y + sy
         a = np.array([x, y])
-    points = np.array(points)
     if dx > dy:
         delta = np.array([1, 0])
     else:
         delta = np.array([0, 1])
-    return np.concatenate([points + delta * w for w in range(-width // 2 + 1, width // 2 + 1)])
+
+    shifted_points = np.zeros((len(points) * width, 2))
+    start = 0
+    for w in range(-width // 2 + 1, width // 2 + 1):
+        end = start + len(points)
+        shifted_points[start:end] = points + delta * w
+        start = end
+
+    return shifted_points
+    
