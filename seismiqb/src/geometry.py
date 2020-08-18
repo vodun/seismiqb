@@ -165,7 +165,6 @@ class SeismicGeometry:
         if process:
             self.process(**kwargs)
 
-
     def scaler(self, array, mode='minmax'):
         """ Normalize array of amplitudes cut from the cube.
 
@@ -802,6 +801,7 @@ class SeismicGeometryHDF5(SeismicGeometry):
     def __init__(self, path, **kwargs):
         self.structured = True
         self.file_hdf5 = None
+        self.iline_to_cdpx, self.xline_to_cdpy = None, None
 
         super().__init__(path, **kwargs)
 
@@ -900,3 +900,27 @@ class SeismicGeometryHDF5(SeismicGeometry):
             cube = self.file_hdf5['cube_h']
             slide = self._cached_load(cube, loc)
         return slide
+
+    def compute_cdp_transform(self, sgy_path, second_trace = 20000):
+        """ !! """
+        HEADERS_POST_FULL = ['INLINE_3D', 'CROSSLINE_3D', 'CDP_X', 'CDP_Y']
+        geom = SeismicGeometry(path=sgy_path, headers=HEADERS_POST_FULL)
+        df = geom.dataframe
+
+        # get two points
+        lines = df[df['trace_index'] == 1].index[0]
+        cdps = (df[df['trace_index'] == 1]['CDP_X'][0], df[df['trace_index'] == 1]['CDP_Y'][0])
+        second_lines = df[df['trace_index'] == second_trace].index[0]
+        second_cdps = (df[df['trace_index'] == second_trace]['CDP_X'][0], df[df['trace_index'] == second_trace]['CDP_Y'][0])
+
+        # transform funcs
+        def xline_to_cdpy(n):
+            return (second_cdps[1] - cdps[1]) / (second_lines[1] - lines[1]) * n + \
+                    cdps[1] - lines[1] * (second_cdps[1] - cdps[1]) / (second_lines[1] - lines[1])
+
+        def iline_to_cdpx(n):
+            return (second_cdps[0] - cdps[0]) / (second_lines[0] - lines[0]) * n + \
+                    cdps[0] - lines[0] * (second_cdps[0]  - cdps[0]) / (second_lines[0] - lines[0])
+
+        self.iline_to_cdpx = iline_to_cdpx
+        self.xline_to_cdpy = xline_to_cdpy

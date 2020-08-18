@@ -392,8 +392,8 @@ def gen_crop_coordinates(point, horizon_matrix, zero_traces,
                 orders_array[top])
 
 
-# @njit
-def groupby_mean(array, axis=-1):
+@njit
+def groupby_mean(array):
     """ Faster version of mean-groupby of data along the first two columns.
     Input array is supposed to have (N, 3) shape.
     """
@@ -402,36 +402,31 @@ def groupby_mean(array, axis=-1):
     output = np.zeros_like(array)
     position = 0
 
-    _axes = [0, 1, 2]
-    axis = axis if axis > 0 else len(_axes) + axis
-    _axes.remove(axis)
-    axes = np.array(_axes)
-
-    prev = array[0, axes]
-    s, c = array[0, axis], 1
+    prev = array[0, :2]
+    s, c = array[0, -1], 1
 
     for i in range(1, n):
-        curr = array[i, axes]
+        curr = array[i, :2]
 
         if prev[0] == curr[0] and prev[1] == curr[1]:
-            s += array[i, axis]
+            s += array[i, -1]
             c += 1
         else:
-            output[position, axes] = prev
-            output[position, axis] = s / c
+            output[position, :2] = prev
+            output[position, -1] = s / c
             position += 1
 
             prev = curr
-            s, c = array[i, axis], 1
+            s, c = array[i, -1], 1
 
-    output[position, axes] = prev
-    output[position, axis] = s / c
+    output[position, :2] = prev
+    output[position, -1] = s / c
     position += 1
     return output[:position]
 
 
-# @njit
-def groupby_min(array, axis=-1):
+@njit
+def groupby_min(array):
     """ Faster version of min-groupby of data along the first two columns.
     Input array is supposed to have (N, 3) shape.
     """
@@ -440,35 +435,30 @@ def groupby_min(array, axis=-1):
     output = np.zeros_like(array)
     position = 0
 
-    _axes = [0, 1, 2]
-    axis = axis if axis > 0 else len(_axes) + axis
-    _axes.remove(axis)
-    axes = np.array(_axes)
-
-    prev = array[0, axes]
-    s = array[0, axis]
+    prev = array[0, :2]
+    s = array[0, -1]
 
     for i in range(1, n):
-        curr = array[i, axes]
+        curr = array[i, :2]
 
         if prev[0] == curr[0] and prev[1] == curr[1]:
-            s = min(s, array[i, axis])
+            s = min(s, array[i, -1])
         else:
-            output[position, axes] = prev
-            output[position, axis] = s
+            output[position, :2] = prev
+            output[position, -1] = s
             position += 1
 
             prev = curr
-            s = array[i, axis]
+            s = array[i, -1]
 
-    output[position, axes] = prev
-    output[position, axis] = s
+    output[position, :2] = prev
+    output[position, -1] = s
     position += 1
     return output[:position]
 
 
-# @njit
-def groupby_max(array, axis=-1):
+@njit
+def groupby_max(array):
     """ Faster version of min-groupby of data along the first two columns.
     Input array is supposed to have (N, 3) shape.
     """
@@ -477,29 +467,24 @@ def groupby_max(array, axis=-1):
     output = np.zeros_like(array)
     position = 0
 
-    _axes = [0, 1, 2]
-    axis = axis if axis > 0 else len(_axes) + axis
-    _axes.remove(axis)
-    axes = np.array(_axes)
-
-    prev = array[0, axes]
-    s = array[0, axis]
+    prev = array[0, :2]
+    s = array[0, -1]
 
     for i in range(1, n):
-        curr = array[i, axes]
+        curr = array[i, :2]
 
         if prev[0] == curr[0] and prev[1] == curr[1]:
-            s = max(s, array[i, axis])
+            s = max(s, array[i, -1])
         else:
-            output[position, axes] = prev
-            output[position, axis] = s
+            output[position, :2] = prev
+            output[position, -1] = s
             position += 1
 
             prev = curr
-            s = array[i, axis]
+            s = array[i, -1]
 
-    output[position, axes] = prev
-    output[position, axis] = s
+    output[position, :2] = prev
+    output[position, -1] = s
     position += 1
     return output[:position]
 

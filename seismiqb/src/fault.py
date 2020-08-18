@@ -10,6 +10,7 @@ from scipy.ndimage import find_objects
 from skimage.measure import label
 
 from .horizon import Horizon
+from .geometry import SeismicGeometry
 from .utils import groupby_mean, groupby_min, groupby_max
 
 class Fault(Horizon):
@@ -100,10 +101,11 @@ class Fault(Horizon):
         n_stick = 0
         for il in ilines:
             curr = points[points[:, 0] == il]
+            curr = curr[curr[:, -1].argsort()]
             length = len(curr)
             step = length // num
             if step == 0:
-                continue
+                step = 1
             selected = np.vstack([curr[::step], curr[-1].reshape(1, -1)])
             sticks = np.hstack([selected, np.array([n_stick] * len(selected)).reshape(-1, 1)])
             all_sticks.append(sticks)
@@ -111,13 +113,22 @@ class Fault(Horizon):
         return np.vstack(all_sticks).reshape(-1, 4)
 
 
-    def dump(self, path, i_step=1, num=5):
+    def dump(self, path, sgy_path, i_step=1, num=5):
         """ Save Fault points to the disk in CHARISMA Fault Sticks format.
         """
-        fault_sticks = self.points_to_sticks(copy(self.points), i_step, num)
+        points = self.cubic_to_lines(copy(self.points))
+        fault_sticks = self.points_to_sticks(points, i_step, num)
         fault_sticks = np.hstack([fault_sticks[:, :-1],
                                   np.array([self.name] * len(fault_sticks)).reshape(-1, 1),
                                   fault_sticks[:, -1:]])
         df = pd.DataFrame(fault_sticks, columns=self.COLUMNS)
+
+        if self.geometry.xline_to_cdpy is None:
+            self.geometry.compute_cdp_transform(sgy_path)
+
+        df.insert(loc=0, column='INLINE-', value=['INLINE-'] *len(df))
+        df.insert(loc=3, column='cdp_y', value=self.geometry.xline_to_cdpy(pd.to_numeric(df['xline'])))
+        df.insert(loc=3, column='cdp_x', value=self.geometry.iline_to_cdpx(pd.to_numeric(df['iline'])))
+
         path = f'{path}_{self.name}'
-        df.to_csv(path, sep=' ', columns=self.COLUMNS, index=False, header=False)
+        df.to_csv(path, sep=' ', index=False, header=False)
