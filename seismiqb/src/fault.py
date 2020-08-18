@@ -94,7 +94,8 @@ class Fault(Horizon):
 
 
     def points_to_sticks(self, points, i_step, num):
-        """ !! """
+        """ Extract iline oriented fault sticks from a solid fault surface.
+        """
         ilines = np.unique(points[:, 0])
         ilines = ilines[::i_step]
         all_sticks = []
@@ -103,9 +104,7 @@ class Fault(Horizon):
             curr = points[points[:, 0] == il]
             curr = curr[curr[:, -1].argsort()]
             length = len(curr)
-            step = length // num
-            if step == 0:
-                step = 1
+            step = max(1, length // num)
             selected = np.vstack([curr[::step], curr[-1].reshape(1, -1)])
             sticks = np.hstack([selected, np.array([n_stick] * len(selected)).reshape(-1, 1)])
             all_sticks.append(sticks)
@@ -114,7 +113,20 @@ class Fault(Horizon):
 
 
     def dump(self, path, sgy_path, i_step=1, num=5):
-        """ Save Fault points to the disk in CHARISMA Fault Sticks format.
+        """ Save Fault to the disk in CHARISMA Fault Sticks format.
+        Note that this version supports iline oriented fault sticks.
+
+        Parameters
+        ----------
+        path : str
+            Path to a file to save fault to.
+        sgy_path : str
+            Path to SEG-Y version of the cube with `cdp_x`, `cdp_y` headers needed to compute
+            cdp coordinates of the fault.
+        i_step : int
+            Ilines dump frequency allowing to save sparse fault surfaces.
+        num : int
+            A number of points for each stick.
         """
         points = self.cubic_to_lines(copy(self.points))
         fault_sticks = self.points_to_sticks(points, i_step, num)

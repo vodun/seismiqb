@@ -902,9 +902,18 @@ class SeismicGeometryHDF5(SeismicGeometry):
         return slide
 
     def compute_cdp_transform(self, sgy_path, second_trace = 20000):
-        """ !! """
-        HEADERS_POST_FULL = ['INLINE_3D', 'CROSSLINE_3D', 'CDP_X', 'CDP_Y']
-        geom = SeismicGeometry(path=sgy_path, headers=HEADERS_POST_FULL)
+        """ Create functions with linear line to cdp transforms and
+        save them to the `iline_to_cdpx` and `xline_to_cdpy` attributes of the class.
+
+        Parameters
+        ----------
+        sgy_path : str
+            Path to SEG-Y version of the cube with `cdp_x`, `cdp_y` headers.
+        second_trace : int
+            Index of a second trace lying on `iline`, `xline` coordinates different
+            from the default first trace with `trace_index = 1`.
+        """
+        geom = SeismicGeometry(path=sgy_path, headers=self.HEADERS_POST_FULL)
         df = geom.dataframe
 
         # get two points
