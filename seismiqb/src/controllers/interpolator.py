@@ -82,8 +82,10 @@ class Interpolator(BaseController):
             horizon = dataset.labels[0][0]
 
         if horizon.is_carcass:
+            self.log('Using CARCASS train')
             method = CarcassInterpolator.train
         else:
+            self.glo('Using GRID train')
             method = GridInterpolator.train
         return method(self, dataset=dataset, horizon=horizon, frequencies=frequencies, **kwargs)
 
@@ -93,8 +95,10 @@ class Interpolator(BaseController):
         horizon = dataset.labels[0][0]
 
         if horizon.is_carcass:
+            self.log('Using CARCASS inference')
             method = CarcassInterpolator.inference
         else:
+            self.log('Using GRID inference')
             method = GridInterpolator.inference
         method(dataset=dataset, version=version, orientation=orientation,
                overlap_factor=overlap_factor, heights_range=heights_range,
