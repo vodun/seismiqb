@@ -371,7 +371,8 @@ class SeismicCubeset(Dataset):
         self._p, self._bins = p, bins # stored for later sampler creation
 
 
-    def make_grid(self, cube_name, crop_shape, ilines_range, xlines_range, h_range, strides=None, batch_size=16):
+    def make_grid(self, cube_name, crop_shape, ilines_range, xlines_range, h_range, strides=None,
+                  batch_size=16, gaps_matrix=None, gaps_threshold=0):
         """ Create regular grid of points in cube.
         This method is usually used with `assemble_predict` action of SeismicCropBatch.
 
@@ -391,9 +392,20 @@ class SeismicCubeset(Dataset):
             Distance between grid points.
         batch_size : int
             Amount of returned points per generator call.
+        gaps_matrix : ndarray
+            Binary matrix of (ilines_len, xlines_len) shape with zeros corresponding
+            to areas that can be skipped in the grid.
+            E.g., matrix with ones at places where a horizon is present and zeros everywhere else.
+            If None, a boolean negation to geometry.zero_traces matrix will be used.
+        gaps_threshold : int
+            Upper bound (exclusive) for total gaps amount in the crop. Default value is 1.
         """
         geom = self.geometries[cube_name]
         strides = strides or crop_shape
+        gaps_matrix = ~geom.zero_traces.astype(bool) if gaps_matrix is None else gaps_matrix
+        if gaps_matrix.shape[0] != geom.ilines_len or \
+           gaps_matrix.shape[1] != geom.xlines_len:
+            raise ValueError('Gaps_matrix shape must be equal to (ilines_len, xlines_len)')
 
         # Assert ranges are valid
         if ilines_range[0] < 0 or \
@@ -423,10 +435,18 @@ class SeismicCubeset(Dataset):
         grid = []
         for il in ilines:
             for xl in xlines:
+                if np.sum(gaps_matrix[il: il + crop_shape[0],
+                                      xl: xl + crop_shape[1]]) < gaps_threshold:
+                    continue
                 for h in hs:
                     point = [cube_name, il, xl, h]
                     grid.append(point)
+
         grid = np.array(grid, dtype=object)
+
+        # Update ranges as some points could be skipped in the grid
+        ilines_range = (np.min(grid[:, 1]), np.max(grid[:, 1]))
+        xlines_range = (np.min(grid[:, 2]), np.max(grid[:, 2]))
 
         # Creating and storing all the necessary things
         grid_gen = (grid[i:i+batch_size]
