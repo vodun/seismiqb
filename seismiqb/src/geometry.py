@@ -1,7 +1,6 @@
 """ SeismicGeometry-class containing geometrical info about seismic-cube."""
 import os
 import sys
-import logging
 from textwrap import dedent
 from random import random
 from itertools import product
@@ -169,6 +168,7 @@ class SeismicGeometry:
         """ Number of meaningful traces. """
         if hasattr(self, 'zero_matrix'):
             return np.prod(self.zero_matrix.shape) - self.zero_matrix.sum()
+        return len(self.dataframe)
 
     def scaler(self, array, mode='minmax'):
         """ Normalize array of amplitudes cut from the cube.
