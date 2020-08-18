@@ -445,8 +445,7 @@ class SeismicCubeset(Dataset):
 
         grid = np.array(grid, dtype=object)
         # Update ranges to actual ones
-        ilines_range = (np.min(grid[:, 1]), np.max(grid[:, 1]))
-        #  + crop_shape[0])
+        ilines_range = (np.min(grid[:, 1]), np.max(grid[:, 1]) + crop_shape[0])
         xlines_range = (np.min(grid[:, 2]), np.max(grid[:, 2]) + crop_shape[1])
         h_range = (np.min(grid[:, 3]), np.max(grid[:, 3]) + crop_shape[2])
 
