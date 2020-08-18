@@ -232,6 +232,29 @@ class SeismicGeometry:
         raise ValueError('Wrong mode', mode)
 
 
+    def __getitem__(self, key):
+        """ Retrieve amplitudes from cube. """
+        key_ = list(key)
+        if len(key_) != len(self.cube_shape):
+            key_ += [slice(None)] * (len(self.cube_shape) - len(key_))
+
+        key, squeeze = [], []
+        for i, item in enumerate(key_):
+            max_size = self.cube_shape[i]
+
+            if isinstance(item, slice):
+                slc = slice(item.start or 0, item.stop or max_size)
+            elif isinstance(item, int):
+                item = item if item >= 0 else max_size - item
+                slc = slice(item, item + 1)
+                squeeze.append(i)
+            key.append(slc)
+
+        crop = self.load_crop(key)
+        if squeeze:
+            crop = np.squeeze(crop, axis=tuple(squeeze))
+        return crop
+
     def parse_axis(self, axis):
         """ Convert string representation of an axis into integer, if needed. """
         if isinstance(axis, str):
