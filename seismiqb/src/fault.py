@@ -3,6 +3,7 @@
 import numpy as np
 import pandas as pd
 from copy import copy
+from numba import njit, prange
 
 from PIL import ImageDraw, Image
 
@@ -54,11 +55,13 @@ class Fault(Horizon):
 
         _points = []
         for slide in slides:
-            line = points[points[:, 0] == slide][:, 1:]
-            line = line - np.array([x_min, h_min]).reshape(-1, 2)
-            img = Image.new('L', (int(x_max - x_min), int(h_max - h_min)), 0)
-            ImageDraw.Draw(img).line(list(line.ravel()), width=1, fill=1)
-            slide_points = np.stack(np.where(np.array(img).T), axis=1) + np.array([x_min, h_min]).reshape(-1, 2)
+            nodes = np.array(points[points[:, 0] == slide][:, 1:], dtype='int64')
+            slide_points = line(nodes, width=1)
+            # line = points[points[:, 0] == slide][:, 1:]
+            # line = line - np.array([x_min, h_min]).reshape(-1, 2)
+            # img = Image.new('L', (int(x_max - x_min), int(h_max - h_min)), 0)
+            # ImageDraw.Draw(img).line(list(line.ravel()), width=1, fill=1)
+            # slide_points = np.stack(np.where(np.array(img).T), axis=1) + np.array([x_min, h_min]).reshape(-1, 2)
             _points += [np.concatenate([np.ones((len(slide_points), 1)) * slide, slide_points], axis=1)]
 
         return np.concatenate(_points, axis=0)
@@ -91,7 +94,6 @@ class Fault(Horizon):
 
         mask[points[:, 0], points[:, 1], points[:, 2]] = 1
         return mask
-
 
     def points_to_sticks(self, points, i_step, num):
         """ Extract iline oriented fault sticks from a solid fault surface.
@@ -144,3 +146,48 @@ class Fault(Horizon):
 
         path = f'{path}_{self.name}'
         df.to_csv(path, sep=' ', index=False, header=False)
+
+@njit
+def line(nodes, width=1):
+    points = np.zeros((0, 2))
+    for i in prange(len(nodes)-1):
+        a = nodes[i]
+        b = nodes[i+1]
+        points = np.concatenate((points, segment(a, b, width)))
+    return points
+
+@njit
+def segment(a, b, width=1):
+    dx = np.abs(a[0] - b[0])
+    dy = np.abs(a[1] - b[1])
+    sx = 2 * (a[0] < b[0]) - 1
+    sy = 2 * (a[1] < b[1]) - 1
+    err = dx - dy
+
+    n_points = max(dx, dy)
+    points = np.zeros((n_points, 2))
+    for i in range(n_points):
+        points[i] = a
+        e2 = 2 * err
+        x = a[0]
+        y = a[1]
+        if e2 >= -dy:
+            err -= dy
+            x = x + sx
+        if e2 <= dx:
+            err += dx
+            y = y + sy
+        a = np.array([x, y])
+    if dx > dy:
+        delta = np.array([1, 0])
+    else:
+        delta = np.array([0, 1])
+
+    shifted_points = np.zeros((len(points) * width, 2))
+    start = 0
+    for w in range(-width // 2 + 1, width // 2 + 1):
+        end = start + len(points)
+        shifted_points[start:end] = points + delta * w
+        start = end
+
+    return shifted_points
