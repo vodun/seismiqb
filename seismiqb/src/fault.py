@@ -56,12 +56,7 @@ class Fault(Horizon):
         _points = []
         for slide in slides:
             nodes = np.array(points[points[:, 0] == slide][:, 1:], dtype='int64')
-            slide_points = line(nodes, width=1)
-            # line = points[points[:, 0] == slide][:, 1:]
-            # line = line - np.array([x_min, h_min]).reshape(-1, 2)
-            # img = Image.new('L', (int(x_max - x_min), int(h_max - h_min)), 0)
-            # ImageDraw.Draw(img).line(list(line.ravel()), width=1, fill=1)
-            # slide_points = np.stack(np.where(np.array(img).T), axis=1) + np.array([x_min, h_min]).reshape(-1, 2)
+            slide_points = _line(nodes, width=1)
             _points += [np.concatenate([np.ones((len(slide_points), 1)) * slide, slide_points], axis=1)]
 
         return np.concatenate(_points, axis=0)
@@ -148,16 +143,16 @@ class Fault(Horizon):
         df.to_csv(path, sep=' ', index=False, header=False)
 
 @njit
-def line(nodes, width=1):
+def _line(nodes, width=1):
     points = np.zeros((0, 2))
     for i in prange(len(nodes)-1):
         a = nodes[i]
         b = nodes[i+1]
-        points = np.concatenate((points, segment(a, b, width)))
+        points = np.concatenate((points, _segment(a, b, width)))
     return points
 
 @njit
-def segment(a, b, width=1):
+def _segment(a, b, width=1):
     dx = np.abs(a[0] - b[0])
     dy = np.abs(a[1] - b[1])
     sx = 2 * (a[0] < b[0]) - 1
