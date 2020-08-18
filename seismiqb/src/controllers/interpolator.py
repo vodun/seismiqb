@@ -100,6 +100,6 @@ class Interpolator(BaseController):
         else:
             self.log('Using GRID inference')
             method = GridInterpolator.inference
-        method(dataset=dataset, version=version, orientation=orientation,
+        method(self, dataset=dataset, version=version, orientation=orientation,
                overlap_factor=overlap_factor, heights_range=heights_range,
                batch_size_multiplier=batch_size_multiplier, **kwargs)
