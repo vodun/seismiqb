@@ -1107,6 +1107,11 @@ class Horizon:
         return self.horizon_metrics.evaluate('instantaneous_phase')
 
     @property
+    def is_carcass(self):
+        """ Check if the horizon is a sparse carcass. """
+        return len(self) / self.filled_matrix.sum() < 0.5
+
+    @property
     def number_of_holes(self):
         """ Number of holes inside horizon borders. """
         holes_array = self.filled_matrix != self.binary_matrix

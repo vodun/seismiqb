@@ -13,7 +13,7 @@ import h5py
 import segyio
 import h5pickle
 
-from .utils import lru_cache, find_min_max #, SafeIO
+from .utils import lru_cache, find_min_max, file_print #, SafeIO
 from .plotters import plot_image
 
 
@@ -165,6 +165,10 @@ class SeismicGeometry:
         if process:
             self.process(**kwargs)
 
+    def __len__(self):
+        """ Number of meaningful traces. """
+        if hasattr(self, 'zero_matrix'):
+            return np.prod(self.zero_matrix.shape) - self.zero_matrix.sum()
 
     def scaler(self, array, mode='minmax'):
         """ Normalize array of amplitudes cut from the cube.
@@ -341,13 +345,7 @@ class SeismicGeometry:
         """ Log some info into desired stream. """
         if not callable(printer):
             path_log = '/'.join(self.path.split('/')[:-1]) + '/CUBE_INFO.log'
-            handler = logging.FileHandler(path_log, mode='w')
-            handler.setFormatter(logging.Formatter('%(message)s'))
-
-            logger = logging.getLogger('geometry_logger')
-            logger.setLevel(logging.INFO)
-            logger.addHandler(handler)
-            printer = logger.info
+            printer = lambda msg: file_print(msg, path_log)
         printer(str(self))
 
     def show_snr(self, **kwargs):
