@@ -969,20 +969,30 @@ class Horizon:
         background[self.geometry.zero_traces == 1] = np.nan
         return background
 
-    def get_array_values(self, array, array_offset, width=5, axes=(2, 1, 0)):
+    def get_array_values(self, array, array_offset=None, dataset=None, width=5, axes=(2, 1, 0)):
         """ Get values from an external array along the horizon.
 
         Parameters
         ----------
         array : np.ndarray
             A data-array to make a cut from.
-        array_offset : tuple
+        array_offset : tuple or None
             an offset defining the location of given array with respect to the horizon.
+            If None, dataset with filled `grid_info` must be supplied.
+        dataset : seismiqb.dataset
+            a dataset with filled grid_info-attr. Must be supplied, if array_offset is None.
         width : int
             required width of the resulting cut.
         axes : tuple
             if not None, axes-transposition with the required axes-order is used.
         """
+        if array_offset is None:
+            try:
+                grid_info = getattr(dataset, 'grid_info')
+                array_offset = [grid_info['range'][i][0] for i in range(3)]
+            except:
+                raise ValueError('Either array_offset or dataset must be supplied!')
+
         horizon_offset = self.bbox[0, 0], self.bbox[1, 0]
 
         if axes is not None:
