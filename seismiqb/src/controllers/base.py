@@ -405,7 +405,6 @@ class BaseController:
 
     def inference_0(self, dataset, heights_range=None, orientation='i', overlap_factor=2, **kwargs):
         """ Inference on chunks, assemble into massive 3D array, extract horizon surface. """
-        _ = kwargs
         geometry = dataset.geometries[0]
         spatial_ranges, heights_range = self.make_inference_ranges(dataset, heights_range)
         config, crop_shape_grid, strides_grid = self.make_inference_config(orientation, overlap_factor)
@@ -414,7 +413,8 @@ class BaseController:
         dataset.make_grid(dataset.indices[0], crop_shape_grid,
                           *spatial_ranges, heights_range,
                           batch_size=self.batch_size,
-                          strides=strides_grid)
+                          strides=strides_grid,
+                          gaps_matrix=kwargs.get('gaps_matrix', None))
 
         inference_pipeline = (self.get_inference_template() << config) << dataset
         for _ in self.make_pbar(range(dataset.grid_iters), desc=f'Inference on {geometry.name} | {orientation}'):
@@ -444,6 +444,7 @@ class BaseController:
                               *current_spatial_ranges, heights_range,
                               batch_size=self.batch_size,
                               strides=strides_grid)
+
             inference_pipeline = (self.get_inference_template() << config) << dataset
             for _ in range(dataset.grid_iters):
                 batch = inference_pipeline.next_batch(D('size'))

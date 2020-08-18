@@ -372,7 +372,7 @@ class SeismicCubeset(Dataset):
 
 
     def make_grid(self, cube_name, crop_shape, ilines_range, xlines_range, h_range, strides=None,
-                  batch_size=16, gaps_matrix=None, gaps_threshold=0):
+                  batch_size=16, gaps_matrix=None, gaps_threshold=1):
         """ Create regular grid of points in cube.
         This method is usually used with `assemble_predict` action of SeismicCropBatch.
 
@@ -398,7 +398,8 @@ class SeismicCubeset(Dataset):
             E.g., matrix with ones at places where a horizon is present and zeros everywhere else.
             If None, a boolean negation to geometry.zero_traces matrix will be used.
         gaps_threshold : int
-            Upper bound (exclusive) for total gaps amount in the crop. Default value is 1.
+            Lower bound for non gap number of points (with 1's in the gaps_matrix)
+            in a crop in the grid. Default value is 1.
         """
         geom = self.geometries[cube_name]
         strides = strides or crop_shape
@@ -443,10 +444,11 @@ class SeismicCubeset(Dataset):
                     grid.append(point)
 
         grid = np.array(grid, dtype=object)
-
-        # Update ranges as some points could be skipped in the grid
+        # Update ranges to actual ones
         ilines_range = (np.min(grid[:, 1]), np.max(grid[:, 1]))
-        xlines_range = (np.min(grid[:, 2]), np.max(grid[:, 2]))
+        #  + crop_shape[0])
+        xlines_range = (np.min(grid[:, 2]), np.max(grid[:, 2]) + crop_shape[1])
+        h_range = (np.min(grid[:, 3]), np.max(grid[:, 3]) + crop_shape[2])
 
         # Creating and storing all the necessary things
         grid_gen = (grid[i:i+batch_size]
