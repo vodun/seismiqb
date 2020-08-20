@@ -448,7 +448,7 @@ class SeismicCubeset(Dataset):
         grid = np.array(grid, dtype=object)
 
         # Creating and storing all the necessary things
-        if len(grid_gen) > 0:
+        if len(grid) > 0:
             grid_gen = (grid[i:i+batch_size]
                         for i in range(0, len(grid), batch_size))
         else:
