@@ -787,6 +787,46 @@ class SeismicGeometrySEGY(SeismicGeometry):
                 if hasattr(self, attr) and getattr(self, attr) is not None:
                     file_hdf5['/info/' + attr] = getattr(self, attr)
 
+    # Convert HDF5 to SEG-Y
+    def make_sgy(self, path_hdf5, path_sgy):
+        """ Save `.hdf5` cube without headers in `.segy` format with current geometry headers.
+
+        Parameters
+        ----------
+        path_hdf5 : str
+            Path to load hdf5 file from. File must have a `cube` key where cube data is stored.
+        path_sgy : str
+            Path to store converted cube. By default, new cube is stored right next to original.
+        postfix : str
+            Postfix to add to the name of resulting cube.
+        """
+        path_sgy = path_sgy or (os.path.splitext(path_hdf5)[0] + postfix + '.sgy')
+        with h5py.File(path_hdf5, 'r') as f:
+            cube_hdf5 = f['cube']
+            with segyio.open(path_sgy, 'r', strict=False) as src:
+                src.mmap()
+                spec = segyio.spec()
+                spec.sorting = int(src.sorting)
+                spec.format = int(src.format)
+                spec.samples = range(self.depth)
+                spec.ilines = self.ilines
+                spec.xlines = self.xlines
+
+                with segyio.create(path_save, spec) as dst:
+                    # Copy all textual headers, including possible extended
+                    for i in range(1 + src.ext_headers):
+                        dst.text[i] = src.text[i]
+
+                    c = 0
+                    for i, il in tqdm(enumerate(spec.ilines)):
+                        for x, xl in enumerate(spec.xlines):
+                            idx = self.dataframe['trace_index'][(il, xl)]
+                            dst.header[c] = src.header[idx]
+
+                            dst.trace[c] = cube_hdf5[i, x, :]
+                            c += 1
+                    dst.bin = src.bin
+                    dst.bin = {segyio.BinField.Traces: c}
 
 
 class SeismicGeometryHDF5(SeismicGeometry):
