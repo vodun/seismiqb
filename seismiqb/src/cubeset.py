@@ -371,8 +371,8 @@ class SeismicCubeset(Dataset):
         self._p, self._bins = p, bins # stored for later sampler creation
 
 
-    def make_grid(self, cube_name, crop_shape, ilines_range, xlines_range, h_range, strides=None,
-                  batch_size=16, filtering_matrix=None, filter_threshold=0):
+    def make_grid(self, cube_name, crop_shape, ilines=None, xlines=None, heights=None,
+                  strides=None, batch_size=16, filtering_matrix=None, filter_threshold=0):
         """ Create regular grid of points in cube.
         This method is usually used with `assemble_predict` action of SeismicCropBatch.
 
@@ -382,11 +382,11 @@ class SeismicCubeset(Dataset):
             Reference to cube. Should be valid key for `geometries` attribute.
         crop_shape : array-like
             Shape of model inputs.
-        ilines_range : array-like of two elements
+        ilines : array-like of two elements
             Location of desired prediction, iline-wise.
-        xlines_range : array-like of two elements
+        xlines : array-like of two elements
             Location of desired prediction, xline-wise.
-        h_range : array-like of two elements
+        heights : array-like of two elements
             Location of desired prediction, depth-wise.
         strides : array-like
             Distance between grid points.
@@ -411,15 +411,19 @@ class SeismicCubeset(Dataset):
         if (filtering_matrix.shape != geometry.cube_shape[:2]).all():
             raise ValueError('Filtering_matrix shape must be equal to (ilines_len, xlines_len)')
 
+        ilines = (0, geometry.ilines_len - 1) if ilines is None else ilines
+        xlines = (0, geometry.xlines_len - 1) if xlines is None else xlines
+        heights = (0, geometry.depth - 1) if heights is None else heights
+
         # Assert ranges are valid
-        if ilines_range[0] < 0 or \
-           xlines_range[0] < 0 or \
-           h_range[0] < 0:
+        if ilines[0] < 0 or \
+           xlines[0] < 0 or \
+           heights[0] < 0:
             raise ValueError('Ranges must contain in the cube.')
 
-        if ilines_range[1] >= geometry.ilines_len or \
-           xlines_range[1] >= geometry.xlines_len or \
-           h_range[1] >= geometry.depth:
+        if ilines[1] >= geometry.ilines_len or \
+           xlines[1] >= geometry.xlines_len or \
+           heights[1] >= geometry.depth:
             raise ValueError('Ranges must contain in the cube.')
 
         # Make separate grids for every axis
@@ -430,39 +434,40 @@ class SeismicCubeset(Dataset):
                 grid_ += [axis_range[1] - crop_shape]
             return sorted(grid_)
 
-        ilines = _make_axis_grid(ilines_range, strides[0], geometry.ilines_len, crop_shape[0])
-        xlines = _make_axis_grid(xlines_range, strides[1], geometry.xlines_len, crop_shape[1])
-        hs = _make_axis_grid(h_range, strides[2], geometry.depth, crop_shape[2])
+        ilines_grid = _make_axis_grid(ilines, strides[0], geometry.ilines_len, crop_shape[0])
+        xlines_grid = _make_axis_grid(xlines, strides[1], geometry.xlines_len, crop_shape[1])
+        heights_grid = _make_axis_grid(heights, strides[2], geometry.depth, crop_shape[2])
 
         # Every point in grid contains reference to cube
         # in order to be valid input for `crop` action of SeismicCropBatch
         grid = []
-        for il in ilines:
-            for xl in xlines:
+        for il in ilines_grid:
+            for xl in xlines_grid:
                 if np.prod(crop_shape[:2]) - np.sum(filtering_matrix[il: il + crop_shape[0],
                                                                      xl: xl + crop_shape[1]]) > filter_threshold:
-                    for h in hs:
+                    for h in heights_grid:
                         point = [cube_name, il, xl, h]
                         grid.append(point)
+
+        offsets = np.array([ilines[0],
+                            xlines[0],
+                            heights[0]])
 
         grid = np.array(grid, dtype=object)
 
         # Creating and storing all the necessary things
+        # Check if grid is not empty
         if len(grid) > 0:
             grid_gen = (grid[i:i+batch_size]
                         for i in range(0, len(grid), batch_size))
+            grid_array = grid[:, 1:].astype(int) - offsets
         else:
-            grid_gen = (grid for _ in range(0))
+            grid_gen = iter(())
+            grid_array = []
 
-        offsets = np.array([ilines_range[0],
-                            xlines_range[0],
-                            h_range[0]])
-
-        predict_shape = (ilines_range[1] - ilines_range[0],
-                         xlines_range[1] - xlines_range[0],
-                         h_range[1] - h_range[0])
-
-        grid_array = grid[:, 1:].astype(int) - offsets
+        predict_shape = (ilines[1] - ilines[0],
+                         xlines[1] - xlines[0],
+                         heights[1] - heights[0])
 
         self.grid_gen = lambda: next(grid_gen)
         self.grid_iters = - (-len(grid) // batch_size)
@@ -472,7 +477,7 @@ class SeismicCubeset(Dataset):
             'crop_shape': crop_shape,
             'cube_name': cube_name,
             'geometry': geometry,
-            'range': [ilines_range, xlines_range, h_range]
+            'range': [ilines, xlines, heights]
         }
 
 
@@ -676,3 +681,58 @@ class SeismicCubeset(Dataset):
         self.grid_iters = - (-len(crops) // batch_size)
         self.grid_info = {'cube_name': cube_name,
                           'geom': horizon.geometry}
+
+
+    def assemble_crops(self, src, dst, grid_info='grid_info', order=None, fill_value=0):
+        """ Glue crops together in accordance to the grid and save to `dst` attribute.
+
+        Note
+        ----
+        In order to use this action you must first call `make_grid` method of SeismicCubeset.
+
+        Parameters
+        ----------
+        src : array-like
+            Sequence of crops.
+        dst : str
+            Attribute to put results in.
+        grid_info : dict or str
+            Dictionary with information about grid. Should be created by `make_grid` method.
+        order : tuple of int
+            Axes-param for `transpose`-operation, applied to a mask before fetching point clouds.
+            Default value of (2, 0, 1) is applicable to standart pipeline with one `rotate_axes`
+            applied to images-tensor.
+        fill_value : float or str
+            Fill_value for background array where all crops from src will be put on.
+            If str, then must be numpy method name that returns a float value.
+        """
+        if isinstance(grid_info, str):
+            try:
+                grid_info = getattr(self, grid_info)
+            except AttributeError:
+                raise AttributeError('Pass grid_info dictionary or call `make_grid` method to create grid_info.')
+
+        # Do nothing if number of crops differ from number of points in the grid.
+        if len(src) != len(grid_info['grid_array']):
+            raise ValueError('Length of src must be equal to number of crops in a grid')
+        order = order or (2, 0, 1)
+        src = np.array(src)
+        if isinstance(fill_value, str):
+            fill_value = getattr(np, fill_value)(src)
+
+        grid_array = grid_info['grid_array']
+        crop_shape = grid_info['crop_shape']
+        background = np.full(grid_info['predict_shape'], fill_value)
+
+        for i in range(len(grid_array)):
+            il, xl, h = grid_array[i, :]
+            il_end = min(background.shape[0], il+crop_shape[0])
+            xl_end = min(background.shape[1], xl+crop_shape[1])
+            h_end = min(background.shape[2], h+crop_shape[2])
+
+            crop = np.transpose(src[i], order)
+            crop = crop[:(il_end-il), :(xl_end-xl), :(h_end-h)]
+            previous = background[il:il_end, xl:xl_end, h:h_end]
+            background[il:il_end, xl:xl_end, h:h_end] = np.maximum(crop, previous)
+
+        setattr(self, dst, background)

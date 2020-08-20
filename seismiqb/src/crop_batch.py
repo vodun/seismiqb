@@ -12,7 +12,6 @@ from ..batchflow import FilesIndex, Batch, action, inbatch_parallel
 from ..batchflow.batch_image import transform_actions # pylint: disable=no-name-in-module,import-error
 
 from .horizon import Horizon
-from .utils import aggregate
 from .plotters import plot_image
 
 
@@ -581,46 +580,6 @@ class SeismicCropBatch(Batch):
                 else:
                     # if a horizon cannot be stitched to a horizon from dst, we enrich dst with it
                     dst.append(horizon_candidate)
-        return self
-
-
-
-    @action
-    @inbatch_parallel(init='run_once', target='for')
-    def assemble_crops(self, src, dst, grid_info, order=None):
-        """ Glue crops together in accordance to the grid.
-
-        Note
-        ----
-        In order to use this action you must first call `make_grid` method of SeismicCubeset.
-
-        Parameters
-        ----------
-        src : array-like
-            Sequence of crops.
-        dst : str
-            Component of batch to put results in.
-        grid_info : dict
-            Dictionary with information about grid. Should be created by `make_grid` method.
-
-        Returns
-        -------
-        SeismicCropBatch
-            Batch with assembled subcube in desired component.
-        """
-        # Do nothing until there is a crop for every point
-        if len(src) != len(grid_info['grid_array']):
-            return self
-
-        order = order or (2, 0, 1)
-        # Since we know that cube is 3-d entity, we can get rid of
-        # unneccessary dimensions
-        src = np.array(src)
-        src = src if len(src.shape) == 4 else np.squeeze(src, axis=-1)
-        assembled = aggregate(src, grid_info['grid_array'], grid_info['crop_shape'],
-                              grid_info['predict_shape'], order)
-
-        setattr(self, dst, assembled)
         return self
 
 
