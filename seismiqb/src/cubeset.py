@@ -454,9 +454,9 @@ class SeismicCubeset(Dataset):
         else:
             grid_gen = (grid for _ in range(0))
 
-        offsets = np.array([min(grid[:, 1]),
-                            min(grid[:, 2]),
-                            min(grid[:, 3])])
+        offsets = np.array([ilines_range[0],
+                            xlines_range[0],
+                            h_range[0]])
 
         predict_shape = (ilines_range[1] - ilines_range[0],
                          xlines_range[1] - xlines_range[0],
