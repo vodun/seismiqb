@@ -668,7 +668,7 @@ class Horizon:
         """
         _ = kwargs
         if grid_info is not None:
-            geometry = grid_info['geom']
+            geometry = grid_info['geometry']
             shifts = np.array([item[0] for item in grid_info['range']])
 
         if geometry is None or shifts is None:

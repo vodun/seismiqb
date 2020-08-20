@@ -536,9 +536,9 @@ class SeismicCropBatch(Batch):
         mask = np.transpose(mask, axes=order)
 
         #
-        geom = self.get(ix, 'geometries')
+        geometry = self.get(ix, 'geometries')
         grid_info = {
-            'geom': geom,
+            'geometry': geometry,
             'range': [[self.get(ix, src_slices)[k][0], None] for k in range(3)]
         }
 

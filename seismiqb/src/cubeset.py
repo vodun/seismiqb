@@ -372,7 +372,7 @@ class SeismicCubeset(Dataset):
 
 
     def make_grid(self, cube_name, crop_shape, ilines_range, xlines_range, h_range, strides=None,
-                  batch_size=16, gaps_matrix=None, gaps_threshold=1):
+                  batch_size=16, filtering_matrix=None, filter_threshold=0):
         """ Create regular grid of points in cube.
         This method is usually used with `assemble_predict` action of SeismicCropBatch.
 
@@ -392,21 +392,24 @@ class SeismicCubeset(Dataset):
             Distance between grid points.
         batch_size : int
             Amount of returned points per generator call.
-        gaps_matrix : ndarray
-            Binary matrix of (ilines_len, xlines_len) shape with zeros corresponding
+        filtering_matrix : ndarray
+            Binary matrix of (ilines_len, xlines_len) shape with ones corresponding
             to areas that can be skipped in the grid.
-            E.g., matrix with ones at places where a horizon is present and zeros everywhere else.
-            If None, a boolean negation to geometry.zero_traces matrix will be used.
-        gaps_threshold : int
-            Lower bound for non gap number of points (with 1's in the gaps_matrix)
-            in a crop in the grid. Default value is 1.
+            E.g., a matrix with zeros at places where a horizon is present and ones everywhere else.
+            If None, geometry.zero_traces matrix will be used.
+        filter_threshold : int or float in [0, 1]
+            Exclusive lower bound for non-gap number of points (with 0's in the filtering_matrix)
+            in a crop in the grid. Default value is 0.
+            If float, proportion from the total number of traces in a crop will be computed.
         """
-        geom = self.geometries[cube_name]
+        geometry = self.geometries[cube_name]
         strides = strides or crop_shape
-        gaps_matrix = ~geom.zero_traces.astype(bool) if gaps_matrix is None else gaps_matrix
-        if gaps_matrix.shape[0] != geom.ilines_len or \
-           gaps_matrix.shape[1] != geom.xlines_len:
-            raise ValueError('Gaps_matrix shape must be equal to (ilines_len, xlines_len)')
+        filter_threshold = int(filter_threshold * np.prod(crop_shape[:2])) \
+            if filter_threshold <= 1 else filter_threshold
+
+        filtering_matrix = geometry.zero_traces if filtering_matrix is None else filtering_matrix
+        if (filtering_matrix.shape != geometry.cube_shape[:2]).all():
+            raise ValueError('Filtering_matrix shape must be equal to (ilines_len, xlines_len)')
 
         # Assert ranges are valid
         if ilines_range[0] < 0 or \
@@ -414,9 +417,9 @@ class SeismicCubeset(Dataset):
            h_range[0] < 0:
             raise ValueError('Ranges must contain in the cube.')
 
-        if ilines_range[1] >= geom.ilines_len or \
-           xlines_range[1] >= geom.xlines_len or \
-           h_range[1] >= geom.depth:
+        if ilines_range[1] >= geometry.ilines_len or \
+           xlines_range[1] >= geometry.xlines_len or \
+           h_range[1] >= geometry.depth:
             raise ValueError('Ranges must contain in the cube.')
 
         # Make separate grids for every axis
@@ -427,31 +430,29 @@ class SeismicCubeset(Dataset):
                 grid_ += [axis_range[1] - crop_shape]
             return sorted(grid_)
 
-        ilines = _make_axis_grid(ilines_range, strides[0], geom.ilines_len, crop_shape[0])
-        xlines = _make_axis_grid(xlines_range, strides[1], geom.xlines_len, crop_shape[1])
-        hs = _make_axis_grid(h_range, strides[2], geom.depth, crop_shape[2])
+        ilines = _make_axis_grid(ilines_range, strides[0], geometry.ilines_len, crop_shape[0])
+        xlines = _make_axis_grid(xlines_range, strides[1], geometry.xlines_len, crop_shape[1])
+        hs = _make_axis_grid(h_range, strides[2], geometry.depth, crop_shape[2])
 
         # Every point in grid contains reference to cube
         # in order to be valid input for `crop` action of SeismicCropBatch
         grid = []
         for il in ilines:
             for xl in xlines:
-                if np.sum(gaps_matrix[il: il + crop_shape[0],
-                                      xl: xl + crop_shape[1]]) < gaps_threshold:
-                    continue
-                for h in hs:
-                    point = [cube_name, il, xl, h]
-                    grid.append(point)
+                if np.prod(crop_shape[:2]) - np.sum(filtering_matrix[il: il + crop_shape[0],
+                                                                     xl: xl + crop_shape[1]]) > filter_threshold:
+                    for h in hs:
+                        point = [cube_name, il, xl, h]
+                        grid.append(point)
 
         grid = np.array(grid, dtype=object)
-        # Update ranges to actual ones
-        ilines_range = (np.min(grid[:, 1]), np.max(grid[:, 1]) + crop_shape[0])
-        xlines_range = (np.min(grid[:, 2]), np.max(grid[:, 2]) + crop_shape[1])
-        h_range = (np.min(grid[:, 3]), np.max(grid[:, 3]) + crop_shape[2])
 
         # Creating and storing all the necessary things
-        grid_gen = (grid[i:i+batch_size]
-                    for i in range(0, len(grid), batch_size))
+        if len(grid_gen) > 0:
+            grid_gen = (grid[i:i+batch_size]
+                        for i in range(0, len(grid), batch_size))
+        else:
+            grid_gen = (grid for _ in range(0))
 
         offsets = np.array([min(grid[:, 1]),
                             min(grid[:, 2]),
@@ -470,7 +471,7 @@ class SeismicCubeset(Dataset):
             'predict_shape': predict_shape,
             'crop_shape': crop_shape,
             'cube_name': cube_name,
-            'geom': geom,
+            'geometry': geometry,
             'range': [ilines_range, xlines_range, h_range]
         }
 
@@ -555,10 +556,10 @@ class SeismicCubeset(Dataset):
         """
         components = ('images', 'masks') if list(self.labels.values())[0] else ('images',)
         cube_name = self.indices[idx]
-        geom = self.geometries[cube_name]
-        crop_shape = np.array(geom.cube_shape)
+        geometry = self.geometries[cube_name]
+        crop_shape = np.array(geometry.cube_shape)
 
-        axis = geom.parse_axis(axis)
+        axis = geometry.parse_axis(axis)
         point = np.array([[cube_name, 0, 0, 0]], dtype=object)
         point[0, axis + 1] = n_line
         crop_shape[axis] = 1
@@ -584,7 +585,7 @@ class SeismicCubeset(Dataset):
         names = ['iline', 'xline', 'slice']
         # configure defaults
         kwargs = {
-            'title': (names[axis] + ' {} out of {} on {}'.format(n_line, geom.cube_shape[axis], cube_name)),
+            'title': (names[axis] + ' {} out of {} on {}'.format(n_line, geometry.cube_shape[axis], cube_name)),
             'order_axes': (1, 0) if axis == 0 else (0, 1),
             'xlabel': 'xlines' if axis in (0, 2) else 'ilines',
             'ylabel': 'height' if axis in (0, 1) else 'xlines',
