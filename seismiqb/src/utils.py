@@ -310,6 +310,30 @@ def cut_data_along_horizon(array, horizon_matrix, width, horizon_offset, array_o
 
     return cut_out
 
+
+def cut_data_along_horizon_np(array, horizon_matrix, width, horizon_offset, array_offset, fill_value):
+    """ Check!!
+    """
+    # compute start and end-points of the overlap
+    horizon_offset, array_offset = np.array(horizon_offset), np.array(array_offset)    
+    horizon_max = horizon_offset + np.array(horizon_matrix.shape)
+    array_max = np.array(array.shape) + array_offset
+    overlap_shape = np.minimum(horizon_max, array_max) - np.maximum(horizon_offset, array_offset)
+    overlap_start = np.maximum(0, horizon_offset - array_offset)
+    heights_start = np.maximum(array_offset - horizon_offset, 0)
+    slc_overlap = [slice(l, h) for l, h in zip(overlap_start, overlap_start + overlap_shape)]
+    slc_heights = [slice(l, h) for l, h in zip(heights_start, heights_start + overlap_shape)]
+    overlap_matrix[slc_overlap] = horizon_matrix[slc_heights]
+
+    # fill the cut
+    result = np.zeros(array.shape[:2] + (width, ))
+    for i, surface_level in enumerate(np.array([horizon_matrix + shift for shift in range(-width // 2 + 1, width // 2 + 1)])):
+        mask = (surface_level >= 0) & (surface_level < array.shape[-1]) & (surface_level != fill_value)
+        iline_ixs, xline_ixs = np.meshgrid(np.arange(surface_level.shape[0]), np.arange(surface_level.shape[1]))
+        result[iline_ixs[mask], xline_ixs[mask], i] = array[iline_ixs[mask], xline_ixs[mask], surface_level[mask]]
+
+    return result
+
 @njit
 def aggregate(array_crops, array_grid, crop_shape, predict_shape, order):
     """ Jit-accelerated function to glue together crops according to grid.
