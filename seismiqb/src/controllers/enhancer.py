@@ -144,8 +144,6 @@ class Enhancer(BaseController):
                            B('prior_masks'),
                            fetches='predictions',
                            save_to=V('predicted_masks', mode='e'))
-            .assemble_crops(src=V('predicted_masks'), dst='assembled_pred',
-                            grid_info=D('grid_info'), order=C('order', default=(0, 1, 2)))
         )
         return inference_template
 
