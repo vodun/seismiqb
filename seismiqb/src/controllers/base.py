@@ -344,7 +344,7 @@ class BaseController:
             If 'x', then cube is split into crossline-oriented slices.
             If 'ix', then both of previous approaches applied, and results are merged.
         overlap_factor : number
-            Overlapping ratio of successive chunks. Can be seen as `how many chunks would cross every through point`.
+            Overlapping ratio of successive crops. Can be seen as `how many crops would cross every through point`.
         heights_range : None or sequence of two ints
             If None, then heights are inffered: from minimum of heights of all horizons in dataset to the maximum.
             If sequence of two ints, heights to inference on.

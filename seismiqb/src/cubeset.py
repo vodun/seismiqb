@@ -386,7 +386,7 @@ class SeismicCubeset(Dataset):
 
 
     def make_grid(self, cube_name, crop_shape, ilines=None, xlines=None, heights=None,
-                  overlap=None, batch_size=16, filtering_matrix=None, filter_threshold=0):
+                  overlap=None, overlap_factor=None, batch_size=16, filtering_matrix=None, filter_threshold=0):
         """ Create regular grid of points in cube.
         This method is usually used with `assemble_predict` action of SeismicCropBatch.
 
@@ -406,9 +406,11 @@ class SeismicCubeset(Dataset):
             Location of desired prediction, depth-wise.
             If None, whole cube ranges will be used.
         overlap : float or array-like
-            Distance between grid points. If float, then overlap stands for overlapping ratio
-            of successive crops.
+            Distance between grid points.
+        overlap_factor : float
+            Overlapping ratio of successive crops.
             Can be seen as `how many crops would cross every through point`.
+            If both overlap and overlap_factor are provided, overlap_factor will be used.
         batch_size : int
             Amount of returned points per generator call.
         filtering_matrix : ndarray
@@ -423,8 +425,8 @@ class SeismicCubeset(Dataset):
         """
         geometry = self.geometries[cube_name]
         overlap = overlap or crop_shape
-        if isinstance(overlap, float):
-            overlap = [max(1, int(item // overlap)) for item in crop_shape]
+        if overlap_factor:
+            overlap = [max(1, int(item // overlap_factor)) for item in crop_shape]
 
         if 0 < filter_threshold < 1:
             filter_threshold = int(filter_threshold * np.prod(crop_shape[:2]))
