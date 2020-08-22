@@ -47,8 +47,8 @@ class SpatialDescriptor:
         try:
             idx = obj.index_headers.index(self.header)
             return getattr(obj, self.attribute)[idx]
-        except ValueError:
-            raise ValueError(f'Current index does not contain {self.header}.')
+        except ValueError as exp:
+            raise ValueError(f'Current index does not contain {self.header}.') from exp
 
 
 def add_descriptors(cls):

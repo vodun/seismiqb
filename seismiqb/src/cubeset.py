@@ -756,8 +756,8 @@ class SeismicCubeset(Dataset):
         if isinstance(grid_info, str):
             try:
                 grid_info = getattr(self, grid_info)
-            except AttributeError:
-                raise AttributeError('Pass grid_info dictionary or call `make_grid` method to create grid_info.')
+            except AttributeError as exp:
+                raise RuntimeError('Pass grid_info dictionary or call `make_grid` method to create grid_info.') from exp
 
         # Do nothing if number of crops differ from number of points in the grid.
         if len(crops) != len(grid_info['grid_array']):
