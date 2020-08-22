@@ -423,11 +423,11 @@ class BaseController:
             _ = inference_pipeline.next_batch(D('size'))
 
         # Assemble crops together in accordance to the created grid
-        dataset.assemble_crops(inference_pipeline.v('predicted_masks'),
-                               dst='assembled_pred', order=config.get('order'))
+        assembled_pred = dataset.assemble_crops(inference_pipeline.v('predicted_masks'),
+                                                order=config.get('order'))
 
         # Convert to Horizon instances
-        return Horizon.from_mask(dataset.assembled_pred, dataset.grid_info, threshold=0.5, minsize=50)
+        return Horizon.from_mask(assembled_pred, dataset.grid_info, threshold=0.5, minsize=50)
 
     def inference_1(self, dataset, heights_range=None, orientation='i', overlap_factor=2,
                     chunk_size=100, chunk_overlap=0.2, **kwargs):
@@ -456,12 +456,11 @@ class BaseController:
                 _ = inference_pipeline.next_batch(D('size'))
 
             # Assemble crops together in accordance to the created grid
-            dataset.assemble_crops(inference_pipeline.v('predicted_masks'),
-                                   dst='assembled_pred', order=config.get('order'))
+            assembled_pred = dataset.assemble_crops(inference_pipeline.v('predicted_masks'),
+                                                    order=config.get('order'))
 
             # Extract Horizon instances
-            chunk_horizons = Horizon.from_mask(dataset.assembled_pred,
-                                               dataset.grid_info, threshold=0.5, minsize=50)
+            chunk_horizons = Horizon.from_mask(assembled_pred, dataset.grid_info, threshold=0.5, minsize=50)
             horizons.extend(chunk_horizons)
 
         return Horizon.merge_list(horizons, mean_threshold=5.5, adjacency=3, minsize=500)
