@@ -420,10 +420,14 @@ class BaseController:
 
         inference_pipeline = (self.get_inference_template() << config) << dataset
         for _ in self.make_pbar(range(dataset.grid_iters), desc=f'Inference on {geometry.name} | {orientation}'):
-            batch = inference_pipeline.next_batch(D('size'))
+            _ = inference_pipeline.next_batch(D('size'))
+
+        # Assemble crops together in accordance to the created grid
+        dataset.assemble_crops(inference_pipeline.v('predicted_masks'),
+                               dst='assembled_pred', order=config.get('order'))
 
         # Convert to Horizon instances
-        return Horizon.from_mask(batch.assembled_pred, dataset.grid_info, threshold=0.5, minsize=50)
+        return Horizon.from_mask(dataset.assembled_pred, dataset.grid_info, threshold=0.5, minsize=50)
 
     def inference_1(self, dataset, heights_range=None, orientation='i', overlap_factor=2,
                     chunk_size=100, chunk_overlap=0.2, **kwargs):
@@ -449,9 +453,14 @@ class BaseController:
 
             inference_pipeline = (self.get_inference_template() << config) << dataset
             for _ in range(dataset.grid_iters):
-                batch = inference_pipeline.next_batch(D('size'))
+                _ = inference_pipeline.next_batch(D('size'))
 
-            chunk_horizons = Horizon.from_mask(batch.assembled_pred,
+            # Assemble crops together in accordance to the created grid
+            dataset.assemble_crops(inference_pipeline.v('predicted_masks'),
+                                   dst='assembled_pred', order=config.get('order'))
+
+            # Extract Horizon instances
+            chunk_horizons = Horizon.from_mask(dataset.assembled_pred,
                                                dataset.grid_info, threshold=0.5, minsize=50)
             horizons.extend(chunk_horizons)
 
@@ -609,7 +618,7 @@ class BaseController:
         inference_template = (
             Pipeline()
             # Initialize everything
-            .init_variable('result_preds', [])
+            .init_variable('predicted_masks', [])
             .import_model('model', C('model_pipeline'))
 
             # Load data
@@ -623,8 +632,6 @@ class BaseController:
             .predict_model('model',
                            B('images'),
                            fetches='predictions',
-                           save_to=V('result_preds', mode='e'))
-            .assemble_crops(src=V('result_preds'), dst='assembled_pred',
-                            grid_info=D('grid_info'), order=C('order', default=(0, 1, 2)))
+                           save_to=V('predicted_masks', mode='e'))
         )
         return inference_template
