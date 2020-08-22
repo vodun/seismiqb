@@ -372,7 +372,7 @@ class SeismicCubeset(Dataset):
 
 
     def make_grid(self, cube_name, crop_shape, ilines=None, xlines=None, heights=None,
-                  strides=None, batch_size=16, filtering_matrix=None, filter_threshold=0):
+                  overlap=None, batch_size=16, filtering_matrix=None, filter_threshold=0):
         """ Create regular grid of points in cube.
         This method is usually used with `assemble_predict` action of SeismicCropBatch.
 
@@ -384,12 +384,17 @@ class SeismicCubeset(Dataset):
             Shape of model inputs.
         ilines : array-like of two elements
             Location of desired prediction, iline-wise.
+            If None, whole cube ranges will be used.
         xlines : array-like of two elements
             Location of desired prediction, xline-wise.
+            If None, whole cube ranges will be used.
         heights : array-like of two elements
             Location of desired prediction, depth-wise.
-        strides : array-like
-            Distance between grid points.
+            If None, whole cube ranges will be used.
+        overlap : float or array-like
+            Distance between grid points. If float, then overlap stands for overlapping ratio
+            of successive crops.
+            Can be seen as `how many crops would cross every through point`.
         batch_size : int
             Amount of returned points per generator call.
         filtering_matrix : ndarray
@@ -403,13 +408,17 @@ class SeismicCubeset(Dataset):
             If float, proportion from the total number of traces in a crop will be computed.
         """
         geometry = self.geometries[cube_name]
-        strides = strides or crop_shape
-        filter_threshold = int(filter_threshold * np.prod(crop_shape[:2])) \
-            if filter_threshold <= 1 else filter_threshold
+        overlap = overlap or crop_shape
+        if isinstance(overlap, float):
+            overlap = [max(1, int(item // overlap)) for item in crop_shape]
+
+        if 0 < filter_threshold < 1:
+            filter_threshold = int(filter_threshold * np.prod(crop_shape[:2]))
 
         filtering_matrix = geometry.zero_traces if filtering_matrix is None else filtering_matrix
         if (filtering_matrix.shape != geometry.cube_shape[:2]).all():
             raise ValueError('Filtering_matrix shape must be equal to (ilines_len, xlines_len)')
+        print('filtering_matrix sum', np.sum(filtering_matrix))
 
         ilines = (0, geometry.ilines_len - 1) if ilines is None else ilines
         xlines = (0, geometry.xlines_len - 1) if xlines is None else xlines
@@ -434,9 +443,9 @@ class SeismicCubeset(Dataset):
                 grid_ += [axis_range[1] - crop_shape]
             return sorted(grid_)
 
-        ilines_grid = _make_axis_grid(ilines, strides[0], geometry.ilines_len, crop_shape[0])
-        xlines_grid = _make_axis_grid(xlines, strides[1], geometry.xlines_len, crop_shape[1])
-        heights_grid = _make_axis_grid(heights, strides[2], geometry.depth, crop_shape[2])
+        ilines_grid = _make_axis_grid(ilines, overlap[0], geometry.ilines_len, crop_shape[0])
+        xlines_grid = _make_axis_grid(xlines, overlap[1], geometry.xlines_len, crop_shape[1])
+        heights_grid = _make_axis_grid(heights, overlap[2], geometry.depth, crop_shape[2])
 
         # Every point in grid contains reference to cube
         # in order to be valid input for `crop` action of SeismicCropBatch
@@ -449,9 +458,7 @@ class SeismicCubeset(Dataset):
                         point = [cube_name, il, xl, h]
                         grid.append(point)
 
-        offsets = np.array([ilines[0],
-                            xlines[0],
-                            heights[0]])
+        shifts = np.array([ilines[0], xlines[0], heights[0]])
 
         grid = np.array(grid, dtype=object)
 
@@ -460,7 +467,7 @@ class SeismicCubeset(Dataset):
         if len(grid) > 0:
             grid_gen = (grid[i:i+batch_size]
                         for i in range(0, len(grid), batch_size))
-            grid_array = grid[:, 1:].astype(int) - offsets
+            grid_array = grid[:, 1:].astype(int) - shifts
         else:
             grid_gen = iter(())
             grid_array = []
@@ -477,7 +484,8 @@ class SeismicCubeset(Dataset):
             'crop_shape': crop_shape,
             'cube_name': cube_name,
             'geometry': geometry,
-            'range': [ilines, xlines, heights]
+            'range': [ilines, xlines, heights],
+            'shifts': shifts
         }
 
 
@@ -683,8 +691,8 @@ class SeismicCubeset(Dataset):
                           'geom': horizon.geometry}
 
 
-    def assemble_crops(self, src, dst, grid_info='grid_info', order=None, fill_value=0):
-        """ Glue crops together in accordance to the grid and save to `dst` attribute.
+    def assemble_crops(self, crops, grid_info='grid_info', order=None, fill_value=0):
+        """ Glue crops together in accordance to the grid.
 
         Note
         ----
@@ -692,10 +700,8 @@ class SeismicCubeset(Dataset):
 
         Parameters
         ----------
-        src : array-like
+        crops : array-like
             Sequence of crops.
-        dst : str
-            Attribute to put results in.
         grid_info : dict or str
             Dictionary with information about grid. Should be created by `make_grid` method.
         order : tuple of int
@@ -703,8 +709,13 @@ class SeismicCubeset(Dataset):
             Default value of (2, 0, 1) is applicable to standart pipeline with one `rotate_axes`
             applied to images-tensor.
         fill_value : float or str
-            Fill_value for background array where all crops from src will be put on.
+            Fill_value for background array where all crops will be put on.
             If str, then must be numpy method name that returns a float value.
+
+        Returns
+        -------
+        np.ndarray
+            Assembled array of shape `grid_info['predict_shape']`.
         """
         if isinstance(grid_info, str):
             try:
@@ -713,12 +724,12 @@ class SeismicCubeset(Dataset):
                 raise AttributeError('Pass grid_info dictionary or call `make_grid` method to create grid_info.')
 
         # Do nothing if number of crops differ from number of points in the grid.
-        if len(src) != len(grid_info['grid_array']):
-            raise ValueError('Length of src must be equal to number of crops in a grid')
+        if len(crops) != len(grid_info['grid_array']):
+            raise ValueError('Length of crops must be equal to number of crops in a grid')
         order = order or (2, 0, 1)
-        src = np.array(src)
+        crops = np.array(crops)
         if isinstance(fill_value, str):
-            fill_value = getattr(np, fill_value)(src)
+            fill_value = getattr(np, fill_value)(crops)
 
         grid_array = grid_info['grid_array']
         crop_shape = grid_info['crop_shape']
@@ -730,9 +741,9 @@ class SeismicCubeset(Dataset):
             xl_end = min(background.shape[1], xl+crop_shape[1])
             h_end = min(background.shape[2], h+crop_shape[2])
 
-            crop = np.transpose(src[i], order)
+            crop = np.transpose(crops[i], order)
             crop = crop[:(il_end-il), :(xl_end-xl), :(h_end-h)]
             previous = background[il:il_end, xl:xl_end, h:h_end]
             background[il:il_end, xl:xl_end, h:h_end] = np.maximum(crop, previous)
 
-        setattr(self, dst, background)
+        return background
