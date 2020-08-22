@@ -754,10 +754,9 @@ class SeismicCubeset(Dataset):
             Assembled array of shape `grid_info['predict_shape']`.
         """
         if isinstance(grid_info, str):
-            try:
-                grid_info = getattr(self, grid_info)
-            except AttributeError as exp:
-                raise RuntimeError('Pass grid_info dictionary or call `make_grid` method to create grid_info.') from exp
+            if not hasattr(self, grid_info):
+                raise ValueError('Pass grid_info dictionary or call `make_grid` method to create grid_info.')
+            grid_info = getattr(self, grid_info)
 
         # Do nothing if number of crops differ from number of points in the grid.
         if len(crops) != len(grid_info['grid_array']):
