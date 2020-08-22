@@ -407,7 +407,7 @@ class SeismicCubeset(Dataset):
             If None, whole cube ranges will be used.
         overlap : float or array-like
             Distance between grid points.
-        overlap_factor : float
+        overlap_factor : float or array-like
             Overlapping ratio of successive crops.
             Can be seen as `how many crops would cross every through point`.
             If both overlap and overlap_factor are provided, overlap_factor will be used.
@@ -425,8 +425,10 @@ class SeismicCubeset(Dataset):
         """
         geometry = self.geometries[cube_name]
         overlap = overlap or crop_shape
+        if isinstance(overlap_factor, (int, float)):
+            overlap_factor = [overlap_factor] * 3
         if overlap_factor:
-            overlap = [max(1, int(item // overlap_factor)) for item in crop_shape]
+            overlap = [max(1, int(item // overlap_factor[i])) for i, item in enumerate(crop_shape)]
 
         if 0 < filter_threshold < 1:
             filter_threshold = int(filter_threshold * np.prod(crop_shape[:2]))
