@@ -746,9 +746,8 @@ class SeismicCubeset(Dataset):
             Axes-param for `transpose`-operation, applied to a mask before fetching point clouds.
             Default value of (2, 0, 1) is applicable to standart pipeline with one `rotate_axes`
             applied to images-tensor.
-        fill_value : float or str
-            Fill_value for background array where all crops will be put on.
-            If str, then must be numpy method name that returns a float value.
+        fill_value : float
+            Fill_value for background array if `len(crops) == 0`.
 
         Returns
         -------
@@ -765,8 +764,8 @@ class SeismicCubeset(Dataset):
             raise ValueError('Length of crops must be equal to number of crops in a grid')
         order = order or (2, 0, 1)
         crops = np.array(crops)
-        if isinstance(fill_value, str):
-            fill_value = getattr(np, fill_value)(crops)
+        if len(crops) != 0:
+            fill_value = np.min(crops)
 
         grid_array = grid_info['grid_array']
         crop_shape = grid_info['crop_shape']

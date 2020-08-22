@@ -447,7 +447,7 @@ class BaseController:
         return Horizon.from_mask(assembled_pred, dataset.grid_info, threshold=0.5, minsize=50)
 
     def inference_1(self, dataset, heights_range=None, orientation='i', overlap_factor=2,
-                    chunk_size=100, chunk_overlap=0.2, **kwargs):
+                    chunk_size=100, chunk_overlap=0.2, filtering_matrix=None, **kwargs):
         """ Split area for inference into `big` chunks, inference on each of them, merge results. """
         _ = kwargs
         geometry = dataset.geometries[0]
@@ -466,7 +466,8 @@ class BaseController:
             dataset.make_grid(dataset.indices[0], crop_shape_grid,
                               *current_spatial_ranges, heights_range,
                               batch_size=self.batch_size,
-                              overlap=overlap_grid)
+                              overlap=overlap_grid,
+                              filtering_matrix=filtering_matrix)
 
             inference_pipeline = (self.get_inference_template() << config) << dataset
             for _ in range(dataset.grid_iters):
