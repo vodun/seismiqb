@@ -436,8 +436,8 @@ class BaseController:
                           filtering_matrix=filtering_matrix)
 
         inference_pipeline = (self.get_inference_template() << config) << dataset
-        for _ in self.make_pbar(range(dataset.grid_iters), desc=f'Inference on {geometry.name} | {orientation}'):
-            inference_pipeline.run(D('size'), n_iters=1)
+        inference_pipeline.run(D('size'), n_iters=dataset.grid_iters, bar=self.bar,
+                               bar_desc=f'Inference on {geometry.name} | {orientation}')
 
         # Assemble crops together in accordance to the created grid
         assembled_pred = dataset.assemble_crops(inference_pipeline.v('predicted_masks'),
@@ -470,8 +470,8 @@ class BaseController:
                               filtering_matrix=filtering_matrix)
 
             inference_pipeline = (self.get_inference_template() << config) << dataset
-            for _ in range(dataset.grid_iters):
-                inference_pipeline.run(D('size'), n_iters=1)
+            inference_pipeline.run(D('size'), n_iters=dataset.grid_iters, bar=self.bar,
+                                   bar_desc=f'Inference on {geometry.name} | {orientation}')
 
             # Assemble crops together in accordance to the created grid
             assembled_pred = dataset.assemble_crops(inference_pipeline.v('predicted_masks'),
