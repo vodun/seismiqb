@@ -432,7 +432,6 @@ class SeismicCubeset(Dataset):
         filtering_matrix = geometry.zero_traces if filtering_matrix is None else filtering_matrix
         if (filtering_matrix.shape != geometry.cube_shape[:2]).all():
             raise ValueError('Filtering_matrix shape must be equal to (ilines_len, xlines_len)')
-        print('filtering_matrix sum', np.sum(filtering_matrix))
 
         ilines = (0, geometry.ilines_len - 1) if ilines is None else ilines
         xlines = (0, geometry.xlines_len - 1) if xlines is None else xlines
