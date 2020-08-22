@@ -415,7 +415,7 @@ class BaseController:
         dataset.make_grid(dataset.indices[0], crop_shape_grid,
                           *spatial_ranges, heights_range,
                           batch_size=self.batch_size,
-                          strides=strides_grid,
+                          overlap=strides_grid,
                           filtering_matrix=filtering_matrix)
 
         inference_pipeline = (self.get_inference_template() << config) << dataset
@@ -449,7 +449,7 @@ class BaseController:
             dataset.make_grid(dataset.indices[0], crop_shape_grid,
                               *current_spatial_ranges, heights_range,
                               batch_size=self.batch_size,
-                              strides=strides_grid)
+                              overlap=strides_grid)
 
             inference_pipeline = (self.get_inference_template() << config) << dataset
             for _ in range(dataset.grid_iters):
