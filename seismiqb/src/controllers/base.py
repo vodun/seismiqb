@@ -404,7 +404,7 @@ class BaseController:
                 heights_range = [0, geometry.depth-1]
         return spatial_ranges, heights_range
 
-    def make_inference_config(self, orientation, overlap_factor):
+    def make_inference_config(self, orientation):
         """ Parameters depending on orientation. """
         config = {'model_pipeline': self.model_pipeline}
         if orientation == 'i':
@@ -415,25 +415,24 @@ class BaseController:
             crop_shape_grid = np.array(self.crop_shape)[[1, 0, 2]]
             config['side_view'] = 1.0
             config['order'] = (1, 0, 2)
-        overlap_grid = [max(1, int(item//overlap_factor))
-                        for item in crop_shape_grid]
-        return config, crop_shape_grid, overlap_grid
+        return config, crop_shape_grid
 
 
     def inference_0(self, dataset, heights_range=None, orientation='i', overlap_factor=2,
-                    filtering_matrix=None, **kwargs):
+                    filtering_matrix=None, filter_threshold=0, **kwargs):
         """ Inference on chunks, assemble into massive 3D array, extract horizon surface. """
         _ = kwargs
         geometry = dataset.geometries[0]
         spatial_ranges, heights_range = self.make_inference_ranges(dataset, heights_range)
-        config, crop_shape_grid, overlap_grid = self.make_inference_config(orientation, overlap_factor)
+        config, crop_shape_grid = self.make_inference_config(orientation)
 
         # Actual inference
         dataset.make_grid(dataset.indices[0], crop_shape_grid,
                           *spatial_ranges, heights_range,
                           batch_size=self.batch_size,
-                          overlap=overlap_grid,
-                          filtering_matrix=filtering_matrix)
+                          overlap_factor=overlap_factor,
+                          filtering_matrix=filtering_matrix,
+                          filter_threshold=filter_threshold)
 
         inference_pipeline = (self.get_inference_template() << config) << dataset
         inference_pipeline.run(D('size'), n_iters=dataset.grid_iters, bar=self.bar,
@@ -447,12 +446,12 @@ class BaseController:
         return Horizon.from_mask(assembled_pred, dataset.grid_info, threshold=0.5, minsize=50)
 
     def inference_1(self, dataset, heights_range=None, orientation='i', overlap_factor=2,
-                    chunk_size=100, chunk_overlap=0.2, filtering_matrix=None, **kwargs):
+                    chunk_size=100, chunk_overlap=0.2, filtering_matrix=None, filter_threshold=0, **kwargs):
         """ Split area for inference into `big` chunks, inference on each of them, merge results. """
         _ = kwargs
         geometry = dataset.geometries[0]
         spatial_ranges, heights_range = self.make_inference_ranges(dataset, heights_range)
-        config, crop_shape_grid, overlap_grid = self.make_inference_config(orientation, overlap_factor)
+        config, crop_shape_grid = self.make_inference_config(orientation)
 
         # Actual inference
         axis = np.argmin(crop_shape_grid[:2])
@@ -466,8 +465,9 @@ class BaseController:
             dataset.make_grid(dataset.indices[0], crop_shape_grid,
                               *current_spatial_ranges, heights_range,
                               batch_size=self.batch_size,
-                              overlap=overlap_grid,
-                              filtering_matrix=filtering_matrix)
+                              overlap_factor=overlap_factor,
+                              filtering_matrix=filtering_matrix,
+                              filter_threshold=filter_threshold)
 
             inference_pipeline = (self.get_inference_template() << config) << dataset
             inference_pipeline.run(D('size'), n_iters=dataset.grid_iters, bar=self.bar,

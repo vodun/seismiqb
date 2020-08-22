@@ -394,20 +394,20 @@ class SeismicCubeset(Dataset):
         ----------
         cube_name : str
             Reference to cube. Should be valid key for `geometries` attribute.
-        crop_shape : array-like
+        crop_shape : sequence
             Shape of model inputs.
-        ilines : array-like of two elements
+        ilines : sequence of two elements
             Location of desired prediction, iline-wise.
             If None, whole cube ranges will be used.
-        xlines : array-like of two elements
+        xlines : sequence of two elements
             Location of desired prediction, xline-wise.
             If None, whole cube ranges will be used.
-        heights : array-like of two elements
+        heights : sequence of two elements
             Location of desired prediction, depth-wise.
             If None, whole cube ranges will be used.
-        overlap : float or array-like
+        overlap : float or sequence
             Distance between grid points.
-        overlap_factor : float or array-like
+        overlap_factor : float or sequence
             Overlapping ratio of successive crops.
             Can be seen as `how many crops would cross every through point`.
             If both overlap and overlap_factor are provided, overlap_factor will be used.
@@ -428,7 +428,7 @@ class SeismicCubeset(Dataset):
         if isinstance(overlap_factor, (int, float)):
             overlap_factor = [overlap_factor] * 3
         if overlap_factor:
-            overlap = [max(1, int(item // overlap_factor[i])) for i, item in enumerate(crop_shape)]
+            overlap = [max(1, int(item // factor)) for item, factor in zip(crop_shape, overlap_factor)]
 
         if 0 < filter_threshold < 1:
             filter_threshold = int(filter_threshold * np.prod(crop_shape[:2]))
@@ -658,7 +658,7 @@ class SeismicCubeset(Dataset):
         ----------
         cube_name : str
             Reference to the cube. Should be a valid key for the `labels_src` attribute.
-        crop_shape : array-like
+        crop_shape : sequence
             The desired shape of the crops.
             Note that final shapes are made in both xline and iline directions. So if
             crop_shape is (1, 64, 64), crops of both (1, 64, 64) and (64, 1, 64) shape
@@ -740,7 +740,7 @@ class SeismicCubeset(Dataset):
 
         Parameters
         ----------
-        crops : array-like
+        crops : sequence
             Sequence of crops.
         grid_info : dict or str
             Dictionary with information about grid. Should be created by `make_grid` method.
