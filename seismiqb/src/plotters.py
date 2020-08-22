@@ -7,7 +7,7 @@ from plotly.subplots import make_subplots
 
 
 def channelize_image(image, total_channels, n_channel=0, greyscale=False, opacity=None):
-    """ Channelize an image. Can be used to make an opaque rgb or greyscale image.
+    """ Channelize an image. Can be used to make an opaque rgb or grayscale image.
     """
     # case of a partially channelized image
     if image.ndim == 3:
@@ -124,7 +124,7 @@ class MatplotlibPlotter:
     def save_and_show(fig, show=True, savepath=None, **kwargs):
         """ Save and show plot if needed.
         """
-        save_kwargs = dict(bbox_inches='tight', pad_inches=0)
+        save_kwargs = dict(bbox_inches='tight', pad_inches=0, dpi=100)
         save_kwargs.update(kwargs.get('save', dict()))
 
         # save if necessary and render
@@ -189,8 +189,14 @@ class MatplotlibPlotter:
         cm.set_bad(color=updated.get('bad_color', updated.get('fill_color', 'white')))
         render_kwargs['cmap'] = cm
 
+        # Create figure and axes
+        if 'ax' in kwargs:
+            ax = kwargs['ax']
+            fig = ax.figure
+        else:
+            fig, ax = plt.subplots(**figure_kwargs)
+
         # channelize and plot the image
-        fig, ax = plt.subplots(**figure_kwargs)
         img = np.transpose(image.squeeze(), axes=updated['order_axes'])
         xticks, yticks = updated.get('xticks', [0, img.shape[1]]), updated.get('yticks', [img.shape[0], 0])
         extent = [xticks[0], xticks[-1], yticks[0], yticks[-1]]
@@ -251,6 +257,7 @@ class MatplotlibPlotter:
                     'cmap': 'gray',
                     'fontsize': 20,
                     'opacity': 1.0,
+                    'label': '', 'title': '', 'xlabel': '', 'ylabel': '',
                     'order_axes': (1, 0)}
         updated = {**defaults, **kwargs}
 
@@ -261,8 +268,14 @@ class MatplotlibPlotter:
         xaxis_kwargs = filter_kwargs(updated, ['xlabel', 'fontsize', 'family', 'color'])
         yaxis_kwargs = filter_kwargs(updated, ['ylabel', 'fontsize', 'family', 'color'])
 
+        # Create figure and axes
+        if 'ax' in kwargs:
+            ax = kwargs['ax']
+            fig = ax.figure
+        else:
+            fig, ax = plt.subplots(**figure_kwargs)
+
         # channelize images and put them on a canvas
-        _, ax = plt.subplots(**figure_kwargs)
         img = np.transpose(images[0].squeeze(), axes=updated['order_axes'])
         xticks, yticks = updated.get('xticks', [0, img.shape[1]]), updated.get('yticks', [img.shape[0], 0])
         extent = [xticks[0], xticks[-1], yticks[0], yticks[-1]]
@@ -282,7 +295,7 @@ class MatplotlibPlotter:
                       extent=extent, **render_kwargs)
         plt.title(**label_kwargs)
 
-        self.save_and_show(plt, **updated)
+        self.save_and_show(fig, **updated)
 
     def rgb(self, image, **kwargs):
         """ Plot one image in 'rgb' using matplotlib.
@@ -365,8 +378,8 @@ class MatplotlibPlotter:
                     'cmap': 'gray',
                     'fontsize': 20,
                     'y': 0.9,
-                    'order_axes': (1, 0),
-                    'label': ''*len(images)}
+                    'label': ''*len(images), 'title': '', 'xlabel': '', 'ylabel': '',
+                    'order_axes': (1, 0)}
         updated = {**defaults, **kwargs}
 
         # form different groups of kwargs

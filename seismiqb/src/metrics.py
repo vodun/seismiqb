@@ -10,6 +10,7 @@ import matplotlib.colors as mcolors
 
 import cv2
 from scipy.signal import hilbert, medfilt
+from scipy.stats import mode as mode_scipy
 
 from ..batchflow.models.metrics import Metrics
 
@@ -464,7 +465,7 @@ class BaseSeismicMetric(Metrics):
         metric[:, :, 1] = median_phase
         metric[:, :, 2:] = phase
 
-        title = 'phase by {}'.format(mode)
+        title = 'phase by {}'.format(correction)
         plot_dict = {
             'spatial': self.spatial,
             'title': '{} for {} on cube {}'.format(title, self.name, self.cube_name),
@@ -582,7 +583,7 @@ class HorizonMetrics(BaseSeismicMetric):
         'local_hellinger', 'support_hellinger',
         'local_wasserstein', 'support_wasserstein',
         'local_tv', 'support_tv',
-        'hilbert',
+        'hilbert', 'instantaneous_phase',
     ]
 
     def __init__(self, horizons, orientation=None, window=23, offset=0, scale=False, chunk_size=256, line=1):
@@ -638,14 +639,19 @@ class HorizonMetrics(BaseSeismicMetric):
 
     def instantaneous_phase(self, **kwargs):
         """ Compute instantaneous phase via Hilbert transform. """
+        #pylint: disable=unexpected-keyword-arg
         analytic = hilbert(self.data, axis=2)
 
         phase = np.angle(analytic)
         phase = phase % (2 * np.pi) - np.pi
 
         phase_slice = phase[:, :, phase.shape[-1] // 2]
-        phase_slice = correct_pi(phase_slice, 1e-5)
-        phase_slice[self.horizon.full_matrix == self.horizon.FILL_VALUE] = np.nan
+        phase_slice[np.isnan(np.std(self.data, axis=-1))] = np.nan
+
+        avg = mode_scipy(phase_slice[~np.isnan(phase_slice)].round(2), None)
+        phase_slice -= avg[0][0]
+        phase_slice[phase_slice >= np.pi] -= 2 * np.pi
+
 
         plot_dict = {
             'spatial': self.spatial,
@@ -660,7 +666,7 @@ class HorizonMetrics(BaseSeismicMetric):
 
 
     def find_best_match(self, offset=0, **kwargs):
-        """ !!. """
+        """ Find the closest horizon to the first one in the list of passed at initialization. """
         _ = kwargs
         if isinstance(self.horizons[1], Horizon):
             self.horizons[1] = [self.horizons[1]]
@@ -817,26 +823,23 @@ class GeometryMetrics(BaseSeismicMetric):
 
     def tracewise(self, func, l=3, pbar=True, **kwargs):
         """ Apply `func` to compare two cubes tracewise. """
-        if len(self.geometries) != 2:
-            raise ValueError()
         pbar = tqdm if pbar else lambda iterator, *args, **kwargs: iterator
         metric = np.full((*self.geometry.ranges, l), np.nan)
 
-        s_1 = self.geometries[0].dataframe['trace_index']
-        s_2 = self.geometries[1].dataframe['trace_index']
+        indices = [geometry.dataframe['trace_index'] for geometry in self.geometries]
 
-        for idx, trace_index_1 in pbar(s_1.iteritems(), total=len(s_1)):
-            trace_index_2 = s_2[idx]
+        for idx, _ in pbar(indices[0].iteritems(), total=len(indices[0])):
+            trace_indices = [ind[idx] for ind in indices]
 
-            header = self.geometries[0].segyfile.header[trace_index_1]
+            header = self.geometries[0].segyfile.header[trace_indices[0]]
             keys = [header.get(field) for field in self.geometries[0].byte_no]
             store_key = [self.geometries[0].uniques_inversed[i][item] for i, item in enumerate(keys)]
             store_key = tuple(store_key)
 
-            trace_1 = self.geometries[0].load_trace(trace_index_1)
-            trace_2 = self.geometries[1].load_trace(trace_index_2)
+            traces = [geometry.load_trace(trace_index) for
+                      geometry, trace_index in zip(self.geometries, trace_indices)]
 
-            metric[store_key] = func(trace_1, trace_2, **kwargs)
+            metric[store_key] = func(*traces, **kwargs)
 
         title = f"tracewise {func}"
         plot_dict = {
@@ -854,8 +857,6 @@ class GeometryMetrics(BaseSeismicMetric):
         """ Apply `func` to compare two cubes tracewise in an unsafe way:
         structure of cubes is assumed to be identical.
         """
-        if len(self.geometries) != 2:
-            raise ValueError()
         pbar = tqdm if pbar else lambda iterator, *args, **kwargs: iterator
         metric = np.full((*self.geometry.ranges, l), np.nan)
 
@@ -865,9 +866,8 @@ class GeometryMetrics(BaseSeismicMetric):
             store_key = [self.geometries[0].uniques_inversed[i][item] for i, item in enumerate(keys)]
             store_key = tuple(store_key)
 
-            trace_1 = self.geometries[0].load_trace(idx)
-            trace_2 = self.geometries[1].load_trace(idx)
-            metric[store_key] = func(trace_1, trace_2, **kwargs)
+            traces = [geometry.load_trace(idx) for geometry in self.geometries]
+            metric[store_key] = func(*traces, **kwargs)
 
         title = f"tracewise unsafe {func}"
         plot_dict = {
@@ -877,6 +877,55 @@ class GeometryMetrics(BaseSeismicMetric):
             'zmin': None, 'zmax': None,
             'ignore_value': np.nan,
             'xlabel': 'ilines', 'ylabel': 'xlines',
+            **kwargs
+        }
+        return metric, plot_dict
+
+
+    def blockwise(self, func, l=3, pbar=True, kernel=(5, 5), block_size=(1000, 1000),
+                  heights=None, prep_func=None, **kwargs):
+        """ Apply function to all traces in lateral window """
+
+        window = np.array(kernel)
+        low = window // 2
+        high = window - low
+
+        total = np.product(self.geometries[0].ranges-window)
+        prep_func = prep_func if prep_func else lambda x: x
+
+        pbar = tqdm if pbar else lambda iterator, *args, **kwargs: iterator
+        metric = np.full((*self.geometries[0].ranges, l), np.nan)
+
+        heights = np.arange(self.geometries[0].cube_shape[2]) if heights is None else np.arange(*heights)
+
+        with pbar(total=total) as prog_bar:
+            for il_block in np.arange(0, self.geometries[0].cube_shape[0], block_size[0]-window[0]):
+                for xl_block in np.arange(0, self.geometries[0].cube_shape[1], block_size[1]-window[1]):
+                    block_len = np.min((np.array(self.geometries[0].ranges) - (il_block, xl_block),
+                                        block_size), axis=0)
+                    locations = [np.arange(il_block, il_block + block_len[0]),
+                                 np.arange(xl_block, xl_block + block_len[1]),
+                                 heights]
+
+                    blocks = [prep_func(geometry.load_crop(locations)) for geometry in self.geometries]
+
+                    for il_kernel in range(low[0], blocks[0].shape[0] - high[0]):
+                        for xl_kernel in range(low[1], blocks[0].shape[1] - high[1]):
+
+                            il_from, il_to = il_kernel - low[0], il_kernel + high[0]
+                            xl_from, xl_to = xl_kernel - low[1], xl_kernel + high[1]
+
+                            subsets = [b[il_from:il_to, xl_from:xl_to, :].reshape((-1, b.shape[-1])) for b in blocks]
+                            metric[il_block + il_kernel, xl_block + xl_kernel, :] = func(*subsets, **kwargs)
+                            prog_bar.update(1)
+
+        title = f"Blockwise {func}"
+        plot_dict = {
+            'spatial': self.spatial,
+            'title': f'{title} for {self.name} on cube {self.cube_name}',
+            'cmap': 'seismic',
+            'zmin': None, 'zmax': None,
+            'ignore_value': np.nan,
             **kwargs
         }
         return metric, plot_dict
@@ -1490,6 +1539,7 @@ def digitize(matrix, quantiles):
 
     if len(bins) > 1:
         digitized = np.digitize(matrix, [*bins, np.nan]).astype(float)
+        digitized[digitized > 0] -= 1
     else:
         digitized = np.zeros_like(matrix, dtype=np.float64)
         digitized[matrix <= bins[0]] = 1.0
@@ -1523,6 +1573,25 @@ def gridify(matrix, frequencies, iline=True, xline=True):
 
     grid[np.isnan(matrix)] = np.nan
     return grid
+
+
+
+def enlarge_carcass_metric(metric, geometry, width=10):
+    """ Increase visibility of a sparce metric grid. """
+    structure = np.ones((1, 3), dtype=np.uint8)
+    metric = np.copy(metric)
+    metric[np.isnan(metric)] = Horizon.FILL_VALUE
+    dilated_1 = cv2.dilate(metric, structure, iterations=width)
+    dilated_2 = cv2.dilate(metric, structure.T, iterations=width)
+
+    metric = np.full_like(metric, np.nan)
+    metric[dilated_1 > -999] = dilated_1[dilated_1 > -999]
+    metric[dilated_2 > -999] = dilated_2[dilated_2 > -999]
+    metric[(dilated_1 > -999) & (dilated_2 > -999)] = (dilated_1[[(dilated_1 > -999) & (dilated_2 > -999)]] + \
+                                                       dilated_2[[(dilated_1 > -999) & (dilated_2 > -999)]]) / 2
+
+    metric[np.isnan(geometry.std_matrix)] = np.nan
+    return metric
 
 
 

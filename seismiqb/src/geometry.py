@@ -1,7 +1,6 @@
 """ SeismicGeometry-class containing geometrical info about seismic-cube."""
 import os
 import sys
-import logging
 from textwrap import dedent
 from random import random
 from itertools import product
@@ -13,7 +12,7 @@ import h5py
 import segyio
 import h5pickle
 
-from .utils import lru_cache, find_min_max #, SafeIO
+from .utils import lru_cache, find_min_max, file_print #, SafeIO
 from .plotters import plot_image
 
 
@@ -165,6 +164,11 @@ class SeismicGeometry:
         if process:
             self.process(**kwargs)
 
+    def __len__(self):
+        """ Number of meaningful traces. """
+        if hasattr(self, 'zero_matrix'):
+            return np.prod(self.zero_matrix.shape) - self.zero_matrix.sum()
+        return len(self.dataframe)
 
     def scaler(self, array, mode='minmax'):
         """ Normalize array of amplitudes cut from the cube.
@@ -341,13 +345,7 @@ class SeismicGeometry:
         """ Log some info into desired stream. """
         if not callable(printer):
             path_log = '/'.join(self.path.split('/')[:-1]) + '/CUBE_INFO.log'
-            handler = logging.FileHandler(path_log, mode='w')
-            handler.setFormatter(logging.Formatter('%(message)s'))
-
-            logger = logging.getLogger('geometry_logger')
-            logger.setLevel(logging.INFO)
-            logger.addHandler(handler)
-            printer = logger.info
+            printer = lambda msg: file_print(msg, path_log)
         printer(str(self))
 
     def show_snr(self, **kwargs):
@@ -663,7 +661,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
         else:
             iterator = np.arange(start, end+1, step)
 
-        indices = self.dataframe['trace_index'].get(iterator, np.nan).values
+        indices = self.dataframe['trace_index'].reindex(iterator, fill_value=np.nan).values
 
         if return_iterator:
             return indices, iterator
@@ -681,7 +679,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
             others = self.uniques[other_axis]
 
         iterator = list(zip([location] * len(others), others) if axis == 0 else zip(others, [location] * len(others)))
-        indices = self.dataframe['trace_index'].get(iterator, np.nan).values
+        indices = self.dataframe['trace_index'].reindex(iterator, fill_value=np.nan).values
 
         #TODO: keep only uniques, when needed, with `nan` filtering
         if stable:
@@ -718,8 +716,9 @@ class SeismicGeometrySEGY(SeismicGeometry):
     def make_crop_indices(self, locations):
         """ Create indices for 3D crop loading. """
         iterator = list(product(*[[self.uniques[idx][i] for i in locations[idx]] for idx in range(2)]))
-        indices = self.dataframe['trace_index'].get(list(iterator), np.nan).values
-        return np.unique(indices)
+        indices = self.dataframe['trace_index'].reindex(iterator, fill_value=np.nan).values
+        _, unique_ind = np.unique(indices, return_index=True)
+        return indices[np.sort(unique_ind, kind='stable')]
 
     def load_crop(self, locations, threshold=10, mode=None, **kwargs):
         """ Smart choice between using :meth:`._load_crop` and stacking multiple slides created by :meth:`.load_slide`.

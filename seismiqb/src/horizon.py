@@ -204,7 +204,7 @@ class UnstructuredHorizon:
             idx_2 = np.zeros_like(others_iterator) if axis == 1 else others_iterator
 
 
-        heights = self.dataframe[self.name].get(iterator, np.nan).values.astype(np.int32)
+        heights = self.dataframe[self.name].reindex(iterator, fill_value=np.nan).values.astype(np.int32)
 
         # Filter labels based on height
         heights_mask = np.asarray((np.isnan(heights) == False) & # pylint: disable=singleton-comparison
@@ -931,11 +931,11 @@ class Horizon:
         elif scale is False:
             scale = lambda array: array
 
-        for h_start in range(self.h_min - low, self.h_max + high, chunk_size):
-            h_end = min(h_start + chunk_size, self.h_max + high, self.geometry.depth)
+        for h_start in range(max(low, self.h_min), self.h_max, chunk_size):
+            h_end = min(h_start + chunk_size, self.h_max + 1)
 
             # Get chunk from the cube (depth-wise)
-            data_chunk = cube_hdf5[h_start:h_end, :, :]
+            data_chunk = cube_hdf5[(h_start-low) : min(h_end+high, self.geometry.depth), :, :]
             data_chunk = scale(data_chunk)
 
             # Check which points of the horizon are in the current chunk (and present)
@@ -947,24 +947,12 @@ class Horizon:
             # Convert spatial coordinates to cubic, convert height to current chunk local system
             idx_i += self.i_min
             idx_x += self.x_min
-            heights -= (h_start + low - offset)
+            heights -= (h_start - offset)
 
-            # Remove traces that are not fully inside `window`
-            mask = (heights + window <= (h_end - h_start))
-            idx_i = idx_i[mask]
-            idx_x = idx_x[mask]
-            heights = heights[mask]
-
-            # Subsequently add values from the cube to background, shift horizon 1 unit lower,
-            # remove all heights that are bigger than can fit into background
+            # Subsequently add values from the cube to background, then shift horizon 1 unit lower
             for j in range(window):
                 background[idx_i, idx_x, np.full_like(heights, j)] = data_chunk[heights, idx_i, idx_x]
                 heights += 1
-
-                mask = heights < chunk_size
-                idx_i = idx_i[mask]
-                idx_x = idx_x[mask]
-                heights = heights[mask]
 
         background[self.geometry.zero_traces == 1] = np.nan
         return background
@@ -1119,6 +1107,11 @@ class Horizon:
         return self.horizon_metrics.evaluate('instantaneous_phase')
 
     @property
+    def is_carcass(self):
+        """ Check if the horizon is a sparse carcass. """
+        return len(self) / self.filled_matrix.sum() < 0.5
+
+    @property
     def number_of_holes(self):
         """ Number of holes inside horizon borders. """
         holes_array = self.filled_matrix != self.binary_matrix
@@ -1145,7 +1138,7 @@ class Horizon:
 
 
     # Evaluate horizon on its own / against other(s)
-    def evaluate(self, supports=50, plot=True, savepath=None, printer=print, **kwargs):
+    def evaluate(self, compute_metric=True, supports=50, plot=True, savepath=None, printer=print, **kwargs):
         """ Compute crucial metrics of a horizon. """
         msg = f"""
         Number of labeled points:                         {len(self)}
@@ -1156,14 +1149,16 @@ class Horizon:
         Number of holes inside borders:                   {self.number_of_holes}
         """
         printer(dedent(msg))
-        return self.horizon_metrics.evaluate('support_corrs', supports=supports, agg='nanmean',
-                                             plot=plot, savepath=savepath, **kwargs)
+        if compute_metric:
+            return self.horizon_metrics.evaluate('support_corrs', supports=supports, agg='nanmean',
+                                                 plot=plot, savepath=savepath, **kwargs)
+        return None
 
 
     def check_proximity(self, other, offset=0):
         """ Shortcut for :meth:`.HorizonMetrics.evaluate` to compare against the best match of list of horizons. """
         _, overlap_info = self.verify_merge(other)
-        diffs = overlap_info['diffs'] + offset
+        diffs = overlap_info.get('diffs', 999) + offset
 
         overlap_info = {
             **overlap_info,
@@ -1385,7 +1380,7 @@ class Horizon:
 
     @staticmethod
     def merge_list(horizons, mean_threshold=2.0, adjacency=3, minsize=50):
-        """ !!. """
+        """ Iteratively try to merge every horizon in a list to every other, until there are no possible merges. """
         horizons = [horizon for horizon in horizons if len(horizon) >= minsize]
 
         # iterate over list of horizons to merge what can be merged
@@ -1548,7 +1543,7 @@ class Horizon:
         df = pd.DataFrame(values, columns=self.COLUMNS)
         df.sort_values(['iline', 'xline'], inplace=True)
 
-        path = path if not add_height else f'{path}_#{self.h_mean}'
+        path = path if not add_height else f'{path}_#{round(self.h_mean, 1)}'
         df.to_csv(path, sep=' ', columns=self.COLUMNS, index=False, header=False)
 
 
@@ -1652,10 +1647,12 @@ class Horizon:
         ----------
         loc : int
             Number of slide to load.
+        width : int
+            Horizon thickness.
         axis : int
             Number of axis to load slide along.
-        stable : bool
-            Whether or not to use the same sorting order as in the segyfile.
+        zoom_slice : tuple
+            Tuple of slices to apply directly to 2d images.
         """
         # Make `locations` for slide loading
         axis = self.geometry.parse_axis(axis)
@@ -1698,7 +1695,7 @@ class Horizon:
             'yticks': yticks[::max(1, round(len(yticks)//10/100))*100][::-1],
             'y': 1.02,
             **kwargs
-            }
+        }
 
         plot_image([seismic_slide, mask], order_axes=order_axes, **kwargs)
 
@@ -1711,7 +1708,7 @@ class Horizon:
         A horizon object with new matrix object and a reference to the old geometry attribute.
         """
         return Horizon(np.copy(self.matrix), self.geometry, i_min=self.i_min, x_min=self.x_min,
-                       name=f'Copy_of_{self.name}')
+                       name=f'copy_of_{self.name}')
 
 
 class StructuredHorizon(Horizon):

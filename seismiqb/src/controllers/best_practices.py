@@ -1,5 +1,5 @@
 """ Collection of good architectures for the tasks of horizon detection. """
-
+# pylint: disable=missing-function-docstring
 import torch
 import torch.nn as nn
 
@@ -8,8 +8,7 @@ from ...batchflow.batchflow.models.torch import ResBlock
 class Dice(nn.Module):
     """ Dice coefficient as a loss function. """
     def forward(self, prediction, target):
-        """ !! """
-        prediction = torch.sigmoid(input)
+        prediction = torch.sigmoid(prediction)
         dice_coeff = 2. * (prediction * target).sum() / (prediction.sum() + target.sum() + 1e-7)
         return 1 - dice_coeff
 

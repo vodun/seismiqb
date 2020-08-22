@@ -14,6 +14,13 @@ from numba import njit, prange
 
 
 
+def file_print(msg, path):
+    """ Print to file. """
+    with open(path, 'w') as file:
+        print(msg, file=file)
+
+
+
 class SafeIO:
     """ Opens the file handler with desired `open` function, closes it at destruction.
     Can log open and close actions to the `log_file`.
