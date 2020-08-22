@@ -415,9 +415,9 @@ class BaseController:
             crop_shape_grid = np.array(self.crop_shape)[[1, 0, 2]]
             config['side_view'] = 1.0
             config['order'] = (1, 0, 2)
-        strides_grid = [max(1, int(item//overlap_factor))
+        overlap_grid = [max(1, int(item//overlap_factor))
                         for item in crop_shape_grid]
-        return config, crop_shape_grid, strides_grid
+        return config, crop_shape_grid, overlap_grid
 
 
     def inference_0(self, dataset, heights_range=None, orientation='i', overlap_factor=2,
@@ -426,13 +426,13 @@ class BaseController:
         _ = kwargs
         geometry = dataset.geometries[0]
         spatial_ranges, heights_range = self.make_inference_ranges(dataset, heights_range)
-        config, crop_shape_grid, strides_grid = self.make_inference_config(orientation, overlap_factor)
+        config, crop_shape_grid, overlap_grid = self.make_inference_config(orientation, overlap_factor)
 
         # Actual inference
         dataset.make_grid(dataset.indices[0], crop_shape_grid,
                           *spatial_ranges, heights_range,
                           batch_size=self.batch_size,
-                          overlap=strides_grid,
+                          overlap=overlap_grid,
                           filtering_matrix=filtering_matrix)
 
         inference_pipeline = (self.get_inference_template() << config) << dataset
@@ -452,7 +452,7 @@ class BaseController:
         _ = kwargs
         geometry = dataset.geometries[0]
         spatial_ranges, heights_range = self.make_inference_ranges(dataset, heights_range)
-        config, crop_shape_grid, strides_grid = self.make_inference_config(orientation, overlap_factor)
+        config, crop_shape_grid, overlap_grid = self.make_inference_config(orientation, overlap_factor)
 
         # Actual inference
         axis = np.argmin(crop_shape_grid[:2])
@@ -466,7 +466,7 @@ class BaseController:
             dataset.make_grid(dataset.indices[0], crop_shape_grid,
                               *current_spatial_ranges, heights_range,
                               batch_size=self.batch_size,
-                              overlap=strides_grid)
+                              overlap=overlap_grid)
 
             inference_pipeline = (self.get_inference_template() << config) << dataset
             for _ in range(dataset.grid_iters):
