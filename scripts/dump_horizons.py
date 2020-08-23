@@ -44,16 +44,14 @@ def main(path_to_cube, path_to_model, path_to_predictions, gpu_device,
                         .init_variable('result_preds', init_on_each_run=list())
                         .predict_model('loaded_model', fetches='sigmoid', cubes=B('data_crops'),
                                        save_to=V('result_preds', mode='e'))
-                        .assemble_crops(src=V('result_preds'), dst='assembled_pred',
-                                        grid_info=D('grid_info'))
-                        ) << ds
 
-    for _ in tqdm(range(ds.grid_iters)):
-        batch = predict_pipeline.next_batch(1, n_epochs=None)
+    predict_pipeline.run(1, n_iters=ds.grid_iters, bar='n')
+    assembled_pred = ds.assemble_crops(predict_pipeline.v('predicted_masks'))
+
     printer('Cube is assembled')
 
     # Fetch and dump horizons
-    prediction = batch.assembled_pred
+    prediction = assembled_pred
     ds.get_point_cloud(prediction, 'horizons', coordinates='lines', threshold=threshold)
     printer('Horizonts are labeled')
 
