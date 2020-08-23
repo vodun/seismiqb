@@ -55,13 +55,13 @@ class SeismicCropBatch(Batch):
         -------
         path : str
             supplied string with random postfix.
+
         Notes
         -----
-        Action `crop` makes a new instance of SeismicCropBatch with
-        different (enlarged) index. Items in that index should point to cube
-        location to cut crops from. Since we can't store multiple copies of the same
-        string in one index (due to internal usage of dictionary), we need to augment
-        those strings with random postfix (which we can remove later).
+        Action `crop` makes a new instance of SeismicCropBatch with different (enlarged) index.
+        Items in that index should point to cube location to cut crops from.
+        Since we can't store multiple copies of the same string in one index (due to internal usage of dictionary),
+        we need to augment those strings with random postfix, which can be removed later.
         """
         return path + AFFIX + ''.join(random.choice(CHARS) for _ in range(SIZE_POSTFIX))
 
@@ -90,12 +90,17 @@ class SeismicCropBatch(Batch):
 
 
     def __getattr__(self, name):
+        """ Retrieve data from either `self` or attached dataset. """
         if hasattr(self.dataset, name):
             return getattr(self.dataset, name)
         return super().__getattr__(name)
 
     def get(self, item=None, component=None):
-        """ Overload `get` in order to use it for some attributes (that are looking like geometries or labels). """
+        """ Custom access for batch attribures.
+        If `component` looks like `label` or `geometry`, then we retrieve that dictionary from
+        attached dataset and use unsalted version of `item` as key.
+        Otherwise, we get position of `item` in the current batch and use it to index sequence-like `component`.
+        """
         if sum([attribute in component for attribute in ['label', 'geom']]):
             if isinstance(item, str) and self.has_salt(item):
                 item = self.unsalt(item)
@@ -106,7 +111,6 @@ class SeismicCropBatch(Batch):
 
         item = self.get_pos(None, component, item)
         return super().get(item, component)
-
 
 
     @action
@@ -123,8 +127,9 @@ class SeismicCropBatch(Batch):
             cut it from. Order is: name, iline, xline, height. For example,
             ['Cube.sgy', 13, 500, 200] stands for crop has [13, 500, 200]
             as its upper rightmost point and must be cut from 'Cube.sgy' file.
-        shape : sequence
-            Desired shape of crops.
+        shape : sequence, ndarray
+            Desired shape of crops along (iline, xline, height) axis. If ndarray, then must have the same length,
+            as `points`, and each row contains a shape for corresponding point.
         direction : sequence of numbers
             Direction of the cut crop relative to the point. Must be a vector on unit cube.
         side_view : bool or float
@@ -133,7 +138,11 @@ class SeismicCropBatch(Batch):
             If True, then shape is transposed with 0.5 probability.
             If float, then shape is transposed with that probability.
         adaptive_slices: bool or str
-            If True, then slices are created so that crops are cut only along the quality grid.
+            If True, then slices are created so that crops are cut only along the grid.
+        grid_src : str
+            Attribut of geometry to get the grid from.
+        eps : int
+            Initial length of slice, that is used to find the closest grid point.
         dst : str, optional
             Component of batch to put positions of crops in.
         passdown : str of list of str
@@ -179,17 +188,15 @@ class SeismicCropBatch(Batch):
             corrected_points_shapes = [self._correct_point_to_grid(point, shape, grid_src, eps) for point in points]
             points = [item[0] for item in corrected_points_shapes]
             shapes = [item[1] for item in corrected_points_shapes]
-            new_batch.add_components((dst_points, dst_shapes), (points, shapes))
 
             locations = [self._make_location(point, shape, direction) for point, shape in corrected_points_shapes]
         else:
             shapes = self._make_shapes(points, shape, side_view)
-            new_batch.add_components((dst_points, dst_shapes), (points, shapes))
 
-            locations = [self._make_location(point, shape, direction)
-                         for point, shape in zip(points, shapes)]
+            locations = [self._make_location(point, shape, direction) for point, shape in zip(points, shapes)]
+
+        new_batch.add_components((dst_points, dst_shapes), (points, shapes))
         new_batch.add_components(dst, locations)
-
         return new_batch
 
     def _make_shapes(self, points, shape, side_view):
@@ -214,9 +221,8 @@ class SeismicCropBatch(Batch):
         shapes = np.array(shapes)
         return shapes
 
-
     def _make_location(self, point, shape, direction=(0, 0, 0)):
-        """ Creates list of `np.arange`'s for desired location. """
+        """ Creates list of slices for desired location. """
         if isinstance(point[1], float) or isinstance(point[2], float) or isinstance(point[3], float):
             ix = point[0]
             cube_shape = np.array(self.get(ix, 'geometries').cube_shape)
@@ -274,7 +280,6 @@ class SeismicCropBatch(Batch):
         return self._correct_point_to_grid(point, shape, grid_src, 2*eps)
 
 
-
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
     def load_cubes(self, ix, dst, src='locations', **kwargs):
@@ -287,7 +292,6 @@ class SeismicCropBatch(Batch):
         dst : str
             Component of batch to put loaded crops in.
         """
-        #pylint: disable=unused-argument
         geom = self.get(ix, 'geometries')
         location = self.get(ix, src)
         return geom.load_crop(location, **kwargs)
@@ -326,7 +330,6 @@ class SeismicCropBatch(Batch):
         -----
         Can be run only after labels-dict is loaded into labels-component.
         """
-        #pylint: disable=unused-argument
         labels = self.get(ix, src_labels) if isinstance(src_labels, str) else src_labels
         labels = [labels] if not isinstance(labels, (tuple, list)) else labels
         check_sum = False
@@ -467,8 +470,17 @@ class SeismicCropBatch(Batch):
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
     def scale(self, ix, mode, src=None, dst=None):
-        """ Scale values in crop. """
-        #pylint: disable=unused-argument
+        """ Scale values in crop.
+
+        Parameters
+        ----------
+        mode : str
+            If `minmax`, then data is scaled to [0, 1] via minmax scaling.
+            If `q` or `normalize`, then data is divided by the maximum of absolute values of the
+            0.01 and 0.99 quantiles.
+            If `q_clip`, then data is clipped to 0.01 and 0.99 quantiles and then divided by the
+            maximum of absolute values of the two.
+        """
         pos = self.get_pos(None, src, ix)
         comp_data = getattr(self, src)[pos]
         geom = self.get(ix, 'geometries')
@@ -501,62 +513,53 @@ class SeismicCropBatch(Batch):
     @action
     @inbatch_parallel(init='indices', target='for', post='_masks_to_horizons_post')
     def masks_to_horizons(self, ix, src='masks', src_locations='locations', dst='predicted_labels', prefix='predict',
-                          threshold=0.5, averaging='mean', minsize=0, order=(2, 0, 1), skip_merge=False,
-                          mean_threshold=2.0, adjacency=1):
-        """ Convert labels from horizons-mask into point-cloud format. Fetches point-clouds from
-        a batch of masks, then merges resulting clouds to those stored in `dst`, whenever possible.
+                          threshold=0.5, mode='mean', minsize=0, mean_threshold=2.0, adjacency=1,
+                          order=(2, 0, 1), skip_merge=False):
+        """ Convert predicted segmentation mask to a list of Horizon instances.
 
         Parameters
         ----------
         src_masks : str
-            component of batch that stores masks.
+            Component of batch that stores masks.
         src_locations : str
-            component of batch that stores locations of crops.
+            Component of batch that stores locations of crops.
         dst : str/object
-            component of batch to store the resulting labels, o/w a storing object.
-        threshold : float
-            parameter of mask-thresholding.
-        averaging : str
-            method of pandas.groupby used for finding the center of a horizon.
-        coordinates : str
-            coordinates-mode to use for keys of point-cloud. Can be either 'cubic'
-            or 'lines'. In case of `lines`-option, `geometries` must be loaded as
-            a component of batch.
+            Component of batch to store the resulting labels, o/w a storing object.
         order : tuple of int
-            axes-param for `transpose`-operation, applied to a mask before fetching point clouds.
+            Axes-param for `transpose`-operation, applied to a mask before fetching point clouds.
             Default value of (2, 0, 1) is applicable to standart pipeline with one `rotate_axes`
             applied to images-tensor.
-        mean_threshold : int
-            if adjacent horizons do not diverge for more than this distance, they can be merged together.
-        adjacency : int
-            max distance between a pair of horizon-borders when the horizons can be adjacent.
-        Returns
-        -------
-        SeismicCropBatch
-            batch with fetched labels.
+        threshold, mode, minsize, mean_threshold, adjacency, prefix
+            Passed directly to `:meth:Horizon.from_mask`.
         """
         _ = dst, mean_threshold, adjacency, skip_merge
 
-        # threshold the mask, reshape and rotate the mask if needed
+        # Threshold the mask, transpose and rotate the mask if needed
         pos = self.get_pos(None, src, ix)
         mask = getattr(self, src)[pos]
         if np.array(order).reshape(-1, 3).shape[0] > 0:
             order = order[pos]
         mask = np.transpose(mask, axes=order)
 
+<<<<<<< HEAD
         #
         geometry = self.get(ix, 'geometries')
         shifts = [self.get(ix, src_locations)[k].start for k in range(3)]
         horizons = Horizon.from_mask(mask, geometry=geometry, shifts=shifts, threshold=threshold,
                                      averaging=averaging, minsize=minsize, prefix=prefix)
+=======
+        geometry = self.get(ix, 'geometries')
+        shifts = [self.get(ix, src_locations)[k].start for k in range(3)]
+
+        horizons = Horizon.from_mask(mask, geometry=geometry, shifts=shifts, threshold=threshold,
+                                     mode=mode, minsize=minsize, prefix=prefix)
+>>>>>>> Update crop_batch docs
         return horizons
 
 
     def _masks_to_horizons_post(self, horizons_lists, *args, dst=None, skip_merge=False,
                                 mean_threshold=2.0, adjacency=1, **kwargs):
-        """ Stitch a set of point-clouds to a point cloud form dst if possible.
-        Post for `get_point_cloud`-action.
-        """
+        """ Flatten list of lists of horizons, attempting to merge what can be merged. """
         _, _ = args, kwargs
         if dst is None:
             raise ValueError("dst should be initialized with empty list.")
@@ -565,14 +568,12 @@ class SeismicCropBatch(Batch):
             setattr(self, dst, [hor for hor_list in horizons_lists for hor in hor_list])
             return self
 
-        # remember, horizons_lists contains lists of horizons
         for horizons in horizons_lists:
             for horizon_candidate in horizons:
                 for horizon_target in dst:
                     merge_code, _ = Horizon.verify_merge(horizon_target, horizon_candidate,
                                                          mean_threshold=mean_threshold,
                                                          adjacency=adjacency)
-
                     if merge_code == 3:
                         merged = Horizon.overlap_merge(horizon_target, horizon_candidate, inplace=True)
                     elif merge_code == 2:
@@ -583,7 +584,7 @@ class SeismicCropBatch(Batch):
                     if merged:
                         break
                 else:
-                    # if a horizon cannot be stitched to a horizon from dst, we enrich dst with it
+                    # If a horizon can't be merged to any of the previous ones, we append it as it is
                     dst.append(horizon_candidate)
         return self
 
