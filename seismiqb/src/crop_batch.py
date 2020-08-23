@@ -17,9 +17,9 @@ from .plotters import plot_image
 
 
 AFFIX = '___'
-SIZE_POSTFIX = 7
+SIZE_POSTFIX = 12
 SIZE_SALT = len(AFFIX) + SIZE_POSTFIX
-
+CHARS = string.ascii_uppercase + string.digits
 
 
 @transform_actions(prefix='_', suffix='_', wrapper='apply_transform')
@@ -63,8 +63,7 @@ class SeismicCropBatch(Batch):
         string in one index (due to internal usage of dictionary), we need to augment
         those strings with random postfix (which we can remove later).
         """
-        chars = string.ascii_uppercase + string.digits
-        return path + AFFIX + ''.join(random.choice(chars) for _ in range(SIZE_POSTFIX))
+        return path + AFFIX + ''.join(random.choice(CHARS) for _ in range(SIZE_POSTFIX))
 
     @staticmethod
     def has_salt(path):
@@ -111,7 +110,7 @@ class SeismicCropBatch(Batch):
 
 
     @action
-    def crop(self, points, shape=None, loc=(0, 0, 0), side_view=False,
+    def crop(self, points, shape=None, direction=(0, 0, 0), side_view=False,
              adaptive_slices=False, grid_src='quality_grid', eps=3,
              dst='locations', passdown=None, dst_points='points', dst_shapes='shapes'):
         """ Generate positions of crops. Creates new instance of `SeismicCropBatch`
@@ -126,8 +125,8 @@ class SeismicCropBatch(Batch):
             as its upper rightmost point and must be cut from 'Cube.sgy' file.
         shape : sequence
             Desired shape of crops.
-        loc : sequence of numbers
-            Location of the point relative to the cut crop. Must be a location on unit cube.
+        direction : sequence of numbers
+            Direction of the cut crop relative to the point. Must be a vector on unit cube.
         side_view : bool or float
             Determines whether to generate crops of transposed shape (xline, iline, height).
             If False, then shape is never transposed.
@@ -140,12 +139,12 @@ class SeismicCropBatch(Batch):
         passdown : str of list of str
             Components of batch to keep in the new one.
         dst_points, dst_shapes : str
-            Components to put point locations and crop shapes in.
+            Components to put points and crop shapes in.
 
         Notes
         -----
         Based on the first column of `points`, new instance of SeismicCropBatch is created.
-        In order to keep multiple references to the same .sgy cube, each index is augmented
+        In order to keep multiple references to the same cube, each index is augmented
         with prefix of fixed length (check `salt` method for details).
 
         Returns
@@ -182,12 +181,12 @@ class SeismicCropBatch(Batch):
             shapes = [item[1] for item in corrected_points_shapes]
             new_batch.add_components((dst_points, dst_shapes), (points, shapes))
 
-            locations = [self._make_location(point, shape, loc) for point, shape in corrected_points_shapes]
+            locations = [self._make_location(point, shape, direction) for point, shape in corrected_points_shapes]
         else:
             shapes = self._make_shapes(points, shape, side_view)
             new_batch.add_components((dst_points, dst_shapes), (points, shapes))
 
-            locations = [self._make_location(point, shape, loc)
+            locations = [self._make_location(point, shape, direction)
                          for point, shape in zip(points, shapes)]
         new_batch.add_components(dst, locations)
 
@@ -216,7 +215,7 @@ class SeismicCropBatch(Batch):
         return shapes
 
 
-    def _make_location(self, point, shape, loc=(0, 0, 0)):
+    def _make_location(self, point, shape, direction=(0, 0, 0)):
         """ Creates list of `np.arange`'s for desired location. """
         if isinstance(point[1], float) or isinstance(point[2], float) or isinstance(point[3], float):
             ix = point[0]
@@ -227,7 +226,7 @@ class SeismicCropBatch(Batch):
 
         location = []
         for i in range(3):
-            start = int(max(anchor_point[i] - loc[i]*shape[i], 0))
+            start = int(max(anchor_point[i] - direction[i]*shape[i], 0))
             stop = start + shape[i]
             location.append(slice(start, stop))
         return location

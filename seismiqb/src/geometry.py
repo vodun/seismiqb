@@ -194,7 +194,6 @@ class SeismicGeometry:
         raise ValueError('Wrong mode', mode)
 
 
-
     def parse_axis(self, axis):
         """ Convert string representation of an axis into integer, if needed. """
         if isinstance(axis, str):
@@ -464,7 +463,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
 
         if self.index_headers == self.INDEX_POST:
             size = self.depth // 10
-            slc = np.stack([self[:, :, i * size] for i in range(1, 9)], axis=-1)
+            slc = np.stack([self[:, :, i * size] for i in range(1, 10)], axis=-1)
             self.zero_traces = np.zeros(self.lens, dtype=np.int)
             self.zero_traces[np.std(slc, axis=-1) == 0] = 1
 

@@ -919,8 +919,7 @@ class Horizon:
         high = max(window - low, 0)
         chunk_size = min(chunk_size, self.h_max - self.h_min + window)
 
-        # cube_hdf5 = self.geometry.file_hdf5['cube_h']
-        background = np.full((self.geometry.ilines_len, self.geometry.xlines_len, window), 0.0)
+        background = np.zeros((self.geometry.ilines_len, self.geometry.xlines_len, window), dtype=np.float32)
 
         # Make callable scaler
         if callable(scale):
@@ -934,7 +933,7 @@ class Horizon:
             h_end = min(h_start + chunk_size, self.h_max + 1)
 
             # Get chunk from the cube (depth-wise)
-            data_chunk = self.geometry[:, :, (h_start-low) : min(h_end+high, self.geometry.depth)]
+            data_chunk = self.geometry[:, :, (h_start - low) : min(h_end + high, self.geometry.depth)]
             data_chunk = scale(data_chunk)
 
             # Check which points of the horizon are in the current chunk (and present)
