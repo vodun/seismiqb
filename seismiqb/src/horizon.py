@@ -204,7 +204,7 @@ class UnstructuredHorizon:
             idx_2 = np.zeros_like(others_iterator) if axis == 1 else others_iterator
 
 
-        heights = self.dataframe[self.name].get(iterator, np.nan).values.astype(np.int32)
+        heights = self.dataframe[self.name].reindex(iterator, fill_value=np.nan).values.astype(np.int32)
 
         # Filter labels based on height
         heights_mask = np.asarray((np.isnan(heights) == False) & # pylint: disable=singleton-comparison
@@ -670,7 +670,7 @@ class Horizon:
         print('in horizon')
         _ = kwargs
         if grid_info is not None:
-            geometry = grid_info['geom']
+            geometry = grid_info['geometry']
             shifts = np.array([item[0] for item in grid_info['range']])
 
         if geometry is None or shifts is None:
@@ -933,11 +933,11 @@ class Horizon:
         elif scale is False:
             scale = lambda array: array
 
-        for h_start in range(self.h_min - low, self.h_max + high, chunk_size):
-            h_end = min(h_start + chunk_size, self.h_max + high, self.geometry.depth)
+        for h_start in range(max(low, self.h_min), self.h_max, chunk_size):
+            h_end = min(h_start + chunk_size, self.h_max + 1)
 
             # Get chunk from the cube (depth-wise)
-            data_chunk = cube_hdf5[h_start:h_end, :, :]
+            data_chunk = cube_hdf5[(h_start-low) : min(h_end+high, self.geometry.depth), :, :]
             data_chunk = scale(data_chunk)
 
             # Check which points of the horizon are in the current chunk (and present)
@@ -949,24 +949,12 @@ class Horizon:
             # Convert spatial coordinates to cubic, convert height to current chunk local system
             idx_i += self.i_min
             idx_x += self.x_min
-            heights -= (h_start + low - offset)
+            heights -= (h_start - offset)
 
-            # Remove traces that are not fully inside `window`
-            mask = (heights + window <= (h_end - h_start))
-            idx_i = idx_i[mask]
-            idx_x = idx_x[mask]
-            heights = heights[mask]
-
-            # Subsequently add values from the cube to background, shift horizon 1 unit lower,
-            # remove all heights that are bigger than can fit into background
+            # Subsequently add values from the cube to background, then shift horizon 1 unit lower
             for j in range(window):
                 background[idx_i, idx_x, np.full_like(heights, j)] = data_chunk[heights, idx_i, idx_x]
                 heights += 1
-
-                mask = heights < chunk_size
-                idx_i = idx_i[mask]
-                idx_x = idx_x[mask]
-                heights = heights[mask]
 
         background[self.geometry.zero_traces == 1] = np.nan
         return background
@@ -1119,6 +1107,11 @@ class Horizon:
     def instantaneous_phase(self):
         """ Phase along the horizon. """
         return self.horizon_metrics.evaluate('instantaneous_phase')
+
+    @property
+    def is_carcass(self):
+        """ Check if the horizon is a sparse carcass. """
+        return len(self) / self.filled_matrix.sum() < 0.5
 
     @property
     def number_of_holes(self):

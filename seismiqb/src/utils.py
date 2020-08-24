@@ -14,6 +14,13 @@ from numba import njit, prange
 
 
 
+def file_print(msg, path):
+    """ Print to file. """
+    with open(path, 'w') as file:
+        print(msg, file=file)
+
+
+
 class SafeIO:
     """ Opens the file handler with desired `open` function, closes it at destruction.
     Can log open and close actions to the `log_file`.
@@ -283,30 +290,6 @@ def convert_point_cloud(path, path_save, names=None, order=None, transform=None)
     if transform:
         data = data.apply(transform)
     data.to_csv(path_save, sep=' ', index=False, header=False)
-
-
-
-@njit
-def aggregate(array_crops, array_grid, crop_shape, predict_shape, order):
-    """ Jit-accelerated function to glue together crops according to grid.
-    At positions, where different crops overlap, only the maximum value is saved.
-    This function is usually called inside SeismicCropBatch's method `assemble_crops`.
-    """
-    #pylint: disable=assignment-from-no-return
-    total = len(array_grid)
-    background = np.full(predict_shape, np.min(array_crops))
-
-    for i in range(total):
-        il, xl, h = array_grid[i, :]
-        il_end = min(background.shape[0], il+crop_shape[0])
-        xl_end = min(background.shape[1], xl+crop_shape[1])
-        h_end = min(background.shape[2], h+crop_shape[2])
-
-        crop = np.transpose(array_crops[i], order)
-        crop = crop[:(il_end-il), :(xl_end-xl), :(h_end-h)]
-        previous = background[il:il_end, xl:xl_end, h:h_end]
-        background[il:il_end, xl:xl_end, h:h_end] = np.maximum(crop, previous)
-    return background
 
 
 def gen_crop_coordinates(point, horizon_matrix, zero_traces,
