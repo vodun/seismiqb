@@ -46,8 +46,8 @@ class SpatialDescriptor:
         try:
             idx = obj.index_headers.index(self.header)
             return getattr(obj, self.attribute)[idx]
-        except ValueError as exp:
-            raise ValueError(f'Current index does not contain {self.header}.') from exp
+        except ValueError as exc:
+            raise ValueError(f'Current index does not contain {self.header}.') from exc
 
 
 def add_descriptors(cls):
@@ -167,6 +167,7 @@ class SeismicGeometry:
         """ Number of meaningful traces. """
         if hasattr(self, 'zero_matrix'):
             return np.prod(self.zero_matrix.shape) - self.zero_matrix.sum()
+        return len(self.dataframe)
 
 
     def scaler(self, array, mode='minmax'):

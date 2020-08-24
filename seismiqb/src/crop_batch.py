@@ -541,19 +541,11 @@ class SeismicCropBatch(Batch):
             order = order[pos]
         mask = np.transpose(mask, axes=order)
 
-<<<<<<< HEAD
-        #
-        geometry = self.get(ix, 'geometries')
-        shifts = [self.get(ix, src_locations)[k].start for k in range(3)]
-        horizons = Horizon.from_mask(mask, geometry=geometry, shifts=shifts, threshold=threshold,
-                                     averaging=averaging, minsize=minsize, prefix=prefix)
-=======
         geometry = self.get(ix, 'geometries')
         shifts = [self.get(ix, src_locations)[k].start for k in range(3)]
 
         horizons = Horizon.from_mask(mask, geometry=geometry, shifts=shifts, threshold=threshold,
                                      mode=mode, minsize=minsize, prefix=prefix)
->>>>>>> Update crop_batch docs
         return horizons
 
 
