@@ -113,7 +113,7 @@ class SeismicGeometry:
 
     # Attributes to store during SEG-Y -> HDF5 conversion
     PRESERVED = [
-        'depth', 'delay', 'sample_rate',
+        'depth', 'delay', 'sample_rate', 'cube_shape',
         'byte_no', 'offsets', 'ranges', 'lens', # `uniques` can't be saved due to different lenghts of arrays
         'value_min', 'value_max', 'q01', 'q99', 'q001', 'q999', 'bins', 'trace_container',
         'ilines', 'xlines', 'ilines_offset', 'xlines_offset', 'ilines_len', 'xlines_len',
@@ -159,6 +159,7 @@ class SeismicGeometry:
         self._quality_map = None
         self._quality_grid = None
 
+        self.loaded = []
         self.has_stats = False
         if process:
             self.process(**kwargs)
@@ -168,6 +169,39 @@ class SeismicGeometry:
         if hasattr(self, 'zero_matrix'):
             return np.prod(self.zero_matrix.shape) - self.zero_matrix.sum()
         return len(self.dataframe)
+
+
+    def store_meta(self):
+        """ Store collected stats on disk. """
+        path_meta = os.path.splitext(self.path)[0] + '.meta'
+
+        # Remove file, if exists: h5py can't do that
+        if os.path.exists(path_meta):
+            os.remove(path_meta)
+
+        # Create file and datasets inside
+        with h5py.File(path_meta, "a") as file_meta:
+            # Save all the necessary attributes to the `info` group
+            for attr in self.PRESERVED:
+                if hasattr(self, attr) and getattr(self, attr) is not None:
+                    file_meta['/info/' + attr] = getattr(self, attr)
+
+    def load_meta(self):
+        """ Retrieve stored stats from disk. """
+        path_meta = os.path.splitext(self.path)[0] + '.meta'
+
+        # Backward compatibility
+        if not os.path.exists(path_meta):
+            path_meta = os.path.splitext(self.path)[0] + '.hdf5'
+
+        with h5py.File(path_meta, "r") as file_meta:
+            for item in self.PRESERVED:
+                try:
+                    value = file_meta['/info/' + item][()]
+                    setattr(self, item, value)
+                    self.loaded.append(item)
+                except KeyError:
+                    pass
 
 
     def scaler(self, array, mode='minmax'):
@@ -242,7 +276,6 @@ class SeismicGeometry:
                                    (threshold - cumsums[idx_1, idx_2, indices-1]) / self.hist_matrix[idx_1, idx_2, indices]
         q_matrix[q_matrix == 0.0] = np.nan
         return q_matrix
-
 
     @property
     def quality_map(self):
@@ -455,7 +488,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
 
 
     # Methods of inferring dataframe and amplitude stats
-    def process(self, collect_stats=False, **kwargs):
+    def process(self, collect_stats=False, recollect=False, **kwargs):
         """ Create dataframe based on `segy` file headers. """
         # Note that all the `segyio` structure inference is disabled
         self.segyfile = SafeIO(self.path, opener=segyio.open, mode='r', strict=False, ignore_geometry=True)
@@ -485,17 +518,11 @@ class SeismicGeometrySEGY(SeismicGeometry):
             self.zero_traces = np.zeros(self.lens, dtype=np.int)
             self.zero_traces[np.std(slc, axis=-1) == 0] = 1
 
-        if collect_stats:
+        path_meta = os.path.splitext(self.path)[0] + '.meta'
+        if os.path.exists(path_meta) and not recollect:
+            self.load_meta()
+        elif collect_stats:
             self.collect_stats(**kwargs)
-
-    def set_index(self, index_headers, sortby=None):
-        """ Change current index to a subset of loaded headers. """
-        self.dataframe.reset_index(inplace=True)
-        if sortby:
-            self.dataframe.sort_values(index_headers, inplace=True, kind='mergesort')# the only stable sorting algorithm
-        self.dataframe.set_index(index_headers, inplace=True)
-        self.index_headers = index_headers
-        self.add_attributes()
 
     def add_attributes(self):
         """ Infer info about curent index from `dataframe` attribute. """
@@ -516,7 +543,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
 
         self.cube_shape = np.asarray([*self.lens, self.depth])
 
-    def collect_stats(self, spatial=True, bins=25, num_keep=15000, **kwargs):
+    def collect_stats(self, spatial=True, bins=25, num_keep=5000, **kwargs):
         """ Pass through file data to collect stats:
             - min/max values.
             - q01/q99 quantiles of amplitudes in the cube.
@@ -579,7 +606,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
                 store_key = [self.uniques_inversed[j][item] for j, item in enumerate(keys)]
                 store_key = tuple(store_key)
 
-                # for each trace, we store an entire histogram of amplitudes
+                # For each trace, we store an entire histogram of amplitudes
                 val_min, val_max = find_min_max(trace)
                 min_matrix[store_key] = val_min
                 max_matrix[store_key] = val_max
@@ -608,7 +635,16 @@ class SeismicGeometrySEGY(SeismicGeometry):
         self.trace_container = np.array(trace_container)
         self.q001, self.q01, self.q99, self.q999 = np.quantile(trace_container, [0.001, 0.01, 0.99, 0.999])
         self.has_stats = True
+        self.store_meta()
 
+    def set_index(self, index_headers, sortby=None):
+        """ Change current index to a subset of loaded headers. """
+        self.dataframe.reset_index(inplace=True)
+        if sortby:
+            self.dataframe.sort_values(index_headers, inplace=True, kind='mergesort')# the only stable sorting algorithm
+        self.dataframe.set_index(index_headers, inplace=True)
+        self.index_headers = index_headers
+        self.add_attributes()
 
     # Methods to load actual data from SEG-Y
     def load_trace(self, index):
@@ -743,7 +779,6 @@ class SeismicGeometrySEGY(SeismicGeometry):
         _, unique_ind = np.unique(indices, return_index=True)
         return indices[np.sort(unique_ind, kind='stable')]
 
-
     def load_crop(self, locations, threshold=15, mode='adaptive', **kwargs):
         """ Smart choice between using :meth:`._load_crop` and stacking multiple slides created by :meth:`.load_slide`.
 
@@ -844,10 +879,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
                 pbar.update()
             pbar.close()
 
-            # Save all the necessary attributes to the `info` group
-            for attr in self.PRESERVED:
-                if hasattr(self, attr) and getattr(self, attr) is not None:
-                    file_hdf5['/info/' + attr] = getattr(self, attr)
+        self.store_meta()
 
 
 
@@ -864,8 +896,6 @@ class SeismicGeometryHDF5(SeismicGeometry):
         self.structured = True
         self.file_hdf5 = None
 
-        self.loaded = []
-
         super().__init__(path, **kwargs)
 
     def process(self, **kwargs):
@@ -880,20 +910,8 @@ class SeismicGeometryHDF5(SeismicGeometry):
     def add_attributes(self):
         """ Store values from `hdf5` file to attributes. """
         self.index_headers = self.INDEX_POST
-
-        for item in self.PRESERVED:
-            try:
-                value = self.file_hdf5['/info/' + item][()]
-                setattr(self, item, value)
-                self.loaded.append(item)
-            except KeyError:
-                pass
-        # BC
-        self.ilines_offset = min(self.ilines)
-        self.xlines_offset = min(self.xlines)
-        self.ilines_len = len(self.ilines)
-        self.xlines_len = len(self.xlines)
-        self.cube_shape = np.asarray([self.ilines_len, self.xlines_len, self.depth])
+        self.load_meta()
+        self.cube_shape = np.asarray([self.ilines_len, self.xlines_len, self.depth]) # BC
         self.has_stats = True
 
     # Methods to load actual data from HDF5
