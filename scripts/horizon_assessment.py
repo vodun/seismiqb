@@ -109,6 +109,7 @@ if __name__ == '__main__':
                     'other_name': other.name,
                     'other_path': os.path.join(*other.path.split('/')[-2:]),
                     'average_l1': overlap_info['mean'],
+                    'other_coverage': other.coverage,
                 }
                 other_prefix = 'carcass' if other.is_carcass else '@'
                 other.show(savepath=os.path.join(config['savedir'], f'{prefix}{other_prefix}_depthmap.png'))
