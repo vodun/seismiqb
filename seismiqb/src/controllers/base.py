@@ -344,7 +344,7 @@ class BaseController:
             If 'x', then cube is split into crossline-oriented slices.
             If 'ix', then both of previous approaches applied, and results are merged.
         overlap_factor : number
-            Overlapping ratio of successive chunks. Can be seen as `how many chunks would cross every through point`.
+            Overlapping ratio of successive crops. Can be seen as `how many crops would cross every through point`.
         heights_range : None or sequence of two ints
             If None, then heights are inffered: from minimum of heights of all horizons in dataset to the maximum.
             If sequence of two ints, heights to inference on.
@@ -404,7 +404,7 @@ class BaseController:
                 heights_range = [0, geometry.depth-1]
         return spatial_ranges, heights_range
 
-    def make_inference_config(self, orientation, overlap_factor):
+    def make_inference_config(self, orientation):
         """ Parameters depending on orientation. """
         config = {'model_pipeline': self.model_pipeline}
         if orientation == 'i':
@@ -415,37 +415,43 @@ class BaseController:
             crop_shape_grid = np.array(self.crop_shape)[[1, 0, 2]]
             config['side_view'] = 1.0
             config['order'] = (1, 0, 2)
-        strides_grid = [max(1, int(item//overlap_factor))
-                        for item in crop_shape_grid]
-        return config, crop_shape_grid, strides_grid
+        return config, crop_shape_grid
 
-    def inference_0(self, dataset, heights_range=None, orientation='i', overlap_factor=2, **kwargs):
+
+    def inference_0(self, dataset, heights_range=None, orientation='i', overlap_factor=2,
+                    filtering_matrix=None, filter_threshold=0, **kwargs):
         """ Inference on chunks, assemble into massive 3D array, extract horizon surface. """
         _ = kwargs
         geometry = dataset.geometries[0]
         spatial_ranges, heights_range = self.make_inference_ranges(dataset, heights_range)
-        config, crop_shape_grid, strides_grid = self.make_inference_config(orientation, overlap_factor)
+        config, crop_shape_grid = self.make_inference_config(orientation)
 
         # Actual inference
         dataset.make_grid(dataset.indices[0], crop_shape_grid,
                           *spatial_ranges, heights_range,
                           batch_size=self.batch_size,
-                          strides=strides_grid)
+                          overlap_factor=overlap_factor,
+                          filtering_matrix=filtering_matrix,
+                          filter_threshold=filter_threshold)
 
         inference_pipeline = (self.get_inference_template() << config) << dataset
-        for _ in self.make_pbar(range(dataset.grid_iters), desc=f'Inference on {geometry.name} | {orientation}'):
-            batch = inference_pipeline.next_batch(D('size'))
+        inference_pipeline.run(D('size'), n_iters=dataset.grid_iters, bar=self.bar,
+                               bar_desc=f'Inference on {geometry.name} | {orientation}')
+
+        # Assemble crops together in accordance to the created grid
+        assembled_pred = dataset.assemble_crops(inference_pipeline.v('predicted_masks'),
+                                                order=config.get('order'))
 
         # Convert to Horizon instances
-        return Horizon.from_mask(batch.assembled_pred, dataset.grid_info, threshold=0.5, minsize=50)
+        return Horizon.from_mask(assembled_pred, dataset.grid_info, threshold=0.5, minsize=50)
 
     def inference_1(self, dataset, heights_range=None, orientation='i', overlap_factor=2,
-                    chunk_size=100, chunk_overlap=0.2, **kwargs):
+                    chunk_size=100, chunk_overlap=0.2, filtering_matrix=None, filter_threshold=0, **kwargs):
         """ Split area for inference into `big` chunks, inference on each of them, merge results. """
         _ = kwargs
         geometry = dataset.geometries[0]
         spatial_ranges, heights_range = self.make_inference_ranges(dataset, heights_range)
-        config, crop_shape_grid, strides_grid = self.make_inference_config(orientation, overlap_factor)
+        config, crop_shape_grid = self.make_inference_config(orientation)
 
         # Actual inference
         axis = np.argmin(crop_shape_grid[:2])
@@ -459,19 +465,24 @@ class BaseController:
             dataset.make_grid(dataset.indices[0], crop_shape_grid,
                               *current_spatial_ranges, heights_range,
                               batch_size=self.batch_size,
-                              strides=strides_grid)
-            inference_pipeline = (self.get_inference_template() << config) << dataset
-            for _ in range(dataset.grid_iters):
-                batch = inference_pipeline.next_batch(D('size'))
+                              overlap_factor=overlap_factor,
+                              filtering_matrix=filtering_matrix,
+                              filter_threshold=filter_threshold)
 
-            chunk_horizons = Horizon.from_mask(batch.assembled_pred,
-                                               dataset.grid_info, threshold=0.0, minsize=50)
+            inference_pipeline = (self.get_inference_template() << config) << dataset
+            inference_pipeline.run(D('size'), n_iters=dataset.grid_iters, bar=self.bar,
+                                   bar_desc=f'Inference on {geometry.name} | {orientation}')
+
+            # Assemble crops together in accordance to the created grid
+            assembled_pred = dataset.assemble_crops(inference_pipeline.v('predicted_masks'),
+                                                    order=config.get('order'))
+
+            # Extract Horizon instances
+            chunk_horizons = Horizon.from_mask(assembled_pred, dataset.grid_info, threshold=0.5, minsize=50)
             horizons.extend(chunk_horizons)
 
             # Cleanup
             inference_pipeline.reset('variables')
-            batch.assembled_pred, batch.images, batch.masks = None, None, None
-            batch = None
             inference_pipeline = None
             gc.collect()
 
@@ -633,7 +644,7 @@ class BaseController:
         inference_template = (
             Pipeline()
             # Initialize everything
-            .init_variable('result_preds', [])
+            .init_variable('predicted_masks', [])
             .import_model('model', C('model_pipeline'))
 
             # Load data
@@ -647,8 +658,6 @@ class BaseController:
             .predict_model('model',
                            B('images'),
                            fetches='predictions',
-                           save_to=V('result_preds', mode='e'))
-            .assemble_crops(src=V('result_preds'), dst='assembled_pred',
-                            grid_info=D('grid_info'), order=C('order', default=(0, 1, 2)))
+                           save_to=V('predicted_masks', mode='e'))
         )
         return inference_template

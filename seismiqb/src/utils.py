@@ -292,30 +292,6 @@ def convert_point_cloud(path, path_save, names=None, order=None, transform=None)
     data.to_csv(path_save, sep=' ', index=False, header=False)
 
 
-
-@njit
-def aggregate(array_crops, array_grid, crop_shape, predict_shape, order):
-    """ Jit-accelerated function to glue together crops according to grid.
-    At positions, where different crops overlap, only the maximum value is saved.
-    This function is usually called inside SeismicCropBatch's method `assemble_crops`.
-    """
-    #pylint: disable=assignment-from-no-return
-    total = len(array_grid)
-    background = np.full(predict_shape, np.min(array_crops))
-
-    for i in range(total):
-        il, xl, h = array_grid[i, :]
-        il_end = min(background.shape[0], il+crop_shape[0])
-        xl_end = min(background.shape[1], xl+crop_shape[1])
-        h_end = min(background.shape[2], h+crop_shape[2])
-
-        crop = np.transpose(array_crops[i], order)
-        crop = crop[:(il_end-il), :(xl_end-xl), :(h_end-h)]
-        previous = background[il:il_end, xl:xl_end, h:h_end]
-        background[il:il_end, xl:xl_end, h:h_end] = np.maximum(crop, previous)
-    return background
-
-
 def gen_crop_coordinates(point, horizon_matrix, zero_traces,
                          stride, shape, fill_value, zeros_threshold=0,
                          empty_threshold=5, safe_stripe=0, num_points=2):
