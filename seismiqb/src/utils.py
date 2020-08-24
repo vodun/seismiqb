@@ -314,23 +314,31 @@ def cut_data_along_horizon(array, horizon_matrix, width, horizon_offset, array_o
 def cut_data_along_horizon_np(array, horizon_matrix, width, horizon_offset, array_offset, fill_value):
     """ Check!!
     """
-    # compute start and end-points of the overlap
-    horizon_offset, array_offset = np.array(horizon_offset), np.array(array_offset)    
-    horizon_max = horizon_offset + np.array(horizon_matrix.shape)
-    array_max = np.array(array.shape) + array_offset
-    overlap_shape = np.minimum(horizon_max, array_max) - np.maximum(horizon_offset, array_offset)
-    overlap_start = np.maximum(0, horizon_offset - array_offset)
-    heights_start = np.maximum(array_offset - horizon_offset, 0)
-    slc_overlap = [slice(l, h) for l, h in zip(overlap_start, overlap_start + overlap_shape)]
-    slc_heights = [slice(l, h) for l, h in zip(heights_start, heights_start + overlap_shape)]
-    overlap_matrix[slc_overlap] = horizon_matrix[slc_heights]
+    # compute start and end-points of the ilines-xlines overlap between
+    # array and horizon_matrix in horizon and array-coordinates
+    horizon_offset, array_offset = np.array(horizon_offset), np.array(array_offset)
+    horizon_max = horizon_offset[:2] + np.array(horizon_matrix.shape)
+    array_max = np.array(array.shape[:2]) + array_offset[:2]
+    overlap_shape = np.minimum(horizon_max[:2], array_max[:2]) - np.maximum(horizon_offset[:2], array_offset[:2])
+    overlap_start = np.maximum(0, horizon_offset[:2] - array_offset[:2])
+    heights_start = np.maximum(array_offset[:2] - horizon_offset[:2], 0)
 
-    # fill the cut
+    # recompute horizon-matrix in array-coordinates
+    slc_array = [slice(l, h) for l, h in zip(overlap_start, overlap_start + overlap_shape)]
+    slc_horizon = [slice(l, h) for l, h in zip(heights_start, heights_start + overlap_shape)]
+    overlap_matrix = np.zeros(array.shape[:2], dtype=np.float32)
+    overlap_matrix[slc_array] = horizon_matrix[slc_horizon]
+    overlap_matrix -= array_offset[-1]
+
+    # make the cut-array and fill int with array-data located on needed heights
     result = np.zeros(array.shape[:2] + (width, ))
-    for i, surface_level in enumerate(np.array([horizon_matrix + shift for shift in range(-width // 2 + 1, width // 2 + 1)])):
-        mask = (surface_level >= 0) & (surface_level < array.shape[-1]) & (surface_level != fill_value)
-        iline_ixs, xline_ixs = np.meshgrid(np.arange(surface_level.shape[0]), np.arange(surface_level.shape[1]))
-        result[iline_ixs[mask], xline_ixs[mask], i] = array[iline_ixs[mask], xline_ixs[mask], surface_level[mask]]
+    for i, surface_level in enumerate(np.array([overlap_matrix + shift for shift in range(-width // 2 + 1,
+                                                                                          width // 2 + 1)])):
+        mask = (surface_level >= 0) & (surface_level < array.shape[-1]) & (surface_level !=
+                                                                           fill_value - array_offset[-1])
+        mask_where = np.where(mask)
+        result[mask_where[0], mask_where[1], i] = array[mask_where[0], mask_where[1],
+                                                        surface_level[mask_where].astype(np.int)]
 
     return result
 
