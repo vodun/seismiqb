@@ -43,10 +43,10 @@ def main(path_to_cube, path_to_model, path_to_predictions, gpu_device,
                         .init_model('dynamic', TFModel, 'loaded_model', load_config)
                         .init_variable('result_preds', init_on_each_run=list())
                         .predict_model('loaded_model', fetches='sigmoid', cubes=B('data_crops'),
-                                       save_to=V('result_preds', mode='e'))
+                                       save_to=V('result_preds', mode='e')))
 
     predict_pipeline.run(1, n_iters=ds.grid_iters, bar='n')
-    assembled_pred = ds.assemble_crops(predict_pipeline.v('predicted_masks'))
+    assembled_pred = ds.assemble_crops(predict_pipeline.v('result_preds'))
 
     printer('Cube is assembled')
 
