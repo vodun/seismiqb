@@ -110,7 +110,7 @@ if __name__ == '__main__':
                     'other_path': os.path.join(*other.path.split('/')[-2:]),
                     'average_l1': overlap_info['mean'],
                 }
-                other_prefix = 'carcass' if other.is_carcass else ''
+                other_prefix = 'carcass' if other.is_carcass else '@'
                 other.show(savepath=os.path.join(config['savedir'], f'{prefix}{other_prefix}_depthmap.png'))
 
                 om = HorizonMetrics(other)
@@ -122,12 +122,13 @@ if __name__ == '__main__':
                     metric = om.evaluate(metric_name, **kwargs)
                     metric = enlarge_carcass_metric(metric, geometry) if other.is_carcass else metric
                     plot_image(metric, figsize=(20, 20),
-                            cmap=METRIC_CMAP, zmin=-1, zmax=1, fill_color='black',
-                            savepath=savepath + '.png')
+                               cmap=METRIC_CMAP, zmin=-1, zmax=1, fill_color='black',
+                               xlabel='INLINE_3D', ylabel='CROSSLINE_3D',
+                               savepath=savepath + '.png')
 
                     row_dict[f'{other_prefix}_{metric_name}'] = np.nanmean(metric)
                 if config['save-files']:
-                    horizon.dump(os.path.join(config['savedir'], f'{horizon.name}_{other_prefix}'), add_height=False)
+                    other.dump(os.path.join(config['savedir'], f'{horizon.name}_{other_prefix}'), add_height=False)
             else:
                 row_dict = {
                     **row_dict,
