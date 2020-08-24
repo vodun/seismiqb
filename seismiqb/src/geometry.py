@@ -788,7 +788,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
                     file_hdf5['/info/' + attr] = getattr(self, attr)
 
     # Convert HDF5 to SEG-Y
-    def make_sgy(self, path_hdf5, path_sgy):
+    def make_sgy(self, path_hdf5='temp.hdf5', path_sgy=None, postfix='', remove_hdf5=False):
         """ Save `.hdf5` cube without headers in `.segy` format with current geometry headers.
 
         Parameters
@@ -801,8 +801,9 @@ class SeismicGeometrySEGY(SeismicGeometry):
             Postfix to add to the name of resulting cube.
         """
         path_sgy = path_sgy or (os.path.splitext(path_hdf5)[0] + postfix + '.sgy')
-        with h5py.File(path_hdf5, 'r') as f:
-            cube_hdf5 = f['cube']
+
+        with h5py.File(path_hdf5, 'r') as src:
+            cube_hdf5 = src['cube']
             with segyio.open(path_sgy, 'r', strict=False) as src:
                 src.mmap()
                 spec = segyio.spec()
@@ -812,7 +813,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
                 spec.ilines = self.ilines
                 spec.xlines = self.xlines
 
-                with segyio.create(path_save, spec) as dst:
+                with segyio.create(path_sgy, spec) as dst:
                     # Copy all textual headers, including possible extended
                     for i in range(1 + src.ext_headers):
                         dst.text[i] = src.text[i]
@@ -827,6 +828,9 @@ class SeismicGeometrySEGY(SeismicGeometry):
                             c += 1
                     dst.bin = src.bin
                     dst.bin = {segyio.BinField.Traces: c}
+
+        if remove_hdf5:
+            os.remove(path_hdf5)
 
 
 class SeismicGeometryHDF5(SeismicGeometry):
