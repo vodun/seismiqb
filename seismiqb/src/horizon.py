@@ -179,7 +179,7 @@ class UnstructuredHorizon:
         high = max(width - low, 0)
 
         shift_1, shift_2, h_min = [slc.start for slc in locations]
-        h_max = locations[-1].start
+        h_max = locations[-1].stop
 
         if iterator is None:
             # Usual case
@@ -1173,7 +1173,25 @@ class Horizon:
 
 
     def check_proximity(self, other, offset=0):
-        """ Compute a number of stats on location of `self` relative to the `other` Horizons. """
+        """ Compute a number of stats on location of `self` relative to the `other` Horizons.
+        This method can be used as either bound or static method.
+
+        Parameters
+        ----------
+        self, other : Horizon
+            Horizons to compare.
+        offset : number
+            Value to shift the first horizon down.
+
+        Returns
+        -------
+        dictionary with following keys:
+            - `mean` for average distance
+            - `abs_mean` for average of absolute values of point-wise distances
+            - `max`, `abs_max`, `std`, `abs_std`
+            - `window_rate` for percentage of traces that are in 5ms from one horizon to the other
+            - `offset_diffs` with point-wise differences
+        """
         _, overlap_info = self.verify_merge(other)
         diffs = overlap_info.get('diffs', 999) + offset
 

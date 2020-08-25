@@ -494,7 +494,6 @@ class SeismicGeometrySEGY(SeismicGeometry):
         """ Create dataframe based on `segy` file headers. """
         # Note that all the `segyio` structure inference is disabled
         self.segyfile = SafeIO(self.path, opener=segyio.open, mode='r', strict=False, ignore_geometry=True)
-        # self.segyfile = segyio.open(self.path, mode='r', strict=False, ignore_geometry=True)
         self.segyfile.mmap()
 
         self.depth = len(self.segyfile.trace[0])
@@ -931,8 +930,7 @@ class SeismicGeometryHDF5(SeismicGeometry):
         No passing through data whatsoever.
         """
         _ = kwargs
-        self.file_hdf5 = SafeIO(self.path, opener=h5py.File, mode='r')
-        # self.file_hdf5 = h5py.File(self.path, mode='r')
+        self.file_hdf5 = h5py.File(self.path, mode='r')
         self.add_attributes()
 
     def add_attributes(self):

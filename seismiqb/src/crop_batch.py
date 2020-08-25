@@ -524,7 +524,7 @@ class SeismicCropBatch(Batch):
         src_locations : str
             Component of batch that stores locations of crops.
         dst : str/object
-            Component of batch to store the resulting labels, o/w a storing object.
+            Component of batch to store the resulting horizons.
         order : tuple of int
             Axes-param for `transpose`-operation, applied to a mask before fetching point clouds.
             Default value of (2, 0, 1) is applicable to standart pipeline with one `rotate_axes`
