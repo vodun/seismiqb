@@ -457,6 +457,60 @@ class SeismicGeometry:
         plot_image(data, backend='matplotlib', bins=bins, mode='histogram', **kwargs)
 
 
+    # Convert HDF5 to SEG-Y
+    def make_sgy(self, hdf5_path='temp.hdf5', segy_path=None, dst=None, postfix='', remove_hdf5=False, zip_result=True):
+        """ Save `.hdf5` cube without headers in `.segy` format with current geometry headers.
+
+        Parameters
+        ----------
+        hdf5_path : str
+            Path to load hdf5 file from. File must have a `cube` key where cube data is stored.
+        segy_path : str
+            Path to load segy file from.
+        dst : syt 
+            Path to store converted cube. By default, new cube is stored right next to original.
+        postfix : str
+            Postfix to add to the name of resulting cube.
+        """
+        dst = dst or (os.path.splitext(hdf5_path)[0] + postfix + '.sgy')
+        if not segy_path:
+            if hasattr(self, 'segy_path'):
+                segy_path = self.segy_path
+            else:
+                segy_path = os.path.splitext(self.path) + '.sgy'
+
+        with h5py.File(hdf5_path, 'r') as src:
+            cube_hdf5 = src['cube']
+            with segyio.open(segy_path, 'r', strict=False) as segy:
+                segy.mmap()
+                spec = segyio.spec()
+                spec.sorting = int(segy.sorting)
+                spec.format = int(segy.format)
+                spec.samples = range(self.depth)
+                spec.ilines = self.ilines
+                spec.xlines = self.xlines
+                print(f'spec.sorting{ spec.sorting}, segy.format {segy.format}')
+                with segyio.create(dst, spec) as dst_file:
+                    # Copy all textual headers, including possible extended
+                    for i in range(1 + segy.ext_headers):
+                        dst_file.text[i] = segy.text[i]
+                    c = 0
+                    for i, _ in tqdm(enumerate(spec.ilines)):
+                        for x, _ in enumerate(spec.xlines):
+                            dst_file.header[c] = segy.header[c]
+                            dst_file.trace[c] = cube_hdf5[i, x, :]
+                            c += 1
+                    dst_file.bin = {segyio.BinField.Traces: c}
+
+        if remove_hdf5:
+            os.remove(hdf5_path)
+
+        if zip_result:
+            dir_name = os.path.dirname(os.path.abspath(dst))
+            file_name = os.path.basename(dst)
+            shutil.make_archive(os.path.splitext(dst)[0], 'zip', dir_name, file_name)
+
+
 class SeismicGeometrySEGY(SeismicGeometry):
     """ Class to infer information about SEG-Y cubes and provide convenient methods of working with them.
     A wrapper around `segyio` to provide higher-level API.
@@ -1043,50 +1097,3 @@ class SeismicGeometryHDF5(SeismicGeometry):
         if squeeze:
             crop = np.squeeze(crop, axis=tuple(squeeze))
         return crop
-
-
-    # Convert HDF5 to SEG-Y
-    def make_sgy(self, path_hdf5='temp.hdf5', dst=None, postfix='', remove_hdf5=False, zip_result=True):
-        """ Save `.hdf5` cube without headers in `.segy` format with current geometry headers.
-
-        Parameters
-        ----------
-        path_hdf5 : str
-            Path to load hdf5 file from. File must have a `cube` key where cube data is stored.
-        path_sgy : str
-            Path to store converted cube. By default, new cube is stored right next to original.
-        postfix : str
-            Postfix to add to the name of resulting cube.
-        """
-        dst = dst or (os.path.splitext(path_hdf5)[0] + postfix + '.sgy')
-        path_sgy = self.segy_path
-        with h5py.File(path_hdf5, 'r') as src:
-            cube_hdf5 = src['cube']
-            with segyio.open(path_sgy, 'r', strict=False) as segy:
-                segy.mmap()
-                spec = segyio.spec()
-                spec.sorting = int(segy.sorting)
-                spec.format = int(segy.format)
-                spec.samples = range(self.depth)
-                spec.ilines = self.ilines
-                spec.xlines = self.xlines
-                print(f'spec.sorting{ spec.sorting}, segy.format {segy.format}')
-                with segyio.create(dst, spec) as dst_file:
-                    # Copy all textual headers, including possible extended
-                    for i in range(1 + segy.ext_headers):
-                        dst_file.text[i] = segy.text[i]
-                    c = 0
-                    for i, _ in tqdm(enumerate(spec.ilines)):
-                        for x, _ in enumerate(spec.xlines):
-                            dst_file.header[c] = segy.header[c]
-                            dst_file.trace[c] = cube_hdf5[i, x, :]
-                            c += 1
-                    dst_file.bin = {segyio.BinField.Traces: c}
-
-        if remove_hdf5:
-            os.remove(path_hdf5)
-
-        if zip_result:
-            dir_name = os.path.dirname(os.path.abspath(dst))
-            file_name = os.path.basename(dst)
-            shutil.make_archive(os.path.splitext(path_hdf5)[0], 'zip', dir_name, file_name)
