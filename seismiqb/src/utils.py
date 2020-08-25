@@ -285,36 +285,6 @@ def convert_point_cloud(path, path_save, names=None, order=None, transform=None)
     data.to_csv(path_save, sep=' ', index=False, header=False)
 
 
-def cut_data_along_horizon(array, horizon_matrix, width, horizon_offset, array_offset, fill_value):
-    """ Function for cutting out array-values along a horizon surface.
-    """
-    # compute start and end-points of the ilines-xlines overlap between
-    # array and horizon_matrix in horizon and array-coordinates
-    horizon_offset, array_offset = np.array(horizon_offset), np.array(array_offset)
-    horizon_max = horizon_offset[:2] + np.array(horizon_matrix.shape)
-    array_max = np.array(array.shape[:2]) + array_offset[:2]
-    overlap_shape = np.minimum(horizon_max[:2], array_max[:2]) - np.maximum(horizon_offset[:2], array_offset[:2])
-    overlap_start = np.maximum(0, horizon_offset[:2] - array_offset[:2])
-    heights_start = np.maximum(array_offset[:2] - horizon_offset[:2], 0)
-
-    # recompute horizon-matrix in array-coordinates
-    slc_array = [slice(l, h) for l, h in zip(overlap_start, overlap_start + overlap_shape)]
-    slc_horizon = [slice(l, h) for l, h in zip(heights_start, heights_start + overlap_shape)]
-    overlap_matrix = np.full(array.shape[:2], fill_value=fill_value, dtype=np.float32)
-    overlap_matrix[slc_array] = horizon_matrix[slc_horizon]
-    overlap_matrix -= array_offset[-1]
-    overlap_matrix = overlap_matrix[..., np.newaxis]
-    overlap_matrix = overlap_matrix + np.arange(-width // 2 + 1, width // 2 + 1)
-
-    # make the cut-array and fill it with array-data located on needed heights
-    result = np.zeros(array.shape[:2] + (width, ))
-    mask = ((overlap_matrix >= 0) & (overlap_matrix < array.shape[-1])
-            & (overlap_matrix != fill_value - array_offset[-1] + np.arange(-width // 2 + 1, width // 2 + 1)))
-    mask_where = np.where(mask)
-    result[mask_where] = array[mask_where[0], mask_where[1], overlap_matrix[mask_where].astype(np.int)]
-
-    return result
-
 @njit
 def aggregate(array_crops, array_grid, crop_shape, predict_shape, order):
     """ Jit-accelerated function to glue together crops according to grid.
