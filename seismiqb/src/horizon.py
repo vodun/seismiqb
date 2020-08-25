@@ -667,7 +667,6 @@ class Horizon:
         prefix : str
             Name of horizon to use.
         """
-        print('in horizon')
         _ = kwargs
         if grid_info is not None:
             geometry = grid_info['geometry']
@@ -699,8 +698,12 @@ class Horizon:
 
                 if len(indices[0]) >= minsize:
                     coords = np.vstack([indices[i] + sl[i].start for i in range(3)]).T
+                    # swap axes
+                    coords[:, [axis, -1]] = coords[:, [-1, axis]]
+                    points = group_function(coords)
+                    points[:, [axis, -1]] = points[:, [-1, axis]]
+                    points = points + shifts
 
-                    points = group_function(coords, axis=axis) + shifts
                     horizons.append(cls(points, geometry, name=f'{prefix}_{i}'))
 
         horizons.sort(key=len)
