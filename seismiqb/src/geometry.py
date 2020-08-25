@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 import h5py
 import segyio
+import cv2
 
 from .utils import lru_cache, find_min_max, file_print, SafeIO
 from .plotters import plot_image
@@ -114,6 +115,7 @@ class SeismicGeometry:
     # Attributes to store during SEG-Y -> HDF5 conversion
     PRESERVED = [
         'depth', 'delay', 'sample_rate', 'cube_shape',
+        'segy_path', 'segy_text', 'rotation_matrix',
         'byte_no', 'offsets', 'ranges', 'lens', # `uniques` can't be saved due to different lenghts of arrays
         'value_min', 'value_max', 'q01', 'q99', 'q001', 'q999', 'bins', 'trace_container',
         'ilines', 'xlines', 'ilines_offset', 'xlines_offset', 'ilines_len', 'xlines_len',
@@ -524,6 +526,11 @@ class SeismicGeometrySEGY(SeismicGeometry):
         elif collect_stats:
             self.collect_stats(**kwargs)
 
+        # Store additional segy info, that is preserved in HDF5
+        self.segy_path = self.path
+        self.segy_text = [self.segyfile.text[i] for i in range(1 + self.segyfile.ext_headers)]
+        self.add_rotation_matrix()
+
     def add_attributes(self):
         """ Infer info about curent index from `dataframe` attribute. """
         self.index_len = len(self.index_headers)
@@ -636,6 +643,25 @@ class SeismicGeometrySEGY(SeismicGeometry):
         self.q001, self.q01, self.q99, self.q999 = np.quantile(trace_container, [0.001, 0.01, 0.99, 0.999])
         self.has_stats = True
         self.store_meta()
+
+    def add_rotation_matrix(self):
+        """ Add transform from INLINE/CROSSLINE corrdinates to CDP system. """
+        ix_points = []
+        cdp_points = []
+
+        for _ in range(3):
+            idx = np.random.randint(len(self.dataframe))
+            trace = self.segyfile.header[idx]
+
+            # INLINE_3D -> CDP_X, CROSSLINE_3D -> CDP_Y
+            ix = (trace[segyio.TraceField.INLINE_3D], trace[segyio.TraceField.CROSSLINE_3D])
+            cdp = (trace[segyio.TraceField.CDP_X], trace[segyio.TraceField.CDP_Y])
+
+            ix_points.append(ix)
+            cdp_points.append(cdp)
+
+        self.rotation_matrix = cv2.getAffineTransform(np.float32(ix_points), np.float32(cdp_points))
+
 
     def set_index(self, index_headers, sortby=None):
         """ Change current index to a subset of loaded headers. """
@@ -881,6 +907,8 @@ class SeismicGeometrySEGY(SeismicGeometry):
 
         self.store_meta()
 
+    # Convenient alias
+    convert_to_hdf5 = make_hdf5
 
 
 class SeismicGeometryHDF5(SeismicGeometry):
