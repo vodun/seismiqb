@@ -376,7 +376,8 @@ class SeismicCubeset(Dataset):
         paths_txt = {}
         for i in range(len(self)):
             dir_path = '/'.join(self.index.get_fullpath(self.indices[i]).split('/')[:-1])
-            dir_ = dir_path + label_dir
+            label_dir_ = label_dir if isinstance(label_dir, str) else label_dir[self.indices[i]]
+            dir_ = dir_path + label_dir_
             paths_txt[self.indices[i]] = glob(dir_)
 
         self.load_geometries(**kwargs)

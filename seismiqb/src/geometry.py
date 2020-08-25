@@ -845,7 +845,6 @@ class SeismicGeometryHDF5(SeismicGeometry):
             Can be `iline`, `xline`, `height`, `depth`, `i`, `x`, `h`, 0, 1, 2.
         """
         _ = kwargs
-
         if axis is None:
             shape = np.array([len(item) for item in locations])
             axis = np.argmin(shape)
