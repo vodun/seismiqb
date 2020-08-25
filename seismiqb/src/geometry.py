@@ -467,7 +467,7 @@ class SeismicGeometry:
             Path to load hdf5 file from. File must have a `cube` key where cube data is stored.
         segy_path : str
             Path to load segy file from.
-        dst : syt 
+        dst : str
             Path to store converted cube. By default, new cube is stored right next to original.
         postfix : str
             Postfix to add to the name of resulting cube.
