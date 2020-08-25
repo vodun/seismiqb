@@ -489,7 +489,6 @@ class SeismicGeometry:
                 spec.samples = range(self.depth)
                 spec.ilines = self.ilines
                 spec.xlines = self.xlines
-                print(f'spec.sorting{ spec.sorting}, segy.format {segy.format}')
                 with segyio.create(dst, spec) as dst_file:
                     # Copy all textual headers, including possible extended
                     for i in range(1 + segy.ext_headers):
