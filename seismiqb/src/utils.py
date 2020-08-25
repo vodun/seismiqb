@@ -303,16 +303,15 @@ def cut_data_along_horizon(array, horizon_matrix, width, horizon_offset, array_o
     overlap_matrix = np.full(array.shape[:2], fill_value=fill_value, dtype=np.float32)
     overlap_matrix[slc_array] = horizon_matrix[slc_horizon]
     overlap_matrix -= array_offset[-1]
+    overlap_matrix = overlap_matrix[..., np.newaxis]
+    overlap_matrix = overlap_matrix + np.arange(-width // 2 + 1, width // 2 + 1)
 
-    # make the cut-array and fill int with array-data located on needed heights
+    # make the cut-array and fill it with array-data located on needed heights
     result = np.zeros(array.shape[:2] + (width, ))
-    for i, surface_level in enumerate(np.array([overlap_matrix + shift for shift in range(-width // 2 + 1,
-                                                                                          width // 2 + 1)])):
-        mask = (surface_level >= 0) & (surface_level < array.shape[-1]) & (surface_level !=
-                                                                           fill_value - array_offset[-1])
-        mask_where = np.where(mask)
-        result[mask_where[0], mask_where[1], i] = array[mask_where[0], mask_where[1],
-                                                        surface_level[mask_where].astype(np.int)]
+    mask = ((overlap_matrix >= 0) & (overlap_matrix < array.shape[-1])
+            & (overlap_matrix != fill_value - array_offset[-1] + np.arange(-width // 2 + 1, width // 2 + 1)))
+    mask_where = np.where(mask)
+    result[mask_where] = array[mask_where[0], mask_where[1], overlap_matrix[mask_where].astype(np.int)]
 
     return result
 
