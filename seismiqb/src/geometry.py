@@ -459,7 +459,7 @@ class SeismicGeometry:
 
     # Convert HDF5 to SEG-Y
     def make_sgy(self, hdf5_path='temp.hdf5', segy_path=None, dst=None, postfix='', remove_hdf5=False, zip_result=True):
-        """ Save `.hdf5` cube without headers in `.segy` format with current geometry headers.
+        """ Convert HDF5 cube to SEG-Y format with current geometry spec.
 
         Parameters
         ----------
@@ -480,6 +480,7 @@ class SeismicGeometry:
                 segy_path = os.path.splitext(self.path) + '.sgy'
 
         with h5py.File(hdf5_path, 'r') as src:
+
             cube_hdf5 = src['cube']
             with segyio.open(segy_path, 'r', strict=False) as segy:
                 segy.mmap()
