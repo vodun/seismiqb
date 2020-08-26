@@ -589,7 +589,7 @@ class Horizon:
         self.path = path
         self.name = os.path.basename(path)
         points = self.file_to_points(path)
-        self.from_points(points, transform)
+        self.from_points(points, transform, **kwargs)
 
     def file_to_points(self, path):
         """ Get point cloud array from file values. """

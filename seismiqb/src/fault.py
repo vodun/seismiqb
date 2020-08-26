@@ -69,7 +69,6 @@ class Fault(Horizon):
         return _points
 
     def _check_sticks(self, points):
-        import pdb; pdb.set_trace()
         if points[0, 0] == points[1, 0]:
             return False
         if points[0, 1] == points[1, 1]:
