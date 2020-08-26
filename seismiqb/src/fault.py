@@ -35,12 +35,12 @@ class Fault(Horizon):
 
         df = pd.read_csv(path, sep='\s+', names=names)
         df = self.fix_sticks(df)[Horizon.COLUMNS]
-        df.sort_values(Horizon.COLUMNS, inplace=True)
+        # df.sort_values(Horizon.COLUMNS, inplace=True)
         return self.interpolate_points(df.values)
 
     def fix_sticks(self, df):
         def _move_stick_end(df):
-            if len(df.iline.unique()) > 1:
+            if (len(df.iline.unique()) > 1) and (len(df.xline.unique()) > 1):
                 df['iline'] = df.iloc[0]['iline']
             return df
 
@@ -49,6 +49,9 @@ class Fault(Horizon):
         return df
 
     def interpolate_points(self, points):
+        transpose = self._check_sticks(points)
+        if transpose:
+            points = points[:, [1, 0, 2]]
         slides = np.unique(points[:, 0])
         x_min, x_max = points[:, 1].min(), points[:, 1].max()
         h_min, h_max = points[:, 2].min(), points[:, 2].max()
@@ -59,7 +62,18 @@ class Fault(Horizon):
             slide_points = _line(nodes, width=1)
             _points += [np.concatenate([np.ones((len(slide_points), 1)) * slide, slide_points], axis=1)]
 
-        return np.concatenate(_points, axis=0)
+        _points = np.concatenate(_points, axis=0)
+        if transpose:
+            _points = _points[:, [1, 0, 2]]
+        return _points
+
+    def _check_sticks(self, points):
+        import pdb; pdb.set_trace()
+        if points[0, 0] == points[1, 0]:
+            return False
+        if points[0, 1] == points[1, 1]:
+            return True
+        raise ValueError('Wrong sticks format')
 
     def add_to_mask(self, mask, locations=None, width=3, alpha=1, **kwargs):
         mask_bbox = np.array([[locations[0][0], locations[0][-1]+1],
