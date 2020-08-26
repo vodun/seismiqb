@@ -8,6 +8,7 @@ from numba import njit, prange
 from PIL import ImageDraw, Image
 
 from scipy.ndimage import find_objects
+from scipy.interpolate import LinearNDInterpolator
 from skimage.measure import label
 
 from .horizon import Horizon
@@ -36,7 +37,7 @@ class Fault(Horizon):
         df = pd.read_csv(path, sep='\s+', names=names)
         df = self.fix_sticks(df)[Horizon.COLUMNS]
         # df.sort_values(Horizon.COLUMNS, inplace=True)
-        return self.interpolate_points(df.values)
+        return self.interpolate_3d(df.values)
 
     def fix_sticks(self, df):
         def _move_stick_end(df):
@@ -74,6 +75,18 @@ class Fault(Horizon):
         if points[0, 1] == points[1, 1]:
             return True
         raise ValueError('Wrong sticks format')
+
+    def interpolate_3d(self, points, axis=1):
+        values = points[:, axis]
+        coord = np.concatenate([points[:, :axis], points[:, axis+1:]], axis=1)
+        interpolator = LinearNDInterpolator(coord, values)
+        grid = np.meshgrid(np.arange(coord[:, 0].min()-10, coord[:, 0].max()+10),
+                           np.arange(coord[:, 1].min()-10, coord[:, 1].max())+10)
+        _values = interpolator(*grid)
+        _coord = np.stack([grid[i][~np.isnan(_values)] for i in range(2)], axis=1)
+        _values = _values[~np.isnan(_values)]
+        _points = np.insert(_coord, axis, _values, 1)
+        return _points
 
     def add_to_mask(self, mask, locations=None, width=3, alpha=1, **kwargs):
         mask_bbox = np.array([[locations[0][0], locations[0][-1]+1],
