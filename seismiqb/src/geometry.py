@@ -161,6 +161,7 @@ class SeismicGeometry:
         self._quality_map = None
         self._quality_grid = None
 
+        self.path_meta = None
         self.loaded = []
         self.has_stats = False
         if process:
@@ -195,6 +196,7 @@ class SeismicGeometry:
         # Backward compatibility
         if not os.path.exists(path_meta):
             path_meta = os.path.splitext(self.path)[0] + '.hdf5'
+        self.path_meta = path_meta
 
         with h5py.File(path_meta, "r") as file_meta:
             for item in self.PRESERVED:
@@ -904,6 +906,8 @@ class SeismicGeometrySEGY(SeismicGeometry):
                 pbar.update()
             pbar.close()
 
+        if not self.has_stats:
+            self.collect_stats()
         self.store_meta()
 
     # Convenient alias
