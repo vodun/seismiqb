@@ -9,7 +9,6 @@ from scipy.signal import butter, lfilter, hilbert
 from scipy.ndimage import gaussian_filter1d
 
 from ..batchflow import FilesIndex, Batch, action, inbatch_parallel, SkipBatchException, apply_parallel
-# from ..batchflow.batch_image import transform_actions # pylint: disable=no-name-in-module,import-error
 
 from .horizon import Horizon
 from .plotters import plot_image
@@ -22,7 +21,6 @@ SIZE_SALT = len(AFFIX) + SIZE_POSTFIX
 CHARS = string.ascii_uppercase + string.digits
 
 
-# @transform_actions(prefix='_', suffix='_', wrapper='apply_transform')
 class SeismicCropBatch(Batch):
     """ Batch with ability to generate 3d-crops of various shapes."""
     components = None

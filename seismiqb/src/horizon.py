@@ -179,7 +179,7 @@ class UnstructuredHorizon:
         high = max(width - low, 0)
 
         shift_1, shift_2, h_min = [slc.start for slc in locations]
-        h_max = locations[-1].start
+        h_max = locations[-1].stop
 
         if iterator is None:
             # Usual case
