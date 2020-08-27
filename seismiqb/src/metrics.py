@@ -150,7 +150,7 @@ class BaseSeismicMetric(Metrics):
             'cmap': METRIC_CMAP,
             'zmin': -1, 'zmax': 1,
             'ignore_value': 0.0,
-            'xlabel': 'ilines', 'ylabel': 'xlines',
+            'xlabel': 'INLINE_3D', 'ylabel': 'CROSSLINE_3D',
             'fill_color': 'black',
             **kwargs
         }
@@ -187,7 +187,7 @@ class BaseSeismicMetric(Metrics):
             'cmap': METRIC_CMAP,
             'zmin': -1.0, 'zmax': 1.0,
             'ignore_value': 0.0,
-            'xlabel': 'ilines', 'ylabel': 'xlines',
+            'xlabel': 'INLINE_3D', 'ylabel': 'CROSSLINE_3D',
             'fill_color': 'black',
             **kwargs
         }
@@ -204,7 +204,7 @@ class BaseSeismicMetric(Metrics):
             'cmap': 'seismic_r',
             'zmin': None, 'zmax': None,
             'ignore_value': np.nan,
-            'xlabel': 'ilines', 'ylabel': 'xlines',
+            'xlabel': 'INLINE_3D', 'ylabel': 'CROSSLINE_3D',
             'fill_color': 'black',
             **kwargs
         }
@@ -220,7 +220,7 @@ class BaseSeismicMetric(Metrics):
             'cmap': 'seismic_r',
             'zmin': None, 'zmax': None,
             'ignore_value': np.nan,
-            'xlabel': 'ilines', 'ylabel': 'xlines',
+            'xlabel': 'INLINE_3D', 'ylabel': 'CROSSLINE_3D',
             'fill_color': 'black',
             **kwargs
         }
@@ -237,7 +237,7 @@ class BaseSeismicMetric(Metrics):
             'cmap': METRIC_CMAP,
             'zmin': 0.0, 'zmax': 1.0,
             'ignore_value': np.nan,
-            'xlabel': 'ilines', 'ylabel': 'xlines',
+            'xlabel': 'INLINE_3D', 'ylabel': 'CROSSLINE_3D',
             'fill_color': 'black',
             **kwargs
         }
@@ -253,7 +253,7 @@ class BaseSeismicMetric(Metrics):
             'cmap': METRIC_CMAP,
             'zmin': 0.0, 'zmax': 1.0,
             'ignore_value': np.nan,
-            'xlabel': 'ilines', 'ylabel': 'xlines',
+            'xlabel': 'INLINE_3D', 'ylabel': 'CROSSLINE_3D',
             'fill_color': 'black',
             **kwargs
         }
@@ -274,7 +274,7 @@ class BaseSeismicMetric(Metrics):
             'cmap': METRIC_CMAP,
             'zmin': None, 'zmax': None,
             'ignore_value': np.nan,
-            'xlabel': 'ilines', 'ylabel': 'xlines',
+            'xlabel': 'INLINE_3D', 'ylabel': 'CROSSLINE_3D',
             'fill_color': 'black',
             **kwargs
         }
@@ -290,7 +290,7 @@ class BaseSeismicMetric(Metrics):
             'cmap': METRIC_CMAP,
             'zmin': None, 'zmax': None,
             'ignore_value': np.nan,
-            'xlabel': 'ilines', 'ylabel': 'xlines',
+            'xlabel': 'INLINE_3D', 'ylabel': 'CROSSLINE_3D',
             'fill_color': 'black',
             **kwargs
         }
@@ -309,7 +309,7 @@ class BaseSeismicMetric(Metrics):
             'cmap': METRIC_CMAP,
             'zmin': None, 'zmax': None,
             'ignore_value': np.nan,
-            'xlabel': 'ilines', 'ylabel': 'xlines',
+            'xlabel': 'INLINE_3D', 'ylabel': 'CROSSLINE_3D',
             'fill_color': 'black',
             **kwargs
         }
@@ -325,7 +325,7 @@ class BaseSeismicMetric(Metrics):
             'cmap': METRIC_CMAP,
             'zmin': None, 'zmax': None,
             'ignore_value': np.nan,
-            'xlabel': 'ilines', 'ylabel': 'xlines',
+            'xlabel': 'INLINE_3D', 'ylabel': 'CROSSLINE_3D',
             'fill_color': 'black',
             **kwargs
         }
@@ -342,7 +342,7 @@ class BaseSeismicMetric(Metrics):
             'cmap': METRIC_CMAP,
             'zmin': None, 'zmax': None,
             'ignore_value': np.nan,
-            'xlabel': 'ilines', 'ylabel': 'xlines',
+            'xlabel': 'INLINE_3D', 'ylabel': 'CROSSLINE_3D',
             'fill_color': 'black',
             **kwargs
         }
@@ -358,7 +358,7 @@ class BaseSeismicMetric(Metrics):
             'cmap': METRIC_CMAP,
             'zmin': None, 'zmax': None,
             'ignore_value': np.nan,
-            'xlabel': 'ilines', 'ylabel': 'xlines',
+            'xlabel': 'INLINE_3D', 'ylabel': 'CROSSLINE_3D',
             'fill_color': 'black',
             **kwargs
         }
@@ -375,7 +375,7 @@ class BaseSeismicMetric(Metrics):
             'cmap': METRIC_CMAP,
             'zmin': None, 'zmax': None,
             'ignore_value': np.nan,
-            'xlabel': 'ilines', 'ylabel': 'xlines',
+            'xlabel': 'INLINE_3D', 'ylabel': 'CROSSLINE_3D',
             'fill_color': 'black',
             **kwargs
         }
@@ -391,7 +391,7 @@ class BaseSeismicMetric(Metrics):
             'cmap': METRIC_CMAP,
             'zmin': None, 'zmax': None,
             'ignore_value': np.nan,
-            'xlabel': 'ilines', 'ylabel': 'xlines',
+            'xlabel': 'INLINE_3D', 'ylabel': 'CROSSLINE_3D',
             'fill_color': 'black',
             **kwargs
         }
@@ -410,7 +410,7 @@ class BaseSeismicMetric(Metrics):
             'cmap': METRIC_CMAP,
             'zmin': None, 'zmax': None,
             'ignore_value': np.nan,
-            'xlabel': 'ilines', 'ylabel': 'xlines',
+            'xlabel': 'INLINE_3D', 'ylabel': 'CROSSLINE_3D',
             'fill_color': 'black',
             **kwargs
         }
@@ -426,7 +426,7 @@ class BaseSeismicMetric(Metrics):
             'cmap': METRIC_CMAP,
             'zmin': None, 'zmax': None,
             'ignore_value': np.nan,
-            'xlabel': 'ilines', 'ylabel': 'xlines',
+            'xlabel': 'INLINE_3D', 'ylabel': 'CROSSLINE_3D',
             'fill_color': 'black',
             **kwargs
         }
@@ -471,7 +471,7 @@ class BaseSeismicMetric(Metrics):
             'title': '{} for {} on cube {}'.format(title, self.name, self.cube_name),
             'cmap': METRIC_CMAP,
             'zmin': -1, 'zmax': 1,
-            'xlabel': 'ilines', 'ylabel': 'xlines',
+            'xlabel': 'INLINE_3D', 'ylabel': 'CROSSLINE_3D',
             **kwargs
         }
         return metric, plot_dict
@@ -529,7 +529,7 @@ class BaseSeismicMetric(Metrics):
             'cmap': 'Reds',
             'zmin': 0.0, 'zmax': np.max(quality_map),
             'ignore_value': np.nan,
-            'xlabel': 'ilines', 'ylabel': 'xlines',
+            'xlabel': 'INLINE_3D', 'ylabel': 'CROSSLINE_3D',
             **kwargs
         }
         return quality_map, plot_dict
@@ -658,7 +658,7 @@ class HorizonMetrics(BaseSeismicMetric):
             'title': 'Instantaneous phase for {} on cube {}'.format(self.name, self.cube_name),
             'cmap': 'seismic',
             'zmin': -np.pi, 'zmax': np.pi,
-            'xlabel': 'ilines', 'ylabel': 'xlines',
+            'xlabel': 'INLINE_3D', 'ylabel': 'CROSSLINE_3D',
             'fill_color': 'black',
             **kwargs
         }
@@ -761,7 +761,7 @@ class HorizonMetrics(BaseSeismicMetric):
             'cmap': 'Reds',
             'zmin': 0, 'zmax': np.nanmax(metric),
             'ignore_value': np.nan,
-            'xlabel': 'ilines', 'ylabel': 'xlines',
+            'xlabel': 'INLINE_3D', 'ylabel': 'CROSSLINE_3D',
             'fill_color': 'black',
             **kwargs
         }
@@ -848,7 +848,7 @@ class GeometryMetrics(BaseSeismicMetric):
             'cmap': 'seismic',
             'zmin': None, 'zmax': None,
             'ignore_value': np.nan,
-            'xlabel': 'ilines', 'ylabel': 'xlines',
+            'xlabel': 'INLINE_3D', 'ylabel': 'CROSSLINE_3D',
             **kwargs
         }
         return metric, plot_dict
@@ -876,7 +876,7 @@ class GeometryMetrics(BaseSeismicMetric):
             'cmap': 'seismic',
             'zmin': None, 'zmax': None,
             'ignore_value': np.nan,
-            'xlabel': 'ilines', 'ylabel': 'xlines',
+            'xlabel': 'INLINE_3D', 'ylabel': 'CROSSLINE_3D',
             **kwargs
         }
         return metric, plot_dict
