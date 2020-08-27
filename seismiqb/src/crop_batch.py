@@ -24,6 +24,10 @@ CHARS = string.ascii_uppercase + string.digits
 class SeismicCropBatch(Batch):
     """ Batch with ability to generate 3d-crops of various shapes."""
     components = None
+    apply_defaults = {
+        'target': 'for',
+        'post': '_assemble'
+    }
 
     def _init_component(self, *args, **kwargs):
         """ Create and preallocate a new attribute with the name ``dst`` if it
@@ -504,7 +508,7 @@ class SeismicCropBatch(Batch):
             raise ValueError('Src must contain at least two components to concatenate')
         result = []
         for component in src:
-            result.append(self.get(ix, src))
+            result.append(self.get(ix, component))
         return np.concatenate(result, axis=axis)
 
     @action
