@@ -1,5 +1,8 @@
 """ Horizon class and metrics. """
 
+import sys
+import os
+
 import numpy as np
 import pandas as pd
 from copy import copy
@@ -70,7 +73,7 @@ class Fault(Horizon):
             return True
         raise ValueError('Wrong sticks format')
 
-    def interpolate_3d(self, points, axis=1):
+    def interpolate_3d(self, points, axis=0):
         values = points[:, axis]
         coord = np.concatenate([points[:, :axis], points[:, axis+1:]], axis=1)
         interpolator = LinearNDInterpolator(coord, values)
@@ -177,6 +180,16 @@ class Fault(Horizon):
 
         return df
 
+    @classmethod
+    def split_file(cls, path, dst='faults'):
+        folder = os.path.dirname(path)
+        faults_folder = os.path.join(folder, dst)
+        if faults_folder and not os.path.isdir(faults_folder):
+            os.makedirs(faults_folder)
+        df = pd.read_csv(path, sep='\s+', names=cls.FAULT_STICKS)
+        def _dump(df):
+            df.to_csv(os.path.join(folder, dst, df.name), sep=' ', header=False, index=False)
+        df.groupby('name').apply(_dump)
 
 @njit
 def _line(nodes, width=1):
