@@ -12,7 +12,7 @@ from scipy.interpolate import LinearNDInterpolator
 from skimage.measure import label
 
 from .horizon import Horizon
-from .geometry import SeismicGeometry
+from .geometry import SeismicGeometry, SeismicGeometrySEGY
 from .utils import groupby_mean, groupby_min, groupby_max
 
 class Fault(Horizon):
@@ -23,31 +23,26 @@ class Fault(Horizon):
     def file_to_points(self, path):
         """ Get point cloud array from file values. """
         #pylint: disable=anomalous-backslash-in-string
+        df = self.read_file(path)
+        if isinstance(self.geometry, SeismicGeometrySEGY):
+            df = self.fix_lines(df)
+        points = self.interpolate_3d(df[Horizon.COLUMNS].values)
+        return points
+
+    @classmethod
+    def read_file(cls, path):
         with open(path) as file:
             line_len = len([item for item in file.readline().split(' ') if len(item) > 0])
         if line_len == 3:
             names = Horizon.REDUCED_CHARISMA_SPEC
         elif line_len == 8:
-            names = self.FAULT_STICKS
+            names = cls.FAULT_STICKS
         elif line_len >= 9:
             names = Horizon.CHARISMA_SPEC
         else:
             raise ValueError('Fault labels must be in FAULT_STICKS, CHARISMA or REDUCED_CHARISMA format.')
 
-        df = pd.read_csv(path, sep='\s+', names=names)
-        df = self.fix_sticks(df)[Horizon.COLUMNS]
-        # df.sort_values(Horizon.COLUMNS, inplace=True)
-        return self.interpolate_3d(df.values)
-
-    def fix_sticks(self, df):
-        def _move_stick_end(df):
-            if (len(df.iline.unique()) > 1) and (len(df.xline.unique()) > 1):
-                df['iline'] = df.iloc[0]['iline']
-            return df
-
-        if 'number' in df.columns:
-            df = df.groupby('number').apply(_move_stick_end)
-        return df
+        return pd.read_csv(path, sep='\s+', names=names)
 
     def interpolate_points(self, points):
         transpose = self._check_sticks(points)
@@ -88,9 +83,9 @@ class Fault(Horizon):
         return _points
 
     def add_to_mask(self, mask, locations=None, width=3, alpha=1, **kwargs):
-        mask_bbox = np.array([[locations[0][0], locations[0][-1]+1],
-                              [locations[1][0], locations[1][-1]+1],
-                              [locations[2][0], locations[2][-1]+1]],
+        mask_bbox = np.array([[locations[0].start, locations[0].stop],
+                              [locations[1].start, locations[1].stop],
+                              [locations[2].start, locations[2].stop]],
                              dtype=np.int32)
         (mask_i_min, mask_i_max), (mask_x_min, mask_x_max), (mask_h_min, mask_h_max) = mask_bbox
 
@@ -99,7 +94,8 @@ class Fault(Horizon):
 
         points = self.points
         for i in range(3):
-            points = points[np.isin(points[:, i], locations[i])]
+            positions = np.arange(locations[i].stop)[locations[i]]
+            points = points[np.isin(points[:, i], positions)]
         def _extend_line(points):
             _points = []
             for x in range(-left, right):
@@ -167,6 +163,20 @@ class Fault(Horizon):
 
         path = f'{path}_{self.name}'
         df.to_csv(path, sep=' ', index=False, header=False)
+
+    def fix_lines(self, df):
+        i_bounds = [self.geometry.ilines_offset, self.geometry.ilines_offset + self.geometry.cube_shape[0]]
+        x_bounds = [self.geometry.xlines_offset, self.geometry.xlines_offset + self.geometry.cube_shape[1]]
+
+        i_mask = np.logical_or(df.iline < i_bounds[0], df.iline >= i_bounds[1])
+        x_mask = np.logical_or(df.xline < x_bounds[0], df.xline >= x_bounds[1])
+
+        _df = df[np.logical_and(i_mask, x_mask)]
+
+        df.loc[np.logical_and(i_mask, x_mask), ['iline', 'xline']] = np.rint(self.geometry.cdp_to_lines(_df[['cdp_x', 'cdp_y']].values)).astype('int32')
+
+        return df
+
 
 @njit
 def _line(nodes, width=1):

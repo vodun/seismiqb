@@ -726,6 +726,13 @@ class SeismicGeometrySEGY(SeismicGeometry):
 
         self.rotation_matrix = cv2.getAffineTransform(np.float32(ix_points), np.float32(cdp_points))
 
+    def lines_to_cdp(self, points):
+        return (self.rotation_matrix[:, :2] @ points.T + self.rotation_matrix[:, 2].reshape(2, -1)).T
+
+    def cdp_to_lines(self, points):
+        inverse_matrix = np.linalg.inv(self.rotation_matrix[:, :2])
+        lines = (inverse_matrix @ points.T - inverse_matrix @ self.rotation_matrix[:, 2].reshape(2, -1)).T
+        return np.rint(lines)
 
     def set_index(self, index_headers, sortby=None):
         """ Change current index to a subset of loaded headers. """
