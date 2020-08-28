@@ -538,14 +538,16 @@ class SeismicCropBatch(Batch):
         # Threshold the mask, transpose and rotate the mask if needed
         mask = self.get(ix, src)
         if np.array(order).reshape(-1, 3).shape[0] > 0:
-            order = self.get(ix, order)
+            order = self.get(ix, 'order')
+        print('order', order)
         mask = np.transpose(mask, axes=order)
 
         geometry = self.get(ix, 'geometries')
         shifts = [self.get(ix, src_locations)[k].start for k in range(3)]
-
+        print('before mask.shape', mask.shape)
         horizons = Horizon.from_mask(mask, geometry=geometry, shifts=shifts, threshold=threshold,
                                      mode=mode, minsize=minsize, prefix=prefix)
+        print('success')
         return horizons
 
 
