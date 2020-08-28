@@ -28,7 +28,7 @@ class SafeIO:
     """
     def __init__(self, path, opener=open, log_file=None, **kwargs):
         self.path = path
-        self.log_file = log_file # or '/notebooks/log_safeio.txt'
+        self.log_file = log_file
         self.handler = opener(path, **kwargs)
 
         if self.log_file:
@@ -48,9 +48,6 @@ class SafeIO:
         return key in self.handler
 
     def __del__(self):
-        if self.log_file:
-            self._info(self.log_file, f'Tried to close {self.path}')
-
         self.handler.close()
 
         if self.log_file:
