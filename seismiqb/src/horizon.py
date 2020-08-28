@@ -669,11 +669,9 @@ class Horizon:
             Name of horizon to use.
         """
         _ = kwargs
-        print(0)
         if grid_info is not None:
             geometry = grid_info['geometry']
             shifts = np.array([item[0] for item in grid_info['range']])
-        print(1)
         if geometry is None or shifts is None:
             raise TypeError('Pass `grid_info` or `geometry` and `shifts` to `from_mask` method of Horizon creation.')
 
@@ -683,12 +681,9 @@ class Horizon:
             group_function = groupby_min
         elif mode in ['max']:
             group_function = groupby_max
-        print(2)
         # Labeled connected regions with an integer
         labeled = label(mask >= threshold)
-        print(3)
         objects = find_objects(labeled)
-        print(4)
         # Create an instance of Horizon for each separate region
         horizons = []
         for i, sl in enumerate(objects):
@@ -704,7 +699,6 @@ class Horizon:
 
                     points = group_function(coords) + shifts
                     horizons.append(Horizon(points, geometry, name=f'{prefix}_{i}'))
-        print(555)
         horizons.sort(key=len)
         return horizons
 

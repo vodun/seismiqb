@@ -113,6 +113,8 @@ class SeismicCropBatch(Batch):
 
         if item is not None:
             pos = np.where(self.indices == item)[0][0]
+            # if isinstance(component, str):
+            #     component = getattr(self, component)
             if isinstance(component, np.ndarray) and len(component) == len(self):
                 return component[pos]
             return super().get(pos, component)
@@ -539,15 +541,12 @@ class SeismicCropBatch(Batch):
         mask = self.get(ix, src)
         if np.array(order).reshape(-1, 3).shape[0] > 0:
             order = self.get(ix, 'order')
-        print('order', order)
         mask = np.transpose(mask, axes=order)
 
         geometry = self.get(ix, 'geometries')
         shifts = [self.get(ix, src_locations)[k].start for k in range(3)]
-        print('before mask.shape', mask.shape)
         horizons = Horizon.from_mask(mask, geometry=geometry, shifts=shifts, threshold=threshold,
                                      mode=mode, minsize=minsize, prefix=prefix)
-        print('success')
         return horizons
 
 
