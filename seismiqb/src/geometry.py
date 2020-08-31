@@ -169,8 +169,8 @@ class SeismicGeometry:
 
     def __len__(self):
         """ Number of meaningful traces. """
-        if hasattr(self, 'zero_matrix'):
-            return np.prod(self.zero_matrix.shape) - self.zero_matrix.sum()
+        if hasattr(self, 'zero_traces'):
+            return np.prod(self.zero_traces.shape) - self.zero_traces.sum()
         return len(self.dataframe)
 
 
@@ -516,10 +516,13 @@ class SeismicGeometrySEGY(SeismicGeometry):
 
         # Create a matrix with ones at fully-zeroes traces
         if self.index_headers == self.INDEX_POST:
-            size = self.depth // 10
-            slc = np.stack([self[:, :, i * size] for i in range(1, 10)], axis=-1)
-            self.zero_traces = np.zeros(self.lens, dtype=np.int)
-            self.zero_traces[np.std(slc, axis=-1) == 0] = 1
+            try:
+                size = self.depth // 10
+                slc = np.stack([self[:, :, i * size] for i in range(1, 10)], axis=-1)
+                self.zero_traces = np.zeros(self.lens, dtype=np.int)
+                self.zero_traces[np.std(slc, axis=-1) == 0] = 1
+            except ValueError: # can't reshape
+                pass
 
         path_meta = os.path.splitext(self.path)[0] + '.meta'
         if os.path.exists(path_meta) and not recollect:
