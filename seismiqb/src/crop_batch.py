@@ -914,7 +914,7 @@ class SeismicCropBatch(Batch):
         return gaussian_filter1d(crop, sigma=sigma, axis=axis, order=order)
 
 
-    def plot_components(self, *components, idx=0, mode='overlap', order_axes=None, **kwargs):
+    def plot_components(self, *components, idx=0, slide=None, mode='overlap', order_axes=None, **kwargs):
         """ Plot components of batch.
 
         Parameters
@@ -934,6 +934,9 @@ class SeismicCropBatch(Batch):
             imgs = [getattr(self, comp)[idx] for comp in components]
         else:
             imgs = [getattr(self, comp) for comp in components]
+
+        if slide is not None:
+            imgs = [img[slide] for img in imgs]
 
         # set some defaults
         kwargs = {

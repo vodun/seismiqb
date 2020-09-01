@@ -11,7 +11,7 @@ from numba import njit, prange
 from PIL import ImageDraw, Image
 
 from scipy.ndimage import find_objects
-from scipy.interpolate import LinearNDInterpolator
+from scipy.interpolate import LinearNDInterpolator, griddata
 from skimage.measure import label
 
 from .horizon import Horizon
@@ -73,7 +73,7 @@ class Fault(Horizon):
             return True
         raise ValueError('Wrong sticks format')
 
-    def interpolate_3d(self, points, axis=0):
+    def interpolate_3d(self, points, axis=1):
         values = points[:, axis]
         coord = np.concatenate([points[:, :axis], points[:, axis+1:]], axis=1)
         interpolator = LinearNDInterpolator(coord, values)
@@ -84,6 +84,16 @@ class Fault(Horizon):
         _values = _values[~np.isnan(_values)]
         _points = np.insert(_coord, axis, _values, 1)
         return _points
+        # coord = points[:, :2]
+
+        # grid = np.meshgrid(np.arange(coord[:, 0].min()-10, coord[:, 0].max()+10, 0.1),
+        #                 np.arange(coord[:, 1].min()-10, coord[:, 1].max())+10, 0.1)
+        # grid = np.stack(grid, axis=2).reshape(-1, 2)
+        # values = griddata(coord, points[:, 2], grid, rescale=True)
+
+        # grid = grid[~np.isnan(values)]
+        # values = values[~np.isnan(values)].reshape(-1, 1)
+        # return np.concatenate([grid, values], axis=1)
 
     def add_to_mask(self, mask, locations=None, width=3, alpha=1, **kwargs):
         mask_bbox = np.array([[locations[0].start, locations[0].stop],
@@ -235,3 +245,61 @@ def _segment(a, b, width=1):
         start = end
 
     return shifted_points
+
+
+def shortest_distance(coords, coefs):
+    return np.abs(sum(coords * coefs[:-1]) + coefs[-1]) / np.sqrt(np.sum(coefs[:-1] ** 2))
+
+def equation_plane(points):
+    pq = points[1] - points[0]
+    pr = points[2] - points[0]
+    product = np.cross(pq, pr)
+    bias = -sum(product * points[0])
+    return np.array([*product, bias])
+
+def equation_line(points):
+    a = points[1][1] - points[0][1]
+    b = points[0][0] - points[1][0]
+    c = -a*(points[0][0]) - b*(points[0][1])
+    return a, b, c
+
+def sign(coords, coefs):
+    return (np.sign(sum(coords * coefs[:-1]) + coefs[-1]))
+    return 0
+
+def bound_lines(nodes):
+    line_coefs = []
+    for i in range(3):
+        indices = [0, 1, 2]
+        indices.pop(i)
+        _coefs = equation_line(nodes[indices])
+        line_coefs += [[*_coefs, sign(nodes[i], _coefs)]]
+    return np.array(line_coefs)
+
+def in_projection(point, coefs):
+    return all([sign(point, coefs[i, :-1]) == coefs[i, -1] for i in range(3)])
+
+def triangle_rasterization(points):
+    shape = points.max(axis=0) - points.min(axis=0)
+    order = np.argsort(shape)[::-1]
+    points = points[:, order]
+
+    bounds = np.stack([points.min(axis=0), points.max(axis=0)])
+    degenerate_coords = sum(shape == 0)
+
+    if degenerate_coords == 3:
+        _points = bounds[1:]
+    elif degenerate_coords == 2:
+        _points = np.tile(np.arange(bounds[0][0], bounds[1][0]+1), 3).reshape(3, -1).T
+        _points[:, 1:] = bounds[0, 1:]
+    else:
+        grid = np.stack(np.meshgrid(*[np.arange(bounds[:, i][0], bounds[:, i][1]+1) for i in range(3)]), axis=-1).reshape(-1, 3)
+        coefs = equation_plane(points)
+        line_coefs = bound_lines(points[:, :-1])
+        _points = []
+        for node in grid:
+            if in_projection(node[:-1], line_coefs) and shortest_distance(node, coefs) < np.sqrt(3) / 2:
+                _points += [node]
+        _points = np.array(_points)
+    reverse = np.arange(len(order))[np.argsort(order)]
+    return _points[:, reverse]
