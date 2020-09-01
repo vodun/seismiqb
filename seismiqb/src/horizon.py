@@ -986,7 +986,7 @@ class Horizon:
                 grid_info = getattr(dataset, 'grid_info')
                 array_shift = [grid_info['range'][i][0] for i in range(3)]
             except:
-                raise ValueError('Either array_shift or dataset must be supplied!')
+                raise ValueError('Either array_shift or dataset with filled grid_info must be supplied!') #pylint: disable=raise-missing-from
 
         array_shift = np.array(array_shift)
         horizon_shift = np.array((self.bbox[0, 0], self.bbox[1, 0]))
