@@ -56,6 +56,7 @@ class Extender(Enhancer):
         prev_len = len(horizon)
         self.log(f'Inference started for {n_steps} with stride {stride}.')
         for _ in self.make_pbar(range(n_steps), desc=f'Extender inference on {horizon.name}'):
+            # Create grid of crops near horizon holes
             dataset.make_extension_grid(dataset.indices[0],
                                         crop_shape=self.crop_shape,
                                         stride=stride,
@@ -73,6 +74,7 @@ class Extender(Enhancer):
                 # no additional predicts
                 break
 
+            # Merge surfaces on crops to the horizon itself
             horizons = [*inference_pipeline.v('predicted_horizons')]
             for hor in horizons:
                 merge_code, _ = Horizon.verify_merge(horizon, hor,
@@ -81,13 +83,19 @@ class Extender(Enhancer):
                 if merge_code == 3:
                     _ = horizon.overlap_merge(hor, inplace=True)
 
+            # Log length increase
             curr_len = len(horizon)
             if (curr_len - prev_len) < 25:
                 break
             self.log(f'Extended from {prev_len} to {curr_len}, + {curr_len - prev_len}')
             prev_len = curr_len
 
+            # Cleanup
+            inference_pipeline.reset('variables')
+            inference_pipeline = None
+
         torch.cuda.empty_cache()
+        horizon.name = f'extended_{horizon.name[8:]}' # get rid of `copy_of_` postfix
         self.predictions = [horizon]
 
 

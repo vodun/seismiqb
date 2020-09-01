@@ -178,13 +178,15 @@ class UnstructuredHorizon:
         low = width // 2
         high = max(width - low, 0)
 
-        shift_1, shift_2, h_min = [np.min(item) for item in locations]
-        h_max = np.max(locations[-1])
+        shift_1, shift_2, h_min = [slc.start for slc in locations]
+        h_max = locations[-1].stop
 
         if iterator is None:
             # Usual case
-            iterator = list(product(*[[self.geometry.uniques[idx][i] for i in locations[idx]] for idx in range(2)]))
-            idx_iterator = np.array(list(product(*locations[:2])))
+            iterator = list(product(*[[self.geometry.uniques[idx][i]
+                                       for i in range(locations[idx].start, locations[idx].stop)]
+                                      for idx in range(2)]))
+            idx_iterator = np.array(list(product(*[list(range(slc.start, slc.stop)) for slc in locations[:2]])))
             idx_1 = idx_iterator[:, 0] - shift_1
             idx_2 = idx_iterator[:, 1] - shift_2
 
@@ -204,7 +206,7 @@ class UnstructuredHorizon:
             idx_2 = np.zeros_like(others_iterator) if axis == 1 else others_iterator
 
 
-        heights = self.dataframe[self.name].get(iterator, np.nan).values.astype(np.int32)
+        heights = self.dataframe[self.name].reindex(iterator, fill_value=np.nan).values.astype(np.int32)
 
         # Filter labels based on height
         heights_mask = np.asarray((np.isnan(heights) == False) & # pylint: disable=singleton-comparison
@@ -264,7 +266,7 @@ class UnstructuredHorizon:
         # Make `locations` for slide loading
         axis = self.geometry.parse_axis(axis)
         locations = self.geometry.make_slide_locations(loc, axis=axis)
-        shape = np.array([len(item) for item in locations])
+        shape = np.array([(slc.stop - slc.start) for slc in locations])
 
         # Create the same indices, as for seismic slide loading
         #TODO: make slide indices shareable
@@ -324,7 +326,7 @@ class Horizon:
           these methods must be used instead of manually permuting `matrix` and `points` attributes.
           For example, filtration or smoothing of a horizon can be done with their help.
 
-        - `Sampler` instance to generate points that are close to the horizon.
+        - `sampler` instance to generate points that are close to the horizon.
           Note that these points are scaled into [0, 1] range along each of the coordinate.
 
         - Method `add_to_mask` puts 1's on the location of a horizon inside provided `background`.
@@ -627,13 +629,12 @@ class Horizon:
 
     def from_full_matrix(self, matrix, **kwargs):
         """ Init from matrix that covers the whole cube. """
-        _ = kwargs
         self.from_matrix(matrix, 0, 0, **kwargs)
 
 
     def from_dict(self, dictionary, transform=True, **kwargs):
         """ Init from mapping from (iline, xline) to depths. """
-        _ = kwargs, dictionary, transform
+        _ = kwargs
 
         points = self.dict_to_points(dictionary)
         self.from_points(points, transform=transform)
@@ -657,6 +658,7 @@ class Horizon:
         grid_info : dict
             Information about mask creation parameters. Required keys are `geom` and `range`
             to infer geometry and leftmost upper point, or they can be passed directly.
+            If not provided, same entities must be passed as arguments `geometry` and `shifts`.
         threshold : float
             Parameter of mask-thresholding.
         mode : str
@@ -668,7 +670,7 @@ class Horizon:
         """
         _ = kwargs
         if grid_info is not None:
-            geometry = grid_info['geom']
+            geometry = grid_info['geometry']
             shifts = np.array([item[0] for item in grid_info['range']])
 
         if geometry is None or shifts is None:
@@ -785,6 +787,10 @@ class Horizon:
         sigma : number
             Standard deviation (spread or “width”) for gaussian kernel.
             The lower, the more weight is put into the point itself.
+        iters : int
+            Number of times to apply smoothing filter.
+        preserve_borders : bool
+            Whether or not to allow method label additional points.
         """
         def smoothing_function(src, **kwds):
             _ = kwds
@@ -837,6 +843,9 @@ class Horizon:
         ----------
         bins : sequence
             Size of ticks alongs each respective axis.
+        quality_grid : ndarray or None
+            If not None, then must be a matrix with zeroes in locations to keep, ones in locations to remove.
+            Applied to `points` before sampler creation.
         """
         _ = kwargs
         default_bins = self.cube_shape // np.array([5, 20, 20])
@@ -863,15 +872,14 @@ class Horizon:
             Where the mask is located.
         width : int
             Width of an added horizon.
+        alpha : number
+            Value to fill backround with at horizon location.
         """
         _ = kwargs
         low = width // 2
         high = max(width - low, 0)
 
-        mask_bbox = np.array([[locations[0][0], locations[0][-1]+1],
-                              [locations[1][0], locations[1][-1]+1],
-                              [locations[2][0], locations[2][-1]+1]],
-                             dtype=np.int32)
+        mask_bbox = np.array([[slc.start, slc.stop] for slc in locations], dtype=np.int32)
 
         # Getting coordinates of overlap in cubic system
         (mask_i_min, mask_i_max), (mask_x_min, mask_x_max), (mask_h_min, mask_h_max) = mask_bbox
@@ -920,8 +928,7 @@ class Horizon:
         high = max(window - low, 0)
         chunk_size = min(chunk_size, self.h_max - self.h_min + window)
 
-        cube_hdf5 = self.geometry.file_hdf5['cube_h']
-        background = np.full((self.geometry.ilines_len, self.geometry.xlines_len, window), 0.0)
+        background = np.zeros((self.geometry.ilines_len, self.geometry.xlines_len, window), dtype=np.float32)
 
         # Make callable scaler
         if callable(scale):
@@ -931,11 +938,11 @@ class Horizon:
         elif scale is False:
             scale = lambda array: array
 
-        for h_start in range(self.h_min - low, self.h_max + high, chunk_size):
-            h_end = min(h_start + chunk_size, self.h_max + high, self.geometry.depth)
+        for h_start in range(max(low, self.h_min), self.h_max, chunk_size):
+            h_end = min(h_start + chunk_size, self.h_max + 1)
 
             # Get chunk from the cube (depth-wise)
-            data_chunk = cube_hdf5[h_start:h_end, :, :]
+            data_chunk = self.geometry[:, :, (h_start - low) : min(h_end + high, self.geometry.depth)]
             data_chunk = scale(data_chunk)
 
             # Check which points of the horizon are in the current chunk (and present)
@@ -947,24 +954,12 @@ class Horizon:
             # Convert spatial coordinates to cubic, convert height to current chunk local system
             idx_i += self.i_min
             idx_x += self.x_min
-            heights -= (h_start + low - offset)
+            heights -= (h_start - offset)
 
-            # Remove traces that are not fully inside `window`
-            mask = (heights + window <= (h_end - h_start))
-            idx_i = idx_i[mask]
-            idx_x = idx_x[mask]
-            heights = heights[mask]
-
-            # Subsequently add values from the cube to background, shift horizon 1 unit lower,
-            # remove all heights that are bigger than can fit into background
+            # Subsequently add values from the cube to background, then shift horizon 1 unit lower
             for j in range(window):
-                background[idx_i, idx_x, np.full_like(heights, j)] = data_chunk[heights, idx_i, idx_x]
+                background[idx_i, idx_x, np.full_like(heights, j)] = data_chunk[idx_i, idx_x, heights]
                 heights += 1
-
-                mask = heights < chunk_size
-                idx_i = idx_i[mask]
-                idx_x = idx_x[mask]
-                heights = heights[mask]
 
         background[self.geometry.zero_traces == 1] = np.nan
         return background
@@ -1175,6 +1170,11 @@ class Horizon:
         return self.horizon_metrics.evaluate('instantaneous_phase')
 
     @property
+    def is_carcass(self):
+        """ Check if the horizon is a sparse carcass. """
+        return len(self) / self.filled_matrix.sum() < 0.5
+
+    @property
     def number_of_holes(self):
         """ Number of holes inside horizon borders. """
         holes_array = self.filled_matrix != self.binary_matrix
@@ -1202,7 +1202,17 @@ class Horizon:
 
     # Evaluate horizon on its own / against other(s)
     def evaluate(self, compute_metric=True, supports=50, plot=True, savepath=None, printer=print, **kwargs):
-        """ Compute crucial metrics of a horizon. """
+        """ Compute crucial metrics of a horizon.
+
+        Parameters
+        ----------
+        compute_metrics : bool
+            Whether to compute correlation map of a horizon.
+        supports, savepath, plot, kwargs
+            Passed directly to `:meth:HorizonMetrics.evaluate`.
+        printer : callable
+            Function to display message with metrics.
+        """
         msg = f"""
         Number of labeled points:                         {len(self)}
         Number of points inside borders:                  {np.sum(self.filled_matrix)}
@@ -1219,7 +1229,25 @@ class Horizon:
 
 
     def check_proximity(self, other, offset=0):
-        """ Shortcut for :meth:`.HorizonMetrics.evaluate` to compare against the best match of list of horizons. """
+        """ Compute a number of stats on location of `self` relative to the `other` Horizons.
+        This method can be used as either bound or static method.
+
+        Parameters
+        ----------
+        self, other : Horizon
+            Horizons to compare.
+        offset : number
+            Value to shift the first horizon down.
+
+        Returns
+        -------
+        dictionary with following keys:
+            - `mean` for average distance
+            - `abs_mean` for average of absolute values of point-wise distances
+            - `max`, `abs_max`, `std`, `abs_std`
+            - `window_rate` for percentage of traces that are in 5ms from one horizon to the other
+            - `offset_diffs` with point-wise differences
+        """
         _, overlap_info = self.verify_merge(other)
         diffs = overlap_info.get('diffs', 999) + offset
 
@@ -1443,14 +1471,16 @@ class Horizon:
 
     @staticmethod
     def merge_list(horizons, mean_threshold=2.0, adjacency=3, minsize=50):
-        """ Iteratively try to merge every horizon in a list to every other, until there are no possible merges. """
+        """ Iteratively try to merge every horizon in a list to every other, until there are no possible merges.
+        Parameters are passed directly to `:meth:~.verify_merge`, `:meth:~.overlap_merge` and `:meth:~.adjacent_merge`.
+        """
         horizons = [horizon for horizon in horizons if len(horizon) >= minsize]
 
-        # iterate over list of horizons to merge what can be merged
+        # Iterate over the list of horizons to merge everything that can be merged
         i = 0
         flag = True
         while flag:
-            # the procedure continues while at least a pair of horizons is mergeable
+            # Continue while at least one pair of horizons was merged at previous iteration
             flag = False
             while True:
                 if i >= len(horizons):
@@ -1458,7 +1488,7 @@ class Horizon:
 
                 j = i + 1
                 while True:
-                    # attempt to merge each horizon to i-th horizon with fixed i
+                    # Attempt to merge j-th horizon to i-th horizon
                     if j >= len(horizons):
                         break
 
@@ -1482,110 +1512,6 @@ class Horizon:
                 i += 1
         return horizons
 
-
-
-    def adjacent_merge_old(self, other, mean_threshold=3.0, adjacency=3,
-                           check_only=False, force_merge=False, inplace=False):
-        """ Collect stats on possible adjacent merge (that is merge with some margin), and, if needed, merge horizons.
-        Note that this function can either merge horizons in-place of the first one (`self`), or create a new instance.
-
-        Parameters
-        ----------
-        self, other : :class:`.Horizon` instances
-            Horizons to compare.
-        mean_threshold : number
-            Height threshold for mean distances.
-        adjacency : int
-            Margin to consider horizons close (spatially).
-        check_only : bool
-            Whether to try to merge horizons or just collect the stats.
-        force_merge : bool
-            Whether to chcek stats before merging. Can be useful if used after :class:`.Horizon.verify_merge` method.
-        inplace : bool
-            Whether to create new instance or update `self`.
-        """
-        adjacency_info = {}
-
-        # Create shared background for both horizons
-        shared_i_min, shared_i_max = min(self.i_min, other.i_min), max(self.i_max, other.i_max)
-        shared_x_min, shared_x_max = min(self.x_min, other.x_min), max(self.x_max, other.x_max)
-
-        background = np.full((shared_i_max - shared_i_min + 1, shared_x_max - shared_x_min + 1),
-                             self.FILL_VALUE, dtype=np.int32)
-
-        # Make all the indices for later usage: in every coordinate system for both horizons
-        self_idx_i = self.points[:, 0] - shared_i_min # in shared system
-        self_idx_x = self.points[:, 1] - shared_x_min
-        self_idx_i_ = self.points[:, 0] - self.i_min  # in local system of self
-        self_idx_x_ = self.points[:, 1] - self.x_min
-
-        other_idx_i = other.points[:, 0] - shared_i_min # in shared system
-        other_idx_x = other.points[:, 1] - shared_x_min
-        other_idx_i_ = other.points[:, 0] - other.i_min # in local system of other
-        other_idx_x_ = other.points[:, 1] - other.x_min
-
-
-        # Put the second of the horizons on background
-        background[other_idx_i, other_idx_x] = other.matrix[other_idx_i_, other_idx_x_]
-
-        # Enlarge the image to count for adjacency
-        if not force_merge:
-            kernel = np.ones((3, 3), np.float32)
-            dilated_background = cv2.dilate(background.astype(np.float32), kernel,
-                                            iterations=adjacency).astype(np.int32)
-        else:
-            dilated_background = background
-
-        # Make counts: number of horizons for each point (can be either 0, 1 or 2)
-        counts = (dilated_background > 0).astype(np.int32)
-        counts[self_idx_i, self_idx_x] += 1
-
-        # Get heights on overlap
-        so_idx_i, so_idx_x = np.asarray(counts == 2).nonzero()
-        self_idx_i_so = so_idx_i - self.i_min + shared_i_min
-        self_idx_x_so = so_idx_x - self.x_min + shared_x_min
-        self_heights = self.matrix[self_idx_i_so, self_idx_x_so]
-        other_heights = background[so_idx_i, so_idx_x]
-
-        # Compare heights to check whether horizons are close enough to each other
-        mergeable = force_merge
-        if len(so_idx_i) != 0 and not force_merge:
-            other_heights_dilated = dilated_background[so_idx_i, so_idx_x]
-
-            diffs_on_shared_overlap = self_heights - other_heights_dilated
-            abs_diffs = np.abs(diffs_on_shared_overlap)
-
-            mean_on_shared_overlap = np.mean(abs_diffs)
-            max_on_shared_overlap = np.max(abs_diffs)
-
-            if mean_on_shared_overlap < mean_threshold:
-                mergeable = True
-
-            adjacency_info.update({'mean': mean_on_shared_overlap,
-                                   'max': max_on_shared_overlap,
-                                   'diffs': diffs_on_shared_overlap})
-
-        # Actually merge two horizons
-        merged = None
-        if check_only is False and mergeable:
-            # Put the first horizon on background
-            background[self_idx_i, self_idx_x] = self.matrix[self_idx_i_, self_idx_x_]
-
-            # Values on overlap
-            overlap_heights = np.where(other_heights != self.FILL_VALUE,
-                                       np.rint((self_heights + other_heights) / 2), self_heights)
-
-            background[so_idx_i, so_idx_x] = overlap_heights
-
-            if inplace:
-                # Change `self` inplace
-                self.from_matrix(background, i_min=shared_i_min, x_min=shared_x_min)
-            else:
-                # Return a new instance of horizon
-                merged = Horizon(background, self.geometry, self.name,
-                                 i_min=shared_i_min, x_min=shared_x_min)
-
-        return mergeable, merged, adjacency_info
 
 
     def dump(self, path, transform=None, add_height=True):
@@ -1725,7 +1651,7 @@ class Horizon:
         # Make `locations` for slide loading
         axis = self.geometry.parse_axis(axis)
         locations = self.geometry.make_slide_locations(loc, axis=axis)
-        shape = np.array([len(item) for item in locations])
+        shape = np.array([(slc.stop - slc.start) for slc in locations])
 
         # Load seismic and mask
         seismic_slide = self.geometry.load_slide(loc=loc, axis=axis)
@@ -1776,7 +1702,7 @@ class Horizon:
         A horizon object with new matrix object and a reference to the old geometry attribute.
         """
         return Horizon(np.copy(self.matrix), self.geometry, i_min=self.i_min, x_min=self.x_min,
-                       name=f'Copy_of_{self.name}')
+                       name=f'copy_of_{self.name}')
 
 
 class StructuredHorizon(Horizon):

@@ -1,4 +1,5 @@
 """ Interpolate horizon from a carcass. """
+#pylint: disable=attribute-defined-outside-init
 import numpy as np
 
 from .base import BaseController
@@ -25,7 +26,17 @@ class CarcassInterpolator(BaseController):
                           bins=np.array([500, 500, 100]),
                           use_grid=True, grid_src=horizon_grid)
 
-        return super().train(dataset, use_grid=True, grid_src=horizon_grid, **kwargs)
+        return BaseController.train(self, dataset, use_grid=True, grid_src=horizon_grid, **kwargs)
+
+    def inference(self, dataset, version=1, orientation='i', overlap_factor=2, heights_range=None,
+                  batch_size_multiplier=1, **kwargs):
+        """ Keep only the biggest horizon; name it after the carcass. """
+        BaseController.inference(self, dataset=dataset, version=version, orientation=orientation,
+                                 overlap_factor=overlap_factor, heights_range=heights_range,
+                                 batch_size_multiplier=batch_size_multiplier, **kwargs)
+
+        self.predictions = [self.predictions[0]]
+        self.predictions[0].name = f'from_{dataset.labels[0][0].name}'
 
 
 
@@ -47,4 +58,48 @@ class GridInterpolator(BaseController):
                           bins=np.array([500, 500, 100]),
                           use_grid=True)
 
-        return super().train(dataset, use_grid=True, **kwargs)
+        return BaseController.train(self, dataset, use_grid=True, **kwargs)
+
+
+    def inference(self, dataset, version=1, orientation='i', overlap_factor=2, heights_range=None,
+                  batch_size_multiplier=1, **kwargs):
+        """ Keep only the biggest horizon; name it after the gridded horizon. """
+        BaseController.inference(self, dataset=dataset, version=version, orientation=orientation,
+                                 overlap_factor=overlap_factor, heights_range=heights_range,
+                                 batch_size_multiplier=batch_size_multiplier, **kwargs)
+
+        self.predictions = [self.predictions[0]]
+        self.predictions[0].name = f'from_gridded_{dataset.labels[0][0].name}'
+
+
+
+class Interpolator(BaseController):
+    """ Automatic choise between Carcass and Grid interpolation. """
+    def train(self, dataset=None, horizon=None, frequencies=(200, 200), **kwargs):
+        """ Train on a carcass or a grid. """
+        if dataset is None and horizon is not None:
+            dataset = self.make_dataset_from_horizon(horizon)
+        horizon = dataset.labels[0][0]
+
+        if horizon.is_carcass:
+            self.log('Using CARCASS train')
+            method = CarcassInterpolator.train
+        else:
+            self.log('Using GRID train')
+            method = GridInterpolator.train
+        return method(self, dataset=dataset, horizon=horizon, frequencies=frequencies, **kwargs)
+
+    def inference(self, dataset, version=1, orientation='i', overlap_factor=2, heights_range=None,
+                  batch_size_multiplier=1, **kwargs):
+        """ Inference with different naming conventions. """
+        horizon = dataset.labels[0][0]
+
+        if horizon.is_carcass:
+            self.log('Using CARCASS inference')
+            method = CarcassInterpolator.inference
+        else:
+            self.log('Using GRID inference')
+            method = GridInterpolator.inference
+        method(self, dataset=dataset, version=version, orientation=orientation,
+               overlap_factor=overlap_factor, heights_range=heights_range,
+               batch_size_multiplier=batch_size_multiplier, **kwargs)

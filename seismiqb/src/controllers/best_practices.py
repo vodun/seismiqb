@@ -1,5 +1,5 @@
 """ Collection of good architectures for the tasks of horizon detection. """
-
+# pylint: disable=missing-function-docstring
 import torch
 import torch.nn as nn
 

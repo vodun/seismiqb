@@ -8,19 +8,18 @@ import cv2
 from scipy.signal import butter, lfilter, hilbert
 from scipy.ndimage import gaussian_filter1d
 
-from ..batchflow import FilesIndex, Batch, action, inbatch_parallel
+from ..batchflow import FilesIndex, Batch, action, inbatch_parallel, SkipBatchException
 from ..batchflow.batch_image import transform_actions # pylint: disable=no-name-in-module,import-error
 
 from .horizon import Horizon
-from .utils import aggregate
 from .plotters import plot_image
 
 
 
 AFFIX = '___'
-SIZE_POSTFIX = 7
+SIZE_POSTFIX = 12
 SIZE_SALT = len(AFFIX) + SIZE_POSTFIX
-
+CHARS = string.ascii_uppercase + string.digits
 
 
 @transform_actions(prefix='_', suffix='_', wrapper='apply_transform')
@@ -56,16 +55,15 @@ class SeismicCropBatch(Batch):
         -------
         path : str
             supplied string with random postfix.
+
         Notes
         -----
-        Action `crop` makes a new instance of SeismicCropBatch with
-        different (enlarged) index. Items in that index should point to cube
-        location to cut crops from. Since we can't store multiple copies of the same
-        string in one index (due to internal usage of dictionary), we need to augment
-        those strings with random postfix (which we can remove later).
+        Action `crop` makes a new instance of SeismicCropBatch with different (enlarged) index.
+        Items in that index should point to cube location to cut crops from.
+        Since we can't store multiple copies of the same string in one index (due to internal usage of dictionary),
+        we need to augment those strings with random postfix, which can be removed later.
         """
-        chars = string.ascii_uppercase + string.digits
-        return path + AFFIX + ''.join(random.choice(chars) for _ in range(SIZE_POSTFIX))
+        return path + AFFIX + ''.join(random.choice(CHARS) for _ in range(SIZE_POSTFIX))
 
     @staticmethod
     def has_salt(path):
@@ -92,12 +90,17 @@ class SeismicCropBatch(Batch):
 
 
     def __getattr__(self, name):
+        """ Retrieve data from either `self` or attached dataset. """
         if hasattr(self.dataset, name):
             return getattr(self.dataset, name)
         return super().__getattr__(name)
 
     def get(self, item=None, component=None):
-        """ Overload `get` in order to use it for some attributes (that are looking like geometries or labels). """
+        """ Custom access for batch attribures.
+        If `component` looks like `label` or `geometry`, then we retrieve that dictionary from
+        attached dataset and use unsalted version of `item` as key.
+        Otherwise, we get position of `item` in the current batch and use it to index sequence-like `component`.
+        """
         if sum([attribute in component for attribute in ['label', 'geom']]):
             if isinstance(item, str) and self.has_salt(item):
                 item = self.unsalt(item)
@@ -110,13 +113,12 @@ class SeismicCropBatch(Batch):
         return super().get(item, component)
 
 
-
     @action
-    def crop(self, points, shape=None, loc=(0, 0, 0), side_view=False,
+    def crop(self, points, shape=None, direction=(0, 0, 0), side_view=False,
              adaptive_slices=False, grid_src='quality_grid', eps=3,
-             dst='slices', passdown=None, dst_points='points', dst_shapes='shapes'):
+             dst='locations', passdown=None, dst_points='points', dst_shapes='shapes'):
         """ Generate positions of crops. Creates new instance of `SeismicCropBatch`
-        with crop positions in one of the components (`slices` by default).
+        with crop positions in one of the components (`locations` by default).
 
         Parameters
         ----------
@@ -125,29 +127,33 @@ class SeismicCropBatch(Batch):
             cut it from. Order is: name, iline, xline, height. For example,
             ['Cube.sgy', 13, 500, 200] stands for crop has [13, 500, 200]
             as its upper rightmost point and must be cut from 'Cube.sgy' file.
-        shape : sequence
-            Desired shape of crops.
-        loc : sequence of numbers
-            Location of the point relative to the cut crop. Must be a location on unit cube.
+        shape : sequence, ndarray
+            Desired shape of crops along (iline, xline, height) axis. If ndarray, then must have the same length,
+            as `points`, and each row contains a shape for corresponding point.
+        direction : sequence of numbers
+            Direction of the cut crop relative to the point. Must be a vector on unit cube.
         side_view : bool or float
             Determines whether to generate crops of transposed shape (xline, iline, height).
             If False, then shape is never transposed.
             If True, then shape is transposed with 0.5 probability.
             If float, then shape is transposed with that probability.
         adaptive_slices: bool or str
-            If `adaptive`, then slices are created so that crops are cut only along the quality grid.
-            If bool, then whether to make slices.
+            If True, then slices are created so that crops are cut only along the grid.
+        grid_src : str
+            Attribut of geometry to get the grid from.
+        eps : int
+            Initial length of slice, that is used to find the closest grid point.
         dst : str, optional
             Component of batch to put positions of crops in.
         passdown : str of list of str
             Components of batch to keep in the new one.
         dst_points, dst_shapes : str
-            Components to put point locations and crop shapes in.
+            Components to put points and crop shapes in.
 
         Notes
         -----
         Based on the first column of `points`, new instance of SeismicCropBatch is created.
-        In order to keep multiple references to the same .sgy cube, each index is augmented
+        In order to keep multiple references to the same cube, each index is augmented
         with prefix of fixed length (check `salt` method for details).
 
         Returns
@@ -182,17 +188,15 @@ class SeismicCropBatch(Batch):
             corrected_points_shapes = [self._correct_point_to_grid(point, shape, grid_src, eps) for point in points]
             points = [item[0] for item in corrected_points_shapes]
             shapes = [item[1] for item in corrected_points_shapes]
-            new_batch.add_components((dst_points, dst_shapes), (points, shapes))
 
-            slices = [self._make_slice(point, shape, loc) for point, shape in corrected_points_shapes]
-            new_batch.add_components(dst, slices)
+            locations = [self._make_location(point, shape, direction) for point, shape in corrected_points_shapes]
         else:
             shapes = self._make_shapes(points, shape, side_view)
-            new_batch.add_components((dst_points, dst_shapes), (points, shapes))
 
-            slices = [self._make_slice(point, shape, loc)
-                      for point, shape in zip(points, shapes)]
-            new_batch.add_components(dst, slices)
+            locations = [self._make_location(point, shape, direction) for point, shape in zip(points, shapes)]
+
+        new_batch.add_components((dst_points, dst_shapes), (points, shapes))
+        new_batch.add_components(dst, locations)
         return new_batch
 
     def _make_shapes(self, points, shape, side_view):
@@ -217,22 +221,21 @@ class SeismicCropBatch(Batch):
         shapes = np.array(shapes)
         return shapes
 
-
-    def _make_slice(self, point, shape, loc=(0, 0, 0)):
-        """ Creates list of `np.arange`'s for desired location. """
+    def _make_location(self, point, shape, direction=(0, 0, 0)):
+        """ Creates list of slices for desired location. """
         if isinstance(point[1], float) or isinstance(point[2], float) or isinstance(point[3], float):
             ix = point[0]
             cube_shape = np.array(self.get(ix, 'geometries').cube_shape)
-            slice_point = np.rint(point[1:].astype(float) * (cube_shape - np.array(shape))).astype(int)
+            anchor_point = np.rint(point[1:].astype(float) * (cube_shape - np.array(shape))).astype(int)
         else:
-            slice_point = point[1:]
+            anchor_point = point[1:]
 
-        slice_ = []
+        location = []
         for i in range(3):
-            start_point = int(max(slice_point[i] - loc[i]*shape[i], 0))
-            end_point = start_point + shape[i]
-            slice_.append(np.arange(start_point, end_point))
-        return slice_
+            start = int(max(anchor_point[i] - direction[i]*shape[i], 0))
+            stop = start + shape[i]
+            location.append(slice(start, stop))
+        return location
 
     def _correct_point_to_grid(self, point, shape, grid_src='quality_grid', eps=3):
         """ Move the point to the closest location in the quality grid. """
@@ -277,10 +280,9 @@ class SeismicCropBatch(Batch):
         return self._correct_point_to_grid(point, shape, grid_src, 2*eps)
 
 
-
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def load_cubes(self, ix, dst, src='slices', **kwargs):
+    def load_cubes(self, ix, dst, src='locations', **kwargs):
         """ Load data from cube in given positions.
 
         Parameters
@@ -290,15 +292,14 @@ class SeismicCropBatch(Batch):
         dst : str
             Component of batch to put loaded crops in.
         """
-        #pylint: disable=unused-argument
         geom = self.get(ix, 'geometries')
-        slice_ = self.get(ix, src)
-        return geom.load_crop(slice_, **kwargs)
+        location = self.get(ix, src)
+        return geom.load_crop(location, **kwargs)
 
 
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def create_masks(self, ix, dst, src='slices', width=3, src_labels='labels', indices=-1):
+    def create_masks(self, ix, dst, src='locations', width=3, src_labels='labels', indices=-1):
         """ Create masks from labels-dictionary in given positions.
 
         Parameters
@@ -329,7 +330,6 @@ class SeismicCropBatch(Batch):
         -----
         Can be run only after labels-dict is loaded into labels-component.
         """
-        #pylint: disable=unused-argument
         labels = self.get(ix, src_labels) if isinstance(src_labels, str) else src_labels
         labels = [labels] if not isinstance(labels, (tuple, list)) else labels
         check_sum = False
@@ -346,12 +346,12 @@ class SeismicCropBatch(Batch):
             pass
         labels = [labels[idx] for idx in indices]
 
-        slice_ = self.get(ix, src)
+        location = self.get(ix, src)
         shape_ = self.get(ix, 'shapes')
         mask = np.zeros((shape_), dtype='float32')
 
         for label in labels:
-            mask = label.add_to_mask(mask, locations=slice_, width=width)
+            mask = label.add_to_mask(mask, locations=location, width=width)
             if check_sum and np.sum(mask) > 0.0:
                 break
         return mask
@@ -384,10 +384,13 @@ class SeismicCropBatch(Batch):
         _ = args, kwargs
         new_index = [self.indices[i] for i, area in enumerate(areas) if area > threshold]
         new_dict = {idx: self.index._paths[idx] for idx in new_index}
-        self.index = FilesIndex.from_index(index=new_index, paths=new_dict, dirs=False)
+        if len(new_index):
+            self.index = FilesIndex.from_index(index=new_index, paths=new_dict, dirs=False)
+        else:
+            raise SkipBatchException
 
         passdown = passdown or []
-        passdown.extend([src, 'slices'])
+        passdown.extend([src, 'locations'])
         passdown = list(set(passdown))
 
         for compo in passdown:
@@ -467,8 +470,17 @@ class SeismicCropBatch(Batch):
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
     def scale(self, ix, mode, src=None, dst=None):
-        """ Scale values in crop. """
-        #pylint: disable=unused-argument
+        """ Scale values in crop.
+
+        Parameters
+        ----------
+        mode : str
+            If `minmax`, then data is scaled to [0, 1] via minmax scaling.
+            If `q` or `normalize`, then data is divided by the maximum of absolute values of the
+            0.01 and 0.99 quantiles.
+            If `q_clip`, then data is clipped to 0.01 and 0.99 quantiles and then divided by the
+            maximum of absolute values of the two.
+        """
         pos = self.get_pos(None, src, ix)
         comp_data = getattr(self, src)[pos]
         geom = self.get(ix, 'geometries')
@@ -500,68 +512,46 @@ class SeismicCropBatch(Batch):
 
     @action
     @inbatch_parallel(init='indices', target='for', post='_masks_to_horizons_post')
-    def masks_to_horizons(self, ix, src='masks', src_slices='slices', dst='predicted_labels', prefix='predict',
-                          threshold=0.5, averaging='mean', minsize=0, order=(2, 0, 1), skip_merge=False,
-                          mean_threshold=2.0, adjacency=1):
-        """ Convert labels from horizons-mask into point-cloud format. Fetches point-clouds from
-        a batch of masks, then merges resulting clouds to those stored in `dst`, whenever possible.
+    def masks_to_horizons(self, ix, src='masks', src_locations='locations', dst='predicted_labels', prefix='predict',
+                          threshold=0.5, mode='mean', minsize=0, mean_threshold=2.0, adjacency=1,
+                          order=(2, 0, 1), skip_merge=False):
+        """ Convert predicted segmentation mask to a list of Horizon instances.
 
         Parameters
         ----------
         src_masks : str
-            component of batch that stores masks.
-        src_slices : str
-            component of batch that stores slices of crops.
+            Component of batch that stores masks.
+        src_locations : str
+            Component of batch that stores locations of crops.
         dst : str/object
-            component of batch to store the resulting labels, o/w a storing object.
-        threshold : float
-            parameter of mask-thresholding.
-        averaging : str
-            method of pandas.groupby used for finding the center of a horizon.
-        coordinates : str
-            coordinates-mode to use for keys of point-cloud. Can be either 'cubic'
-            or 'lines'. In case of `lines`-option, `geometries` must be loaded as
-            a component of batch.
+            Component of batch to store the resulting horizons.
         order : tuple of int
-            axes-param for `transpose`-operation, applied to a mask before fetching point clouds.
+            Axes-param for `transpose`-operation, applied to a mask before fetching point clouds.
             Default value of (2, 0, 1) is applicable to standart pipeline with one `rotate_axes`
             applied to images-tensor.
-        mean_threshold : int
-            if adjacent horizons do not diverge for more than this distance, they can be merged together.
-        adjacency : int
-            max distance between a pair of horizon-borders when the horizons can be adjacent.
-        Returns
-        -------
-        SeismicCropBatch
-            batch with fetched labels.
+        threshold, mode, minsize, mean_threshold, adjacency, prefix
+            Passed directly to `:meth:Horizon.from_mask`.
         """
         _ = dst, mean_threshold, adjacency, skip_merge
 
-        # threshold the mask, reshape and rotate the mask if needed
+        # Threshold the mask, transpose and rotate the mask if needed
         pos = self.get_pos(None, src, ix)
         mask = getattr(self, src)[pos]
         if np.array(order).reshape(-1, 3).shape[0] > 0:
             order = order[pos]
         mask = np.transpose(mask, axes=order)
 
-        #
-        geom = self.get(ix, 'geometries')
-        grid_info = {
-            'geom': geom,
-            'range': [[self.get(ix, src_slices)[k][0], None] for k in range(3)]
-        }
+        geometry = self.get(ix, 'geometries')
+        shifts = [self.get(ix, src_locations)[k].start for k in range(3)]
 
-        # get horizons and merge them with matching aggregated ones
-        horizons = Horizon.from_mask(mask, grid_info, threshold=threshold,
-                                     averaging=averaging, minsize=minsize, prefix=prefix)
+        horizons = Horizon.from_mask(mask, geometry=geometry, shifts=shifts, threshold=threshold,
+                                     mode=mode, minsize=minsize, prefix=prefix)
         return horizons
 
 
     def _masks_to_horizons_post(self, horizons_lists, *args, dst=None, skip_merge=False,
                                 mean_threshold=2.0, adjacency=1, **kwargs):
-        """ Stitch a set of point-clouds to a point cloud form dst if possible.
-        Post for `get_point_cloud`-action.
-        """
+        """ Flatten list of lists of horizons, attempting to merge what can be merged. """
         _, _ = args, kwargs
         if dst is None:
             raise ValueError("dst should be initialized with empty list.")
@@ -570,14 +560,12 @@ class SeismicCropBatch(Batch):
             setattr(self, dst, [hor for hor_list in horizons_lists for hor in hor_list])
             return self
 
-        # remember, horizons_lists contains lists of horizons
         for horizons in horizons_lists:
             for horizon_candidate in horizons:
                 for horizon_target in dst:
                     merge_code, _ = Horizon.verify_merge(horizon_target, horizon_candidate,
                                                          mean_threshold=mean_threshold,
                                                          adjacency=adjacency)
-
                     if merge_code == 3:
                         merged = Horizon.overlap_merge(horizon_target, horizon_candidate, inplace=True)
                     elif merge_code == 2:
@@ -588,48 +576,8 @@ class SeismicCropBatch(Batch):
                     if merged:
                         break
                 else:
-                    # if a horizon cannot be stitched to a horizon from dst, we enrich dst with it
+                    # If a horizon can't be merged to any of the previous ones, we append it as it is
                     dst.append(horizon_candidate)
-        return self
-
-
-
-    @action
-    @inbatch_parallel(init='run_once', target='for')
-    def assemble_crops(self, src, dst, grid_info, order=None):
-        """ Glue crops together in accordance to the grid.
-
-        Note
-        ----
-        In order to use this action you must first call `make_grid` method of SeismicCubeset.
-
-        Parameters
-        ----------
-        src : array-like
-            Sequence of crops.
-        dst : str
-            Component of batch to put results in.
-        grid_info : dict
-            Dictionary with information about grid. Should be created by `make_grid` method.
-
-        Returns
-        -------
-        SeismicCropBatch
-            Batch with assembled subcube in desired component.
-        """
-        # Do nothing until there is a crop for every point
-        if len(src) != len(grid_info['grid_array']):
-            return self
-
-        order = order or (2, 0, 1)
-        # Since we know that cube is 3-d entity, we can get rid of
-        # unneccessary dimensions
-        src = np.array(src)
-        src = src if len(src.shape) == 4 else np.squeeze(src, axis=-1)
-        assembled = aggregate(src, grid_info['grid_array'], grid_info['crop_shape'],
-                              grid_info['predict_shape'], order)
-
-        setattr(self, dst, assembled)
         return self
 
 

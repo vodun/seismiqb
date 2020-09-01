@@ -8,6 +8,17 @@ import pandas as pd
 
 
 
+def str2bool(string):
+    """ Convert string or booleans to True/False. """
+    if isinstance(string, bool):
+        return string
+    if string.lower() in ('yes', 'true', 't', 'y', '1'):
+        return True
+    if string.lower() in ('no', 'false', 'f', 'n', '0'):
+        return False
+    raise argparse.ArgumentTypeError('Boolean value expected.')
+
+
 def make_config(description, args, filename, show=True):
     """ Assemble script configuration from command line arguments, JSON file and inputs.
 

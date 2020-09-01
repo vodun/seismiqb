@@ -39,7 +39,7 @@ class Enhancer(BaseController):
         super().train(dataset, **kwargs)
 
 
-    def inference(self, horizon, **kwargs):
+    def inference(self, horizon, filtering_matrix=None, **kwargs):
         """ Runs enhancement procedure for a given horizon with trained/loaded model.
 
         Parameters
@@ -49,8 +49,13 @@ class Enhancer(BaseController):
         kwargs : dict
             Other arguments for `.meth:Detector.inference`.
         """
+        #pylint: disable=attribute-defined-outside-init
         dataset = self.make_dataset_from_horizon(horizon)
-        super().inference(dataset, **kwargs)
+        if filtering_matrix is None:
+            filtering_matrix = 1 - (horizon.full_matrix > 0)
+        super().inference(dataset, filtering_matrix=filtering_matrix, **kwargs)
+        self.predictions = [self.predictions[0]]
+        self.predictions[0].name = f'enhanced_{horizon.name}'
 
 
     def load_pipeline(self):
@@ -141,8 +146,6 @@ class Enhancer(BaseController):
                            B('prior_masks'),
                            fetches='predictions',
                            save_to=V('predicted_masks', mode='e'))
-            .assemble_crops(src=V('predicted_masks'), dst='assembled_pred',
-                            grid_info=D('grid_info'), order=C('order', default=(0, 1, 2)))
         )
         return inference_template
 

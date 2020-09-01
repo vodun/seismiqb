@@ -189,8 +189,14 @@ class MatplotlibPlotter:
         cm.set_bad(color=updated.get('bad_color', updated.get('fill_color', 'white')))
         render_kwargs['cmap'] = cm
 
+        # Create figure and axes
+        if 'ax' in kwargs:
+            ax = kwargs['ax']
+            fig = ax.figure
+        else:
+            fig, ax = plt.subplots(**figure_kwargs)
+
         # channelize and plot the image
-        fig, ax = plt.subplots(**figure_kwargs)
         img = np.transpose(image.squeeze(), axes=updated['order_axes'])
         xticks, yticks = updated.get('xticks', [0, img.shape[1]]), updated.get('yticks', [img.shape[0], 0])
         extent = [xticks[0], xticks[-1], yticks[0], yticks[-1]]
@@ -262,8 +268,14 @@ class MatplotlibPlotter:
         xaxis_kwargs = filter_kwargs(updated, ['xlabel', 'fontsize', 'family', 'color'])
         yaxis_kwargs = filter_kwargs(updated, ['ylabel', 'fontsize', 'family', 'color'])
 
+        # Create figure and axes
+        if 'ax' in kwargs:
+            ax = kwargs['ax']
+            fig = ax.figure
+        else:
+            fig, ax = plt.subplots(**figure_kwargs)
+
         # channelize images and put them on a canvas
-        _, ax = plt.subplots(**figure_kwargs)
         img = np.transpose(images[0].squeeze(), axes=updated['order_axes'])
         xticks, yticks = updated.get('xticks', [0, img.shape[1]]), updated.get('yticks', [img.shape[0], 0])
         extent = [xticks[0], xticks[-1], yticks[0], yticks[-1]]
@@ -283,7 +295,7 @@ class MatplotlibPlotter:
                       extent=extent, **render_kwargs)
         plt.title(**label_kwargs)
 
-        self.save_and_show(plt, **updated)
+        self.save_and_show(fig, **updated)
 
     def rgb(self, image, **kwargs):
         """ Plot one image in 'rgb' using matplotlib.
