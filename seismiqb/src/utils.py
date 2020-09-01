@@ -610,7 +610,8 @@ def generate_points(edges, divisors, lengths, indices):
     for i, idx in enumerate(indices):
         idx_copy = idx
         for j, (edge, divisors_, length) in enumerate(zip(edges, divisors, lengths)):
+            idx_copy = idx
             for divisor in divisors_:
                 idx_copy //= divisor
-            low[i, j] = edge[(idx_copy % length)]
+            low[i, j] = edge[idx_copy % length]
     return low
