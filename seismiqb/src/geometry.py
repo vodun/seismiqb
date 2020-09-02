@@ -201,22 +201,25 @@ class SeismicGeometry:
         self.path_meta = path_meta
 
         for item in self.PRESERVED:
-            self.load_meta_item(item)
+            value = self.load_meta_item(item)
+            if value is not None:
+                setattr(self, item, value)
 
     def load_meta_item(self, item):
         """ Load individual item """
         with h5py.File(self.path_meta, "r") as file_meta:
             try:
                 value = file_meta['/info/' + item][()]
-                setattr(self, item, value)
                 self.loaded.append(item)
+                return value
             except KeyError:
-                pass
+                return None
 
     def __getattr__(self, key):
-        if key in self.PRESERVED_LAZY and key not in self.loaded:
-            self.load_meta_item(key)
-        getattr(self, key)
+        """ Load item from stored meta, if needed. """
+        if key in self.PRESERVED_LAZY and self.path_meta is not None and key not in self.__dict__:
+            return self.load_meta_item(key)
+        return object.__getattribute__(self, key)
 
 
     def scaler(self, array, mode='minmax'):
