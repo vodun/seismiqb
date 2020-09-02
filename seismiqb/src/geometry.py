@@ -117,10 +117,12 @@ class SeismicGeometry:
         'depth', 'delay', 'sample_rate', 'cube_shape',
         'segy_path', 'segy_text', 'rotation_matrix',
         'byte_no', 'offsets', 'ranges', 'lens', # `uniques` can't be saved due to different lenghts of arrays
-        'value_min', 'value_max', 'q01', 'q99', 'q001', 'q999', 'bins', 'trace_container',
         'ilines', 'xlines', 'ilines_offset', 'xlines_offset', 'ilines_len', 'xlines_len',
-        'zero_traces', 'min_matrix', 'max_matrix', 'mean_matrix', 'std_matrix', 'hist_matrix',
-        '_quality_map',
+        'value_min', 'value_max', 'q01', 'q99', 'q001', 'q999', 'bins', 'zero_traces', '_quality_map',
+    ]
+
+    PRESERVED_LAZY = [
+        'trace_container', 'min_matrix', 'max_matrix', 'mean_matrix', 'std_matrix', 'hist_matrix',
     ]
 
     # Headers to load from SEG-Y cube
@@ -185,7 +187,7 @@ class SeismicGeometry:
         # Create file and datasets inside
         with h5py.File(path_meta, "a") as file_meta:
             # Save all the necessary attributes to the `info` group
-            for attr in self.PRESERVED:
+            for attr in self.PRESERVED + self.PRESERVED_LAZY:
                 if hasattr(self, attr) and getattr(self, attr) is not None:
                     file_meta['/info/' + attr] = getattr(self, attr)
 
@@ -198,14 +200,26 @@ class SeismicGeometry:
             path_meta = os.path.splitext(self.path)[0] + '.hdf5'
         self.path_meta = path_meta
 
-        with h5py.File(path_meta, "r") as file_meta:
-            for item in self.PRESERVED:
-                try:
-                    value = file_meta['/info/' + item][()]
-                    setattr(self, item, value)
-                    self.loaded.append(item)
-                except KeyError:
-                    pass
+        for item in self.PRESERVED:
+            value = self.load_meta_item(item)
+            if value is not None:
+                setattr(self, item, value)
+
+    def load_meta_item(self, item):
+        """ Load individual item """
+        with h5py.File(self.path_meta, "r") as file_meta:
+            try:
+                value = file_meta['/info/' + item][()]
+                self.loaded.append(item)
+                return value
+            except KeyError:
+                return None
+
+    def __getattr__(self, key):
+        """ Load item from stored meta, if needed. """
+        if key in self.PRESERVED_LAZY and self.path_meta is not None and key not in self.__dict__:
+            return self.load_meta_item(key)
+        return object.__getattribute__(self, key)
 
 
     def scaler(self, array, mode='minmax'):
