@@ -206,7 +206,7 @@ class SeismicGeometry:
                 setattr(self, item, value)
 
     def load_meta_item(self, item):
-        """ Load individual item """
+        """ Load individual item. """
         with h5py.File(self.path_meta, "r") as file_meta:
             try:
                 value = file_meta['/info/' + item][()]
@@ -350,6 +350,25 @@ class SeismicGeometry:
 
     # Instance introspection and visualization methods
     @property
+    def reset_cache(self):
+        """ Clear cached slides. """
+        if self.structured is False:
+            method = self.load_slide
+        else:
+            method = self._cached_load
+        method.reset()
+
+    @property
+    def cache_size(self):
+        """ Total size of cached slides. """
+        if self.structured is False:
+            method = self.load_slide
+        else:
+            method = self._cached_load
+
+        return sum(item.nbytes / (1024 ** 3) for item in method.cache().values())
+
+    @property
     def nbytes(self):
         """ Size of instance in bytes. """
         attrs = [
@@ -357,7 +376,7 @@ class SeismicGeometry:
             *[attr for attr in self.__dict__
               if 'matrix' in attr or '_quality' in attr],
         ]
-        return sum(sys.getsizeof(getattr(self, attr)) for attr in attrs if hasattr(self, attr))
+        return sum(sys.getsizeof(getattr(self, attr)) for attr in attrs if hasattr(self, attr)) + self.cache_size
 
     @property
     def ngbytes(self):
