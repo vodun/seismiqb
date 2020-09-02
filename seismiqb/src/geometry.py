@@ -349,7 +349,6 @@ class SeismicGeometry:
 
 
     # Instance introspection and visualization methods
-    @property
     def reset_cache(self):
         """ Clear cached slides. """
         if self.structured is False:
@@ -357,6 +356,16 @@ class SeismicGeometry:
         else:
             method = self._cached_load
         method.reset()
+
+    @property
+    def cache_length(self):
+        """ Total size of cached slides. """
+        if self.structured is False:
+            method = self.load_slide
+        else:
+            method = self._cached_load
+
+        return len(method.cache())
 
     @property
     def cache_size(self):

@@ -615,7 +615,6 @@ def generate_points(edges, divisors, lengths, indices):
     low = np.zeros((len(indices), len(lengths)))
 
     for i, idx in enumerate(indices):
-        idx_copy = idx
         for j, (edge, divisors_, length) in enumerate(zip(edges, divisors, lengths)):
             idx_copy = idx
             for divisor in divisors_:

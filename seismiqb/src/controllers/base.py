@@ -285,8 +285,8 @@ class BaseController:
         model_pipeline = (self.get_train_template(**kwargs) << pipeline_config) << dataset
         batch = model_pipeline.next_batch(D('size'))
         self.log(f'Used batch size is: {self.batch_size}; actual batch size is: {len(batch)}')
-        self.log(f'Cache sizes: {[len(item.cache_size) for item in dataset.geometries.values()]} ')
-        self.log(f'Cache lengths: {[len(item._cached_load.cache()) for item in dataset.geometries.values()]}')
+        self.log(f'Cache sizes: {[item.cache_size for item in dataset.geometries.values()]}')
+        self.log(f'Cache lengths: {[item.cache_length for item in dataset.geometries.values()]}')
         self.batch_size = bs
 
         model_pipeline.run(D('size'), n_iters=n_iters + np.random.randint(100),
@@ -447,7 +447,7 @@ class BaseController:
 
         # Log memory usage info and clean up
         self.log(f'Cache sizes: {[item.cache_size for item in dataset.geometries.values()]}')
-        self.log(f'Cache lengths: {[len(item._cached_load.cache()) for item in dataset.geometries.values()]}')
+        self.log(f'Cache lengths: {[item.cache_length for item in dataset.geometries.values()]}')
         for item in dataset.geometries.values():
             item.reset_cache()
 
@@ -497,7 +497,7 @@ class BaseController:
             gc.collect()
 
         self.log(f'Cache sizes: {[item.cache_size for item in dataset.geometries.values()]}')
-        self.log(f'Cache lengths: {[len(item._cached_load.cache()) for item in dataset.geometries.values()]}')
+        self.log(f'Cache lengths: {[item.cache_length for item in dataset.geometries.values()]}')
         for item in dataset.geometries.values():
             item.reset_cache()
 
