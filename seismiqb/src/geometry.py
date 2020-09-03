@@ -188,8 +188,12 @@ class SeismicGeometry:
         with h5py.File(path_meta, "a") as file_meta:
             # Save all the necessary attributes to the `info` group
             for attr in self.PRESERVED + self.PRESERVED_LAZY:
-                if hasattr(self, attr) and getattr(self, attr) is not None:
-                    file_meta['/info/' + attr] = getattr(self, attr)
+                try:
+                    if hasattr(self, attr) and getattr(self, attr) is not None:
+                        file_meta['/info/' + attr] = getattr(self, attr)
+                except ValueError:
+                    # Raised when you try to store post-stack descriptors for pre-stack cube
+                    pass
 
     def load_meta(self):
         """ Retrieve stored stats from disk. """
@@ -359,7 +363,7 @@ class SeismicGeometry:
 
     @property
     def cache_length(self):
-        """ Total size of cached slides. """
+        """ Total amount of cached slides. """
         if self.structured is False:
             method = self.load_slide
         else:
