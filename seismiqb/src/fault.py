@@ -43,7 +43,7 @@ class Fault(Horizon):
             col = 'xline'
         else:
             raise ValueError('!!!!')
-        return df.groupby(col).apply(lambda x: x[Horizon.COLUMNS].values)
+        return df.groupby(col).apply(lambda x: x[Horizon.COLUMNS].values.astype('int'))
 
 
     @classmethod
@@ -64,8 +64,7 @@ class Fault(Horizon):
     def interpolate_3d(self, sticks):
         triangles = triangulation(sticks)
         points = []
-        import tqdm
-        for triangle in tqdm.tqdm(triangles):
+        for triangle in triangles:
             res = triangle_rasterization(triangle)
             points += [res]
         return np.concatenate(points, axis=0)
