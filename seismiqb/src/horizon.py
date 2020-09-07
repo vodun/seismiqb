@@ -1571,7 +1571,7 @@ class Horizon:
         plot_image(amplitudes, mode='rgb', **kwargs)
 
 
-    def show_3d(self, n=300, threshold=100., **kwargs):
+    def show_3d(self, n=300, threshold=100., savepath=None, **kwargs):
         """ Amazing plot with Plotly. """
         import plotly
         import plotly.figure_factory as ff
@@ -1642,6 +1642,9 @@ class Horizon:
             }
         )
         fig.show()
+
+        if savepath:
+            fig.write_html(savepath)
 
 
     def show_slide(self, loc, width=3, axis='i', order_axes=None, zoom_slice=None, **kwargs):
