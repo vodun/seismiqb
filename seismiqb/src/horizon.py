@@ -14,7 +14,7 @@ from scipy.ndimage.morphology import binary_fill_holes, binary_erosion
 from scipy.ndimage import find_objects
 from skimage.measure import label
 
-from .utils import round_to_array, groupby_mean, groupby_min, groupby_max, HorizonSampler
+from .utils import round_to_array, groupby_mean, groupby_min, groupby_max, HorizonSampler, filter_simplices
 from .plotters import plot_image
 
 
@@ -1569,6 +1569,79 @@ class Horizon:
             }
 
         plot_image(amplitudes, mode='rgb', **kwargs)
+
+
+    def show_3d(self, n=300, threshold=100., **kwargs):
+        """ Amazing plot with Plotly. """
+        import plotly
+        import plotly.figure_factory as ff
+        from scipy.spatial import Delaunay
+
+        weights_matrix = self.full_matrix
+        grad_i = np.diff(weights_matrix, axis=0, prepend=0)
+        grad_x = np.diff(weights_matrix, axis=1, prepend=0)
+        weights_matrix = (grad_i + grad_x) / 2
+        weights_matrix[np.abs(weights_matrix) > 50] = np.nan
+        weights_matrix[self.full_matrix < 0] = np.nan
+        weights_matrix = np.clip(weights_matrix, -5, 5)
+
+        idx = np.nonzero(self.full_matrix > 0)
+        probs = np.abs(weights_matrix[idx[0], idx[1]].flatten())
+        probs[np.isnan(probs)] = 10
+        indices = np.random.choice(len(probs), size=n, p=probs / probs.sum())
+
+
+        ilines = self.points[:, 0][indices]
+        xlines = self.points[:, 1][indices]
+        ilines, xlines = np.meshgrid(ilines, xlines)
+        ilines = ilines.flatten()
+        xlines = xlines.flatten()
+
+        heights = self.matrix[ilines, xlines]
+        mask = (heights != self.FILL_VALUE)
+
+        x = ilines[mask]
+        y = xlines[mask]
+        z = heights[mask]
+
+        tri = Delaunay(np.vstack([x, y]).T)
+        simplices = filter_simplices(simplices=tri.simplices, points=tri.points,
+                                     matrix=self.full_matrix, threshold=threshold)
+
+        kwargs = {
+            'title': f'Horizon `{self.name}` on `{self.cube_name}`',
+            'colormap': plotly.colors.sequential.Viridis[::-1],
+            'show_colorbar': False,
+            'width': 800,
+            'height': 800,
+            'aspectratio': {'x': self.i_length / self.x_length, 'y': 1, 'z': 1},
+            **kwargs
+        }
+
+        fig = ff.create_trisurf(x=x, y=y, z=z, simplices=simplices, **kwargs)
+
+        fig.update_layout(
+            {
+                'scene': {
+                    'xaxis': {
+                        'title': self.geometry.index_headers[0],
+                        'autorange': 'reversed',
+                    },
+                    'yaxis': {
+                        'title': self.geometry.index_headers[1],
+                    },
+                    'zaxis': {
+                        'title': 'DEPTH',
+                        'autorange': 'reversed',
+                        'range': [-self.h_max-100, -self.h_min+100],
+                    },
+                    'camera_eye': {
+                        "x": 1.25, "y": 1.5, "z": 1.5
+                    },
+                }
+            }
+        )
+        fig.show()
 
 
     def show_slide(self, loc, width=3, axis='i', order_axes=None, zoom_slice=None, **kwargs):
