@@ -13,6 +13,7 @@ from PIL import ImageDraw, Image
 from scipy.ndimage import find_objects
 from scipy.interpolate import LinearNDInterpolator, griddata
 from skimage.measure import label
+from sklearn.decomposition import PCA
 
 from .horizon import Horizon
 from .geometry import SeismicGeometry, SeismicGeometrySEGY
@@ -31,6 +32,7 @@ class Fault(Horizon):
         if isinstance(self.geometry, SeismicGeometrySEGY):
             df = self.fix_lines(df)
         sticks = self.sticks(df)
+        sticks = self.order_sticks(sticks)
         points = self.interpolate_3d(sticks)
         return points
 
@@ -43,7 +45,7 @@ class Fault(Horizon):
             col = 'xline'
         else:
             raise ValueError('!!!!')
-        return df.groupby(col).apply(lambda x: x[Horizon.COLUMNS].values.astype('int'))
+        return df.groupby(col).apply(lambda x: x[Horizon.COLUMNS].values)
 
 
     @classmethod
@@ -174,3 +176,9 @@ class Fault(Horizon):
         def _dump(df):
             df.to_csv(os.path.join(folder, dst, df.name), sep=' ', header=False, index=False)
         df.groupby('name').apply(_dump)
+
+    def order_sticks(self, sticks):
+        pca = PCA(1)
+        coords = pca.fit_transform(pca.fit_transform(np.array([stick[0][:2] for stick in sticks.values])))
+        indices = np.array([i for _, i in sorted(zip(coords, range(len(sticks))))])
+        return sticks.iloc[indices]
