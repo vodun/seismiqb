@@ -1571,7 +1571,7 @@ class Horizon:
         plot_image(amplitudes, mode='rgb', **kwargs)
 
 
-    def show_3d(self, n=300, threshold=100., savepath=None, **kwargs):
+    def show_3d(self, n=300, threshold=100., z_ratio=1., margin=100, savepath=None, **kwargs):
         """ Amazing plot with Plotly. """
         import plotly
         import plotly.figure_factory as ff
@@ -1581,13 +1581,10 @@ class Horizon:
         grad_i = np.diff(weights_matrix, axis=0, prepend=0)
         grad_x = np.diff(weights_matrix, axis=1, prepend=0)
         weights_matrix = (grad_i + grad_x) / 2
-        weights_matrix[np.abs(weights_matrix) > 50] = np.nan
         weights_matrix[self.full_matrix < 0] = np.nan
-        weights_matrix = np.clip(weights_matrix, -5, 5)
 
         idx = np.nonzero(self.full_matrix > 0)
         probs = np.abs(weights_matrix[idx[0], idx[1]].flatten())
-        probs[np.isnan(probs)] = 10
         indices = np.random.choice(len(probs), size=n, p=probs / probs.sum())
 
 
@@ -1597,7 +1594,7 @@ class Horizon:
         ilines = ilines.flatten()
         xlines = xlines.flatten()
 
-        heights = self.matrix[ilines, xlines]
+        heights = self.full_matrix[ilines, xlines]
         mask = (heights != self.FILL_VALUE)
 
         x = ilines[mask]
@@ -1610,11 +1607,12 @@ class Horizon:
 
         kwargs = {
             'title': f'Horizon `{self.name}` on `{self.cube_name}`',
-            'colormap': plotly.colors.sequential.Viridis[::-1],
+            'colormap': plotly.colors.sequential.Viridis[::-1][:4],
+            'edges_color': 'rgb(70, 40, 50)',
             'show_colorbar': False,
             'width': 800,
             'height': 800,
-            'aspectratio': {'x': self.i_length / self.x_length, 'y': 1, 'z': 1},
+            'aspectratio': {'x': self.i_length / self.x_length, 'y': 1, 'z': z_ratio},
             **kwargs
         }
 
@@ -1632,8 +1630,7 @@ class Horizon:
                     },
                     'zaxis': {
                         'title': 'DEPTH',
-                        'autorange': 'reversed',
-                        'range': [-self.h_max-100, -self.h_min+100],
+                        'range': [self.h_max + margin, self.h_min - margin],
                     },
                     'camera_eye': {
                         "x": 1.25, "y": 1.5, "z": 1.5
