@@ -1020,6 +1020,66 @@ class Horizon:
 
         return result
 
+
+    def get_array_values_(self, array, array_shift=None, dataset=None, width=5, axes=(2, 1, 0)):
+        """ Get values from an external array along the horizon.
+
+        Parameters
+        ----------
+        array : np.ndarray
+            A data-array to make a cut from.
+        array_shift : tuple or None
+            an offset defining the location of given array with respect to the horizon.
+            If None, dataset with filled `grid_info` must be supplied.
+        dataset : seismiqb.dataset
+            a dataset with filled grid_info-attr. Must be supplied, if array_shift is None.
+        width : int
+            required width of the resulting cut.
+        axes : tuple
+            if not None, axes-transposition with the required axes-order is used.
+        """
+        if array_shift is None:
+            try:
+                grid_info = getattr(dataset, 'grid_info')
+                array_shift = [grid_info['range'][i][0] for i in range(3)]
+            except:
+                raise ValueError('Either array_shift or dataset with filled grid_info must be supplied!') #pylint: disable=raise-missing-from
+
+        array_shift = np.array(array_shift)
+        horizon_shift = np.array((self.bbox[0, 0], self.bbox[1, 0]))
+
+        if axes is not None:
+            array = np.transpose(array, axes=axes)
+
+        # compute start and end-points of the ilines-xlines overlap between
+        # array and matrix in horizon and array-coordinates
+        horizon_shift, array_shift = np.array(horizon_shift), np.array(array_shift)
+        horizon_max = horizon_shift[:2] + np.array(horizon_matrix.shape)
+        array_max = np.array(array.shape[:2]) + array_shift[:2]
+        overlap_shape = np.minimum(horizon_max[:2], array_max[:2]) - np.maximum(horizon_shift[:2], array_shift[:2])
+        overlap_start = np.maximum(0, horizon_shift[:2] - array_shift[:2])
+        heights_start = np.maximum(array_shift[:2] - horizon_shift[:2], 0)
+
+        # recompute horizon-matrix in array-coordinates
+        slc_array = [slice(l, h) for l, h in zip(overlap_start, overlap_start + overlap_shape)]
+        slc_horizon = [slice(l, h) for l, h in zip(heights_start, heights_start + overlap_shape)]
+        overlap_matrix = np.full(array.shape[:2], fill_value=self.FILL_VALUE, dtype=np.float32)
+        overlap_matrix[slc_array] = horizon_matrix[slc_horizon]
+        overlap_matrix -= array_shift[-1]
+
+        # make the cut-array and fill it with array-data located on needed heights
+        result = np.full(array.shape[:2] + (width, ), np.nan, dtype=np.float32)
+        for i, surface_level in enumerate(np.array([overlap_matrix + shift for shift in range(-width // 2 + 1,
+                                                                                                    width // 2 + 1)])):
+            mask = (surface_level >= 0) & (surface_level < array.shape[-1]) & (surface_level !=
+                                                                               self.FILL_VALUE - array_shift[-1])
+            mask_where = np.where(mask)
+            result[mask_where[0], mask_where[1], i] = array[mask_where[0], mask_where[1],
+                                                            surface_level[mask_where].astype(np.int)]
+
+        return result
+
+
     def get_cube_values_line(self, orientation='ilines', line=1, window=23, offset=0, scale=False):
         """ Get values from the cube along the horizon on a particular line.
 
