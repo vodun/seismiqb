@@ -775,7 +775,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
 
         self.rotation_matrix = cv2.getAffineTransform(np.float32(ix_points), np.float32(cdp_points))
 
-    def compute_area(self, correct=True):
+    def compute_area(self, correct=True, shift=50):
         """ Compute approximate area of the cube in square kilometres.
 
         Parameters
@@ -790,8 +790,15 @@ class SeismicGeometrySEGY(SeismicGeometry):
         x = self.xlines[self.xlines_len // 2]
 
         cdp_x, cdp_y = self.dataframe[['CDP_X', 'CDP_Y']].ix[(i, x)]
-        cdp_x_delta = self.dataframe[['CDP_X']].ix[(i, x+1)][0] - cdp_x
-        cdp_y_delta = self.dataframe[['CDP_Y']].ix[(i+1, x)][0] - cdp_y
+        cdp_x_delta = abs(self.dataframe[['CDP_X']].ix[(i, x + shift)][0] - cdp_x)
+        cdp_y_delta = abs(self.dataframe[['CDP_Y']].ix[(i + shift, x)][0] - cdp_y)
+
+        if cdp_x_delta == 0 and cdp_y_delta == 0:
+            cdp_x_delta = abs(self.dataframe[['CDP_X']].ix[(i + shift, x)][0] - cdp_x)
+            cdp_y_delta = abs(self.dataframe[['CDP_Y']].ix[(i, x + shift)][0] - cdp_y)
+
+        cdp_x_delta /= shift
+        cdp_y_delta /= shift
 
         ilines_km = cdp_y_delta * self.ilines_len / 1000
         xlines_km = cdp_x_delta * self.xlines_len / 1000
