@@ -1054,7 +1054,7 @@ class Horizon:
         # compute start and end-points of the ilines-xlines overlap between
         # array and matrix in horizon and array-coordinates
         horizon_shift, array_shift = np.array(horizon_shift), np.array(array_shift)
-        horizon_max = horizon_shift[:2] + np.array(horizon_matrix.shape)
+        horizon_max = horizon_shift[:2] + np.array(self.matrix.shape)
         array_max = np.array(array.shape[:2]) + array_shift[:2]
         overlap_shape = np.minimum(horizon_max[:2], array_max[:2]) - np.maximum(horizon_shift[:2], array_shift[:2])
         overlap_start = np.maximum(0, horizon_shift[:2] - array_shift[:2])
@@ -1064,7 +1064,7 @@ class Horizon:
         slc_array = [slice(l, h) for l, h in zip(overlap_start, overlap_start + overlap_shape)]
         slc_horizon = [slice(l, h) for l, h in zip(heights_start, heights_start + overlap_shape)]
         overlap_matrix = np.full(array.shape[:2], fill_value=self.FILL_VALUE, dtype=np.float32)
-        overlap_matrix[slc_array] = horizon_matrix[slc_horizon]
+        overlap_matrix[slc_array] = self.matrix[slc_horizon]
         overlap_matrix -= array_shift[-1]
 
         # make the cut-array and fill it with array-data located on needed heights
