@@ -1571,7 +1571,7 @@ class Horizon:
         plot_image(amplitudes, mode='rgb', **kwargs)
 
 
-    def show_3d(self, n=300, threshold=100., z_ratio=1., margin=100, savepath=None, **kwargs):
+    def show_3d(self, n=100, threshold=100., z_ratio=1., margin=100, savepath=None, **kwargs):
         """ Amazing plot with Plotly. """
         import plotly
         import plotly.figure_factory as ff
@@ -1581,10 +1581,11 @@ class Horizon:
         grad_i = np.diff(weights_matrix, axis=0, prepend=0)
         grad_x = np.diff(weights_matrix, axis=1, prepend=0)
         weights_matrix = (grad_i + grad_x) / 2
-        weights_matrix[self.full_matrix < 0] = np.nan
+        weights_matrix[np.abs(weights_matrix) > 100] = np.nan
 
         idx = np.nonzero(self.full_matrix > 0)
         probs = np.abs(weights_matrix[idx[0], idx[1]].flatten())
+        probs[np.isnan(probs)] = np.nanmax(probs)
         indices = np.random.choice(len(probs), size=n, p=probs / probs.sum())
 
 
