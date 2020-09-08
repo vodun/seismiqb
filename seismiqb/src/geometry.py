@@ -775,6 +775,32 @@ class SeismicGeometrySEGY(SeismicGeometry):
 
         self.rotation_matrix = cv2.getAffineTransform(np.float32(ix_points), np.float32(cdp_points))
 
+    def compute_area(self, correct=True):
+        """ Compute approximate area of the cube in square kilometres.
+
+        Parameters
+        ----------
+        correct : bool
+            Whether to correct computed area for zero traces.
+        """
+        if self.headers != self.HEADERS_POST_FULL:
+            raise TypeError('Geometry index must be `POST_FULL`')
+
+        i = self.ilines[self.ilines_len // 2]
+        x = self.xlines[self.xlines_len // 2]
+
+        cdp_x, cdp_y = self.dataframe[['CDP_X', 'CDP_Y']].ix[(i, x)]
+        cdp_x_delta = self.dataframe[['CDP_X']].ix[(i, x+1)][0] - cdp_x
+        cdp_y_delta = self.dataframe[['CDP_Y']].ix[(i+1, x)][0] - cdp_y
+
+        ilines_km = cdp_y_delta * self.ilines_len / 1000
+        xlines_km = cdp_x_delta * self.xlines_len / 1000
+        area = ilines_km * xlines_km
+
+        if correct and hasattr(self, 'zero_traces'):
+            area -= (cdp_x_delta / 1000) * (cdp_y_delta / 1000) * np.sum(self.zero_traces)
+        return area
+
 
     def set_index(self, index_headers, sortby=None):
         """ Change current index to a subset of loaded headers. """
