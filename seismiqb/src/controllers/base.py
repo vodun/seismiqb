@@ -556,10 +556,10 @@ class BaseController:
                 savepath=self.make_save_path(*prefix, name + 'corrs.png')
             )
 
-            local_corrs = hm.evaluate(
-                'local_corrs',
-                plot=True, show_plot=self.show_plots, kernel_size=9,
-                savepath=self.make_save_path(*prefix, name + 'local_corrs.png')
+            phase = hm.evaluate(
+                'instantaneous_phase',
+                plot=True, show_plot=self.show_plots,
+                savepath=self.make_save_path(*prefix, name + 'instantaneous_phase.png')
             )
 
             # Compare to targets
@@ -584,11 +584,11 @@ class BaseController:
                 horizon.dump(path=self.make_save_path(*prefix, dump_name), add_height=False)
 
             info['corrs'] = np.nanmean(corrs)
-            info['local_corrs'] = np.nanmean(local_corrs)
+            info['phase'] = np.nanmean(np.abs(phase))
             results.append((info))
 
             self.log(f'horizon {i}: len {len(horizon)}, cov {horizon.coverage:4.4}, '
-                     f'corrs {info["corrs"]:4.4}, local corrs {info["local_corrs"]:4.4}, depth {horizon.h_mean}')
+                     f'corrs {info["corrs"]:4.4}, phase {info["phase"]:4.4}, depth {horizon.h_mean}')
 
         return results
 

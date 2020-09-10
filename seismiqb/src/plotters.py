@@ -224,6 +224,9 @@ class MatplotlibPlotter:
         ax.set_facecolor(updated['facecolor'])
         ax.tick_params(**tick_params)
 
+        if kwargs.get('disable_axes'):
+            ax.set_axis_off()
+
         self.save_and_show(fig, **updated)
 
     def overlap(self, images, **kwargs):
