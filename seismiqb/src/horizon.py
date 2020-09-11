@@ -1571,7 +1571,8 @@ class Horizon:
         plot_image(amplitudes, mode='rgb', **kwargs)
 
 
-    def show_3d(self, n=100, threshold=100., z_ratio=1., margin=100, savepath=None, **kwargs):
+    def show_3d(self, n=100, threshold=100., z_ratio=1., show_axes=True,
+                width=1200, height=1200, margin=100, savepath=None, **kwargs):
         """ Amazing plot with Plotly. """
         import plotly
         import plotly.figure_factory as ff
@@ -1611,8 +1612,8 @@ class Horizon:
             'colormap': plotly.colors.sequential.Viridis[::-1][:4],
             'edges_color': 'rgb(70, 40, 50)',
             'show_colorbar': False,
-            'width': 800,
-            'height': 800,
+            'width': width,
+            'height': height,
             'aspectratio': {'x': self.i_length / self.x_length, 'y': 1, 'z': z_ratio},
             **kwargs
         }
@@ -1623,14 +1624,17 @@ class Horizon:
             {
                 'scene': {
                     'xaxis': {
-                        'title': self.geometry.index_headers[0],
+                        'title': self.geometry.index_headers[0] if show_axes else '',
+                        'showticklabels': show_axes,
                         'autorange': 'reversed',
                     },
                     'yaxis': {
-                        'title': self.geometry.index_headers[1],
+                        'title': self.geometry.index_headers[1] if show_axes else '',
+                        'showticklabels': show_axes,
                     },
                     'zaxis': {
-                        'title': 'DEPTH',
+                        'title': 'DEPTH' if show_axes else '',
+                        'showticklabels': show_axes,
                         'range': [self.h_max + margin, self.h_min - margin],
                     },
                     'camera_eye': {
@@ -1643,6 +1647,7 @@ class Horizon:
 
         if savepath:
             fig.write_html(savepath)
+        return fig
 
 
     def show_slide(self, loc, width=3, axis='i', order_axes=None, zoom_slice=None, **kwargs):
