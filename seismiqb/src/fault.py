@@ -29,8 +29,7 @@ class Fault(Horizon):
         """ Get point cloud array from file values. """
         #pylint: disable=anomalous-backslash-in-string
         df = self.read_file(path)
-        if isinstance(self.geometry, SeismicGeometrySEGY):
-            df = self.fix_lines(df)
+        df = self.fix_lines(df)
         sticks = self.sticks(df)
         sticks = self.order_sticks(sticks)
         points = self.interpolate_3d(sticks)
@@ -45,7 +44,7 @@ class Fault(Horizon):
             col = 'xline'
         else:
             raise ValueError('!!!!')
-        return df.groupby(col).apply(lambda x: x[Horizon.COLUMNS].values)
+        return df.groupby(col).apply(lambda x: x[Horizon.COLUMNS].values).reset_index(drop=True)
 
 
     @classmethod

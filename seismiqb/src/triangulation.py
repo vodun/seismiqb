@@ -11,7 +11,7 @@ def triangle_rasterization(points, width=1):
         for y in range(np.min(points[:, 1]), np.max(points[:, 1]+1)):
             for z in range(np.min(points[:, 2]), np.max(points[:, 2]+1)):
                 node = np.array([x, y, z])
-                if distance_to_triangle(points, node) <= width:
+                if distance_to_triangle(points, node) < 0.5 * width:
                     _points[i] = node
                     i += 1
     return _points[:i]
