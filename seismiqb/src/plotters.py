@@ -226,6 +226,49 @@ class MatplotlibPlotter:
 
         self.save_and_show(fig, **updated)
 
+
+    def wiggle(self, image, **kwargs):
+        """ Make wiggle plot of an image.
+        """
+        defaults = {'figsize': (12, 7),
+                    'overlap': False,
+                    'line_color': 'k',
+                    'label': '',
+                    'title': '',
+                    'width_multiplier': 2,
+                    'xstep': 5}
+        updated = {**defaults, **kwargs}
+        line_color = updated['line_color']
+        xstep = updated['xstep']
+        width_mul = updated['width_multiplier']
+
+        figure_kwargs = filter_kwargs(updated, ['figsize', 'facecolor', 'dpi'])
+
+        xlim_curr = (0, len(image))
+        ylim_curr = (0, len(image[0]))
+
+        offsets = np.arange(*xlim_curr, xstep)
+
+        # Create figure and axes
+        if 'ax' in kwargs:
+            ax = kwargs['ax']
+            fig = ax.figure
+        else:
+            fig, ax = plt.subplots(**figure_kwargs)
+
+        if isinstance(line_color, str):
+            line_color = [line_color] * len(offsets)
+
+        y = np.arange(*ylim_curr)
+        for ix, k in enumerate(offsets):
+            x = k + width_mul * image[k, slice(*ylim_curr)] / np.std(image)
+            col = line_color[ix]
+            ax.plot(x, y, '{}-'.format(col))
+            ax.fill_betweenx(y, k, x, where=(x > k), color=col)
+    
+        self.save_and_show(fig, **updated)
+
+
     def overlap(self, images, **kwargs):
         """ Plot several images on one canvas using matplotlib: render the first one in greyscale
         and the rest ones in 'rgb' channels, one channel for each image.
