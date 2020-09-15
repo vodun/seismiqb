@@ -12,7 +12,11 @@ from numba import njit, prange
 import cv2
 from scipy.ndimage.morphology import binary_fill_holes, binary_erosion
 from scipy.ndimage import find_objects
+from scipy.spatial import Delaunay
 from skimage.measure import label
+
+import plotly
+import plotly.figure_factory as ff
 
 from .utils import round_to_array, groupby_mean, groupby_min, groupby_max, HorizonSampler, filter_simplices
 from .plotters import plot_image
@@ -1573,11 +1577,33 @@ class Horizon:
 
     def show_3d(self, n=100, threshold=100., z_ratio=1., show_axes=True,
                 width=1200, height=1200, margin=100, savepath=None, **kwargs):
-        """ Amazing plot with Plotly. """
-        import plotly
-        import plotly.figure_factory as ff
-        from scipy.spatial import Delaunay
+        """ Interactive 3D plot. Roughly, does the following:
+            - select `n` points to represent the horizon surface
+            - triangulate those points
+            - remove some of the triangles on conditions
+            - use Plotly to draw the tri-surface
 
+        Parameters
+        ----------
+        n : int
+            Number of points to use to create horizon surface.
+            The more, the better the image is and the slower it is displayed.
+        threshold : number
+            Threshold to remove triangles with bigger height differences in vertices.
+        z_ratio : number
+            Aspect ratio between height axis and spatial ones.
+        show_axes : bool
+            Whether to show axes and their labels.
+        width, height : number
+            Size of the image.
+        margin : number
+            Added margin from below and above along height axis.
+        savepath : str
+            Path to save interactive html to.
+        kwargs : dict
+            Other arguments of plot creation.
+        """
+        # Take most representative points of a horizon
         weights_matrix = self.full_matrix
         grad_i = np.diff(weights_matrix, axis=0, prepend=0)
         grad_x = np.diff(weights_matrix, axis=1, prepend=0)
@@ -1589,24 +1615,26 @@ class Horizon:
         probs[np.isnan(probs)] = np.nanmax(probs)
         indices = np.random.choice(len(probs), size=n, p=probs / probs.sum())
 
-
+        # Convert to meshgrid
         ilines = self.points[:, 0][indices]
         xlines = self.points[:, 1][indices]
         ilines, xlines = np.meshgrid(ilines, xlines)
         ilines = ilines.flatten()
         xlines = xlines.flatten()
 
+        # Remove from grid points with no horizon in it
         heights = self.full_matrix[ilines, xlines]
         mask = (heights != self.FILL_VALUE)
-
         x = ilines[mask]
         y = xlines[mask]
         z = heights[mask]
 
+        # Triangulate points and remove some of the triangles
         tri = Delaunay(np.vstack([x, y]).T)
         simplices = filter_simplices(simplices=tri.simplices, points=tri.points,
                                      matrix=self.full_matrix, threshold=threshold)
 
+        # Arguments of graph creation
         kwargs = {
             'title': f'Horizon `{self.name}` on `{self.cube_name}`',
             'colormap': plotly.colors.sequential.Viridis[::-1][:4],
@@ -1620,6 +1648,7 @@ class Horizon:
 
         fig = ff.create_trisurf(x=x, y=y, z=z, simplices=simplices, **kwargs)
 
+        # Update scene with title, labels and axes
         fig.update_layout(
             {
                 'scene': {

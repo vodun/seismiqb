@@ -581,21 +581,19 @@ def nb_mode(array, mask):
 @njit
 def filter_simplices(simplices, points, matrix, threshold=5.):
     """ Remove simplices outside of matrix. """
+    #pylint: disable=consider-using-enumerate
     mask = np.ones(len(simplices), dtype=np.int32)
 
     for i in range(len(simplices)):
         tri = points[simplices[i]].astype(np.int32)
 
         middle_i, middle_x = np.mean(tri[:, 0]), np.mean(tri[:, 1])
-        height_0 = matrix[tri[0, 0], tri[0, 1]]
-        height_1 = matrix[tri[1, 0], tri[1, 1]]
-        height_2 = matrix[tri[2, 0], tri[2, 1]]
-        heights = np.array([height_0, height_1, height_2])
+        heights = np.array([matrix[tri[0, 0], tri[0, 1]],
+                            matrix[tri[1, 0], tri[1, 1]],
+                            matrix[tri[2, 0], tri[2, 1]]])
 
         if matrix[int(middle_i), int(middle_x)] < 0 or np.std(heights) > threshold:
             mask[i] = 0
-
-
 
     return simplices[mask == 1]
 
