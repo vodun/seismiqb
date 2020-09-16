@@ -1,4 +1,4 @@
-# Notebooks for HorizonDetection
+# Notebooks
 
 Multiple approaches to horizon detection (each in its own directory):
 

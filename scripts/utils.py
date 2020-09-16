@@ -1,3 +1,4 @@
+""" Helper functions for scripts: mainly, parsing supplied CLI and JSON configurations. """
 import os
 import argparse
 import json
@@ -6,9 +7,21 @@ import numpy as np
 import pandas as pd
 
 
+
+def str2bool(string):
+    """ Convert string or booleans to True/False. """
+    if isinstance(string, bool):
+        return string
+    if string.lower() in ('yes', 'true', 't', 'y', '1'):
+        return True
+    if string.lower() in ('no', 'false', 'f', 'n', '0'):
+        return False
+    raise argparse.ArgumentTypeError('Boolean value expected.')
+
+
 def make_config(description, args, filename, show=True):
     """ Assemble script configuration from command line arguments, JSON file and inputs.
-    
+
     Parameters
     ----------
     description : str
@@ -21,7 +34,8 @@ def make_config(description, args, filename, show=True):
         Whether to print the resulting config.
     """
     # Parse the command line arguments and create convenient help (called by -h)
-    parser = argparse.ArgumentParser(description=description, formatter_class=argparse.RawTextHelpFormatter)
+    parser = argparse.ArgumentParser(description=description,
+                                     formatter_class=argparse.RawTextHelpFormatter)
     for argname, desc, dtype, default in args:
         if default is None:
             nargs = '*' if isinstance(dtype, list) else '?'
@@ -30,8 +44,9 @@ def make_config(description, args, filename, show=True):
                                 default=default, help=desc)
         else:
             nargs = '*' if isinstance(default, list) else '?'
-            parser.add_argument(f'--{argname}', metavar=argname, nargs=nargs,
-                                default=default, type=dtype, help=desc)
+            dtype = dtype[0] if isinstance(dtype, list) else dtype
+            parser.add_argument(f'--{argname}', metavar=argname, nargs=nargs, type=dtype,
+                                default=default, help=desc)
 
     config_cl = parser.parse_args()
     config = {key.replace('_', '-') : value for key, value in vars(config_cl).items()}
@@ -43,7 +58,7 @@ def make_config(description, args, filename, show=True):
             config_json = json.load(file)
         config = {**config_json, **config}
 
-    # Ask user to input unfilled required arguments 
+    # Ask user to input unfilled required arguments
     for argname, desc, dtype, default in args:
         if argname not in config or (default is None and config[argname] == default):
             config[argname] = input(f'Enter {dtype} value for {argname} ({desc}):')

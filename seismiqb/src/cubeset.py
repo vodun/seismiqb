@@ -4,7 +4,7 @@ from glob import glob
 
 import numpy as np
 
-from ..batchflow import Dataset, Sampler, DatasetIndex, Pipeline
+from ..batchflow import FilesIndex, DatasetIndex, Dataset, Sampler, Pipeline
 from ..batchflow import NumpySampler, ConstantSampler
 
 from .geometry import SeismicGeometry
@@ -41,18 +41,32 @@ class SeismicCubeset(Dataset):
     #pylint: disable=too-many-public-methods
     def __init__(self, index, batch_class=SeismicCropBatch, preloaded=None, *args, **kwargs):
         """ Initialize additional attributes. """
+        if not isinstance(index, FilesIndex):
+            index = [index] if isinstance(index, str) else index
+            index = FilesIndex(path=index, no_ext=True)
         super().__init__(index, batch_class=batch_class, preloaded=preloaded, *args, **kwargs)
         self.crop_index, self.crop_points = None, None
 
         self.geometries = IndexedDict({ix: SeismicGeometry(self.index.get_fullpath(ix), process=False)
                                        for ix in self.indices})
-        self.labels = IndexedDict({ix: dict() for ix in self.indices})
+        self.labels = IndexedDict({ix: [] for ix in self.indices})
         self.samplers = IndexedDict({ix: None for ix in self.indices})
         self._sampler = None
         self._p, self._bins = None, None
 
         self.grid_gen, self.grid_info, self.grid_iters = None, None, None
         self.shapes_gen, self.orders_gen = None, None
+
+
+    @classmethod
+    def from_horizon(cls, horizon):
+        """ Create dataset from an instance of Horizon. """
+        cube_path = horizon.geometry.path
+        dataset = SeismicCubeset(cube_path)
+        dataset.geometries[0] = horizon.geometry
+        dataset.labels[0] = [horizon]
+        return dataset
+
 
     def __str__(self):
         msg = f'Seismic Cubeset with {len(self)} cube{"s" if len(self) > 1 else ""}:\n'
@@ -328,7 +342,7 @@ class SeismicCubeset(Dataset):
         unsalted = np.array([batch.unsalt(item) for item in batch.indices])
         background = np.zeros_like(self.geometries[idx].zero_traces)
 
-        for slice_ in np.array(batch.slices)[unsalted == self.indices[idx]]:
+        for slice_ in np.array(batch.locations)[unsalted == self.indices[idx]]:
             idx_i, idx_x, _ = slice_
             background[idx_i, idx_x] += 1
 
@@ -371,7 +385,8 @@ class SeismicCubeset(Dataset):
         self._p, self._bins = p, bins # stored for later sampler creation
 
 
-    def make_grid(self, cube_name, crop_shape, ilines_range, xlines_range, h_range, strides=None, batch_size=16):
+    def make_grid(self, cube_name, crop_shape, ilines=None, xlines=None, heights=None,
+                  overlap=None, overlap_factor=None, batch_size=16, filtering_matrix=None, filter_threshold=0):
         """ Create regular grid of points in cube.
         This method is usually used with `assemble_predict` action of SeismicCropBatch.
 
@@ -379,31 +394,62 @@ class SeismicCubeset(Dataset):
         ----------
         cube_name : str
             Reference to cube. Should be valid key for `geometries` attribute.
-        crop_shape : array-like
+        crop_shape : sequence
             Shape of model inputs.
-        ilines_range : array-like of two elements
+        ilines : sequence of two elements
             Location of desired prediction, iline-wise.
-        xlines_range : array-like of two elements
+            If None, whole cube ranges will be used.
+        xlines : sequence of two elements
             Location of desired prediction, xline-wise.
-        h_range : array-like of two elements
+            If None, whole cube ranges will be used.
+        heights : sequence of two elements
             Location of desired prediction, depth-wise.
-        strides : array-like
+            If None, whole cube ranges will be used.
+        overlap : float or sequence
             Distance between grid points.
+        overlap_factor : float or sequence
+            Overlapping ratio of successive crops.
+            Can be seen as `how many crops would cross every through point`.
+            If both overlap and overlap_factor are provided, overlap_factor will be used.
         batch_size : int
             Amount of returned points per generator call.
+        filtering_matrix : ndarray
+            Binary matrix of (ilines_len, xlines_len) shape with ones corresponding
+            to areas that can be skipped in the grid.
+            E.g., a matrix with zeros at places where a horizon is present and ones everywhere else.
+            If None, geometry.zero_traces matrix will be used.
+        filter_threshold : int or float in [0, 1]
+            Exclusive lower bound for non-gap number of points (with 0's in the filtering_matrix)
+            in a crop in the grid. Default value is 0.
+            If float, proportion from the total number of traces in a crop will be computed.
         """
-        geom = self.geometries[cube_name]
-        strides = strides or crop_shape
+        geometry = self.geometries[cube_name]
+        overlap = overlap or crop_shape
+        if isinstance(overlap_factor, (int, float)):
+            overlap_factor = [overlap_factor] * 3
+        if overlap_factor:
+            overlap = [max(1, int(item // factor)) for item, factor in zip(crop_shape, overlap_factor)]
+
+        if 0 < filter_threshold < 1:
+            filter_threshold = int(filter_threshold * np.prod(crop_shape[:2]))
+
+        filtering_matrix = geometry.zero_traces if filtering_matrix is None else filtering_matrix
+        if (filtering_matrix.shape != geometry.cube_shape[:2]).all():
+            raise ValueError('Filtering_matrix shape must be equal to (ilines_len, xlines_len)')
+
+        ilines = (0, geometry.ilines_len - 1) if ilines is None else ilines
+        xlines = (0, geometry.xlines_len - 1) if xlines is None else xlines
+        heights = (0, geometry.depth - 1) if heights is None else heights
 
         # Assert ranges are valid
-        if ilines_range[0] < 0 or \
-           xlines_range[0] < 0 or \
-           h_range[0] < 0:
+        if ilines[0] < 0 or \
+           xlines[0] < 0 or \
+           heights[0] < 0:
             raise ValueError('Ranges must contain in the cube.')
 
-        if ilines_range[1] >= geom.ilines_len or \
-           xlines_range[1] >= geom.xlines_len or \
-           h_range[1] >= geom.depth:
+        if ilines[1] >= geometry.ilines_len or \
+           xlines[1] >= geometry.xlines_len or \
+           heights[1] >= geometry.depth:
             raise ValueError('Ranges must contain in the cube.')
 
         # Make separate grids for every axis
@@ -414,33 +460,38 @@ class SeismicCubeset(Dataset):
                 grid_ += [axis_range[1] - crop_shape]
             return sorted(grid_)
 
-        ilines = _make_axis_grid(ilines_range, strides[0], geom.ilines_len, crop_shape[0])
-        xlines = _make_axis_grid(xlines_range, strides[1], geom.xlines_len, crop_shape[1])
-        hs = _make_axis_grid(h_range, strides[2], geom.depth, crop_shape[2])
+        ilines_grid = _make_axis_grid(ilines, overlap[0], geometry.ilines_len, crop_shape[0])
+        xlines_grid = _make_axis_grid(xlines, overlap[1], geometry.xlines_len, crop_shape[1])
+        heights_grid = _make_axis_grid(heights, overlap[2], geometry.depth, crop_shape[2])
 
         # Every point in grid contains reference to cube
         # in order to be valid input for `crop` action of SeismicCropBatch
         grid = []
-        for il in ilines:
-            for xl in xlines:
-                for h in hs:
-                    point = [cube_name, il, xl, h]
-                    grid.append(point)
+        for il in ilines_grid:
+            for xl in xlines_grid:
+                if np.prod(crop_shape[:2]) - np.sum(filtering_matrix[il: il + crop_shape[0],
+                                                                     xl: xl + crop_shape[1]]) > filter_threshold:
+                    for h in heights_grid:
+                        point = [cube_name, il, xl, h]
+                        grid.append(point)
+
+        shifts = np.array([ilines[0], xlines[0], heights[0]])
+
         grid = np.array(grid, dtype=object)
 
         # Creating and storing all the necessary things
-        grid_gen = (grid[i:i+batch_size]
-                    for i in range(0, len(grid), batch_size))
+        # Check if grid is not empty
+        if len(grid) > 0:
+            grid_gen = (grid[i:i+batch_size]
+                        for i in range(0, len(grid), batch_size))
+            grid_array = grid[:, 1:].astype(int) - shifts
+        else:
+            grid_gen = iter(())
+            grid_array = []
 
-        offsets = np.array([min(grid[:, 1]),
-                            min(grid[:, 2]),
-                            min(grid[:, 3])])
-
-        predict_shape = (ilines_range[1] - ilines_range[0],
-                         xlines_range[1] - xlines_range[0],
-                         h_range[1] - h_range[0])
-
-        grid_array = grid[:, 1:].astype(int) - offsets
+        predict_shape = (ilines[1] - ilines[0],
+                         xlines[1] - xlines[0],
+                         heights[1] - heights[0])
 
         self.grid_gen = lambda: next(grid_gen)
         self.grid_iters = - (-len(grid) // batch_size)
@@ -449,8 +500,9 @@ class SeismicCubeset(Dataset):
             'predict_shape': predict_shape,
             'crop_shape': crop_shape,
             'cube_name': cube_name,
-            'geom': geom,
-            'range': [ilines_range, xlines_range, h_range]
+            'geometry': geometry,
+            'range': [ilines, xlines, heights],
+            'shifts': shifts
         }
 
 
@@ -515,17 +567,19 @@ class SeismicCubeset(Dataset):
                                                                 printer=printer, hist=hist, plot=plot)
 
 
-    def show_slide(self, idx=0, n_line=0, axis='iline', mode='overlap', backend='matplotlib', **kwargs):
+    def show_slide(self, loc, idx=0, axis='iline', zoom_slice=None, mode='overlap', backend='matplotlib', **kwargs):
         """ Show full slide of the given cube on the given line.
 
         Parameters
         ----------
+        loc : int
+            Number of slide to load.
+        axis : int
+            Number of axis to load slide along.
+        zoom_slice : tuple
+            Tuple of slices to apply directly to 2d images.
         idx : str, int
             Number of cube in the index to use.
-        axis : str
-            Axis to cut along. Can be either `iline` or `xline`.
-        n_line : int
-            Number of line to show.
         mode : str
             Way of showing results. Can be either `overlap` or `separate`.
         backend : str
@@ -534,43 +588,64 @@ class SeismicCubeset(Dataset):
         """
         components = ('images', 'masks') if list(self.labels.values())[0] else ('images',)
         cube_name = self.indices[idx]
-        geom = self.geometries[cube_name]
-        crop_shape = np.array(geom.cube_shape)
+        geometry = self.geometries[cube_name]
+        crop_shape = np.array(geometry.cube_shape)
 
-        axis = geom.parse_axis(axis)
+        axis = geometry.parse_axis(axis)
         point = np.array([[cube_name, 0, 0, 0]], dtype=object)
-        point[0, axis + 1] = n_line
+        point[0, axis + 1] = loc
         crop_shape[axis] = 1
 
         pipeline = (Pipeline()
                     .crop(points=point, shape=crop_shape)
                     .load_cubes(dst='images')
-                    .scale(mode='normalize', src='images')
-                    .rotate_axes(src='images'))
+                    .scale(mode='q', src='images'))
 
         if 'masks' in components:
-            horizons = kwargs.pop('horizons', -1)
-            width = kwargs.pop('width', 4)
+            indices = kwargs.pop('indices', -1)
+            width = kwargs.pop('width', 5)
             labels_pipeline = (Pipeline()
-                               .create_masks(dst='masks', width=width, horizons=horizons)
-                               .rotate_axes(src='masks'))
+                               .create_masks(dst='masks', width=width, indices=indices))
 
             pipeline = pipeline + labels_pipeline
 
         batch = (pipeline << self).next_batch(len(self), n_epochs=None)
         imgs = [np.squeeze(getattr(batch, comp)) for comp in components]
+        xticks = list(range(imgs[0].shape[0]))
+        yticks = list(range(imgs[0].shape[1]))
 
-        names = ['iline', 'xline', 'slice']
-        # configure defaults
+        if zoom_slice:
+            imgs = [img[zoom_slice] for img in imgs]
+            xticks = xticks[zoom_slice[0]]
+            yticks = yticks[zoom_slice[1]]
+
+        # Plotting defaults
+        if axis in [0, 1]:
+            header = geometry.index_headers[axis]
+            xlabel = geometry.index_headers[1 - axis]
+            ylabel = 'depth'
+            total = geometry.lens[axis]
+        if axis == 2:
+            header = 'Depth'
+            xlabel = geometry.index_headers[0]
+            ylabel = geometry.index_headers[1]
+            total = geometry.depth
+
         kwargs = {
-            'title': (names[axis] + ' {} out of {} on {}'.format(n_line, geom.cube_shape[axis], cube_name)),
-            'order_axes': (1, 0) if axis == 0 else (0, 1),
-            'xlabel': 'xlines' if axis in (0, 2) else 'ilines',
-            'ylabel': 'height' if axis in (0, 1) else 'xlines',
+            'mode': mode,
+            'backend': backend,
+            'title': (f'Data slice on `{geometry.name}`' +
+                      f'\n {header} {loc} out of {total}'),
+            'xlabel': xlabel,
+            'ylabel': ylabel,
+            'xticks': xticks[::max(1, round(len(xticks)//8/100))*100],
+            'yticks': yticks[::max(1, round(len(yticks)//10/100))*100][::-1],
+            'y': 1.02,
             **kwargs
         }
 
-        plot_image(imgs, backend=backend, mode=mode, **kwargs)
+        plot_image(imgs, **kwargs)
+        return batch
 
 
     def make_extension_grid(self, cube_name, crop_shape, labels_src='predicted_labels',
@@ -583,7 +658,7 @@ class SeismicCubeset(Dataset):
         ----------
         cube_name : str
             Reference to the cube. Should be a valid key for the `labels_src` attribute.
-        crop_shape : array-like
+        crop_shape : sequence
             The desired shape of the crops.
             Note that final shapes are made in both xline and iline directions. So if
             crop_shape is (1, 64, 64), crops of both (1, 64, 64) and (64, 1, 64) shape
@@ -653,4 +728,60 @@ class SeismicCubeset(Dataset):
         self.orders_gen = lambda: next(orders_gen)
         self.grid_iters = - (-len(crops) // batch_size)
         self.grid_info = {'cube_name': cube_name,
-                          'geom': horizon.geometry}
+                          'geometry': horizon.geometry}
+
+
+    def assemble_crops(self, crops, grid_info='grid_info', order=None, fill_value=0):
+        """ Glue crops together in accordance to the grid.
+
+        Note
+        ----
+        In order to use this action you must first call `make_grid` method of SeismicCubeset.
+
+        Parameters
+        ----------
+        crops : sequence
+            Sequence of crops.
+        grid_info : dict or str
+            Dictionary with information about grid. Should be created by `make_grid` method.
+        order : tuple of int
+            Axes-param for `transpose`-operation, applied to a mask before fetching point clouds.
+            Default value of (2, 0, 1) is applicable to standart pipeline with one `rotate_axes`
+            applied to images-tensor.
+        fill_value : float
+            Fill_value for background array if `len(crops) == 0`.
+
+        Returns
+        -------
+        np.ndarray
+            Assembled array of shape `grid_info['predict_shape']`.
+        """
+        if isinstance(grid_info, str):
+            if not hasattr(self, grid_info):
+                raise ValueError('Pass grid_info dictionary or call `make_grid` method to create grid_info.')
+            grid_info = getattr(self, grid_info)
+
+        # Do nothing if number of crops differ from number of points in the grid.
+        if len(crops) != len(grid_info['grid_array']):
+            raise ValueError('Length of crops must be equal to number of crops in a grid')
+        order = order or (2, 0, 1)
+        crops = np.array(crops)
+        if len(crops) != 0:
+            fill_value = np.min(crops)
+
+        grid_array = grid_info['grid_array']
+        crop_shape = grid_info['crop_shape']
+        background = np.full(grid_info['predict_shape'], fill_value)
+
+        for i in range(len(grid_array)):
+            il, xl, h = grid_array[i, :]
+            il_end = min(background.shape[0], il+crop_shape[0])
+            xl_end = min(background.shape[1], xl+crop_shape[1])
+            h_end = min(background.shape[2], h+crop_shape[2])
+
+            crop = np.transpose(crops[i], order)
+            crop = crop[:(il_end-il), :(xl_end-xl), :(h_end-h)]
+            previous = background[il:il_end, xl:xl_end, h:h_end]
+            background[il:il_end, xl:xl_end, h:h_end] = np.maximum(crop, previous)
+
+        return background

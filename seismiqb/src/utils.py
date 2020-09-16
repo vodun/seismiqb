@@ -11,6 +11,14 @@ import pandas as pd
 import segyio
 
 from numba import njit, prange
+from ..batchflow import Sampler
+
+
+
+def file_print(msg, path):
+    """ Print to file. """
+    with open(path, 'w') as file:
+        print(msg, file=file)
 
 
 
@@ -21,7 +29,7 @@ class SafeIO:
     """
     def __init__(self, path, opener=open, log_file=None, **kwargs):
         self.path = path
-        self.log_file = log_file # or '/notebooks/log_safeio.txt'
+        self.log_file = log_file
         self.handler = opener(path, **kwargs)
 
         if self.log_file:
@@ -41,9 +49,6 @@ class SafeIO:
         return key in self.handler
 
     def __del__(self):
-        if self.log_file:
-            self._info(self.log_file, f'Tried to close {self.path}')
-
         self.handler.close()
 
         if self.log_file:
@@ -283,30 +288,6 @@ def convert_point_cloud(path, path_save, names=None, order=None, transform=None)
     if transform:
         data = data.apply(transform)
     data.to_csv(path_save, sep=' ', index=False, header=False)
-
-
-
-@njit
-def aggregate(array_crops, array_grid, crop_shape, predict_shape, order):
-    """ Jit-accelerated function to glue together crops according to grid.
-    At positions, where different crops overlap, only the maximum value is saved.
-    This function is usually called inside SeismicCropBatch's method `assemble_crops`.
-    """
-    #pylint: disable=assignment-from-no-return
-    total = len(array_grid)
-    background = np.full(predict_shape, np.min(array_crops))
-
-    for i in range(total):
-        il, xl, h = array_grid[i, :]
-        il_end = min(background.shape[0], il+crop_shape[0])
-        xl_end = min(background.shape[1], xl+crop_shape[1])
-        h_end = min(background.shape[2], h+crop_shape[2])
-
-        crop = np.transpose(array_crops[i], order)
-        crop = crop[:(il_end-il), :(xl_end-xl), :(h_end-h)]
-        previous = background[il:il_end, xl:xl_end, h:h_end]
-        background[il:il_end, xl:xl_end, h:h_end] = np.maximum(crop, previous)
-    return background
 
 
 def gen_crop_coordinates(point, horizon_matrix, zero_traces,
@@ -595,3 +576,48 @@ def nb_mode(array, mask):
 
                 temp[il, xl] = element
     return temp
+
+
+class HorizonSampler(Sampler):
+    """ Compact version of histogram-based sampler for 3D points structure. """
+    def __init__(self, histogram, seed=None, **kwargs):
+        super().__init__(histogram, seed, **kwargs)
+        # Bins and their probabilities: keep only non-zero ones
+        bins = histogram[0]
+        probs = (bins / np.sum(bins)).reshape(-1)
+        self.nonzero_probs_idx = np.asarray(probs != 0.0).nonzero()[0]
+        self.nonzero_probs = probs[self.nonzero_probs_idx]
+
+        # Edges of bins: keep lengths and diffs between successive edges
+        self.edges = histogram[1]
+        self.lens_edges = np.array([len(edge) - 1 for edge in self.edges])
+        self.divisors = [np.array(self.lens_edges[i+1:]).astype(np.int64)
+                         for i, _ in enumerate(self.edges)]
+        self.shifts_edges = [np.diff(edge)[0] for edge in self.edges]
+
+        # Uniform sampler
+        self.state = np.random.RandomState(seed=seed)
+        self.state_sampler = self.state.uniform
+
+    def sample(self, size):
+        """ Generate random sample from histogram distribution. """
+        # Choose bin indices
+        indices = np.random.choice(self.nonzero_probs_idx, p=self.nonzero_probs, size=size)
+
+        # Convert bin indices to its starting coordinates
+        low = generate_points(self.edges, divisors=self.divisors, lengths=self.lens_edges, indices=indices)
+        high = low + self.shifts_edges
+        return self.state_sampler(low=low, high=high)
+
+@njit
+def generate_points(edges, divisors, lengths, indices):
+    """ Accelerate sampling method of `HorizonSampler`. """
+    low = np.zeros((len(indices), len(lengths)))
+
+    for i, idx in enumerate(indices):
+        for j, (edge, divisors_, length) in enumerate(zip(edges, divisors, lengths)):
+            idx_copy = idx
+            for divisor in divisors_:
+                idx_copy //= divisor
+            low[i, j] = edge[idx_copy % length]
+    return low

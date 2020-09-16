@@ -59,9 +59,9 @@ class Extractor(BaseController):
 
 
     def inference_1(self, dataset, heights_range=None, orientation='i', overlap_factor=2,
-                    filter=True,
-                    thresholds=None, coverage_threshold=0.5, std_threshold=5., metric_threshold=0.5,
-                    chunk_size=100, chunk_overlap=0.2, minsize=10000, **kwargs):
+                    filter=True, thresholds=None, coverage_threshold=0.5, std_threshold=5.,
+                    metric_threshold=0.5, chunk_size=100, chunk_overlap=0.2, minsize=10000,
+                    filtering_matrix=None, filter_threshold=0, **kwargs):
         """ Split area for inference into `big` chunks, inference on each of them, merge results. """
         #pylint: disable=redefined-builtin, too-many-branches
         _ = kwargs
@@ -69,7 +69,7 @@ class Extractor(BaseController):
 
         geometry = dataset.geometries[0]
         spatial_ranges, heights_range = self.make_inference_ranges(dataset, heights_range)
-        config, crop_shape_grid, strides_grid = self.make_inference_config(orientation, overlap_factor)
+        config, crop_shape_grid = self.make_inference_config(orientation)
 
         # Actual inference
         axis = np.argmin(crop_shape_grid[:2])
@@ -83,14 +83,19 @@ class Extractor(BaseController):
             dataset.make_grid(dataset.indices[0], crop_shape_grid,
                               *current_spatial_ranges, heights_range,
                               batch_size=self.batch_size,
-                              strides=strides_grid)
-            inference_pipeline = (self.get_inference_template() << config) << dataset
-            for _ in range(dataset.grid_iters):
-                batch = inference_pipeline.next_batch(D('size'))
+                              overlap_factor=overlap_factor,
+                              filtering_matrix=filtering_matrix,
+                              filter_threshold=filter_threshold)
 
+            inference_pipeline = (self.get_inference_template() << config) << dataset
+            inference_pipeline.run(D('size'), n_iters=dataset.grid_iters, bar=self.bar,
+                                   bar_desc=f'Inference on {geometry.name} | {orientation}')
+
+            assembled_pred = dataset.assemble_crops(inference_pipeline.v('predicted_masks'),
+                                                    order=config.get('order'))
             # Specific to Extractor:
             for sign in [-1, +1]:
-                mask = sign * batch.assembled_pred
+                mask = sign * assembled_pred
 
                 for i, threshold in enumerate(thresholds):
                     chunk_horizons = Horizon.from_mask(mask, dataset.grid_info,

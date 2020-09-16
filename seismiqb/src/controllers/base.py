@@ -5,12 +5,14 @@
     - evaluating predictions
     - and more
 """
-#pylint: disable=import-error, no-name-in-module, wrong-import-position
+#pylint: disable=import-error, no-name-in-module, wrong-import-position, protected-access
 import os
+import gc
 import logging
 import random
-from glob import glob
 from copy import copy
+from glob import glob
+import psutil
 
 import numpy as np
 import torch
@@ -102,8 +104,9 @@ class BaseController:
     def log(self, msg):
         """ Log supplied message. """
         if self.logger is not None:
-            self.logger(f'{self.__class__.__name__} ::: {msg}')
-
+            process = psutil.Process(os.getpid())
+            uss = process.memory_full_info().uss / (1024 ** 3)
+            self.logger(f'{self.__class__.__name__} ::: {uss:2.4} ::: {msg}')
 
     # Dataset creation: geometries, labels, grids, samplers
     def make_dataset(self, cube_paths, horizon_paths=None):
@@ -144,7 +147,6 @@ class BaseController:
         self.log(f'Created dataset ::: {msg}')
         return dataset
 
-
     def make_dataset_from_horizon(self, horizon):
         """ Create an instance of :class:`.SeismicCubeset` from a given horizon.
 
@@ -157,7 +159,7 @@ class BaseController:
 
         dsi = FilesIndex(path=[cube_path], no_ext=True)
         dataset = SeismicCubeset(dsi)
-        dataset.load_geometries()
+        dataset.geometries[dataset.indices[0]] = horizon.geometry
         dataset.labels[dataset.indices[0]] = [horizon]
 
         self.log(f'Created dataset from horizon {horizon.name}')
@@ -217,6 +219,10 @@ class BaseController:
         dataset.create_sampler(quality_grid=grid, bins=bins)
         dataset.modify_sampler('train_sampler', finish=True, **kwargs)
         dataset.train_sampler(random.randint(0, 100000))
+        self.log('Created sampler')
+
+        # Cleanup
+        dataset.sampler = None
 
         for i, idx in enumerate(dataset.indices):
             dataset.show_slices(
@@ -232,7 +238,6 @@ class BaseController:
                 cmap='Reds', interpolation='bilinear', show=self.show_plots, figsize=(15, 15),
                 savepath=self.make_save_path(f'slices_n_{idx}.png')
             )
-
 
     # Train model on a created dataset
     def train(self, dataset, model_config=None, device=None, n_iters=300,
@@ -280,27 +285,34 @@ class BaseController:
         model_pipeline = (self.get_train_template(**kwargs) << pipeline_config) << dataset
         batch = model_pipeline.next_batch(D('size'))
         self.log(f'Used batch size is: {self.batch_size}; actual batch size is: {len(batch)}')
+        self.log(f'Cache sizes: {[item.cache_size for item in dataset.geometries.values()]}')
+        self.log(f'Cache lengths: {[item.cache_length for item in dataset.geometries.values()]}')
         self.batch_size = bs
 
-        model_pipeline.run(D('size'), n_iters=n_iters,
+        model_pipeline.run(D('size'), n_iters=n_iters + np.random.randint(100),
                            bar=self.bar,
                            bar_desc=W(V('loss_history')[-1].format('Loss is: {:7.7}')))
         plot_loss(model_pipeline.v('loss_history'), show=self.show_plots,
                   savepath=self.make_save_path('model_loss.png'))
 
         self.model_pipeline = model_pipeline
-
         last_loss = np.mean(model_pipeline.v('loss_history')[-50:])
         self.log(f'Train finished; last loss is {last_loss}')
+        self.log(f'Cache sizes: {[item.cache_size for item in dataset.geometries.values()]}')
+        self.log(f'Cache lengths: {[len(item._cached_load.cache()) for item in dataset.geometries.values()]}')
+
+        # Cleanup
         torch.cuda.empty_cache()
+        self.model_pipeline.reset('variables')
+        batch.images, batch.masks = None, None
+        for item in dataset.geometries.values():
+            item.reset_cache()
         return last_loss
 
     def load_model(self, path=None):
         """ Load pre-trained model from disk. """
         path = path or self.model_path
         raise NotImplementedError('Yet to be implemented!')
-
-
 
     # Inference on a chosen set of data
     def inference(self, dataset, version=1, orientation='i', overlap_factor=2, heights_range=None,
@@ -335,7 +347,7 @@ class BaseController:
             If 'x', then cube is split into crossline-oriented slices.
             If 'ix', then both of previous approaches applied, and results are merged.
         overlap_factor : number
-            Overlapping ratio of successive chunks. Can be seen as `how many chunks would cross every through point`.
+            Overlapping ratio of successive crops. Can be seen as `how many crops would cross every through point`.
         heights_range : None or sequence of two ints
             If None, then heights are inffered: from minimum of heights of all horizons in dataset to the maximum.
             If sequence of two ints, heights to inference on.
@@ -358,11 +370,16 @@ class BaseController:
         else:
             horizons_i = method(dataset, orientation='i', overlap_factor=overlap_factor,
                                 heights_range=heights_range, **kwargs)
+            gc.collect()
+            self.log('Done i-inference')
+
             horizons_x = method(dataset, orientation='x', overlap_factor=overlap_factor,
                                 heights_range=heights_range, **kwargs)
+            gc.collect()
+            self.log('Done x-inference')
+
             horizons = Horizon.merge_list(horizons_i + horizons_x, minsize=1000)
-        self.predictions = horizons
-        self.batch_size = bs
+            gc.collect()
 
         # Log some results
         if horizons:
@@ -372,6 +389,9 @@ class BaseController:
             self.log(f'Len max: {len(horizons[0])}')
         else:
             self.log('Zero horizons were predicted; possible problems..?')
+
+        self.predictions = horizons
+        self.batch_size = bs
         torch.cuda.empty_cache()
 
     def make_inference_ranges(self, dataset, heights_range):
@@ -387,7 +407,7 @@ class BaseController:
                 heights_range = [0, geometry.depth-1]
         return spatial_ranges, heights_range
 
-    def make_inference_config(self, orientation, overlap_factor):
+    def make_inference_config(self, orientation):
         """ Parameters depending on orientation. """
         config = {'model_pipeline': self.model_pipeline}
         if orientation == 'i':
@@ -398,42 +418,58 @@ class BaseController:
             crop_shape_grid = np.array(self.crop_shape)[[1, 0, 2]]
             config['side_view'] = 1.0
             config['order'] = (1, 0, 2)
-        strides_grid = [max(1, int(item//overlap_factor))
-                        for item in crop_shape_grid]
-        return config, crop_shape_grid, strides_grid
+        return config, crop_shape_grid
 
 
-    def inference_0(self, dataset, heights_range=None, orientation='i', overlap_factor=2, **kwargs):
+    def inference_0(self, dataset, heights_range=None, orientation='i', overlap_factor=2,
+                    filtering_matrix=None, filter_threshold=0, **kwargs):
         """ Inference on chunks, assemble into massive 3D array, extract horizon surface. """
         _ = kwargs
         geometry = dataset.geometries[0]
         spatial_ranges, heights_range = self.make_inference_ranges(dataset, heights_range)
-        config, crop_shape_grid, strides_grid = self.make_inference_config(orientation, overlap_factor)
+        config, crop_shape_grid = self.make_inference_config(orientation)
 
         # Actual inference
         dataset.make_grid(dataset.indices[0], crop_shape_grid,
                           *spatial_ranges, heights_range,
                           batch_size=self.batch_size,
-                          strides=strides_grid)
+                          overlap_factor=overlap_factor,
+                          filtering_matrix=filtering_matrix,
+                          filter_threshold=filter_threshold)
 
         inference_pipeline = (self.get_inference_template() << config) << dataset
-        for _ in self.make_pbar(range(dataset.grid_iters), desc=f'Inference on {geometry.name} | {orientation}'):
-            batch = inference_pipeline.next_batch(D('size'))
+        inference_pipeline.run(D('size'), n_iters=dataset.grid_iters, bar=self.bar,
+                               bar_desc=f'Inference on {geometry.name} | {orientation}')
+
+        # Assemble crops together in accordance to the created grid
+        assembled_pred = dataset.assemble_crops(inference_pipeline.v('predicted_masks'),
+                                                order=config.get('order'))
+
+        # Log memory usage info and clean up
+        self.log(f'Cache sizes: {[item.cache_size for item in dataset.geometries.values()]}')
+        self.log(f'Cache lengths: {[item.cache_length for item in dataset.geometries.values()]}')
+
+        inference_pipeline.reset('variables')
+        inference_pipeline = None
+        for item in dataset.geometries.values():
+            item.reset_cache()
+        gc.collect()
 
         # Convert to Horizon instances
-        return Horizon.from_mask(batch.assembled_pred, dataset.grid_info, threshold=0.5, minsize=50)
+        return Horizon.from_mask(assembled_pred, dataset.grid_info, threshold=0.5, minsize=50)
 
     def inference_1(self, dataset, heights_range=None, orientation='i', overlap_factor=2,
-                    chunk_size=100, chunk_overlap=0.2, **kwargs):
+                    chunk_size=100, chunk_overlap=0.2, filtering_matrix=None, filter_threshold=0, **kwargs):
         """ Split area for inference into `big` chunks, inference on each of them, merge results. """
         _ = kwargs
         geometry = dataset.geometries[0]
         spatial_ranges, heights_range = self.make_inference_ranges(dataset, heights_range)
-        config, crop_shape_grid, strides_grid = self.make_inference_config(orientation, overlap_factor)
+        config, crop_shape_grid = self.make_inference_config(orientation)
 
         # Actual inference
         axis = np.argmin(crop_shape_grid[:2])
         iterator = range(spatial_ranges[axis][0], spatial_ranges[axis][1], int(chunk_size*(1 - chunk_overlap)))
+        self.log(f'Starting chunk {orientation} inference with {len(iterator)} chunks')
 
         horizons = []
         for chunk in self.make_pbar(iterator, desc=f'Inference on {geometry.name}| {orientation}'):
@@ -443,14 +479,31 @@ class BaseController:
             dataset.make_grid(dataset.indices[0], crop_shape_grid,
                               *current_spatial_ranges, heights_range,
                               batch_size=self.batch_size,
-                              strides=strides_grid)
-            inference_pipeline = (self.get_inference_template() << config) << dataset
-            for _ in range(dataset.grid_iters):
-                batch = inference_pipeline.next_batch(D('size'))
+                              overlap_factor=overlap_factor,
+                              filtering_matrix=filtering_matrix,
+                              filter_threshold=filter_threshold)
 
-            chunk_horizons = Horizon.from_mask(batch.assembled_pred,
-                                               dataset.grid_info, threshold=0.5, minsize=50)
+            inference_pipeline = (self.get_inference_template() << config) << dataset
+            inference_pipeline.run(D('size'), n_iters=dataset.grid_iters)
+
+            # Assemble crops together in accordance to the created grid
+            assembled_pred = dataset.assemble_crops(inference_pipeline.v('predicted_masks'),
+                                                    order=config.get('order'))
+
+            # Extract Horizon instances
+            chunk_horizons = Horizon.from_mask(assembled_pred, dataset.grid_info, threshold=0.5, minsize=50)
             horizons.extend(chunk_horizons)
+
+            # Cleanup
+            inference_pipeline.reset('variables')
+            inference_pipeline = None
+            gc.collect()
+
+        self.log(f'Cache sizes: {[item.cache_size for item in dataset.geometries.values()]}')
+        self.log(f'Cache lengths: {[item.cache_length for item in dataset.geometries.values()]}')
+        for item in dataset.geometries.values():
+            item.reset_cache()
+        gc.collect()
 
         return Horizon.merge_list(horizons, mean_threshold=5.5, adjacency=3, minsize=500)
 
@@ -476,7 +529,7 @@ class BaseController:
 
         Plots
         -----
-        Maps of computed metrics: correlation, Hellinger distance, argmax of cross-correlation.
+        Maps of computed metrics: correlation, local correlation.
         If targets are provided, also l1 differences.
         """
         #pylint: disable=cell-var-from-loop, invalid-name, protected-access
@@ -485,23 +538,24 @@ class BaseController:
             info = {}
             horizon = self.predictions[i]
             horizon._horizon_metrics = None
+            hm = HorizonMetrics((horizon, self.targets))
             prefix = [horizon.geometry.short_name, f'{i}_horizon'] if add_prefix else []
 
             # Basic demo: depth map and properties
             horizon.show(show=self.show_plots,
                          savepath=self.make_save_path(*prefix, name + 'horizon_img.png'))
 
-            # Correlations
             with open(self.make_save_path(*prefix, name + 'self_results.txt'), 'w') as result_txt:
-                corrs = horizon.evaluate(
-                    supports=supports,
-                    printer=lambda msg: print(msg, file=result_txt),
-                    plot=True, show_plot=self.show_plots,
-                    savepath=self.make_save_path(*prefix, name + 'corrs.png')
-                )
+                horizon.evaluate(compute_metric=False, printer=lambda msg: print(msg, file=result_txt))
 
-            hm = HorizonMetrics((horizon, self.targets))
-            # Instantaneous phase
+            # Correlations
+            corrs = hm.evaluate(
+                'support_corrs',
+                supports=supports,
+                plot=True, show_plot=self.show_plots,
+                savepath=self.make_save_path(*prefix, name + 'corrs.png')
+            )
+
             local_corrs = hm.evaluate(
                 'local_corrs',
                 plot=True, show_plot=self.show_plots, kernel_size=9,
@@ -522,8 +576,12 @@ class BaseController:
                     )
                 self.log(f'horizon {i}: wr {info["window_rate"]}, mean {info["mean"]}')
 
+            # Save surface to disk
             if dump:
-                horizon.dump(path=self.make_save_path(*prefix, name + f'{i}_predicted_horizon'))
+                dump_name = name + '_' if name else ''
+                dump_name += f'{i}_' if n > 1 else ''
+                dump_name += horizon.name or 'predicted'
+                horizon.dump(path=self.make_save_path(*prefix, dump_name), add_height=False)
 
             info['corrs'] = np.nanmean(corrs)
             info['local_corrs'] = np.nanmean(local_corrs)
@@ -533,7 +591,6 @@ class BaseController:
                      f'corrs {info["corrs"]:4.4}, local corrs {info["local_corrs"]:4.4}, depth {horizon.h_mean}')
 
         return results
-
 
     # Pipelines
     def load_pipeline(self):
@@ -606,7 +663,7 @@ class BaseController:
         inference_template = (
             Pipeline()
             # Initialize everything
-            .init_variable('result_preds', [])
+            .init_variable('predicted_masks', [])
             .import_model('model', C('model_pipeline'))
 
             # Load data
@@ -620,8 +677,6 @@ class BaseController:
             .predict_model('model',
                            B('images'),
                            fetches='predictions',
-                           save_to=V('result_preds', mode='e'))
-            .assemble_crops(src=V('result_preds'), dst='assembled_pred',
-                            grid_info=D('grid_info'), order=C('order', default=(0, 1, 2)))
+                           save_to=V('predicted_masks', mode='e'))
         )
         return inference_template

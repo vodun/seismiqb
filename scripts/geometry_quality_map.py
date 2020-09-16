@@ -4,7 +4,7 @@ import sys
 import warnings
 warnings.filterwarnings("ignore")
 
-from utils import make_config, save_point_cloud, safe_mkdir
+from utils import str2bool, make_config, save_point_cloud, safe_mkdir
 
 sys.path.append('..')
 from seismiqb import SeismicGeometry, plot_image
@@ -23,8 +23,8 @@ ARGS = [
     ('cube-path', 'path to the seismic cube in HDF5 format', str, None),
     ('savedir', 'path to save files to', str, '_placeholder_'),
     ('metrics', 'metrics to compute for quality map creation', str, ['support_hellinger']),
-    ('add-prefix', 'whether to prepend cube name to the saved file names', bool, True),
-    ('save-txt', 'whether to save point cloud quality map to disk', bool, False),
+    ('add-prefix', 'whether to prepend cube name to the saved file names', str2bool, True),
+    ('save-txt', 'whether to save point cloud of quality map to disk', str2bool, False),
 ]
 
 
