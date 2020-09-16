@@ -381,7 +381,7 @@ class Horizon:
         self._h_min, self._h_max = None, None
         self._h_mean, self._h_std = None, None
         self._horizon_metrics = None
-        self.support_corrs = None
+        self.support_corrs_matrix = None
 
         # Attributes from geometry
         self.geometry = geometry
@@ -517,7 +517,7 @@ class Horizon:
         self._h_mean, self._h_std = None, None
         self._len = None
         self._horizon_metrics = None
-        self.support_corrs = None
+        self.support_corrs_matrix = None
 
         if storage == 'matrix':
             self._matrix = None
@@ -836,7 +836,7 @@ class Horizon:
 
 
     # Horizon usage: point/mask generation
-    def create_sampler(self, bins=None, quality_grid=None, weights=False, threshold='q0.5', **kwargs):
+    def create_sampler(self, bins=None, quality_grid=None, weights=False, threshold=0, **kwargs):
         """ Create sampler based on horizon location.
 
         Parameters
@@ -864,9 +864,8 @@ class Horizon:
                 weights = self.support_corrs[points[:, 0], points[:, 1]]
             points = points[~np.isnan(weights)]
             weights = weights[~np.isnan(weights)]
-            # q = float(q[1:]) if isinstance(q, str) else q
-            points = points[weights > 0]
-            weights = weights[weights > 0]
+            points = points[weights > threshold]
+            weights = weights[weights > threshold]
         self.sampler = HorizonSampler(np.histogramdd(points/self.cube_shape, bins=bins, weights=weights))
 
 
@@ -1153,6 +1152,16 @@ class Horizon:
         grad[self.matrix == self.FILL_VALUE] = self.FILL_VALUE
         return grad
 
+    @property
+    def support_corrs(self):
+        if self.support_corrs_matrix is None:
+            self.support_corrs_matrix = self._support_corrs()
+        return self.support_corrs_matrix
+
+
+    def _support_corrs(self, supports=50, **kwargs):
+        return self.horizon_metrics.evaluate('support_corrs', supports=supports, **kwargs)
+
 
     # Evaluate horizon on its own / against other(s)
     def evaluate(self, compute_metric=True, supports=50, plot=True, savepath=None, printer=print, **kwargs):
@@ -1177,10 +1186,9 @@ class Horizon:
         """
         printer(dedent(msg))
         if compute_metric:
-            if self.support_corrs is None:
-                self.support_corrs = self.horizon_metrics.evaluate('support_corrs', supports=supports, agg='nanmean',
-                                                                   plot=plot, savepath=savepath, **kwargs)
-            return self.support_corrs
+            self.support_corrs_matrix = self.horizon_metrics.evaluate('support_corrs', supports=supports, agg='nanmean',
+                                                                      plot=plot, savepath=savepath, **kwargs)
+            return self.support_corrs_matrix
         return None
 
 
