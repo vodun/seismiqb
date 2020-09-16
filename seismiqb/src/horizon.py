@@ -18,7 +18,6 @@ from .utils import round_to_array, groupby_mean, groupby_min, groupby_max, Horiz
 from .plotters import plot_image
 
 
-
 class UnstructuredHorizon:
     """  Contains unstructured horizon.
 
@@ -837,7 +836,7 @@ class Horizon:
 
 
     # Horizon usage: point/mask generation
-    def create_sampler(self, bins=None, quality_grid=None, weights=None, threshold='q0.5', **kwargs):
+    def create_sampler(self, bins=None, quality_grid=None, weights=False, threshold='q0.5', **kwargs):
         """ Create sampler based on horizon location.
 
         Parameters
@@ -847,6 +846,9 @@ class Horizon:
         quality_grid : ndarray or None
             If not None, then must be a matrix with zeroes in locations to keep, ones in locations to remove.
             Applied to `points` before sampler creation.
+        weights : ndarray or boolean
+            Weights matrix with shape (ilines_len, xlines_len) for weighted sampler.
+            If True support correlation metric will be used.
         """
         _ = kwargs
         default_bins = self.cube_shape // np.array([5, 20, 20])
@@ -857,14 +859,15 @@ class Horizon:
             points = _filtering_function(np.copy(self.points), 1 - quality_grid)
         else:
             points = self.points
-        if isinstance(weights, str):
-            weights = self.support_corrs[points[:, 0], points[:, 1]]
+        if weights:
+            if not isinstance(weights, np.ndarray):
+                weights = self.support_corrs[points[:, 0], points[:, 1]]
             points = points[~np.isnan(weights)]
             weights = weights[~np.isnan(weights)]
             # q = float(q[1:]) if isinstance(q, str) else q
             points = points[weights > 0]
             weights = weights[weights > 0]
-        self.sampler = HistoSampler(np.histogramdd(points/self.cube_shape, bins=bins, weights=weights))
+        self.sampler = HorizonSampler(np.histogramdd(points/self.cube_shape, bins=bins, weights=weights))
 
 
     def add_to_mask(self, mask, locations=None, width=3, alpha=1, **kwargs):
