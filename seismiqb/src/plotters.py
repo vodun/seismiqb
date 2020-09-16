@@ -228,26 +228,26 @@ class MatplotlibPlotter:
 
 
     def wiggle(self, image, **kwargs):
-        """ Make wiggle plot of an image.
+        """ Make wiggle plot of an image. If needed overlap the wiggle plot with a curve supplied by an
+        array of heights.
         """
         defaults = {'figsize': (12, 7),
-                    'overlap': False,
+                    'with_curve': False,
                     'line_color': 'k',
                     'label': '',
                     'title': '',
                     'width_multiplier': 2,
-                    'xstep': 5}
+                    'xstep': 5,
+                    'points_marker': 'ro'}
         updated = {**defaults, **kwargs}
-        line_color = updated['line_color']
-        xstep = updated['xstep']
-        width_mul = updated['width_multiplier']
+        line_color, xstep, width_mul, with_curve, points_marker = [updated[key] for key in (
+            'line_color', 'xstep', 'width_mul', 'with_curve', 'points_marker')
+        )]
 
         figure_kwargs = filter_kwargs(updated, ['figsize', 'facecolor', 'dpi'])
 
-        xlim_curr = (0, len(image))
-        ylim_curr = (0, len(image[0]))
-
-        offsets = np.arange(*xlim_curr, xstep)
+        if with_curve:
+            image, heghts = image
 
         # Create figure and axes
         if 'ax' in kwargs:
@@ -255,6 +255,11 @@ class MatplotlibPlotter:
             fig = ax.figure
         else:
             fig, ax = plt.subplots(**figure_kwargs)
+
+        # Creating wiggle-curves and adding height-points if needed
+        xlim_curr = (0, len(image))
+        ylim_curr = (0, len(image[0]))
+        offsets = np.arange(*xlim_curr, xstep)
 
         if isinstance(line_color, str):
             line_color = [line_color] * len(offsets)
@@ -265,7 +270,10 @@ class MatplotlibPlotter:
             col = line_color[ix]
             ax.plot(x, y, '{}-'.format(col))
             ax.fill_betweenx(y, k, x, where=(x > k), color=col)
-    
+
+            if with_curve:
+                ax.plot(x[heights[ix]], heights[ix], points_marker)
+
         self.save_and_show(fig, **updated)
 
 
