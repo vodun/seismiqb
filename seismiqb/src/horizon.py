@@ -857,7 +857,6 @@ class Horizon:
             # q = float(q[1:]) if isinstance(q, str) else q
             points = points[weights > 0]
             weights = weights[weights > 0]
-            # weights = (weights - np.min(weights)) / (np.max(weights) - np.min(weights))
         self.sampler = HistoSampler(np.histogramdd(points/self.cube_shape, bins=bins, weights=weights))
 
 
