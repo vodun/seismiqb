@@ -274,6 +274,7 @@ class BaseController:
         self.log('Train started')
         pipeline_config = {
             'model_config': {**model_config, 'device': device},
+            'crop_shape': self.crop_shape,
             'adaptive_slices': use_grid, 'grid_src': grid_src,
             'side_view': side_view,
             'width': width,
@@ -594,27 +595,35 @@ class BaseController:
         return results
 
     # Pipelines
-    def load_pipeline(self):
+    def load_pipeline(self, dynamic_factor=1, dynamic_low=None, dynamic_high=None, **kwargs):
         """ Define data loading pipeline.
 
         Following parameters are fetched from pipeline config: `adaptive_slices`, 'grid_src' and `rebatch_threshold`.
         """
+        _ = kwargs
+        self.log(f'Generating data with dynamic factor of {dynamic_factor}')
         return (
             Pipeline()
+            .init_variable('shape', None)
+            .call(generate_shape, shape=C('crop_shape'),
+                  dynamic_factor=dynamic_factor, dynamic_low=dynamic_low, dynamic_high=dynamic_high,
+                  save_to=V('shape'))
             .crop(points=D('train_sampler')(self.batch_size),
-                  shape=self.crop_shape,
+                  shape=V('shape'),
                   side_view=C('side_view', default=False),
                   adaptive_slices=C('adaptive_slices'),
                   grid_src=C('grid_src', default='quality_grid'))
+
             .create_masks(dst='masks', width=C('width', default=3))
             .mask_rebatch(src='masks', threshold=C('rebatch_threshold', default=0.1))
             .load_cubes(dst='images')
-            .adaptive_reshape(src=['images', 'masks'], shape=self.crop_shape)
+            .adaptive_reshape(src=['images', 'masks'], shape=V('shape'))
             .scale(mode='q', src='images')
         )
 
-    def augmentation_pipeline(self):
+    def augmentation_pipeline(self, **kwargs):
         """ Define augmentation pipeline. """
+        _ = kwargs
         return (
             Pipeline()
             .transpose(src=['images', 'masks'], order=(1, 2, 0))
@@ -629,11 +638,12 @@ class BaseController:
             .transpose(src=['images', 'masks'], order=(2, 0, 1))
         )
 
-    def train_pipeline(self):
+    def train_pipeline(self, **kwargs):
         """ Define model initialization and model training pipeline.
 
         Following parameters are fetched from pipeline config: `model_config`.
         """
+        _ = kwargs
         return (
             Pipeline()
             .init_variable('loss_history', [])
@@ -648,11 +658,10 @@ class BaseController:
 
     def get_train_template(self, **kwargs):
         """ Define the whole training procedure pipeline including data loading, augmentation and model training. """
-        _ = kwargs
         return (
-            self.load_pipeline() +
-            self.augmentation_pipeline() +
-            self.train_pipeline()
+            self.load_pipeline(**kwargs) +
+            self.augmentation_pipeline(**kwargs) +
+            self.train_pipeline(**kwargs)
         )
 
 
@@ -681,3 +690,14 @@ class BaseController:
                            save_to=V('predicted_masks', mode='e'))
         )
         return inference_template
+
+
+def generate_shape(_, shape, dynamic_factor=1, dynamic_low=None, dynamic_high=None):
+    """ Dynamically generate shape of a crop to get. """
+    dynamic_low = dynamic_low or dynamic_factor
+    dynamic_high = dynamic_high or dynamic_factor
+
+    i, x, h = shape
+    x_ = np.random.randint(x // dynamic_low, x * dynamic_high + 1)
+    h_ = np.random.randint(h // dynamic_low, h * dynamic_high + 1)
+    return (i, x_, h_)
