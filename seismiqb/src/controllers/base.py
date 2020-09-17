@@ -278,6 +278,7 @@ class BaseController:
             'side_view': side_view,
             'width': width,
             'rebatch_threshold': rebatch_threshold,
+            **kwargs
         }
 
         bs = self.batch_size

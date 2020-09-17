@@ -1676,7 +1676,6 @@ class Horizon:
 
         if savepath:
             fig.write_html(savepath)
-        return fig
 
 
     def show_slide(self, loc, width=3, axis='i', order_axes=None, zoom_slice=None, **kwargs):
