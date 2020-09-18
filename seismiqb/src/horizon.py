@@ -972,7 +972,7 @@ class Horizon:
             A data-array to make a cut from.
         shifts : tuple or None
             an offset defining the location of given array with respect to the horizon.
-            If None, dataset with filled `grid_info` must be supplied.
+            If None, `grid_info` with key `range` must be supplied.
         grid_info : dict
             Whenever passed, must contain key `range`.
             Used for infering shifts of the array with respect to horizon.
