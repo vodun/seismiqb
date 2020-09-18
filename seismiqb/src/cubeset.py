@@ -447,9 +447,9 @@ class SeismicCubeset(Dataset):
            heights[0] < 0:
             raise ValueError('Ranges must contain in the cube.')
 
-        if ilines[1] >= geometry.ilines_len or \
-           xlines[1] >= geometry.xlines_len or \
-           heights[1] >= geometry.depth:
+        if ilines[1] > geometry.ilines_len or \
+           xlines[1] > geometry.xlines_len or \
+           heights[1] > geometry.depth:
             raise ValueError('Ranges must contain in the cube.')
 
         # Make separate grids for every axis
