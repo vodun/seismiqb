@@ -967,6 +967,66 @@ class Horizon:
         background[self.geometry.zero_traces == 1] = np.nan
         return background
 
+
+    def get_array_values(self, array, shifts=None, grid_info=None, width=5, axes=(2, 1, 0)):
+        """ Get values from an external array along the horizon.
+
+        Parameters
+        ----------
+        array : np.ndarray
+            A data-array to make a cut from.
+        shifts : tuple or None
+            an offset defining the location of given array with respect to the horizon.
+            If None, `grid_info` with key `range` must be supplied.
+        grid_info : dict
+            Whenever passed, must contain key `range`.
+            Used for infering shifts of the array with respect to horizon.
+        width : int
+            required width of the resulting cut.
+        axes : tuple
+            if not None, axes-transposition with the required axes-order is used.
+        """
+        if shifts is None and grid_info is None:
+            raise ValueError('Either shifts or dataset with filled grid_info must be supplied!')
+
+        if shifts is None:
+            shifts = [grid_info['range'][i][0] for i in range(3)]
+
+        shifts = np.array(shifts)
+        horizon_shift = np.array((self.bbox[0, 0], self.bbox[1, 0]))
+
+        if axes is not None:
+            array = np.transpose(array, axes=axes)
+
+        # compute start and end-points of the ilines-xlines overlap between
+        # array and matrix in horizon and array-coordinates
+        horizon_shift, shifts = np.array(horizon_shift), np.array(shifts)
+        horizon_max = horizon_shift[:2] + np.array(self.matrix.shape)
+        array_max = np.array(array.shape[:2]) + shifts[:2]
+        overlap_shape = np.minimum(horizon_max[:2], array_max[:2]) - np.maximum(horizon_shift[:2], shifts[:2])
+        overlap_start = np.maximum(0, horizon_shift[:2] - shifts[:2])
+        heights_start = np.maximum(shifts[:2] - horizon_shift[:2], 0)
+
+        # recompute horizon-matrix in array-coordinates
+        slc_array = [slice(l, h) for l, h in zip(overlap_start, overlap_start + overlap_shape)]
+        slc_horizon = [slice(l, h) for l, h in zip(heights_start, heights_start + overlap_shape)]
+        overlap_matrix = np.full(array.shape[:2], fill_value=self.FILL_VALUE, dtype=np.float32)
+        overlap_matrix[slc_array] = self.matrix[slc_horizon]
+        overlap_matrix -= shifts[-1]
+
+        # make the cut-array and fill it with array-data located on needed heights
+        result = np.full(array.shape[:2] + (width, ), np.nan, dtype=np.float32)
+        for i, surface_level in enumerate(np.array([overlap_matrix + shift for shift in range(-width // 2 + 1,
+                                                                                                    width // 2 + 1)])):
+            mask = (surface_level >= 0) & (surface_level < array.shape[-1]) & (surface_level !=
+                                                                               self.FILL_VALUE - shifts[-1])
+            mask_where = np.where(mask)
+            result[mask_where[0], mask_where[1], i] = array[mask_where[0], mask_where[1],
+                                                            surface_level[mask_where].astype(np.int)]
+
+        return result
+
+
     def get_cube_values_line(self, orientation='ilines', line=1, window=23, offset=0, scale=False):
         """ Get values from the cube along the horizon on a particular line.
 
@@ -1538,7 +1598,8 @@ class Horizon:
         plot_image(matrix, mode='single', **kwargs)
 
 
-    def show_amplitudes_rgb(self, width=3, channel_weights=(1, 0.5, 0.25), to_uint8=True, **kwargs):
+    def show_amplitudes_rgb(self, width=3, channel_weights=(1, 0.5, 0.25), to_uint8=True,
+                            channels=None, **kwargs):
         """ Show trace values on the horizon and surfaces directly under it.
 
         Parameters
@@ -1549,12 +1610,16 @@ class Horizon:
             Weights applied to rgb-channels.
         to_uint8 : bool
             Determines whether the image should be cast to uint8.
+        channels : tuple
+            Tuple of 3 ints. Determines channels to take from amplitudes to form rgb-image.
         backend : str
             Can be either 'matplotlib' ('plt') or 'plotly' ('go')
         """
+        channels = (0, width, -1) if channels is None else channels
+
         # get values along the horizon and cast them to [0, 1]
         amplitudes = self.get_cube_values(window=1 + width*2, offset=width)
-        amplitudes = amplitudes[:, :, (0, width, -1)]
+        amplitudes = amplitudes[:, :, channels]
         amplitudes -= np.nanmin(amplitudes, axis=(0, 1)).reshape(1, 1, -1)
         amplitudes *= 1 / np.nanmax(amplitudes, axis=(0, 1)).reshape(1, 1, -1)
         amplitudes[self.full_matrix == self.FILL_VALUE, :] = np.nan
