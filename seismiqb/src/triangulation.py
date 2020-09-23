@@ -5,11 +5,11 @@ from numba import njit, prange
 @njit
 def triangle_rasterization(points, width=1):
     shape = np.array([np.max(points[:, i]) - np.min(points[:, i]) for i in range(3)])
-    _points = np.zeros((int((shape[0] + 1) * (shape[1] + 1) * (shape[2] + 1)), 3))
+    _points = np.zeros((int((shape[0] + 2) * (shape[1] + 2) * (shape[2] + 2)), 3))
     i = 0
-    for x in prange(np.min(points[:, 0]), np.max(points[:, 0]+1)):
-        for y in range(np.min(points[:, 1]), np.max(points[:, 1]+1)):
-            for z in range(np.min(points[:, 2]), np.max(points[:, 2]+1)):
+    for x in prange(int(np.min(points[:, 0])), int(np.max(points[:, 0])+1)):
+        for y in range(int(np.min(points[:, 1])), int(np.max(points[:, 1]+1))):
+            for z in range(int(np.min(points[:, 2])), int(np.max(points[:, 2]+1))):
                 node = np.array([x, y, z])
                 if distance_to_triangle(points, node) < 0.5 * width:
                     _points[i] = node

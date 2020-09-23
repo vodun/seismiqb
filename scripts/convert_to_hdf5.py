@@ -23,6 +23,8 @@ ARGS = [
 
 
 if __name__ == '__main__':
+    import time
+    start = time.time()
     config = make_config(MSG, ARGS, os.path.basename(__file__).split('.')[0])
 
     geometry = SeismicGeometry(
@@ -32,3 +34,4 @@ if __name__ == '__main__':
         collect_stats=True, spatial=True,
     )
     geometry.make_hdf5()
+    print((time.time() - start)/60)

@@ -1062,7 +1062,11 @@ class SeismicGeometryHDF5(SeismicGeometry):
         """ Store values from `hdf5` file to attributes. """
         self.index_headers = self.INDEX_POST
         self.load_meta()
-        self.cube_shape = np.asarray([self.ilines_len, self.xlines_len, self.depth]) # BC
+        if hasattr(self, 'lens'):
+            self.cube_shape = np.asarray([self.ilines_len, self.xlines_len, self.depth]) # BC
+        else:
+            self.cube_shape = self.file_hdf5['cube'].shape
+            self.lens = self.cube_shape
         self.has_stats = True
 
     # Methods to load actual data from HDF5

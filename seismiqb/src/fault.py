@@ -31,7 +31,7 @@ class Fault(Horizon):
         df = self.read_file(path)
         df = self.fix_lines(df)
         sticks = self.sticks(df)
-        sticks = self.order_sticks(sticks)
+        sticks = self.sort_sticks(sticks)
         points = self.interpolate_3d(sticks)
         return points
 
@@ -66,7 +66,7 @@ class Fault(Horizon):
         triangles = triangulation(sticks)
         points = []
         for triangle in triangles:
-            res = triangle_rasterization(triangle)
+            res = triangle_rasterization(triangle, width=5)
             points += [res]
         return np.concatenate(points, axis=0)
 
@@ -153,6 +153,7 @@ class Fault(Horizon):
         df.to_csv(path, sep=' ', index=False, header=False)
 
     def fix_lines(self, df):
+        " Fix broken iline and crossline coordinates. "
         i_bounds = [self.geometry.ilines_offset, self.geometry.ilines_offset + self.geometry.cube_shape[0]]
         x_bounds = [self.geometry.xlines_offset, self.geometry.xlines_offset + self.geometry.cube_shape[1]]
 
@@ -165,6 +166,25 @@ class Fault(Horizon):
 
         return df
 
+    def sort_sticks(self, sticks):
+        """ Sort sticks with respect of fault direction. """
+        pca = PCA(1)
+        coords = pca.fit_transform(pca.fit_transform(np.array([stick[0][:2] for stick in sticks.values])))
+        indices = np.array([i for _, i in sorted(zip(coords, range(len(sticks))))])
+        return sticks.iloc[indices]
+
+    @classmethod
+    def check_format(cls, path, verbose=False):
+        try:
+            df = cls.read_file(path)
+        except ValueError:
+            print(path, ': wrong format')
+        else:
+            if 'name' in df.columns and len(df.name.unique()) > 1:
+                print(path, ': fault file must be splitted.')
+            elif verbose:
+                print(path, ': OK')
+
     @classmethod
     def split_file(cls, path, dst='faults'):
         folder = os.path.dirname(path)
@@ -176,8 +196,3 @@ class Fault(Horizon):
             df.to_csv(os.path.join(folder, dst, df.name), sep=' ', header=False, index=False)
         df.groupby('name').apply(_dump)
 
-    def order_sticks(self, sticks):
-        pca = PCA(1)
-        coords = pca.fit_transform(pca.fit_transform(np.array([stick[0][:2] for stick in sticks.values])))
-        indices = np.array([i for _, i in sorted(zip(coords, range(len(sticks))))])
-        return sticks.iloc[indices]
