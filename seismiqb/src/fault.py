@@ -35,7 +35,8 @@ class Fault(Horizon):
         points = self.interpolate_3d(sticks)
         return points
 
-    def sticks(self, df):
+    @classmethod
+    def sticks(cls, df):
         if 'number' in df.columns:
             col = 'number'
         elif df.iline.iloc[0] == df.iline.iloc[1]:
@@ -182,6 +183,10 @@ class Fault(Horizon):
         else:
             if 'name' in df.columns and len(df.name.unique()) > 1:
                 print(path, ': fault file must be splitted.')
+            elif len(cls.sticks(df)) == 1:
+                print(path, ': fault has an only one stick')
+            elif any(cls.sticks(df).apply(len) == 1):
+                print(path, ': fault has one point stick')
             elif verbose:
                 print(path, ': OK')
 
