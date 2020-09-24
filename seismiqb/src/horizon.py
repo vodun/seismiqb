@@ -871,7 +871,7 @@ class Horizon:
         width : int
             Width of an added horizon.
         alpha : number
-            Value to fill backround with at horizon location.
+            Value to fill background with at horizon location.
         """
         _ = kwargs
         low = width // 2

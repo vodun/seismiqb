@@ -14,7 +14,7 @@ from .horizon import Horizon, UnstructuredHorizon
 from .metrics import HorizonMetrics
 from .plotters import plot_image
 from .utils import IndexedDict, round_to_array, gen_crop_coordinates
-
+from .rectified import RectifiedAmplitudes, RectifiedSurface
 
 
 def astype_object(array):
@@ -359,7 +359,8 @@ class SeismicCubeset(Dataset):
         return batch
 
 
-    def load(self, label_dir=None, filter_zeros=True, dst_labels='labels', p=None, bins=None, **kwargs):
+    def load(self, label_dir=None, filter_zeros=True, dst_labels='labels',
+             labels_class=None, p=None, bins=None, **kwargs):
         """ Load everything: geometries, point clouds, labels, samplers.
 
         Parameters
@@ -381,9 +382,23 @@ class SeismicCubeset(Dataset):
             paths_txt[self.indices[i]] = glob(dir_)
 
         self.load_geometries(**kwargs)
-        self.create_labels(paths=paths_txt, filter_zeros=filter_zeros, dst=dst_labels)
+        self.create_labels(paths=paths_txt, filter_zeros=filter_zeros, dst=dst_labels, labels_class=labels_class)
         self._p, self._bins = p, bins # stored for later sampler creation
 
+    def load_rectified_surface(self, horizon_dir, surface_dir, horizon_dst='labels', surface_dst='surfaces', cutouts_dst='cutouts',
+                               window=3, offset=0, scale=True, filter_zeros=True, **kwargs):
+        """"""
+        self.load(label_dir=horizon_dir, dst_labels=horizon_dst, filter_zeros=filter_zeros, **kwargs)
+        self.cutout_amplitudes_along_horizon(horizon_dst=horizon_dst, cutouts_dst=cutouts_dst, window=window, offset=offset, scale=scale)
+        self.load(label_dir=surface_dir, dst_labels=surface_dst, filter_zeros=filter_zeros, labels_class=RectifiedSurface, **kwargs)
+
+    def cutout_amplitudes_along_horizon(self, horizon_dst, cutouts_dst, window, offset, scale):
+        """"""
+        horizons_dict = getattr(self, horizon_dst)
+        cutouts = IndexedDict({})
+        for ix, horizons in horizons_dict.items():
+            cutouts[ix] = RectifiedAmplitudes(horizons=horizons, window=window, offset=offset, scale=scale)
+        setattr(self, cutouts_dst, cutouts)
 
     def make_grid(self, cube_name, crop_shape, ilines=None, xlines=None, heights=None,
                   overlap=None, overlap_factor=None, batch_size=16, filtering_matrix=None, filter_threshold=0):

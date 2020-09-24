@@ -103,7 +103,7 @@ class SeismicCropBatch(Batch):
         attached dataset and use unsalted version of `item` as key.
         Otherwise, we get position of `item` in the current batch and use it to index sequence-like `component`.
         """
-        if sum([attribute in component for attribute in ['label', 'geom']]):
+        if sum([attribute in component for attribute in ['label', 'geom', 'cutouts']]):
             if isinstance(item, str) and self.has_salt(item):
                 item = self.unsalt(item)
             res = getattr(self, component)
@@ -289,7 +289,7 @@ class SeismicCropBatch(Batch):
 
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def load_cubes(self, ix, dst, src='locations', **kwargs):
+    def load_cubes(self, ix, dst, src_data='geometries', src_locations='locations', **kwargs):
         """ Load data from cube in given positions.
 
         Parameters
@@ -299,14 +299,14 @@ class SeismicCropBatch(Batch):
         dst : str
             Component of batch to put loaded crops in.
         """
-        geometry = self.get(ix, 'geometries')
-        location = self.get(ix, src)
-        return geometry.load_crop(location, **kwargs)
+        data = self.get(ix, src_data)
+        location = self.get(ix, src_locations)
+        return data.load_crop(location, **kwargs)
 
 
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def create_masks(self, ix, dst, src='locations', width=3, src_labels='labels', indices=-1):
+    def create_masks(self, ix, dst, src_labels='labels', src_locations='locations', width=3, indices=-1):
         """ Create masks from labels-dictionary in given positions.
 
         Parameters
@@ -353,7 +353,7 @@ class SeismicCropBatch(Batch):
             pass
         labels = [labels[idx] for idx in indices]
 
-        location = self.get(ix, src)
+        location = self.get(ix, src_locations)
         shape_ = self.get(ix, 'shapes')
         mask = np.zeros((shape_), dtype='float32')
 
@@ -515,7 +515,7 @@ class SeismicCropBatch(Batch):
 
     @action
     @inbatch_parallel(init='indices', target='for', post='_masks_to_horizons_post')
-    def masks_to_horizons(self, ix, src='masks', src_locations='locations', dst='predicted_labels', prefix='predict',
+    def masks_to_horizons(self, ix, src_masks='masks', src_locations='locations', dst='predicted_labels', prefix='predict',
                           threshold=0.5, mode='mean', minsize=0, mean_threshold=2.0, adjacency=1,
                           order=(2, 0, 1), skip_merge=False):
         """ Convert predicted segmentation mask to a list of Horizon instances.
@@ -538,7 +538,7 @@ class SeismicCropBatch(Batch):
         _ = dst, mean_threshold, adjacency, skip_merge
 
         # Threshold the mask, transpose and rotate the mask if needed
-        mask = self.get(ix, src)
+        mask = self.get(ix, src_masks)
         if np.array(order).reshape(-1, 3).shape[0] > 0:
             order = self.get(ix, np.array(order).reshape(-1, 3))
         mask = np.transpose(mask, axes=order)
