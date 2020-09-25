@@ -14,7 +14,7 @@ from .horizon import Horizon, UnstructuredHorizon
 from .metrics import HorizonMetrics
 from .plotters import plot_image
 from .utils import IndexedDict, round_to_array, gen_crop_coordinates
-from .rectified import RectifiedAmplitudes, RectifiedSurface
+from .rectified import RectifiedGeometry, RectifiedSurface
 
 
 def astype_object(array):
@@ -385,22 +385,24 @@ class SeismicCubeset(Dataset):
         self.create_labels(paths=paths_txt, filter_zeros=filter_zeros, dst=dst_labels, labels_class=labels_class)
         self._p, self._bins = p, bins # stored for later sampler creation
 
-    def load_rectified_surface(self, horizon_dir, surface_dir, horizon_dst='labels', surface_dst='surfaces', cutouts_dst='cutouts',
-                               window=3, offset=0, scale=True, filter_zeros=True, **kwargs):
+    def load_rectified_surface(self, horizon_dir, surface_dir, horizon_dst='labels', surface_dst='surfaces',
+                               cutouts_dst='cutouts', window=3, offset=0, scale=True, filter_zeros=True, **kwargs):
         """"""
         self.load(label_dir=horizon_dir, dst_labels=horizon_dst, filter_zeros=filter_zeros, **kwargs)
-        self.cutout_amplitudes_along_horizon(horizon_dst=horizon_dst, cutouts_dst=cutouts_dst, window=window, offset=offset, scale=scale)
-        self.load(label_dir=surface_dir, dst_labels=surface_dst, filter_zeros=filter_zeros, labels_class=RectifiedSurface, **kwargs)
+        self.load_rectified_geometry(horizon_dst=horizon_dst, cutouts_dst=cutouts_dst,
+                                     window=window, offset=offset, scale=scale)
+        self.load(label_dir=surface_dir, dst_labels=surface_dst, filter_zeros=filter_zeros,
+                  labels_class=RectifiedSurface, **kwargs)
 
-    def cutout_amplitudes_along_horizon(self, horizon_dst, cutouts_dst, window, offset, scale):
+    def load_rectified_geometry(self, horizon_dst, cutouts_dst, window, offset, scale):
         """"""
         horizons_dict = getattr(self, horizon_dst)
         cutouts = IndexedDict({})
         for ix, horizons in horizons_dict.items():
-            cutouts[ix] = RectifiedAmplitudes(horizons=horizons, window=window, offset=offset, scale=scale)
+            cutouts[ix] = RectifiedGeometry(horizons=horizons, window=window, offset=offset, scale=scale)
         setattr(self, cutouts_dst, cutouts)
 
-    def make_grid(self, cube_name, crop_shape, ilines=None, xlines=None, heights=None,
+    def make_grid(self, cube_name, crop_shape, ilines=None, xlines=None, heights=None, mode='volume', horizon_num=0,
                   overlap=None, overlap_factor=None, batch_size=16, filtering_matrix=None, filter_threshold=0):
         """ Create regular grid of points in cube.
         This method is usually used with `assemble_predict` action of SeismicCropBatch.
@@ -420,6 +422,13 @@ class SeismicCubeset(Dataset):
         heights : sequence of two elements
             Location of desired prediction, depth-wise.
             If None, whole cube ranges will be used.
+        mode : 'volume' or 'area'
+            Mode to generate grid coordinates.
+            If 'volume' use all volume defined by `ilines`, `xlines`, `heights`.
+            If 'area' use area define by `ilines` and `xlines` ignoring `heights`.
+            Defaults to 'volume'.
+        horizon_num : int
+            Number of horizon to use for setting `heights` in `mode='area'`.
         overlap : float or sequence
             Distance between grid points.
         overlap_factor : float or sequence
@@ -438,6 +447,11 @@ class SeismicCubeset(Dataset):
             in a crop in the grid. Default value is 0.
             If float, proportion from the total number of traces in a crop will be computed.
         """
+        if mode == 'area':
+            h_mean = int(self.labels[cube_name][horizon_num].h_mean)
+            heights = (h_mean, h_mean + 1)
+        elif mode != 'volume':
+            raise ValueError("`mode` can either be 'volume' or 'area'.")
         geometry = self.geometries[cube_name]
         overlap = overlap or crop_shape
         if isinstance(overlap_factor, (int, float)):

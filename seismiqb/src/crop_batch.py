@@ -99,11 +99,12 @@ class SeismicCropBatch(Batch):
 
     def get(self, item=None, component=None):
         """ Custom access for batch attribures.
-        If `component` looks like `label` or `geometry`, then we retrieve that dictionary from
-        attached dataset and use unsalted version of `item` as key.
-        Otherwise, we get position of `item` in the current batch and use it to index sequence-like `component`.
+        If `component` looks like `label`, `geometry`, 'cutouts' or `surface`,
+        then we retrieve that dictionary from attached dataset and use unsalted
+        version of `item` as key. Otherwise, we get position of `item`
+        in the current batch and use it to index sequence-like `component`.
         """
-        if sum([attribute in component for attribute in ['label', 'geom', 'cutouts']]):
+        if sum([attribute in component for attribute in ['label', 'geom', 'cutouts', 'surfaces']]):
             if isinstance(item, str) and self.has_salt(item):
                 item = self.unsalt(item)
             res = getattr(self, component)

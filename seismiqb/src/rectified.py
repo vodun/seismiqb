@@ -1,7 +1,4 @@
 """ 2D surface class and metrics. """
-
-import os
-
 import numpy as np
 
 from .horizon import Horizon
@@ -9,7 +6,7 @@ from .utils import IndexedDict
 
 
 
-class RectifiedAmplitudes:
+class RectifiedGeometry:
     """"""
     def __init__(self, horizons, window, offset, scale):
         self.horizons = horizons
@@ -22,12 +19,12 @@ class RectifiedAmplitudes:
         """"""
         x_slice, y_slice, z_slice = locations
         depth_range = [key for key in self.data.keys() if z_slice.start in key]
-        if len(depth_range) == 1:
-            return self.data[depth_range[0]][x_slice, y_slice]
-        elif len(depth_range) > 1:
+        if len(depth_range) > 1:
             raise KeyError(f'More than one amplitudes cutout corresponds to given depth range {z_slice}: {depth_range}')
-        else:
+        if len(depth_range) == 0:
             raise KeyError(f'No cutout amplitudes found at given depth')
+        return self.data[depth_range[0]][x_slice, y_slice]
+
     @property
     def data(self):
         """"""
@@ -36,12 +33,13 @@ class RectifiedAmplitudes:
         return self._data
 
     def load_data(self):
+        """"""
         self._data = IndexedDict({})
         for horizon in self.horizons:
-            amplitudes = horizon.get_cube_values(window=self.window, offset=self.offset, scale=self.scale)
-            amplitudes[horizon.full_matrix == horizon.FILL_VALUE] = np.nan
-            depth_range = range(horizon._depths[0], horizon._depths[-1])
-            self._data[depth_range] = amplitudes
+            cutout = horizon.get_cube_values(window=self.window, offset=self.offset, scale=self.scale)
+            cutout[horizon.full_matrix == horizon.FILL_VALUE] = np.nan
+            depth_range = range(horizon.h_min, horizon.h_max)
+            self._data[depth_range] = cutout
 
     def reload_data(self, window=None, offset=None, scale=None):
         """"""
@@ -52,7 +50,9 @@ class RectifiedAmplitudes:
 
 class RectifiedSurface(Horizon):
     """"""
-    def add_to_mask(self, mask, locations=None, alpha=1):
+    def add_to_mask(self, mask, locations=None, **kwargs):
+        """"""
+        _ = kwargs
         mask_bbox = np.array([[slc.start, slc.stop] for slc in locations], dtype=np.int32)
         (mask_i_min, mask_i_max), (mask_x_min, mask_x_max), (_, mask_h) = mask_bbox
 
@@ -65,9 +65,10 @@ class RectifiedSurface(Horizon):
 
             idx_i, idx_x = np.asarray(overlap != self.FILL_VALUE).nonzero()
             heights = overlap[idx_i, idx_x]
-            if heights.min() <= mask_h <= heights.max():
-                idx_i += i_min - mask_i_min
-                idx_x += x_min - mask_x_min
-                mask[idx_i, idx_x] = alpha
+            if idx_i.size != 0:
+                if heights.min() <= mask_h <= heights.max():
+                    idx_i += i_min - mask_i_min
+                    idx_x += x_min - mask_x_min
+                    mask[idx_i, idx_x] = 1
 
         return mask
