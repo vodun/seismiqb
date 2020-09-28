@@ -11,6 +11,8 @@ import pandas as pd
 import segyio
 
 from scipy.ndimage import measurements
+from skimage.morphology import thin
+from sklearn.decomposition import PCA
 
 from numba import njit, prange
 from ..batchflow import Sampler
@@ -627,26 +629,20 @@ def generate_points(edges, divisors, lengths, indices):
 def filter_faults(labels, threshold=20):
     res = []
     for i in range(labels[1]):
-        bounds = np.where(labels[0] == i)[0]
+        bounds = np.where(labels[0] == i+1)[0]
         if bounds.max() - bounds.min() >= threshold:
-            res.append(i)
+            res.append(i+1)
     return res
 
-@njit
 def split_faults(labels, indices):
-    indices = np.arange(labels[1])
     new_labels = np.zeros_like(labels[0])
-    for new_index in prange(len(indices)):
+    for new_index in range(len(indices)):
         i = indices[new_index]
-        fault = np.where(labels[0] == i)
-        ilines = set(fault[0])
-        for il in ilines:
-            x, y = fault[2][fault[0] == il], fault[1][fault[0] == il]
-            _x = np.array(sorted(set(x)))
-            _y = np.array([np.median(y[x == i]) for i in _x])
-            _x = np.minimum(_x, new_labels.shape[1]-1)
-            for coord in zip(_y.astype(np.int64), _x.astype(np.int64)):
-                new_labels[il, coord[0], coord[1]] = new_index + 1
+        fault = np.zeros_like(labels[0])
+        fault[labels[0] == i] = 1
+        for il in set(np.where(fault != 0)[0]):
+            fault[il] = thin(fault[il])
+        new_labels += fault * (new_index + 1)
     return new_labels
 
 def process_faults(faults, threshold=10, slices=None):
