@@ -12,7 +12,6 @@ from PIL import ImageDraw, Image
 
 from scipy.ndimage import find_objects
 from scipy.interpolate import LinearNDInterpolator, griddata
-from skimage.measure import label
 from sklearn.decomposition import PCA
 
 from .horizon import Horizon
@@ -200,4 +199,3 @@ class Fault(Horizon):
         def _dump(df):
             df.to_csv(os.path.join(folder, dst, df.name), sep=' ', header=False, index=False)
         df.groupby('name').apply(_dump)
-
