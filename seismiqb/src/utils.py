@@ -649,7 +649,9 @@ def split_faults(labels, indices):
                 new_labels[il, coord[0], coord[1]] = new_index + 1
     return new_labels
 
-def process_faults(faults, threshold=10):
-    labels = measurements.label(faults.file_hdf5['cube'])
+def process_faults(faults, threshold=10, slices=None):
+    if slices is None:
+        slices = [slice(None, None, None)] * 3
+    labels = measurements.label(faults.file_hdf5['cube'][slices])
     indices = filter_faults(labels, threshold)
     return split_faults(labels, indices)
