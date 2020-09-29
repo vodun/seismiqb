@@ -963,6 +963,11 @@ class Horizon:
                 background[idx_i, idx_x, np.full_like(heights, j)] = data_chunk[idx_i, idx_x, heights]
                 heights += 1
 
+                mask = heights < data_chunk.shape[2]
+                idx_i = idx_i[mask]
+                idx_x = idx_x[mask]
+                heights = heights[mask]
+
         background[self.geometry.zero_traces == 1] = np.nan
         return background
 
