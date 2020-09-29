@@ -775,6 +775,28 @@ class Horizon:
     filter = filter_points
 
 
+    def thin_out(self, factor=1, threshold=256):
+        """ Thin out the horizon by keeping only each `factor`s line.
+
+        Parameters
+        ----------
+        factor : integer or sequence of two integers
+            Frequency of lines to keep along ilines and xlines direction.
+        threshold : integer
+            Minimal amount of points in a line to keep.
+        """
+        if isinstance(factor, int):
+            factor = (factor, factor)
+
+        uniques, counts = np.unique(self.points[:, 0], return_counts=True)
+        mask_i = np.isin(self.points[:, 0], uniques[counts > threshold][::factor[0]])
+
+        uniques, counts = np.unique(self.points[:, 1], return_counts=True)
+        mask_x = np.isin(self.points[:, 1], uniques[counts > threshold][::factor[1]])
+
+        self.points = self.points[mask_i + mask_x]
+        self.reset_storage('matrix')
+
     def smooth_out(self, kernel_size=3, sigma=0.8, iters=1, preserve_borders=True, **kwargs):
         """ Convolve the horizon with gaussian kernel with special treatment to absent points:
         if the point was present in the original horizon, then it is changed to a weighted sum of all
@@ -1124,6 +1146,18 @@ class Horizon:
     def is_carcass(self):
         """ Check if the horizon is a sparse carcass. """
         return len(self) / self.filled_matrix.sum() < 0.5
+
+    @property
+    def carcass_ilines(self):
+        """ Labeled inlines in a carcass. """
+        uniques, counts = np.unique(self.points[:, 0], return_counts=True)
+        return uniques[counts > 256]
+
+    @property
+    def carcass_xlines(self):
+        """ Labeled inlines in a carcass. """
+        uniques, counts = np.unique(self.points[:, 1], return_counts=True)
+        return uniques[counts > 256]
 
     @property
     def number_of_holes(self):
@@ -1505,6 +1539,12 @@ class Horizon:
         Coverage:          {self.coverage:3.5}
         Solidity:          {self.solidity:3.5}
         Num of holes:      {self.number_of_holes}
+        """
+
+        if self.is_carcass:
+            msg += f"""
+        Unique ilines:     {self.carcass_ilines}
+        Unique xlines:     {self.carcass_xlines}
         """
         return dedent(msg)
 
