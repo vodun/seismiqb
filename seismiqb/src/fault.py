@@ -24,7 +24,21 @@ class Fault(Horizon):
     FAULT_STICKS = ['INLINE', 'iline', 'xline', 'cdp_x', 'cdp_y', 'height', 'name', 'number']
     COLUMNS = ['iline', 'xline', 'height', 'name', 'number']
 
-    def file_to_points(self, path):
+    def from_file(self, path, transform=True, **kwargs):
+        """ Init from path to either CHARISMA or REDUCED_CHARISMA csv-like file
+        or from .npy file with points. """
+        _ = kwargs
+
+        self.path = path
+        self.name = os.path.basename(path)
+        if '.npy' in path:
+            points = np.load(path, allow_pickle=True)
+            transform = False
+        else:
+            points = self.csv_to_points(path)
+        self.from_points(points, transform, **kwargs)
+
+    def csv_to_points(self, path):
         """ Get point cloud array from file values. """
         #pylint: disable=anomalous-backslash-in-string
         df = self.read_file(path)
@@ -124,6 +138,9 @@ class Fault(Horizon):
         indices = np.array([i for _, i in sorted(zip(coords, range(len(sticks))))])
         return sticks.iloc[indices]
 
+    def dump_points(self, path):
+        self.points.dump(path)
+
     @classmethod
     def check_format(cls, path, verbose=False):
         """ Find errors in fault file.
@@ -135,7 +152,7 @@ class Fault(Horizon):
         verbose : bool
             response if file is succesfully readed.
         """
-        for filename in glob.glob(path)
+        for filename in glob.glob(path):
             try:
                 df = cls.read_file(filename)
             except ValueError:

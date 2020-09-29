@@ -1,5 +1,6 @@
 """ Contains container for storing dataset of seismic crops. """
 #pylint: disable=too-many-lines
+import os
 from glob import glob
 
 import numpy as np
@@ -157,6 +158,20 @@ class SeismicCubeset(Dataset):
             if filter_zeros:
                 _ = [getattr(item, 'filter')() for item in label_list]
             getattr(self, dst)[ix] = [item for item in label_list if len(item.points) > 0]
+
+    def dump_labels(self, path):
+        """ Dump points as .npy file. """
+        for i in range(len(self.indices)):
+            for label in self.labels[i]:
+                dirname = os.path.dirname(self.index.get_fullpath(self.indices[i]))
+                if path[0] == '/':
+                    path = path[1:]
+                dirname = os.path.join(dirname, path)
+                if not os.path.exists(dirname):
+                    os.makedirs(dirname)
+                save_to = os.path.join(dirname, label.name + '.npy')
+                label.dump_points(save_to)
+
 
     @property
     def sampler(self):
