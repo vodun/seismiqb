@@ -474,6 +474,7 @@ class BaseController:
         self.log(f'Starting chunk {orientation} inference with {len(iterator)} chunks')
 
         horizons = []
+        total_length, total_unfiltered_length = 0, 0
         for chunk in self.make_pbar(iterator, desc=f'Inference on {geometry.name}| {orientation}'):
             current_spatial_ranges = copy(spatial_ranges)
             current_spatial_ranges[axis] = [chunk, min(chunk + chunk_size, spatial_ranges[axis][-1])]
@@ -484,6 +485,8 @@ class BaseController:
                               overlap_factor=overlap_factor,
                               filtering_matrix=filtering_matrix,
                               filter_threshold=filter_threshold)
+            total_length += dataset.grid_info['length']
+            total_unfiltered_length += dataset.grid_info['unfiltered_length']
 
             inference_pipeline = (self.get_inference_template() << config) << dataset
             inference_pipeline.run(D('size'), n_iters=dataset.grid_iters)
@@ -503,6 +506,7 @@ class BaseController:
 
         self.log(f'Cache sizes: {[item.cache_size for item in dataset.geometries.values()]}')
         self.log(f'Cache lengths: {[item.cache_length for item in dataset.geometries.values()]}')
+        self.log(f'Inferenced total of {total_length} out of {total_unfiltered_length} crops possible')
         for item in dataset.geometries.values():
             item.reset_cache()
         gc.collect()
