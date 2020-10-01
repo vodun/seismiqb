@@ -424,6 +424,7 @@ class SeismicCubeset(Dataset):
             in a crop in the grid. Default value is 0.
             If float, proportion from the total number of traces in a crop will be computed.
         """
+        #pylint: disable=too-many-branches
         geometry = self.geometries[cube_name]
 
         if isinstance(overlap_factor, (int, float)):
@@ -778,15 +779,21 @@ class SeismicCubeset(Dataset):
         crop_shape = grid_info['crop_shape']
         background = np.full(grid_info['predict_shape'], fill_value)
 
-        for i in range(len(grid_array)):
-            il, xl, h = grid_array[i, :]
-            il_end = min(background.shape[0], il+crop_shape[0])
-            xl_end = min(background.shape[1], xl+crop_shape[1])
-            h_end = min(background.shape[2], h+crop_shape[2])
+        for j, (i, x, h) in enumerate(grid_array):
+            crop_slice, background_slice = [], []
 
-            crop = np.transpose(crops[i], order)
-            crop = crop[:(il_end-il), :(xl_end-xl), :(h_end-h)]
-            previous = background[il:il_end, xl:xl_end, h:h_end]
-            background[il:il_end, xl:xl_end, h:h_end] = np.maximum(crop, previous)
+            for k, start in enumerate((i, x, h)):
+                if start >= 0:
+                    end = min(background.shape[k], start + crop_shape[k])
+                    crop_slice.append(slice(0, end - start))
+                    background_slice.append(slice(start, end))
+                else:
+                    crop_slice.append(slice(-start, None))
+                    background_slice.append(slice(None))
+
+            crop = np.transpose(crops[j], order)
+            crop = crop[crop_slice]
+            previous = background[background_slice]
+            background[background_slice] = np.maximum(crop, previous)
 
         return background
