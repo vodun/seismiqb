@@ -776,7 +776,7 @@ class Horizon:
 
 
     def thin_out(self, factor=1, threshold=256):
-        """ Thin out the horizon by keeping only each `factor`s line.
+        """ Thin out the horizon by keeping only each `factor`-th line.
 
         Parameters
         ----------
@@ -1155,7 +1155,7 @@ class Horizon:
 
     @property
     def carcass_xlines(self):
-        """ Labeled inlines in a carcass. """
+        """ Labeled xlines in a carcass. """
         uniques, counts = np.unique(self.points[:, 1], return_counts=True)
         return uniques[counts > 256]
 
@@ -1631,7 +1631,7 @@ class Horizon:
         Parameters
         ----------
         n : int
-            Number of points to use to create horizon surface.
+            Number of points for horizon surface creation.
             The more, the better the image is and the slower it is displayed.
         threshold : number
             Threshold to remove triangles with bigger height differences in vertices.
