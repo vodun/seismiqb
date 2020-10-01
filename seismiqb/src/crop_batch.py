@@ -171,25 +171,24 @@ class SeismicCropBatch(Batch):
         # pylint: disable=protected-access
 
         # Create all the points and shapes
-        indices = points[:, 0]
-
         if adaptive_slices:
             shape = np.asarray(shape)
 
-            points_, shapes = [], []
+            indices, points_, shapes = [], [], []
             for point in points:
                 try:
                     point_, shape_ = self._correct_point_to_grid(point, shape, grid_src, eps)
+                    indices.append(point[0])
                     points_.append(point_)
                     shapes.append(shape_)
                 except RecursionError:
                     pass
             points = points_
-
-            locations = [self._make_location(point, shape, direction) for point, shape in zip(points, shapes)]
         else:
+            indices = points[:, 0]
             shapes = self._make_shapes(points, shape, side_view)
-            locations = [self._make_location(point, shape, direction) for point, shape in zip(points, shapes)]
+
+        locations = [self._make_location(point, shape, direction) for point, shape in zip(points, shapes)]
 
         # Create a new Batch instance, if needed
         if not hasattr(self, 'transformed'):
