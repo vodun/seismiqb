@@ -566,6 +566,7 @@ class SeismicGeometry:
             shutil.make_archive(os.path.splitext(path_segy)[0], 'zip', dir_name, file_name)
 
     def cdp_to_lines(self, points):
+        """ Convert CDP to lines. """
         inverse_matrix = np.linalg.inv(self.rotation_matrix[:, :2])
         lines = (inverse_matrix @ points.T - inverse_matrix @ self.rotation_matrix[:, 2].reshape(2, -1)).T
         return np.rint(lines)
@@ -781,6 +782,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
         self.rotation_matrix = cv2.getAffineTransform(np.float32(ix_points), np.float32(cdp_points))
 
     def lines_to_cdp(self, points):
+        """ Convert lines to CDP. """
         return (self.rotation_matrix[:, :2] @ points.T + self.rotation_matrix[:, 2].reshape(2, -1)).T
 
     def set_index(self, index_headers, sortby=None):
@@ -1156,7 +1158,8 @@ class SeismicGeometryHDF5(SeismicGeometry):
         lines = df[df['trace_index'] == 1].index[0]
         cdps = (df[df['trace_index'] == 1]['CDP_X'][0], df[df['trace_index'] == 1]['CDP_Y'][0])
         second_lines = df[df['trace_index'] == second_trace].index[0]
-        second_cdps = (df[df['trace_index'] == second_trace]['CDP_X'][0], df[df['trace_index'] == second_trace]['CDP_Y'][0])
+        second_cdps = (df[df['trace_index'] == second_trace]['CDP_X'][0],
+                       df[df['trace_index'] == second_trace]['CDP_Y'][0])
 
         # transform funcs
         def xline_to_cdpy(n):

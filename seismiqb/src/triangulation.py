@@ -99,7 +99,7 @@ def distance_to_triangle(triangle, node):
                 else:
                     if -d >= a:
                         s = 1
-                        sqrdistance = a + 2.0 * d + f;  # GF 20101013 fixed typo d*s ->2*d
+                        sqrdistance = a + 2.0 * d + f  # GF 20101013 fixed typo d*s ->2*d
                     else:
                         s = -d / a
                         sqrdistance = d * s + f
@@ -120,7 +120,7 @@ def distance_to_triangle(triangle, node):
                 if numer >= denom:
                     s = 1.0
                     t = 0.0
-                    sqrdistance = a + 2.0 * d + f;  # GF 20101014 fixed typo 2*b -> 2*d
+                    sqrdistance = a + 2.0 * d + f  # GF 20101014 fixed typo 2*b -> 2*d
                 else:
                     s = numer / denom
                     t = 1 - s

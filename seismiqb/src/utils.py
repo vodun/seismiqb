@@ -12,7 +12,6 @@ import segyio
 
 from scipy.ndimage import measurements
 from skimage.morphology import thin
-from sklearn.decomposition import PCA
 
 from numba import njit, prange
 from ..batchflow import Sampler
@@ -626,18 +625,42 @@ def generate_points(edges, divisors, lengths, indices):
 
 
 @njit
-def filter_faults(labels, threshold=20):
-    res = []
+def _filter_faults(labels, threshold=20):
+    """ Filter short fault.
+    
+    Parameters
+    ----------
+    threshold : int
+        length (in ilines) of fault
+
+    Returns
+    -------
+    indices : list of int
+        indices of good fault
+    """
+    indices = []
     for i in range(labels[1]):
         bounds = np.where(labels[0] == i+1)[0]
         if bounds.max() - bounds.min() >= threshold:
-            res.append(i+1)
-    return res
+            indices.append(i+1)
+    return indices
 
-def split_faults(labels, indices):
+def _thin_faults(labels, indices):
+    """ Transform each fault to thin line.
+    
+    Parameters
+    ----------
+    labels : tuple
+        output of measurements.label
+    indices : list of ints
+        indices of faults to keep
+    Returns
+    -------
+    new_labels : numpy.ndarray
+        mask with transformed faults
+    """
     new_labels = np.zeros_like(labels[0])
-    for new_index in range(len(indices)):
-        i = indices[new_index]
+    for new_index, i in enumerate(indices):
         fault = np.zeros_like(labels[0])
         fault[labels[0] == i] = 1
         for il in set(np.where(fault != 0)[0]):
@@ -650,5 +673,5 @@ def process_faults(faults, threshold=10, slices=None):
     if slices is not None:
         cube = cube[slices]
     labels = measurements.label(cube)
-    indices = filter_faults(labels, threshold)
-    return split_faults(labels, indices)
+    indices = _filter_faults(labels, threshold)
+    return _thin_faults(labels, indices)

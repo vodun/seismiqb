@@ -1,22 +1,14 @@
 """ Horizon class and metrics. """
 
-import sys
 import os
+import glob
 
 import numpy as np
 import pandas as pd
-from copy import copy
-from numba import njit, prange
 
-from PIL import ImageDraw, Image
-
-from scipy.ndimage import find_objects
-from scipy.interpolate import LinearNDInterpolator, griddata
 from sklearn.decomposition import PCA
 
 from .horizon import Horizon
-from .geometry import SeismicGeometry, SeismicGeometrySEGY
-from .utils import groupby_mean, groupby_min, groupby_max
 from .triangulation import triangulation, triangle_rasterization
 
 class Fault(Horizon):
@@ -82,17 +74,17 @@ class Fault(Horizon):
         triangles = triangulation(sticks)
         points = []
         for triangle in triangles:
-            res = triangle_rasterization(triangle, width=5)
+            res = triangle_rasterization(triangle, width=1)
             points += [res]
         return np.concatenate(points, axis=0)
 
-    def add_to_mask(self, mask, locations=None, width=3, alpha=1, **kwargs):
+    def add_to_mask(self, mask, locations=None, width=1, alpha=1, **kwargs):
         """ Add fault to background. """
         mask_bbox = np.array([[locations[0].start, locations[0].stop],
                               [locations[1].start, locations[1].stop],
                               [locations[2].start, locations[2].stop]],
                              dtype=np.int32)
-        (mask_i_min, mask_i_max), (mask_x_min, mask_x_max), (mask_h_min, mask_h_max) = mask_bbox
+        (mask_i_min, _), (mask_x_min, _), (mask_h_min, _) = mask_bbox
 
         left =  width // 2
         right = width - left
@@ -127,7 +119,9 @@ class Fault(Horizon):
 
         _df = df[np.logical_and(i_mask, x_mask)]
 
-        df.loc[np.logical_and(i_mask, x_mask), ['iline', 'xline']] = np.rint(self.geometry.cdp_to_lines(_df[['cdp_x', 'cdp_y']].values)).astype('int32')
+        df.loc[np.logical_and(i_mask, x_mask), ['iline', 'xline']] = np.rint(
+            self.geometry.cdp_to_lines(_df[['cdp_x', 'cdp_y']].values)
+        ).astype('int32')
 
         return df
 
