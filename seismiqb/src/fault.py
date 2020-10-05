@@ -6,8 +6,6 @@ import glob
 import numpy as np
 import pandas as pd
 
-from numba import njit
-
 from sklearn.decomposition import PCA
 
 from .horizon import Horizon
@@ -18,11 +16,15 @@ class Fault(Horizon):
     FAULT_STICKS = ['INLINE', 'iline', 'xline', 'cdp_x', 'cdp_y', 'height', 'name', 'number']
     COLUMNS = ['iline', 'xline', 'height', 'name', 'number']
 
+    def __init__(self, *args, **kwargs):
+        self._max = None
+        self._min = None
+        super().__init__(*args, **kwargs)
+
     def from_file(self, path, transform=True, **kwargs):
         """ Init from path to either CHARISMA or REDUCED_CHARISMA csv-like file
         or from .npy file with points. """
         _ = kwargs
-
         self.path = path
         self.name = os.path.basename(path)
         ext = os.path.splitext(path)[1]
@@ -30,23 +32,24 @@ class Fault(Horizon):
             points = np.load(path, allow_pickle=True)
             self.from_points(points, False, **kwargs)
         else:
-            points = self.csv_to_points(path)
+            points = self.csv_to_points(path, **kwargs)
             self.from_points(points, transform, **kwargs)
         self._max = self.points.max(axis=0)
         self._min = self.points.min(axis=0)
 
-    def csv_to_points(self, path):
+    def csv_to_points(self, path, **kwargs):
         """ Get point cloud array from file values. """
         #pylint: disable=anomalous-backslash-in-string
         df = self.read_file(path)
         df = self.fix_lines(df)
         sticks = self.read_sticks(df)
         sticks = self.sort_sticks(sticks)
-        points = self.interpolate_3d(sticks)
+        points = self.interpolate_3d(sticks, **kwargs)
         return points
 
     @classmethod
     def read_sticks(cls, df):
+        """ Transform initial fault dataframe to array of sticks. """
         if 'number' in df.columns:
             col = 'number'
         elif df.iline.iloc[0] == df.iline.iloc[1]:
@@ -72,14 +75,15 @@ class Fault(Horizon):
         else:
             raise ValueError('Fault labels must be in FAULT_STICKS, CHARISMA or REDUCED_CHARISMA format.')
 
-        return pd.read_csv(path, sep='\s+', names=names)
+        return pd.read_csv(path, sep=r'\s+', names=names)
 
-    def interpolate_3d(self, sticks):
+    def interpolate_3d(self, sticks, **kwargs):
         """ Interpolate fault sticks as a surface. """
+        width = kwargs.get('width', 1)
         triangles = triangulation(sticks)
         points = []
         for triangle in triangles:
-            res = triangle_rasterization(triangle, width=1)
+            res = triangle_rasterization(triangle, width)
             points += [res]
         return np.concatenate(points, axis=0)
 
@@ -93,17 +97,16 @@ class Fault(Horizon):
 
         if (self._max < mask_bbox[:, 0]).any() or (self._min >= mask_bbox[:, 1]).any():
             return mask
-        else:
-            cond = np.ones(len(points))
-            for i in range(3):
-                _cond = np.logical_and(points[:, i] >= locations[i].start, points[:, i] < locations[i].stop)
-                cond = np.logical_and(cond, _cond)
-            points = points[cond]
-            points = points - np.array(mask_bbox[:, 0]).reshape(1, 3)
-            points = np.maximum(points, 0)
-            points = np.minimum(points, np.array(mask.shape) - 1)
-            mask[points[:, 0], points[:, 1], points[:, 2]] = 1
-            return mask
+        cond = np.ones(len(points))
+        for i in range(3):
+            _cond = np.logical_and(points[:, i] >= locations[i].start, points[:, i] < locations[i].stop)
+            cond = np.logical_and(cond, _cond)
+        points = points[cond]
+        points = points - np.array(mask_bbox[:, 0]).reshape(1, 3)
+        points = np.maximum(points, 0)
+        points = np.minimum(points, np.array(mask.shape) - 1)
+        mask[points[:, 0], points[:, 1], points[:, 2]] = 1
+        return mask
 
     def fix_lines(self, df):
         """ Fix broken iline and crossline coordinates. """

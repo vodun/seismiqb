@@ -627,7 +627,7 @@ def generate_points(edges, divisors, lengths, indices):
 @njit
 def _filter_faults(labels, threshold=20):
     """ Filter short fault.
-    
+
     Parameters
     ----------
     threshold : int
@@ -647,7 +647,7 @@ def _filter_faults(labels, threshold=20):
 
 def _thin_faults(labels, indices):
     """ Transform each fault to thin line.
-    
+
     Parameters
     ----------
     labels : tuple
@@ -669,6 +669,20 @@ def _thin_faults(labels, indices):
     return new_labels
 
 def process_faults(faults, threshold=10, slices=None):
+    """ Postprocessing for predicted cube of faults.
+
+    Parameters
+    ----------
+    threshold : int
+        length (in ilines) of fault
+    slices : tuple of slices
+        region of cube to process
+
+    Returns
+    -------
+    new_labels : numpy.ndarray
+        mask of the same size with transformed faults
+    """
     cube = faults.file_hdf5['cube']
     if slices is not None:
         cube = cube[slices]

@@ -4,6 +4,20 @@ from numba import njit, prange
 
 @njit
 def triangle_rasterization(points, width=1):
+    """ Transform triangle to surface of the fixed thickness.
+
+    Parameters
+    ----------
+    points : numpy.ndarray
+        array of size 3 x 3: each row is a vertex of triangle
+    width : int
+        thickness
+
+    Return
+    ------
+    numpy.ndarray
+        array of size N x 3 where N is a number of points in rasterization.
+    """
     shape = np.array([np.max(points[:, i]) - np.min(points[:, i]) for i in range(3)])
     _points = np.zeros((int((shape[0] + 2) * (shape[1] + 2) * (shape[2] + 2)), 3))
     i = 0
@@ -17,6 +31,18 @@ def triangle_rasterization(points, width=1):
     return _points[:i]
 
 def triangulation(points):
+    """ Compute triangulation of the fault.
+
+    Parameters
+    ----------
+    points : numpy.ndarray
+        array of sticks
+
+    Return
+    ------
+    numpy.ndarray
+        triangultaion
+    """
     triangles = []
     for s1, s2 in zip(points[:-1], points[1:]):
         if len(s1) > len(s2):
