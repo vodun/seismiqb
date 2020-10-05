@@ -6,6 +6,8 @@ import glob
 import numpy as np
 import pandas as pd
 
+from numba import njit
+
 from sklearn.decomposition import PCA
 
 from .horizon import Horizon
@@ -23,12 +25,15 @@ class Fault(Horizon):
 
         self.path = path
         self.name = os.path.basename(path)
-        if '.npy' in path:
+        ext = os.path.splitext(path)[1]
+        if ext == '.npy':
             points = np.load(path, allow_pickle=True)
-            transform = False
+            self.from_points(points, False, **kwargs)
         else:
             points = self.csv_to_points(path)
-        self.from_points(points, transform, **kwargs)
+            self.from_points(points, transform, **kwargs)
+        self._max = self.points.max(axis=0)
+        self._min = self.points.min(axis=0)
 
     def csv_to_points(self, path):
         """ Get point cloud array from file values. """
@@ -78,36 +83,27 @@ class Fault(Horizon):
             points += [res]
         return np.concatenate(points, axis=0)
 
-    def add_to_mask(self, mask, locations=None, width=1, alpha=1, **kwargs):
+    def add_to_mask(self, mask, locations=None, **kwargs):
         """ Add fault to background. """
         mask_bbox = np.array([[locations[0].start, locations[0].stop],
                               [locations[1].start, locations[1].stop],
                               [locations[2].start, locations[2].stop]],
                              dtype=np.int32)
-        (mask_i_min, _), (mask_x_min, _), (mask_h_min, _) = mask_bbox
-
-        left =  width // 2
-        right = width - left
-
         points = self.points
-        for i in range(3):
-            positions = np.arange(locations[i].stop)[locations[i]]
-            points = points[np.isin(points[:, i], positions)]
-        def _extend_line(points):
-            _points = []
-            for x in range(-left, right):
-                for y in range(-left, right):
-                    arr = points + np.array([x, y, 0]).reshape(1, 3)
-                    _points.append(arr)
-            return np.concatenate(_points)
 
-        points = _extend_line(points)
-        points = points - np.array([mask_i_min, mask_x_min, mask_h_min]).reshape(1, 3)
-        points = np.maximum(points, 0)
-        points = np.minimum(points, np.array(mask.shape) - 1)
-
-        mask[points[:, 0], points[:, 1], points[:, 2]] = 1
-        return mask
+        if (self._max < mask_bbox[:, 0]).any() or (self._min >= mask_bbox[:, 1]).any():
+            return mask
+        else:
+            cond = np.ones(len(points))
+            for i in range(3):
+                _cond = np.logical_and(points[:, i] >= locations[i].start, points[:, i] < locations[i].stop)
+                cond = np.logical_and(cond, _cond)
+            points = points[cond]
+            points = points - np.array(mask_bbox[:, 0]).reshape(1, 3)
+            points = np.maximum(points, 0)
+            points = np.minimum(points, np.array(mask.shape) - 1)
+            mask[points[:, 0], points[:, 1], points[:, 2]] = 1
+            return mask
 
     def fix_lines(self, df):
         """ Fix broken iline and crossline coordinates. """
@@ -132,8 +128,12 @@ class Fault(Horizon):
         indices = np.array([i for _, i in sorted(zip(coords, range(len(sticks))))])
         return sticks.iloc[indices]
 
-    def dump_points(self, path):
-        self.points.dump(path)
+    def dump_points(self, path, fmt='npy'):
+        """ Dump interpolated fault points. """
+        if fmt == 'npy':
+            self.points.dump(path)
+        else:
+            raise ValueError('Unknown format:', fmt)
 
     @classmethod
     def check_format(cls, path, verbose=False):
