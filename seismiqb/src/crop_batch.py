@@ -170,10 +170,30 @@ class SeismicCropBatch(Batch):
         """
         # pylint: disable=protected-access
 
+        # Create all the points and shapes
+        if adaptive_slices:
+            shape = np.asarray(shape)
+
+            indices, points_, shapes = [], [], []
+            for point in points:
+                try:
+                    point_, shape_ = self._correct_point_to_grid(point, shape, grid_src, eps)
+                    indices.append(point[0])
+                    points_.append(point_)
+                    shapes.append(shape_)
+                except RecursionError:
+                    pass
+            points = points_
+        else:
+            indices = points[:, 0]
+            shapes = self._make_shapes(points, shape, side_view)
+
+        locations = [self._make_location(point, shape, direction) for point, shape in zip(points, shapes)]
+
+        # Create a new Batch instance, if needed
         if not hasattr(self, 'transformed'):
-            new_index = [self.salt(ix) for ix in points[:, 0]]
-            new_dict = {ix: self.index.get_fullpath(self.unsalt(ix))
-                        for ix in new_index}
+            new_index = [self.salt(ix) for ix in indices]
+            new_dict = {ix: self.index.get_fullpath(self.unsalt(ix)) for ix in new_index}
             new_batch = type(self)(FilesIndex.from_index(index=new_index, paths=new_dict, dirs=False))
             new_batch.transformed = True
 
@@ -183,24 +203,10 @@ class SeismicCropBatch(Batch):
             for component in passdown:
                 if hasattr(self, component):
                     new_batch.add_components(component, getattr(self, component))
-
         else:
             if len(points) != len(self):
                 raise ValueError('Subsequent usage of `crop` must have the same number of points!')
             new_batch = self
-
-        if adaptive_slices:
-            shape = np.asarray(shape)
-
-            corrected_points_shapes = [self._correct_point_to_grid(point, shape, grid_src, eps) for point in points]
-            points = [item[0] for item in corrected_points_shapes]
-            shapes = [item[1] for item in corrected_points_shapes]
-
-            locations = [self._make_location(point, shape, direction) for point, shape in corrected_points_shapes]
-        else:
-            shapes = self._make_shapes(points, shape, side_view)
-
-            locations = [self._make_location(point, shape, direction) for point, shape in zip(points, shapes)]
 
         new_batch.add_components((dst_points, dst_shapes), (points, shapes))
         new_batch.add_components(dst, locations)
@@ -289,7 +295,7 @@ class SeismicCropBatch(Batch):
 
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def load_cubes(self, ix, dst, src='locations', **kwargs):
+    def load_cubes(self, ix, dst, src_locations='locations', src_geometry='geometries', **kwargs):
         """ Load data from cube in given positions.
 
         Parameters

@@ -401,7 +401,8 @@ class SeismicCubeset(Dataset):
 
 
     def make_grid(self, cube_name, crop_shape, ilines=None, xlines=None, heights=None,
-                  overlap=None, overlap_factor=None, batch_size=16, filtering_matrix=None, filter_threshold=0):
+                  strides=None, overlap=None, overlap_factor=None,
+                  batch_size=16, filtering_matrix=None, filter_threshold=0):
         """ Create regular grid of points in cube.
         This method is usually used with `assemble_predict` action of SeismicCropBatch.
 
@@ -420,7 +421,7 @@ class SeismicCubeset(Dataset):
         heights : sequence of two elements
             Location of desired prediction, depth-wise.
             If None, whole cube ranges will be used.
-        overlap : float or sequence
+        strides : float or sequence
             Distance between grid points.
         overlap_factor : float or sequence
             Overlapping ratio of successive crops.
@@ -438,12 +439,18 @@ class SeismicCubeset(Dataset):
             in a crop in the grid. Default value is 0.
             If float, proportion from the total number of traces in a crop will be computed.
         """
+        #pylint: disable=too-many-branches
         geometry = self.geometries[cube_name]
-        overlap = overlap or crop_shape
+
         if isinstance(overlap_factor, (int, float)):
             overlap_factor = [overlap_factor] * 3
-        if overlap_factor:
-            overlap = [max(1, int(item // factor)) for item, factor in zip(crop_shape, overlap_factor)]
+        if strides is None:
+            if overlap:
+                strides = (c - o for c, o in zip(crop_shape, overlap))
+            elif overlap_factor:
+                strides = [max(1, int(item // factor)) for item, factor in zip(crop_shape, overlap_factor)]
+            else:
+                strides = crop_shape
 
         if 0 < filter_threshold < 1:
             filter_threshold = int(filter_threshold * np.prod(crop_shape[:2]))
@@ -452,20 +459,18 @@ class SeismicCubeset(Dataset):
         if (filtering_matrix.shape != geometry.cube_shape[:2]).all():
             raise ValueError('Filtering_matrix shape must be equal to (ilines_len, xlines_len)')
 
-        ilines = (0, geometry.ilines_len - 1) if ilines is None else ilines
-        xlines = (0, geometry.xlines_len - 1) if xlines is None else xlines
-        heights = (0, geometry.depth - 1) if heights is None else heights
+        ilines = (0, geometry.ilines_len) if ilines is None else ilines
+        xlines = (0, geometry.xlines_len) if xlines is None else xlines
+        heights = (0, geometry.depth) if heights is None else heights
 
         # Assert ranges are valid
-        if ilines[0] < 0 or \
-           xlines[0] < 0 or \
-           heights[0] < 0:
-            raise ValueError('Ranges must contain in the cube.')
+        if ilines[0] < 0 or xlines[0] < 0 or heights[0] < 0:
+            raise ValueError('Ranges must contain within the cube.')
 
-        if ilines[1] >= geometry.ilines_len or \
-           xlines[1] >= geometry.xlines_len or \
-           heights[1] >= geometry.depth:
-            raise ValueError('Ranges must contain in the cube.')
+        if ilines[1] > geometry.ilines_len or \
+           xlines[1] > geometry.xlines_len or \
+           heights[1] > geometry.depth:
+            raise ValueError('Ranges must contain within the cube.')
 
         # Make separate grids for every axis
         def _make_axis_grid(axis_range, stride, length, crop_shape):
@@ -475,9 +480,9 @@ class SeismicCubeset(Dataset):
                 grid_ += [axis_range[1] - crop_shape]
             return sorted(grid_)
 
-        ilines_grid = _make_axis_grid(ilines, overlap[0], geometry.ilines_len, crop_shape[0])
-        xlines_grid = _make_axis_grid(xlines, overlap[1], geometry.xlines_len, crop_shape[1])
-        heights_grid = _make_axis_grid(heights, overlap[2], geometry.depth, crop_shape[2])
+        ilines_grid = _make_axis_grid(ilines, strides[0], geometry.ilines_len, crop_shape[0])
+        xlines_grid = _make_axis_grid(xlines, strides[1], geometry.xlines_len, crop_shape[1])
+        heights_grid = _make_axis_grid(heights, strides[2], geometry.depth, crop_shape[2])
 
         # Every point in grid contains reference to cube
         # in order to be valid input for `crop` action of SeismicCropBatch
@@ -489,13 +494,11 @@ class SeismicCubeset(Dataset):
                     for h in heights_grid:
                         point = [cube_name, il, xl, h]
                         grid.append(point)
-
-        shifts = np.array([ilines[0], xlines[0], heights[0]])
-
         grid = np.array(grid, dtype=object)
 
         # Creating and storing all the necessary things
         # Check if grid is not empty
+        shifts = np.array([ilines[0], xlines[0], heights[0]])
         if len(grid) > 0:
             grid_gen = (grid[i:i+batch_size]
                         for i in range(0, len(grid), batch_size))
@@ -514,10 +517,13 @@ class SeismicCubeset(Dataset):
             'grid_array': grid_array,
             'predict_shape': predict_shape,
             'crop_shape': crop_shape,
+            'strides': strides,
             'cube_name': cube_name,
             'geometry': geometry,
             'range': [ilines, xlines, heights],
-            'shifts': shifts
+            'shifts': shifts,
+            'length': len(grid_array),
+            'unfiltered_length': len(ilines_grid) * len(xlines_grid) * len(heights_grid)
         }
 
 
@@ -788,15 +794,21 @@ class SeismicCubeset(Dataset):
         crop_shape = grid_info['crop_shape']
         background = np.full(grid_info['predict_shape'], fill_value)
 
-        for i in range(len(grid_array)):
-            il, xl, h = grid_array[i, :]
-            il_end = min(background.shape[0], il+crop_shape[0])
-            xl_end = min(background.shape[1], xl+crop_shape[1])
-            h_end = min(background.shape[2], h+crop_shape[2])
+        for j, (i, x, h) in enumerate(grid_array):
+            crop_slice, background_slice = [], []
 
-            crop = np.transpose(crops[i], order)
-            crop = crop[:(il_end-il), :(xl_end-xl), :(h_end-h)]
-            previous = background[il:il_end, xl:xl_end, h:h_end]
-            background[il:il_end, xl:xl_end, h:h_end] = np.maximum(crop, previous)
+            for k, start in enumerate((i, x, h)):
+                if start >= 0:
+                    end = min(background.shape[k], start + crop_shape[k])
+                    crop_slice.append(slice(0, end - start))
+                    background_slice.append(slice(start, end))
+                else:
+                    crop_slice.append(slice(-start, None))
+                    background_slice.append(slice(None))
+
+            crop = np.transpose(crops[j], order)
+            crop = crop[crop_slice]
+            previous = background[background_slice]
+            background[background_slice] = np.maximum(crop, previous)
 
         return background

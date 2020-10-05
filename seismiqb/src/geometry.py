@@ -113,6 +113,7 @@ class SeismicGeometry:
     #TODO: add separate class for cube-like labels
     SEGY_ALIASES = ['sgy', 'segy', 'seg']
     HDF5_ALIASES = ['hdf5', 'h5py']
+    NPZ_ALIASES = ['npz']
 
     # Attributes to store during SEG-Y -> HDF5 conversion
     PRESERVED = [
@@ -146,6 +147,8 @@ class SeismicGeometry:
             new_cls = SeismicGeometrySEGY
         elif fmt in cls.HDF5_ALIASES:
             new_cls = SeismicGeometryHDF5
+        elif fmt in cls.NPZ_ALIASES:
+            new_cls = SeismicGeometryNPZ
         else:
             raise TypeError('Unknown format of the cube.')
 
@@ -785,6 +788,40 @@ class SeismicGeometrySEGY(SeismicGeometry):
         """ Convert lines to CDP. """
         return (self.rotation_matrix[:, :2] @ points.T + self.rotation_matrix[:, 2].reshape(2, -1)).T
 
+    def compute_area(self, correct=True, shift=50):
+        """ Compute approximate area of the cube in square kilometres.
+
+        Parameters
+        ----------
+        correct : bool
+            Whether to correct computed area for zero traces.
+        """
+        if self.headers != self.HEADERS_POST_FULL:
+            raise TypeError('Geometry index must be `POST_FULL`')
+
+        i = self.ilines[self.ilines_len // 2]
+        x = self.xlines[self.xlines_len // 2]
+
+        cdp_x, cdp_y = self.dataframe[['CDP_X', 'CDP_Y']].ix[(i, x)]
+        cdp_x_delta = abs(self.dataframe[['CDP_X']].ix[(i, x + shift)][0] - cdp_x)
+        cdp_y_delta = abs(self.dataframe[['CDP_Y']].ix[(i + shift, x)][0] - cdp_y)
+
+        if cdp_x_delta == 0 and cdp_y_delta == 0:
+            cdp_x_delta = abs(self.dataframe[['CDP_X']].ix[(i + shift, x)][0] - cdp_x)
+            cdp_y_delta = abs(self.dataframe[['CDP_Y']].ix[(i, x + shift)][0] - cdp_y)
+
+        cdp_x_delta /= shift
+        cdp_y_delta /= shift
+
+        ilines_km = cdp_y_delta * self.ilines_len / 1000
+        xlines_km = cdp_x_delta * self.xlines_len / 1000
+        area = ilines_km * xlines_km
+
+        if correct and hasattr(self, 'zero_traces'):
+            area -= (cdp_x_delta / 1000) * (cdp_y_delta / 1000) * np.sum(self.zero_traces)
+        return area
+
+
     def set_index(self, index_headers, sortby=None):
         """ Change current index to a subset of loaded headers. """
         self.dataframe.reset_index(inplace=True)
@@ -1203,3 +1240,76 @@ class SeismicGeometryHDF5(SeismicGeometry):
         if squeeze:
             crop = np.squeeze(crop, axis=tuple(squeeze))
         return crop
+
+
+
+class SeismicGeometryNPZ(SeismicGeometry):
+    """ Create a Geometry instance from a `numpy`-saved file. Stores everything in memory.
+    Can simultaneously work with multiple type of cube attributes, e.g. amplitudes, GLCM, RMS, etc.
+    """
+    #pylint: disable=attribute-defined-outside-init
+    def __init__(self, path, **kwargs):
+        self.structured = True
+        self.file_npz = None
+        self.names = None
+        self.data = {}
+
+        super().__init__(path, **kwargs)
+
+    def process(self, order=(0, 1, 2), **kwargs):
+        """ Create all the missing attributes. """
+        self.index_headers = SeismicGeometry.INDEX_POST
+        self.file_npz = np.load(self.path, allow_pickle=True, mmap_mode='r')
+
+        self.names = list(self.file_npz.keys())
+        self.data = {key : np.transpose(self.file_npz[key], order) for key in self.names}
+
+        data = self.data['data']
+        self.cube_shape = np.array(data.shape)
+        self.lens = self.cube_shape[:2]
+        self.zero_traces = np.zeros(self.lens)
+
+        # Attributes
+        self.depth = self.cube_shape[2]
+        self.delay, self.sample_rate = 0, 0
+        self.value_min = np.min(data)
+        self.value_max = np.max(data)
+        self.q001, self.q01, self.q99, self.q999 = np.quantile(data, [0.001, 0.01, 0.99, 0.999])
+
+
+    # Methods to load actual data from NPZ
+    def load_crop(self, locations, names=None, **kwargs):
+        """ Load 3D crop from the cube.
+        Automatically chooses the fastest axis to use: as `hdf5` files store multiple copies of data with
+        various orientations, some axis are faster than others depending on exact crop location and size.
+
+        Parameters
+        locations : sequence of slices
+            Location to load: slices along the first index, the second, and depth.
+        names : sequence
+            Names of data attributes to load.
+        """
+        _ = kwargs
+        names = names or self.names[:1]
+        shape = np.array([(slc.stop - slc.start) for slc in locations])
+        axis = np.argmin(shape)
+
+        crops = [self.data[key][locations[0], locations[1], locations[2]] for key in names]
+        crop = np.concatenate(crops, axis=axis)
+        return crop
+
+    def load_slide(self, loc, axis='iline', **kwargs):
+        """ Load desired slide along desired axis. """
+        _ = kwargs
+        locations = self.make_slide_locations(loc, axis)
+        crop = self.load_crop(locations, names=['data'])
+        return crop.squeeze()
+
+    @property
+    def nbytes(self):
+        """ Size of instance in bytes. """
+        return sum(sys.getsizeof(self.data[key]) for key in self.names)
+
+    def __getattr__(self, key):
+        """ Use default `object` getattr, without `.meta` magic. """
+        return object.__getattribute__(self, key)
