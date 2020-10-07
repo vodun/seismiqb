@@ -99,12 +99,12 @@ class SeismicCropBatch(Batch):
 
     def get(self, item=None, component=None):
         """ Custom access for batch attribures.
-        If `component` looks like `label`, `geometry`, 'cutouts' or `surface`,
-        then we retrieve that dictionary from attached dataset and use unsalted
+        If `component` looks like `label` or `geometry` then we retrieve
+        that dictionary from attached dataset and use unsalted
         version of `item` as key. Otherwise, we get position of `item`
         in the current batch and use it to index sequence-like `component`.
         """
-        if sum([attribute in component for attribute in ['label', 'geom', 'cutouts', 'surfaces']]):
+        if sum([attribute in component for attribute in ['label', 'geom']]):
             if isinstance(item, str) and self.has_salt(item):
                 item = self.unsalt(item)
             res = getattr(self, component)
@@ -290,20 +290,47 @@ class SeismicCropBatch(Batch):
 
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def load_cubes(self, ix, dst, src_data='geometries', src_locations='locations', **kwargs):
+    def load_cubes(self, ix, dst, src_geometry='geometries', src_locations='locations', src_labels='labels',
+                   along_nearest_horizon=False, window=None, offset=None, **kwargs):
         """ Load data from cube in given positions.
 
         Parameters
         ----------
-        src : str
-            Component of batch with positions of crops to load.
         dst : str
             Component of batch to put loaded crops in.
-        """
-        data = self.get(ix, src_data)
-        location = self.get(ix, src_locations)
-        return data.load_crop(location, **kwargs)
+        src_geometry : str
+            Dataset attribute to load crops from
+            when `along_nearest_horizon` is False.
+        src_locations : str
+            Dataset attribute to load crops from
+            when `along_nearest_horizon` is True.
+        src_labels : str
+            Dataset attribute to load crops from
+            when `along_nearest_horizon` is True.
+        along_nearest_horizon : bool
+            Crop creation mode.
+            If True, crop data along horizon from `src_labels`
+            nearest to height from `src_locations`.
+            If False, just crop data at given `src_locations`.
+            Defaults to False.
+        window : int
+            Width of data to cut when `along_nearest_horizon` is True.
+        offset : int
+            Offset of data to cut when `along_nearest_horizon` is True.
 
+        Notes
+        -----
+        Cropping data along horizon will lead to it "rectification",
+        i.e. horizon amplitudes will form a straight plane in resulting crop.
+        """
+        location = self.get(ix, src_locations)
+        if along_nearest_horizon:
+            location_h_mean = (location[2].start + location[2].stop) // 2
+            nearest_horizon_num = np.argmin([horizon.h_mean - location_h_mean for horizon in self.get(ix, 'labels')])
+            nearest_horizon = self.get(ix, 'labels')[nearest_horizon_num]
+            return nearest_horizon.load_crop_along(location, window, offset)
+        geometry = self.get(ix, src_data)
+        return geometry.load_crop(location, **kwargs)
 
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
@@ -735,9 +762,10 @@ class SeismicCropBatch(Batch):
 
         copy_ = copy(crop)
         for _ in range(int(n)):
-            x_ = int(rnd(max(crop.shape[0] - patch_shape[0], 1)))
-            h_ = int(rnd(max(crop.shape[1] - patch_shape[1], 1)))
-            copy_[x_:x_+patch_shape[0], h_:h_+patch_shape[1], :] = 0
+            starts = [int(rnd(crop.shape[ax] - patch_shape[ax])) for ax in range(3)]
+            stops = [starts[ax] + patch_shape[ax] for ax in range(3)]
+            slices = [slice(start, stop) for start, stop in zip(starts, stops)]
+            copy_[slices] = 0
         return copy_
 
     @apply_parallel

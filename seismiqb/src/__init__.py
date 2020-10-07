@@ -8,4 +8,3 @@ from .metrics import HorizonMetrics, GeometryMetrics, enlarge_carcass_metric, ME
 from .plotters import plot_image, plot_loss
 from .utils import * # pylint: disable=wildcard-import
 from .controllers import *
-from .rectified import RectifiedGeometry, RectifiedSurface

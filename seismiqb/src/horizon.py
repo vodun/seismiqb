@@ -14,7 +14,7 @@ from scipy.ndimage.morphology import binary_fill_holes, binary_erosion
 from scipy.ndimage import find_objects
 from skimage.measure import label
 
-from .utils import round_to_array, groupby_mean, groupby_min, groupby_max, HorizonSampler
+from .utils import round_to_array, groupby_mean, groupby_min, groupby_max, HorizonSampler, lru_cache
 from .plotters import plot_image
 
 
@@ -377,6 +377,7 @@ class Horizon:
         self._matrix = None
         self._points = None
         self._depths = None
+        self._cube_values_along = None
 
         # Heights information
         self._h_min, self._h_max = None, None
@@ -962,6 +963,28 @@ class Horizon:
         background[self.geometry.zero_traces == 1] = np.nan
         return background
 
+
+    """Cached version of `Horizon.get_cube_values`
+    to allow direct calls of that method that won't be cached."""
+    cached_get_cube_values = lru_cache(1)(get_cube_values)
+
+
+    def load_crop_along(self, location, window, offset, **kwargs):
+        """Make crops from data cut along the horizon.
+
+        Parameters
+        ----------
+        location : iterable of at least 2 slices
+            First two slices are used as `ilines` and `xlines` ranges
+            to cut crop from. All other slices are omitted.
+
+        Other parameters are the same as in `Horizon.get_cube_values`.
+        """
+        i_slice, x_slice = [slice(slice_.start + shift, slice_.stop + shift) for slice_, shift in zip(location[:2], self.bbox[:,0])]
+        data = self.cached_get_cube_values(window, offset, **kwargs)
+        return data[i_slice, x_slice]
+
+
     def get_cube_values_line(self, orientation='ilines', line=1, window=23, offset=0, scale=False):
         """ Get values from the cube along the horizon on a particular line.
 
@@ -1100,11 +1123,8 @@ class Horizon:
 
     @property
     def horizon_metrics(self):
-        """ Create `HorizonMetrics` instance in a cached manner. """
-        if self._horizon_metrics is None:
-            from .metrics import HorizonMetrics
-            self._horizon_metrics = HorizonMetrics(self)
-        return self._horizon_metrics
+        """ Calculate `HorizonMetrics` on demand. """
+        return HorizonMetrics(self)
 
     @property
     def instantaneous_phase(self):
