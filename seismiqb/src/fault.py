@@ -6,8 +6,11 @@ import glob
 import numpy as np
 import pandas as pd
 
+import h5py
+
 from sklearn.decomposition import PCA
 
+from .geometry import SeismicGeometry
 from .horizon import Horizon
 from .triangulation import triangulation, triangle_rasterization
 
@@ -17,8 +20,7 @@ class Fault(Horizon):
     COLUMNS = ['iline', 'xline', 'height', 'name', 'number']
 
     def __init__(self, *args, **kwargs):
-        self._max = None
-        self._min = None
+        self.cube = None
         super().__init__(*args, **kwargs)
 
     def from_file(self, path, transform=True, **kwargs):
@@ -27,15 +29,13 @@ class Fault(Horizon):
         _ = kwargs
         self.path = path
         self.name = os.path.basename(path)
-        ext = os.path.splitext(path)[1]
-        if ext == '.npy':
+        ext = os.path.splitext(path)[1][1:]
+        if ext == 'npy':
             points = np.load(path, allow_pickle=True)
             self.from_points(points, False, **kwargs)
         else:
             points = self.csv_to_points(path, **kwargs)
             self.from_points(points, transform, **kwargs)
-        self._max = self.points.max(axis=0)
-        self._min = self.points.min(axis=0)
 
     def csv_to_points(self, path, **kwargs):
         """ Get point cloud array from file values. """
@@ -89,24 +89,31 @@ class Fault(Horizon):
 
     def add_to_mask(self, mask, locations=None, **kwargs):
         """ Add fault to background. """
-        mask_bbox = np.array([[locations[0].start, locations[0].stop],
-                              [locations[1].start, locations[1].stop],
-                              [locations[2].start, locations[2].stop]],
-                             dtype=np.int32)
-        points = self.points
-
-        if (self._max < mask_bbox[:, 0]).any() or (self._min >= mask_bbox[:, 1]).any():
+        if self.cube:
+            _slice = [slice(locations[i].start, locations[i].stop) for i in range(3)]
+            mask[_slice] = self.cube[_slice]
             return mask
-        cond = np.ones(len(points))
-        for i in range(3):
-            _cond = np.logical_and(points[:, i] >= locations[i].start, points[:, i] < locations[i].stop)
-            cond = np.logical_and(cond, _cond)
-        points = points[cond]
-        points = points - np.array(mask_bbox[:, 0]).reshape(1, 3)
-        points = np.maximum(points, 0)
-        points = np.minimum(points, np.array(mask.shape) - 1)
-        mask[points[:, 0], points[:, 1], points[:, 2]] = 1
-        return mask
+        else:
+            mask_bbox = np.array([[locations[0].start, locations[0].stop],
+                                [locations[1].start, locations[1].stop],
+                                [locations[2].start, locations[2].stop]],
+                                dtype=np.int32)
+            points = self.points
+            _min = self.i_min, self.x_min, self._h_min
+            _max = self.i_max, self.x_max, self._h_max
+
+            if (_max < mask_bbox[:, 0]).any() or (_min >= mask_bbox[:, 1]).any():
+                return mask
+            cond = np.ones(len(points))
+            for i in range(3):
+                _cond = np.logical_and(points[:, i] >= locations[i].start, points[:, i] < locations[i].stop)
+                cond = np.logical_and(cond, _cond)
+            points = points[cond]
+            points = points - np.array(mask_bbox[:, 0]).reshape(1, 3)
+            points = np.maximum(points, 0)
+            points = np.minimum(points, np.array(mask.shape) - 1)
+            mask[points[:, 0], points[:, 1], points[:, 2]] = 1
+            return mask
 
     def fix_lines(self, df):
         """ Fix broken iline and crossline coordinates. """
@@ -135,6 +142,28 @@ class Fault(Horizon):
         """ Dump interpolated fault points. """
         if fmt == 'npy':
             self.points.dump(path)
+        elif fmt == 'hdf5':
+            file_hdf5 = h5py.File(path, "a")
+            if 'cube' not in file_hdf5:
+                cube_hdf5 = file_hdf5.create_dataset('cube', self.geometry.cube_shape)
+                cube_hdf5_x = file_hdf5.create_dataset('cube_x', self.geometry.cube_shape[[1, 2, 0]])
+                cube_hdf5_h = file_hdf5.create_dataset('cube_h', self.geometry.cube_shape[[2, 0, 1]])
+            else:
+                cube_hdf5 = file_hdf5['cube']
+                cube_hdf5_x = file_hdf5['cube_x']
+                cube_hdf5_h = file_hdf5['cube_h']
+
+            shape = (self.i_length, self.x_length, self.h_max - self.h_min + 1)
+            fault_array = np.zeros(shape)
+
+            points = self.points - np.array([self.i_min, self.x_min, self._h_min])
+            fault_array[points[:, 0], points[:, 1], points[:, 2]] = 1
+
+            cube_hdf5[self.i_min:self.i_max+1, self.x_min:self.x_max+1, self.h_min:self.h_max+1] += fault_array
+            cube_hdf5_x[self.x_min:self.x_max+1, self.h_min:self.h_max+1, self.i_min:self.i_max+1] += np.transpose(fault_array, (1, 2, 0))
+            cube_hdf5_h[self.h_min:self.h_max+1, self.i_min:self.i_max+1, self.x_min:self.x_max+1] += np.transpose(fault_array, (2, 0, 1))
+
+            file_hdf5.close()
         else:
             raise ValueError('Unknown format:', fmt)
 

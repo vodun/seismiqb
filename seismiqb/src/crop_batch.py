@@ -305,8 +305,8 @@ class SeismicCropBatch(Batch):
         dst : str
             Component of batch to put loaded crops in.
         """
-        geometry = self.get(ix, 'geometries')
-        location = self.get(ix, src)
+        geometry = self.get(ix, src_geometry)
+        location = self.get(ix, src_locations)
         return geometry[tuple(location)]
         # return geometry.load_crop(location, **kwargs)
 

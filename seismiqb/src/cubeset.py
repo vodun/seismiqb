@@ -159,7 +159,7 @@ class SeismicCubeset(Dataset):
                 _ = [getattr(item, 'filter')() for item in label_list]
             getattr(self, dst)[ix] = [item for item in label_list if len(item.points) > 0]
 
-    def dump_labels(self, path, fmt='npy'):
+    def dump_labels(self, path, fmt='npy', separate=False):
         """ Dump points to file. """
         for i in range(len(self.indices)):
             for label in self.labels[i]:
@@ -169,7 +169,10 @@ class SeismicCubeset(Dataset):
                 dirname = os.path.join(dirname, path)
                 if not os.path.exists(dirname):
                     os.makedirs(dirname)
-                save_to = os.path.join(dirname, label.name + '.' + fmt)
+                if separate:
+                    save_to == os.path.join(dirname, label.name + '.' + fmt)
+                else:
+                    save_to = os.path.join(dirname, 'faults' + '.' + fmt)
                 label.dump_points(save_to, fmt)
 
 
