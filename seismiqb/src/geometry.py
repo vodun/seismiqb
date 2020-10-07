@@ -1217,7 +1217,7 @@ class SeismicGeometryNPZ(SeismicGeometry):
         self.names = list(self.file_npz.keys())
         self.data = {key : np.transpose(self.file_npz[key], order) for key in self.names}
 
-        data = self.data['data']
+        data = self.data[self.names[0]]
         self.cube_shape = np.array(data.shape)
         self.lens = self.cube_shape[:2]
         self.zero_traces = np.zeros(self.lens)

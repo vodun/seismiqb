@@ -402,8 +402,10 @@ class BaseController:
         spatial_ranges = [[0, item-1] for item in geometry.cube_shape[:2]]
         if heights_range is None:
             if self.targets:
-                min_height = max(0, min(horizon.h_min for horizon in self.targets) - self.crop_shape[2]//2)
-                max_height = min(geometry.depth-1, max(horizon.h_max for horizon in self.targets) + self.crop_shape[2]//2)
+                min_height = max(0,
+                                 min(horizon.h_min for horizon in self.targets) - self.crop_shape[2]//2)
+                max_height = min(geometry.depth,
+                                 max(horizon.h_max for horizon in self.targets) + self.crop_shape[2]//2)
                 heights_range = [min_height, max_height]
             else:
                 heights_range = [0, geometry.depth-1]
