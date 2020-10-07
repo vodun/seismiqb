@@ -1266,3 +1266,7 @@ class SeismicGeometryNPZ(SeismicGeometry):
     def __getattr__(self, key):
         """ Use default `object` getattr, without `.meta` magic. """
         return object.__getattribute__(self, key)
+
+    def __getitem__(self, key):
+        """ Get data from the first named array. """
+        return self.data[self.names[0]][key]
