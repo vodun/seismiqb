@@ -325,16 +325,23 @@ class SeismicCropBatch(Batch):
         """
         location = self.get(ix, src_locations)
         if along_nearest_horizon:
-            location_h_mean = (location[2].start + location[2].stop) // 2
-            nearest_horizon_num = np.argmin([horizon.h_mean - location_h_mean for horizon in self.get(ix, 'labels')])
-            nearest_horizon = self.get(ix, 'labels')[nearest_horizon_num]
+            nearest_horizon = self.get_nearest_horizon(ix, src_labels, location[2])
             return nearest_horizon.load_crop_along(location, window, offset)
-        geometry = self.get(ix, src_data)
-        return geometry.load_crop(location, **kwargs)
+        else:
+            geometry = self.get(ix, src_data)
+            return geometry.load_crop(location, **kwargs)
+
+    def get_nearest_horizon(self, ix, src_labels, heights_slice):
+        """Get horizon with its `h_mean` closest to mean of `heights_slice`."""
+        location_h_mean = (heights_slice.start + heights_slice.stop) // 2
+        nearest_horizon_ind = np.argmin([horizon.h_mean - location_h_mean for horizon in self.get(ix, src_labels)])
+        return self.get(ix, src_labels)[nearest_horizon_ind]
+
 
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def create_masks(self, ix, dst, src_labels='labels', src_locations='locations', width=3, indices=-1):
+    def create_masks(self, ix, dst, src_labels='labels', src_locations='locations',
+                     width=3, indices=-1, along_nearest_horizon=False):
         """ Create masks from labels-dictionary in given positions.
 
         Parameters
@@ -355,6 +362,12 @@ class SeismicCropBatch(Batch):
             and must be ints in range [0, len(horizons) - 1].
             Note if you want to pass an index of a single label it must be a list with one
             element.
+        along_nearest_horizon : bool
+            Mask creation mode.
+            If True, create masks for horizon from `src_labels`
+            nearest to height from `src_locations`.
+            If False, just create masks at given `src_locations`.
+            Defaults to False.
 
         Returns
         -------
@@ -368,25 +381,31 @@ class SeismicCropBatch(Batch):
         labels = self.get(ix, src_labels) if isinstance(src_labels, str) else src_labels
         labels = [labels] if not isinstance(labels, (tuple, list)) else labels
         check_sum = False
-
-        if indices in [-1, 'all']:
-            indices = np.arange(0, len(labels))
-        elif indices in [1, 'single']:
-            indices = np.arange(0, len(labels))
-            np.random.shuffle(indices)
-            check_sum = True
-        elif isinstance(indices, int):
-            raise ValueError('Inidices should be either -1, 1 or a sequence of ints.')
-        elif isinstance(indices, (tuple, list, np.ndarray)):
-            pass
-        labels = [labels[idx] for idx in indices]
+        rectify = False
 
         location = self.get(ix, src_locations)
+
+        if along_nearest_horizon:
+            labels = [self.get_nearest_horizon(ix, src_labels, location[2])]
+            rectify = True
+        else:
+            if indices in [-1, 'all']:
+                indices = np.arange(0, len(labels))
+            elif indices in [1, 'single']:
+                indices = np.arange(0, len(labels))
+                np.random.shuffle(indices)
+                check_sum = True
+            elif isinstance(indices, int):
+                raise ValueError('Inidices should be either -1, 1 or a sequence of ints.')
+            elif isinstance(indices, (tuple, list, np.ndarray)):
+                pass
+            labels = [labels[idx] for idx in indices]
+
         shape_ = self.get(ix, 'shapes')
         mask = np.zeros((shape_), dtype='float32')
 
         for label in labels:
-            mask = label.add_to_mask(mask, locations=location, width=width)
+            mask = label.add_to_mask(mask, locations=location, width=width, rectify=rectify)
             if check_sum and np.sum(mask) > 0.0:
                 break
         return mask

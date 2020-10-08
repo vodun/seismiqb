@@ -859,7 +859,7 @@ class Horizon:
         self.sampler = HorizonSampler(np.histogramdd(points/self.cube_shape, bins=bins))
 
 
-    def add_to_mask(self, mask, locations=None, width=3, alpha=1, **kwargs):
+    def add_to_mask(self, mask, locations=None, width=3, alpha=1, rectify=False, **kwargs):
         """ Add horizon to a background.
         Note that background is changed in-place.
 
@@ -873,6 +873,9 @@ class Horizon:
             Width of an added horizon.
         alpha : number
             Value to fill background with at horizon location.
+        rectify : bool
+            Whether to apply `np.max` to resulted mask along last axis or not.
+            Required, when mask created for data cut out along the horizon.
         """
         _ = kwargs
         low = width // 2
@@ -891,10 +894,10 @@ class Horizon:
             overlap = self.matrix[i_min - self.i_min:i_max - self.i_min,
                                   x_min - self.x_min:x_max - self.x_min]
 
+            # All labels heights are used, when mask is created for rectified data.
+            heights_check = True if rectify else (overlap >= mask_h_min + low) & (overlap <= mask_h_max - high)
             # Coordinates of points to use in overlap local system
-            idx_i, idx_x = np.asarray((overlap != self.FILL_VALUE) &
-                                      (overlap >= mask_h_min + low) &
-                                      (overlap <= mask_h_max - high)).nonzero()
+            idx_i, idx_x = np.asarray((overlap != self.FILL_VALUE) & heights_check).nonzero()
             heights = overlap[idx_i, idx_x]
 
             # Convert coordinates to mask local system
@@ -902,6 +905,9 @@ class Horizon:
             idx_x += x_min - mask_x_min
             heights -= (mask_h_min + low)
 
+            # Heights are squeezed into single dimension, when mask is created for rectified data.
+            heights = 0 if rectify else heights
+            width = 1 if rectify else width
             for _ in range(width):
                 mask[idx_i, idx_x, heights] = alpha
                 heights += 1
@@ -980,9 +986,8 @@ class Horizon:
 
         Other parameters are the same as in `Horizon.get_cube_values`.
         """
-        i_slice, x_slice = [slice(slice_.start + shift, slice_.stop + shift) for slice_, shift in zip(location[:2], self.bbox[:,0])]
         data = self.cached_get_cube_values(window, offset, **kwargs)
-        return data[i_slice, x_slice]
+        return data[location[0], location[1]]
 
 
     def get_cube_values_line(self, orientation='ilines', line=1, window=23, offset=0, scale=False):
