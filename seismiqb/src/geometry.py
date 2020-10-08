@@ -974,7 +974,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
         return crop
 
     # Convert SEG-Y to HDF5
-    def make_hdf5(self, path_hdf5=None, postfix=''):
+    def make_hdf5(self, path_hdf5=None, postfix='', store_meta=True):
         """ Converts `.segy` cube to `.hdf5` format.
 
         Parameters
@@ -1018,9 +1018,10 @@ class SeismicGeometrySEGY(SeismicGeometry):
                 pbar.update()
             pbar.close()
 
-        if not self.has_stats:
-            self.collect_stats()
-        self.store_meta()
+        if store_meta:
+            if not self.has_stats:
+                self.collect_stats()
+            self.store_meta()
 
 
     # Convenient alias
