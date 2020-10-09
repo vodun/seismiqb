@@ -473,8 +473,8 @@ class BaseController:
         # Actual inference
         axis = np.argmin(crop_shape_grid[:2])
         iterator = range(spatial_ranges[axis][0], spatial_ranges[axis][1], int(chunk_size*(1 - chunk_overlap)))
-        self.log(f'Starting chunk {orientation} inference with {len(iterator)} chunks\
-                   over {spatial_ranges}, {heights_range}')
+        self.log(f'Starting chunk {orientation} inference with {len(iterator)} chunks ' +
+                 f'over {spatial_ranges}, {heights_range}')
 
         horizons = []
         total_length, total_unfiltered_length = 0, 0

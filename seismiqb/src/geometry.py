@@ -1233,8 +1233,6 @@ class SeismicGeometryNPZ(SeismicGeometry):
     # Methods to load actual data from NPZ
     def load_crop(self, locations, names=None, **kwargs):
         """ Load 3D crop from the cube.
-        Automatically chooses the fastest axis to use: as `hdf5` files store multiple copies of data with
-        various orientations, some axis are faster than others depending on exact crop location and size.
 
         Parameters
         locations : sequence of slices
