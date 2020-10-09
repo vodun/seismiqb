@@ -372,7 +372,7 @@ class SeismicCubeset(Dataset):
             Whether to remove labels on zero-traces.
         """
         _ = kwargs
-        label_dir = label_dir or '/BEST_HORIZONS/*'
+        label_dir = label_dir or '/INPUTS/HORIZONS/RAW/*'
 
         paths_txt = {}
         for i in range(len(self)):
