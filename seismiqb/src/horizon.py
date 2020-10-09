@@ -971,23 +971,29 @@ class Horizon:
         return background
 
 
-    """Cached version of `Horizon.get_cube_values`
-    to allow direct calls of that method that won't be cached."""
+    # Cached version of `Horizon.get_cube_values`.
+    # to allow direct calls of that method that won't be cached.
     cached_get_cube_values = lru_cache(1)(get_cube_values)
 
 
-    def load_crop_along(self, location, window, offset, **kwargs):
+    def load_crop_along(self, location, window, offset, cache_call=False, **kwargs):
         """Make crops from data cut along the horizon.
 
         Parameters
         ----------
-        location : iterable of at least 2 slices
+        location : sequence of at least 2 slices
             First two slices are used as `ilines` and `xlines` ranges
             to cut crop from. All other slices are omitted.
+        cache_call : bool
+            Whether cache call of `Horizon.get_cube_values` or not.
+            Defaults to False.
 
         Other parameters are the same as in `Horizon.get_cube_values`.
         """
-        data = self.cached_get_cube_values(window, offset, **kwargs)
+        if cache_call:
+            data = self.cached_get_cube_values(window, offset, **kwargs)
+        else:
+            data = self.get_cube_values(window, offset, **kwargs)
         return data[location[0], location[1]]
 
 
@@ -1130,6 +1136,7 @@ class Horizon:
     @property
     def horizon_metrics(self):
         """ Calculate `HorizonMetrics` on demand. """
+        from .metrics import HorizonMetrics
         return HorizonMetrics(self)
 
     @property

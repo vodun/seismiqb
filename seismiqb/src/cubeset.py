@@ -18,6 +18,7 @@ from .plotters import plot_image
 from .utils import IndexedDict, round_to_array, gen_crop_coordinates
 
 
+
 def astype_object(array):
     """ Converts array to `object` dtype. Picklable, unlike inline lambda function. """
     return array.astype(np.object)
@@ -51,7 +52,6 @@ class SeismicCubeset(Dataset):
         self.geometries = IndexedDict({ix: SeismicGeometry(self.index.get_fullpath(ix), process=False)
                                        for ix in self.indices})
         self.labels = IndexedDict({ix: [] for ix in self.indices})
-        self._horizons_matrices = None
         self.samplers = IndexedDict({ix: None for ix in self.indices})
         self._sampler = None
         self._p, self._bins = None, None
@@ -164,14 +164,6 @@ class SeismicCubeset(Dataset):
                 _ = [getattr(item, 'filter')() for item in label_list]
             getattr(self, dst)[ix] = label_list
 
-    @property
-    def horizons_matrices(self):
-        """"""
-        if self._horizons_matrices is None:
-            self._horizons_matrices = IndexedDict()
-            for ix in self.indices:
-                self._horizons_matrices[ix] = np.stack([horizon.matrix for horizon in self.labels[ix]])
-        return self._horizons_matrices
 
     @property
     def sampler(self):
