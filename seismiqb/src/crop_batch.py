@@ -345,7 +345,7 @@ class SeismicCropBatch(Batch):
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
     def create_masks(self, ix, dst, src_labels='labels', src_locations='locations',
-                     width=3, indices=-1, along_nearest_horizon=False, rectify=True):
+                     width=3, indices='all', along_nearest_horizon=False, rectify=True):
         """ Create masks from labels-dictionary in given positions.
 
         Parameters
@@ -360,12 +360,10 @@ class SeismicCropBatch(Batch):
             Component of batch with labels dict.
         indices : str, int or sequence of ints
             A choice scenario of used labels per crop.
-            If -1 or 'all', all possible labels will be added.
-            If 1 or 'single', one random label will be added.
-            If array-like then elements are interpreted as indices of the desired labels
-            and must be ints in range [0, len(horizons) - 1].
-            Note if you want to pass an index of a single label it must be a list with one
-            element.
+            If 'all', all labels will be added.
+            If 'single', one random label will be added.
+            If int or array-like then element(s) are interpreted as indices of
+            desired labels and must be ints in range [0, len(horizons) - 1].
         along_nearest_horizon : bool
             Mask creation mode.
             If True, create masks for horizon from `src_labels`
@@ -388,6 +386,7 @@ class SeismicCropBatch(Batch):
         """
         labels = self.get(ix, src_labels) if isinstance(src_labels, str) else src_labels
         labels = [labels] if not isinstance(labels, (tuple, list)) else labels
+        indices = [indices] if isinstance(indices, int)
         check_sum = False
 
         location = self.get(ix, src_locations)
@@ -395,17 +394,13 @@ class SeismicCropBatch(Batch):
         if along_nearest_horizon:
             labels = [self.get_nearest_horizon(ix, src_labels, location[2])]
         else:
-            if indices in [-1, 'all']:
-                indices = np.arange(0, len(labels))
-            elif indices in [1, 'single']:
-                indices = np.arange(0, len(labels))
-                np.random.shuffle(indices)
+            if isinstance(indices, (tuple, list, np.ndarray)):
+                labels = [labels[idx] for idx in indices]
+            elif indices == 'single':
+                np.random.shuffle(labels)
                 check_sum = True
-            elif isinstance(indices, int):
-                raise ValueError('Inidices should be either -1, 1 or a sequence of ints.')
-            elif isinstance(indices, (tuple, list, np.ndarray)):
+            elif indices == 'all':
                 pass
-            labels = [labels[idx] for idx in indices]
 
         rectify = along_nearest_horizon if rectify is None
         crop_shape = self.get(ix, 'shapes')

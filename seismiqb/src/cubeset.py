@@ -562,7 +562,7 @@ class SeismicCubeset(Dataset):
         title_fontsize = plot_dict.get('title_fontsize', 18)
 
         plot_over = self.labels[self.grid_info['cube_name']][plot_over] if isinstance(plot_over, int) else plot_over
-        fig, ax = plt.subplots(figsize=figsize)
+        _fig, ax = plt.subplots(figsize=figsize)
         plot_over.show(ax=ax)
         ax.set_title(f'Grid over {ax.get_title()}', fontsize=title_fontsize)
 
