@@ -291,7 +291,7 @@ class SeismicCropBatch(Batch):
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
     def load_cubes(self, ix, dst, src_geometry='geometries', src_locations='locations', src_labels='labels',
-                   along_nearest_horizon=False, window=None, offset=None, **kwargs):
+                   along_nearest_horizon=False, offset=0, **kwargs):
         """ Load data from cube in given positions.
 
         Parameters
@@ -313,10 +313,8 @@ class SeismicCropBatch(Batch):
             nearest to height from `src_locations`.
             If False, just crop data at given `src_locations`.
             Defaults to False.
-        window : int
-            Width of data to cut when `along_nearest_horizon` is True.
         offset : int
-            Offset of data to cut when `along_nearest_horizon` is True.
+            Offset from horizon of data to crop when `along_nearest_horizon` is True.
 
         Notes
         -----
@@ -325,8 +323,9 @@ class SeismicCropBatch(Batch):
         """
         location = self.get(ix, src_locations)
         if along_nearest_horizon:
+            window = self.get(ix, 'shapes')[2]
             nearest_horizon = self.get_nearest_horizon(ix, src_labels, location[2])
-            return nearest_horizon.load_crop_along(location, window, offset)
+            return nearest_horizon.load_crop_along(location, window, offset, **kwargs)
         else:
             geometry = self.get(ix, src_data)
             return geometry.load_crop(location, **kwargs)
@@ -381,13 +380,13 @@ class SeismicCropBatch(Batch):
         labels = self.get(ix, src_labels) if isinstance(src_labels, str) else src_labels
         labels = [labels] if not isinstance(labels, (tuple, list)) else labels
         check_sum = False
-        rectify = False
 
         location = self.get(ix, src_locations)
+        crop_shape = self.get(ix, 'shapes')
 
         if along_nearest_horizon:
             labels = [self.get_nearest_horizon(ix, src_labels, location[2])]
-            rectify = True
+            crop_shape = (crop_shape[0], crop_shape[1], 1)
         else:
             if indices in [-1, 'all']:
                 indices = np.arange(0, len(labels))
@@ -401,11 +400,9 @@ class SeismicCropBatch(Batch):
                 pass
             labels = [labels[idx] for idx in indices]
 
-        shape_ = self.get(ix, 'shapes')
-        mask = np.zeros((shape_), dtype='float32')
-
+        mask = np.zeros((crop_shape), dtype='float32')
         for label in labels:
-            mask = label.add_to_mask(mask, locations=location, width=width, rectify=rectify)
+            mask = label.add_to_mask(mask, locations=location, width=width, rectify=along_nearest_horizon)
             if check_sum and np.sum(mask) > 0.0:
                 break
         return mask

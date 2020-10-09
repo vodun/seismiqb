@@ -874,8 +874,9 @@ class Horizon:
         alpha : number
             Value to fill background with at horizon location.
         rectify : bool
-            Whether to apply `np.max` to resulted mask along last axis or not.
+            Whether to squeeze mask into single dimension along depth axis.
             Required, when mask created for data cut out along the horizon.
+            Defauts to False.
         """
         _ = kwargs
         low = width // 2
@@ -908,9 +909,9 @@ class Horizon:
             # Heights are squeezed into single dimension, when mask is created for rectified data.
             heights = 0 if rectify else heights
             width = 1 if rectify else width
-            for _ in range(width):
-                mask[idx_i, idx_x, heights] = alpha
-                heights += 1
+
+            for offset in range(width):
+                mask[idx_i, idx_x, heights + offset] = alpha
         return mask
 
 

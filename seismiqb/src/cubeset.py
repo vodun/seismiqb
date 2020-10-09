@@ -4,6 +4,8 @@ from glob import glob
 
 import numpy as np
 
+from matplotlib import pyplot as plt
+
 from ..batchflow import FilesIndex, DatasetIndex, Dataset, Sampler, Pipeline
 from ..batchflow import NumpySampler, ConstantSampler
 
@@ -405,7 +407,7 @@ class SeismicCubeset(Dataset):
         self._p, self._bins = p, bins # stored for later sampler creation
 
 
-    def make_grid(self, cube_name, crop_shape, ilines=None, xlines=None, heights=None, mode='3d', horizon_num=None,
+    def make_grid(self, cube_name, crop_shape, ilines=None, xlines=None, heights=None, mode='3d', horizon=0,
                   overlap=None, overlap_factor=None, batch_size=16, filtering_matrix=None, filter_threshold=0):
         """ Create regular grid of points in cube.
         This method is usually used with `assemble_predict` action of SeismicCropBatch.
@@ -430,8 +432,10 @@ class SeismicCubeset(Dataset):
             If '3d' gen grid in volume defined by `ilines`, `xlines`, `heights`.
             If '2d' gen grid on area defined by `ilines` and `xlines` and infer `heights` from `horizon_num`.
             Defaults to '3d'.
-        horizon_num : int
-            Number of horizon to use for setting `heights` in `mode='area'`.
+        horizon : Horizon or int
+            Horizon to use for setting `heights` when `mode='area'`.
+            Instance of Horizon or index for items from `self.labels`.
+            By default first item of `self.labels` used.
         overlap : float or sequence
             Distance between grid points.
         overlap_factor : float or sequence
@@ -451,8 +455,8 @@ class SeismicCubeset(Dataset):
             If float, proportion from the total number of traces in a crop will be computed.
         """
         if mode == '2d':
-            horizon_num = 0 if horizon_num is None else horizon_num
-            h_mean = int(self.labels[cube_name][horizon_num].h_mean)
+            horizon = self.labels[cube_name][horizon] if isinstance(horizon, int) else horizon
+            h_mean = int(horizon.h_mean)
             heights = (h_mean, h_mean + 1)
         elif mode != '3d':
             raise ValueError("`mode` can either be '3d' or '2d'.")
@@ -537,6 +541,43 @@ class SeismicCubeset(Dataset):
             'range': [ilines, xlines, heights],
             'shifts': shifts
         }
+
+
+    def show_grid(self, plot_over=0, plot_dict=None):
+        """Plot grid over selected surface to visualize how it overlaps data.
+
+        Parameters
+        ----------
+        plot_over : Horizon or int
+            Horizon to show below grid.
+            Instance of Horizon or index for items from `self.labels`.
+            By default first item of `self.labels` used.
+        plot_dict : dict, optional
+            Dict of plot parameters, such as:
+                figsize : tuple
+                    Size of resulted figure.
+                line_color : color in matplotlib format
+                    Color of grid line.
+                dot_color : color in matplotlib format
+                    Color of dots in grid lines intersections.
+                title_fontsize : int
+                    Font size of title over the figure.
+        """
+        plot_dict = plot_dict or {}
+        figsize = plot_dict.get('figsize', (15,5))
+        line_color = plot_dict.get('line_color', 'cornflowerblue')
+        dot_color = plot_dict.get('dot_color', 'crimson')
+        title_fontsize = plot_dict.get('title_fontsize', 18)
+
+        plot_over = self.labels[self.grid_info['cube_name']][plot_over] if isinstance(plot_over, int) else plot_over
+        fig, ax = plt.subplots(figsize=figsize)
+        plot_over.show(ax=ax)
+        ax.set_title(f'Grid over {ax.get_title()}', fontsize=title_fontsize)
+
+        for x, y, _ in self.grid_info['grid_array']:
+            ax.axvline(x, zorder=1, color=line_color)
+            ax.axhline(y, zorder=1, color=line_color)
+            ax.plot(x, y, 'h', color=dot_color, alpha=0.9, zorder=2)
 
 
     def mask_to_horizons(self, src, cube_name, threshold=0.5, averaging='mean', minsize=0,
