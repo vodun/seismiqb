@@ -8,8 +8,6 @@ import pytest
 import numpy as np
 
 from seismiqb import SeismicGeometry
-# from seismicpro.batchflow import V, B, L, I
-# from seismicpro.src import SeismicDataset, FieldIndex, TraceIndex, merge_segy_files
 
 PATH = "/data/acquisition_footprints/7-2_ftp_input.sgy" #"os.path.join(os.path.dirname(os.path.realpath(__file__)), '../../../datasets/demo_data/teapot_dome_10.sgy')
 PATH2 = "/data/acquisition_footprints/7-2_ftp_output.sgy"
@@ -70,6 +68,7 @@ def compare_segy_files(path_1, path_2):
     #     i += chunk_size
 
 
+@pytest.mark.slow
 def test_load_dump_segy(tmp_path):
     g = SeismicGeometry(PATH)
 

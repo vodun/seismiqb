@@ -535,27 +535,36 @@ class SeismicGeometry:
         with h5py.File(path_hdf5, 'r') as src:
             cube_hdf5 = src['cube']
 
-            with segyio.open(path_spec, 'r', strict=False) as segy:
-                segy.mmap()
-                spec = segyio.spec()
-                spec.sorting = int(segy.sorting)
-                spec.format = int(segy.format)
-                spec.samples = range(self.depth)
-                spec.ilines = self.ilines
-                spec.xlines = self.xlines
+            geom = SeismicGeometry(path_spec)
+            segy = geom.segyfile
 
-                with segyio.create(path_segy, spec) as dst_file:
-                    # Copy all textual headers, including possible extended
-                    for i in range(1 + segy.ext_headers):
-                        dst_file.text[i] = segy.text[i]
+            segy.mmap()
+            spec = segyio.spec()
+            spec.sorting = segyio.TraceSortingFormat.INLINE_SORTING
+            spec.format = int(segy.format)
+            spec.samples = range(self.depth)
 
-                    c = 0
-                    for i, _ in tqdm(enumerate(spec.ilines)):
-                        for x, _ in enumerate(spec.xlines):
-                            dst_file.header[c] = segy.header[c]
-                            dst_file.trace[c] = cube_hdf5[i, x, :]
-                            c += 1
-                    dst_file.bin = {segyio.BinField.Traces: c}
+            idx = np.stack(geom.dataframe.index)
+            ilines = np.unique(idx[:, 0])
+            xlines = np.unique(idx[:, 1])
+
+            i_enc = {num: k for k, num in enumerate(ilines)}
+            x_enc = {num: k for k, num in enumerate(xlines)}
+
+            spec.ilines = ilines
+            spec.xlines = xlines
+
+            with segyio.create(path_segy, spec) as dst_file:
+                # Copy all textual headers, including possible extended
+                for i in range(1 + segy.ext_headers):
+                    dst_file.text[i] = segy.text[i]
+
+                c = 0
+                for i, x in idx:
+                    dst_file.header[c] = segy.header[c]
+                    dst_file.trace[c] = cube_hdf5[i_enc[i], x_enc[x], :]
+                    c += 1
+                dst_file.bin = {segyio.BinField.Traces: c}
 
         if remove_hdf5:
             os.remove(path_hdf5)
