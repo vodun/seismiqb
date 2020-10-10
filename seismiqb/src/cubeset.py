@@ -449,7 +449,7 @@ class SeismicCubeset(Dataset):
             overlap_factor = [overlap_factor] * 3
         if strides is None:
             if overlap:
-                strides = (c - o for c, o in zip(crop_shape, overlap))
+                strides = [c - o for c, o in zip(crop_shape, overlap)]
             elif overlap_factor:
                 strides = [max(1, int(item // factor)) for item, factor in zip(crop_shape, overlap_factor)]
             else:

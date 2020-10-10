@@ -1264,7 +1264,7 @@ class SeismicGeometryNPZ(SeismicGeometry):
         self.names = list(self.file_npz.keys())
         self.data = {key : np.transpose(self.file_npz[key], order) for key in self.names}
 
-        data = self.data['data']
+        data = self.data[self.names[0]]
         self.cube_shape = np.array(data.shape)
         self.lens = self.cube_shape[:2]
         self.zero_traces = np.zeros(self.lens)
@@ -1280,8 +1280,6 @@ class SeismicGeometryNPZ(SeismicGeometry):
     # Methods to load actual data from NPZ
     def load_crop(self, locations, names=None, **kwargs):
         """ Load 3D crop from the cube.
-        Automatically chooses the fastest axis to use: as `hdf5` files store multiple copies of data with
-        various orientations, some axis are faster than others depending on exact crop location and size.
 
         Parameters
         locations : sequence of slices
@@ -1313,3 +1311,7 @@ class SeismicGeometryNPZ(SeismicGeometry):
     def __getattr__(self, key):
         """ Use default `object` getattr, without `.meta` magic. """
         return object.__getattribute__(self, key)
+
+    def __getitem__(self, key):
+        """ Get data from the first named array. """
+        return self.data[self.names[0]][key]
