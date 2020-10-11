@@ -1020,7 +1020,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
         return crop
 
     # Convert SEG-Y to HDF5
-    def make_hdf5(self, path_hdf5=None, postfix=''):
+    def make_hdf5(self, path_hdf5=None, postfix='', unsafe=True):
         """ Converts `.segy` cube to `.hdf5` format.
 
         Parameters
@@ -1030,9 +1030,9 @@ class SeismicGeometrySEGY(SeismicGeometry):
         postfix : str
             Postfix to add to the name of resulting cube.
         """
-        if self.index_headers != self.INDEX_POST:
+        if self.index_headers != self.INDEX_POST and not unsafe:
             # Currently supports only INLINE/CROSSLINE cubes
-            raise TypeError(f'Current index must be {self.INDEX_POST}')
+            raise TypeError(f'Either set `unsafe=True` or set index to {self.INDEX_POST}')
 
         path_hdf5 = path_hdf5 or (os.path.splitext(self.path)[0] + postfix + '.hdf5')
 
@@ -1047,18 +1047,18 @@ class SeismicGeometrySEGY(SeismicGeometry):
             cube_hdf5_h = file_hdf5.create_dataset('cube_h', self.cube_shape[[2, 0, 1]])
 
             # Default projection (ilines, xlines, depth) and depth-projection (depth, ilines, xlines)
-            pbar = tqdm(total=self.ilines_len + self.xlines_len, ncols=1000)
+            pbar = tqdm(total=self.cube_shape[0] + self.cube_shape[1], ncols=1000)
 
             pbar.set_description(f'Converting {self.long_name}; ilines projection')
-            for i in range(self.ilines_len):
+            for i in range(self.cube_shape[0]):
                 slide = self.load_slide(i, stable=False)
-                cube_hdf5[i, :, :] = slide.reshape(1, self.xlines_len, self.depth)
+                cube_hdf5[i, :, :] = slide.reshape(1, self.cube_shape[1], self.cube_shape[2])
                 cube_hdf5_h[:, i, :] = slide.T
                 pbar.update()
 
             # xline-oriented projection: (xlines, depth, ilines)
             pbar.set_description(f'Converting {self.long_name} to hdf5; xlines projection')
-            for x in range(self.xlines_len):
+            for x in range(self.cube_shape[1]):
                 slide = self.load_slide(x, axis=1, stable=False).T
                 cube_hdf5_x[x, :, :,] = slide
                 pbar.update()

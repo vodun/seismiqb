@@ -33,6 +33,10 @@ class Fault(Horizon):
         if ext == 'npy':
             points = np.load(path, allow_pickle=True)
             self.from_points(points, False, **kwargs)
+        elif ext == 'hdf5':
+            cube = SeismicGeometry(path, **kwargs).file_hdf5['cube']
+            points = np.stack(np.where(np.array(cube) == 1)).T
+            self.from_points(points, False, **kwargs)
         else:
             points = self.csv_to_points(path, **kwargs)
             self.from_points(points, transform, **kwargs)
@@ -99,8 +103,8 @@ class Fault(Horizon):
                                 [locations[2].start, locations[2].stop]],
                                 dtype=np.int32)
             points = self.points
-            _min = self.i_min, self.x_min, self._h_min
-            _max = self.i_max, self.x_max, self._h_max
+            _min = self.i_min, self.x_min, self.h_min
+            _max = self.i_max, self.x_max, self.h_max
 
             if (_max < mask_bbox[:, 0]).any() or (_min >= mask_bbox[:, 1]).any():
                 return mask

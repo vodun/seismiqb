@@ -307,8 +307,9 @@ class SeismicCropBatch(Batch):
         """
         geometry = self.get(ix, src_geometry)
         location = self.get(ix, src_locations)
-        return geometry[tuple(location)]
-        # return geometry.load_crop(location, **kwargs)
+        #print(locations)
+        #return geometry[tuple(location)]
+        return geometry.load_crop(location, **kwargs)
 
 
     @action

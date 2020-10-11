@@ -34,4 +34,3 @@ if __name__ == '__main__':
         collect_stats=True, spatial=True,
     )
     geometry.make_hdf5()
-    print((time.time() - start)/60)

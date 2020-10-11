@@ -170,7 +170,7 @@ class SeismicCubeset(Dataset):
                 if not os.path.exists(dirname):
                     os.makedirs(dirname)
                 if separate:
-                    save_to == os.path.join(dirname, label.name + '.' + fmt)
+                    save_to = os.path.join(dirname, label.name + '.' + fmt)
                 else:
                     save_to = os.path.join(dirname, 'faults' + '.' + fmt)
                 label.dump_points(save_to, fmt)
@@ -390,7 +390,8 @@ class SeismicCubeset(Dataset):
             Whether to remove labels on zero-traces.
         """
         _ = kwargs
-        label_dir = label_dir or '/BEST_HORIZONS/*'
+        label_dir = label_dir or '/INPUTS/HORIZONS/RAW/*'
+
         paths_txt = {}
         for i in range(len(self)):
             dir_path = '/'.join(self.index.get_fullpath(self.indices[i]).split('/')[:-1])
