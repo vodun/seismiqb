@@ -1085,7 +1085,6 @@ class SeismicGeometryHDF5(SeismicGeometry):
     def __init__(self, path, **kwargs):
         self.structured = True
         self.file_hdf5 = None
-        self.iline_to_cdpx, self.xline_to_cdpy = None, None
 
         super().__init__(path, **kwargs)
 

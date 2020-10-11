@@ -1,4 +1,4 @@
-""" Horizon class and metrics. """
+""" Fault class and metrics. """
 
 import os
 import glob
@@ -52,20 +52,6 @@ class Fault(Horizon):
         return points
 
     @classmethod
-    def read_sticks(cls, df):
-        """ Transform initial fault dataframe to array of sticks. """
-        if 'number' in df.columns:
-            col = 'number'
-        elif df.iline.iloc[0] == df.iline.iloc[1]:
-            col = 'iline'
-        elif df.xline.iloc[0] == df.xline.iloc[1]:
-            col = 'xline'
-        else:
-            raise ValueError('Wrong format of sticks: there is no column to group points into sticks.')
-        return df.groupby(col).apply(lambda x: x[Horizon.COLUMNS].values).reset_index(drop=True)
-
-
-    @classmethod
     def read_file(cls, path):
         """ Read data frame with sticks. """
         with open(path) as file:
@@ -80,6 +66,43 @@ class Fault(Horizon):
             raise ValueError('Fault labels must be in FAULT_STICKS, CHARISMA or REDUCED_CHARISMA format.')
 
         return pd.read_csv(path, sep=r'\s+', names=names)
+
+    def fix_lines(self, df):
+        """ Fix broken iline and crossline coordinates. If coordinates are out of the cube, 'iline' and 'xline'
+        will be infered from 'cdp_x' and 'cdp_y'. """
+        i_bounds = [self.geometry.ilines_offset, self.geometry.ilines_offset + self.geometry.cube_shape[0]]
+        x_bounds = [self.geometry.xlines_offset, self.geometry.xlines_offset + self.geometry.cube_shape[1]]
+
+        i_mask = np.logical_or(df.iline < i_bounds[0], df.iline >= i_bounds[1])
+        x_mask = np.logical_or(df.xline < x_bounds[0], df.xline >= x_bounds[1])
+
+        _df = df[np.logical_and(i_mask, x_mask)]
+
+        df.loc[np.logical_and(i_mask, x_mask), ['iline', 'xline']] = np.rint(
+            self.geometry.cdp_to_lines(_df[['cdp_x', 'cdp_y']].values)
+        ).astype('int32')
+
+        return df
+
+    @classmethod
+    def read_sticks(cls, df):
+        """ Transform initial fault dataframe to array of sticks. """
+        if 'number' in df.columns:
+            col = 'number'
+        elif df.iline.iloc[0] == df.iline.iloc[1]:
+            col = 'iline'
+        elif df.xline.iloc[0] == df.xline.iloc[1]:
+            col = 'xline'
+        else:
+            raise ValueError('Wrong format of sticks: there is no column to group points into sticks.')
+        return df.groupby(col).apply(lambda x: x[Horizon.COLUMNS].values).reset_index(drop=True)
+
+    def sort_sticks(self, sticks):
+        """ Sort sticks with respect of fault direction. """
+        pca = PCA(1)
+        coords = pca.fit_transform(pca.fit_transform(np.array([stick[0][:2] for stick in sticks.values])))
+        indices = np.array([i for _, i in sorted(zip(coords, range(len(sticks))))])
+        return sticks.iloc[indices]
 
     def interpolate_3d(self, sticks, **kwargs):
         """ Interpolate fault sticks as a surface. """
@@ -108,68 +131,12 @@ class Fault(Horizon):
 
             if (_max < mask_bbox[:, 0]).any() or (_min >= mask_bbox[:, 1]).any():
                 return mask
-            cond = np.ones(len(points))
             for i in range(3):
-                _cond = np.logical_and(points[:, i] >= locations[i].start, points[:, i] < locations[i].stop)
-                cond = np.logical_and(cond, _cond)
-            points = points[cond]
+                points = points[points[:, i] >= locations[i].start]
+                points = points[points[:, i] < locations[i].stop]
             points = points - np.array(mask_bbox[:, 0]).reshape(1, 3)
-            points = np.maximum(points, 0)
-            points = np.minimum(points, np.array(mask.shape) - 1)
             mask[points[:, 0], points[:, 1], points[:, 2]] = 1
             return mask
-
-    def fix_lines(self, df):
-        """ Fix broken iline and crossline coordinates. """
-        i_bounds = [self.geometry.ilines_offset, self.geometry.ilines_offset + self.geometry.cube_shape[0]]
-        x_bounds = [self.geometry.xlines_offset, self.geometry.xlines_offset + self.geometry.cube_shape[1]]
-
-        i_mask = np.logical_or(df.iline < i_bounds[0], df.iline >= i_bounds[1])
-        x_mask = np.logical_or(df.xline < x_bounds[0], df.xline >= x_bounds[1])
-
-        _df = df[np.logical_and(i_mask, x_mask)]
-
-        df.loc[np.logical_and(i_mask, x_mask), ['iline', 'xline']] = np.rint(
-            self.geometry.cdp_to_lines(_df[['cdp_x', 'cdp_y']].values)
-        ).astype('int32')
-
-        return df
-
-    def sort_sticks(self, sticks):
-        """ Sort sticks with respect of fault direction. """
-        pca = PCA(1)
-        coords = pca.fit_transform(pca.fit_transform(np.array([stick[0][:2] for stick in sticks.values])))
-        indices = np.array([i for _, i in sorted(zip(coords, range(len(sticks))))])
-        return sticks.iloc[indices]
-
-    def dump_points(self, path, fmt='npy'):
-        """ Dump interpolated fault points. """
-        if fmt == 'npy':
-            self.points.dump(path)
-        elif fmt == 'hdf5':
-            file_hdf5 = h5py.File(path, "a")
-            if 'cube' not in file_hdf5:
-                cube_hdf5 = file_hdf5.create_dataset('cube', self.geometry.cube_shape)
-                cube_hdf5_x = file_hdf5.create_dataset('cube_x', self.geometry.cube_shape[[1, 2, 0]])
-                cube_hdf5_h = file_hdf5.create_dataset('cube_h', self.geometry.cube_shape[[2, 0, 1]])
-            else:
-                cube_hdf5 = file_hdf5['cube']
-                cube_hdf5_x = file_hdf5['cube_x']
-                cube_hdf5_h = file_hdf5['cube_h']
-
-            shape = (self.i_length, self.x_length, self.h_max - self.h_min + 1)
-            fault_array = np.zeros(shape)
-
-            points = self.points - np.array([self.i_min, self.x_min, self._h_min])
-            fault_array[points[:, 0], points[:, 1], points[:, 2]] = 1
-
-            cube_hdf5[self.i_min:self.i_max+1, self.x_min:self.x_max+1, self.h_min:self.h_max+1] += fault_array
-            cube_hdf5_x[self.x_min:self.x_max+1, self.h_min:self.h_max+1, self.i_min:self.i_max+1] += np.transpose(fault_array, (1, 2, 0))
-            cube_hdf5_h[self.h_min:self.h_max+1, self.i_min:self.i_max+1, self.x_min:self.x_max+1] += np.transpose(fault_array, (2, 0, 1))
-
-            file_hdf5.close()
-        else:
-            raise ValueError('Unknown format:', fmt)
 
     @classmethod
     def check_format(cls, path, verbose=False):
@@ -205,6 +172,8 @@ class Fault(Horizon):
         if faults_folder and not os.path.isdir(faults_folder):
             os.makedirs(faults_folder)
         df = pd.read_csv(path, sep='\s+', names=cls.FAULT_STICKS)
-        def _dump(df):
-            df.to_csv(os.path.join(folder, dst, df.name), sep=' ', header=False, index=False)
-        df.groupby('name').apply(_dump)
+        df.groupby('name').apply(cls,fault_to_csv)
+
+    @classmethod
+    def fault_to_csv(cls, df):
+        df.to_csv(os.path.join(folder, dst, df.name), sep=' ', header=False, index=False)
