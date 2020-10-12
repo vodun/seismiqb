@@ -1,12 +1,15 @@
 """ Build a complete report on the results of carcass interpolation. """
 import os
 import sys
+import shutil
 from copy import copy
+from glob import glob
 import warnings
 warnings.filterwarnings("ignore")
 
 import numpy as np
 import pandas as pd
+from fpdf import FPDF
 
 from utils import str2bool, make_config, safe_mkdir
 
@@ -31,10 +34,12 @@ ARGS = [
     ('horizon-path', 'path to the horizon in a seismic cube in CHARISMA format', [str], None),
     ('other-path', 'path to the horizon in a seismic cube in CHARISMA format', [str], []),
     ('savedir', 'path to save files to', str, '_placeholder_'),
-    ('metrics', 'which metrics to compute', str, ['support_corrs']),
-    ('add-prefix', 'whether to prepend horizon name to the saved file names', str2bool, True),
-    ('save-files', 'whether to save horizons/carcasses to disk', str2bool, True),
-    ('save-txt', 'whether to save point cloud of metrics to disk', str2bool, False),
+    ('metrics', 'which metrics to compute. Default is `support_corrs`', str, ['support_corrs']),
+    ('add-prefix', 'whether to prepend horizon name to the saved file names. Default is True', str2bool, True),
+    ('save-files', 'whether to save horizons/carcasses to disk. Default is True', str2bool, True),
+    ('save-txt', 'whether to save point cloud of metrics to disk. Default is False', str2bool, False),
+    ('save-pdf', 'whether to save pdf with report to disk. Default is True', str2bool, True),
+    ('save-zip', 'whether to zip the entire report folder and save next to it. Default is True', str2bool, True),
 ]
 
 
@@ -50,6 +55,15 @@ SUPPORT_KWARGS = {
     'agg': 'nanmean',
     'supports': 100,
 }
+
+
+class ReportPDF(FPDF):
+    """ PDF with custom header. """
+    def header(self):
+        """ Add `seismiqb` to the header. """
+        self.set_font('Arial', 'B', 24)
+        self.cell(0, 10, 'seismiqb horizon report', 0, 0, 'R')
+        self.ln(20)
 
 
 if __name__ == '__main__':
@@ -111,7 +125,7 @@ if __name__ == '__main__':
                     'average_l1': overlap_info['mean'],
                     'other_coverage': other.coverage,
                 }
-                other_prefix = 'carcass' if other.is_carcass else '@'
+                other_prefix = '_carcass' if other.is_carcass else '_expert'
                 other.show(savepath=os.path.join(config['savedir'], f'{prefix}{other_prefix}_depthmap.png'))
 
                 om = HorizonMetrics(other)
@@ -145,3 +159,28 @@ if __name__ == '__main__':
         dataframe.append(row_dict)
         pd.DataFrame(dataframe).to_csv(os.path.join(config['savedir'], 'report.csv'),
                                        sep=',', index=False)
+
+    if config['save-pdf']:
+        images = []
+        for metric_name in config['metrics']:
+            images += glob(os.path.join(config['savedir'], f'*{metric_name}*'))
+
+        width, height = metric.shape
+        pdf_path = os.path.join(config['savedir'], 'report.pdf')
+
+        pdf = ReportPDF(unit='pt', format=(width, height))
+
+        for path in sorted(images):
+            pdf.add_page()
+            pdf.set_font('Arial', 'B', min(height//40, 30))
+            pdf.cell(0, height//8 - 15, path.split('/')[-1].split('.')[0], align='C')
+            pdf.image(path, width//8, height//8, 3*width//4, 3*height//4)
+
+        _ = pdf.output(pdf_path, 'F')
+
+
+    if config['save-zip']:
+        dir_name = config['savedir'].strip('/')
+        splitted = dir_name.split('/')
+        root_dir = os.path.join(*splitted[:-1])
+        shutil.make_archive(config['savedir'], 'zip', config['savedir'], root_dir)
