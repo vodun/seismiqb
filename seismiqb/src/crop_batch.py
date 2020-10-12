@@ -5,8 +5,9 @@ from copy import copy
 
 import numpy as np
 import cv2
-from scipy.signal import butter, lfilter, hilbert
+from scipy.interpolate import interp1d
 from scipy.ndimage import gaussian_filter1d
+from scipy.signal import butter, lfilter, hilbert
 
 from ..batchflow import FilesIndex, Batch, action, inbatch_parallel, SkipBatchException, apply_parallel
 
@@ -667,6 +668,69 @@ class SeismicCropBatch(Batch):
             combined[:point_x, :, :] = rotated[:point_x, :, :]
         return combined
 
+    @apply_parallel
+    def linearize_masks(self, crop, n=3, shift=0, kind='random', width=None):
+        """ Sample `n` points from the original mask and create a new mask by interpolating them.
+
+        Parameters
+        ----------
+        n : int
+            Number of points to sample.
+        shift : int
+            Maximum amplitude of random shift along the heights axis.
+        king : {'random', 'linear', 'nearest', 'zero', 'slinear', 'quadratic', 'cubic', 'previous', 'next'}
+            Type of interpolation to use. If 'random', then chosen randomly for each crop.
+        width : int
+            Width of interpolated lines.
+        """
+        # Parse arguments
+        if kind == 'random':
+            kind = np.random.choice(['linear', 'slinear', 'quadratic', 'cubic'])
+        width = width or np.sum(crop, axis=2).mean()
+
+        # Choose the anchor points
+        axis = 1 - np.argmin(crop.shape)
+        *nz, _ = np.nonzero(crop)
+        min_, max_ = nz[axis][0], nz[axis][-1]
+        idx = [min_, max_]
+
+        length = max_ - min_
+        step = length // n
+
+        for i in range(0, max_-step, step):
+            idx.append(np.random.randint(i, i + step))
+
+        # Put anchors into new mask
+        mask_ = np.zeros_like(crop)
+        slc = (idx if axis == 0 else slice(None),
+               idx if axis == 1 else slice(None),
+               slice(None))
+        mask_[slc] = crop[slc]
+        *nz, y = np.nonzero(mask_)
+
+        # Shift heights randomly
+        x = nz[axis]
+        y += np.random.randint(-shift, shift + 1, size=y.shape)
+
+        # Sort and keep only unique values, based on `x`
+        sort_indices = np.argsort(x)
+        x, y = x[sort_indices], y[sort_indices]
+        _, unique_indices = np.unique(x, return_index=True)
+        x, y = x[unique_indices], y[unique_indices]
+
+        # Interpolate points; put into mask
+        interpolator = interp1d(x, y, kind=kind)
+        indices = np.arange(min_, max_, dtype=np.int32)
+        heights = interpolator(indices).astype(np.int32)
+
+        slc = (indices if axis == 0 else indices * 0,
+               indices if axis == 1 else indices * 0,
+               np.clip(heights, 0, 255))
+        mask_[slc] = 1
+
+        # Make horizon wider
+        structure = np.ones((1, 3), dtype=np.uint8)
+        return cv2.dilate(mask_, structure, iterations=width)
 
     @apply_parallel
     def transpose(self, crop, order):

@@ -8,11 +8,11 @@ warnings.filterwarnings("ignore")
 import numpy as np
 import pandas as pd
 
-from utils import str2bool, make_config, save_point_cloud, safe_mkdir
+from utils import str2bool, make_config, safe_mkdir
 
 sys.path.append('..')
 from seismiqb import SeismicGeometry, Horizon, HorizonMetrics
-from seismiqb import METRIC_CMAP, enlarge_carcass_metric, plot_image
+from seismiqb import METRIC_CMAP, enlarge_carcass_metric, plot_image, save_point_cloud
 
 
 
@@ -118,10 +118,13 @@ if __name__ == '__main__':
                 for metric_name in config['metrics']:
                     kwargs = copy(LOCAL_KWARGS) if metric_name.startswith('local') else copy(SUPPORT_KWARGS)
                     kwargs = {} if metric_name.startswith('insta') else kwargs
-                    savepath = os.path.join(config['savedir'], f'{prefix}{other_prefix}_{metric_name}')
+                    savepath = os.path.join(config['savedir'],
+                                            f'{prefix}{other_prefix}_{metric_name}')
 
                     metric = om.evaluate(metric_name, **kwargs)
-                    metric = enlarge_carcass_metric(metric, geometry) if other.is_carcass else metric
+                    if other.is_carcass:
+                        metric = enlarge_carcass_metric(metric, geometry)
+
                     plot_image(metric, figsize=(20, 20),
                                cmap=METRIC_CMAP, zmin=-1, zmax=1, fill_color='black',
                                xlabel='INLINE_3D', ylabel='CROSSLINE_3D',
@@ -129,7 +132,8 @@ if __name__ == '__main__':
 
                     row_dict[f'{other_prefix}_{metric_name}'] = np.nanmean(metric)
                 if config['save-files']:
-                    other.dump(os.path.join(config['savedir'], f'{horizon.name}_{other_prefix}'), add_height=False)
+                    other.dump(os.path.join(config['savedir'], f'{horizon.name}_{other_prefix}'),
+                               add_height=False)
             else:
                 row_dict = {
                     **row_dict,
@@ -139,4 +143,5 @@ if __name__ == '__main__':
                 }
 
         dataframe.append(row_dict)
-        pd.DataFrame(dataframe).to_csv(os.path.join(config['savedir'], 'report.csv'), sep=',', index=False)
+        pd.DataFrame(dataframe).to_csv(os.path.join(config['savedir'], 'report.csv'),
+                                       sep=',', index=False)
