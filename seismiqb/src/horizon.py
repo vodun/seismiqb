@@ -1603,8 +1603,18 @@ class Horizon:
             fault_array[points[:, 0], points[:, 1], points[:, 2]] = 1
 
             cube_hdf5[self.i_min:self.i_max+1, self.x_min:self.x_max+1, self.h_min:self.h_max+1] += fault_array
-            cube_hdf5_x[self.x_min:self.x_max+1, self.h_min:self.h_max+1, self.i_min:self.i_max+1] += np.transpose(fault_array, (1, 2, 0))
-            cube_hdf5_h[self.h_min:self.h_max+1, self.i_min:self.i_max+1, self.x_min:self.x_max+1] += np.transpose(fault_array, (2, 0, 1))
+
+            cube_hdf5_x[
+                self.x_min:self.x_max+1,
+                self.h_min:self.h_max+1,
+                self.i_min:self.i_max+1
+            ] += np.transpose(fault_array, (1, 2, 0))
+
+            cube_hdf5_h[
+                self.h_min:self.h_max+1,
+                self.i_min:self.i_max+1,
+                self.x_min:self.x_max+1
+            ] += np.transpose(fault_array, (2, 0, 1))
 
             file_hdf5.close()
         else:

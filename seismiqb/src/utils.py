@@ -641,10 +641,10 @@ def generate_points(edges, divisors, lengths, indices):
     return low
 
 @njit(parallel=True)
-def filter_array(array, result, window):
-    for i in prange(0, array.shape[0]-window[0]+1):
-        for j in prange(0, array.shape[1]-window[1]+1):
-            for k in prange(0, array.shape[2]-window[2]+1):
+def semblance(array, result, window):
+    for i in prange(array.shape[0]-window[0]+1):
+        for j in prange(array.shape[1]-window[1]+1):
+            for k in prange(array.shape[2]-window[2]+1):
                 region = array[i:i+window[0], j:j+window[1], k:k+window[2]]
                 denum = np.sum(region**2) * region.shape[0] * region.shape[1]
                 if denum != 0:

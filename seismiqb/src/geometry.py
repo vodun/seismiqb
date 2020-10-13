@@ -14,7 +14,7 @@ import h5py
 import segyio
 import cv2
 
-from .utils import lru_cache, find_min_max, file_print, SafeIO, filter_array
+from .utils import lru_cache, find_min_max, file_print, SafeIO, semblance
 from .plotters import plot_image
 
 
@@ -574,23 +574,29 @@ class SeismicGeometry:
         lines = (inverse_matrix @ points.T - inverse_matrix @ self.rotation_matrix[:, 2].reshape(2, -1)).T
         return np.rint(lines)
 
-    def compute_attribute(self, labels=None, locations=None, window=10, attribute='semblance', ):
+    def compute_attribute(self, locations=None, window=10, attribute='semblance'):
+        """ Compute attribute on cube.
+
+        Parameters
+        ----------
+        locations : tuple of tuples
+            each tuple is min and max for each axis to compute attribute. By default,\
+            attribute will be computed for the whole cube.
+        window : int or tuple
+            Path to load segy file from with geometry spec.
+        path_segy : str
+            Path to store converted cube. By default, new cube is stored right next to original.
+        postfix : str
+            Postfix to add to the name of resulting cube."""
         if isinstance(window, int):
             window = np.ones(3, dtype=np.int32) * window
-        if labels:
-            _min = self.cube_shape
-            _max = np.zeros(3)
-            for label in labels:
-                _min = np.minimum(label.points.min(axis=0)+1, _min)
-                _max =  np.maximum(label.points.max(axis=0)+1, _max)
+        if locations:
+            _min, _max = locations
+            _min = np.array(_min)
+            _max = np.array(_max)
         else:
-            if locations:
-                _min, _max = locations
-                _min = np.array(_min)
-                _max = np.array(_max)
-            else:
-                _min = np.zeros(3)
-                _max = self.cube_shape
+            _min = np.zeros(3)
+            _max = self.cube_shape
 
         _min = _min.astype(int)
         _max = _max.astype(int)
@@ -599,7 +605,10 @@ class SeismicGeometry:
         window = np.minimum(np.array(window), cube.shape)
 
         result = np.zeros_like(cube)
-        return filter_array(cube, result, window)
+        if attribute == 'semblance':
+            return semblance(cube, result, window)
+        else:
+            raise ValueError('Unknown attribute:', attribute)
 
 
 class SeismicGeometrySEGY(SeismicGeometry):

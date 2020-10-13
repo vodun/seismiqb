@@ -6,7 +6,6 @@ import glob
 import numpy as np
 import pandas as pd
 
-import h5py
 from numba import njit
 
 from scipy.ndimage import measurements
@@ -24,13 +23,13 @@ class Fault(Horizon):
 
     def __init__(self, *args, **kwargs):
         self.cube = None
+        self.name = None
         super().__init__(*args, **kwargs)
 
     def from_file(self, path, transform=True, **kwargs):
         """ Init from path to either CHARISMA or REDUCED_CHARISMA csv-like file
         or from .npy file with points. """
         _ = kwargs
-        self.path = path
         self.name = os.path.basename(path)
         ext = os.path.splitext(path)[1][1:]
         if ext == 'npy':
@@ -119,27 +118,22 @@ class Fault(Horizon):
 
     def add_to_mask(self, mask, locations=None, **kwargs):
         """ Add fault to background. """
-        if self.cube:
-            _slice = [slice(locations[i].start, locations[i].stop) for i in range(3)]
-            mask[_slice] = self.cube[_slice]
-            return mask
-        else:
-            mask_bbox = np.array([[locations[0].start, locations[0].stop],
-                                [locations[1].start, locations[1].stop],
-                                [locations[2].start, locations[2].stop]],
-                                dtype=np.int32)
-            points = self.points
-            _min = self.i_min, self.x_min, self.h_min
-            _max = self.i_max, self.x_max, self.h_max
+        mask_bbox = np.array([[locations[0].start, locations[0].stop],
+                            [locations[1].start, locations[1].stop],
+                            [locations[2].start, locations[2].stop]],
+                            dtype=np.int32)
+        points = self.points
+        _min = self.i_min, self.x_min, self.h_min
+        _max = self.i_max, self.x_max, self.h_max
 
-            if (_max < mask_bbox[:, 0]).any() or (_min >= mask_bbox[:, 1]).any():
-                return mask
-            for i in range(3):
-                points = points[points[:, i] >= locations[i].start]
-                points = points[points[:, i] < locations[i].stop]
-            points = points - np.array(mask_bbox[:, 0]).reshape(1, 3)
-            mask[points[:, 0], points[:, 1], points[:, 2]] = 1
+        if (_max < mask_bbox[:, 0]).any() or (_min >= mask_bbox[:, 1]).any():
             return mask
+        for i in range(3):
+            points = points[points[:, i] >= locations[i].start]
+            points = points[points[:, i] < locations[i].stop]
+        points = points - np.array(mask_bbox[:, 0]).reshape(1, 3)
+        mask[points[:, 0], points[:, 1], points[:, 2]] = 1
+        return mask
 
     @classmethod
     def check_format(cls, path, verbose=False):
@@ -175,10 +169,11 @@ class Fault(Horizon):
         if faults_folder and not os.path.isdir(faults_folder):
             os.makedirs(faults_folder)
         df = pd.read_csv(path, sep='\s+', names=cls.FAULT_STICKS)
-        df.groupby('name').apply(cls,fault_to_csv)
+        df.groupby('name').apply(cls.fault_to_csv, folder=folder, dst=dst)
 
     @classmethod
-    def fault_to_csv(cls, df):
+    def fault_to_csv(cls, df, folder, dst):
+        """ Save separate fault to csv. """
         df.to_csv(os.path.join(folder, dst, df.name), sep=' ', header=False, index=False)
 
 
