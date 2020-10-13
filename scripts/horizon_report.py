@@ -40,6 +40,7 @@ ARGS = [
     ('save-txt', 'whether to save point cloud of metrics to disk. Default is False', str2bool, False),
     ('save-pdf', 'whether to save pdf with report to disk. Default is True', str2bool, True),
     ('save-zip', 'whether to zip the entire report folder and save next to it. Default is True', str2bool, True),
+    ('remove-images', 'whether to remove images from the resulting folder. Default is False', str2bool, False),
 ]
 
 
@@ -178,9 +179,12 @@ if __name__ == '__main__':
 
         _ = pdf.output(pdf_path, 'F')
 
+    if config['remove-images']:
+        _ = [os.remove(path) for path in glob(os.path.join(config['savedir'], '*.png'))]
 
     if config['save-zip']:
-        dir_name = config['savedir'].strip('/')
-        splitted = dir_name.split('/')
-        root_dir = os.path.join(*splitted[:-1])
-        shutil.make_archive(config['savedir'], 'zip', config['savedir'], root_dir)
+        savedir = config['savedir'][:-1] if config['savedir'].endswith('/') else savedir
+
+        root_dir = os.path.dirname(savedir)
+        base_dir = savedir.split('/')[-1]
+        shutil.make_archive(savedir, 'zip', root_dir, base_dir)
