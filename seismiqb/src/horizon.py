@@ -650,9 +650,9 @@ class Horizon:
         return points
 
 
-    @classmethod
-    def from_mask(cls, mask, grid_info=None, geometry=None, shifts=None, mode='mean',
-                  threshold=0.5, minsize=0, prefix='predict', axis=-1, **kwargs):
+    @staticmethod
+    def from_mask(mask, grid_info=None, geometry=None, shifts=None,
+                  mode='mean', threshold=0.5, minsize=0, prefix='predict', **kwargs):
         """ Convert mask to a list of horizons.
         Returned list is sorted on length of horizons.
 
@@ -702,13 +702,9 @@ class Horizon:
 
                 if len(indices[0]) >= minsize:
                     coords = np.vstack([indices[i] + sl[i].start for i in range(3)]).T
-                    # swap axes
-                    coords[:, [axis, -1]] = coords[:, [-1, axis]]
-                    points = group_function(coords)
-                    points[:, [axis, -1]] = points[:, [-1, axis]]
-                    points = points + shifts
 
-                    horizons.append(cls(points, geometry, name=f'{prefix}_{i}'))
+                    points = group_function(coords) + shifts
+                    horizons.append(Horizon(points, geometry, name=f'{prefix}_{i}'))
 
         horizons.sort(key=len)
         return horizons
@@ -1588,7 +1584,7 @@ class Horizon:
     def dump_points(self, path, fmt='npy'):
         """ Dump points. """
         if fmt == 'npy':
-            self.points.dump(path)
+            self.points.save(path, allow_pickle=False)
         elif fmt == 'hdf5':
             file_hdf5 = h5py.File(path, "a")
             if 'cube' not in file_hdf5:

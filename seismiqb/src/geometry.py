@@ -14,7 +14,7 @@ import h5py
 import segyio
 import cv2
 
-from .utils import lru_cache, find_min_max, file_print, SafeIO
+from .utils import lru_cache, find_min_max, file_print, SafeIO, filter_array
 from .plotters import plot_image
 
 
@@ -574,6 +574,33 @@ class SeismicGeometry:
         lines = (inverse_matrix @ points.T - inverse_matrix @ self.rotation_matrix[:, 2].reshape(2, -1)).T
         return np.rint(lines)
 
+    def compute_attribute(self, labels=None, locations=None, window=10, attribute='semblance', ):
+        if isinstance(window, int):
+            window = np.ones(3, dtype=np.int32) * window
+        if labels:
+            _min = self.cube_shape
+            _max = np.zeros(3)
+            for label in labels:
+                _min = np.minimum(label.points.min(axis=0)+1, _min)
+                _max =  np.maximum(label.points.max(axis=0)+1, _max)
+        else:
+            if locations:
+                _min, _max = locations
+                _min = np.array(_min)
+                _max = np.array(_max)
+            else:
+                _min = np.zeros(3)
+                _max = self.cube_shape
+
+        _min = _min.astype(int)
+        _max = _max.astype(int)
+
+        cube = self.file_hdf5['cube'][_min[0]:_max[0], _min[1]:_max[1], _min[2]:_max[2]]
+        window = np.minimum(np.array(window), cube.shape)
+
+        result = np.zeros_like(cube)
+        return filter_array(cube, result, window)
+
 
 class SeismicGeometrySEGY(SeismicGeometry):
     """ Class to infer information about SEG-Y cubes and provide convenient methods of working with them.
@@ -1071,7 +1098,6 @@ class SeismicGeometrySEGY(SeismicGeometry):
 
     # Convenient alias
     convert_to_hdf5 = make_hdf5
-
 
 class SeismicGeometryHDF5(SeismicGeometry):
     """ Class to infer information about HDF5 cubes and provide convenient methods of working with them.

@@ -7,7 +7,10 @@ import numpy as np
 import pandas as pd
 
 import h5py
+from numba import njit
 
+from scipy.ndimage import measurements
+from skimage.morphology import thin
 from sklearn.decomposition import PCA
 
 from .geometry import SeismicGeometry
@@ -31,7 +34,7 @@ class Fault(Horizon):
         self.name = os.path.basename(path)
         ext = os.path.splitext(path)[1][1:]
         if ext == 'npy':
-            points = np.load(path, allow_pickle=True)
+            points = np.load(path, allow_pickle=False)
             self.from_points(points, False, **kwargs)
         elif ext == 'hdf5':
             cube = SeismicGeometry(path, **kwargs).file_hdf5['cube']
@@ -177,3 +180,70 @@ class Fault(Horizon):
     @classmethod
     def fault_to_csv(cls, df):
         df.to_csv(os.path.join(folder, dst, df.name), sep=' ', header=False, index=False)
+
+
+@njit
+def _filter_faults(labels, threshold=20):
+    """ Filter short fault.
+
+    Parameters
+    ----------
+    threshold : int
+        length (in ilines) of fault
+
+    Returns
+    -------
+    indices : list of int
+        indices of good fault
+    """
+    indices = []
+    for i in range(labels[1]):
+        bounds = np.where(labels[0] == i+1)[0]
+        if bounds.max() - bounds.min() >= threshold:
+            indices.append(i+1)
+    return indices
+
+def _thin_faults(labels, indices):
+    """ Transform each fault to thin line.
+
+    Parameters
+    ----------
+    labels : tuple
+        output of measurements.label
+    indices : list of ints
+        indices of faults to keep
+    Returns
+    -------
+    new_labels : numpy.ndarray
+        mask with transformed faults
+    """
+    new_labels = np.zeros_like(labels[0])
+    for new_index, i in enumerate(indices):
+        fault = np.zeros_like(labels[0])
+        fault[labels[0] == i] = 1
+        for il in set(np.where(fault != 0)[0]):
+            fault[il] = thin(fault[il])
+        new_labels += fault * (new_index + 1)
+    return new_labels
+
+def process_faults(faults, threshold=10, slices=None):
+    """ Postprocessing for predicted cube of faults.
+
+    Parameters
+    ----------
+    threshold : int
+        length (in ilines) of fault
+    slices : tuple of slices
+        region of cube to process
+
+    Returns
+    -------
+    new_labels : numpy.ndarray
+        mask of the same size with transformed faults
+    """
+    cube = faults.file_hdf5['cube']
+    if slices is not None:
+        cube = cube[slices]
+    labels = measurements.label(cube)
+    indices = _filter_faults(labels, threshold)
+    return _thin_faults(labels, indices)

@@ -10,9 +10,6 @@ import numpy as np
 import pandas as pd
 import segyio
 
-from scipy.ndimage import measurements
-from skimage.morphology import thin
-
 from numba import njit, prange
 from ..batchflow import Sampler
 
@@ -643,69 +640,13 @@ def generate_points(edges, divisors, lengths, indices):
             low[i, j] = edge[idx_copy % length]
     return low
 
-
-@njit
-def _filter_faults(labels, threshold=20):
-    """ Filter short fault.
-
-    Parameters
-    ----------
-    threshold : int
-        length (in ilines) of fault
-
-    Returns
-    -------
-    indices : list of int
-        indices of good fault
-    """
-    indices = []
-    for i in range(labels[1]):
-        bounds = np.where(labels[0] == i+1)[0]
-        if bounds.max() - bounds.min() >= threshold:
-            indices.append(i+1)
-    return indices
-
-def _thin_faults(labels, indices):
-    """ Transform each fault to thin line.
-
-    Parameters
-    ----------
-    labels : tuple
-        output of measurements.label
-    indices : list of ints
-        indices of faults to keep
-    Returns
-    -------
-    new_labels : numpy.ndarray
-        mask with transformed faults
-    """
-    new_labels = np.zeros_like(labels[0])
-    for new_index, i in enumerate(indices):
-        fault = np.zeros_like(labels[0])
-        fault[labels[0] == i] = 1
-        for il in set(np.where(fault != 0)[0]):
-            fault[il] = thin(fault[il])
-        new_labels += fault * (new_index + 1)
-    return new_labels
-
-def process_faults(faults, threshold=10, slices=None):
-    """ Postprocessing for predicted cube of faults.
-
-    Parameters
-    ----------
-    threshold : int
-        length (in ilines) of fault
-    slices : tuple of slices
-        region of cube to process
-
-    Returns
-    -------
-    new_labels : numpy.ndarray
-        mask of the same size with transformed faults
-    """
-    cube = faults.file_hdf5['cube']
-    if slices is not None:
-        cube = cube[slices]
-    labels = measurements.label(cube)
-    indices = _filter_faults(labels, threshold)
-    return _thin_faults(labels, indices)
+@njit(parallel=True)
+def filter_array(array, result, window):
+    for i in prange(0, array.shape[0]-window[0]+1):
+        for j in prange(0, array.shape[1]-window[1]+1):
+            for k in prange(0, array.shape[2]-window[2]+1):
+                region = array[i:i+window[0], j:j+window[1], k:k+window[2]]
+                denum = np.sum(region**2) * region.shape[0] * region.shape[1]
+                if denum != 0:
+                    result[i, j, k] = ((np.sum(np.sum(region, axis=0), axis=0)**2).sum()) / denum
+    return result
