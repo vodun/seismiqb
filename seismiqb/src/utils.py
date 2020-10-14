@@ -640,13 +640,40 @@ def generate_points(edges, divisors, lengths, indices):
             low[i, j] = edge[idx_copy % length]
     return low
 
-@njit(parallel=True)
-def semblance(array, result, window):
-    for i in prange(array.shape[0]-window[0]+1):
-        for j in prange(array.shape[1]-window[1]+1):
-            for k in prange(array.shape[2]-window[2]+1):
-                region = array[i:i+window[0], j:j+window[1], k:k+window[2]]
-                denum = np.sum(region**2) * region.shape[0] * region.shape[1]
-                if denum != 0:
-                    result[i, j, k] = ((np.sum(np.sum(region, axis=0), axis=0)**2).sum()) / denum
+#@njit(parallel=True)
+def attr_filter(array, result, window, points, attribute='semblance'):
+    """ Compute semblance for the cube. """
+    if attribute == 'semblance':
+        fn = semblance
+    elif attribute == 'semblance_2':
+        fn = semblance_2
+    l = len(points)
+    for index in prange(0, l):
+        i, j, k = points[index]
+        region = array[
+            max(i - window[0] // 2, 0):min(i + window[0] // 2 + window[0] % 2, array.shape[0]),
+            max(j - window[1] // 2, 0):min(j + window[1] // 2 + window[1] % 2, array.shape[1]),
+            max(k - window[2] // 2, 0):min(k + window[2] // 2 + window[2] % 2, array.shape[2])
+        ]
+        result[i, j, k] = fn(np.copy(region))
     return result
+
+#@njit
+def semblance(region):
+    denum = np.sum(region**2) * region.shape[0] * region.shape[1]
+    if denum != 0:
+        return ((np.sum(np.sum(region, axis=0), axis=0)**2).sum()) / denum
+    else:
+        return 0.
+
+#@njit
+def semblance_2(region):
+    region = region.reshape(-1, region.shape[-1])
+    covariation = region.dot(region.T)
+    s = 0.
+    for i in prange(len(covariation)):
+        s += covariation[i, i]
+    if s != 0:
+        return covariation.sum() / (s * len(region))
+    else:
+        return 0.

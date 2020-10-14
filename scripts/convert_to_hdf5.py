@@ -23,8 +23,6 @@ ARGS = [
 
 
 if __name__ == '__main__':
-    import time
-    start = time.time()
     config = make_config(MSG, ARGS, os.path.basename(__file__).split('.')[0])
 
     geometry = SeismicGeometry(

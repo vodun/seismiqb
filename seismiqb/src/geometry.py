@@ -2,6 +2,7 @@
 import os
 import sys
 import shutil
+import itertools
 
 from textwrap import dedent
 from random import random
@@ -574,7 +575,7 @@ class SeismicGeometry:
         lines = (inverse_matrix @ points.T - inverse_matrix @ self.rotation_matrix[:, 2].reshape(2, -1)).T
         return np.rint(lines)
 
-    def compute_attribute(self, locations=None, window=10, attribute='semblance'):
+    def compute_attribute(self, locations=None, points=None, window=10, attribute='semblance'):
         """ Compute attribute on cube.
 
         Parameters
@@ -584,10 +585,17 @@ class SeismicGeometry:
             attribute will be computed for the whole cube.
         window : int or tuple
             Path to load segy file from with geometry spec.
-        path_segy : str
-            Path to store converted cube. By default, new cube is stored right next to original.
-        postfix : str
-            Postfix to add to the name of resulting cube."""
+        attribute : str
+            name of the attribute
+        points : np.ndarray
+            where to compute attribute
+        Returns
+        -------
+        np.ndarray
+            array of the shape corresponding to locations
+        """
+        if locations is not None and points is not None:
+            raise ValueError('At least one of locations and points must be None.')
         if isinstance(window, int):
             window = np.ones(3, dtype=np.int32) * window
         if locations:
@@ -605,10 +613,12 @@ class SeismicGeometry:
         window = np.minimum(np.array(window), cube.shape)
 
         result = np.zeros_like(cube)
-        if attribute == 'semblance':
-            return semblance(cube, result, window)
-        else:
-            raise ValueError('Unknown attribute:', attribute)
+        if points is None:
+            points = list(itertools.product(*[range(cube.shape[i]) for i in range(3)]))
+        if isinstance(points, list):
+            points = np.array(points)
+
+        return attr_filter(cube, result, window, points, attribute)
 
 
 class SeismicGeometrySEGY(SeismicGeometry):
