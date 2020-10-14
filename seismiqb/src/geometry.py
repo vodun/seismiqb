@@ -15,7 +15,7 @@ import h5py
 import segyio
 import cv2
 
-from .utils import lru_cache, find_min_max, file_print, SafeIO, semblance
+from .utils import lru_cache, find_min_max, file_print, SafeIO, attr_filter
 from .plotters import plot_image
 
 
@@ -182,9 +182,12 @@ class SeismicGeometry:
         return len(self.dataframe)
 
 
-    def store_meta(self):
+    def store_meta(self, path=None):
         """ Store collected stats on disk. """
-        path_meta = os.path.splitext(self.path)[0] + '.meta'
+        if path is None:
+            path_meta = os.path.splitext(self.path)[0] + '.meta'
+        else:
+            path_meta = path
 
         # Remove file, if exists: h5py can't do that
         if os.path.exists(path_meta):
@@ -620,6 +623,24 @@ class SeismicGeometry:
 
         return attr_filter(cube, result, window, points, attribute)
 
+    def create_hdf5(self, path_hdf5, array):
+        if (array.shape != self.cube_shape).all():
+            raise ValueError(f'array has shape {array.shape} but must have {self.cube_shape}')
+        if os.path.exists(path_hdf5):
+            os.remove(path_hdf5)
+
+        # Create file and datasets inside
+        with h5py.File(path_hdf5, "a") as file_hdf5:
+            cube_hdf5 = file_hdf5.create_dataset('cube', self.cube_shape)
+            cube_hdf5_x = file_hdf5.create_dataset('cube_x', self.cube_shape[[1, 2, 0]])
+            cube_hdf5_h = file_hdf5.create_dataset('cube_h', self.cube_shape[[2, 0, 1]])
+
+            cube_hdf5[:, :, :] = array
+            cube_hdf5_x[:, :, :] = array.transpose((1, 2, 0))
+            cube_hdf5_h[:, :, :] = array.transpose((2, 0, 1))
+
+        path_meta = os.path.splitext(path_hdf5)[0] + '.meta'
+        self.store_meta(path_meta)
 
 class SeismicGeometrySEGY(SeismicGeometry):
     """ Class to infer information about SEG-Y cubes and provide convenient methods of working with them.

@@ -640,7 +640,7 @@ def generate_points(edges, divisors, lengths, indices):
             low[i, j] = edge[idx_copy % length]
     return low
 
-#@njit(parallel=True)
+@njit(parallel=True)
 def attr_filter(array, result, window, points, attribute='semblance'):
     """ Compute semblance for the cube. """
     if attribute == 'semblance':
@@ -658,7 +658,7 @@ def attr_filter(array, result, window, points, attribute='semblance'):
         result[i, j, k] = fn(np.copy(region))
     return result
 
-#@njit
+@njit
 def semblance(region):
     denum = np.sum(region**2) * region.shape[0] * region.shape[1]
     if denum != 0:
@@ -666,7 +666,7 @@ def semblance(region):
     else:
         return 0.
 
-#@njit
+@njit
 def semblance_2(region):
     region = region.reshape(-1, region.shape[-1])
     covariation = region.dot(region.T)
