@@ -54,7 +54,11 @@ def compare_segy_files(path_1, path_2):
 
 
 @pytest.mark.slow
-@pytest.mark.parametrize("cubes", ['ixh']) #, 'i', 'x', 'h'])
+@pytest.mark.parametrize("cubes", [
+    # 'ixh',
+    'i',
+    # 'x', 'h'
+])
 def test_load_dump_segy(tmp_path, cubes):
     g = SeismicGeometry(PATH)
 
