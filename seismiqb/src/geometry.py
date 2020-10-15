@@ -15,7 +15,7 @@ import h5py
 import segyio
 import cv2
 
-from .utils import lru_cache, find_min_max, file_print, SafeIO, attr_filter
+from .utils import lru_cache, find_min_max, file_print, SafeIO, attr_filter, make_axis_grid
 from .plotters import plot_image
 
 
@@ -623,21 +623,52 @@ class SeismicGeometry:
 
         return attr_filter(cube, result, window, points, attribute)
 
-    def create_hdf5(self, path_hdf5, array):
-        if (array.shape != self.cube_shape).all():
-            raise ValueError(f'array has shape {array.shape} but must have {self.cube_shape}')
+    def create_hdf5(self, path_hdf5, src, shape=None, stride=None, bar=False):
+        chunks = []
+        def _infer_tuple(value, default):
+            if value is None:
+                value = default
+            elif isinstance(value, int):
+                value = tuple([value] * 3)
+            elif isinstance(value, tuple):
+                value = tuple([item if item else default[i] for i, item in enumerate(value)])
+            return value
+
+        shape = _infer_tuple(shape, self.cube_shape)
+        stride = _infer_tuple(stride, shape)
+
+        ilines_grid = make_axis_grid((0, self.cube_shape[0]), stride[0], self.cube_shape[0], shape[0])
+        xlines_grid = make_axis_grid((0, self.cube_shape[1]), stride[1], self.cube_shape[1], shape[1])
+        heights_grid = make_axis_grid((0, self.cube_shape[2]), stride[2], self.cube_shape[2], shape[2])
+
+        if isinstance(src, np.ndarray):
+            if (src.shape != self.cube_shape).all():
+                raise ValueError(f'src has shape {src.shape} but must have {self.cube_shape}')
+            chunks += [(0, 0, 0), src]
+            shape = self.cube_shape
+            total = 1
+        elif isinstance(src, str):
+            def _attribute():
+                for iline in ilines_grid:
+                    for xline in xlines_grid:
+                        for height in heights_grid:
+                            locations = [[iline, xline, height], [iline+shape[0], xline+shape[1], height+shape[2]]]
+                            yield [(iline, xline, height), self.compute_attribute(locations, attribute=src)]
+            chunks = _attribute()
+            total = len(ilines_grid) * len(xlines_grid) * len(heights_grid)
+
         if os.path.exists(path_hdf5):
             os.remove(path_hdf5)
 
-        # Create file and datasets inside
         with h5py.File(path_hdf5, "a") as file_hdf5:
             cube_hdf5 = file_hdf5.create_dataset('cube', self.cube_shape)
             cube_hdf5_x = file_hdf5.create_dataset('cube_x', self.cube_shape[[1, 2, 0]])
             cube_hdf5_h = file_hdf5.create_dataset('cube_h', self.cube_shape[[2, 0, 1]])
-
-            cube_hdf5[:, :, :] = array
-            cube_hdf5_x[:, :, :] = array.transpose((1, 2, 0))
-            cube_hdf5_h[:, :, :] = array.transpose((2, 0, 1))
+            _chunks = tqdm(chunks, total=total) if bar else chunks
+            for (iline, xline, height), chunk in _chunks:
+                cube_hdf5[iline:iline+shape[0], xline:xline+shape[1], height:height+shape[2]] = chunk
+                cube_hdf5_x[xline:xline+shape[1], height:height+shape[2], iline:iline+shape[0]] = chunk.transpose((1, 2, 0))
+                cube_hdf5_h[height:height+shape[2], iline:iline+shape[0], xline:xline+shape[1]] = chunk.transpose((2, 0, 1))
 
         path_meta = os.path.splitext(path_hdf5)[0] + '.meta'
         self.store_meta(path_meta)

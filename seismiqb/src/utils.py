@@ -373,6 +373,14 @@ def gen_crop_coordinates(point, horizon_matrix, zero_traces,
                 orders_array[top])
 
 
+def make_axis_grid(axis_range, stride, length, crop_shape):
+    # Make separate grids for every axis
+    grid = np.arange(*axis_range, stride)
+    grid_ = [x for x in grid if x + crop_shape < length]
+    if len(grid) != len(grid_):
+        grid_ += [axis_range[1] - crop_shape]
+    return sorted(grid_)
+
 @njit
 def groupby_mean(array):
     """ Faster version of mean-groupby of data along the first two columns.

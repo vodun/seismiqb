@@ -14,7 +14,7 @@ from .crop_batch import SeismicCropBatch
 from .horizon import Horizon, UnstructuredHorizon
 from .metrics import HorizonMetrics
 from .plotters import plot_image
-from .utils import IndexedDict, round_to_array, gen_crop_coordinates
+from .utils import IndexedDict, round_to_array, gen_crop_coordinates, make_axis_grid
 
 
 
@@ -476,17 +476,9 @@ class SeismicCubeset(Dataset):
            heights[1] > geometry.depth:
             raise ValueError('Ranges must contain within the cube.')
 
-        # Make separate grids for every axis
-        def _make_axis_grid(axis_range, stride, length, crop_shape):
-            grid = np.arange(*axis_range, stride)
-            grid_ = [x for x in grid if x + crop_shape < length]
-            if len(grid) != len(grid_):
-                grid_ += [axis_range[1] - crop_shape]
-            return sorted(grid_)
-
-        ilines_grid = _make_axis_grid(ilines, strides[0], geometry.ilines_len, crop_shape[0])
-        xlines_grid = _make_axis_grid(xlines, strides[1], geometry.xlines_len, crop_shape[1])
-        heights_grid = _make_axis_grid(heights, strides[2], geometry.depth, crop_shape[2])
+        ilines_grid = make_axis_grid(ilines, strides[0], geometry.ilines_len, crop_shape[0])
+        xlines_grid = make_axis_grid(xlines, strides[1], geometry.xlines_len, crop_shape[1])
+        heights_grid = make_axis_grid(heights, strides[2], geometry.depth, crop_shape[2])
 
         # Every point in grid contains reference to cube
         # in order to be valid input for `crop` action of SeismicCropBatch
