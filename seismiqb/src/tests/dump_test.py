@@ -52,31 +52,17 @@ def compare_segy_files(path_1, path_2):
 
         assert np.allclose(s1, s2)
 
-    
-
-    # n_ilines = g1.cube_shape[0]
-    # chunk_size = get_chunk_size((g1, g2), 0)
-    # chunk_size = min(chunk_size, n_ilines)
-
-    # i = 0
-    # while i < n_ilines:
-    #     slices1 = load_slices(g1, axis=0, start=i, end=i + chunk_size)
-    #     slices2 = load_slices(g2, axis=0, start=i, end=i + chunk_size)
-
-    #     assert np.allclose(slices1, slices2)
-
-    #     i += chunk_size
-
 
 @pytest.mark.slow
-def test_load_dump_segy(tmp_path):
+@pytest.mark.parametrize("cubes", ['ixh']) #, 'i', 'x', 'h'])
+def test_load_dump_segy(tmp_path, cubes):
     g = SeismicGeometry(PATH)
 
     hdf5_path = os.path.join(tmp_path, 'tmp.hdf5')
-    g.make_hdf5(hdf5_path, store_meta=False)
+    g.make_hdf5(hdf5_path, store_meta=False, cubes=cubes)
 
     out_path = os.path.join(tmp_path, 'out.sgy')
 
-    g.make_sgy(path_hdf5=hdf5_path, path_segy=out_path, zip_result=False, remove_hdf5=True)
+    g.make_sgy(path_hdf5=hdf5_path, path_segy=out_path, from_cubes=cubes, zip_result=False, remove_hdf5=True)
 
     compare_segy_files(PATH, out_path)
