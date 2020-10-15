@@ -583,15 +583,16 @@ class SeismicGeometry:
 
         Parameters
         ----------
-        locations : tuple of tuples
-            each tuple is min and max for each axis to compute attribute. By default,\
+        locations : tuple of slices
+            slices for each axis of cube to compute attribute. If locations is None,\
             attribute will be computed for the whole cube.
-        window : int or tuple
-            Path to load segy file from with geometry spec.
+        points : np.ndarray
+            points where compute the attribute. In other points attribute will be equal to 0.
+        window : int or tuple of ints
+            window for the filter.
         attribute : str
             name of the attribute
-        points : np.ndarray
-            where to compute attribute
+
         Returns
         -------
         np.ndarray
@@ -601,18 +602,10 @@ class SeismicGeometry:
             raise ValueError('At least one of locations and points must be None.')
         if isinstance(window, int):
             window = np.ones(3, dtype=np.int32) * window
-        if locations:
-            _min, _max = locations
-            _min = np.array(_min)
-            _max = np.array(_max)
-        else:
-            _min = np.zeros(3)
-            _max = self.cube_shape
+        if locations is None:
+            locations = [slice(0, self.cube_shape[i]) for i in range(3)]
 
-        _min = _min.astype(int)
-        _max = _max.astype(int)
-
-        cube = self.file_hdf5['cube'][_min[0]:_max[0], _min[1]:_max[1], _min[2]:_max[2]]
+        cube = self.file_hdf5['cube'][locations[0], locations[1], locations[2]]
         window = np.minimum(np.array(window), cube.shape)
 
         result = np.zeros_like(cube)
@@ -624,6 +617,21 @@ class SeismicGeometry:
         return attr_filter(cube, result, window, points, attribute)
 
     def create_hdf5(self, path_hdf5, src, shape=None, stride=None, bar=False):
+        """ Create hdf5 file from np.ndarray or with geological attribute.
+
+        Parameters
+        ----------
+        path_hdf5 : str
+
+        src : np.ndarray or str
+            if `str`, must be a name of the attribute to compute.
+        shape : int, tuple or None
+            shape of chunks.
+        stride : str
+            stride for chunks
+        bar : bool
+            progress bar
+        """
         chunks = []
         def _infer_tuple(value, default):
             if value is None:
@@ -637,25 +645,21 @@ class SeismicGeometry:
         shape = _infer_tuple(shape, self.cube_shape)
         stride = _infer_tuple(stride, shape)
 
-        ilines_grid = make_axis_grid((0, self.cube_shape[0]), stride[0], self.cube_shape[0], shape[0])
-        xlines_grid = make_axis_grid((0, self.cube_shape[1]), stride[1], self.cube_shape[1], shape[1])
-        heights_grid = make_axis_grid((0, self.cube_shape[2]), stride[2], self.cube_shape[2], shape[2])
+        grid = [make_axis_grid((0, self.cube_shape[i]), stride[i], self.cube_shape[i], shape[i]) for i in range(3)]
 
         if isinstance(src, np.ndarray):
             if (src.shape != self.cube_shape).all():
                 raise ValueError(f'src has shape {src.shape} but must have {self.cube_shape}')
-            chunks += [(0, 0, 0), src]
+            chunks += [[(0, 0, 0), src]]
             shape = self.cube_shape
             total = 1
         elif isinstance(src, str):
             def _attribute():
-                for iline in ilines_grid:
-                    for xline in xlines_grid:
-                        for height in heights_grid:
-                            locations = [[iline, xline, height], [iline+shape[0], xline+shape[1], height+shape[2]]]
-                            yield [(iline, xline, height), self.compute_attribute(locations, attribute=src)]
+                for coord in itertools.product(*grid):
+                    locations = [slice(coord[i], coord[i] + shape[i]) for i in range(3)]
+                    yield [coord, self.compute_attribute(locations, attribute=src)]
             chunks = _attribute()
-            total = len(ilines_grid) * len(xlines_grid) * len(heights_grid)
+            total = np.prod([len(item) for item in grid])
 
         if os.path.exists(path_hdf5):
             os.remove(path_hdf5)
@@ -665,10 +669,12 @@ class SeismicGeometry:
             cube_hdf5_x = file_hdf5.create_dataset('cube_x', self.cube_shape[[1, 2, 0]])
             cube_hdf5_h = file_hdf5.create_dataset('cube_h', self.cube_shape[[2, 0, 1]])
             _chunks = tqdm(chunks, total=total) if bar else chunks
+
             for (iline, xline, height), chunk in _chunks:
-                cube_hdf5[iline:iline+shape[0], xline:xline+shape[1], height:height+shape[2]] = chunk
-                cube_hdf5_x[xline:xline+shape[1], height:height+shape[2], iline:iline+shape[0]] = chunk.transpose((1, 2, 0))
-                cube_hdf5_h[height:height+shape[2], iline:iline+shape[0], xline:xline+shape[1]] = chunk.transpose((2, 0, 1))
+                _slice = (slice(iline, iline+shape[0]), slice(xline, xline+shape[1]), slice(height, height+shape[2]))
+                cube_hdf5[_slice[0], _slice[1], _slice[2]] = chunk
+                cube_hdf5_x[_slice[1], _slice[2], _slice[0]] = chunk.transpose((1, 2, 0))
+                cube_hdf5_h[_slice[2], _slice[0], _slice[1]] = chunk.transpose((2, 0, 1))
 
         path_meta = os.path.splitext(path_hdf5)[0] + '.meta'
         self.store_meta(path_meta)
