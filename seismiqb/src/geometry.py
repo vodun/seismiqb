@@ -534,8 +534,6 @@ class SeismicGeometry:
             path_hdf5 = os.path.join(os.path.dirname(self.path), 'temp.hdf5')
 
         with h5py.File(path_hdf5, 'r') as src:
-            cube_hdf5 = src['cube']
-
             geom = SeismicGeometry(path_spec)
             segy = geom.segyfile
 
@@ -555,26 +553,36 @@ class SeismicGeometry:
             spec.ilines = ilines
             spec.xlines = xlines
 
+            if 'i' in from_cubes and 'cube' in src:
+                cube_hdf5 = src['cube']
+
+                def get_traces(i, x):
+                    return cube_hdf5[i_enc[i], x_enc[x], :]
+            elif 'x' in from_cubes and 'cube_x' in src:
+                cube_hdf5 = src['cube_x']
+
+                def get_traces(i, x):
+                    return cube_hdf5[x_enc[x], :, i_enc[i]]
+            elif 'h' in from_cubes and 'cube_h' in src:
+                cube_hdf5 = src['cube_h']
+
+                def get_traces(i, x):
+                    return cube_hdf5[:, i_enc[i], x_enc[x]]
+            else:
+                raise ValueError("from cubes == " + from_cubes +
+                                 "but only {} are present".format([k for k in src.keys() if k.startswith("cube")]))
+
             with segyio.create(path_segy, spec) as dst_file:
                 # Copy all textual headers, including possible extended
                 for i in range(1 + segy.ext_headers):
                     dst_file.text[i] = segy.text[i]
 
-                tmp_arr = np.empty((chunk_size, cube_hdf5.shape[-1]), dtype=np.float32)
-                for counter, (i, x) in enumerate(idx):
-                    c = counter % chunk_size
-                    if c == 0 and counter > 0:
-                        dst_file.trace[counter - chunk_size:counter] = tmp_arr
+                for c, (i, x) in enumerate(idx):
+                    dst_file.trace[c] = get_traces(i, x)
 
-                    tmp_arr[c] = cube_hdf5[i_enc[i], x_enc[x], :]
-
-                counter = len(idx)
-                c = counter % chunk_size
-                if c > 0:
-                    dst_file.trace[counter - c:counter] = tmp_arr[:c]
-
-                dst_file.header[:counter] = segy.header[:counter]
-                dst_file.bin = {segyio.BinField.Traces: counter + 1}
+                l = len(idx)
+                dst_file.header[:l] = segy.header[:l]
+                dst_file.bin = {segyio.BinField.Traces: l}
 
         if remove_hdf5:
             os.remove(path_hdf5)
