@@ -14,6 +14,7 @@ import pandas as pd
 import h5py
 import segyio
 import cv2
+from scipy.ndimage import zoom
 
 from .utils import lru_cache, find_min_max, file_print, SafeIO, attr_filter, make_axis_grid
 from .plotters import plot_image
@@ -578,7 +579,7 @@ class SeismicGeometry:
         lines = (inverse_matrix @ points.T - inverse_matrix @ self.rotation_matrix[:, 2].reshape(2, -1)).T
         return np.rint(lines)
 
-    def compute_attribute(self, locations=None, points=None, window=10, attribute='semblance'):
+    def compute_attribute(self, locations=None, points=None, window=10, stride=1, attribute='semblance'):
         """ Compute attribute on cube.
 
         Parameters
@@ -602,19 +603,28 @@ class SeismicGeometry:
             raise ValueError('At least one of locations and points must be None.')
         if isinstance(window, int):
             window = np.ones(3, dtype=np.int32) * window
+        if isinstance(stride, int):
+            stride = np.ones(3, dtype=np.int32) * stride
         if locations is None:
             locations = [slice(0, self.cube_shape[i]) for i in range(3)]
 
         cube = self.file_hdf5['cube'][locations[0], locations[1], locations[2]]
         window = np.minimum(np.array(window), cube.shape)
 
-        result = np.zeros_like(cube)
+        shape = np.ceil(np.array(cube.shape) / np.array(stride)).astype(int)
+        result = np.zeros(shape)
+
         if points is None:
             points = list(itertools.product(*[range(cube.shape[i]) for i in range(3)]))
         if isinstance(points, list):
             points = np.array(points)
 
-        return attr_filter(cube, result, window, points, attribute)
+        attr = attr_filter(cube, result, window, stride, points, attribute)
+        attr = zoom(attr, np.array(cube.shape) / np.array(attr.shape))
+
+        result = np.zeros_like(cube)
+        result[:attr.shape[0], :attr.shape[1], :attr.shape[2]] = attr
+        return result
 
     def create_hdf5(self, path_hdf5, src, shape=None, stride=None, bar=False):
         """ Create hdf5 file from np.ndarray or with geological attribute.
@@ -671,7 +681,11 @@ class SeismicGeometry:
             _chunks = tqdm(chunks, total=total) if bar else chunks
 
             for (iline, xline, height), chunk in _chunks:
-                _slice = (slice(iline, iline+shape[0]), slice(xline, xline+shape[1]), slice(height, height+shape[2]))
+                _slice = (
+                    slice(iline, min(iline+shape[0], self.cube_shape[0])),
+                    slice(xline, min(xline+shape[1], self.cube_shape[1])),
+                    slice(height, min(height+shape[2], self.cube_shape[2]))
+                )
                 cube_hdf5[_slice[0], _slice[1], _slice[2]] = chunk
                 cube_hdf5_x[_slice[1], _slice[2], _slice[0]] = chunk.transpose((1, 2, 0))
                 cube_hdf5_h[_slice[2], _slice[0], _slice[1]] = chunk.transpose((2, 0, 1))

@@ -6,7 +6,7 @@ import glob
 import numpy as np
 import pandas as pd
 
-from numba import njit
+from numba import njit, prange
 
 from scipy.ndimage import measurements
 from skimage.morphology import thin
@@ -177,8 +177,8 @@ class Fault(Horizon):
         df.to_csv(os.path.join(folder, dst, df.name), sep=' ', header=False, index=False)
 
 
-@njit
-def _filter_faults(labels, threshold=20):
+@njit(parallel=True)
+def _filter_faults(labels, n_faults, threshold=30):
     """ Filter short fault.
 
     Parameters
@@ -191,11 +191,12 @@ def _filter_faults(labels, threshold=20):
     indices : list of int
         indices of good fault
     """
-    indices = []
-    for i in range(labels[1]):
-        bounds = np.where(labels[0] == i+1)[0]
-        if bounds.max() - bounds.min() >= threshold:
-            indices.append(i+1)
+    indices = np.zeros(n_faults)
+    for i in prange(n_faults):
+        bounds = np.where(labels == i+1)
+        size = (bounds[1].max() - bounds[1].min()) ** 2 + (bounds[0].max() - bounds[0].min()) ** 2
+        if np.sqrt(size) >= threshold:
+            indices[i] = 1
     return indices
 
 def _thin_faults(labels, indices):
@@ -214,14 +215,15 @@ def _thin_faults(labels, indices):
     """
     new_labels = np.zeros_like(labels[0])
     for new_index, i in enumerate(indices):
-        fault = np.zeros_like(labels[0])
-        fault[labels[0] == i] = 1
-        for il in set(np.where(fault != 0)[0]):
-            fault[il] = thin(fault[il])
-        new_labels += fault * (new_index + 1)
+        new_labels[labels[0] == i + 1] = new_index + 1
+        # fault = np.zeros_like(labels[0])
+        # fault[labels[0] == i] = 1
+        # for il in set(np.where(fault != 0)[0]):
+        #     fault[il] = thin(fault[il])
+        # new_labels += fault * (new_index + 1)
     return new_labels
 
-def process_faults(faults, threshold=10, slices=None):
+def process_faults(faults, threshold=30, slices=None, step=None):
     """ Postprocessing for predicted cube of faults.
 
     Parameters
@@ -239,6 +241,62 @@ def process_faults(faults, threshold=10, slices=None):
     cube = faults.file_hdf5['cube']
     if slices is not None:
         cube = cube[slices]
-    labels = measurements.label(cube)
-    indices = _filter_faults(labels, threshold)
-    return _thin_faults(labels, indices)
+    if step is None:
+        step = cube.shape[0]
+    labels = np.zeros(cube.shape)
+    import tqdm
+    for start in tqdm.tqdm(range(0, cube.shape[0], step)):
+        stop = min(start + step, cube.shape[0])
+        _labels = measurements.label(cube[start:stop])
+        indices = np.where(_filter_faults(_labels[0], _labels[1], threshold))[0]
+        labels[start:stop][_thin_faults(_labels, indices) > 0] = 1
+    return labels
+
+def split_faults(array, step=None, overlap=1, sequential=False):
+    """ Label faults in an array.
+
+    Parameters
+    ----------
+    array : np.ndarray
+        binary mask of faults
+    step : int
+        size of chunks to apply `measurements.label`
+    overlap : int
+        size of overlap to join faults from different chunks
+    sequential : bool
+        resulting labels are a sequence or not
+
+    Returns
+    -------
+    np.ndarray
+        array of the same size with labels
+    """
+    if step is None:
+        step = len(array)
+    chunks = [(start, array[start:start+step]) for start in range(0, array.shape[0], step-overlap)]
+    s = [[1,1,1], [1,1,1], [1,1,1]]
+    result = np.zeros_like(array)
+    n_objects = 0
+    for start, item in chunks:
+        objects, _n_objects = measurements.label(item, structure=s)
+        objects[objects > 0] += n_objects
+        coords = np.where(result[start:start+overlap] > 0)
+
+        transform = {k: v for k, v in zip(
+            objects[:overlap][coords[0], coords[1]],
+            result[start:start+overlap][coords[0], coords[1]]
+        ) if k != v}
+
+        for k, v in transform.items():
+            objects[objects == k] = v
+
+        result[start:start+step] = objects
+        n_objects += _n_objects
+    if sequential:
+        new_index = 1
+        for i in range(n_objects):
+            mask = (result == i+1)
+            if mask.any():
+                result[mask] = new_index
+                new_index += 1
+    return result

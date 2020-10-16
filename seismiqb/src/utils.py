@@ -649,7 +649,7 @@ def generate_points(edges, divisors, lengths, indices):
     return low
 
 @njit(parallel=True)
-def attr_filter(array, result, window, points, attribute='semblance'):
+def attr_filter(array, result, window, stride, points, attribute='semblance'):
     """ Compute semblance for the cube. """
     if attribute == 'semblance':
         fn = semblance
@@ -658,12 +658,13 @@ def attr_filter(array, result, window, points, attribute='semblance'):
     l = len(points)
     for index in prange(0, l):
         i, j, k = points[index]
-        region = array[
-            max(i - window[0] // 2, 0):min(i + window[0] // 2 + window[0] % 2, array.shape[0]),
-            max(j - window[1] // 2, 0):min(j + window[1] // 2 + window[1] % 2, array.shape[1]),
-            max(k - window[2] // 2, 0):min(k + window[2] // 2 + window[2] % 2, array.shape[2])
-        ]
-        result[i, j, k] = fn(np.copy(region))
+        if (i % stride[0] == 0) and (j % stride[1] == 0) and (k % stride[2] == 0):
+            region = array[
+                max(i - window[0] // 2, 0):min(i + window[0] // 2 + window[0] % 2, array.shape[0]),
+                max(j - window[1] // 2, 0):min(j + window[1] // 2 + window[1] % 2, array.shape[1]),
+                max(k - window[2] // 2, 0):min(k + window[2] // 2 + window[2] % 2, array.shape[2])
+            ]
+            result[i // stride[0], j // stride[1], k // stride[2]] = fn(np.copy(region))
     return result
 
 @njit
