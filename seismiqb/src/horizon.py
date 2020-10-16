@@ -1012,7 +1012,7 @@ class Horizon:
         # make the cut-array and fill it with array-data located on needed heights
         result = np.full(array.shape[:2] + (width, ), np.nan, dtype=np.float32)
         for i, surface_level in enumerate(np.array([overlap_matrix + shift for shift in range(-width // 2 + 1,
-                                                                                                    width // 2 + 1)])):
+                                                                                              width // 2 + 1)])):
             mask = (surface_level >= 0) & (surface_level < array.shape[-1]) & (surface_level !=
                                                                                self.FILL_VALUE - shifts[-1])
             mask_where = np.where(mask)

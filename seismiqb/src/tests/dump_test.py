@@ -2,35 +2,13 @@
 
 import os
 
-import psutil
-
 import pytest
 import numpy as np
 
 from seismiqb import SeismicGeometry
 
-PATH = "/data/acquisition_footprints/7-2_ftp_input.sgy" #"os.path.join(os.path.dirname(os.path.realpath(__file__)), '../../../datasets/demo_data/teapot_dome_10.sgy')
-PATH2 = "/data/acquisition_footprints/7-2_ftp_output.sgy"
+PATH = "/data/acquisition_footprints/7-2_ftp_input.sgy"
 
-
-def get_chunk_size(geometries, axis):
-    mem_avail = psutil.virtual_memory().available
-
-    if not isinstance(geometries, (list, tuple)):
-        geometries = (geometries,)
-
-    mem_needed_for_slide = 0
-    for geom in geometries:
-        l = list(geom.cube_shape)
-        del l[axis]
-        t = geom.load_trace(0)
-        mem_needed_for_slide += t.itemsize * l[0] * l[1]
-
-    return mem_avail // mem_needed_for_slide
-
-
-# @pytest.mark.parametrize('path_1', [PATH, PATH2])
-# @pytest.mark.parametrize('path_2', [PATH, PATH2])
 def compare_segy_files(path_1, path_2):
     """ Checks that two SEG-Y files contain exacly same traces
 
@@ -57,9 +35,11 @@ def compare_segy_files(path_1, path_2):
 @pytest.mark.parametrize("cubes", [
     # 'ixh',
     'i',
-    # 'x', 'h'
+    'x', 'h'
 ])
 def test_load_dump_segy(tmp_path, cubes):
+    """ Loads SEG-Y file, converts it to hdf5 with specified cubes,
+    then dumps to SEG-Y again and compares it to the original file """
     g = SeismicGeometry(PATH)
 
     hdf5_path = os.path.join(tmp_path, 'tmp.hdf5')
