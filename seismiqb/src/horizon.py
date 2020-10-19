@@ -7,6 +7,7 @@ from textwrap import dedent
 
 import numpy as np
 import pandas as pd
+import h5py
 from numba import njit, prange
 
 import cv2
@@ -1584,7 +1585,12 @@ class Horizon:
     def dump_points(self, path, fmt='npy'):
         """ Dump points. """
         if fmt == 'npy':
-            self.points.save(path, allow_pickle=False)
+            if os.path.exists(path):
+                points = np.load(path, allow_pickle=False)
+                points = np.concatenate([points, self.points], axis=0)
+            else:
+                points = self.points
+            np.save(path, points, allow_pickle=False)
         elif fmt == 'hdf5':
             file_hdf5 = h5py.File(path, "a")
             if 'cube' not in file_hdf5:

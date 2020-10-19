@@ -168,7 +168,7 @@ class Fault(Horizon):
         faults_folder = os.path.join(folder, dst)
         if faults_folder and not os.path.isdir(faults_folder):
             os.makedirs(faults_folder)
-        df = pd.read_csv(path, sep='\s+', names=cls.FAULT_STICKS)
+        df = pd.read_csv(path, sep=r'\s+', names=cls.FAULT_STICKS)
         df.groupby('name').apply(cls.fault_to_csv, folder=folder, dst=dst)
 
     @classmethod
@@ -257,7 +257,7 @@ def split_faults(array, step=None, overlap=1, sequential=False):
 
     Parameters
     ----------
-    array : np.ndarray
+    array : np.ndarray or SeismicGeometry
         binary mask of faults
     step : int
         size of chunks to apply `measurements.label`
@@ -271,20 +271,21 @@ def split_faults(array, step=None, overlap=1, sequential=False):
     np.ndarray
         array of the same size with labels
     """
+    if isinstance(array, SeismicGeometry):
+        array = array.file_hdf5['cube']
     if step is None:
         step = len(array)
     chunks = [(start, array[start:start+step]) for start in range(0, array.shape[0], step-overlap)]
-    s = [[1,1,1], [1,1,1], [1,1,1]]
+    s = np.ones((3, 3, 3))
     result = np.zeros_like(array)
     n_objects = 0
     for start, item in chunks:
         objects, _n_objects = measurements.label(item, structure=s)
         objects[objects > 0] += n_objects
         coords = np.where(result[start:start+overlap] > 0)
-
         transform = {k: v for k, v in zip(
-            objects[:overlap][coords[0], coords[1]],
-            result[start:start+overlap][coords[0], coords[1]]
+            objects[:overlap][coords[0], coords[1], coords[2]],
+            result[start:start+overlap][coords[0], coords[1], coords[2]]
         ) if k != v}
 
         for k, v in transform.items():

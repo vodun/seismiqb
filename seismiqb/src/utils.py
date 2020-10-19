@@ -374,7 +374,7 @@ def gen_crop_coordinates(point, horizon_matrix, zero_traces,
 
 
 def make_axis_grid(axis_range, stride, length, crop_shape):
-    # Make separate grids for every axis
+    """ Make separate grids for every axis. """
     grid = np.arange(*axis_range, stride)
     grid_ = [x for x in grid if x + crop_shape < length]
     if len(grid) != len(grid_):
@@ -653,10 +653,10 @@ def attr_filter(array, result, window, stride, points, attribute='semblance'):
     """ Compute semblance for the cube. """
     if attribute == 'semblance':
         fn = semblance
-    elif attribute == 'semblance_2':
-        fn = semblance_2
-    l = len(points)
-    for index in prange(0, l):
+    # elif attribute == 'semblance_2':
+    #     fn = semblance_2
+    l = points.shape[0]
+    for index in prange(l):
         i, j, k = points[index]
         if (i % stride[0] == 0) and (j % stride[1] == 0) and (k % stride[2] == 0):
             region = array[
@@ -664,25 +664,24 @@ def attr_filter(array, result, window, stride, points, attribute='semblance'):
                 max(j - window[1] // 2, 0):min(j + window[1] // 2 + window[1] % 2, array.shape[1]),
                 max(k - window[2] // 2, 0):min(k + window[2] // 2 + window[2] % 2, array.shape[2])
             ]
-            result[i // stride[0], j // stride[1], k // stride[2]] = fn(np.copy(region))
+            result[i // stride[0], j // stride[1], k // stride[2]] = fn(region.copy())
     return result
 
 @njit
 def semblance(region):
+    """ Semblance attribute. """
     denum = np.sum(region**2) * region.shape[0] * region.shape[1]
     if denum != 0:
         return ((np.sum(np.sum(region, axis=0), axis=0)**2).sum()) / denum
-    else:
-        return 0.
+    return 0.
 
 @njit
 def semblance_2(region):
     region = region.reshape(-1, region.shape[-1])
     covariation = region.dot(region.T)
     s = 0.
-    for i in prange(len(covariation)):
+    for i in prange(covariation.shape[0]):
         s += covariation[i, i]
     if s != 0:
         return covariation.sum() / (s * len(region))
-    else:
-        return 0.
+    return 0.

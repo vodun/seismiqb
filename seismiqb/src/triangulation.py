@@ -58,6 +58,7 @@ def triangulation(points):
 @njit
 def distance_to_triangle(triangle, node):
     """ https://gist.github.com/joshuashaffer/99d58e4ccbd37ca5d96e """
+    # pylint: disable=invalid-name, too-many-nested-blocks, too-many-branches
     B = triangle[0, :]
     E0 = triangle[1, :] - B
     E1 = triangle[2, :] - B
@@ -215,8 +216,5 @@ def distance_to_triangle(triangle, node):
     # account for numerical round-off error
     if sqrdistance < 0:
         sqrdistance = 0
-
     dist = np.sqrt(sqrdistance)
-
-    PP0 = B + s * E0 + t * E1
     return dist

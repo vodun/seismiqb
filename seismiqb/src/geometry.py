@@ -626,7 +626,7 @@ class SeismicGeometry:
         result[:attr.shape[0], :attr.shape[1], :attr.shape[2]] = attr
         return result
 
-    def create_hdf5(self, path_hdf5, src, shape=None, stride=None, bar=False):
+    def create_hdf5(self, path_hdf5, src, shape=None, stride=None, pbar=False):
         """ Create hdf5 file from np.ndarray or with geological attribute.
 
         Parameters
@@ -639,7 +639,7 @@ class SeismicGeometry:
             shape of chunks.
         stride : str
             stride for chunks
-        bar : bool
+        pbar : bool
             progress bar
         """
         chunks = []
@@ -678,7 +678,7 @@ class SeismicGeometry:
             cube_hdf5 = file_hdf5.create_dataset('cube', self.cube_shape)
             cube_hdf5_x = file_hdf5.create_dataset('cube_x', self.cube_shape[[1, 2, 0]])
             cube_hdf5_h = file_hdf5.create_dataset('cube_h', self.cube_shape[[2, 0, 1]])
-            _chunks = tqdm(chunks, total=total) if bar else chunks
+            _chunks = tqdm(chunks, total=total) if pbar else chunks
 
             for (iline, xline, height), chunk in _chunks:
                 _slice = (
