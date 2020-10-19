@@ -7,9 +7,9 @@ import numpy as np
 import pandas as pd
 
 from numba import njit, prange
+from tqdm.auto import tqdm
 
 from scipy.ndimage import measurements
-from skimage.morphology import thin
 from sklearn.decomposition import PCA
 
 from .geometry import SeismicGeometry
@@ -176,83 +176,7 @@ class Fault(Horizon):
         """ Save separate fault to csv. """
         df.to_csv(os.path.join(folder, dst, df.name), sep=' ', header=False, index=False)
 
-
-@njit(parallel=True)
-def _filter_faults(labels, n_faults, threshold=30):
-    """ Filter short fault.
-
-    Parameters
-    ----------
-    threshold : int
-        length (in ilines) of fault
-
-    Returns
-    -------
-    indices : list of int
-        indices of good fault
-    """
-    indices = np.zeros(n_faults)
-    for i in prange(n_faults):
-        bounds = np.where(labels == i+1)
-        size = (bounds[1].max() - bounds[1].min()) ** 2 + (bounds[0].max() - bounds[0].min()) ** 2
-        if np.sqrt(size) >= threshold:
-            indices[i] = 1
-    return indices
-
-def _thin_faults(labels, indices):
-    """ Transform each fault to thin line.
-
-    Parameters
-    ----------
-    labels : tuple
-        output of measurements.label
-    indices : list of ints
-        indices of faults to keep
-    Returns
-    -------
-    new_labels : numpy.ndarray
-        mask with transformed faults
-    """
-    new_labels = np.zeros_like(labels[0])
-    for new_index, i in enumerate(indices):
-        new_labels[labels[0] == i + 1] = new_index + 1
-        # fault = np.zeros_like(labels[0])
-        # fault[labels[0] == i] = 1
-        # for il in set(np.where(fault != 0)[0]):
-        #     fault[il] = thin(fault[il])
-        # new_labels += fault * (new_index + 1)
-    return new_labels
-
-def process_faults(faults, threshold=30, slices=None, step=None):
-    """ Postprocessing for predicted cube of faults.
-
-    Parameters
-    ----------
-    threshold : int
-        length (in ilines) of fault
-    slices : tuple of slices
-        region of cube to process
-
-    Returns
-    -------
-    new_labels : numpy.ndarray
-        mask of the same size with transformed faults
-    """
-    cube = faults.file_hdf5['cube']
-    if slices is not None:
-        cube = cube[slices]
-    if step is None:
-        step = cube.shape[0]
-    labels = np.zeros(cube.shape)
-    import tqdm
-    for start in tqdm.tqdm(range(0, cube.shape[0], step)):
-        stop = min(start + step, cube.shape[0])
-        _labels = measurements.label(cube[start:stop])
-        indices = np.where(_filter_faults(_labels[0], _labels[1], threshold))[0]
-        labels[start:stop][_thin_faults(_labels, indices) > 0] = 1
-    return labels
-
-def split_faults(array, step=None, overlap=1, sequential=False):
+def split_faults(array, step=None, overlap=1, sequential=True, threshold=None, pbar=False):
     """ Label faults in an array.
 
     Parameters
@@ -264,7 +188,12 @@ def split_faults(array, step=None, overlap=1, sequential=False):
     overlap : int
         size of overlap to join faults from different chunks
     sequential : bool
-        resulting labels are a sequence or not
+        resulting labels are a sequence or not. False value makes computation faster.
+    threshold : float or None
+        if not None, fault less than threshold withh be removed. Size is the maximal distance
+        between two points of fault.
+    pbar : bool
+        progress bar
 
     Returns
     -------
@@ -279,6 +208,9 @@ def split_faults(array, step=None, overlap=1, sequential=False):
     s = np.ones((3, 3, 3))
     result = np.zeros_like(array)
     n_objects = 0
+    if pbar:
+        chunks = tqdm(chunks)
+        print('Compute labels')
     for start, item in chunks:
         objects, _n_objects = measurements.label(item, structure=s)
         objects[objects > 0] += n_objects
@@ -294,10 +226,63 @@ def split_faults(array, step=None, overlap=1, sequential=False):
         result[start:start+step] = objects
         n_objects += _n_objects
     if sequential:
-        new_index = 1
-        for i in range(n_objects):
-            mask = (result == i+1)
-            if mask.any():
-                result[mask] = new_index
-                new_index += 1
+        print('Make labels sequential.')
+        result = _sequential_labels(result)
+    if threshold:
+        indices = np.unique(result)[1:]
+        print('Compute sizes.')
+        sizes = faults_sizes(result, indices)
+        for i, label in enumerate(indices):
+            if sizes[i] < threshold:
+                result[result == label] = 0
     return result
+
+@njit(parallel=True)
+def _sequential_labels(labels):
+    indices = np.unique(labels)
+    for i in prange(labels.shape[0]): # pylint: disable=not-an-iterable
+        for j in prange(labels.shape[1]): # pylint: disable=not-an-iterable
+            for k in prange(labels.shape[2]): # pylint: disable=not-an-iterable
+                if labels[i, j, k] != 0:
+                    label = np.where(indices == labels[i, j, k])[0][0]
+                    labels[i, j, k] = label + 1
+    return labels
+
+def faults_sizes(labels, indices):
+    """ Compute sizes of faults.
+
+    Parameters
+    ----------
+    labels : numpy.ndarray
+        3d array with labels
+    indices : numpy.ndarray
+        indices of faults to compute size
+    Returns
+    -------
+    sizes : numpy.ndarray
+    """
+    bounds = np.zeros((len(indices), 4))
+    bounds[:, 0] = labels.shape[0]
+    bounds[:, 1] = labels.shape[1]
+    sizes = np.zeros_like(indices)
+    return _faults_sizes(labels, indices, bounds, sizes)
+
+@njit(parallel=True)
+def _faults_sizes(labels, indices, bounds, sizes):
+    for i in prange(labels.shape[0]): # pylint: disable=not-an-iterable
+        for j in prange(labels.shape[1]): # pylint: disable=not-an-iterable
+            for k in prange(labels.shape[2]): # pylint: disable=not-an-iterable
+                if labels[i, j, k] > 0:
+                    index = np.where(indices == labels[i, j, k])[0][0]
+
+                    left_top = bounds[index][:2]
+                    if (i < left_top[0]) or (j < left_top[1]):
+                        bounds[index, :2] = np.array([i, j])
+
+                    right_bottom = bounds[index][2:]
+                    if (i > right_bottom[0]) or (j > right_bottom[1]):
+                        bounds[index, 2:] = np.array([i, j])
+
+    for i in prange(len(sizes)): # pylint: disable=not-an-iterable
+        sizes[i] = (bounds[i, 2] - bounds[i, 0]) ** 2 + (bounds[i, 3] - bounds[i, 1]) ** 2
+    return sizes

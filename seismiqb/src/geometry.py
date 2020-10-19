@@ -1292,7 +1292,7 @@ class SeismicGeometryHDF5(SeismicGeometry):
             slide = self._cached_load(cube, loc)
         return slide
 
-    def compute_cdp_transform(self, sgy_path, second_trace = 20000):
+    def compute_cdp_transform(self, sgy_path, second_trace=20000):
         """ Create functions with linear line to cdp transforms and
         save them to the `iline_to_cdpx` and `xline_to_cdpy` attributes of the class.
 

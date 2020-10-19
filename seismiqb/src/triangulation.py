@@ -21,7 +21,7 @@ def triangle_rasterization(points, width=1):
     shape = np.array([np.max(points[:, i]) - np.min(points[:, i]) for i in range(3)])
     _points = np.zeros((int((shape[0] + 2) * (shape[1] + 2) * (shape[2] + 2)), 3))
     i = 0
-    for x in prange(int(np.min(points[:, 0])), int(np.max(points[:, 0])+1)):
+    for x in prange(int(np.min(points[:, 0])), int(np.max(points[:, 0])+1)): # pylint: disable=not-an-iterable
         for y in range(int(np.min(points[:, 1])), int(np.max(points[:, 1]+1))):
             for z in range(int(np.min(points[:, 2])), int(np.max(points[:, 2]+1))):
                 node = np.array([x, y, z])
@@ -58,7 +58,7 @@ def triangulation(points):
 @njit
 def distance_to_triangle(triangle, node):
     """ https://gist.github.com/joshuashaffer/99d58e4ccbd37ca5d96e """
-    # pylint: disable=invalid-name, too-many-nested-blocks, too-many-branches
+    # pylint: disable=invalid-name, too-many-nested-blocks, too-many-branches, too-many-statements
     B = triangle[0, :]
     E0 = triangle[1, :] - B
     E1 = triangle[2, :] - B

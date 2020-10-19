@@ -656,7 +656,7 @@ def attr_filter(array, result, window, stride, points, attribute='semblance'):
     # elif attribute == 'semblance_2':
     #     fn = semblance_2
     l = points.shape[0]
-    for index in prange(l):
+    for index in prange(l): # pylint: disable=not-an-iterable
         i, j, k = points[index]
         if (i % stride[0] == 0) and (j % stride[1] == 0) and (k % stride[2] == 0):
             region = array[
@@ -669,7 +669,7 @@ def attr_filter(array, result, window, stride, points, attribute='semblance'):
 
 @njit
 def semblance(region):
-    """ Semblance attribute. """
+    """ Marfurt semblance. """
     denum = np.sum(region**2) * region.shape[0] * region.shape[1]
     if denum != 0:
         return ((np.sum(np.sum(region, axis=0), axis=0)**2).sum()) / denum
@@ -677,10 +677,11 @@ def semblance(region):
 
 @njit
 def semblance_2(region):
+    """ Marfurt semblance v2. """
     region = region.reshape(-1, region.shape[-1])
     covariation = region.dot(region.T)
     s = 0.
-    for i in prange(covariation.shape[0]):
+    for i in prange(covariation.shape[0]): # pylint: disable=not-an-iterable
         s += covariation[i, i]
     if s != 0:
         return covariation.sum() / (s * len(region))
