@@ -588,9 +588,11 @@ class SeismicGeometry:
             slices for each axis of cube to compute attribute. If locations is None,\
             attribute will be computed for the whole cube.
         points : np.ndarray
-            points where compute the attribute. In other points attribute will be equal to 0.
+            points where compute the attribute. In other points attribute will be equal to numpy.nan.
         window : int or tuple of ints
             window for the filter.
+        stride : int or tuple of ints
+            stride to compute attribute
         attribute : str
             name of the attribute
 
@@ -599,8 +601,6 @@ class SeismicGeometry:
         np.ndarray
             array of the shape corresponding to locations
         """
-        if locations is not None and points is not None:
-            raise ValueError('At least one of locations and points must be None.')
         if isinstance(window, int):
             window = np.ones(3, dtype=np.int32) * window
         if isinstance(stride, int):
@@ -608,11 +608,21 @@ class SeismicGeometry:
         if locations is None:
             locations = [slice(0, self.cube_shape[i]) for i in range(3)]
 
+        if points is not None:
+            for i in range(3):
+                start = locations[i].start or 0
+                stop = locations[i].stop or self.cube_shape[i]
+                points = points[points[:, i] >= start]
+                points = points[points[:, i] < stop]
+                points[:, i] -= start
+            stride = np.ones(3, dtype='int32')
+
         cube = self.file_hdf5['cube'][locations[0], locations[1], locations[2]]
         window = np.minimum(np.array(window), cube.shape)
 
         shape = np.ceil(np.array(cube.shape) / np.array(stride)).astype(int)
-        result = np.zeros(shape)
+        result = np.empty(shape)
+        result[:] = np.nan
 
         if points is None:
             points = list(itertools.product(*[range(cube.shape[i]) for i in range(3)]))
@@ -620,11 +630,9 @@ class SeismicGeometry:
             points = np.array(points)
 
         attr = attr_filter(cube, result, window, stride, points, attribute)
-        attr = zoom(attr, np.array(cube.shape) / np.array(attr.shape))
-
-        result = np.zeros_like(cube)
-        result[:attr.shape[0], :attr.shape[1], :attr.shape[2]] = attr
-        return result
+        if np.any(stride > 1):
+            attr = zoom(attr, np.array(cube.shape) / np.array(attr.shape))
+        return attr
 
     def create_hdf5(self, path_hdf5, src, shape=None, stride=None, pbar=False):
         """ Create hdf5 file from np.ndarray or with geological attribute.
