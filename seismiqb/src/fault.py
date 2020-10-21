@@ -284,7 +284,7 @@ def filter_faults(labels, threshold, sizes=None):
     indices = np.unique(labels)[1:]
     if sizes is None:
         sizes = faults_sizes(labels, indices)
-    return _filter_labels(labels, sizes, indices, threshold)
+    return _filter_faults(labels, sizes, indices, threshold)
 
 @njit(parallel=True)
 def _sequential_labels(labels):
