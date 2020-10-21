@@ -231,37 +231,6 @@ def split_faults(array, step=None, overlap=1, pbar=False):
     sizes = faults_sizes(labels, indices)
     return labels, sizes
 
-def filter_labels(labels, threshold, sizes=None):
-    """ Filter faults by size.
-
-    Parameters
-    ----------
-    labels : numpy.ndarray
-        3d array with labels
-    threshold : float
-        faults with the size less then threshold will be removed
-    sizes : numpy.ndarray or sizes
-        precompured sizes of faults
-    Returns
-    -------
-    sizes : numpy.ndarray
-    """
-    indices = np.unique(labels)[1:]
-    if sizes is None:
-        sizes = faults_sizes(labels, indices)
-    return _filter_labels(labels, sizes, indices, threshold)
-
-@njit(parallel=True)
-def _sequential_labels(labels):
-    indices = np.unique(labels)
-    for i in prange(labels.shape[0]): # pylint: disable=not-an-iterable
-        for j in prange(labels.shape[1]): # pylint: disable=not-an-iterable
-            for k in prange(labels.shape[2]): # pylint: disable=not-an-iterable
-                if labels[i, j, k] != 0:
-                    label = np.where(indices == labels[i, j, k])[0][0]
-                    labels[i, j, k] = label
-    return labels
-
 def faults_sizes(labels, indices):
     """ Compute sizes of faults.
 
@@ -297,8 +266,39 @@ def _faults_sizes(labels, indices, bounds, sizes):
         sizes[i] = (bounds[i, 2] - bounds[i, 0]) ** 2 + (bounds[i, 3] - bounds[i, 1]) ** 2
     return sizes
 
+def filter_faults(labels, threshold, sizes=None):
+    """ Filter faults by size.
+
+    Parameters
+    ----------
+    labels : numpy.ndarray
+        3d array with labels
+    threshold : float
+        faults with the size less then threshold will be removed
+    sizes : numpy.ndarray or sizes
+        precompured sizes of faults
+    Returns
+    -------
+    sizes : numpy.ndarray
+    """
+    indices = np.unique(labels)[1:]
+    if sizes is None:
+        sizes = faults_sizes(labels, indices)
+    return _filter_labels(labels, sizes, indices, threshold)
+
 @njit(parallel=True)
-def _filter_labels(labels, sizes, indices, threshold):
+def _sequential_labels(labels):
+    indices = np.unique(labels)
+    for i in prange(labels.shape[0]): # pylint: disable=not-an-iterable
+        for j in prange(labels.shape[1]): # pylint: disable=not-an-iterable
+            for k in prange(labels.shape[2]): # pylint: disable=not-an-iterable
+                if labels[i, j, k] != 0:
+                    label = np.where(indices == labels[i, j, k])[0][0]
+                    labels[i, j, k] = label
+    return labels
+
+@njit(parallel=True)
+def _filter_faults(labels, sizes, indices, threshold):
     for i in prange(labels.shape[0]): # pylint: disable=not-an-iterable
         for j in prange(labels.shape[1]): # pylint: disable=not-an-iterable
             for k in prange(labels.shape[2]): # pylint: disable=not-an-iterable
