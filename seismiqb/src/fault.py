@@ -263,7 +263,7 @@ def _faults_sizes(labels, indices, bounds, sizes):
                     bounds[index, 3] = max(bounds[index][3], j)
 
     for i in prange(len(sizes)): # pylint: disable=not-an-iterable
-        sizes[i] = (bounds[i, 2] - bounds[i, 0]) ** 2 + (bounds[i, 3] - bounds[i, 1]) ** 2
+        sizes[i] = ((bounds[i, 2] - bounds[i, 0]) ** 2 + (bounds[i, 3] - bounds[i, 1]) ** 2) ** 0.5
     return sizes
 
 def filter_faults(labels, threshold, sizes=None):
