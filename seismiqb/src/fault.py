@@ -176,7 +176,7 @@ class Fault(Horizon):
         """ Save separate fault to csv. """
         df.to_csv(os.path.join(folder, dst, df.name), sep=' ', header=False, index=False)
 
-def split_faults(array, step=None, overlap=1, sequential=True, threshold=None, pbar=False):
+def split_faults(array, step=None, overlap=1, pbar=False):
     """ Label faults in an array.
 
     Parameters
@@ -206,36 +206,34 @@ def split_faults(array, step=None, overlap=1, sequential=True, threshold=None, p
         step = len(array)
     chunks = [(start, array[start:start+step]) for start in range(0, array.shape[0], step-overlap)]
     s = np.ones((3, 3, 3))
-    result = np.zeros_like(array)
+    labels = np.zeros_like(array)
     n_objects = 0
     if pbar:
         chunks = tqdm(chunks)
-        print('Compute labels')
     for start, item in chunks:
         objects, _n_objects = measurements.label(item, structure=s)
         objects[objects > 0] += n_objects
-        coords = np.where(result[start:start+overlap] > 0)
+        coords = np.where(labels[start:start+overlap] > 0)
         transform = {k: v for k, v in zip(
             objects[:overlap][coords[0], coords[1], coords[2]],
-            result[start:start+overlap][coords[0], coords[1], coords[2]]
+            labels[start:start+overlap][coords[0], coords[1], coords[2]]
         ) if k != v}
 
         for k, v in transform.items():
             objects[objects == k] = v
 
-        result[start:start+step] = objects
+        labels[start:start+step] = objects
         n_objects += _n_objects
-    if sequential:
-        print('Make labels sequential.')
-        result = _sequential_labels(result)
-    if threshold:
-        indices = np.unique(result)[1:]
-        print('Compute sizes.')
-        sizes = faults_sizes(result, indices)
-        for i, label in enumerate(indices):
-            if sizes[i] < threshold:
-                result[result == label] = 0
-    return result
+    labels = _sequential_labels(labels)
+    indices = np.unique(labels)[1:]
+    sizes = faults_sizes(labels, indices)
+    return labels, sizes
+
+def filter_labels(labels, threshold, sizes=None):
+    if sizes is None:
+        indices = np.unique(labels)[1:]
+        sizes = faults_sizes(labels, indices)
+    return _filter_labels(result, sizes, indices, threshold)
 
 @njit(parallel=True)
 def _sequential_labels(labels):
@@ -286,3 +284,14 @@ def _faults_sizes(labels, indices, bounds, sizes):
     for i in prange(len(sizes)): # pylint: disable=not-an-iterable
         sizes[i] = (bounds[i, 2] - bounds[i, 0]) ** 2 + (bounds[i, 3] - bounds[i, 1]) ** 2
     return sizes
+
+@njit(parallel=True)
+def _filter_labels(labels, sizes, indices, threshold):
+    for i in prange(labels.shape[0]): # pylint: disable=not-an-iterable
+        for j in prange(labels.shape[1]): # pylint: disable=not-an-iterable
+            for k in prange(labels.shape[2]): # pylint: disable=not-an-iterable
+                if labels[i, j, k] > 0:
+                    index = np.where(indices == labels[i, j, k])[0][0]
+                    if sizes[index] < threshold:
+                        labels[i, j, k] = 0
+    return labels

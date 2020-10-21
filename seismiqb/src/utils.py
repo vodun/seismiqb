@@ -653,8 +653,10 @@ def attr_filter(array, result, window, stride, points, attribute='semblance'):
     """ Compute semblance for the cube. """
     if attribute == 'semblance':
         fn = semblance
-    # elif attribute == 'semblance_2':
-    #     fn = semblance_2
+    elif attribute == 'semblance_2':
+        fn = semblance_2
+    elif attribute == 'corr':
+        fn = local_correlation
     l = points.shape[0]
     for index in prange(l): # pylint: disable=not-an-iterable
         i, j, k = points[index]
@@ -686,3 +688,16 @@ def semblance_2(region):
     if s != 0:
         return covariation.sum() / (s * len(region))
     return 0.
+
+@njit(parallel=True)
+def local_correlation(region):
+    """ Correlation in window. """
+    center = region[
+        region.shape[0] - region.shape[0] // 2,
+        region.shape[1] - region.shape[1] // 2,
+    ]
+    corr = np.zeros((region.shape[0], region.shape[1]))
+    for i in range(region.shape[0]):
+        for j in range(region.shape[1]):
+            corr[i, j] = np.corrcoef(center, region[i, j])[0, 1]
+    return np.mean(corr)

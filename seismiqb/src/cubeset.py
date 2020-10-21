@@ -376,6 +376,17 @@ class SeismicCubeset(Dataset):
         plot_image(background, **kwargs)
         return batch
 
+    def show_points(self, idx=0, **kwargs):
+        map = np.zeros(self.geometries[idx].cube_shape[:-1])
+        for label in self.labels[idx]:
+            map[label.points[:, 0], label.points[:, 1]] = 1
+        kwargs = {
+            'title': f'Faults on {self.indices[idx]}',
+            'xlabel': 'ilines', 'ylabel': 'xlines', 'cmap': 'Reds',
+            **kwargs
+        }
+        plot_image(map, **kwargs)
+
 
     def load(self, label_dir=None, filter_zeros=True, dst_labels='labels', p=None, bins=None, **kwargs):
         """ Load everything: geometries, point clouds, labels, samplers.
