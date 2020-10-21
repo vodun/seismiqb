@@ -246,8 +246,8 @@ def filter_labels(labels, threshold, sizes=None):
     -------
     sizes : numpy.ndarray
     """
+    indices = np.unique(labels)[1:]
     if sizes is None:
-        indices = np.unique(labels)[1:]
         sizes = faults_sizes(labels, indices)
     return _filter_labels(labels, sizes, indices, threshold)
 
@@ -259,7 +259,7 @@ def _sequential_labels(labels):
             for k in prange(labels.shape[2]): # pylint: disable=not-an-iterable
                 if labels[i, j, k] != 0:
                     label = np.where(indices == labels[i, j, k])[0][0]
-                    labels[i, j, k] = label + 1
+                    labels[i, j, k] = label
     return labels
 
 def faults_sizes(labels, indices):
@@ -288,14 +288,10 @@ def _faults_sizes(labels, indices, bounds, sizes):
             for k in prange(labels.shape[2]): # pylint: disable=not-an-iterable
                 if labels[i, j, k] > 0:
                     index = np.where(indices == labels[i, j, k])[0][0]
-
-                    left_top = bounds[index][:2]
-                    if (i < left_top[0]) or (j < left_top[1]):
-                        bounds[index, :2] = np.array([i, j])
-
-                    right_bottom = bounds[index][2:]
-                    if (i > right_bottom[0]) or (j > right_bottom[1]):
-                        bounds[index, 2:] = np.array([i, j])
+                    bounds[index, 0] = min(bounds[index][0], i)
+                    bounds[index, 1] = min(bounds[index][1], j)
+                    bounds[index, 2] = max(bounds[index][2], i)
+                    bounds[index, 3] = max(bounds[index][3], j)
 
     for i in prange(len(sizes)): # pylint: disable=not-an-iterable
         sizes[i] = (bounds[i, 2] - bounds[i, 0]) ** 2 + (bounds[i, 3] - bounds[i, 1]) ** 2

@@ -585,7 +585,7 @@ class SeismicGeometry:
         Parameters
         ----------
         locations : tuple of slices
-            slices for each axis of cube to compute attribute. If locations is None,\
+            slices for each axis of cube to compute attribute. If locations is None,
             attribute will be computed for the whole cube.
         points : np.ndarray
             points where compute the attribute. In other points attribute will be equal to numpy.nan.
