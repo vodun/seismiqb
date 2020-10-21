@@ -1,4 +1,4 @@
-""" Fault class and metrics. """
+""" Fault class and processing methods. """
 
 import os
 import glob
@@ -17,7 +17,15 @@ from .horizon import Horizon
 from .triangulation import triangulation, triangle_rasterization
 
 class Fault(Horizon):
-    """ !! """
+    """ Contains points of fault.
+
+    Initialized from `storage` and `geometry`.
+
+    Storage can be one of:
+        - csv-like file in CHARISMA, REDUCED_CHARISMA or FAULT_STICKS format.
+        - ndarray of (N, 3) shape.
+        - hdf5 file as a binary mask for cube.
+    """
     FAULT_STICKS = ['INLINE', 'iline', 'xline', 'cdp_x', 'cdp_y', 'height', 'name', 'number']
     COLUMNS = ['iline', 'xline', 'height', 'name', 'number']
 
@@ -27,8 +35,8 @@ class Fault(Horizon):
         super().__init__(*args, **kwargs)
 
     def from_file(self, path, transform=True, **kwargs):
-        """ Init from path to either CHARISMA or REDUCED_CHARISMA csv-like file
-        or from .npy file with points. """
+        """ Init from path to either CHARISMA, REDUCED_CHARISMA or FAULT_STICKS csv-like file
+        from .npy or .hdf5 file with points. """
         _ = kwargs
         self.name = os.path.basename(path)
         ext = os.path.splitext(path)[1][1:]
@@ -45,7 +53,6 @@ class Fault(Horizon):
 
     def csv_to_points(self, path, **kwargs):
         """ Get point cloud array from file values. """
-        #pylint: disable=anomalous-backslash-in-string
         df = self.read_file(path)
         df = self.fix_lines(df)
         sticks = self.read_sticks(df)
@@ -163,7 +170,7 @@ class Fault(Horizon):
 
     @classmethod
     def split_file(cls, path, dst='faults'):
-        """ Split file with multiple faults into separate. """
+        """ Split file with multiple faults into separate files. """
         folder = os.path.dirname(path)
         faults_folder = os.path.join(folder, dst)
         if faults_folder and not os.path.isdir(faults_folder):
@@ -187,11 +194,6 @@ def split_faults(array, step=None, overlap=1, pbar=False):
         size of chunks to apply `measurements.label`
     overlap : int
         size of overlap to join faults from different chunks
-    sequential : bool
-        resulting labels are a sequence or not. False value makes computation faster.
-    threshold : float or None
-        if not None, fault less than threshold withh be removed. Size is the maximal distance
-        between two points of fault.
     pbar : bool
         progress bar
 
@@ -230,10 +232,24 @@ def split_faults(array, step=None, overlap=1, pbar=False):
     return labels, sizes
 
 def filter_labels(labels, threshold, sizes=None):
+    """ Filter faults by size.
+
+    Parameters
+    ----------
+    labels : numpy.ndarray
+        3d array with labels
+    threshold : float
+        faults with the size less then threshold will be removed
+    sizes : numpy.ndarray or sizes
+        precompured sizes of faults
+    Returns
+    -------
+    sizes : numpy.ndarray
+    """
     if sizes is None:
         indices = np.unique(labels)[1:]
         sizes = faults_sizes(labels, indices)
-    return _filter_labels(result, sizes, indices, threshold)
+    return _filter_labels(labels, sizes, indices, threshold)
 
 @njit(parallel=True)
 def _sequential_labels(labels):
