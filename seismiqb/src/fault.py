@@ -210,8 +210,8 @@ def split_faults(array, step=None, overlap=1, pbar=False):
     chunks = [(start, array[start:start+step]) for start in range(0, array.shape[0], step-overlap)]
     s = np.ones((3, 3, 3))
 
-    overlap_chunk = np.zeros((overlap, array.shape[1], array.shape[2]))
-    labels = []
+    overlap_old = None#np.zeros((overlap, array.shape[1], array.shape[2]))
+    labels = None
 
     n_objects = 0
     if pbar:
@@ -219,27 +219,41 @@ def split_faults(array, step=None, overlap=1, pbar=False):
     for start, item in chunks:
         objects, _n_objects = measurements.label(item, structure=s)
         objects[objects > 0] += n_objects
-        coords = np.where(overlap_chunk > 0)
+        overlap_new = objects[:overlap]
 
-        if len(coords[0]) > 0:
-            transform = {k: v for k, v in zip(
-                objects[:overlap][coords[0], coords[1], coords[2]],
-                overlap_chunk[coords[0], coords[1], coords[2]]
-            ) if k != v}
+        if overlap_old is not None:
+            coords = np.where(overlap_old > 0)
+            if len(coords[0]) > 0:
+                transform = {k: v for k, v in zip(
+                    overlap_new[coords[0], coords[1], coords[2]],
+                    overlap_old[coords[0], coords[1], coords[2]]
+                ) if k != v}
 
-            for k, v in transform.items():
-                objects[objects == k] = v
+                for k, v in transform.items():
+                    objects[objects == k] = v
+                overlap_new = objects[:overlap]
 
+                transform = {k: v for k, v in zip(
+                    overlap_old[coords[0], coords[1], coords[2]],
+                    overlap_new[coords[0], coords[1], coords[2]]
+                ) if k != v}
+
+                for k, v in transform.items():
+                    labels[labels[:, 3] == k, 3] = v
+
+        overlap_old = objects[-overlap:]
+        objects = objects[overlap:]
         nonzero_coord = np.where(objects)
-        overlap_chunk = objects[-overlap:]
         objects = np.stack(
             [*nonzero_coord, objects[nonzero_coord[0], nonzero_coord[1], nonzero_coord[2]]],
             axis = -1
         )
-        objects[:, 0] += start
-        labels += [objects]
+        objects[:, 0] += start + overlap
+        if labels is None:
+            labels = objects     
+        else:
+            labels = np.concatenate([labels, objects])
         n_objects += _n_objects
-    labels = np.concatenate(labels)
     labels = _sequential_labels(labels)
     sizes = faults_sizes(labels)
     return labels, sizes
