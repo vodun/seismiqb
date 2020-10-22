@@ -188,7 +188,7 @@ def split_faults(array, step=None, overlap=1, pbar=False):
 
     Parameters
     ----------
-    array : np.ndarray or SeismicGeometry
+    array : numpy.ndarray or SeismicGeometry
         binary mask of faults
     step : int
         size of chunks to apply `measurements.label`
@@ -199,8 +199,9 @@ def split_faults(array, step=None, overlap=1, pbar=False):
 
     Returns
     -------
-    np.ndarray
-        array of the same size with labels
+    numpy.ndarray
+        array of shape (N, 4) where the first 3 columns are coordinates of points and the last one
+        is for labels
     """
     if isinstance(array, SeismicGeometry):
         array = array.file_hdf5['cube']
@@ -208,62 +209,67 @@ def split_faults(array, step=None, overlap=1, pbar=False):
         step = len(array)
     chunks = [(start, array[start:start+step]) for start in range(0, array.shape[0], step-overlap)]
     s = np.ones((3, 3, 3))
-    labels = np.zeros_like(array)
+
+    overlap_chunk = np.zeros((overlap, array.shape[1], array.shape[2]))
+    labels = []
+
     n_objects = 0
     if pbar:
         chunks = tqdm(chunks)
     for start, item in chunks:
         objects, _n_objects = measurements.label(item, structure=s)
         objects[objects > 0] += n_objects
-        coords = np.where(labels[start:start+overlap] > 0)
-        transform = {k: v for k, v in zip(
-            objects[:overlap][coords[0], coords[1], coords[2]],
-            labels[start:start+overlap][coords[0], coords[1], coords[2]]
-        ) if k != v}
+        coords = np.where(overlap_chunk > 0)
 
-        for k, v in transform.items():
-            objects[objects == k] = v
+        if len(coords[0]) > 0:
+            transform = {k: v for k, v in zip(
+                objects[:overlap][coords[0], coords[1], coords[2]],
+                overlap_chunk[coords[0], coords[1], coords[2]]
+            ) if k != v}
 
-        labels[start:start+step] = objects
+            for k, v in transform.items():
+                objects[objects == k] = v
+
+        nonzero_coord = np.where(objects)
+        overlap_chunk = objects[-overlap:]
+        objects = np.stack(
+            [*nonzero_coord, objects[nonzero_coord[0], nonzero_coord[1], nonzero_coord[2]]],
+            axis = -1
+        )
+        objects[:, 0] += start
+        labels += [objects]
         n_objects += _n_objects
+    labels = np.concatenate(labels)
     labels = _sequential_labels(labels)
-    indices = np.unique(labels)[1:]
-    sizes = faults_sizes(labels, indices)
+    sizes = faults_sizes(labels)
     return labels, sizes
 
-def faults_sizes(labels, indices):
+@njit(parallel=True)
+def _sequential_labels(labels):
+    indices = np.unique(labels[:, 3])
+    for i in prange(len(labels)): # pylint: disable=not-an-iterable
+        labels[i, 3] = np.where(indices == labels[i, 3])[0][0] + 1
+    return labels
+
+@njit(parallel=True)
+def faults_sizes(labels):
     """ Compute sizes of faults.
 
     Parameters
     ----------
     labels : numpy.ndarray
-        3d array with labels
-    indices : numpy.ndarray
-        indices of faults to compute size
+        array of shape (N, 4) where the first 3 columns are coordinates of points and the last one
+        is for labels
     Returns
     -------
     sizes : numpy.ndarray
     """
-    bounds = np.zeros((len(indices), 4))
-    bounds[:, 0] = labels.shape[0]
-    bounds[:, 1] = labels.shape[1]
+    indices = np.unique(labels[:, 3])
     sizes = np.zeros_like(indices)
-    return _faults_sizes(labels, indices, bounds, sizes)
-
-@njit(parallel=True)
-def _faults_sizes(labels, indices, bounds, sizes):
-    for i in prange(labels.shape[0]): # pylint: disable=not-an-iterable
-        for j in prange(labels.shape[1]): # pylint: disable=not-an-iterable
-            for k in prange(labels.shape[2]): # pylint: disable=not-an-iterable
-                if labels[i, j, k] > 0:
-                    index = np.where(indices == labels[i, j, k])[0][0]
-                    bounds[index, 0] = min(bounds[index][0], i)
-                    bounds[index, 1] = min(bounds[index][1], j)
-                    bounds[index, 2] = max(bounds[index][2], i)
-                    bounds[index, 3] = max(bounds[index][3], j)
-
-    for i in prange(len(sizes)): # pylint: disable=not-an-iterable
-        sizes[i] = (bounds[i, 2] - bounds[i, 0]) ** 2 + (bounds[i, 3] - bounds[i, 1]) ** 2
+    for i in prange(len(indices)):
+        label = indices[i]
+        array = labels[labels[:, 3] == label]
+        sizes[label-1] = ((array[:, 0].max() - array[:, 0].min()) ** 2 + (array[:, 1].max() - array[:, 1].min())) ** 0.5
     return sizes
 
 def filter_faults(labels, threshold, sizes=None):
@@ -272,38 +278,18 @@ def filter_faults(labels, threshold, sizes=None):
     Parameters
     ----------
     labels : numpy.ndarray
-        3d array with labels
+        array of shape (N, 4) where the first 3 columns are coordinates of points and the last one
+        is for labels
     threshold : float
         faults with the size less then threshold will be removed
     sizes : numpy.ndarray or sizes
         precompured sizes of faults
     Returns
     -------
-    sizes : numpy.ndarray
+    numpy.ndarray
+        filtered array
     """
-    indices = np.unique(labels)[1:]
     if sizes is None:
-        sizes = faults_sizes(labels, indices)
-    return _filter_faults(labels, sizes, indices, threshold)
-
-@njit(parallel=True)
-def _sequential_labels(labels):
-    indices = np.unique(labels)
-    for i in prange(labels.shape[0]): # pylint: disable=not-an-iterable
-        for j in prange(labels.shape[1]): # pylint: disable=not-an-iterable
-            for k in prange(labels.shape[2]): # pylint: disable=not-an-iterable
-                if labels[i, j, k] != 0:
-                    label = np.where(indices == labels[i, j, k])[0][0]
-                    labels[i, j, k] = label
-    return labels
-
-@njit(parallel=True)
-def _filter_faults(labels, sizes, indices, threshold):
-    for i in prange(labels.shape[0]): # pylint: disable=not-an-iterable
-        for j in prange(labels.shape[1]): # pylint: disable=not-an-iterable
-            for k in prange(labels.shape[2]): # pylint: disable=not-an-iterable
-                if labels[i, j, k] > 0:
-                    index = np.where(indices == labels[i, j, k])[0][0]
-                    if sizes[index] < threshold:
-                        labels[i, j, k] = 0
-    return labels
+        sizes = faults_sizes(labels)
+    indices = np.where(sizes >= threshold)[0] + 1
+    return labels[np.isin(labels[:, 3], indices)]
