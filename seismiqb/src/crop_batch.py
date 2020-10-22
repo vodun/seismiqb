@@ -678,7 +678,7 @@ class SeismicCropBatch(Batch):
             Number of points to sample.
         shift : int
             Maximum amplitude of random shift along the heights axis.
-        king : {'random', 'linear', 'nearest', 'zero', 'slinear', 'quadratic', 'cubic', 'previous', 'next'}
+        kind : {'random', 'linear', 'slinear', 'quadratic', 'cubic', 'previous', 'next'}
             Type of interpolation to use. If 'random', then chosen randomly for each crop.
         width : int
             Width of interpolated lines.
@@ -694,9 +694,7 @@ class SeismicCropBatch(Batch):
         min_, max_ = nz[axis][0], nz[axis][-1]
         idx = [min_, max_]
 
-        length = max_ - min_
-        step = length // n
-
+        step = (max_ - min_) // n
         for i in range(0, max_-step, step):
             idx.append(np.random.randint(i, i + step))
 
@@ -712,7 +710,7 @@ class SeismicCropBatch(Batch):
         x = nz[axis]
         y += np.random.randint(-shift, shift + 1, size=y.shape)
 
-        # Sort and keep only unique values, based on `x`
+        # Sort and keep only unique values, based on `x` to remove width of original mask
         sort_indices = np.argsort(x)
         x, y = x[sort_indices], y[sort_indices]
         _, unique_indices = np.unique(x, return_index=True)

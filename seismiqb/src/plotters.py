@@ -474,7 +474,7 @@ class MatplotlibPlotter:
 
         Parameters
         ----------
-        curves : tuple
+        curve : tuple
             a sequence containing curves for plotting along with, possibly, specification of
             plot formats. Must at least contain an array of ys, but may also be comprised of
             triples of (xs, ys, fmt) for an arbitrary number of curves.

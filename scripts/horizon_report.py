@@ -162,16 +162,16 @@ if __name__ == '__main__':
                                        sep=',', index=False)
 
     if config['save-pdf']:
-        images = []
+        paths_images = []
         for metric_name in config['metrics']:
-            images += glob(os.path.join(config['savedir'], f'*{metric_name}*'))
+            paths_images += glob(os.path.join(config['savedir'], f'*{metric_name}*'))
 
         width, height = metric.shape
         pdf_path = os.path.join(config['savedir'], 'report.pdf')
 
         pdf = ReportPDF(unit='pt', format=(width, height))
 
-        for path in sorted(images):
+        for path in sorted(paths_images):
             pdf.add_page()
             pdf.set_font('Arial', 'B', min(height//40, 30))
             pdf.cell(0, height//8 - 15, path.split('/')[-1].split('.')[0], align='C')
@@ -183,7 +183,8 @@ if __name__ == '__main__':
         _ = [os.remove(path) for path in glob(os.path.join(config['savedir'], '*.png'))]
 
     if config['save-zip']:
-        savedir = config['savedir'][:-1] if config['savedir'].endswith('/') else savedir
+        savedir = config['savedir']
+        savedir = savedir[:-1] if savedir.endswith('/') else savedir
 
         root_dir = os.path.dirname(savedir)
         base_dir = savedir.split('/')[-1]
