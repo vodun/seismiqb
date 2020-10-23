@@ -26,6 +26,7 @@ class Fault(Horizon):
         - ndarray of (N, 3) shape.
         - hdf5 file as a binary mask for cube.
     """
+    #pylint: disable=attribute-defined-outside-init
     FAULT_STICKS = ['INLINE', 'iline', 'xline', 'cdp_x', 'cdp_y', 'height', 'name', 'number']
     COLUMNS = ['iline', 'xline', 'height', 'name', 'number']
 
