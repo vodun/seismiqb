@@ -183,14 +183,14 @@ class Fault(Horizon):
         """ Save separate fault to csv. """
         df.to_csv(os.path.join(folder, dst, df.name), sep=' ', header=False, index=False)
 
-def split_faults(array, step=None, overlap=1, pbar=False):
+def split_faults(array, chunk_size=None, overlap=1, pbar=False):
     """ Label faults in an array.
 
     Parameters
     ----------
     array : numpy.ndarray or SeismicGeometry
         binary mask of faults
-    step : int
+    chunk_size : int
         size of chunks to apply `measurements.label`
     overlap : int
         size of overlap to join faults from different chunks
@@ -205,55 +205,46 @@ def split_faults(array, step=None, overlap=1, pbar=False):
     """
     if isinstance(array, SeismicGeometry):
         array = array.file_hdf5['cube']
-    if step is None:
-        step = len(array)
-    chunks = [(start, array[start:start+step]) for start in range(0, array.shape[0], step-overlap)]
+    if chunk_size is None:
+        chunk_size = len(array)
+    chunks = [(start, array[start:start+chunk_size+overlap]) for start in range(0, array.shape[0], chunk_size)]
     s = np.ones((3, 3, 3))
 
-    overlap_old = None#np.zeros((overlap, array.shape[1], array.shape[2]))
+    prev_overlap = None
     labels = None
 
     n_objects = 0
     if pbar:
         chunks = tqdm(chunks)
     for start, item in chunks:
-        objects, _n_objects = measurements.label(item, structure=s)
-        objects[objects > 0] += n_objects
-        overlap_new = objects[:overlap]
+        chunk_labels, new_objects = measurements.label(item, structure=s)
+        chunk_labels[chunk_labels > 0] += n_objects
+        next_overlap = chunk_labels[:overlap]
 
-        if overlap_old is not None:
-            coords = np.where(overlap_old > 0)
+        if prev_overlap is not None:
+            coords = np.where(prev_overlap > 0)
             if len(coords[0]) > 0:
-                transform = {k: v for k, v in zip(
-                    overlap_new[coords[0], coords[1], coords[2]],
-                    overlap_old[coords[0], coords[1], coords[2]]
-                ) if k != v}
+                while (next_overlap != prev_overlap).any():
+                    chunk_transform = {k: v for k, v in zip(next_overlap[coords], prev_overlap[coords]) if k != v}
+                    for k, v in chunk_transform.items():
+                        chunk_labels[chunk_labels == k] = v
+                    next_overlap = chunk_labels[:overlap]
 
-                for k, v in transform.items():
-                    objects[objects == k] = v
-                overlap_new = objects[:overlap]
+                    labels_transform = {k: v for k, v in zip(prev_overlap[coords], next_overlap[coords]) if k != v}
+                    for k, v in labels_transform.items():
+                        labels[labels[:, 3] == k, 3] = v
+                        prev_overlap[prev_overlap == k] = v
 
-                transform = {k: v for k, v in zip(
-                    overlap_old[coords[0], coords[1], coords[2]],
-                    overlap_new[coords[0], coords[1], coords[2]]
-                ) if k != v}
-
-                for k, v in transform.items():
-                    labels[labels[:, 3] == k, 3] = v
-
-        overlap_old = objects[-overlap:]
-        objects = objects[overlap:]
-        nonzero_coord = np.where(objects)
-        objects = np.stack(
-            [*nonzero_coord, objects[nonzero_coord[0], nonzero_coord[1], nonzero_coord[2]]],
-            axis = -1
-        )
-        objects[:, 0] += start + overlap
+        prev_overlap = chunk_labels[-overlap:]
+        chunk_labels = chunk_labels[overlap:]
+        nonzero_coord = np.where(chunk_labels)
+        chunk_labels = np.stack([*nonzero_coord, chunk_labels[nonzero_coord]], axis = -1)
+        chunk_labels[:, 0] += start + overlap
         if labels is None:
-            labels = objects     
+            labels = chunk_labels     
         else:
-            labels = np.concatenate([labels, objects])
-        n_objects += _n_objects
+            labels = np.concatenate([labels, chunk_labels])
+        n_objects += new_objects
     labels = _sequential_labels(labels)
     sizes = faults_sizes(labels)
     return labels, sizes
