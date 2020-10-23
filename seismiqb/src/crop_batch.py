@@ -295,7 +295,7 @@ class SeismicCropBatch(Batch):
 
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def load_cubes(self, ix, dst, src_locations='locations', src_geometry='geometries', **kwargs):
+    def load_cubes(self, ix, dst, src_locations='locations', src_geometry='geometries', use_3d=False, **kwargs):
         """ Load data from cube in given positions.
 
         Parameters
@@ -304,11 +304,13 @@ class SeismicCropBatch(Batch):
             Component of batch with positions of crops to load.
         dst : str
             Component of batch to put loaded crops in.
+        use_3d : bool
+            if True, use slicing of geometry, `load_crop`, otherwise.
         """
         geometry = self.get(ix, src_geometry)
         location = self.get(ix, src_locations)
-        #print(locations)
-        #return geometry[tuple(location)]
+        if use_3d: 
+            return geometry[tuple(location)]
         return geometry.load_crop(location, **kwargs)
 
 

@@ -29,11 +29,6 @@ class Fault(Horizon):
     FAULT_STICKS = ['INLINE', 'iline', 'xline', 'cdp_x', 'cdp_y', 'height', 'name', 'number']
     COLUMNS = ['iline', 'xline', 'height', 'name', 'number']
 
-    def __init__(self, *args, **kwargs):
-        self.cube = None
-        self.name = None
-        super().__init__(*args, **kwargs)
-
     def from_file(self, path, transform=True, **kwargs):
         """ Init from path to either CHARISMA, REDUCED_CHARISMA or FAULT_STICKS csv-like file
         from .npy or .hdf5 file with points. """
@@ -130,11 +125,10 @@ class Fault(Horizon):
                             [locations[2].start, locations[2].stop]],
                             dtype=np.int32)
         points = self.points
-        _min = self.i_min, self.x_min, self.h_min
-        _max = self.i_max, self.x_max, self.h_max
 
-        if (_max < mask_bbox[:, 0]).any() or (_min >= mask_bbox[:, 1]).any():
+        if (self.bbox[:, 1] < mask_bbox[:, 0]).any() or (self.bbox[:, 0] >= mask_bbox[:, 1]).any():
             return mask
+
         for i in range(3):
             points = points[points[:, i] >= locations[i].start]
             points = points[points[:, i] < locations[i].stop]
@@ -208,45 +202,46 @@ def split_faults(array, chunk_size=None, overlap=1, pbar=False):
     if chunk_size is None:
         chunk_size = len(array)
     chunks = [(start, array[start:start+chunk_size+overlap]) for start in range(0, array.shape[0], chunk_size)]
-    s = np.ones((3, 3, 3))
 
-    prev_overlap = None
-    labels = None
-
+    prev_overlap = np.zeros((0, *array.shape[1:]))
+    labels = np.zeros((0, 4), dtype='int32')
     n_objects = 0
+    s = np.ones((3, 3, 3))
     if pbar:
         chunks = tqdm(chunks)
     for start, item in chunks:
-        chunk_labels, new_objects = measurements.label(item, structure=s)
-        chunk_labels[chunk_labels > 0] += n_objects
-        next_overlap = chunk_labels[:overlap]
+        chunk_labels, new_objects = measurements.label(item, structure=s) # compute labels for new chunk
+        chunk_labels[chunk_labels > 0] += n_objects # shift all values to avoid intersecting with previous labels
+        new_overlap = chunk_labels[:overlap]
 
-        if prev_overlap is not None:
+        if len(prev_overlap) > 0:
             coords = np.where(prev_overlap > 0)
             if len(coords[0]) > 0:
-                while (next_overlap != prev_overlap).any():
-                    chunk_transform = {k: v for k, v in zip(next_overlap[coords], prev_overlap[coords]) if k != v}
+                # while there are the same objects with different labels repeat procedure
+                while (new_overlap != prev_overlap).any():
+                    # find overlapping objects and change labels in chunk
+                    chunk_transform = {k: v for k, v in zip(new_overlap[coords], prev_overlap[coords]) if k != v}
                     for k, v in chunk_transform.items():
                         chunk_labels[chunk_labels == k] = v
-                    next_overlap = chunk_labels[:overlap]
+                    new_overlap = chunk_labels[:overlap]
 
-                    labels_transform = {k: v for k, v in zip(prev_overlap[coords], next_overlap[coords]) if k != v}
+                    # find overlapping objects and change labels in processed part of cube
+                    labels_transform = {k: v for k, v in zip(prev_overlap[coords], new_overlap[coords]) if k != v}
                     for k, v in labels_transform.items():
                         labels[labels[:, 3] == k, 3] = v
                         prev_overlap[prev_overlap == k] = v
 
         prev_overlap = chunk_labels[-overlap:]
         chunk_labels = chunk_labels[overlap:]
+
         nonzero_coord = np.where(chunk_labels)
         chunk_labels = np.stack([*nonzero_coord, chunk_labels[nonzero_coord]], axis = -1)
-        chunk_labels[:, 0] += start + overlap
-        if labels is None:
-            labels = chunk_labels     
-        else:
-            labels = np.concatenate([labels, chunk_labels])
+        chunk_labels[:, 0] += start
+        labels = np.concatenate([labels, chunk_labels])
         n_objects += new_objects
-    labels = _sequential_labels(labels)
-    sizes = faults_sizes(labels)
+
+    labels = _sequential_labels(labels) # make labels sequential from 1 to number of labels
+    sizes = faults_sizes(labels) # compute object sizes
     return labels, sizes
 
 @njit(parallel=True)
@@ -271,7 +266,7 @@ def faults_sizes(labels):
     """
     indices = np.unique(labels[:, 3])
     sizes = np.zeros_like(indices)
-    for i in prange(len(indices)):
+    for i in prange(len(indices)): # pylint: disable=not-an-iterable
         label = indices[i]
         array = labels[labels[:, 3] == label]
         sizes[label-1] = ((array[:, 0].max() - array[:, 0].min()) ** 2 + (array[:, 1].max() - array[:, 1].min())) ** 0.5

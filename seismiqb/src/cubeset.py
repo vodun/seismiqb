@@ -378,15 +378,17 @@ class SeismicCubeset(Dataset):
 
     def show_points(self, idx=0, **kwargs):
         """ Plot 2D map of points. """
-        _map = np.zeros(self.geometries[idx].cube_shape[:-1])
+        map = np.zeros(self.geometries[idx].cube_shape[:-1])
         for label in self.labels[idx]:
-            _map[label.points[:, 0], label.points[:, 1]] = 1
+            map[label.points[:, 0], label.points[:, 1]] += 1
         kwargs = {
             'title': f'Faults on {self.indices[idx]}',
-            'xlabel': 'ilines', 'ylabel': 'xlines', 'cmap': 'Reds',
+            'xlabel': self.geometries[idx].index_headers[0],
+            'ylabel': self.geometries[idx].index_headers[1],
+            'cmap': 'Reds',
             **kwargs
         }
-        plot_image(_map, **kwargs)
+        plot_image(map, **kwargs)
 
 
     def load(self, label_dir=None, filter_zeros=True, dst_labels='labels', p=None, bins=None, **kwargs):

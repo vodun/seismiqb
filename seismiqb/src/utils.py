@@ -671,13 +671,15 @@ def attr_filter(array, result, window, stride, points, attribute='semblance'):
 
 @njit
 def semblance(region):
-    """ Marfurt semblance. """
+    """ Marfurt semblance based on paper Marfurt et al.
+    `3-D seismic attributes using a semblance-based coherency algorithm
+    <http://mcee.ou.edu/aaspi/publications/1998/marfurt_etal_GPHY1998b.pdf>`__. """
     denum = np.sum(region**2) * region.shape[0] * region.shape[1]
     if denum != 0:
         return ((np.sum(np.sum(region, axis=0), axis=0)**2).sum()) / denum
     return 0.
 
-@njit
+@njit(parallel=True)
 def semblance_2(region):
     """ Marfurt semblance v2. """
     region = region.reshape(-1, region.shape[-1])
@@ -697,7 +699,7 @@ def local_correlation(region):
         region.shape[1] - region.shape[1] // 2,
     ]
     corr = np.zeros((region.shape[0], region.shape[1]))
-    for i in range(region.shape[0]):
+    for i in prange(region.shape[0]):
         for j in range(region.shape[1]):
             corr[i, j] = np.corrcoef(center, region[i, j])[0, 1]
     return np.mean(corr)
