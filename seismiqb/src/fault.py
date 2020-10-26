@@ -164,19 +164,18 @@ class Fault(Horizon):
                     print(filename, ': OK')
 
     @classmethod
-    def split_file(cls, path, dst='faults'):
+    def split_file(cls, path, dst):
         """ Split file with multiple faults into separate files. """
         folder = os.path.dirname(path)
-        faults_folder = os.path.join(folder, dst)
-        if faults_folder and not os.path.isdir(faults_folder):
-            os.makedirs(faults_folder)
+        if dst and not os.path.isdir(dst):
+            os.makedirs(dst)
         df = pd.read_csv(path, sep=r'\s+', names=cls.FAULT_STICKS)
         df.groupby('name').apply(cls.fault_to_csv, folder=folder, dst=dst)
 
     @classmethod
-    def fault_to_csv(cls, df, folder, dst):
+    def fault_to_csv(cls, df, dst):
         """ Save separate fault to csv. """
-        df.to_csv(os.path.join(folder, dst, df.name), sep=' ', header=False, index=False)
+        df.to_csv(os.path.join(dst, df.name), sep=' ', header=False, index=False)
 
 def split_faults(array, chunk_size=None, overlap=1, pbar=False):
     """ Label faults in an array.
