@@ -4,8 +4,6 @@ from glob import glob
 
 import numpy as np
 
-from matplotlib import pyplot as plt
-
 from ..batchflow import FilesIndex, DatasetIndex, Dataset, Sampler, Pipeline
 from ..batchflow import NumpySampler, ConstantSampler
 
@@ -426,7 +424,7 @@ class SeismicCubeset(Dataset):
             Defaults to '3d'.
         horizon : Horizon or int
             Horizon to use for setting `heights` when `mode='area'`.
-            Instance of Horizon or index for items from `self.labels`.
+            Instance of Horizon or index for items from `labels` attribute.
             By default first item of `self.labels` used.
         overlap : float or sequence
             Distance between grid points.
@@ -448,8 +446,8 @@ class SeismicCubeset(Dataset):
         """
         if mode == '2d':
             horizon = self.labels[cube_name][horizon] if isinstance(horizon, int) else horizon
-            h_mean = int(horizon.h_mean)
-            heights = (h_mean, h_mean + 1)
+            height = int(horizon.h_mean) - crop_shape[2] // 2 # start for heights slices made by `crop` action
+            heights = (height, height + 1)
         elif mode != '3d':
             raise ValueError("`mode` can either be '3d' or '2d'.")
         geometry = self.geometries[cube_name]
@@ -466,9 +464,9 @@ class SeismicCubeset(Dataset):
         if (filtering_matrix.shape != geometry.cube_shape[:2]).all():
             raise ValueError('Filtering_matrix shape must be equal to (ilines_len, xlines_len)')
 
-        ilines = (0, geometry.ilines_len - 1) if ilines is None else ilines
-        xlines = (0, geometry.xlines_len - 1) if xlines is None else xlines
-        heights = (0, geometry.depth - 1) if heights is None else heights
+        ilines = (0, geometry.ilines_len) if ilines is None else ilines
+        xlines = (0, geometry.xlines_len) if xlines is None else xlines
+        heights = (0, geometry.depth) if heights is None else heights
 
         # Assert ranges are valid
         if ilines[0] < 0 or \
@@ -476,9 +474,9 @@ class SeismicCubeset(Dataset):
            heights[0] < 0:
             raise ValueError('Ranges must contain in the cube.')
 
-        if ilines[1] >= geometry.ilines_len or \
-           xlines[1] >= geometry.xlines_len or \
-           heights[1] >= geometry.depth:
+        if ilines[1] > geometry.ilines_len or \
+           xlines[1] > geometry.xlines_len or \
+           heights[1] > geometry.depth:
             raise ValueError('Ranges must contain in the cube.')
 
         # Make separate grids for every axis
@@ -535,15 +533,17 @@ class SeismicCubeset(Dataset):
         }
 
 
-    def show_grid(self, plot_over=0, plot_dict=None):
+    def show_grid(self, plot_over='labels', surface_num=0, plot_dict=None):
         """Plot grid over selected surface to visualize how it overlaps data.
 
         Parameters
         ----------
-        plot_over : Horizon or int
-            Horizon to show below grid.
-            Instance of Horizon or index for items from `self.labels`.
-            By default first item of `self.labels` used.
+        plot_over : str
+            Attribute to show below the grid.
+            Defaults to `labels`.
+        surface_num : int
+            Index of surface from `plot_over` to show.
+            Defaults to 0.
         plot_dict : dict, optional
             Dict of plot parameters, such as:
                 figsize : tuple
@@ -555,21 +555,22 @@ class SeismicCubeset(Dataset):
                 title_fontsize : int
                     Font size of title over the figure.
         """
-        plot_dict = plot_dict or {}
-        figsize = plot_dict.get('figsize', (15,5))
-        line_color = plot_dict.get('line_color', 'cornflowerblue')
-        dot_color = plot_dict.get('dot_color', 'crimson')
-        title_fontsize = plot_dict.get('title_fontsize', 18)
+        from matplotlib import pyplot as plt #pylint: disable=import-outside-toplevel
+        default_plot_dict = {'figsize': (15, 5),
+                             'line_color': 'cornflowerblue',
+                             'dot_color': 'crimson',
+                             'title_fontsize': 18}
+        plot_dict = default_plot_dict if plot_dict is None else {**default_plot_dict, **plot_dict}
 
-        plot_over = self.labels[self.grid_info['cube_name']][plot_over] if isinstance(plot_over, int) else plot_over
-        _fig, ax = plt.subplots(figsize=figsize)
-        plot_over.show(ax=ax)
-        ax.set_title(f'Grid over {ax.get_title()}', fontsize=title_fontsize)
+        _fig, ax = plt.subplots(figsize=plot_dict['figsize'])
+        surface = getattr(self, plot_over)[self.grid_info['cube_name']][surface_num]
+        surface.show(ax=ax)
+        ax.set_title(f'Grid over {ax.get_title()}', fontsize=plot_dict['title_fontsize'])
 
         for x, y, _ in self.grid_info['grid_array']:
-            ax.axvline(x, zorder=1, color=line_color)
-            ax.axhline(y, zorder=1, color=line_color)
-            ax.plot(x, y, 'h', color=dot_color, alpha=0.9, zorder=2)
+            ax.axvline(x, zorder=1, color=plot_dict['line_color'])
+            ax.axhline(y, zorder=1, color=plot_dict['line_color'])
+            ax.plot(x, y, 'h', color=plot_dict['dot_color'], alpha=0.9, zorder=2)
 
 
     def mask_to_horizons(self, src, cube_name, threshold=0.5, averaging='mean', minsize=0,

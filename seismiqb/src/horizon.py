@@ -858,8 +858,7 @@ class Horizon:
 
         self.sampler = HorizonSampler(np.histogramdd(points/self.cube_shape, bins=bins))
 
-
-    def add_to_mask(self, mask, locations=None, width=3, alpha=1, rectify=False, **kwargs):
+    def add_to_mask(self, mask, locations=None, width=3, alpha=1, mode='3d', **kwargs):
         """ Add horizon to a background.
         Note that background is changed in-place.
 
@@ -870,13 +869,13 @@ class Horizon:
         locations : ndarray
             Where the mask is located.
         width : int
-            Width of an added horizon.
+            Width of an added horizon when `mode` is '3d'.
         alpha : number
             Value to fill background with at horizon location.
-        rectify : bool
-            Whether to squeeze mask into single dimension along depth axis.
-            Required, when mask created for data cut out along the horizon.
-            Defauts to False.
+        mode : '2d' or '3d'
+            Whether squeeze mask into single dimension along depth axis or not.
+            Use '2d' to create mask for data cut out along the horizon.
+            Defauts to '3d'.
         """
         _ = kwargs
         low = width // 2
@@ -892,30 +891,31 @@ class Horizon:
         x_min, x_max = max(self.x_min, mask_x_min), min(self.x_max + 1, mask_x_max)
 
         if i_max >= i_min and x_max >= x_min:
-            overlap = self.matrix[i_min - self.i_min:i_max - self.i_min,
-                                  x_min - self.x_min:x_max - self.x_min]
+            overlap = self.matrix[i_min - self.i_min : i_max - self.i_min,
+                                  x_min - self.x_min : x_max - self.x_min]
 
-            # All labels heights are used, when mask is created for rectified data.
-            heights_check = True if rectify else (overlap >= mask_h_min + low) & (overlap <= mask_h_max - high)
-            # Coordinates of points to use in overlap local system
-            idx_i, idx_x = np.asarray((overlap != self.FILL_VALUE) & heights_check).nonzero()
-            heights = overlap[idx_i, idx_x]
+            if mode == '2d':
+                binarize = np.vectorize(lambda x: 0 if x < 0 else alpha)
+                mask[i_min - mask_i_min : i_max - mask_i_min,
+                     x_min - mask_x_min : x_max - mask_x_min, 0] = binarize(overlap)
+            elif mode == '3d':
+                # Coordinates of points to use in overlap local system
+                zero_trace_check = (overlap != self.FILL_VALUE)
+                heights_check = (overlap >= mask_h_min + low) & (overlap <= mask_h_max - high)
+                idx_i, idx_x = np.asarray(zero_trace_check & heights_check).nonzero()
+                heights = overlap[idx_i, idx_x]
 
-            # Convert coordinates to mask local system
-            idx_i += i_min - mask_i_min
-            idx_x += x_min - mask_x_min
-            heights -= (mask_h_min + low)
+                # Convert coordinates to mask local system
+                idx_i += i_min - mask_i_min
+                idx_x += x_min - mask_x_min
+                heights -= (mask_h_min + low)
 
-            # Heights are squeezed into single dimension, when mask is created for rectified data.
-            heights = 0 if rectify else heights
-            width = 1 if rectify else width
-
-            for offset in range(width):
-                mask[idx_i, idx_x, heights + offset] = alpha
+                for offset in range(width):
+                    mask[idx_i, idx_x, heights + offset] = alpha
         return mask
 
 
-    def get_cube_values(self, window=23, offset=0, scale=False, chunk_size=256):
+    def get_cube_values(self, window=23, offset=0, scale=False, chunk_size=256, nan_zero_traces=True):
         """ Get values from the cube along the horizon.
 
         Parameters
@@ -926,9 +926,12 @@ class Horizon:
             Value to add to each entry in matrix.
         scale : bool, callable
             If True, then values are scaled to [0, 1] range.
-            If callable, then it is applied to iline-oriented slices of data from the cube.
+            If callable, then it is applied to data cropped along horizon.
         chunk_size : int
             Size of data along height axis processed at a time.
+        nan_zero_traces : bool
+            Whether fill zero traces with nans or not.
+            Defaults to True.
         """
         low = window // 2
         high = max(window - low, 0)
@@ -967,16 +970,16 @@ class Horizon:
                 background[idx_i, idx_x, np.full_like(heights, j)] = data_chunk[idx_i, idx_x, heights]
                 heights += 1
 
-        background[self.geometry.zero_traces == 1] = np.nan
+        if nan_zero_traces:
+            background[self.geometry.zero_traces == 1] = np.nan
         return background
 
 
-    # Cached version of `Horizon.get_cube_values`.
-    # to allow direct calls of that method that won't be cached.
+    # Cached version of `get_cube_values`.
     cached_get_cube_values = lru_cache(1)(get_cube_values)
 
 
-    def load_crop_along(self, location, window, offset, cache_call=False, **kwargs):
+    def load_crop_along(self, location, window, offset, cache_call=True, scale='local', **kwargs):
         """Make crops from data cut along the horizon.
 
         Parameters
@@ -986,15 +989,24 @@ class Horizon:
             to cut crop from. All other slices are omitted.
         cache_call : bool
             Whether cache call of `Horizon.get_cube_values` or not.
-            Defaults to False.
+            Defaults to True.
+        scale : bool or callable or 'local'
+            If bool or callable, passed unchanged to `get_cube_values`.
+            If 'local', passes a callable that scales data to [0, 1] range by
+            min and max values calculated on data loaded along horizon itself.
+            Defaults to 'local'.
 
         Other parameters are the same as in `Horizon.get_cube_values`.
         """
+        def min_max_scaler(arr):
+            min_, max_ = arr.min(), arr.max()
+            return (arr - min_) / (max_ - min_)
+        scale = min_max_scaler if scale == 'local' else scale
+
         if cache_call:
-            data = self.cached_get_cube_values(window, offset, **kwargs)
-        else:
-            data = self.get_cube_values(window, offset, **kwargs)
-        return data[location[0], location[1]]
+            data = self.cached_get_cube_values(window, offset, nan_zero_traces=False, scale=scale, **kwargs)
+            return data[location[0], location[1]]
+        raise NotImplementedError()
 
 
     def get_cube_values_line(self, orientation='ilines', line=1, window=23, offset=0, scale=False):

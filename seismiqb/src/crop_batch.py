@@ -322,7 +322,7 @@ class SeismicCropBatch(Batch):
 
         Notes
         -----
-        Cropping data along horizon will lead to it "rectification",
+        Cropping data along horizon will lead to its "rectification",
         i.e. horizon amplitudes will form a straight plane in resulting crop.
         """
         location = self.get(ix, src_locations)
@@ -345,7 +345,7 @@ class SeismicCropBatch(Batch):
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
     def create_masks(self, ix, dst, src_labels='labels', src_locations='locations',
-                     width=3, indices='all', along_nearest_horizon=False, rectify=True):
+                     width=3, indices='all', along_nearest_horizon=False, mode='auto'):
         """ Create masks from labels-dictionary in given positions.
 
         Parameters
@@ -370,10 +370,11 @@ class SeismicCropBatch(Batch):
             nearest to height from `src_locations`.
             If False, just create masks at given `src_locations`.
             Defaults to False.
-        rectify : bool
+        mode : '2d' or '3d'
             Whether squeeze mask into single dimension along depth axis or not.
-            If None further replaced by value of `along_nearest_horizon`.
-            Defaults to None.
+            If kept default, being automatically set according to
+            `along_nearest_horizon`: '2d' if True and '3d' if False.
+            Defaults to 'auto'.
 
         Returns
         -------
@@ -384,9 +385,11 @@ class SeismicCropBatch(Batch):
         -----
         Can be run only after labels-dict is loaded into labels-component.
         """
+        if mode == 'auto':
+            mode = '2d' if along_nearest_horizon else '3d'
         labels = self.get(ix, src_labels) if isinstance(src_labels, str) else src_labels
         labels = [labels] if not isinstance(labels, (tuple, list)) else labels
-        indices = [indices] if isinstance(indices, int)
+        indices = [indices] if isinstance(indices, int) else indices
         check_sum = False
 
         location = self.get(ix, src_locations)
@@ -402,13 +405,12 @@ class SeismicCropBatch(Batch):
             elif indices == 'all':
                 pass
 
-        rectify = along_nearest_horizon if rectify is None
         crop_shape = self.get(ix, 'shapes')
-        crop_shape = (crop_shape[0], crop_shape[1], 1) if rectify else crop_shape
+        crop_shape = (*crop_shape[:2], 1) if mode == '2d' else crop_shape
         mask = np.zeros((crop_shape), dtype='float32')
 
         for label in labels:
-            mask = label.add_to_mask(mask, locations=location, width=width, rectify=rectify)
+            mask = label.add_to_mask(mask, locations=location, width=width, mode=mode)
             if check_sum and np.sum(mask) > 0.0:
                 break
         return mask
@@ -566,8 +568,8 @@ class SeismicCropBatch(Batch):
     @action
     @inbatch_parallel(init='indices', target='for', post='_masks_to_horizons_post')
     def masks_to_horizons(self, ix, src_masks='masks', src_locations='locations', dst='predicted_labels',
-                          prefix='predict', threshold=0.5, mode='mean', minsize=0, mean_threshold=2.0,
-                          adjacency=1, order=(2, 0, 1), skip_merge=False):
+                          threshold=0.5, mode='mean', minsize=0, mean_threshold=2.0,
+                          adjacency=1, order=(2, 0, 1), skip_merge=False, prefix='predict'):
         """ Convert predicted segmentation mask to a list of Horizon instances.
 
         Parameters
