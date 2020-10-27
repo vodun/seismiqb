@@ -556,6 +556,7 @@ class SeismicGeometry:
                     # Copy all textual headers, including possible extended
                     for i in range(1 + segy.ext_headers):
                         dst_file.text[i] = segy.text[i]
+                    dst_file.bin = segy.bin
 
                     c = 0
                     for i, _ in tqdm(enumerate(spec.ilines)):
