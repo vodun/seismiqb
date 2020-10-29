@@ -5,7 +5,7 @@ from glob import glob
 import numpy as np
 
 from ..batchflow import FilesIndex, DatasetIndex, Dataset, Sampler, Pipeline
-from ..batchflow import NumpySampler, ConstantSampler
+from ..batchflow import NumpySampler
 
 from .geometry import SeismicGeometry
 from .crop_batch import SeismicCropBatch
@@ -17,9 +17,10 @@ from .utils import IndexedDict, round_to_array, gen_crop_coordinates
 
 
 
-def astype_object(array):
+def sampler_transform(points, ix=None):
     """ Converts array to `object` dtype. Picklable, unlike inline lambda function. """
-    return array.astype(np.object)
+    points = points.astype(np.object)
+    return np.concatenate([np.full((len(points), 1), ix), points], axis=1)
 
 
 
@@ -225,8 +226,7 @@ class SeismicCubeset(Dataset):
 
         sampler = 0 & NumpySampler('n', dim=4)
         for i, ix in enumerate(self.indices):
-            sampler_ = (ConstantSampler(ix)
-                        & samplers[ix].apply(astype_object))
+            sampler_ = samplers[ix].apply(lambda points: sampler_transform(points, ix=ix))
             sampler = sampler | (p[i] & sampler_)
         setattr(self, dst, sampler)
 
@@ -372,7 +372,7 @@ class SeismicCubeset(Dataset):
             Whether to remove labels on zero-traces.
         """
         _ = kwargs
-        label_dir = label_dir or '/BEST_HORIZONS/*'
+        label_dir = label_dir or '/INPUTS/HORIZONS/RAW/*'
 
         paths_txt = {}
         for i in range(len(self)):

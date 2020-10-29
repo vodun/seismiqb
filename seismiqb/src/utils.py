@@ -290,6 +290,23 @@ def convert_point_cloud(path, path_save, names=None, order=None, transform=None)
     data.to_csv(path_save, sep=' ', index=False, header=False)
 
 
+def save_point_cloud(metric, save_path, geometry=None):
+    """ Save 2D map as a .txt point cloud. Can be opened by GENERAL format reader in geological software. """
+    idx_1, idx_2 = np.asarray(~np.isnan(metric)).nonzero()
+    points = np.hstack([idx_1.reshape(-1, 1),
+                        idx_2.reshape(-1, 1),
+                        metric[idx_1, idx_2].reshape(-1, 1)])
+
+    if geometry is not None:
+        points[:, 0] += geometry.ilines_offset
+        points[:, 1] += geometry.xlines_offset
+
+    df = pd.DataFrame(points, columns=['iline', 'xline', 'metric_value'])
+    df.sort_values(['iline', 'xline'], inplace=True)
+    df.to_csv(save_path, sep=' ', columns=['iline', 'xline', 'metric_value'],
+              index=False, header=False)
+
+
 def gen_crop_coordinates(point, horizon_matrix, zero_traces,
                          stride, shape, fill_value, zeros_threshold=0,
                          empty_threshold=5, safe_stripe=0, num_points=2):
