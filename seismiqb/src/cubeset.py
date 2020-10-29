@@ -5,7 +5,7 @@ from glob import glob
 import numpy as np
 
 from ..batchflow import FilesIndex, DatasetIndex, Dataset, Sampler, Pipeline
-from ..batchflow import NumpySampler, ConstantSampler
+from ..batchflow import NumpySampler
 
 from .geometry import SeismicGeometry
 from .crop_batch import SeismicCropBatch
@@ -229,7 +229,6 @@ class SeismicCubeset(Dataset):
             sampler_ = samplers[ix].apply(lambda points: sampler_transform(points, ix=ix))
             sampler = sampler | (p[i] & sampler_)
         setattr(self, dst, sampler)
-
 
     def modify_sampler(self, dst, mode='iline', low=None, high=None,
                        each=None, each_start=None,
