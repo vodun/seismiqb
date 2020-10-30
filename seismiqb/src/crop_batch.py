@@ -104,7 +104,7 @@ class SeismicCropBatch(Batch):
         version of `item` as key. Otherwise, we get position of `item`
         in the current batch and use it to index sequence-like `component`.
         """
-        if sum([attribute in component for attribute in ['label', 'geom']]):
+        if any([attribute in component for attribute in ['label', 'geom', 'cone', 'estuar']]):
             if isinstance(item, str) and self.has_salt(item):
                 item = self.unsalt(item)
             res = getattr(self, component)
@@ -290,8 +290,8 @@ class SeismicCropBatch(Batch):
 
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def load_cubes(self, ix, dst, src_geometry='geometries', src_locations='locations', src_labels='labels',
-                   along_nearest_horizon=False, offset=0, **kwargs):
+    def load_cubes(self, ix, dst, src_geometry='geometries', src_locations='locations',
+                   src_labels='labels', along_nearest_horizon=False, **kwargs):
         """ Load data from cube in given locations.
 
         If `along_nearest_horizon` is True, crops are made along horizon from
@@ -317,8 +317,6 @@ class SeismicCropBatch(Batch):
             If True, crop rectified data along nearest horizon.
             If False, just crop data at given `src_locations`.
             Defaults to False.
-        offset : int
-            Offset from horizon of data to crop when `along_nearest_horizon` is True.
 
         Notes
         -----
@@ -327,19 +325,32 @@ class SeismicCropBatch(Batch):
         """
         location = self.get(ix, src_locations)
         if along_nearest_horizon:
-            window = self.get(ix, 'shapes')[2]
             nearest_horizon = self.get_nearest_horizon(ix, src_labels, location[2])
-            crop = nearest_horizon.load_crop_along(location, window, offset, **kwargs)
+            crop = nearest_horizon.crop_matrix('amplitudes', location, **kwargs)
         else:
             geometry = self.get(ix, src_geometry)
             crop = geometry.load_crop(location, **kwargs)
         return crop
+
 
     def get_nearest_horizon(self, ix, src_labels, heights_slice):
         """Get horizon with its `h_mean` closest to mean of `heights_slice`."""
         location_h_mean = (heights_slice.start + heights_slice.stop) // 2
         nearest_horizon_ind = np.argmin([abs(horizon.h_mean - location_h_mean) for horizon in self.get(ix, src_labels)])
         return self.get(ix, src_labels)[nearest_horizon_ind]
+
+
+    @action
+    @inbatch_parallel(init='indices', post='_assemble', target='for')
+    def load_crops(self, ix, dst, matrix, src_locations='locations',
+                   src_labels='labels', along_nearest_horizon=True, **kwargs):
+        """ Crop horizon matrices in given locations."""
+        if not along_nearest_horizon:
+            raise NotImplementedError()
+        location = self.get(ix, src_locations)
+        # window = self.get(ix, 'shapes')[2]
+        nearest_horizon = self.get_nearest_horizon(ix, src_labels, location[2])
+        return nearest_horizon.crop_matrix(matrix, location, **kwargs)
 
 
     @action
@@ -526,21 +537,25 @@ class SeismicCropBatch(Batch):
 
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def scale(self, ix, mode, src=None, dst=None):
+    def scale(self, ix, scaler='minmax', src=None, dst=None):
         """ Scale values in crop.
 
         Parameters
         ----------
-        mode : str
-            If `minmax`, then data is scaled to [0, 1] via minmax scaling.
-            If `q` or `normalize`, then data is divided by the maximum of absolute values of the
-            0.01 and 0.99 quantiles.
-            If `q_clip`, then data is clipped to 0.01 and 0.99 quantiles and then divided by the
-            maximum of absolute values of the two.
+        scaler : callable or str
+            If callable, then directly applied to data.
+            If str, then `SeismicGeometry.scaler` applied in one of the modes:
+            - `minmax`: scaled to [0, 1] via minmax scaling.
+            - `q` or `normalize`: divided by the maximum of absolute values
+                                  of the 0.01 and 0.99 quantiles.
+            - `q_clip`: clipped to 0.01 and 0.99 quantiles and then divided
+                        by the maximum of absolute values of the two.
         """
         data = self.get(ix, src)
+        if callable(scaler):
+            return scaler(data)
         geometry = self.get(ix, 'geometries')
-        return geometry.scaler(data, mode)
+        return geometry.scaler(data, mode=scaler)
 
 
     @action
@@ -972,12 +987,13 @@ class SeismicCropBatch(Batch):
             If 'freq', compute instantaneous frequency.
         """
         analytic = hilbert(crop, axis=axis)
-        phase = np.unwrap(np.angle(analytic))
+        discontinuous_phase = np.angle(analytic)
+        continuous_phase = np.arcsin(np.sin(discontinuous_phase))
 
         if mode == 'phase':
-            return phase
+            return continuous_phase
         if 'freq' in mode:
-            return np.diff(phase, axis=axis, prepend=0) / (2*np.pi)
+            return np.diff(continuous_phase, axis=axis, prepend=0) / (2*np.pi)
         raise ValueError('Unknown `mode` parameter.')
 
     @apply_parallel

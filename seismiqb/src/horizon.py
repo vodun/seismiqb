@@ -890,10 +890,9 @@ class Horizon:
         i_min, i_max = max(self.i_min, mask_i_min), min(self.i_max + 1, mask_i_max)
         x_min, x_max = max(self.x_min, mask_x_min), min(self.x_max + 1, mask_x_max)
 
-        if i_max >= i_min and x_max >= x_min:
+        if i_max > i_min and x_max > x_min:
             overlap = self.matrix[i_min - self.i_min : i_max - self.i_min,
                                   x_min - self.x_min : x_max - self.x_min]
-
             if mode == '2d':
                 binarize = np.vectorize(lambda x: 0 if x < 0 else alpha)
                 mask[i_min - mask_i_min : i_max - mask_i_min,
@@ -979,34 +978,43 @@ class Horizon:
     cached_get_cube_values = lru_cache(1)(get_cube_values)
 
 
-    def load_crop_along(self, location, window, offset, cache_call=True, scale='local', **kwargs):
+    def get_heights_matrix(self, scale=True):
+        """Transform `full_matrix` attribute for further cropping."""
+        matrix = self.full_matrix[..., np.newaxis]
+        if scale:
+            matrix = (matrix - self.h_min) / (self.h_max - self.h_min)
+        matrix[matrix < 0] = 0
+        return matrix
+
+
+    # Cached version of `get_heights_matrix`.
+    cached_get_heights_matrix = lru_cache(1)(get_heights_matrix)
+
+
+    def crop_matrix(self, matrix, location, **kwargs):
         """Make crops from data cut along the horizon.
 
         Parameters
         ----------
+        matrix : str
+            A keyword to define, which function to use for matrix retrieval:
+            - 'amplitudes': load cube cube values cut along the horizon;
+            - 'heigts': load normalized heights matrix with zero-filled nans;
+            - 'metrics': load random support metrics matrix.
         location : sequence of at least 2 slices
             First two slices are used as `ilines` and `xlines` ranges
-            to cut crop from. All other slices are omitted.
-        cache_call : bool
-            Whether cache call of `Horizon.get_cube_values` or not.
-            Defaults to True.
-        scale : bool or callable or 'local'
-            If bool or callable, passed unchanged to `get_cube_values`.
-            If 'local', passes a callable that scales data to [0, 1] range by
-            min and max values calculated on data loaded along horizon itself.
-            Defaults to 'local'.
-
-        Other parameters are the same as in `Horizon.get_cube_values`.
+            to cut crop from. Last 'depth' slice is omitted.
+        kwargs :
+            For `get_cube_values`, `get_heights_matrix` or `Horizon.evaluate`.
         """
-        def min_max_scaler(arr):
-            min_, max_ = arr.min(), arr.max()
-            return (arr - min_) / (max_ - min_)
-        scale = min_max_scaler if scale == 'local' else scale
-
-        if cache_call:
-            data = self.cached_get_cube_values(window, offset, nan_zero_traces=False, scale=scale, **kwargs)
-            return data[location[0], location[1]]
-        raise NotImplementedError()
+        if matrix == 'amplitudes':
+            window = location[2].stop - location[2].start
+            data = self.cached_get_cube_values(nan_zero_traces=False, window=window, **kwargs)
+        elif matrix == 'heights':
+            data = self.cached_get_heights_matrix(**kwargs)
+        elif matrix == 'metrics':
+            data = self.cached_metrics_evaluate(**kwargs)
+        return data[location[0], location[1]]
 
 
     def get_cube_values_line(self, orientation='ilines', line=1, window=23, offset=0, scale=False):
@@ -1213,6 +1221,17 @@ class Horizon:
             return self.horizon_metrics.evaluate('support_corrs', supports=supports, agg='nanmean',
                                                  plot=plot, savepath=savepath, **kwargs)
         return None
+
+
+    @lru_cache(1)
+    def cached_metrics_evaluate(self, scale=True, metric='support_corrs', supports=50, agg='nanmean', **kwargs):
+        """Cached metrics calcucaltion."""
+        metrics = self.horizon_metrics.evaluate(metric=metric, supports=supports, agg=agg,
+                                                plot=False, savepath=None, **kwargs)
+        if scale:
+            metrics = (metrics + 1) / 2
+            metrics = np.nan_to_num(metrics)
+        return metrics[..., np.newaxis]
 
 
     def check_proximity(self, other, offset=0):
