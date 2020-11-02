@@ -487,9 +487,10 @@ class SeismicGeometry:
             'cmap': 'gray',
             'xticks': xticks[::max(1, round(len(xticks)//10/100))*100],
             'yticks': yticks[::max(1, round(len(yticks)//10/100))*100][::-1],
+            'mode': 'single',
             **kwargs
         }
-        plot_image(slide, mode='single', **kwargs)
+        plot_image(slide, **kwargs)
 
     def show_amplitude_hist(self, scaler=None, bins=50, **kwargs):
         """ Show distribution of amplitudes in `trace_container`. Optionally applies chosen `scaler`. """
