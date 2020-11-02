@@ -119,7 +119,7 @@ def plot_loss(*data, title=None, **kwargs):
         'label': title or 'Loss graph',
         **kwargs
     }
-    plot_image(*data, mode='curve', backend='mpl', **kwargs)
+    plot_image(data, mode='curve', backend='mpl', **kwargs)
 
 
 class MatplotlibPlotter:
@@ -223,6 +223,9 @@ class MatplotlibPlotter:
             cb.ax.yaxis.set_tick_params(color=yaxis_kwargs.get('color', 'black'))
         ax.set_facecolor(updated['facecolor'])
         ax.tick_params(**tick_params)
+
+        if kwargs.get('disable_axes'):
+            ax.set_axis_off()
 
         self.save_and_show(fig, **updated)
 
@@ -549,12 +552,12 @@ class MatplotlibPlotter:
 
         self.save_and_show(plt, **updated)
 
-    def curve(self, *args, **kwargs):
+    def curve(self, curve, average=True, window=10, **kwargs):
         """ Plot a curve.
 
         Parameters
         ----------
-        args : tuple
+        curve : tuple
             a sequence containing curves for plotting along with, possibly, specification of
             plot formats. Must at least contain an array of ys, but may also be comprised of
             triples of (xs, ys, fmt) for an arbitrary number of curves.
@@ -574,6 +577,7 @@ class MatplotlibPlotter:
         # defaults
         defaults = {'figsize': (8, 5),
                     'label': 'Curve plot',
+                    'linecolor': 'b',
                     'xlabel': 'x',
                     'ylabel': 'y',
                     'fontsize': 15,
@@ -583,15 +587,47 @@ class MatplotlibPlotter:
 
         # form groups of kwargs
         figure_kwargs = filter_kwargs(updated, ['figsize', 'facecolor', 'dpi'])
+        plot_kwargs = filter_kwargs(updated, ['alpha', 'linestyle', 'label'])
         label_kwargs = filter_kwargs(updated, ['label', 'fontsize', 'family', 'color'])
         xlabel_kwargs = filter_kwargs(updated, ['xlabel', 'fontsize', 'family', 'color'])
         ylabel_kwargs = filter_kwargs(updated, ['ylabel', 'fontsize', 'family', 'color'])
 
-        # plot the curves
+        plot_kwargs['color'] = updated['linecolor']
+
         plt.figure(**figure_kwargs)
-        curves = plt.plot(*args)
+
+        # Make averaged data
+        if average:
+            ys = curve[int(len(curve) > 1)]
+
+            averaged, container = [], []
+            running_sum = 0
+
+            for value in ys:
+                container.append(value)
+                running_sum += value
+                if len(container) > window:
+                    popped = container.pop(0)
+                    running_sum -= popped
+                averaged.append(running_sum / len(container))
+
+            if len(curve) == 1:
+                avg = (averaged, )
+            else:
+                avg = list(curve)
+                avg[1] = averaged
+
+            avg_kwargs = {**plot_kwargs,
+                          'label': f'Averaged {plot_kwargs["label"].lower()}',
+                          'alpha': 1}
+            plt.plot(*avg, **avg_kwargs)
+            plot_kwargs['alpha'] = 0.5
+
+        # plot the curve
+        plt.plot(*curve, **plot_kwargs)
+
         if 'curve_labels' in updated:
-            plt.legend(curves, updated['curve_labels'])
+            plt.legend()
 
         plt.xlabel(**xlabel_kwargs)
         plt.ylabel(**ylabel_kwargs)
@@ -599,7 +635,6 @@ class MatplotlibPlotter:
         plt.grid(updated['grid'])
 
         self.save_and_show(plt, **updated)
-
 
 
 

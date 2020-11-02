@@ -290,6 +290,23 @@ def convert_point_cloud(path, path_save, names=None, order=None, transform=None)
     data.to_csv(path_save, sep=' ', index=False, header=False)
 
 
+def save_point_cloud(metric, save_path, geometry=None):
+    """ Save 2D map as a .txt point cloud. Can be opened by GENERAL format reader in geological software. """
+    idx_1, idx_2 = np.asarray(~np.isnan(metric)).nonzero()
+    points = np.hstack([idx_1.reshape(-1, 1),
+                        idx_2.reshape(-1, 1),
+                        metric[idx_1, idx_2].reshape(-1, 1)])
+
+    if geometry is not None:
+        points[:, 0] += geometry.ilines_offset
+        points[:, 1] += geometry.xlines_offset
+
+    df = pd.DataFrame(points, columns=['iline', 'xline', 'metric_value'])
+    df.sort_values(['iline', 'xline'], inplace=True)
+    df.to_csv(save_path, sep=' ', columns=['iline', 'xline', 'metric_value'],
+              index=False, header=False)
+
+
 def gen_crop_coordinates(point, horizon_matrix, zero_traces,
                          stride, shape, fill_value, zeros_threshold=0,
                          empty_threshold=5, safe_stripe=0, num_points=2):
@@ -576,6 +593,26 @@ def nb_mode(array, mask):
 
                 temp[il, xl] = element
     return temp
+
+
+@njit
+def filter_simplices(simplices, points, matrix, threshold=5.):
+    """ Remove simplices outside of matrix. """
+    #pylint: disable=consider-using-enumerate
+    mask = np.ones(len(simplices), dtype=np.int32)
+
+    for i in range(len(simplices)):
+        tri = points[simplices[i]].astype(np.int32)
+
+        middle_i, middle_x = np.mean(tri[:, 0]), np.mean(tri[:, 1])
+        heights = np.array([matrix[tri[0, 0], tri[0, 1]],
+                            matrix[tri[1, 0], tri[1, 1]],
+                            matrix[tri[2, 0], tri[2, 1]]])
+
+        if matrix[int(middle_i), int(middle_x)] < 0 or np.std(heights) > threshold:
+            mask[i] = 0
+
+    return simplices[mask == 1]
 
 
 class HorizonSampler(Sampler):

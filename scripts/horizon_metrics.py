@@ -7,10 +7,10 @@ warnings.filterwarnings("ignore")
 
 import numpy as np
 
-from utils import str2bool, make_config, save_point_cloud, safe_mkdir
+from utils import str2bool, make_config, safe_mkdir
 
 sys.path.append('..')
-from seismiqb import SeismicGeometry, Horizon, HorizonMetrics
+from seismiqb import SeismicGeometry, Horizon, HorizonMetrics, save_point_cloud
 
 
 
