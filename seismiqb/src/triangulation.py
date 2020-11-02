@@ -11,7 +11,7 @@ def triangle_rasterization(points, width=1):
     points : numpy.ndarray
         array of size 3 x 3: each row is a vertex of triangle
     width : int
-        thickness
+        thicc
 
     Return
     ------
@@ -21,7 +21,7 @@ def triangle_rasterization(points, width=1):
     shape = np.array([np.max(points[:, i]) - np.min(points[:, i]) for i in range(3)])
     _points = np.zeros((int((shape[0] + 2) * (shape[1] + 2) * (shape[2] + 2)), 3))
     i = 0
-    for x in prange(int(np.min(points[:, 0])), int(np.max(points[:, 0])+1)): # pylint: disable=not-an-iterable
+    for x in range(int(np.min(points[:, 0])), int(np.max(points[:, 0])+1)): # pylint: disable=not-an-iterable
         for y in range(int(np.min(points[:, 1])), int(np.max(points[:, 1]+1))):
             for z in range(int(np.min(points[:, 2])), int(np.max(points[:, 2]+1))):
                 node = np.array([x, y, z])

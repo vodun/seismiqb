@@ -185,10 +185,7 @@ class SeismicGeometry:
 
     def store_meta(self, path=None):
         """ Store collected stats on disk. """
-        if path is None:
-            path_meta = os.path.splitext(self.path)[0] + '.meta'
-        else:
-            path_meta = path
+        path_meta = path or os.path.splitext(self.path)[0] + '.meta'
 
         # Remove file, if exists: h5py can't do that
         if os.path.exists(path_meta):
@@ -580,7 +577,7 @@ class SeismicGeometry:
         lines = (inverse_matrix @ points.T - inverse_matrix @ self.rotation_matrix[:, 2].reshape(2, -1)).T
         return np.rint(lines)
 
-    def compute_attribute(self, locations=None, points=None, window=10, stride=1, attribute='semblance'):
+    def apply_conv(self, locations=None, points=None, window=10, stride=1, attribute='semblance'):
         """ Compute attribute on cube.
 
         Parameters
@@ -622,11 +619,10 @@ class SeismicGeometry:
         window = np.minimum(np.array(window), cube.shape)
 
         shape = np.ceil(np.array(cube.shape) / np.array(stride)).astype(int)
-        result = np.empty(shape)
-        result[:] = np.nan
+        result = np.full(shape, np.nan)
 
         if points is None:
-            points = list(itertools.product(*[range(cube.shape[i]) for i in range(3)]))
+            points = np.stack(np.meshgrid(*[range(cube.shape[i]) for i in range(3)]), axis=-1).reshape(-1, 2)
         if isinstance(points, list):
             points = np.array(points)
 
@@ -635,7 +631,7 @@ class SeismicGeometry:
             attr = zoom(attr, np.array(cube.shape) / np.array(attr.shape))
         return attr
 
-    def create_hdf5(self, path_hdf5, src, shape=None, stride=None, pbar=False):
+    def create_hdf5(self, path_hdf5, src, chunk_shape=None, stride=None, pbar=False):
         """ Create hdf5 file from np.ndarray or with geological attribute.
 
         Parameters
@@ -644,7 +640,7 @@ class SeismicGeometry:
 
         src : np.ndarray or str
             if `str`, must be a name of the attribute to compute.
-        shape : int, tuple or None
+        chunk_shape : int, tuple or None
             shape of chunks.
         stride : str
             stride for chunks
@@ -661,22 +657,22 @@ class SeismicGeometry:
                 value = tuple([item if item else default[i] for i, item in enumerate(value)])
             return value
 
-        shape = _infer_tuple(shape, self.cube_shape)
-        stride = _infer_tuple(stride, shape)
+        chunk_shape = _infer_tuple(chunk_shape, self.cube_shape)
+        stride = _infer_tuple(stride, chunk_shape)
 
-        grid = [make_axis_grid((0, self.cube_shape[i]), stride[i], self.cube_shape[i], shape[i]) for i in range(3)]
+        grid = [make_axis_grid((0, self.cube_shape[i]), stride[i], self.cube_shape[i], chunk_shape[i]) for i in range(3)]
 
         if isinstance(src, np.ndarray):
             if (src.shape != self.cube_shape).all():
                 raise ValueError(f'src has shape {src.shape} but must have {self.cube_shape}')
             chunks += [[(0, 0, 0), src]]
-            shape = self.cube_shape
+            chunk_shape = self.cube_shape
             total = 1
         elif isinstance(src, str):
             def _attribute():
                 for coord in itertools.product(*grid):
-                    locations = [slice(coord[i], coord[i] + shape[i]) for i in range(3)]
-                    yield [coord, self.compute_attribute(locations, attribute=src)]
+                    locations = [slice(coord[i], coord[i] + chunk_shape[i]) for i in range(3)]
+                    yield [coord, self.apply_conv(locations, attribute=src)]
             chunks = _attribute()
             total = np.prod([len(item) for item in grid])
 
@@ -690,14 +686,14 @@ class SeismicGeometry:
             _chunks = tqdm(chunks, total=total) if pbar else chunks
 
             for (iline, xline, height), chunk in _chunks:
-                _slice = (
-                    slice(iline, min(iline+shape[0], self.cube_shape[0])),
-                    slice(xline, min(xline+shape[1], self.cube_shape[1])),
-                    slice(height, min(height+shape[2], self.cube_shape[2]))
+                slc = (
+                    slice(iline, min(iline+chunk_shape[0], self.cube_shape[0])),
+                    slice(xline, min(xline+chunk_shape[1], self.cube_shape[1])),
+                    slice(height, min(height+chunk_shape[2], self.cube_shape[2]))
                 )
-                cube_hdf5[_slice[0], _slice[1], _slice[2]] = chunk
-                cube_hdf5_x[_slice[1], _slice[2], _slice[0]] = chunk.transpose((1, 2, 0))
-                cube_hdf5_h[_slice[2], _slice[0], _slice[1]] = chunk.transpose((2, 0, 1))
+                cube_hdf5[slc[0], slc[1], slc[2]] = chunk
+                cube_hdf5_x[slc[1], slc[2], slc[0]] = chunk.transpose((1, 2, 0))
+                cube_hdf5_h[slc[2], slc[0], slc[1]] = chunk.transpose((2, 0, 1))
 
         path_meta = os.path.splitext(path_hdf5)[0] + '.meta'
         self.store_meta(path_meta)

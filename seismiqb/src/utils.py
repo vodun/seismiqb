@@ -701,5 +701,6 @@ def local_correlation(region):
     corr = np.zeros((region.shape[0], region.shape[1]))
     for i in prange(region.shape[0]): # pylint: disable=not-an-iterable
         for j in range(region.shape[1]):
-            corr[i, j] = np.corrcoef(center, region[i, j])[0, 1]
+            cov = np.mean((center - np.mean(center)) * (region[i, j] - np.mean(region[i,j])))
+            corr[i, j] = cov / np.std(center) / np.std(region[i, j])
     return np.mean(corr)

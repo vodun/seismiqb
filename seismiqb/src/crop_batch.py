@@ -299,7 +299,7 @@ class SeismicCropBatch(Batch):
 
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def load_cubes(self, ix, dst, src_locations='locations', src_geometry='geometries', use_3d=False, **kwargs):
+    def load_cubes(self, ix, dst, src_locations='locations', src_geometry='geometries', slicing='custom', **kwargs):
         """ Load data from cube in given positions.
 
         Parameters
@@ -308,15 +308,19 @@ class SeismicCropBatch(Batch):
             Component of batch with positions of crops to load.
         dst : str
             Component of batch to put loaded crops in.
-        use_3d : bool
-            if True, use slicing of geometry, `load_crop`, otherwise.
+        slicing : str
+            if 'native', crop will be looaded as a slice of geometry. If 'custom', use `load_crop` method to make crops.
+            The 'native' option is prefered to 3D crops to speed up loading.
         """
         geometry = self.get(ix, src_geometry)
         location = self.get(ix, src_locations)
-        if use_3d:
-            return geometry[tuple(location)]
-        return geometry.load_crop(location, **kwargs)
-
+        if slicing == 'native':
+            crop = geometry[tuple(location)]
+        elif slicing == 'custom':
+            crop = geometry.load_crop(location, **kwargs)
+        else:
+            raise ValueError(f"slicing must be 'native' or 'custom' but {slicing} were given.")
+        return crop
 
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')

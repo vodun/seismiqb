@@ -16,6 +16,8 @@ from .geometry import SeismicGeometry
 from .horizon import Horizon
 from .triangulation import triangulation, triangle_rasterization
 
+
+
 class Fault(Horizon):
     """ Contains points of fault.
 
@@ -32,7 +34,8 @@ class Fault(Horizon):
 
     def from_file(self, path, transform=True, **kwargs):
         """ Init from path to either CHARISMA, REDUCED_CHARISMA or FAULT_STICKS csv-like file
-        from .npy or .hdf5 file with points. """
+        from .npy or .hdf5 file with points.
+        """
         _ = kwargs
         self.name = os.path.basename(path)
         ext = os.path.splitext(path)[1][1:]
@@ -170,7 +173,7 @@ class Fault(Horizon):
         if dst and not os.path.isdir(dst):
             os.makedirs(dst)
         df = pd.read_csv(path, sep=r'\s+', names=cls.FAULT_STICKS)
-        df.groupby('name').apply(cls.fault_to_csv, folder=folder, dst=dst)
+        df.groupby('name').apply(cls.fault_to_csv, dst=dst)
 
     @classmethod
     def fault_to_csv(cls, df, dst):
@@ -197,11 +200,12 @@ def split_faults(array, chunk_size=None, overlap=1, pbar=False):
         array of shape (N, 4) where the first 3 columns are coordinates of points and the last one
         is for labels
     """
+    # TODO: make chunks along xlines
     if isinstance(array, SeismicGeometry):
         array = array.file_hdf5['cube']
     if chunk_size is None:
         chunk_size = len(array)
-    chunks = [(start, array[start:start+chunk_size+overlap]) for start in range(0, array.shape[0], chunk_size)]
+    chunks = [(start, array[start:start+chunk_size]) for start in range(0, array.shape[0], chunk_size-overlap)]
 
     prev_overlap = np.zeros((0, *array.shape[1:]))
     labels = np.zeros((0, 4), dtype='int32')
@@ -269,7 +273,7 @@ def faults_sizes(labels):
     for i in prange(len(indices)): # pylint: disable=not-an-iterable
         label = indices[i]
         array = labels[labels[:, 3] == label]
-        sizes[label-1] = ((array[:, 0].max() - array[:, 0].min()) ** 2 + (array[:, 1].max() - array[:, 1].min())) ** 0.5
+        sizes[label-1] = ((array[:, 0].max() - array[:, 0].min()) ** 2 + (array[:, 1].max() - array[:, 1].min()) ** 2) ** 0.5
     return sizes
 
 def filter_faults(labels, threshold, sizes=None):

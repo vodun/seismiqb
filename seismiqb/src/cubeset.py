@@ -169,10 +169,8 @@ class SeismicCubeset(Dataset):
                 dirname = os.path.join(dirname, path)
                 if not os.path.exists(dirname):
                     os.makedirs(dirname)
-                if separate:
-                    save_to = os.path.join(dirname, label.name + '.' + fmt)
-                else:
-                    save_to = os.path.join(dirname, 'faults' + '.' + fmt)
+                name = label.name if separate else 'faults'
+                save_to = os.path.join(dirname, name + '.' + fmt)
                 label.dump_points(save_to, fmt)
 
 
@@ -376,13 +374,15 @@ class SeismicCubeset(Dataset):
         plot_image(background, **kwargs)
         return batch
 
-    def show_points(self, idx=0, **kwargs):
+    def show_points(self, idx=0, src_labels='labels', **kwargs):
         """ Plot 2D map of points. """
         map_ = np.zeros(self.geometries[idx].cube_shape[:-1])
-        for label in self.labels[idx]:
+        for label in getattr(self, src_labels)[idx]:
             map_[label.points[:, 0], label.points[:, 1]] += 1
+        labels_class = type(getattr(self, src_labels)[idx][0]).__name__
+        map_[map_ == 0] = np.nan
         kwargs = {
-            'title': f'Faults on {self.indices[idx]}',
+            'title': f'{labels_class} on {self.indices[idx]}',
             'xlabel': self.geometries[idx].index_headers[0],
             'ylabel': self.geometries[idx].index_headers[1],
             'cmap': 'Reds',
