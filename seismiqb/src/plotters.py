@@ -48,7 +48,7 @@ def convert_kwargs(mode, backend, kwargs):
     """
     if backend == 'matplotlib':
         # make conversion-dict for kwargs-keys
-        if mode in ['single', 'rgb', 'overlap', 'histogram', 'curve', 'histogram']:
+        if mode in ['single', 'rgb', 'overlap', 'histogram', 'curve', 'histogram', 'wiggle']:
             keys_converter = {'title': 'label', 't':'label'}
         elif mode in ['separate']:
             keys_converter = {'title': 't', 'label': 't'}
@@ -269,6 +269,12 @@ class MatplotlibPlotter:
 
         if with_curve:
             image, heights = image
+
+            # transform height-mask to heights if needed
+            if heights.ndim == 2:
+                heights = np.where(heights)[1]
+        elif isinstance(image, (list, tuple)):
+            image = image[0]
 
         # Create figure and axes
         if 'ax' in kwargs:
