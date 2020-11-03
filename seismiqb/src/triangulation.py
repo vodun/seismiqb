@@ -1,6 +1,6 @@
 """ Triangulation functions. """
 import numpy as np
-from numba import njit, range
+from numba import njit
 
 @njit
 def triangle_rasterization(points, width=1):

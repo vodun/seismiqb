@@ -381,6 +381,33 @@ def make_axis_grid(axis_range, stride, length, crop_shape):
         grid_ += [axis_range[1] - crop_shape]
     return sorted(grid_)
 
+def infer_tuple(value, default):
+    """ Transform int or tuple with Nones to tuple with values from default.
+
+    Parameters
+    ----------
+    value : None, int or tuple
+        value to transform
+    default : tuple
+
+    Returns
+    -------
+    tuple
+
+    Examples
+    --------
+        None --> default
+        5 --> (5, 5, 5)
+        (None, None, 3) --> (default[0], default[1], 3)
+    """
+    if value is None:
+        value = default
+    elif isinstance(value, int):
+        value = tuple([value] * 3)
+    elif isinstance(value, tuple):
+        value = tuple([item if item else default[i] for i, item in enumerate(value)])
+    return value
+
 @njit
 def groupby_mean(array):
     """ Faster version of mean-groupby of data along the first two columns.

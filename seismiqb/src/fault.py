@@ -272,7 +272,7 @@ def faults_sizes(labels):
     for i in prange(len(indices)): # pylint: disable=not-an-iterable
         label = indices[i]
         array = labels[labels[:, 3] == label]
-        i_len = (array[:, 0].max() - array[:, 0].min()
+        i_len = (array[:, 0].max() - array[:, 0].min())
         x_len = (array[:, 1].max() - array[:, 1].min())
         sizes[label-1] = (i_len ** 2 + x_len ** 2) ** 0.5
     return sizes

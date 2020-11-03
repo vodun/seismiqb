@@ -16,7 +16,8 @@ import segyio
 import cv2
 from scipy.ndimage import zoom
 
-from .utils import lru_cache, find_min_max, file_print, SafeIO, attr_filter, make_axis_grid
+from .utils import lru_cache, find_min_max, file_print, \
+                   SafeIO, attr_filter, make_axis_grid, infer_tuple
 from .plotters import plot_image
 
 
@@ -648,17 +649,9 @@ class SeismicGeometry:
             progress bar
         """
         chunks = []
-        def _infer_tuple(value, default):
-            if value is None:
-                value = default
-            elif isinstance(value, int):
-                value = tuple([value] * 3)
-            elif isinstance(value, tuple):
-                value = tuple([item if item else default[i] for i, item in enumerate(value)])
-            return value
 
-        chunk_shape = _infer_tuple(chunk_shape, self.cube_shape)
-        stride = _infer_tuple(stride, chunk_shape)
+        chunk_shape = infer_tuple(chunk_shape, self.cube_shape)
+        stride = infer_tuple(stride, chunk_shape)
 
         grid = [make_axis_grid(
             (0, self.cube_shape[i]),
