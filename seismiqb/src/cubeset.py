@@ -6,8 +6,9 @@ from glob import glob
 import numpy as np
 import h5py
 from tqdm.auto import tqdm
+import contextlib
 
-from ..batchflow import FilesIndex, DatasetIndex, Dataset, Sampler, Pipeline
+from ..batchflow import FilesIndex, DatasetIndex, Dataset, Sampler, Pipeline, D
 from ..batchflow import NumpySampler, ConstantSampler
 
 from .geometry import SeismicGeometry
@@ -826,7 +827,33 @@ class SeismicCubeset(Dataset):
         return background
 
     def make_prediction(self, path_hdf5, pipeline, crop_shape, crop_stride,
-                        idx=0, src='predictions', chunk_shape=None, chunk_stride=None):
+                        idx=0, src='predictions', chunk_shape=None, chunk_stride=None, batch_size=8,
+                        pbar=True):
+        """ Create hdf5 file with prediction.
+
+        Parameters
+        ----------
+        path_hdf5 : str
+
+        pipeline : Pipeline
+            pipeline for inference
+        crop_shape : int, tuple or None
+            shape of crops. Must be the same as defined in pipeline.
+        crop_stride : int
+            stride for crops
+        idx : int
+            index of cube to infer
+        src : str
+            pipeline variable for predictions
+        chunk_shape : int, tuple or None
+            shape of chunks.
+        chunk_stride : int
+            stride for chunks
+        batch_size : int
+
+        pbar : bool
+            progress bar
+        """
         geometry = self.geometries[idx]
         chunk_shape = infer_tuple(chunk_shape, geometry.cube_shape)
         chunk_stride = infer_tuple(chunk_stride, chunk_shape)
@@ -841,21 +868,23 @@ class SeismicCubeset(Dataset):
         if os.path.exists(path_hdf5):
             os.remove(path_hdf5)
 
-        total = 0
-        for i_min, x_min in chunk_grid:
-            i_max = min(i_min+chunk_shape[0], cube_shape[0])
-            x_max = min(x_min+chunk_shape[1], cube_shape[1])
-            self.make_grid(
-                self.indices[idx], crop_shape,
-                [i_min, i_max], [x_min, x_max], [0, geometry.depth-1],
-                strides=crop_stride, batch_size=8
-            )
-            total += self.grid_iters
+        if pbar:
+            total = 0
+            for i_min, x_min in chunk_grid:
+                i_max = min(i_min+chunk_shape[0], cube_shape[0])
+                x_max = min(x_min+chunk_shape[1], cube_shape[1])
+                self.make_grid(
+                    self.indices[idx], crop_shape,
+                    [i_min, i_max], [x_min, x_max], [0, geometry.depth-1],
+                    strides=crop_stride, batch_size=batch_size
+                )
+                total += self.grid_iters
 
         with h5py.File(path_hdf5, "a") as file_hdf5:
             aggregation_map = np.zeros(cube_shape[:-1])
             cube_hdf5 = file_hdf5.create_dataset('cube', cube_shape)
-            with tqdm(total=total) as pbar:
+            context = tqdm(total=total) if pbar else contextlib.suppress()
+            with context as progress_bar:
                 for i_min, x_min in chunk_grid:
                     i_max = min(i_min+chunk_shape[0], cube_shape[0])
                     x_max = min(x_min+chunk_shape[1], cube_shape[1])
@@ -866,12 +895,13 @@ class SeismicCubeset(Dataset):
                     )
                     chunk_pipeline = pipeline << self
                     for _ in range(self.grid_iters):
-                        batch = chunk_pipeline.next_batch()
-                        pbar.update()
+                        _ = chunk_pipeline.next_batch(D('size'))
+                        if pbar:
+                            progress_bar.update()
 
                     # Write to hdf5
                     slices = tuple([slice(*item) for item in self.grid_info['range']])
-                    prediction = (self.assemble_crops(chunk_pipeline.v(src), order=(0, 1, 2)) > 0.5).astype(int)
+                    prediction = self.assemble_crops(chunk_pipeline.v(src), order=(0, 1, 2))
                     aggregation_map[tuple(slices[:-1])] += 1
                     cube_hdf5[slices[0], slices[1], slices[2]] = +prediction
                 cube_hdf5[:] = cube_hdf5 / np.expand_dims(aggregation_map, axis=-1)

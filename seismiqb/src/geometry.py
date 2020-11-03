@@ -643,7 +643,7 @@ class SeismicGeometry:
             if `str`, must be a name of the attribute to compute.
         chunk_shape : int, tuple or None
             shape of chunks.
-        stride : str
+        stride : int
             stride for chunks
         pbar : bool
             progress bar
