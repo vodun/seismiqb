@@ -169,7 +169,6 @@ class Fault(Horizon):
     @classmethod
     def split_file(cls, path, dst):
         """ Split file with multiple faults into separate files. """
-        folder = os.path.dirname(path)
         if dst and not os.path.isdir(dst):
             os.makedirs(dst)
         df = pd.read_csv(path, sep=r'\s+', names=cls.FAULT_STICKS)
@@ -273,7 +272,9 @@ def faults_sizes(labels):
     for i in prange(len(indices)): # pylint: disable=not-an-iterable
         label = indices[i]
         array = labels[labels[:, 3] == label]
-        sizes[label-1] = ((array[:, 0].max() - array[:, 0].min()) ** 2 + (array[:, 1].max() - array[:, 1].min()) ** 2) ** 0.5
+        i_len = (array[:, 0].max() - array[:, 0].min()
+        x_len = (array[:, 1].max() - array[:, 1].min())
+        sizes[label-1] = (i_len ** 2 + x_len ** 2) ** 0.5
     return sizes
 
 def filter_faults(labels, threshold, sizes=None):

@@ -660,7 +660,10 @@ class SeismicGeometry:
         chunk_shape = _infer_tuple(chunk_shape, self.cube_shape)
         stride = _infer_tuple(stride, chunk_shape)
 
-        grid = [make_axis_grid((0, self.cube_shape[i]), stride[i], self.cube_shape[i], chunk_shape[i]) for i in range(3)]
+        grid = [make_axis_grid(
+            (0, self.cube_shape[i]),
+            stride[i], self.cube_shape[i], chunk_shape[i]
+        ) for i in range(3)]
 
         if isinstance(src, np.ndarray):
             if (src.shape != self.cube_shape).all():
