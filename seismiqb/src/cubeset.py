@@ -2,11 +2,11 @@
 #pylint: disable=too-many-lines
 import os
 from glob import glob
+import contextlib
 
 import numpy as np
 import h5py
 from tqdm.auto import tqdm
-import contextlib
 
 from ..batchflow import FilesIndex, DatasetIndex, Dataset, Sampler, Pipeline, D
 from ..batchflow import NumpySampler, ConstantSampler
