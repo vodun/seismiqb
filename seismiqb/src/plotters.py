@@ -252,7 +252,6 @@ class MatplotlibPlotter:
             other
         """
         defaults = {'figsize': (12, 7),
-                    'with_curve': False,
                     'line_color': 'k',
                     'label': '', 'xlabel': '', 'ylabel': '', 'title': '',
                     'fontsize': 20,
@@ -262,22 +261,26 @@ class MatplotlibPlotter:
 
         # deal with kwargs
         updated = {**defaults, **kwargs}
-        line_color, xstep, width_mul, with_curve, points_marker = [updated[key] for key in (
-            'line_color', 'xstep', 'width_multiplier', 'with_curve', 'points_marker')]
+        line_color, xstep, width_mul, points_marker = [updated[key] for key in (
+            'line_color', 'xstep', 'width_multiplier', 'points_marker')]
 
         figure_kwargs = filter_kwargs(updated, ['figsize', 'facecolor', 'dpi'])
         label_kwargs = filter_kwargs(updated, ['label', 'y', 'fontsize', 'family', 'color'])
         xaxis_kwargs = filter_kwargs(updated, ['xlabel', 'fontsize', 'family', 'color'])
         yaxis_kwargs = filter_kwargs(updated, ['ylabel', 'fontsize', 'family', 'color'])
 
-        if with_curve:
-            image, heights = image
+        # parse image arg
+        with_curve = False
+        if isinstance(image, (list, tuple)):
+            if len(image) > 1:
+                with_curve = True
+                image, heights = image[:2]
 
-            # transform height-mask to heights if needed
-            if heights.ndim == 2:
-                heights = np.where(heights)[1]
-        elif isinstance(image, (list, tuple)):
-            image = image[0]
+                # transform height-mask to heights if needed
+                if heights.ndim == 2:
+                    heights = np.where(heights)[1]
+            else:
+                image = image[0]
 
         # Create figure and axes
         if 'ax' in kwargs:
