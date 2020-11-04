@@ -675,15 +675,9 @@ def generate_points(edges, divisors, lengths, indices):
             low[i, j] = edge[idx_copy % length]
     return low
 
-@njit(parallel=True)
+# @njit(parallel=True)
 def attr_filter(array, result, window, stride, points, attribute='semblance'):
     """ Compute semblance for the cube. """
-    if attribute == 'semblance':
-        fn = semblance
-    elif attribute == 'semblance_2':
-        fn = semblance_2
-    elif attribute == 'corr':
-        fn = local_correlation
     l = points.shape[0]
     for index in prange(l): # pylint: disable=not-an-iterable
         i, j, k = points[index]
@@ -693,7 +687,13 @@ def attr_filter(array, result, window, stride, points, attribute='semblance'):
                 max(j - window[1] // 2, 0):min(j + window[1] // 2 + window[1] % 2, array.shape[1]),
                 max(k - window[2] // 2, 0):min(k + window[2] // 2 + window[2] % 2, array.shape[2])
             ]
-            result[i // stride[0], j // stride[1], k // stride[2]] = fn(region.copy())
+            if attribute == 'semblance':
+                val = semblance(region.copy())
+            elif attribute == 'semblance_2':
+                val = semblance_2(region.copy())
+            elif attribute == 'corr':
+                val = local_correlation(region.copy())
+            result[i // stride[0], j // stride[1], k // stride[2]] = val
     return result
 
 @njit
@@ -721,12 +721,9 @@ def semblance_2(region):
 @njit(parallel=True)
 def local_correlation(region):
     """ Correlation in window. """
-    center = region[
-        region.shape[0] - region.shape[0] // 2,
-        region.shape[1] - region.shape[1] // 2,
-    ]
+    center = region[region.shape[0] // 2, region.shape[1] // 2]
     corr = np.zeros((region.shape[0], region.shape[1]))
-    for i in prange(region.shape[0]): # pylint: disable=not-an-iterable
+    for i in range(region.shape[0]): # pylint: disable=not-an-iterable
         for j in range(region.shape[1]):
             cov = np.mean((center - np.mean(center)) * (region[i, j] - np.mean(region[i,j])))
             corr[i, j] = cov / np.std(center) / np.std(region[i, j])

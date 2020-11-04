@@ -620,10 +620,10 @@ class SeismicGeometry:
         window = np.minimum(np.array(window), cube.shape)
 
         shape = np.ceil(np.array(cube.shape) / np.array(stride)).astype(int)
-        result = np.full(shape, np.nan)
+        result = np.full(shape, np.nan, dtype='float32')
 
         if points is None:
-            points = np.stack(np.meshgrid(*[range(cube.shape[i]) for i in range(3)]), axis=-1).reshape(-1, 2)
+            points = np.stack(np.meshgrid(*[range(cube.shape[i]) for i in range(3)]), axis=-1).reshape(-1, 3)
         if isinstance(points, list):
             points = np.array(points)
 
