@@ -891,7 +891,7 @@ class SeismicCubeset(Dataset):
                     self.make_grid(
                         self.indices[idx], crop_shape,
                         [i_min, i_max], [x_min, x_max], [0, geometry.depth-1],
-                        strides=crop_stride, batch_size=8
+                        strides=crop_stride, batch_size=batch_size
                     )
                     chunk_pipeline = pipeline << self
                     for _ in range(self.grid_iters):
