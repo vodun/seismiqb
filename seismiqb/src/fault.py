@@ -36,19 +36,18 @@ class Fault(Horizon):
         """ Init from path to either CHARISMA, REDUCED_CHARISMA or FAULT_STICKS csv-like file
         from .npy or .hdf5 file with points.
         """
-        _ = kwargs
         self.name = os.path.basename(path)
         ext = os.path.splitext(path)[1][1:]
         if ext == 'npy':
             points = np.load(path, allow_pickle=False)
-            self.from_points(points, False, **kwargs)
+            transform = False
         elif ext == 'hdf5':
             cube = SeismicGeometry(path, **kwargs).file_hdf5['cube']
-            points = np.stack(np.where(np.array(cube) == 1)).T
-            self.from_points(points, False, **kwargs)
+            points = np.stack(np.where(np.array(cube) == 1)).T #TODO: get points in chunks
+            transform = False
         else:
             points = self.csv_to_points(path, **kwargs)
-            self.from_points(points, transform, **kwargs)
+        self.from_points(points, transform, **kwargs)
 
     def csv_to_points(self, path, **kwargs):
         """ Get point cloud array from file values. """
@@ -86,27 +85,26 @@ class Fault(Horizon):
 
         _df = df[np.logical_and(i_mask, x_mask)]
 
-        df.loc[np.logical_and(i_mask, x_mask), ['iline', 'xline']] = np.rint(
-            self.geometry.cdp_to_lines(_df[['cdp_x', 'cdp_y']].values)
-        ).astype('int32')
+        coords = np.rint(self.geometry.cdp_to_lines(_df[['cdp_x', 'cdp_y']].values)).astype('int32')
+        df.loc[np.logical_and(i_mask, x_mask), ['iline', 'xline']] = coords
 
         return df
 
     @classmethod
     def read_sticks(cls, df):
         """ Transform initial fault dataframe to array of sticks. """
-        if 'number' in df.columns:
+        if 'number' in df.columns: # fault file has stick index
             col = 'number'
-        elif df.iline.iloc[0] == df.iline.iloc[1]:
+        elif df.iline.iloc[0] == df.iline.iloc[1]: # there is stick points with the same iline
             col = 'iline'
-        elif df.xline.iloc[0] == df.xline.iloc[1]:
+        elif df.xline.iloc[0] == df.xline.iloc[1]: # there is stick points with the same xline
             col = 'xline'
         else:
             raise ValueError('Wrong format of sticks: there is no column to group points into sticks.')
         return df.groupby(col).apply(lambda x: x[Horizon.COLUMNS].values).reset_index(drop=True)
 
     def sort_sticks(self, sticks):
-        """ Sort sticks with respect of fault direction. """
+        """ Order sticks with respect of fault direction. Is necessary to perform following triangulation. """
         pca = PCA(1)
         coords = pca.fit_transform(pca.fit_transform(np.array([stick[0][:2] for stick in sticks.values])))
         indices = np.array([i for _, i in sorted(zip(coords, range(len(sticks))))])
