@@ -8,7 +8,7 @@ import numpy as np
 import h5py
 from tqdm.auto import tqdm
 
-from ..batchflow import FilesIndex, DatasetIndex, Dataset, Sampler, Pipeline, D
+from ..batchflow import FilesIndex, DatasetIndex, Dataset, Sampler, Pipeline
 from ..batchflow import NumpySampler, ConstantSampler
 
 from .geometry import SeismicGeometry
@@ -895,7 +895,7 @@ class SeismicCubeset(Dataset):
                     )
                     chunk_pipeline = pipeline << self
                     for _ in range(self.grid_iters):
-                        _ = chunk_pipeline.next_batch(D('size'))
+                        _ = chunk_pipeline.next_batch(len(self))
                         if pbar:
                             progress_bar.update()
 

@@ -1293,40 +1293,6 @@ class SeismicGeometryHDF5(SeismicGeometry):
             slide = self._cached_load(cube, loc)
         return slide
 
-    def compute_cdp_transform(self, sgy_path, second_trace=20000):
-        """ Create functions with linear line to cdp transforms and
-        save them to the `iline_to_cdpx` and `xline_to_cdpy` attributes of the class.
-
-        Parameters
-        ----------
-        sgy_path : str
-            Path to SEG-Y version of the cube with `cdp_x`, `cdp_y` headers.
-        second_trace : int
-            Index of a second trace lying on `iline`, `xline` coordinates different
-            from the default first trace with `trace_index = 1`.
-        """
-        geom = SeismicGeometry(path=sgy_path, headers=self.HEADERS_POST_FULL)
-        df = geom.dataframe
-
-        # get two points
-        lines = df[df['trace_index'] == 1].index[0]
-        cdps = (df[df['trace_index'] == 1]['CDP_X'][0], df[df['trace_index'] == 1]['CDP_Y'][0])
-        second_lines = df[df['trace_index'] == second_trace].index[0]
-        second_cdps = (df[df['trace_index'] == second_trace]['CDP_X'][0],
-                       df[df['trace_index'] == second_trace]['CDP_Y'][0])
-
-        # transform funcs
-        def xline_to_cdpy(n):
-            return (second_cdps[1] - cdps[1]) / (second_lines[1] - lines[1]) * n + \
-                    cdps[1] - lines[1] * (second_cdps[1] - cdps[1]) / (second_lines[1] - lines[1])
-
-        def iline_to_cdpx(n):
-            return (second_cdps[0] - cdps[0]) / (second_lines[0] - lines[0]) * n + \
-                    cdps[0] - lines[0] * (second_cdps[0]  - cdps[0]) / (second_lines[0] - lines[0])
-
-        self.iline_to_cdpx = iline_to_cdpx
-        self.xline_to_cdpy = xline_to_cdpy
-
     def __getitem__(self, key):
         """ Retrieve amplitudes from cube. Uses the usual `Numpy` semantics for indexing 3D array. """
         key_ = list(key)

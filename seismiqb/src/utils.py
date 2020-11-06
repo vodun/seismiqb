@@ -675,7 +675,7 @@ def generate_points(edges, divisors, lengths, indices):
             low[i, j] = edge[idx_copy % length]
     return low
 
-# @njit(parallel=True)
+@njit(parallel=True)
 def attr_filter(array, result, window, stride, points, attribute='semblance'):
     """ Compute semblance for the cube. """
     l = points.shape[0]
@@ -726,5 +726,7 @@ def local_correlation(region):
     for i in range(region.shape[0]): # pylint: disable=not-an-iterable
         for j in range(region.shape[1]):
             cov = np.mean((center - np.mean(center)) * (region[i, j] - np.mean(region[i,j])))
-            corr[i, j] = cov / np.std(center) / np.std(region[i, j])
+            den = np.std(center) / np.std(region[i, j])
+            if den != 0:
+                corr[i, j] = cov / den
     return np.mean(corr)
