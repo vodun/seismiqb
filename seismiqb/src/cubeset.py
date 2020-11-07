@@ -17,13 +17,6 @@ from .utils import IndexedDict, round_to_array, gen_crop_coordinates
 
 
 
-def sampler_transform(points, ix=None):
-    """ Converts array to `object` dtype. Picklable, unlike inline lambda function. """
-    points = points.astype(np.object)
-    return np.concatenate([np.full((len(points), 1), ix), points], axis=1)
-
-
-
 class SeismicCubeset(Dataset):
     """ Stores indexing structure for dataset of seismic cubes along with additional structures.
 
@@ -226,7 +219,7 @@ class SeismicCubeset(Dataset):
 
         sampler = 0 & NumpySampler('n', dim=4)
         for i, ix in enumerate(self.indices):
-            sampler_ = samplers[ix].apply(lambda points: sampler_transform(points, ix=ix))
+            sampler_ = samplers[ix].apply(Modificator(cube_name=ix))
             sampler = sampler | (p[i] & sampler_)
         setattr(self, dst, sampler)
 
@@ -797,3 +790,16 @@ class SeismicCubeset(Dataset):
             background[background_slice] = np.maximum(crop, previous)
 
         return background
+
+
+
+class Modificator:
+    """ Converts array to `object` dtype and prepends the `cube_name` column.
+    Picklable, unlike inline lambda function.
+    """
+    def __init__(self, cube_name):
+        self.cube_name = cube_name
+
+    def __call__(self, points):
+        points = points.astype(np.object)
+        return np.concatenate([np.full((len(points), 1), self.cube_name), points], axis=1)
