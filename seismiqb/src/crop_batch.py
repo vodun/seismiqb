@@ -172,13 +172,17 @@ class SeismicCropBatch(Batch):
         # pylint: disable=protected-access
 
         # Create all the points and shapes
-        if adaptive_slices:
+        if isinstance(shape, dict):
+            shape = {k: np.asarray(v) for k, v in shape.items()}
+        else:
             shape = np.asarray(shape)
 
+        if adaptive_slices:
             indices, points_, shapes = [], [], []
             for point in points:
                 try:
-                    point_, shape_ = self._correct_point_to_grid(point, shape, grid_src, eps)
+                    shape_ = shape[points[0]] if isinstance(shape, dict) else shape
+                    point_, shape_ = self._correct_point_to_grid(point, shape_, grid_src, eps)
                     indices.append(point[0])
                     points_.append(point_)
                     shapes.append(shape_)
@@ -221,17 +225,17 @@ class SeismicCropBatch(Batch):
 
         if side_view:
             side_view = side_view if isinstance(side_view, float) else 0.5
-        shape = np.asarray(shape)
         shapes = []
-        for _ in points:
+        for point in points:
+            shape_ = shape[point[0]] if isinstance(shape, dict) else shape
             if not side_view:
-                shapes.append(shape)
+                shapes.append(shape_)
             else:
                 flag = np.random.random() > side_view
                 if flag:
-                    shapes.append(shape)
+                    shapes.append(shape_)
                 else:
-                    shapes.append(shape[[1, 0, 2]])
+                    shapes.append(shape_[[1, 0, 2]])
         shapes = np.array(shapes)
         return shapes
 
@@ -296,7 +300,7 @@ class SeismicCropBatch(Batch):
 
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def load_cubes(self, ix, dst, src_locations='locations', src_geometry='geometries', **kwargs):
+    def load_cubes(self, ix, dst, src_locations='locations', src_geometry='geometries', slicing='custom', **kwargs):
         """ Load data from cube in given positions.
 
         Parameters
@@ -305,11 +309,19 @@ class SeismicCropBatch(Batch):
             Component of batch with positions of crops to load.
         dst : str
             Component of batch to put loaded crops in.
+        slicing : str
+            if 'native', crop will be looaded as a slice of geometry. If 'custom', use `load_crop` method to make crops.
+            The 'native' option is prefered to 3D crops to speed up loading.
         """
         geometry = self.get(ix, src_geometry)
         location = self.get(ix, src_locations)
-        return geometry.load_crop(location, **kwargs)
-
+        if slicing == 'native':
+            crop = geometry[tuple(location)]
+        elif slicing == 'custom':
+            crop = geometry.load_crop(location, **kwargs)
+        else:
+            raise ValueError(f"slicing must be 'native' or 'custom' but {slicing} were given.")
+        return crop
 
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
@@ -1001,7 +1013,7 @@ class SeismicCropBatch(Batch):
         return gaussian_filter1d(crop, sigma=sigma, axis=axis, order=order)
 
 
-    def plot_components(self, *components, idx=0, mode='overlap', order_axes=None, **kwargs):
+    def plot_components(self, *components, idx=0, slide=None, mode='overlap', order_axes=None, **kwargs):
         """ Plot components of batch.
 
         Parameters
@@ -1021,6 +1033,9 @@ class SeismicCropBatch(Batch):
             imgs = [getattr(self, comp)[idx] for comp in components]
         else:
             imgs = [getattr(self, comp) for comp in components]
+
+        if slide is not None:
+            imgs = [img[slide] for img in imgs]
 
         # set some defaults
         kwargs = {
