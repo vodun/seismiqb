@@ -2,6 +2,7 @@
 import os
 import sys
 import shutil
+import itertools
 
 from textwrap import dedent
 from random import random
@@ -13,8 +14,10 @@ import pandas as pd
 import h5py
 import segyio
 import cv2
+from scipy.ndimage import zoom
 
-from .utils import lru_cache, find_min_max, file_print, SafeIO
+from .utils import lru_cache, find_min_max, file_print, \
+                   SafeIO, attr_filter, make_axis_grid, infer_tuple
 from .plotters import plot_image
 
 
@@ -181,9 +184,9 @@ class SeismicGeometry:
         return len(self.dataframe)
 
 
-    def store_meta(self):
+    def store_meta(self, path=None):
         """ Store collected stats on disk. """
-        path_meta = os.path.splitext(self.path)[0] + '.meta'
+        path_meta = path or os.path.splitext(self.path)[0] + '.meta'
 
         # Remove file, if exists: h5py can't do that
         if os.path.exists(path_meta):
@@ -551,6 +554,7 @@ class SeismicGeometry:
                     # Copy all textual headers, including possible extended
                     for i in range(1 + segy.ext_headers):
                         dst_file.text[i] = segy.text[i]
+                    dst_file.bin = segy.bin
 
                     c = 0
                     for i, _ in tqdm(enumerate(spec.ilines)):
@@ -568,6 +572,127 @@ class SeismicGeometry:
             file_name = os.path.basename(path_segy)
             shutil.make_archive(os.path.splitext(path_segy)[0], 'zip', dir_name, file_name)
 
+    def cdp_to_lines(self, points):
+        """ Convert CDP to lines. """
+        inverse_matrix = np.linalg.inv(self.rotation_matrix[:, :2])
+        lines = (inverse_matrix @ points.T - inverse_matrix @ self.rotation_matrix[:, 2].reshape(2, -1)).T
+        return np.rint(lines)
+
+    def apply_conv(self, locations=None, points=None, window=10, stride=1, attribute='semblance'):
+        """ Compute attribute on cube.
+
+        Parameters
+        ----------
+        locations : tuple of slices
+            slices for each axis of cube to compute attribute. If locations is None,
+            attribute will be computed for the whole cube.
+        points : np.ndarray
+            points where compute the attribute. In other points attribute will be equal to numpy.nan.
+        window : int or tuple of ints
+            window for the filter.
+        stride : int or tuple of ints
+            stride to compute attribute
+        attribute : str
+            name of the attribute
+
+        Returns
+        -------
+        np.ndarray
+            array of the shape corresponding to locations
+        """
+        if isinstance(window, int):
+            window = np.ones(3, dtype=np.int32) * window
+        if isinstance(stride, int):
+            stride = np.ones(3, dtype=np.int32) * stride
+        if locations is None:
+            locations = [slice(0, self.cube_shape[i]) for i in range(3)]
+
+        if points is not None:
+            for i in range(3):
+                start = locations[i].start or 0
+                stop = locations[i].stop or self.cube_shape[i]
+                points = points[points[:, i] >= start]
+                points = points[points[:, i] < stop]
+                points[:, i] -= start
+            stride = np.ones(3, dtype='int32')
+
+        cube = self.file_hdf5['cube'][locations[0], locations[1], locations[2]]
+        window = np.minimum(np.array(window), cube.shape)
+
+        shape = np.ceil(np.array(cube.shape) / np.array(stride)).astype(int)
+        result = np.full(shape, np.nan, dtype='float32')
+
+        if points is None:
+            points = np.stack(np.meshgrid(*[range(cube.shape[i]) for i in range(3)]), axis=-1).reshape(-1, 3)
+        if isinstance(points, list):
+            points = np.array(points)
+
+        attr = attr_filter(cube, result, window, stride, points, attribute)
+        if np.any(stride > 1):
+            attr = zoom(attr, np.array(cube.shape) / np.array(attr.shape))
+        return attr
+
+    def create_hdf5(self, path_hdf5, src, chunk_shape=None, stride=None, pbar=False):
+        """ Create hdf5 file from np.ndarray or with geological attribute.
+
+        Parameters
+        ----------
+        path_hdf5 : str
+
+        src : np.ndarray or str
+            if `str`, must be a name of the attribute to compute.
+        chunk_shape : int, tuple or None
+            shape of chunks.
+        stride : int
+            stride for chunks
+        pbar : bool
+            progress bar
+        """
+        chunks = []
+
+        chunk_shape = infer_tuple(chunk_shape, self.cube_shape)
+        stride = infer_tuple(stride, chunk_shape)
+
+        grid = [make_axis_grid(
+            (0, self.cube_shape[i]),
+            stride[i], self.cube_shape[i], chunk_shape[i]
+        ) for i in range(3)]
+
+        if isinstance(src, np.ndarray):
+            if (src.shape != self.cube_shape).all():
+                raise ValueError(f'src has shape {src.shape} but must have {self.cube_shape}')
+            chunks += [[(0, 0, 0), src]]
+            chunk_shape = self.cube_shape
+            total = 1
+        elif isinstance(src, str):
+            def _attribute():
+                for coord in itertools.product(*grid):
+                    locations = [slice(coord[i], coord[i] + chunk_shape[i]) for i in range(3)]
+                    yield [coord, self.apply_conv(locations, attribute=src)]
+            chunks = _attribute()
+            total = np.prod([len(item) for item in grid])
+
+        if os.path.exists(path_hdf5):
+            os.remove(path_hdf5)
+
+        with h5py.File(path_hdf5, "a") as file_hdf5:
+            cube_hdf5 = file_hdf5.create_dataset('cube', self.cube_shape)
+            cube_hdf5_x = file_hdf5.create_dataset('cube_x', self.cube_shape[[1, 2, 0]])
+            cube_hdf5_h = file_hdf5.create_dataset('cube_h', self.cube_shape[[2, 0, 1]])
+            _chunks = tqdm(chunks, total=total) if pbar else chunks
+
+            for (iline, xline, height), chunk in _chunks:
+                slc = (
+                    slice(iline, min(iline+chunk_shape[0], self.cube_shape[0])),
+                    slice(xline, min(xline+chunk_shape[1], self.cube_shape[1])),
+                    slice(height, min(height+chunk_shape[2], self.cube_shape[2]))
+                )
+                cube_hdf5[slc[0], slc[1], slc[2]] = chunk
+                cube_hdf5_x[slc[1], slc[2], slc[0]] = chunk.transpose((1, 2, 0))
+                cube_hdf5_h[slc[2], slc[0], slc[1]] = chunk.transpose((2, 0, 1))
+
+        path_meta = os.path.splitext(path_hdf5)[0] + '.meta'
+        self.store_meta(path_meta)
 
 class SeismicGeometrySEGY(SeismicGeometry):
     """ Class to infer information about SEG-Y cubes and provide convenient methods of working with them.
@@ -777,6 +902,10 @@ class SeismicGeometrySEGY(SeismicGeometry):
             cdp_points.append(cdp)
 
         self.rotation_matrix = cv2.getAffineTransform(np.float32(ix_points), np.float32(cdp_points))
+
+    def lines_to_cdp(self, points):
+        """ Convert lines to CDP. """
+        return (self.rotation_matrix[:, :2] @ points.T + self.rotation_matrix[:, 2].reshape(2, -1)).T
 
     def compute_area(self, correct=True, shift=50):
         """ Compute approximate area of the cube in square kilometres.
@@ -1065,7 +1194,6 @@ class SeismicGeometrySEGY(SeismicGeometry):
     # Convenient alias
     convert_to_hdf5 = make_hdf5
 
-
 class SeismicGeometryHDF5(SeismicGeometry):
     """ Class to infer information about HDF5 cubes and provide convenient methods of working with them.
 
@@ -1093,7 +1221,11 @@ class SeismicGeometryHDF5(SeismicGeometry):
         """ Store values from `hdf5` file to attributes. """
         self.index_headers = self.INDEX_POST
         self.load_meta()
-        self.cube_shape = np.asarray([self.ilines_len, self.xlines_len, self.depth]) # BC
+        if hasattr(self, 'lens'):
+            self.cube_shape = np.asarray([self.ilines_len, self.xlines_len, self.depth]) # BC
+        else:
+            self.cube_shape = self.file_hdf5['cube'].shape
+            self.lens = self.cube_shape
         self.has_stats = True
 
     # Methods to load actual data from HDF5
@@ -1110,7 +1242,6 @@ class SeismicGeometryHDF5(SeismicGeometry):
             Can be `iline`, `xline`, `height`, `depth`, `i`, `x`, `h`, 0, 1, 2.
         """
         _ = kwargs
-
         if axis is None:
             shape = np.array([(slc.stop - slc.start) for slc in locations])
             axis = np.argmin(shape)
@@ -1164,7 +1295,6 @@ class SeismicGeometryHDF5(SeismicGeometry):
             cube = self.file_hdf5['cube_h']
             slide = self._cached_load(cube, loc)
         return slide
-
 
     def __getitem__(self, key):
         """ Retrieve amplitudes from cube. Uses the usual `Numpy` semantics for indexing 3D array. """

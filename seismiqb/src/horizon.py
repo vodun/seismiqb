@@ -7,6 +7,7 @@ from textwrap import dedent
 
 import numpy as np
 import pandas as pd
+import h5py
 from numba import njit, prange
 
 import cv2
@@ -575,14 +576,16 @@ class Horizon:
 
         # Collect stats on separate axes. Note that depth stats are properties
         self.reset_storage('matrix')
-        self.i_min, self.x_min, self._h_min = np.min(self.points, axis=0).astype(np.int32)
-        self.i_max, self.x_max, self._h_max = np.max(self.points, axis=0).astype(np.int32)
+        if len(self.points) > 0:
+            self.i_min, self.x_min, self._h_min = np.min(self.points, axis=0).astype(np.int32)
+            self.i_max, self.x_max, self._h_max = np.max(self.points, axis=0).astype(np.int32)
 
-        self.i_length = (self.i_max - self.i_min) + 1
-        self.x_length = (self.x_max - self.x_min) + 1
-        self.bbox = np.array([[self.i_min, self.i_max],
-                              [self.x_min, self.x_max]],
-                             dtype=np.int32)
+            self.i_length = (self.i_max - self.i_min) + 1
+            self.x_length = (self.x_max - self.x_min) + 1
+            self.bbox = np.array([[self.i_min, self.i_max],
+                                  [self.x_min, self.x_max],
+                                  [self.h_min, self.h_max]],
+                                 dtype=np.int32)
 
 
     def from_file(self, path, transform=True, **kwargs):
@@ -592,7 +595,7 @@ class Horizon:
         self.path = path
         self.name = os.path.basename(path)
         points = self.file_to_points(path)
-        self.from_points(points, transform)
+        self.from_points(points, transform, **kwargs)
 
     def file_to_points(self, path):
         """ Get point cloud array from file values. """
@@ -622,7 +625,8 @@ class Horizon:
         self.i_length = (self.i_max - self.i_min) + 1
         self.x_length = (self.x_max - self.x_min) + 1
         self.bbox = np.array([[self.i_min, self.i_max],
-                              [self.x_min, self.x_max]],
+                              [self.x_min, self.x_max],
+                              [self.h_min, self.h_max]],
                              dtype=np.int32)
 
         self.reset_storage('points')
@@ -1580,6 +1584,50 @@ class Horizon:
 
         path = path if not add_height else f'{path}_#{round(self.h_mean, 1)}'
         df.to_csv(path, sep=' ', columns=self.COLUMNS, index=False, header=False)
+
+    def dump_points(self, path, fmt='npy'):
+        """ Dump points. """
+        if fmt == 'npy':
+            if os.path.exists(path):
+                points = np.load(path, allow_pickle=False)
+                points = np.concatenate([points, self.points], axis=0)
+            else:
+                points = self.points
+            np.save(path, points, allow_pickle=False)
+        elif fmt == 'hdf5':
+            file_hdf5 = h5py.File(path, "a")
+            if 'cube' not in file_hdf5:
+                cube_hdf5 = file_hdf5.create_dataset('cube', self.geometry.cube_shape)
+                cube_hdf5_x = file_hdf5.create_dataset('cube_x', self.geometry.cube_shape[[1, 2, 0]])
+                cube_hdf5_h = file_hdf5.create_dataset('cube_h', self.geometry.cube_shape[[2, 0, 1]])
+            else:
+                cube_hdf5 = file_hdf5['cube']
+                cube_hdf5_x = file_hdf5['cube_x']
+                cube_hdf5_h = file_hdf5['cube_h']
+
+            shape = (self.i_length, self.x_length, self.h_max - self.h_min + 1)
+            fault_array = np.zeros(shape)
+
+            points = self.points - np.array([self.i_min, self.x_min, self._h_min])
+            fault_array[points[:, 0], points[:, 1], points[:, 2]] = 1
+
+            cube_hdf5[self.i_min:self.i_max+1, self.x_min:self.x_max+1, self.h_min:self.h_max+1] += fault_array
+
+            cube_hdf5_x[
+                self.x_min:self.x_max+1,
+                self.h_min:self.h_max+1,
+                self.i_min:self.i_max+1
+            ] += np.transpose(fault_array, (1, 2, 0))
+
+            cube_hdf5_h[
+                self.h_min:self.h_max+1,
+                self.i_min:self.i_max+1,
+                self.x_min:self.x_max+1
+            ] += np.transpose(fault_array, (2, 0, 1))
+
+            file_hdf5.close()
+        else:
+            raise ValueError('Unknown format:', fmt)
 
 
     # Methods of (visual) representation of a horizon
