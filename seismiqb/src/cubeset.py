@@ -119,6 +119,23 @@ class SeismicCubeset(Dataset):
             if logs:
                 self.geometries[ix].log()
 
+    def add_geometries_targets(self, paths, dst='geom_targets'):
+        """Create targets from given cubes
+
+        Parameters
+        ----------
+        paths : dict
+            Mapping from indices to txt paths with target cubes.
+        dst : str, optional
+            Name of attribute to put targets in, by default 'geom_targets'
+        """
+        if not hasattr(self, dst):
+            setattr(self, dst, IndexedDict({ix: None for ix in self.indices}))
+
+        for ix in self.indices:
+            getattr(self, dst)[ix] = SeismicGeometry(paths[ix])
+
+
     def convert_to_hdf5(self, postfix=''):
         """ Converts every cube in dataset from `.segy` to `.hdf5`. """
         for ix in self.indices:
