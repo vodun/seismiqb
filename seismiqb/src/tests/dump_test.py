@@ -10,7 +10,7 @@ from seismiqb import SeismicGeometry
 PATH = "/data/acquisition_footprints/7-2_ftp_input.sgy"
 
 def compare_segy_files(path_1, path_2):
-    """ Checks that two SEG-Y files contain exacly same traces
+    """ Checks that two SEG-Y files contain exactly same traces
 
     Parameters
     ----------
@@ -22,6 +22,16 @@ def compare_segy_files(path_1, path_2):
     g2 = SeismicGeometry(path_2)
 
     assert np.all(g1.cube_shape == g2.cube_shape)
+
+    f1 = g1.segyfile
+    f2 = g2.segyfile
+
+    l1 = len(f1.header)
+    l2 = len(f2.header)
+
+    assert l1 == l2
+    for i in range(l1):
+        assert f1.header[i] == f2.header[i]
 
     n_ilines = g1.cube_shape[0]
     for i in range(n_ilines):
