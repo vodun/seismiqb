@@ -290,6 +290,23 @@ def convert_point_cloud(path, path_save, names=None, order=None, transform=None)
     data.to_csv(path_save, sep=' ', index=False, header=False)
 
 
+def save_point_cloud(metric, save_path, geometry=None):
+    """ Save 2D map as a .txt point cloud. Can be opened by GENERAL format reader in geological software. """
+    idx_1, idx_2 = np.asarray(~np.isnan(metric)).nonzero()
+    points = np.hstack([idx_1.reshape(-1, 1),
+                        idx_2.reshape(-1, 1),
+                        metric[idx_1, idx_2].reshape(-1, 1)])
+
+    if geometry is not None:
+        points[:, 0] += geometry.ilines_offset
+        points[:, 1] += geometry.xlines_offset
+
+    df = pd.DataFrame(points, columns=['iline', 'xline', 'metric_value'])
+    df.sort_values(['iline', 'xline'], inplace=True)
+    df.to_csv(save_path, sep=' ', columns=['iline', 'xline', 'metric_value'],
+              index=False, header=False)
+
+
 def gen_crop_coordinates(point, horizon_matrix, zero_traces,
                          stride, shape, fill_value, zeros_threshold=0,
                          empty_threshold=5, safe_stripe=0, num_points=2):
@@ -372,6 +389,41 @@ def gen_crop_coordinates(point, horizon_matrix, zero_traces,
                 shapes_array[top], \
                 orders_array[top])
 
+
+def make_axis_grid(axis_range, stride, length, crop_shape):
+    """ Make separate grids for every axis. """
+    grid = np.arange(*axis_range, stride)
+    grid_ = [x for x in grid if x + crop_shape < length]
+    if len(grid) != len(grid_):
+        grid_ += [axis_range[1] - crop_shape]
+    return sorted(grid_)
+
+def infer_tuple(value, default):
+    """ Transform int or tuple with Nones to tuple with values from default.
+
+    Parameters
+    ----------
+    value : None, int or tuple
+        value to transform
+    default : tuple
+
+    Returns
+    -------
+    tuple
+
+    Examples
+    --------
+        None --> default
+        5 --> (5, 5, 5)
+        (None, None, 3) --> (default[0], default[1], 3)
+    """
+    if value is None:
+        value = default
+    elif isinstance(value, int):
+        value = tuple([value] * 3)
+    elif isinstance(value, tuple):
+        value = tuple([item if item else default[i] for i, item in enumerate(value)])
+    return value
 
 @njit
 def groupby_mean(array):
@@ -468,8 +520,6 @@ def groupby_max(array):
     output[position, -1] = s
     position += 1
     return output[:position]
-
-
 
 
 @njit
@@ -578,6 +628,26 @@ def nb_mode(array, mask):
     return temp
 
 
+@njit
+def filter_simplices(simplices, points, matrix, threshold=5.):
+    """ Remove simplices outside of matrix. """
+    #pylint: disable=consider-using-enumerate
+    mask = np.ones(len(simplices), dtype=np.int32)
+
+    for i in range(len(simplices)):
+        tri = points[simplices[i]].astype(np.int32)
+
+        middle_i, middle_x = np.mean(tri[:, 0]), np.mean(tri[:, 1])
+        heights = np.array([matrix[tri[0, 0], tri[0, 1]],
+                            matrix[tri[1, 0], tri[1, 1]],
+                            matrix[tri[2, 0], tri[2, 1]]])
+
+        if matrix[int(middle_i), int(middle_x)] < 0 or np.std(heights) > threshold:
+            mask[i] = 0
+
+    return simplices[mask == 1]
+
+
 class HorizonSampler(Sampler):
     """ Compact version of histogram-based sampler for 3D points structure. """
     def __init__(self, histogram, seed=None, **kwargs):
@@ -621,3 +691,59 @@ def generate_points(edges, divisors, lengths, indices):
                 idx_copy //= divisor
             low[i, j] = edge[idx_copy % length]
     return low
+
+@njit(parallel=True)
+def attr_filter(array, result, window, stride, points, attribute='semblance'):
+    """ Compute semblance for the cube. """
+    l = points.shape[0]
+    for index in prange(l): # pylint: disable=not-an-iterable
+        i, j, k = points[index]
+        if (i % stride[0] == 0) and (j % stride[1] == 0) and (k % stride[2] == 0):
+            region = array[
+                max(i - window[0] // 2, 0):min(i + window[0] // 2 + window[0] % 2, array.shape[0]),
+                max(j - window[1] // 2, 0):min(j + window[1] // 2 + window[1] % 2, array.shape[1]),
+                max(k - window[2] // 2, 0):min(k + window[2] // 2 + window[2] % 2, array.shape[2])
+            ]
+            if attribute == 'semblance':
+                val = semblance(region.copy())
+            elif attribute == 'semblance_2':
+                val = semblance_2(region.copy())
+            elif attribute == 'corr':
+                val = local_correlation(region.copy())
+            result[i // stride[0], j // stride[1], k // stride[2]] = val
+    return result
+
+@njit
+def semblance(region):
+    """ Marfurt semblance based on paper Marfurt et al.
+    `3-D seismic attributes using a semblance-based coherency algorithm
+    <http://mcee.ou.edu/aaspi/publications/1998/marfurt_etal_GPHY1998b.pdf>`__. """
+    denum = np.sum(region**2) * region.shape[0] * region.shape[1]
+    if denum != 0:
+        return ((np.sum(np.sum(region, axis=0), axis=0)**2).sum()) / denum
+    return 0.
+
+@njit(parallel=True)
+def semblance_2(region):
+    """ Marfurt semblance v2. """
+    region = region.reshape(-1, region.shape[-1])
+    covariation = region.dot(region.T)
+    s = 0.
+    for i in prange(covariation.shape[0]): # pylint: disable=not-an-iterable
+        s += covariation[i, i]
+    if s != 0:
+        return covariation.sum() / (s * len(region))
+    return 0.
+
+@njit(parallel=True)
+def local_correlation(region):
+    """ Correlation in window. """
+    center = region[region.shape[0] // 2, region.shape[1] // 2]
+    corr = np.zeros((region.shape[0], region.shape[1]))
+    for i in range(region.shape[0]): # pylint: disable=not-an-iterable
+        for j in range(region.shape[1]):
+            cov = np.mean((center - np.mean(center)) * (region[i, j] - np.mean(region[i,j])))
+            den = np.std(center) / np.std(region[i, j])
+            if den != 0:
+                corr[i, j] = cov / den
+    return np.mean(corr)

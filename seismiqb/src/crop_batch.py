@@ -5,8 +5,9 @@ from copy import copy
 
 import numpy as np
 import cv2
-from scipy.signal import butter, lfilter, hilbert
+from scipy.interpolate import interp1d
 from scipy.ndimage import gaussian_filter1d
+from scipy.signal import butter, lfilter, hilbert
 
 from ..batchflow import FilesIndex, Batch, action, inbatch_parallel, SkipBatchException, apply_parallel
 
@@ -170,10 +171,34 @@ class SeismicCropBatch(Batch):
         """
         # pylint: disable=protected-access
 
+        # Create all the points and shapes
+        if isinstance(shape, dict):
+            shape = {k: np.asarray(v) for k, v in shape.items()}
+        else:
+            shape = np.asarray(shape)
+
+        if adaptive_slices:
+            indices, points_, shapes = [], [], []
+            for point in points:
+                try:
+                    shape_ = shape[points[0]] if isinstance(shape, dict) else shape
+                    point_, shape_ = self._correct_point_to_grid(point, shape_, grid_src, eps)
+                    indices.append(point[0])
+                    points_.append(point_)
+                    shapes.append(shape_)
+                except RecursionError:
+                    pass
+            points = points_
+        else:
+            indices = points[:, 0]
+            shapes = self._make_shapes(points, shape, side_view)
+
+        locations = [self._make_location(point, shape, direction) for point, shape in zip(points, shapes)]
+
+        # Create a new Batch instance, if needed
         if not hasattr(self, 'transformed'):
-            new_index = [self.salt(ix) for ix in points[:, 0]]
-            new_dict = {ix: self.index.get_fullpath(self.unsalt(ix))
-                        for ix in new_index}
+            new_index = [self.salt(ix) for ix in indices]
+            new_dict = {ix: self.index.get_fullpath(self.unsalt(ix)) for ix in new_index}
             new_batch = type(self)(FilesIndex.from_index(index=new_index, paths=new_dict, dirs=False))
             new_batch.transformed = True
 
@@ -183,24 +208,10 @@ class SeismicCropBatch(Batch):
             for component in passdown:
                 if hasattr(self, component):
                     new_batch.add_components(component, getattr(self, component))
-
         else:
             if len(points) != len(self):
                 raise ValueError('Subsequent usage of `crop` must have the same number of points!')
             new_batch = self
-
-        if adaptive_slices:
-            shape = np.asarray(shape)
-
-            corrected_points_shapes = [self._correct_point_to_grid(point, shape, grid_src, eps) for point in points]
-            points = [item[0] for item in corrected_points_shapes]
-            shapes = [item[1] for item in corrected_points_shapes]
-
-            locations = [self._make_location(point, shape, direction) for point, shape in corrected_points_shapes]
-        else:
-            shapes = self._make_shapes(points, shape, side_view)
-
-            locations = [self._make_location(point, shape, direction) for point, shape in zip(points, shapes)]
 
         new_batch.add_components((dst_points, dst_shapes), (points, shapes))
         new_batch.add_components(dst, locations)
@@ -214,17 +225,17 @@ class SeismicCropBatch(Batch):
 
         if side_view:
             side_view = side_view if isinstance(side_view, float) else 0.5
-        shape = np.asarray(shape)
         shapes = []
-        for _ in points:
+        for point in points:
+            shape_ = shape[point[0]] if isinstance(shape, dict) else shape
             if not side_view:
-                shapes.append(shape)
+                shapes.append(shape_)
             else:
                 flag = np.random.random() > side_view
                 if flag:
-                    shapes.append(shape)
+                    shapes.append(shape_)
                 else:
-                    shapes.append(shape[[1, 0, 2]])
+                    shapes.append(shape_[[1, 0, 2]])
         shapes = np.array(shapes)
         return shapes
 
@@ -289,7 +300,7 @@ class SeismicCropBatch(Batch):
 
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def load_cubes(self, ix, dst, src='locations', **kwargs):
+    def load_cubes(self, ix, dst, src_locations='locations', src_geometry='geometries', slicing='custom', **kwargs):
         """ Load data from cube in given positions.
 
         Parameters
@@ -298,11 +309,19 @@ class SeismicCropBatch(Batch):
             Component of batch with positions of crops to load.
         dst : str
             Component of batch to put loaded crops in.
+        slicing : str
+            if 'native', crop will be looaded as a slice of geometry. If 'custom', use `load_crop` method to make crops.
+            The 'native' option is prefered to 3D crops to speed up loading.
         """
-        geometry = self.get(ix, 'geometries')
-        location = self.get(ix, src)
-        return geometry.load_crop(location, **kwargs)
-
+        geometry = self.get(ix, src_geometry)
+        location = self.get(ix, src_locations)
+        if slicing == 'native':
+            crop = geometry[tuple(location)]
+        elif slicing == 'custom':
+            crop = geometry.load_crop(location, **kwargs)
+        else:
+            raise ValueError(f"slicing must be 'native' or 'custom' but {slicing} were given.")
+        return crop
 
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
@@ -661,6 +680,67 @@ class SeismicCropBatch(Batch):
             combined[:point_x, :, :] = rotated[:point_x, :, :]
         return combined
 
+    @apply_parallel
+    def linearize_masks(self, crop, n=3, shift=0, kind='random', width=None):
+        """ Sample `n` points from the original mask and create a new mask by interpolating them.
+
+        Parameters
+        ----------
+        n : int
+            Number of points to sample.
+        shift : int
+            Maximum amplitude of random shift along the heights axis.
+        kind : {'random', 'linear', 'slinear', 'quadratic', 'cubic', 'previous', 'next'}
+            Type of interpolation to use. If 'random', then chosen randomly for each crop.
+        width : int
+            Width of interpolated lines.
+        """
+        # Parse arguments
+        if kind == 'random':
+            kind = np.random.choice(['linear', 'slinear', 'quadratic', 'cubic'])
+        width = width or np.sum(crop, axis=2).mean()
+
+        # Choose the anchor points
+        axis = 1 - np.argmin(crop.shape)
+        *nz, _ = np.nonzero(crop)
+        min_, max_ = nz[axis][0], nz[axis][-1]
+        idx = [min_, max_]
+
+        step = (max_ - min_) // n
+        for i in range(0, max_-step, step):
+            idx.append(np.random.randint(i, i + step))
+
+        # Put anchors into new mask
+        mask_ = np.zeros_like(crop)
+        slc = (idx if axis == 0 else slice(None),
+               idx if axis == 1 else slice(None),
+               slice(None))
+        mask_[slc] = crop[slc]
+        *nz, y = np.nonzero(mask_)
+
+        # Shift heights randomly
+        x = nz[axis]
+        y += np.random.randint(-shift, shift + 1, size=y.shape)
+
+        # Sort and keep only unique values, based on `x` to remove width of original mask
+        sort_indices = np.argsort(x)
+        x, y = x[sort_indices], y[sort_indices]
+        _, unique_indices = np.unique(x, return_index=True)
+        x, y = x[unique_indices], y[unique_indices]
+
+        # Interpolate points; put into mask
+        interpolator = interp1d(x, y, kind=kind)
+        indices = np.arange(min_, max_, dtype=np.int32)
+        heights = interpolator(indices).astype(np.int32)
+
+        slc = (indices if axis == 0 else indices * 0,
+               indices if axis == 1 else indices * 0,
+               np.clip(heights, 0, 255))
+        mask_[slc] = 1
+
+        # Make horizon wider
+        structure = np.ones((1, 3), dtype=np.uint8)
+        return cv2.dilate(mask_, structure, iterations=width)
 
     @apply_parallel
     def transpose(self, crop, order):
@@ -933,7 +1013,7 @@ class SeismicCropBatch(Batch):
         return gaussian_filter1d(crop, sigma=sigma, axis=axis, order=order)
 
 
-    def plot_components(self, *components, idx=0, mode='overlap', order_axes=None, **kwargs):
+    def plot_components(self, *components, idx=0, slide=None, mode='overlap', order_axes=None, **kwargs):
         """ Plot components of batch.
 
         Parameters
@@ -953,6 +1033,9 @@ class SeismicCropBatch(Batch):
             imgs = [getattr(self, comp)[idx] for comp in components]
         else:
             imgs = [getattr(self, comp) for comp in components]
+
+        if slide is not None:
+            imgs = [img[slide] for img in imgs]
 
         # set some defaults
         kwargs = {

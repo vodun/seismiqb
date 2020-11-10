@@ -7,14 +7,19 @@ from textwrap import dedent
 
 import numpy as np
 import pandas as pd
+import h5py
 from numba import njit, prange
 
 import cv2
 from scipy.ndimage.morphology import binary_fill_holes, binary_erosion
 from scipy.ndimage import find_objects
+from scipy.spatial import Delaunay
 from skimage.measure import label
 
-from .utils import round_to_array, groupby_mean, groupby_min, groupby_max, HorizonSampler
+import plotly
+import plotly.figure_factory as ff
+
+from .utils import round_to_array, groupby_mean, groupby_min, groupby_max, HorizonSampler, filter_simplices
 from .plotters import plot_image
 
 
@@ -571,14 +576,16 @@ class Horizon:
 
         # Collect stats on separate axes. Note that depth stats are properties
         self.reset_storage('matrix')
-        self.i_min, self.x_min, self._h_min = np.min(self.points, axis=0).astype(np.int32)
-        self.i_max, self.x_max, self._h_max = np.max(self.points, axis=0).astype(np.int32)
+        if len(self.points) > 0:
+            self.i_min, self.x_min, self._h_min = np.min(self.points, axis=0).astype(np.int32)
+            self.i_max, self.x_max, self._h_max = np.max(self.points, axis=0).astype(np.int32)
 
-        self.i_length = (self.i_max - self.i_min) + 1
-        self.x_length = (self.x_max - self.x_min) + 1
-        self.bbox = np.array([[self.i_min, self.i_max],
-                              [self.x_min, self.x_max]],
-                             dtype=np.int32)
+            self.i_length = (self.i_max - self.i_min) + 1
+            self.x_length = (self.x_max - self.x_min) + 1
+            self.bbox = np.array([[self.i_min, self.i_max],
+                                  [self.x_min, self.x_max],
+                                  [self.h_min, self.h_max]],
+                                 dtype=np.int32)
 
 
     def from_file(self, path, transform=True, **kwargs):
@@ -588,7 +595,7 @@ class Horizon:
         self.path = path
         self.name = os.path.basename(path)
         points = self.file_to_points(path)
-        self.from_points(points, transform)
+        self.from_points(points, transform, **kwargs)
 
     def file_to_points(self, path):
         """ Get point cloud array from file values. """
@@ -618,7 +625,8 @@ class Horizon:
         self.i_length = (self.i_max - self.i_min) + 1
         self.x_length = (self.x_max - self.x_min) + 1
         self.bbox = np.array([[self.i_min, self.i_max],
-                              [self.x_min, self.x_max]],
+                              [self.x_min, self.x_max],
+                              [self.h_min, self.h_max]],
                              dtype=np.int32)
 
         self.reset_storage('points')
@@ -770,6 +778,28 @@ class Horizon:
 
     filter = filter_points
 
+
+    def thin_out(self, factor=1, threshold=256):
+        """ Thin out the horizon by keeping only each `factor`-th line.
+
+        Parameters
+        ----------
+        factor : integer or sequence of two integers
+            Frequency of lines to keep along ilines and xlines direction.
+        threshold : integer
+            Minimal amount of points in a line to keep.
+        """
+        if isinstance(factor, int):
+            factor = (factor, factor)
+
+        uniques, counts = np.unique(self.points[:, 0], return_counts=True)
+        mask_i = np.isin(self.points[:, 0], uniques[counts > threshold][::factor[0]])
+
+        uniques, counts = np.unique(self.points[:, 1], return_counts=True)
+        mask_x = np.isin(self.points[:, 1], uniques[counts > threshold][::factor[1]])
+
+        self.points = self.points[mask_i + mask_x]
+        self.reset_storage('matrix')
 
     def smooth_out(self, kernel_size=3, sigma=0.8, iters=1, preserve_borders=True, **kwargs):
         """ Convolve the horizon with gaussian kernel with special treatment to absent points:
@@ -959,6 +989,11 @@ class Horizon:
                 background[idx_i, idx_x, np.full_like(heights, j)] = data_chunk[idx_i, idx_x, heights]
                 heights += 1
 
+                mask = heights < data_chunk.shape[2]
+                idx_i = idx_i[mask]
+                idx_x = idx_x[mask]
+                heights = heights[mask]
+
         background[self.geometry.zero_traces == 1] = np.nan
         return background
 
@@ -1011,8 +1046,9 @@ class Horizon:
 
         # make the cut-array and fill it with array-data located on needed heights
         result = np.full(array.shape[:2] + (width, ), np.nan, dtype=np.float32)
-        for i, surface_level in enumerate(np.array([overlap_matrix + shift for shift in range(-width // 2 + 1,
-                                                                                              width // 2 + 1)])):
+        iterator = [overlap_matrix + shift for shift in range(-width // 2 + 1, width // 2 + 1)]
+
+        for i, surface_level in enumerate(np.array(iterator)):
             mask = (surface_level >= 0) & (surface_level < array.shape[-1]) & (surface_level !=
                                                                                self.FILL_VALUE - shifts[-1])
             mask_where = np.where(mask)
@@ -1175,6 +1211,18 @@ class Horizon:
     def is_carcass(self):
         """ Check if the horizon is a sparse carcass. """
         return len(self) / self.filled_matrix.sum() < 0.5
+
+    @property
+    def carcass_ilines(self):
+        """ Labeled inlines in a carcass. """
+        uniques, counts = np.unique(self.points[:, 0], return_counts=True)
+        return uniques[counts > 256]
+
+    @property
+    def carcass_xlines(self):
+        """ Labeled xlines in a carcass. """
+        uniques, counts = np.unique(self.points[:, 1], return_counts=True)
+        return uniques[counts > 256]
 
     @property
     def number_of_holes(self):
@@ -1537,6 +1585,50 @@ class Horizon:
         path = path if not add_height else f'{path}_#{round(self.h_mean, 1)}'
         df.to_csv(path, sep=' ', columns=self.COLUMNS, index=False, header=False)
 
+    def dump_points(self, path, fmt='npy'):
+        """ Dump points. """
+        if fmt == 'npy':
+            if os.path.exists(path):
+                points = np.load(path, allow_pickle=False)
+                points = np.concatenate([points, self.points], axis=0)
+            else:
+                points = self.points
+            np.save(path, points, allow_pickle=False)
+        elif fmt == 'hdf5':
+            file_hdf5 = h5py.File(path, "a")
+            if 'cube' not in file_hdf5:
+                cube_hdf5 = file_hdf5.create_dataset('cube', self.geometry.cube_shape)
+                cube_hdf5_x = file_hdf5.create_dataset('cube_x', self.geometry.cube_shape[[1, 2, 0]])
+                cube_hdf5_h = file_hdf5.create_dataset('cube_h', self.geometry.cube_shape[[2, 0, 1]])
+            else:
+                cube_hdf5 = file_hdf5['cube']
+                cube_hdf5_x = file_hdf5['cube_x']
+                cube_hdf5_h = file_hdf5['cube_h']
+
+            shape = (self.i_length, self.x_length, self.h_max - self.h_min + 1)
+            fault_array = np.zeros(shape)
+
+            points = self.points - np.array([self.i_min, self.x_min, self._h_min])
+            fault_array[points[:, 0], points[:, 1], points[:, 2]] = 1
+
+            cube_hdf5[self.i_min:self.i_max+1, self.x_min:self.x_max+1, self.h_min:self.h_max+1] += fault_array
+
+            cube_hdf5_x[
+                self.x_min:self.x_max+1,
+                self.h_min:self.h_max+1,
+                self.i_min:self.i_max+1
+            ] += np.transpose(fault_array, (1, 2, 0))
+
+            cube_hdf5_h[
+                self.h_min:self.h_max+1,
+                self.i_min:self.i_max+1,
+                self.x_min:self.x_max+1
+            ] += np.transpose(fault_array, (2, 0, 1))
+
+            file_hdf5.close()
+        else:
+            raise ValueError('Unknown format:', fmt)
+
 
     # Methods of (visual) representation of a horizon
     def __repr__(self):
@@ -1556,6 +1648,12 @@ class Horizon:
         Coverage:          {self.coverage:3.5}
         Solidity:          {self.solidity:3.5}
         Num of holes:      {self.number_of_holes}
+        """
+
+        if self.is_carcass:
+            msg += f"""
+        Unique ilines:     {self.carcass_ilines}
+        Unique xlines:     {self.carcass_xlines}
         """
         return dedent(msg)
 
@@ -1634,6 +1732,109 @@ class Horizon:
             }
 
         plot_image(amplitudes, mode='rgb', **kwargs)
+
+
+    def show_3d(self, n=100, threshold=100., z_ratio=1., show_axes=True,
+                width=1200, height=1200, margin=100, savepath=None, **kwargs):
+        """ Interactive 3D plot. Roughly, does the following:
+            - select `n` points to represent the horizon surface
+            - triangulate those points
+            - remove some of the triangles on conditions
+            - use Plotly to draw the tri-surface
+
+        Parameters
+        ----------
+        n : int
+            Number of points for horizon surface creation.
+            The more, the better the image is and the slower it is displayed.
+        threshold : number
+            Threshold to remove triangles with bigger height differences in vertices.
+        z_ratio : number
+            Aspect ratio between height axis and spatial ones.
+        show_axes : bool
+            Whether to show axes and their labels.
+        width, height : number
+            Size of the image.
+        margin : number
+            Added margin from below and above along height axis.
+        savepath : str
+            Path to save interactive html to.
+        kwargs : dict
+            Other arguments of plot creation.
+        """
+        # Take most representative points of a horizon
+        weights_matrix = self.full_matrix
+        grad_i = np.diff(weights_matrix, axis=0, prepend=0)
+        grad_x = np.diff(weights_matrix, axis=1, prepend=0)
+        weights_matrix = (grad_i + grad_x) / 2
+        weights_matrix[np.abs(weights_matrix) > 100] = np.nan
+
+        idx = np.nonzero(self.full_matrix > 0)
+        probs = np.abs(weights_matrix[idx[0], idx[1]].flatten())
+        probs[np.isnan(probs)] = np.nanmax(probs)
+        indices = np.random.choice(len(probs), size=n, p=probs / probs.sum())
+
+        # Convert to meshgrid
+        ilines = self.points[:, 0][indices]
+        xlines = self.points[:, 1][indices]
+        ilines, xlines = np.meshgrid(ilines, xlines)
+        ilines = ilines.flatten()
+        xlines = xlines.flatten()
+
+        # Remove from grid points with no horizon in it
+        heights = self.full_matrix[ilines, xlines]
+        mask = (heights != self.FILL_VALUE)
+        x = ilines[mask]
+        y = xlines[mask]
+        z = heights[mask]
+
+        # Triangulate points and remove some of the triangles
+        tri = Delaunay(np.vstack([x, y]).T)
+        simplices = filter_simplices(simplices=tri.simplices, points=tri.points,
+                                     matrix=self.full_matrix, threshold=threshold)
+
+        # Arguments of graph creation
+        kwargs = {
+            'title': f'Horizon `{self.name}` on `{self.cube_name}`',
+            'colormap': plotly.colors.sequential.Viridis[::-1][:4],
+            'edges_color': 'rgb(70, 40, 50)',
+            'show_colorbar': False,
+            'width': width,
+            'height': height,
+            'aspectratio': {'x': self.i_length / self.x_length, 'y': 1, 'z': z_ratio},
+            **kwargs
+        }
+
+        fig = ff.create_trisurf(x=x, y=y, z=z, simplices=simplices, **kwargs)
+
+        # Update scene with title, labels and axes
+        fig.update_layout(
+            {
+                'scene': {
+                    'xaxis': {
+                        'title': self.geometry.index_headers[0] if show_axes else '',
+                        'showticklabels': show_axes,
+                        'autorange': 'reversed',
+                    },
+                    'yaxis': {
+                        'title': self.geometry.index_headers[1] if show_axes else '',
+                        'showticklabels': show_axes,
+                    },
+                    'zaxis': {
+                        'title': 'DEPTH' if show_axes else '',
+                        'showticklabels': show_axes,
+                        'range': [self.h_max + margin, self.h_min - margin],
+                    },
+                    'camera_eye': {
+                        "x": 1.25, "y": 1.5, "z": 1.5
+                    },
+                }
+            }
+        )
+        fig.show()
+
+        if savepath:
+            fig.write_html(savepath)
 
 
     def show_slide(self, loc, width=3, axis='i', order_axes=None, zoom_slice=None, **kwargs):
