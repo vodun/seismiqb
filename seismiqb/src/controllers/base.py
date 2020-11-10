@@ -20,7 +20,7 @@ import torch
 from tqdm.auto import tqdm
 
 from ...batchflow import Pipeline, FilesIndex
-from ...batchflow import B, V, C, D, P, R, W
+from ...batchflow import B, V, C, D, P, R
 from ...batchflow.models.torch import EncoderDecoder
 
 from ..cubeset import SeismicCubeset, Horizon
@@ -240,7 +240,7 @@ class BaseController:
             )
 
     # Train model on a created dataset
-    def train(self, dataset, model_config=None, device=None, n_iters=300,
+    def train(self, dataset, model_config=None, device=None, n_iters=300, prefetch=1,
               use_grid=False, grid_src='quality_grid', side_view=False,
               width=3, batch_size_multiplier=1, rebatch_threshold=0.00, **kwargs):
         """ Train model for horizon detection.
@@ -292,8 +292,7 @@ class BaseController:
         self.batch_size = bs
 
         model_pipeline.run(D('size'), n_iters=n_iters + np.random.randint(100),
-                           bar=self.bar,
-                           bar_desc=W(V('loss_history')[-1].format('Loss is: {:7.7}')))
+                           bar={'bar': self.bar, 'monitors': 'loss_history'}, prefetch=prefetch)
         plot_loss(model_pipeline.v('loss_history'), show=self.show_plots,
                   savepath=self.make_save_path('model_loss.png'))
 
@@ -426,10 +425,9 @@ class BaseController:
 
 
     def inference_0(self, dataset, heights_range=None, orientation='i', overlap_factor=2,
-                    filtering_matrix=None, filter_threshold=0, **kwargs):
+                    filtering_matrix=None, filter_threshold=0, prefetch=1, **kwargs):
         """ Inference on chunks, assemble into massive 3D array, extract horizon surface. """
         _ = kwargs
-        geometry = dataset.geometries[0]
         spatial_ranges, heights_range = self.make_inference_ranges(dataset, heights_range)
         config, crop_shape_grid = self.make_inference_config(orientation)
 
@@ -443,7 +441,7 @@ class BaseController:
 
         inference_pipeline = (self.get_inference_template() << config) << dataset
         inference_pipeline.run(D('size'), n_iters=dataset.grid_iters, bar=self.bar,
-                               bar_desc=f'Inference on {geometry.name} | {orientation}')
+                               prefetch=prefetch)
 
         # Assemble crops together in accordance to the created grid
         assembled_pred = dataset.assemble_crops(inference_pipeline.v('predicted_masks'),
@@ -462,7 +460,7 @@ class BaseController:
         # Convert to Horizon instances
         return Horizon.from_mask(assembled_pred, dataset.grid_info, threshold=0.5, minsize=50)
 
-    def inference_1(self, dataset, heights_range=None, orientation='i', overlap_factor=2,
+    def inference_1(self, dataset, heights_range=None, orientation='i', overlap_factor=2, prefetch=1,
                     chunk_size=100, chunk_overlap=0.2, filtering_matrix=None, filter_threshold=0, **kwargs):
         """ Split area for inference into `big` chunks, inference on each of them, merge results. """
         _ = kwargs
@@ -492,7 +490,7 @@ class BaseController:
             total_unfiltered_length += dataset.grid_info['unfiltered_length']
 
             inference_pipeline = (self.get_inference_template() << config) << dataset
-            inference_pipeline.run(D('size'), n_iters=dataset.grid_iters)
+            inference_pipeline.run(D('size'), n_iters=dataset.grid_iters, prefetch=prefetch)
 
             # Assemble crops together in accordance to the created grid
             assembled_pred = dataset.assemble_crops(inference_pipeline.v('predicted_masks'),
