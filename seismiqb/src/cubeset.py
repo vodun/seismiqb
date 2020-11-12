@@ -373,10 +373,15 @@ class SeismicCubeset(Dataset):
     def show_points(self, idx=0, src_labels='labels', **kwargs):
         """ Plot 2D map of points. """
         map_ = np.zeros(self.geometries[idx].cube_shape[:-1])
+        denum = np.zeros(self.geometries[idx].cube_shape[:-1])
         for label in getattr(self, src_labels)[idx]:
-            map_[label.points[:, 0], label.points[:, 1]] += 1
-        labels_class = type(getattr(self, src_labels)[idx][0]).__name__
+            map_[label.points[:, 0], label.points[:, 1]] += label.points[:, 2]
+            denum[label.points[:, 0], label.points[:, 1]] += 1
+        denum[denum == 0] = 1
+        map_ = map_ / denum
         map_[map_ == 0] = np.nan
+
+        labels_class = type(getattr(self, src_labels)[idx][0]).__name__
         kwargs = {
             'title': f'{labels_class} on {self.indices[idx]}',
             'xlabel': self.geometries[idx].index_headers[0],
