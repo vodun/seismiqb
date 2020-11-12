@@ -177,19 +177,23 @@ class Fault(Horizon):
         """ Save separate fault to csv. """
         df.to_csv(os.path.join(dst, df.name), sep=' ', header=False, index=False)
 
-def split_faults(array, chunk_size=None, overlap=1, pbar=False):
+def split_faults(array, chunk_size=None, overlap=1, pbar=False, cube_shape=None, fmt='mask'):
     """ Label faults in an array.
 
     Parameters
     ----------
     array : numpy.ndarray or SeismicGeometry
-        binary mask of faults
+        binary mask of faults or array of coordinates
     chunk_size : int
         size of chunks to apply `measurements.label`
     overlap : int
         size of overlap to join faults from different chunks
     pbar : bool
         progress bar
+    cube_shape : tuple
+        shape of cube. If fmt='mask', can be infered from array.
+    fmt : str
+        If 'mask', array is a binary mask of faults. If 'points', array consists of coordinates of fault points.
 
     Returns
     -------
@@ -202,9 +206,27 @@ def split_faults(array, chunk_size=None, overlap=1, pbar=False):
         array = array.file_hdf5['cube']
     if chunk_size is None:
         chunk_size = len(array)
-    chunks = [(start, array[start:start+chunk_size]) for start in range(0, array.shape[0], chunk_size-overlap)]
 
-    prev_overlap = np.zeros((0, *array.shape[1:]))
+    if cube_shape is None:
+        if fmt == 'mask':
+            cube_shape = array.shape
+        else:
+            raise ValueError("If fmt='points', cube_shape must be specified")
+
+    if fmt == 'mask':
+        chunks = [(start, array[start:start+chunk_size]) for start in range(0, cube_shape[0], chunk_size-overlap)]
+    else:
+        def _chunks():
+            for start in range(0, cube_shape[0], chunk_size-overlap):
+                chunk = np.zeros((chunk_size, *cube_shape[1:]))
+                points = array[array[:, 0] < start+chunk_size]
+                points = points[points[:, 0] >= start]
+                chunk[points[:, 0]-start, points[:, 1], points[:, 2]] = 1
+                yield (start, chunk)
+        chunks = _chunks()
+
+
+    prev_overlap = np.zeros((0, *cube_shape[1:]))
     labels = np.zeros((0, 4), dtype='int32')
     n_objects = 0
     s = np.ones((3, 3, 3))

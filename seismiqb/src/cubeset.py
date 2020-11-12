@@ -895,7 +895,6 @@ class SeismicCubeset(Dataset):
                     )
                     chunk_pipeline = pipeline << self
                     for _ in range(self.grid_iters):
-                        pass
                         _ = chunk_pipeline.next_batch(len(self))
                         if pbar:
                             progress_bar.update()
@@ -914,7 +913,9 @@ class SeismicCubeset(Dataset):
                     stop = grid[i+1] if i < len(grid)-1 else cube_shape[0]
                     cube_hdf5[start:stop] = cube_hdf5[start:stop] > threshold
                     if fmt == 'npy':
-                        points += [np.stack(np.where(cube_hdf5[start:stop]), axis=-1)]
+                        points_ = np.stack(np.where(cube_hdf5[start:stop]), axis=-1)
+                        points_[:, 0] += start
+                        points += [points_]
 
         if fmt == 'npy':
             os.remove(path)
