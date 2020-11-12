@@ -819,21 +819,23 @@ class SeismicCubeset(Dataset):
 
         return background
 
-    def make_prediction(self, path_hdf5, pipeline, crop_shape, crop_stride,
+    def make_prediction(self, path, pipeline, crop_shape, crop_stride, fmt='hdf5',
                         idx=0, src='predictions', chunk_shape=None, chunk_stride=None, batch_size=8,
-                        pbar=True):
+                        threshold=0.5, pbar=True):
         """ Create hdf5 file with prediction.
 
         Parameters
         ----------
-        path_hdf5 : str
-
+        path : str
+            path to save predictions
         pipeline : Pipeline
             pipeline for inference
         crop_shape : int, tuple or None
             shape of crops. Must be the same as defined in pipeline.
         crop_stride : int
             stride for crops
+        fmt : str
+            'hdf5' or 'npy'. If 'npy', the resulting file will include points after thresholding.
         idx : int
             index of cube to infer
         src : str
@@ -846,20 +848,25 @@ class SeismicCubeset(Dataset):
 
         pbar : bool
             progress bar
+        threshold : float ot None
+            threshold for predictions
         """
+        if fmt == 'npy' and threshold is None:
+            raise ValueError("If fmt is 'npy' then threshold can't be None")
+
         geometry = self.geometries[idx]
         chunk_shape = infer_tuple(chunk_shape, geometry.cube_shape)
         chunk_stride = infer_tuple(chunk_stride, chunk_shape)
 
         cube_shape = geometry.cube_shape
         chunk_grid = [
-            make_axis_grid((0, cube_shape[i]), chunk_stride[i], cube_shape[i], crop_shape[i])
+            make_axis_grid((0, cube_shape[i]), chunk_stride[i], cube_shape[i], chunk_shape[i])
             for i in range(2)
         ]
         chunk_grid = np.stack(np.meshgrid(*chunk_grid), axis=-1).reshape(-1, 2)
 
-        if os.path.exists(path_hdf5):
-            os.remove(path_hdf5)
+        if os.path.exists(path):
+            os.remove(path)
 
         if pbar:
             total = 0
@@ -873,7 +880,7 @@ class SeismicCubeset(Dataset):
                 )
                 total += self.grid_iters
 
-        with h5py.File(path_hdf5, "a") as file_hdf5:
+        with h5py.File(path, "a") as file_hdf5:
             aggregation_map = np.zeros(cube_shape[:-1])
             cube_hdf5 = file_hdf5.create_dataset('cube', cube_shape)
             context = tqdm(total=total) if pbar else contextlib.suppress()
@@ -888,6 +895,7 @@ class SeismicCubeset(Dataset):
                     )
                     chunk_pipeline = pipeline << self
                     for _ in range(self.grid_iters):
+                        pass
                         _ = chunk_pipeline.next_batch(len(self))
                         if pbar:
                             progress_bar.update()
@@ -896,8 +904,21 @@ class SeismicCubeset(Dataset):
                     slices = tuple([slice(*item) for item in self.grid_info['range']])
                     prediction = self.assemble_crops(chunk_pipeline.v(src), order=(0, 1, 2))
                     aggregation_map[tuple(slices[:-1])] += 1
-                    cube_hdf5[slices[0], slices[1], slices[2]] = +prediction
-                cube_hdf5[:] = cube_hdf5 / np.expand_dims(aggregation_map, axis=-1)
+                    cube_hdf5[slices[0], slices[1], slices[2]] += prediction
+            cube_hdf5[:] = cube_hdf5 / np.expand_dims(aggregation_map, axis=-1)
+
+            grid = np.arange(0, cube_shape[0], chunk_stride[0])
+            if threshold is not None:
+                points = []
+                for i, start in enumerate(grid):
+                    stop = grid[i+1] if i < len(grid)-1 else cube_shape[0]
+                    cube_hdf5[start:stop] = cube_hdf5[start:stop] > threshold
+                    if fmt == 'npy':
+                        points += [np.stack(np.where(cube_hdf5[start:stop]), axis=-1)]
+
+        if fmt == 'npy':
+            os.remove(path)
+            np.save(path, np.concatenate(points, axis=0), allow_pickle=False)
 
 class Modificator:
     """ Converts array to `object` dtype and prepends the `cube_name` column.
