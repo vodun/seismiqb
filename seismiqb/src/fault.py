@@ -204,14 +204,12 @@ def split_faults(array, chunk_size=None, overlap=1, pbar=False, cube_shape=None,
     # TODO: make chunks along xlines
     if isinstance(array, SeismicGeometry):
         array = array.file_hdf5['cube']
-    if chunk_size is None:
-        chunk_size = len(array)
+    chunk_size = chunk_size or len(array)
 
-    if cube_shape is None:
-        if fmt == 'mask':
-            cube_shape = array.shape
-        else:
-            raise ValueError("If fmt='points', cube_shape must be specified")
+    if cube_shape is None and fmt == 'points':
+        raise ValueError("If fmt='points', cube_shape must be specified")
+
+    cube_shape = cube_shape or array.shape
 
     if fmt == 'mask':
         chunks = [(start, array[start:start+chunk_size]) for start in range(0, cube_shape[0], chunk_size-overlap)]
@@ -230,8 +228,7 @@ def split_faults(array, chunk_size=None, overlap=1, pbar=False, cube_shape=None,
     labels = np.zeros((0, 4), dtype='int32')
     n_objects = 0
     s = np.ones((3, 3, 3))
-    if pbar:
-        chunks = tqdm(chunks)
+    chunks = tqdm(chunks) if pbar else chunks
     for start, item in chunks:
         chunk_labels, new_objects = measurements.label(item, structure=s) # compute labels for new chunk
         chunk_labels[chunk_labels > 0] += n_objects # shift all values to avoid intersecting with previous labels
