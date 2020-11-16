@@ -573,7 +573,7 @@ class HorizonMetrics(BaseSeismicMetric):
         or nested sequence of horizon and list of horizons, then the first horizon is compared against the
         best match from the list.
     other parameters
-        Passed direcly to :meth:`.Horizon.get_cube_values` or :meth:`.Horizon.get_cube_values_line`.
+        Passed directly to :meth:`.Horizon.get_cube_values` or :meth:`.Horizon.get_cube_values_line`.
     """
     AVAILABLE_METRICS = [
         'local_corrs', 'support_corrs',

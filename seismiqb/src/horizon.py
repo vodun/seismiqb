@@ -17,7 +17,7 @@ from skimage.measure import label
 from .utils import round_to_array, groupby_mean, groupby_min, groupby_max, HorizonSampler, lru_cache
 from .plotters import plot_image
 
-
+CACHE_SIZE = 10
 
 class UnstructuredHorizon:
     """  Contains unstructured horizon.
@@ -377,7 +377,6 @@ class Horizon:
         self._matrix = None
         self._points = None
         self._depths = None
-        self._cube_values_along = None
 
         # Heights information
         self._h_min, self._h_max = None, None
@@ -894,9 +893,8 @@ class Horizon:
             overlap = self.matrix[i_min - self.i_min : i_max - self.i_min,
                                   x_min - self.x_min : x_max - self.x_min]
             if mode == '2d':
-                binarize = np.vectorize(lambda x: 0 if x < 0 else alpha)
                 mask[i_min - mask_i_min : i_max - mask_i_min,
-                     x_min - mask_x_min : x_max - mask_x_min, 0] = binarize(overlap)
+                     x_min - mask_x_min : x_max - mask_x_min, 0] = (overlap >= 0).astype(np.int32) * alpha
             elif mode == '3d':
                 # Coordinates of points to use in overlap local system
                 zero_trace_check = (overlap != self.FILL_VALUE)
@@ -914,7 +912,7 @@ class Horizon:
         return mask
 
 
-    def get_cube_values(self, window=23, offset=0, scale=False, chunk_size=256, nan_zero_traces=True):
+    def get_cube_values(self, window=23, offset=0, scale=False, chunk_size=256, nan_zero_traces=True, cached=False):
         """ Get values from the cube along the horizon.
 
         Parameters
@@ -975,12 +973,12 @@ class Horizon:
 
 
     # Cached version of `get_cube_values`.
-    cached_get_cube_values = lru_cache(1)(get_cube_values)
+    cached_get_cube_values = lru_cache(CACHE_SIZE)(get_cube_values)
 
 
     def get_heights_matrix(self, scale=True):
         """Transform `full_matrix` attribute for further cropping."""
-        matrix = self.full_matrix[..., np.newaxis]
+        matrix = self.full_matrix
         if scale:
             matrix = (matrix - self.h_min) / (self.h_max - self.h_min)
         matrix[matrix < 0] = 0
@@ -988,33 +986,34 @@ class Horizon:
 
 
     # Cached version of `get_heights_matrix`.
-    cached_get_heights_matrix = lru_cache(1)(get_heights_matrix)
+    cached_get_heights_matrix = lru_cache(CACHE_SIZE)(get_heights_matrix)
 
 
-    def crop_matrix(self, matrix, location, **kwargs):
+    def get_attribute(self, src, location=(None, None, None), **kwargs):
         """Make crops from data cut along the horizon.
 
         Parameters
         ----------
-        matrix : str
-            A keyword to define, which function to use for matrix retrieval:
-            - 'amplitudes': load cube cube values cut along the horizon;
-            - 'heigts': load normalized heights matrix with zero-filled nans;
-            - 'metrics': load random support metrics matrix.
+        src : str
+            A keyword defining horizon attribute to make crops from:
+            - 'amplitudes': cube values cut along the horizon;
+            - 'heigts': normalized heights matrix with zero-filled nans;
+            - 'metrics': random support metrics matrix.
         location : sequence of at least 2 slices
             First two slices are used as `ilines` and `xlines` ranges
             to cut crop from. Last 'depth' slice is omitted.
         kwargs :
             For `get_cube_values`, `get_heights_matrix` or `Horizon.evaluate`.
         """
-        if matrix == 'amplitudes':
-            window = location[2].stop - location[2].start
-            data = self.cached_get_cube_values(nan_zero_traces=False, window=window, **kwargs)
-        elif matrix == 'heights':
+        x_slice, i_slice, h_slice = location
+        if src == 'amplitudes':
+            window = h_slice.stop - h_slice.start if h_slice is not None else None
+            data = self.cached_get_cube_values(nan_zero_traces=False, window=window, cached=True, **kwargs)
+        elif src == 'heights':
             data = self.cached_get_heights_matrix(**kwargs)
-        elif matrix == 'metrics':
+        elif src == 'metrics':
             data = self.cached_metrics_evaluate(**kwargs)
-        return data[location[0], location[1]]
+        return data[x_slice, i_slice]
 
 
     def get_cube_values_line(self, orientation='ilines', line=1, window=23, offset=0, scale=False):
@@ -1223,15 +1222,26 @@ class Horizon:
         return None
 
 
-    @lru_cache(1)
-    def cached_metrics_evaluate(self, scale=True, metric='support_corrs', supports=50, agg='nanmean', **kwargs):
-        """Cached metrics calcucaltion."""
+    @lru_cache(CACHE_SIZE)
+    def cached_metrics_evaluate(self, normalize=True, metric='support_corrs', supports=50, agg='nanmean', **kwargs):
+        """Cached metrics calcucaltion with disabled plotting option.
+
+        Parameters
+        ----------
+        normalize : bool
+            Whether apply normalization to calculated metrics.
+        other parameters :
+            Passed directly to `HorizonMetrics.evaluate`.
+        """
         metrics = self.horizon_metrics.evaluate(metric=metric, supports=supports, agg=agg,
                                                 plot=False, savepath=None, **kwargs)
-        if scale:
-            metrics = (metrics + 1) / 2
-            metrics = np.nan_to_num(metrics)
-        return metrics[..., np.newaxis]
+        if normalize:
+            if metric == 'support_corrs':
+                metrics = (metrics + 1) / 2
+                metrics = np.nan_to_num(metrics)
+            else:
+                raise ValueError("Normalization for '{}' metric is not implemented".format(metric))
+        return metrics
 
 
     def check_proximity(self, other, offset=0):
@@ -1693,6 +1703,13 @@ class Horizon:
         }
 
         plot_image([seismic_slide, mask], order_axes=order_axes, **kwargs)
+
+
+    def reset_cache(self):
+        """ Clear cached data. """
+        for attr in dir(self):
+            if attr.startswith('cached'):
+                getattr(self, attr).reset()
 
 
     def __copy__(self):

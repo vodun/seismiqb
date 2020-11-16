@@ -1,6 +1,7 @@
 """ Contains container for storing dataset of seismic crops. """
 #pylint: disable=too-many-lines
 from glob import glob
+from warnings import warn
 
 import numpy as np
 
@@ -56,6 +57,7 @@ class SeismicCubeset(Dataset):
 
         self.grid_gen, self.grid_info, self.grid_iters = None, None, None
         self.shapes_gen, self.orders_gen = None, None
+        self.cached_attributes = ['geometries']
 
 
     @classmethod
@@ -155,12 +157,35 @@ class SeismicCubeset(Dataset):
                     labels_class = Horizon
                 else:
                     labels_class = UnstructuredHorizon
-
             label_list = [labels_class(path, self.geometries[ix], **kwargs) for path in paths[ix]]
             label_list.sort(key=lambda label: label.h_mean)
             if filter_zeros:
                 _ = [getattr(item, 'filter')() for item in label_list]
             getattr(self, dst)[ix] = label_list
+            self.cached_attributes.append(dst)
+
+
+    def reset_caches(self, attrs=None, cubes=None):
+        """Reset lru cache for class attributes.
+
+        Parameters
+        ----------
+        attrs : sequence
+            Class attributes to reset cache in.
+            If None, reset in `geometries` and attrs added by `create_labels`.
+            Defaults to None.
+        cubes : sequence
+            Cube names to reset cache in `attrs` for.
+            If None, reset for all cubes of the dataset.
+            Defaults to None.
+        """
+        attrs = attrs or self.cached_attributes
+        cubes = cubes or self.indices
+        for attr in attrs:
+            for cube in cubes:
+                cached_attr = getattr(self, attr)[cube]
+                cached_attr = cached_attr if isinstance(cached_attr, list) else [cached_attr]
+                [item.reset_cache() for item in cached_attr]
 
 
     @property
@@ -387,11 +412,12 @@ class SeismicCubeset(Dataset):
         label_dir = label_dir or '/BEST_HORIZONS/*'
 
         paths_txt = {}
-        for i in range(len(self)):
-            dir_path = '/'.join(self.index.get_fullpath(self.indices[i]).split('/')[:-1])
-            dir_ = dir_path + label_dir
-            paths_txt[self.indices[i]] = glob(dir_)
-
+        for idx in self.indices:
+            dir_path = '/'.join(self.index.get_fullpath(idx).split('/')[:-1])
+            dir_ = glob(dir_path + label_dir)
+            if len(dir_) == 0:
+                warn("No labels in {}".format(dir_path))
+            paths_txt[idx] = dir_
         self.load_geometries(**kwargs)
         self.create_labels(paths=paths_txt, filter_zeros=filter_zeros, dst=dst_labels, labels_class=labels_class)
         self._p, self._bins = p, bins # stored for later sampler creation

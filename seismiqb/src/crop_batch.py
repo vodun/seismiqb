@@ -28,6 +28,8 @@ class SeismicCropBatch(Batch):
         'target': 'for',
         'post': '_assemble'
     }
+    DATASET_ATTRIBUTES = ['label', 'geom', 'fan', 'channel']
+
 
     def _init_component(self, *args, **kwargs):
         """ Create and preallocate a new attribute with the name ``dst`` if it
@@ -98,13 +100,13 @@ class SeismicCropBatch(Batch):
         return super().__getattr__(name)
 
     def get(self, item=None, component=None):
-        """ Custom access for batch attribures.
-        If `component` looks like `label` or `geometry` then we retrieve
-        that dictionary from attached dataset and use unsalted
-        version of `item` as key. Otherwise, we get position of `item`
-        in the current batch and use it to index sequence-like `component`.
+        """ Custom access for batch attributes.
+        If `component` has an entry from `DATASET_ATTRIBUTES` than retrieve it
+        from attached dataset and use unsalted version of `item` as key.
+        Otherwise, get position of `item` in the current batch and use it
+        to index sequence-like `component`.
         """
-        if any([attribute in component for attribute in ['label', 'geom', 'cone', 'estuar']]):
+        if any(attribute in component for attribute in self.DATASET_ATTRIBUTES):
             if isinstance(item, str) and self.has_salt(item):
                 item = self.unsalt(item)
             res = getattr(self, component)
@@ -122,9 +124,10 @@ class SeismicCropBatch(Batch):
         return getattr(self, component)
 
     @action
-    def crop(self, points, shape=None, direction=(0, 0, 0), side_view=False,
-             adaptive_slices=False, grid_src='quality_grid', eps=3,
-             dst='locations', passdown=None, dst_points='points', dst_shapes='shapes'):
+    def make_locations(self, points, shape=None, direction=(0, 0, 0), eps=3,
+                       side_view=False, adaptive_slices=False, passdown=None,
+                       grid_src='quality_grid', dst='locations',
+                       dst_points='points', dst_shapes='shapes'):
         """ Generate positions of crops. Creates new instance of `SeismicCropBatch`
         with crop positions in one of the components (`locations` by default).
 
@@ -140,6 +143,8 @@ class SeismicCropBatch(Batch):
             as `points`, and each row contains a shape for corresponding point.
         direction : sequence of numbers
             Direction of the cut crop relative to the point. Must be a vector on unit cube.
+        eps : int
+            Initial length of slice, that is used to find the closest grid point.
         side_view : bool or float
             Determines whether to generate crops of transposed shape (xline, iline, height).
             If False, then shape is never transposed.
@@ -147,14 +152,12 @@ class SeismicCropBatch(Batch):
             If float, then shape is transposed with that probability.
         adaptive_slices: bool or str
             If True, then slices are created so that crops are cut only along the grid.
-        grid_src : str
-            Attribut of geometry to get the grid from.
-        eps : int
-            Initial length of slice, that is used to find the closest grid point.
-        dst : str, optional
-            Component of batch to put positions of crops in.
         passdown : str of list of str
             Components of batch to keep in the new one.
+        grid_src : str
+            Attribut of geometry to get the grid from.
+        dst : str, optional
+            Component of batch to put positions of crops in.
         dst_points, dst_shapes : str
             Components to put points and crop shapes in.
 
@@ -170,11 +173,9 @@ class SeismicCropBatch(Batch):
             Batch with positions of crops in specified component.
         """
         # pylint: disable=protected-access
-
         if not hasattr(self, 'transformed'):
             new_index = [self.salt(ix) for ix in points[:, 0]]
-            new_dict = {ix: self.index.get_fullpath(self.unsalt(ix))
-                        for ix in new_index}
+            new_dict = {ix: self.index.get_fullpath(self.unsalt(ix)) for ix in new_index}
             new_batch = type(self)(FilesIndex.from_index(index=new_index, paths=new_dict, dirs=False))
             new_batch.transformed = True
 
@@ -336,22 +337,25 @@ class SeismicCropBatch(Batch):
     def get_nearest_horizon(self, ix, src_labels, heights_slice):
         """Get horizon with its `h_mean` closest to mean of `heights_slice`."""
         location_h_mean = (heights_slice.start + heights_slice.stop) // 2
-        nearest_horizon_ind = np.argmin([abs(horizon.h_mean - location_h_mean) for horizon in self.get(ix, src_labels)])
+        nearest_horizon_ind = np.argmin([abs(horizon.h_mean - location_h_mean)
+                                        for horizon in self.get(ix, src_labels)])
         return self.get(ix, src_labels)[nearest_horizon_ind]
 
 
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def load_crops(self, ix, dst, matrix, src_locations='locations',
-                   src_labels='labels', along_nearest_horizon=True, **kwargs):
+    def crop_attribute(self, ix, dst, src_attribute, src_locations='locations',
+                       src_labels='labels', ndim=3, **kwargs):
         """ Crop horizon matrices in given locations."""
-        if not along_nearest_horizon:
-            raise NotImplementedError()
         location = self.get(ix, src_locations)
-        # window = self.get(ix, 'shapes')[2]
         nearest_horizon = self.get_nearest_horizon(ix, src_labels, location[2])
-        return nearest_horizon.crop_matrix(matrix, location, **kwargs)
-
+        crop = nearest_horizon.get_attribute(src_attribute, location, **kwargs)
+        if ndim == 3 and crop.ndim == 2:
+            crop = crop[..., np.newaxis]
+        elif ndim != crop.ndim:
+            raise ValueError("Crop returned by `Horizon.crop_matrix` has "
+                             "{} dimensions when {} expected.".format(crop.ndim, ndim))
+        return crop
 
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
