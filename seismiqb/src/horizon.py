@@ -989,30 +989,36 @@ class Horizon:
     cached_get_heights_matrix = lru_cache(CACHE_SIZE)(get_heights_matrix)
 
 
-    def get_attribute(self, src, location=(None, None, None), **kwargs):
+    def get_attribute(self, src_attribute, location=(None, None, None), **kwargs):
         """Make crops from data cut along the horizon.
 
         Parameters
         ----------
-        src : str
+        src_attribute : str
             A keyword defining horizon attribute to make crops from:
-            - 'amplitudes': cube values cut along the horizon;
-            - 'heigts': normalized heights matrix with zero-filled nans;
+            - 'cube_values': cube values cut along the horizon;
+            - 'heights': matrix of heights with zero-filled nans;
             - 'metrics': random support metrics matrix.
-        location : sequence of at least 2 slices
-            First two slices are used as `ilines` and `xlines` ranges
-            to cut crop from. Last 'depth' slice is omitted.
+        location : sequence of 3 slices
+            First two slices are used as `iline` and `xline` ranges to cut crop
+            from. Last 'depth' slice is used to infer `window` parameter when
+            `src_attribute` is 'cube_values'.
         kwargs :
-            For `get_cube_values`, `get_heights_matrix` or `Horizon.evaluate`.
+            For one of the functions depending on chosen `src_attribute`:
+            - 'cube_values' — `cached_get_cube_values`;
+            - 'heights' — `cached_get_heights_matrix`;
+            - 'metrics' — `cached_metrics_evaluate`.
         """
         x_slice, i_slice, h_slice = location
-        if src == 'amplitudes':
+        if src_attribute == 'cube_values':
             window = h_slice.stop - h_slice.start if h_slice is not None else None
             data = self.cached_get_cube_values(nan_zero_traces=False, window=window, cached=True, **kwargs)
-        elif src == 'heights':
+        elif src_attribute == 'heights':
             data = self.cached_get_heights_matrix(**kwargs)
-        elif src == 'metrics':
+        elif src_attribute == 'metrics':
             data = self.cached_metrics_evaluate(**kwargs)
+        else:
+            raise ValueError("Unknown `src_attribute`. Expected 'cube_values', 'heights' or 'metrics'.")
         return data[x_slice, i_slice]
 
 
@@ -1093,11 +1099,25 @@ class Horizon:
 
     # Horizon properties
     @property
-    def amplitudes(self):
+    def cube_values(self):
         """ Values from the cube along the horizon. """
-        amplitudes = self.get_cube_values(window=1)
-        amplitudes[self.full_matrix == self.FILL_VALUE] = np.nan
-        return amplitudes
+        cube_values = self.get_cube_values(window=1)
+        cube_values[self.full_matrix == self.FILL_VALUE] = np.nan
+        return cube_values
+
+    @property
+    def amplitudes(self):
+        """ Alias for cube values. Depending on what loaded to cube geometries
+        might actually not be amplitudes, so use it with caution.
+        """
+        return self.cube_values
+
+    @property
+    def phases(self):
+        """ Alias for cube values. Depending on what loaded to cube geometries
+        might actually not be phases, so use it with caution.
+        """
+        return self.cube_values
 
     @property
     def binary_matrix(self):

@@ -291,47 +291,20 @@ class SeismicCropBatch(Batch):
 
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def load_cubes(self, ix, dst, src_geometry='geometries', src_locations='locations',
-                   src_labels='labels', along_nearest_horizon=False, **kwargs):
-        """ Load data from cube in given locations.
-
-        If `along_nearest_horizon` is True, crops are made along horizon from
-        `src_labels` nearest to mean value of heights from `src_locations`.
-        Note, that this usecase corresponds to loading of rectified data, i.e.
-        amplitudes from `src_geometries` are croped relative to horizon.
+    def load_cubes(self, ix, dst, locations='locations',
+                   src_geometry='geometries', src_labels='labels', **kwargs):
+        """ Load geometry data from cube in given locations.
 
         Parameters
         ----------
         dst : str
             Component of batch to put loaded crops in.
-        src_geometry : str
-            Dataset attribute to load crops from
-            when `along_nearest_horizon` is False.
-        src_locations : str
-            Dataset attribute to load crops from
-            when `along_nearest_horizon` is True.
-        src_labels : str
-            Dataset attribute to load crops from
-            when `along_nearest_horizon` is True.
-        along_nearest_horizon : bool
-            Crop creation mode.
-            If True, crop rectified data along nearest horizon.
-            If False, just crop data at given `src_locations`.
-            Defaults to False.
-
-        Notes
-        -----
-        Cropping data along horizon will lead to its "rectification",
-        i.e. horizon amplitudes will form a straight plane in resulting crop.
+        locations : str
+            Component of batch that stores locations of crops.
         """
-        location = self.get(ix, src_locations)
-        if along_nearest_horizon:
-            nearest_horizon = self.get_nearest_horizon(ix, src_labels, location[2])
-            crop = nearest_horizon.crop_matrix('amplitudes', location, **kwargs)
-        else:
-            geometry = self.get(ix, src_geometry)
-            crop = geometry.load_crop(location, **kwargs)
-        return crop
+        geometry = self.get(ix, src_geometry)
+        location = self.get(ix, locations)
+        return geometry.load_crop(location, **kwargs)
 
 
     def get_nearest_horizon(self, ix, src_labels, heights_slice):
@@ -344,52 +317,71 @@ class SeismicCropBatch(Batch):
 
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def crop_attribute(self, ix, dst, src_attribute, src_locations='locations',
-                       src_labels='labels', ndim=3, **kwargs):
-        """ Crop horizon matrices in given locations."""
-        location = self.get(ix, src_locations)
+    def load_attribute(self, ix, dst, src_attribute, src_labels='labels',
+                       locations='locations', final_ndim=3, **kwargs):
+        """Load attribute for depth-nearest label and crop in given locations.
+
+        Parameters
+        ----------
+        src_attribute : str
+            A keyword defining label attribute to make crops from:
+            - 'cube_values' — cube values cut along the horizon;
+            - 'heights' — matrix of heights with zero-filled nans;
+            - 'metrics' — random support metrics matrix.
+        src_labels : str
+            Dataset attribute with labels dict.
+        locations : str
+            Component of batch that stores locations of crops.
+        final_ndim : 2 or 3
+            Number of dimensions returned crop should have.
+        kwargs :
+            For one of `Horizon` functions depending on chosen `src_attribute`:
+            - 'cube_values' — `cached_get_cube_values`;
+            - 'heights' — `cached_get_heights_matrix`;
+            - 'metrics' — `cached_metrics_evaluate`.
+
+        Notes
+        -----
+        This function loads rectified data, e.g. amplitudes are croped relative
+        to horizon and will form a straight plane in the resulting crop.
+        """
+        location = self.get(ix, locations)
         nearest_horizon = self.get_nearest_horizon(ix, src_labels, location[2])
         crop = nearest_horizon.get_attribute(src_attribute, location, **kwargs)
-        if ndim == 3 and crop.ndim == 2:
+        if final_ndim == 3 and crop.ndim == 2:
             crop = crop[..., np.newaxis]
-        elif ndim != crop.ndim:
-            raise ValueError("Crop returned by `Horizon.crop_matrix` has "
-                             "{} dimensions when {} expected.".format(crop.ndim, ndim))
+        elif final_ndim != crop.ndim:
+            raise ValueError("Crop returned by `Horizon.get_attribute` has {} dimensions, but shape conversion "
+                             "to expected {} dimensions is not implemented.".format(crop.ndim, final_ndim))
         return crop
 
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def create_masks(self, ix, dst, src_labels='labels', src_locations='locations',
-                     width=3, indices='all', along_nearest_horizon=False, mode='auto'):
+    def create_masks(self, ix, dst, src_labels='labels', locations='locations',
+                     use_labels='all', mode='auto', thicken=3):
         """ Create masks from labels-dictionary in given positions.
 
         Parameters
         ----------
-        src : str
-            Component of batch with positions of crops to load.
         dst : str
             Component of batch to put loaded masks in.
-        width : int
-            Width of horizons in the `horizon` mode.
         src_labels : str
-            Component of batch with labels dict.
-        indices : str, int or sequence of ints
-            A choice scenario of used labels per crop.
-            If 'all', all labels will be added.
-            If 'single', one random label will be added.
+            Dataset attribute with labels dict.
+        locations : str
+            Component of batch that stores locations of crops.
+        use_labels : str, int or sequence of ints
+            Which labels to use in mask creation.
+            If 'all', use all labels.
+            If 'single', use one random label.
+            If 'nearest', use one label closest to height from `locations`.
             If int or array-like then element(s) are interpreted as indices of
             desired labels and must be ints in range [0, len(horizons) - 1].
-        along_nearest_horizon : bool
-            Mask creation mode.
-            If True, create masks for horizon from `src_labels`
-            nearest to height from `src_locations`.
-            If False, just create masks at given `src_locations`.
-            Defaults to False.
         mode : '2d' or '3d'
             Whether squeeze mask into single dimension along depth axis or not.
-            If kept default, being automatically set according to
-            `along_nearest_horizon`: '2d' if True and '3d' if False.
-            Defaults to 'auto'.
+            If kept default, being automatically set according to `use_labels`:
+            '2d' if 'nearest' and '3d' else. Defaults to 'auto'.
+        thicken : int
+            How much to thicken the horizon when `mode` is '3d'.
 
         Returns
         -------
@@ -400,33 +392,28 @@ class SeismicCropBatch(Batch):
         -----
         Can be run only after labels-dict is loaded into labels-component.
         """
-        if mode == 'auto':
-            mode = '2d' if along_nearest_horizon else '3d'
         labels = self.get(ix, src_labels) if isinstance(src_labels, str) else src_labels
         labels = [labels] if not isinstance(labels, (tuple, list)) else labels
-        indices = [indices] if isinstance(indices, int) else indices
-        check_sum = False
+        use_labels = [use_labels] if isinstance(use_labels, int) else use_labels
 
-        location = self.get(ix, src_locations)
+        location = self.get(ix, locations)
 
-        if along_nearest_horizon:
+        if isinstance(use_labels, (tuple, list, np.ndarray)):
+            labels = [labels[idx] for idx in use_labels]
+        elif use_labels == 'single':
+            np.random.shuffle(labels)
+        elif use_labels == 'nearest':
             labels = [self.get_nearest_horizon(ix, src_labels, location[2])]
-        else:
-            if isinstance(indices, (tuple, list, np.ndarray)):
-                labels = [labels[idx] for idx in indices]
-            elif indices == 'single':
-                np.random.shuffle(labels)
-                check_sum = True
-            elif indices == 'all':
-                pass
 
+        if mode == 'auto':
+            mode = '2d' if use_labels == 'nearest' else '3d'
         crop_shape = self.get(ix, 'shapes')
         crop_shape = (*crop_shape[:2], 1) if mode == '2d' else crop_shape
         mask = np.zeros((crop_shape), dtype='float32')
 
         for label in labels:
-            mask = label.add_to_mask(mask, locations=location, width=width, mode=mode)
-            if check_sum and np.sum(mask) > 0.0:
+            mask = label.add_to_mask(mask, locations=location, width=thicken, mode=mode)
+            if use_labels == 'single' and np.sum(mask) > 0.0:
                 break
         return mask
 
@@ -586,7 +573,7 @@ class SeismicCropBatch(Batch):
 
     @action
     @inbatch_parallel(init='indices', target='for', post='_masks_to_horizons_post')
-    def masks_to_horizons(self, ix, src_masks='masks', src_locations='locations', dst='predicted_labels',
+    def masks_to_horizons(self, ix, src_masks='masks', locations='locations', dst='predicted_labels',
                           threshold=0.5, mode='mean', minsize=0, mean_threshold=2.0,
                           adjacency=1, order=(2, 0, 1), skip_merge=False, prefix='predict'):
         """ Convert predicted segmentation mask to a list of Horizon instances.
@@ -595,7 +582,7 @@ class SeismicCropBatch(Batch):
         ----------
         src_masks : str
             Component of batch that stores masks.
-        src_locations : str
+        locations : str
             Component of batch that stores locations of crops.
         dst : str/object
             Component of batch to store the resulting horizons.
@@ -615,7 +602,7 @@ class SeismicCropBatch(Batch):
         mask = np.transpose(mask, axes=order)
 
         geometry = self.get(ix, 'geometries')
-        shifts = [self.get(ix, src_locations)[k].start for k in range(3)]
+        shifts = [self.get(ix, locations)[k].start for k in range(3)]
         horizons = Horizon.from_mask(mask, geometry=geometry, shifts=shifts, threshold=threshold,
                                      mode=mode, minsize=minsize, prefix=prefix)
         return horizons

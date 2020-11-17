@@ -185,7 +185,8 @@ class SeismicCubeset(Dataset):
             for cube in cubes:
                 cached_attr = getattr(self, attr)[cube]
                 cached_attr = cached_attr if isinstance(cached_attr, list) else [cached_attr]
-                [item.reset_cache() for item in cached_attr]
+                for item in cached_attr:
+                    item.reset_cache()
 
 
     @property
