@@ -1,4 +1,4 @@
-""" Seismic Crop Batch."""
+""" Seismic Crop Batch. """
 import string
 import random
 from copy import copy
@@ -22,7 +22,7 @@ CHARS = string.ascii_uppercase + string.digits
 
 
 class SeismicCropBatch(Batch):
-    """ Batch with ability to generate 3d-crops of various shapes."""
+    """ Batch with ability to generate 3d-crops of various shapes. """
     components = None
     apply_defaults = {
         'target': 'for',
@@ -33,7 +33,8 @@ class SeismicCropBatch(Batch):
 
     def _init_component(self, *args, **kwargs):
         """ Create and preallocate a new attribute with the name ``dst`` if it
-        does not exist and return batch indices."""
+        does not exist and return batch indices.
+        """
         _ = args
         dst = kwargs.get("dst")
         if dst is None:
@@ -331,7 +332,7 @@ class SeismicCropBatch(Batch):
         src_labels : str
             Dataset attribute with labels dict.
         locations : str
-            Component of batch that stores locations of crops.
+            Component of batch with locations of crops to load.
         final_ndim : 2 or 3
             Number of dimensions returned crop should have.
         kwargs :
@@ -978,13 +979,12 @@ class SeismicCropBatch(Batch):
             If 'freq', compute instantaneous frequency.
         """
         analytic = hilbert(crop, axis=axis)
-        discontinuous_phase = np.angle(analytic)
-        continuous_phase = np.arcsin(np.sin(discontinuous_phase))
+        phase = np.unwrap(np.angle(analytic))
 
         if mode == 'phase':
-            return continuous_phase
+            return phase
         if 'freq' in mode:
-            return np.diff(continuous_phase, axis=axis, prepend=0) / (2*np.pi)
+            return np.diff(phase, axis=axis, prepend=0) / (2*np.pi)
         raise ValueError('Unknown `mode` parameter.')
 
     @apply_parallel

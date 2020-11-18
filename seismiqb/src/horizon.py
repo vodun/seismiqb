@@ -2,8 +2,9 @@
 #pylint: disable=too-many-lines, import-error
 import os
 from copy import copy
-from itertools import product
+from warnings import warn
 from textwrap import dedent
+from itertools import product
 
 import numpy as np
 import pandas as pd
@@ -17,7 +18,10 @@ from skimage.measure import label
 from .utils import round_to_array, groupby_mean, groupby_min, groupby_max, HorizonSampler, lru_cache
 from .plotters import plot_image
 
-CACHE_SIZE = 10
+
+# Temporary solution due to the fact that lru_cache always works classwide
+MAX_CACHE_SIZE = 30
+
 
 class UnstructuredHorizon:
     """  Contains unstructured horizon.
@@ -360,7 +364,15 @@ class Horizon:
     # Value to place into blank spaces
     FILL_VALUE = -999999
 
+    instances_num = 0
+
     def __init__(self, storage, geometry, name=None, **kwargs):
+        # FIXME
+        Horizon.instances_num += 1
+        if Horizon.instances_num > MAX_CACHE_SIZE:
+            warn("Number of Horizon instances exceeds maximum cache size for its functions."
+                 "It may result in slowdown of pipelines that use `load_attribute` action.")
+
         # Meta information
         self.path = None
         self.name = name
@@ -511,7 +523,7 @@ class Horizon:
         return self._len
 
     def reset_storage(self, storage=None):
-        """ Reset storage along with depth-wise stats."""
+        """ Reset storage along with depth-wise stats. """
         self._depths = None
         self._h_min, self._h_max = None, None
         self._h_mean, self._h_std = None, None
@@ -743,7 +755,7 @@ class Horizon:
 
 
     def filter_points(self, filtering_matrix=None, **kwargs):
-        """ Remove points that correspond to 1's in `filtering_matrix` from points storage."""
+        """ Remove points that correspond to 1's in `filtering_matrix` from points storage. """
         if filtering_matrix is None:
             filtering_matrix = self.geometry.zero_traces
 
@@ -754,7 +766,7 @@ class Horizon:
         self.apply_to_points(filtering_function, **kwargs)
 
     def filter_matrix(self, filtering_matrix=None, **kwargs):
-        """ Remove points that correspond to 1's in `filtering_matrix` from matrix storage."""
+        """ Remove points that correspond to 1's in `filtering_matrix` from matrix storage. """
         if filtering_matrix is None:
             filtering_matrix = self.geometry.zero_traces
 
@@ -897,9 +909,9 @@ class Horizon:
                      x_min - mask_x_min : x_max - mask_x_min, 0] = (overlap >= 0).astype(np.int32) * alpha
             elif mode == '3d':
                 # Coordinates of points to use in overlap local system
-                zero_trace_check = (overlap != self.FILL_VALUE)
-                heights_check = (overlap >= mask_h_min + low) & (overlap <= mask_h_max - high)
-                idx_i, idx_x = np.asarray(zero_trace_check & heights_check).nonzero()
+                idx_i, idx_x = np.asarray((overlap != self.FILL_VALUE) &
+                                          (overlap >= mask_h_min + low) &
+                                          (overlap <= mask_h_max - high)).nonzero()
                 heights = overlap[idx_i, idx_x]
 
                 # Convert coordinates to mask local system
@@ -907,12 +919,12 @@ class Horizon:
                 idx_x += x_min - mask_x_min
                 heights -= (mask_h_min + low)
 
-                for offset in range(width):
-                    mask[idx_i, idx_x, heights + offset] = alpha
+                for shift in range(width):
+                    mask[idx_i, idx_x, heights + shift] = alpha
         return mask
 
 
-    def get_cube_values(self, window=23, offset=0, scale=False, chunk_size=256, nan_zero_traces=True, cached=False):
+    def get_cube_values(self, window=23, offset=0, scale=False, chunk_size=256, nan_zero_traces=True):
         """ Get values from the cube along the horizon.
 
         Parameters
@@ -973,24 +985,11 @@ class Horizon:
 
 
     # Cached version of `get_cube_values`.
-    cached_get_cube_values = lru_cache(CACHE_SIZE)(get_cube_values)
+    cached_get_cube_values = lru_cache(MAX_CACHE_SIZE)(get_cube_values)
 
 
-    def get_heights_matrix(self, scale=True):
-        """Transform `full_matrix` attribute for further cropping."""
-        matrix = self.full_matrix
-        if scale:
-            matrix = (matrix - self.h_min) / (self.h_max - self.h_min)
-        matrix[matrix < 0] = 0
-        return matrix
-
-
-    # Cached version of `get_heights_matrix`.
-    cached_get_heights_matrix = lru_cache(CACHE_SIZE)(get_heights_matrix)
-
-
-    def get_attribute(self, src_attribute, location=(None, None, None), **kwargs):
-        """Make crops from data cut along the horizon.
+    def get_attribute(self, src_attribute, location=(slice(None), slice(None), slice(None)), **kwargs):
+        """ Make crops from `src_attribute` of horizon at `location`.
 
         Parameters
         ----------
@@ -1003,18 +1002,39 @@ class Horizon:
             First two slices are used as `iline` and `xline` ranges to cut crop
             from. Last 'depth' slice is used to infer `window` parameter when
             `src_attribute` is 'cube_values'.
+            If kept default, `src_attribute` is returned uncropped.
         kwargs :
             For one of the functions depending on chosen `src_attribute`:
             - 'cube_values' — `cached_get_cube_values`;
-            - 'heights' — `cached_get_heights_matrix`;
+            - 'heights' — no kwargs passed;
             - 'metrics' — `cached_metrics_evaluate`.
+
+        Examples
+        --------
+
+        >>> horizon.get_attribute('cube_values', (x_slice, i_slice, h_slice), window=10, scale=True)
+
+        >>> horizon.get_attribute('heights', (x_slice, i_slice, h_slice))
+
+        >>> horizon.get_attribute('metrics', metrics='hilbert', normalize=False)
+
+        Notes
+        -----
+
+        Although the function can be used in a straightforward way as described above, originally it was implemented
+        to provide an interface for accessing `Horizon` attributes from `SeismicCropBatch` to allow calls like this:
+
+        >>> Pipeline().load_attribute('cube_values', dst='amplitudes')
         """
         x_slice, i_slice, h_slice = location
         if src_attribute == 'cube_values':
-            window = h_slice.stop - h_slice.start if h_slice is not None else None
-            data = self.cached_get_cube_values(nan_zero_traces=False, window=window, cached=True, **kwargs)
+            if h_slice != slice(None):
+                kwargs['window'] = h_slice.stop - h_slice.start
+            if 'nan_zero_traces' not in kwargs.keys():
+                kwargs['nan_zero_traces'] = False
+            data = self.cached_get_cube_values(**kwargs)
         elif src_attribute == 'heights':
-            data = self.cached_get_heights_matrix(**kwargs)
+            data = self.full_matrix_normalized
         elif src_attribute == 'metrics':
             data = self.cached_metrics_evaluate(**kwargs)
         else:
@@ -1158,6 +1178,14 @@ class Horizon:
         return self.put_on_full()
 
     @property
+    def full_matrix_normalized(self):
+        """ Normalized matrix with FILL_VALUEs replaced with zeros. """
+        matrix = self.full_matrix
+        matrix = (matrix - self.h_min) / (self.h_max - self.h_min)
+        matrix[matrix < 0] = 0
+        return matrix
+
+    @property
     def grad_i(self):
         """ Change of heights along iline direction. """
         return self.grad_along_axis(0)
@@ -1242,9 +1270,9 @@ class Horizon:
         return None
 
 
-    @lru_cache(CACHE_SIZE)
+    @lru_cache(MAX_CACHE_SIZE)
     def cached_metrics_evaluate(self, normalize=True, metric='support_corrs', supports=50, agg='nanmean', **kwargs):
-        """Cached metrics calcucaltion with disabled plotting option.
+        """ Cached metrics calcucaltion with disabled plotting option.
 
         Parameters
         ----------
@@ -1728,7 +1756,7 @@ class Horizon:
     def reset_cache(self):
         """ Clear cached data. """
         for attr in dir(self):
-            if attr.startswith('cached'):
+            if attr.startswith('cached_'):
                 getattr(self, attr).reset()
 
 

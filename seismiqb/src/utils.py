@@ -160,7 +160,6 @@ class lru_cache:
         @wraps(func)
         def wrapper(*args, **kwargs):
             key = self.make_key(args, kwargs)
-
             # If result is already in cache, just retrieve it and update its timings
             with self.lock:
                 result = self.cache.get(key, self.default)

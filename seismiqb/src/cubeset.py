@@ -185,8 +185,7 @@ class SeismicCubeset(Dataset):
             for cube in cubes:
                 cached_attr = getattr(self, attr)[cube]
                 cached_attr = cached_attr if isinstance(cached_attr, list) else [cached_attr]
-                for item in cached_attr:
-                    item.reset_cache()
+                _ = [item.reset_cache() for item in cached_attr]
 
 
     @property
@@ -424,10 +423,10 @@ class SeismicCubeset(Dataset):
         self._p, self._bins = p, bins # stored for later sampler creation
 
 
-    def make_grid(self, cube_name, crop_shape, ilines=None, xlines=None, heights=None, mode='3d', horizon=0,
+    def make_grid(self, cube_name, crop_shape, ilines=None, xlines=None, heights=None, mode='3d',
                   overlap=None, overlap_factor=None, batch_size=16, filtering_matrix=None, filter_threshold=0):
         """ Create regular grid of points in cube.
-        This method is usually used with `assemble_predict` action of SeismicCropBatch.
+        This method is usually used with `SeismicCropBatch.assemble_predict`.
 
         Parameters
         ----------
@@ -435,46 +434,49 @@ class SeismicCubeset(Dataset):
             Reference to cube. Should be valid key for `geometries` attribute.
         crop_shape : sequence
             Shape of model inputs.
-        ilines : sequence of two elements
+        ilines : sequence of two int
             Location of desired prediction, iline-wise.
             If None, whole cube ranges will be used.
-        xlines : sequence of two elements
+        xlines : sequence of two int
             Location of desired prediction, xline-wise.
             If None, whole cube ranges will be used.
-        heights : sequence of two elements
-            Location of desired prediction, depth-wise.
+        heights : sequence of two int or int
+            If sequence, location of desired prediction, depth-wise.
+            If int, a height to make grid along when `mode` is '2d'. Note that
+            in this case height will be corrected by half of crop height.
             If None, whole cube ranges will be used.
         mode : '3d' or '2d'
             Mode to generate grid coordinates.
-            If '3d' gen grid in volume defined by `ilines`, `xlines`, `heights`.
-            If '2d' gen grid on area defined by `ilines` and `xlines` and infer `heights` from `horizon_num`.
+            If '3d', in volume defined by `ilines`, `xlines`, `heights`.
+            If '2d', on area defined by `ilines`, `xlines`.
             Defaults to '3d'.
-        horizon : Horizon or int
-            Horizon to use for setting `heights` when `mode='area'`.
-            Instance of Horizon or index for items from `labels` attribute.
-            By default first item of `self.labels` used.
         overlap : float or sequence
             Distance between grid points.
         overlap_factor : float or sequence
             Overlapping ratio of successive crops.
             Can be seen as `how many crops would cross every through point`.
-            If both overlap and overlap_factor are provided, overlap_factor will be used.
+            If both overlap and overlap_factor are provided,
+            only overlap_factor will be used.
         batch_size : int
             Amount of returned points per generator call.
         filtering_matrix : ndarray
-            Binary matrix of (ilines_len, xlines_len) shape with ones corresponding
-            to areas that can be skipped in the grid.
-            E.g., a matrix with zeros at places where a horizon is present and ones everywhere else.
+            Binary matrix of (ilines_len, xlines_len) shape with ones
+            corresponding to areas that can be skipped in the grid.
+            E.g., a matrix with zeros at places where a horizon is present
+            and ones everywhere else.
             If None, geometry.zero_traces matrix will be used.
         filter_threshold : int or float in [0, 1]
-            Exclusive lower bound for non-gap number of points (with 0's in the filtering_matrix)
-            in a crop in the grid. Default value is 0.
-            If float, proportion from the total number of traces in a crop will be computed.
+            Exclusive lower bound for non-gap number of points (with 0's in the
+            filtering_matrix) in a crop in the grid. Default value is 0.
+            If float, proportion from the total number of traces in a crop will
+            be computed.
         """
         if mode == '2d':
-            horizon = self.labels[cube_name][horizon] if isinstance(horizon, int) else horizon
-            height = int(horizon.h_mean) - crop_shape[2] // 2 # start for heights slices made by `crop` action
-            heights = (height, height + 1)
+            if isinstance(heights, int):
+                height = int(heights) - crop_shape[2] // 2 # start for heights slices made by `crop` action
+                heights = (height, height + 1)
+            else:
+                raise ValueError("`heights` should be a single `int` value when `mode` is '2d'")
         elif mode != '3d':
             raise ValueError("`mode` can either be '3d' or '2d'.")
         geometry = self.geometries[cube_name]
