@@ -8,7 +8,7 @@ max-line-length=120
 max-attributes=35
 max-args=20
 max-locals=25
-max-branches=15
+max-branches=20
 variable-rgx=(.*[a-z][a-z0-9_]{1,30}|[a-z_])$ # snake_case + single letters
 argument-rgx=(.*[a-z][a-z0-9_]{1,30}|[a-z_])$ # snake_case + single letters
 
