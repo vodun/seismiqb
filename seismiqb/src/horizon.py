@@ -1585,8 +1585,11 @@ class Horizon:
         path = path if not add_height else f'{path}_#{round(self.h_mean, 1)}'
         df.to_csv(path, sep=' ', columns=self.COLUMNS, index=False, header=False)
 
-    def dump_points(self, path, fmt='npy'):
+    def dump_points(self, path, fmt='npy', projections='ixh'):
         """ Dump points. """
+        projections = [{'i': '', 'x': '_x', 'h': '_h'}[l] for l in projections]
+        axis = {'': [0, 1, 2], '_x': [1, 2, 0], '_h': [2, 0, 1]}
+
         if fmt == 'npy':
             if os.path.exists(path):
                 points = np.load(path, allow_pickle=False)
@@ -1596,14 +1599,13 @@ class Horizon:
             np.save(path, points, allow_pickle=False)
         elif fmt == 'hdf5':
             file_hdf5 = h5py.File(path, "a")
-            if 'cube' not in file_hdf5:
-                cube_hdf5 = file_hdf5.create_dataset('cube', self.geometry.cube_shape)
-                cube_hdf5_x = file_hdf5.create_dataset('cube_x', self.geometry.cube_shape[[1, 2, 0]])
-                cube_hdf5_h = file_hdf5.create_dataset('cube_h', self.geometry.cube_shape[[2, 0, 1]])
-            else:
-                cube_hdf5 = file_hdf5['cube']
-                cube_hdf5_x = file_hdf5['cube_x']
-                cube_hdf5_h = file_hdf5['cube_h']
+            cube_hdf5 = dict()
+            for projection in projections:
+                name = 'cube' + projection
+                if name not in file_hdf5:
+                    cube_hdf5[name] = file_hdf5.create_dataset(name, self.geometry.cube_shape[axis[projection]])
+                else:
+                    cube_hdf5[name] = file_hdf5[name]
 
             shape = (self.i_length, self.x_length, self.h_max - self.h_min + 1)
             fault_array = np.zeros(shape)
@@ -1611,21 +1613,16 @@ class Horizon:
             points = self.points - np.array([self.i_min, self.x_min, self._h_min])
             fault_array[points[:, 0], points[:, 1], points[:, 2]] = 1
 
-            cube_hdf5[self.i_min:self.i_max+1, self.x_min:self.x_max+1, self.h_min:self.h_max+1] += fault_array
+            slices = (slice(self.i_min, self.i_max+1), slice(self.x_min,self.x_max+1), slice(self.h_min, self.h_max+1))
 
-            cube_hdf5_x[
-                self.x_min:self.x_max+1,
-                self.h_min:self.h_max+1,
-                self.i_min:self.i_max+1
-            ] += np.transpose(fault_array, (1, 2, 0))
-
-            cube_hdf5_h[
-                self.h_min:self.h_max+1,
-                self.i_min:self.i_max+1,
-                self.x_min:self.x_max+1
-            ] += np.transpose(fault_array, (2, 0, 1))
+            for projection in projections:
+                name = 'cube' + projection
+                ax = axis[projection]
+                cube_hdf5[name][slices[ax[0]], slices[ax[1]], slices[ax[2]]] += np.transpose(fault_array, axis[projection])
 
             file_hdf5.close()
+            path_meta = os.path.splitext(path)[0] + '.meta'
+            self.geometry.store_meta(path_meta)
         else:
             raise ValueError('Unknown format:', fmt)
 

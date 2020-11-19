@@ -13,6 +13,7 @@ from ..batchflow import FilesIndex, Batch, action, inbatch_parallel, SkipBatchEx
 
 from .horizon import Horizon
 from .plotters import plot_image
+from .utils import attr_filter
 
 
 
@@ -381,6 +382,18 @@ class SeismicCropBatch(Batch):
             if check_sum and np.sum(mask) > 0.0:
                 break
         return mask
+
+    @action
+    @inbatch_parallel(init='indices', post='_assemble', target='for')
+    def compute_attr(self, ix, dst, src='images', attribute='semblance', window=10, stride=1, axis=-1):
+        image = self.get(ix, src)
+        if isinstance(window, int):
+            window = np.ones(3, dtype=np.int32) * window
+        if isinstance(stride, int):
+            stride = np.ones(3, dtype=np.int32) * stride
+        result = np.zeros_like(image)
+        points = np.stack(np.meshgrid(*[range(image.shape[i]) for i in range(3)]), axis=-1).reshape(-1, 3)
+        return 1 - attr_filter(image, result, window, stride, points, attribute)
 
 
     @action

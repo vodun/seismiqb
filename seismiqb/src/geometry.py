@@ -632,7 +632,8 @@ class SeismicGeometry:
             attr = zoom(attr, np.array(cube.shape) / np.array(attr.shape))
         return attr
 
-    def create_hdf5(self, path_hdf5, src, chunk_shape=None, stride=None, pbar=False):
+    def create_hdf5(self, path_hdf5, src, chunk_shape=None, stride=None,
+                    projections='ixh', pbar=False):
         """ Create hdf5 file from np.ndarray or with geological attribute.
 
         Parameters
@@ -648,6 +649,9 @@ class SeismicGeometry:
         pbar : bool
             progress bar
         """
+        projections = [{'i': '', 'x': '_x', 'h': '_h'}[l] for l in projections]
+        axis = {'': [0, 1, 2], '_x': [1, 2, 0], '_h': [2, 0, 1]}
+
         chunks = []
 
         chunk_shape = infer_tuple(chunk_shape, self.cube_shape)
@@ -676,9 +680,10 @@ class SeismicGeometry:
             os.remove(path_hdf5)
 
         with h5py.File(path_hdf5, "a") as file_hdf5:
-            cube_hdf5 = file_hdf5.create_dataset('cube', self.cube_shape)
-            cube_hdf5_x = file_hdf5.create_dataset('cube_x', self.cube_shape[[1, 2, 0]])
-            cube_hdf5_h = file_hdf5.create_dataset('cube_h', self.cube_shape[[2, 0, 1]])
+            cube_hdf5 = dict()
+            for projection in projections:
+                name = 'cube' + projection
+                cube_hdf5[name] = file_hdf5.create_dataset(name, self.cube_shape[axis[projection]])
             _chunks = tqdm(chunks, total=total) if pbar else chunks
 
             for (iline, xline, height), chunk in _chunks:
@@ -687,9 +692,10 @@ class SeismicGeometry:
                     slice(xline, min(xline+chunk_shape[1], self.cube_shape[1])),
                     slice(height, min(height+chunk_shape[2], self.cube_shape[2]))
                 )
-                cube_hdf5[slc[0], slc[1], slc[2]] = chunk
-                cube_hdf5_x[slc[1], slc[2], slc[0]] = chunk.transpose((1, 2, 0))
-                cube_hdf5_h[slc[2], slc[0], slc[1]] = chunk.transpose((2, 0, 1))
+                for projection in projections:
+                    ax = axis[projection]
+                    name = 'cube' + projection
+                    cube_hdf5[name][slc[ax[0]], slc[ax[1]], slc[ax[2]]] = chunk.transpose(ax)
 
         path_meta = os.path.splitext(path_hdf5)[0] + '.meta'
         self.store_meta(path_meta)
@@ -1262,7 +1268,7 @@ class SeismicGeometryHDF5(SeismicGeometry):
     def _load_i(self, ilines, xlines, heights):
         cube_hdf5 = self.file_hdf5['cube']
         return np.stack([self._cached_load(cube_hdf5, iline)[xlines, :][:, heights]
-                         for iline in range(ilines.start, ilines.stop)])
+                        for iline in range(ilines.start, ilines.stop)])
 
     def _load_x(self, ilines, xlines, heights):
         cube_hdf5 = self.file_hdf5['cube_x']
@@ -1275,11 +1281,13 @@ class SeismicGeometryHDF5(SeismicGeometry):
                          for height in range(heights.start, heights.stop)], axis=2)
 
     @lru_cache(128)
-    def _cached_load(self, cube, loc):
+    def _cached_load(self, cube, loc, axis=0):
         """ Load one slide of data from a certain cube projection.
         Caches the result in a thread-safe manner.
         """
-        return cube[loc, :, :]
+        slc = [slice(None), slice(None), slice(None)]
+        slc[axis] = loc
+        return cube[slc[0], slc[1], slc[2]]
 
     def load_slide(self, loc, axis='iline', **kwargs):
         """ Load desired slide along desired axis. """
