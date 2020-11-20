@@ -724,7 +724,7 @@ class SeismicCubeset(Dataset):
 
             result = gen_crop_coordinates(point,
                                           hor_matrix, zero_traces,
-                                          stride, crop_shape,
+                                          stride, crop_shape, horizon.geometry.depth,
                                           horizon.FILL_VALUE, **kwargs)
             if not result:
                 continue

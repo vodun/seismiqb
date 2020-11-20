@@ -308,7 +308,7 @@ def save_point_cloud(metric, save_path, geometry=None):
 
 
 def gen_crop_coordinates(point, horizon_matrix, zero_traces,
-                         stride, shape, fill_value, zeros_threshold=0,
+                         stride, shape, depth, fill_value, zeros_threshold=0,
                          empty_threshold=5, safe_stripe=0, num_points=2):
     """ Generate crop coordinates next to the point with maximum horizon covered area.
 
@@ -354,7 +354,7 @@ def gen_crop_coordinates(point, horizon_matrix, zero_traces,
                 num_empty = np.sum(horizon_patch == fill_value)
                 if num_empty > empty_threshold:
                     candidates.append([il, point[1],
-                                       hor_height - shape[2] // 2])
+                                       min(hor_height - shape[2] // 2, depth - shape[2] - 1)])
                     shapes.append([shape[1], shape[0], shape[2]])
                     orders.append([0, 2, 1])
                     intersections.append(shape[1] - num_empty)
@@ -372,7 +372,7 @@ def gen_crop_coordinates(point, horizon_matrix, zero_traces,
                 num_empty = np.sum(horizon_patch == fill_value)
                 if num_empty > empty_threshold:
                     candidates.append([point[0], xl,
-                                       hor_height - shape[2] // 2])
+                                       min(hor_height - shape[2] // 2, depth - shape[2] - 1)])
                     shapes.append(shape)
                     orders.append([2, 0, 1])
                     intersections.append(shape[1] - num_empty)
@@ -626,6 +626,15 @@ def nb_mode(array, mask):
 
                 temp[il, xl] = element
     return temp
+
+
+def make_gaussian_kernel(kernel_size=3, sigma=1.):
+    """ Create Gaussian kernel with given parameters. """
+    ax = np.linspace(-(kernel_size - 1) / 2., (kernel_size - 1) / 2., kernel_size)
+    x_points, y_points = np.meshgrid(ax, ax)
+    kernel = np.exp(-0.5 * (np.square(x_points) + np.square(y_points)) / np.square(sigma))
+    gaussian_kernel = (kernel / np.sum(kernel).astype(np.float32))
+    return gaussian_kernel
 
 
 @njit

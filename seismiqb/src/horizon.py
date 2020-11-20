@@ -20,6 +20,7 @@ import plotly
 import plotly.figure_factory as ff
 
 from .utils import round_to_array, groupby_mean, groupby_min, groupby_max, HorizonSampler, filter_simplices
+from .utils import make_gaussian_kernel
 from .plotters import plot_image
 
 
@@ -635,7 +636,12 @@ class Horizon:
 
     def from_full_matrix(self, matrix, **kwargs):
         """ Init from matrix that covers the whole cube. """
-        self.from_matrix(matrix, 0, 0, **kwargs)
+        kwargs = {
+            'i_min': 0,
+            'x_min': 0,
+            **kwargs
+        }
+        self.from_matrix(matrix, **kwargs)
 
 
     def from_dict(self, dictionary, transform=True, **kwargs):
@@ -822,37 +828,12 @@ class Horizon:
         """
         def smoothing_function(src, **kwds):
             _ = kwds
-            k = int(np.floor(kernel_size / 2))
-
-            ax = np.linspace(-(kernel_size - 1) / 2., (kernel_size - 1) / 2., kernel_size)
-            x_points, y_points = np.meshgrid(ax, ax)
-            kernel = np.exp(-0.5 * (np.square(x_points) + np.square(y_points)) / np.square(sigma))
-            gaussian_kernel = (kernel / np.sum(kernel).astype(np.float32))
-            raveled_gaussian_kernel = gaussian_kernel.ravel()
-
-            @njit
-            def _smoothing_function(src, fill_value):
-                #pylint: disable=not-an-iterable
-                dst = np.copy(src)
-                for iline in range(k, src.shape[0]-k):
-                    for xline in prange(k, src.shape[1]-k):
-                        element = src[iline-k:iline+k+1, xline-k:xline+k+1]
-
-                        s, sum_weights = 0.0, 0.0
-                        for item, weight in zip(element.ravel(), raveled_gaussian_kernel):
-                            if item != fill_value:
-                                s += item * weight
-                                sum_weights += weight
-
-                        if sum_weights != 0.0:
-                            val = s / sum_weights
-                            dst[iline, xline] = val
-                dst = np.rint(dst).astype(np.int32)
-                return dst
+            gaussian_kernel = make_gaussian_kernel(kernel_size, sigma)
 
             smoothed = src
             for _ in range(iters):
-                smoothed = _smoothing_function(smoothed, self.FILL_VALUE)
+                smoothed = _smoothing_function(smoothed, gaussian_kernel, self.FILL_VALUE)
+                smoothed = np.rint(smoothed).astype(np.int32)
 
             if preserve_borders:
                 # pylint: disable=invalid-unary-operand-type
@@ -1249,6 +1230,13 @@ class Horizon:
         grad[self.matrix == self.FILL_VALUE] = self.FILL_VALUE
         return grad
 
+    def make_float_matrix(self, kernel_size=7, sigma=2., margin=5):
+        """ Smooth the depth matrix to produce floating point numbers. """
+        kernel = make_gaussian_kernel(kernel_size, sigma)
+        float_matrix = _smoothing_function(self.full_matrix, kernel,
+                                           fill_value=self.FILL_VALUE,
+                                           preserve=True, margin=margin)
+        return float_matrix
 
     # Evaluate horizon on its own / against other(s)
     def evaluate(self, compute_metric=True, supports=50, plot=True, savepath=None, printer=print, **kwargs):
@@ -1564,7 +1552,8 @@ class Horizon:
 
 
 
-    def dump(self, path, transform=None, add_height=True):
+    # Save horizon to disk
+    def dump(self, path, transform=None, add_height=False):
         """ Save horizon points on disk.
 
         Parameters
@@ -1581,6 +1570,36 @@ class Horizon:
 
         df = pd.DataFrame(values, columns=self.COLUMNS)
         df.sort_values(['iline', 'xline'], inplace=True)
+
+        path = path if not add_height else f'{path}_#{round(self.h_mean, 1)}'
+        df.to_csv(path, sep=' ', columns=self.COLUMNS, index=False, header=False)
+
+    def dump_float(self, path, transform=None, kernel_size=7, sigma=2., margin=5, add_height=False):
+        """ Smooth out the horizon values, producing floating-point numbers, and dump to the disk.
+
+        Parameters
+        ----------
+        path : str
+            Path to a file to save horizon to.
+        transform : None or callable
+            If callable, then applied to points after converting to ilines/xlines coordinate system.
+        kernel_size : int
+            Size of the filtering kernel.
+        sigma : number
+            Standard deviation of the Gaussian kernel.
+        margin : number
+            During the filtering, not include in the computation all the points that are
+            further away from the current, than the margin.
+        add_height : bool
+            Whether to concatenate average horizon height to a file name.
+        """
+        matrix = self.make_float_matrix(kernel_size=kernel_size, sigma=sigma, margin=margin)
+        values = self.matrix_to_points(matrix)
+        values = values if transform is None else transform(values)
+
+        df = pd.DataFrame(values, columns=self.COLUMNS)
+        df.sort_values(['iline', 'xline'], inplace=True)
+        df = df.astype({'iline': np.int32, 'xline': np.int32, 'height': np.float32})
 
         path = path if not add_height else f'{path}_#{round(self.h_mean, 1)}'
         df.to_csv(path, sep=' ', columns=self.COLUMNS, index=False, header=False)
@@ -1911,6 +1930,34 @@ class Horizon:
 class StructuredHorizon(Horizon):
     """ Convenient alias for `Horizon` class. """
 
+
+@njit(parallel=True)
+def _smoothing_function(src, kernel, fill_value, preserve=False, margin=33):
+    #pylint: disable=not-an-iterable
+    k1 = int(np.floor(kernel.shape[0] / 2))
+    k2 = int(np.floor(kernel.shape[1] / 2))
+    raveled_kernel = kernel.ravel() / np.sum(kernel)
+
+    dst = np.copy(src)
+    for iline in range(k1, src.shape[0]-k1):
+        for xline in prange(k2, src.shape[1]-k2):
+            central = src[iline, xline]
+            if preserve and central == fill_value:
+                continue
+
+            element = src[iline-k1:iline+k1+1, xline-k2:xline+k2+1]
+
+            s, sum_weights = 0.0, 0.0
+            for item, weight in zip(element.ravel(), raveled_kernel):
+                if item != fill_value:
+                    if abs(item - central) <= margin:
+                        s += item * weight
+                        sum_weights += weight
+
+            if sum_weights != 0.0:
+                val = s / sum_weights
+                dst[iline, xline] = val
+    return dst
 
 @njit
 def _filtering_function(points, filtering_matrix):
