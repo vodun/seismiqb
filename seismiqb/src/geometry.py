@@ -17,7 +17,8 @@ import cv2
 from scipy.ndimage import zoom
 
 from .utils import lru_cache, find_min_max, file_print, \
-                   SafeIO, attr_filter, make_axis_grid, infer_tuple
+                   SafeIO, attr_filter, make_axis_grid, infer_tuple,\
+                   projection_transformations
 from .plotters import plot_image
 
 
@@ -649,8 +650,7 @@ class SeismicGeometry:
         pbar : bool
             progress bar
         """
-        projections = [{'i': '', 'x': '_x', 'h': '_h'}[l] for l in projections]
-        axis = {'': [0, 1, 2], '_x': [1, 2, 0], '_h': [2, 0, 1]}
+        cube_keys, axes = projection_transformations(projections)
 
         chunks = []
 
@@ -682,19 +682,18 @@ class SeismicGeometry:
         with h5py.File(path_hdf5, "a") as file_hdf5:
             cube_hdf5 = dict()
             for projection in projections:
-                name = 'cube' + projection
-                cube_hdf5[name] = file_hdf5.create_dataset(name, self.cube_shape[axis[projection]])
+                name = cube_keys[projection]
+                cube_hdf5[name] = file_hdf5.create_dataset(name, self.cube_shape[axes[projection]])
             _chunks = tqdm(chunks, total=total) if pbar else chunks
 
-            for (iline, xline, height), chunk in _chunks:
-                slc = (
-                    slice(iline, min(iline+chunk_shape[0], self.cube_shape[0])),
-                    slice(xline, min(xline+chunk_shape[1], self.cube_shape[1])),
-                    slice(height, min(height+chunk_shape[2], self.cube_shape[2]))
-                )
+            for coord, chunk in _chunks:
+                slc = [
+                    slice(start, min(start+length, stop))
+                    for start, length, stop in zip(coord, chunk_shape, self.cube_shape)
+                ]
                 for projection in projections:
-                    ax = axis[projection]
-                    name = 'cube' + projection
+                    ax = axes[projection]
+                    name = cube_keys[projection]
                     cube_hdf5[name][slc[ax[0]], slc[ax[1]], slc[ax[2]]] = chunk.transpose(ax)
 
         path_meta = os.path.splitext(path_hdf5)[0] + '.meta'
@@ -1148,7 +1147,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
         return crop
 
     # Convert SEG-Y to HDF5
-    def make_hdf5(self, path_hdf5=None, postfix='', unsafe=True):
+    def make_hdf5(self, path_hdf5=None, postfix='', unsafe=True, projections='ixh'):
         """ Converts `.segy` cube to `.hdf5` format.
 
         Parameters
@@ -1158,6 +1157,8 @@ class SeismicGeometrySEGY(SeismicGeometry):
         postfix : str
             Postfix to add to the name of resulting cube.
         """
+        cube_keys, axes = projection_transformations(projections)
+
         if self.index_headers != self.INDEX_POST and not unsafe:
             # Currently supports only INLINE/CROSSLINE cubes
             raise TypeError(f'Either set `unsafe=True` or set index to {self.INDEX_POST}')
@@ -1170,27 +1171,35 @@ class SeismicGeometrySEGY(SeismicGeometry):
 
         # Create file and datasets inside
         with h5py.File(path_hdf5, "a") as file_hdf5:
-            cube_hdf5 = file_hdf5.create_dataset('cube', self.cube_shape)
-            cube_hdf5_x = file_hdf5.create_dataset('cube_x', self.cube_shape[[1, 2, 0]])
-            cube_hdf5_h = file_hdf5.create_dataset('cube_h', self.cube_shape[[2, 0, 1]])
+            cube_hdf5 = {
+                cube_keys[p]: file_hdf5.create_dataset(cube_keys[p], self.cube_shape[axes[p]]) for p in projections
+            }
 
             # Default projection (ilines, xlines, depth) and depth-projection (depth, ilines, xlines)
-            pbar = tqdm(total=self.cube_shape[0] + self.cube_shape[1], ncols=1000)
+            total = 0
+            if 'i' in projections:
+                total += self.cube_shape[0]
+            if 'x' in projections:
+                total += self.cube_shape[1]
+            pbar = tqdm(total=total, ncols=1000)
 
             pbar.set_description(f'Converting {self.long_name}; ilines projection')
             for i in range(self.cube_shape[0]):
                 slide = self.load_slide(i, stable=False)
-                cube_hdf5[i, :, :] = slide.reshape(1, self.cube_shape[1], self.cube_shape[2])
-                cube_hdf5_h[:, i, :] = slide.T
+                if 'i' in projections:
+                    cube_hdf5['cube'][i, :, :] = slide.reshape(1, self.cube_shape[1], self.cube_shape[2])
+                if 'h' in projections:
+                    cube_hdf5['cube_h'][:, i, :] = slide.T
                 pbar.update()
 
             # xline-oriented projection: (xlines, depth, ilines)
-            pbar.set_description(f'Converting {self.long_name} to hdf5; xlines projection')
-            for x in range(self.cube_shape[1]):
-                slide = self.load_slide(x, axis=1, stable=False).T
-                cube_hdf5_x[x, :, :,] = slide
-                pbar.update()
-            pbar.close()
+            if 'x' in projections:
+                pbar.set_description(f'Converting {self.long_name} to hdf5; xlines projection')
+                for x in range(self.cube_shape[1]):
+                    slide = self.load_slide(x, axis=1, stable=False).T
+                    cube_hdf5['cube_x'][x, :, :,] = slide
+                    pbar.update()
+                pbar.close()
 
         if not self.has_stats:
             self.collect_stats()
@@ -1250,16 +1259,20 @@ class SeismicGeometryHDF5(SeismicGeometry):
         _ = kwargs
         if axis is None:
             shape = np.array([(slc.stop - slc.start) for slc in locations])
-            axis = np.argmin(shape)
+            indices = np.argsort(shape)
+            mapping = {0: 'cube', 1: 'cube_x', 2: 'cube_h'}
+            for axis in indices:
+                if mapping[axis] in self.file_hdf5:
+                    break
         else:
             mapping = {0: 0, 1: 1, 2: 2,
                        'i': 0, 'x': 1, 'h': 2,
                        'iline': 0, 'xline': 1, 'height': 2, 'depth': 2}
             axis = mapping[axis]
 
-        if axis == 1 and 'cube_x' in self.file_hdf5:
+        if axis == 1:
             crop = self._load_x(*locations)
-        elif axis == 2 and 'cube_h' in self.file_hdf5:
+        elif axis == 2:
             crop = self._load_h(*locations)
         else: # backward compatibility
             crop = self._load_i(*locations)
@@ -1293,15 +1306,29 @@ class SeismicGeometryHDF5(SeismicGeometry):
         """ Load desired slide along desired axis. """
         _ = kwargs
         axis = self.parse_axis(axis)
-        if axis == 0:
-            cube = self.file_hdf5['cube']
+        mapping = {0: 'cube', 1: 'cube_x', 2: 'cube_h'}
+        load_axis = {
+            0: {'cube_x': 2, 'cube_h': 1},
+            1: {'cube': 1, 'cube_h': 2},
+            2: {'cube': 2, 'cube_x': 1}
+        }
+
+        if mapping[axis] in self.file_hdf5:
+            cube = self.file_hdf5[mapping[axis]]
             slide = self._cached_load(cube, loc)
-        elif axis == 1:
-            cube = self.file_hdf5['cube_x']
-            slide = self._cached_load(cube, loc).T
-        elif axis == 2:
-            cube = self.file_hdf5['cube_h']
-            slide = self._cached_load(cube, loc)
+            if mapping[axis] == 'cube_x':
+                slide = slide.T
+        else:
+            axis_1, axis_2 = [i for i in range(3) if i != axis]
+            if self.cube_shape[axis_1] < self.cube_shape[axis_2] and mapping[axis_1] in self.file_hdf5:
+                cube_name = mapping[axis_1]
+            else:
+                cube_name = mapping[axis_2]
+            cube = self.file_hdf5[cube_name]
+            slide = self._cached_load(cube, loc, load_axis[axis][cube_name])
+            if cube_name == 'cube_x' and axis != 0 or cube_name == 'cube_h' and axis == 2:
+                slide = slide.T
+
         return slide
 
     def __getitem__(self, key):

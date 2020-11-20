@@ -1587,8 +1587,7 @@ class Horizon:
 
     def dump_points(self, path, fmt='npy', projections='ixh'):
         """ Dump points. """
-        projections = [{'i': '', 'x': '_x', 'h': '_h'}[l] for l in projections]
-        axis = {'': [0, 1, 2], '_x': [1, 2, 0], '_h': [2, 0, 1]}
+        cube_keys, axes = projection_transformations(projections)
 
         if fmt == 'npy':
             if os.path.exists(path):
@@ -1601,9 +1600,9 @@ class Horizon:
             file_hdf5 = h5py.File(path, "a")
             cube_hdf5 = dict()
             for projection in projections:
-                name = 'cube' + projection
+                name = cube_keys[projection]
                 if name not in file_hdf5:
-                    cube_hdf5[name] = file_hdf5.create_dataset(name, self.geometry.cube_shape[axis[projection]])
+                    cube_hdf5[name] = file_hdf5.create_dataset(name, self.geometry.cube_shape[axes[projection]])
                 else:
                     cube_hdf5[name] = file_hdf5[name]
 
@@ -1616,9 +1615,9 @@ class Horizon:
             slices = (slice(self.i_min, self.i_max+1), slice(self.x_min,self.x_max+1), slice(self.h_min, self.h_max+1))
 
             for projection in projections:
-                name = 'cube' + projection
-                ax = axis[projection]
-                cube_hdf5[name][slices[ax[0]], slices[ax[1]], slices[ax[2]]] += np.transpose(fault_array, axis[projection])
+                name = cube_keys[projection]
+                ax = axes[projection]
+                cube_hdf5[name][slices[ax[0]], slices[ax[1]], slices[ax[2]]] += np.transpose(fault_array, ax)
 
             file_hdf5.close()
             path_meta = os.path.splitext(path)[0] + '.meta'

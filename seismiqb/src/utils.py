@@ -425,6 +425,11 @@ def infer_tuple(value, default):
         value = tuple([item if item else default[i] for i, item in enumerate(value)])
     return value
 
+def projection_transformations(projections):
+    cube_keys = {'i': 'cube', 'x': 'cube_x', 'h': 'cube_h'}
+    axes = {'i': [0, 1, 2], 'x': [1, 2, 0], 'h': [2, 0, 1]}
+    return cube_keys, axes
+
 @njit
 def groupby_mean(array):
     """ Faster version of mean-groupby of data along the first two columns.
