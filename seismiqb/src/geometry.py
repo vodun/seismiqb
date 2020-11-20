@@ -432,6 +432,11 @@ class SeismicGeometry:
             """
         return dedent(msg)
 
+    @property
+    def axis_names(self):
+        """ Names of the axis: multiple headers and `DEPTH` as the last one. """
+        return self.index_headers + ['DEPTH']
+
     def log(self, printer=None):
         """ Log info about cube into desired stream. By default, creates a file next to the cube. """
         if not callable(printer):
@@ -452,7 +457,8 @@ class SeismicGeometry:
         matrix = np.log(self.mean_matrix**2 / self.std_matrix**2)
         plot_image(matrix, mode='single', **kwargs)
 
-    def show_slide(self, loc=None, start=None, end=None, step=1, axis=0, zoom_slice=None, stable=True, **kwargs):
+    def show_slide(self, loc=None, start=None, end=None, step=1, axis=0, zoom_slice=None,
+                   n_ticks=5, delta_ticks=100, stable=True, **kwargs):
         """ Show seismic slide in desired place. Works with both SEG-Y and HDF5 files.
 
         Parameters
@@ -480,16 +486,38 @@ class SeismicGeometry:
 
         # Plot params
         if len(self.index_headers) > 1:
-            title = f'{self.index_headers[axis]} {loc} out of {self.lens[axis]}'
+            title = f'{self.axis_names[axis]} {loc} out of {self.cube_shape[axis]}'
+
+            if axis in [0, 1]:
+                xlabel = self.index_headers[1 - axis]
+                ylabel = 'DEPTH'
+            else:
+                xlabel = self.index_headers[0]
+                ylabel = self.index_headers[1]
         else:
             title = '2D seismic slide'
+            xlabel = self.index_headers[0]
+            ylabel = 'DEPTH'
+
+        xticks = xticks[::max(1, round(len(xticks) // (n_ticks - 1) / delta_ticks)) * delta_ticks] + [xticks[-1]]
+        xticks = sorted(list(set(xticks)))
+        yticks = yticks[::max(1, round(len(xticks) // (n_ticks - 1) / delta_ticks)) * delta_ticks] + [yticks[-1]]
+        yticks = sorted(list(set(yticks)), reverse=True)
+
+        if (xticks[-1] - xticks[-2]) < delta_ticks:
+            xticks.pop(-2)
+        if (yticks[0] - yticks[1]) < delta_ticks:
+            yticks.pop(1)
+
         kwargs = {
             'title': title,
-            'xlabel': self.index_headers[1 - axis] if len(self.index_headers) > 1 else self.index_headers[0],
-            'ylabel': 'depth',
+            'xlabel': xlabel,
+            'ylabel': ylabel,
             'cmap': 'gray',
-            'xticks': xticks[::max(1, round(len(xticks)//10/100))*100],
-            'yticks': yticks[::max(1, round(len(yticks)//10/100))*100][::-1],
+            'xticks': xticks,
+            'yticks': yticks,
+            'labeltop': False,
+            'labelright': False,
             **kwargs
         }
         plot_image(slide, mode='single', **kwargs)

@@ -1913,7 +1913,8 @@ class Horizon:
             fig.write_html(savepath)
 
 
-    def show_slide(self, loc, width=3, axis='i', order_axes=None, zoom_slice=None, **kwargs):
+    def show_slide(self, loc, width=3, axis='i', order_axes=None, zoom_slice=None,
+                   n_ticks=5, delta_ticks=100, **kwargs):
         """ Show slide with horizon on it.
 
         Parameters
@@ -1947,25 +1948,34 @@ class Horizon:
             yticks = yticks[zoom_slice[1]]
 
         # defaults for plotting if not supplied in kwargs
+        header = self.geometry.axis_names[axis]
+        total = self.geometry.cube_shape[axis]
+
         if axis in [0, 1]:
-            header = self.geometry.index_headers[axis]
             xlabel = self.geometry.index_headers[1 - axis]
-            ylabel = 'depth'
-            total = self.geometry.lens[axis]
+            ylabel = 'DEPTH'
         if axis == 2:
-            header = 'Depth'
             xlabel = self.geometry.index_headers[0]
             ylabel = self.geometry.index_headers[1]
             total = self.geometry.depth
 
+        xticks = xticks[::max(1, round(len(xticks) // (n_ticks - 1) / delta_ticks)) * delta_ticks] + [xticks[-1]]
+        xticks = sorted(list(set(xticks)))
+        yticks = yticks[::max(1, round(len(xticks) // (n_ticks - 1) / delta_ticks)) * delta_ticks] + [yticks[-1]]
+        yticks = sorted(list(set(yticks)), reverse=True)
+
+        if (xticks[-1] - xticks[-2]) < delta_ticks:
+            xticks.pop(-2)
+        if (yticks[0] - yticks[1]) < delta_ticks:
+            yticks.pop(1)
+
         kwargs = {
             'mode': 'overlap',
-            'title': (f'Horizon `{self.name}` on `{self.geometry.name}`' +
-                      f'\n {header} {loc} out of {total}'),
+            'title': f'Horizon `{self.name}` on `{self.geometry.name}`\n {header} {loc} out of {total}',
             'xlabel': xlabel,
             'ylabel': ylabel,
-            'xticks': xticks[::max(1, round(len(xticks)//8/100))*100],
-            'yticks': yticks[::max(1, round(len(yticks)//10/100))*100][::-1],
+            'xticks': xticks,
+            'yticks': yticks,
             'y': 1.02,
             **kwargs
         }
