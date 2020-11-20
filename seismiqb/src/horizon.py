@@ -1551,8 +1551,77 @@ class Horizon:
         return horizons
 
 
+    @staticmethod
+    def average_horizons(horizons):
+        """ Average list of horizons into one surface. """
+        geometry = horizons[0].geometry
+        horizon_matrix = np.zeros(geometry.lens, dtype=np.float32)
+        std_matrix = np.zeros(geometry.lens, dtype=np.float32)
+        counts_matrix = np.zeros(geometry.lens, dtype=np.int32)
+
+        for horizon in horizons:
+            fm = horizon.full_matrix
+            horizon_matrix[fm != Horizon.FILL_VALUE] += fm[fm != Horizon.FILL_VALUE]
+            std_matrix[fm != Horizon.FILL_VALUE] += fm[fm != Horizon.FILL_VALUE] ** 2
+            counts_matrix[fm != Horizon.FILL_VALUE] += 1
+
+        horizon_matrix[counts_matrix != 0] /= counts_matrix[counts_matrix != 0]
+        horizon_matrix[counts_matrix == 0] = Horizon.FILL_VALUE
+
+        std_matrix[counts_matrix != 0] /= counts_matrix[counts_matrix != 0]
+        std_matrix -= horizon_matrix ** 2
+        std_matrix = np.sqrt(std_matrix)
+        std_matrix[counts_matrix == 0] = np.nan
+
+        averaged_horizon = Horizon(horizon_matrix.astype(np.int32), geometry=geometry)
+        return averaged_horizon, {
+            'matrix': horizon_matrix,
+            'std_matrix': std_matrix,
+        }
+
 
     # Save horizon to disk
+    @staticmethod
+    def dump_charisma(points, path, transform=None, add_height=False):
+        """ Save (N, 3) array of points to disk in CHARISMA-compatible format.
+
+        Parameters
+        ----------
+        points : ndarray
+            Array of (N, 3) shape.
+        path : str
+            Path to a file to save horizon to.
+        transform : None or callable
+            If callable, then applied to points after converting to ilines/xlines coordinate system.
+        add_height : bool
+            Whether to concatenate average horizon height to a file name.
+        """
+        points = points if transform is None else transform(points)
+        path = path if not add_height else f'{path}_#{round(np.mean(points[:, 2]), 1)}'
+
+        df = pd.DataFrame(points, columns=Horizon.COLUMNS)
+        df.sort_values(['iline', 'xline'], inplace=True)
+        df = df.astype({'iline': np.int32, 'xline': np.int32, 'height': np.float32})
+        df.to_csv(path, sep=' ', columns=Horizon.COLUMNS, index=False, header=False)
+
+    def dump_matrix(self, matrix, path, transform=None, add_height=False):
+        """ Save (N_ILINES, N_CROSSLINES) matrix in CHARISMA-compatible format.
+
+        Parameters
+        ----------
+        matrix : ndarray
+            Array of (N_ILINES, N_CROSSLINES) shape with depth values.
+        path : str
+            Path to a file to save horizon to.
+        transform : None or callable
+            If callable, then applied to points after converting to ilines/xlines coordinate system.
+        add_height : bool
+            Whether to concatenate average horizon height to a file name.
+        """
+        points = Horizon.matrix_to_points(matrix)
+        points = self.cubic_to_lines(points)
+        Horizon.dump_charisma(points, path, transform, add_height)
+
     def dump(self, path, transform=None, add_height=False):
         """ Save horizon points on disk.
 
@@ -1565,14 +1634,8 @@ class Horizon:
         add_height : bool
             Whether to concatenate average horizon height to a file name.
         """
-        values = self.cubic_to_lines(copy(self.points))
-        values = values if transform is None else transform(values)
-
-        df = pd.DataFrame(values, columns=self.COLUMNS)
-        df.sort_values(['iline', 'xline'], inplace=True)
-
-        path = path if not add_height else f'{path}_#{round(self.h_mean, 1)}'
-        df.to_csv(path, sep=' ', columns=self.COLUMNS, index=False, header=False)
+        points = self.cubic_to_lines(copy(self.points))
+        self.dump_charisma(points, path, transform, add_height)
 
     def dump_float(self, path, transform=None, kernel_size=7, sigma=2., margin=5, add_height=False):
         """ Smooth out the horizon values, producing floating-point numbers, and dump to the disk.
@@ -1594,15 +1657,9 @@ class Horizon:
             Whether to concatenate average horizon height to a file name.
         """
         matrix = self.make_float_matrix(kernel_size=kernel_size, sigma=sigma, margin=margin)
-        values = self.matrix_to_points(matrix)
-        values = values if transform is None else transform(values)
-
-        df = pd.DataFrame(values, columns=self.COLUMNS)
-        df.sort_values(['iline', 'xline'], inplace=True)
-        df = df.astype({'iline': np.int32, 'xline': np.int32, 'height': np.float32})
-
-        path = path if not add_height else f'{path}_#{round(self.h_mean, 1)}'
-        df.to_csv(path, sep=' ', columns=self.COLUMNS, index=False, header=False)
+        points = self.matrix_to_points(matrix)
+        points = self.cubic_to_lines(points)
+        self.dump_charisma(points, path, transform, add_height)
 
     def dump_points(self, path, fmt='npy'):
         """ Dump points. """
