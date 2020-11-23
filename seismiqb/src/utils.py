@@ -13,7 +13,8 @@ import segyio
 from numba import njit, prange
 from ..batchflow import Sampler
 
-
+import torch
+import torch.nn.functional as F
 
 def file_print(msg, path):
     """ Print to file. """
@@ -717,6 +718,31 @@ def attr_filter(array, result, window, stride, points, attribute='semblance'):
                 val = local_correlation(region.copy())
             result[i // stride[0], j // stride[1], k // stride[2]] = val
     return result
+
+def attr_filter_gpu(array, window, device='cuda:0', attribute='semblance'):
+    """ Compute semblance for the cube. """
+    inputs = torch.Tensor(array).to(device)
+    inputs = inputs.view(1, 1, *inputs.shape)
+    num = F.pad(inputs, (0, 0,
+                         window[1] // 2, window[1] - window[1] // 2 - 1,
+                         window[0] // 2, window[0] - window[0] // 2 - 1,
+                         0, 0,
+                         0, 0))
+    num = F.conv3d(num, torch.ones((1, 1, window[0], window[1], 1), dtype=torch.float32).to(device)) ** 2
+    num = F.pad(num, (window[2] // 2, window[2] - window[2] // 2 - 1,
+                      0, 0,
+                      0, 0,
+                      0, 0,
+                      0, 0))
+    num = F.conv3d(num, torch.ones((1, 1, 1, 1, window[2]), dtype=torch.float32).to(device))
+
+    denum = F.pad(inputs, (window[2] // 2, window[2] - window[2] // 2 - 1,
+                           window[1] // 2, window[1] - window[1] // 2 - 1,
+                           window[0] // 2, window[0] - window[0] // 2 - 1,
+                           0, 0,
+                           0, 0))
+    denum = F.conv3d(denum ** 2, torch.ones((1, 1, window[0], window[1], window[2]), dtype=torch.float32).to(device)) * window[0] * window[1]
+    return (num / denum).cpu().numpy()[0, 0]
 
 @njit
 def semblance(region):

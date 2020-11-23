@@ -17,7 +17,7 @@ import cv2
 from scipy.ndimage import zoom
 
 from .utils import lru_cache, find_min_max, file_print, \
-                   SafeIO, attr_filter, make_axis_grid, infer_tuple,\
+                   SafeIO, attr_filter, attr_filter_gpu, make_axis_grid, infer_tuple,\
                    projection_transformations
 from .plotters import plot_image
 
@@ -579,7 +579,7 @@ class SeismicGeometry:
         lines = (inverse_matrix @ points.T - inverse_matrix @ self.rotation_matrix[:, 2].reshape(2, -1)).T
         return np.rint(lines)
 
-    def apply_conv(self, locations=None, points=None, window=10, stride=1, attribute='semblance'):
+    def apply_conv(self, locations=None, points=None, window=10, stride=1, attribute='semblance', mode='numba'):
         """ Compute attribute on cube.
 
         Parameters
@@ -628,7 +628,10 @@ class SeismicGeometry:
         if isinstance(points, list):
             points = np.array(points)
 
-        attr = attr_filter(cube, result, window, stride, points, attribute)
+        if mode == 'numba':
+            attr = attr_filter(cube, result, window, stride, points, attribute)
+        else:
+            attr = attr_filter_gpu(cube, result, window, stride)
         if np.any(stride > 1):
             attr = zoom(attr, np.array(cube.shape) / np.array(attr.shape))
         return attr
