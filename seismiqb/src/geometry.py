@@ -1269,7 +1269,6 @@ class SeismicGeometryHDF5(SeismicGeometry):
             Identificator of the axis to use to load data.
             Can be `iline`, `xline`, `height`, `depth`, `i`, `x`, `h`, 0, 1, 2.
         """
-        _ = kwargs
         if axis is None:
             shape = np.array([(slc.stop - slc.start) for slc in locations])
             axis = np.argmin(shape)
@@ -1280,48 +1279,49 @@ class SeismicGeometryHDF5(SeismicGeometry):
             axis = mapping[axis]
 
         if axis == 1 and 'cube_x' in self.file_hdf5:
-            crop = self._load_x(*locations)
+            crop = self._load_x(*locations, **kwargs)
         elif axis == 2 and 'cube_h' in self.file_hdf5:
-            crop = self._load_h(*locations)
+            crop = self._load_h(*locations, **kwargs)
         else: # backward compatibility
-            crop = self._load_i(*locations)
+            crop = self._load_i(*locations, **kwargs)
         return crop
 
-    def _load_i(self, ilines, xlines, heights):
+    def _load_i(self, ilines, xlines, heights, **kwargs):
         cube_hdf5 = self.file_hdf5['cube']
-        return np.stack([self._cached_load(cube_hdf5, iline)[xlines, :][:, heights]
+        return np.stack([self._cached_load(cube_hdf5, iline, **kwargs)[xlines, :][:, heights]
                          for iline in range(ilines.start, ilines.stop)])
 
-    def _load_x(self, ilines, xlines, heights):
+    def _load_x(self, ilines, xlines, heights, **kwargs):
         cube_hdf5 = self.file_hdf5['cube_x']
-        return np.stack([self._cached_load(cube_hdf5, xline)[heights, :][:, ilines].transpose([1, 0])
+        return np.stack([self._cached_load(cube_hdf5, xline, **kwargs)[heights, :][:, ilines].transpose([1, 0])
                          for xline in range(xlines.start, xlines.stop)], axis=1)
 
-    def _load_h(self, ilines, xlines, heights):
+    def _load_h(self, ilines, xlines, heights, **kwargs):
         cube_hdf5 = self.file_hdf5['cube_h']
-        return np.stack([self._cached_load(cube_hdf5, height)[ilines, :][:, xlines]
+        return np.stack([self._cached_load(cube_hdf5, height, **kwargs)[ilines, :][:, xlines]
                          for height in range(heights.start, heights.stop)], axis=2)
 
     @lru_cache(128)
-    def _cached_load(self, cube, loc):
+    def _cached_load(self, cube, loc, **kwargs):
         """ Load one slide of data from a certain cube projection.
         Caches the result in a thread-safe manner.
         """
+        _ = kwargs
         return cube[loc, :, :]
 
     def load_slide(self, loc, axis='iline', **kwargs):
         """ Load desired slide along desired axis. """
-        _ = kwargs
         axis = self.parse_axis(axis)
+
         if axis == 0:
             cube = self.file_hdf5['cube']
-            slide = self._cached_load(cube, loc)
+            slide = self._cached_load(cube, loc, **kwargs)
         elif axis == 1:
             cube = self.file_hdf5['cube_x']
-            slide = self._cached_load(cube, loc).T
+            slide = self._cached_load(cube, loc, **kwargs).T
         elif axis == 2:
             cube = self.file_hdf5['cube_h']
-            slide = self._cached_load(cube, loc)
+            slide = self._cached_load(cube, loc, **kwargs)
         return slide
 
     def __getitem__(self, key):

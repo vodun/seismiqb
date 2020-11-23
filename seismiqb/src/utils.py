@@ -1,6 +1,6 @@
 """ Utility functions. """
 from math import isnan
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict
 from threading import RLock
 from functools import wraps
 from hashlib import blake2b
@@ -81,23 +81,15 @@ class Singleton:
 
 class lru_cache:
     """ Thread-safe least recent used cache. Must be applied to class methods.
+    Adds the `use_cache` argument to the decorated method to control whether the caching logic is applied.
+    Stored values are individual for each instance of the class.
 
     Parameters
     ----------
     maxsize : int
         Maximum amount of stored values.
-    storage : None, OrderedDict or PickleDict
-        Storage to use.
-        If None, then no caching is applied.
-    classwide : bool
-        If True, then first argument of a method (self) is changed to class name for the purposes on hashing.
-    anchor : bool
-        If True, then code of the whole directory this file is located is used to create a persistent hash
-        for the purposes of storing.
     attributes: None, str or sequence of str
         Attributes to get from object and use as additions to key.
-    pickle_module: str
-        Module to use to save/load files on disk. Used only if `storage` is :class:`.PickleDict`.
 
     Examples
     --------
@@ -112,9 +104,8 @@ class lru_cache:
     All arguments to the decorated method must be hashable.
     """
     #pylint: disable=invalid-name, attribute-defined-outside-init
-    def __init__(self, maxsize=None, classwide=False, attributes=None):
+    def __init__(self, maxsize=None, attributes=None):
         self.maxsize = maxsize
-        self.classwide = classwide
 
         # Make `attributes` always a list
         if isinstance(attributes, str):
@@ -128,68 +119,72 @@ class lru_cache:
         self.lock = RLock()
         self.reset()
 
-
-    def reset(self):
+    def reset(self, instance=None):
         """ Clear cache and stats. """
-        self.cache = OrderedDict()
-        self.is_full = False
-        self.stats = {'hit': 0, 'miss': 0}
+        if instance is None:
+            self.cache = defaultdict(OrderedDict)
+            self.is_full = defaultdict(lambda: False)
+            self.stats = defaultdict(lambda: {'hit': 0, 'miss': 0})
+        else:
+            self.cache[instance] = OrderedDict()
+            self.is_full[instance] = False
+            self.stats[instance] = {'hit': 0, 'miss': 0}
 
-    def make_key(self, args, kwargs):
-        """ Create a key from a combination of instance reference or class reference,
-        method args, and instance attributes.
-        """
-        key = list(args)
-        # key[0] is `instance` if applied to a method
+    def make_key(self, instance, args, kwargs):
+        """ Create a key from a combination of instance reference, method args, and instance attributes. """
+        key = [instance] + list(args)
         if kwargs:
             for k, v in sorted(kwargs.items()):
                 key.append((k, v))
 
         if self.attributes:
             for attr in self.attributes:
-                attr_hash = stable_hash(getattr(key[0], attr))
+                attr_hash = stable_hash(getattr(instance, attr))
                 key.append(attr_hash)
-
-        if self.classwide:
-            key[0] = key[0].__class__
         return tuple(key)
 
 
     def __call__(self, func):
         """ Add the cache to the function. """
         @wraps(func)
-        def wrapper(*args, **kwargs):
-            key = self.make_key(args, kwargs)
+        def wrapper(instance, *args, use_cache=True, **kwargs):
+            # Skip the caching logic and evaluate function directly
+            if not use_cache:
+                result = func(instance, *args, **kwargs)
+                return result
+
+            key = self.make_key(instance, args, kwargs)
 
             # If result is already in cache, just retrieve it and update its timings
             with self.lock:
-                result = self.cache.get(key, self.default)
+                result = self.cache[instance].get(key, self.default)
                 if result is not self.default:
-                    del self.cache[key]
-                    self.cache[key] = result
-                    self.stats['hit'] += 1
+                    del self.cache[instance][key]
+                    self.cache[instance][key] = result
+                    self.stats[instance]['hit'] += 1
                     return result
 
             # The result was not found in cache: evaluate function
-            result = func(*args, **kwargs)
+            result = func(instance, *args, **kwargs)
 
             # Add the result to cache
             with self.lock:
-                self.stats['miss'] += 1
-                if key in self.cache:
+                self.stats[instance]['miss'] += 1
+                if key in self.cache[instance]:
                     pass
-                elif self.is_full:
-                    self.cache.popitem(last=False)
-                    self.cache[key] = result
+                elif self.is_full[instance]:
+                    self.cache[instance].popitem(last=False)
+                    self.cache[instance][key] = result
                 else:
-                    self.cache[key] = result
-                    self.is_full = (len(self.cache) >= self.maxsize)
+                    self.cache[instance][key] = result
+                    self.is_full[instance] = (len(self.cache) >= self.maxsize)
             return result
 
         wrapper.__name__ = func.__name__
         wrapper.cache = lambda: self.cache
         wrapper.stats = lambda: self.stats
         wrapper.reset = self.reset
+        wrapper.reset_instance = lambda instance: self.reset(instance=instance)
         return wrapper
 
 

@@ -1230,9 +1230,9 @@ class Horizon:
         grad[self.matrix == self.FILL_VALUE] = self.FILL_VALUE
         return grad
 
-    def make_float_matrix(self, kernel_size=7, sigma=2., margin=5):
+    def make_float_matrix(self, kernel=None, kernel_size=7, sigma=2., margin=5):
         """ Smooth the depth matrix to produce floating point numbers. """
-        kernel = make_gaussian_kernel(kernel_size, sigma)
+        kernel = kernel or make_gaussian_kernel(kernel_size, sigma)
         float_matrix = _smoothing_function(self.full_matrix, kernel,
                                            fill_value=self.FILL_VALUE,
                                            preserve=True, margin=margin)
