@@ -391,6 +391,7 @@ class SeismicCropBatch(Batch):
             window = np.ones(3, dtype=np.int32) * window
         if isinstance(stride, int):
             stride = np.ones(3, dtype=np.int32) * stride
+        window = np.minimum(np.array(window), image.shape)
         result = np.zeros_like(image)
         if mode == 'numba':
             points = np.stack(np.meshgrid(*[range(image.shape[i]) for i in range(3)]), axis=-1).reshape(-1, 3)

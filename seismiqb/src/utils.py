@@ -426,7 +426,7 @@ def infer_tuple(value, default):
         value = tuple([item if item else default[i] for i, item in enumerate(value)])
     return value
 
-def projection_transformations(projections):
+def projection_transformations():
     cube_keys = {'i': 'cube', 'x': 'cube_x', 'h': 'cube_h'}
     axes = {'i': [0, 1, 2], 'x': [1, 2, 0], 'h': [2, 0, 1]}
     return cube_keys, axes
@@ -742,7 +742,7 @@ def attr_filter_gpu(array, window, device='cuda:0', attribute='semblance'):
                            0, 0,
                            0, 0))
     denum = F.conv3d(denum ** 2, torch.ones((1, 1, window[0], window[1], window[2]), dtype=torch.float32).to(device)) * window[0] * window[1]
-    return (num / denum).cpu().numpy()[0, 0]
+    return np.nan_to_num((num / denum).cpu().numpy()[0, 0])
 
 @njit
 def semblance(region):

@@ -601,6 +601,18 @@ class SeismicGeometry:
         np.ndarray
             array of the shape corresponding to locations
         """
+        cube_keys, axes = projection_transformations()
+        if 'cube' in self.file_hdf5:
+            cube_name = 'cube'
+            projection = 'i'
+        elif 'cube_x' in  self.file_hdf5:
+            cube_name = 'cube_x'
+            projection = 'x'
+        elif 'cube_h' in self.file_hdf5:
+            cube_name = 'cube_h'
+            projection = 'h'
+        ax = axes[projection]
+
         if isinstance(window, int):
             window = np.ones(3, dtype=np.int32) * window
         if isinstance(stride, int):
@@ -617,27 +629,30 @@ class SeismicGeometry:
                 points[:, i] -= start
             stride = np.ones(3, dtype='int32')
 
-        cube = self.file_hdf5['cube'][locations[0], locations[1], locations[2]]
-        window = np.minimum(np.array(window), cube.shape)
+        ax = axes[projection]
+        cube = self.file_hdf5[cube_name][locations[ax[0]], locations[ax[1]], locations[ax[2]]]
+        if projection == 'x':
+            cube = cube.transpose((2, 0, 1))
+        elif projection == 'h':
+            cube = cube.transpose((1, 2, 0))
 
+        window = np.minimum(np.array(window), cube.shape)
         shape = np.ceil(np.array(cube.shape) / np.array(stride)).astype(int)
         result = np.full(shape, np.nan, dtype='float32')
 
         if points is None:
             points = np.stack(np.meshgrid(*[range(cube.shape[i]) for i in range(3)]), axis=-1).reshape(-1, 3)
-        if isinstance(points, list):
-            points = np.array(points)
 
         if mode == 'numba':
             attr = attr_filter(cube, result, window, stride, points, attribute)
         else:
-            attr = attr_filter_gpu(cube, result, window, stride)
+            attr = attr_filter_gpu(cube, window)
         if np.any(stride > 1):
             attr = zoom(attr, np.array(cube.shape) / np.array(attr.shape))
         return attr
 
     def create_hdf5(self, path_hdf5, src, chunk_shape=None, stride=None,
-                    projections='ixh', pbar=False):
+                    projections='ixh', pbar=False, mode='numba'):
         """ Create hdf5 file from np.ndarray or with geological attribute.
 
         Parameters
@@ -653,7 +668,7 @@ class SeismicGeometry:
         pbar : bool
             progress bar
         """
-        cube_keys, axes = projection_transformations(projections)
+        cube_keys, axes = projection_transformations()
 
         chunks = []
 
@@ -675,13 +690,12 @@ class SeismicGeometry:
             def _attribute():
                 for coord in itertools.product(*grid):
                     locations = [slice(coord[i], coord[i] + chunk_shape[i]) for i in range(3)]
-                    yield [coord, self.apply_conv(locations, attribute=src)]
+                    yield [coord, self.apply_conv(locations, attribute=src, mode=mode)]
             chunks = _attribute()
             total = np.prod([len(item) for item in grid])
 
         if os.path.exists(path_hdf5):
             os.remove(path_hdf5)
-
         with h5py.File(path_hdf5, "a") as file_hdf5:
             cube_hdf5 = dict()
             for projection in projections:
@@ -1160,7 +1174,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
         postfix : str
             Postfix to add to the name of resulting cube.
         """
-        cube_keys, axes = projection_transformations(projections)
+        cube_keys, axes = projection_transformations()
 
         if self.index_headers != self.INDEX_POST and not unsafe:
             # Currently supports only INLINE/CROSSLINE cubes
@@ -1323,7 +1337,9 @@ class SeismicGeometryHDF5(SeismicGeometry):
                 slide = slide.T
         else:
             axis_1, axis_2 = [i for i in range(3) if i != axis]
-            if self.cube_shape[axis_1] < self.cube_shape[axis_2] and mapping[axis_1] in self.file_hdf5:
+            if self.cube_shape[axis_1] > self.cube_shape[axis_2]:
+                axis_1, axis_2 = axis_2, axis_1
+            if mapping[axis_1] in self.file_hdf5:
                 cube_name = mapping[axis_1]
             else:
                 cube_name = mapping[axis_2]

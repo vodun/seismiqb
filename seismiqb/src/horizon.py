@@ -1588,7 +1588,7 @@ class Horizon:
 
     def dump_points(self, path, fmt='npy', projections='ixh'):
         """ Dump points. """
-        cube_keys, axes = projection_transformations(projections)
+        cube_keys, axes = projection_transformations()
 
         if fmt == 'npy':
             if os.path.exists(path):
@@ -1598,6 +1598,8 @@ class Horizon:
                 points = self.points
             np.save(path, points, allow_pickle=False)
         elif fmt == 'hdf5':
+            if os.path.exists(path):
+                os.remove(path)
             file_hdf5 = h5py.File(path, "a")
             cube_hdf5 = dict()
             for projection in projections:
