@@ -90,6 +90,8 @@ class lru_cache:
         Maximum amount of stored values.
     attributes: None, str or sequence of str
         Attributes to get from object and use as additions to key.
+    apply_by_default : bool
+        Whether the cache logic is on by default.
 
     Examples
     --------
@@ -104,8 +106,9 @@ class lru_cache:
     All arguments to the decorated method must be hashable.
     """
     #pylint: disable=invalid-name, attribute-defined-outside-init
-    def __init__(self, maxsize=None, attributes=None):
+    def __init__(self, maxsize=None, attributes=None, apply_by_default=True):
         self.maxsize = maxsize
+        self.apply_by_default = apply_by_default
 
         # Make `attributes` always a list
         if isinstance(attributes, str):
@@ -147,7 +150,13 @@ class lru_cache:
     def __call__(self, func):
         """ Add the cache to the function. """
         @wraps(func)
-        def wrapper(instance, *args, use_cache=True, **kwargs):
+        def wrapper(instance, *args, **kwargs):
+            # Parse the `use_cache`
+            if 'use_cache' in kwargs:
+                use_cache = kwargs.pop('use_cache')
+            else:
+                use_cache = self.apply_by_default
+
             # Skip the caching logic and evaluate function directly
             if not use_cache:
                 result = func(instance, *args, **kwargs)
@@ -177,7 +186,7 @@ class lru_cache:
                     self.cache[instance][key] = result
                 else:
                     self.cache[instance][key] = result
-                    self.is_full[instance] = (len(self.cache) >= self.maxsize)
+                    self.is_full[instance] = (len(self.cache[instance]) >= self.maxsize)
             return result
 
         wrapper.__name__ = func.__name__

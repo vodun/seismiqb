@@ -367,7 +367,7 @@ class SeismicGeometry:
             method = self.load_slide
         else:
             method = self._cached_load
-        method.reset()
+        method.reset(instance=self)
 
     @property
     def cache_length(self):
@@ -377,7 +377,7 @@ class SeismicGeometry:
         else:
             method = self._cached_load
 
-        return len(method.cache())
+        return len(method.cache()[self])
 
     @property
     def cache_size(self):
@@ -387,7 +387,7 @@ class SeismicGeometry:
         else:
             method = self._cached_load
 
-        return sum(item.nbytes / (1024 ** 3) for item in method.cache().values())
+        return sum(item.nbytes / (1024 ** 3) for item in method.cache()[self].values())
 
     @property
     def nbytes(self):
