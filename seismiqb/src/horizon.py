@@ -366,10 +366,11 @@ class Horizon:
     # Value to place into blank spaces
     FILL_VALUE = -999999
 
-    def __init__(self, storage, geometry, name=None, **kwargs):
+    def __init__(self, storage, geometry, name=None, dtype=np.int32, **kwargs):
         # Meta information
         self.path = None
         self.name = name
+        self.dtype = dtype
         self.format = None
 
         # Location of the horizon inside cube spatial range
@@ -454,7 +455,7 @@ class Horizon:
         """
         if self._matrix is None and self.points is not None:
             self._matrix = self.points_to_matrix(self.points, self.i_min, self.x_min,
-                                                 self.i_length, self.x_length)
+                                                 self.i_length, self.x_length, self.dtype)
         return self._matrix
 
     @matrix.setter
@@ -462,10 +463,11 @@ class Horizon:
         self._matrix = value
 
     @staticmethod
-    def points_to_matrix(points, i_min, x_min, i_length, x_length):
+    def points_to_matrix(points, i_min, x_min, i_length, x_length, dtype=np.int32):
         """ Convert array of (N, 3) shape to a depth map (matrix). """
-        matrix = np.full((i_length, x_length), Horizon.FILL_VALUE, np.int32)
-        matrix[points[:, 0] - i_min, points[:, 1] - x_min] = points[:, 2]
+        matrix = np.full((i_length, x_length), Horizon.FILL_VALUE, dtype)
+        matrix[points[:, 0].astype(np.int32) - i_min,
+               points[:, 1].astype(np.int32) - x_min] = points[:, 2]
         return matrix
 
     @property
@@ -573,13 +575,18 @@ class Horizon:
                            (points[:, 1] < self.cube_shape[1]) &
                            (points[:, 2] < self.cube_shape[2]))[0]
             points = points[idx]
-        self.points = np.rint(points).astype(np.int32)
+
+        if self.dtype == np.int32:
+            points = np.rint(points)
+        self.points = points.astype(self.dtype)
 
         # Collect stats on separate axes. Note that depth stats are properties
         self.reset_storage('matrix')
         if len(self.points) > 0:
-            self.i_min, self.x_min, self._h_min = np.min(self.points, axis=0).astype(np.int32)
-            self.i_max, self.x_max, self._h_max = np.max(self.points, axis=0).astype(np.int32)
+            self.i_min, self.x_min, _ = np.min(self.points, axis=0).astype(np.int32)
+            self.i_max, self.x_max, _ = np.max(self.points, axis=0).astype(np.int32)
+            self._h_min = self.points[:, 2].min().astype(self.dtype)
+            self._h_max = self.points[:, 2].max().astype(self.dtype)
 
             self.i_length = (self.i_max - self.i_min) + 1
             self.x_length = (self.x_max - self.x_min) + 1
@@ -1232,7 +1239,7 @@ class Horizon:
 
     def make_float_matrix(self, kernel=None, kernel_size=7, sigma=2., margin=5):
         """ Smooth the depth matrix to produce floating point numbers. """
-        kernel = kernel or make_gaussian_kernel(kernel_size, sigma)
+        kernel = kernel if kernel is not None else make_gaussian_kernel(kernel_size, sigma)
         float_matrix = _smoothing_function(self.full_matrix, kernel,
                                            fill_value=self.FILL_VALUE,
                                            preserve=True, margin=margin)
