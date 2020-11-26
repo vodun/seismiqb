@@ -742,7 +742,7 @@ def attr_filter_gpu(array, window, device='cuda:0', attribute='semblance'):
                            0, 0,
                            0, 0))
     denum = F.conv3d(denum ** 2, torch.ones((1, 1, window[0], window[1], window[2]), dtype=torch.float32).to(device)) * window[0] * window[1]
-    return np.nan_to_num((num / denum).cpu().numpy()[0, 0])
+    return np.nan_to_num((num / denum).cpu().numpy()[0, 0], nan=1.)
 
 @njit
 def semblance(region):
