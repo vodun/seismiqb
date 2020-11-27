@@ -62,8 +62,7 @@ def make_hdf5_cube(tmp_path_factory):
 
 
 @pytest.mark.slow
-@pytest.mark.parametrize("projections", ['ixh', 'i', 'x', 'h']
-])
+@pytest.mark.parametrize("projections", ['ixh', 'i', 'x', 'h'])
 def test_load_dump_segy(tmp_path, make_hdf5_cube, projections):
     """ Loads SEG-Y file, converts it to hdf5 with specified projections.
     Loads the new hdf5, then dumps it to SEG-Y again and compares it to the original file """
