@@ -514,7 +514,7 @@ class SeismicGeometry:
     # Convert HDF5 to SEG-Y
     def make_sgy(self, path_hdf5=None, path_spec=None, postfix='',
                  remove_hdf5=False, zip_result=True, path_segy=None,
-                 from_cubes='ixh', chunk_size=100):
+                 chunk_size=100):
         """ Convert HDF5 cube to SEG-Y format with current geometry spec.
 
         Parameters
@@ -559,24 +559,17 @@ class SeismicGeometry:
             spec.ilines = ilines
             spec.xlines = xlines
 
-            if 'i' in from_cubes and 'cube' in src:
+            if 'cube' in src:
                 cube_hdf5 = src['cube']
-
-                def get_traces(i, x):
-                    return cube_hdf5[i_enc[i], x_enc[x], :]
-            elif 'x' in from_cubes and 'cube_x' in src:
+                iloc = [0, 1, 2]
+            elif 'cube_x' in src:
                 cube_hdf5 = src['cube_x']
-
-                def get_traces(i, x):
-                    return cube_hdf5[x_enc[x], :, i_enc[i]]
-            elif 'h' in from_cubes and 'cube_h' in src:
+                iloc = [1, 2, 0]
+            elif 'cube_h' in src:
                 cube_hdf5 = src['cube_h']
-
-                def get_traces(i, x):
-                    return cube_hdf5[:, i_enc[i], x_enc[x]]
+                iloc = [2, 0, 1]
             else:
-                raise ValueError("from cubes == " + from_cubes +
-                                 "but only {} are present".format([k for k in src.keys() if k.startswith("cube")]))
+                raise ValueError("None of 'cube', 'cube_x', 'cube_h' present!")
 
             with segyio.create(path_segy, spec) as dst_file:
                 # Copy all textual headers, including possible extended
@@ -585,7 +578,10 @@ class SeismicGeometry:
                 dst_file.bin = segy.bin
 
                 for c, (i, x) in enumerate(idx):
-                    dst_file.trace[c] = get_traces(i, x)
+                    locs = [i_enc[i], x_enc[x], slice(None)]
+                    locs = locs[iloc[0]], locs[iloc[1]], locs[iloc[2]]
+
+                    dst_file.trace[c] = cube_hdf5[locs] #get_traces(i, x)
 
                 l = len(idx)
                 dst_file.header[:l] = segy.header[:l]

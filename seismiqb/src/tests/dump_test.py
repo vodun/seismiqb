@@ -62,7 +62,8 @@ def make_hdf5_cube(tmp_path_factory):
 
 
 @pytest.mark.slow
-@pytest.mark.parametrize("projections", ['ixh', 'i', 'x', 'h'])
+@pytest.mark.parametrize("projections", ['ixh', 'i', 'x', 'h']
+])
 def test_load_dump_segy(tmp_path, make_hdf5_cube, projections):
     """ Loads SEG-Y file, converts it to hdf5 with specified projections.
     Loads the new hdf5, then dumps it to SEG-Y again and compares it to the original file """
@@ -70,6 +71,6 @@ def test_load_dump_segy(tmp_path, make_hdf5_cube, projections):
     g = SeismicGeometry(hdf5_path)
 
     out_path = os.path.join(tmp_path, 'out.sgy')
-    g.make_sgy(path_hdf5=hdf5_path, path_segy=out_path, from_cubes=projections, zip_result=False, remove_hdf5=True)
+    g.make_sgy(path_hdf5=hdf5_path, path_segy=out_path, zip_result=False, remove_hdf5=False)
 
     compare_segy_files(PATH, out_path)
