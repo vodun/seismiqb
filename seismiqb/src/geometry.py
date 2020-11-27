@@ -817,7 +817,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
 
         self.cube_shape = np.asarray([*self.lens, self.depth])
 
-    def collect_stats(self, spatial=True, bins=25, num_keep=5000, **kwargs):
+    def collect_stats(self, spatial=True, bins=25, num_keep=5000, bar=True, **kwargs):
         """ Pass through file data to collect stats:
             - min/max values.
             - q01/q99 quantiles of amplitudes in the cube.
@@ -846,7 +846,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
         trace_container = []
         value_min, value_max = np.inf, -np.inf
 
-        for i in tqdm(range(num_traces), desc='Finding min/max', ncols=1000):
+        for i in tqdm(range(num_traces), desc='Finding min/max', ncols=1000, disable=(not bar)):
             trace = self.segyfile.trace[i]
 
             trace_min, trace_max = find_min_max(trace)
@@ -871,7 +871,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
 
             # Iterate over traces
             description = f'Collecting stats for {self.name}'
-            for i in tqdm(range(num_traces), desc=description, ncols=1000):
+            for i in tqdm(range(num_traces), desc=description, ncols=1000, disable=(not bar)):
                 trace = self.segyfile.trace[i]
                 header = self.segyfile.header[i]
 
@@ -1168,7 +1168,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
         return crop
 
     # Convert SEG-Y to HDF5
-    def make_hdf5(self, path_hdf5=None, postfix='', unsafe=True, store_meta=True, cubes='ixh'):
+    def make_hdf5(self, path_hdf5=None, postfix='', unsafe=True, store_meta=True, cubes='ixh', bar=True):
         """ Converts `.segy` cube to `.hdf5` format.
 
         Parameters
@@ -1198,7 +1198,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
                 cube_hdf5_h = file_hdf5.create_dataset('cube_h', self.cube_shape[[2, 0, 1]])
 
             # Default projection (ilines, xlines, depth) and depth-projection (depth, ilines, xlines)
-            pbar = tqdm(total=self.cube_shape[0] + self.cube_shape[1], ncols=1000)
+            pbar = tqdm(total=self.cube_shape[0] + self.cube_shape[1], ncols=1000, disable=(not bar))
 
             if 'i' in cubes or 'h' in cubes:
                 pbar.set_description(f'Converting {self.long_name}; ilines projection')
@@ -1222,8 +1222,11 @@ class SeismicGeometrySEGY(SeismicGeometry):
 
         if store_meta:
             if not self.has_stats:
-                self.collect_stats()
-            self.store_meta()
+                self.collect_stats(bar=bar)
+
+            path_meta = os.path.splitext(path_hdf5)[0] + '.meta'
+            self.store_meta(path_meta)
+
 
 
     # Convenient alias
@@ -1259,7 +1262,14 @@ class SeismicGeometryHDF5(SeismicGeometry):
         if hasattr(self, 'lens'):
             self.cube_shape = np.asarray([self.ilines_len, self.xlines_len, self.depth]) # BC
         else:
-            self.cube_shape = self.file_hdf5['cube'].shape
+            if 'cube' in self.file_hdf5:
+                i, x, h = self.file_hdf5['cube'].shape
+            elif 'cube_x' in  self.file_hdf5:
+                x, h, i = self.file_hdf5['cube_x'].shape
+            elif 'cube_h' in  self.file_hdf5:
+                h, i, x = self.file_hdf5['cube_h'].shape
+
+            self.cube_shape = i, x, h
             self.lens = self.cube_shape
         self.has_stats = True
 
