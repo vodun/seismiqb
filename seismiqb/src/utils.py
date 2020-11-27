@@ -1,6 +1,6 @@
 """ Utility functions. """
 from math import isnan
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict
 from threading import RLock
 from functools import wraps
 from hashlib import blake2b
@@ -9,12 +9,12 @@ from tqdm import tqdm
 import numpy as np
 import pandas as pd
 import segyio
+import torch
+import torch.nn.functional as F
 
 from numba import njit, prange
 from ..batchflow import Sampler
 
-import torch
-import torch.nn.functional as F
 
 def file_print(msg, path):
     """ Print to file. """
@@ -82,23 +82,17 @@ class Singleton:
 
 class lru_cache:
     """ Thread-safe least recent used cache. Must be applied to class methods.
+    Adds the `use_cache` argument to the decorated method to control whether the caching logic is applied.
+    Stored values are individual for each instance of the class.
 
     Parameters
     ----------
     maxsize : int
         Maximum amount of stored values.
-    storage : None, OrderedDict or PickleDict
-        Storage to use.
-        If None, then no caching is applied.
-    classwide : bool
-        If True, then first argument of a method (self) is changed to class name for the purposes on hashing.
-    anchor : bool
-        If True, then code of the whole directory this file is located is used to create a persistent hash
-        for the purposes of storing.
     attributes: None, str or sequence of str
         Attributes to get from object and use as additions to key.
-    pickle_module: str
-        Module to use to save/load files on disk. Used only if `storage` is :class:`.PickleDict`.
+    apply_by_default : bool
+        Whether the cache logic is on by default.
 
     Examples
     --------
@@ -113,9 +107,9 @@ class lru_cache:
     All arguments to the decorated method must be hashable.
     """
     #pylint: disable=invalid-name, attribute-defined-outside-init
-    def __init__(self, maxsize=None, classwide=False, attributes=None):
+    def __init__(self, maxsize=None, attributes=None, apply_by_default=True):
         self.maxsize = maxsize
-        self.classwide = classwide
+        self.apply_by_default = apply_by_default
 
         # Make `attributes` always a list
         if isinstance(attributes, str):
@@ -129,68 +123,78 @@ class lru_cache:
         self.lock = RLock()
         self.reset()
 
-
-    def reset(self):
+    def reset(self, instance=None):
         """ Clear cache and stats. """
-        self.cache = OrderedDict()
-        self.is_full = False
-        self.stats = {'hit': 0, 'miss': 0}
+        if instance is None:
+            self.cache = defaultdict(OrderedDict)
+            self.is_full = defaultdict(lambda: False)
+            self.stats = defaultdict(lambda: {'hit': 0, 'miss': 0})
+        else:
+            self.cache[instance] = OrderedDict()
+            self.is_full[instance] = False
+            self.stats[instance] = {'hit': 0, 'miss': 0}
 
-    def make_key(self, args, kwargs):
-        """ Create a key from a combination of instance reference or class reference,
-        method args, and instance attributes.
-        """
-        key = list(args)
-        # key[0] is `instance` if applied to a method
+    def make_key(self, instance, args, kwargs):
+        """ Create a key from a combination of instance reference, method args, and instance attributes. """
+        key = [instance] + list(args)
         if kwargs:
             for k, v in sorted(kwargs.items()):
                 key.append((k, v))
 
         if self.attributes:
             for attr in self.attributes:
-                attr_hash = stable_hash(getattr(key[0], attr))
+                attr_hash = stable_hash(getattr(instance, attr))
                 key.append(attr_hash)
-
-        if self.classwide:
-            key[0] = key[0].__class__
         return tuple(key)
 
 
     def __call__(self, func):
         """ Add the cache to the function. """
         @wraps(func)
-        def wrapper(*args, **kwargs):
-            key = self.make_key(args, kwargs)
+        def wrapper(instance, *args, **kwargs):
+            # Parse the `use_cache`
+            if 'use_cache' in kwargs:
+                use_cache = kwargs.pop('use_cache')
+            else:
+                use_cache = self.apply_by_default
+
+            # Skip the caching logic and evaluate function directly
+            if not use_cache:
+                result = func(instance, *args, **kwargs)
+                return result
+
+            key = self.make_key(instance, args, kwargs)
 
             # If result is already in cache, just retrieve it and update its timings
             with self.lock:
-                result = self.cache.get(key, self.default)
+                result = self.cache[instance].get(key, self.default)
                 if result is not self.default:
-                    del self.cache[key]
-                    self.cache[key] = result
-                    self.stats['hit'] += 1
+                    del self.cache[instance][key]
+                    self.cache[instance][key] = result
+                    self.stats[instance]['hit'] += 1
                     return result
 
             # The result was not found in cache: evaluate function
-            result = func(*args, **kwargs)
+            result = func(instance, *args, **kwargs)
 
             # Add the result to cache
             with self.lock:
-                self.stats['miss'] += 1
-                if key in self.cache:
+                self.stats[instance]['miss'] += 1
+                if key in self.cache[instance]:
                     pass
-                elif self.is_full:
-                    self.cache.popitem(last=False)
-                    self.cache[key] = result
+                elif self.is_full[instance]:
+                    self.cache[instance].popitem(last=False)
+                    self.cache[instance][key] = result
                 else:
-                    self.cache[key] = result
-                    self.is_full = (len(self.cache) >= self.maxsize)
+                    self.cache[instance][key] = result
+                    self.is_full[instance] = (len(self.cache[instance]) >= self.maxsize)
             return result
 
         wrapper.__name__ = func.__name__
         wrapper.cache = lambda: self.cache
         wrapper.stats = lambda: self.stats
         wrapper.reset = self.reset
+        wrapper.reset_instance = lambda instance: self.reset(instance=instance)
         return wrapper
 
 
@@ -309,7 +313,7 @@ def save_point_cloud(metric, save_path, geometry=None):
 
 
 def gen_crop_coordinates(point, horizon_matrix, zero_traces,
-                         stride, shape, fill_value, zeros_threshold=0,
+                         stride, shape, depth, fill_value, zeros_threshold=0,
                          empty_threshold=5, safe_stripe=0, num_points=2):
     """ Generate crop coordinates next to the point with maximum horizon covered area.
 
@@ -355,7 +359,7 @@ def gen_crop_coordinates(point, horizon_matrix, zero_traces,
                 num_empty = np.sum(horizon_patch == fill_value)
                 if num_empty > empty_threshold:
                     candidates.append([il, point[1],
-                                       hor_height - shape[2] // 2])
+                                       min(hor_height - shape[2] // 2, depth - shape[2] - 1)])
                     shapes.append([shape[1], shape[0], shape[2]])
                     orders.append([0, 2, 1])
                     intersections.append(shape[1] - num_empty)
@@ -373,7 +377,7 @@ def gen_crop_coordinates(point, horizon_matrix, zero_traces,
                 num_empty = np.sum(horizon_patch == fill_value)
                 if num_empty > empty_threshold:
                     candidates.append([point[0], xl,
-                                       hor_height - shape[2] // 2])
+                                       min(hor_height - shape[2] // 2, depth - shape[2] - 1)])
                     shapes.append(shape)
                     orders.append([2, 0, 1])
                     intersections.append(shape[1] - num_empty)
@@ -634,6 +638,15 @@ def nb_mode(array, mask):
     return temp
 
 
+def make_gaussian_kernel(kernel_size=3, sigma=1.):
+    """ Create Gaussian kernel with given parameters. """
+    ax = np.linspace(-(kernel_size - 1) / 2., (kernel_size - 1) / 2., kernel_size)
+    x_points, y_points = np.meshgrid(ax, ax)
+    kernel = np.exp(-0.5 * (np.square(x_points) + np.square(y_points)) / np.square(sigma))
+    gaussian_kernel = (kernel / np.sum(kernel).astype(np.float32))
+    return gaussian_kernel
+
+
 @njit
 def filter_simplices(simplices, points, matrix, threshold=5.):
     """ Remove simplices outside of matrix. """
@@ -719,7 +732,7 @@ def attr_filter(array, result, window, stride, points, attribute='semblance'):
             result[i // stride[0], j // stride[1], k // stride[2]] = val
     return result
 
-def attr_filter_gpu(array, window, device='cuda:0', attribute='semblance'):
+def attr_filter_gpu(array, window, stride, device='cuda:0', attribute='semblance'):
     """ Compute semblance for the cube. """
     inputs = torch.Tensor(array).to(device)
     inputs = inputs.view(1, 1, *inputs.shape)
@@ -741,7 +754,8 @@ def attr_filter_gpu(array, window, device='cuda:0', attribute='semblance'):
                            window[0] // 2, window[0] - window[0] // 2 - 1,
                            0, 0,
                            0, 0))
-    denum = F.conv3d(denum ** 2, torch.ones((1, 1, window[0], window[1], window[2]), dtype=torch.float32).to(device)) * window[0] * window[1]
+    denum = F.conv3d(denum ** 2, torch.ones((1, 1, window[0], window[1], window[2]), dtype=torch.float32).to(device))
+    denum *= window[0] * window[1]
     return np.nan_to_num((num / denum).cpu().numpy()[0, 0], nan=1.)
 
 @njit

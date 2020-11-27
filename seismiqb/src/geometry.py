@@ -368,7 +368,7 @@ class SeismicGeometry:
             method = self.load_slide
         else:
             method = self._cached_load
-        method.reset()
+        method.reset(instance=self)
 
     @property
     def cache_length(self):
@@ -378,7 +378,7 @@ class SeismicGeometry:
         else:
             method = self._cached_load
 
-        return len(method.cache())
+        return len(method.cache()[self])
 
     @property
     def cache_size(self):
@@ -388,7 +388,7 @@ class SeismicGeometry:
         else:
             method = self._cached_load
 
-        return sum(item.nbytes / (1024 ** 3) for item in method.cache().values())
+        return sum(item.nbytes / (1024 ** 3) for item in method.cache()[self].values())
 
     @property
     def nbytes(self):
@@ -433,6 +433,11 @@ class SeismicGeometry:
             """
         return dedent(msg)
 
+    @property
+    def axis_names(self):
+        """ Names of the axis: multiple headers and `DEPTH` as the last one. """
+        return self.index_headers + ['DEPTH']
+
     def log(self, printer=None):
         """ Log info about cube into desired stream. By default, creates a file next to the cube. """
         if not callable(printer):
@@ -453,7 +458,8 @@ class SeismicGeometry:
         matrix = np.log(self.mean_matrix**2 / self.std_matrix**2)
         plot_image(matrix, mode='single', **kwargs)
 
-    def show_slide(self, loc=None, start=None, end=None, step=1, axis=0, zoom_slice=None, stable=True, **kwargs):
+    def show_slide(self, loc=None, start=None, end=None, step=1, axis=0, zoom_slice=None,
+                   n_ticks=5, delta_ticks=100, stable=True, **kwargs):
         """ Show seismic slide in desired place. Works with both SEG-Y and HDF5 files.
 
         Parameters
@@ -481,16 +487,38 @@ class SeismicGeometry:
 
         # Plot params
         if len(self.index_headers) > 1:
-            title = f'{self.index_headers[axis]} {loc} out of {self.lens[axis]}'
+            title = f'{self.axis_names[axis]} {loc} out of {self.cube_shape[axis]}'
+
+            if axis in [0, 1]:
+                xlabel = self.index_headers[1 - axis]
+                ylabel = 'DEPTH'
+            else:
+                xlabel = self.index_headers[0]
+                ylabel = self.index_headers[1]
         else:
             title = '2D seismic slide'
+            xlabel = self.index_headers[0]
+            ylabel = 'DEPTH'
+
+        xticks = xticks[::max(1, round(len(xticks) // (n_ticks - 1) / delta_ticks)) * delta_ticks] + [xticks[-1]]
+        xticks = sorted(list(set(xticks)))
+        yticks = yticks[::max(1, round(len(xticks) // (n_ticks - 1) / delta_ticks)) * delta_ticks] + [yticks[-1]]
+        yticks = sorted(list(set(yticks)), reverse=True)
+
+        if (xticks[-1] - xticks[-2]) < delta_ticks:
+            xticks.pop(-2)
+        if (yticks[0] - yticks[1]) < delta_ticks:
+            yticks.pop(1)
+
         kwargs = {
             'title': title,
-            'xlabel': self.index_headers[1 - axis] if len(self.index_headers) > 1 else self.index_headers[0],
-            'ylabel': 'depth',
+            'xlabel': xlabel,
+            'ylabel': ylabel,
             'cmap': 'gray',
-            'xticks': xticks[::max(1, round(len(xticks)//10/100))*100],
-            'yticks': yticks[::max(1, round(len(yticks)//10/100))*100][::-1],
+            'xticks': xticks,
+            'yticks': yticks,
+            'labeltop': False,
+            'labelright': False,
             **kwargs
         }
         plot_image(slide, mode='single', **kwargs)
@@ -601,7 +629,7 @@ class SeismicGeometry:
         np.ndarray
             array of the shape corresponding to locations
         """
-        cube_keys, axes = projection_transformations()
+        _, axes = projection_transformations()
         if 'cube' in self.file_hdf5:
             cube_name = 'cube'
             projection = 'i'
@@ -1273,7 +1301,6 @@ class SeismicGeometryHDF5(SeismicGeometry):
             Identificator of the axis to use to load data.
             Can be `iline`, `xline`, `height`, `depth`, `i`, `x`, `h`, 0, 1, 2.
         """
-        _ = kwargs
         if axis is None:
             shape = np.array([(slc.stop - slc.start) for slc in locations])
             indices = np.argsort(shape)
@@ -1288,40 +1315,40 @@ class SeismicGeometryHDF5(SeismicGeometry):
             axis = mapping[axis]
 
         if axis == 1:
-            crop = self._load_x(*locations)
+            crop = self._load_x(*locations, **kwargs)
         elif axis == 2:
-            crop = self._load_h(*locations)
+            crop = self._load_h(*locations, **kwargs)
         else: # backward compatibility
-            crop = self._load_i(*locations)
+            crop = self._load_i(*locations, **kwargs)
         return crop
 
-    def _load_i(self, ilines, xlines, heights):
+    def _load_i(self, ilines, xlines, heights, **kwargs):
         cube_hdf5 = self.file_hdf5['cube']
-        return np.stack([self._cached_load(cube_hdf5, iline)[xlines, :][:, heights]
+        return np.stack([self._cached_load(cube_hdf5, iline, **kwargs)[xlines, :][:, heights]
                         for iline in range(ilines.start, ilines.stop)])
 
-    def _load_x(self, ilines, xlines, heights):
+    def _load_x(self, ilines, xlines, heights, **kwargs):
         cube_hdf5 = self.file_hdf5['cube_x']
-        return np.stack([self._cached_load(cube_hdf5, xline)[heights, :][:, ilines].transpose([1, 0])
+        return np.stack([self._cached_load(cube_hdf5, xline, **kwargs)[heights, :][:, ilines].transpose([1, 0])
                          for xline in range(xlines.start, xlines.stop)], axis=1)
 
-    def _load_h(self, ilines, xlines, heights):
+    def _load_h(self, ilines, xlines, heights, **kwargs):
         cube_hdf5 = self.file_hdf5['cube_h']
-        return np.stack([self._cached_load(cube_hdf5, height)[ilines, :][:, xlines]
+        return np.stack([self._cached_load(cube_hdf5, height, **kwargs)[ilines, :][:, xlines]
                          for height in range(heights.start, heights.stop)], axis=2)
 
     @lru_cache(128)
-    def _cached_load(self, cube, loc, axis=0):
+    def _cached_load(self, cube, loc, axis=0, **kwargs):
         """ Load one slide of data from a certain cube projection.
         Caches the result in a thread-safe manner.
         """
+        _ = kwargs
         slc = [slice(None), slice(None), slice(None)]
         slc[axis] = loc
         return cube[slc[0], slc[1], slc[2]]
 
     def load_slide(self, loc, axis='iline', **kwargs):
         """ Load desired slide along desired axis. """
-        _ = kwargs
         axis = self.parse_axis(axis)
         mapping = {0: 'cube', 1: 'cube_x', 2: 'cube_h'}
         load_axis = {
@@ -1332,7 +1359,7 @@ class SeismicGeometryHDF5(SeismicGeometry):
 
         if mapping[axis] in self.file_hdf5:
             cube = self.file_hdf5[mapping[axis]]
-            slide = self._cached_load(cube, loc)
+            slide = self._cached_load(cube, loc, **kwargs)
             if mapping[axis] == 'cube_x':
                 slide = slide.T
         else:
@@ -1344,7 +1371,7 @@ class SeismicGeometryHDF5(SeismicGeometry):
             else:
                 cube_name = mapping[axis_2]
             cube = self.file_hdf5[cube_name]
-            slide = self._cached_load(cube, loc, load_axis[axis][cube_name])
+            slide = self._cached_load(cube, loc, load_axis[axis][cube_name], **kwargs)
             if cube_name == 'cube_x' and axis != 0 or cube_name == 'cube_h' and axis == 2:
                 slide = slide.T
 

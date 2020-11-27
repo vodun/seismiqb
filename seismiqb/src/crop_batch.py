@@ -149,7 +149,7 @@ class SeismicCropBatch(Batch):
         adaptive_slices: bool or str
             If True, then slices are created so that crops are cut only along the grid.
         grid_src : str
-            Attribut of geometry to get the grid from.
+            Attribute of geometry to get the grid from.
         eps : int
             Initial length of slice, that is used to find the closest grid point.
         dst : str, optional
@@ -357,10 +357,16 @@ class SeismicCropBatch(Batch):
         -----
         Can be run only after labels-dict is loaded into labels-component.
         """
+        location = self.get(ix, src)
+        shape_ = self.get(ix, 'shapes')
+        mask = np.zeros((shape_), dtype='float32')
+
         labels = self.get(ix, src_labels) if isinstance(src_labels, str) else src_labels
         labels = [labels] if not isinstance(labels, (tuple, list)) else labels
-        check_sum = False
+        if len(labels) == 0:
+            return mask
 
+        check_sum = False
         if indices in [-1, 'all']:
             indices = np.arange(0, len(labels))
         elif indices in [1, 'single']:
@@ -373,10 +379,6 @@ class SeismicCropBatch(Batch):
             pass
         labels = [labels[idx] for idx in indices]
 
-        location = self.get(ix, src)
-        shape_ = self.get(ix, 'shapes')
-        mask = np.zeros((shape_), dtype='float32')
-
         for label in labels:
             mask = label.add_to_mask(mask, locations=location, width=width)
             if check_sum and np.sum(mask) > 0.0:
@@ -385,7 +387,31 @@ class SeismicCropBatch(Batch):
 
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def compute_attr(self, ix, dst, src='images', attribute='semblance', window=10, stride=1, axis=-1, mode='numba'):
+    def compute_attr(self, ix, dst, src='images', attribute='semblance', window=10, stride=1, device='cpu'):
+        """ Compute geological attribute.
+
+        Parameters
+        ----------
+        dst : str
+            Destination batch component
+        src : str, optional
+            Source batch component, by default 'images'
+        attribute : str, optional
+            Attribute to compute, by default 'semblance'
+        window : int or tuple, optional
+            Window to compute attribute, by default 10 (for each axis)
+        stride : int, optional
+            Stride for windows, by default 1 (for each axis)
+        axis : int, optional
+            [description], by default -1
+        device : str, optional
+            Device to compute attribute, by default 'cpu'
+
+        Returns
+        -------
+        SeismicCropBatch
+            Batch with loaded masks in desired components.
+        """
         image = self.get(ix, src)
         if isinstance(window, int):
             window = np.ones(3, dtype=np.int32) * window
@@ -393,11 +419,13 @@ class SeismicCropBatch(Batch):
             stride = np.ones(3, dtype=np.int32) * stride
         window = np.minimum(np.array(window), image.shape)
         result = np.zeros_like(image)
-        if mode == 'numba':
+        if mode == 'cpu':
             points = np.stack(np.meshgrid(*[range(image.shape[i]) for i in range(3)]), axis=-1).reshape(-1, 3)
-            return attr_filter(image, result, window, stride, points, attribute)
+            result = attr_filter(image, result, window, stride, points, attribute)
         else:
-            return attr_filter_gpu(image, window)
+            mode = mode.replace('gpu', 'cuda')
+            result = attr_filter_gpu(image, window, stride, mode, attribute)
+        return result
 
     @action
     @inbatch_parallel(init='indices', post='_post_mask_rebatch', target='for',
@@ -431,7 +459,7 @@ class SeismicCropBatch(Batch):
             raise SkipBatchException
 
         passdown = passdown or []
-        passdown.extend([src, 'locations'])
+        passdown.extend([src, 'locations', 'shapes'])
         passdown = list(set(passdown))
 
         for compo in passdown:
