@@ -440,10 +440,10 @@ class SeismicCubeset(Dataset):
         xlines : sequence of two int
             Location of desired prediction, xline-wise.
             If None, whole cube ranges will be used.
-        heights : sequence of two int or int
+        heights : sequence of two int or a single number
             If sequence, location of desired prediction, depth-wise.
-            If int, a height to make grid along when `mode` is '2d'. Note that
-            in this case height will be corrected by half of crop height.
+            If single number, a height to make grid along when `mode` is '2d'.
+            In this case height will be corrected by half of crop height.
             If None, whole cube ranges will be used.
         mode : '3d' or '2d'
             Mode to generate grid coordinates.
@@ -472,7 +472,7 @@ class SeismicCubeset(Dataset):
             be computed.
         """
         if mode == '2d':
-            if isinstance(heights, int):
+            if isinstance(heights, (int, float)):
                 height = int(heights) - crop_shape[2] // 2 # start for heights slices made by `crop` action
                 heights = (height, height + 1)
             else:

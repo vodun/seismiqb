@@ -62,7 +62,10 @@ class IndexedDict(OrderedDict):
             key = list(self.keys())[key]
         return super().__getitem__(key)
 
-
+class HashableDict(dict):
+    """ Dict with redefined hash to allow using it as a key. """
+    def __hash__(self):
+        return hash(tuple(sorted(self.items())))
 
 def stable_hash(key):
     """ Hash that stays the same between different runs of Python interpreter. """
@@ -152,6 +155,14 @@ class lru_cache:
 
         if self.classwide:
             key[0] = key[0].__class__
+
+        for index, item in enumerate(key):
+            if isinstance(item, dict):
+                key[index] = HashableDict(item)
+            if isinstance(item, tuple) and len(item) == 2:
+                if isinstance(item[1], dict):
+                    key[index] = (item[0], HashableDict(item[1]))
+
         return tuple(key)
 
 

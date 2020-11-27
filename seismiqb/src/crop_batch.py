@@ -28,6 +28,7 @@ class SeismicCropBatch(Batch):
         'target': 'for',
         'post': '_assemble'
     }
+    # When an attribute containing one of keywords from list it accessed via `get`, firstly search it in `self.dataset`.
     DATASET_ATTRIBUTES = ['label', 'geom', 'fan', 'channel']
 
 
@@ -318,7 +319,7 @@ class SeismicCropBatch(Batch):
 
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def load_attribute(self, ix, dst, src_attribute, src_labels='labels',
+    def load_attribute(self, ix, dst, src_attribute=None, src_labels='labels',
                        locations='locations', final_ndim=3, **kwargs):
         """Load attribute for depth-nearest label and crop in given locations.
 
@@ -348,7 +349,7 @@ class SeismicCropBatch(Batch):
         """
         location = self.get(ix, locations)
         nearest_horizon = self.get_nearest_horizon(ix, src_labels, location[2])
-        crop = nearest_horizon.get_attribute(src_attribute, location, **kwargs)
+        crop = nearest_horizon.load_attribute(src_attribute, location, **kwargs)
         if final_ndim == 3 and crop.ndim == 2:
             crop = crop[..., np.newaxis]
         elif final_ndim != crop.ndim:
@@ -359,7 +360,7 @@ class SeismicCropBatch(Batch):
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
     def create_masks(self, ix, dst, src_labels='labels', locations='locations',
-                     use_labels='all', mode='auto', thicken=3):
+                     use_labels='all', mode='auto', width=3):
         """ Create masks from labels-dictionary in given positions.
 
         Parameters
@@ -381,7 +382,7 @@ class SeismicCropBatch(Batch):
             Whether squeeze mask into single dimension along depth axis or not.
             If kept default, being automatically set according to `use_labels`:
             '2d' if 'nearest' and '3d' else. Defaults to 'auto'.
-        thicken : int
+        width : int
             How much to thicken the horizon when `mode` is '3d'.
 
         Returns
@@ -413,7 +414,7 @@ class SeismicCropBatch(Batch):
         mask = np.zeros((crop_shape), dtype='float32')
 
         for label in labels:
-            mask = label.add_to_mask(mask, locations=location, width=thicken, mode=mode)
+            mask = label.add_to_mask(mask, locations=location, width=width, mode=mode)
             if use_labels == 'single' and np.sum(mask) > 0.0:
                 break
         return mask
