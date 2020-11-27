@@ -7,7 +7,8 @@ import numpy as np
 
 from seismiqb import SeismicGeometry
 
-PATH = "/data/acquisition_footprints/7-2_ftp_input.sgy"
+PATH = os.path.join(os.path.dirname(os.path.realpath(__file__)),
+                    "../../../datasets/demo_data/CUBE_30_SCHLUM/Schlumberger_800_SLB_Force_Fault_Model_BlockId.segy")
 
 def compare_segy_files(path_1, path_2):
     """ Checks that two SEG-Y files contain exactly same traces
@@ -41,22 +42,34 @@ def compare_segy_files(path_1, path_2):
         assert np.allclose(s1, s2)
 
 
-@pytest.mark.slow
-@pytest.mark.parametrize("cubes", [
-    # 'ixh',
-    'i',
-    'x', 'h'
-])
-def test_load_dump_segy(tmp_path, cubes):
-    """ Loads SEG-Y file, converts it to hdf5 with specified cubes,
-    then dumps to SEG-Y again and compares it to the original file """
-    g = SeismicGeometry(PATH)
+@pytest.fixture(scope='module')
+def make_hdf5_cube(tmp_path_factory):
+    """ Creates hdf5 files with cubes in specified projections to use in hdf5-related tests """
+    cubes = {}
 
-    hdf5_path = os.path.join(tmp_path, 'tmp.hdf5')
-    g.make_hdf5(hdf5_path, store_meta=False, cubes=cubes)
+    def _make_cube(projection):
+        if projection not in cubes:
+            g = SeismicGeometry(PATH)
+
+            hdf5_path = os.path.join(tmp_path_factory.mktemp('cubes'), projection + '.hdf5')
+            g.make_hdf5(hdf5_path, store_meta=True, cubes=projection, bar=False)
+
+            cubes[projection] = hdf5_path
+
+        return cubes[projection]
+
+    return _make_cube
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("projections", ['ixh', 'i', 'x', 'h'])
+def test_load_dump_segy(tmp_path, make_hdf5_cube, projections):
+    """ Loads SEG-Y file, converts it to hdf5 with specified projections.
+    Loads the new hdf5, then dumps it to SEG-Y again and compares it to the original file """
+    hdf5_path = make_hdf5_cube(projections)
+    g = SeismicGeometry(hdf5_path)
 
     out_path = os.path.join(tmp_path, 'out.sgy')
-
-    g.make_sgy(path_hdf5=hdf5_path, path_segy=out_path, from_cubes=cubes, zip_result=False, remove_hdf5=True)
+    g.make_sgy(path_hdf5=hdf5_path, path_segy=out_path, from_cubes=projections, zip_result=False, remove_hdf5=True)
 
     compare_segy_files(PATH, out_path)
