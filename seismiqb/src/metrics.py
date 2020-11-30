@@ -653,6 +653,10 @@ class HorizonMetrics(BaseSeismicMetric):
         phase_slice -= avg[0][0]
         phase_slice[phase_slice >= np.pi] -= 2 * np.pi
 
+        if np.nanmin(phase_slice) < -np.pi:
+            phase_slice[phase_slice < -np.pi] += 2 * np.pi
+        if np.nanmax(phase_slice) > np.pi:
+            phase_slice[phase_slice > np.pi] -= 2 * np.pi
 
         plot_dict = {
             'spatial': self.spatial,

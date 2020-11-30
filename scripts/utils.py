@@ -71,23 +71,6 @@ def make_config(description, args, filename, show=True):
     return config
 
 
-def save_point_cloud(metric, save_path, geometry=None):
-    """ Save 2D metric map as a .txt point cloud. Can be opened by GENERAL format reader in geological software. """
-    idx_1, idx_2 = np.asarray(~np.isnan(metric)).nonzero()
-    points = np.hstack([idx_1.reshape(-1, 1),
-                        idx_2.reshape(-1, 1),
-                        metric[idx_1, idx_2].reshape(-1, 1)])
-
-    if geometry is not None:
-        points[:, 0] += geometry.ilines_offset
-        points[:, 1] += geometry.xlines_offset
-
-    df = pd.DataFrame(points, columns=['iline', 'xline', 'metric_value'])
-    df.sort_values(['iline', 'xline'], inplace=True)
-    df.to_csv(save_path, sep=' ', columns=['iline', 'xline', 'metric_value'],
-              index=False, header=False)
-
-
 def safe_mkdir(path):
     """ Make directory, if it does not exists. """
     try:
