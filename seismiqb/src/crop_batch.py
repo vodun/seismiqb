@@ -377,7 +377,7 @@ class SeismicCropBatch(Batch):
 
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def create_masks(self, ix, dst, src_labels='labels', locations='locations',
+    def create_masks(self, ix, dst, src_labels='labels', src_locations='locations',
                      use_labels='all', mode='auto', width=3):
         """ Create masks from labels-dictionary in given positions.
 
@@ -387,13 +387,13 @@ class SeismicCropBatch(Batch):
             Component of batch to put loaded masks in.
         src_labels : str
             Dataset attribute with labels dict.
-        locations : str
+        src_locations : str
             Component of batch that stores locations of crops.
         use_labels : str, int or sequence of ints
             Which labels to use in mask creation.
             If 'all', use all labels.
             If 'single', use one random label.
-            If 'nearest', use one label closest to height from `locations`.
+            If 'nearest', use one label closest to height from `src_locations`.
             If int or array-like then element(s) are interpreted as indices of
             desired labels and must be ints in range [0, len(horizons) - 1].
         mode : '2d' or '3d'
@@ -412,7 +412,7 @@ class SeismicCropBatch(Batch):
         -----
         Can be run only after labels-dict is loaded into labels-component.
         """
-        location = self.get(ix, src)
+        location = self.get(ix, src_locations)
         shape_ = self.get(ix, 'shapes')
         mask = np.zeros((shape_), dtype='float32')
 
@@ -422,8 +422,6 @@ class SeismicCropBatch(Batch):
             return mask
 
         use_labels = [use_labels] if isinstance(use_labels, int) else use_labels
-
-        location = self.get(ix, locations)
 
         if isinstance(use_labels, (tuple, list, np.ndarray)):
             labels = [labels[idx] for idx in use_labels]

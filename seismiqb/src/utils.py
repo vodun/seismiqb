@@ -102,6 +102,7 @@ class lru_cache:
     Notes
     -----
     All arguments to the decorated method must be hashable.
+    Class defining decorated attribute must have `_cached_attributes` attribute, to allow tracking cached methods.
     """
     #pylint: disable=invalid-name, attribute-defined-outside-init
     def __init__(self, maxsize=None, attributes=None, apply_by_default=True):
@@ -149,6 +150,8 @@ class lru_cache:
         """ Add the cache to the function. """
         @wraps(func)
         def wrapper(instance, *args, **kwargs):
+            # pylint: disable=protected-access
+            instance._cached_attributes.add(func.__name__)
             # Parse the `use_cache`
             if 'use_cache' in kwargs:
                 use_cache = kwargs.pop('use_cache')

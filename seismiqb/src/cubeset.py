@@ -3,6 +3,7 @@
 import os
 from glob import glob
 from warnings import warn
+from collections import Sequence, defaultdict
 import contextlib
 
 import numpy as np
@@ -55,7 +56,7 @@ class SeismicCubeset(Dataset):
 
         self.grid_gen, self.grid_info, self.grid_iters = None, None, None
         self.shapes_gen, self.orders_gen = None, None
-        self.cached_attributes = ['geometries']
+        self._cached_attributes = {'geometries'}
 
 
     @classmethod
@@ -121,6 +122,52 @@ class SeismicCubeset(Dataset):
             if logs:
                 self.geometries[ix].log()
 
+
+    def load_corresponding_labels(self, correspondence, labels_dirs, dst_labels, main_labels, **kwargs):
+        """ Load corresponding labels into corresponding dataset attributes.
+
+        Parameters
+        ----------
+        correspondence : dict
+            Correspondence between cube name and a list of patterns for its labels.
+        labels_dirs : sequence
+            Paths to folders to look corresponding labels with patterns from `correspondence` values for.
+            Paths must be relative to cube location.
+        dst_labels : sequence
+            Names of dataset components to load corresponding labels into.
+        main_labels : str
+            Which dataset attribute assign to `self.labels`.
+        kwargs :
+            For `SeismicCubeset.create_labels`.
+
+        Examples
+        --------
+        The following argument values may be used to load for labels for 'CUBE_01_XXX':
+        - from 'INPUTS/FACIES/FANS_HORIZONS/horizon_01_corrected.char' into `horizons` component;
+        - from 'INPUTS/FACIES/FANS/fans_on_horizon_01_corrected_v8.char' into `fans` component,
+        and assign `self.horizons` to `self.labels`.
+
+        >>> correspondence = {'CUBE_01_XXX' : ['horizon_01']}
+        >>> labels_dirs = ['INPUTS/FACIES/FANS_HORIZONS', 'INPUTS/FACIES/FANS']
+        >>> dst_labels = ['horizons', 'fans']
+        >>> main_labels = 'horizons'
+        """
+        self.load_geometries()
+        for label_dir, dst_label in zip(labels_dirs, dst_labels):
+            paths_txt = defaultdict(list)
+            for cube_name, labels in correspondence.items():
+                full_cube_name = f"amplitudes_{cube_name}"
+                cube_dir = '/'.join(self.index.get_fullpath(full_cube_name).split('/')[:-1])
+                for label in labels:
+                    label_mask = '/'.join([cube_dir, label_dir, f"*{label}"])
+                    label_path = glob(label_mask)
+                    if len(label_path) > 1:
+                        raise ValueError('Multiple files match pattern')
+                    paths_txt[full_cube_name].append(label_path[0])
+            self.create_labels(paths=paths_txt, dst=dst_label, labels_class=Horizon, **kwargs)
+        self.labels = getattr(self, main_labels)
+
+
     def convert_to_hdf5(self, postfix=''):
         """ Converts every cube in dataset from `.segy` to `.hdf5`. """
         for ix in self.indices:
@@ -160,11 +207,11 @@ class SeismicCubeset(Dataset):
             if filter_zeros:
                 _ = [getattr(item, 'filter')() for item in label_list]
             getattr(self, dst)[ix] = [item for item in label_list if len(item.points) > 0]
-            self.cached_attributes.append(dst)
+            self._cached_attributes.add(dst)
 
 
-    def reset_caches(self, attrs=None, cubes=None):
-        """Reset lru cache for class attributes.
+    def reset_caches(self, attrs=None):
+        """Reset lru cache for cached class attributes.
 
         Parameters
         ----------
@@ -172,17 +219,13 @@ class SeismicCubeset(Dataset):
             Class attributes to reset cache in.
             If None, reset in `geometries` and attrs added by `create_labels`.
             Defaults to None.
-        cubes : sequence
-            Cube names to reset cache in `attrs` for.
-            If None, reset for all cubes of the dataset.
-            Defaults to None.
         """
-        attrs = attrs or self.cached_attributes
-        cubes = cubes or self.indices
+        attrs = attrs or self._cached_attributes
         for attr in attrs:
-            for cube in cubes:
+            # import pdb;pdb.set_trace()
+            for cube in self.indices:
                 cached_attr = getattr(self, attr)[cube]
-                cached_attr = cached_attr if isinstance(cached_attr, list) else [cached_attr]
+                cached_attr = cached_attr if isinstance(cached_attr, Sequence) else [cached_attr]
                 _ = [item.reset_cache() for item in cached_attr]
 
 
@@ -453,7 +496,8 @@ class SeismicCubeset(Dataset):
 
 
     def make_grid(self, cube_name, crop_shape, ilines=None, xlines=None, heights=None, mode='3d',
-                  strides=None, overlap_factor=None, batch_size=16, filtering_matrix=None, filter_threshold=0):
+                  strides=None, overlap=None, overlap_factor=None,
+                  batch_size=16, filtering_matrix=None, filter_threshold=0):
         """ Create regular grid of points in cube.
         This method is usually used with `SeismicCropBatch.assemble_predict`.
 
@@ -480,6 +524,8 @@ class SeismicCubeset(Dataset):
             If '2d', on area defined by `ilines`, `xlines`.
             Defaults to '3d'.
         strides : float or sequence
+            Distance between grid points.
+        overlap : float or sequence
             Distance between grid points.
         overlap_factor : float or sequence
             Overlapping ratio of successive crops.

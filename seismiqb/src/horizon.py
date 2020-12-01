@@ -2,7 +2,6 @@
 #pylint: disable=too-many-lines, import-error
 import os
 from copy import copy
-from warnings import warn
 from textwrap import dedent
 from itertools import product
 
@@ -21,7 +20,8 @@ from skimage.measure import label
 import plotly
 import plotly.figure_factory as ff
 
-from .utils import round_to_array, groupby_mean, groupby_min, groupby_max, HorizonSampler, filter_simplices, lru_cache, make_gaussian_kernel
+from .utils import round_to_array, groupby_mean, groupby_min, groupby_max, HorizonSampler, filter_simplices, lru_cache
+from .utils import make_gaussian_kernel
 from .plotters import plot_image
 
 
@@ -369,6 +369,9 @@ class Horizon:
 
     # Value to place into blank spaces
     FILL_VALUE = -999999
+
+    # Keep track of class attributes decorated by `lru_cache`
+    _cached_attributes = set()
 
     def __init__(self, storage, geometry, name=None, dtype=np.int32, **kwargs):
         # Meta information
@@ -975,8 +978,9 @@ class Horizon:
         arr[np.where(~mask)] = normalize.get('fill_value', np.nan)
         return arr
 
-
-    def get_cube_values(self, window=23, offset=0, chunk_size=256, nan_zero_traces=True, normalize=False):
+    @lru_cache(1)
+    def get_cube_values(self, window=23, offset=0, chunk_size=256, nan_zero_traces=True,
+                        normalize=False, use_cache=False):
         """ Get values from the cube along the horizon.
 
         Parameters
@@ -1033,11 +1037,8 @@ class Horizon:
         return self.normalize_by_binary_matrix(background, normalize)
 
 
-    # Cached version of `get_cube_values`.
-    cached_get_cube_values = lru_cache(MAX_CACHE_SIZE)(get_cube_values)
-
-
-    def get_instantaneous_amplitude(self, window=23, depths='mid', normalize=False, **kwargs):
+    @lru_cache(1)
+    def get_instantaneous_amplitude(self, window=23, depths='mid', normalize=False, use_cache=False, **kwargs):
         """ Calculate instantaneous amplitude along the horizon.
 
         Parameters
@@ -1073,11 +1074,8 @@ class Horizon:
         return self.normalize_by_binary_matrix(result, normalize)
 
 
-    # Cached version of `get_instantaneous_amplitude`.
-    cached_get_instantaneous_amplitude = lru_cache(MAX_CACHE_SIZE)(get_instantaneous_amplitude)
-
-
-    def get_instantaneous_phase(self, window=23, depths=slice(None), normalize=False, **kwargs):
+    @lru_cache(1)
+    def get_instantaneous_phase(self, window=23, depths=slice(None), normalize=False, use_cache=False, **kwargs):
         """ Calculate instantaneous phase along the horizon.
 
         Parameters
@@ -1113,11 +1111,8 @@ class Horizon:
         return self.normalize_by_binary_matrix(result, normalize)
 
 
-    # Cached version of `get_instantaneous_phase`.
-    cached_get_instantaneous_phase = lru_cache(MAX_CACHE_SIZE)(get_instantaneous_phase)
-
-
-    def get_full_matrix(self, normalize=False):
+    @lru_cache(1)
+    def get_full_matrix(self, normalize=False, use_cache=False):
         """ Transform `matrix` attribute to match cubic coordinates.
 
         Parameters
@@ -1127,10 +1122,6 @@ class Horizon:
         """
         matrix = self.put_on_full()
         return self.normalize_by_binary_matrix(matrix, normalize)
-
-
-    # Cached version of `get_full_matrix`
-    cached_get_full_matrix = lru_cache(MAX_CACHE_SIZE)(get_full_matrix)
 
 
     def load_attribute(self, src_attribute, location=(slice(None), slice(None), slice(None)), **kwargs):
@@ -1171,21 +1162,23 @@ class Horizon:
 
         >>> Pipeline().load_attribute('cube_values', dst='amplitudes')
         """
-        func_by_attr = {'cube_values' : 'cached_get_cube_values',
-                        'amplitudes' : 'cached_get_cube_values',
-                        'heights' : 'cached_get_full_matrix',
-                        'metrics' : 'cached_metrics_evaluate',
-                        'instant_phase' : 'cached_get_instantaneous_phase',
-                        'instant_amplitude' : 'cached_get_instantaneous_amplitude'}
+        func_by_attr = {'cube_values' : 'get_cube_values',
+                        'amplitudes' : 'get_cube_values',
+                        'heights' : 'get_full_matrix',
+                        'metrics' : 'metrics_evaluate',
+                        'instant_phase' : 'get_instantaneous_phase',
+                        'instant_amplitude' : 'get_instantaneous_amplitude'}
 
         x_slice, i_slice, h_slice = location
         if src_attribute == 'cube_values':
             kwargs = {
+                'nan_zero_traces': False,
                 # `window` arg for `get_cube_values` can be infered from `h_slice`
                 **({'window': h_slice.stop - h_slice.start} if h_slice != slice(None) else {}),
-                **{'nan_zero_traces': False},
-                **kwargs # if `window` or `nan_zero_kwargs` passed, they overwrite defaults and infered ones
+                # if `nan_zero_kwargs` or `window` passed in original `kwargs`, they overwrite defaults and infered ones
+                **kwargs
             }
+        kwargs = {'use_cache': True, **kwargs}
 
         func_name = func_by_attr.get(src_attribute)
         if func_name is None:
@@ -1494,8 +1487,9 @@ class Horizon:
         return None
 
 
-    @lru_cache(MAX_CACHE_SIZE)
-    def cached_metrics_evaluate(self, normalize=False, metric='support_corrs', supports=50, agg='nanmean', **kwargs):
+    @lru_cache(1)
+    def metrics_evaluate(self, normalize=False, metric='support_corrs', supports=50, agg='nanmean',
+                         use_cache=False, **kwargs):
         """ Cached metrics calcucaltion with disabled plotting option.
 
         Parameters
@@ -2230,9 +2224,8 @@ class Horizon:
 
     def reset_cache(self):
         """ Clear cached data. """
-        for attr in dir(self):
-            if attr.startswith('cached_'):
-                getattr(self, attr).reset()
+        for attr in self._cached_attributes:
+            getattr(self, attr).reset_instance(self)
 
 
     def __copy__(self):
