@@ -17,8 +17,7 @@ import cv2
 from scipy.ndimage import zoom
 
 from .utils import lru_cache, find_min_max, file_print, \
-                   SafeIO, attr_filter, attr_filter_gpu, make_axis_grid, infer_tuple,\
-                   projection_transformations
+                   SafeIO, attr_filter, attr_filter_gpu, make_axis_grid, infer_tuple
 from .plotters import plot_image
 
 
@@ -141,6 +140,9 @@ class SeismicGeometry:
     INDEX_PRE = ['FieldRecord', 'TraceNumber']
     INDEX_POST = ['INLINE_3D', 'CROSSLINE_3D']
     INDEX_CDP = ['CDP_Y', 'CDP_X']
+
+    CUBE_PROJECTIONS = {'i': 'cube', 'x': 'cube_x', 'h': 'cube_h'}
+    PROJECTION_AXES = {'i': [0, 1, 2], 'x': [1, 2, 0], 'h': [2, 0, 1]}
 
     def __new__(cls, path, *args, **kwargs):
         """ Select the type of geometry based on file extension. """
@@ -629,7 +631,7 @@ class SeismicGeometry:
         np.ndarray
             array of the shape corresponding to locations
         """
-        _, axes = projection_transformations()
+        axes = self.PROJECTION_AXES
         if 'cube' in self.file_hdf5:
             cube_name = 'cube'
             projection = 'i'
@@ -687,16 +689,18 @@ class SeismicGeometry:
         ----------
         path_hdf5 : str
 
-        src : np.ndarray or str
-            if `str`, must be a name of the attribute to compute.
+        src : np.ndarray, iterable or str
+            If `str`, must be a name of the attribute to compute.
+            If 'iterable, items must be tuples (coord of chunk, chunk).
         chunk_shape : int, tuple or None
-            shape of chunks.
+            Shape of chunks.
         stride : int
-            stride for chunks
+            Stride for chunks.
         pbar : bool
-            progress bar
+            Progress bar.
         """
-        cube_keys, axes = projection_transformations()
+        cube_keys = self.CUBE_PROJECTIONS
+        axes = self.PROJECTION_AXES
 
         chunks = []
 
@@ -1202,7 +1206,8 @@ class SeismicGeometrySEGY(SeismicGeometry):
         postfix : str
             Postfix to add to the name of resulting cube.
         """
-        cube_keys, axes = projection_transformations()
+        cube_keys = self.CUBE_PROJECTIONS
+        axes = self.PROJECTION_AXES
 
         if self.index_headers != self.INDEX_POST and not unsafe:
             # Currently supports only INLINE/CROSSLINE cubes

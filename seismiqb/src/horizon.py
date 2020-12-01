@@ -20,7 +20,7 @@ import plotly
 import plotly.figure_factory as ff
 
 from .utils import round_to_array, groupby_mean, groupby_min, groupby_max, \
-                   HorizonSampler, filter_simplices, projection_transformations
+                   HorizonSampler, filter_simplices
 from .utils import make_gaussian_kernel
 from .plotters import plot_image
 
@@ -1671,7 +1671,8 @@ class Horizon:
 
     def dump_points(self, path, fmt='npy', projections='ixh'):
         """ Dump points. """
-        cube_keys, axes = projection_transformations()
+        cube_keys = self.geometry.CUBE_PROJECTIONS
+        axes = self.geometry.PROJECTION_AXES
 
         if fmt == 'npy':
             if os.path.exists(path):
@@ -1688,7 +1689,7 @@ class Horizon:
             for projection in projections:
                 name = cube_keys[projection]
                 if name not in file_hdf5:
-                    cube_hdf5[name] = file_hdf5.create_dataset(name, self.geometry.cube_shape[axes[projection]])
+                    cube_hdf5[name] = file_hdf5.create_dataset(name, self.cube_shape[axes[projection]])
                 else:
                     cube_hdf5[name] = file_hdf5[name]
 
