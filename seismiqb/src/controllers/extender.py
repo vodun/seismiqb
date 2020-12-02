@@ -125,7 +125,7 @@ class Extender(Enhancer):
             .init_variable('predicted_horizons', default=list())
             .import_model('base', C('model_pipeline'))
             # Load data
-            .crop(points=L(D('grid_gen')), shape=L(D('shapes_gen')))
+            .make_locations(points=L(D('grid_gen')), shape=L(D('shapes_gen')))
             .load_cubes(dst='images')
             .create_masks(dst='prior_masks', width=3)
             .adaptive_reshape(src=['images', 'prior_masks'],

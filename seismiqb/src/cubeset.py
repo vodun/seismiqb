@@ -404,8 +404,8 @@ class SeismicCubeset(Dataset):
             points = sampler(n)
         else:
             points = sampler.sample(n)
-        batch = (self.p.crop(points=points, shape=shape, side_view=side_view,
-                             adaptive_slices=adaptive_slices, grid_src=grid_src)
+        batch = (self.p.make_locations(points=points, shape=shape, side_view=side_view,
+                                       adaptive_slices=adaptive_slices, grid_src=grid_src)
                  .next_batch(self.size))
 
         unsalted = np.array([batch.unsalt(item) for item in batch.indices])
@@ -742,15 +742,15 @@ class SeismicCubeset(Dataset):
         crop_shape[axis] = 1
 
         pipeline = (Pipeline()
-                    .crop(points=point, shape=crop_shape)
+                    .make_locations(points=point, shape=crop_shape)
                     .load_cubes(dst='images')
                     .scale(mode='q', src='images'))
 
         if 'masks' in components:
-            indices = kwargs.pop('indices', -1)
+            use_labels = kwargs.pop('use_labels', -1)
             width = kwargs.pop('width', 5)
             labels_pipeline = (Pipeline()
-                               .create_masks(dst='masks', width=width, indices=indices))
+                               .create_masks(dst='masks', width=width, use_labels=use_labels))
 
             pipeline = pipeline + labels_pipeline
 
