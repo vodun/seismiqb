@@ -70,6 +70,19 @@ def stable_hash(key):
         key = key.encode('ascii')
     return str(blake2b(key).hexdigest())
 
+def flatten_nested(obj):
+    """ Recursively unwrap nested tuple, list or dictinary. """
+    result = []
+    if isinstance(obj, (tuple, list)):
+        for item in obj:
+            result.append(flatten_nested(item))
+    elif isinstance(obj, dict):
+        for key, value in sorted(obj.items()):
+            result.append((key, flatten_nested(value)))
+    else:
+        return obj
+    return tuple(result)
+
 class Singleton:
     """ There must be only one!"""
     instance = None
@@ -143,7 +156,8 @@ class lru_cache:
             for attr in self.attributes:
                 attr_hash = stable_hash(getattr(instance, attr))
                 key.append(attr_hash)
-        return tuple(key)
+
+        return flatten_nested(key)
 
 
     def __call__(self, func):

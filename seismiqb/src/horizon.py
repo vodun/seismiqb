@@ -975,7 +975,7 @@ class Horizon:
             arr = (arr + normalize['shift']) * normalize['rescale']
         else:
             raise ValueError('Unknown normalize mode {}'.format(normalize['mode']))
-        arr[np.where(~mask)] = normalize.get('fill_value', np.nan)
+        arr[np.where(~mask)] = normalize.get('fill_value', 0)
         return arr
 
     @lru_cache(1)
@@ -1170,7 +1170,7 @@ class Horizon:
                         'instant_amplitude' : 'get_instantaneous_amplitude'}
 
         x_slice, i_slice, h_slice = location
-        if src_attribute == 'cube_values':
+        if src_attribute in ['cube_values', 'amplitudes']:
             kwargs = {
                 'nan_zero_traces': False,
                 # `window` arg for `get_cube_values` can be infered from `h_slice`

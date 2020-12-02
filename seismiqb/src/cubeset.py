@@ -460,6 +460,33 @@ class SeismicCubeset(Dataset):
         plot_image(map_, **kwargs)
 
 
+    def call_for_attrs(self, func, cubes, attrs, **kwargs):
+        """ Call specific function for all attrs of specific cubes.
+
+        func : str
+            Name of the function or method to call.
+        cubes : sequence of str
+            For the attributes of which cubes to call `func`.
+        attrs : sequence of str
+            For what cube attributes to call `func`.
+        kwargs :
+            For `func`.
+
+        Examples
+        --------
+        >>> cubeset.call_for_attrs('smooth_out', ['CUBE_01_XXX', 'CUBE_02_YYY'], ['horizons', 'fans'}, kernel_size=2])
+        """
+        for cube in cubes:
+            if cube not in self.indices:
+                warn(f"Can't call {func} for {attrs} of cube {cube}, since it is not in index.")
+            else:
+                for attr in attrs:
+                    for item in getattr(self, attr)[cube]:
+                        res = getattr(item, func)(**kwargs)
+                        if res is not None:
+                            warn(f"Call for {item} returned not None, which is not expected.")
+
+
     def load(self, label_dir=None, filter_zeros=True, dst_labels='labels',
              labels_class=None, p=None, bins=None, **kwargs):
         """ Load everything: geometries, point clouds, labels, samplers.
