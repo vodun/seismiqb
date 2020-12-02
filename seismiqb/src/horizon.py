@@ -1123,8 +1123,7 @@ class Horizon:
         return self.normalize_by_binary_matrix(matrix, normalize)
 
 
-    def load_attribute(self, src_attribute, location=(slice(None), slice(None), slice(None)),
-                       normalize=False, **kwargs):
+    def load_attribute(self, src_attribute, location=(slice(None), slice(None), slice(None)), **kwargs):
         """ Make crops from `src_attribute` of horizon at `location`.
 
         Parameters
@@ -1142,7 +1141,8 @@ class Horizon:
             `src_attribute` is 'cube_values'.
             If kept default, `src_attribute` is returned uncropped.
         normalize : str or dict
-            For `Horizon.normalize_by_binary_matrix`.
+            For `Horizon.normalize_by_binary_matrix` which is called
+            under the hood in each of the functions from `func_by_attr`.
         kwargs :
             For function from `func_by_attr` correspondence (defined below),
             where `src_attribute` acts as a key.
@@ -1185,7 +1185,7 @@ class Horizon:
         func_name = func_by_attr.get(src_attribute)
         if func_name is None:
             raise ValueError("Unknown `src_attribute` {}. Expected {}.".format(src_attribute, func_by_attr.keys()))
-        data = getattr(self, func_name)(normalize, **kwargs)
+        data = getattr(self, func_name)(**kwargs)
         return data[x_slice, i_slice]
 
 

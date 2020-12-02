@@ -93,8 +93,8 @@ class SeismicCubeset(Dataset):
         Get 2nd `channels` attribute item for cube with name 'CUBE_01_XXX':
         >>> cubeset['CUBE_01_XXX', 'channels', 2]
         """
-        idx, attr = key[:2]
-        item_num = key[2] if len(key) == 3 else slice(None)
+        idx, attr, *item_num = key
+        item_num = item_num[0] if len(item_num) == 1 else slice(None)
         return getattr(self, attr)[idx][item_num]
 
 
@@ -108,8 +108,8 @@ class SeismicCubeset(Dataset):
         Set 2nd item of `channels` attribute for cube with name 'CUBE_01_XXX' to `channel_0`:
         >>> cubeset['CUBE_01_XXX', 'channels', 2] = channel_0
         """
-        idx, attr = key[:2]
-        item_num = key[2] if len(key) == 3 else slice(None)
+        idx, attr, *item_num = key
+        item_num = item_num[0] if len(item_num) == 1 else slice(None)
         getattr(self, attr)[idx][item_num] = value
 
 
@@ -153,51 +153,6 @@ class SeismicCubeset(Dataset):
                 self.geometries[ix].log()
 
 
-    def load_corresponding_labels(self, correspondence, labels_dirs, dst_labels, main_labels, **kwargs):
-        """ Load corresponding labels into corresponding dataset attributes.
-
-        Parameters
-        ----------
-        correspondence : dict
-            Correspondence between cube name and a list of patterns for its labels.
-        labels_dirs : sequence
-            Paths to folders to look corresponding labels with patterns from `correspondence` values for.
-            Paths must be relative to cube location.
-        dst_labels : sequence
-            Names of dataset components to load corresponding labels into.
-        main_labels : str
-            Which dataset attribute assign to `self.labels`.
-        kwargs :
-            For `SeismicCubeset.create_labels`.
-
-        Examples
-        --------
-        The following argument values may be used to load for labels for 'CUBE_01_XXX':
-        - from 'INPUTS/FACIES/FANS_HORIZONS/horizon_01_corrected.char' into `horizons` component;
-        - from 'INPUTS/FACIES/FANS/fans_on_horizon_01_corrected_v8.char' into `fans` component,
-        and assign `self.horizons` to `self.labels`.
-
-        >>> correspondence = {'CUBE_01_XXX' : ['horizon_01']}
-        >>> labels_dirs = ['INPUTS/FACIES/FANS_HORIZONS', 'INPUTS/FACIES/FANS']
-        >>> dst_labels = ['horizons', 'fans']
-        >>> main_labels = 'horizons'
-        """
-        self.load_geometries()
-        for label_dir, dst_label in zip(labels_dirs, dst_labels):
-            paths_txt = defaultdict(list)
-            for cube_name, labels in correspondence.items():
-                full_cube_name = f"amplitudes_{cube_name}"
-                cube_dir = '/'.join(self.index.get_fullpath(full_cube_name).split('/')[:-1])
-                for label in labels:
-                    label_mask = '/'.join([cube_dir, label_dir, f"*{label}"])
-                    label_path = glob(label_mask)
-                    if len(label_path) > 1:
-                        raise ValueError('Multiple files match pattern')
-                    paths_txt[full_cube_name].append(label_path[0])
-            self.create_labels(paths=paths_txt, dst=dst_label, labels_class=Horizon, **kwargs)
-        self.labels = getattr(self, main_labels)
-
-
     def convert_to_hdf5(self, postfix=''):
         """ Converts every cube in dataset from `.segy` to `.hdf5`. """
         for ix in self.indices:
@@ -224,7 +179,7 @@ class SeismicCubeset(Dataset):
             Same instance with loaded labels.
         """
         if not hasattr(self, dst):
-            setattr(self, dst, IndexedDict({ix: dict() for ix in self.indices}))
+            setattr(self, dst, IndexedDict({ix: [] for ix in self.indices}))
 
         for idx in self.indices:
             if labels_class is None:
@@ -489,11 +444,12 @@ class SeismicCubeset(Dataset):
         plot_image(map_, **kwargs)
 
 
-    def call_for_attrs(self, func, indices, attrs, **kwargs):
+    def apply_to_attrs(self, func, indices, attrs, **kwargs):
         """ Call specific function for all attrs of specific cubes.
 
-        func : str
-            Name of the function or method to call.
+        func : str or callable
+            If str, name of the function or method to call from the attribute.
+            If callable, applied directly to each item of cubeset attribute from `attrs`.
         indices : sequence of str
             For the attributes of which cubes to call `func`.
         attrs : sequence of str
@@ -503,7 +459,7 @@ class SeismicCubeset(Dataset):
 
         Examples
         --------
-        >>> cubeset.call_for_attrs('smooth_out', ['CUBE_01_XXX', 'CUBE_02_YYY'], ['horizons', 'fans'}, kernel_size=2])
+        >>> cubeset.apply_to_attrs('smooth_out', ['CUBE_01_XXX', 'CUBE_02_YYY'], ['horizons', 'fans'}, kernel_size=2])
         """
         for idx in indices:
             if idx not in self.indices:
@@ -511,44 +467,9 @@ class SeismicCubeset(Dataset):
             else:
                 for attr in attrs:
                     for item in self[idx, attr]:
-                        res = getattr(item, func)(**kwargs)
+                        res = getattr(item, func)(**kwargs) if isinstance(func, str) else func(item, **kwargs)
                         if res is not None:
                             warn(f"Call for {item} returned not None, which is not expected.")
-
-
-    def load(self, label_dir=None, filter_zeros=True, dst_labels='labels',
-             labels_class=None, p=None, bins=None, **kwargs):
-        """ Load everything: geometries, point clouds, labels, samplers.
-
-        Parameters
-        ----------
-        label_dir : str
-            Relative path from each cube to directory with labels.
-        filter_zeros : bool
-            Whether to remove labels on zero-traces.
-        dst_labels : str
-            Class attribute to put loaded data into.
-        labels_class : class
-            Class to use for labels creation.
-            See details in `SeismicCubeset.create_labels`.
-        p : sequence of numbers
-            Proportions of different cubes in sampler.
-        bins : TODO
-        """
-        _ = kwargs
-        label_dir = label_dir or '/INPUTS/HORIZONS/RAW/*'
-
-        paths_txt = {}
-        for idx in self.indices:
-            dir_path = '/'.join(self.index.get_fullpath(idx).split('/')[:-1])
-            label_dir_ = label_dir if isinstance(label_dir, str) else label_dir[idx]
-            dir_ = glob(dir_path + label_dir_)
-            if len(dir_) == 0:
-                warn("No labels in {}".format(dir_path))
-            paths_txt[idx] = dir_
-        self.load_geometries(**kwargs)
-        self.create_labels(paths=paths_txt, filter_zeros=filter_zeros, dst=dst_labels, **kwargs)
-        self._p, self._bins = p, bins # stored for later sampler creation
 
 
     def make_grid(self, cube_name, crop_shape, ilines=None, xlines=None, heights=None, mode='3d',
@@ -757,7 +678,7 @@ class SeismicCubeset(Dataset):
         horizons = Horizon.from_mask(mask, grid_info,
                                      threshold=threshold, averaging=averaging, minsize=minsize, prefix=prefix)
         if not hasattr(self, dst):
-            setattr(self, dst, IndexedDict({ix: dict() for ix in self.indices}))
+            setattr(self, dst, IndexedDict({ix: [] for ix in self.indices}))
 
         self[cube_name, dst] = horizons
 
@@ -1102,6 +1023,88 @@ class SeismicCubeset(Dataset):
                     aggregation_map[tuple(slices[:-1])] += 1
                     cube_hdf5[slices[0], slices[1], slices[2]] = +prediction
                 cube_hdf5[:] = cube_hdf5 / np.expand_dims(aggregation_map, axis=-1)
+
+    # Task-specific loaders
+
+    def load(self, label_dir=None, filter_zeros=True, dst_labels='labels',
+             labels_class=None, p=None, bins=None, **kwargs):
+        """ Load everything: geometries, point clouds, labels, samplers.
+
+        Parameters
+        ----------
+        label_dir : str
+            Relative path from each cube to directory with labels.
+        filter_zeros : bool
+            Whether to remove labels on zero-traces.
+        dst_labels : str
+            Class attribute to put loaded data into.
+        labels_class : class
+            Class to use for labels creation.
+            See details in `SeismicCubeset.create_labels`.
+        p : sequence of numbers
+            Proportions of different cubes in sampler.
+        bins : TODO
+        """
+        _ = kwargs
+        label_dir = label_dir or '/INPUTS/HORIZONS/RAW/*'
+
+        paths_txt = {}
+        for idx in self.indices:
+            dir_path = '/'.join(self.index.get_fullpath(idx).split('/')[:-1])
+            label_dir_ = label_dir if isinstance(label_dir, str) else label_dir[idx]
+            dir_ = glob(dir_path + label_dir_)
+            if len(dir_) == 0:
+                warn("No labels in {}".format(dir_path))
+            paths_txt[idx] = dir_
+        self.load_geometries(**kwargs)
+        self.create_labels(paths=paths_txt, filter_zeros=filter_zeros, dst=dst_labels, **kwargs)
+        self._p, self._bins = p, bins # stored for later sampler creation
+
+
+    def load_corresponding_labels(self, correspondence, labels_dirs, dst_labels, main_labels, **kwargs):
+        """ Load corresponding labels into corresponding dataset attributes.
+
+        Parameters
+        ----------
+        correspondence : dict
+            Correspondence between cube name and a list of patterns for its labels.
+        labels_dirs : sequence
+            Paths to folders to look corresponding labels with patterns from `correspondence` values for.
+            Paths must be relative to cube location.
+        dst_labels : sequence
+            Names of dataset components to load corresponding labels into.
+        main_labels : str
+            Which dataset attribute assign to `self.labels`.
+        kwargs :
+            For `SeismicCubeset.create_labels`.
+
+        Examples
+        --------
+        The following argument values may be used to load for labels for 'CUBE_01_XXX':
+        - from 'INPUTS/FACIES/FANS_HORIZONS/horizon_01_corrected.char' into `horizons` component;
+        - from 'INPUTS/FACIES/FANS/fans_on_horizon_01_corrected_v8.char' into `fans` component,
+        and assign `self.horizons` to `self.labels`.
+
+        >>> correspondence = {'CUBE_01_XXX' : ['horizon_01']}
+        >>> labels_dirs = ['INPUTS/FACIES/FANS_HORIZONS', 'INPUTS/FACIES/FANS']
+        >>> dst_labels = ['horizons', 'fans']
+        >>> main_labels = 'horizons'
+        """
+        self.load_geometries()
+        for label_dir, dst_label in zip(labels_dirs, dst_labels):
+            paths_txt = defaultdict(list)
+            for cube_name, labels in correspondence.items():
+                full_cube_name = f"amplitudes_{cube_name}"
+                cube_dir = '/'.join(self.index.get_fullpath(full_cube_name).split('/')[:-1])
+                for label in labels:
+                    label_mask = '/'.join([cube_dir, label_dir, f"*{label}"])
+                    label_path = glob(label_mask)
+                    if len(label_path) > 1:
+                        raise ValueError('Multiple files match pattern')
+                    paths_txt[full_cube_name].append(label_path[0])
+            self.create_labels(paths=paths_txt, dst=dst_label, labels_class=Horizon, **kwargs)
+        self.labels = getattr(self, main_labels)
+
 
 class Modificator:
     """ Converts array to `object` dtype and prepends the `cube_name` column.
