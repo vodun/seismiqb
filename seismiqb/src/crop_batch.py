@@ -330,8 +330,7 @@ class SeismicCropBatch(Batch):
     def get_nearest_horizon(self, ix, src_labels, heights_slice):
         """Get horizon with its `h_mean` closest to mean of `heights_slice`."""
         location_h_mean = (heights_slice.start + heights_slice.stop) // 2
-        nearest_horizon_ind = np.argmin([abs(horizon.h_mean - location_h_mean)
-                                        for horizon in self.get(ix, src_labels)])
+        nearest_horizon_ind = np.argmin([abs(horizon.h_mean - location_h_mean) for horizon in self.get(ix, src_labels)])
         return self.get(ix, src_labels)[nearest_horizon_ind]
 
 
@@ -393,13 +392,14 @@ class SeismicCropBatch(Batch):
             Which labels to use in mask creation.
             If 'all', use all labels.
             If 'single', use one random label.
-            If 'nearest', use one label closest to height from `src_locations`.
+            If 'nearest_to_center', use one label closest to height from `src_locations`.
             If int or array-like then element(s) are interpreted as indices of
             desired labels and must be ints in range [0, len(horizons) - 1].
-        mode : '2d' or '3d'
-            Whether squeeze mask into single dimension along depth axis or not.
-            If kept default, being automatically set according to `use_labels`:
-            '2d' if 'nearest' and '3d' else. Defaults to 'auto'.
+        mode : '2d', '3d' or 'auto'
+            If '3d', create conventional mask by cube volume defined by `src_locations`.
+            If '2d', squeeze mask into single dimension along depth axis.
+            If 'auto', set according to `use_labels`: '2d' if 'nearest_to_center' and '3d' else.
+            Defaults to 'auto'.
         width : int
             How much to thicken the horizon when `mode` is '3d'.
 
@@ -427,11 +427,11 @@ class SeismicCropBatch(Batch):
             labels = [labels[idx] for idx in use_labels]
         elif use_labels == 'single':
             np.random.shuffle(labels)
-        elif use_labels == 'nearest':
+        elif use_labels == 'nearest_to_center':
             labels = [self.get_nearest_horizon(ix, src_labels, location[2])]
 
         if mode == 'auto':
-            mode = '2d' if use_labels == 'nearest' else '3d'
+            mode = '2d' if use_labels == 'nearest_to_center' else '3d'
         crop_shape = self.get(ix, 'shapes')
         crop_shape = (*crop_shape[:2], 1) if mode == '2d' else crop_shape
         mask = np.zeros((crop_shape), dtype='float32')

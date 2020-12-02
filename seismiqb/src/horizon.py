@@ -978,9 +978,8 @@ class Horizon:
         arr[np.where(~mask)] = normalize.get('fill_value', 0)
         return arr
 
-    @lru_cache(1)
-    def get_cube_values(self, window=23, offset=0, chunk_size=256, nan_zero_traces=True,
-                        normalize=False, use_cache=False):
+    @lru_cache(maxsize=1, apply_by_default=False)
+    def get_cube_values(self, window=23, offset=0, chunk_size=256, nan_zero_traces=True, normalize=False):
         """ Get values from the cube along the horizon.
 
         Parameters
@@ -1037,8 +1036,8 @@ class Horizon:
         return self.normalize_by_binary_matrix(background, normalize)
 
 
-    @lru_cache(1)
-    def get_instantaneous_amplitude(self, window=23, depths='mid', normalize=False, use_cache=False, **kwargs):
+    @lru_cache(maxsize=1, apply_by_default=False)
+    def get_instantaneous_amplitude(self, window=23, depths='mid', normalize=False, **kwargs):
         """ Calculate instantaneous amplitude along the horizon.
 
         Parameters
@@ -1068,14 +1067,14 @@ class Horizon:
         and then only central N=10 of them will be returned.
         """
         depths = [window // 2] if depths == 'mid' else depths
-        amplitudes = self.get_cube_values(window, **kwargs)
+        amplitudes = self.get_cube_values(window, use_cache=False, **kwargs) #pylint: disable=unexpected-keyword-arg
         result = np.abs(hilbert(amplitudes))[:, :, depths]
         result[self.full_matrix == self.FILL_VALUE] = np.nan
         return self.normalize_by_binary_matrix(result, normalize)
 
 
-    @lru_cache(1)
-    def get_instantaneous_phase(self, window=23, depths=slice(None), normalize=False, use_cache=False, **kwargs):
+    @lru_cache(maxsize=1, apply_by_default=False)
+    def get_instantaneous_phase(self, window=23, depths=slice(None), normalize=False, **kwargs):
         """ Calculate instantaneous phase along the horizon.
 
         Parameters
@@ -1105,14 +1104,14 @@ class Horizon:
         and then only central N=10 of them will be returned.
         """
         depths = [window // 2] if depths == 'mid' else depths
-        amplitudes = self.get_cube_values(window, **kwargs)
+        amplitudes = self.get_cube_values(window, use_cache=False, **kwargs) #pylint: disable=unexpected-keyword-arg
         result = np.angle(hilbert(amplitudes))[:, :, depths]
         result[self.full_matrix == self.FILL_VALUE] = np.nan
         return self.normalize_by_binary_matrix(result, normalize)
 
 
-    @lru_cache(1)
-    def get_full_matrix(self, normalize=False, use_cache=False):
+    @lru_cache(maxsize=1, apply_by_default=False)
+    def get_full_matrix(self, normalize=False):
         """ Transform `matrix` attribute to match cubic coordinates.
 
         Parameters
@@ -1124,7 +1123,8 @@ class Horizon:
         return self.normalize_by_binary_matrix(matrix, normalize)
 
 
-    def load_attribute(self, src_attribute, location=(slice(None), slice(None), slice(None)), **kwargs):
+    def load_attribute(self, src_attribute, location=(slice(None), slice(None), slice(None)),
+                       normalize=False, **kwargs):
         """ Make crops from `src_attribute` of horizon at `location`.
 
         Parameters
@@ -1132,7 +1132,7 @@ class Horizon:
         src_attribute : str
             A keyword defining horizon attribute to make crops from:
             - 'cube_values' or 'amplitudes': cube values cut along the horizon;
-            - 'heights': matrix of heights with zero-filled nans;
+            - 'heights': horizon depth map in cubic coordinates;
             - 'metrics': random support metrics matrix.
             - 'instant_phase': instantaneous phase along the horizon;
             - 'instant_amplitude': instantaneous amplitude along the horizon;
@@ -1141,6 +1141,8 @@ class Horizon:
             from. Last 'depth' slice is used to infer `window` parameter when
             `src_attribute` is 'cube_values'.
             If kept default, `src_attribute` is returned uncropped.
+        normalize : str or dict
+            For `Horizon.normalize_by_binary_matrix`.
         kwargs :
             For function from `func_by_attr` correspondence (defined below),
             where `src_attribute` acts as a key.
@@ -1157,8 +1159,8 @@ class Horizon:
         Notes
         -----
 
-        Although the function can be used in a straightforward way as described above, originally it was implemented
-        to provide an interface for accessing `Horizon` attributes from `SeismicCropBatch` to allow calls like this:
+        Although the function can be used in a straightforward way as described above, its main purpose is to act
+        as an interface for accessing `Horizon` attributes from `SeismicCropBatch` to allow calls like this:
 
         >>> Pipeline().load_attribute('cube_values', dst='amplitudes')
         """
@@ -1183,7 +1185,7 @@ class Horizon:
         func_name = func_by_attr.get(src_attribute)
         if func_name is None:
             raise ValueError("Unknown `src_attribute` {}. Expected {}.".format(src_attribute, func_by_attr.keys()))
-        data = getattr(self, func_name)(**kwargs)
+        data = getattr(self, func_name)(normalize, **kwargs)
         return data[x_slice, i_slice]
 
 
@@ -1487,9 +1489,8 @@ class Horizon:
         return None
 
 
-    @lru_cache(1)
-    def metrics_evaluate(self, normalize=False, metric='support_corrs', supports=50, agg='nanmean',
-                         use_cache=False, **kwargs):
+    @lru_cache(maxsize=1, apply_by_default=False)
+    def metrics_evaluate(self, normalize=False, metric='support_corrs', supports=50, agg='nanmean', **kwargs):
         """ Cached metrics calcucaltion with disabled plotting option.
 
         Parameters

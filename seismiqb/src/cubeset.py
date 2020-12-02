@@ -3,7 +3,7 @@
 import os
 from glob import glob
 from warnings import warn
-from collections import Sequence, defaultdict
+from collections import defaultdict
 import contextlib
 
 import numpy as np
@@ -81,6 +81,36 @@ class SeismicCubeset(Dataset):
             for horizon in labels:
                 msg += f'        {horizon.name}\n'
         return msg
+
+
+    def __getitem__(self, key):
+        """ Select attribute or its item for specific cube.
+
+        Examples
+        --------
+        Get `labels` attribute for cube with 0 index:
+        >>> cubeset[0, 'labels']
+        Get 2nd `channels` attribute item for cube with name 'CUBE_01_XXX':
+        >>> cubeset['CUBE_01_XXX', 'channels', 2]
+        """
+        idx, attr = key[:2]
+        item_num = key[2] if len(key) == 3 else slice(None)
+        return getattr(self, attr)[idx][item_num]
+
+
+    def __setitem__(self, key, value):
+        """ Set attribute or its item for specific cube.
+
+        Examples
+        --------
+        Set `labels` attribute for cube with 0 index to `[label_0, label_1]`:
+        >>> cubeset[0, 'labels'] = [label_0, label_1]
+        Set 2nd item of `channels` attribute for cube with name 'CUBE_01_XXX' to `channel_0`:
+        >>> cubeset['CUBE_01_XXX', 'channels', 2] = channel_0
+        """
+        idx, attr = key[:2]
+        item_num = key[2] if len(key) == 3 else slice(None)
+        getattr(self, attr)[idx][item_num] = value
 
 
     def gen_batch(self, batch_size, shuffle=False, n_iters=None, n_epochs=None, drop_last=False,
@@ -196,17 +226,17 @@ class SeismicCubeset(Dataset):
         if not hasattr(self, dst):
             setattr(self, dst, IndexedDict({ix: dict() for ix in self.indices}))
 
-        for ix in self.indices:
+        for idx in self.indices:
             if labels_class is None:
-                if self.geometries[ix].structured:
+                if self.geometries[idx].structured:
                     labels_class = Horizon
                 else:
                     labels_class = UnstructuredHorizon
-            label_list = [labels_class(path, self.geometries[ix], **kwargs) for path in paths[ix]]
+            label_list = [labels_class(path, self.geometries[idx], **kwargs) for path in paths[idx]]
             label_list.sort(key=lambda label: label.h_mean)
             if filter_zeros:
                 _ = [getattr(item, 'filter')() for item in label_list]
-            getattr(self, dst)[ix] = [item for item in label_list if len(item.points) > 0]
+            self[idx, dst] = [item for item in label_list if len(item.points) > 0]
             self._cached_attributes.add(dst)
 
 
@@ -215,17 +245,16 @@ class SeismicCubeset(Dataset):
 
         Parameters
         ----------
-        attrs : sequence
+        attrs : list or tuple of str
             Class attributes to reset cache in.
             If None, reset in `geometries` and attrs added by `create_labels`.
             Defaults to None.
         """
-        attrs = attrs or self._cached_attributes
-        for attr in attrs:
-            # import pdb;pdb.set_trace()
-            for cube in self.indices:
-                cached_attr = getattr(self, attr)[cube]
-                cached_attr = cached_attr if isinstance(cached_attr, Sequence) else [cached_attr]
+        cached_attributes = attrs or self._cached_attributes
+        for idx in self.indices:
+            for attr in cached_attributes:
+                cached_attr = self[idx, attr]
+                cached_attr = cached_attr if isinstance(cached_attr, list) else [cached_attr]
                 _ = [item.reset_cache() for item in cached_attr]
 
 
@@ -446,9 +475,9 @@ class SeismicCubeset(Dataset):
     def show_points(self, idx=0, src_labels='labels', **kwargs):
         """ Plot 2D map of points. """
         map_ = np.zeros(self.geometries[idx].cube_shape[:-1])
-        for label in getattr(self, src_labels)[idx]:
+        for label in self[idx, src_labels]:
             map_[label.points[:, 0], label.points[:, 1]] += 1
-        labels_class = type(getattr(self, src_labels)[idx][0]).__name__
+        labels_class = type(self[idx, src_labels, 0]).__name__
         map_[map_ == 0] = np.nan
         kwargs = {
             'title': f'{labels_class} on {self.indices[idx]}',
@@ -460,12 +489,12 @@ class SeismicCubeset(Dataset):
         plot_image(map_, **kwargs)
 
 
-    def call_for_attrs(self, func, cubes, attrs, **kwargs):
+    def call_for_attrs(self, func, indices, attrs, **kwargs):
         """ Call specific function for all attrs of specific cubes.
 
         func : str
             Name of the function or method to call.
-        cubes : sequence of str
+        indices : sequence of str
             For the attributes of which cubes to call `func`.
         attrs : sequence of str
             For what cube attributes to call `func`.
@@ -476,12 +505,12 @@ class SeismicCubeset(Dataset):
         --------
         >>> cubeset.call_for_attrs('smooth_out', ['CUBE_01_XXX', 'CUBE_02_YYY'], ['horizons', 'fans'}, kernel_size=2])
         """
-        for cube in cubes:
-            if cube not in self.indices:
-                warn(f"Can't call {func} for {attrs} of cube {cube}, since it is not in index.")
+        for idx in indices:
+            if idx not in self.indices:
+                warn(f"Can't call {func} for {attrs} of cube {idx}, since it is not in index.")
             else:
                 for attr in attrs:
-                    for item in getattr(self, attr)[cube]:
+                    for item in self[idx, attr]:
                         res = getattr(item, func)(**kwargs)
                         if res is not None:
                             warn(f"Call for {item} returned not None, which is not expected.")
@@ -690,7 +719,7 @@ class SeismicCubeset(Dataset):
         plot_dict = default_plot_dict if plot_dict is None else {**default_plot_dict, **plot_dict}
 
         _fig, ax = plt.subplots(figsize=plot_dict['figsize'])
-        surface = getattr(self, plot_over)[self.grid_info['cube_name']][surface_num]
+        surface = self[self.grid_info['cube_name'], plot_over, surface_num]
         surface.show(ax=ax)
         ax.set_title(f'Grid over {ax.get_title()}', fontsize=plot_dict['title_fontsize'])
 
@@ -730,7 +759,7 @@ class SeismicCubeset(Dataset):
         if not hasattr(self, dst):
             setattr(self, dst, IndexedDict({ix: dict() for ix in self.indices}))
 
-        getattr(self, dst)[cube_name] = horizons
+        self[cube_name, dst] = horizons
 
 
     def merge_horizons(self, src, mean_threshold=2.0, adjacency=3, minsize=50):
@@ -754,7 +783,7 @@ class SeismicCubeset(Dataset):
         """
         for idx in self.indices:
             if horizon.geometry.name == self.geometries[idx].name:
-                horizons_to_compare = getattr(self, src_labels)[idx]
+                horizons_to_compare = self[idx, src_labels]
                 break
         HorizonMetrics([horizon, horizons_to_compare]).evaluate('compare', agg=None,
                                                                 absolute=absolute, offset=offset,
@@ -878,7 +907,7 @@ class SeismicCubeset(Dataset):
             covered points.
             If False then all points from the horizon border will be used.
         """
-        horizon = getattr(self, labels_src)[cube_name][0] if isinstance(labels_src, str) else labels_src
+        horizon = self[cube_name, labels_src, 0] if isinstance(labels_src, str) else labels_src
 
         zero_traces = horizon.geometry.zero_traces
         hor_matrix = horizon.full_matrix.astype(np.int32)

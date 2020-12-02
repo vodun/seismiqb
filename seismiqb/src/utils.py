@@ -70,17 +70,17 @@ def stable_hash(key):
         key = key.encode('ascii')
     return str(blake2b(key).hexdigest())
 
-def flatten_nested(obj):
-    """ Recursively unwrap nested tuple, list or dictinary. """
+def tuplize_nested(iterable):
+    """ Recursively convert nested list or dictionary into nested tuple. """
     result = []
-    if isinstance(obj, (tuple, list)):
-        for item in obj:
-            result.append(flatten_nested(item))
-    elif isinstance(obj, dict):
-        for key, value in sorted(obj.items()):
-            result.append((key, flatten_nested(value)))
+    if isinstance(iterable, (tuple, list)):
+        for item in iterable:
+            result.append(tuplize_nested(item))
+    elif isinstance(iterable, dict):
+        for key, value in sorted(iterable.items()):
+            result.append((key, tuplize_nested(value)))
     else:
-        return obj
+        return iterable
     return tuple(result)
 
 class Singleton:
@@ -115,7 +115,6 @@ class lru_cache:
     Notes
     -----
     All arguments to the decorated method must be hashable.
-    Class defining decorated attribute must have `_cached_attributes` attribute, to allow tracking cached methods.
     """
     #pylint: disable=invalid-name, attribute-defined-outside-init
     def __init__(self, maxsize=None, attributes=None, apply_by_default=True):
@@ -157,7 +156,7 @@ class lru_cache:
                 attr_hash = stable_hash(getattr(instance, attr))
                 key.append(attr_hash)
 
-        return flatten_nested(key)
+        return tuplize_nested(key)
 
 
     def __call__(self, func):
@@ -165,7 +164,11 @@ class lru_cache:
         @wraps(func)
         def wrapper(instance, *args, **kwargs):
             # pylint: disable=protected-access
+            # Keep track of cached functions.
+            if not hasattr(instance, '_cached_attributes'):
+                setattr(instance, '_cached_attributes', [])
             instance._cached_attributes.add(func.__name__)
+
             # Parse the `use_cache`
             if 'use_cache' in kwargs:
                 use_cache = kwargs.pop('use_cache')
