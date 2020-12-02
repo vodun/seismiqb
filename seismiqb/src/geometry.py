@@ -1251,6 +1251,10 @@ class SeismicGeometryHDF5(SeismicGeometry):
         self.file_hdf5 = h5py.File(self.path, mode='r')
         self.add_attributes()
 
+        self.cube_i = self.file_hdf5['cube']
+        self.cube_x = self.file_hdf5['cube_x']
+        self.cube_h = self.file_hdf5['cube_h']
+
     def add_attributes(self):
         """ Store values from `hdf5` file to attributes. """
         self.index_headers = self.INDEX_POST
@@ -1358,14 +1362,15 @@ class SeismicGeometryHDF5(SeismicGeometry):
         shape = [(slc.stop - slc.start) for slc in key]
         axis = np.argmin(shape)
         if axis == 0:
-            crop = self.file_hdf5['cube'][key[0], key[1], key[2]]
+            crop = self.cube_i[key[0], key[1], key[2]]
         elif axis == 1:
-            crop = self.file_hdf5['cube_x'][key[1], key[2], key[0]].transpose((2, 0, 1))
+            crop = self.cube_x[key[1], key[2], key[0]].transpose((2, 0, 1))
         elif axis == 2:
-            crop = self.file_hdf5['cube_h'][key[2], key[0], key[1]].transpose((1, 2, 0))
+            crop = self.cube_h[key[2], key[0], key[1]].transpose((1, 2, 0))
 
         if squeeze:
             crop = np.squeeze(crop, axis=tuple(squeeze))
+
         return crop
 
 
