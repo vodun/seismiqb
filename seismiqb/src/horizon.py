@@ -846,7 +846,7 @@ class Horizon:
 
             smoothed = src
             for _ in range(iters):
-                smoothed = _smoothing_function(smoothed, gaussian_kernel, self.FILL_VALUE)
+                smoothed = _smoothing_function(smoothed, gaussian_kernel, self.FILL_VALUE, False, np.inf)
                 smoothed = np.rint(smoothed).astype(np.int32)
 
             if preserve_borders:
