@@ -249,6 +249,9 @@ class MatplotlibPlotter:
                 yaxis-label.
             title : str
                 title of the plot.
+            reverse : bool
+                whether to reverse the plot in y-axis. True by default. In that
+                way, uses the same orientation when rendered as other modes.
             other
         """
         defaults = {'figsize': (12, 7),
@@ -257,12 +260,13 @@ class MatplotlibPlotter:
                     'fontsize': 20,
                     'width_multiplier': 2,
                     'xstep': 5,
-                    'points_marker': 'ro'}
+                    'points_marker': 'ro',
+                    'reverse': True}
 
         # deal with kwargs
         updated = {**defaults, **kwargs}
-        line_color, xstep, width_mul, points_marker = [updated[key] for key in (
-            'line_color', 'xstep', 'width_multiplier', 'points_marker')]
+        line_color, xstep, width_mul, points_marker, reverse = [updated[key] for key in (
+            'line_color', 'xstep', 'width_multiplier', 'points_marker', 'reverse')]
 
         figure_kwargs = filter_kwargs(updated, ['figsize', 'facecolor', 'dpi'])
         label_kwargs = filter_kwargs(updated, ['label', 'y', 'fontsize', 'family', 'color'])
@@ -303,6 +307,8 @@ class MatplotlibPlotter:
             line_color = [line_color] * len(offsets)
 
         y = np.arange(*ylim_curr)
+        if reverse:
+            y = y[::-1]
         for ix, k in enumerate(offsets):
             x = k + width_mul * image[k, slice(*ylim_curr)] / np.std(image)
             col = line_color[ix]
