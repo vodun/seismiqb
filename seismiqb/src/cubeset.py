@@ -1,8 +1,12 @@
 """ Contains container for storing dataset of seismic crops. """
 #pylint: disable=too-many-lines
+import os
 from glob import glob
+import contextlib
 
 import numpy as np
+import h5py
+from tqdm.auto import tqdm
 
 from ..batchflow import FilesIndex, DatasetIndex, Dataset, Sampler, Pipeline
 from ..batchflow import NumpySampler
@@ -13,14 +17,7 @@ from .crop_batch import SeismicCropBatch
 from .horizon import Horizon, UnstructuredHorizon
 from .metrics import HorizonMetrics
 from .plotters import plot_image
-from .utils import IndexedDict, round_to_array, gen_crop_coordinates
-
-
-
-def sampler_transform(points, ix=None):
-    """ Converts array to `object` dtype. Picklable, unlike inline lambda function. """
-    points = points.astype(np.object)
-    return np.concatenate([np.full((len(points), 1), ix), points], axis=1)
+from .utils import IndexedDict, round_to_array, gen_crop_coordinates, make_axis_grid, infer_tuple
 
 
 
@@ -157,7 +154,22 @@ class SeismicCubeset(Dataset):
             label_list.sort(key=lambda label: label.h_mean)
             if filter_zeros:
                 _ = [getattr(item, 'filter')() for item in label_list]
-            getattr(self, dst)[ix] = label_list
+            getattr(self, dst)[ix] = [item for item in label_list if len(item.points) > 0]
+
+    def dump_labels(self, path, fmt='npy', separate=False):
+        """ Dump points to file. """
+        for i in range(len(self.indices)):
+            for label in self.labels[i]:
+                dirname = os.path.dirname(self.index.get_fullpath(self.indices[i]))
+                if path[0] == '/':
+                    path = path[1:]
+                dirname = os.path.join(dirname, path)
+                if not os.path.exists(dirname):
+                    os.makedirs(dirname)
+                name = label.name if separate else 'faults'
+                save_to = os.path.join(dirname, name + '.' + fmt)
+                label.dump_points(save_to, fmt)
+
 
     @property
     def sampler(self):
@@ -226,7 +238,7 @@ class SeismicCubeset(Dataset):
 
         sampler = 0 & NumpySampler('n', dim=4)
         for i, ix in enumerate(self.indices):
-            sampler_ = samplers[ix].apply(lambda points: sampler_transform(points, ix=ix))
+            sampler_ = samplers[ix].apply(Modificator(cube_name=ix))
             sampler = sampler | (p[i] & sampler_)
         setattr(self, dst, sampler)
 
@@ -358,6 +370,22 @@ class SeismicCubeset(Dataset):
         plot_image(background, **kwargs)
         return batch
 
+    def show_points(self, idx=0, src_labels='labels', **kwargs):
+        """ Plot 2D map of points. """
+        map_ = np.zeros(self.geometries[idx].cube_shape[:-1])
+        for label in getattr(self, src_labels)[idx]:
+            map_[label.points[:, 0], label.points[:, 1]] += 1
+        labels_class = type(getattr(self, src_labels)[idx][0]).__name__
+        map_[map_ == 0] = np.nan
+        kwargs = {
+            'title': f'{labels_class} on {self.indices[idx]}',
+            'xlabel': self.geometries[idx].index_headers[0],
+            'ylabel': self.geometries[idx].index_headers[1],
+            'cmap': 'Reds',
+            **kwargs
+        }
+        plot_image(map_, **kwargs)
+
 
     def load(self, label_dir=None, filter_zeros=True, dst_labels='labels', p=None, bins=None, **kwargs):
         """ Load everything: geometries, point clouds, labels, samplers.
@@ -377,11 +405,12 @@ class SeismicCubeset(Dataset):
         paths_txt = {}
         for i in range(len(self)):
             dir_path = '/'.join(self.index.get_fullpath(self.indices[i]).split('/')[:-1])
-            dir_ = dir_path + label_dir
+            label_dir_ = label_dir if isinstance(label_dir, str) else label_dir[self.indices[i]]
+            dir_ = dir_path + label_dir_
             paths_txt[self.indices[i]] = glob(dir_)
 
         self.load_geometries(**kwargs)
-        self.create_labels(paths=paths_txt, filter_zeros=filter_zeros, dst=dst_labels)
+        self.create_labels(paths=paths_txt, filter_zeros=filter_zeros, dst=dst_labels, **kwargs)
         self._p, self._bins = p, bins # stored for later sampler creation
 
 
@@ -457,17 +486,9 @@ class SeismicCubeset(Dataset):
            heights[1] > geometry.depth:
             raise ValueError('Ranges must contain within the cube.')
 
-        # Make separate grids for every axis
-        def _make_axis_grid(axis_range, stride, length, crop_shape):
-            grid = np.arange(*axis_range, stride)
-            grid_ = [x for x in grid if x + crop_shape < length]
-            if len(grid) != len(grid_):
-                grid_ += [axis_range[1] - crop_shape]
-            return sorted(grid_)
-
-        ilines_grid = _make_axis_grid(ilines, strides[0], geometry.ilines_len, crop_shape[0])
-        xlines_grid = _make_axis_grid(xlines, strides[1], geometry.xlines_len, crop_shape[1])
-        heights_grid = _make_axis_grid(heights, strides[2], geometry.depth, crop_shape[2])
+        ilines_grid = make_axis_grid(ilines, strides[0], geometry.ilines_len, crop_shape[0])
+        xlines_grid = make_axis_grid(xlines, strides[1], geometry.xlines_len, crop_shape[1])
+        heights_grid = make_axis_grid(heights, strides[2], geometry.depth, crop_shape[2])
 
         # Every point in grid contains reference to cube
         # in order to be valid input for `crop` action of SeismicCropBatch
@@ -573,7 +594,8 @@ class SeismicCubeset(Dataset):
                                                                 printer=printer, hist=hist, plot=plot)
 
 
-    def show_slide(self, loc, idx=0, axis='iline', zoom_slice=None, mode='overlap', backend='matplotlib', **kwargs):
+    def show_slide(self, loc, idx=0, axis='iline', zoom_slice=None, mode='overlap',
+                   n_ticks=5, delta_ticks=100, **kwargs):
         """ Show full slide of the given cube on the given line.
 
         Parameters
@@ -626,26 +648,33 @@ class SeismicCubeset(Dataset):
             yticks = yticks[zoom_slice[1]]
 
         # Plotting defaults
+        header = geometry.axis_names[axis]
+        total = geometry.cube_shape[axis]
+
         if axis in [0, 1]:
-            header = geometry.index_headers[axis]
             xlabel = geometry.index_headers[1 - axis]
-            ylabel = 'depth'
-            total = geometry.lens[axis]
+            ylabel = 'DEPTH'
         if axis == 2:
-            header = 'Depth'
             xlabel = geometry.index_headers[0]
             ylabel = geometry.index_headers[1]
-            total = geometry.depth
+
+        xticks = xticks[::max(1, round(len(xticks) // (n_ticks - 1) / delta_ticks)) * delta_ticks] + [xticks[-1]]
+        xticks = sorted(list(set(xticks)))
+        yticks = yticks[::max(1, round(len(xticks) // (n_ticks - 1) / delta_ticks)) * delta_ticks] + [yticks[-1]]
+        yticks = sorted(list(set(yticks)), reverse=True)
+
+        if len(xticks) > 2 and (xticks[-1] - xticks[-2]) < delta_ticks:
+            xticks.pop(-2)
+        if len(yticks) > 2 and (yticks[0] - yticks[1]) < delta_ticks:
+            yticks.pop(1)
 
         kwargs = {
             'mode': mode,
-            'backend': backend,
-            'title': (f'Data slice on `{geometry.name}`' +
-                      f'\n {header} {loc} out of {total}'),
+            'title': f'Data slice on `{geometry.name}\n {header} {loc} out of {total}',
             'xlabel': xlabel,
             'ylabel': ylabel,
-            'xticks': xticks[::max(1, round(len(xticks)//8/100))*100],
-            'yticks': yticks[::max(1, round(len(yticks)//10/100))*100][::-1],
+            'xticks': xticks,
+            'yticks': yticks,
             'y': 1.02,
             **kwargs
         }
@@ -703,7 +732,7 @@ class SeismicCubeset(Dataset):
 
             result = gen_crop_coordinates(point,
                                           hor_matrix, zero_traces,
-                                          stride, crop_shape,
+                                          stride, crop_shape, horizon.geometry.depth,
                                           horizon.FILL_VALUE, **kwargs)
             if not result:
                 continue
@@ -797,3 +826,94 @@ class SeismicCubeset(Dataset):
             background[background_slice] = np.maximum(crop, previous)
 
         return background
+
+    def make_prediction(self, path_hdf5, pipeline, crop_shape, crop_stride,
+                        idx=0, src='predictions', chunk_shape=None, chunk_stride=None, batch_size=8,
+                        pbar=True):
+        """ Create hdf5 file with prediction.
+
+        Parameters
+        ----------
+        path_hdf5 : str
+
+        pipeline : Pipeline
+            pipeline for inference
+        crop_shape : int, tuple or None
+            shape of crops. Must be the same as defined in pipeline.
+        crop_stride : int
+            stride for crops
+        idx : int
+            index of cube to infer
+        src : str
+            pipeline variable for predictions
+        chunk_shape : int, tuple or None
+            shape of chunks.
+        chunk_stride : int
+            stride for chunks
+        batch_size : int
+
+        pbar : bool
+            progress bar
+        """
+        geometry = self.geometries[idx]
+        chunk_shape = infer_tuple(chunk_shape, geometry.cube_shape)
+        chunk_stride = infer_tuple(chunk_stride, chunk_shape)
+
+        cube_shape = geometry.cube_shape
+        chunk_grid = [
+            make_axis_grid((0, cube_shape[i]), chunk_stride[i], cube_shape[i], crop_shape[i])
+            for i in range(2)
+        ]
+        chunk_grid = np.stack(np.meshgrid(*chunk_grid), axis=-1).reshape(-1, 2)
+
+        if os.path.exists(path_hdf5):
+            os.remove(path_hdf5)
+
+        if pbar:
+            total = 0
+            for i_min, x_min in chunk_grid:
+                i_max = min(i_min+chunk_shape[0], cube_shape[0])
+                x_max = min(x_min+chunk_shape[1], cube_shape[1])
+                self.make_grid(
+                    self.indices[idx], crop_shape,
+                    [i_min, i_max], [x_min, x_max], [0, geometry.depth-1],
+                    strides=crop_stride, batch_size=batch_size
+                )
+                total += self.grid_iters
+
+        with h5py.File(path_hdf5, "a") as file_hdf5:
+            aggregation_map = np.zeros(cube_shape[:-1])
+            cube_hdf5 = file_hdf5.create_dataset('cube', cube_shape)
+            context = tqdm(total=total) if pbar else contextlib.suppress()
+            with context as progress_bar:
+                for i_min, x_min in chunk_grid:
+                    i_max = min(i_min+chunk_shape[0], cube_shape[0])
+                    x_max = min(x_min+chunk_shape[1], cube_shape[1])
+                    self.make_grid(
+                        self.indices[idx], crop_shape,
+                        [i_min, i_max], [x_min, x_max], [0, geometry.depth-1],
+                        strides=crop_stride, batch_size=batch_size
+                    )
+                    chunk_pipeline = pipeline << self
+                    for _ in range(self.grid_iters):
+                        _ = chunk_pipeline.next_batch(len(self))
+                        if pbar:
+                            progress_bar.update()
+
+                    # Write to hdf5
+                    slices = tuple([slice(*item) for item in self.grid_info['range']])
+                    prediction = self.assemble_crops(chunk_pipeline.v(src), order=(0, 1, 2))
+                    aggregation_map[tuple(slices[:-1])] += 1
+                    cube_hdf5[slices[0], slices[1], slices[2]] = +prediction
+                cube_hdf5[:] = cube_hdf5 / np.expand_dims(aggregation_map, axis=-1)
+
+class Modificator:
+    """ Converts array to `object` dtype and prepends the `cube_name` column.
+    Picklable, unlike inline lambda function.
+    """
+    def __init__(self, cube_name):
+        self.cube_name = cube_name
+
+    def __call__(self, points):
+        points = points.astype(np.object)
+        return np.concatenate([np.full((len(points), 1), self.cube_name), points], axis=1)
