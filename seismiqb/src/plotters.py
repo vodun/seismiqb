@@ -251,7 +251,7 @@ class MatplotlibPlotter:
                 title of the plot.
             reverse : bool
                 whether to reverse the plot in y-axis. True by default. In that
-                way, uses the same orientation when rendered as other modes.
+                way, uses the same orientation as other modes.
             other
         """
         defaults = {'figsize': (12, 7),
@@ -317,6 +317,16 @@ class MatplotlibPlotter:
 
             if with_curve:
                 ax.plot(x[heights[ix]], heights[ix], points_marker)
+            if k == 0:
+                xmin = np.min(x)
+            if k == len(offsets) - 1:
+                xmax = np.max(x)
+
+        # adjust the canvas
+        xlim = updated.get('xlim', (xmin, xmax))
+        ylim = updated.get('ylim', (np.min(y), np.max(y)))
+        ax.set_xlim(xlim)
+        ax.set_ylim(ylim)
 
         self.save_and_show(fig, **updated)
 
