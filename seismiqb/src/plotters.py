@@ -317,9 +317,9 @@ class MatplotlibPlotter:
 
             if with_curve:
                 ax.plot(x[heights[ix]], heights[ix], points_marker)
-            if k == 0:
+            if ix == 0:
                 xmin = np.min(x)
-            if k == len(offsets) - 1:
+            if ix == len(offsets) - 1:
                 xmax = np.max(x)
 
         # adjust the canvas
