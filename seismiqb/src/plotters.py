@@ -104,11 +104,11 @@ def plot_image(image, mode='single', backend='matplotlib', **kwargs):
     """
     convert_kwargs(mode, backend, kwargs)
     if backend in ('matplotlib', 'plt', 'mpl', 'm', 'mp'):
-        getattr(MatplotlibPlotter(), mode)(image, **kwargs)
-    elif backend in ('plotly', 'go'):
-        getattr(PlotlyPlotter(), mode)(image, **kwargs)
-    else:
-        raise ValueError('{} backend is not supported!'.format(backend))
+        return getattr(MatplotlibPlotter(), mode)(image, **kwargs)
+    if backend in ('plotly', 'go'):
+        return getattr(PlotlyPlotter(), mode)(image, **kwargs)
+
+    raise ValueError('{} backend is not supported!'.format(backend))
 
 
 def plot_loss(*data, title=None, **kwargs):
@@ -126,7 +126,7 @@ class MatplotlibPlotter:
     """ Plotting backend for matplotlib.
     """
     @staticmethod
-    def save_and_show(fig, show=True, savepath=None, **kwargs):
+    def save_and_show(fig, show=True, savepath=None, return_figure=False, **kwargs):
         """ Save and show plot if needed.
         """
         save_kwargs = dict(bbox_inches='tight', pad_inches=0, dpi=100)
@@ -139,6 +139,10 @@ class MatplotlibPlotter:
             fig.show()
         else:
             plt.close()
+
+        if return_figure:
+            return fig
+        return None
 
     def single(self, image, **kwargs):
         """ Plot single image/heatmap using matplotlib.
@@ -227,7 +231,7 @@ class MatplotlibPlotter:
         if kwargs.get('disable_axes'):
             ax.set_axis_off()
 
-        self.save_and_show(fig, **updated)
+        return self.save_and_show(fig, **updated)
 
     def overlap(self, images, **kwargs):
         """ Plot several images on one canvas using matplotlib: render the first one in greyscale
@@ -308,7 +312,7 @@ class MatplotlibPlotter:
                       extent=extent, **render_kwargs)
         plt.title(**label_kwargs)
 
-        self.save_and_show(fig, **updated)
+        return self.save_and_show(fig, **updated)
 
     def rgb(self, image, **kwargs):
         """ Plot one image in 'rgb' using matplotlib.
@@ -358,7 +362,7 @@ class MatplotlibPlotter:
         plt.ylabel(**yaxis_kwargs)
         plt.tick_params(**tick_params)
 
-        self.save_and_show(plt, **updated)
+        return self.save_and_show(plt, **updated)
 
     def separate(self, images, **kwargs):
         """ Plot several images on a row of canvases using matplotlib.
@@ -410,6 +414,10 @@ class MatplotlibPlotter:
         for i, img in enumerate(images):
             args = {key: (value[i] if isinstance(value, list) else value)
                     for key, value in render_kwargs.items()}
+            cm = plt.get_cmap(args['cmap'])
+            cm.set_bad(color=updated.get('bad_color', updated.get('fill_color', 'white')))
+            args['cmap'] = cm
+
             ax[i].imshow(np.transpose(img.squeeze(), axes=updated['order_axes']), **args)
 
             ax[i].set_xlabel(**xaxis_kwargs)
@@ -418,7 +426,7 @@ class MatplotlibPlotter:
 
         fig.suptitle(**label_kwargs)
 
-        self.save_and_show(plt, **updated)
+        return self.save_and_show(plt, **updated)
 
     def histogram(self, image, **kwargs):
         """ Plot histogram using matplotlib.
@@ -467,7 +475,7 @@ class MatplotlibPlotter:
         plt.xlim(xaxis_kwargs.get('xlim'))  # these are positional ones
         plt.ylim(yaxis_kwargs.get('ylim'))
 
-        self.save_and_show(plt, **updated)
+        return self.save_and_show(plt, **updated)
 
     def curve(self, curve, average=True, window=10, **kwargs):
         """ Plot a curve.
@@ -551,7 +559,7 @@ class MatplotlibPlotter:
         plt.title(**label_kwargs)
         plt.grid(updated['grid'])
 
-        self.save_and_show(plt, **updated)
+        return self.save_and_show(plt, **updated)
 
 
 
