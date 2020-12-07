@@ -2022,10 +2022,10 @@ class StructuredHorizon(Horizon):
 
 @njit
 def _filtering_function(points, filtering_matrix):
-    #pylint: disable=consider-using-enumerate
+    #pylint: disable=consider-using-enumerate, not-an-iterable
     mask = np.ones(len(points), dtype=np.int32)
 
-    for i in range(len(points)):
+    for i in prange(len(points)):
         il, xl = points[i, 0], points[i, 1]
         if filtering_matrix[il, xl] == 1:
             mask[i] = 0

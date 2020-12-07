@@ -203,7 +203,7 @@ def smooth_out(matrix, kernel=None, kernel_size=3, sigma=2.0, iters=1,
 @njit(parallel=True)
 def _smooth_out(src, kernel, preserve, margin):
     """ Jit-accelerated function to apply smoothing. """
-    #pylint: disable=too-many-nested-blocks, consider-using-enumerate
+    #pylint: disable=too-many-nested-blocks, consider-using-enumerate, not-an-iterable
     k = int(np.floor(kernel.shape[0] / 2))
     raveled_kernel = kernel.ravel() / np.sum(kernel)
 
@@ -277,6 +277,7 @@ def gridify(matrix, frequencies, iline=True, xline=True):
 @njit(parallel=True)
 def perturb(data, perturbations, window):
     """ Take a subset of size `window` from each trace, with the center being shifted by `perturbations`. """
+    #pylint: disable=not-an-iterable
     i_range, x_range = data.shape[:2]
     output = np.full((i_range, x_range, window), 0.0)
     central = ceil(data.shape[-1] / 2)
@@ -288,3 +289,15 @@ def perturb(data, perturbations, window):
             start = central + perturbations[il, xl]
             output[il, xl, :] = data[il, xl, start-low:start+high]
     return output
+
+@njit
+def histo_reduce(data, bins):
+    """ Convert each entry in data to histograms according to `bins`. """
+    #pylint: disable=not-an-iterable
+    i_range, x_range = data.shape[:2]
+
+    hist_matrix = np.full((i_range, x_range, len(bins) - 1), np.nan)
+    for il in prange(i_range):
+        for xl in prange(x_range):
+            hist_matrix[il, xl] = np.histogram(data[il, xl], bins=bins)[0]
+    return hist_matrix

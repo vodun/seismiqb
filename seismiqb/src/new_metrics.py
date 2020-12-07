@@ -19,7 +19,7 @@ from .horizon import Horizon
 from .utility_classes import Accumulator
 from .functional import to_device, from_device
 from .functional import correlation, crosscorrelation, btch, kl, js, hellinger, tv, hilbert
-from .functional import smooth_out, digitize, gridify, perturb
+from .functional import smooth_out, digitize, gridify, perturb, histo_reduce
 from .plotters import plot_image
 
 
@@ -667,7 +667,7 @@ class HorizonMetrics(BaseMetrics):
     def probs(self):
         """ Probabilistic interpretation of `data`. """
         if self._probs is None:
-            hist_matrix = NumbaNumpy.histo_reduce(self.data, self.horizon.geometry.bins)
+            hist_matrix = histo_reduce(self.data, self.horizon.geometry.bins)
             self._probs = hist_matrix / np.sum(hist_matrix, axis=-1, keepdims=True) + self.EPS
         return self._probs
 
