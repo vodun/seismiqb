@@ -832,9 +832,9 @@ class SeismicCubeset(Dataset):
 
         return background
 
-    def make_prediction(self, path, pipeline, crop_shape, crop_stride, fmt='hdf5',
+    def make_prediction(self, dst, pipeline, crop_shape, crop_stride, fmt='array',
                         idx=0, src='predictions', chunk_shape=None, chunk_stride=None, batch_size=8,
-                        threshold=0.5, pbar=True):
+                        agg='max', projection='ixh', threshold=0.5, pbar=True, tmp_file='hdf5'):
         """ Create hdf5 file with prediction.
 
         Parameters
@@ -864,75 +864,72 @@ class SeismicCubeset(Dataset):
         threshold : float ot None
             threshold for predictions
         """
-        if fmt == 'npy' and threshold is None:
-            raise ValueError("If fmt is 'npy' then threshold can't be None")
+        tmp_path, path = dst
+        filename, ext = os.path.splitext(dst)
+        if fmt == 'points':
+            if threshold is None:
+                raise ValueError("If fmt is 'points' then threshold can't be None")
+            tmp_path, path = filename + '_tmp.' + tmp_file, dst
+        else:
+            tmp_path, path = dst, dst
 
         geometry = self.geometries[idx]
-        chunk_shape = infer_tuple(chunk_shape, geometry.cube_shape)
+        cube_shape = geometry.cube_shape
+
+        chunk_shape = infer_tuple(chunk_shape, cube_shape)
         chunk_stride = infer_tuple(chunk_stride, chunk_shape)
 
-        cube_shape = geometry.cube_shape
         chunk_grid = [
             make_axis_grid((0, cube_shape[i]), chunk_stride[i], cube_shape[i], chunk_shape[i])
-            for i in range(2)
+            for i in range(3)
         ]
-        chunk_grid = np.stack(np.meshgrid(*chunk_grid), axis=-1).reshape(-1, 2)
-
-        if os.path.exists(path):
-            os.remove(path)
+        chunk_grid = np.stack(np.meshgrid(*chunk_grid), axis=-1).reshape(-1, 3)
 
         if pbar:
             total = 0
-            for i_min, x_min in chunk_grid:
-                i_max = min(i_min+chunk_shape[0], cube_shape[0])
-                x_max = min(x_min+chunk_shape[1], cube_shape[1])
+            for lower_bound in chunk_grid:
+                upper_bound = np.minimum(lower_bound + chunk_shape, cube_shape)
                 self.make_grid(
                     self.indices[idx], crop_shape,
-                    [i_min, i_max], [x_min, x_max], [0, geometry.depth-1],
+                    *list(zip(lower_bound, upper_bound)),
                     strides=crop_stride, batch_size=batch_size
                 )
                 total += self.grid_iters
 
-        with h5py.File(path, "a") as file_hdf5:
-            aggregation_map = np.zeros(cube_shape[:-1])
-            cube_hdf5 = file_hdf5.create_dataset('cube', cube_shape)
-            context = tqdm(total=total) if pbar else contextlib.suppress()
-            with context as progress_bar:
-                for i_min, x_min in chunk_grid:
-                    i_max = min(i_min+chunk_shape[0], cube_shape[0])
-                    x_max = min(x_min+chunk_shape[1], cube_shape[1])
-                    self.make_grid(
-                        self.indices[idx], crop_shape,
-                        [i_min, i_max], [x_min, x_max], [0, geometry.depth-1],
-                        strides=crop_stride, batch_size=batch_size
-                    )
-                    chunk_pipeline = pipeline << self
-                    for _ in range(self.grid_iters):
-                        _ = chunk_pipeline.next_batch(len(self))
-                        if pbar:
-                            progress_bar.update()
+        def _predictions():
+            for lower_bound in chunk_grid:
+                upper_bound = np.minimum(lower_bound + chunk_shape, cube_shape)
+                self.make_grid(
+                    self.indices[idx], crop_shape,
+                    *list(zip(lower_bound, upper_bound)),
+                    strides=crop_stride, batch_size=batch_size
+                )
+                chunk_pipeline = pipeline << self
+                for _ in range(self.grid_iters):
+                    _ = chunk_pipeline.next_batch(len(self))
 
-                    # Write to hdf5
-                    slices = tuple([slice(*item) for item in self.grid_info['range']])
-                    prediction = self.assemble_crops(chunk_pipeline.v(src), order=(0, 1, 2))
-                    aggregation_map[tuple(slices[:-1])] += 1
-                    cube_hdf5[slices[0], slices[1], slices[2]] += prediction
-            cube_hdf5[:] = cube_hdf5 / np.expand_dims(aggregation_map, axis=-1)
+                # Write to hdf5
+                slices = tuple([slice(*item) for item in self.grid_info['range']])
+                prediction = self.assemble_crops(chunk_pipeline.v(src), order=(0, 1, 2))
+                yield prediction
 
-            grid = np.arange(0, cube_shape[0], chunk_stride[0])
-            if threshold is not None:
-                points = []
-                for i, start in enumerate(grid):
-                    stop = grid[i+1] if i < len(grid)-1 else cube_shape[0]
-                    cube_hdf5[start:stop] = cube_hdf5[start:stop] > threshold
-                    if fmt == 'npy':
-                        points_ = np.stack(np.where(cube_hdf5[start:stop]), axis=-1)
-                        points_[:, 0] += start
-                        points += [points_]
+        chunks = tqdm(_predictions(), total=total) if pbar else _predictions()
+        geometry.create_hdf5_from_iterable(chunks, tmp_path, cube_shape, chunk_shape, chunk_stride, agg, projection)
 
-        if fmt == 'npy':
-            os.remove(path)
-            np.save(path, np.concatenate(points, axis=0), allow_pickle=False)
+        #     grid = np.arange(0, cube_shape[0], chunk_stride[0])
+        #     if threshold is not None:
+        #         points = []
+        #         for i, start in enumerate(grid):
+        #             stop = grid[i+1] if i < len(grid)-1 else cube_shape[0]
+        #             cube_hdf5[start:stop] = cube_hdf5[start:stop] > threshold
+        #             if fmt == 'npy':
+        #                 points_ = np.stack(np.where(cube_hdf5[start:stop]), axis=-1)
+        #                 points_[:, 0] += start
+        #                 points += [points_]
+
+        # if fmt == 'npy':
+        #     os.remove(path)
+        #     np.save(path, np.concatenate(points, axis=0), allow_pickle=False)
 
 class Modificator:
     """ Converts array to `object` dtype and prepends the `cube_name` column.

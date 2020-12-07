@@ -13,7 +13,7 @@ from ..batchflow import FilesIndex, Batch, action, inbatch_parallel, SkipBatchEx
 
 from .horizon import Horizon
 from .plotters import plot_image
-from .utils import attr_filter, attr_filter_gpu
+from .utils import attr_filter, attr_filter
 
 
 
@@ -419,12 +419,12 @@ class SeismicCropBatch(Batch):
             stride = np.ones(3, dtype=np.int32) * stride
         window = np.minimum(np.array(window), image.shape)
         result = np.zeros_like(image)
-        if mode == 'cpu':
+        if device == 'cpu':
             points = np.stack(np.meshgrid(*[range(image.shape[i]) for i in range(3)]), axis=-1).reshape(-1, 3)
             result = attr_filter(image, result, window, stride, points, attribute)
         else:
-            mode = mode.replace('gpu', 'cuda')
-            result = attr_filter_gpu(image, window, stride, mode, attribute)
+            device = device.replace('gpu', 'cuda')
+            result = attr_filter_gpu(image, window, stride, device, attribute)
         return result
 
     @action
