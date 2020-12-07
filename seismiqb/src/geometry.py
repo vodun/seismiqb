@@ -16,8 +16,8 @@ import segyio
 import cv2
 from scipy.ndimage import zoom
 
-from .utils import lru_cache, find_min_max, file_print, \
-                   SafeIO, attr_filter, make_axis_grid, infer_tuple
+from .utils import find_min_max, file_print, attr_filter, make_axis_grid, infer_tuple
+from .utility_classes import lru_cache, SafeIO
 from .plotters import plot_image
 
 

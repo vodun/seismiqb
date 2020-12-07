@@ -1020,7 +1020,7 @@ def compute_local_func(function, name, data, bad_traces, kernel_size=3, reduce_f
     return metric, title
 
 
-@njit
+@njit(parallel=True)
 def apply_local_func(compute_func, reduce_func, data, bad_traces, kernel_size):
     """ Apply function in window. """
     #pylint: disable=too-many-nested-blocks, consider-using-enumerate
@@ -1029,13 +1029,13 @@ def apply_local_func(compute_func, reduce_func, data, bad_traces, kernel_size):
     metric = np.full((i_range, x_range), np.nan)
 
     for il in prange(i_range):
-        for xl in prange(x_range):
+        for xl in range(x_range):
             if bad_traces[il, xl] == 0:
                 trace = data[il, xl, :]
 
                 metric_element = np.full((kernel_size, kernel_size), np.nan)
-                for _idx in prange(-k, k+1):
-                    for _jdx in prange(-k, k+1):
+                for _idx in range(-k, k+1):
+                    for _jdx in range(-k, k+1):
                         if bad_traces[il+_idx, xl+_jdx] == 0:
                             trace_ = data[il+_idx, xl+_jdx]
                             metric_element[k+_idx, k+_jdx] = compute_func(trace, trace_)
@@ -1193,7 +1193,7 @@ def _compute_local_crosscorrs(array_1, array_2):
     temp = np.zeros(len(array_1))
     for k in range(len(array_1)):
         temp[k] = np.sum(array_1[k:] * array_2[:len(array_1)-k])
-    return np.argmax(temp)
+    return np.argmax(temp) - (temp.size // 2)
 
 
 def compute_support_crosscorrs(data, supports, bad_traces, safe_strip=0, **kwargs):
