@@ -610,44 +610,75 @@ class SeismicCubeset(Dataset):
         }
 
 
-    def show_grid(self, plot_over='labels', surface_num=0, plot_dict=None):
+    def show_grid(self, src_labels='labels', labels_indices=None, attribute='cube_values', plot_dict=None):
         """Plot grid over selected surface to visualize how it overlaps data.
 
         Parameters
         ----------
-        plot_over : str
-            Attribute to show below the grid.
+        src_labels : str
+            Labels to show below the grid.
             Defaults to `labels`.
-        surface_num : int
-            Index of surface from `plot_over` to show.
-            Defaults to 0.
+        labels_indices : str
+            Indices of items from `src_labels` to show below the grid.
+        attribute : str
+            Alias from `Horizon.FUNC_BY_ATTR` to show below the grid.
         plot_dict : dict, optional
             Dict of plot parameters, such as:
                 figsize : tuple
                     Size of resulted figure.
-                line_color : color in matplotlib format
-                    Color of grid line.
-                dot_color : color in matplotlib format
-                    Color of dots in grid lines intersections.
+                attribute_cmap : cmap in matplotlib format
+                    Colormap of the shown attribute.
+                grid_color : color in matplotlib format
+                    Color of grid lines.
                 title_fontsize : int
                     Font size of title over the figure.
+                single_crop_color: color in matplotlib format
+                    Color of first and last crops lines.
         """
         from matplotlib import pyplot as plt #pylint: disable=import-outside-toplevel
-        default_plot_dict = {'figsize': (15, 5),
-                             'line_color': 'cornflowerblue',
-                             'dot_color': 'crimson',
-                             'title_fontsize': 18}
+        default_plot_dict = {
+            'figsize': (15, 10),
+            'attribute_cmap' : 'tab20b',
+            'grid_color': 'darkslategray',
+            'grid_linestyle': 'dashed',
+            'title_fontsize': 18,
+            'single_crop_color': 'crimson'
+        }
         plot_dict = default_plot_dict if plot_dict is None else {**default_plot_dict, **plot_dict}
 
-        _fig, ax = plt.subplots(figsize=plot_dict['figsize'])
-        surface = self[self.grid_info['cube_name'], plot_over, surface_num]
-        surface.show(ax=ax)
-        ax.set_title(f'Grid over {ax.get_title()}', fontsize=plot_dict['title_fontsize'])
+        labels_indices = labels_indices if isinstance(labels_indices, (tuple, list)) else [labels_indices]
+        labels_indices = slice(None) if labels_indices[0] is None else labels_indices
+        labels = self[self.grid_info['cube_name'], src_labels, labels_indices]
 
-        for x, y, _ in self.grid_info['grid_array']:
-            ax.axvline(x, zorder=1, color=plot_dict['line_color'])
-            ax.axhline(y, zorder=1, color=plot_dict['line_color'])
-            ax.plot(x, y, 'h', color=plot_dict['dot_color'], alpha=0.9, zorder=2)
+        _fig, axes = plt.subplots(ncols=len(labels), figsize=plot_dict['figsize'])
+        axes = axes if isinstance(axes, np.ndarray) else [axes]
+
+        for ax, label in zip(axes, labels):
+            underlay = label.load_attribute(attribute, transform={'fill_value': np.nan})
+            if len(underlay.shape) == 3:
+                underlay = underlay[:, :, underlay.shape[2] // 2].squeeze()
+            underlay = underlay.T
+            ax.imshow(underlay, cmap=plot_dict['attribute_cmap'])
+            ax.set_xlim([0, underlay.shape[1]])
+            ax.set_ylim([underlay.shape[0], 0])
+            ax.set_title("Grid over `{}` on `{}`".format(attribute, label.name), fontsize=plot_dict['title_fontsize'])
+
+            crop_shape = self.grid_info['crop_shape']
+            grid_plot_dict = {'color': plot_dict['grid_color'], 'linestyle': plot_dict['grid_linestyle'], 'zorder': 1}
+            for x, y, _ in self.grid_info['grid_array']:
+                ax.axvline(x, **grid_plot_dict)
+                ax.axvline(x + crop_shape[0], **grid_plot_dict)
+                ax.axhline(y, **grid_plot_dict)
+                ax.axhline(y + crop_shape[1], **grid_plot_dict)
+
+            single_crop_plot_dict = {'color': plot_dict['single_crop_color'], 'zorder': 2, 'linewidth': 3}
+            # Plot first crop
+            ax.hlines(y=crop_shape[0], xmin=0, xmax=crop_shape[1], **single_crop_plot_dict)
+            ax.vlines(x=crop_shape[1], ymin=0, ymax=crop_shape[0], **single_crop_plot_dict)
+            # Plot last crop
+            last_x, last_y, _ = self.grid_info['grid_array'][-1]
+            ax.hlines(y=last_y, xmin=underlay.shape[1] - crop_shape[1], xmax=underlay.shape[1], **single_crop_plot_dict)
+            ax.vlines(x=last_x, ymin=underlay.shape[0] - crop_shape[0], ymax=underlay.shape[0], **single_crop_plot_dict)
 
 
     def mask_to_horizons(self, src, cube_name, threshold=0.5, averaging='mean', minsize=0,

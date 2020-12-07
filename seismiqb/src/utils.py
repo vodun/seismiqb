@@ -84,7 +84,7 @@ def tuplize_nested(iterable):
     return tuple(result)
 
 class Singleton:
-    """ There must be only one!"""
+    """ There must be only one! """
     instance = None
     def __init__(self):
         if not Singleton.instance:
@@ -106,15 +106,21 @@ class lru_cache:
 
     Examples
     --------
-    Store loaded slides::
+    Store loaded slides by default:
 
-    @lru_cache(maxsize=128)
-    def load_slide(cube_name, slide_no):
-        pass
+    >>> @lru_cache(maxsize=128)
+    >>> def load_slide(cube_name, slide_no):
+    >>>     pass
+
+    Store loaded slides only when `use_cache` is explicitly passed to function arguments:
+
+    >>> @lru_cache(maxsize=128, apply_by_default=false)
+    >>> def load_slide(cube_name, slide_no):
+    >>>     pass
 
     Notes
     -----
-    All arguments to the decorated method must be hashable.
+    On first call assigns an empty set to class attribute `_cached_attributes` to keep track of decorated functions.
     """
     #pylint: disable=invalid-name, attribute-defined-outside-init
     def __init__(self, maxsize=None, attributes=None, apply_by_default=True):
@@ -166,7 +172,7 @@ class lru_cache:
             # pylint: disable=protected-access
             # Keep track of cached functions.
             if not hasattr(instance, '_cached_attributes'):
-                setattr(instance, '_cached_attributes', [])
+                setattr(instance, '_cached_attributes', set())
             instance._cached_attributes.add(func.__name__)
 
             # Parse the `use_cache`
