@@ -660,8 +660,7 @@ class SeismicGeometry:
         return attr_filter(cube, window, device, attribute)
 
     @classmethod
-    def create_file_from_iterable(cls, src, dst, shape, window, stride, agg=None, projection='ixh',
-                                  threshold=None):
+    def create_file_from_iterable(cls, src, dst, shape, window, stride, agg=None, projection='ixh', threshold=None):
         shape = np.array(shape)
         window = np.array(window)
         stride = np.array(stride)
@@ -1336,8 +1335,8 @@ class SeismicGeometryHDF5(SeismicGeometry):
             shape = np.array([((slc.stop or stop) - (slc.start or 0)) for slc, stop in zip(locations, self.cube_shape)])
             indices = np.argsort(shape)
             mapping = {0: 'cube', 1: 'cube_x', 2: 'cube_h'}
-            for axis in indices:
-                if mapping[axis] in self.file_hdf5:
+            for ax in indices:
+                if mapping[ax] in self.file_hdf5:
                     break
         else:
             mapping = {0: 0, 1: 1, 2: 2,

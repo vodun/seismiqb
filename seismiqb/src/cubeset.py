@@ -2,10 +2,8 @@
 #pylint: disable=too-many-lines
 import os
 from glob import glob
-import contextlib
 
 import numpy as np
-import h5py
 from tqdm.auto import tqdm
 
 from ..batchflow import FilesIndex, DatasetIndex, Dataset, Sampler, Pipeline
