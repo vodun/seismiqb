@@ -353,6 +353,8 @@ class SeismicCropBatch(Batch):
             Component of batch with locations of crops to load.
         final_ndim : 2 or 3
             Number of dimensions returned crop should have.
+        transform : str or dict
+            For `Horizon.transform_by_binary_matrix`.
         kwargs :
             For one of `Horizon` functions depending on chosen `src_attribute`:
             - 'cube_values' — `cached_get_cube_values`;
@@ -376,8 +378,7 @@ class SeismicCropBatch(Batch):
 
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def create_masks(self, ix, dst, src_labels='labels', src_locations='locations',
-                     use_labels='all', mode='auto', width=3):
+    def create_masks(self, ix, dst, src_labels='labels', src_locations='locations', use_labels='all', width=3):
         """ Create masks from labels-dictionary in given positions.
 
         Parameters
@@ -395,13 +396,8 @@ class SeismicCropBatch(Batch):
             If 'nearest_to_center', use one label closest to height from `src_locations`.
             If int or array-like then element(s) are interpreted as indices of
             desired labels and must be ints in range [0, len(horizons) - 1].
-        mode : '2d', '3d' or 'auto'
-            If '3d', create conventional mask by cube volume defined by `src_locations`.
-            If '2d', squeeze mask into single dimension along depth axis.
-            If 'auto', set according to `use_labels`: '2d' if 'nearest_to_center' and '3d' else.
-            Defaults to 'auto'.
         width : int
-            How much to thicken the horizon when `mode` is '3d'.
+            How much to thicken the horizon.
 
         Returns
         -------
@@ -413,8 +409,8 @@ class SeismicCropBatch(Batch):
         Can be run only after labels-dict is loaded into labels-component.
         """
         location = self.get(ix, src_locations)
-        shape_ = self.get(ix, 'shapes')
-        mask = np.zeros((shape_), dtype='float32')
+        crop_shape = self.get(ix, 'shapes')
+        mask = np.zeros(crop_shape, dtype='float32')
 
         labels = self.get(ix, src_labels) if isinstance(src_labels, str) else src_labels
         labels = [labels] if not isinstance(labels, (tuple, list)) else labels
@@ -430,14 +426,8 @@ class SeismicCropBatch(Batch):
         elif use_labels == 'nearest_to_center':
             labels = [self.get_nearest_horizon(ix, src_labels, location[2])]
 
-        if mode == 'auto':
-            mode = '2d' if use_labels == 'nearest_to_center' else '3d'
-        crop_shape = self.get(ix, 'shapes')
-        crop_shape = (*crop_shape[:2], 1) if mode == '2d' else crop_shape
-        mask = np.zeros((crop_shape), dtype='float32')
-
         for label in labels:
-            mask = label.add_to_mask(mask, locations=location, width=width, mode=mode)
+            mask = label.add_to_mask(mask, locations=location, width=width)
             if use_labels == 'single' and np.sum(mask) > 0.0:
                 break
         return mask

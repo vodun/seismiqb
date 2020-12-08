@@ -373,9 +373,9 @@ class Horizon:
         'heights' : 'get_full_matrix',
         'full_matrix' : 'get_full_matrix',
         'metrics' : 'metrics_evaluate',
-        'instant_phase' : 'get_instantaneous_phase',
-        'instant_amplitude' : 'get_instantaneous_amplitude',
-        'mask' : 'get_full_binary_matrix',
+        'instant_phases' : 'get_instantaneous_phase',
+        'instant_amplitudes' : 'get_instantaneous_amplitude',
+        'masks' : 'get_full_binary_matrix',
         'full_binary_matrix' : 'get_full_binary_matrix'
         }
 
@@ -889,7 +889,7 @@ class Horizon:
 
         self.sampler = HorizonSampler(np.histogramdd(points/self.cube_shape, bins=bins))
 
-    def add_to_mask(self, mask, locations=None, width=3, alpha=1, mode='3d', **kwargs):
+    def add_to_mask(self, mask, locations=None, width=3, alpha=1, **kwargs):
         """ Add horizon to a background.
         Note that background is changed in-place.
 
@@ -900,13 +900,9 @@ class Horizon:
         locations : ndarray
             Where the mask is located.
         width : int
-            Width of an added horizon when `mode` is '3d'.
+            Width of an added horizon.
         alpha : number
             Value to fill background with at horizon location.
-        mode : '2d' or '3d'
-            Whether squeeze mask into single dimension along depth axis or not.
-            Use '2d' to create mask for data cut out along the horizon.
-            Defauts to '3d'.
         """
         _ = kwargs
         low = width // 2
@@ -924,23 +920,20 @@ class Horizon:
         if i_max > i_min and x_max > x_min:
             overlap = self.matrix[i_min - self.i_min : i_max - self.i_min,
                                   x_min - self.x_min : x_max - self.x_min]
-            if mode == '2d':
-                mask[i_min - mask_i_min : i_max - mask_i_min,
-                     x_min - mask_x_min : x_max - mask_x_min, 0] = (overlap >= 0).astype(np.int32) * alpha
-            elif mode == '3d':
-                # Coordinates of points to use in overlap local system
-                idx_i, idx_x = np.asarray((overlap != self.FILL_VALUE) &
-                                          (overlap >= mask_h_min + low) &
-                                          (overlap <= mask_h_max - high)).nonzero()
-                heights = overlap[idx_i, idx_x]
 
-                # Convert coordinates to mask local system
-                idx_i += i_min - mask_i_min
-                idx_x += x_min - mask_x_min
-                heights -= (mask_h_min + low)
+            # Coordinates of points to use in overlap local system
+            idx_i, idx_x = np.asarray((overlap != self.FILL_VALUE) &
+                                      (overlap >= mask_h_min + low) &
+                                      (overlap <= mask_h_max - high)).nonzero()
+            heights = overlap[idx_i, idx_x]
 
-                for shift in range(width):
-                    mask[idx_i, idx_x, heights + shift] = alpha
+            # Convert coordinates to mask local system
+            idx_i += i_min - mask_i_min
+            idx_x += x_min - mask_x_min
+            heights -= (mask_h_min + low)
+
+            for shift in range(width):
+                mask[idx_i, idx_x, heights + shift] = alpha
         return mask
 
 
@@ -950,7 +943,7 @@ class Horizon:
         Parameters
         ----------
         arr : np.array
-            Array to normalize.
+            Array to transform.
         transform : callable, str or dict
             Transformation parameters.
             If str, a name of normalization mode — either 'min-max' or 'mean-std'.
@@ -981,8 +974,7 @@ class Horizon:
         else:
             raise ValueError('Unknown normalize mode {}'.format(normalize['normalize']))
 
-        fill_value = transform.get('fill_value', 0)
-        arr = arr.astype(type(fill_value))
+        fill_value = transform.get('fill_value', 0) if isinstance(transform, dict) else 0
         arr[np.where(~mask)] = fill_value
         return arr
 
@@ -1144,9 +1136,9 @@ class Horizon:
             - 'cube_values' or 'amplitudes': cube values cut along the horizon;
             - 'heights' or 'full_matrix': horizon depth map in cubic coordinates;
             - 'metrics': random support metrics matrix.
-            - 'instant_phase': instantaneous phase along the horizon;
-            - 'instant_amplitude': instantaneous amplitude along the horizon;
-            - 'mask' or 'full_binary_matrix': mask of horizon;
+            - 'instant_phases': instantaneous phase along the horizon;
+            - 'instant_amplitudes': instantaneous amplitude along the horizon;
+            - 'masks' or 'full_binary_matrix': mask of horizon;
         location : sequence of 3 slices or None
             First two slices are used as `iline` and `xline` ranges to cut crop from.
             Last 'depth' slice is used to infer `window` parameter when `src_attribute` is 'cube_values'.
@@ -1184,14 +1176,12 @@ class Horizon:
                 **({'window': h_slice.stop - h_slice.start} if h_slice != slice(None) else {}),
                 **default_kwargs
             }
-        elif src_attribute in ['mask', 'full_binary_matrix']:
+        elif src_attribute in ['masks', 'full_binary_matrix']:
             default_kwargs = {
                 'fill_value': 0,
-                'dtype': np.int32,
                 **default_kwargs
             }
         kwargs = {**default_kwargs, **kwargs}
-
         func_name = self.FUNC_BY_ATTR.get(src_attribute)
         if func_name is None:
             raise ValueError("Unknown `src_attribute` {}. Expected {}.".format(src_attribute, self.FUNC_BY_ATTR.keys()))

@@ -9,6 +9,7 @@ import contextlib
 import numpy as np
 import h5py
 from tqdm.auto import tqdm
+from scipy.special import expit
 
 from ..batchflow import FilesIndex, DatasetIndex, Dataset, Sampler, Pipeline
 from ..batchflow import NumpySampler
@@ -463,7 +464,7 @@ class SeismicCubeset(Dataset):
         """
         for idx in indices:
             if idx not in self.indices:
-                warn(f"Can't call {func} for {attrs} of cube {idx}, since it is not in index.")
+                warn(f"Can't call `{func} for {attrs} of cube {idx}, since it is not in index.")
             else:
                 for attr in attrs:
                     for item in self[idx, attr]:
@@ -626,59 +627,72 @@ class SeismicCubeset(Dataset):
             Dict of plot parameters, such as:
                 figsize : tuple
                     Size of resulted figure.
-                attribute_cmap : cmap in matplotlib format
-                    Colormap of the shown attribute.
-                grid_color : color in matplotlib format
-                    Color of grid lines.
                 title_fontsize : int
                     Font size of title over the figure.
-                single_crop_color: color in matplotlib format
-                    Color of first and last crops lines.
+                attr_* : any parameter for `plt.imshow`
+                    Passed to attribute plotter
+                grid_* : any parameter for `plt.hlines` and `plt.vlines`
+                    Passed to grid plotter
+                crop_* : any parameter for `plt.hlines` and `plt.vlines`
+                    Passed to corners crops plotter
         """
         from matplotlib import pyplot as plt #pylint: disable=import-outside-toplevel
-        default_plot_dict = {
-            'figsize': (15, 10),
-            'attribute_cmap' : 'tab20b',
-            'grid_color': 'darkslategray',
-            'grid_linestyle': 'dashed',
-            'title_fontsize': 18,
-            'single_crop_color': 'crimson'
-        }
-        plot_dict = default_plot_dict if plot_dict is None else {**default_plot_dict, **plot_dict}
 
         labels_indices = labels_indices if isinstance(labels_indices, (tuple, list)) else [labels_indices]
         labels_indices = slice(None) if labels_indices[0] is None else labels_indices
         labels = self[self.grid_info['cube_name'], src_labels, labels_indices]
 
+        # Calculate grid lines coordinates
+        (x_min, x_max), (y_min, y_max) = self.grid_info['range'][:2]
+        x_stride, y_stride = self.grid_info['strides'][:2]
+        x_crop, y_crop = self.grid_info['crop_shape'][:2]
+        x_lines = list(np.arange(0, x_max, x_stride)) + [x_max - x_crop]
+        y_lines = list(np.arange(0, y_max, y_stride)) + [y_max - y_crop]
+
+        default_plot_dict = {
+            'figsize': (20 * x_max // y_max, 10),
+            'title_fontsize': 18,
+            'attr_cmap' : 'tab20b',
+            'grid_color': 'darkslategray',
+            'grid_linestyle': 'dashed',
+            'crop_color': 'crimson',
+            'crop_linewidth': 3
+        }
+        plot_dict = default_plot_dict if plot_dict is None else {**default_plot_dict, **plot_dict}
+        attr_plot_dict = {k.split('attr_')[-1]: v for k, v in plot_dict.items() if k.startswith('attr_')}
+        attr_plot_dict['zorder'] = 0
+        grid_plot_dict = {k.split('grid_')[-1]: v for k, v in plot_dict.items() if k.startswith('grid_')}
+        grid_plot_dict['zorder'] = 1
+        crop_plot_dict = {k.split('crop_')[-1]: v for k, v in plot_dict.items() if k.startswith('crop_')}
+        crop_plot_dict['zorder'] = 2
+
         _fig, axes = plt.subplots(ncols=len(labels), figsize=plot_dict['figsize'])
         axes = axes if isinstance(axes, np.ndarray) else [axes]
 
         for ax, label in zip(axes, labels):
+            # Plot underlaying attribute
             underlay = label.load_attribute(attribute, transform={'fill_value': np.nan})
             if len(underlay.shape) == 3:
                 underlay = underlay[:, :, underlay.shape[2] // 2].squeeze()
             underlay = underlay.T
-            ax.imshow(underlay, cmap=plot_dict['attribute_cmap'])
-            ax.set_xlim([0, underlay.shape[1]])
-            ax.set_ylim([underlay.shape[0], 0])
+            ax.imshow(underlay, **attr_plot_dict)
             ax.set_title("Grid over `{}` on `{}`".format(attribute, label.name), fontsize=plot_dict['title_fontsize'])
 
-            crop_shape = self.grid_info['crop_shape']
-            grid_plot_dict = {'color': plot_dict['grid_color'], 'linestyle': plot_dict['grid_linestyle'], 'zorder': 1}
-            for x, y, _ in self.grid_info['grid_array']:
-                ax.axvline(x, **grid_plot_dict)
-                ax.axvline(x + crop_shape[0], **grid_plot_dict)
-                ax.axhline(y, **grid_plot_dict)
-                ax.axhline(y + crop_shape[1], **grid_plot_dict)
+            # Set limits
+            ax.set_xlim([x_min, x_max])
+            ax.set_ylim([y_max, y_min])
 
-            single_crop_plot_dict = {'color': plot_dict['single_crop_color'], 'zorder': 2, 'linewidth': 3}
+            # Plot grid
+            ax.vlines(x_lines, y_min, y_max, **grid_plot_dict)
+            ax.hlines(y_lines, x_min, x_max, **grid_plot_dict)
+
             # Plot first crop
-            ax.hlines(y=crop_shape[0], xmin=0, xmax=crop_shape[1], **single_crop_plot_dict)
-            ax.vlines(x=crop_shape[1], ymin=0, ymax=crop_shape[0], **single_crop_plot_dict)
+            ax.vlines(x=x_lines[0] + x_crop, ymin=y_min, ymax=y_crop, **crop_plot_dict)
+            ax.hlines(y=y_lines[0] + y_crop, xmin=x_min, xmax=x_crop, **crop_plot_dict)
+
             # Plot last crop
-            last_x, last_y, _ = self.grid_info['grid_array'][-1]
-            ax.hlines(y=last_y, xmin=underlay.shape[1] - crop_shape[1], xmax=underlay.shape[1], **single_crop_plot_dict)
-            ax.vlines(x=last_x, ymin=underlay.shape[0] - crop_shape[0], ymax=underlay.shape[0], **single_crop_plot_dict)
+            ax.vlines(x=x_lines[-1], ymin=y_max - x_crop, ymax=y_max, **crop_plot_dict)
+            ax.hlines(y=y_lines[-1], xmin=x_max - y_crop, xmax=x_max, **crop_plot_dict)
 
 
     def mask_to_horizons(self, src, cube_name, threshold=0.5, averaging='mean', minsize=0,
@@ -1054,6 +1068,45 @@ class SeismicCubeset(Dataset):
                     aggregation_map[tuple(slices[:-1])] += 1
                     cube_hdf5[slices[0], slices[1], slices[2]] = +prediction
                 cube_hdf5[:] = cube_hdf5 / np.expand_dims(aggregation_map, axis=-1)
+
+
+    def make_labels_prediction(self, pipeline, crop_shape, overlap_factor,
+                               src_labels='horizons', dst_labels='predictions',
+                               pipeline_var='predictions', order=(1, 2, 0), binarize=True):
+        """
+        Make predictions and put them into dataset attribute.
+
+        Parameters
+        ----------
+        pipeline : Pipeline
+            Inference pipeline.
+        crop_shape : sequence
+            For `SeismicCubeset.make_grid`.
+        overlap_factor : float or sequence
+            For `SeismicCubeset.make_grid`.
+        src_labels : str
+            Name of dataset component with items to make grid for.
+        dst_labels : str
+            Name of dataset component to put predictions into.
+        pipeline_var : str
+            Name of pipeline variable to get predictions for assemble from.
+        order : tuple of int
+            For `SeismicCubeset.assemble_crops`.
+        binarize : bool
+            Whether convert probability to class label or not.
+        """
+        setattr(self, dst_labels, IndexedDict({ix: [] for ix in self.indices}))
+        for idx, labels in getattr(self, src_labels).items():
+            for label in labels:
+                self.make_grid(cube_name=idx, crop_shape=crop_shape, overlap_factor=overlap_factor,
+                               heights=int(label.h_mean), mode='2d')
+                pipeline = pipeline << self
+                pipeline.run(batch_size=self.size, n_iters=self.grid_iters, bar='n')
+                prediction = self.assemble_crops(pipeline.v(pipeline_var), order=(1, 2, 0)).squeeze()
+                prediction = expit(prediction)
+                prediction = prediction.round() if binarize else prediction
+                self[idx, dst_labels] += [Horizon(prediction, label.geometry)]
+
 
     # Task-specific loaders
 

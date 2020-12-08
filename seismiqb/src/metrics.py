@@ -620,7 +620,7 @@ class HorizonMetrics(BaseSeismicMetric):
         """ Create `data` attribute at the first time of evaluation. """
         if self._data is None:
             self._data = self.horizon.get_cube_values(window=self.window, offset=self.offset,
-                                                      normalize=self.normalize, chunk_size=self.chunk_size)
+                                                      transform=self.normalize, chunk_size=self.chunk_size)
         self._data[self._data == Horizon.FILL_VALUE] = np.nan
         return self._data
 
