@@ -660,7 +660,8 @@ class SeismicGeometry:
         return attr_filter(cube, window, device, attribute)
 
     @classmethod
-    def create_hdf5_from_iterable(cls, src, dst, shape, window, stride, agg=None, projection='ixh'):
+    def create_file_from_iterable(cls, src, dst, shape, window, stride, agg=None, projection='ixh',
+                                  threshold=None):
         shape = np.array(shape)
         window = np.array(window)
         stride = np.array(stride)
@@ -714,14 +715,25 @@ class SeismicGeometry:
                     agg_map[tuple(slices)] += 1
                 chunk /= agg_map
                 chunk = _chunk + chunk
-            for axis in projection:
-                transpose_axes = cls.PROJECTION_AXES[axis]
-                cube_slice = [slice(position[i], position[i]+chunk.shape[i]) for i in cls.PROJECTION_AXES[axis]]
-                dst[axis][cube_slice[0], cube_slice[1], cube_slice[2]] = chunk.transpose(transpose_axes)
+            transpose_axes = cls.PROJECTION_AXES[projection[0]]
+            main_cube[cube_slice[0], cube_slice[1], cube_slice[2]] = chunk.transpose(transpose_axes)
 
         if ext == 'npy':
+            if threshold is not None:
+                dst['i'] = (dst['i'] > threshold).astype(int)
             np.save(path, dst['i'], allow_pickle=False)
         else:
+            for i in range(0, main_cube.shape[0], window[0]):
+                slide = main_cube[i:i+window[0]]
+                if threshold is not None:
+                    slide = (slide > threshold).astype(int)
+                    main_cube[i:i+window[0]] = slide
+                slide = slide.transpose(cls.PROJECTION_AXES_REVERSE[projection[0]])
+                main_axis = cls.PROJECTION_AXES[projection[0]][0]
+                for axis in projection[1:]:
+                    slices = [slice(None) for i in range(3)]
+                    slices[cls.PROJECTION_AXES_REVERSE[axis][main_axis]] = slice(i, i+window[0])
+                    dst[axis][tuple(slices)] = slide.transpose(cls.PROJECTION_AXES[axis])
             file_hdf5.close()
 
     def compute_attribute(self, attr, dst, chunk_shape=None, chunk_stride=None, window=10,
@@ -757,7 +769,7 @@ class SeismicGeometry:
         total = np.prod([len(item) for item in grid])
         chunks = tqdm(chunks, total=total) if pbar else chunks
 
-        self.create_hdf5_from_iterable(chunks, dst, self.cube_shape, chunk_shape,
+        self.create_file_from_iterable(chunks, dst, self.cube_shape, chunk_shape,
                                        chunk_stride, agg=agg, projection='ixh')
 
         # self.store_meta(path_meta)
@@ -1138,7 +1150,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
         5:110 ilines, 100:1105 crosslines, 0:700 depths, locations must be::
             [slice(5, 110), slice(100, 1105), slice(0, 700)]
         """
-        shape = np.array([(slc.stop - slc.start) for slc in locations])
+        shape = np.array([((slc.stop or stop) - (slc.start or 0)) for slc, stop in zip(locations, self.cube_shape)])
         indices = self.make_crop_indices(locations)
         crop = self.load_traces(indices)[..., locations[-1]].reshape(shape)
         return crop
@@ -1163,7 +1175,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
             Upper bound for amount of slides to load. Used only in `adaptive` mode.
         """
         _ = kwargs
-        shape = np.array([(slc.stop - slc.start) for slc in locations])
+        shape = np.array([((slc.stop or stop) - (slc.start or 0)) for slc, stop in zip(locations, self.cube_shape)])
         axis = np.argmin(shape)
         if mode == 'adaptive':
             if axis in [0, 1]:
@@ -1321,7 +1333,7 @@ class SeismicGeometryHDF5(SeismicGeometry):
             Can be `iline`, `xline`, `height`, `depth`, `i`, `x`, `h`, 0, 1, 2.
         """
         if axis is None:
-            shape = np.array([(slc.stop - slc.start) for slc in locations])
+            shape = np.array([((slc.stop or stop) - (slc.start or 0)) for slc, stop in zip(locations, self.cube_shape)])
             indices = np.argsort(shape)
             mapping = {0: 'cube', 1: 'cube_x', 2: 'cube_h'}
             for axis in indices:

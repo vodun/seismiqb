@@ -826,15 +826,17 @@ class SeismicCubeset(Dataset):
                     background_slice.append(slice(None))
 
             crop = np.transpose(crops[j], order)
-            crop = crop[crop_slice]
-            previous = background[background_slice]
-            background[background_slice] = np.maximum(crop, previous)
+            crop = crop[tuple(crop_slice)]
+            previous = background[tuple(background_slice)]
+            background[tuple(background_slice)] = np.maximum(crop, previous)
 
         return background
 
-    def make_prediction(self, dst, pipeline, crop_shape, crop_stride, fmt='array',
+    def make_prediction(self, dst, pipeline, crop_shape, crop_stride, fmt='array', locations=None,
+                        output_shape=None,
                         idx=0, src='predictions', chunk_shape=None, chunk_stride=None, batch_size=8,
-                        agg='max', projection='ixh', threshold=0.5, pbar=True, tmp_file='hdf5'):
+                        agg='max', projection='ixh', threshold=0.5, pbar=True, tmp_file='hdf5',
+                        remove_tmp=False):
         """ Create hdf5 file with prediction.
 
         Parameters
@@ -864,23 +866,29 @@ class SeismicCubeset(Dataset):
         threshold : float ot None
             threshold for predictions
         """
-        tmp_path, path = dst
-        filename, ext = os.path.splitext(dst)
         if fmt == 'points':
             if threshold is None:
                 raise ValueError("If fmt is 'points' then threshold can't be None")
-            tmp_path, path = filename + '_tmp.' + tmp_file, dst
+            tmp_path, path = os.path.splitext(dst)[0] + '_tmp.' + tmp_file, dst
         else:
             tmp_path, path = dst, dst
 
         geometry = self.geometries[idx]
         cube_shape = geometry.cube_shape
 
-        chunk_shape = infer_tuple(chunk_shape, cube_shape)
+        if locations is None:
+            locations = [(0, cube_shape[i]) for i in range(3)]
+        else:
+            locations = [(item.start or 0, item.stop or stop) for item, stop in zip(locations, cube_shape)]
+        locations = np.array(locations)
+
+        output_shape = output_shape or locations[:, 1] - locations[:, 0]
+        chunk_shape = infer_tuple(chunk_shape, output_shape)
+        chunk_shape = np.minimum(np.array(chunk_shape), np.array(output_shape))
         chunk_stride = infer_tuple(chunk_stride, chunk_shape)
 
         chunk_grid = [
-            make_axis_grid((0, cube_shape[i]), chunk_stride[i], cube_shape[i], chunk_shape[i])
+            make_axis_grid(locations[i], chunk_stride[i], cube_shape[i], chunk_shape[i])
             for i in range(3)
         ]
         chunk_grid = np.stack(np.meshgrid(*chunk_grid), axis=-1).reshape(-1, 3)
@@ -896,6 +904,9 @@ class SeismicCubeset(Dataset):
                 )
                 total += self.grid_iters
 
+        if pbar:
+            progress_bar = tqdm(total=total)
+
         def _predictions():
             for lower_bound in chunk_grid:
                 upper_bound = np.minimum(lower_bound + chunk_shape, cube_shape)
@@ -907,29 +918,39 @@ class SeismicCubeset(Dataset):
                 chunk_pipeline = pipeline << self
                 for _ in range(self.grid_iters):
                     _ = chunk_pipeline.next_batch(len(self))
-
-                # Write to hdf5
-                slices = tuple([slice(*item) for item in self.grid_info['range']])
+                    if pbar:
+                        progress_bar.update(1)
                 prediction = self.assemble_crops(chunk_pipeline.v(src), order=(0, 1, 2))
-                yield prediction
+                prediction = prediction[:output_shape[0], :output_shape[1], :output_shape[2]]
+                yield lower_bound - np.array([locations[i][0] for i in range(3)]), prediction
 
-        chunks = tqdm(_predictions(), total=total) if pbar else _predictions()
-        geometry.create_hdf5_from_iterable(chunks, tmp_path, cube_shape, chunk_shape, chunk_stride, agg, projection)
+        geometry.create_file_from_iterable(_predictions(), tmp_path, output_shape,
+                                           chunk_shape, chunk_stride, agg, projection, threshold)
+        if pbar:
+            progress_bar.close()
 
-        #     grid = np.arange(0, cube_shape[0], chunk_stride[0])
-        #     if threshold is not None:
-        #         points = []
-        #         for i, start in enumerate(grid):
-        #             stop = grid[i+1] if i < len(grid)-1 else cube_shape[0]
-        #             cube_hdf5[start:stop] = cube_hdf5[start:stop] > threshold
-        #             if fmt == 'npy':
-        #                 points_ = np.stack(np.where(cube_hdf5[start:stop]), axis=-1)
-        #                 points_[:, 0] += start
-        #                 points += [points_]
+        if fmt == 'points':
+            if tmp_file == 'npy':
+                array = np.load(tmp_path, allow_pickle=False)
+                points = np.stack(np.where(array), axis=-1)
+                points[:, 0] += locations[0][0]
+            else:
+                cube = SeismicGeometry(tmp_path)
+                axis = SeismicGeometry.PROJECTION_AXES[projection[0]][0]
+                points = []
+                for start in np.arange(0, cube.cube_shape[axis], chunk_stride[axis]):
+                    end = min(start + chunk_stride[axis], cube.cube_shape[axis])
+                    slices = [slice(None) for i in range(3)]
+                    slices[axis] = slice(start, end)
+                    points_ = np.stack(np.where(cube.load_crop(slices)), axis=-1)
+                    points_[:, 0] += start
+                    points_ += np.array([locations[i][0] for i in range(3)])[np.newaxis, ...]
+                    points += [points_]
+                points = np.concatenate(points, axis=0)
+            np.save(path, points, allow_pickle=False)
 
-        # if fmt == 'npy':
-        #     os.remove(path)
-        #     np.save(path, np.concatenate(points, axis=0), allow_pickle=False)
+        if remove_tmp:
+            os.remove(tmp_path)
 
 class Modificator:
     """ Converts array to `object` dtype and prepends the `cube_name` column.
