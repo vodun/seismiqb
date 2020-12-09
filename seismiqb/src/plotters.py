@@ -226,6 +226,40 @@ class MatplotlibPlotter:
 
         self.save_and_show(fig, **updated)
 
+    def grid(self, images, single_kwargs, **kwargs):
+        """ Make grid of plots using.
+
+        Parameters
+        ----------
+        images : tuple/list
+            sequence of arrays for plotting
+        single_kwargs : tuple/list/dict
+            either sequence of dicts or one dict containing params for single-plots
+        **kwargs : dict
+            determines how grid is plotted
+        """
+        defaults = {'figsize': (14, 12),
+                    'sharex': 'col',
+                    'sharey': 'row',
+                    'nrows': 1,
+                    'ncols': len(images)}
+
+        updated = {**defaults, **kwargs}
+
+        subplots_kwargs = filter_kwargs(updated, ['nrows', 'ncols', 'sharex', 'sharey', 'figsize'])
+
+        # convert single-kwargs if needed
+        if isinstance(single_kwargs, dict):
+            single_kwargs = [single_kwargs] * len(images)
+        
+        # make the plots
+        nrows, ncols = subplots_kwargs['nrows'], subplots_kwargs['ncols']
+        fig, ax = plt.subplots(**subplots_kwargs)
+        for i in range(nrows):
+            for j in range(ncols):
+                self.single(images[i * ncols + j], **single_kwargs[i * ncols + j], ax=ax[i, j])
+        self.save_and_show(fig)
+
     def overlap(self, images, **kwargs):
         """ Plot several images on one canvas using matplotlib: render the first one in greyscale
         and the rest ones in 'rgb' channels, one channel for each image.
