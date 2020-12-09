@@ -361,7 +361,7 @@ class SeismicGeometry:
         if self.structured is False:
             method = self.load_slide
         else:
-            method = self._cached_load
+            method = self.file_hdf5._cached_load
 
         return len(method.cache()[self])
 
@@ -371,7 +371,7 @@ class SeismicGeometry:
         if self.structured is False:
             method = self.load_slide
         else:
-            method = self._cached_load
+            method = self.file_hdf5._cached_load
 
         return sum(item.nbytes / (1024 ** 3) for item in method.cache()[self].values())
 
@@ -625,15 +625,34 @@ class SeismicGeometry:
 
     @classmethod
     def create_file_from_iterable(cls, src, dst, shape, window, stride, agg=None, projection='ixh', threshold=None):
+        """ Aggregate multiple chunks into file with 3D cube.
+
+        Parameters
+        ----------
+        src : iterable
+            Each item is a tuple (position, array) where position is a 3D coordinate of the left upper array corner.
+        dst : str
+            Path to the resulting .hsd5 or .npy file.
+        shape : tuple
+            Shape of the resulting array.
+        window : tuple
+            Chunk shape.
+        stride : tuple
+            Stride for chunks. Values in overlapped regions will be aggregated.
+        agg : 'mean', 'min' or 'max' or None, optional
+            The way to aggregate values in overlapped regions. None means that new chunk will rewrite
+            previous value in cube.
+        projection : str, optional
+            Projections to create in hdf5 file, by default 'ixh'
+        threshold : float or None, optional
+            If not None, threshold to transform values into [0, 1], by default None
+        """
         shape = np.array(shape)
         window = np.array(window)
         stride = np.array(stride)
 
         path = dst
         ext = os.path.splitext(dst)[1][1:]
-
-        if os.path.exists(path):
-            os.remove(path)
 
         if ext == 'npy':
             dst = np.zeros(shape)
@@ -649,10 +668,7 @@ class SeismicGeometry:
             cube_slice = [slice(position[i], position[i]+chunk.shape[i]) for i in range(3)]
             _chunk = dst[cube_slice]
             if agg in ('max', 'min'):
-                if agg == 'max':
-                    chunk = np.maximum(chunk, _chunk)
-                else:
-                    chunk = np.minimum(chunk, _chunk)
+                chunk = np.maximum(chunk, _chunk) if agg == 'max' else np.minimum(chunk, _chunk)
             elif agg == 'mean':
                 slices = [slice(position[i], position[i]+chunk.shape[i]) for i in range(3)]
 
@@ -670,7 +686,6 @@ class SeismicGeometry:
                 chunk /= agg_map
                 chunk = _chunk + chunk
             dst[cube_slice] = chunk
-
         if ext == 'npy':
             if threshold is not None:
                 dst = (dst > threshold).astype(int)
@@ -716,7 +731,6 @@ class SeismicGeometry:
         chunks = _attribute()
         total = np.prod([len(item) for item in grid])
         chunks = tqdm(chunks, total=total) if pbar else chunks
-
         self.create_file_from_iterable(chunks, dst, self.cube_shape, chunk_shape,
                                        chunk_stride, agg=agg, projection='ixh')
 

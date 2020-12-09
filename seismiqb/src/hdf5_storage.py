@@ -140,16 +140,18 @@ class FileHDF5:
         src_cube = self.get_cube(src_axis)
         shape = np.array(src_cube.shape)[self.TRANSPOSE[src_axis]]
 
+        projections = [item for item in projections if item not in self.projections]
+        self.projections += projections
+
         for i in range(0, src_cube.shape[0], stride):
             slide = src_cube[i:i+stride]
-        slide = slide.transpose(self.TRANSPOSE[src_axis])
-        main_axis = self.STRAIGHT[src_axis][0]
-        for axis in projections:
-            if axis not in self.projections:
+            slide = slide.transpose(self.TRANSPOSE[src_axis])
+            main_axis = self.STRAIGHT[src_axis][0]
+            for axis in projections:
                 _shape = np.array(shape)[self.STRAIGHT[axis]]
                 if self.NAMES[axis] not in self.file_hdf5:
                     self.file_hdf5.create_dataset(self.NAMES[axis], _shape)
                 slices = [slice(None) for i in range(3)]
                 slices[self.TRANSPOSE[axis][main_axis]] = slice(i, i+stride)
                 self.get_cube(axis)[tuple(slices)] = slide.transpose(self.STRAIGHT[axis])
-                self.projections = self.projections + [axis]
+
