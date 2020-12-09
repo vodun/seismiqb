@@ -527,7 +527,8 @@ class SeismicGeometry:
 
     # Convert HDF5 to SEG-Y
     def make_sgy(self, path_hdf5=None, path_spec=None, postfix='',
-                 remove_hdf5=False, zip_result=True, path_segy=None):
+                 remove_hdf5=False, zip_result=True, path_segy=None,
+                 chunk_size=100):
         """ Convert HDF5 cube to SEG-Y format with current geometry spec.
 
         Parameters
@@ -553,30 +554,51 @@ class SeismicGeometry:
             path_hdf5 = os.path.join(os.path.dirname(self.path), 'temp.hdf5')
 
         with h5py.File(path_hdf5, 'r') as src:
-            cube_hdf5 = src['cube']
+            geom = SeismicGeometry(path_spec)
+            segy = geom.segyfile
 
-            with segyio.open(path_spec, 'r', strict=False) as segy:
-                segy.mmap()
-                spec = segyio.spec()
-                spec.sorting = int(segy.sorting)
-                spec.format = int(segy.format)
-                spec.samples = range(self.depth)
-                spec.ilines = self.ilines
-                spec.xlines = self.xlines
+            segy.mmap()
+            spec = segyio.spec()
+            spec.sorting = segyio.TraceSortingFormat.INLINE_SORTING
+            spec.format = int(segy.format)
+            spec.samples = range(self.depth)
 
-                with segyio.create(path_segy, spec) as dst_file:
-                    # Copy all textual headers, including possible extended
-                    for i in range(1 + segy.ext_headers):
-                        dst_file.text[i] = segy.text[i]
-                    dst_file.bin = segy.bin
+            idx = np.stack(geom.dataframe.index)
+            ilines = np.unique(idx[:, 0])
+            xlines = np.unique(idx[:, 1])
 
-                    c = 0
-                    for i, _ in tqdm(enumerate(spec.ilines)):
-                        for x, _ in enumerate(spec.xlines):
-                            dst_file.header[c] = segy.header[c]
-                            dst_file.trace[c] = cube_hdf5[i, x, :]
-                            c += 1
-                    dst_file.bin = {segyio.BinField.Traces: c}
+            i_enc = {num: k for k, num in enumerate(ilines)}
+            x_enc = {num: k for k, num in enumerate(xlines)}
+
+            spec.ilines = ilines
+            spec.xlines = xlines
+
+            if 'cube' in src:
+                cube_hdf5 = src['cube']
+                iloc = [0, 1, 2]
+            elif 'cube_x' in src:
+                cube_hdf5 = src['cube_x']
+                iloc = [1, 2, 0]
+            elif 'cube_h' in src:
+                cube_hdf5 = src['cube_h']
+                iloc = [2, 0, 1]
+            else:
+                raise ValueError("None of 'cube', 'cube_x', 'cube_h' present!")
+
+            with segyio.create(path_segy, spec) as dst_file:
+                # Copy all textual headers, including possible extended
+                for i in range(1 + segy.ext_headers):
+                    dst_file.text[i] = segy.text[i]
+                dst_file.bin = segy.bin
+
+                for c, (i, x) in enumerate(idx):
+                    locs = [i_enc[i], x_enc[x], slice(None)]
+                    locs = locs[iloc[0]], locs[iloc[1]], locs[iloc[2]]
+
+                    dst_file.trace[c] = cube_hdf5[locs] #get_traces(i, x)
+
+                l = len(idx)
+                dst_file.header[:l] = segy.header[:l]
 
         if remove_hdf5:
             os.remove(path_hdf5)
@@ -833,7 +855,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
 
         self.cube_shape = np.asarray([*self.lens, self.depth])
 
-    def collect_stats(self, spatial=True, bins=25, num_keep=5000, **kwargs):
+    def collect_stats(self, spatial=True, bins=25, num_keep=5000, bar=True, **kwargs):
         """ Pass through file data to collect stats:
             - min/max values.
             - q01/q99 quantiles of amplitudes in the cube.
@@ -862,7 +884,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
         trace_container = []
         value_min, value_max = np.inf, -np.inf
 
-        for i in tqdm(range(num_traces), desc='Finding min/max', ncols=1000):
+        for i in tqdm(range(num_traces), desc='Finding min/max', ncols=1000, disable=(not bar)):
             trace = self.segyfile.trace[i]
 
             trace_min, trace_max = find_min_max(trace)
@@ -887,7 +909,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
 
             # Iterate over traces
             description = f'Collecting stats for {self.name}'
-            for i in tqdm(range(num_traces), desc=description, ncols=1000):
+            for i in tqdm(range(num_traces), desc=description, ncols=1000, disable=(not bar)):
                 trace = self.segyfile.trace[i]
                 header = self.segyfile.header[i]
 
@@ -1184,7 +1206,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
         return crop
 
     # Convert SEG-Y to HDF5
-    def make_hdf5(self, path_hdf5=None, postfix='', unsafe=True, projections='ixh'):
+    def make_hdf5(self, path_hdf5=None, postfix='', unsafe=True, store_meta=True, projections='ixh', bar=True):
         """ Converts `.segy` cube to `.hdf5` format.
 
         Parameters
@@ -1220,7 +1242,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
                 total += self.cube_shape[0]
             if 'x' in projections:
                 total += self.cube_shape[1]
-            pbar = tqdm(total=total, ncols=1000)
+            pbar = tqdm(total=total, ncols=1000, disable=(not bar))
 
             pbar.set_description(f'Converting {self.long_name}; ilines projection')
             for i in range(self.cube_shape[0]):
@@ -1238,11 +1260,15 @@ class SeismicGeometrySEGY(SeismicGeometry):
                     slide = self.load_slide(x, axis=1, stable=False).T
                     cube_hdf5['cube_x'][x, :, :,] = slide
                     pbar.update()
-                pbar.close()
+            pbar.close()
 
-        if not self.has_stats:
-            self.collect_stats()
-        self.store_meta()
+        if store_meta:
+            if not self.has_stats:
+                self.collect_stats(bar=bar)
+
+            path_meta = os.path.splitext(path_hdf5)[0] + '.meta'
+            self.store_meta(path_meta)
+
 
 
     # Convenient alias
@@ -1270,6 +1296,10 @@ class SeismicGeometryHDF5(SeismicGeometry):
         _ = kwargs
         self.file_hdf5 = FileHDF5(self.path, mode='r') # h5py.File(self.path, mode='r')
         self.add_attributes()
+
+        self.cube_i = self.file_hdf5['cube']
+        self.cube_x = self.file_hdf5['cube_x']
+        self.cube_h = self.file_hdf5['cube_h']
 
     def add_attributes(self):
         """ Store values from `hdf5` file to attributes. """
