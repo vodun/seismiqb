@@ -15,6 +15,7 @@ import h5py
 import segyio
 import cv2
 
+from .hdf5_storage import FileHDF5
 from .utils import lru_cache, find_min_max, file_print, \
                    SafeIO, attr_filter, make_axis_grid, infer_tuple
 from .plotters import plot_image
@@ -369,7 +370,7 @@ class SeismicGeometry:
         if self.structured is False:
             method = self.load_slide
         else:
-            method = self._cached_load
+            method = self.file_hdf5._cached_load
         method.reset(instance=self)
 
     @property
@@ -631,30 +632,11 @@ class SeismicGeometry:
         np.ndarray
             array of the shape corresponding to locations
         """
-        axes = self.PROJECTION_AXES
-        if 'cube' in self.file_hdf5:
-            cube_name = 'cube'
-            projection = 'i'
-        elif 'cube_x' in  self.file_hdf5:
-            cube_name = 'cube_x'
-            projection = 'x'
-        elif 'cube_h' in self.file_hdf5:
-            cube_name = 'cube_h'
-            projection = 'h'
-        ax = axes[projection]
-
         if isinstance(window, int):
             window = np.ones(3, dtype=np.int32) * window
         if locations is None:
             locations = [slice(0, self.cube_shape[i]) for i in range(3)]
-
-        ax = axes[projection]
-        cube = self.file_hdf5[cube_name][locations[ax[0]], locations[ax[1]], locations[ax[2]]]
-        if projection == 'x':
-            cube = cube.transpose((2, 0, 1))
-        elif projection == 'h':
-            cube = cube.transpose((1, 2, 0))
-
+        cube = self.file_hdf5[locations]
         window = np.minimum(np.array(window), cube.shape)
 
         return attr_filter(cube, window, device, attribute)
@@ -672,17 +654,9 @@ class SeismicGeometry:
             os.remove(path)
 
         if ext == 'npy':
-            projection = 'i'
-            main_cube = np.zeros(shape)
-            dst = {'i': main_cube}
+            dst = np.zeros(shape)
         elif ext == 'hdf5':
-            file_hdf5 = h5py.File(path, "a")
-            dst = {}
-            for axis in projection:
-                cube_name = cls.CUBE_PROJECTIONS[axis]
-                cube_shape = shape[cls.PROJECTION_AXES[axis]]
-                dst[axis] = file_hdf5.create_dataset(cube_name, cube_shape)
-            main_cube = dst[projection[0]]
+            dst = FileHDF5(path, projection[0], shape=shape, mode='a')
 
         lower_bounds = [make_axis_grid((0, shape[i]), stride[i], shape[i], window[i]) for i in range(3)]
         lower_bounds = np.stack(np.meshgrid(*lower_bounds), axis=-1).reshape(-1, 3)
@@ -690,9 +664,8 @@ class SeismicGeometry:
         grid = np.stack([lower_bounds, upper_bounds], axis=-1)
 
         for position, chunk in src:
-            cube_slice = [slice(position[i], position[i]+chunk.shape[i]) for i in cls.PROJECTION_AXES[projection[0]]]
-            transpose_axes = cls.PROJECTION_AXES_REVERSE[projection[0]]
-            _chunk = main_cube[cube_slice[0], cube_slice[1], cube_slice[2]].transpose(transpose_axes)
+            cube_slice = [slice(position[i], position[i]+chunk.shape[i]) for i in range(3)]
+            _chunk = dst[cube_slice]
             if agg in ('max', 'min'):
                 if agg == 'max':
                     chunk = np.maximum(chunk, _chunk)
@@ -714,26 +687,20 @@ class SeismicGeometry:
                     agg_map[tuple(slices)] += 1
                 chunk /= agg_map
                 chunk = _chunk + chunk
-            transpose_axes = cls.PROJECTION_AXES[projection[0]]
-            main_cube[cube_slice[0], cube_slice[1], cube_slice[2]] = chunk.transpose(transpose_axes)
+            dst[cube_slice] = chunk
 
         if ext == 'npy':
             if threshold is not None:
-                dst['i'] = (dst['i'] > threshold).astype(int)
-            np.save(path, dst['i'], allow_pickle=False)
+                dst = (dst > threshold).astype(int)
+            np.save(path, dst, allow_pickle=False)
         else:
-            for i in range(0, main_cube.shape[0], window[0]):
-                slide = main_cube[i:i+window[0]]
+            for i in range(0, dst.shape[0], window[0]):
+                slide = dst[i:i+window[0]]
                 if threshold is not None:
                     slide = (slide > threshold).astype(int)
-                    main_cube[i:i+window[0]] = slide
-                slide = slide.transpose(cls.PROJECTION_AXES_REVERSE[projection[0]])
-                main_axis = cls.PROJECTION_AXES[projection[0]][0]
-                for axis in projection[1:]:
-                    slices = [slice(None) for i in range(3)]
-                    slices[cls.PROJECTION_AXES_REVERSE[axis][main_axis]] = slice(i, i+window[0])
-                    dst[axis][tuple(slices)] = slide.transpose(cls.PROJECTION_AXES[axis])
-            file_hdf5.close()
+                    dst[i:i+window[0]] = slide
+            dst.add_projection(projection[1:])
+            dst.close()
 
     def compute_attribute(self, attr, dst, chunk_shape=None, chunk_stride=None, window=10,
                           agg=None, projections='ixh', pbar=False, device='cpu'):
@@ -1304,7 +1271,7 @@ class SeismicGeometryHDF5(SeismicGeometry):
         No passing through data whatsoever.
         """
         _ = kwargs
-        self.file_hdf5 = h5py.File(self.path, mode='r')
+        self.file_hdf5 = FileHDF5(self.path, mode='r') # h5py.File(self.path, mode='r')
         self.add_attributes()
 
     def add_attributes(self):
@@ -1314,7 +1281,7 @@ class SeismicGeometryHDF5(SeismicGeometry):
         if hasattr(self, 'lens'):
             self.cube_shape = np.asarray([self.ilines_len, self.xlines_len, self.depth]) # BC
         else:
-            self.cube_shape = self.file_hdf5['cube'].shape
+            self.cube_shape = self.file_hdf5.shape
             self.lens = self.cube_shape
         self.has_stats = True
 
@@ -1331,112 +1298,113 @@ class SeismicGeometryHDF5(SeismicGeometry):
             Identificator of the axis to use to load data.
             Can be `iline`, `xline`, `height`, `depth`, `i`, `x`, `h`, 0, 1, 2.
         """
-        if axis is None:
-            shape = np.array([((slc.stop or stop) - (slc.start or 0)) for slc, stop in zip(locations, self.cube_shape)])
-            indices = np.argsort(shape)
-            mapping = {0: 'cube', 1: 'cube_x', 2: 'cube_h'}
-            for ax in indices:
-                if mapping[ax] in self.file_hdf5:
-                    break
-        else:
-            mapping = {0: 0, 1: 1, 2: 2,
-                       'i': 0, 'x': 1, 'h': 2,
-                       'iline': 0, 'xline': 1, 'height': 2, 'depth': 2}
-            axis = mapping[axis]
+        # if axis is None:
+        #     shape = np.array([((slc.stop or stop) - (slc.start or 0)) for slc, stop in zip(locations, self.cube_shape)])
+        #     indices = np.argsort(shape)
+        #     mapping = {0: 'cube', 1: 'cube_x', 2: 'cube_h'}
+        #     for ax in indices:
+        #         if mapping[ax] in self.file_hdf5:
+        #             break
+        # else:
+        #     mapping = {0: 0, 1: 1, 2: 2,
+        #                'i': 0, 'x': 1, 'h': 2,
+        #                'iline': 0, 'xline': 1, 'height': 2, 'depth': 2}
+        #     axis = mapping[axis]
 
-        if axis == 1:
-            crop = self._load_x(*locations, **kwargs)
-        elif axis == 2:
-            crop = self._load_h(*locations, **kwargs)
-        else: # backward compatibility
-            crop = self._load_i(*locations, **kwargs)
-        return crop
+        # if axis == 1:
+        #     crop = self._load_x(*locations, **kwargs)
+        # elif axis == 2:
+        #     crop = self._load_h(*locations, **kwargs)
+        # else: # backward compatibility
+        #     crop = self._load_i(*locations, **kwargs)
+        return self.file_hdf5.load_crop(locations, axis, **kwargs)
 
-    def _load_i(self, ilines, xlines, heights, **kwargs):
-        cube_hdf5 = self.file_hdf5['cube']
-        return np.stack([self._cached_load(cube_hdf5, iline, **kwargs)[xlines, :][:, heights]
-                        for iline in range(ilines.start, ilines.stop)])
+    # def _load_i(self, ilines, xlines, heights, **kwargs):
+    #     cube_hdf5 = self.file_hdf5['cube']
+    #     return np.stack([self._cached_load(cube_hdf5, iline, **kwargs)[xlines, :][:, heights]
+    #                     for iline in range(ilines.start, ilines.stop)])
 
-    def _load_x(self, ilines, xlines, heights, **kwargs):
-        cube_hdf5 = self.file_hdf5['cube_x']
-        return np.stack([self._cached_load(cube_hdf5, xline, **kwargs)[heights, :][:, ilines].transpose([1, 0])
-                         for xline in range(xlines.start, xlines.stop)], axis=1)
+    # def _load_x(self, ilines, xlines, heights, **kwargs):
+    #     cube_hdf5 = self.file_hdf5['cube_x']
+    #     return np.stack([self._cached_load(cube_hdf5, xline, **kwargs)[heights, :][:, ilines].transpose([1, 0])
+    #                      for xline in range(xlines.start, xlines.stop)], axis=1)
 
-    def _load_h(self, ilines, xlines, heights, **kwargs):
-        cube_hdf5 = self.file_hdf5['cube_h']
-        return np.stack([self._cached_load(cube_hdf5, height, **kwargs)[ilines, :][:, xlines]
-                         for height in range(heights.start, heights.stop)], axis=2)
+    # def _load_h(self, ilines, xlines, heights, **kwargs):
+    #     cube_hdf5 = self.file_hdf5['cube_h']
+    #     return np.stack([self._cached_load(cube_hdf5, height, **kwargs)[ilines, :][:, xlines]
+    #                      for height in range(heights.start, heights.stop)], axis=2)
 
-    @lru_cache(128)
-    def _cached_load(self, cube, loc, axis=0, **kwargs):
-        """ Load one slide of data from a certain cube projection.
-        Caches the result in a thread-safe manner.
-        """
-        _ = kwargs
-        slc = [slice(None), slice(None), slice(None)]
-        slc[axis] = loc
-        return cube[slc[0], slc[1], slc[2]]
+    # @lru_cache(128)
+    # def _cached_load(self, cube, loc, axis=0, **kwargs):
+    #     """ Load one slide of data from a certain cube projection.
+    #     Caches the result in a thread-safe manner.
+    #     """
+    #     _ = kwargs
+    #     slc = [slice(None), slice(None), slice(None)]
+    #     slc[axis] = loc
+    #     return cube[slc[0], slc[1], slc[2]]
 
     def load_slide(self, loc, axis='iline', **kwargs):
-        """ Load desired slide along desired axis. """
-        axis = self.parse_axis(axis)
-        mapping = {0: 'cube', 1: 'cube_x', 2: 'cube_h'}
-        load_axis = {
-            0: {'cube_x': 2, 'cube_h': 1},
-            1: {'cube': 1, 'cube_h': 2},
-            2: {'cube': 2, 'cube_x': 1}
-        }
+        # """ Load desired slide along desired axis. """
+        # axis = self.parse_axis(axis)
+        # mapping = {0: 'cube', 1: 'cube_x', 2: 'cube_h'}
+        # load_axis = {
+        #     0: {'cube_x': 2, 'cube_h': 1},
+        #     1: {'cube': 1, 'cube_h': 2},
+        #     2: {'cube': 2, 'cube_x': 1}
+        # }
 
-        if mapping[axis] in self.file_hdf5:
-            cube = self.file_hdf5[mapping[axis]]
-            slide = self._cached_load(cube, loc, **kwargs)
-            if mapping[axis] == 'cube_x':
-                slide = slide.T
-        else:
-            axis_1, axis_2 = [i for i in range(3) if i != axis]
-            if self.cube_shape[axis_1] > self.cube_shape[axis_2]:
-                axis_1, axis_2 = axis_2, axis_1
-            if mapping[axis_1] in self.file_hdf5:
-                cube_name = mapping[axis_1]
-            else:
-                cube_name = mapping[axis_2]
-            cube = self.file_hdf5[cube_name]
-            slide = self._cached_load(cube, loc, load_axis[axis][cube_name], **kwargs)
-            if cube_name == 'cube_x' and axis != 0 or cube_name == 'cube_h' and axis == 2:
-                slide = slide.T
+        # if mapping[axis] in self.file_hdf5:
+        #     cube = self.file_hdf5[mapping[axis]]
+        #     slide = self._cached_load(cube, loc, **kwargs)
+        #     if mapping[axis] == 'cube_x':
+        #         slide = slide.T
+        # else:
+        #     axis_1, axis_2 = [i for i in range(3) if i != axis]
+        #     if self.cube_shape[axis_1] > self.cube_shape[axis_2]:
+        #         axis_1, axis_2 = axis_2, axis_1
+        #     if mapping[axis_1] in self.file_hdf5:
+        #         cube_name = mapping[axis_1]
+        #     else:
+        #         cube_name = mapping[axis_2]
+        #     cube = self.file_hdf5[cube_name]
+        #     slide = self._cached_load(cube, loc, load_axis[axis][cube_name], **kwargs)
+        #     if cube_name == 'cube_x' and axis != 0 or cube_name == 'cube_h' and axis == 2:
+        #         slide = slide.T
 
-        return slide
+        return self.file_hdf5.load_slide(loc, axis, **kwargs)
 
     def __getitem__(self, key):
         """ Retrieve amplitudes from cube. Uses the usual `Numpy` semantics for indexing 3D array. """
-        key_ = list(key)
-        if len(key_) != len(self.cube_shape):
-            key_ += [slice(None)] * (len(self.cube_shape) - len(key_))
+        # key_ = list(key)
+        # if len(key_) != len(self.cube_shape):
+        #     key_ += [slice(None)] * (len(self.cube_shape) - len(key_))
 
-        key, squeeze = [], []
-        for i, item in enumerate(key_):
-            max_size = self.cube_shape[i]
+        # key, squeeze = [], []
+        # for i, item in enumerate(key_):
+        #     max_size = self.cube_shape[i]
 
-            if isinstance(item, slice):
-                slc = slice(item.start or 0, item.stop or max_size)
-            elif isinstance(item, int):
-                item = item if item >= 0 else max_size - item
-                slc = slice(item, item + 1)
-                squeeze.append(i)
-            key.append(slc)
+        #     if isinstance(item, slice):
+        #         slc = slice(item.start or 0, item.stop or max_size)
+        #     elif isinstance(item, int):
+        #         item = item if item >= 0 else max_size - item
+        #         slc = slice(item, item + 1)
+        #         squeeze.append(i)
+        #     key.append(slc)
 
-        shape = [(slc.stop - slc.start) for slc in key]
-        axis = np.argmin(shape)
-        if axis == 0:
-            crop = self.file_hdf5['cube'][key[0], key[1], key[2]]
-        elif axis == 1:
-            crop = self.file_hdf5['cube_x'][key[1], key[2], key[0]].transpose((2, 0, 1))
-        elif axis == 2:
-            crop = self.file_hdf5['cube_h'][key[2], key[0], key[1]].transpose((1, 2, 0))
+        # shape = [(slc.stop - slc.start) for slc in key]
+        # axis = np.argmin(shape)
+        # if axis == 0:
+        #     crop = self.file_hdf5['cube'][key[0], key[1], key[2]]
+        # elif axis == 1:
+        #     crop = self.file_hdf5['cube_x'][key[1], key[2], key[0]].transpose((2, 0, 1))
+        # elif axis == 2:
+        #     crop = self.file_hdf5['cube_h'][key[2], key[0], key[1]].transpose((1, 2, 0))
 
-        if squeeze:
-            crop = np.squeeze(crop, axis=tuple(squeeze))
-        return crop
+        # if squeeze:
+        #     crop = np.squeeze(crop, axis=tuple(squeeze))
+        # return crop
+        return self.file_hdf5[key]
 
 
 

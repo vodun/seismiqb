@@ -934,7 +934,7 @@ class SeismicCubeset(Dataset):
                 points[:, 0] += locations[0][0]
             else:
                 cube = SeismicGeometry(tmp_path)
-                axis = SeismicGeometry.PROJECTION_AXES[projection[0]][0]
+                axis = cube.file_hdf5.projections[0]
                 points = []
                 for start in np.arange(0, cube.cube_shape[axis], chunk_stride[axis]):
                     end = min(start + chunk_stride[axis], cube.cube_shape[axis])
