@@ -226,17 +226,19 @@ class MatplotlibPlotter:
 
         self.save_and_show(fig, **updated)
 
-    def grid(self, images, single_kwargs, **kwargs):
+
+    def grid(self, images, single_kwargs=None, **kwargs):
         """ Make grid of plots using.
 
         Parameters
         ----------
-        images : tuple/list
+        images : tuple or list
             sequence of arrays for plotting
-        single_kwargs : tuple/list/dict
+        single_kwargs : tuple or list or dict
             either sequence of dicts or one dict containing params for single-plots
         **kwargs : dict
-            determines how grid is plotted
+            the arguments can be either lists - in this case these are used for 
+            determines how grid is plotted.
         """
         defaults = {'figsize': (14, 12),
                     'sharex': 'col',
@@ -245,13 +247,25 @@ class MatplotlibPlotter:
                     'ncols': len(images)}
 
         updated = {**defaults, **kwargs}
-
         subplots_kwargs = filter_kwargs(updated, ['nrows', 'ncols', 'sharex', 'sharey', 'figsize'])
+        single_updates = filter_kwargs(updated, ['label', 'xlabel', 'ylabel', 'cmap',
+                                                'order_axes', 'facecolor', 'fontsize',
+                                                'vmin', 'vmax'])
 
-        # convert single-kwargs if needed
+        # make and update the sequence of args for plotters if needed
+        # make sure that each elem of single_updates is iterable
+        single_updates = {key: value if isinstance(value, (tuple, list)) else [value] * len(images)
+                          for key, value in single_updates.items()}
+
+        # prepare the list of dicts for each image
+        single_kwargs = dict() if single_kwargs is None else single_kwargs
         if isinstance(single_kwargs, dict):
-            single_kwargs = [single_kwargs] * len(images)
-        
+            single_kwargs = [{**single_kwargs} for _ in range(len(images))]
+
+        # make final dict of kwargs for each ax
+        for i, single in enumerate(single_kwargs):
+            single.update({key: value[i] for key, value in single_updates.items()})
+
         # make the plots
         nrows, ncols = subplots_kwargs['nrows'], subplots_kwargs['ncols']
         fig, ax = plt.subplots(**subplots_kwargs)
