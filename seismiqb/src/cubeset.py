@@ -847,40 +847,55 @@ class SeismicCubeset(Dataset):
 
         return background
 
-    def make_prediction(self, dst, pipeline, crop_shape, crop_stride, fmt='array', locations=None,
-                        output_shape=None,
+    def make_prediction(self, dst, pipeline, crop_shape, crop_stride, locations=None,
                         idx=0, src='predictions', chunk_shape=None, chunk_stride=None, batch_size=8,
-                        agg='max', projection='ixh', threshold=0.5, pbar=True, tmp_file='hdf5',
-                        remove_tmp=False):
-        """ Create hdf5 file with prediction.
+                        agg='max', projection='ixh', threshold=0.5, pbar=True,
+                        fmt='array', tmp_file='hdf5', remove_tmp=True):
+        """ Infer, assemble and dump predictions from pipeline.
 
         Parameters
         ----------
-        path : str
-            path to save predictions
+        dst : str
+            Path to save predictions. Should have `npy` or `hdf5` extension.
         pipeline : Pipeline
-            pipeline for inference
-        crop_shape : int, tuple or None
-            shape of crops. Must be the same as defined in pipeline.
-        crop_stride : int
-            stride for crops
-        fmt : str
-            'hdf5' or 'npy'. If 'npy', the resulting file will include points after thresholding.
-        idx : int
-            index of cube to infer
-        src : str
-            pipeline variable for predictions
-        chunk_shape : int, tuple or None
-            shape of chunks.
-        chunk_stride : int
-            stride for chunks
-        batch_size : int
-
-        pbar : bool
-            progress bar
-        threshold : float ot None
-            threshold for predictions
+            Pipeline for inference, `run_later` action must be provided.
+        crop_shape : tuple
+            Shape of crops. Must be the same as defined in pipeline. Is needed to create grid for each
+            chunk of prediction.
+        crop_stride : tuple or None
+            Stride for crops, by default None (crop_stride is equal to crop_shape).
+        locations : tuple of slices or None, optional
+            Region of cube to inder, by default None. None means that prediction will be infered for the whole cube.
+        idx : int, optional
+            Index of the cube in dataset to infer, by default 0.
+        src : str, optional
+            Variable of pipeline which stores predictions, by default 'predictions'.
+        chunk_shape : tuple or None, optional
+            Shape of chunk to split initial cube, by default None. Pipeline will be executed chunk-wise,
+            then prediction will be aggregated and stored to `'dst'`. None means that chunk has shape of
+            the whole cube.
+        chunk_stride : tuple or None, optional
+            Stride for crops, by default None (chunk_stride is equal to chunk_shape).
+        batch_size : int, optional
+            Batch size for `make_grid`, by default 8
+        agg : str, optional
+            Aggregation for chunks, by default 'max'
+        projection : str, optional
+            Projections to create in hdf5 file, by default 'ixh'
+        threshold : float, optional
+            Threshold to transform predictions to 'points' format, by default 0.5
+        pbar : bool, optional
+            Progress bar, by default True
+        fmt : 'array' or `points`, optional
+            Format to store predictions, by default 'array'. If 'array', the resulting array will correspond
+            to the initial cube. If 'pointa', the resulting array will have coordinates of nonzero points in array
+            after thresholding (see `threshold` parameter below).
+        tmp_file : str, optional
+            Path to tmp file to aggregate prediction and the transform it to 'points' format, by default 'hdf5'.
+        remove_tmp : bool, optional
+            Remove or not tmp file, by default True.
         """
+        #pylint: disable=too-many-arguments, too-many-branches, too-many-statements
         if fmt == 'points':
             if threshold is None:
                 raise ValueError("If fmt is 'points' then threshold can't be None")
@@ -897,7 +912,7 @@ class SeismicCubeset(Dataset):
             locations = [(item.start or 0, item.stop or stop) for item, stop in zip(locations, cube_shape)]
         locations = np.array(locations)
 
-        output_shape = output_shape or locations[:, 1] - locations[:, 0]
+        output_shape = locations[:, 1] - locations[:, 0]
         chunk_shape = infer_tuple(chunk_shape, output_shape)
         chunk_shape = np.minimum(np.array(chunk_shape), np.array(output_shape))
         chunk_stride = infer_tuple(chunk_stride, chunk_shape)

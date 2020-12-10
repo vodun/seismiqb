@@ -361,7 +361,7 @@ class SeismicGeometry:
         if self.structured is False:
             method = self.load_slide
         else:
-            method = self.file_hdf5.__gt__cached_load
+            method = self.file_hdf5.cached_load
 
         return len(method.cache()[self])
 
