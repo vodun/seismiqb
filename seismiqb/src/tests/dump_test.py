@@ -1,4 +1,5 @@
 """ Test for dumping data """
+# pylint: disable=redefined-outer-name
 
 import os
 
