@@ -15,7 +15,7 @@ from .crop_batch import SeismicCropBatch
 from .horizon import Horizon, UnstructuredHorizon
 from .metrics import HorizonMetrics
 from .plotters import plot_image
-from .utils import IndexedDict, round_to_array, gen_crop_coordinates, make_axis_grid, infer_tuple
+from .utils import IndexedDict, round_to_array, gen_crop_coordinates, make_axis_grid, infer_tuple, parse_axis
 
 
 
@@ -639,7 +639,7 @@ class SeismicCubeset(Dataset):
         geometry = self.geometries[cube_name]
         crop_shape = np.array(geometry.cube_shape)
 
-        axis = geometry.parse_axis(axis)
+        axis = parse_axis(axis, geometry.index_headers)
         point = np.array([[cube_name, 0, 0, 0]], dtype=object)
         point[0, axis + 1] = loc
         crop_shape[axis] = 1

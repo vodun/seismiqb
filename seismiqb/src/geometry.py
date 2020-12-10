@@ -352,7 +352,7 @@ class SeismicGeometry:
         if self.structured is False:
             method = self.load_slide
         else:
-            method = self.file_hdf5._cached_load
+            method = self.file_hdf5.cached_load
         method.reset(instance=self)
 
     @property
@@ -361,7 +361,7 @@ class SeismicGeometry:
         if self.structured is False:
             method = self.load_slide
         else:
-            method = self.file_hdf5._cached_load
+            method = self.file_hdf5.__gt__cached_load
 
         return len(method.cache()[self])
 
@@ -371,7 +371,7 @@ class SeismicGeometry:
         if self.structured is False:
             method = self.load_slide
         else:
-            method = self.file_hdf5._cached_load
+            method = self.file_hdf5.cached_load
 
         return sum(item.nbytes / (1024 ** 3) for item in method.cache()[self].values())
 
@@ -855,7 +855,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
 
         self.cube_shape = np.asarray([*self.lens, self.depth])
 
-    def collect_stats(self, spatial=True, bins=25, num_keep=5000, bar=True, **kwargs):
+    def collect_stats(self, spatial=True, bins=25, num_keep=5000, pbar=True, **kwargs):
         """ Pass through file data to collect stats:
             - min/max values.
             - q01/q99 quantiles of amplitudes in the cube.
@@ -884,7 +884,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
         trace_container = []
         value_min, value_max = np.inf, -np.inf
 
-        for i in tqdm(range(num_traces), desc='Finding min/max', ncols=1000, disable=(not bar)):
+        for i in tqdm(range(num_traces), desc='Finding min/max', ncols=1000, disable=(not pbar)):
             trace = self.segyfile.trace[i]
 
             trace_min, trace_max = find_min_max(trace)
@@ -909,7 +909,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
 
             # Iterate over traces
             description = f'Collecting stats for {self.name}'
-            for i in tqdm(range(num_traces), desc=description, ncols=1000, disable=(not bar)):
+            for i in tqdm(range(num_traces), desc=description, ncols=1000, disable=(not pbar)):
                 trace = self.segyfile.trace[i]
                 header = self.segyfile.header[i]
 
@@ -1206,7 +1206,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
         return crop
 
     # Convert SEG-Y to HDF5
-    def make_hdf5(self, path_hdf5=None, postfix='', unsafe=True, store_meta=True, projections='ixh', bar=True):
+    def make_hdf5(self, path_hdf5=None, postfix='', unsafe=True, store_meta=True, projections='ixh', pbar=True):
         """ Converts `.segy` cube to `.hdf5` format.
 
         Parameters
@@ -1242,29 +1242,29 @@ class SeismicGeometrySEGY(SeismicGeometry):
                 total += self.cube_shape[0]
             if 'x' in projections:
                 total += self.cube_shape[1]
-            pbar = tqdm(total=total, ncols=1000, disable=(not bar))
+            progress_bar = tqdm(total=total, ncols=1000, disable=(not pbar))
 
-            pbar.set_description(f'Converting {self.long_name}; ilines projection')
+            progress_bar.set_description(f'Converting {self.long_name}; ilines projection')
             for i in range(self.cube_shape[0]):
                 slide = self.load_slide(i, stable=False)
                 if 'i' in projections:
                     cube_hdf5['cube'][i, :, :] = slide.reshape(1, self.cube_shape[1], self.cube_shape[2])
                 if 'h' in projections:
                     cube_hdf5['cube_h'][:, i, :] = slide.T
-                pbar.update()
+                progress_bar.update()
 
             # xline-oriented projection: (xlines, depth, ilines)
             if 'x' in projections:
-                pbar.set_description(f'Converting {self.long_name} to hdf5; xlines projection')
+                progress_bar.set_description(f'Converting {self.long_name} to hdf5; xlines projection')
                 for x in range(self.cube_shape[1]):
                     slide = self.load_slide(x, axis=1, stable=False).T
                     cube_hdf5['cube_x'][x, :, :,] = slide
-                    pbar.update()
-            pbar.close()
+                    progress_bar.update()
+            progress_bar.close()
 
         if store_meta:
             if not self.has_stats:
-                self.collect_stats(bar=bar)
+                self.collect_stats(pbar=pbar)
 
             path_meta = os.path.splitext(path_hdf5)[0] + '.meta'
             self.store_meta(path_meta)
@@ -1297,10 +1297,6 @@ class SeismicGeometryHDF5(SeismicGeometry):
         self.file_hdf5 = FileHDF5(self.path, mode='r') # h5py.File(self.path, mode='r')
         self.add_attributes()
 
-        self.cube_i = self.file_hdf5['cube']
-        self.cube_x = self.file_hdf5['cube_x']
-        self.cube_h = self.file_hdf5['cube_h']
-
     def add_attributes(self):
         """ Store values from `hdf5` file to attributes. """
         self.index_headers = self.INDEX_POST
@@ -1328,6 +1324,7 @@ class SeismicGeometryHDF5(SeismicGeometry):
         return self.file_hdf5.load_crop(locations, axis, **kwargs)
 
     def load_slide(self, loc, axis='iline', **kwargs):
+        """ Load desired slide along desired axis. """
         return self.file_hdf5.load_slide(loc, axis, **kwargs)
 
     def __getitem__(self, key):
