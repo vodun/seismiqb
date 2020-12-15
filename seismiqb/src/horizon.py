@@ -1814,7 +1814,7 @@ class Horizon:
         plot_image(amplitudes, mode='rgb', **kwargs)
 
 
-    def show_3d(self, n=100, threshold=100., z_ratio=1., show_axes=True,
+    def show_3d(self, n_points=100, threshold=100., z_ratio=1., zoom_slice=None, show_axes=True,
                 width=1200, height=1200, margin=100, savepath=None, **kwargs):
         """ Interactive 3D plot. Roughly, does the following:
             - select `n` points to represent the horizon surface
@@ -1824,7 +1824,7 @@ class Horizon:
 
         Parameters
         ----------
-        n : int
+        n_points : int
             Number of points for horizon surface creation.
             The more, the better the image is and the slower it is displayed.
         threshold : number
@@ -1842,26 +1842,34 @@ class Horizon:
         kwargs : dict
             Other arguments of plot creation.
         """
-        x, y, z, simplices = self.triangulation(n, threshold)
         title = f'Horizon `{self.name}` on `{self.cube_name}`'
         aspect_ratio = (self.i_length / self.x_length, 1, z_ratio)
         axis_labels = (self.geometry.index_headers[0], self.geometry.index_headers[1], 'DEPTH')
+        if zoom_slice is None:
+            zoom_slice = [slice(0, i) for i in self.geometry.cube_shape]
+        zoom_slice[-1] = slice(self.h_min, self.h_max)
 
-        show_3d(x, y, z, simplices, title, self.h_min, self.h_max, show_axes, aspect_ratio,
+        x, y, z, simplices = self.triangulation(n_points, threshold, zoom_slice)
+
+        show_3d(x, y, z, simplices, title, zoom_slice, show_axes, aspect_ratio,
                 axis_labels, width, height, margin, savepath, **kwargs)
 
 
-    def _triangulation(self, n, threshold):
-        weights_matrix = self.full_matrix
+    def triangulation(self, n_points, threshold, slices, **kwargs):
+        _ = kwargs
+        weights_matrix = self.full_matrix#[slices[:2]]
+        # coordinates = np.arange(0, self.cube_shape[0] * self.cube_shape[1])
+        # coordinates = coordinates.reshape(self.cube_shape[:2])[slices[:2]].flatten()
+
         grad_i = np.diff(weights_matrix, axis=0, prepend=0)
         grad_x = np.diff(weights_matrix, axis=1, prepend=0)
         weights_matrix = (grad_i + grad_x) / 2
         weights_matrix[np.abs(weights_matrix) > 100] = np.nan
 
-        idx = np.nonzero(self.full_matrix > 0)
+        idx = np.nonzero(self.full_matrix > 0) #[slices[:2]]
         probs = np.abs(weights_matrix[idx[0], idx[1]].flatten())
         probs[np.isnan(probs)] = np.nanmax(probs)
-        indices = np.random.choice(len(probs), size=n, p=probs / probs.sum())
+        indices = np.random.choice(len(probs), size=n_points, p=probs / probs.sum())
 
         # Convert to meshgrid
         ilines = self.points[:, 0][indices]

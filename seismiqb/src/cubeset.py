@@ -406,8 +406,10 @@ class SeismicCubeset(Dataset):
         }
         plot_image(map_, **kwargs)
 
-    def show_3d_faults(self, idx=0, n_sticks=100, n_nodes=10, z_ratio=1., zoom_slice=None,
-                       projections=None, **kwargs):
+    def show_3d(self, idx=0, src='labels', z_ratio=1., zoom_slice=None,
+                n_points=100, threshold=100, n_sticks=100, n_nodes=10,
+                projections=None, **kwargs):
+        src = [src] if isinstance(src, str) else src
         geometry = self.geometries[idx]
         coords = np.zeros((0, 3), dtype='int')
         simplices = np.zeros((0, 3), dtype='int')
@@ -415,10 +417,18 @@ class SeismicCubeset(Dataset):
         if zoom_slice is None:
             zoom_slice = [slice(0, i) for i in geometry.cube_shape]
 
-        for label in self.labels[idx]:
-            x, y, z, simplices_ = label.triangulation(n_sticks, n_nodes)
-            simplices = np.concatenate([simplices, simplices_ + len(coords)], axis=0)
-            coords = np.concatenate([coords, np.stack([x, y, z], axis=1)], axis=0)
+        for src_ in src:
+            for label in getattr(self, src_)[idx]:
+                triangulation_kwargs = {
+                    'n_points': n_points,
+                    'threshold': threshold,
+                    'n_sticks': n_sticks,
+                    'n_nodes': n_nodes,
+                    'slices': zoom_slice
+                }
+                x, y, z, simplices_ = label.triangulation(**triangulation_kwargs)
+                simplices = np.concatenate([simplices, simplices_ + len(coords)], axis=0)
+                coords = np.concatenate([coords, np.stack([x, y, z], axis=1)], axis=0)
 
         title = f'Faults on `{geometry.name}`'
         aspect_ratio = (geometry.cube_shape[0] / geometry.cube_shape[1], 1, z_ratio)

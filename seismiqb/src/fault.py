@@ -216,7 +216,7 @@ class Fault(Horizon):
         show_3d(x, y, z, simplices, title, self.h_min, self.h_max, show_axes, aspect_ratio,
                 axis_labels, width, height, margin, savepath, **kwargs)
 
-    def triangulation(self, n_sticks=100, n_nodes=10):
+    def triangulation(self, n_sticks=100, n_nodes=10, **kwargs):
         sticks = get_sticks(self.points, n_sticks, n_nodes)
         simplices = triangulation(sticks, True)
         coords = np.concatenate(sticks)
