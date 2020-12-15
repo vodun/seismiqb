@@ -15,9 +15,9 @@ from ..batchflow import Sampler
 
 
 
-def file_print(msg, path):
+def file_print(msg, path, mode='w'):
     """ Print to file. """
-    with open(path, 'w') as file:
+    with open(path, mode) as file:
         print(msg, file=file)
 
 
@@ -70,15 +70,15 @@ def stable_hash(key):
         key = key.encode('ascii')
     return str(blake2b(key).hexdigest())
 
-def tuplize_nested(iterable):
+def flatten_nested(iterable):
     """ Recursively convert nested list or dictionary into nested tuple. """
     result = []
     if isinstance(iterable, (tuple, list)):
         for item in iterable:
-            result.append(tuplize_nested(item))
+            result.append(flatten_nested(item))
     elif isinstance(iterable, dict):
         for key, value in sorted(iterable.items()):
-            result.append((key, tuplize_nested(value)))
+            result.append((key, flatten_nested(value)))
     else:
         return iterable
     return tuple(result)
@@ -162,7 +162,7 @@ class lru_cache:
                 attr_hash = stable_hash(getattr(instance, attr))
                 key.append(attr_hash)
 
-        return tuplize_nested(key)
+        return flatten_nested(key)
 
 
     def __call__(self, func):

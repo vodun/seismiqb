@@ -393,7 +393,7 @@ class SeismicCropBatch(Batch):
             Which labels to use in mask creation.
             If 'all', use all labels.
             If 'single', use one random label.
-            If 'nearest_to_center', use one label closest to height from `src_locations`.
+            If 'nearest' or 'nearest_to_center', use one label closest to height from `src_locations`.
             If int or array-like then element(s) are interpreted as indices of
             desired labels and must be ints in range [0, len(horizons) - 1].
         width : int
@@ -423,7 +423,7 @@ class SeismicCropBatch(Batch):
             labels = [labels[idx] for idx in use_labels]
         elif use_labels == 'single':
             np.random.shuffle(labels)
-        elif use_labels == 'nearest_to_center':
+        elif use_labels in ['nearest', 'nearest_to_center']:
             labels = [self.get_nearest_horizon(ix, src_labels, location[2])]
 
         for label in labels:
@@ -565,8 +565,7 @@ class SeismicCropBatch(Batch):
 
 
     @action
-    @inbatch_parallel(init='_init_component', post='_assemble', target='for')
-    def concat_components(self, ix, src, dst, axis=-1):
+    def concat_components(self, src, dst, axis=-1):
         """ Concatenate a list of components and save results to `dst` component.
 
         Parameters
@@ -578,13 +577,26 @@ class SeismicCropBatch(Batch):
         axis : int
             The axis along which the arrays will be joined.
         """
+        if axis != -1:
+            raise NotImplementedError("For now function works for `axis=-1` only.")
         _ = dst
+
         if not isinstance(src, (list, tuple, np.ndarray)) or len(src) < 2:
             raise ValueError('Src must contain at least two components to concatenate')
-        result = []
-        for component in src:
-            result.append(self.get(ix, component))
-        return np.concatenate(result, axis=axis)
+        items = [getattr(self, attr) for attr in src]
+
+        depth = sum(item.shape[-1] for item in items)
+        final_shape = (*items[0].shape[:3], depth)
+        prealloc = np.empty(final_shape, dtype=np.float32)
+
+        start_depth = 0
+        for item in items:
+            depth_shift = item.shape[-1]
+            prealloc[..., start_depth:start_depth + depth_shift] = item
+            start_depth += depth_shift
+        setattr(self, dst, prealloc)
+        return self
+
 
     @action
     @inbatch_parallel(init='indices', target='for', post='_masks_to_horizons_post')
@@ -796,10 +808,13 @@ class SeismicCropBatch(Batch):
         structure = np.ones((1, 3), dtype=np.uint8)
         return cv2.dilate(mask_, structure, iterations=width)
 
-    @apply_parallel
-    def transpose(self, crop, order):
+    @action
+    def transpose(self, src, order):
         """ Change order of axis. """
-        return np.transpose(crop, order)
+        order = [i+1 for i in order] # Correct for batch items dimension
+        for attr in src:
+            setattr(self, attr, np.transpose(self.get(component=attr), (0, *order)))
+        return self
 
     @apply_parallel
     def rotate_axes(self, crop):

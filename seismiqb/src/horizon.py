@@ -367,17 +367,15 @@ class Horizon:
     FILL_VALUE = -999999
 
     # Correspondence between attribute alias and the class function that calculates it
-    FUNC_BY_ATTR = {
-        'cube_values' : 'get_cube_values',
-        'amplitudes' : 'get_cube_values',
-        'heights' : 'get_full_matrix',
-        'full_matrix' : 'get_full_matrix',
-        'metrics' : 'metrics_evaluate',
-        'instant_phases' : 'get_instantaneous_phase',
-        'instant_amplitudes' : 'get_instantaneous_amplitude',
-        'masks' : 'get_full_binary_matrix',
-        'full_binary_matrix' : 'get_full_binary_matrix'
-        }
+    ATTR_BY_FUNC = {
+        'get_cube_values': ['cube_values', 'amplitudes'],
+        'get_full_matrix': ['full_matrix', 'heights'],
+        'metrics_evaluate': ['metrics'],
+        'get_instantaneous_phases': ['instant_phases'],
+        'get_instantaneous_amplitudes': ['instant_amplitudes'],
+        'get_full_binary_matrix': ['full_binary_matrix', 'masks']
+    }
+    FUNC_BY_ATTR = {attr: func for func, attrs in ATTR_BY_FUNC.items() for attr in attrs}
 
 
     def __init__(self, storage, geometry, name=None, dtype=np.int32, **kwargs):
@@ -958,7 +956,7 @@ class Horizon:
             return arr
 
         mask = self.put_on_full(self.binary_matrix, fill_value=False, dtype=bool)
-        values = arr[np.where(mask)]
+        values = arr[mask]
         normalize = transform if isinstance(transform, str) else transform.get('normalize')
 
         if normalize is None:
@@ -975,7 +973,7 @@ class Horizon:
             raise ValueError('Unknown normalize mode {}'.format(normalize['normalize']))
 
         fill_value = transform.get('fill_value', 0) if isinstance(transform, dict) else 0
-        arr[np.where(~mask)] = fill_value
+        arr[~mask] = fill_value
         return arr
 
 
@@ -1038,7 +1036,7 @@ class Horizon:
 
 
     @lru_cache(maxsize=1, apply_by_default=False)
-    def get_instantaneous_amplitude(self, window=23, depths=None, transform=False, **kwargs):
+    def get_instantaneous_amplitudes(self, window=23, depths=None, transform=False, **kwargs):
         """ Calculate instantaneous amplitude along the horizon.
 
         Parameters
@@ -1056,9 +1054,9 @@ class Horizon:
 
         Notes
         -----
-        Keep in mind, that hilbert transform produces artifacts at signal start and end. Therefore if you want to get
+        Keep in mind, that Hilbert transform produces artifacts at signal start and end. Therefore if you want to get
         an attribute with `N` channels along depth axis, you should provide `window` broader then `N`. E.g. in call
-        `label.get_instantaneous_amplitude(channels=range(10, 21), window=41)` the attribute will be first calculated
+        `label.get_instantaneous_amplitudes(channels=range(10, 21), window=41)` the attribute will be first calculated
         by array of `(xlines, ilines, 41)` shape and then the slice `[..., ..., 10:21]` of them will be returned.
         """
         depths = [window // 2] if depths is None else depths
@@ -1069,7 +1067,7 @@ class Horizon:
 
 
     @lru_cache(maxsize=1, apply_by_default=False)
-    def get_instantaneous_phase(self, window=23, depths=None, transform=False, **kwargs):
+    def get_instantaneous_phases(self, window=23, depths=None, transform=False, **kwargs):
         """ Calculate instantaneous phase along the horizon.
 
         Parameters
@@ -1087,9 +1085,9 @@ class Horizon:
 
         Notes
         -----
-        Keep in mind, that hilbert transform produces artifacts at signal start and end. Therefore if you want to get
+        Keep in mind, that Hilbert transform produces artifacts at signal start and end. Therefore if you want to get
         an attribute with `N` channels along depth axis, you should provide `window` broader then `N`. E.g. in call
-        `label.get_instantaneous_phase(channels=range(10, 21), window=41)` the attribute will be first calculated
+        `label.get_instantaneous_phases(channels=range(10, 21), window=41)` the attribute will be first calculated
         by array of `(xlines, ilines, 41)` shape and then the slice `[..., ..., 10:21]` of them will be returned.
         """
         depths = [window // 2] if depths is None else depths

@@ -477,7 +477,7 @@ class SeismicCubeset(Dataset):
                   strides=None, overlap=None, overlap_factor=None,
                   batch_size=16, filtering_matrix=None, filter_threshold=0):
         """ Create regular grid of points in cube.
-        This method is usually used with `SeismicCropBatch.assemble_predict`.
+        This method is usually used with `:meth.assemble_predict`.
 
         Parameters
         ----------
@@ -1071,7 +1071,7 @@ class SeismicCubeset(Dataset):
 
 
     def make_labels_prediction(self, pipeline, crop_shape, overlap_factor,
-                               src_labels='horizons', dst_labels='predictions',
+                               src_labels='horizons', dst_labels='predictions', bar='n',
                                pipeline_var='predictions', order=(1, 2, 0), binarize=True):
         """
         Make predictions and put them into dataset attribute.
@@ -1095,17 +1095,19 @@ class SeismicCubeset(Dataset):
         binarize : bool
             Whether convert probability to class label or not.
         """
+        # pylint: disable=blacklisted-name
         setattr(self, dst_labels, IndexedDict({ix: [] for ix in self.indices}))
         for idx, labels in getattr(self, src_labels).items():
             for label in labels:
                 self.make_grid(cube_name=idx, crop_shape=crop_shape, overlap_factor=overlap_factor,
                                heights=int(label.h_mean), mode='2d')
                 pipeline = pipeline << self
-                pipeline.run(batch_size=self.size, n_iters=self.grid_iters, bar='n')
+                pipeline.run(batch_size=self.size, n_iters=self.grid_iters, bar=bar)
                 prediction = self.assemble_crops(pipeline.v(pipeline_var), order=(1, 2, 0)).squeeze()
                 prediction = expit(prediction)
                 prediction = prediction.round() if binarize else prediction
-                self[idx, dst_labels] += [Horizon(prediction, label.geometry)]
+                prediction_name = "{}_predicted".format(label.name)
+                self[idx, dst_labels] += [Horizon(prediction, label.geometry, prediction_name)]
 
 
     # Task-specific loaders
