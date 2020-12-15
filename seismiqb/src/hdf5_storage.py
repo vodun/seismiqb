@@ -115,7 +115,7 @@ class FileHDF5:
         locations[axis] = slice(loc, loc+1)
         slc = [slice(None) for _ in range(3)]
         slc[axis] = 0
-        return self.load_crop(locations, **kwargs)[slc]
+        return self.load_crop(locations, **kwargs)[tuple(slc)]
 
     @lru_cache(128)
     def cached_load(self, cube, loc, axis=0, **kwargs):

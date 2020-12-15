@@ -16,13 +16,10 @@ from scipy.ndimage import find_objects
 from scipy.spatial import Delaunay
 from skimage.measure import label
 
-import plotly
-import plotly.figure_factory as ff
-
 from .utils import round_to_array, groupby_mean, groupby_min, groupby_max, \
                    HorizonSampler, filter_simplices
 from .utils import make_gaussian_kernel
-from .plotters import plot_image
+from .plotters import plot_image, show_3d
 
 
 
@@ -1845,7 +1842,16 @@ class Horizon:
         kwargs : dict
             Other arguments of plot creation.
         """
-        # Take most representative points of a horizon
+        x, y, z, simplices = self.triangulation(n, threshold)
+        title = f'Horizon `{self.name}` on `{self.cube_name}`'
+        aspect_ratio = (self.i_length / self.x_length, 1, z_ratio)
+        axis_labels = (self.geometry.index_headers[0], self.geometry.index_headers[1], 'DEPTH')
+
+        show_3d(x, y, z, simplices, title, self.h_min, self.h_max, show_axes, aspect_ratio,
+                axis_labels, width, height, margin, savepath, **kwargs)
+
+
+    def _triangulation(self, n, threshold):
         weights_matrix = self.full_matrix
         grad_i = np.diff(weights_matrix, axis=0, prepend=0)
         grad_x = np.diff(weights_matrix, axis=1, prepend=0)
@@ -1875,50 +1881,7 @@ class Horizon:
         tri = Delaunay(np.vstack([x, y]).T)
         simplices = filter_simplices(simplices=tri.simplices, points=tri.points,
                                      matrix=self.full_matrix, threshold=threshold)
-
-        # Arguments of graph creation
-        kwargs = {
-            'title': f'Horizon `{self.name}` on `{self.cube_name}`',
-            'colormap': plotly.colors.sequential.Viridis[::-1][:4],
-            'edges_color': 'rgb(70, 40, 50)',
-            'show_colorbar': False,
-            'width': width,
-            'height': height,
-            'aspectratio': {'x': self.i_length / self.x_length, 'y': 1, 'z': z_ratio},
-            **kwargs
-        }
-
-        fig = ff.create_trisurf(x=x, y=y, z=z, simplices=simplices, **kwargs)
-
-        # Update scene with title, labels and axes
-        fig.update_layout(
-            {
-                'scene': {
-                    'xaxis': {
-                        'title': self.geometry.index_headers[0] if show_axes else '',
-                        'showticklabels': show_axes,
-                        'autorange': 'reversed',
-                    },
-                    'yaxis': {
-                        'title': self.geometry.index_headers[1] if show_axes else '',
-                        'showticklabels': show_axes,
-                    },
-                    'zaxis': {
-                        'title': 'DEPTH' if show_axes else '',
-                        'showticklabels': show_axes,
-                        'range': [self.h_max + margin, self.h_min - margin],
-                    },
-                    'camera_eye': {
-                        "x": 1.25, "y": 1.5, "z": 1.5
-                    },
-                }
-            }
-        )
-        fig.show()
-
-        if savepath:
-            fig.write_html(savepath)
-
+        return x, y, z, simplices
 
     def show_slide(self, loc, width=3, axis='i', order_axes=None, zoom_slice=None,
                    n_ticks=5, delta_ticks=100, **kwargs):

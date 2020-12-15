@@ -11,10 +11,13 @@ from tqdm.auto import tqdm
 
 from scipy.ndimage import measurements
 from sklearn.decomposition import PCA
+from sklearn.neighbors import NearestNeighbors
 
 from .geometry import SeismicGeometry
 from .horizon import Horizon
 from .triangulation import triangulation, triangle_rasterization
+
+from .plotters import show_3d
 
 
 
@@ -177,6 +180,48 @@ class Fault(Horizon):
         """ Save separate fault to csv. """
         df.to_csv(os.path.join(dst, df.name), sep=' ', header=False, index=False)
 
+    def show_3d(self, n_sticks=100, n_nodes=10, z_ratio=1., show_axes=True,
+                width=1200, height=1200, margin=100, savepath=None, **kwargs):
+        """ Interactive 3D plot. Roughly, does the following:
+            - select `n` points to represent the horizon surface
+            - triangulate those points
+            - remove some of the triangles on conditions
+            - use Plotly to draw the tri-surface
+
+        Parameters
+        ----------
+        n : int
+            Number of points for horizon surface creation.
+            The more, the better the image is and the slower it is displayed.
+        threshold : number
+            Threshold to remove triangles with bigger height differences in vertices.
+        z_ratio : number
+            Aspect ratio between height axis and spatial ones.
+        show_axes : bool
+            Whether to show axes and their labels.
+        width, height : number
+            Size of the image.
+        margin : number
+            Added margin from below and above along height axis.
+        savepath : str
+            Path to save interactive html to.
+        kwargs : dict
+            Other arguments of plot creation.
+        """
+        x, y, z, simplices = self.triangulation(n_sticks, n_nodes)
+        title = f'Fault `{self.name}` on `{self.cube_name}`'
+        aspect_ratio = (self.i_length / self.x_length, 1, z_ratio)
+        axis_labels = (self.geometry.index_headers[0], self.geometry.index_headers[1], 'DEPTH')
+
+        show_3d(x, y, z, simplices, title, self.h_min, self.h_max, show_axes, aspect_ratio,
+                axis_labels, width, height, margin, savepath, **kwargs)
+
+    def triangulation(self, n_sticks=100, n_nodes=10):
+        sticks = get_sticks(self.points, n_sticks, n_nodes)
+        simplices = triangulation(sticks, True)
+        coords = np.concatenate(sticks)
+        return coords[:, 0], coords[:, 1], coords[:, 2], simplices
+
 def split_faults(array, chunk_size=None, overlap=1, pbar=False, cube_shape=None, fmt='mask'):
     """ Label faults in an array.
 
@@ -315,3 +360,44 @@ def filter_faults(labels, threshold, sizes=None):
         sizes = faults_sizes(labels)
     indices = np.where(sizes >= threshold)[0] + 1
     return labels[np.isin(labels[:, 3], indices)]
+
+def get_sticks(points, n_sticks, n_nodes):
+    pca = PCA(1)
+    array = pca.fit_transform(points[:, :2])
+    axis = 0 if np.abs(pca.components_[0][0]) > np.abs(pca.components_[0][1]) else 1
+
+    column = points[:, 0] if axis == 0 else points[:, 1]
+    step = max((column.max() - column.min()) // (n_sticks + 1), 1)
+
+    points = points[np.argsort(points[:, axis])]
+    projections = np.split(points, np.unique(points[:, axis], return_index=True)[1][1:])[::step]
+
+    res = []
+
+    for p in projections:
+        points_ = thick(p).astype(int)
+        loc = p[0, axis]
+        nodes = approximate_points(points_[:, [1-axis, 2]], n_nodes)
+        nodes_ = np.zeros((len(nodes), 3))
+        nodes_[:, [1-axis, 2]] = nodes
+        nodes_[:, axis] = loc
+        res += [nodes_]
+    return res
+
+def thick(points):
+    points = points[np.argsort(points[:, -1])]
+    splitted = np.split(points, np.unique(points[:, -1], return_index=True)[1][1:])
+    return np.stack([np.mean(item, axis=0) for item in splitted], axis=0)
+
+def approximate_points(points, n_points):
+    pca = PCA(1)
+    array = pca.fit_transform(points)
+
+    step = (array.max() - array.min()) / (n_points - 1)
+    initial = np.arange(array.min(), array.max() + step / 2, step)
+    indices = np.unique(nearest_neighbors(initial.reshape(-1, 1), array.reshape(-1, 1), 1))
+    return points[indices]
+
+def nearest_neighbors(values, all_values, nbr_neighbors=10):
+    nn = NearestNeighbors(nbr_neighbors).fit(all_values)
+    return nn.kneighbors(values)[1].flatten()

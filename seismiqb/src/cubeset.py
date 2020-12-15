@@ -14,7 +14,7 @@ from .crop_batch import SeismicCropBatch
 
 from .horizon import Horizon, UnstructuredHorizon
 from .metrics import HorizonMetrics
-from .plotters import plot_image
+from .plotters import plot_image, show_3d
 from .utils import IndexedDict, round_to_array, gen_crop_coordinates, make_axis_grid, infer_tuple, parse_axis
 
 
@@ -406,6 +406,38 @@ class SeismicCubeset(Dataset):
         }
         plot_image(map_, **kwargs)
 
+    def show_3d_faults(self, idx=0, n_sticks=100, n_nodes=10, z_ratio=1., zoom_slice=None,
+                       projections=None, **kwargs):
+        geometry = self.geometries[idx]
+        coords = np.zeros((0, 3), dtype='int')
+        simplices = np.zeros((0, 3), dtype='int')
+
+        if zoom_slice is None:
+            zoom_slice = [slice(0, i) for i in geometry.cube_shape]
+
+        for label in self.labels[idx]:
+            x, y, z, simplices_ = label.triangulation(n_sticks, n_nodes)
+            simplices = np.concatenate([simplices, simplices_ + len(coords)], axis=0)
+            coords = np.concatenate([coords, np.stack([x, y, z], axis=1)], axis=0)
+
+        title = f'Faults on `{geometry.name}`'
+        aspect_ratio = (geometry.cube_shape[0] / geometry.cube_shape[1], 1, z_ratio)
+        axis_labels = (geometry.index_headers[0], geometry.index_headers[1], 'DEPTH')
+
+        images = []
+        if projections is not None:
+            for loc, axis, opacity in projections:
+                image = geometry.load_slide(loc, axis=axis)
+                if axis == 0:
+                    image = image[zoom_slice[1:]]
+                elif axis == 1:
+                    image = image[zoom_slice[0], zoom_slice[-1]]
+                else:
+                    image = image[zoom_slice[:-1]]
+                images += [(image, loc, axis, opacity)]
+
+        show_3d(coords[:, 0], coords[:, 1], coords[:, 2], simplices, title, zoom_slice,
+                aspect_ratio=aspect_ratio, axis_labels=axis_labels, images=images, **kwargs)
 
     def load(self, label_dir=None, filter_zeros=True, dst_labels='labels', p=None, bins=None, **kwargs):
         """ Load everything: geometries, point clouds, labels, samplers.
