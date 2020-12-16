@@ -1857,23 +1857,26 @@ class Horizon:
 
     def triangulation(self, n_points, threshold, slices, **kwargs):
         _ = kwargs
-        weights_matrix = self.full_matrix#[slices[:2]]
-        # coordinates = np.arange(0, self.cube_shape[0] * self.cube_shape[1])
-        # coordinates = coordinates.reshape(self.cube_shape[:2])[slices[:2]].flatten()
+        weights_matrix = self.full_matrix
 
         grad_i = np.diff(weights_matrix, axis=0, prepend=0)
         grad_x = np.diff(weights_matrix, axis=1, prepend=0)
         weights_matrix = (grad_i + grad_x) / 2
         weights_matrix[np.abs(weights_matrix) > 100] = np.nan
 
-        idx = np.nonzero(self.full_matrix > 0) #[slices[:2]]
+        idx = np.stack(np.nonzero(self.full_matrix > 0), axis=0)
+        mask_1 = (idx <= np.array([slices[0].stop, slices[1].stop]).reshape(2, 1)).all(axis=0)
+        mask_2 = (idx >= np.array([slices[0].start, slices[1].start]).reshape(2, 1)).all(axis=0)
+        mask = np.logical_and(mask_1, mask_2)
+        idx = idx[:, mask]
+
         probs = np.abs(weights_matrix[idx[0], idx[1]].flatten())
         probs[np.isnan(probs)] = np.nanmax(probs)
         indices = np.random.choice(len(probs), size=n_points, p=probs / probs.sum())
 
         # Convert to meshgrid
-        ilines = self.points[:, 0][indices]
-        xlines = self.points[:, 1][indices]
+        ilines = self.points[mask, 0][indices]
+        xlines = self.points[mask, 1][indices]
         ilines, xlines = np.meshgrid(ilines, xlines)
         ilines = ilines.flatten()
         xlines = xlines.flatten()

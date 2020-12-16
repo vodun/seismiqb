@@ -216,11 +216,18 @@ class Fault(Horizon):
         show_3d(x, y, z, simplices, title, self.h_min, self.h_max, show_axes, aspect_ratio,
                 axis_labels, width, height, margin, savepath, **kwargs)
 
-    def triangulation(self, n_sticks=100, n_nodes=10, **kwargs):
-        sticks = get_sticks(self.points, n_sticks, n_nodes)
-        simplices = triangulation(sticks, True)
-        coords = np.concatenate(sticks)
-        return coords[:, 0], coords[:, 1], coords[:, 2], simplices
+    def triangulation(self, n_sticks, n_nodes, slices, **kwargs):
+        points = self.points.copy()
+        for i in range(3):
+            points = points[points[:, i] <= slices[i].stop]
+            points = points[points[:, i] >= slices[i].start]
+        if len(points) > 3:
+            sticks = get_sticks(points, n_sticks, n_nodes)
+            simplices = triangulation(sticks, True)
+            coords = np.concatenate(sticks)
+            return coords[:, 0], coords[:, 1], coords[:, 2], simplices
+        else:
+            return None, None, None, None
 
 def split_faults(array, chunk_size=None, overlap=1, pbar=False, cube_shape=None, fmt='mask'):
     """ Label faults in an array.

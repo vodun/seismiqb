@@ -408,8 +408,8 @@ class SeismicCubeset(Dataset):
 
     def show_3d(self, idx=0, src='labels', z_ratio=1., zoom_slice=None,
                 n_points=100, threshold=100, n_sticks=100, n_nodes=10,
-                projections=None, **kwargs):
-        src = [src] if isinstance(src, str) else src
+                projections=None, margin=20, **kwargs):
+        src = src if isinstance(src, (tuple, list)) else [src]
         geometry = self.geometries[idx]
         coords = np.zeros((0, 3), dtype='int')
         simplices = np.zeros((0, 3), dtype='int')
@@ -418,7 +418,11 @@ class SeismicCubeset(Dataset):
             zoom_slice = [slice(0, i) for i in geometry.cube_shape]
 
         for src_ in src:
-            for label in getattr(self, src_)[idx]:
+            if isinstance(src_, str):
+                labels = getattr(self, src_)[idx]
+            else:
+                labels = [src_]
+            for label in labels:
                 triangulation_kwargs = {
                     'n_points': n_points,
                     'threshold': threshold,
@@ -427,8 +431,9 @@ class SeismicCubeset(Dataset):
                     'slices': zoom_slice
                 }
                 x, y, z, simplices_ = label.triangulation(**triangulation_kwargs)
-                simplices = np.concatenate([simplices, simplices_ + len(coords)], axis=0)
-                coords = np.concatenate([coords, np.stack([x, y, z], axis=1)], axis=0)
+                if x is not None:
+                    simplices = np.concatenate([simplices, simplices_ + len(coords)], axis=0)
+                    coords = np.concatenate([coords, np.stack([x, y, z], axis=1)], axis=0)
 
         title = f'Faults on `{geometry.name}`'
         aspect_ratio = (geometry.cube_shape[0] / geometry.cube_shape[1], 1, z_ratio)
@@ -446,7 +451,7 @@ class SeismicCubeset(Dataset):
                     image = image[zoom_slice[:-1]]
                 images += [(image, loc, axis, opacity)]
 
-        show_3d(coords[:, 0], coords[:, 1], coords[:, 2], simplices, title, zoom_slice,
+        show_3d(coords[:, 0], coords[:, 1], coords[:, 2], simplices, title, zoom_slice, margin=margin,
                 aspect_ratio=aspect_ratio, axis_labels=axis_labels, images=images, **kwargs)
 
     def load(self, label_dir=None, filter_zeros=True, dst_labels='labels', p=None, bins=None, **kwargs):
