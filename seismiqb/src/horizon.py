@@ -1237,7 +1237,7 @@ class Horizon:
         return float_matrix
 
     def enlarge_carcass_image(self, image, width=10):
-        """ Increase visibility of a sparce carcass metric. """
+        """ Increase visibility of a sparse carcass metric. """
         # Convert all the nans to a number, so that `dilate` can work with it
         image = image.copy()
         image[np.isnan(image)] = self.FILL_VALUE
@@ -2020,7 +2020,7 @@ class StructuredHorizon(Horizon):
     """ Convenient alias for `Horizon` class. """
 
 
-@njit
+@njit(parallel=True)
 def _filtering_function(points, filtering_matrix):
     #pylint: disable=consider-using-enumerate, not-an-iterable
     mask = np.ones(len(points), dtype=np.int32)

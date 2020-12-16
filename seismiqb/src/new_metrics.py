@@ -258,7 +258,7 @@ class BaseMetrics:
         elif isinstance(supports, (tuple, list, np.ndarray)):
             support_coords = xp.asarray(supports)
 
-        # Save for plot/debug
+        # Save for plot and introspection
         self._last_evaluation['support_coords'] = from_device(support_coords)
 
         # Generate support traces

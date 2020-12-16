@@ -1,11 +1,14 @@
 """ Contains various functions for mathematical/geological transforms. """
 from math import isnan, ceil
+from warnings import warn
 
 import numpy as np
 try:
     import cupy as cp
+    CUPY_AVAILABLE = True
 except ImportError:
     cp = np
+    CUPY_AVAILABLE = False
 from numba import njit, prange
 
 from .utility_classes import Accumulator
@@ -22,28 +25,30 @@ def to_device(array, device='cpu'):
     device : str or int
         Device specificator. Can be either string (`cpu`, `gpu:4`) or integer (`4`).
     """
-    if cp is not np:
-        if isinstance(device, str) and ':' in device:
-            device = int(device.split(':')[1])
-        if device in ['cuda', 'gpu']:
-            device = 0
+    if isinstance(device, str) and ':' in device:
+        device = int(device.split(':')[1])
+    if device in ['cuda', 'gpu']:
+        device = 0
 
-        if isinstance(device, int):
+    if isinstance(device, int):
+        if CUPY_AVAILABLE:
             with cp.cuda.Device(device):
                 array = cp.asarray(array)
+        else:
+            warn('Performance Warning: computing metrics on CPU as `cupy` is not available', RuntimeWarning)
     return array
 
 def from_device(array):
-    """ Mode the data to GPU.
+    """ Move the data from GPU, if needed.
     If `cupy` is not installed or supplied array already resides on CPU, does nothing.
     """
-    if (cp is not np) and hasattr(array, 'device'):
+    if CUPY_AVAILABLE and hasattr(array, 'device'):
         array = cp.asnumpy(array)
     return array
 
 
 
-# Functions to compute various distances between two arrays
+# Functions to compute various distances between two atleast 2d arrays
 def correlation(array1, array2, std1, std2, **kwargs):
     """ Compute correlation. """
     _ = kwargs
@@ -55,7 +60,7 @@ def correlation(array1, array2, std1, std2, **kwargs):
 def crosscorrelation(array1, array2, std1, std2, **kwargs):
     """ Compute crosscorrelation. """
     _ = std1, std2, kwargs
-    xp = cp.get_array_module(array1) if (cp is not np) else np
+    xp = cp.get_array_module(array1) if CUPY_AVAILABLE else np
     window = array1.shape[-1]
     pad_width = [(0, 0)] * (array2.ndim - 1) + [(window//2, window - window//2)]
     padded = xp.pad(array2, pad_width=tuple(pad_width))
@@ -70,21 +75,21 @@ def crosscorrelation(array1, array2, std1, std2, **kwargs):
 def btch(array1, array2, std1, std2, **kwargs):
     """ Compute Bhattacharyya distance. """
     _ = std1, std2, kwargs
-    xp = cp.get_array_module(array1) if (cp is not np) else np
+    xp = cp.get_array_module(array1) if CUPY_AVAILABLE else np
     return xp.sqrt(array1 * array2).sum(axis=-1)
 
 
 def kl(array1, array2, std1, std2, **kwargs):
     """ Compute Kullback-Leibler divergence. """
     _ = std1, std2, kwargs
-    xp = cp.get_array_module(array1) if (cp is not np) else np
+    xp = cp.get_array_module(array1) if CUPY_AVAILABLE else np
     return 1 - (array2 * xp.log2(array2/array1)).sum(axis=-1)
 
 
 def js(array1, array2, std1, std2, **kwargs):
     """ Compute Janson-Shannon divergence. """
     _ = std1, std2, kwargs
-    xp = cp.get_array_module(array1) if (cp is not np) else np
+    xp = cp.get_array_module(array1) if CUPY_AVAILABLE else np
 
     average = (array1 + array2) / 2
     log_average = xp.log2(average)
@@ -96,7 +101,7 @@ def js(array1, array2, std1, std2, **kwargs):
 def hellinger(array1, array2, std1, std2, **kwargs):
     """ Compute Hellinger distance. """
     _ = std1, std2, kwargs
-    xp = cp.get_array_module(array1) if (cp is not np) else np
+    xp = cp.get_array_module(array1) if CUPY_AVAILABLE else np
 
     div = xp.sqrt(((xp.sqrt(array2) - xp.sqrt(array1)) ** 2).sum(axis=-1)) / xp.sqrt(2)
     return 1 - div
@@ -105,14 +110,13 @@ def hellinger(array1, array2, std1, std2, **kwargs):
 def tv(array1, array2, std1, std2, **kwargs):
     """ Compute total variation distance. """
     _ = std1, std2, kwargs
-    xp = cp.get_array_module(array1) if (cp is not np) else np
+    xp = cp.get_array_module(array1) if CUPY_AVAILABLE else np
     return 1 - xp.abs(array2 - array1).sum(axis=-1) / 2
-
 
 
 def hilbert(array, axis=-1):
     """ Compute the analytic signal, using the Hilbert transform. """
-    xp = cp.get_array_module(array) if (cp is not np) else np
+    xp = cp.get_array_module(array) if CUPY_AVAILABLE else np
     N = array.shape[axis]
     fft = xp.fft.fft(array, n=N, axis=axis)
 
@@ -134,7 +138,6 @@ def hilbert(array, axis=-1):
 
 
 
-
 def make_gaussian_kernel(kernel_size=3, sigma=1.):
     """ Create Gaussian kernel with given parameters: kernel size and std. """
     ax = np.linspace(-(kernel_size - 1) / 2., (kernel_size - 1) / 2., kernel_size)
@@ -142,7 +145,6 @@ def make_gaussian_kernel(kernel_size=3, sigma=1.):
     kernel = np.exp(-0.5 * (np.square(x_points) + np.square(y_points)) / np.square(sigma))
     gaussian_kernel = (kernel / np.sum(kernel).astype(np.float32))
     return gaussian_kernel
-
 
 
 def smooth_out(matrix, kernel=None, kernel_size=3, sigma=2.0, iters=1,
@@ -158,7 +160,7 @@ def smooth_out(matrix, kernel=None, kernel_size=3, sigma=2.0, iters=1,
     kernel : ndarray or None
         Kernel to convolve with.
     kernel_size : int
-        If the kernel is not provided, shape of the Gaussian kernel.
+        If the kernel is not provided, shape of the square Gaussian kernel.
     sigma : number
         If the kernel is not provided, std of the Gaussian kernel.
     iters : int
@@ -245,7 +247,7 @@ def digitize(matrix, quantiles):
     return digitized
 
 
-def gridify(matrix, frequencies, iline=True, xline=True):
+def gridify(matrix, frequencies, iline=True, xline=True, full_lines=True):
     """ Convert digitized map into grid with various frequencies corresponding to different bins. """
     values = np.unique(matrix[~np.isnan(matrix)])
 
@@ -264,15 +266,21 @@ def gridify(matrix, frequencies, iline=True, xline=True):
 
         if iline:
             mask = (idx_1 % freq == 0)
-            # grid[idx_1[mask], idx_2[mask]] = 1
-            grid[idx_1[mask], :] = 1
+            if full_lines:
+                grid[idx_1[mask], :] = 1
+            else:
+                grid[idx_1[mask], idx_2[mask]] = 1
+
         if xline:
             mask = (idx_2 % freq == 0)
-            # grid[idx_1[mask], idx_2[mask]] = 1
-            grid[:, idx_2[mask]] = 1
+            if full_lines:
+                grid[:, idx_2[mask]] = 1
+            else:
+                grid[idx_1[mask], idx_2[mask]] = 1
 
     grid[np.isnan(matrix)] = np.nan
     return grid
+
 
 @njit(parallel=True)
 def perturb(data, perturbations, window):
@@ -289,6 +297,7 @@ def perturb(data, perturbations, window):
             start = central + perturbations[il, xl]
             output[il, xl, :] = data[il, xl, start-low:start+high]
     return output
+
 
 @njit
 def histo_reduce(data, bins):

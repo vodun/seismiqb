@@ -8,8 +8,10 @@ from hashlib import blake2b
 import numpy as np
 try:
     import cupy as cp
+    CUPY_AVAILABLE = True
 except ImportError:
     cp = np
+    CUPY_AVAILABLE = False
 from numba import njit
 
 from ..batchflow import Sampler
@@ -21,7 +23,7 @@ class Accumulator:
     An example of usage:
         one can either store matrices and take a mean along desired axis at the end of their generation,
         or sequentially update the `mean` matrix with the new data by using this class.
-    Note the latter approach is inherintly slower, but requires much O(N) times less memory,
+    Note the latter approach is inherintly slower, but requires O(N) times less memory,
     where N is the number of accumulated matrices.
 
     This class is intended to be used in the following manner:
@@ -63,7 +65,7 @@ class Accumulator:
     def init(self, matrix):
         """ Initialize all the containers on first `update`. """
         # No amortization: collect all the matrices and apply reduce afterwards
-        self.module = cp.get_array_module(matrix) if (cp is not np) else np
+        self.module = cp.get_array_module(matrix) if CUPY_AVAILABLE else np
 
         if self.amortize is False or self.agg in ['stack', 'mode']:
             self.values = [matrix]
@@ -71,6 +73,7 @@ class Accumulator:
             self.initialized = True
             return
 
+        # Amortization: init all the containers
         if self.agg in ['mean', 'nanmean']:
             # Sum of values and counts of non-nan
             self.value = matrix
@@ -101,10 +104,12 @@ class Accumulator:
             self.init(matrix.copy())
             return
 
+        # No amortization: just store everything
         if self.amortize is False or self.agg in ['stack', 'mode']:
             self.values.append(matrix)
             return
 
+        # Amortization: update underlying containers
         slc = ~self.module.isnan(matrix)
 
         if self.agg in ['min', 'nanmin']:
@@ -144,6 +149,8 @@ class Accumulator:
         # No amortization: apply function along the axis to the stacked array
         if self.amortize is False or self.agg in ['stack', 'mode']:
             stacked = self.module.stack(self.values, axis=self.axis)
+            if final:
+                self.values = None
 
             if self.agg in ['stack']:
                 value = stacked
@@ -164,7 +171,7 @@ class Accumulator:
 
             return value
 
-
+        # Amortization: compute desired aggregation
         if self.agg in ['min', 'nanmin', 'max', 'nanmax']:
             value = self.value
 
