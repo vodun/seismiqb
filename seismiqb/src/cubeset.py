@@ -406,7 +406,7 @@ class SeismicCubeset(Dataset):
         }
         plot_image(map_, **kwargs)
 
-    def show_3d(self, idx=0, src='labels', z_ratio=1., zoom_slice=None,
+    def show_3d(self, idx=0, src='labels', aspect_ratio=None, zoom_slice=None,
                 n_points=100, threshold=100, n_sticks=100, n_nodes=10,
                 projections=None, margin=20, **kwargs):
         src = src if isinstance(src, (tuple, list)) else [src]
@@ -436,7 +436,12 @@ class SeismicCubeset(Dataset):
                     coords = np.concatenate([coords, np.stack([x, y, z], axis=1)], axis=0)
 
         title = f'Faults on `{geometry.name}`'
-        aspect_ratio = (geometry.cube_shape[0] / geometry.cube_shape[1], 1, z_ratio)
+
+        default_aspect_ratio = (geometry.cube_shape[0] / geometry.cube_shape[1], 1, 1)
+        if aspect_ratio is None:
+            aspect_ratio = [None] * 3
+        aspect_ratio = [item or default for item, default in zip(aspect_ratio, default_aspect_ratio)]
+
         axis_labels = (geometry.index_headers[0], geometry.index_headers[1], 'DEPTH')
 
         images = []

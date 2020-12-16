@@ -50,15 +50,9 @@ def triangulation(points, return_indices=False):
     if return_indices:
         n_points = np.cumsum([0, *[len(item) for item in points]])
         points = np.array([np.arange(len(points[i])) + n_points[i] for i in range(len(points))])
-        # points = [[np.zeros(len(item)) + idx, np.arange(len(item))] for idx, item in enumerate(points)]
-        # print(np.array(points))
-        # points = np.array(points).transpose(0, 2, 1)
-        # print(points[:, :, 0].shape, n_points[:, np.newaxis].shape)
-       # points = points[:, :, 0] * n_points[:, np.newaxis] + points[:, :, 1]
     for s1, s2 in zip(points[:-1], points[1:]):
         if len(s1) > len(s2):
             s1, s2 = s2, s1
-            swap = True
         n = len(s1)
         nodes = [item for sublist in zip(s1, s2[:n]) for item in sublist]
         nodes = [nodes[i:i+3] for i in range(len(nodes[:-2]))] if len(nodes) > 2 else []

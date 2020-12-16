@@ -229,6 +229,17 @@ class Fault(Horizon):
         else:
             return None, None, None, None
 
+    def split_faults(self, path, prefix='fault', threshold=None, bar=False, **kwargs):
+        faults, sizes = split_faults(self.points, cube_shape=tuple(self.cube_shape), pbar=bar, **kwargs)
+        order = np.argsort(sizes)[::-1]
+        for i in tqdm(range(len(sizes)), disable=(not bar)):
+            fault = faults[order][i]
+            size = sizes[order][i]
+            if threshold and (size < threshold):
+                break
+            fault_path = os.path.join(path, prefix + '_' + str(i))
+            np.save(fault_path, fault[:, :3], allow_pickle=False)
+
 def split_faults(array, chunk_size=None, overlap=1, pbar=False, cube_shape=None, fmt='mask'):
     """ Label faults in an array.
 
@@ -265,6 +276,7 @@ def split_faults(array, chunk_size=None, overlap=1, pbar=False, cube_shape=None,
 
     if fmt == 'mask':
         chunks = [(start, array[start:start+chunk_size]) for start in range(0, cube_shape[0], chunk_size-overlap)]
+        total = len(chunks)
     else:
         def _chunks():
             for start in range(0, cube_shape[0], chunk_size-overlap):
@@ -274,13 +286,13 @@ def split_faults(array, chunk_size=None, overlap=1, pbar=False, cube_shape=None,
                 chunk[points[:, 0]-start, points[:, 1], points[:, 2]] = 1
                 yield (start, chunk)
         chunks = _chunks()
-
+        total = len(range(0, cube_shape[0], chunk_size-overlap))
 
     prev_overlap = np.zeros((0, *cube_shape[1:]))
     labels = np.zeros((0, 4), dtype='int32')
     n_objects = 0
     s = np.ones((3, 3, 3))
-    chunks = tqdm(chunks) if pbar else chunks
+    chunks = tqdm(chunks, total=total) if pbar else chunks
     for start, item in chunks:
         chunk_labels, new_objects = measurements.label(item, structure=s) # compute labels for new chunk
         chunk_labels[chunk_labels > 0] += n_objects # shift all values to avoid intersecting with previous labels
@@ -312,18 +324,12 @@ def split_faults(array, chunk_size=None, overlap=1, pbar=False, cube_shape=None,
         labels = np.concatenate([labels, chunk_labels])
         n_objects += new_objects
 
-    labels = _sequential_labels(labels) # make labels sequential from 1 to number of labels
-    sizes = faults_sizes(labels) # compute object sizes
+    labels = labels[np.argsort(labels[:, 3])]
+    labels = np.array(np.split(labels, np.unique(labels[:, 3], return_index=True)[1][1:]))
+    sizes = faults_sizes(labels)
     return labels, sizes
 
-@njit(parallel=True)
-def _sequential_labels(labels):
-    indices = np.unique(labels[:, 3])
-    for i in prange(len(labels)): # pylint: disable=not-an-iterable
-        labels[i, 3] = np.where(indices == labels[i, 3])[0][0] + 1
-    return labels
-
-@njit(parallel=True)
+# @njit(parallel=True)
 def faults_sizes(labels):
     """ Compute sizes of faults.
 
@@ -336,15 +342,19 @@ def faults_sizes(labels):
     -------
     sizes : numpy.ndarray
     """
-    indices = np.unique(labels[:, 3])
-    sizes = np.zeros_like(indices)
-    for i in prange(len(indices)): # pylint: disable=not-an-iterable
-        label = indices[i]
-        array = labels[labels[:, 3] == label]
+    # indices = np.unique(labels[:, 3])
+    sizes = []
+    # for i in prange(len(indices)): # pylint: disable=not-an-iterable
+    #     label = indices[i]
+    #     array = labels[labels[:, 3] == label]
+    #     i_len = (array[:, 0].max() - array[:, 0].min())
+    #     x_len = (array[:, 1].max() - array[:, 1].min())
+    #     sizes[label-1] = (i_len ** 2 + x_len ** 2) ** 0.5
+    for array in labels:
         i_len = (array[:, 0].max() - array[:, 0].min())
         x_len = (array[:, 1].max() - array[:, 1].min())
-        sizes[label-1] = (i_len ** 2 + x_len ** 2) ** 0.5
-    return sizes
+        sizes += [(i_len ** 2 + x_len ** 2) ** 0.5]
+    return np.array(sizes)
 
 def filter_faults(labels, threshold, sizes=None):
     """ Filter faults by size.
@@ -366,7 +376,8 @@ def filter_faults(labels, threshold, sizes=None):
     if sizes is None:
         sizes = faults_sizes(labels)
     indices = np.where(sizes >= threshold)[0] + 1
-    return labels[np.isin(labels[:, 3], indices)]
+    return labels[np.isin(labels[:, 3], indices)], sizes[np.isin(labels[:, 3], indices)]
+
 
 def get_sticks(points, n_sticks, n_nodes):
     pca = PCA(1)
@@ -384,11 +395,12 @@ def get_sticks(points, n_sticks, n_nodes):
     for p in projections:
         points_ = thick(p).astype(int)
         loc = p[0, axis]
-        nodes = approximate_points(points_[:, [1-axis, 2]], n_nodes)
-        nodes_ = np.zeros((len(nodes), 3))
-        nodes_[:, [1-axis, 2]] = nodes
-        nodes_[:, axis] = loc
-        res += [nodes_]
+        if len(points_) > 3:
+            nodes = approximate_points(points_[:, [1-axis, 2]], n_nodes)
+            nodes_ = np.zeros((len(nodes), 3))
+            nodes_[:, [1-axis, 2]] = nodes
+            nodes_[:, axis] = loc
+            res += [nodes_]
     return res
 
 def thick(points):
