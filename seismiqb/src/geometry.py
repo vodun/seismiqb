@@ -520,7 +520,7 @@ class SeismicGeometry:
             'labelright': False,
             **kwargs
         }
-        plot_image(slide, mode='single', **kwargs)
+        plot_image(slide, **kwargs)
 
     def show_amplitude_hist(self, scaler=None, bins=50, **kwargs):
         """ Show distribution of amplitudes in `trace_container`. Optionally applies chosen `scaler`. """
