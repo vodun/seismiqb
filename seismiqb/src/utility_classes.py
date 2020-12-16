@@ -50,13 +50,17 @@ class Accumulator:
         If False, then accumulation logic is applied.
         Allows for trade-off between memory usage and speed: `amortize=False` is faster,
         but takes more memory resources.
+    total : int or None
+        If integer, then total number of matrices to be aggregated.
+        Used to reduce the memory footprint if `amortize` is set to False.
     axis : int
         Axis to stack matrices on and to apply aggregation funcitons.
     """
     #pylint: disable=attribute-defined-outside-init
-    def __init__(self, agg='mean', amortize=False, axis=0):
+    def __init__(self, agg='mean', amortize=False, total=None, axis=0):
         self.agg = agg
         self.amortize = amortize
+        self.total = total
         self.axis = axis
 
         self.initialized = False
@@ -66,9 +70,14 @@ class Accumulator:
         """ Initialize all the containers on first `update`. """
         # No amortization: collect all the matrices and apply reduce afterwards
         self.module = cp.get_array_module(matrix) if CUPY_AVAILABLE else np
+        self.n = 1
 
         if self.amortize is False or self.agg in ['stack', 'mode']:
-            self.values = [matrix]
+            if self.total:
+                self.values = self.module.empty((self.total, *matrix.shape))
+                self.values[0, ...] = matrix
+            else:
+                self.values = [matrix]
 
             self.initialized = True
             return
@@ -92,7 +101,6 @@ class Accumulator:
             # Keep the current maximum/minimum and update indices matrix, if needed
             self.value = matrix
             self.indices = self.module.zeros_like(matrix)
-            self.n = 1
 
         self.initialized = True
         return
@@ -106,7 +114,12 @@ class Accumulator:
 
         # No amortization: just store everything
         if self.amortize is False or self.agg in ['stack', 'mode']:
-            self.values.append(matrix)
+            if self.total:
+                self.values[self.n, ...] = matrix
+            else:
+                self.values.append(matrix)
+
+            self.n += 1
             return
 
         # Amortization: update underlying containers
@@ -134,21 +147,24 @@ class Accumulator:
             slc_ = matrix < self.value
             self.value[slc_] = matrix[slc_]
             self.indices[slc_] = self.n
-            self.n += 1
 
         elif self.agg in ['argmax']:
             slc_ = matrix > self.value
             self.value[slc_] = matrix[slc_]
             self.indices[slc_] = self.n
-            self.n += 1
 
+        self.n += 1
         return
 
     def get(self, final=False):
         """ Use stored matrices to get the aggregated result. """
         # No amortization: apply function along the axis to the stacked array
         if self.amortize is False or self.agg in ['stack', 'mode']:
-            stacked = self.module.stack(self.values, axis=self.axis)
+            if self.total:
+                stacked = self.values
+            else:
+                stacked = self.module.stack(self.values, axis=self.axis)
+
             if final:
                 self.values = None
 
