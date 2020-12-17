@@ -21,7 +21,7 @@ import plotly
 import plotly.figure_factory as ff
 
 from .utils import round_to_array, groupby_mean, groupby_min, groupby_max, HorizonSampler, filter_simplices, lru_cache
-from .utils import make_gaussian_kernel
+from .utils import make_gaussian_kernel, pop_kwargs_for_function
 from .plotters import plot_image
 
 
@@ -935,29 +935,27 @@ class Horizon:
         return mask
 
 
-    def transform_by_binary_matrix(self, arr, transform='min-max'):
-        """ Normalize array where `binary_matrix` is True or/and fill it with constant where `binary_matrix` is False.
+    def transform_where_present(self, arr, normalize=None, fill_value=None, shift=None, rescale=None):
+        """ Normalize array where horizon is present, fill in with constant where it is not.
 
         Parameters
         ----------
         arr : np.array
-            Array to transform.
-        transform : callable, str or dict
-            Transformation parameters.
-            If str, a name of normalization mode — either 'min-max' or 'mean-std'.
-            If dict, must at least include `normalize` or `fill_value` keys:
-                normalize : 'min-max', 'mean-std' or 'shift-rescale'
-                fill_value : any value compatible with `arr.dtype`
-                shift : number (for 'shift-rescale' mode)
-                rescale : number (for 'shift-rescale' mode)
-            Defaults to 'min-max'.
+            Array to transform. Its shape at first two dimensions must match `self.presence_matrix` shape.
+        normalize : 'min-max', 'mean-std', 'shift-rescale' or False
+            Normalization mode for data where `presence_matrix` is True.
+            If None, no normalization applied. Defaults to False.
+        fill_value : any value compatible with `arr.dtype`
+            Value to fill `arr` in where `presence_matrix` is False.
+            If None, no filling applied. Defaults to None.
+        shift, rescale : number, optional
+            For 'shift-rescale` normalization mode.
         """
-        if not transform:
+
+        if normalize is None and fill_value is None:
             return arr
 
-        mask = self.put_on_full(self.binary_matrix, fill_value=False, dtype=bool)
-        values = arr[mask]
-        normalize = transform if isinstance(transform, str) else transform.get('normalize')
+        values = arr[self.presence_matrix]
 
         if normalize is None:
             pass
@@ -968,17 +966,17 @@ class Horizon:
             mean, std = values.mean(), values.std()
             arr = (arr - mean) / std
         elif normalize == 'shift-rescale':
-            arr = (arr + transform['shift']) * transform['rescale']
+            arr = (arr + shift) * rescale
         else:
-            raise ValueError('Unknown normalize mode {}'.format(normalize['normalize']))
+            raise ValueError('Unknown normalize mode {}'.format(normalize))
 
-        fill_value = transform.get('fill_value', 0) if isinstance(transform, dict) else 0
-        arr[~mask] = fill_value
+        if fill_value is not None:
+            arr[~self.presence_matrix] = fill_value
         return arr
 
 
     @lru_cache(maxsize=1, apply_by_default=False)
-    def get_cube_values(self, window=23, offset=0, chunk_size=256, nan_zero_traces=True, transform=False):
+    def get_cube_values(self, window=23, offset=0, chunk_size=256, **kwargs):
         """ Get values from the cube along the horizon.
 
         Parameters
@@ -995,9 +993,10 @@ class Horizon:
         nan_zero_traces : bool
             Whether fill zero traces with nans or not.
             Defaults to True.
-        transform : str or dict
-            For `Horizon.transform_by_binary_matrix`.
+        kwargs :
+            For `Horizon.transform_where_present`.
         """
+        transform_kwargs = pop_kwargs_for_function(self.transform_where_present, **kwargs)
         low = window // 2
         high = max(window - low, 0)
         chunk_size = min(chunk_size, self.h_max - self.h_min + window)
@@ -1030,13 +1029,12 @@ class Horizon:
                 idx_x = idx_x[mask]
                 heights = heights[mask]
 
-        if nan_zero_traces:
-            background[self.geometry.zero_traces == 1] = np.nan
-        return self.transform_by_binary_matrix(background, transform)
+        background[self.geometry.zero_traces == 1] = np.nan
+        return self.transform_where_present(background, **transform_kwargs)
 
 
     @lru_cache(maxsize=1, apply_by_default=False)
-    def get_instantaneous_amplitudes(self, window=23, depths=None, transform=False, **kwargs):
+    def get_instantaneous_amplitudes(self, window=23, depths=None, **kwargs):
         """ Calculate instantaneous amplitude along the horizon.
 
         Parameters
@@ -1047,10 +1045,8 @@ class Horizon:
             Which depth channels of resulted array to return.
             If slice or sequence of int, used for slicing calculated attribute along last axis.
             If None, infer middle channel index from 'window' and slice at it calculated attribute along last axis.
-        transform : str or dict
-            For `Horizon.transform_by_binary_matrix`.
         kwargs :
-            For `Horizon.get_cube_values`.
+            For `Horizon.get_cube_values` and `Horizon.transform_where_present`.
 
         Notes
         -----
@@ -1059,15 +1055,16 @@ class Horizon:
         `label.get_instantaneous_amplitudes(channels=range(10, 21), window=41)` the attribute will be first calculated
         by array of `(xlines, ilines, 41)` shape and then the slice `[..., ..., 10:21]` of them will be returned.
         """
+        transform_kwargs = pop_kwargs_for_function(self.transform_where_present, **kwargs)
         depths = [window // 2] if depths is None else depths
         amplitudes = self.get_cube_values(window, use_cache=False, **kwargs) #pylint: disable=unexpected-keyword-arg
         result = np.abs(hilbert(amplitudes))[:, :, depths]
         # result[self.full_matrix == self.FILL_VALUE] = np.nan
-        return self.transform_by_binary_matrix(result, transform)
+        return self.transform_where_present(result, **transform_kwargs)
 
 
     @lru_cache(maxsize=1, apply_by_default=False)
-    def get_instantaneous_phases(self, window=23, depths=None, transform=False, **kwargs):
+    def get_instantaneous_phases(self, window=23, depths=None, **kwargs):
         """ Calculate instantaneous phase along the horizon.
 
         Parameters
@@ -1078,10 +1075,8 @@ class Horizon:
             Which depth channels of resulted array to return.
             If slice or sequence of int, used for slicing calculated attribute along last axis.
             If None, infer middle channel index from 'window' and slice at it calculated attribute along last axis.
-        transform : str or dict
-            For `Horizon.transform_by_binary_matrix`.
         kwargs :
-            For `Horizon.get_cube_values`.
+            For `Horizon.get_cube_values` and `Horizon.transform_where_present`.
 
         Notes
         -----
@@ -1090,39 +1085,40 @@ class Horizon:
         `label.get_instantaneous_phases(channels=range(10, 21), window=41)` the attribute will be first calculated
         by array of `(xlines, ilines, 41)` shape and then the slice `[..., ..., 10:21]` of them will be returned.
         """
+        transform_kwargs = pop_kwargs_for_function(self.transform_where_present, **kwargs)
         depths = [window // 2] if depths is None else depths
         amplitudes = self.get_cube_values(window, use_cache=False, **kwargs) #pylint: disable=unexpected-keyword-arg
         result = np.angle(hilbert(amplitudes))[:, :, depths]
         # result[self.full_matrix == self.FILL_VALUE] = np.nan
-        return self.transform_by_binary_matrix(result, transform)
+        return self.transform_where_present(result, **transform_kwargs)
 
 
     @lru_cache(maxsize=1, apply_by_default=False)
-    def get_full_matrix(self, transform=False, **kwargs):
+    def get_full_matrix(self, **kwargs):
         """ Transform `matrix` attribute to match cubic coordinates.
 
         Parameters
         ----------
-        transform : str or dict
-            For `Horizon.transform_by_binary_matrix`.
         kwargs :
-            For `put_on_full`.
+            For `put_on_full` and `Horizon.transform_where_present`.
         """
-        matrix = self.put_on_full(**kwargs)
-        return self.transform_by_binary_matrix(matrix, transform)
+        transform_kwargs = pop_kwargs_for_function(self.transform_where_present, **kwargs)
+        matrix = self.put_on_full(self.matrix, **kwargs)
+        return self.transform_where_present(matrix, **transform_kwargs)
 
 
     @lru_cache(maxsize=1, apply_by_default=False)
-    def get_full_binary_matrix(self, transform=False, **kwargs):
+    def get_full_binary_matrix(self, **kwargs):
         """ Transform `binary_matrix` attribute to match cubic coordinates.
 
         Parameters
         ----------
         kwargs :
-            For `put_on_full`.
+            For `put_on_full` and `Horizon.transform_where_present`.
         """
+        transform_kwargs = pop_kwargs_for_function(self.transform_where_present, **kwargs)
         full_binary_matrix = self.put_on_full(self.binary_matrix, **kwargs)
-        return self.transform_by_binary_matrix(full_binary_matrix, transform)
+        return self.transform_where_present(full_binary_matrix, **transform_kwargs)
 
     def load_attribute(self, src_attribute, location=None, **kwargs):
         """ Make crops from `src_attribute` of horizon at `location`.
@@ -1141,10 +1137,9 @@ class Horizon:
             First two slices are used as `iline` and `xline` ranges to cut crop from.
             Last 'depth' slice is used to infer `window` parameter when `src_attribute` is 'cube_values'.
             If None, `src_attribute` is returned uncropped.
-        transform : str or dict
-            For `Horizon.transform_by_binary_matrix` which is called under the hood during attribute calculation.
         kwargs :
             For `Horizon` function with name from `Horizon.FUNC_BY_ATTR` where `src_attribute` is key to this dict.
+            For `Horizon.transform_where_present`.
 
         Examples
         --------
@@ -1153,7 +1148,7 @@ class Horizon:
 
         >>> horizon.load_attribute('heights')
 
-        >>> horizon.load_attribute('metrics', metrics='hilbert', transform='min-max')
+        >>> horizon.load_attribute('metrics', metrics='hilbert', normalize='min-max')
 
         Notes
         -----
@@ -1376,6 +1371,11 @@ class Horizon:
         return self.get_full_matrix()
 
     @property
+    def presence_matrix(self):
+        """ Binary matrix in cubic coordinate system. """
+        return self.put_on_full(self.binary_matrix, fill_value=False, dtype=bool)
+
+    @property
     def grad_i(self):
         """ Change of heights along iline direction. """
         return self.grad_along_axis(0)
@@ -1480,20 +1480,21 @@ class Horizon:
 
 
     @lru_cache(maxsize=1, apply_by_default=False)
-    def metrics_evaluate(self, transform=False, metric='support_corrs', supports=50, agg='nanmean', **kwargs):
+    def metrics_evaluate(self, metric='support_corrs', supports=50, agg='nanmean', **kwargs):
         """ Cached metrics calcucaltion with disabled plotting option.
 
         Parameters
         ----------
-        transform : bool
-            Whether apply normalization to calculated metrics.
-        other parameters :
-            Passed directly to `HorizonMetrics.evaluate`.
+        metric, supports, agg :
+            For `HorizonMetrics.evaluate`.
+        kwargs :
+            For `HorizonMetrics.evaluate` and `Horizon.transform_where_present`.
         """
+        transform_kwargs = pop_kwargs_for_function(self.transform_where_present, **kwargs)
         metrics = self.horizon_metrics.evaluate(metric=metric, supports=supports, agg=agg,
                                                 plot=False, savepath=None, **kwargs)
         metrics = np.nan_to_num(metrics)
-        return self.transform_by_binary_matrix(metrics, transform)
+        return self.transform_where_present(metrics, **transform_kwargs)
 
 
     def check_proximity(self, other, offset=0):

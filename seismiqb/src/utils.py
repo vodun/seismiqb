@@ -70,15 +70,15 @@ def stable_hash(key):
         key = key.encode('ascii')
     return str(blake2b(key).hexdigest())
 
-def flatten_nested(iterable):
+def to_nested_tuple(iterable):
     """ Recursively convert nested list or dictionary into nested tuple. """
     result = []
     if isinstance(iterable, (tuple, list)):
         for item in iterable:
-            result.append(flatten_nested(item))
+            result.append(to_nested_tuple(item))
     elif isinstance(iterable, dict):
         for key, value in sorted(iterable.items()):
-            result.append((key, flatten_nested(value)))
+            result.extend((key, to_nested_tuple(value)))
     else:
         return iterable
     return tuple(result)
@@ -162,7 +162,7 @@ class lru_cache:
                 attr_hash = stable_hash(getattr(instance, attr))
                 key.append(attr_hash)
 
-        return flatten_nested(key)
+        return to_nested_tuple(key)
 
 
     def __call__(self, func):
@@ -784,3 +784,11 @@ def local_correlation(region):
             if den != 0:
                 corr[i, j] = cov / den
     return np.mean(corr)
+
+def pop_kwargs_for_function(func, **kwargs):
+    """ Pop variables from kwargs that are meant for function. """
+    varnames = func.__code__.co_varnames
+    defaults = func.__defaults__
+    if len(varnames) != len(defaults):
+        raise ValueError("Can't define correspondence between variables and their defaults.")
+    return {k: kwargs.pop(k, v) for k, v in zip(varnames, defaults)}

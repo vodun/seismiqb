@@ -543,12 +543,12 @@ class SeismicCropBatch(Batch):
 
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def scale(self, ix, scaler='minmax', src=None, dst=None):
-        """ Scale values in crop.
+    def normalize(self, ix, mode='minmax', src=None, dst=None):
+        """ Normalize values in crop.
 
         Parameters
         ----------
-        scaler : callable or str
+        mode : callable or str
             If callable, then directly applied to data.
             If str, then `SeismicGeometry.scaler` applied in one of the modes:
             - `minmax`: scaled to [0, 1] via minmax scaling.
@@ -558,10 +558,10 @@ class SeismicCropBatch(Batch):
                         by the maximum of absolute values of the two.
         """
         data = self.get(ix, src)
-        if callable(scaler):
-            return scaler(data)
+        if callable(mode):
+            return mode(data)
         geometry = self.get(ix, 'geometries')
-        return geometry.scaler(data, mode=scaler)
+        return geometry.scaler(data, mode=mode)
 
 
     @action
