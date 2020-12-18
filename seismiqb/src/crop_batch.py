@@ -13,7 +13,7 @@ from ..batchflow import FilesIndex, Batch, action, inbatch_parallel, SkipBatchEx
 
 from .horizon import Horizon
 from .plotters import plot_image
-from .utils import attr_filter
+from .utils import compute_attribute
 
 
 
@@ -413,13 +413,7 @@ class SeismicCropBatch(Batch):
             Batch with loaded masks in desired components.
         """
         image = self.get(ix, src)
-        if isinstance(window, int):
-            window = np.ones(3, dtype=np.int32) * window
-        if isinstance(stride, int):
-            stride = np.ones(3, dtype=np.int32) * stride
-        window = np.minimum(np.array(window), image.shape)
-        result = np.zeros_like(image)
-        result = attr_filter(image, window, device, attribute)
+        result = compute_attribute(image, window, device, attribute)
         return result
 
     @action

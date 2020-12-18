@@ -403,7 +403,7 @@ def make_axis_grid(axis_range, stride, length, crop_shape):
         grid_ += [axis_range[1] - crop_shape]
     return sorted(grid_)
 
-def infer_tuple(value, default):
+def fill_defaults(value, default):
     """ Transform int or tuple with Nones to tuple with values from default.
 
     Parameters
@@ -719,8 +719,12 @@ def generate_points(edges, divisors, lengths, indices):
             low[i, j] = edge[idx_copy % length]
     return low
 
-def attr_filter(array, window, device='cuda:0', attribute='semblance'):
+def compute_attribute(array, window, device='cuda:0', attribute='semblance'):
     """ Compute semblance for the cube. """
+    if isinstance(window, int):
+        window = np.ones(3, dtype=np.int32) * window
+    window = np.minimum(np.array(window), array.shape)
+
     inputs = torch.Tensor(array).to(device)
     inputs = inputs.view(1, 1, *inputs.shape)
     padding = [(w // 2, w - w // 2 - 1) for w in window]

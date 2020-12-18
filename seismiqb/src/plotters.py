@@ -792,7 +792,7 @@ class PlotlyPlotter:
 
         self.save_and_show(fig, **updated)
 
-def show_3d(x, y, z, simplices, title, zoom_slice, show_axes=True, aspect_ratio=(1, 1, 1),
+def show_3d(x, y, z, simplices, colors, title, zoom_slice, show_axes=True, aspect_ratio=(1, 1, 1),
             axis_labels=None, width=1200, height=1200, margin=100, savepath=None,
             images=None, resize_factor=2, colorscale='Greys', **kwargs):
     # Arguments of graph creation
@@ -806,7 +806,7 @@ def show_3d(x, y, z, simplices, title, zoom_slice, show_axes=True, aspect_ratio=
         'aspectratio': {'x': aspect_ratio[0], 'y': aspect_ratio[1], 'z': aspect_ratio[2]},
         **kwargs
     }
-    fig = ff.create_trisurf(x=x, y=y, z=z, simplices=simplices, **kwargs)
+    fig = ff.create_trisurf(x=x, y=y, z=z, color_func=colors, simplices=simplices, **kwargs)
     if images is not None:
         for image, loc, axis, opacity in images:
             shape = image.shape

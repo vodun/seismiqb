@@ -45,7 +45,7 @@ class Fault(Horizon):
             points = np.load(path, allow_pickle=False)
             transform = False
         elif ext == 'hdf5':
-            cube = SeismicGeometry(path, **kwargs).file_hdf5['cube']
+            cube = SeismicGeometry(path, **kwargs).file_hdf5['cube_i']
             points = np.stack(np.where(np.array(cube) == 1)).T #TODO: get points in chunks
             transform = False
         else:
@@ -266,7 +266,7 @@ def split_faults(array, chunk_size=None, overlap=1, pbar=False, cube_shape=None,
     """
     # TODO: make chunks along xlines
     if isinstance(array, SeismicGeometry):
-        array = array.file_hdf5['cube']
+        array = array.file_hdf5['cube_i']
     chunk_size = chunk_size or len(array)
 
     if cube_shape is None and fmt == 'points':
