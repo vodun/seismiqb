@@ -38,7 +38,7 @@ class FileHDF5:
     def __init__(self, filename, projections=None, shape=None, mode='r'):
         self.filename = filename
         if mode in ('r', 'r+'):
-            self.file_hdf5 = SafeIO(h5py.File)(filename, mode=mode)
+            self.file_hdf5 = SafeIO(filename, opener=h5py.File, mode=mode)
             self.projections = [axis for axis in range(3) if self.NAMES[axis] in self.file_hdf5]
             axis = self.projections[0]
             self.shape = np.array(self.cube_orientation(axis).shape)[self.TRANSPOSE[axis]]
@@ -53,7 +53,7 @@ class FileHDF5:
                 _shape = np.array(shape)[self.STRAIGHT[p]]
                 self.file_hdf5.create_dataset(self.NAMES[p], _shape)
 
-        for axis in self.projection:
+        for axis in self.projections:
             cube_name = self.NAMES[axis]
             setattr(self, cube_name, self.file_hdf5[cube_name])
 
@@ -70,7 +70,7 @@ class FileHDF5:
         -------
         h5py._hl.dataset.Dataset
         """
-        return getattr(self, self.NAMES[projection])
+        return self.file_hdf5[self.NAMES[projection]]
 
     def _process_key(self, key):
         """ Process slices for cube to put into __getitem__ and __setitem__. """
