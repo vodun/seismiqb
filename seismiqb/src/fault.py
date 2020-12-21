@@ -243,13 +243,12 @@ class Fault(Horizon):
         for i in range(3):
             points = points[points[:, i] <= slices[i].stop]
             points = points[points[:, i] >= slices[i].start]
-        if len(points) > 3:
-            sticks = get_sticks(points, n_sticks, n_nodes)
-            simplices = triangulation(sticks, True)
-            coords = np.concatenate(sticks)
-            return coords[:, 0], coords[:, 1], coords[:, 2], simplices
-        else:
+        if len(points) <= 3:
             return None, None, None, None
+        sticks = get_sticks(points, n_sticks, n_nodes)
+        simplices = triangulation(sticks, True)
+        coords = np.concatenate(sticks)
+        return coords[:, 0], coords[:, 1], coords[:, 2], simplices
 
     def split_faults(self, path, prefix='fault', threshold=None, pbar=False, **kwargs):
         """ Split file with faults points into separate connected faults.
@@ -440,7 +439,7 @@ def approximate_points(points, n_points):
     indices = np.unique(nearest_neighbors(initial.reshape(-1, 1), array.reshape(-1, 1), 1))
     return points[indices]
 
-def nearest_neighbors(values, all_values, nbr_neighbors=10):
+def nearest_neighbors(values, all_values, n_neighbors=10):
     """ Find nearest neighbours for each `value` items in `all_values`. """
-    nn = NearestNeighbors(nbr_neighbors).fit(all_values)
+    nn = NearestNeighbors(n_neighbors=n_neighbors).fit(all_values)
     return nn.kneighbors(values)[1].flatten()

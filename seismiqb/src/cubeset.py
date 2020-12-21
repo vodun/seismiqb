@@ -447,35 +447,31 @@ class SeismicCubeset(Dataset):
                 slice(item.start or 0, item.stop or stop) for item, stop in zip(zoom_slice, geometry.cube_shape)
             ]
         zoom_slice = tuple(zoom_slice)
+        triangulation_kwargs = {
+            'n_points': n_points,
+            'threshold': threshold,
+            'n_sticks': n_sticks,
+            'n_nodes': n_nodes,
+            'slices': zoom_slice
+        }
 
-        for src_ in src:
-            if isinstance(src_, str):
-                labels = getattr(self, src_)[idx]
-            else:
-                labels = [src_]
-            for label in labels:
-                triangulation_kwargs = {
-                    'n_points': n_points,
-                    'threshold': threshold,
-                    'n_sticks': n_sticks,
-                    'n_nodes': n_nodes,
-                    'slices': zoom_slice
-                }
-                x, y, z, simplices_ = label.triangulation(**triangulation_kwargs)
-                if x is not None:
-                    simplices += [simplices_ + sum([len(item) for item in coords])]
-                    color = colors_mapping.get(type(label).__name__, colors_mapping.get('all', 'green'))
-                    colors += [[color] * len(simplices_)]
-                    coords += [np.stack([x, y, z], axis=1)]
+        labels = [getattr(self, src_)[idx] if isinstance(src_, str) else [src_] for src_ in src]
+        labels = sum(labels, [])
+        for label in labels:
+            x, y, z, simplices_ = label.triangulation(**triangulation_kwargs)
+            if x is not None:
+                simplices += [simplices_ + sum([len(item) for item in coords])]
+                color = colors_mapping.get(type(label).__name__, colors_mapping.get('all', 'green'))
+                colors += [[color] * len(simplices_)]
+                coords += [np.stack([x, y, z], axis=1)]
 
         simplices = np.concatenate(simplices, axis=0)
         coords = np.concatenate(coords, axis=0)
         colors = np.concatenate(colors)
-        title = f'Faults on `{geometry.name}`'
+        title = geometry.name
 
         default_aspect_ratio = (geometry.cube_shape[0] / geometry.cube_shape[1], 1, 1)
-        if aspect_ratio is None:
-            aspect_ratio = [None] * 3
+        aspect_ratio = [None] * 3 if aspect_ratio is None else aspect_ratio
         aspect_ratio = [item or default for item, default in zip(aspect_ratio, default_aspect_ratio)]
 
         axis_labels = (geometry.index_headers[0], geometry.index_headers[1], 'DEPTH')
