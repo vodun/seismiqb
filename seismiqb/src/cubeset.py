@@ -392,7 +392,47 @@ class SeismicCubeset(Dataset):
 
     def show_3d(self, idx=0, src='labels', aspect_ratio=None, zoom_slice=None,
                 n_points=100, threshold=100, n_sticks=100, n_nodes=10,
-                projections=None, margin=20, colors_mapping=None, **kwargs):
+                projections=None, margin=(0, 0, 20), colors_mapping=None, **kwargs):
+        """ Interactive 3D plot for some elements of cube. Roughly, does the following:
+            - take some faults and/or horizons
+            - select `n` points to represent the horizon surface and `n_sticks` and `n_nodes` for each fault
+            - triangulate those points
+            - remove some of the triangles on conditions
+            - use Plotly to draw the tri-surface
+            - draw few slides of the cube
+        Parameters
+        ----------
+        idx : int, str
+            Cube index.
+        src : str, Horizon-instance or list
+            Items to draw. If item of list (or `src` itself) is str, then all items of that dataset attribute
+            will be drawn, by default, 'labels'.
+        aspect_ratio : tuple of floats.
+            Aspect ratio for each axis.
+        zoom_slice : tuple of slices
+            Crop from cube to show.
+        n_points : int
+            Number of points for horizon surface creation.
+            The more, the better the image is and the slower it is displayed.
+        threshold : number
+            Threshold to remove triangles with bigger height differences in vertices.
+        n_sticks : int
+            Number of sticks for each fault.
+        n_nodes : int
+            Number of nodes for each stick.
+        projections : list of tuples
+            Each tuple is pair of location and axis to load slide from seismic cube.
+        margin : tuple of ints
+            Added margin for each axis, by default, (0, 0, 20).
+        show_axes : bool
+            Whether to show axes and their labels.
+        width, height : number
+            Size of the image.
+        savepath : str
+            Path to save interactive html to.
+        kwargs : dict
+            Other arguments of plot creation.
+        """
         src = src if isinstance(src, (tuple, list)) else [src]
         geometry = self.geometries[idx]
         colors_mapping = colors_mapping or {'all': 'green'}
@@ -406,6 +446,7 @@ class SeismicCubeset(Dataset):
             zoom_slice = [
                 slice(item.start or 0, item.stop or stop) for item, stop in zip(zoom_slice, geometry.cube_shape)
             ]
+        zoom_slice = tuple(zoom_slice)
 
         for src_ in src:
             if isinstance(src_, str):
@@ -441,7 +482,7 @@ class SeismicCubeset(Dataset):
 
         images = []
         if projections is not None:
-            for loc, axis, opacity in projections:
+            for loc, axis in projections:
                 image = geometry.load_slide(loc, axis=axis)
                 if axis == 0:
                     image = image[zoom_slice[1:]]
@@ -449,9 +490,9 @@ class SeismicCubeset(Dataset):
                     image = image[zoom_slice[0], zoom_slice[-1]]
                 else:
                     image = image[zoom_slice[:-1]]
-                images += [(image, loc, axis, opacity)]
+                images += [(image, loc, axis)]
 
-        show_3d(coords[:, 0], coords[:, 1], coords[:, 2], simplices, colors, title, zoom_slice, margin=margin,
+        show_3d(coords[:, 0], coords[:, 1], coords[:, 2], simplices, title, zoom_slice, colors, margin=margin,
                 aspect_ratio=aspect_ratio, axis_labels=axis_labels, images=images, **kwargs)
 
     def load(self, label_dir=None, filter_zeros=True, dst_labels='labels', p=None, bins=None, **kwargs):

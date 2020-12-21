@@ -6,7 +6,6 @@ import glob
 import numpy as np
 import pandas as pd
 
-from numba import njit, prange
 from tqdm.auto import tqdm
 
 from scipy.ndimage import measurements
@@ -180,7 +179,7 @@ class Fault(Horizon):
         """ Save separate fault to csv. """
         df.to_csv(os.path.join(dst, df.name), sep=' ', header=False, index=False)
 
-    def show_3d(self, n_sticks=100, n_nodes=10, z_ratio=1., show_axes=True,
+    def show_3d(self, n_sticks=100, n_nodes=10, z_ratio=1., zoom_slice=None, show_axes=True,
                 width=1200, height=1200, margin=100, savepath=None, **kwargs):
         """ Interactive 3D plot. Roughly, does the following:
             - select `n` points to represent the horizon surface
@@ -190,13 +189,16 @@ class Fault(Horizon):
 
         Parameters
         ----------
-        n : int
-            Number of points for horizon surface creation.
-            The more, the better the image is and the slower it is displayed.
+        n_sticks : int
+            Number of sticks for each fault.
+        n_nodes : int
+            Number of nodes for each stick.
         threshold : number
             Threshold to remove triangles with bigger height differences in vertices.
         z_ratio : number
             Aspect ratio between height axis and spatial ones.
+        zoom_slice : tuple of slices
+            Crop from cube to show.
         show_axes : bool
             Whether to show axes and their labels.
         width, height : number
@@ -208,15 +210,35 @@ class Fault(Horizon):
         kwargs : dict
             Other arguments of plot creation.
         """
-        x, y, z, simplices = self.triangulation(n_sticks, n_nodes)
         title = f'Fault `{self.name}` on `{self.cube_name}`'
         aspect_ratio = (self.i_length / self.x_length, 1, z_ratio)
         axis_labels = (self.geometry.index_headers[0], self.geometry.index_headers[1], 'DEPTH')
+        if zoom_slice is None:
+            zoom_slice = [slice(0, i) for i in self.geometry.cube_shape]
+        zoom_slice[-1] = slice(self.h_min, self.h_max)
+        x, y, z, simplices = self.triangulation(n_sticks, n_nodes, zoom_slice)
 
-        show_3d(x, y, z, simplices, title, self.h_min, self.h_max, show_axes, aspect_ratio,
+        show_3d(x, y, z, simplices, title, zoom_slice, None, show_axes, aspect_ratio,
                 axis_labels, width, height, margin, savepath, **kwargs)
 
     def triangulation(self, n_sticks, n_nodes, slices, **kwargs):
+        """ Create triangultaion of fault.
+
+        Parameters
+        ----------
+        n_sticks : int
+            Number of sticks to create.
+        n_nodes : int
+            Number of nodes for each stick.
+        slices : tuple
+            Region to process.
+
+        Returns
+        -------
+        x, y, z, simplices
+            `x`, `y` and `z` are np.ndarrays of triangle vertices, `simplices` is (N, 3) array where each row
+            represent triangle. Elements of row are indices of points that are vertices of triangle.
+        """
         points = self.points.copy()
         for i in range(3):
             points = points[points[:, i] <= slices[i].stop]
@@ -229,10 +251,25 @@ class Fault(Horizon):
         else:
             return None, None, None, None
 
-    def split_faults(self, path, prefix='fault', threshold=None, bar=False, **kwargs):
-        faults, sizes = split_faults(self.points, cube_shape=tuple(self.cube_shape), pbar=bar, **kwargs)
+    def split_faults(self, path, prefix='fault', threshold=None, pbar=False, **kwargs):
+        """ Split file with faults points into separate connected faults.
+
+        Parameters
+        ----------
+        path : str
+            Folder to save separate faults.
+        prefix : str, optional
+            Name prefix for each fault, by default 'fault'.
+        threshold : float, optional
+            Drop fault with size less then threshold, by default None.
+        pbar : bool, optional
+            Enable progress bar, by default False.
+        **kwargs
+            Arguments for `split_faults` function.
+        """
+        faults, sizes = split_faults(self.points, cube_shape=tuple(self.cube_shape), pbar=pbar, **kwargs)
         order = np.argsort(sizes)[::-1]
-        for i in tqdm(range(len(sizes)), disable=(not bar)):
+        for i in tqdm(range(len(sizes)), disable=(not pbar)):
             fault = faults[order][i]
             size = sizes[order][i]
             if threshold and (size < threshold):
@@ -266,7 +303,7 @@ def split_faults(array, chunk_size=None, overlap=1, pbar=False, cube_shape=None,
     """
     # TODO: make chunks along xlines
     if isinstance(array, SeismicGeometry):
-        array = array.file_hdf5['cube_i']
+        array = array.file_hdf5
     chunk_size = chunk_size or len(array)
 
     if cube_shape is None and fmt == 'points':
@@ -329,7 +366,6 @@ def split_faults(array, chunk_size=None, overlap=1, pbar=False, cube_shape=None,
     sizes = faults_sizes(labels)
     return labels, sizes
 
-# @njit(parallel=True)
 def faults_sizes(labels):
     """ Compute sizes of faults.
 
@@ -342,46 +378,31 @@ def faults_sizes(labels):
     -------
     sizes : numpy.ndarray
     """
-    # indices = np.unique(labels[:, 3])
     sizes = []
-    # for i in prange(len(indices)): # pylint: disable=not-an-iterable
-    #     label = indices[i]
-    #     array = labels[labels[:, 3] == label]
-    #     i_len = (array[:, 0].max() - array[:, 0].min())
-    #     x_len = (array[:, 1].max() - array[:, 1].min())
-    #     sizes[label-1] = (i_len ** 2 + x_len ** 2) ** 0.5
     for array in labels:
         i_len = (array[:, 0].max() - array[:, 0].min())
         x_len = (array[:, 1].max() - array[:, 1].min())
         sizes += [(i_len ** 2 + x_len ** 2) ** 0.5]
     return np.array(sizes)
 
-def filter_faults(labels, threshold, sizes=None):
-    """ Filter faults by size.
+def get_sticks(points, n_sticks, n_nodes):
+    """ Get sticks from fault which is represented as a cloud of points.
 
     Parameters
     ----------
-    labels : numpy.ndarray
-        array of shape (N, 4) where the first 3 columns are coordinates of points and the last one
-        is for labels
-    threshold : float
-        faults with the size less then threshold will be removed
-    sizes : numpy.ndarray or sizes
-        precompured sizes of faults
+    points : np.ndarray
+        Fault points.
+    n_sticks : int
+        Number of sticks to create.
+    n_nodes : int
+        Number of nodes for each stick.
+
     Returns
     -------
-    numpy.ndarray
-        filtered array
+    [type]
+        [description]
     """
-    if sizes is None:
-        sizes = faults_sizes(labels)
-    indices = np.where(sizes >= threshold)[0] + 1
-    return labels[np.isin(labels[:, 3], indices)], sizes[np.isin(labels[:, 3], indices)]
-
-
-def get_sticks(points, n_sticks, n_nodes):
     pca = PCA(1)
-    array = pca.fit_transform(points[:, :2])
     axis = 0 if np.abs(pca.components_[0][0]) > np.abs(pca.components_[0][1]) else 1
 
     column = points[:, 0] if axis == 0 else points[:, 1]
@@ -404,11 +425,13 @@ def get_sticks(points, n_sticks, n_nodes):
     return res
 
 def thick(points):
+    """ Make thick line. """
     points = points[np.argsort(points[:, -1])]
     splitted = np.split(points, np.unique(points[:, -1], return_index=True)[1][1:])
     return np.stack([np.mean(item, axis=0) for item in splitted], axis=0)
 
 def approximate_points(points, n_points):
+    """ Approximate points by stick. """
     pca = PCA(1)
     array = pca.fit_transform(points)
 
@@ -418,5 +441,6 @@ def approximate_points(points, n_points):
     return points[indices]
 
 def nearest_neighbors(values, all_values, nbr_neighbors=10):
+    """ Find nearest neighbours for each `value` items in `all_values`. """
     nn = NearestNeighbors(nbr_neighbors).fit(all_values)
     return nn.kneighbors(values)[1].flatten()

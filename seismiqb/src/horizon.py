@@ -1815,7 +1815,7 @@ class Horizon:
 
 
     def show_3d(self, n_points=100, threshold=100., z_ratio=1., zoom_slice=None, show_axes=True,
-                width=1200, height=1200, margin=100, savepath=None, **kwargs):
+                width=1200, height=1200, margin=(0, 0, 100), savepath=None, **kwargs):
         """ Interactive 3D plot. Roughly, does the following:
             - select `n` points to represent the horizon surface
             - triangulate those points
@@ -1831,6 +1831,8 @@ class Horizon:
             Threshold to remove triangles with bigger height differences in vertices.
         z_ratio : number
             Aspect ratio between height axis and spatial ones.
+        zoom_slice : tuple of slices
+            Crop from cube to show.
         show_axes : bool
             Whether to show axes and their labels.
         width, height : number
@@ -1851,11 +1853,27 @@ class Horizon:
 
         x, y, z, simplices = self.triangulation(n_points, threshold, zoom_slice)
 
-        show_3d(x, y, z, simplices, title, zoom_slice, show_axes, aspect_ratio,
+        show_3d(x, y, z, simplices, title, zoom_slice, None, show_axes, aspect_ratio,
                 axis_labels, width, height, margin, savepath, **kwargs)
 
 
     def triangulation(self, n_points, threshold, slices, **kwargs):
+        """ Create triangultaion of horizon.
+
+        Parameters
+        ----------
+        n_points: int
+            Number of points for horizon surface creation.
+            The more, the better the image is and the slower it is displayed.
+        slices : tuple
+            Region to process.
+
+        Returns
+        -------
+        x, y, z, simplices
+            `x`, `y` and `z` are np.ndarrays of triangle vertices, `simplices` is (N, 3) array where each row
+            represent triangle. Elements of row are indices of points that are vertices of triangle.
+        """
         _ = kwargs
         weights_matrix = self.full_matrix
 
