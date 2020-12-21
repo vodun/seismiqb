@@ -228,17 +228,34 @@ class MatplotlibPlotter:
 
 
     def grid(self, images, single_kwargs=None, **kwargs):
-        """ Make grid of plots using.
+        """ Make grid of plots using range of images and info about how the grid should be organized.
 
         Parameters
         ----------
         images : tuple or list
             sequence of arrays for plotting
-        single_kwargs : tuple or list or dict
-            either sequence of dicts or one dict containing params for single-plots
-        **kwargs : dict
-            the arguments can be either lists - in this case these are used for 
-            determines how grid is plotted.
+        single_kwargs : tuple or list or dicts
+            either sequence of dicts or one dict. Contains parameters for single plots.
+        kwargs : dict
+            contains arguments for updating single plots-dicts. Can either contain lists or simple args.
+            In case of lists, each subsequent arg is used for updating corresponding single-plot dict.
+
+            label : str
+                title of rendered image.
+            vmin : float
+                the lowest brightness-level to be rendered.
+            vmax : float
+                the highest brightness-level to be rendered.
+            cmap : str
+                colormap of rendered image.
+            xlabel : str
+                xaxis-label.
+            ylabel : str
+                yaxis-label.
+            order_axes : tuple
+                tuple of ints; defines the order of axes for transposition operation
+                applied to the image.
+            other
         """
         defaults = {'figsize': (14, 12),
                     'sharex': 'col',
@@ -247,7 +264,8 @@ class MatplotlibPlotter:
                     'ncols': len(images)}
 
         updated = {**defaults, **kwargs}
-        subplots_kwargs = filter_kwargs(updated, ['nrows', 'ncols', 'sharex', 'sharey', 'figsize'])
+        subplots_kwargs = filter_kwargs(updated, ['nrows', 'ncols', 'sharex', 'sharey',
+                                                  'figsize', 'fig', 'ax'])
         single_updates = filter_kwargs(updated, ['label', 'xlabel', 'ylabel', 'cmap',
                                                 'order_axes', 'facecolor', 'fontsize',
                                                 'vmin', 'vmax'])
@@ -266,13 +284,20 @@ class MatplotlibPlotter:
         for i, single in enumerate(single_kwargs):
             single.update({key: value[i] for key, value in single_updates.items()})
 
-        # make the plots
-        nrows, ncols = subplots_kwargs['nrows'], subplots_kwargs['ncols']
-        fig, ax = plt.subplots(**subplots_kwargs)
+        # create axes and make the plots
+        nrows, ncols = subplots_kwargs.get('nrows'), subplots_kwargs.get('ncols')
+        if nrows is None or ncols is None:
+            fig, ax = subplots_kwargs.get('fig'), subplots_kwargs.get('ax')
+            if fig is None or ax is None:
+                raise ValueError('Either grid params (nrows and ncols) or grid objects (fig, ax) should be supplied.')
+        else:
+            fig, ax = plt.subplots(**subplots_kwargs)
+
         for i in range(nrows):
             for j in range(ncols):
                 self.single(images[i * ncols + j], **single_kwargs[i * ncols + j], ax=ax[i, j])
         self.save_and_show(fig)
+
 
     def overlap(self, images, **kwargs):
         """ Plot several images on one canvas using matplotlib: render the first one in greyscale
