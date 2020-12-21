@@ -831,7 +831,7 @@ def show_3d(x, y, z, simplices, title, zoom_slice, colors=None, show_axes=True, 
     kwargs : dict
         Other arguments of plot creation.
     """
-    #pylint: too-many-arguments
+    #pylint: disable=too-many-arguments
     # Arguments of graph creation
     kwargs = {
         'title': title,
