@@ -6,7 +6,7 @@ import h5py
 
 from .utils import SafeIO, lru_cache, parse_axis, make_axis_grid
 
-class FileHDF5:
+class StorageHDF5:
     """ Class for storing 3D data in hdf5 format. To speed up loading, the file can store multiple transposed
     copies of the same cube.
 
@@ -104,8 +104,8 @@ class FileHDF5:
     def __setitem__(self, key, value):
         key, _ = self._process_key(key)
         for projection in self.projections:
-            slices = np.array(key)[self.STRAIGHT[projection]]
-            self.cube_orientation(projection)[slices[0], slices[1], slices[2]] = value.transpose(self.STRAIGHT[projection])
+            slices = tuple(np.array(key)[self.STRAIGHT[projection]])
+            self.cube_orientation(projection)[slices] = value.transpose(self.STRAIGHT[projection])
 
     def load_slide(self, loc, axis=0, **kwargs):
         """ Load 2D slide from seismic cube in the fastest way by choosing the most appropriate orientation.
@@ -177,11 +177,11 @@ class FileHDF5:
             automatically in the most optimal way.
         """
         projection = projection or self.get_optimal_projection(locations)
-        if projection == 1:
+        if projection == 0:
             crop = self._load_x(*locations, **kwargs)
-        elif projection == 2:
+        elif projection == 1:
             crop = self._load_h(*locations, **kwargs)
-        elif projection == 3:
+        elif projection == 2:
             crop = self._load_i(*locations, **kwargs)
         else:
             raise ValueError('Wrong projection value:', projection)
@@ -243,21 +243,22 @@ class FileHDF5:
                 self.cube_orientation(axis)[tuple(slices)] = slide.transpose(self.STRAIGHT[axis])
 
     @classmethod
-    def create_file_from_iterable(cls, src, dst, shape, window, stride, agg=None, projection='ixh', threshold=None):
+    def create_file_from_iterable(cls, src, shape, window, stride, dst=None,
+                                  agg=None, projection='ixh', threshold=None):
         """ Aggregate multiple chunks into file with 3D cube.
 
         Parameters
         ----------
         src : iterable
             Each item is a tuple (position, array) where position is a 3D coordinate of the left upper array corner.
-        dst : str
-            Path to the resulting .hsd5 or .npy file.
         shape : tuple
             Shape of the resulting array.
         window : tuple
             Chunk shape.
         stride : tuple
             Stride for chunks. Values in overlapped regions will be aggregated.
+        dst : str or None, optional
+            Path to the resulting .hdf5. If None, function will return array with predictions
         agg : 'mean', 'min' or 'max' or None, optional
             The way to aggregate values in overlapped regions. None means that new chunk will rewrite
             previous value in cube.
@@ -270,13 +271,10 @@ class FileHDF5:
         window = np.array(window)
         stride = np.array(stride)
 
-        path = dst
-        ext = os.path.splitext(dst)[1][1:]
-
-        if ext == 'npy':
+        if dst is None:
             dst = np.zeros(shape)
-        elif ext == 'hdf5':
-            dst = FileHDF5(path, projection[0], shape=shape, mode='a')
+        else:
+            dst = StorageHDF5(dst, projection[0], shape=shape, mode='a')
 
         lower_bounds = [make_axis_grid((0, shape[i]), stride[i], shape[i], window[i]) for i in range(3)]
         lower_bounds = np.stack(np.meshgrid(*lower_bounds), axis=-1).reshape(-1, 3)
@@ -303,10 +301,9 @@ class FileHDF5:
                 chunk /= agg_map
                 chunk = _chunk + chunk
             dst[slices] = chunk
-        if ext == 'npy':
+        if isinstance(dst, np.ndarray):
             if threshold is not None:
                 dst = (dst > threshold).astype(int)
-            np.save(path, dst, allow_pickle=False)
         else:
             for i in range(0, dst.shape[0], window[0]):
                 slide = dst[i:i+window[0]]
@@ -314,21 +311,46 @@ class FileHDF5:
                     slide = (slide > threshold).astype(int)
                     dst[i:i+window[0]] = slide
             dst.add_projection(projection[1:])
-            dst.close()
+        return dst
 
-    def to_points(self, chunk_stride):
+    def to_points(self, chunk_shape, threshold=None):
+        """ Transform array to array of nonzero points.
+
+        Parameters
+        ----------
+        chunk_shape : tuple
+            shape of chunk
+        threshold : float or None, optional
+            Threshold to transform array into binary array, by default None
+
+        Returns
+        -------
+        np.ndarray
+            array of shape (N, 3) with coordinates of nonzero points.
+        """
         axis = self.projections[0]
         points = []
-        for start in range(0, self.shape[axis], chunk_stride[axis]):
-            end = min(start + chunk_stride[axis], self.shape[axis])
+        for start in range(0, self.shape[axis], chunk_shape[axis]):
+            end = min(start + chunk_shape[axis], self.shape[axis])
             slices = [slice(None) for i in range(3)]
             slices[axis] = slice(start, end)
-            points_ = np.stack(np.where(self.load_crop(slices)), axis=-1)
+            chunk = self.load_crop(slices)
+            if threshold:
+                chunk = chunk > threshold
+            points_ = np.stack(np.where(chunk), axis=-1)
             points_[:, 0] += start
             points += [points_]
         points = np.concatenate(points, axis=0)
         return points
 
     @classmethod
-    def from_points(cls, points):
-        pass
+    def from_points(cls, points, path):
+        """ Create hdf5 file from coordinates of nonzero points.
+
+        Returns
+        -------
+            StorageHDF5
+        """
+        file_hdf5 = cls(path, mode='a')
+        file_hdf5[points[0], points[1], points[2]] = 1
+        return file_hdf5

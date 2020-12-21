@@ -13,7 +13,7 @@ from .geometry import SeismicGeometry
 from .crop_batch import SeismicCropBatch
 
 from .horizon import Horizon, UnstructuredHorizon
-from .hdf5_storage import FileHDF5
+from .hdf5_storage import StorageHDF5
 from .metrics import HorizonMetrics
 from .plotters import plot_image, show_3d
 from .utils import IndexedDict, round_to_array, gen_crop_coordinates, make_axis_grid, fill_defaults, parse_axis
@@ -403,7 +403,9 @@ class SeismicCubeset(Dataset):
         if zoom_slice is None:
             zoom_slice = [slice(0, geometry.cube_shape[i]) for i in range(3)]
         else:
-            zoom_slice = [slice(item.start or 0, item.stop or stop) for item, stop in zip(zoom_slice, geometry.cube_shape)]
+            zoom_slice = [
+                slice(item.start or 0, item.stop or stop) for item, stop in zip(zoom_slice, geometry.cube_shape)
+            ]
 
         for src_ in src:
             if isinstance(src_, str):
@@ -518,7 +520,6 @@ class SeismicCubeset(Dataset):
             in a crop in the grid. Default value is 0.
             If float, proportion from the total number of traces in a crop will be computed.
         """
-        #pylint: disable=too-many-branches
         geometry = self.geometries[cube_name]
 
         if isinstance(overlap_factor, (int, float)):
@@ -541,32 +542,10 @@ class SeismicCubeset(Dataset):
         ilines = (0, geometry.ilines_len) if ilines is None else ilines
         xlines = (0, geometry.xlines_len) if xlines is None else xlines
         heights = (0, geometry.depth) if heights is None else heights
-
-        # Assert ranges are valid
-        if ilines[0] < 0 or xlines[0] < 0 or heights[0] < 0:
-            raise ValueError('Ranges must contain within the cube.')
-
-        if ilines[1] > geometry.ilines_len or \
-           xlines[1] > geometry.xlines_len or \
-           heights[1] > geometry.depth:
-            raise ValueError('Ranges must contain within the cube.')
-
-        ilines_grid = make_axis_grid(ilines, strides[0], geometry.ilines_len, crop_shape[0])
-        xlines_grid = make_axis_grid(xlines, strides[1], geometry.xlines_len, crop_shape[1])
-        heights_grid = make_axis_grid(heights, strides[2], geometry.depth, crop_shape[2])
-
-        # Every point in grid contains reference to cube
-        # in order to be valid input for `crop` action of SeismicCropBatch
-        grid = []
-        for il in ilines_grid:
-            for xl in xlines_grid:
-                if np.prod(crop_shape[:2]) - np.sum(filtering_matrix[il: il + crop_shape[0],
-                                                                     xl: xl + crop_shape[1]]) > filter_threshold:
-                    for h in heights_grid:
-                        point = [cube_name, il, xl, h]
-                        grid.append(point)
-        grid = np.array(grid, dtype=object)
-
+        #pylint: disable=too-many-branches
+        ilines_grid, xlines_grid, heights_grid, grid = self._crop_positions(cube_name, crop_shape, ilines, xlines,
+                                                                            heights, strides, overlap, overlap_factor,
+                                                                            filtering_matrix, filter_threshold)
         # Creating and storing all the necessary things
         # Check if grid is not empty
         shifts = np.array([ilines[0], xlines[0], heights[0]])
@@ -597,6 +576,36 @@ class SeismicCubeset(Dataset):
             'unfiltered_length': len(ilines_grid) * len(xlines_grid) * len(heights_grid)
         }
 
+    def _crop_positions(self, cube_name, crop_shape, ilines=None, xlines=None, heights=None,
+                       strides=None, overlap=None, overlap_factor=None,
+                       filtering_matrix=None, filter_threshold=0):
+        """ Create grid for each axis and array of crop positions. """
+        geometry = self.geometries[cube_name]
+
+        # Assert ranges are valid
+        if ilines[0] < 0 or xlines[0] < 0 or heights[0] < 0:
+            raise ValueError('Ranges must contain within the cube.')
+
+        if ilines[1] > geometry.ilines_len or \
+           xlines[1] > geometry.xlines_len or \
+           heights[1] > geometry.depth:
+            raise ValueError('Ranges must contain within the cube.')
+
+        ilines_grid = make_axis_grid(ilines, strides[0], geometry.ilines_len, crop_shape[0])
+        xlines_grid = make_axis_grid(xlines, strides[1], geometry.xlines_len, crop_shape[1])
+        heights_grid = make_axis_grid(heights, strides[2], geometry.depth, crop_shape[2])
+
+        # Every point in grid contains reference to cube
+        # in order to be valid input for `crop` action of SeismicCropBatch
+        grid = []
+        for il in ilines_grid:
+            for xl in xlines_grid:
+                if np.prod(crop_shape[:2]) - np.sum(filtering_matrix[il: il + crop_shape[0],
+                                                                     xl: xl + crop_shape[1]]) > filter_threshold:
+                    for h in heights_grid:
+                        point = [cube_name, il, xl, h]
+                        grid.append(point)
+        return ilines_grid, xlines_grid, heights_grid, np.array(grid, dtype=object)
 
     def mask_to_horizons(self, src, cube_name, threshold=0.5, averaging='mean', minsize=0,
                          dst='predicted_horizons', prefix='predict', src_grid_info='grid_info'):
@@ -899,8 +908,8 @@ class SeismicCubeset(Dataset):
 
         Parameters
         ----------
-        dst : str
-            Path to save predictions. Should have `npy` or `hdf5` extension.
+        dst : str or None
+            Path to save predictions. If None, function returns`np.ndarray` with predictions.
         pipeline : Pipeline
             Pipeline for inference, `run_later` action must be provided.
         crop_shape : tuple
@@ -930,16 +939,9 @@ class SeismicCubeset(Dataset):
             Threshold to transform predictions to 'points' format, by default 0.5
         pbar : bool, optional
             Progress bar, by default True
-        fmt : 'array' or `points`, optional
-            Format to store predictions, by default 'array'. If 'array', the resulting array will correspond
-            to the initial cube. If 'pointa', the resulting array will have coordinates of nonzero points in array
-            after thresholding (see `threshold` parameter below).
-        tmp_file : str, optional
-            Path to tmp file to aggregate prediction and the transform it to 'points' format, by default 'hdf5'.
-        remove_tmp : bool, optional
-            Remove or not tmp file, by default True.
         """
         cube_shape = self.geometries[idx].cube_shape
+
         if locations is None:
             locations = [(0, s) for s in cube_shape]
         else:
@@ -947,49 +949,26 @@ class SeismicCubeset(Dataset):
         locations = np.array(locations)
         output_shape = locations[:, 1] - locations[:, 0]
 
-        predictions_generator = self._predictions_generator(idx, pipeline, locations, output_shape,
-                                                            chunk_shape, chunk_stride, crop_shape, crop_stride,
-                                                            batch_size, src, pbar)
-
-        FileHDF5.create_file_from_iterable(predictions_generator, dst, output_shape,
-                                           chunk_shape, chunk_stride, agg, projection, threshold)
-
-        # if fmt == 'points':
-        #     if tmp_file == 'npy':
-        #         array = np.load(tmp_path, allow_pickle=False)
-        #         points = np.stack(np.where(array), axis=-1)
-        #         points[:, 0] += locations[0][0]
-        #     else:
-        #         file_hdf5 = FileHDF5(tmp_path, mode='r')
-        #         axis = file_hdf5.projections[0]
-        #         points = []
-        #         for start in range(0, file_hdf5.shape[axis], chunk_stride[axis]):
-        #             end = min(start + chunk_stride[axis], file_hdf5.shape[axis])
-        #             slices = [slice(None) for i in range(3)]
-        #             slices[axis] = slice(start, end)
-        #             points_ = np.stack(np.where(file_hdf5.load_crop(slices)), axis=-1)
-        #             points_[:, 0] += start
-        #             points_ += np.array([locations[i][0] for i in range(3)])[np.newaxis, ...]
-        #             points += [points_]
-        #         points = np.concatenate(points, axis=0)
-        #     np.save(path, points, allow_pickle=False)
-
-        # if remove_tmp:
-        #     os.remove(tmp_path)
-
-    def _predictions_generator(self, idx, pipeline, locations, output_shape, chunk_shape, chunk_stride,
-                               crop_shape, crop_stride, batch_size, src, pbar):
-        geometry = self.geometries[idx]
-        cube_shape = geometry.cube_shape
         chunk_shape = fill_defaults(chunk_shape, output_shape)
         chunk_shape = np.minimum(np.array(chunk_shape), np.array(output_shape))
         chunk_stride = fill_defaults(chunk_stride, chunk_shape)
 
-        chunk_grid = [
-            make_axis_grid(locations[i], chunk_stride[i], cube_shape[i], chunk_shape[i])
-            for i in range(3)
-        ]
-        chunk_grid = np.stack(np.meshgrid(*chunk_grid), axis=-1).reshape(-1, 3)
+        predictions_generator = self._predictions_generator(idx, pipeline, locations, output_shape,
+                                                            chunk_shape, chunk_stride, crop_shape, crop_stride,
+                                                            batch_size, src, pbar)
+
+        return StorageHDF5.create_file_from_iterable(predictions_generator, output_shape,
+                                                     chunk_shape, chunk_stride, dst, agg, projection, threshold)
+
+    def _predictions_generator(self, idx, pipeline, locations, output_shape, chunk_shape, chunk_stride,
+                               crop_shape, crop_stride, batch_size, src, pbar):
+        """ Apply inference pipeline to each chunk. Returns position of predictions and corresponding array. """
+        geometry = self.geometries[idx]
+        cube_shape = geometry.cube_shape
+
+        chunk_grid = self._crop_positions(idx, chunk_shape, ilines=locations[0], xlines=locations[1],
+                                          heights=locations[2], filtering_matrix=geometry.zero_traces,
+                                          strides=chunk_stride)[-1][:, 1:]
 
         if pbar:
             total = self._compute_total_batches_in_all_chunks(idx, chunk_grid, chunk_shape,
@@ -1016,7 +995,7 @@ class SeismicCubeset(Dataset):
             progress_bar.close()
 
     def add_geometries_targets(self, paths, dst='geom_targets'):
-        """Create targets from given cubes
+        """ Create targets from given cubes.
 
         Parameters
         ----------
@@ -1032,6 +1011,7 @@ class SeismicCubeset(Dataset):
             getattr(self, dst)[ix] = SeismicGeometry(paths[ix])
 
     def _compute_total_batches_in_all_chunks(self, idx, chunk_grid, chunk_shape, crop_shape, crop_stride, batch_size):
+        """ Is needed to use progress bar in `make_prediction`. """
         total = 0
         for lower_bound in chunk_grid:
             upper_bound = np.minimum(lower_bound + chunk_shape, self.geometries[idx].cube_shape)

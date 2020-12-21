@@ -15,7 +15,7 @@ import h5py
 import segyio
 import cv2
 
-from .hdf5_storage import FileHDF5
+from .hdf5_storage import StorageHDF5
 from .utils import lru_cache, find_min_max, file_print, parse_axis,\
                    SafeIO, compute_attribute, make_axis_grid, fill_defaults
 from .plotters import plot_image
@@ -527,14 +527,13 @@ class SeismicGeometry:
 
     # Convert HDF5 to SEG-Y
     def make_sgy(self, path_hdf5=None, path_spec=None, postfix='',
-                 remove_hdf5=False, zip_result=True, path_segy=None,
-                 chunk_size=100):
-        """ Convert HDF5 cube to SEG-Y format with current geometry spec.
+                 remove_hdf5=False, zip_result=True, path_segy=None, pbar=False):
+        """ Convert POST-STACK HDF5 cube to SEG-Y format with current geometry spec.
 
         Parameters
         ----------
         path_hdf5 : str
-            Path to load hdf5 file from. File must have a `cube` key where cube data is stored.
+            Path to load hdf5 file from.
         path_spec : str
             Path to load segy file from with geometry spec.
         path_segy : str
@@ -553,52 +552,36 @@ class SeismicGeometry:
         if path_hdf5 is None:
             path_hdf5 = os.path.join(os.path.dirname(self.path), 'temp.hdf5')
 
-        with h5py.File(path_hdf5, 'r') as src:
-            geom = SeismicGeometry(path_spec)
-            segy = geom.segyfile
+        file_hdf5 = StorageHDF5(path_hdf5, mode='r')
+        geometry = SeismicGeometry(path_spec)
 
-            segy.mmap()
-            spec = segyio.spec()
-            spec.sorting = segyio.TraceSortingFormat.INLINE_SORTING
-            spec.format = int(segy.format)
-            spec.samples = range(self.depth)
+        segy = geometry.segyfile
+        spec = segyio.spec()
+        spec.sorting = segyio.TraceSortingFormat.INLINE_SORTING
+        spec.format = int(segy.format)
+        spec.samples = range(self.depth)
 
-            idx = np.stack(geom.dataframe.index)
-            ilines = np.unique(idx[:, 0])
-            xlines = np.unique(idx[:, 1])
+        idx = np.stack(geometry.dataframe.index)
+        ilines, xlines = self.load_meta_item('ilines'), self.load_meta_item('xlines')
 
-            i_enc = {num: k for k, num in enumerate(ilines)}
-            x_enc = {num: k for k, num in enumerate(xlines)}
+        i_enc = {num: k for k, num in enumerate(ilines)}
+        x_enc = {num: k for k, num in enumerate(xlines)}
 
-            spec.ilines = ilines
-            spec.xlines = xlines
+        spec.ilines = ilines
+        spec.xlines = xlines
 
-            if 'cube_i' in src:
-                cube_hdf5 = src['cube_i']
-                iloc = [0, 1, 2]
-            elif 'cube_x' in src:
-                cube_hdf5 = src['cube_x']
-                iloc = [1, 2, 0]
-            elif 'cube_h' in src:
-                cube_hdf5 = src['cube_h']
-                iloc = [2, 0, 1]
-            else:
-                raise ValueError("None of 'cube_i', 'cube_x', 'cube_h' present!")
+        with segyio.create(path_segy, spec) as dst_file:
+            # Copy all textual headers, including possible extended
+            for i in range(1 + segy.ext_headers):
+                dst_file.text[i] = segy.text[i]
 
-            with segyio.create(path_segy, spec) as dst_file:
-                # Copy all textual headers, including possible extended
-                for i in range(1 + segy.ext_headers):
-                    dst_file.text[i] = segy.text[i]
-                dst_file.bin = segy.bin
+            for c, (i, x) in enumerate(tqdm(idx, disable=(not pbar))):
+                locs = [i_enc[i], x_enc[x], slice(None)]
+                dst_file.header[c] = segy.header[c]
+                dst_file.trace[c] = file_hdf5[locs]
 
-                for c, (i, x) in enumerate(idx):
-                    locs = [i_enc[i], x_enc[x], slice(None)]
-                    locs = locs[iloc[0]], locs[iloc[1]], locs[iloc[2]]
-
-                    dst_file.trace[c] = cube_hdf5[locs] #get_traces(i, x)
-
-                l = len(idx)
-                dst_file.header[:l] = segy.header[:l]
+            dst_file.bin = segy.bin
+            dst_file.bin[segyio.BinField.Traces] = len(idx)
 
         if remove_hdf5:
             os.remove(path_hdf5)
@@ -674,8 +657,8 @@ class SeismicGeometry:
         chunks = _iterator()
         total = np.prod([len(item) for item in grid])
         chunks = tqdm(chunks, total=total) if pbar else chunks
-        FileHDF5.create_file_from_iterable(chunks, dst, self.cube_shape, chunk_shape,
-                                           chunk_stride, agg=agg, projection='ixh')
+        return StorageHDF5.create_file_from_iterable(chunks, self.cube_shape, chunk_shape,
+                                                     chunk_stride, dst=dst, agg=agg, projection='ixh')
 
         # self.store_meta(path_meta)
 
@@ -1215,7 +1198,7 @@ class SeismicGeometryHDF5(SeismicGeometry):
         No passing through data whatsoever.
         """
         _ = kwargs
-        self.file_hdf5 = FileHDF5(self.path, mode='r') # h5py.File(self.path, mode='r')
+        self.file_hdf5 = StorageHDF5(self.path, mode='r') # h5py.File(self.path, mode='r')
         self.add_attributes()
 
     def add_attributes(self):
