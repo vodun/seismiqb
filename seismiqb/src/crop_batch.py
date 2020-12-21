@@ -328,7 +328,7 @@ class SeismicCropBatch(Batch):
         return crop
 
     def get_nearest_horizon(self, ix, src_labels, heights_slice):
-        """Get horizon with its `h_mean` closest to mean of `heights_slice`."""
+        """ Get horizon with its `h_mean` closest to mean of `heights_slice`. """
         location_h_mean = (heights_slice.start + heights_slice.stop) // 2
         nearest_horizon_ind = np.argmin([abs(horizon.h_mean - location_h_mean) for horizon in self.get(ix, src_labels)])
         return self.get(ix, src_labels)[nearest_horizon_ind]
@@ -338,7 +338,7 @@ class SeismicCropBatch(Batch):
     @inbatch_parallel(init='indices', post='_assemble', target='for')
     def load_attribute(self, ix, dst, src_attribute=None, src_labels='labels',
                        locations='locations', final_ndim=3, **kwargs):
-        """Load attribute for depth-nearest label and crop in given locations.
+        """ Load attribute for depth-nearest label and crop in given locations.
 
         Parameters
         ----------

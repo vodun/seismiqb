@@ -196,8 +196,117 @@ class SeismicCubeset(Dataset):
             self._cached_attributes.add(dst)
 
 
+    def show_labels(self, indices=None, main_labels='labels', overlay_labels=None, attributes=None, correspondence=None,
+                    scale=1, colorbar=True, main_cmap='tab20b', overlay_cmap='autumn', overlay_alpha=0.7,
+                    suptitle_size=20,title_size=15):
+        """ Show specific attributes for labels of selected cubes with optional overlay by other attributes.
+
+        Parameters
+        ----------
+        indices : list of int, list of str or None
+            Cubes indices to show labels for. If None, show labels for all cubes. Defaults to None.
+        main_labels : str
+            Name of cubeset attribute to get labels from for the main image.
+        overlay_labels : str
+            Name of cubeset attribute to get labels from for the overlay image.
+        attributes : str or list of str
+            Names of label attribute to show in a row (incompatible with `correspondence` arg).
+        correspondence : list of dicts
+            Alternative plotting specifications allowing nuanced vizualizations (incompatible with `attributes` arg).
+            Each item of a list must be a dict defining label-attribute correspondence for specific subplot in a row.
+            This dict should consist of `str` keys with the names of cubeset attributes to get labels for plotting from
+            and `dict` values, specifying at least an attribute to plot for selected label. This allows plotting both
+            non-overlayed and overlayed by mask images of specific label attribute, e.g.:
+            >>> [
+            >>>     {
+            >>>         'labels' : dict(attribute='amplitudes', cmap='tab20c')
+            >>>     },
+            >>>     {
+            >>>         'labels' : dict(attribute='amplitudes', cmap='tab20c'),
+            >>>         'channels': dict(attribute='masks', cmap='Blues, alpha=0.5)
+            >>>     }
+            >>> ]
+        scale : int
+            How much to scale the figure.
+        colorbar : bool
+            Whether plot colorbar for every subplot.
+            May be overriden for specific subplot by `colorbar` from `correspondence` arg if specified there.
+        main_cmap : str
+            Default name of colormap for main image.
+            May be overriden for specific subplot by `cmap` from `correspondence` arg if specified there.
+        overlay_cmap : str
+            Default name of colormap for overlay image.
+            May be overriden for specific subplot by `cmap` from `correspondence` arg if specified there.
+        overlay_alpha : float from [0, 1]
+            Default opacity for overlay image.
+            May be overriden for specific subplot by `alpha` from `correspondence` arg if specified there.
+        suptitle_size : int
+            Fontsize of suptitle for a row of images.
+        title_size : int
+            Size of titles for every subplot in a row.
+        """
+        #pylint: disable=import-outside-toplevel
+        from matplotlib import pyplot as plt
+        from mpl_toolkits import axes_grid1
+
+        def add_colorbar(im, aspect=20, pad_fraction=0.5, **kwargs):
+            """Add a vertical color bar to an image plot. """
+            divider = axes_grid1.make_axes_locatable(im.axes)
+            width = axes_grid1.axes_size.AxesY(im.axes, aspect=1./aspect)
+            pad = axes_grid1.axes_size.Fraction(pad_fraction, width)
+            current_ax = plt.gca()
+            cax = divider.append_axes("right", size=width, pad=pad)
+            plt.sca(current_ax)
+            return im.axes.figure.colorbar(im, cax=cax, **kwargs)
+
+        indices = indices or self.indices
+        if correspondence is None:
+            attributes = 'heights' if attributes is None else attributes
+            attributes = [attributes] if isinstance(attributes, str) else attributes
+            correspondence = [{main_labels: dict(attribute=attribute)} for attribute in attributes]
+        elif attributes is not None:
+            raise ValueError("Can't use both `correspondence` and `attributes`.")
+
+        for idx in indices:
+            for label_num, label in enumerate(self[idx, main_labels]):
+                ratio = np.divide(*label.cube_shape[1::-1])
+                figaspect = np.array([ratio * len(correspondence), 1]) * scale * 10
+                fig, axes = plt.subplots(ncols=len(correspondence), figsize=figaspect)
+                axes = axes if isinstance(axes, np.ndarray) else [axes]
+                suptitle_size = int(ratio * suptitle_size)
+                title_size = int(title_size * ratio)
+                fig.suptitle(f"`{label.name}` on `{idx}`", size=suptitle_size)
+                input_lims = [slice(*lims) for lims in label.bbox[:2]]
+                for ax, src_params in zip(axes, correspondence):
+                    if overlay_labels is not None and overlay_labels not in src_params:
+                        src_params[overlay_labels] = dict(attribute='masks')
+                    attributes = []
+                    for layer_num, (src, params) in enumerate(src_params.items()):
+                        attribute = params['attribute']
+                        attributes.append(attribute)
+                        data = self[idx, src, label_num].load_attribute(attribute, fill_value=np.nan)
+
+                        if layer_num == 0:
+                            alpha = 1
+                            cmap = params.get('cmap', main_cmap)
+                        else:
+                            alpha = params.get('alpha', overlay_alpha)
+                            cmap = params.get('cmap', overlay_cmap)
+
+                        if len(data.shape) > 2 and data.shape[2] != 1:
+                            data = data[..., data.shape[2] // 2 + 1]
+                        data = data.squeeze()
+                        data = data[input_lims]
+
+                        im = ax.imshow(data, cmap=cmap, alpha=alpha)
+                        local_colorbar = params.get('colorbar', colorbar)
+                        if local_colorbar and layer_num == 0:
+                            add_colorbar(im)
+                    ax.set_title(', '.join(np.unique(attributes)), size=title_size)
+
+
     def reset_caches(self, attrs=None):
-        """Reset lru cache for cached class attributes.
+        """ Reset lru cache for cached class attributes.
 
         Parameters
         ----------
@@ -612,7 +721,7 @@ class SeismicCubeset(Dataset):
 
 
     def show_grid(self, src_labels='labels', labels_indices=None, attribute='cube_values', plot_dict=None):
-        """Plot grid over selected surface to visualize how it overlaps data.
+        """ Plot grid over selected surface to visualize how it overlaps data.
 
         Parameters
         ----------
@@ -636,7 +745,8 @@ class SeismicCubeset(Dataset):
                 crop_* : any parameter for `plt.hlines` and `plt.vlines`
                     Passed to corners crops plotter
         """
-        from matplotlib import pyplot as plt #pylint: disable=import-outside-toplevel
+        #pylint: disable=import-outside-toplevel
+        from matplotlib import pyplot as plt
 
         labels_indices = labels_indices if isinstance(labels_indices, (tuple, list)) else [labels_indices]
         labels_indices = slice(None) if labels_indices[0] is None else labels_indices
@@ -789,7 +899,7 @@ class SeismicCubeset(Dataset):
         pipeline = (Pipeline()
                     .make_locations(points=point, shape=crop_shape)
                     .load_cubes(dst='images')
-                    .scale(mode='q', src='images'))
+                    .normalize(mode='q', src='images'))
 
         if 'masks' in components:
             use_labels = kwargs.pop('use_labels', -1)
@@ -1147,7 +1257,7 @@ class SeismicCubeset(Dataset):
         self._p, self._bins = p, bins # stored for later sampler creation
 
 
-    def load_corresponding_labels(self, correspondence, labels_dirs, dst_labels, main_labels, **kwargs):
+    def load_corresponding_labels(self, info, dst_labels=None, main_labels=None, **kwargs):
         """ Load corresponding labels into corresponding dataset attributes.
 
         Parameters
@@ -1177,18 +1287,27 @@ class SeismicCubeset(Dataset):
         >>> main_labels = 'horizons'
         """
         self.load_geometries()
-        for label_dir, dst_label in zip(labels_dirs, dst_labels):
-            paths_txt = defaultdict(list)
-            for cube_name, labels in correspondence.items():
+
+        label_dir = info['PATHS']["LABELS"]
+        labels_subdirs = info['PATHS']["SUBDIRS"]
+        dst_labels = dst_labels or [labels_subdir.lower() for labels_subdir in labels_subdirs]
+        for labels_subdir, dst_label in zip(labels_subdirs, dst_labels):
+            paths = defaultdict(list)
+            for cube_name, labels in info['CUBES'].items():
                 full_cube_name = f"amplitudes_{cube_name}"
-                cube_dir = '/'.join(self.index.get_fullpath(full_cube_name).split('/')[:-1])
+                cube_path = self.index.get_fullpath(full_cube_name)
+                cube_dir = cube_path[:cube_path.rfind('/')]
                 for label in labels:
-                    label_mask = '/'.join([cube_dir, label_dir, f"*{label}"])
+                    label_mask = '/'.join([cube_dir, label_dir, labels_subdir, f"*{label}"])
                     label_path = glob(label_mask)
                     if len(label_path) > 1:
                         raise ValueError('Multiple files match pattern')
-                    paths_txt[full_cube_name].append(label_path[0])
-            self.create_labels(paths=paths_txt, dst=dst_label, labels_class=Horizon, **kwargs)
+                    paths[full_cube_name].append(label_path[0])
+            self.create_labels(paths=paths, dst=dst_label, labels_class=Horizon, **kwargs)
+        if main_labels is None:
+            main_labels = dst_labels[0]
+            warn("""Cubeset `labels` point now to `{}`.
+                    To suppress this warning, explicitly pass value for `main_labels`.""".format(main_labels))
         self.labels = getattr(self, main_labels)
 
 

@@ -4,6 +4,7 @@ from collections import OrderedDict, defaultdict
 from threading import RLock
 from functools import wraps
 from hashlib import blake2b
+import inspect
 
 from tqdm import tqdm
 import numpy as np
@@ -15,6 +16,7 @@ from ..batchflow import Sampler
 
 
 
+# pylint: disable=redefined-outer-name
 def file_print(msg, path, mode='w'):
     """ Print to file. """
     with open(path, mode) as file:
@@ -787,8 +789,8 @@ def local_correlation(region):
 
 def pop_kwargs_for_function(func, **kwargs):
     """ Pop variables from kwargs that are meant for function. """
-    varnames = func.__code__.co_varnames
-    defaults = func.__defaults__
-    if len(varnames) != len(defaults):
-        raise ValueError("Can't define correspondence between variables and their defaults.")
-    return {k: kwargs.pop(k, v) for k, v in zip(varnames, defaults)}
+    # pylint: disable=protected-access
+    func_params = inspect.signature(func).parameters
+    kwargs_defaults = {k: v.default for k, v in func_params.items()
+                       if v.default != inspect._empty}
+    return {k: kwargs.pop(k, v) for k, v in kwargs_defaults.items()}

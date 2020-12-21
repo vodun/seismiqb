@@ -623,7 +623,7 @@ class BaseController:
             .mask_rebatch(src='masks', threshold=C('rebatch_threshold', default=0.1))
             .load_cubes(dst='images')
             .adaptive_reshape(src=['images', 'masks'], shape=V('shape'))
-            .scale(mode='q', src='images')
+            .normalize(mode='q', src='images')
         )
 
     def augmentation_pipeline(self, **kwargs):
@@ -686,7 +686,7 @@ class BaseController:
                             side_view=C('side_view', default=False))
             .load_cubes(dst='images')
             .adaptive_reshape(src='images', shape=self.crop_shape)
-            .scale(mode='q', src='images')
+            .normalize(mode='q', src='images')
 
             # Predict with model, then aggregate
             .predict_model('model',
