@@ -172,6 +172,9 @@ class StorageHDF5:
 
     @lru_cache(128)
     def construct_slide(self, loc, axis=0, **kwargs):
+        """ Load one slide of data from a most appropriate cube projection.
+        Caches the result in a thread-safe manner.
+        """
         locations = [slice(None) for _ in range(3)]
         locations[axis] = slice(loc, loc+1)
         slc = [slice(None) for _ in range(3)]
@@ -211,8 +214,6 @@ class StorageHDF5:
         for i, iline in enumerate(range(start, stop)):
             crop[i] = self.load_existed_slide(cube_hdf5, iline, **kwargs)[xlines, :][:, heights]
         return crop
-        # return np.stack([self.load_existed_slide(cube_hdf5, iline, **kwargs)[xlines, :][:, heights]
-        #                  for iline in range(ilines.start or start, ilines.stop or stop)], axis=0)
 
     def _load_x(self, ilines, xlines, heights, **kwargs):
         cube_hdf5 = self.cube_orientation(1)
@@ -224,11 +225,9 @@ class StorageHDF5:
         for i, xline in enumerate(range(start, stop)):
             crop[i] = self.load_existed_slide(cube_hdf5, xline, **kwargs)[heights, :][:, ilines]
         return crop.T
-        # return np.stack([self.load_existed_slide(cube_hdf5, xline, **kwargs)[heights, :][:, ilines].transpose([1, 0])
-        #                  for xline in range(xlines.start or start, xlines.stop or stop)], axis=1)
 
     def _load_h(self, ilines, xlines, heights, **kwargs):
-        cube_hdf5 = self.cube_orientation(w)
+        cube_hdf5 = self.cube_orientation(2)
         start, stop = heights.start or 0, heights.stop or cube_hdf5.shape[0]
         shape_i = (ilines.stop or cube_hdf5.shape[1]) - (ilines.start or 0)
         shape_x = (xlines.stop or cube_hdf5.shape[2]) - (xlines.start or 0)
@@ -236,9 +235,7 @@ class StorageHDF5:
         crop = np.empty((stop - start, shape_i, shape_x))
         for i, height in enumerate(range(start, stop)):
             crop[i] = self.load_existed_slide(cube_hdf5, height, **kwargs)[ilines, :][:, xlines]
-        return crop.T
-        # return np.stack([self.load_existed_slide(cube_hdf5, height, **kwargs)[ilines, :][:, xlines]
-        #                  for height in range(heights.start or start, heights.stop or stop)], axis=2)
+        return crop
 
     def add_projection(self, projections, stride=100):
         """ Add additional cube orientations. To avoid load of the whole cube into memory it can be loaded
