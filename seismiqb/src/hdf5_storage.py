@@ -39,7 +39,8 @@ class StorageHDF5:
         self.filename = filename
         if mode in ('r', 'r+'):
             self.file_hdf5 = SafeIO(filename, opener=h5py.File, mode=mode)
-            self.projections = [axis for axis in range(3) if self.NAMES[axis] in self.file_hdf5]
+            projections = projections or [axis for axis in range(3) if self.NAMES[axis] in self.file_hdf5]
+            self.projections = [parse_axis(item) for item in projections]
             axis = self.projections[0]
             self.shape = np.array(self.cube_orientation(axis).shape)[self.TRANSPOSE[axis]]
         elif mode == 'a':
@@ -72,72 +73,6 @@ class StorageHDF5:
         """
         return self.file_hdf5[self.NAMES[projection]]
 
-    def _process_key(self, key):
-        """ Process slices for cube to put into __getitem__ and __setitem__. """
-        key_ = [key] if isinstance(key, slice) else list(key)
-        key, squeeze = [], []
-        if len(key_) != len(self.shape):
-            key_ += [slice(None)] * (len(self.shape) - len(key_))
-        for i, item in enumerate(key_):
-            max_size = self.shape[i]
-
-            if isinstance(item, slice):
-                slc = slice(item.start or 0, item.stop or max_size)
-            elif isinstance(item, int):
-                item = item if item >= 0 else max_size - item
-                slc = slice(item, item + 1)
-                squeeze.append(i)
-            key.append(slc)
-        return key, squeeze
-
-    def __getitem__(self, key):
-        key, squeeze = self._process_key(key)
-        projection = self.get_optimal_projection(key)
-        slices = tuple([key[axis] for axis in self.STRAIGHT[projection]])
-
-        transposed_crop = self.cube_orientation(projection)[slices]
-        crop = transposed_crop.transpose(self.TRANSPOSE[projection])
-        if squeeze:
-            crop = np.squeeze(crop, axis=tuple(squeeze))
-        return crop
-
-    def __setitem__(self, key, value):
-        key, _ = self._process_key(key)
-        for projection in self.projections:
-            slices = tuple(np.array(key)[self.STRAIGHT[projection]])
-            self.cube_orientation(projection)[slices] = value.transpose(self.STRAIGHT[projection])
-
-    def load_slide(self, loc, axis=0, **kwargs):
-        """ Load 2D slide from seismic cube in the fastest way by choosing the most appropriate orientation.
-
-        Parameters
-        ----------
-        loc : int
-            Slide position.
-        axis : int, optional
-            Corresponding axis, by default 0
-
-        Returns
-        -------
-        np.ndarray
-        """
-        axis = parse_axis(axis)
-        locations = [slice(None) for _ in range(3)]
-        locations[axis] = slice(loc, loc+1)
-        slc = [slice(None) for _ in range(3)]
-        slc[axis] = 0
-        return self.load_crop(locations, **kwargs)[tuple(slc)]
-
-    @lru_cache(128)
-    def cached_load(self, cube, loc, axis=0, **kwargs):
-        """ Load one slide of data from a certain cube projection.
-        Caches the result in a thread-safe manner.
-        """
-        _ = kwargs
-        slc = [slice(None), slice(None), slice(None)]
-        slc[parse_axis(axis)] = loc
-        return cube[slc[0], slc[1], slc[2]]
-
     def get_optimal_projection(self, locations):
         """ Choose optimal cube orientation from the existing ones to speed up crop loading.
 
@@ -165,6 +100,80 @@ class StorageHDF5:
                 break
         return axis
 
+    def __getitem__(self, key):
+        key, squeeze = self._process_key(key)
+        projection = self.get_optimal_projection(key)
+        slices = tuple([key[axis] for axis in self.STRAIGHT[projection]])
+
+        transposed_crop = self.cube_orientation(projection)[slices]
+        crop = transposed_crop.transpose(self.TRANSPOSE[projection])
+        if squeeze:
+            crop = np.squeeze(crop, axis=tuple(squeeze))
+        return crop
+
+    def _process_key(self, key):
+        """ Process slices for cube to put into __getitem__ and __setitem__. """
+        key_ = [key] if isinstance(key, slice) else list(key)
+        key, squeeze = [], []
+        if len(key_) != len(self.shape):
+            key_ += [slice(None)] * (len(self.shape) - len(key_))
+        for i, item in enumerate(key_):
+            max_size = self.shape[i]
+
+            if isinstance(item, slice):
+                slc = slice(item.start or 0, item.stop or max_size)
+            elif isinstance(item, int):
+                item = item if item >= 0 else max_size - item
+                slc = slice(item, item + 1)
+                squeeze.append(i)
+            key.append(slc)
+        return key, squeeze
+
+    def __setitem__(self, key, value):
+        key, _ = self._process_key(key)
+        for projection in self.projections:
+            slices = tuple(np.array(key)[self.STRAIGHT[projection]])
+            self.cube_orientation(projection)[slices] = value.transpose(self.STRAIGHT[projection])
+
+    @lru_cache(128)
+    def load_slide(self, loc, axis=0, **kwargs):
+        """ Load 2D slide from seismic cube in the fastest way by choosing the most appropriate orientation.
+
+        Parameters
+        ----------
+        loc : int
+            Slide position.
+        axis : int, optional
+            Corresponding axis, by default 0
+
+        Returns
+        -------
+        np.ndarray
+        """
+        axis = parse_axis(axis)
+        locations = [slice(None) for _ in range(3)]
+        locations[axis] = slice(loc, loc+1)
+        slc = [slice(None) for _ in range(3)]
+        slc[axis] = 0
+        if axis in self.projections:
+            cube_hdf5 = self.cube_orientation(0)
+            slide = self.cached_load(cube_hdf5, loc)
+            if axis == 1:
+                slide = slide.T
+        else:
+            slide = self.load_crop(locations, **kwargs)[tuple(slc)]
+        return slide
+
+    @lru_cache(128)
+    def cached_load(self, cube, loc, axis=0, **kwargs):
+        """ Load one slide of data from a certain cube projection.
+        Caches the result in a thread-safe manner.
+        """
+        _ = kwargs
+        slc = [slice(None), slice(None), slice(None)]
+        slc[parse_axis(axis)] = loc
+        return cube[slc[0], slc[1], slc[2]]
+
     def load_crop(self, locations, projection=None, **kwargs):
         """ Load crop from seismic cube in the fastest way by choosing the most appropriate orientation.
 
@@ -178,11 +187,11 @@ class StorageHDF5:
         """
         projection = projection or self.get_optimal_projection(locations)
         if projection == 0:
-            crop = self._load_x(*locations, **kwargs)
-        elif projection == 1:
-            crop = self._load_h(*locations, **kwargs)
-        elif projection == 2:
             crop = self._load_i(*locations, **kwargs)
+        elif projection == 1:
+            crop = self._load_x(*locations, **kwargs)
+        elif projection == 2:
+            crop = self._load_h(*locations, **kwargs)
         else:
             raise ValueError('Wrong projection value:', projection)
         return crop
