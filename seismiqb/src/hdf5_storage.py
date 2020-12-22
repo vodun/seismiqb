@@ -101,6 +101,7 @@ class StorageHDF5:
         return axis
 
     def __getitem__(self, key):
+        """ Use native slicing of HDF5. """
         key, squeeze = self._process_key(key)
         projection = self.get_optimal_projection(key)
         slices = tuple([key[axis] for axis in self.STRAIGHT[projection]])
@@ -135,7 +136,6 @@ class StorageHDF5:
             slices = tuple(np.array(key)[self.STRAIGHT[projection]])
             self.cube_orientation(projection)[slices] = value.transpose(self.STRAIGHT[projection])
 
-    @lru_cache(128)
     def load_slide(self, loc, axis=0, **kwargs):
         """ Load 2D slide from seismic cube in the fastest way by choosing the most appropriate orientation.
 
@@ -151,21 +151,17 @@ class StorageHDF5:
         np.ndarray
         """
         axis = parse_axis(axis)
-        locations = [slice(None) for _ in range(3)]
-        locations[axis] = slice(loc, loc+1)
-        slc = [slice(None) for _ in range(3)]
-        slc[axis] = 0
         if axis in self.projections:
-            cube_hdf5 = self.cube_orientation(0)
-            slide = self.cached_load(cube_hdf5, loc)
+            cube_hdf5 = self.cube_orientation(axis)
+            slide = self.load_existed_slide(cube_hdf5, loc)
             if axis == 1:
                 slide = slide.T
         else:
-            slide = self.load_crop(locations, **kwargs)[tuple(slc)]
+            slide = self.construct_slide(loc, axis)
         return slide
 
     @lru_cache(128)
-    def cached_load(self, cube, loc, axis=0, **kwargs):
+    def load_existed_slide(self, cube, loc, axis=0, **kwargs):
         """ Load one slide of data from a certain cube projection.
         Caches the result in a thread-safe manner.
         """
@@ -173,6 +169,15 @@ class StorageHDF5:
         slc = [slice(None), slice(None), slice(None)]
         slc[parse_axis(axis)] = loc
         return cube[slc[0], slc[1], slc[2]]
+
+    @lru_cache(128)
+    def construct_slide(self, loc, axis=0, **kwargs):
+        locations = [slice(None) for _ in range(3)]
+        locations[axis] = slice(loc, loc+1)
+        slc = [slice(None) for _ in range(3)]
+        slc[axis] = 0
+        slide = self.load_crop(locations, **kwargs)[tuple(slc)]
+        return slide
 
     def load_crop(self, locations, projection=None, **kwargs):
         """ Load crop from seismic cube in the fastest way by choosing the most appropriate orientation.
@@ -198,21 +203,42 @@ class StorageHDF5:
 
     def _load_i(self, ilines, xlines, heights, **kwargs):
         cube_hdf5 = self.cube_orientation(0)
-        start, stop = 0, cube_hdf5.shape[0]
-        return np.stack([self.cached_load(cube_hdf5, iline, **kwargs)[xlines, :][:, heights]
-                         for iline in range(ilines.start or start, ilines.stop or stop)], axis=0)
+        start, stop = ilines.start or 0, ilines.stop or cube_hdf5.shape[0]
+        shape_x = (xlines.stop or cube_hdf5.shape[1]) - (xlines.start or 0)
+        shape_h = (heights.stop or cube_hdf5.shape[2]) - (heights.start or 0)
+
+        crop = np.empty((stop - start, shape_x, shape_h))
+        for i, iline in enumerate(range(start, stop)):
+            crop[i] = self.load_existed_slide(cube_hdf5, iline, **kwargs)[xlines, :][:, heights]
+        return crop
+        # return np.stack([self.load_existed_slide(cube_hdf5, iline, **kwargs)[xlines, :][:, heights]
+        #                  for iline in range(ilines.start or start, ilines.stop or stop)], axis=0)
 
     def _load_x(self, ilines, xlines, heights, **kwargs):
         cube_hdf5 = self.cube_orientation(1)
-        start, stop = 0, cube_hdf5.shape[0]
-        return np.stack([self.cached_load(cube_hdf5, xline, **kwargs)[heights, :][:, ilines].transpose([1, 0])
-                         for xline in range(xlines.start or start, xlines.stop or stop)], axis=1)
+        start, stop = xlines.start or 0, xlines.stop or cube_hdf5.shape[0]
+        shape_h = (heights.stop or cube_hdf5.shape[1]) - (heights.start or 0)
+        shape_i = (ilines.stop or cube_hdf5.shape[2]) - (ilines.start or 0)
+
+        crop = np.empty((stop - start, shape_h, shape_i))
+        for i, xline in enumerate(range(start, stop)):
+            crop[i] = self.load_existed_slide(cube_hdf5, xline, **kwargs)[heights, :][:, ilines]
+        return crop.T
+        # return np.stack([self.load_existed_slide(cube_hdf5, xline, **kwargs)[heights, :][:, ilines].transpose([1, 0])
+        #                  for xline in range(xlines.start or start, xlines.stop or stop)], axis=1)
 
     def _load_h(self, ilines, xlines, heights, **kwargs):
-        cube_hdf5 = self.cube_orientation(2)
-        start, stop = 0, cube_hdf5.shape[0]
-        return np.stack([self.cached_load(cube_hdf5, height, **kwargs)[ilines, :][:, xlines]
-                         for height in range(heights.start or start, heights.stop or stop)], axis=2)
+        cube_hdf5 = self.cube_orientation(w)
+        start, stop = heights.start or 0, heights.stop or cube_hdf5.shape[0]
+        shape_i = (ilines.stop or cube_hdf5.shape[1]) - (ilines.start or 0)
+        shape_x = (xlines.stop or cube_hdf5.shape[2]) - (xlines.start or 0)
+
+        crop = np.empty((stop - start, shape_i, shape_x))
+        for i, height in enumerate(range(start, stop)):
+            crop[i] = self.load_existed_slide(cube_hdf5, height, **kwargs)[ilines, :][:, xlines]
+        return crop.T
+        # return np.stack([self.load_existed_slide(cube_hdf5, height, **kwargs)[ilines, :][:, xlines]
+        #                  for height in range(heights.start or start, heights.stop or stop)], axis=2)
 
     def add_projection(self, projections, stride=100):
         """ Add additional cube orientations. To avoid load of the whole cube into memory it can be loaded
