@@ -19,8 +19,7 @@ from skimage.measure import label
 import plotly
 import plotly.figure_factory as ff
 
-from .utils import round_to_array, groupby_mean, groupby_min, groupby_max, \
-                   HorizonSampler, filter_simplices
+from .utils import round_to_array, groupby_mean, groupby_min, groupby_max, HorizonSampler, filter_simplices
 from .utils import make_gaussian_kernel
 from .plotters import plot_image
 
