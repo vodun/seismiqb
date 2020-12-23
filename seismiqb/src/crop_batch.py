@@ -131,7 +131,7 @@ class SeismicCropBatch(Batch):
                        side_view=False, adaptive_slices=False, passdown=None,
                        grid_src='quality_grid', dst='locations',
                        dst_points='points', dst_shapes='shapes'):
-        """ Generate positions of crops. Creates new instance of `SeismicCropBatch`
+        """ Generate positions of crops. Creates new instance of `:class:.SeismicCropBatch`
         with crop positions in one of the components (`locations` by default).
 
         Parameters
@@ -343,27 +343,21 @@ class SeismicCropBatch(Batch):
         Parameters
         ----------
         src_attribute : str
-            A keyword defining label attribute to make crops from:
-            - 'cube_values' — cube values cut along the horizon;
-            - 'heights' — matrix of heights with zero-filled nans;
-            - 'metrics' — random support metrics matrix.
+            A keyword from `:attr:~Horizon.ATTRIBUTE_TO_METHOD` keys, defining label attribute to make crops from.
         src_labels : str
             Dataset attribute with labels dict.
         locations : str
             Component of batch with locations of crops to load.
         final_ndim : 2 or 3
             Number of dimensions returned crop should have.
-        transform : str or dict
-            For `Horizon.transform_by_binary_matrix`.
         kwargs :
-            For one of `Horizon` functions depending on chosen `src_attribute`:
-            - 'cube_values' — `cached_get_cube_values`;
-            - 'heights' — `cached_get_heights_matrix`;
-            - 'metrics' — `cached_metrics_evaluate`.
+            Passed directly to either:
+            - one of attribute-evaluating methods from `:attr:~Horizon.ATTRIBUTE_TO_METHOD` depending on `src_attribute`
+            - or attribute-transforming method `:meth:~Horizon.transform_where_present`.
 
         Notes
         -----
-        This function loads rectified data, e.g. amplitudes are croped relative
+        This method loads rectified data, e.g. amplitudes are croped relative
         to horizon and will form a straight plane in the resulting crop.
         """
         location = self.get(ix, locations)
@@ -550,7 +544,7 @@ class SeismicCropBatch(Batch):
         ----------
         mode : callable or str
             If callable, then directly applied to data.
-            If str, then `SeismicGeometry.scaler` applied in one of the modes:
+            If str, then `:meth:~SeismicGeometry.scaler` applied in one of the modes:
             - `minmax`: scaled to [0, 1] via minmax scaling.
             - `q` or `normalize`: divided by the maximum of absolute values
                                   of the 0.01 and 0.99 quantiles.
@@ -583,7 +577,7 @@ class SeismicCropBatch(Batch):
 
         if not isinstance(src, (list, tuple, np.ndarray)) or len(src) < 2:
             raise ValueError('Src must contain at least two components to concatenate')
-        items = [getattr(self, attr) for attr in src]
+        items = [self.get(None, attr) for attr in src]
 
         depth = sum(item.shape[-1] for item in items)
         final_shape = (*items[0].shape[:3], depth)
@@ -811,6 +805,7 @@ class SeismicCropBatch(Batch):
     @action
     def transpose(self, src, order):
         """ Change order of axis. """
+        src = [src] if isinstance(src, str) else src
         order = [i+1 for i in order] # Correct for batch items dimension
         for attr in src:
             setattr(self, attr, np.transpose(self.get(component=attr), (0, *order)))

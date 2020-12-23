@@ -556,30 +556,30 @@ class SeismicCubeset(Dataset):
         plot_image(map_, **kwargs)
 
 
-    def apply_to_attrs(self, func, indices, attrs, **kwargs):
-        """ Call specific function for all attrs of specific cubes.
+    def apply_to_attributes(self, function, indices, attributes, **kwargs):
+        """ Call specific function for all attributes of specific cubes.
 
-        func : str or callable
+        function : str or callable
             If str, name of the function or method to call from the attribute.
-            If callable, applied directly to each item of cubeset attribute from `attrs`.
+            If callable, applied directly to each item of cubeset attribute from `attributes`.
         indices : sequence of str
-            For the attributes of which cubes to call `func`.
-        attrs : sequence of str
-            For what cube attributes to call `func`.
+            For the attributes of which cubes to call `function`.
+        attributes : sequence of str
+            For what cube attributes to call `function`.
         kwargs :
-            For `func`.
+            Passed directly to `function`.
 
         Examples
         --------
-        >>> cubeset.apply_to_attrs('smooth_out', ['CUBE_01_XXX', 'CUBE_02_YYY'], ['horizons', 'fans'}, kernel_size=2])
+        >>> cubeset.apply_to_attributes('smooth_out', ['CUBE_01_XXX', 'CUBE_02_YYY'], ['horizons', 'fans'}, iters=3])
         """
         for idx in indices:
             if idx not in self.indices:
-                warn(f"Can't call `{func} for {attrs} of cube {idx}, since it is not in index.")
+                warn(f"Can't call `{function} for {attributes} of cube {idx}, since it is not in index.")
             else:
-                for attr in attrs:
-                    for item in self[idx, attr]:
-                        res = getattr(item, func)(**kwargs) if isinstance(func, str) else func(item, **kwargs)
+                for attribute in attributes:
+                    for item in self[idx, attribute]:
+                        res = function(item, **kwargs) if callable(function) else getattr(item, function)(**kwargs)
                         if res is not None:
                             warn(f"Call for {item} returned not None, which is not expected.")
 
@@ -733,7 +733,7 @@ class SeismicCubeset(Dataset):
         labels_indices : str
             Indices of items from `src_labels` to show below the grid.
         attribute : str
-            Alias from `Horizon.FUNC_BY_ATTR` to show below the grid.
+            Alias from `:attr:~Horizon.FUNC_BY_ATTR` to show below the grid.
         plot_dict : dict, optional
             Dict of plot parameters, such as:
                 figsize : tuple
@@ -1193,9 +1193,9 @@ class SeismicCubeset(Dataset):
         pipeline : Pipeline
             Inference pipeline.
         crop_shape : sequence
-            For `SeismicCubeset.make_grid`.
+            Passed directly to `:meth:.make_grid`.
         overlap_factor : float or sequence
-            For `SeismicCubeset.make_grid`.
+            Passed directly to `:meth:.make_grid`.
         src_labels : str
             Name of dataset component with items to make grid for.
         dst_labels : str
@@ -1203,7 +1203,7 @@ class SeismicCubeset(Dataset):
         pipeline_var : str
             Name of pipeline variable to get predictions for assemble from.
         order : tuple of int
-            For `SeismicCubeset.assemble_crops`.
+            Passed directly to `:meth:.assemble_crops`.
         binarize : bool
             Whether convert probability to class label or not.
         """
@@ -1238,7 +1238,7 @@ class SeismicCubeset(Dataset):
             Class attribute to put loaded data into.
         labels_class : class
             Class to use for labels creation.
-            See details in `SeismicCubeset.create_labels`.
+            See details in `:meth:.create_labels`.
         p : sequence of numbers
             Proportions of different cubes in sampler.
         bins : TODO
@@ -1274,7 +1274,7 @@ class SeismicCubeset(Dataset):
         main_labels : str
             Which dataset attribute assign to `self.labels`.
         kwargs :
-            For `SeismicCubeset.create_labels`.
+            Passed directly to `:meth:.create_labels`.
 
         Examples
         --------

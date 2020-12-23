@@ -122,7 +122,7 @@ class lru_cache:
 
     Notes
     -----
-    On first call assigns an empty set to class attribute `_cached_attributes` to keep track of decorated functions.
+    On first call assigns an empty set to an instance attribute `_cached_attributes` to keep track of decorated methods.
     """
     #pylint: disable=invalid-name, attribute-defined-outside-init
     def __init__(self, maxsize=None, attributes=None, apply_by_default=True):
@@ -787,10 +787,10 @@ def local_correlation(region):
                 corr[i, j] = cov / den
     return np.mean(corr)
 
-def pop_kwargs_for_function(func, kwargs):
-    """ Pop variables from kwargs that are meant for function. """
+def retrieve_function_arguments(function, dictionary):
+    """ Retrieve both positional and keyword arguments for a passed `function` from a `dictionary`.
+    Note that retrieved values are removed from the passed `dictionary` in-place. """
     # pylint: disable=protected-access
-    func_params = inspect.signature(func).parameters
-    kwargs_defaults = {k: v.default for k, v in func_params.items()
-                       if v.default != inspect._empty}
-    return {k: kwargs.pop(k, v) for k, v in kwargs_defaults.items()}
+    parameters = inspect.signature(function).parameters
+    arguments_with_defaults = {k: v.default for k, v in parameters.items() if v.default != inspect._empty}
+    return {k: dictionary.pop(k, v) for k, v in arguments_with_defaults.items()}

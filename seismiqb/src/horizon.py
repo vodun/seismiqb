@@ -21,7 +21,7 @@ import plotly
 import plotly.figure_factory as ff
 
 from .utils import round_to_array, groupby_mean, groupby_min, groupby_max, HorizonSampler, filter_simplices, lru_cache
-from .utils import make_gaussian_kernel, pop_kwargs_for_function
+from .utils import make_gaussian_kernel, retrieve_function_arguments
 from .plotters import plot_image
 
 
@@ -367,15 +367,15 @@ class Horizon:
     FILL_VALUE = -999999
 
     # Correspondence between attribute alias and the class function that calculates it
-    ATTR_BY_FUNC = {
+    METHOD_TO_ATTRIBUTE = {
         'get_cube_values': ['cube_values', 'amplitudes'],
         'get_full_matrix': ['full_matrix', 'heights'],
-        'metrics_evaluate': ['metrics'],
+        'evaluate_metric': ['metrics'],
         'get_instantaneous_phases': ['instant_phases'],
         'get_instantaneous_amplitudes': ['instant_amplitudes'],
         'get_full_binary_matrix': ['full_binary_matrix', 'masks']
     }
-    FUNC_BY_ATTR = {attr: func for func, attrs in ATTR_BY_FUNC.items() for attr in attrs}
+    ATTRIBUTE_TO_METHOD = {attr: func for func, attrs in METHOD_TO_ATTRIBUTE.items() for attr in attrs}
 
 
     def __init__(self, storage, geometry, name=None, dtype=np.int32, **kwargs):
@@ -935,44 +935,44 @@ class Horizon:
         return mask
 
 
-    def transform_where_present(self, arr, normalize=None, fill_value=None, shift=None, rescale=None):
-        """ Normalize array where horizon is present, fill in with constant where it is not.
+    def transform_where_present(self, array, normalize=None, fill_value=None, shift=None, rescale=None):
+        """ Normalize array where horizon is present, fill with constant where the horizon is absent.
 
         Parameters
         ----------
-        arr : np.array
-            Array to transform. Its shape at first two dimensions must match `self.presence_matrix` shape.
-        normalize : 'min-max', 'mean-std', 'shift-rescale' or False
+        array : np.array
+            Matrix of (cube_ilines, cube_xlines, ...) shape.
+        normalize : 'min-max', 'mean-std', 'shift-rescale' or None
             Normalization mode for data where `presence_matrix` is True.
-            If None, no normalization applied. Defaults to False.
-        fill_value : any value compatible with `arr.dtype`
-            Value to fill `arr` in where `presence_matrix` is False.
+            If None, no normalization applied. Defaults to None.
+        fill_value : numpy primitive type
+            Value to fill `array` in where `:attr:.presence_matrix` is False. Must be compatible with `array.dtype`.
             If None, no filling applied. Defaults to None.
         shift, rescale : number, optional
             For 'shift-rescale` normalization mode.
         """
 
         if normalize is None and fill_value is None:
-            return arr
+            return array
 
-        values = arr[self.presence_matrix]
+        values = array[self.presence_matrix]
 
         if normalize is None:
             pass
         elif normalize == 'min-max':
             min_, max_ = values.min(), values.max()
-            arr = (arr - min_) / (max_ - min_)
+            array = (array - min_) / (max_ - min_)
         elif normalize == 'mean-std':
             mean, std = values.mean(), values.std()
-            arr = (arr - mean) / std
+            array = (array - mean) / std
         elif normalize == 'shift-rescale':
-            arr = (arr + shift) * rescale
+            array = (array + shift) * rescale
         else:
             raise ValueError('Unknown normalize mode {}'.format(normalize))
 
         if fill_value is not None:
-            arr[~self.presence_matrix] = fill_value
-        return arr
+            array[~self.presence_matrix] = fill_value
+        return array
 
 
     @lru_cache(maxsize=1, apply_by_default=False)
@@ -994,9 +994,9 @@ class Horizon:
             Whether fill zero traces with nans or not.
             Defaults to True.
         kwargs :
-            For `Horizon.transform_where_present`.
+            Passed directly to `:meth:.transform_where_present`.
         """
-        transform_kwargs = pop_kwargs_for_function(self.transform_where_present, kwargs)
+        transform_kwargs = retrieve_function_arguments(self.transform_where_present, kwargs)
         low = window // 2
         high = max(window - low, 0)
         chunk_size = min(chunk_size, self.h_max - self.h_min + window)
@@ -1046,7 +1046,7 @@ class Horizon:
             If slice or sequence of int, used for slicing calculated attribute along last axis.
             If None, infer middle channel index from 'window' and slice at it calculated attribute along last axis.
         kwargs :
-            For `Horizon.get_cube_values` and `Horizon.transform_where_present`.
+            Passed directly to `:meth:.get_cube_values` and `:meth:.transform_where_present``.
 
         Notes
         -----
@@ -1055,7 +1055,7 @@ class Horizon:
         `label.get_instantaneous_amplitudes(channels=range(10, 21), window=41)` the attribute will be first calculated
         by array of `(xlines, ilines, 41)` shape and then the slice `[..., ..., 10:21]` of them will be returned.
         """
-        transform_kwargs = pop_kwargs_for_function(self.transform_where_present, kwargs)
+        transform_kwargs = retrieve_function_arguments(self.transform_where_present, kwargs)
         depths = [window // 2] if depths is None else depths
         amplitudes = self.get_cube_values(window, use_cache=False, **kwargs) #pylint: disable=unexpected-keyword-arg
         result = np.abs(hilbert(amplitudes))[:, :, depths]
@@ -1076,7 +1076,7 @@ class Horizon:
             If slice or sequence of int, used for slicing calculated attribute along last axis.
             If None, infer middle channel index from 'window' and slice at it calculated attribute along last axis.
         kwargs :
-            For `Horizon.get_cube_values` and `Horizon.transform_where_present`.
+            Passed directly to `:meth:.get_cube_values` and `:meth:.transform_where_present`.
 
         Notes
         -----
@@ -1085,7 +1085,7 @@ class Horizon:
         `label.get_instantaneous_phases(channels=range(10, 21), window=41)` the attribute will be first calculated
         by array of `(xlines, ilines, 41)` shape and then the slice `[..., ..., 10:21]` of them will be returned.
         """
-        transform_kwargs = pop_kwargs_for_function(self.transform_where_present, kwargs)
+        transform_kwargs = retrieve_function_arguments(self.transform_where_present, kwargs)
         depths = [window // 2] if depths is None else depths
         amplitudes = self.get_cube_values(window, use_cache=False, **kwargs) #pylint: disable=unexpected-keyword-arg
         result = np.angle(hilbert(amplitudes))[:, :, depths]
@@ -1100,9 +1100,9 @@ class Horizon:
         Parameters
         ----------
         kwargs :
-            For `put_on_full` and `Horizon.transform_where_present`.
+            Passed directly to `:meth:.put_on_full` and `:meth:.transform_where_present`.
         """
-        transform_kwargs = pop_kwargs_for_function(self.transform_where_present, kwargs)
+        transform_kwargs = retrieve_function_arguments(self.transform_where_present, kwargs)
         matrix = self.put_on_full(self.matrix, **kwargs)
         return self.transform_where_present(matrix, **transform_kwargs)
 
@@ -1114,9 +1114,9 @@ class Horizon:
         Parameters
         ----------
         kwargs :
-            For `put_on_full` and `Horizon.transform_where_present`.
+            Passed directly to `:meth:.put_on_full` and `:meth:.transform_where_present`.
         """
-        transform_kwargs = pop_kwargs_for_function(self.transform_where_present, kwargs)
+        transform_kwargs = retrieve_function_arguments(self.transform_where_present, kwargs)
         full_binary_matrix = self.put_on_full(self.binary_matrix, **kwargs)
         return self.transform_where_present(full_binary_matrix, **transform_kwargs)
 
@@ -1138,9 +1138,9 @@ class Horizon:
             Last 'depth' slice is used to infer `window` parameter when `src_attribute` is 'cube_values'.
             If None, `src_attribute` is returned uncropped.
         kwargs :
-            For `Horizon` function with name from `Horizon.FUNC_BY_ATTR` where `src_attribute` is key to this dict.
-            For `Horizon.transform_where_present`.
-
+            Passed directly to either:
+            - one of attribute-evaluating methods from `:attr:.ATTRIBUTE_TO_METHOD` depending on `src_attribute`;
+            - or attribute-transforming method `:meth:.transform_where_present`.
         Examples
         --------
 
@@ -1154,7 +1154,7 @@ class Horizon:
         -----
 
         Although the function can be used in a straightforward way as described above, its main purpose is to act
-        as an interface for accessing `Horizon` attributes from `SeismicCropBatch` to allow calls like this:
+        as an interface for accessing `:class:.Horizon` attributes from `:class:~SeismicCropBatch` to allow calls like:
 
         >>> Pipeline().load_attribute('cube_values', dst='amplitudes')
         """
@@ -1175,9 +1175,10 @@ class Horizon:
                 **default_kwargs
             }
         kwargs = {**default_kwargs, **kwargs}
-        func_name = self.FUNC_BY_ATTR.get(src_attribute)
+        func_name = self.ATTRIBUTE_TO_METHOD.get(src_attribute)
         if func_name is None:
-            raise ValueError("Unknown `src_attribute` {}. Expected {}.".format(src_attribute, self.FUNC_BY_ATTR.keys()))
+            raise ValueError("Unknown `src_attribute` {}. Expected {}.".format(src_attribute,
+                                                                               self.ATTRIBUTE_TO_METHOD.keys()))
         data = getattr(self, func_name)(**kwargs)
         return data[x_slice, i_slice]
 
@@ -1392,7 +1393,7 @@ class Horizon:
 
     @property
     def horizon_metrics(self):
-        """ Calculate `HorizonMetrics` on demand. """
+        """ Calculate `:class:~HorizonMetrics` on demand. """
         from .metrics import HorizonMetrics
         return HorizonMetrics(self)
 
@@ -1480,17 +1481,17 @@ class Horizon:
 
 
     @lru_cache(maxsize=1, apply_by_default=False)
-    def metrics_evaluate(self, metric='support_corrs', supports=50, agg='nanmean', **kwargs):
+    def evaluate_metric(self, metric='support_corrs', supports=50, agg='nanmean', **kwargs):
         """ Cached metrics calcucaltion with disabled plotting option.
 
         Parameters
         ----------
         metric, supports, agg :
-            For `HorizonMetrics.evaluate`.
+            Passed directly to `:meth:.HorizonMetrics.evaluate`.
         kwargs :
-            For `HorizonMetrics.evaluate` and `Horizon.transform_where_present`.
+            Passed directly to `:meth:.HorizonMetrics.evaluate` and `:meth:.transform_where_present`.
         """
-        transform_kwargs = pop_kwargs_for_function(self.transform_where_present, kwargs)
+        transform_kwargs = retrieve_function_arguments(self.transform_where_present, kwargs)
         metrics = self.horizon_metrics.evaluate(metric=metric, supports=supports, agg=agg,
                                                 plot=False, savepath=None, **kwargs)
         metrics = np.nan_to_num(metrics)
@@ -2232,7 +2233,7 @@ class Horizon:
 
 
 class StructuredHorizon(Horizon):
-    """ Convenient alias for `Horizon` class. """
+    """ Convenient alias for `:class:.Horizon` class. """
 
 
 @njit(parallel=True)
