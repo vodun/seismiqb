@@ -9,8 +9,7 @@ import numpy as np
 
 from seismiqb import SeismicGeometry, StorageHDF5
 
-PATH = os.path.join(os.path.dirname(os.path.realpath(__file__)),
-                    "/data/seismic_data/seismic_interpretation/CUBE_30_SCHLUM/Schlumberger_800_SLB_Force_Fault_Model_BlockId.segy")
+PATH = "/data/seismic_data/seismic_interpretation/CUBE_30_SCHLUM/Schlumberger_800_SLB_Force_Fault_Model_BlockId.segy"
 
 def compare_segy_files(path_1, path_2):
     """ Checks that two SEG-Y files contain exactly same traces
