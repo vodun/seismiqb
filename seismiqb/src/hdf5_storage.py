@@ -127,6 +127,8 @@ class StorageHDF5:
                 item = item if item >= 0 else max_size - item
                 slc = slice(item, item + 1)
                 squeeze.append(i)
+            else:
+                raise ValueError(f'key elements must be slices or int but {type(item)} was given.')
             key.append(slc)
         return key, squeeze
 
@@ -172,9 +174,6 @@ class StorageHDF5:
 
     @lru_cache(128)
     def construct_slide(self, loc, axis=0, **kwargs):
-        """ Load one slide of data from a most appropriate cube projection.
-        Caches the result in a thread-safe manner.
-        """
         locations = [slice(None) for _ in range(3)]
         locations[axis] = slice(loc, loc+1)
         slc = [slice(None) for _ in range(3)]
@@ -227,7 +226,7 @@ class StorageHDF5:
         return crop.T
 
     def _load_h(self, ilines, xlines, heights, **kwargs):
-        cube_hdf5 = self.cube_orientation(2)
+        cube_hdf5 = self.cube_orientation(w)
         start, stop = heights.start or 0, heights.stop or cube_hdf5.shape[0]
         shape_i = (ilines.stop or cube_hdf5.shape[1]) - (ilines.start or 0)
         shape_x = (xlines.stop or cube_hdf5.shape[2]) - (xlines.start or 0)
@@ -235,7 +234,7 @@ class StorageHDF5:
         crop = np.empty((stop - start, shape_i, shape_x))
         for i, height in enumerate(range(start, stop)):
             crop[i] = self.load_existed_slide(cube_hdf5, height, **kwargs)[ilines, :][:, xlines]
-        return crop
+        return crop.T
 
     def add_projection(self, projections, stride=100):
         """ Add additional cube orientations. To avoid load of the whole cube into memory it can be loaded
