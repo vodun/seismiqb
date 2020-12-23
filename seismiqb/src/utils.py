@@ -787,7 +787,7 @@ def local_correlation(region):
                 corr[i, j] = cov / den
     return np.mean(corr)
 
-def pop_kwargs_for_function(func, **kwargs):
+def pop_kwargs_for_function(func, kwargs):
     """ Pop variables from kwargs that are meant for function. """
     # pylint: disable=protected-access
     func_params = inspect.signature(func).parameters

@@ -137,7 +137,7 @@ class UnstructuredHorizon:
         columns = columns or self.geometry.index_headers + [height_prefix]
 
         self.path = path
-        self.name = os.path.basename(path)
+        self.name = os.path.basename(path) if self.name is None else self.name
 
         defaults = {'sep': '\s+'}
         reader_params = reader_params or {}
@@ -613,7 +613,7 @@ class Horizon:
         _ = kwargs
 
         self.path = path
-        self.name = os.path.basename(path)
+        self.name = os.path.basename(path) if self.name is None else self.name
         points = self.file_to_points(path)
         self.from_points(points, transform, **kwargs)
 
@@ -996,7 +996,7 @@ class Horizon:
         kwargs :
             For `Horizon.transform_where_present`.
         """
-        transform_kwargs = pop_kwargs_for_function(self.transform_where_present, **kwargs)
+        transform_kwargs = pop_kwargs_for_function(self.transform_where_present, kwargs)
         low = window // 2
         high = max(window - low, 0)
         chunk_size = min(chunk_size, self.h_max - self.h_min + window)
@@ -1055,7 +1055,7 @@ class Horizon:
         `label.get_instantaneous_amplitudes(channels=range(10, 21), window=41)` the attribute will be first calculated
         by array of `(xlines, ilines, 41)` shape and then the slice `[..., ..., 10:21]` of them will be returned.
         """
-        transform_kwargs = pop_kwargs_for_function(self.transform_where_present, **kwargs)
+        transform_kwargs = pop_kwargs_for_function(self.transform_where_present, kwargs)
         depths = [window // 2] if depths is None else depths
         amplitudes = self.get_cube_values(window, use_cache=False, **kwargs) #pylint: disable=unexpected-keyword-arg
         result = np.abs(hilbert(amplitudes))[:, :, depths]
@@ -1085,7 +1085,7 @@ class Horizon:
         `label.get_instantaneous_phases(channels=range(10, 21), window=41)` the attribute will be first calculated
         by array of `(xlines, ilines, 41)` shape and then the slice `[..., ..., 10:21]` of them will be returned.
         """
-        transform_kwargs = pop_kwargs_for_function(self.transform_where_present, **kwargs)
+        transform_kwargs = pop_kwargs_for_function(self.transform_where_present, kwargs)
         depths = [window // 2] if depths is None else depths
         amplitudes = self.get_cube_values(window, use_cache=False, **kwargs) #pylint: disable=unexpected-keyword-arg
         result = np.angle(hilbert(amplitudes))[:, :, depths]
@@ -1102,7 +1102,7 @@ class Horizon:
         kwargs :
             For `put_on_full` and `Horizon.transform_where_present`.
         """
-        transform_kwargs = pop_kwargs_for_function(self.transform_where_present, **kwargs)
+        transform_kwargs = pop_kwargs_for_function(self.transform_where_present, kwargs)
         matrix = self.put_on_full(self.matrix, **kwargs)
         return self.transform_where_present(matrix, **transform_kwargs)
 
@@ -1116,7 +1116,7 @@ class Horizon:
         kwargs :
             For `put_on_full` and `Horizon.transform_where_present`.
         """
-        transform_kwargs = pop_kwargs_for_function(self.transform_where_present, **kwargs)
+        transform_kwargs = pop_kwargs_for_function(self.transform_where_present, kwargs)
         full_binary_matrix = self.put_on_full(self.binary_matrix, **kwargs)
         return self.transform_where_present(full_binary_matrix, **transform_kwargs)
 
@@ -1490,7 +1490,7 @@ class Horizon:
         kwargs :
             For `HorizonMetrics.evaluate` and `Horizon.transform_where_present`.
         """
-        transform_kwargs = pop_kwargs_for_function(self.transform_where_present, **kwargs)
+        transform_kwargs = pop_kwargs_for_function(self.transform_where_present, kwargs)
         metrics = self.horizon_metrics.evaluate(metric=metric, supports=supports, agg=agg,
                                                 plot=False, savepath=None, **kwargs)
         metrics = np.nan_to_num(metrics)

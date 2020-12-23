@@ -198,7 +198,7 @@ class SeismicCubeset(Dataset):
 
     def show_labels(self, indices=None, main_labels='labels', overlay_labels=None, attributes=None, correspondence=None,
                     scale=1, colorbar=True, main_cmap='tab20b', overlay_cmap='autumn', overlay_alpha=0.7,
-                    suptitle_size=20,title_size=15):
+                    suptitle_size=20, title_size=15, transpose=True):
         """ Show specific attributes for labels of selected cubes with optional overlay by other attributes.
 
         Parameters
@@ -244,6 +244,8 @@ class SeismicCubeset(Dataset):
             Fontsize of suptitle for a row of images.
         title_size : int
             Size of titles for every subplot in a row.
+        transpose : bool
+            Whether plot data in `plot_image` way or not.
         """
         #pylint: disable=import-outside-toplevel
         from matplotlib import pyplot as plt
@@ -254,9 +256,7 @@ class SeismicCubeset(Dataset):
             divider = axes_grid1.make_axes_locatable(im.axes)
             width = axes_grid1.axes_size.AxesY(im.axes, aspect=1./aspect)
             pad = axes_grid1.axes_size.Fraction(pad_fraction, width)
-            current_ax = plt.gca()
             cax = divider.append_axes("right", size=width, pad=pad)
-            plt.sca(current_ax)
             return im.axes.figure.colorbar(im, cax=cax, **kwargs)
 
         indices = indices or self.indices
@@ -269,7 +269,8 @@ class SeismicCubeset(Dataset):
 
         for idx in indices:
             for label_num, label in enumerate(self[idx, main_labels]):
-                ratio = np.divide(*label.cube_shape[1::-1])
+                x, y = label.cube_shape[:-1] if transpose else label.cube_shape[1::-1]
+                ratio = np.divide(x, y)
                 figaspect = np.array([ratio * len(correspondence), 1]) * scale * 10
                 fig, axes = plt.subplots(ncols=len(correspondence), figsize=figaspect)
                 axes = axes if isinstance(axes, np.ndarray) else [axes]
@@ -297,6 +298,7 @@ class SeismicCubeset(Dataset):
                             data = data[..., data.shape[2] // 2 + 1]
                         data = data.squeeze()
                         data = data[input_lims]
+                        data = data.T if transpose else data
 
                         im = ax.imshow(data, cmap=cmap, alpha=alpha)
                         local_colorbar = params.get('colorbar', colorbar)
