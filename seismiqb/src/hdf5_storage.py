@@ -174,6 +174,9 @@ class StorageHDF5:
 
     @lru_cache(128)
     def construct_slide(self, loc, axis=0, **kwargs):
+        """ Load one slide from file without corresponding axis.
+        Caches the result in a thread-safe manner.
+        """
         locations = [slice(None) for _ in range(3)]
         locations[axis] = slice(loc, loc+1)
         slc = [slice(None) for _ in range(3)]
