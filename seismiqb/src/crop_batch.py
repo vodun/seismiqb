@@ -14,6 +14,7 @@ from ..batchflow import FilesIndex, Batch, action, inbatch_parallel, SkipBatchEx
 from .horizon import Horizon
 from .plotters import plot_image
 
+from .utils import adjusted_shape_3d
 
 
 AFFIX = '___'
@@ -122,7 +123,8 @@ class SeismicCropBatch(Batch):
         return getattr(self, component)
 
     @action
-    def crop(self, points, shape=None, direction=(0, 0, 0), side_view=False,
+    def crop(self, points, shape=None, direction=(0, 0, 0), side_view=False, adjust=False,
+             angle_1=0, angle_2=0,
              adaptive_slices=False, grid_src='quality_grid', eps=3,
              dst='locations', passdown=None, dst_points='points', dst_shapes='shapes'):
         """ Generate positions of crops. Creates new instance of `SeismicCropBatch`
@@ -172,6 +174,9 @@ class SeismicCropBatch(Batch):
         # pylint: disable=protected-access
 
         # Create all the points and shapes
+        if adjust:
+            crop_shape = shape
+            shape = adjusted_shape_3d(shape, angle_1, angle_2)
         if isinstance(shape, dict):
             shape = {k: np.asarray(v) for k, v in shape.items()}
         else:
@@ -201,6 +206,9 @@ class SeismicCropBatch(Batch):
             new_dict = {ix: self.index.get_fullpath(self.unsalt(ix)) for ix in new_index}
             new_batch = type(self)(FilesIndex.from_index(index=new_index, paths=new_dict, dirs=False))
             new_batch.transformed = True
+            if adjust:
+                new_batch.crop_shape = crop_shape
+                new_batch.load_shape = shape
 
             passdown = passdown or []
             passdown = [passdown] if isinstance(passdown, str) else passdown
@@ -820,7 +828,7 @@ class SeismicCropBatch(Batch):
         return copy_
 
     @apply_parallel
-    def rotate(self, crop, angle):
+    def rotate(self, crop, angle_1, angle_2=0):
         """ Rotate crop along the first two axes.
 
         Parameters
@@ -828,6 +836,14 @@ class SeismicCropBatch(Batch):
         angle : float
             Angle of rotation.
         """
+        crop = self._rotate(crop, angle_1)
+        if angle_2 != 0:
+            crop = crop.transpose(2, 0, 1)
+            crop = self._rotate(crop, angle_2)
+            crop = crop.transpose(1, 2, 0)
+        return crop
+
+    def _rotate(self, crop, angle):
         shape = crop.shape
         matrix = cv2.getRotationMatrix2D((shape[1]//2, shape[0]//2), angle, 1)
         return cv2.warpAffine(crop, matrix, (shape[1], shape[0])).reshape(shape)
@@ -1012,6 +1028,15 @@ class SeismicCropBatch(Batch):
         """ Apply a gaussian filter along specified axis. """
         return gaussian_filter1d(crop, sigma=sigma, axis=axis, order=order)
 
+    @apply_parallel
+    def central_crop(self, crop):
+        crop_shape = np.array(crop.shape)
+        shape = np.array(self.crop_shape)
+        if (shape > crop_shape).any():
+            raise ValueError(f"shape can't be large then crop shape ({crop_shape}) but {shape} was given.")
+        corner = crop_shape // 2 - shape // 2
+        slices = tuple([slice(start, start+length) for start, length in zip(corner, shape)])
+        return crop[slices]
 
     def plot_components(self, *components, idx=0, slide=None, mode='overlap', order_axes=None, **kwargs):
         """ Plot components of batch.

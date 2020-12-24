@@ -425,6 +425,27 @@ def infer_tuple(value, default):
         value = tuple([item if item else default[i] for i, item in enumerate(value)])
     return value
 
+def adjusted_shape_2d(shape, angle):
+    angle = np.abs(2 * np.pi * angle / 360)
+    limit = np.arctan(shape[1] / shape[0])
+    x_max, y_max = shape
+    if angle:
+        if angle < limit:
+            x_max = shape[0] * np.cos(angle) + shape[1] * np.sin(angle) + 1
+        else:
+            x_max = (shape[0] ** 2 + shape[1] ** 2) ** 0.5 + 1
+
+        if angle < np.pi / 2 - limit:
+            y_max = shape[0] * np.sin(angle) + shape[1] * np.cos(angle) + 1
+        else:
+            y_max = (shape[0] ** 2 + shape[1] ** 2) ** 0.5 + 1
+    return (int(np.ceil(x_max)), int(np.ceil(y_max)))
+
+def adjusted_shape_3d(shape, angle_1, angle_2=0):
+    i_shape, x_shape = adjusted_shape_2d(shape[:-1], angle_2)
+    x_shape, h_shape = adjusted_shape_2d((x_shape, shape[-1]), angle_1)
+    return (i_shape, x_shape, h_shape)    
+
 @njit
 def groupby_mean(array):
     """ Faster version of mean-groupby of data along the first two columns.

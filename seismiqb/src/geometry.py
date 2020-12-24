@@ -539,7 +539,7 @@ class SeismicGeometry:
             path_hdf5 = os.path.join(os.path.dirname(self.path), 'temp.hdf5')
 
         with h5py.File(path_hdf5, 'r') as src:
-            cube_hdf5 = src['cube']
+            cube_hdf5 = src['cube_i']
 
             with segyio.open(path_spec, 'r', strict=False) as segy:
                 segy.mmap()
@@ -616,7 +616,7 @@ class SeismicGeometry:
                 points[:, i] -= start
             stride = np.ones(3, dtype='int32')
 
-        cube = self.file_hdf5['cube'][locations[0], locations[1], locations[2]]
+        cube = self.file_hdf5['cube_i'][locations[0], locations[1], locations[2]]
         window = np.minimum(np.array(window), cube.shape)
 
         shape = np.ceil(np.array(cube.shape) / np.array(stride)).astype(int)
@@ -676,7 +676,7 @@ class SeismicGeometry:
             os.remove(path_hdf5)
 
         with h5py.File(path_hdf5, "a") as file_hdf5:
-            cube_hdf5 = file_hdf5.create_dataset('cube', self.cube_shape)
+            cube_hdf5 = file_hdf5.create_dataset('cube_i', self.cube_shape)
             cube_hdf5_x = file_hdf5.create_dataset('cube_x', self.cube_shape[[1, 2, 0]])
             cube_hdf5_h = file_hdf5.create_dataset('cube_h', self.cube_shape[[2, 0, 1]])
             _chunks = tqdm(chunks, total=total) if pbar else chunks
@@ -1164,7 +1164,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
 
         # Create file and datasets inside
         with h5py.File(path_hdf5, "a") as file_hdf5:
-            cube_hdf5 = file_hdf5.create_dataset('cube', self.cube_shape)
+            cube_hdf5 = file_hdf5.create_dataset('cube_i', self.cube_shape)
             cube_hdf5_x = file_hdf5.create_dataset('cube_x', self.cube_shape[[1, 2, 0]])
             cube_hdf5_h = file_hdf5.create_dataset('cube_h', self.cube_shape[[2, 0, 1]])
 
@@ -1224,7 +1224,7 @@ class SeismicGeometryHDF5(SeismicGeometry):
         if hasattr(self, 'lens'):
             self.cube_shape = np.asarray([self.ilines_len, self.xlines_len, self.depth]) # BC
         else:
-            self.cube_shape = self.file_hdf5['cube'].shape
+            self.cube_shape = self.file_hdf5['cube_i'].shape
             self.lens = self.cube_shape
         self.has_stats = True
 
@@ -1260,7 +1260,7 @@ class SeismicGeometryHDF5(SeismicGeometry):
         return crop
 
     def _load_i(self, ilines, xlines, heights):
-        cube_hdf5 = self.file_hdf5['cube']
+        cube_hdf5 = self.file_hdf5['cube_i']
         return np.stack([self._cached_load(cube_hdf5, iline)[xlines, :][:, heights]
                          for iline in range(ilines.start, ilines.stop)])
 
@@ -1286,7 +1286,7 @@ class SeismicGeometryHDF5(SeismicGeometry):
         _ = kwargs
         axis = self.parse_axis(axis)
         if axis == 0:
-            cube = self.file_hdf5['cube']
+            cube = self.file_hdf5['cube_i']
             slide = self._cached_load(cube, loc)
         elif axis == 1:
             cube = self.file_hdf5['cube_x']
@@ -1317,7 +1317,7 @@ class SeismicGeometryHDF5(SeismicGeometry):
         shape = [(slc.stop - slc.start) for slc in key]
         axis = np.argmin(shape)
         if axis == 0:
-            crop = self.file_hdf5['cube'][key[0], key[1], key[2]]
+            crop = self.file_hdf5['cube_i'][key[0], key[1], key[2]]
         elif axis == 1:
             crop = self.file_hdf5['cube_x'][key[1], key[2], key[0]].transpose((2, 0, 1))
         elif axis == 2:
