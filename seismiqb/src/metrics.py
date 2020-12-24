@@ -573,7 +573,7 @@ class HorizonMetrics(BaseSeismicMetric):
         or nested sequence of horizon and list of horizons, then the first horizon is compared against the
         best match from the list.
     other parameters
-        Passed direcly to :meth:`.Horizon.get_cube_values` or :meth:`.Horizon.get_cube_values_line`.
+        Passed directly to :meth:`.Horizon.get_cube_values` or :meth:`.Horizon.get_cube_values_line`.
     """
     AVAILABLE_METRICS = [
         'local_corrs', 'support_corrs',
@@ -586,7 +586,7 @@ class HorizonMetrics(BaseSeismicMetric):
         'hilbert', 'instantaneous_phase',
     ]
 
-    def __init__(self, horizons, orientation=None, window=23, offset=0, scale=False, chunk_size=256, line=1):
+    def __init__(self, horizons, orientation=None, window=23, offset=0, normalize=False, chunk_size=256, line=1):
         super().__init__()
         horizons = list(horizons) if isinstance(horizons, tuple) else horizons
         horizons = horizons if isinstance(horizons, list) else [horizons]
@@ -594,7 +594,7 @@ class HorizonMetrics(BaseSeismicMetric):
 
         # Save parameters for later evaluation
         self.orientation, self.line = orientation, line
-        self.window, self.offset, self.scale, self.chunk_size = window, offset, scale, chunk_size
+        self.window, self.offset, self.normalize, self.chunk_size = window, offset, normalize, chunk_size
 
         # The first horizon is used to evaluate metrics
         self.horizon = horizons[0]
@@ -610,7 +610,8 @@ class HorizonMetrics(BaseSeismicMetric):
 
         else: # metrics are computed on a specific slide
             self._data, self.bad_traces = self.horizon.get_cube_values_line(orientation=orientation, line=line,
-                                                                            window=window, offset=offset, scale=scale)
+                                                                            window=window, offset=offset,
+                                                                            normalize=normalize)
             self._probs = None
             self.spatial = False
 
@@ -619,7 +620,7 @@ class HorizonMetrics(BaseSeismicMetric):
         """ Create `data` attribute at the first time of evaluation. """
         if self._data is None:
             self._data = self.horizon.get_cube_values(window=self.window, offset=self.offset,
-                                                      scale=self.scale, chunk_size=self.chunk_size)
+                                                      transform=self.normalize, chunk_size=self.chunk_size)
         self._data[self._data == Horizon.FILL_VALUE] = np.nan
         return self._data
 
