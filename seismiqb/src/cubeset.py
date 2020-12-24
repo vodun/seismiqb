@@ -277,7 +277,7 @@ class SeismicCubeset(Dataset):
                 suptitle_size = int(ratio * suptitle_size)
                 title_size = int(title_size * ratio)
                 fig.suptitle(f"`{label.name}` on `{idx}`", size=suptitle_size)
-                input_lims = [slice(*lims) for lims in label.bbox[:2]]
+                main_label_bounds = tuple(slice(*lims) for lims in label.bbox[:2])
                 for ax, src_params in zip(axes, correspondence):
                     if overlay_labels is not None and overlay_labels not in src_params:
                         src_params[overlay_labels] = dict(attribute='masks')
@@ -297,7 +297,7 @@ class SeismicCubeset(Dataset):
                         if len(data.shape) > 2 and data.shape[2] != 1:
                             data = data[..., data.shape[2] // 2 + 1]
                         data = data.squeeze()
-                        data = data[input_lims]
+                        data = data[main_label_bounds]
                         data = data.T if transpose else data
 
                         im = ax.imshow(data, cmap=cmap, alpha=alpha)
@@ -588,7 +588,7 @@ class SeismicCubeset(Dataset):
                   strides=None, overlap=None, overlap_factor=None,
                   batch_size=16, filtering_matrix=None, filter_threshold=0):
         """ Create regular grid of points in cube.
-        This method is usually used with `:meth.assemble_predict`.
+        This method is usually used with :meth:`.assemble_predict`.
 
         Parameters
         ----------
@@ -733,7 +733,7 @@ class SeismicCubeset(Dataset):
         labels_indices : str
             Indices of items from `src_labels` to show below the grid.
         attribute : str
-            Alias from `:attr:~Horizon.FUNC_BY_ATTR` to show below the grid.
+            Alias from :attr:`~Horizon.FUNC_BY_ATTR` to show below the grid.
         plot_dict : dict, optional
             Dict of plot parameters, such as:
                 figsize : tuple
@@ -1193,9 +1193,9 @@ class SeismicCubeset(Dataset):
         pipeline : Pipeline
             Inference pipeline.
         crop_shape : sequence
-            Passed directly to `:meth:.make_grid`.
+            Passed directly to :meth:`.make_grid`.
         overlap_factor : float or sequence
-            Passed directly to `:meth:.make_grid`.
+            Passed directly to :meth:`.make_grid`.
         src_labels : str
             Name of dataset component with items to make grid for.
         dst_labels : str
@@ -1203,7 +1203,7 @@ class SeismicCubeset(Dataset):
         pipeline_var : str
             Name of pipeline variable to get predictions for assemble from.
         order : tuple of int
-            Passed directly to `:meth:.assemble_crops`.
+            Passed directly to :meth:`.assemble_crops`.
         binarize : bool
             Whether convert probability to class label or not.
         """
@@ -1238,7 +1238,7 @@ class SeismicCubeset(Dataset):
             Class attribute to put loaded data into.
         labels_class : class
             Class to use for labels creation.
-            See details in `:meth:.create_labels`.
+            See details in :meth:`.create_labels`.
         p : sequence of numbers
             Proportions of different cubes in sampler.
         bins : TODO
@@ -1274,7 +1274,7 @@ class SeismicCubeset(Dataset):
         main_labels : str
             Which dataset attribute assign to `self.labels`.
         kwargs :
-            Passed directly to `:meth:.create_labels`.
+            Passed directly to :meth:`.create_labels`.
 
         Examples
         --------

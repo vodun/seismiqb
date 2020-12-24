@@ -945,8 +945,8 @@ class Horizon:
         normalize : 'min-max', 'mean-std', 'shift-rescale' or None
             Normalization mode for data where `presence_matrix` is True.
             If None, no normalization applied. Defaults to None.
-        fill_value : numpy primitive type
-            Value to fill `array` in where `:attr:.presence_matrix` is False. Must be compatible with `array.dtype`.
+        fill_value : number
+            Value to fill `array` in where :attr:`.presence_matrix` is False. Must be compatible with `array.dtype`.
             If None, no filling applied. Defaults to None.
         shift, rescale : number, optional
             For 'shift-rescale` normalization mode.
@@ -994,7 +994,7 @@ class Horizon:
             Whether fill zero traces with nans or not.
             Defaults to True.
         kwargs :
-            Passed directly to `:meth:.transform_where_present`.
+            Passed directly to :meth:`.transform_where_present`.
         """
         transform_kwargs = retrieve_function_arguments(self.transform_where_present, kwargs)
         low = window // 2
@@ -1046,7 +1046,7 @@ class Horizon:
             If slice or sequence of int, used for slicing calculated attribute along last axis.
             If None, infer middle channel index from 'window' and slice at it calculated attribute along last axis.
         kwargs :
-            Passed directly to `:meth:.get_cube_values` and `:meth:.transform_where_present``.
+            Passed directly to :meth:`.get_cube_values` and :meth:`.transform_where_present``.
 
         Notes
         -----
@@ -1076,7 +1076,7 @@ class Horizon:
             If slice or sequence of int, used for slicing calculated attribute along last axis.
             If None, infer middle channel index from 'window' and slice at it calculated attribute along last axis.
         kwargs :
-            Passed directly to `:meth:.get_cube_values` and `:meth:.transform_where_present`.
+            Passed directly to :meth:`.get_cube_values` and :meth:`.transform_where_present`.
 
         Notes
         -----
@@ -1100,7 +1100,7 @@ class Horizon:
         Parameters
         ----------
         kwargs :
-            Passed directly to `:meth:.put_on_full` and `:meth:.transform_where_present`.
+            Passed directly to :meth:`.put_on_full` and :meth:`.transform_where_present`.
         """
         transform_kwargs = retrieve_function_arguments(self.transform_where_present, kwargs)
         matrix = self.put_on_full(self.matrix, **kwargs)
@@ -1114,7 +1114,7 @@ class Horizon:
         Parameters
         ----------
         kwargs :
-            Passed directly to `:meth:.put_on_full` and `:meth:.transform_where_present`.
+            Passed directly to :meth:`.put_on_full` and :meth:`.transform_where_present`.
         """
         transform_kwargs = retrieve_function_arguments(self.transform_where_present, kwargs)
         full_binary_matrix = self.put_on_full(self.binary_matrix, **kwargs)
@@ -1139,8 +1139,8 @@ class Horizon:
             If None, `src_attribute` is returned uncropped.
         kwargs :
             Passed directly to either:
-            - one of attribute-evaluating methods from `:attr:.ATTRIBUTE_TO_METHOD` depending on `src_attribute`;
-            - or attribute-transforming method `:meth:.transform_where_present`.
+            - one of attribute-evaluating methods from :attr:`.ATTRIBUTE_TO_METHOD` depending on `src_attribute`;
+            - or attribute-transforming method :meth:`.transform_where_present`.
         Examples
         --------
 
@@ -1154,7 +1154,7 @@ class Horizon:
         -----
 
         Although the function can be used in a straightforward way as described above, its main purpose is to act
-        as an interface for accessing `:class:.Horizon` attributes from `:class:~SeismicCropBatch` to allow calls like:
+        as an interface for accessing :class:`.Horizon` attributes from :class:`~SeismicCropBatch` to allow calls like:
 
         >>> Pipeline().load_attribute('cube_values', dst='amplitudes')
         """
@@ -1393,7 +1393,7 @@ class Horizon:
 
     @property
     def horizon_metrics(self):
-        """ Calculate `:class:~HorizonMetrics` on demand. """
+        """ Calculate :class:`~HorizonMetrics` on demand. """
         from .metrics import HorizonMetrics
         return HorizonMetrics(self)
 
@@ -1461,7 +1461,7 @@ class Horizon:
         compute_metrics : bool
             Whether to compute correlation map of a horizon.
         supports, savepath, plot, kwargs
-            Passed directly to `:meth:HorizonMetrics.evaluate`.
+            Passed directly to :meth:`HorizonMetrics.evaluate`.
         printer : callable
             Function to display message with metrics.
         """
@@ -1487,9 +1487,9 @@ class Horizon:
         Parameters
         ----------
         metric, supports, agg :
-            Passed directly to `:meth:.HorizonMetrics.evaluate`.
+            Passed directly to :meth:`.HorizonMetrics.evaluate`.
         kwargs :
-            Passed directly to `:meth:.HorizonMetrics.evaluate` and `:meth:.transform_where_present`.
+            Passed directly to :meth:`.HorizonMetrics.evaluate` and :meth:`.transform_where_present`.
         """
         transform_kwargs = retrieve_function_arguments(self.transform_where_present, kwargs)
         metrics = self.horizon_metrics.evaluate(metric=metric, supports=supports, agg=agg,
@@ -1742,7 +1742,7 @@ class Horizon:
     @staticmethod
     def merge_list(horizons, mean_threshold=2.0, adjacency=3, minsize=50):
         """ Iteratively try to merge every horizon in a list to every other, until there are no possible merges.
-        Parameters are passed directly to `:meth:~.verify_merge`, `:meth:~.overlap_merge` and `:meth:~.adjacent_merge`.
+        Parameters are passed directly to :meth:`~.verify_merge`, :meth:`~.overlap_merge` and :meth:`~.adjacent_merge`.
         """
         horizons = [horizon for horizon in horizons if len(horizon) >= minsize]
 
@@ -2233,7 +2233,7 @@ class Horizon:
 
 
 class StructuredHorizon(Horizon):
-    """ Convenient alias for `:class:.Horizon` class. """
+    """ Convenient alias for :class:`.Horizon` class. """
 
 
 @njit(parallel=True)

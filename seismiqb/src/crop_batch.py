@@ -131,7 +131,7 @@ class SeismicCropBatch(Batch):
                        side_view=False, adaptive_slices=False, passdown=None,
                        grid_src='quality_grid', dst='locations',
                        dst_points='points', dst_shapes='shapes'):
-        """ Generate positions of crops. Creates new instance of `:class:.SeismicCropBatch`
+        """ Generate positions of crops. Creates new instance of :class:`.SeismicCropBatch`
         with crop positions in one of the components (`locations` by default).
 
         Parameters
@@ -343,7 +343,7 @@ class SeismicCropBatch(Batch):
         Parameters
         ----------
         src_attribute : str
-            A keyword from `:attr:~Horizon.ATTRIBUTE_TO_METHOD` keys, defining label attribute to make crops from.
+            A keyword from :attr:`~Horizon.ATTRIBUTE_TO_METHOD` keys, defining label attribute to make crops from.
         src_labels : str
             Dataset attribute with labels dict.
         locations : str
@@ -352,8 +352,8 @@ class SeismicCropBatch(Batch):
             Number of dimensions returned crop should have.
         kwargs :
             Passed directly to either:
-            - one of attribute-evaluating methods from `:attr:~Horizon.ATTRIBUTE_TO_METHOD` depending on `src_attribute`
-            - or attribute-transforming method `:meth:~Horizon.transform_where_present`.
+            - one of attribute-evaluating methods from :attr:`~Horizon.ATTRIBUTE_TO_METHOD` depending on `src_attribute`
+            - or attribute-transforming method :meth:`~Horizon.transform_where_present`.
 
         Notes
         -----
@@ -544,7 +544,7 @@ class SeismicCropBatch(Batch):
         ----------
         mode : callable or str
             If callable, then directly applied to data.
-            If str, then `:meth:~SeismicGeometry.scaler` applied in one of the modes:
+            If str, then :meth:`~SeismicGeometry.scaler` applied in one of the modes:
             - `minmax`: scaled to [0, 1] via minmax scaling.
             - `q` or `normalize`: divided by the maximum of absolute values
                                   of the 0.01 and 0.99 quantiles.
@@ -612,7 +612,7 @@ class SeismicCropBatch(Batch):
             Default value of (2, 0, 1) is applicable to standart pipeline with one `rotate_axes`
             applied to images-tensor.
         threshold, mode, minsize, mean_threshold, adjacency, prefix
-            Passed directly to `:meth:Horizon.from_mask`.
+            Passed directly to :meth:`Horizon.from_mask`.
         """
         _ = dst, mean_threshold, adjacency, skip_merge
 

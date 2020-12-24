@@ -16,9 +16,9 @@ from ..batchflow import Sampler
 
 
 
-# pylint: disable=redefined-outer-name
 def file_print(msg, path, mode='w'):
     """ Print to file. """
+    # pylint: disable=redefined-outer-name
     with open(path, mode) as file:
         print(msg, file=file)
 
@@ -72,17 +72,17 @@ def stable_hash(key):
         key = key.encode('ascii')
     return str(blake2b(key).hexdigest())
 
-def to_nested_tuple(iterable):
-    """ Recursively convert nested list or dictionary into nested tuple. """
+def flatten_nested(iterable):
+    """ Recursively flatten nested structure of tuples, list and dicts. """
     result = []
     if isinstance(iterable, (tuple, list)):
         for item in iterable:
-            result.append(to_nested_tuple(item))
+            result.extend(flatten_nested(item))
     elif isinstance(iterable, dict):
         for key, value in sorted(iterable.items()):
-            result.extend((key, to_nested_tuple(value)))
+            result.extend((*flatten_nested(key), *flatten_nested(value)))
     else:
-        return iterable
+        return (iterable,)
     return tuple(result)
 
 class Singleton:
@@ -108,15 +108,15 @@ class lru_cache:
 
     Examples
     --------
-    Store loaded slides by default:
+    Always cache loaded slides except when `use_cache=False` is explicitly passed to method arguments:
 
     >>> @lru_cache(maxsize=128)
     >>> def load_slide(cube_name, slide_no):
     >>>     pass
 
-    Store loaded slides only when `use_cache` is explicitly passed to function arguments:
+    Only cache loaded slides when `use_cache=True` is explicitly passed to method arguments:
 
-    >>> @lru_cache(maxsize=128, apply_by_default=false)
+    >>> @lru_cache(maxsize=128, apply_by_default=False)
     >>> def load_slide(cube_name, slide_no):
     >>>     pass
 
@@ -164,7 +164,7 @@ class lru_cache:
                 attr_hash = stable_hash(getattr(instance, attr))
                 key.append(attr_hash)
 
-        return to_nested_tuple(key)
+        return flatten_nested(key)
 
 
     def __call__(self, func):
