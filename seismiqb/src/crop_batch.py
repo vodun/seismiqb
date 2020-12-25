@@ -186,7 +186,7 @@ class SeismicCropBatch(Batch):
         SeismicCropBatch
             Batch with positions of crops in specified component.
         """
-        # pylint: disable=too-many-return-statements
+        # pylint: disable=too-many-arguments
 
         # Create all the points and shapes
         crop_shape = shape
