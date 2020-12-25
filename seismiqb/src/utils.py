@@ -1,9 +1,10 @@
 """ Utility functions. """
 from math import isnan
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict
 from threading import RLock
 from functools import wraps
 from hashlib import blake2b
+import inspect
 
 from tqdm import tqdm
 import numpy as np
@@ -15,9 +16,10 @@ from ..batchflow import Sampler
 
 
 
-def file_print(msg, path):
+def file_print(msg, path, mode='w'):
     """ Print to file. """
-    with open(path, 'w') as file:
+    # pylint: disable=redefined-outer-name
+    with open(path, mode) as file:
         print(msg, file=file)
 
 
@@ -62,8 +64,6 @@ class IndexedDict(OrderedDict):
             key = list(self.keys())[key]
         return super().__getitem__(key)
 
-
-
 def stable_hash(key):
     """ Hash that stays the same between different runs of Python interpreter. """
     if not isinstance(key, (str, bytes)):
@@ -72,8 +72,21 @@ def stable_hash(key):
         key = key.encode('ascii')
     return str(blake2b(key).hexdigest())
 
+def flatten_nested(iterable):
+    """ Recursively flatten nested structure of tuples, list and dicts. """
+    result = []
+    if isinstance(iterable, (tuple, list)):
+        for item in iterable:
+            result.extend(flatten_nested(item))
+    elif isinstance(iterable, dict):
+        for key, value in sorted(iterable.items()):
+            result.extend((*flatten_nested(key), *flatten_nested(value)))
+    else:
+        return (iterable,)
+    return tuple(result)
+
 class Singleton:
-    """ There must be only one!"""
+    """ There must be only one! """
     instance = None
     def __init__(self):
         if not Singleton.instance:
@@ -81,40 +94,40 @@ class Singleton:
 
 class lru_cache:
     """ Thread-safe least recent used cache. Must be applied to class methods.
+    Adds the `use_cache` argument to the decorated method to control whether the caching logic is applied.
+    Stored values are individual for each instance of the class.
 
     Parameters
     ----------
     maxsize : int
         Maximum amount of stored values.
-    storage : None, OrderedDict or PickleDict
-        Storage to use.
-        If None, then no caching is applied.
-    classwide : bool
-        If True, then first argument of a method (self) is changed to class name for the purposes on hashing.
-    anchor : bool
-        If True, then code of the whole directory this file is located is used to create a persistent hash
-        for the purposes of storing.
     attributes: None, str or sequence of str
         Attributes to get from object and use as additions to key.
-    pickle_module: str
-        Module to use to save/load files on disk. Used only if `storage` is :class:`.PickleDict`.
+    apply_by_default : bool
+        Whether the cache logic is on by default.
 
     Examples
     --------
-    Store loaded slides::
+    Always cache loaded slides except when `use_cache=False` is explicitly passed to method arguments:
 
-    @lru_cache(maxsize=128)
-    def load_slide(cube_name, slide_no):
-        pass
+    >>> @lru_cache(maxsize=128)
+    >>> def load_slide(cube_name, slide_no):
+    >>>     pass
+
+    Only cache loaded slides when `use_cache=True` is explicitly passed to method arguments:
+
+    >>> @lru_cache(maxsize=128, apply_by_default=False)
+    >>> def load_slide(cube_name, slide_no):
+    >>>     pass
 
     Notes
     -----
-    All arguments to the decorated method must be hashable.
+    On first call assigns an empty set to an instance attribute `_cached_attributes` to keep track of decorated methods.
     """
     #pylint: disable=invalid-name, attribute-defined-outside-init
-    def __init__(self, maxsize=None, classwide=False, attributes=None):
+    def __init__(self, maxsize=None, attributes=None, apply_by_default=True):
         self.maxsize = maxsize
-        self.classwide = classwide
+        self.apply_by_default = apply_by_default
 
         # Make `attributes` always a list
         if isinstance(attributes, str):
@@ -128,68 +141,85 @@ class lru_cache:
         self.lock = RLock()
         self.reset()
 
-
-    def reset(self):
+    def reset(self, instance=None):
         """ Clear cache and stats. """
-        self.cache = OrderedDict()
-        self.is_full = False
-        self.stats = {'hit': 0, 'miss': 0}
+        if instance is None:
+            self.cache = defaultdict(OrderedDict)
+            self.is_full = defaultdict(lambda: False)
+            self.stats = defaultdict(lambda: {'hit': 0, 'miss': 0})
+        else:
+            self.cache[instance] = OrderedDict()
+            self.is_full[instance] = False
+            self.stats[instance] = {'hit': 0, 'miss': 0}
 
-    def make_key(self, args, kwargs):
-        """ Create a key from a combination of instance reference or class reference,
-        method args, and instance attributes.
-        """
-        key = list(args)
-        # key[0] is `instance` if applied to a method
+    def make_key(self, instance, args, kwargs):
+        """ Create a key from a combination of instance reference, method args, and instance attributes. """
+        key = [instance] + list(args)
         if kwargs:
             for k, v in sorted(kwargs.items()):
                 key.append((k, v))
 
         if self.attributes:
             for attr in self.attributes:
-                attr_hash = stable_hash(getattr(key[0], attr))
+                attr_hash = stable_hash(getattr(instance, attr))
                 key.append(attr_hash)
 
-        if self.classwide:
-            key[0] = key[0].__class__
-        return tuple(key)
+        return flatten_nested(key)
 
 
     def __call__(self, func):
         """ Add the cache to the function. """
         @wraps(func)
-        def wrapper(*args, **kwargs):
-            key = self.make_key(args, kwargs)
+        def wrapper(instance, *args, **kwargs):
+            # pylint: disable=protected-access
+            # Keep track of cached functions.
+            if not hasattr(instance, '_cached_attributes'):
+                setattr(instance, '_cached_attributes', set())
+            instance._cached_attributes.add(func.__name__)
+
+            # Parse the `use_cache`
+            if 'use_cache' in kwargs:
+                use_cache = kwargs.pop('use_cache')
+            else:
+                use_cache = self.apply_by_default
+
+            # Skip the caching logic and evaluate function directly
+            if not use_cache:
+                result = func(instance, *args, **kwargs)
+                return result
+
+            key = self.make_key(instance, args, kwargs)
 
             # If result is already in cache, just retrieve it and update its timings
             with self.lock:
-                result = self.cache.get(key, self.default)
+                result = self.cache[instance].get(key, self.default)
                 if result is not self.default:
-                    del self.cache[key]
-                    self.cache[key] = result
-                    self.stats['hit'] += 1
+                    del self.cache[instance][key]
+                    self.cache[instance][key] = result
+                    self.stats[instance]['hit'] += 1
                     return result
 
             # The result was not found in cache: evaluate function
-            result = func(*args, **kwargs)
+            result = func(instance, *args, **kwargs)
 
             # Add the result to cache
             with self.lock:
-                self.stats['miss'] += 1
-                if key in self.cache:
+                self.stats[instance]['miss'] += 1
+                if key in self.cache[instance]:
                     pass
-                elif self.is_full:
-                    self.cache.popitem(last=False)
-                    self.cache[key] = result
+                elif self.is_full[instance]:
+                    self.cache[instance].popitem(last=False)
+                    self.cache[instance][key] = result
                 else:
-                    self.cache[key] = result
-                    self.is_full = (len(self.cache) >= self.maxsize)
+                    self.cache[instance][key] = result
+                    self.is_full[instance] = (len(self.cache[instance]) >= self.maxsize)
             return result
 
         wrapper.__name__ = func.__name__
         wrapper.cache = lambda: self.cache
         wrapper.stats = lambda: self.stats
         wrapper.reset = self.reset
+        wrapper.reset_instance = lambda instance: self.reset(instance=instance)
         return wrapper
 
 
@@ -308,7 +338,7 @@ def save_point_cloud(metric, save_path, geometry=None):
 
 
 def gen_crop_coordinates(point, horizon_matrix, zero_traces,
-                         stride, shape, fill_value, zeros_threshold=0,
+                         stride, shape, depth, fill_value, zeros_threshold=0,
                          empty_threshold=5, safe_stripe=0, num_points=2):
     """ Generate crop coordinates next to the point with maximum horizon covered area.
 
@@ -354,7 +384,7 @@ def gen_crop_coordinates(point, horizon_matrix, zero_traces,
                 num_empty = np.sum(horizon_patch == fill_value)
                 if num_empty > empty_threshold:
                     candidates.append([il, point[1],
-                                       hor_height - shape[2] // 2])
+                                       min(hor_height - shape[2] // 2, depth - shape[2] - 1)])
                     shapes.append([shape[1], shape[0], shape[2]])
                     orders.append([0, 2, 1])
                     intersections.append(shape[1] - num_empty)
@@ -372,7 +402,7 @@ def gen_crop_coordinates(point, horizon_matrix, zero_traces,
                 num_empty = np.sum(horizon_patch == fill_value)
                 if num_empty > empty_threshold:
                     candidates.append([point[0], xl,
-                                       hor_height - shape[2] // 2])
+                                       min(hor_height - shape[2] // 2, depth - shape[2] - 1)])
                     shapes.append(shape)
                     orders.append([2, 0, 1])
                     intersections.append(shape[1] - num_empty)
@@ -454,7 +484,7 @@ def adjusted_shape_2d(shape, angle):
             y_max = (shape[0] ** 2 + shape[1] ** 2) ** 0.5 + 1
     return (int(np.ceil(x_max)), int(np.ceil(y_max)))
 
-def adjusted_shape_3d(shape, angle_1, angle_2=0):
+def adjusted_shape_3d(shape, angle_1, angle_2=0, scale=(1, 1, 1)):
     """ Compute adjusted 3D crop shape to rotate it and get central crop without padding.
 
     Parameters
@@ -464,13 +494,14 @@ def adjusted_shape_3d(shape, angle_1, angle_2=0):
     angle_1 : float
         Rotation angle in (xline, depth) plane.
     angle_2 : int, optional
-        Rotation angle in (iline, xline) plane, by default 0
+        Rotation angle in (iline, xline) plane, by default 0.
 
     Returns
     -------
     tuple
         Adjusted crop shape.
     """
+    shape = np.ceil(np.array(shape) / np.array(scale)).astype(int)
     i_shape, x_shape = adjusted_shape_2d(shape[:-1], angle_2)
     x_shape, h_shape = adjusted_shape_2d((x_shape, shape[-1]), angle_1)
     return (i_shape, x_shape, h_shape)
@@ -678,6 +709,15 @@ def nb_mode(array, mask):
     return temp
 
 
+def make_gaussian_kernel(kernel_size=3, sigma=1.):
+    """ Create Gaussian kernel with given parameters. """
+    ax = np.linspace(-(kernel_size - 1) / 2., (kernel_size - 1) / 2., kernel_size)
+    x_points, y_points = np.meshgrid(ax, ax)
+    kernel = np.exp(-0.5 * (np.square(x_points) + np.square(y_points)) / np.square(sigma))
+    gaussian_kernel = (kernel / np.sum(kernel).astype(np.float32))
+    return gaussian_kernel
+
+
 @njit
 def filter_simplices(simplices, points, matrix, threshold=5.):
     """ Remove simplices outside of matrix. """
@@ -797,3 +837,11 @@ def local_correlation(region):
             if den != 0:
                 corr[i, j] = cov / den
     return np.mean(corr)
+
+def retrieve_function_arguments(function, dictionary):
+    """ Retrieve both positional and keyword arguments for a passed `function` from a `dictionary`.
+    Note that retrieved values are removed from the passed `dictionary` in-place. """
+    # pylint: disable=protected-access
+    parameters = inspect.signature(function).parameters
+    arguments_with_defaults = {k: v.default for k, v in parameters.items() if v.default != inspect._empty}
+    return {k: dictionary.pop(k, v) for k, v in arguments_with_defaults.items()}
