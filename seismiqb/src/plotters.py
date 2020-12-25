@@ -82,7 +82,7 @@ class MatplotlibPlotter:
         values in some cases.
         """
         # make conversion-dict for kwargs-keys
-        if mode in ['single', 'rgb', 'overlap', 'histogram', 'curve', 'histogram']:
+        if mode in ['single', 'rgb', 'overlap', 'histogram', 'curve', 'histogram', 'grid']:
             keys_converter = {'title': 'label', 't':'label'}
         elif mode in ['separate']:
             keys_converter = {'title': 't', 'label': 't'}
