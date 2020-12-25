@@ -560,8 +560,8 @@ class BaseSeismicMetric(Metrics):
 class HorizonMetrics(BaseSeismicMetric):
     """ Evaluate metric(s) on horizon(s).
     During initialization, data along the horizon is cut with the desired parameters.
-    To get the value of a particular metric, use :meth:`.evaluate`::
-        HorizonMetrics(horizon).evaluate('support_corrs', supports=20, agg='mean')
+    To get the value of a particular metric, use :meth:`.evaluate`:
+    >>> HorizonMetrics(horizon).evaluate('support_corrs', supports=20, agg='mean')
 
     To plot the results, set `plot` argument of :meth:`.evaluate` to True.
 
