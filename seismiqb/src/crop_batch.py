@@ -174,9 +174,8 @@ class SeismicCropBatch(Batch):
         # pylint: disable=protected-access
 
         # Create all the points and shapes
-        if adjust:
-            crop_shape = shape
-            shape = adjusted_shape_3d(shape, angle_1, angle_2)
+        crop_shape = shape
+        shape = adjusted_shape_3d(shape, angle_1, angle_2) if adjust else shape
         if isinstance(shape, dict):
             shape = {k: np.asarray(v) for k, v in shape.items()}
         else:
@@ -1030,6 +1029,7 @@ class SeismicCropBatch(Batch):
 
     @apply_parallel
     def central_crop(self, crop):
+        """ Central crop of `self.crop_shape` shape. """
         crop_shape = np.array(crop.shape)
         shape = np.array(self.crop_shape)
         if (shape > crop_shape).any():

@@ -426,6 +426,19 @@ def infer_tuple(value, default):
     return value
 
 def adjusted_shape_2d(shape, angle):
+    """ Compute adjusted 2D crop shape to rotate it and get central crop without padding.
+
+    Parameters
+    ----------
+    shape : tuple
+        Target сrop shape.
+    angle : float
+
+    Returns
+    -------
+    tuple
+        Adjusted crop shape.
+    """
     angle = np.abs(2 * np.pi * angle / 360)
     limit = np.arctan(shape[1] / shape[0])
     x_max, y_max = shape
@@ -442,9 +455,25 @@ def adjusted_shape_2d(shape, angle):
     return (int(np.ceil(x_max)), int(np.ceil(y_max)))
 
 def adjusted_shape_3d(shape, angle_1, angle_2=0):
+    """ Compute adjusted 3D crop shape to rotate it and get central crop without padding.
+
+    Parameters
+    ----------
+    shape : tuple
+        Target сrop shape.
+    angle_1 : float
+        Rotation angle in (xline, depth) plane.
+    angle_2 : int, optional
+        Rotation angle in (iline, xline) plane, by default 0
+
+    Returns
+    -------
+    tuple
+        Adjusted crop shape.
+    """
     i_shape, x_shape = adjusted_shape_2d(shape[:-1], angle_2)
     x_shape, h_shape = adjusted_shape_2d((x_shape, shape[-1]), angle_1)
-    return (i_shape, x_shape, h_shape)    
+    return (i_shape, x_shape, h_shape)
 
 @njit
 def groupby_mean(array):
