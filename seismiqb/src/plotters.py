@@ -82,10 +82,12 @@ class MatplotlibPlotter:
         values in some cases.
         """
         # make conversion-dict for kwargs-keys
-        if mode in ['single', 'rgb', 'overlap', 'histogram', 'curve', 'histogram', 'grid']:
+        if mode in ['single', 'rgb', 'overlap', 'histogram', 'curve', 'histogram']:
             keys_converter = {'title': 'label', 't':'label'}
-        elif mode in ['separate']:
+        elif mode == 'separate':
             keys_converter = {'title': 't', 'label': 't'}
+        elif mode == 'grid':
+            keys_converter = {'title': 't'}
 
         keys_converter = {
             **keys_converter,
@@ -249,6 +251,7 @@ class MatplotlibPlotter:
         single_updates = filter_kwargs(updated, ['label', 'xlabel', 'ylabel', 'cmap',
                                                 'order_axes', 'facecolor', 'fontsize',
                                                 'vmin', 'vmax'])
+        title_kwargs = filter_kwargs(updated, ['t', 'y', 'fontsize', 'family', 'color'])
 
         # make and update the sequence of args for plotters if needed
         # make sure that each elem of single_updates is iterable
@@ -272,10 +275,12 @@ class MatplotlibPlotter:
                 raise ValueError('Either grid params (nrows and ncols) or grid objects (fig, ax) should be supplied.')
         else:
             fig, ax = plt.subplots(**subplots_kwargs)
-
+            ax = ax.reshape((nrows, ncols))
         for i in range(nrows):
             for j in range(ncols):
                 self.single(images[i * ncols + j], **single_kwargs[i * ncols + j], ax=ax[i, j])
+
+        fig.suptitle(**title_kwargs)
         self.save_and_show(fig)
 
 
