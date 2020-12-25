@@ -490,9 +490,9 @@ class SeismicGeometry:
         yticks = yticks[::max(1, round(len(xticks) // (n_ticks - 1) / delta_ticks)) * delta_ticks] + [yticks[-1]]
         yticks = sorted(list(set(yticks)), reverse=True)
 
-        if (xticks[-1] - xticks[-2]) < delta_ticks:
+        if len(xticks) > 2 and (xticks[-1] - xticks[-2]) < delta_ticks:
             xticks.pop(-2)
-        if (yticks[0] - yticks[1]) < delta_ticks:
+        if len(yticks) > 2 and (yticks[0] - yticks[1]) < delta_ticks:
             yticks.pop(1)
 
         kwargs = {
@@ -506,7 +506,7 @@ class SeismicGeometry:
             'labelright': False,
             **kwargs
         }
-        plot_image(slide, mode='single', **kwargs)
+        plot_image(slide, **kwargs)
 
     def show_amplitude_hist(self, scaler=None, bins=50, **kwargs):
         """ Show distribution of amplitudes in `trace_container`. Optionally applies chosen `scaler`. """

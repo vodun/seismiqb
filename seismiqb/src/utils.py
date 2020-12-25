@@ -4,6 +4,7 @@ from collections import OrderedDict, defaultdict
 from threading import RLock
 from functools import wraps
 from hashlib import blake2b
+import inspect
 
 from tqdm import tqdm
 import numpy as np
@@ -16,9 +17,11 @@ from numba import njit, prange
 from ..batchflow import Sampler
 
 
-def file_print(msg, path):
+
+def file_print(msg, path, mode='w'):
     """ Print to file. """
-    with open(path, 'w') as file:
+    # pylint: disable=redefined-outer-name
+    with open(path, mode) as file:
         print(msg, file=file)
 
 
@@ -63,8 +66,6 @@ class IndexedDict(OrderedDict):
             key = list(self.keys())[key]
         return super().__getitem__(key)
 
-
-
 def stable_hash(key):
     """ Hash that stays the same between different runs of Python interpreter. """
     if not isinstance(key, (str, bytes)):
@@ -73,8 +74,21 @@ def stable_hash(key):
         key = key.encode('ascii')
     return str(blake2b(key).hexdigest())
 
+def flatten_nested(iterable):
+    """ Recursively flatten nested structure of tuples, list and dicts. """
+    result = []
+    if isinstance(iterable, (tuple, list)):
+        for item in iterable:
+            result.extend(flatten_nested(item))
+    elif isinstance(iterable, dict):
+        for key, value in sorted(iterable.items()):
+            result.extend((*flatten_nested(key), *flatten_nested(value)))
+    else:
+        return (iterable,)
+    return tuple(result)
+
 class Singleton:
-    """ There must be only one!"""
+    """ There must be only one! """
     instance = None
     def __init__(self):
         if not Singleton.instance:
@@ -96,15 +110,21 @@ class lru_cache:
 
     Examples
     --------
-    Store loaded slides::
+    Always cache loaded slides except when `use_cache=False` is explicitly passed to method arguments:
 
-    @lru_cache(maxsize=128)
-    def load_slide(cube_name, slide_no):
-        pass
+    >>> @lru_cache(maxsize=128)
+    >>> def load_slide(cube_name, slide_no):
+    >>>     pass
+
+    Only cache loaded slides when `use_cache=True` is explicitly passed to method arguments:
+
+    >>> @lru_cache(maxsize=128, apply_by_default=False)
+    >>> def load_slide(cube_name, slide_no):
+    >>>     pass
 
     Notes
     -----
-    All arguments to the decorated method must be hashable.
+    On first call assigns an empty set to an instance attribute `_cached_attributes` to keep track of decorated methods.
     """
     #pylint: disable=invalid-name, attribute-defined-outside-init
     def __init__(self, maxsize=None, attributes=None, apply_by_default=True):
@@ -145,13 +165,20 @@ class lru_cache:
             for attr in self.attributes:
                 attr_hash = stable_hash(getattr(instance, attr))
                 key.append(attr_hash)
-        return tuple(key)
+
+        return flatten_nested(key)
 
 
     def __call__(self, func):
         """ Add the cache to the function. """
         @wraps(func)
         def wrapper(instance, *args, **kwargs):
+            # pylint: disable=protected-access
+            # Keep track of cached functions.
+            if not hasattr(instance, '_cached_attributes'):
+                setattr(instance, '_cached_attributes', set())
+            instance._cached_attributes.add(func.__name__)
+
             # Parse the `use_cache`
             if 'use_cache' in kwargs:
                 use_cache = kwargs.pop('use_cache')
@@ -743,3 +770,11 @@ def compute_attribute(array, window, device='cuda:0', attribute='semblance'):
 
     denum *= normilizing.view(*normilizing.shape, 1)
     return np.nan_to_num((num / denum).cpu().numpy()[0, 0], nan=1.)
+
+def retrieve_function_arguments(function, dictionary):
+    """ Retrieve both positional and keyword arguments for a passed `function` from a `dictionary`.
+    Note that retrieved values are removed from the passed `dictionary` in-place. """
+    # pylint: disable=protected-access
+    parameters = inspect.signature(function).parameters
+    arguments_with_defaults = {k: v.default for k, v in parameters.items() if v.default != inspect._empty}
+    return {k: dictionary.pop(k, v) for k, v in arguments_with_defaults.items()}
