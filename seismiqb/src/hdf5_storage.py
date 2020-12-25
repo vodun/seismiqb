@@ -396,8 +396,10 @@ class StorageHDF5:
 
     @property
     def cache_length(self):
+        """ Total amount of cached slides. """
         return len(self.load_existed_slide.cache()[self]) + len(self.construct_slide.cache()[self])
 
     @property
     def cache_items(self):
+        """ Total size of cached slides. """
         return [*self.load_existed_slide.cache()[self].values(), *self.construct_slide.cache()[self].values()]
