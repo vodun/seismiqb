@@ -388,3 +388,16 @@ class StorageHDF5:
         file_hdf5 = cls(path, mode='a')
         file_hdf5[points[0], points[1], points[2]] = 1
         return file_hdf5
+
+    def reset(self):
+        """ Reset cache. """
+        self.load_existed_slide.reset(instance=self)
+        self.construct_slide.reset(instance=self)
+
+    @property
+    def cache_length(self):
+        return len(self.load_existed_slide.cache()[self]) + len(self.construct_slide.cache()[self])
+
+    @property
+    def cache_items(self):
+        return [*self.load_existed_slide.cache()[self].values(), *self.construct_slide.cache()[self].values()]
