@@ -339,7 +339,7 @@ class lru_cache:
             for attr in self.attributes:
                 attr_hash = stable_hash(getattr(instance, attr))
                 key.append(attr_hash)
-        return tuple(key)
+        return flatten_nested(key)
 
 
     def __call__(self, func):
@@ -406,6 +406,19 @@ def stable_hash(key):
     if not isinstance(key, bytes):
         key = key.encode('ascii')
     return str(blake2b(key).hexdigest())
+
+def flatten_nested(iterable):
+    """ Recursively flatten nested structure of tuples, list and dicts. """
+    result = []
+    if isinstance(iterable, (tuple, list)):
+        for item in iterable:
+            result.extend(flatten_nested(item))
+    elif isinstance(iterable, dict):
+        for key, value in sorted(iterable.items()):
+            result.extend((*flatten_nested(key), *flatten_nested(value)))
+    else:
+        return (iterable,)
+    return tuple(result)
 
 
 
