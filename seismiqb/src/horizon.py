@@ -7,7 +7,6 @@ from itertools import product
 
 import numpy as np
 import pandas as pd
-import h5py
 from numba import njit, prange
 
 import cv2
@@ -20,6 +19,7 @@ from skimage.measure import label
 import plotly
 import plotly.figure_factory as ff
 
+from .hdf5_storage import StorageHDF5
 from .utils import round_to_array, groupby_mean, groupby_min, groupby_max, HorizonSampler, filter_simplices, lru_cache
 from .utils import make_gaussian_kernel, retrieve_function_arguments
 from .plotters import plot_image
@@ -1895,8 +1895,6 @@ class Horizon:
 
     def dump_points(self, path, fmt='npy', projections='ixh'):
         """ Dump points. """
-        cube_keys = self.geometry.CUBE_PROJECTIONS
-        axes = self.geometry.PROJECTION_AXES
 
         if fmt == 'npy':
             if os.path.exists(path):
@@ -1906,31 +1904,16 @@ class Horizon:
                 points = self.points
             np.save(path, points, allow_pickle=False)
         elif fmt == 'hdf5':
-            if os.path.exists(path):
-                os.remove(path)
-            file_hdf5 = h5py.File(path, "a")
-            cube_hdf5 = dict()
-            for projection in projections:
-                name = cube_keys[projection]
-                if name not in file_hdf5:
-                    cube_hdf5[name] = file_hdf5.create_dataset(name, self.cube_shape[axes[projection]])
-                else:
-                    cube_hdf5[name] = file_hdf5[name]
-
+            file_hdf5 = StorageHDF5(path, mode='a', projections=projections, shape=self.cube_shape)
             shape = (self.i_length, self.x_length, self.h_max - self.h_min + 1)
             fault_array = np.zeros(shape)
-
             points = self.points - np.array([self.i_min, self.x_min, self._h_min])
             fault_array[points[:, 0], points[:, 1], points[:, 2]] = 1
 
             slices = (slice(self.i_min, self.i_max+1), slice(self.x_min,self.x_max+1), slice(self.h_min, self.h_max+1))
 
-            for projection in projections:
-                name = cube_keys[projection]
-                ax = axes[projection]
-                cube_hdf5[name][slices[ax[0]], slices[ax[1]], slices[ax[2]]] += np.transpose(fault_array, ax)
+            file_hdf5[slices] += fault_array
 
-            file_hdf5.close()
             path_meta = os.path.splitext(path)[0] + '.meta'
             self.geometry.store_meta(path_meta)
         else:
