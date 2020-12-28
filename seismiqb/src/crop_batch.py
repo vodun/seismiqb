@@ -680,7 +680,7 @@ class SeismicCropBatch(Batch):
 
 
     @apply_parallel
-    def adaptive_reshape(self, crop, shape):
+    def adaptive_reshape(self, crop, shape=None):
         """ Changes axis of view to match desired shape.
         Must be used in combination with `side_view` argument of `crop` action.
 
@@ -689,6 +689,7 @@ class SeismicCropBatch(Batch):
         shape : sequence
             Desired shape of resulting crops.
         """
+        shape = self.load_shape if shape is None else shape
         if (np.array(crop.shape) != np.array(shape)).any():
             return crop.transpose([1, 0, 2])
         return crop
@@ -947,21 +948,18 @@ class SeismicCropBatch(Batch):
             Zooming factor for each axis.
         """
         scale = scale if isinstance(scale, (list, tuple)) else [scale] * 3
+        crop = self._scale(crop, [scale[0], scale[1]])
+
+        crop = crop.transpose(1, 2, 0)
+        crop = self._scale(crop, [1, scale[-1]]).transpose(2, 0, 1)
+        return crop
+
+    def _scale(self, crop, scale):
         shape = crop.shape
         matrix = np.zeros((2, 3))
         matrix[:, :-1] = np.diag([scale[1], scale[0]])
         matrix[:, -1] = np.array([shape[1], shape[0]]) * (1 - np.array([scale[1], scale[0]])) / 2
-        crop = cv2.warpAffine(crop, matrix, (shape[1], shape[0]))
-
-        crop = crop.transpose(1, 2, 0)
-        matrix = np.zeros((2, 3))
-        matrix[0, 0] = scale[-1]
-        matrix[0, -1] = shape[-1] * (1 - scale[-1]) / 2
-
-        matrix[:, :-1] = np.diag([scale[2], 1])
-        matrix[0, -1] = shape[-1] * (1 - scale[-1]) / 2
-        crop = cv2.warpAffine(crop, matrix, (shape[2], shape[1])).transpose(2, 0, 1)
-        return crop
+        return cv2.warpAffine(crop, matrix, (shape[1], shape[0])).reshape(shape)
 
     @apply_parallel
     def affine_transform(self, crop, alpha_affine=10):
