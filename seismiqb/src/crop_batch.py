@@ -192,7 +192,6 @@ class SeismicCropBatch(Batch):
         crop_shape = shape
         scale = scale if isinstance(scale, (list, tuple)) else [scale] * 3
         shape = adjusted_shape_3d(shape, angle_1, angle_2, scale) if adjust else shape
-        print(shape)
         if isinstance(shape, dict):
             shape = {k: np.asarray(v) for k, v in shape.items()}
         else:
