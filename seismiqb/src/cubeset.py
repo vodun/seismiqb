@@ -197,7 +197,7 @@ class SeismicCubeset(Dataset):
 
 
     def show_labels(self, indices=None, main_labels='labels', overlay_labels=None, attributes=None, correspondence=None,
-                    scale=1, colorbar=True, main_cmap='tab20b', overlay_cmap='autumn', overlay_alpha=0.7,
+                    scale=10, colorbar=True, main_cmap='tab20b', overlay_cmap='autumn', overlay_alpha=0.7,
                     suptitle_size=20, title_size=15, transpose=True):
         """ Show specific attributes for labels of selected cubes with optional overlay by other attributes.
 
@@ -269,14 +269,15 @@ class SeismicCubeset(Dataset):
 
         for idx in indices:
             for label_num, label in enumerate(self[idx, main_labels]):
-                x, y = label.cube_shape[:-1] if transpose else label.cube_shape[1::-1]
-                ratio = np.divide(x, y)
-                figaspect = np.array([ratio * len(correspondence), 1]) * scale * 10
+                figaspect = np.array([len(correspondence), 1]) * scale
                 fig, axes = plt.subplots(ncols=len(correspondence), figsize=figaspect)
                 axes = axes if isinstance(axes, np.ndarray) else [axes]
-                suptitle_size = int(ratio * suptitle_size)
-                title_size = int(title_size * ratio)
-                fig.suptitle(f"`{label.name}` on `{idx}`", size=suptitle_size)
+
+                x, y = label.cube_shape[:2]
+                suptitle_y = np.divide(y, x) if transpose else np.divide(x, y)
+                suptitle_y = suptitle_y + 0.1 if suptitle_y < 0.85 else 0.95
+                fig.suptitle(f"`{label.name}` on `{idx}`", size=suptitle_size, y=suptitle_y)
+
                 main_label_bounds = tuple(slice(*lims) for lims in label.bbox[:2])
                 for ax, src_params in zip(axes, correspondence):
                     if overlay_labels is not None and overlay_labels not in src_params:
