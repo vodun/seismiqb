@@ -885,7 +885,7 @@ class Horizon:
         else:
             points = self.points
 
-        self.sampler = HorizonSampler(np.histogramdd(points/self.cube_shape, bins=bins))
+        self.sampler = HorizonSampler(np.histogramdd(points/self.cube_shape, bins=bins), **kwargs)
 
     def add_to_mask(self, mask, locations=None, width=3, alpha=1, **kwargs):
         """ Add horizon to a background.
