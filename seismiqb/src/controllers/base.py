@@ -106,7 +106,7 @@ class BaseController:
         if self.logger is not None:
             process = psutil.Process(os.getpid())
             uss = process.memory_full_info().uss / (1024 ** 3)
-            self.logger(f'{self.__class__.__name__} ::: {uss:2.4} ::: {msg}')
+            self.logger(f'{self.__class__.__name__} ::: {uss:2.4f} ::: {msg}')
 
     # Dataset creation: geometries, labels, grids, samplers
     def make_dataset(self, cube_paths, horizon_paths=None):
@@ -300,7 +300,7 @@ class BaseController:
         last_loss = np.mean(model_pipeline.v('loss_history')[-50:])
         self.log(f'Train finished; last loss is {last_loss}')
         self.log(f'Cache sizes: {[item.cache_size for item in dataset.geometries.values()]}')
-        self.log(f'Cache lengths: {[len(item._cached_load.cache()) for item in dataset.geometries.values()]}')
+        self.log(f'Cache lengths: {[item.cache_length for item in dataset.geometries.values()]}')
 
         # Cleanup
         torch.cuda.empty_cache()
@@ -480,30 +480,17 @@ class BaseController:
             current_spatial_ranges = copy(spatial_ranges)
             current_spatial_ranges[axis] = [chunk, min(chunk + chunk_size, spatial_ranges[axis][-1])]
 
-            dataset.make_grid(dataset.indices[0], crop_shape_grid,
-                              *current_spatial_ranges, heights_range,
-                              batch_size=self.batch_size,
-                              overlap_factor=overlap_factor,
-                              filtering_matrix=filtering_matrix,
-                              filter_threshold=filter_threshold)
+            chunk_horizons = self._inference_chunk(dataset=dataset, ranges=(*current_spatial_ranges, heights_range),
+                                                   pipeline_config=config, crop_shape=crop_shape_grid,
+                                                   overlap_factor=overlap_factor, filtering_matrix=filtering_matrix,
+                                                   filter_threshold=filter_threshold, prefetch=prefetch)
+            horizons.extend(chunk_horizons)
+
             total_length += dataset.grid_info['length']
             total_unfiltered_length += dataset.grid_info['unfiltered_length']
 
-            inference_pipeline = (self.get_inference_template() << config) << dataset
-            inference_pipeline.run(D('size'), n_iters=dataset.grid_iters, prefetch=prefetch)
-
-            # Assemble crops together in accordance to the created grid
-            assembled_pred = dataset.assemble_crops(inference_pipeline.v('predicted_masks'),
-                                                    order=config.get('order'))
-
-            # Extract Horizon instances
-            chunk_horizons = Horizon.from_mask(assembled_pred, dataset.grid_info, threshold=0.5, minsize=50)
-            horizons.extend(chunk_horizons)
-
-            # Cleanup
-            inference_pipeline.reset('variables')
-            inference_pipeline = None
             gc.collect()
+            self.log(f'{chunk} after cleanup')
 
         self.log(f'Cache sizes: {[item.cache_size for item in dataset.geometries.values()]}')
         self.log(f'Cache lengths: {[item.cache_length for item in dataset.geometries.values()]}')
@@ -513,6 +500,51 @@ class BaseController:
         gc.collect()
 
         return Horizon.merge_list(horizons, mean_threshold=5.5, adjacency=3, minsize=500)
+
+
+    def _inference_chunk(self, dataset, ranges, pipeline_config, crop_shape,
+                         overlap_factor, filtering_matrix, filter_threshold, prefetch):
+        """ !!. """
+        dataset.make_grid(dataset.indices[0], crop_shape,
+                          *ranges,
+                          batch_size=self.batch_size,
+                          overlap_factor=overlap_factor,
+                          filtering_matrix=filtering_matrix,
+                          filter_threshold=filter_threshold)
+
+        self.log(f'{ranges[0]} before inference pipeline')
+        inference_pipeline = (self.get_inference_template() << pipeline_config) << dataset
+        # inference_pipeline.run(D('size'), n_iters=dataset.grid_iters, prefetch=prefetch)
+
+        crops = []
+        for _ in range(dataset.grid_iters):
+            batch = inference_pipeline.next_batch(D('size'))
+            crops.extend(item for item in batch.predictions)
+        self.log(f'{ranges[0]} after inference pipeline run')
+
+        self.log(f'{ranges[0]} crops size: {sum(item.nbytes / (1024 ** 3) for item in crops)}')
+        inference_pipeline.reset('variables')
+        inference_pipeline = None
+        gc.collect()
+        self.log(f'{ranges[0]} after crops copy and cleanup')
+
+        # Assemble crops together in accordance to the created grid
+        assembled_pred = dataset.assemble_crops(crops, order=pipeline_config.get('order'))
+        self.log(f'{ranges[0]} after assemble')
+
+        # Extract Horizon instances
+        chunk_horizons = Horizon.from_mask(assembled_pred, dataset.grid_info, threshold=0.5, minsize=50)
+        s = sum(item.points.nbytes / (1024 ** 3) for item in chunk_horizons)
+        self.log(f'{ranges[0]} size of horizons: {s}')
+        self.log(f'{ranges[0]} after from mask')
+
+        # Cleanup
+        # inference_pipeline.reset('variables')
+        # inference_pipeline = None
+        del crops
+        del assembled_pred
+        gc.collect()
+        return chunk_horizons
 
 
     def evaluate(self, n=5, add_prefix=False, dump=False, supports=50, name=''):
@@ -678,7 +710,7 @@ class BaseController:
         inference_template = (
             Pipeline()
             # Initialize everything
-            .init_variable('predicted_masks', [])
+            .init_variable('predicted_masks', list())
             .import_model('model', C('model_pipeline'))
 
             # Load data
@@ -692,7 +724,7 @@ class BaseController:
             .predict_model('model',
                            B('images'),
                            fetches='predictions',
-                           save_to=V('predicted_masks', mode='e'))
+                           save_to=B('predictions'))
         )
         return inference_template
 

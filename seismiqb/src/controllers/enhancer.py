@@ -130,7 +130,6 @@ class Enhancer(BaseController):
         inference_template = (
             Pipeline()
             # Init everything
-            .init_variable('predicted_masks', default=list())
             .import_model('base', C('model_pipeline'))
             # Load data
             .crop(points=D('grid_gen')(), shape=self.crop_shape,
@@ -145,7 +144,7 @@ class Enhancer(BaseController):
                            B('images'),
                            B('prior_masks'),
                            fetches='predictions',
-                           save_to=V('predicted_masks', mode='e'))
+                           save_to=B('predictions'))
         )
         return inference_template
 
