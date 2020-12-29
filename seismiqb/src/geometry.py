@@ -2,6 +2,7 @@
 import os
 import sys
 import shutil
+import itertools
 
 from textwrap import dedent
 from random import random
@@ -13,8 +14,10 @@ import pandas as pd
 import h5py
 import segyio
 import cv2
+from scipy.ndimage import zoom
 
-from .utils import lru_cache, find_min_max, file_print, SafeIO
+from .utils import lru_cache, find_min_max, file_print, \
+                   SafeIO, attr_filter, make_axis_grid, infer_tuple
 from .plotters import plot_image
 
 
@@ -113,6 +116,7 @@ class SeismicGeometry:
     #TODO: add separate class for cube-like labels
     SEGY_ALIASES = ['sgy', 'segy', 'seg']
     HDF5_ALIASES = ['hdf5', 'h5py']
+    NPZ_ALIASES = ['npz']
 
     # Attributes to store during SEG-Y -> HDF5 conversion
     PRESERVED = [
@@ -146,6 +150,8 @@ class SeismicGeometry:
             new_cls = SeismicGeometrySEGY
         elif fmt in cls.HDF5_ALIASES:
             new_cls = SeismicGeometryHDF5
+        elif fmt in cls.NPZ_ALIASES:
+            new_cls = SeismicGeometryNPZ
         else:
             raise TypeError('Unknown format of the cube.')
 
@@ -178,9 +184,9 @@ class SeismicGeometry:
         return len(self.dataframe)
 
 
-    def store_meta(self):
+    def store_meta(self, path=None):
         """ Store collected stats on disk. """
-        path_meta = os.path.splitext(self.path)[0] + '.meta'
+        path_meta = path or os.path.splitext(self.path)[0] + '.meta'
 
         # Remove file, if exists: h5py can't do that
         if os.path.exists(path_meta):
@@ -361,7 +367,7 @@ class SeismicGeometry:
             method = self.load_slide
         else:
             method = self._cached_load
-        method.reset()
+        method.reset(instance=self)
 
     @property
     def cache_length(self):
@@ -371,7 +377,7 @@ class SeismicGeometry:
         else:
             method = self._cached_load
 
-        return len(method.cache())
+        return len(method.cache()[self])
 
     @property
     def cache_size(self):
@@ -381,7 +387,7 @@ class SeismicGeometry:
         else:
             method = self._cached_load
 
-        return sum(item.nbytes / (1024 ** 3) for item in method.cache().values())
+        return sum(item.nbytes / (1024 ** 3) for item in method.cache()[self].values())
 
     @property
     def nbytes(self):
@@ -426,6 +432,11 @@ class SeismicGeometry:
             """
         return dedent(msg)
 
+    @property
+    def axis_names(self):
+        """ Names of the axis: multiple headers and `DEPTH` as the last one. """
+        return self.index_headers + ['DEPTH']
+
     def log(self, printer=None):
         """ Log info about cube into desired stream. By default, creates a file next to the cube. """
         if not callable(printer):
@@ -446,7 +457,8 @@ class SeismicGeometry:
         matrix = np.log(self.mean_matrix**2 / self.std_matrix**2)
         plot_image(matrix, mode='single', **kwargs)
 
-    def show_slide(self, loc=None, start=None, end=None, step=1, axis=0, zoom_slice=None, stable=True, **kwargs):
+    def show_slide(self, loc=None, start=None, end=None, step=1, axis=0, zoom_slice=None,
+                   n_ticks=5, delta_ticks=100, stable=True, **kwargs):
         """ Show seismic slide in desired place. Works with both SEG-Y and HDF5 files.
 
         Parameters
@@ -474,19 +486,41 @@ class SeismicGeometry:
 
         # Plot params
         if len(self.index_headers) > 1:
-            title = f'{self.index_headers[axis]} {loc} out of {self.lens[axis]}'
+            title = f'{self.axis_names[axis]} {loc} out of {self.cube_shape[axis]}'
+
+            if axis in [0, 1]:
+                xlabel = self.index_headers[1 - axis]
+                ylabel = 'DEPTH'
+            else:
+                xlabel = self.index_headers[0]
+                ylabel = self.index_headers[1]
         else:
             title = '2D seismic slide'
+            xlabel = self.index_headers[0]
+            ylabel = 'DEPTH'
+
+        xticks = xticks[::max(1, round(len(xticks) // (n_ticks - 1) / delta_ticks)) * delta_ticks] + [xticks[-1]]
+        xticks = sorted(list(set(xticks)))
+        yticks = yticks[::max(1, round(len(xticks) // (n_ticks - 1) / delta_ticks)) * delta_ticks] + [yticks[-1]]
+        yticks = sorted(list(set(yticks)), reverse=True)
+
+        if len(xticks) > 2 and (xticks[-1] - xticks[-2]) < delta_ticks:
+            xticks.pop(-2)
+        if len(yticks) > 2 and (yticks[0] - yticks[1]) < delta_ticks:
+            yticks.pop(1)
+
         kwargs = {
             'title': title,
-            'xlabel': self.index_headers[1 - axis] if len(self.index_headers) > 1 else self.index_headers[0],
-            'ylabel': 'depth',
+            'xlabel': xlabel,
+            'ylabel': ylabel,
             'cmap': 'gray',
-            'xticks': xticks[::max(1, round(len(xticks)//10/100))*100],
-            'yticks': yticks[::max(1, round(len(yticks)//10/100))*100][::-1],
+            'xticks': xticks,
+            'yticks': yticks,
+            'labeltop': False,
+            'labelright': False,
             **kwargs
         }
-        plot_image(slide, mode='single', **kwargs)
+        plot_image(slide, **kwargs)
 
     def show_amplitude_hist(self, scaler=None, bins=50, **kwargs):
         """ Show distribution of amplitudes in `trace_container`. Optionally applies chosen `scaler`. """
@@ -548,6 +582,7 @@ class SeismicGeometry:
                     # Copy all textual headers, including possible extended
                     for i in range(1 + segy.ext_headers):
                         dst_file.text[i] = segy.text[i]
+                    dst_file.bin = segy.bin
 
                     c = 0
                     for i, _ in tqdm(enumerate(spec.ilines)):
@@ -565,6 +600,127 @@ class SeismicGeometry:
             file_name = os.path.basename(path_segy)
             shutil.make_archive(os.path.splitext(path_segy)[0], 'zip', dir_name, file_name)
 
+    def cdp_to_lines(self, points):
+        """ Convert CDP to lines. """
+        inverse_matrix = np.linalg.inv(self.rotation_matrix[:, :2])
+        lines = (inverse_matrix @ points.T - inverse_matrix @ self.rotation_matrix[:, 2].reshape(2, -1)).T
+        return np.rint(lines)
+
+    def apply_conv(self, locations=None, points=None, window=10, stride=1, attribute='semblance'):
+        """ Compute attribute on cube.
+
+        Parameters
+        ----------
+        locations : tuple of slices
+            slices for each axis of cube to compute attribute. If locations is None,
+            attribute will be computed for the whole cube.
+        points : np.ndarray
+            points where compute the attribute. In other points attribute will be equal to numpy.nan.
+        window : int or tuple of ints
+            window for the filter.
+        stride : int or tuple of ints
+            stride to compute attribute
+        attribute : str
+            name of the attribute
+
+        Returns
+        -------
+        np.ndarray
+            array of the shape corresponding to locations
+        """
+        if isinstance(window, int):
+            window = np.ones(3, dtype=np.int32) * window
+        if isinstance(stride, int):
+            stride = np.ones(3, dtype=np.int32) * stride
+        if locations is None:
+            locations = [slice(0, self.cube_shape[i]) for i in range(3)]
+
+        if points is not None:
+            for i in range(3):
+                start = locations[i].start or 0
+                stop = locations[i].stop or self.cube_shape[i]
+                points = points[points[:, i] >= start]
+                points = points[points[:, i] < stop]
+                points[:, i] -= start
+            stride = np.ones(3, dtype='int32')
+
+        cube = self.file_hdf5['cube'][locations[0], locations[1], locations[2]]
+        window = np.minimum(np.array(window), cube.shape)
+
+        shape = np.ceil(np.array(cube.shape) / np.array(stride)).astype(int)
+        result = np.full(shape, np.nan, dtype='float32')
+
+        if points is None:
+            points = np.stack(np.meshgrid(*[range(cube.shape[i]) for i in range(3)]), axis=-1).reshape(-1, 3)
+        if isinstance(points, list):
+            points = np.array(points)
+
+        attr = attr_filter(cube, result, window, stride, points, attribute)
+        if np.any(stride > 1):
+            attr = zoom(attr, np.array(cube.shape) / np.array(attr.shape))
+        return attr
+
+    def create_hdf5(self, path_hdf5, src, chunk_shape=None, stride=None, pbar=False):
+        """ Create hdf5 file from np.ndarray or with geological attribute.
+
+        Parameters
+        ----------
+        path_hdf5 : str
+
+        src : np.ndarray or str
+            if `str`, must be a name of the attribute to compute.
+        chunk_shape : int, tuple or None
+            shape of chunks.
+        stride : int
+            stride for chunks
+        pbar : bool
+            progress bar
+        """
+        chunks = []
+
+        chunk_shape = infer_tuple(chunk_shape, self.cube_shape)
+        stride = infer_tuple(stride, chunk_shape)
+
+        grid = [make_axis_grid(
+            (0, self.cube_shape[i]),
+            stride[i], self.cube_shape[i], chunk_shape[i]
+        ) for i in range(3)]
+
+        if isinstance(src, np.ndarray):
+            if (src.shape != self.cube_shape).all():
+                raise ValueError(f'src has shape {src.shape} but must have {self.cube_shape}')
+            chunks += [[(0, 0, 0), src]]
+            chunk_shape = self.cube_shape
+            total = 1
+        elif isinstance(src, str):
+            def _attribute():
+                for coord in itertools.product(*grid):
+                    locations = [slice(coord[i], coord[i] + chunk_shape[i]) for i in range(3)]
+                    yield [coord, self.apply_conv(locations, attribute=src)]
+            chunks = _attribute()
+            total = np.prod([len(item) for item in grid])
+
+        if os.path.exists(path_hdf5):
+            os.remove(path_hdf5)
+
+        with h5py.File(path_hdf5, "a") as file_hdf5:
+            cube_hdf5 = file_hdf5.create_dataset('cube', self.cube_shape)
+            cube_hdf5_x = file_hdf5.create_dataset('cube_x', self.cube_shape[[1, 2, 0]])
+            cube_hdf5_h = file_hdf5.create_dataset('cube_h', self.cube_shape[[2, 0, 1]])
+            _chunks = tqdm(chunks, total=total) if pbar else chunks
+
+            for (iline, xline, height), chunk in _chunks:
+                slc = (
+                    slice(iline, min(iline+chunk_shape[0], self.cube_shape[0])),
+                    slice(xline, min(xline+chunk_shape[1], self.cube_shape[1])),
+                    slice(height, min(height+chunk_shape[2], self.cube_shape[2]))
+                )
+                cube_hdf5[slc[0], slc[1], slc[2]] = chunk
+                cube_hdf5_x[slc[1], slc[2], slc[0]] = chunk.transpose((1, 2, 0))
+                cube_hdf5_h[slc[2], slc[0], slc[1]] = chunk.transpose((2, 0, 1))
+
+        path_meta = os.path.splitext(path_hdf5)[0] + '.meta'
+        self.store_meta(path_meta)
 
 class SeismicGeometrySEGY(SeismicGeometry):
     """ Class to infer information about SEG-Y cubes and provide convenient methods of working with them.
@@ -775,6 +931,43 @@ class SeismicGeometrySEGY(SeismicGeometry):
 
         self.rotation_matrix = cv2.getAffineTransform(np.float32(ix_points), np.float32(cdp_points))
 
+    def lines_to_cdp(self, points):
+        """ Convert lines to CDP. """
+        return (self.rotation_matrix[:, :2] @ points.T + self.rotation_matrix[:, 2].reshape(2, -1)).T
+
+    def compute_area(self, correct=True, shift=50):
+        """ Compute approximate area of the cube in square kilometres.
+
+        Parameters
+        ----------
+        correct : bool
+            Whether to correct computed area for zero traces.
+        """
+        if self.headers != self.HEADERS_POST_FULL:
+            raise TypeError('Geometry index must be `POST_FULL`')
+
+        i = self.ilines[self.ilines_len // 2]
+        x = self.xlines[self.xlines_len // 2]
+
+        cdp_x, cdp_y = self.dataframe[['CDP_X', 'CDP_Y']].ix[(i, x)]
+        cdp_x_delta = abs(self.dataframe[['CDP_X']].ix[(i, x + shift)][0] - cdp_x)
+        cdp_y_delta = abs(self.dataframe[['CDP_Y']].ix[(i + shift, x)][0] - cdp_y)
+
+        if cdp_x_delta == 0 and cdp_y_delta == 0:
+            cdp_x_delta = abs(self.dataframe[['CDP_X']].ix[(i + shift, x)][0] - cdp_x)
+            cdp_y_delta = abs(self.dataframe[['CDP_Y']].ix[(i, x + shift)][0] - cdp_y)
+
+        cdp_x_delta /= shift
+        cdp_y_delta /= shift
+
+        ilines_km = cdp_y_delta * self.ilines_len / 1000
+        xlines_km = cdp_x_delta * self.xlines_len / 1000
+        area = ilines_km * xlines_km
+
+        if correct and hasattr(self, 'zero_traces'):
+            area -= (cdp_x_delta / 1000) * (cdp_y_delta / 1000) * np.sum(self.zero_traces)
+        return area
+
 
     def set_index(self, index_headers, sortby=None):
         """ Change current index to a subset of loaded headers. """
@@ -941,12 +1134,15 @@ class SeismicGeometrySEGY(SeismicGeometry):
 
         if mode == 'slide':
             slc = locations[axis]
-            if axis in [0, 1]:
-                return np.stack([self.load_slide(loc, axis=axis)[..., locations[-1]]
+            if axis == 0:
+                return np.stack([self.load_slide(loc, axis=axis)[locations[1], locations[2]]
+                                 for loc in range(slc.start, slc.stop)], axis=axis)
+            if axis == 1:
+                return np.stack([self.load_slide(loc, axis=axis)[locations[0], locations[2]]
                                  for loc in range(slc.start, slc.stop)], axis=axis)
             if axis == 2:
                 return np.stack([self.load_slide(loc, axis=axis)[locations[0], locations[1]]
-                                 for loc in range(slc.start, slc.stop)], axis=-1)
+                                 for loc in range(slc.start, slc.stop)], axis=axis)
         return self._load_crop(locations)
 
 
@@ -974,7 +1170,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
         return crop
 
     # Convert SEG-Y to HDF5
-    def make_hdf5(self, path_hdf5=None, postfix=''):
+    def make_hdf5(self, path_hdf5=None, postfix='', unsafe=True):
         """ Converts `.segy` cube to `.hdf5` format.
 
         Parameters
@@ -984,9 +1180,9 @@ class SeismicGeometrySEGY(SeismicGeometry):
         postfix : str
             Postfix to add to the name of resulting cube.
         """
-        if self.index_headers != self.INDEX_POST:
+        if self.index_headers != self.INDEX_POST and not unsafe:
             # Currently supports only INLINE/CROSSLINE cubes
-            raise TypeError(f'Current index must be {self.INDEX_POST}')
+            raise TypeError(f'Either set `unsafe=True` or set index to {self.INDEX_POST}')
 
         path_hdf5 = path_hdf5 or (os.path.splitext(self.path)[0] + postfix + '.hdf5')
 
@@ -1001,18 +1197,18 @@ class SeismicGeometrySEGY(SeismicGeometry):
             cube_hdf5_h = file_hdf5.create_dataset('cube_h', self.cube_shape[[2, 0, 1]])
 
             # Default projection (ilines, xlines, depth) and depth-projection (depth, ilines, xlines)
-            pbar = tqdm(total=self.ilines_len + self.xlines_len, ncols=1000)
+            pbar = tqdm(total=self.cube_shape[0] + self.cube_shape[1], ncols=1000)
 
             pbar.set_description(f'Converting {self.long_name}; ilines projection')
-            for i in range(self.ilines_len):
+            for i in range(self.cube_shape[0]):
                 slide = self.load_slide(i, stable=False)
-                cube_hdf5[i, :, :] = slide.reshape(1, self.xlines_len, self.depth)
+                cube_hdf5[i, :, :] = slide.reshape(1, self.cube_shape[1], self.cube_shape[2])
                 cube_hdf5_h[:, i, :] = slide.T
                 pbar.update()
 
             # xline-oriented projection: (xlines, depth, ilines)
             pbar.set_description(f'Converting {self.long_name} to hdf5; xlines projection')
-            for x in range(self.xlines_len):
+            for x in range(self.cube_shape[1]):
                 slide = self.load_slide(x, axis=1, stable=False).T
                 cube_hdf5_x[x, :, :,] = slide
                 pbar.update()
@@ -1025,7 +1221,6 @@ class SeismicGeometrySEGY(SeismicGeometry):
 
     # Convenient alias
     convert_to_hdf5 = make_hdf5
-
 
 class SeismicGeometryHDF5(SeismicGeometry):
     """ Class to infer information about HDF5 cubes and provide convenient methods of working with them.
@@ -1054,7 +1249,11 @@ class SeismicGeometryHDF5(SeismicGeometry):
         """ Store values from `hdf5` file to attributes. """
         self.index_headers = self.INDEX_POST
         self.load_meta()
-        self.cube_shape = np.asarray([self.ilines_len, self.xlines_len, self.depth]) # BC
+        if hasattr(self, 'lens'):
+            self.cube_shape = np.asarray([self.ilines_len, self.xlines_len, self.depth]) # BC
+        else:
+            self.cube_shape = self.file_hdf5['cube'].shape
+            self.lens = self.cube_shape
         self.has_stats = True
 
     # Methods to load actual data from HDF5
@@ -1070,8 +1269,6 @@ class SeismicGeometryHDF5(SeismicGeometry):
             Identificator of the axis to use to load data.
             Can be `iline`, `xline`, `height`, `depth`, `i`, `x`, `h`, 0, 1, 2.
         """
-        _ = kwargs
-
         if axis is None:
             shape = np.array([(slc.stop - slc.start) for slc in locations])
             axis = np.argmin(shape)
@@ -1082,50 +1279,50 @@ class SeismicGeometryHDF5(SeismicGeometry):
             axis = mapping[axis]
 
         if axis == 1 and 'cube_x' in self.file_hdf5:
-            crop = self._load_x(*locations)
+            crop = self._load_x(*locations, **kwargs)
         elif axis == 2 and 'cube_h' in self.file_hdf5:
-            crop = self._load_h(*locations)
+            crop = self._load_h(*locations, **kwargs)
         else: # backward compatibility
-            crop = self._load_i(*locations)
+            crop = self._load_i(*locations, **kwargs)
         return crop
 
-    def _load_i(self, ilines, xlines, heights):
+    def _load_i(self, ilines, xlines, heights, **kwargs):
         cube_hdf5 = self.file_hdf5['cube']
-        return np.stack([self._cached_load(cube_hdf5, iline)[xlines, :][:, heights]
+        return np.stack([self._cached_load(cube_hdf5, iline, **kwargs)[xlines, :][:, heights]
                          for iline in range(ilines.start, ilines.stop)])
 
-    def _load_x(self, ilines, xlines, heights):
+    def _load_x(self, ilines, xlines, heights, **kwargs):
         cube_hdf5 = self.file_hdf5['cube_x']
-        return np.stack([self._cached_load(cube_hdf5, xline)[heights, :][:, ilines].transpose([1, 0])
+        return np.stack([self._cached_load(cube_hdf5, xline, **kwargs)[heights, :][:, ilines].transpose([1, 0])
                          for xline in range(xlines.start, xlines.stop)], axis=1)
 
-    def _load_h(self, ilines, xlines, heights):
+    def _load_h(self, ilines, xlines, heights, **kwargs):
         cube_hdf5 = self.file_hdf5['cube_h']
-        return np.stack([self._cached_load(cube_hdf5, height)[ilines, :][:, xlines]
+        return np.stack([self._cached_load(cube_hdf5, height, **kwargs)[ilines, :][:, xlines]
                          for height in range(heights.start, heights.stop)], axis=2)
 
     @lru_cache(128)
-    def _cached_load(self, cube, loc):
+    def _cached_load(self, cube, loc, **kwargs):
         """ Load one slide of data from a certain cube projection.
         Caches the result in a thread-safe manner.
         """
+        _ = kwargs
         return cube[loc, :, :]
 
     def load_slide(self, loc, axis='iline', **kwargs):
         """ Load desired slide along desired axis. """
-        _ = kwargs
         axis = self.parse_axis(axis)
+
         if axis == 0:
             cube = self.file_hdf5['cube']
-            slide = self._cached_load(cube, loc)
+            slide = self._cached_load(cube, loc, **kwargs)
         elif axis == 1:
             cube = self.file_hdf5['cube_x']
-            slide = self._cached_load(cube, loc).T
+            slide = self._cached_load(cube, loc, **kwargs).T
         elif axis == 2:
             cube = self.file_hdf5['cube_h']
-            slide = self._cached_load(cube, loc)
+            slide = self._cached_load(cube, loc, **kwargs)
         return slide
-
 
     def __getitem__(self, key):
         """ Retrieve amplitudes from cube. Uses the usual `Numpy` semantics for indexing 3D array. """
@@ -1157,3 +1354,78 @@ class SeismicGeometryHDF5(SeismicGeometry):
         if squeeze:
             crop = np.squeeze(crop, axis=tuple(squeeze))
         return crop
+
+
+
+class SeismicGeometryNPZ(SeismicGeometry):
+    """ Create a Geometry instance from a `numpy`-saved file. Stores everything in memory.
+    Can simultaneously work with multiple type of cube attributes, e.g. amplitudes, GLCM, RMS, etc.
+    """
+    #pylint: disable=attribute-defined-outside-init
+    def __init__(self, path, **kwargs):
+        self.structured = True
+        self.file_npz = None
+        self.names = None
+        self.data = {}
+
+        super().__init__(path, **kwargs)
+
+    def process(self, order=(0, 1, 2), **kwargs):
+        """ Create all the missing attributes. """
+        self.index_headers = SeismicGeometry.INDEX_POST
+        self.file_npz = np.load(self.path, allow_pickle=True, mmap_mode='r')
+
+        self.names = list(self.file_npz.keys())
+        self.data = {key : np.transpose(self.file_npz[key], order) for key in self.names}
+
+        data = self.data[self.names[0]]
+        self.cube_shape = np.array(data.shape)
+        self.lens = self.cube_shape[:2]
+        self.zero_traces = np.zeros(self.lens)
+
+        # Attributes
+        self.depth = self.cube_shape[2]
+        self.delay, self.sample_rate = 0, 0
+        self.value_min = np.min(data)
+        self.value_max = np.max(data)
+        self.q001, self.q01, self.q99, self.q999 = np.quantile(data, [0.001, 0.01, 0.99, 0.999])
+
+
+    # Methods to load actual data from NPZ
+    def load_crop(self, locations, names=None, **kwargs):
+        """ Load 3D crop from the cube.
+
+        Parameters
+        locations : sequence of slices
+            Location to load: slices along the first index, the second, and depth.
+        names : sequence
+            Names of data attributes to load.
+        """
+        _ = kwargs
+        names = names or self.names[:1]
+        shape = np.array([(slc.stop - slc.start) for slc in locations])
+        axis = np.argmin(shape)
+
+        crops = [self.data[key][locations[0], locations[1], locations[2]] for key in names]
+        crop = np.concatenate(crops, axis=axis)
+        return crop
+
+    def load_slide(self, loc, axis='iline', **kwargs):
+        """ Load desired slide along desired axis. """
+        _ = kwargs
+        locations = self.make_slide_locations(loc, axis)
+        crop = self.load_crop(locations, names=['data'])
+        return crop.squeeze()
+
+    @property
+    def nbytes(self):
+        """ Size of instance in bytes. """
+        return sum(sys.getsizeof(self.data[key]) for key in self.names)
+
+    def __getattr__(self, key):
+        """ Use default `object` getattr, without `.meta` magic. """
+        return object.__getattribute__(self, key)
+
+    def __getitem__(self, key):
+        """ Get data from the first named array. """
+        return self.data[self.names[0]][key]

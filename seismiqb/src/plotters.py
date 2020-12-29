@@ -70,7 +70,7 @@ def plot_loss(*data, title=None, **kwargs):
         'label': title or 'Loss graph',
         **kwargs
     }
-    plot_image(*data, mode='curve', backend='mpl', **kwargs)
+    plot_image(data, mode='curve', backend='mpl', **kwargs)
 
 
 class MatplotlibPlotter:
@@ -205,6 +205,110 @@ class MatplotlibPlotter:
             cb.ax.yaxis.set_tick_params(color=yaxis_kwargs.get('color', 'black'))
         ax.set_facecolor(updated['facecolor'])
         ax.tick_params(**tick_params)
+
+        if kwargs.get('disable_axes'):
+            ax.set_axis_off()
+
+        self.save_and_show(fig, **updated)
+
+
+    def wiggle(self, image, **kwargs):
+        """ Make wiggle plot of an image. If needed overlap the wiggle plot with a curve supplied by an
+        array of heights.
+
+        Parameters
+        ----------
+        image : np.ndarray or list
+            either 2d-array or a list of 2d-array and a 1d-curve to plot atop the array.
+        kwargs : dict
+            figsize : tuple
+                tuple of two ints containing the size of the rendered image.
+            label : str
+                title of rendered image.
+            xlabel : str
+                xaxis-label.
+            ylabel : str
+                yaxis-label.
+            title : str
+                title of the plot.
+            reverse : bool
+                whether to reverse the plot in y-axis. True by default. In that
+                way, uses the same orientation as other modes.
+            other
+        """
+        defaults = {'figsize': (12, 7),
+                    'line_color': 'k',
+                    'label': '', 'xlabel': '', 'ylabel': '', 'title': '',
+                    'fontsize': 20,
+                    'width_multiplier': 2,
+                    'xstep': 5,
+                    'points_marker': 'ro',
+                    'reverse': True}
+
+        # deal with kwargs
+        updated = {**defaults, **kwargs}
+        line_color, xstep, width_mul, points_marker, reverse = [updated[key] for key in (
+            'line_color', 'xstep', 'width_multiplier', 'points_marker', 'reverse')]
+
+        figure_kwargs = filter_kwargs(updated, ['figsize', 'facecolor', 'dpi'])
+        label_kwargs = filter_kwargs(updated, ['label', 'y', 'fontsize', 'family', 'color'])
+        xaxis_kwargs = filter_kwargs(updated, ['xlabel', 'fontsize', 'family', 'color'])
+        yaxis_kwargs = filter_kwargs(updated, ['ylabel', 'fontsize', 'family', 'color'])
+
+        # parse image arg
+        with_curve = False
+        if isinstance(image, (list, tuple)):
+            if len(image) > 1:
+                with_curve = True
+                image, heights = image[:2]
+
+                # transform height-mask to heights if needed
+                if heights.ndim == 2:
+                    heights = np.where(heights)[1]
+            else:
+                image = image[0]
+
+        # Create figure and axes
+        if 'ax' in kwargs:
+            ax = kwargs['ax']
+            fig = ax.figure
+        else:
+            fig, ax = plt.subplots(**figure_kwargs)
+
+        # add titles and labels
+        ax.set_title(**label_kwargs)
+        ax.set_xlabel(**xaxis_kwargs)
+        ax.set_ylabel(**yaxis_kwargs)
+
+        # Creating wiggle-curves and adding height-points if needed
+        xlim_curr = (0, len(image))
+        ylim_curr = (0, len(image[0]))
+        offsets = np.arange(*xlim_curr, xstep)
+
+        if isinstance(line_color, str):
+            line_color = [line_color] * len(offsets)
+
+        y = np.arange(*ylim_curr)
+        if reverse:
+            y = y[::-1]
+        for ix, k in enumerate(offsets):
+            x = k + width_mul * image[k, slice(*ylim_curr)] / np.std(image)
+            col = line_color[ix]
+            ax.plot(x, y, '{}-'.format(col))
+            ax.fill_betweenx(y, k, x, where=(x > k), color=col)
+
+            if with_curve:
+                ax.plot(x[heights[ix]], heights[ix], points_marker)
+            if ix == 0:
+                xmin = np.min(x)
+            if ix == len(offsets) - 1:
+                xmax = np.max(x)
+
+        # adjust the canvas
+        xlim = updated.get('xlim', (xmin, xmax))
+        ylim = updated.get('ylim', (np.min(y), np.max(y)))
+        ax.set_xlim(xlim)
+        ax.set_ylim(ylim)
 
         self.save_and_show(fig, **updated)
 
@@ -524,12 +628,12 @@ class MatplotlibPlotter:
 
         self.save_and_show(plt, **updated)
 
-    def curve(self, *args, **kwargs):
+    def curve(self, curve, average=True, window=10, **kwargs):
         """ Plot a curve.
 
         Parameters
         ----------
-        args : tuple
+        curve : tuple
             a sequence containing curves for plotting along with, possibly, specification of
             plot formats. Must at least contain an array of ys, but may also be comprised of
             triples of (xs, ys, fmt) for an arbitrary number of curves.
@@ -549,6 +653,7 @@ class MatplotlibPlotter:
         # defaults
         defaults = {'figsize': (8, 5),
                     'label': 'Curve plot',
+                    'linecolor': 'b',
                     'xlabel': 'x',
                     'ylabel': 'y',
                     'fontsize': 15,
@@ -558,15 +663,47 @@ class MatplotlibPlotter:
 
         # form groups of kwargs
         figure_kwargs = filter_kwargs(updated, ['figsize', 'facecolor', 'dpi'])
+        plot_kwargs = filter_kwargs(updated, ['alpha', 'linestyle', 'label'])
         label_kwargs = filter_kwargs(updated, ['label', 'fontsize', 'family', 'color'])
         xlabel_kwargs = filter_kwargs(updated, ['xlabel', 'fontsize', 'family', 'color'])
         ylabel_kwargs = filter_kwargs(updated, ['ylabel', 'fontsize', 'family', 'color'])
 
-        # plot the curves
+        plot_kwargs['color'] = updated['linecolor']
+
         plt.figure(**figure_kwargs)
-        curves = plt.plot(*args)
+
+        # Make averaged data
+        if average:
+            ys = curve[int(len(curve) > 1)]
+
+            averaged, container = [], []
+            running_sum = 0
+
+            for value in ys:
+                container.append(value)
+                running_sum += value
+                if len(container) > window:
+                    popped = container.pop(0)
+                    running_sum -= popped
+                averaged.append(running_sum / len(container))
+
+            if len(curve) == 1:
+                avg = (averaged, )
+            else:
+                avg = list(curve)
+                avg[1] = averaged
+
+            avg_kwargs = {**plot_kwargs,
+                          'label': f'Averaged {plot_kwargs["label"].lower()}',
+                          'alpha': 1}
+            plt.plot(*avg, **avg_kwargs)
+            plot_kwargs['alpha'] = 0.5
+
+        # plot the curve
+        plt.plot(*curve, **plot_kwargs)
+
         if 'curve_labels' in updated:
-            plt.legend(curves, updated['curve_labels'])
+            plt.legend()
 
         plt.xlabel(**xlabel_kwargs)
         plt.ylabel(**ylabel_kwargs)

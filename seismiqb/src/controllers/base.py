@@ -20,7 +20,7 @@ import torch
 from tqdm.auto import tqdm
 
 from ...batchflow import Pipeline, FilesIndex
-from ...batchflow import B, V, C, D, P, R, W
+from ...batchflow import B, V, C, D, P, R
 from ...batchflow.models.torch import EncoderDecoder
 
 from ..cubeset import SeismicCubeset, Horizon
@@ -240,7 +240,7 @@ class BaseController:
             )
 
     # Train model on a created dataset
-    def train(self, dataset, model_config=None, device=None, n_iters=300,
+    def train(self, dataset, model_config=None, device=None, n_iters=300, prefetch=1,
               use_grid=False, grid_src='quality_grid', side_view=False,
               width=3, batch_size_multiplier=1, rebatch_threshold=0.00, **kwargs):
         """ Train model for horizon detection.
@@ -274,10 +274,12 @@ class BaseController:
         self.log('Train started')
         pipeline_config = {
             'model_config': {**model_config, 'device': device},
+            'crop_shape': self.crop_shape,
             'adaptive_slices': use_grid, 'grid_src': grid_src,
             'side_view': side_view,
             'width': width,
             'rebatch_threshold': rebatch_threshold,
+            **kwargs
         }
 
         bs = self.batch_size
@@ -290,8 +292,7 @@ class BaseController:
         self.batch_size = bs
 
         model_pipeline.run(D('size'), n_iters=n_iters + np.random.randint(100),
-                           bar=self.bar,
-                           bar_desc=W(V('loss_history')[-1].format('Loss is: {:7.7}')))
+                           bar={'bar': self.bar, 'monitors': 'loss_history'}, prefetch=prefetch)
         plot_loss(model_pipeline.v('loss_history'), show=self.show_plots,
                   savepath=self.make_save_path('model_loss.png'))
 
@@ -400,8 +401,10 @@ class BaseController:
         spatial_ranges = [[0, item-1] for item in geometry.cube_shape[:2]]
         if heights_range is None:
             if self.targets:
-                min_height = max(0, min(horizon.h_min for horizon in self.targets) - 100)
-                max_height = min(geometry.depth-1, max(horizon.h_max for horizon in self.targets) + 100)
+                min_height = max(0,
+                                 min(horizon.h_min for horizon in self.targets) - self.crop_shape[2]//2)
+                max_height = min(geometry.depth,
+                                 max(horizon.h_max for horizon in self.targets) + self.crop_shape[2]//2)
                 heights_range = [min_height, max_height]
             else:
                 heights_range = [0, geometry.depth-1]
@@ -422,10 +425,9 @@ class BaseController:
 
 
     def inference_0(self, dataset, heights_range=None, orientation='i', overlap_factor=2,
-                    filtering_matrix=None, filter_threshold=0, **kwargs):
+                    filtering_matrix=None, filter_threshold=0, prefetch=1, **kwargs):
         """ Inference on chunks, assemble into massive 3D array, extract horizon surface. """
         _ = kwargs
-        geometry = dataset.geometries[0]
         spatial_ranges, heights_range = self.make_inference_ranges(dataset, heights_range)
         config, crop_shape_grid = self.make_inference_config(orientation)
 
@@ -439,7 +441,7 @@ class BaseController:
 
         inference_pipeline = (self.get_inference_template() << config) << dataset
         inference_pipeline.run(D('size'), n_iters=dataset.grid_iters, bar=self.bar,
-                               bar_desc=f'Inference on {geometry.name} | {orientation}')
+                               prefetch=prefetch)
 
         # Assemble crops together in accordance to the created grid
         assembled_pred = dataset.assemble_crops(inference_pipeline.v('predicted_masks'),
@@ -458,7 +460,7 @@ class BaseController:
         # Convert to Horizon instances
         return Horizon.from_mask(assembled_pred, dataset.grid_info, threshold=0.5, minsize=50)
 
-    def inference_1(self, dataset, heights_range=None, orientation='i', overlap_factor=2,
+    def inference_1(self, dataset, heights_range=None, orientation='i', overlap_factor=2, prefetch=1,
                     chunk_size=100, chunk_overlap=0.2, filtering_matrix=None, filter_threshold=0, **kwargs):
         """ Split area for inference into `big` chunks, inference on each of them, merge results. """
         _ = kwargs
@@ -469,9 +471,11 @@ class BaseController:
         # Actual inference
         axis = np.argmin(crop_shape_grid[:2])
         iterator = range(spatial_ranges[axis][0], spatial_ranges[axis][1], int(chunk_size*(1 - chunk_overlap)))
-        self.log(f'Starting chunk {orientation} inference with {len(iterator)} chunks')
+        self.log(f'Starting chunk {orientation} inference with {len(iterator)} chunks ' +
+                 f'over {spatial_ranges}, {heights_range}')
 
         horizons = []
+        total_length, total_unfiltered_length = 0, 0
         for chunk in self.make_pbar(iterator, desc=f'Inference on {geometry.name}| {orientation}'):
             current_spatial_ranges = copy(spatial_ranges)
             current_spatial_ranges[axis] = [chunk, min(chunk + chunk_size, spatial_ranges[axis][-1])]
@@ -482,9 +486,11 @@ class BaseController:
                               overlap_factor=overlap_factor,
                               filtering_matrix=filtering_matrix,
                               filter_threshold=filter_threshold)
+            total_length += dataset.grid_info['length']
+            total_unfiltered_length += dataset.grid_info['unfiltered_length']
 
             inference_pipeline = (self.get_inference_template() << config) << dataset
-            inference_pipeline.run(D('size'), n_iters=dataset.grid_iters)
+            inference_pipeline.run(D('size'), n_iters=dataset.grid_iters, prefetch=prefetch)
 
             # Assemble crops together in accordance to the created grid
             assembled_pred = dataset.assemble_crops(inference_pipeline.v('predicted_masks'),
@@ -501,6 +507,7 @@ class BaseController:
 
         self.log(f'Cache sizes: {[item.cache_size for item in dataset.geometries.values()]}')
         self.log(f'Cache lengths: {[item.cache_length for item in dataset.geometries.values()]}')
+        self.log(f'Inferenced total of {total_length} out of {total_unfiltered_length} crops possible')
         for item in dataset.geometries.values():
             item.reset_cache()
         gc.collect()
@@ -556,10 +563,10 @@ class BaseController:
                 savepath=self.make_save_path(*prefix, name + 'corrs.png')
             )
 
-            local_corrs = hm.evaluate(
-                'local_corrs',
-                plot=True, show_plot=self.show_plots, kernel_size=9,
-                savepath=self.make_save_path(*prefix, name + 'local_corrs.png')
+            phase = hm.evaluate(
+                'instantaneous_phase',
+                plot=True, show_plot=self.show_plots,
+                savepath=self.make_save_path(*prefix, name + 'instantaneous_phase.png')
             )
 
             # Compare to targets
@@ -584,36 +591,44 @@ class BaseController:
                 horizon.dump(path=self.make_save_path(*prefix, dump_name), add_height=False)
 
             info['corrs'] = np.nanmean(corrs)
-            info['local_corrs'] = np.nanmean(local_corrs)
+            info['phase'] = np.nanmean(np.abs(phase))
             results.append((info))
 
             self.log(f'horizon {i}: len {len(horizon)}, cov {horizon.coverage:4.4}, '
-                     f'corrs {info["corrs"]:4.4}, local corrs {info["local_corrs"]:4.4}, depth {horizon.h_mean}')
+                     f'corrs {info["corrs"]:4.4}, phase {info["phase"]:4.4}, depth {horizon.h_mean}')
 
         return results
 
     # Pipelines
-    def load_pipeline(self):
+    def load_pipeline(self, dynamic_factor=1, dynamic_low=None, dynamic_high=None, **kwargs):
         """ Define data loading pipeline.
 
         Following parameters are fetched from pipeline config: `adaptive_slices`, 'grid_src' and `rebatch_threshold`.
         """
+        _ = kwargs
+        self.log(f'Generating data with dynamic factor of {dynamic_factor}')
         return (
             Pipeline()
-            .crop(points=D('train_sampler')(self.batch_size),
-                  shape=self.crop_shape,
-                  side_view=C('side_view', default=False),
-                  adaptive_slices=C('adaptive_slices'),
-                  grid_src=C('grid_src', default='quality_grid'))
+            .init_variable('shape', None)
+            .call(generate_shape, shape=C('crop_shape'),
+                  dynamic_factor=dynamic_factor, dynamic_low=dynamic_low, dynamic_high=dynamic_high,
+                  save_to=V('shape'))
+            .make_locations(points=D('train_sampler')(self.batch_size),
+                            shape=V('shape'),
+                            side_view=C('side_view', default=False),
+                            adaptive_slices=C('adaptive_slices'),
+                            grid_src=C('grid_src', default='quality_grid'))
+
             .create_masks(dst='masks', width=C('width', default=3))
             .mask_rebatch(src='masks', threshold=C('rebatch_threshold', default=0.1))
             .load_cubes(dst='images')
-            .adaptive_reshape(src=['images', 'masks'], shape=self.crop_shape)
-            .scale(mode='q', src='images')
+            .adaptive_reshape(src=['images', 'masks'], shape=V('shape'))
+            .normalize(mode='q', src='images')
         )
 
-    def augmentation_pipeline(self):
+    def augmentation_pipeline(self, **kwargs):
         """ Define augmentation pipeline. """
+        _ = kwargs
         return (
             Pipeline()
             .transpose(src=['images', 'masks'], order=(1, 2, 0))
@@ -628,11 +643,12 @@ class BaseController:
             .transpose(src=['images', 'masks'], order=(2, 0, 1))
         )
 
-    def train_pipeline(self):
+    def train_pipeline(self, **kwargs):
         """ Define model initialization and model training pipeline.
 
         Following parameters are fetched from pipeline config: `model_config`.
         """
+        _ = kwargs
         return (
             Pipeline()
             .init_variable('loss_history', [])
@@ -647,11 +663,10 @@ class BaseController:
 
     def get_train_template(self, **kwargs):
         """ Define the whole training procedure pipeline including data loading, augmentation and model training. """
-        _ = kwargs
         return (
-            self.load_pipeline() +
-            self.augmentation_pipeline() +
-            self.train_pipeline()
+            self.load_pipeline(**kwargs) +
+            self.augmentation_pipeline(**kwargs) +
+            self.train_pipeline(**kwargs)
         )
 
 
@@ -667,11 +682,11 @@ class BaseController:
             .import_model('model', C('model_pipeline'))
 
             # Load data
-            .crop(points=D('grid_gen')(), shape=self.crop_shape,
-                  side_view=C('side_view', default=False))
+            .make_locations(points=D('grid_gen')(), shape=self.crop_shape,
+                            side_view=C('side_view', default=False))
             .load_cubes(dst='images')
             .adaptive_reshape(src='images', shape=self.crop_shape)
-            .scale(mode='q', src='images')
+            .normalize(mode='q', src='images')
 
             # Predict with model, then aggregate
             .predict_model('model',
@@ -680,3 +695,14 @@ class BaseController:
                            save_to=V('predicted_masks', mode='e'))
         )
         return inference_template
+
+
+def generate_shape(_, shape, dynamic_factor=1, dynamic_low=None, dynamic_high=None):
+    """ Dynamically generate shape of a crop to get. """
+    dynamic_low = dynamic_low or dynamic_factor
+    dynamic_high = dynamic_high or dynamic_factor
+
+    i, x, h = shape
+    x_ = np.random.randint(x // dynamic_low, x * dynamic_high + 1)
+    h_ = np.random.randint(h // dynamic_low, h * dynamic_high + 1)
+    return (i, x_, h_)

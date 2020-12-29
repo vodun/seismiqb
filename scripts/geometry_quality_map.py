@@ -4,10 +4,10 @@ import sys
 import warnings
 warnings.filterwarnings("ignore")
 
-from utils import str2bool, make_config, save_point_cloud, safe_mkdir
+from utils import str2bool, make_config, safe_mkdir
 
 sys.path.append('..')
-from seismiqb import SeismicGeometry, plot_image
+from seismiqb import SeismicGeometry, plot_image, save_point_cloud
 
 
 
