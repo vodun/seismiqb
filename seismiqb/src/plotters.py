@@ -201,7 +201,7 @@ class MatplotlibPlotter:
             ax.set_yticks(yticks)
 
         if updated['colorbar']:
-            cb = fig.colorbar(ax_img, **colorbar_kwargs)
+            cb = fig.colorbar(ax_img, **colorbar_kwargs, ax=ax)
             cb.ax.yaxis.set_tick_params(color=yaxis_kwargs.get('color', 'black'))
         ax.set_facecolor(updated['facecolor'])
         ax.tick_params(**tick_params)
@@ -250,7 +250,7 @@ class MatplotlibPlotter:
                                                   'figsize', 'fig', 'ax'])
         single_updates = filter_kwargs(updated, ['label', 'xlabel', 'ylabel', 'cmap',
                                                 'order_axes', 'facecolor', 'fontsize',
-                                                'vmin', 'vmax'])
+                                                'vmin', 'vmax', 'pad'])
         title_kwargs = filter_kwargs(updated, ['t', 'y', 'fontsize', 'family', 'color'])
 
         # make and update the sequence of args for plotters if needed
