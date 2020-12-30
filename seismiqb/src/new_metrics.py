@@ -26,7 +26,7 @@ from .plotters import plot_image
 
 CDICT = {
     'red': [[0.0, None, 1.0], [0.33, 1.0, 1.0], [0.66, 1.0, 1.0], [1.0, 0.0, None]],
-    'green': [[0.0, None, 0.0], [0.33, 0.0, 0.0], [0.66, 1.0, 1.0], [1.0, 0.5019607843137255, None]],
+    'green': [[0.0, None, 0.0], [0.33, 0.0, 0.0], [0.66, 1.0, 1.0], [1.0, 0.5, None]],
     'blue': [[0.0, None, 0.0], [0.33, 0.0, 0.0], [0.66, 0.0, 0.0], [1.0, 0.0, None]]
 }
 METRIC_CMAP = LinearSegmentedColormap('MetricMap', CDICT)
@@ -451,7 +451,8 @@ class BaseMetrics:
         }
         return metric, plot_dict
 
-    def support_js(self, supports=100, safe_strip=0, normalize=False, agg='mean', amortize=False, device='cpu', pbar=None, **kwargs):
+    def support_js(self, supports=100, safe_strip=0, normalize=False, agg='mean', amortize=False,
+                   device='cpu', pbar=None, **kwargs):
         """ Compute Jensen-Shannon divergence against reference traces. """
         metric = self.compute_support(function=js, data=self.probs, bad_traces=self.bad_traces,
                                       supports=supports, safe_strip=safe_strip,
@@ -470,7 +471,8 @@ class BaseMetrics:
         return metric, plot_dict
 
 
-    def local_hellinger(self, kernel_size=3, normalize=False, agg='mean', amortize=False, device='cpu', pbar=None, **kwargs):
+    def local_hellinger(self, kernel_size=3, normalize=False, agg='mean', amortize=False,
+                        device='cpu', pbar=None, **kwargs):
         """ Compute Hellinger distance in a local fashion. """
         metric = self.compute_local(function=hellinger, data=self.probs, bad_traces=self.bad_traces,
                                     kernel_size=kernel_size, normalize=normalize, agg=agg, amortize=amortize,
