@@ -1,5 +1,6 @@
 """ Utility functions. """
 from math import isnan
+import inspect
 
 from tqdm import tqdm
 import numpy as np

@@ -31,6 +31,7 @@ class Accumulator:
         - iteratively call `update` method with new matrices
         - to get the aggregated result, use `get` method
 
+    NaNs are ignored in all computations.
     This class works with both CPU (`numpy`) and GPU (`cupy`) arrays and automatically detects current device.
 
     Parameters
@@ -97,7 +98,7 @@ class Accumulator:
             self.squared_means = matrix ** 2
             self.counts = (~self.module.isnan(matrix)).astype(self.module.int32)
 
-        elif self.agg in ['argmin', 'argmax']:
+        elif self.agg in ['argmin', 'argmax', 'nanargmin', 'nanargmax']:
             # Keep the current maximum/minimum and update indices matrix, if needed
             self.value = matrix
             self.indices = self.module.zeros_like(matrix)
@@ -126,29 +127,39 @@ class Accumulator:
         slc = ~self.module.isnan(matrix)
 
         if self.agg in ['min', 'nanmin']:
-            self.value[slc] = self.module.minimum(self.value[slc], matrix[slc])
+            self.value[slc] = self.module.fmin(self.value[slc], matrix[slc])
 
         elif self.agg in ['max', 'nanmax']:
-            self.value[slc] = self.module.maximum(self.value[slc], matrix[slc])
+            self.value[slc] = self.module.fmax(self.value[slc], matrix[slc])
 
         elif self.agg in ['mean', 'nanmean']:
-            self.value[slc][np.isnan(self.value[slc])] = 0.0
+            mask = np.logical_and(slc, self.module.isnan(self.value))
+            self.value[mask] = 0.0
             self.value[slc] += matrix[slc]
             self.counts[slc] += 1
 
         elif self.agg in ['std', 'nanstd']:
-            self.means[slc][np.isnan(self.means[slc])] = 0.0
-            self.squared_means[slc][np.isnan(self.squared_means[slc])] = 0.0
+            mask = np.logical_and(slc, self.module.isnan(self.means))
+            self.means[mask] = 0.0
+            self.squared_means[mask] = 0.0
             self.means[slc] += matrix[slc]
             self.squared_means[slc] += matrix[slc] ** 2
             self.counts[slc] += 1
 
-        elif self.agg in ['argmin']:
+        elif self.agg in ['argmin', 'nanargmin']:
+            mask = self.module.logical_and(slc, self.module.isnan(self.value))
+            self.value[mask] = matrix[mask]
+            self.indices[mask] = self.n
+
             slc_ = matrix < self.value
             self.value[slc_] = matrix[slc_]
             self.indices[slc_] = self.n
 
-        elif self.agg in ['argmax']:
+        elif self.agg in ['argmax', 'nanargmax']:
+            mask = self.module.logical_and(slc, self.module.isnan(self.value))
+            self.value[mask] = matrix[mask]
+            self.indices[mask] = self.n
+
             slc_ = matrix > self.value
             self.value[slc_] = matrix[slc_]
             self.indices[slc_] = self.n
@@ -205,15 +216,8 @@ class Accumulator:
             squared_means[slc] /= self.counts[slc]
             value = self.module.sqrt(squared_means - means ** 2)
 
-        elif self.agg in ['argmin', 'argmax']:
+        elif self.agg in ['argmin', 'argmax', 'nanargmin', 'nanargmax']:
             value = self.indices
-
-        elif self.agg in ['stack']:
-            value = np.stack(self.values, axis=-1)
-
-        elif self.agg in ['mode']:
-            # Compute number of occurences of each unique item along the last axis, and take argmax of it
-            stacked = self.module.stack(self.values, axis=-1)
 
         return value
 
@@ -313,7 +317,7 @@ class lru_cache:
         else:
             self.attributes = False
 
-        self.default = Singleton()
+        self.default = Singleton
         self.lock = RLock()
         self.reset()
 
@@ -392,12 +396,9 @@ class lru_cache:
         return wrapper
 
 
-class Singleton:
-    """ There must be only one!"""
-    instance = None
-    def __init__(self):
-        if not Singleton.instance:
-            Singleton.instance = self
+class SingletonClass:
+    """ There must be only one! """
+Singleton = SingletonClass()
 
 def stable_hash(key):
     """ Hash that stays the same between different runs of Python interpreter. """

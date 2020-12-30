@@ -629,14 +629,14 @@ class HorizonMetrics(BaseMetrics):
         'instantaneous_phase',
     ]
 
-    def __init__(self, horizons, window=23, offset=0, scale=False, chunk_size=256):
+    def __init__(self, horizons, window=23, offset=0, normalize=False, chunk_size=256):
         super().__init__()
         horizons = list(horizons) if isinstance(horizons, tuple) else horizons
         horizons = horizons if isinstance(horizons, list) else [horizons]
         self.horizons = horizons
 
         # Save parameters for later evaluation
-        self.window, self.offset, self.scale, self.chunk_size = window, offset, scale, chunk_size
+        self.window, self.offset, self.normalize, self.chunk_size = window, offset, normalize, chunk_size
 
         # The first horizon is used to evaluate metrics
         self.horizon = horizons[0]
@@ -662,7 +662,7 @@ class HorizonMetrics(BaseMetrics):
         """ Create `data` attribute at the first time of evaluation. """
         if self._data is None:
             self._data = self.horizon.get_cube_values(window=self.window, offset=self.offset,
-                                                      scale=self.scale, chunk_size=self.chunk_size)
+                                                      normalize=self.normalize, chunk_size=self.chunk_size)
         self._data[self._data == Horizon.FILL_VALUE] = np.nan
         return self._data
 

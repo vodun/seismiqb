@@ -837,6 +837,8 @@ class Horizon:
 
         Parameters
         ----------
+        kernel : ndarray or None
+            If passed, then ready-to-use kernel. Otherwise, gaussian kernel will be created.
         kernel_size : int
             Size of gaussian filter.
         sigma : number

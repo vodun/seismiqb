@@ -1,4 +1,4 @@
-"""Init file. """
+""" Init file. """
 # pylint: disable=wildcard-import
 from .cubeset import SeismicCubeset
 from .crop_batch import SeismicCropBatch
