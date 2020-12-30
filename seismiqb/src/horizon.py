@@ -947,7 +947,7 @@ class Horizon:
             For 'shift-rescale` normalization mode.
         """
 
-        if normalize is None and fill_value is None:
+        if not normalize and fill_value is None:
             return array
 
         values = array[self.presence_matrix]
@@ -1459,10 +1459,12 @@ class Horizon:
 
         # Mix matrices
         image = np.full_like(image, np.nan)
-        image[dilated1 > -999] = dilated1[dilated1 > -999]
-        image[dilated2 > -999] = dilated2[dilated2 > -999]
-        image[(dilated1 > -999) & (dilated2 > -999)] = (dilated1[[(dilated1 > -999) & (dilated2 > -999)]] + \
-                                                        dilated2[[(dilated1 > -999) & (dilated2 > -999)]]) / 2
+        image[dilated1 != self.FILL_VALUE] = dilated1[dilated1 != self.FILL_VALUE]
+        image[dilated2 != self.FILL_VALUE] = dilated2[dilated2 != self.FILL_VALUE]
+
+        mask = (dilated1 != self.FILL_VALUE) & (dilated2 != self.FILL_VALUE)
+        image[mask] = (dilated1[mask] + dilated2[mask]) / 2
+
         # Fix zero traces
         image[np.isnan(self.geometry.std_matrix)] = np.nan
         return image

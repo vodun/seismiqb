@@ -175,6 +175,7 @@ class BaseMetrics:
         # Compute metric by shifting arrays
         total = kernel_size * kernel_size - 1
         pbar = Notifier(pbar, total=total) if pbar else None
+
         accumulator = Accumulator(agg=agg, amortize=amortize, axis=axis, total=total)
         for i in range(kernel_size):
             for j in range(kernel_size):
@@ -284,10 +285,12 @@ class BaseMetrics:
         return from_device(result)
 
 
-    def local_corrs(self, kernel_size=3, normalize=True, agg='mean', device='cpu', pbar=None, **kwargs):
+    def local_corrs(self, kernel_size=3, normalize=True, agg='mean', amortize=False,
+                    device='cpu', pbar=None, **kwargs):
         """ Compute correlation in a local fashion. """
         metric = self.compute_local(function=correlation, data=self.data, bad_traces=self.bad_traces,
-                                    kernel_size=kernel_size, normalize=normalize, agg=agg, device=device, pbar=pbar)
+                                    kernel_size=kernel_size, normalize=normalize, agg=agg, amortize=amortize,
+                                    device=device, pbar=pbar)
 
         title, plot_defaults = self.get_plot_defaults()
         title = f'Local correlation, k={kernel_size}, with `{agg}` aggregation\nfor {title}'
@@ -299,11 +302,13 @@ class BaseMetrics:
         }
         return metric, plot_dict
 
-    def support_corrs(self, supports=100, safe_strip=0, normalize=True, agg='mean', device='cpu', pbar=None, **kwargs):
+    def support_corrs(self, supports=100, safe_strip=0, normalize=True, agg='mean', amortize=False,
+                      device='cpu', pbar=None, **kwargs):
         """ Compute correlation against reference traces. """
         metric = self.compute_support(function=correlation, data=self.data, bad_traces=self.bad_traces,
                                       supports=supports, safe_strip=safe_strip,
-                                      normalize=normalize, agg=agg, device=device, pbar=pbar)
+                                      normalize=normalize, agg=agg, device=device, amortize=amortize,
+                                      pbar=pbar)
 
         title, plot_defaults = self.get_plot_defaults()
         n_supports = supports if isinstance(supports, int) else len(supports)
@@ -317,10 +322,12 @@ class BaseMetrics:
         return metric, plot_dict
 
 
-    def local_crosscorrs(self, kernel_size=3, normalize=False, agg='mean', device='cpu', pbar=None, **kwargs):
+    def local_crosscorrs(self, kernel_size=3, normalize=False, agg='mean', amortize=False,
+                         device='cpu', pbar=None, **kwargs):
         """ Compute cross-correlation in a local fashion. """
         metric = self.compute_local(function=crosscorrelation, data=self.data, bad_traces=self.bad_traces,
-                                    kernel_size=kernel_size, normalize=normalize, agg=agg, device=device, pbar=pbar)
+                                    kernel_size=kernel_size, normalize=normalize, agg=agg, amortize=amortize,
+                                    device=device, pbar=pbar)
         zvalue = np.nanquantile(np.abs(metric), 0.98).astype(np.int32)
 
         title, plot_defaults = self.get_plot_defaults()
@@ -334,12 +341,12 @@ class BaseMetrics:
         }
         return metric, plot_dict
 
-    def support_crosscorrs(self, supports=100, safe_strip=0, normalize=False, agg='mean',
+    def support_crosscorrs(self, supports=100, safe_strip=0, normalize=False, agg='mean', amortize=False,
                            device='cpu', pbar=None, **kwargs):
         """ Compute cross-correlation against reference traces. """
         metric = self.compute_support(function=crosscorrelation, data=self.data, bad_traces=self.bad_traces,
                                       supports=supports, safe_strip=safe_strip,
-                                      normalize=normalize, agg=agg, device=device, pbar=pbar)
+                                      normalize=normalize, agg=agg, amortize=amortize, device=device, pbar=pbar)
         zvalue = np.nanquantile(np.abs(metric), 0.98).astype(np.int32)
 
         title, plot_defaults = self.get_plot_defaults()
@@ -355,10 +362,12 @@ class BaseMetrics:
         return metric, plot_dict
 
 
-    def local_btch(self, kernel_size=3, normalize=False, agg='mean', device='cpu', pbar=None, **kwargs):
+    def local_btch(self, kernel_size=3, normalize=False, agg='mean', amortize=False,
+                   device='cpu', pbar=None, **kwargs):
         """ Compute Bhattacharyya divergence in a local fashion. """
         metric = self.compute_local(function=btch, data=self.probs, bad_traces=self.bad_traces,
-                                    kernel_size=kernel_size, normalize=normalize, agg=agg, device=device, pbar=pbar)
+                                    kernel_size=kernel_size, normalize=normalize, agg=agg, amortize=amortize,
+                                    device=device, pbar=pbar)
 
         title, plot_defaults = self.get_plot_defaults()
         title = f'Local Bhattacharyya divergence, k={kernel_size}, with `{agg}` aggregation\nfor {title}'
@@ -370,11 +379,12 @@ class BaseMetrics:
         }
         return metric, plot_dict
 
-    def support_btch(self, supports=100, safe_strip=0, normalize=False, agg='mean', device='cpu', pbar=None, **kwargs):
+    def support_btch(self, supports=100, safe_strip=0, normalize=False, agg='mean', amortize=False,
+                     device='cpu', pbar=None, **kwargs):
         """ Compute Bhattacharyya divergence against reference traces. """
         metric = self.compute_support(function=btch, data=self.probs, bad_traces=self.bad_traces,
                                       supports=supports, safe_strip=safe_strip,
-                                      normalize=normalize, agg=agg, device=device, pbar=pbar)
+                                      normalize=normalize, agg=agg, amortize=amortize, device=device, pbar=pbar)
 
         title, plot_defaults = self.get_plot_defaults()
         n_supports = supports if isinstance(supports, int) else len(supports)
@@ -388,10 +398,12 @@ class BaseMetrics:
         return metric, plot_dict
 
 
-    def local_kl(self, kernel_size=3, normalize=False, agg='mean', device='cpu', pbar=None, **kwargs):
+    def local_kl(self, kernel_size=3, normalize=False, agg='mean', amortize=False,
+                 device='cpu', pbar=None, **kwargs):
         """ Compute Kullback-Leibler divergence in a local fashion. """
         metric = self.compute_local(function=kl, data=self.probs, bad_traces=self.bad_traces,
-                                    kernel_size=kernel_size, normalize=normalize, agg=agg, device=device, pbar=pbar)
+                                    kernel_size=kernel_size, normalize=normalize, agg=agg, amortize=amortize,
+                                    device=device, pbar=pbar)
 
         title, plot_defaults = self.get_plot_defaults()
         title = f'Local KL divergence, k={kernel_size}, with `{agg}` aggregation\nfor {title}'
@@ -403,11 +415,13 @@ class BaseMetrics:
         }
         return metric, plot_dict
 
-    def support_kl(self, supports=100, safe_strip=0, normalize=False, agg='mean', device='cpu', pbar=None, **kwargs):
+    def support_kl(self, supports=100, safe_strip=0, normalize=False, agg='mean', amortize=False,
+                   device='cpu', pbar=None, **kwargs):
         """ Compute Kullback-Leibler divergence against reference traces. """
         metric = self.compute_support(function=kl, data=self.probs, bad_traces=self.bad_traces,
                                       supports=supports, safe_strip=safe_strip,
-                                      normalize=normalize, agg=agg, device=device, pbar=pbar)
+                                      normalize=normalize, agg=agg, amortize=amortize,
+                                      device=device, pbar=pbar)
 
         title, plot_defaults = self.get_plot_defaults()
         n_supports = supports if isinstance(supports, int) else len(supports)
@@ -421,10 +435,11 @@ class BaseMetrics:
         return metric, plot_dict
 
 
-    def local_js(self, kernel_size=3, normalize=False, agg='mean', device='cpu', pbar=None, **kwargs):
+    def local_js(self, kernel_size=3, normalize=False, agg='mean', amortize=False, device='cpu', pbar=None, **kwargs):
         """ Compute Jensen-Shannon divergence in a local fashion. """
         metric = self.compute_local(function=js, data=self.probs, bad_traces=self.bad_traces,
-                                    kernel_size=kernel_size, normalize=normalize, agg=agg, device=device, pbar=pbar)
+                                    kernel_size=kernel_size, normalize=normalize, agg=agg, amortize=amortize,
+                                    device=device, pbar=pbar)
 
         title, plot_defaults = self.get_plot_defaults()
         title = f'Local JS divergence, k={kernel_size}, with `{agg}` aggregation\nfor {title}'
@@ -436,11 +451,12 @@ class BaseMetrics:
         }
         return metric, plot_dict
 
-    def support_js(self, supports=100, safe_strip=0, normalize=False, agg='mean', device='cpu', pbar=None, **kwargs):
+    def support_js(self, supports=100, safe_strip=0, normalize=False, agg='mean', amortize=False, device='cpu', pbar=None, **kwargs):
         """ Compute Jensen-Shannon divergence against reference traces. """
         metric = self.compute_support(function=js, data=self.probs, bad_traces=self.bad_traces,
                                       supports=supports, safe_strip=safe_strip,
-                                      normalize=normalize, agg=agg, device=device, pbar=pbar)
+                                      normalize=normalize, agg=agg, amortize=amortize,
+                                      device=device, pbar=pbar)
 
         title, plot_defaults = self.get_plot_defaults()
         n_supports = supports if isinstance(supports, int) else len(supports)
@@ -454,10 +470,11 @@ class BaseMetrics:
         return metric, plot_dict
 
 
-    def local_hellinger(self, kernel_size=3, normalize=False, agg='mean', device='cpu', pbar=None, **kwargs):
+    def local_hellinger(self, kernel_size=3, normalize=False, agg='mean', amortize=False, device='cpu', pbar=None, **kwargs):
         """ Compute Hellinger distance in a local fashion. """
         metric = self.compute_local(function=hellinger, data=self.probs, bad_traces=self.bad_traces,
-                                    kernel_size=kernel_size, normalize=normalize, agg=agg, device=device, pbar=pbar)
+                                    kernel_size=kernel_size, normalize=normalize, agg=agg, amortize=amortize,
+                                    device=device, pbar=pbar)
 
         title, plot_defaults = self.get_plot_defaults()
         title = f'Local Hellinger distance, k={kernel_size}, with `{agg}` aggregation\nfor {title}'
@@ -469,12 +486,13 @@ class BaseMetrics:
         }
         return metric, plot_dict
 
-    def support_hellinger(self, supports=100, safe_strip=0, normalize=False, agg='mean',
+    def support_hellinger(self, supports=100, safe_strip=0, normalize=False, agg='mean', amortize=False,
                           device='cpu', pbar=None, **kwargs):
         """ Compute Hellinger distance against reference traces. """
         metric = self.compute_support(function=hellinger, data=self.probs, bad_traces=self.bad_traces,
                                       supports=supports, safe_strip=safe_strip,
-                                      normalize=normalize, agg=agg, device=device, pbar=pbar)
+                                      normalize=normalize, agg=agg, amortize=amortize,
+                                      device=device, pbar=pbar)
 
         title, plot_defaults = self.get_plot_defaults()
         n_supports = supports if isinstance(supports, int) else len(supports)
@@ -488,10 +506,11 @@ class BaseMetrics:
         return metric, plot_dict
 
 
-    def local_tv(self, kernel_size=3, normalize=False, agg='mean', device='cpu', pbar=None, **kwargs):
+    def local_tv(self, kernel_size=3, normalize=False, agg='mean', amortize=False, device='cpu', pbar=None, **kwargs):
         """ Compute total variation in a local fashion. """
         metric = self.compute_local(function=tv, data=self.probs, bad_traces=self.bad_traces,
-                                    kernel_size=kernel_size, normalize=normalize, agg=agg, device=device, pbar=pbar)
+                                    kernel_size=kernel_size, normalize=normalize, agg=agg, amortize=amortize,
+                                    device=device, pbar=pbar)
 
         title, plot_defaults = self.get_plot_defaults()
         title = f'Local total variation, k={kernel_size}, with `{agg}` aggregation\nfor {title}'
@@ -503,11 +522,13 @@ class BaseMetrics:
         }
         return metric, plot_dict
 
-    def support_tv(self, supports=100, safe_strip=0, normalize=False, agg='mean', device='cpu', pbar=None, **kwargs):
+    def support_tv(self, supports=100, safe_strip=0, normalize=False, agg='mean', amortize=False,
+                   device='cpu', pbar=None, **kwargs):
         """ Compute total variation against reference traces. """
         metric = self.compute_support(function=tv, data=self.probs, bad_traces=self.bad_traces,
                                       supports=supports, safe_strip=safe_strip,
-                                      normalize=normalize, agg=agg, device=device, pbar=pbar)
+                                      normalize=normalize, agg=agg, amortize=amortize,
+                                      device=device, pbar=pbar)
 
         title, plot_defaults = self.get_plot_defaults()
         n_supports = supports if isinstance(supports, int) else len(supports)
