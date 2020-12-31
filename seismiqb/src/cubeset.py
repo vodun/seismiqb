@@ -20,8 +20,8 @@ from .crop_batch import SeismicCropBatch
 from .horizon import Horizon, UnstructuredHorizon
 from .metrics import HorizonMetrics
 from .plotters import plot_image
-from .utils import IndexedDict, round_to_array, gen_crop_coordinates, make_axis_grid, infer_tuple
-
+from .utils import round_to_array, gen_crop_coordinates, make_axis_grid, infer_tuple
+from .utility_classes import IndexedDict
 
 
 class SeismicCubeset(Dataset):
