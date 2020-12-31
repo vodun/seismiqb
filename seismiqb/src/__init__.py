@@ -6,7 +6,7 @@ from .geometry import SeismicGeometry
 from .horizon import UnstructuredHorizon, StructuredHorizon, Horizon
 from .facies import GeoBody
 from .fault import Fault, split_faults, filter_faults
-from .metrics import HorizonMetrics, GeometryMetrics, enlarge_carcass_metric, METRIC_CMAP
+from .metrics import HorizonMetrics, GeometryMetrics, METRIC_CMAP
 from .plotters import plot_image, plot_loss
 from .utils import *
 from .utility_classes import *
