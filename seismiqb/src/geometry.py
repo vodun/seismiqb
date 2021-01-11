@@ -16,7 +16,7 @@ import segyio
 import cv2
 
 from .hdf5_storage import StorageHDF5
-from .utils import find_min_max, file_print, compute_attribute, make_axis_grid, fill_defaults
+from .utils import find_min_max, file_print, compute_attribute, make_axis_grid, fill_defaults, parse_axis
 from .utility_classes import lru_cache, SafeIO
 from .plotters import plot_image
 
