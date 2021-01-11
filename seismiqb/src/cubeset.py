@@ -19,8 +19,8 @@ from .horizon import Horizon, UnstructuredHorizon
 from .hdf5_storage import StorageHDF5
 from .metrics import HorizonMetrics
 from .plotters import plot_image
-from .utils import IndexedDict, round_to_array, gen_crop_coordinates, make_axis_grid, fill_defaults, parse_axis
-
+from .utils import round_to_array, gen_crop_coordinates, make_axis_grid, fill_defaults, parse_axis
+from .utility_classes import IndexedDict
 
 
 class SeismicCubeset(Dataset):
@@ -351,7 +351,7 @@ class SeismicCubeset(Dataset):
         self._sampler = sampler
 
 
-    def create_sampler(self, mode='hist', p=None, transforms=None, dst='sampler', **kwargs):
+    def create_sampler(self, mode='hist', p=None, transforms=None, dst='sampler', src_labels='labels', **kwargs):
         """ Create samplers for every cube and store it in `samplers`
         attribute of passed dataset. Also creates one combined sampler
         and stores it in `sampler` attribute of passed dataset.
@@ -391,7 +391,8 @@ class SeismicCubeset(Dataset):
 
             elif mode[ix] == 'hist' or mode[ix] == 'horizon':
                 sampler = 0 & NumpySampler('n', dim=3)
-                for i, label in enumerate(self.labels[ix]):
+                labels = getattr(self, src_labels)[ix]
+                for i, label in enumerate(labels):
                     label.create_sampler(**kwargs)
                     sampler = sampler | label.sampler
             else:

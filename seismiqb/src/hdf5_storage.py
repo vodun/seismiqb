@@ -4,7 +4,8 @@ import os
 import numpy as np
 import h5py
 
-from .utils import SafeIO, lru_cache, parse_axis, make_axis_grid
+from .utils import parse_axis, make_axis_grid
+from .utility_classes import SafeIO, lru_cache
 
 class StorageHDF5:
     """ Class for storing 3D data in hdf5 format. To speed up loading, the file can store multiple transposed
