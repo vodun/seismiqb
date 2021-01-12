@@ -316,7 +316,7 @@ def get_sticks(points, n_sticks, n_nodes):
 
     Parameters
     ----------
-    points : np.ndarray
+    points : numpy.ndarray
         Fault points.
     n_sticks : int
         Number of sticks to create.
@@ -325,8 +325,9 @@ def get_sticks(points, n_sticks, n_nodes):
 
     Returns
     -------
-    [type]
-        [description]
+    numpy.ndarray
+        Array of fault sticks. Each item is an array of points and corresponds to stick. Each point of that array
+        is a node of stick.
     """
     pca = PCA(1)
     axis = 0 if np.abs(pca.components_[0][0]) > np.abs(pca.components_[0][1]) else 1
@@ -340,7 +341,7 @@ def get_sticks(points, n_sticks, n_nodes):
     res = []
 
     for p in projections:
-        points_ = thick(p).astype(int)
+        points_ = thicken_line(p).astype(int)
         loc = p[0, axis]
         if len(points_) > 3:
             nodes = approximate_points(points_[:, [1-axis, 2]], n_nodes)
@@ -350,7 +351,7 @@ def get_sticks(points, n_sticks, n_nodes):
             res += [nodes_]
     return res
 
-def thick(points):
+def thicken_line(points):
     """ Make thick line. """
     points = points[np.argsort(points[:, -1])]
     splitted = np.split(points, np.unique(points[:, -1], return_index=True)[1][1:])
