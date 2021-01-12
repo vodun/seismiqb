@@ -1,5 +1,6 @@
 """ Utility functions. """
 from math import isnan
+import inspect
 
 from tqdm import tqdm
 import numpy as np
@@ -10,9 +11,10 @@ from numba import njit, prange
 
 
 
-def file_print(msg, path):
+def file_print(msg, path, mode='w'):
     """ Print to file. """
-    with open(path, 'w') as file:
+    # pylint: disable=redefined-outer-name
+    with open(path, mode) as file:
         print(msg, file=file)
 
 
@@ -526,3 +528,11 @@ def local_correlation(region):
             if den != 0:
                 corr[i, j] = cov / den
     return np.mean(corr)
+
+def retrieve_function_arguments(function, dictionary):
+    """ Retrieve both positional and keyword arguments for a passed `function` from a `dictionary`.
+    Note that retrieved values are removed from the passed `dictionary` in-place. """
+    # pylint: disable=protected-access
+    parameters = inspect.signature(function).parameters
+    arguments_with_defaults = {k: v.default for k, v in parameters.items() if v.default != inspect._empty}
+    return {k: dictionary.pop(k, v) for k, v in arguments_with_defaults.items()}

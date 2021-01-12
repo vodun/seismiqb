@@ -83,7 +83,7 @@ def kl(array1, array2, std1, std2, **kwargs):
     """ Compute Kullback-Leibler divergence. """
     _ = std1, std2, kwargs
     xp = cp.get_array_module(array1) if CUPY_AVAILABLE else np
-    return 1 - (array2 * xp.log2(array2/array1)).sum(axis=-1)
+    return 1 - (array2 * xp.log2(array2 / array1)).sum(axis=-1)
 
 
 def js(array1, array2, std1, std2, **kwargs):
@@ -103,7 +103,7 @@ def hellinger(array1, array2, std1, std2, **kwargs):
     _ = std1, std2, kwargs
     xp = cp.get_array_module(array1) if CUPY_AVAILABLE else np
 
-    div = xp.sqrt(((xp.sqrt(array2) - xp.sqrt(array1)) ** 2).sum(axis=-1)) / xp.sqrt(2)
+    div = xp.sqrt(((xp.sqrt(array1) - xp.sqrt(array2)) ** 2).sum(axis=-1)) / xp.sqrt(2)
     return 1 - div
 
 
