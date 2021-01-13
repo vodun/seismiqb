@@ -14,8 +14,6 @@ from ..batchflow import FilesIndex, Batch, action, inbatch_parallel, SkipBatchEx
 from .horizon import Horizon
 from .plotters import plot_image
 
-from .utils import adjusted_shape_3d
-
 
 AFFIX = '___'
 SIZE_POSTFIX = 12
@@ -130,7 +128,6 @@ class SeismicCropBatch(Batch):
     @action
     def make_locations(self, points, shape=None, direction=(0, 0, 0), eps=3,
                        side_view=False, adaptive_slices=False, passdown=None,
-                       adjust=False, angle_1=0, angle_2=0, scale=1,
                        grid_src='quality_grid', dst='locations',
                        dst_points='points', dst_shapes='shapes'):
         """ Generate positions of crops. Creates new instance of :class:`.SeismicCropBatch`
@@ -159,15 +156,6 @@ class SeismicCropBatch(Batch):
             If True, then slices are created so that crops are cut only along the grid.
         passdown : str of list of str
             Components of batch to keep in the new one.
-        adjust : bool
-            Perform adjusting of shape to avoid padding after `rotate` and `scale`. Proposed that `scale` is evaluated
-            after `rotate`.
-        angle_1 : float
-            Rotation angle in (xline, depth) plane, by default 0.
-        angle_2 : int, optional
-            Rotation angle in (iline, xline) plane, by default 0.
-        scale : float or tuple
-            Scale factors for each axis.
         grid_src : str
             Attribut of geometry to get the grid from.
         dst : str, optional
@@ -189,9 +177,6 @@ class SeismicCropBatch(Batch):
         # pylint: disable=too-many-arguments
 
         # Create all the points and shapes
-        crop_shape = shape
-        scale = scale if isinstance(scale, (list, tuple)) else [scale] * 3
-        shape = adjusted_shape_3d(shape, angle_1, angle_2, scale) if adjust else shape
         if isinstance(shape, dict):
             shape = {k: np.asarray(v) for k, v in shape.items()}
         else:
@@ -221,9 +206,6 @@ class SeismicCropBatch(Batch):
             new_dict = {ix: self.index.get_fullpath(self.unsalt(ix)) for ix in new_index}
             new_batch = type(self)(FilesIndex.from_index(index=new_index, paths=new_dict, dirs=False))
             new_batch.transformed = True
-            if adjust:
-                new_batch.crop_shape = crop_shape
-                new_batch.load_shape = shape
 
             passdown = passdown or []
             passdown = [passdown] if isinstance(passdown, str) else passdown
@@ -903,7 +885,7 @@ class SeismicCropBatch(Batch):
         return copy_
 
     @apply_parallel
-    def rotate(self, crop, angle_1, angle_2=0):
+    def rotate(self, crop, angle_1, angle_2=0, angle_3=0):
         """ Rotate crop along the first two axes.
 
         Parameters
@@ -916,6 +898,10 @@ class SeismicCropBatch(Batch):
             crop = crop.transpose(2, 0, 1)
             crop = self._rotate(crop, angle_2)
             crop = crop.transpose(1, 2, 0)
+        if angle_3 != 0:
+            crop = crop.transpose(1, 2, 0)
+            crop = self._rotate(crop, angle_3)
+            crop = crop.transpose(2, 0, 1)
         return crop
 
     def _rotate(self, crop, angle):
@@ -1114,10 +1100,10 @@ class SeismicCropBatch(Batch):
         return gaussian_filter1d(crop, sigma=sigma, axis=axis, order=order)
 
     @apply_parallel
-    def central_crop(self, crop):
+    def central_crop(self, crop, shape):
         """ Central crop of `self.crop_shape` shape. """
         crop_shape = np.array(crop.shape)
-        shape = np.array(self.crop_shape)
+        shape = np.array(shape)
         if (shape > crop_shape).any():
             raise ValueError(f"shape can't be large then crop shape ({crop_shape}) but {shape} was given.")
         corner = crop_shape // 2 - shape // 2

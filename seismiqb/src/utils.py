@@ -484,7 +484,7 @@ def adjusted_shape_2d(shape, angle):
             y_max = (shape[0] ** 2 + shape[1] ** 2) ** 0.5 + 1
     return (int(np.ceil(x_max)), int(np.ceil(y_max)))
 
-def adjusted_shape_3d(shape, angle_1, angle_2=0, scale=(1, 1, 1)):
+def adjusted_shape_3d(shape, angle_1, angle_2=0, angle_3=0, scale=(1, 1, 1)):
     """ Compute adjusted 3D crop shape to rotate it and get central crop without padding.
 
     Parameters
@@ -502,8 +502,13 @@ def adjusted_shape_3d(shape, angle_1, angle_2=0, scale=(1, 1, 1)):
         Adjusted crop shape.
     """
     shape = np.ceil(np.array(shape) / np.array(scale)).astype(int)
-    i_shape, x_shape = adjusted_shape_2d(shape[:-1], angle_2)
-    x_shape, h_shape = adjusted_shape_2d((x_shape, shape[-1]), angle_1)
+    i_shape, x_shape, h_shape = shape
+    if angle_3 != 0:
+        i_shape, h_shape = adjusted_shape_2d((i_shape, h_shape), angle_3)
+    if angle_2 != 0:
+        i_shape, x_shape = adjusted_shape_2d((i_shape, x_shape), angle_2)
+    if angle_1 != 0:
+        x_shape, h_shape = adjusted_shape_2d((x_shape, h_shape), angle_1)
     return (i_shape, x_shape, h_shape)
 
 @njit
