@@ -661,7 +661,7 @@ class SeismicCropBatch(Batch):
 
 
     @apply_parallel
-    def adaptive_reshape(self, crop, shape=None):
+    def adaptive_reshape(self, crop, shape):
         """ Changes axis of view to match desired shape.
         Must be used in combination with `side_view` argument of `crop` action.
 
@@ -670,9 +670,8 @@ class SeismicCropBatch(Batch):
         shape : sequence
             Desired shape of resulting crops.
         """
-        shape = self.load_shape if shape is None else shape
         if (np.array(crop.shape) != np.array(shape)).any():
-            return crop.transpose([1, 0, 2])
+            return crop.transpose(1, 0, 2)
         return crop
 
     @apply_parallel
