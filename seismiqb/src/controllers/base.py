@@ -10,6 +10,7 @@ import os
 import gc
 import logging
 import random
+from time import perf_counter
 from copy import copy
 from glob import glob
 import psutil
@@ -271,6 +272,7 @@ class BaseController:
         model_config = model_config or self.model_config
         device = device or self.device
 
+        # Prepare parameters
         self.log('Train started')
         pipeline_config = {
             'model_config': {**model_config, 'device': device},
@@ -282,6 +284,7 @@ class BaseController:
             **kwargs
         }
 
+        # Test batch: get statistics and time separately
         bs = self.batch_size
         self.batch_size = int(self.batch_size * batch_size_multiplier)
         model_pipeline = (self.get_train_template(**kwargs) << pipeline_config) << dataset
@@ -291,14 +294,18 @@ class BaseController:
         self.log(f'Cache lengths: {[item.cache_length for item in dataset.geometries.values()]}')
         self.batch_size = bs
 
+        # Run training procedure
+        start_time = perf_counter()
         model_pipeline.run(D('size'), n_iters=n_iters + np.random.randint(100),
                            bar={'bar': self.bar, 'monitors': 'loss_history'}, prefetch=prefetch)
         plot_loss(model_pipeline.v('loss_history'), show=self.show_plots,
                   savepath=self.make_save_path('model_loss.png'))
+        self.train_time = perf_counter() - start_time
 
+        # Log stats and store model
         self.model_pipeline = model_pipeline
         last_loss = np.mean(model_pipeline.v('loss_history')[-50:])
-        self.log(f'Train finished; last loss is {last_loss}')
+        self.log(f'Train finished in {self.train_time:4.1f}; last loss is {last_loss:4.4f}')
         self.log(f'Cache sizes: {[item.cache_size for item in dataset.geometries.values()]}')
         self.log(f'Cache lengths: {[item.cache_length for item in dataset.geometries.values()]}')
 
@@ -365,22 +372,22 @@ class BaseController:
         bs = self.batch_size
         self.batch_size = int(self.batch_size * batch_size_multiplier)
 
+        start_time = perf_counter()
         if len(orientation) == 1:
             horizons = method(dataset, orientation=orientation, overlap_factor=overlap_factor,
                               heights_range=heights_range, **kwargs)
         else:
             horizons_i = method(dataset, orientation='i', overlap_factor=overlap_factor,
                                 heights_range=heights_range, **kwargs)
-            gc.collect()
             self.log('Done i-inference')
 
             horizons_x = method(dataset, orientation='x', overlap_factor=overlap_factor,
                                 heights_range=heights_range, **kwargs)
-            gc.collect()
             self.log('Done x-inference')
 
             horizons = Horizon.merge_list(horizons_i + horizons_x, minsize=1000)
-            gc.collect()
+        self.inference_time = perf_counter() - start_time
+        self.log(f'Inference done in {self.inference_time:4.1f}')
 
         # Log some results
         if horizons:
@@ -432,33 +439,22 @@ class BaseController:
         config, crop_shape_grid = self.make_inference_config(orientation)
 
         # Actual inference
-        dataset.make_grid(dataset.indices[0], crop_shape_grid,
-                          *spatial_ranges, heights_range,
-                          batch_size=self.batch_size,
-                          overlap_factor=overlap_factor,
-                          filtering_matrix=filtering_matrix,
-                          filter_threshold=filter_threshold)
-
-        inference_pipeline = (self.get_inference_template() << config) << dataset
-        inference_pipeline.run(D('size'), n_iters=dataset.grid_iters, bar=self.bar,
-                               prefetch=prefetch)
-
-        # Assemble crops together in accordance to the created grid
-        assembled_pred = dataset.assemble_crops(inference_pipeline.v('predicted_masks'),
-                                                order=config.get('order'))
+        horizons = self._inference_chunk(dataset=dataset, ranges=(*spatial_ranges, heights_range),
+                                         pipeline_config=config, crop_shape=crop_shape_grid,
+                                         overlap_factor=overlap_factor, filtering_matrix=filtering_matrix,
+                                         filter_threshold=filter_threshold, prefetch=prefetch)
 
         # Log memory usage info and clean up
         self.log(f'Cache sizes: {[item.cache_size for item in dataset.geometries.values()]}')
         self.log(f'Cache lengths: {[item.cache_length for item in dataset.geometries.values()]}')
+        total_length = dataset.grid_info['length']
+        total_unfiltered_length = dataset.grid_info['unfiltered_length']
+        self.log(f'Inferenced total of {total_length} out of {total_unfiltered_length} crops possible')
 
-        inference_pipeline.reset('variables')
-        inference_pipeline = None
         for item in dataset.geometries.values():
             item.reset_cache()
         gc.collect()
-
-        # Convert to Horizon instances
-        return Horizon.from_mask(assembled_pred, dataset.grid_info, threshold=0.5, minsize=50)
+        return horizons
 
     def inference_1(self, dataset, heights_range=None, orientation='i', overlap_factor=2, prefetch=1,
                     chunk_size=100, chunk_overlap=0.2, filtering_matrix=None, filter_threshold=0, **kwargs):
@@ -489,9 +485,7 @@ class BaseController:
             total_length += dataset.grid_info['length']
             total_unfiltered_length += dataset.grid_info['unfiltered_length']
 
-            gc.collect()
-            self.log(f'{chunk} after cleanup')
-
+        # Log and cleanup
         self.log(f'Cache sizes: {[item.cache_size for item in dataset.geometries.values()]}')
         self.log(f'Cache lengths: {[item.cache_length for item in dataset.geometries.values()]}')
         self.log(f'Inferenced total of {total_length} out of {total_unfiltered_length} crops possible')
@@ -504,7 +498,7 @@ class BaseController:
 
     def _inference_chunk(self, dataset, ranges, pipeline_config, crop_shape,
                          overlap_factor, filtering_matrix, filter_threshold, prefetch):
-        """ !!. """
+        """ Inference on a chunk of cube, parametrized by `ranges`. """
         dataset.make_grid(dataset.indices[0], crop_shape,
                           *ranges,
                           batch_size=self.batch_size,
@@ -512,37 +506,22 @@ class BaseController:
                           filtering_matrix=filtering_matrix,
                           filter_threshold=filter_threshold)
 
-        self.log(f'{ranges[0]} before inference pipeline')
         inference_pipeline = (self.get_inference_template() << pipeline_config) << dataset
-        # inference_pipeline.run(D('size'), n_iters=dataset.grid_iters, prefetch=prefetch)
 
-        crops = []
+        predicted_crops = []
         for _ in range(dataset.grid_iters):
             batch = inference_pipeline.next_batch(D('size'))
-            crops.extend(item for item in batch.predictions)
-        self.log(f'{ranges[0]} after inference pipeline run')
-
-        self.log(f'{ranges[0]} crops size: {sum(item.nbytes / (1024 ** 3) for item in crops)}')
-        inference_pipeline.reset('variables')
-        inference_pipeline = None
-        gc.collect()
-        self.log(f'{ranges[0]} after crops copy and cleanup')
+            predicted_crops.extend(item for item in batch.predictions)
 
         # Assemble crops together in accordance to the created grid
-        assembled_pred = dataset.assemble_crops(crops, order=pipeline_config.get('order'))
-        self.log(f'{ranges[0]} after assemble')
+        assembled_pred = dataset.assemble_crops(predicted_crops, order=pipeline_config.get('order'))
 
         # Extract Horizon instances
         chunk_horizons = Horizon.from_mask(assembled_pred, dataset.grid_info, threshold=0.5, minsize=50)
-        s = sum(item.points.nbytes / (1024 ** 3) for item in chunk_horizons)
-        self.log(f'{ranges[0]} size of horizons: {s}')
-        self.log(f'{ranges[0]} after from mask')
 
         # Cleanup
-        # inference_pipeline.reset('variables')
-        # inference_pipeline = None
-        del crops
-        del assembled_pred
+        inference_pipeline.reset('variables')
+        inference_pipeline = None
         gc.collect()
         return chunk_horizons
 
