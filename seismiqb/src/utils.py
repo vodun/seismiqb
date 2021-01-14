@@ -484,17 +484,23 @@ def adjust_shape_2d(shape, angle):
             y_max = (shape[0] ** 2 + shape[1] ** 2) ** 0.5 + 1
     return (int(np.ceil(x_max)), int(np.ceil(y_max)))
 
-def adjust_shape_3d(shape, angle_1, angle_2=0, angle_3=0, scale=(1, 1, 1)):
-    """ Compute adjusted 3D crop shape to rotate it and get central crop without padding.
+def adjust_shape_3d(shape, angle_i, angle_x=0, angle_h=0, scale=(1, 1, 1)):
+    """ Compute adjusted 3D crop shape to rotate it and get central crop without padding. Adjustments is based on
+    proposition that rotation angles are defined as Tait-Bryan angles and scale performed before rotations.
+    The sequence of extrinsic rotations axes is (iline axis, xline axis, depth axis).
 
     Parameters
     ----------
     shape : tuple
         Target сrop shape.
-    angle_1 : float
-        Rotation angle in (xline, depth) plane.
-    angle_2 : int, optional
-        Rotation angle in (iline, xline) plane, by default 0.
+    angle_i : float
+        Rotation angle about iline axis.
+    angle_x : int, optional
+        Rotation angle about xline axis, by default 0.
+    angle_h : int, optional
+        Rotation angle about depth axis, by default 0.
+    scale : int or tuple, optional
+        Scale for each axis
 
     Returns
     -------
@@ -503,12 +509,12 @@ def adjust_shape_3d(shape, angle_1, angle_2=0, angle_3=0, scale=(1, 1, 1)):
     """
     shape = np.ceil(np.array(shape) / np.array(scale)).astype(int)
     i_shape, x_shape, h_shape = shape
-    if angle_3 != 0:
-        i_shape, h_shape = adjust_shape_2d((i_shape, h_shape), angle_3)
-    if angle_2 != 0:
-        i_shape, x_shape = adjust_shape_2d((i_shape, x_shape), angle_2)
-    if angle_1 != 0:
-        x_shape, h_shape = adjust_shape_2d((x_shape, h_shape), angle_1)
+    if angle_h != 0:
+        i_shape, x_shape = adjust_shape_2d((i_shape, x_shape), angle_h)
+    if angle_x != 0:
+        i_shape, h_shape = adjust_shape_2d((i_shape, h_shape), angle_x)
+    if angle_i != 0:
+        x_shape, h_shape = adjust_shape_2d((x_shape, h_shape), angle_i)
     return (i_shape, x_shape, h_shape)
 
 @njit

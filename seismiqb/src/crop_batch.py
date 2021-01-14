@@ -882,23 +882,28 @@ class SeismicCropBatch(Batch):
         return copy_
 
     @apply_parallel
-    def rotate(self, crop, angle_1, angle_2=0, angle_3=0):
-        """ Rotate crop along the first two axes.
+    def rotate(self, crop, angle_i, angle_x=0, angle_h=0):
+        """ Rotate crop along the first two axes. Angles are defined as Tait-Bryan angles and the sequence of
+        extrinsic rotations axes is (iline axis, xline axis, depth axis).
 
         Parameters
         ----------
-        angle : float
-            Angle of rotation.
+        angle_i : float
+            Angle of rotation about iline axis.
+        angle_x : float
+            Angle of rotation about xline axis.
+        angle_h : float
+            Angle of rotation about depth axis.
         """
-        crop = self._rotate(crop, angle_1)
-        if angle_2 != 0:
-            crop = crop.transpose(2, 0, 1)
-            crop = self._rotate(crop, angle_2)
+        crop = self._rotate(crop, angle_i)
+        if angle_x != 0:
             crop = crop.transpose(1, 2, 0)
-        if angle_3 != 0:
-            crop = crop.transpose(1, 2, 0)
-            crop = self._rotate(crop, angle_3)
+            crop = self._rotate(crop, angle_x)
             crop = crop.transpose(2, 0, 1)
+        if angle_h != 0:
+            crop = crop.transpose(2, 0, 1)
+            crop = self._rotate(crop, angle_h)
+            crop = crop.transpose(1, 2, 0)
         return crop
 
     def _rotate(self, crop, angle):
