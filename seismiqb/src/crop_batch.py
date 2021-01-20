@@ -927,7 +927,7 @@ class SeismicCropBatch(Batch):
 
     @apply_parallel
     def scale(self, crop, scale):
-        """ Zoom in or zoom out along the first two axes of crop.
+        """ Zoom in or zoom out along each axis of crop.
 
         Parameters
         ----------
