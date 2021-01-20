@@ -1103,7 +1103,7 @@ class SeismicCropBatch(Batch):
 
     @apply_parallel
     def central_crop(self, crop, shape):
-        """ Central crop of `self.crop_shape` shape. """
+        """ Central crop of defined shape. """
         crop_shape = np.array(crop.shape)
         shape = np.array(shape)
         if (shape > crop_shape).any():
