@@ -611,7 +611,7 @@ class SeismicCubeset(Dataset):
         labels = [getattr(self, src_)[idx] if isinstance(src_, str) else [src_] for src_ in src]
         labels = sum(labels, [])
         for label in labels:
-            x, y, z, simplices_ = label.triangulation(**triangulation_kwargs)
+            x, y, z, simplices_ = label.make_triangulation(**triangulation_kwargs)
             if x is not None:
                 simplices += [simplices_ + sum([len(item) for item in coords])]
                 color = colors_mapping.get(type(label).__name__, colors_mapping.get('all', 'green'))
