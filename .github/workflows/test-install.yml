@@ -27,4 +27,4 @@ jobs:
         pip install git+https://github.com/gazprom-neft/seismiqb.git
     
     - name: Run 'import' in installed environment
-      run: python -c 'import seismiqb' 
+      run: python3 -c 'import seismiqb' 
