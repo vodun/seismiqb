@@ -17,13 +17,13 @@ jobs:
 
     steps:
     - name: Set up Python ${{ matrix.python-version }} on ${{ matrix.os }}
-      uses: actions/setup-python@v1
+      uses: actions/setup-python@v2
       with:
         python-version: ${{ matrix.python-version }}
 
-    - name: Install as a package
+    - name: Install via pip from github
       run: |
-        pip install -U pip
+        pip install --user -U pip
         pip install wheel
         pip install git+https://github.com/gazprom-neft/seismiqb.git@${{ github.sha }}
     
