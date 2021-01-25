@@ -25,7 +25,7 @@ setup(
         'matplotlib>=3.0.2',
         'tqdm>=4.50.0',
         'segyio>=1.8.3',
-        'scikit-image>=0.13.1',
+        'scikit-learn>=0.21.3',
         'numba>=0.43.0',
         'scikit_image>=0.16.2',
         'nbconvert>=5.6.1',
