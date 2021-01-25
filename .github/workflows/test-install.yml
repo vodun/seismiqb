@@ -7,12 +7,12 @@ on:
 
 jobs:
 
-  test_requirements:
+  test_install:
 
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest]
         python-version: [3.6, 3.7, 3.8]
 
     steps:
@@ -23,6 +23,7 @@ jobs:
 
     - name: Install as a package
       run: |
+        pip install wheel
         pip install git+https://github.com/gazprom-neft/seismiqb.git
     
     - name: Run 'import' in installed environment
