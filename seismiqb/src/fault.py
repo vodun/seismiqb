@@ -373,6 +373,7 @@ def nearest_neighbors(values, all_values, n_neighbors=10):
 @njit(parallel=True)
 def insert_fault_into_mask(mask, points, mask_bbox):
     """ Add new points into binary mask. """
+    #pylint: disable=not-an-iterable
     for i in prange(len(points)):
         point = points[i]
         if (point[0] >= mask_bbox[0][0]) and (point[0] < mask_bbox[0][1]):
