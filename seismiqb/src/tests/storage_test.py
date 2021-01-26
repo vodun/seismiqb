@@ -90,7 +90,7 @@ def test_hdf5_storage_creation(make_hdf5_storage, projections):
     assert tuple(cube.projections) == tuple(projections)
     for axis in projections:
         if axis == 0:
-            assert cube.cube_orientation(axis) == cube.file_hdf5['cube_i']
+            assert cube.cube_orientation(axis) == cube.file_hdf5['cube']
         elif axis == 1:
             assert cube.cube_orientation(axis) == cube.file_hdf5['cube_x']
         else:

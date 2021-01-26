@@ -1124,7 +1124,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
             Postfix to add to the name of resulting cube.
         """
 
-        cube_keys = {'i': 'cube_i', 'x': 'cube_x', 'h': 'cube_h'}
+        cube_keys = {'i': 'cube', 'x': 'cube_x', 'h': 'cube_h'}
         axes = {'i': [0, 1, 2], 'x': [1, 2, 0], 'h': [2, 0, 1]}
 
         if self.index_headers != self.INDEX_POST and not unsafe:
@@ -1155,7 +1155,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
             for i in range(self.cube_shape[0]):
                 slide = self.load_slide(i, stable=False)
                 if 'i' in projections:
-                    cube_hdf5['cube_i'][i, :, :] = slide.reshape(1, self.cube_shape[1], self.cube_shape[2])
+                    cube_hdf5['cube'][i, :, :] = slide.reshape(1, self.cube_shape[1], self.cube_shape[2])
                 if 'h' in projections:
                     cube_hdf5['cube_h'][:, i, :] = slide.T
                 progress_bar.update()

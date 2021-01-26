@@ -32,8 +32,8 @@ class StorageHDF5:
         'i': [0, 1, 2], 'x': [2, 0, 1], 'h': [1, 2, 0]
     }
     NAMES = {
-        0: 'cube_i', 1: 'cube_x', 2: 'cube_h',
-        'i': 'cube_i', 'x': 'cube_x', 'h': 'cube_h'
+        0: 'cube', 1: 'cube_x', 2: 'cube_h',
+        'i': 'cube', 'x': 'cube_x', 'h': 'cube_h'
     }
 
     def __init__(self, filename, projections='ixh', shape=None, mode='r'):

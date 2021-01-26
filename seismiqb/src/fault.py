@@ -6,6 +6,8 @@ import glob
 import numpy as np
 import pandas as pd
 
+from numba import prange, njit
+
 from tqdm.auto import tqdm
 
 from scipy.ndimage import measurements
@@ -42,7 +44,7 @@ class Fault(Horizon):
             points = np.load(path, allow_pickle=False)
             transform = False
         elif ext == 'hdf5':
-            cube = SeismicGeometry(path, **kwargs).file_hdf5['cube_i']
+            cube = SeismicGeometry(path, **kwargs).file_hdf5['cube']
             points = np.stack(np.where(np.array(cube) == 1)).T #TODO: get points in chunks
             transform = False
         else:
@@ -131,11 +133,7 @@ class Fault(Horizon):
         if (self.bbox[:, 1] < mask_bbox[:, 0]).any() or (self.bbox[:, 0] >= mask_bbox[:, 1]).any():
             return mask
 
-        for i in range(3):
-            points = points[points[:, i] >= locations[i].start]
-            points = points[points[:, i] < locations[i].stop]
-        points = points - np.array(mask_bbox[:, 0]).reshape(1, 3)
-        mask[points[:, 0], points[:, 1], points[:, 2]] = 1
+        insert_fault_into_mask(mask, points, mask_bbox)
         return mask
 
     @classmethod
@@ -371,3 +369,13 @@ def nearest_neighbors(values, all_values, n_neighbors=10):
     """ Find nearest neighbours for each `value` items in `all_values`. """
     nn = NearestNeighbors(n_neighbors=n_neighbors).fit(all_values)
     return nn.kneighbors(values)[1].flatten()
+
+@njit(parallel=True)
+def insert_fault_into_mask(mask, points, mask_bbox):
+    """ Add new points into binary mask. """
+    for i in prange(len(points)):
+        point = points[i]
+        if (point[0] >= mask_bbox[0][0]) and (point[0] < mask_bbox[0][1]):
+            if (point[1] >= mask_bbox[1][0]) and (point[1] < mask_bbox[1][1]):
+                if (point[2] >= mask_bbox[2][0]) and (point[2] < mask_bbox[2][1]):
+                    mask[point[0] - mask_bbox[0][0], point[1] - mask_bbox[1][0], point[2] - mask_bbox[2][0]] = 1

@@ -1269,7 +1269,7 @@ class Horizon:
 
         # Parameters for different orientation
         if orientation.startswith('i'):
-            cube_hdf5 = self.geometry.file_hdf5['cube_i']
+            cube_hdf5 = self.geometry.file_hdf5['cube']
             slide_transform = lambda array: array
 
             hor_line = np.squeeze(self.matrix[line, :])
