@@ -1009,7 +1009,7 @@ class SeismicCubeset(Dataset):
                     .normalize(mode='q', src='images'))
 
         if 'masks' in components:
-            use_labels = kwargs.pop('use_labels', -1)
+            use_labels = kwargs.pop('use_labels', 'all')
             width = kwargs.pop('width', 5)
             labels_pipeline = (Pipeline()
                                .create_masks(dst='masks', width=width, use_labels=use_labels))
