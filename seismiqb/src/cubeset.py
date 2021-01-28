@@ -1116,7 +1116,7 @@ class SeismicCubeset(Dataset):
 
     def make_prediction(self, dst, pipeline, crop_shape, crop_stride, locations=None,
                         idx=0, src='predictions', chunk_shape=None, chunk_stride=None, batch_size=8,
-                        agg='max', projection='ixh', threshold=0.5, pbar=True):
+                        agg='max', projection='ixh', threshold=0.5, pbar=True, order=(0, 1, 2)):
         """ Infer, assemble and dump predictions from pipeline.
 
         Parameters
@@ -1152,6 +1152,8 @@ class SeismicCubeset(Dataset):
             Threshold to transform predictions to 'points' format, by default 0.5
         pbar : bool, optional
             Progress bar, by default True
+        order : tuple of int
+            Passed directly to :meth:`.assemble_crops`.
         """
         cube_shape = self.geometries[idx].cube_shape
 
@@ -1168,13 +1170,13 @@ class SeismicCubeset(Dataset):
 
         predictions_generator = self._predictions_generator(idx, pipeline, locations, output_shape,
                                                             chunk_shape, chunk_stride, crop_shape, crop_stride,
-                                                            batch_size, src, pbar)
+                                                            batch_size, src, pbar, order)
 
         return StorageHDF5.create_file_from_iterable(predictions_generator, output_shape,
                                                      chunk_shape, chunk_stride, dst, agg, projection, threshold)
 
     def _predictions_generator(self, idx, pipeline, locations, output_shape, chunk_shape, chunk_stride,
-                               crop_shape, crop_stride, batch_size, src, pbar):
+                               crop_shape, crop_stride, batch_size, src, pbar, order):
         """ Apply inference pipeline to each chunk. Returns position of predictions and corresponding array. """
         geometry = self.geometries[idx]
         cube_shape = geometry.cube_shape
@@ -1200,7 +1202,7 @@ class SeismicCubeset(Dataset):
                 _ = chunk_pipeline.next_batch(len(self))
                 if pbar:
                     progress_bar.update(1)
-            prediction = self.assemble_crops(chunk_pipeline.v(src), order=(0, 1, 2))
+            prediction = self.assemble_crops(chunk_pipeline.v(src), order=order)
             prediction = prediction[:output_shape[0], :output_shape[1], :output_shape[2]]
             position = lower_bound - np.array([locations[i][0] for i in range(3)])
             yield position, prediction
