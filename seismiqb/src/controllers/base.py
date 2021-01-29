@@ -566,18 +566,24 @@ class BaseController:
             with open(self.make_save_path(*prefix, name + 'self_results.txt'), 'w') as result_txt:
                 horizon.evaluate(compute_metric=False, printer=lambda msg: print(msg, file=result_txt))
 
-            # Correlations
+            # Metric maps
             corrs = hm.evaluate(
                 'support_corrs',
                 supports=supports,
-                plot=True, show_plot=self.show_plots,
+                plot=True, show=self.show_plots,
                 savepath=self.make_save_path(*prefix, name + 'corrs.png')
             )
 
             phase = hm.evaluate(
                 'instantaneous_phase',
-                plot=True, show_plot=self.show_plots,
+                plot=True, show=self.show_plots,
                 savepath=self.make_save_path(*prefix, name + 'instantaneous_phase.png')
+            )
+
+            perturbed_mean, perturbed_max = hm.evaluate(
+                'perturbed',
+                plot=True, show=self.show_plots, device='gpu',
+                savepath=self.make_save_path(*prefix, name + 'perturbed.png')
             )
 
             # Compare to targets
@@ -588,7 +594,7 @@ class BaseController:
                 with open(self.make_save_path(*prefix, name + 'results.txt'), 'w') as result_txt:
                     hm.evaluate(
                         'compare', agg=None, hist=False,
-                        plot=True, show_plot=self.show_plots,
+                        plot=True, show=self.show_plots,
                         printer=lambda msg: print(msg, file=result_txt),
                         savepath=self.make_save_path(*prefix, name + 'l1.png')
                     )
@@ -603,6 +609,8 @@ class BaseController:
 
             info['corrs'] = np.nanmean(corrs)
             info['phase'] = np.nanmean(np.abs(phase))
+            info['perturbed_mean'] = np.nanmean(perturbed_mean)
+            info['perturbed_max'] = np.nanmean(perturbed_max)
             results.append((info))
 
             self.log(f'horizon {i}: len {len(horizon)}, cov {horizon.coverage:4.4}, '
@@ -689,7 +697,6 @@ class BaseController:
         inference_template = (
             Pipeline()
             # Initialize everything
-            .init_variable('predicted_masks', list())
             .import_model('model', C('model_pipeline'))
 
             # Load data

@@ -735,7 +735,7 @@ class HorizonMetrics(BaseMetrics):
             Parameters of individual metric evaluation
         """
         w = self.data.shape[2]
-        window = window or w - 2 * clip
+        window = window or w - 2 * clip - 1
 
         # Compute metrics for multiple perturbed horizons: generate shifts, apply them to data,
         # evaluate metric on the produced array

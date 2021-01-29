@@ -329,7 +329,7 @@ class SeismicGeometry:
             Other parameters of metric(s) evaluation.
         """
         from .metrics import GeometryMetrics #pylint: disable=import-outside-toplevel
-        quality_map = GeometryMetrics(self).evaluate('quality_map', quantiles=quantiles, agg=None,
+        quality_map = GeometryMetrics(self).evaluate('quality_map', quantiles=quantiles,
                                                      metric_names=metric_names, **kwargs)
         self._quality_map = quality_map
         return quality_map
