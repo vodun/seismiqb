@@ -53,11 +53,11 @@ def plot_image(image, mode='single', backend='matplotlib', **kwargs):
     plotting task to one of the methods of backend-classes.
     """
     if backend in ('matplotlib', 'plt', 'mpl', 'm', 'mp'):
-        MatplotlibPlotter().convert_kwargs(mode, kwargs)
-        getattr(MatplotlibPlotter(), mode)(image, **kwargs)
+        kwargs = MatplotlibPlotter.convert_kwargs(mode, kwargs)
+        getattr(MatplotlibPlotter, mode)(image, **kwargs)
     elif backend in ('plotly', 'go'):
-        PlotlyPlotter().convert_kwargs(mode, kwargs)
-        getattr(PlotlyPlotter(), mode)(image, **kwargs)
+        kwargs = PlotlyPlotter.convert_kwargs(mode, kwargs)
+        getattr(PlotlyPlotter, mode)(image, **kwargs)
     else:
         raise ValueError('{} backend is not supported!'.format(backend))
 
@@ -78,7 +78,7 @@ class MatplotlibPlotter:
     """
     @staticmethod
     def convert_kwargs(mode, kwargs):
-        """ Update kwargs-dict to match matplotlib-cinventions: update keys of the dict and
+        """ Make a dict of kwargs to match matplotlib-conventions: update keys of the dict and
         values in some cases.
         """
         # make conversion-dict for kwargs-keys
@@ -94,18 +94,19 @@ class MatplotlibPlotter:
             'zmin': 'vmin', 'zmax': 'vmax',
             'xaxis': 'xlabel', 'yaxis': 'ylabel'
         }
-        # make conversion-procedure for key-value pairs
-        def converter(k, v):
-            if k in ('xaxis', 'yaxis'):
-                return keys_converter[k], v['title_text']
-            return keys_converter[k], v
 
-        # perform conversion inplace
-        for key in keys_converter:
-            if key in kwargs:
-                value = kwargs.get(key)
-                new_k, new_v = converter(key, value)
-                kwargs[new_k] = new_v
+        # make new dict updating keys and values
+        converted = {}
+        for key, value in kwargs.items():
+            if key in keys_converter:
+                new_key = keys_converter[key]
+                if key in ['xaxis', 'yaxis']:
+                    converted[new_key] = value.get('title_text', '')
+                else:
+                    converted[new_key] = value
+            else:
+                converted[key] = value
+        return converted
 
     @staticmethod
     def save_and_show(fig, show=True, savepath=None, **kwargs):
@@ -122,7 +123,8 @@ class MatplotlibPlotter:
         else:
             plt.close()
 
-    def single(self, image, **kwargs):
+    @classmethod
+    def single(cls, image, **kwargs):
         """ Plot single image/heatmap using matplotlib.
 
         Parameters
@@ -209,10 +211,10 @@ class MatplotlibPlotter:
         if kwargs.get('disable_axes'):
             ax.set_axis_off()
 
-        self.save_and_show(fig, **updated)
+        cls.save_and_show(fig, **updated)
 
-
-    def wiggle(self, image, **kwargs):
+    @classmethod
+    def wiggle(cls, image, **kwargs):
         """ Make wiggle plot of an image. If needed overlap the wiggle plot with a curve supplied by an
         array of heights.
 
@@ -310,10 +312,10 @@ class MatplotlibPlotter:
         ax.set_xlim(xlim)
         ax.set_ylim(ylim)
 
-        self.save_and_show(fig, **updated)
+        cls.save_and_show(fig, **updated)
 
-
-    def grid(self, images, single_kwargs=None, **kwargs):
+    @classmethod
+    def grid(cls, images, single_kwargs=None, **kwargs):
         """ Make grid of plots using range of images and info about how the grid should be organized.
 
         Parameters
@@ -382,13 +384,13 @@ class MatplotlibPlotter:
             ax = ax.reshape((nrows, ncols))
         for i in range(nrows):
             for j in range(ncols):
-                self.single(images[i * ncols + j], **single_kwargs[i * ncols + j], ax=ax[i, j])
+                cls.single(images[i * ncols + j], **single_kwargs[i * ncols + j], ax=ax[i, j])
 
         fig.suptitle(**title_kwargs)
-        self.save_and_show(fig)
+        cls.save_and_show(fig)
 
-
-    def overlap(self, images, **kwargs):
+    @classmethod
+    def overlap(cls, images, **kwargs):
         """ Plot several images on one canvas using matplotlib: render the first one in greyscale
         and the rest ones in 'rgb' channels, one channel for each image.
         Supports up to four images in total.
@@ -467,9 +469,10 @@ class MatplotlibPlotter:
                       extent=extent, **render_kwargs)
         plt.title(**label_kwargs)
 
-        self.save_and_show(fig, **updated)
+        cls.save_and_show(fig, **updated)
 
-    def rgb(self, image, **kwargs):
+    @classmethod
+    def rgb(cls, image, **kwargs):
         """ Plot one image in 'rgb' using matplotlib.
 
         Parameters
@@ -517,9 +520,10 @@ class MatplotlibPlotter:
         plt.ylabel(**yaxis_kwargs)
         plt.tick_params(**tick_params)
 
-        self.save_and_show(plt, **updated)
+        cls.save_and_show(plt, **updated)
 
-    def separate(self, images, **kwargs):
+    @classmethod
+    def separate(cls, images, **kwargs):
         """ Plot several images on a row of canvases using matplotlib.
         TODO: add grid support.
 
@@ -577,9 +581,10 @@ class MatplotlibPlotter:
 
         fig.suptitle(**label_kwargs)
 
-        self.save_and_show(plt, **updated)
+        cls.save_and_show(plt, **updated)
 
-    def histogram(self, image, **kwargs):
+    @classmethod
+    def histogram(cls, image, **kwargs):
         """ Plot histogram using matplotlib.
 
         Parameters
@@ -626,9 +631,10 @@ class MatplotlibPlotter:
         plt.xlim(xaxis_kwargs.get('xlim'))  # these are positional ones
         plt.ylim(yaxis_kwargs.get('ylim'))
 
-        self.save_and_show(plt, **updated)
+        cls.save_and_show(plt, **updated)
 
-    def curve(self, curve, average=True, window=10, **kwargs):
+    @classmethod
+    def curve(cls, curve, average=True, window=10, **kwargs):
         """ Plot a curve.
 
         Parameters
@@ -710,7 +716,7 @@ class MatplotlibPlotter:
         plt.title(**label_kwargs)
         plt.grid(updated['grid'])
 
-        self.save_and_show(plt, **updated)
+        cls.save_and_show(plt, **updated)
 
 class PlotlyPlotter:
     """ Plotting backend for plotly.
@@ -727,27 +733,26 @@ class PlotlyPlotter:
             'vmin': 'zmin', 'vmax': 'zmax',
         }
 
-        # make conversion-procedure for key-value pairs
-        def converter(k, v):
-            if k == 'xlabel':
-                return keys_converter[k], {'title_text': v,
-                                            'automargin': True,
-                                            'titlefont': {'size': kwargs.get('fontsize', 30)}}
-            if k == 'ylabel':
-                return keys_converter[k], {'title_text': v,
-                                            'titlefont': {'size': kwargs.get('fontsize', 30)},
-                                            'automargin': True,
-                                            'autorange': 'reversed'}
-            return keys_converter[k], v
+        # make new dict updating keys and values
+        converted = {}
+        for key, value in kwargs.items():
+            if key in keys_converter:
+                new_key = keys_converter[key]
+                if key == 'xlabel':
+                    converted[new_key] = {'title_text': value,
+                                          'automargin': True,
+                                          'titlefont': {'size': kwargs.get('fontsize', 30)}
+                if key == 'ylabel':
+                    converted[new_key] = {'title_text': value,
+                                          'titlefont': {'size': kwargs.get('fontsize', 30)},
+                                          'automargin': True,
+                                          'autorange': 'reversed'}
+                else:
+                    converted[new_key] = value
+            else:
+                converted[key] = value
+        return converted
 
-        # perform conversion inplace
-        for key in keys_converter:
-            if key in kwargs:
-                value = kwargs.get(key)
-                new_k, new_v = converter(key, value)
-                kwargs[new_k] = new_v
-
-    
     @staticmethod
     def save_and_show(fig, show=True, savepath=None, **kwargs):
         """ Save and show plot if needed.
@@ -762,7 +767,8 @@ class PlotlyPlotter:
         else:
             fig.close()
 
-    def single(self, image, **kwargs):
+    @classmethod
+    def single(cls, image, **kwargs):
         """ Plot single image/heatmap using plotly.
 
         Parameters
@@ -816,9 +822,10 @@ class PlotlyPlotter:
         fig = go.Figure(data=plot_data)
         fig.update_layout(width=width, height=height, **label_kwargs)
 
-        self.save_and_show(fig, **updated)
+        cls.save_and_show(fig, **updated)
 
-    def overlap(self, images, **kwargs):
+    @classmethod
+    def overlap(cls, images, **kwargs):
         """ Plot several images on one canvas using plotly: render the first one in greyscale
         and the rest ones in opaque 'rgb' channels, one channel for each image.
         Supports up to four images in total.
@@ -879,9 +886,10 @@ class PlotlyPlotter:
         fig = go.Figure(data=plot_data)
         fig.update_layout(width=width, height=height, **label_kwargs)
 
-        self.save_and_show(fig, **updated)
+        cls.save_and_show(fig, **updated)
 
-    def rgb(self, image, **kwargs):
+    @classmethod
+    def rgb(cls, image, **kwargs):
         """ Plot one image in 'rgb' using plotly.
 
         Parameters
@@ -927,9 +935,10 @@ class PlotlyPlotter:
         fig = go.Figure(data=plot_data)
         fig.update_layout(width=width, height=height, **label_kwargs)
 
-        self.save_and_show(fig, **updated)
+        cls.save_and_show(fig, **updated)
 
-    def separate(self, images, **kwargs):
+    @classmethod
+    def separate(cls, images, **kwargs):
         """ Plot several images on a row of canvases using plotly.
         TODO: add grid support.
 
@@ -977,4 +986,4 @@ class PlotlyPlotter:
             fig.update_yaxes(row=1, col=i + 1, **yaxis_kwargs['yaxis'])
         fig.update_layout(**label_kwargs)
 
-        self.save_and_show(fig, **updated)
+        cls.save_and_show(fig, **updated)
