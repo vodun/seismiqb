@@ -16,7 +16,6 @@ from .plotters import plot_image
 from .utils import compute_attribute
 
 
-
 AFFIX = '___'
 SIZE_POSTFIX = 12
 SIZE_SALT = len(AFFIX) + SIZE_POSTFIX
@@ -176,8 +175,6 @@ class SeismicCropBatch(Batch):
         SeismicCropBatch
             Batch with positions of crops in specified component.
         """
-        # pylint: disable=protected-access
-
         # Create all the points and shapes
         if isinstance(shape, dict):
             shape = {k: np.asarray(v) for k, v in shape.items()}
@@ -716,7 +713,7 @@ class SeismicCropBatch(Batch):
             Desired shape of resulting crops.
         """
         if (np.array(crop.shape) != np.array(shape)).any():
-            return crop.transpose([1, 0, 2])
+            return crop.transpose(1, 0, 2)
         return crop
 
     @apply_parallel
@@ -929,14 +926,31 @@ class SeismicCropBatch(Batch):
         return copy_
 
     @apply_parallel
-    def rotate(self, crop, angle):
-        """ Rotate crop along the first two axes.
+    def rotate(self, crop, angle_i, angle_x=0, angle_h=0):
+        """ Rotate crop along the first two axes. Angles are defined as Tait-Bryan angles and the sequence of
+        extrinsic rotations axes is (iline axis, xline axis, depth axis).
 
         Parameters
         ----------
-        angle : float
-            Angle of rotation.
+        angle_i : float
+            Angle of rotation about iline axis.
+        angle_x : float
+            Angle of rotation about xline axis.
+        angle_h : float
+            Angle of rotation about depth axis.
         """
+        crop = self._rotate(crop, angle_i)
+        if angle_x != 0:
+            crop = crop.transpose(1, 2, 0)
+            crop = self._rotate(crop, angle_x)
+            crop = crop.transpose(2, 0, 1)
+        if angle_h != 0:
+            crop = crop.transpose(2, 0, 1)
+            crop = self._rotate(crop, angle_h)
+            crop = crop.transpose(1, 2, 0)
+        return crop
+
+    def _rotate(self, crop, angle):
         shape = crop.shape
         matrix = cv2.getRotationMatrix2D((shape[1]//2, shape[0]//2), angle, 1)
         return cv2.warpAffine(crop, matrix, (shape[1], shape[0])).reshape(shape)
@@ -956,16 +970,26 @@ class SeismicCropBatch(Batch):
         return crop
 
     @apply_parallel
-    def scale_2d(self, crop, scale):
-        """ Zoom in or zoom out along the first two axes of crop.
+    def scale(self, crop, scale):
+        """ Zoom in or zoom out along each axis of crop.
 
         Parameters
         ----------
-        scale : float
-            Zooming factor.
+        scale : tuple or float
+            Zooming factor for each axis.
         """
+        scale = scale if isinstance(scale, (list, tuple)) else [scale] * 3
+        crop = self._scale(crop, [scale[0], scale[1]])
+
+        crop = crop.transpose(1, 2, 0)
+        crop = self._scale(crop, [1, scale[-1]]).transpose(2, 0, 1)
+        return crop
+
+    def _scale(self, crop, scale):
         shape = crop.shape
-        matrix = cv2.getRotationMatrix2D((shape[1]//2, shape[0]//2), 0, scale)
+        matrix = np.zeros((2, 3))
+        matrix[:, :-1] = np.diag([scale[1], scale[0]])
+        matrix[:, -1] = np.array([shape[1], shape[0]]) * (1 - np.array([scale[1], scale[0]])) / 2
         return cv2.warpAffine(crop, matrix, (shape[1], shape[0])).reshape(shape)
 
     @apply_parallel
@@ -1121,6 +1145,16 @@ class SeismicCropBatch(Batch):
         """ Apply a gaussian filter along specified axis. """
         return gaussian_filter1d(crop, sigma=sigma, axis=axis, order=order)
 
+    @apply_parallel
+    def central_crop(self, crop, shape):
+        """ Central crop of defined shape. """
+        crop_shape = np.array(crop.shape)
+        shape = np.array(shape)
+        if (shape > crop_shape).any():
+            raise ValueError(f"shape can't be large then crop shape ({crop_shape}) but {shape} was given.")
+        corner = crop_shape // 2 - shape // 2
+        slices = tuple([slice(start, start+length) for start, length in zip(corner, shape)])
+        return crop[slices]
 
     def plot_components(self, *components, idx=0, slide=None, mode='overlap', order_axes=None, **kwargs):
         """ Plot components of batch.

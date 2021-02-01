@@ -16,7 +16,8 @@ from sklearn.neighbors import NearestNeighbors
 
 from .geometry import SeismicGeometry
 from .horizon import Horizon
-from .triangulation import triangulation, triangle_rasterization
+from .triangulation import make_triangulation, triangle_rasterization
+from .plotters import show_3d
 
 
 
@@ -115,7 +116,7 @@ class Fault(Horizon):
     def interpolate_3d(self, sticks, **kwargs):
         """ Interpolate fault sticks as a surface. """
         width = kwargs.get('width', 1)
-        triangles = triangulation(sticks)
+        triangles = make_triangulation(sticks)
         points = []
         for triangle in triangles:
             res = triangle_rasterization(triangle, width)
@@ -200,6 +201,77 @@ class Fault(Horizon):
                 break
             fault_path = os.path.join(path, prefix + '_' + str(i))
             np.save(fault_path, fault[:, :3], allow_pickle=False)
+
+    def show_3d(self, n_sticks=100, n_nodes=10, z_ratio=1., zoom_slice=None, show_axes=True,
+                width=1200, height=1200, margin=20, savepath=None, **kwargs):
+        """ Interactive 3D plot. Roughly, does the following:
+            - select `n` points to represent the horizon surface
+            - triangulate those points
+            - remove some of the triangles on conditions
+            - use Plotly to draw the tri-surface
+
+        Parameters
+        ----------
+        n_sticks : int
+            Number of sticks for each fault.
+        n_nodes : int
+            Number of nodes for each stick.
+        z_ratio : int
+            Aspect ratio between height axis and spatial ones.
+        zoom_slice : tuple of slices or None.
+            Crop from cube to show. If None, the whole cube volume will be shown.
+        show_axes : bool
+            Whether to show axes and their labels.
+        width, height : int
+            Size of the image.
+        margin : int
+            Added margin from below and above along height axis.
+        savepath : str
+            Path to save interactive html to.
+        kwargs : dict
+            Other arguments of plot creation.
+        """
+        title = f'Fault `{self.name}` on `{self.cube_name}`'
+        aspect_ratio = (self.i_length / self.x_length, 1, z_ratio)
+        axis_labels = (self.geometry.index_headers[0], self.geometry.index_headers[1], 'DEPTH')
+        if zoom_slice is None:
+            zoom_slice = [slice(0, i) for i in self.geometry.cube_shape]
+        zoom_slice[-1] = slice(self.h_min, self.h_max)
+        margin = [margin] * 3 if isinstance(margin, int) else margin
+        x, y, z, simplices = self.make_triangulation(n_sticks, n_nodes, zoom_slice)
+
+        show_3d(x, y, z, simplices, title, zoom_slice, None, show_axes, aspect_ratio,
+                axis_labels, width, height, margin, savepath, **kwargs)
+
+    def make_triangulation(self, n_sticks, n_nodes, slices, **kwargs):
+        """ Create triangultaion of fault.
+
+        Parameters
+        ----------
+        n_sticks : int
+            Number of sticks to create.
+        n_nodes : int
+            Number of nodes for each stick.
+        slices : tuple
+            Region to process.
+
+        Returns
+        -------
+        x, y, z, simplices
+            `x`, `y` and `z` are numpy.ndarrays of triangle vertices, `simplices` is (N, 3) array where each row
+            represent triangle. Elements of row are indices of points that are vertices of triangle.
+        """
+        points = self.points.copy()
+        for i in range(3):
+            points = points[points[:, i] <= slices[i].stop]
+            points = points[points[:, i] >= slices[i].start]
+        if len(points) <= 3:
+            return None, None, None, None
+        sticks = get_sticks(points, n_sticks, n_nodes)
+        simplices = make_triangulation(sticks, True)
+        coords = np.concatenate(sticks)
+        return coords[:, 0], coords[:, 1], coords[:, 2], simplices
+
 
 def split_faults(array, chunk_size=None, overlap=1, pbar=False, cube_shape=None, fmt='mask'):
     """ Label faults in an array.
@@ -327,7 +399,34 @@ def get_sticks(points, n_sticks, n_nodes):
         Array of fault sticks. Each item is an array of points and corresponds to stick. Each point of that array
         is a node of stick.
     """
+<<<<<<< HEAD
     pca = PCA(1)
+=======
+    if sizes is None:
+        sizes = faults_sizes(labels)
+    indices = np.where(sizes >= threshold)[0] + 1
+    return labels[np.isin(labels[:, 3], indices)]
+
+def get_sticks(points, n_sticks, n_nodes):
+    """ Get sticks from fault which is represented as a cloud of points.
+
+    Parameters
+    ----------
+    points : np.ndarray
+        Fault points.
+    n_sticks : int
+        Number of sticks to create.
+    n_nodes : int
+        Number of nodes for each stick.
+
+    Returns
+    -------
+    numpy.ndarray
+        Array of sticks. Each item of array is a stick: sequence of 3D points.
+    """
+    pca = PCA(1)
+    pca.fit(points)
+>>>>>>> bad35b2cb064cfca6f1d6c1254bf8182b81bc776
     axis = 0 if np.abs(pca.components_[0][0]) > np.abs(pca.components_[0][1]) else 1
 
     column = points[:, 0] if axis == 0 else points[:, 1]
@@ -369,6 +468,7 @@ def nearest_neighbors(values, all_values, n_neighbors=10):
     """ Find nearest neighbours for each `value` items in `all_values`. """
     nn = NearestNeighbors(n_neighbors=n_neighbors).fit(all_values)
     return nn.kneighbors(values)[1].flatten()
+<<<<<<< HEAD
 
 @njit(parallel=True)
 def insert_fault_into_mask(mask, points, mask_bbox):
@@ -380,3 +480,5 @@ def insert_fault_into_mask(mask, points, mask_bbox):
             if (point[1] >= mask_bbox[1][0]) and (point[1] < mask_bbox[1][1]):
                 if (point[2] >= mask_bbox[2][0]) and (point[2] < mask_bbox[2][1]):
                     mask[point[0] - mask_bbox[0][0], point[1] - mask_bbox[1][0], point[2] - mask_bbox[2][0]] = 1
+=======
+>>>>>>> bad35b2cb064cfca6f1d6c1254bf8182b81bc776

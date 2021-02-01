@@ -1,5 +1,5 @@
 """ Utility functions. """
-from math import isnan
+from math import isnan, atan
 import inspect
 
 from tqdm import tqdm
@@ -264,6 +264,68 @@ def parse_axis(axis, index_headers=None):
         elif axis in ['h', 'height', 'depth']:
             axis = 2
     return axis
+
+def adjust_shape_2d(shape, angle):
+    """ Compute adjusted 2D crop shape to rotate it and get central crop without padding.
+
+    Parameters
+    ----------
+    shape : tuple
+        Target сrop shape.
+    angle : float
+
+    Returns
+    -------
+    tuple
+        Adjusted crop shape.
+    """
+    angle = abs(2 * np.pi * angle / 360)
+    limit = atan(shape[1] / shape[0])
+    x_max, y_max = shape
+    if angle != 0:
+        if angle < limit:
+            x_max = shape[0] * np.cos(angle) + shape[1] * np.sin(angle) + 1
+        else:
+            x_max = (shape[0] ** 2 + shape[1] ** 2) ** 0.5 + 1
+
+        if angle < np.pi / 2 - limit:
+            y_max = shape[0] * np.sin(angle) + shape[1] * np.cos(angle) + 1
+        else:
+            y_max = (shape[0] ** 2 + shape[1] ** 2) ** 0.5 + 1
+    return (int(np.ceil(x_max)), int(np.ceil(y_max)))
+
+def adjust_shape_3d(shape, angle_i, angle_x=0, angle_h=0, scale=(1, 1, 1)):
+    """ Compute adjusted 3D crop shape to rotate it and get central crop without padding. Adjustments is based on
+    proposition that rotation angles are defined as Tait-Bryan angles and scale performed before rotations.
+    The sequence of extrinsic rotations axes is (iline axis, xline axis, depth axis).
+
+    Parameters
+    ----------
+    shape : tuple
+        Target сrop shape.
+    angle_i : float
+        Rotation angle about iline axis.
+    angle_x : int, optional
+        Rotation angle about xline axis, by default 0.
+    angle_h : int, optional
+        Rotation angle about depth axis, by default 0.
+    scale : int or tuple, optional
+        Scale for each axis
+
+    Returns
+    -------
+    tuple
+        Adjusted crop shape.
+    """
+    shape = np.ceil(np.array(shape) / np.array(scale)).astype(int)
+    i_shape, x_shape, h_shape = shape
+    if angle_h != 0:
+        i_shape, x_shape = adjust_shape_2d((i_shape, x_shape), angle_h)
+    if angle_x != 0:
+        i_shape, h_shape = adjust_shape_2d((i_shape, h_shape), angle_x)
+    if angle_i != 0:
+        x_shape, h_shape = adjust_shape_2d((x_shape, h_shape), angle_i)
+    return (i_shape, x_shape, h_shape)
 
 @njit
 def groupby_mean(array):
