@@ -386,32 +386,6 @@ def get_sticks(points, n_sticks, n_nodes):
 
     Parameters
     ----------
-    points : numpy.ndarray
-        Fault points.
-    n_sticks : int
-        Number of sticks to create.
-    n_nodes : int
-        Number of nodes for each stick.
-
-    Returns
-    -------
-    numpy.ndarray
-        Array of fault sticks. Each item is an array of points and corresponds to stick. Each point of that array
-        is a node of stick.
-    """
-<<<<<<< HEAD
-    pca = PCA(1)
-=======
-    if sizes is None:
-        sizes = faults_sizes(labels)
-    indices = np.where(sizes >= threshold)[0] + 1
-    return labels[np.isin(labels[:, 3], indices)]
-
-def get_sticks(points, n_sticks, n_nodes):
-    """ Get sticks from fault which is represented as a cloud of points.
-
-    Parameters
-    ----------
     points : np.ndarray
         Fault points.
     n_sticks : int
@@ -426,7 +400,6 @@ def get_sticks(points, n_sticks, n_nodes):
     """
     pca = PCA(1)
     pca.fit(points)
->>>>>>> bad35b2cb064cfca6f1d6c1254bf8182b81bc776
     axis = 0 if np.abs(pca.components_[0][0]) > np.abs(pca.components_[0][1]) else 1
 
     column = points[:, 0] if axis == 0 else points[:, 1]
@@ -468,7 +441,6 @@ def nearest_neighbors(values, all_values, n_neighbors=10):
     """ Find nearest neighbours for each `value` items in `all_values`. """
     nn = NearestNeighbors(n_neighbors=n_neighbors).fit(all_values)
     return nn.kneighbors(values)[1].flatten()
-<<<<<<< HEAD
 
 @njit(parallel=True)
 def insert_fault_into_mask(mask, points, mask_bbox):
@@ -480,5 +452,3 @@ def insert_fault_into_mask(mask, points, mask_bbox):
             if (point[1] >= mask_bbox[1][0]) and (point[1] < mask_bbox[1][1]):
                 if (point[2] >= mask_bbox[2][0]) and (point[2] < mask_bbox[2][1]):
                     mask[point[0] - mask_bbox[0][0], point[1] - mask_bbox[1][0], point[2] - mask_bbox[2][0]] = 1
-=======
->>>>>>> bad35b2cb064cfca6f1d6c1254bf8182b81bc776

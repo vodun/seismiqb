@@ -19,7 +19,7 @@ from .horizon import Horizon, UnstructuredHorizon
 from .hdf5_storage import StorageHDF5
 from .metrics import HorizonMetrics
 from .plotters import plot_image, show_3d
-from .utils import round_to_array, gen_crop_coordinates, make_axis_grid, fill_defaults, parse_axis, infer_tuple
+from .utils import round_to_array, gen_crop_coordinates, make_axis_grid, fill_defaults, parse_axis
 from .utility_classes import IndexedDict
 
 
@@ -1416,13 +1416,8 @@ class SeismicCubeset(Dataset):
                 warn("No labels in {}".format(dir_path))
             paths_txt[idx] = dir_
         self.load_geometries(**kwargs)
-<<<<<<< HEAD
-        self.create_labels(paths=paths_txt, filter_zeros=filter_zeros,
-                           dst=dst_labels, labels_class=labels_class, **kwargs)
-=======
         self.create_labels(paths=paths_txt, filter_zeros=filter_zeros, dst=dst_labels,
                            labels_class=labels_class, **kwargs)
->>>>>>> bad35b2cb064cfca6f1d6c1254bf8182b81bc776
         self._p, self._bins = p, bins # stored for later sampler creation
 
 
