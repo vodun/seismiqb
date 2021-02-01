@@ -568,7 +568,7 @@ class SeismicCropBatch(Batch):
 
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def normalize(self, ix, mode='minmax', src=None, dst=None):
+    def normalize(self, ix, mode='minmax', stats='geometry', src=None, dst=None):
         """ Normalize values in crop.
 
         Parameters
@@ -585,8 +585,21 @@ class SeismicCropBatch(Batch):
         data = self.get(ix, src)
         if callable(mode):
             return mode(data)
-        geometry = self.get(ix, 'geometries')
-        return geometry.scaler(data, mode=mode)
+        if stats == 'geometry':
+            geometry = self.get(ix, 'geometries')
+            return geometry.scaler(data, mode=mode)
+        if stats == 'item':
+            if mode == 'minmax':
+                min_ = data.min()
+                max_ = data.max()
+                return (data - min_) / (max_ - min_)
+            if mode in ['q', 'normalize']:
+                q05 = np.quantile(data, 0.05)
+                q95 = np.quantile(data, 0.95)
+                return 2 * (data - q05) / (q95 - q05) - 1
+            if mode == 'q_clip':
+                return np.clip(data, q01, q99) / max(abs(q01), abs(q99))
+            raise ValueError('Unknown mode')
 
 
     @action
