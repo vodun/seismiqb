@@ -250,7 +250,7 @@ def infer_tuple(value, default):
         value = tuple([item if item else default[i] for i, item in enumerate(value)])
     return value
 
-def adjust_shape_2d(shape, angle):
+def _adjust_shape_for_rotation(shape, angle):
     """ Compute adjusted 2D crop shape to rotate it and get central crop without padding.
 
     Parameters
@@ -279,38 +279,35 @@ def adjust_shape_2d(shape, angle):
             y_max = (shape[0] ** 2 + shape[1] ** 2) ** 0.5 + 1
     return (int(np.ceil(x_max)), int(np.ceil(y_max)))
 
-def adjust_shape_3d(shape, angle_i, angle_x=0, angle_h=0, scale=(1, 1, 1)):
+def adjust_shape_3d(shape, angle, scale=(1, 1, 1)):
     """ Compute adjusted 3D crop shape to rotate it and get central crop without padding. Adjustments is based on
-    proposition that rotation angles are defined as Tait-Bryan angles and scale performed before rotations.
-    The sequence of extrinsic rotations axes is (iline axis, xline axis, depth axis).
+    proposition that rotation angles are defined as Tait-Bryan angles and the sequence of extrinsic rotations axes
+    is (axis_2, axis_0, axis_1) and scale performed after rotation.
 
     Parameters
     ----------
     shape : tuple
         Target сrop shape.
-    angle_i : float
-        Rotation angle about iline axis.
-    angle_x : int, optional
-        Rotation angle about xline axis, by default 0.
-    angle_h : int, optional
-        Rotation angle about depth axis, by default 0.
+    angle : float or tuple of floats
+        Rotation angles about each axis.
     scale : int or tuple, optional
-        Scale for each axis
+        Scale for each axis.
 
     Returns
     -------
     tuple
         Adjusted crop shape.
     """
+    angle = angle if isinstance(angle, (tuple, list)) else (angle, 0, 0)
+    scale = scale if isinstance(scale, (tuple, list)) else (scale, scale, 1)
     shape = np.ceil(np.array(shape) / np.array(scale)).astype(int)
-    i_shape, x_shape, h_shape = shape
-    if angle_h != 0:
-        i_shape, x_shape = adjust_shape_2d((i_shape, x_shape), angle_h)
-    if angle_x != 0:
-        i_shape, h_shape = adjust_shape_2d((i_shape, h_shape), angle_x)
-    if angle_i != 0:
-        x_shape, h_shape = adjust_shape_2d((x_shape, h_shape), angle_i)
-    return (i_shape, x_shape, h_shape)
+    if angle[2] != 0:
+        shape[2], shape[0] = _adjust_shape_for_rotation((shape[2], shape[0]), angle[2])
+    if angle[1] != 0:
+        shape[2], shape[1] = _adjust_shape_for_rotation((shape[2], shape[1]), angle[1])
+    if angle[0] != 0:
+        shape[0], shape[1] = _adjust_shape_for_rotation((shape[0], shape[1]), angle[0])
+    return tuple(shape)
 
 @njit
 def groupby_mean(array):
