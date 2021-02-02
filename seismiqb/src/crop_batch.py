@@ -889,7 +889,8 @@ class SeismicCropBatch(Batch):
         Parameters
         ----------
         angle : float or tuple of floats
-            Angle of rotation about each axis. If float, angle of rotation about the last axis.
+            Angles of rotation about each axes (axis_2, axis_0, axis_1). If float, angle of rotation
+            about the last axis.
         """
         angle = angle if isinstance(angle, (tuple, list)) else (angle, 0, 0)
         crop = self._rotate(crop, angle[0])

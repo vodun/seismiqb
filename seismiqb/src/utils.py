@@ -281,15 +281,15 @@ def _adjust_shape_for_rotation(shape, angle):
 
 def adjust_shape_3d(shape, angle, scale=(1, 1, 1)):
     """ Compute adjusted 3D crop shape to rotate it and get central crop without padding. Adjustments is based on
-    proposition that rotation angles are defined as Tait-Bryan angles and scale performed before rotations.
-    The sequence of extrinsic rotations axes is (iline axis, xline axis, depth axis).
+    proposition that rotation angles are defined as Tait-Bryan angles and the sequence of extrinsic rotations axes
+    is (axis_2, axis_0, axis_1) and scale performed after rotation.
 
     Parameters
     ----------
     shape : tuple
         Target сrop shape.
     angle : float or tuple of floats
-        Rotation angle about each axis.
+        Rotation angles about each axis.
     scale : int or tuple, optional
         Scale for each axis.
 
