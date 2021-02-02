@@ -986,7 +986,7 @@ class SeismicCubeset(Dataset):
 
 
     def show_slide(self, loc, idx=0, axis='iline', zoom_slice=None, mode='overlap',
-                   n_ticks=5, delta_ticks=100, **kwargs):
+                   n_ticks=5, delta_ticks=100, orientation='all', **kwargs):
         """ Show full slide of the given cube on the given line.
 
         Parameters
@@ -1024,7 +1024,7 @@ class SeismicCubeset(Dataset):
             use_labels = kwargs.pop('use_labels', 'all')
             width = kwargs.pop('width', 5)
             labels_pipeline = (Pipeline()
-                               .create_masks(dst='masks', width=width, use_labels=use_labels))
+                               .create_masks(dst='masks', width=width, use_labels=use_labels, orientation=orientation))
 
             pipeline = pipeline + labels_pipeline
 
