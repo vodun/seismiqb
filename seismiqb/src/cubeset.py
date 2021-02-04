@@ -159,7 +159,7 @@ class SeismicCubeset(Dataset):
             self.geometries[ix].make_hdf5(postfix=postfix)
 
 
-    def create_labels(self, paths=None, filter_zeros=True, dst='labels', labels_class=None, **kwargs):
+    def create_labels(self, paths=None, filter_zeros=True, dst='labels', labels_class=None, bar=False, **kwargs):
         """ Create labels (horizons, facies, etc) from given paths.
 
         Parameters
@@ -173,6 +173,8 @@ class SeismicCubeset(Dataset):
         labels_class : class
             Class to use for labels creation. If None, infer from `geometries`.
             Defaults to None.
+        bar : bool
+            Progress bar for labels loading. Defaults to False.
         Returns
         -------
         SeismicCubeset
@@ -187,7 +189,8 @@ class SeismicCubeset(Dataset):
                     labels_class = Horizon
                 else:
                     labels_class = UnstructuredHorizon
-            label_list = [labels_class(path, self.geometries[idx], **kwargs) for path in paths[idx]]
+            pbar = tqdm(paths[idx], disable=(not bar))
+            label_list = [labels_class(path, self.geometries[idx], **kwargs) for path in pbar]
             label_list.sort(key=lambda label: label.h_mean)
             if filter_zeros:
                 _ = [getattr(item, 'filter')() for item in label_list]
@@ -986,7 +989,7 @@ class SeismicCubeset(Dataset):
 
 
     def show_slide(self, loc, idx=0, axis='iline', zoom_slice=None, mode='overlap',
-                   n_ticks=5, delta_ticks=100, orientation='all', **kwargs):
+                   n_ticks=5, delta_ticks=100, **kwargs):
         """ Show full slide of the given cube on the given line.
 
         Parameters
@@ -1024,7 +1027,7 @@ class SeismicCubeset(Dataset):
             use_labels = kwargs.pop('use_labels', 'all')
             width = kwargs.pop('width', 5)
             labels_pipeline = (Pipeline()
-                               .create_masks(dst='masks', width=width, use_labels=use_labels, orientation=orientation))
+                               .create_masks(dst='masks', width=width, use_labels=use_labels))
 
             pipeline = pipeline + labels_pipeline
 

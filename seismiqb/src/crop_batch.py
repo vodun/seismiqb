@@ -371,7 +371,7 @@ class SeismicCropBatch(Batch):
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
     def create_masks(self, ix, dst, src_labels='labels', src_locations='locations',
-                     orientation='all', use_labels='all', width=3):
+                     use_labels='all', width=3):
         """ Create masks from labels-dictionary in given positions.
 
         Parameters
@@ -422,10 +422,9 @@ class SeismicCropBatch(Batch):
         crop_orientation = 0 if crop_shape[0] < crop_shape[1] else 1
 
         for label in labels:
-            if orientation == 'all' or (orientation == 'along' and crop_orientation == label.axis):
-                mask = label.add_to_mask(mask, locations=location, width=width)
-                if use_labels == 'single' and np.sum(mask) > 0.0:
-                    break
+            mask = label.add_to_mask(mask, locations=location, width=width)
+            if use_labels == 'single' and np.sum(mask) > 0.0:
+                break
         return mask
 
     @action
@@ -593,11 +592,17 @@ class SeismicCropBatch(Batch):
             if mode == 'minmax':
                 min_ = data.min()
                 max_ = data.max()
-                return (data - min_) / (max_ - min_)
+                if (max_ - min_) > 0:
+                    return (data - min_) / (max_ - min_)
+                else:
+                    return np.zeros_like(data)
             if mode in ['q', 'normalize']:
                 q05 = np.quantile(data, 0.05)
                 q95 = np.quantile(data, 0.95)
-                return 2 * (data - q05) / (q95 - q05) - 1
+                if (q95 - q05) > 0:
+                    return 2 * (data - q05) / (q95 - q05) - 1
+                else:
+                    return np.zeros_like(data)
             if mode == 'q_clip':
                 return np.clip(data, q01, q99) / max(abs(q01), abs(q99))
             raise ValueError('Unknown mode')

@@ -52,10 +52,6 @@ class Fault(Horizon):
             points = self.csv_to_points(path, **kwargs)
         self.from_points(points, transform, **kwargs)
 
-        # pca = PCA(1)
-        # pca.fit(self.points)
-        # self.axis = 0 if np.abs(pca.components_[0][0]) > np.abs(pca.components_[0][1]) else 1
-
     def csv_to_points(self, path, **kwargs):
         """ Get point cloud array from file values. """
         df = self.read_file(path)

@@ -136,7 +136,10 @@ def hilbert(array, axis=-1):
     result = xp.fft.ifft(fft * h, axis=axis)
     return result
 
-
+def instantaneous_phase(array, axis=-1):
+    xp = cp.get_array_module(array) if CUPY_AVAILABLE else np
+    array = hilbert(array, axis=axis)
+    return xp.angle(array) % (2 * xp.pi) - xp.pi
 
 def make_gaussian_kernel(kernel_size=3, sigma=1.):
     """ Create Gaussian kernel with given parameters: kernel size and std. """
