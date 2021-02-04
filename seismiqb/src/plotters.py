@@ -53,10 +53,8 @@ def plot_image(image, mode='single', backend='matplotlib', **kwargs):
     plotting task to one of the methods of backend-classes.
     """
     if backend in ('matplotlib', 'plt', 'mpl', 'm', 'mp'):
-        kwargs = MatplotlibPlotter.convert_kwargs(mode, kwargs)
         getattr(MatplotlibPlotter, mode)(image, **kwargs)
     elif backend in ('plotly', 'go'):
-        kwargs = PlotlyPlotter.convert_kwargs(mode, kwargs)
         getattr(PlotlyPlotter, mode)(image, **kwargs)
     else:
         raise ValueError('{} backend is not supported!'.format(backend))
