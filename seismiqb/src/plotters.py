@@ -153,6 +153,7 @@ class MatplotlibPlotter:
                 applied to the image.
             other
         """
+        kwargs = cls.convert_kwargs('single', kwargs)
         # update defaults
         defaults = {'figsize': (12, 7),
                     'cmap': 'viridis_r',
@@ -238,6 +239,7 @@ class MatplotlibPlotter:
                 way, uses the same orientation as other modes.
             other
         """
+        kwargs = cls.convert_kwargs('wiggle', kwargs)
         defaults = {'figsize': (12, 7),
                     'line_color': 'k',
                     'label': '', 'xlabel': '', 'ylabel': '', 'title': '',
@@ -315,15 +317,13 @@ class MatplotlibPlotter:
         cls.save_and_show(fig, **updated)
 
     @classmethod
-    def grid(cls, images, single_kwargs=None, **kwargs):
+    def grid(cls, sequence, **kwargs):
         """ Make grid of plots using range of images and info about how the grid should be organized.
 
         Parameters
         ----------
-        images : tuple or list
-            sequence of arrays for plotting
-        single_kwargs : tuple or list or dicts
-            either sequence of dicts or one dict. Contains parameters for single plots.
+        sequence : tuple or list of images or dicts
+            sequence of either arrays or dicts with kwargs for plotting.
         kwargs : dict
             contains arguments for updating single plots-dicts. Can either contain lists or simple args.
             In case of lists, each subsequent arg is used for updating corresponding single-plot dict.
@@ -345,6 +345,7 @@ class MatplotlibPlotter:
                 applied to the image.
             other
         """
+        kwargs = cls.convert_kwargs('grid', kwargs)
         defaults = {'figsize': (14, 12),
                     'sharex': 'col',
                     'sharey': 'row',
@@ -354,24 +355,27 @@ class MatplotlibPlotter:
         updated = {**defaults, **kwargs}
         subplots_kwargs = filter_kwargs(updated, ['nrows', 'ncols', 'sharex', 'sharey',
                                                   'figsize', 'fig', 'ax'])
-        single_updates = filter_kwargs(updated, ['label', 'xlabel', 'ylabel', 'cmap',
-                                                'order_axes', 'facecolor', 'fontsize',
-                                                'vmin', 'vmax', 'pad'])
+        single_defaults = filter_kwargs(updated, ['label', 'xlabel', 'ylabel', 'cmap',
+                                                 'order_axes', 'facecolor', 'fontsize',
+                                                 'vmin', 'vmax', 'pad'])
         title_kwargs = filter_kwargs(updated, ['t', 'y', 'fontsize', 'family', 'color'])
 
         # make and update the sequence of args for plotters if needed
         # make sure that each elem of single_updates is iterable
-        single_updates = {key: value if isinstance(value, (tuple, list)) else [value] * len(images)
-                          for key, value in single_updates.items()}
-
-        # prepare the list of dicts for each image
-        single_kwargs = dict() if single_kwargs is None else single_kwargs
-        if isinstance(single_kwargs, dict):
-            single_kwargs = [{**single_kwargs} for _ in range(len(images))]
+        single_defaults = {key: value if isinstance(value, (tuple, list)) else [value] * len(images)
+                           for key, value in single_defaults.items()}
 
         # make final dict of kwargs for each ax
-        for i, single in enumerate(single_kwargs):
-            single.update({key: value[i] for key, value in single_updates.items()})
+        single_kwargs = []
+        for i in range(len(sequence)):
+            if isinstance(sequence[i], dict):
+                single_update = filter_kwargs(sequence[i], ['label', 'xlabel', 'ylabel', 'cmap',
+                                                            'order_axes', 'facecolor', 'fontsize',
+                                                            'vmin', 'vmax', 'pad'])
+            else:
+                single_update = {}
+            single = {**{key: value[i] for key, value in single_defaults.items()}, **single_update}
+            single_kwargs.append(single)
 
         # create axes and make the plots
         nrows, ncols = subplots_kwargs.get('nrows'), subplots_kwargs.get('ncols')
@@ -384,7 +388,11 @@ class MatplotlibPlotter:
             ax = ax.reshape((nrows, ncols))
         for i in range(nrows):
             for j in range(ncols):
-                cls.single(images[i * ncols + j], **single_kwargs[i * ncols + j], ax=ax[i, j])
+                if isinstance(sequence[i * ncols + j], dict):
+                    image = sequence[i * ncols + j]['image']
+                else:
+                    image = sequence[i * ncols + j]
+                cls.single(image, **single_kwargs[i * ncols + j], ax=ax[i, j])
 
         fig.suptitle(**title_kwargs)
         cls.save_and_show(fig)
@@ -421,6 +429,7 @@ class MatplotlibPlotter:
                 applied to the image.
             other
         """
+        kwargs = cls.convert_kwargs('overlap', kwargs)
         defaults = {'figsize': (12, 7),
                     'y' : 1.1,
                     'cmap': 'gray',
@@ -493,6 +502,7 @@ class MatplotlibPlotter:
                 applied to the image.
             other
         """
+        kwargs = cls.convert_kwargs('rgb', kwargs)        
         # update defaults
         defaults = {'figsize': (12, 7),
                     'fontsize': 20,
@@ -549,6 +559,7 @@ class MatplotlibPlotter:
                 applied to the image.
             other
         """
+        kwargs = cls.convert_kwargs('separate', kwargs)
         # embedded params
         defaults = {'figsize': (6 * len(images), 7),
                     'cmap': 'gray',
@@ -602,6 +613,7 @@ class MatplotlibPlotter:
                 the number of bins to use.
             other
         """
+        kwargs = cls.convert_kwargs('histogram', kwargs)
         # update defaults
         defaults = {'figsize': (8, 5),
                     'bins': 50,
@@ -656,6 +668,7 @@ class MatplotlibPlotter:
                 list/tuple of curve-labels
             other
         """
+        kwargs = cls.convert_kwargs('curve', kwargs)
         # defaults
         defaults = {'figsize': (8, 5),
                     'label': 'Curve plot',
@@ -797,6 +810,7 @@ class PlotlyPlotter:
                 applied to the image.
             other
         """
+        kwargs = cls.convert_kwargs('single', kwargs)
         # update defaults to make total dict of kwargs
         defaults = {'reversescale': True,
                     'colorscale': 'viridis',
@@ -852,6 +866,7 @@ class PlotlyPlotter:
                 applied to the image.
             other
         """
+        kwargs = cls.convert_kwargs('overlap', kwargs)
         # update defaults to make total dict of kwargs
         defaults = {'coloraxis_colorbar': {'title': 'amplitude'},
                     'colors': ('red', 'green', 'blue'),
@@ -912,6 +927,7 @@ class PlotlyPlotter:
                 applied to the image.
             other
         """
+        kwargs = cls.convert_kwargs('rgb', kwargs)
         # update defaults to make total dict of kwargs
         defaults = {'coloraxis_colorbar': {'title': 'depth'},
                     'max_size' : 600,
@@ -962,6 +978,7 @@ class PlotlyPlotter:
                 applied to the image.
             other
         """
+        kwargs = cls.convert_kwargs('separate', kwargs)
         # defaults
         defaults = {'max_size' : 600,
                     'order_axes': (1, 0),
