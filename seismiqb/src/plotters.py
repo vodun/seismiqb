@@ -57,10 +57,9 @@ def plot_image(image, mode='single', backend='matplotlib', **kwargs):
     """
     if backend in ('matplotlib', 'plt', 'mpl', 'm', 'mp'):
         return getattr(MatplotlibPlotter, mode)(image, **kwargs)
-    elif backend in ('plotly', 'go'):
+    if backend in ('plotly', 'go'):
         return getattr(PlotlyPlotter, mode)(image, **kwargs)
-    else:
-        raise ValueError('{} backend is not supported!'.format(backend))
+    raise ValueError('{} backend is not supported!'.format(backend))
 
 
 def plot_loss(*data, title=None, **kwargs):
@@ -373,11 +372,11 @@ class MatplotlibPlotter:
 
         # make final dict of kwargs for each ax
         single_kwargs = []
-        for i in range(len(sequence)):
-            if isinstance(sequence[i], dict):
-                single_update = filter_kwargs(sequence[i], ['label', 'xlabel', 'ylabel', 'cmap',
-                                                            'order_axes', 'facecolor', 'fontsize',
-                                                            'vmin', 'vmax', 'pad'])
+        for i, ax_kwargs in enumerate(sequence):
+            if isinstance(ax_kwargs, dict):
+                single_update = filter_kwargs(ax_kwargs, ['label', 'xlabel', 'ylabel', 'cmap',
+                                                          'order_axes', 'facecolor', 'fontsize',
+                                                          'vmin', 'vmax', 'pad'])
             else:
                 single_update = {}
             single = {**{key: value[i] for key, value in single_defaults.items()}, **single_update}
@@ -508,7 +507,7 @@ class MatplotlibPlotter:
                 applied to the image.
             other
         """
-        kwargs = cls.convert_kwargs('rgb', kwargs)        
+        kwargs = cls.convert_kwargs('rgb', kwargs)
         # update defaults
         defaults = {'figsize': (12, 7),
                     'fontsize': 20,
