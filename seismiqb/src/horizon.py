@@ -10,19 +10,18 @@ import pandas as pd
 import h5py
 from numba import njit, prange
 
-import cv2
+from cv2 import dilate
 from scipy.ndimage.morphology import binary_fill_holes, binary_erosion
 from scipy.ndimage import find_objects
 from scipy.spatial import Delaunay
 from scipy.signal import hilbert
 from skimage.measure import label
 
-import plotly
-import plotly.figure_factory as ff
-
-from .utils import round_to_array, groupby_mean, groupby_min, groupby_max, HorizonSampler, filter_simplices, lru_cache
-from .utils import make_gaussian_kernel, retrieve_function_arguments
-from .plotters import plot_image
+from .utility_classes import HorizonSampler, lru_cache
+from .utils import round_to_array, groupby_mean, groupby_min, groupby_max, filter_simplices
+from .utils import retrieve_function_arguments
+from .functional import smooth_out
+from .plotters import plot_image, show_3d
 
 
 class UnstructuredHorizon:
@@ -826,7 +825,7 @@ class Horizon:
         self.points = self.points[mask_i + mask_x]
         self.reset_storage('matrix')
 
-    def smooth_out(self, kernel_size=3, sigma=0.8, iters=1, preserve_borders=True, **kwargs):
+    def smooth_out(self, kernel=None, kernel_size=3, sigma=0.8, iters=1, preserve_borders=True, margin=5, **kwargs):
         """ Convolve the horizon with gaussian kernel with special treatment to absent points:
         if the point was present in the original horizon, then it is changed to a weighted sum of all
         present points nearby;
@@ -835,6 +834,8 @@ class Horizon:
 
         Parameters
         ----------
+        kernel : ndarray or None
+            If passed, then ready-to-use kernel. Otherwise, gaussian kernel will be created.
         kernel_size : int
             Size of gaussian filter.
         sigma : number
@@ -845,20 +846,11 @@ class Horizon:
         preserve_borders : bool
             Whether or not to allow method label additional points.
         """
-        def smoothing_function(src, **kwds):
-            _ = kwds
-            gaussian_kernel = make_gaussian_kernel(kernel_size, sigma)
-
-            smoothed = src
-            for _ in range(iters):
-                smoothed = _smoothing_function(smoothed, gaussian_kernel, self.FILL_VALUE, False, np.inf)
-                smoothed = np.rint(smoothed).astype(np.int32)
-
-            if preserve_borders:
-                # pylint: disable=invalid-unary-operand-type
-                idx_i, idx_x = np.asarray(~self.filled_matrix).nonzero()
-                smoothed[idx_i, idx_x] = self.FILL_VALUE
-            return smoothed
+        def smoothing_function(matrix):
+            smoothed = smooth_out(matrix, kernel=kernel,
+                                  kernel_size=kernel_size, sigma=sigma, margin=margin,
+                                  fill_value=self.FILL_VALUE, preserve=preserve_borders, iters=iters)
+            return np.rint(smoothed).astype(np.int32)
 
         self.apply_to_matrix(smoothing_function, **kwargs)
 
@@ -952,7 +944,7 @@ class Horizon:
             For 'shift-rescale` normalization mode.
         """
 
-        if normalize is None and fill_value is None:
+        if not normalize and fill_value is None:
             return array
 
         values = array[self.presence_matrix]
@@ -1444,13 +1436,35 @@ class Horizon:
         grad[self.matrix == self.FILL_VALUE] = self.FILL_VALUE
         return grad
 
-    def make_float_matrix(self, kernel=None, kernel_size=7, sigma=2., margin=5):
+    def make_float_matrix(self, kernel=None, kernel_size=7, sigma=2., margin=5, iters=1):
         """ Smooth the depth matrix to produce floating point numbers. """
-        kernel = kernel if kernel is not None else make_gaussian_kernel(kernel_size, sigma)
-        float_matrix = _smoothing_function(self.full_matrix, kernel,
-                                           fill_value=self.FILL_VALUE,
-                                           preserve=True, margin=margin)
+        float_matrix = smooth_out(self.full_matrix, kernel=kernel,
+                                  kernel_size=kernel_size, sigma=sigma, margin=margin,
+                                  fill_value=self.FILL_VALUE, preserve=True, iters=iters)
         return float_matrix
+
+    def enlarge_carcass_image(self, image, width=10):
+        """ Increase visibility of a sparse carcass metric. """
+        # Convert all the nans to a number, so that `dilate` can work with it
+        image = image.copy()
+        image[np.isnan(image)] = self.FILL_VALUE
+
+        # Apply dilations along both axis
+        structure = np.ones((1, 3), dtype=np.uint8)
+        dilated1 = dilate(image, structure, iterations=width)
+        dilated2 = dilate(image, structure.T, iterations=width)
+
+        # Mix matrices
+        image = np.full_like(image, np.nan)
+        image[dilated1 != self.FILL_VALUE] = dilated1[dilated1 != self.FILL_VALUE]
+        image[dilated2 != self.FILL_VALUE] = dilated2[dilated2 != self.FILL_VALUE]
+
+        mask = (dilated1 != self.FILL_VALUE) & (dilated2 != self.FILL_VALUE)
+        image[mask] = (dilated1[mask] + dilated2[mask]) / 2
+
+        # Fix zero traces
+        image[np.isnan(self.geometry.std_matrix)] = np.nan
+        return image
 
     # Evaluate horizon on its own / against other(s)
     def evaluate(self, compute_metric=True, supports=50, plot=True, savepath=None, printer=print, **kwargs):
@@ -1696,8 +1710,8 @@ class Horizon:
 
         # Enlarge the image to account for adjacency
         kernel = np.ones((3, 3), np.float32)
-        dilated_background = cv2.dilate(background.astype(np.float32), kernel,
-                                        iterations=adjacency).astype(np.int32)
+        dilated_background = dilate(background.astype(np.float32), kernel,
+                                    iterations=adjacency).astype(np.int32)
 
         # Make counts: number of horizons in each point; create indices of overlap
         counts = (dilated_background != 0).astype(np.int32)
@@ -1976,7 +1990,7 @@ class Horizon:
         return background
 
 
-    def show(self, src='matrix', fill_value=None, on_full=True, **kwargs):
+    def show(self, src='matrix', fill_value=None, on_full=True, enlarge=True, width=3, **kwargs):
         """ Nice visualization of a horizon-related matrix. """
         matrix = getattr(self, src) if isinstance(src, str) else src
         fill_value = fill_value if fill_value is not None else self.FILL_VALUE
@@ -1985,6 +1999,9 @@ class Horizon:
             matrix = self.put_on_full(matrix=matrix, fill_value=fill_value)
         else:
             matrix = copy(matrix).astype(np.float32)
+
+        if self.is_carcass and enlarge:
+            matrix = self.enlarge_carcass_image(matrix, width)
 
         # defaults for plotting if not supplied in kwargs
         kwargs = {
@@ -2042,8 +2059,8 @@ class Horizon:
         plot_image(amplitudes, mode='rgb', **kwargs)
 
 
-    def show_3d(self, n=100, threshold=100., z_ratio=1., show_axes=True,
-                width=1200, height=1200, margin=100, savepath=None, **kwargs):
+    def show_3d(self, n_points=100, threshold=100., z_ratio=1., zoom_slice=None, show_axes=True,
+                width=1200, height=1200, margin=(0, 0, 100), savepath=None, **kwargs):
         """ Interactive 3D plot. Roughly, does the following:
             - select `n` points to represent the horizon surface
             - triangulate those points
@@ -2052,39 +2069,77 @@ class Horizon:
 
         Parameters
         ----------
-        n : int
+        n_points : int
             Number of points for horizon surface creation.
             The more, the better the image is and the slower it is displayed.
-        threshold : number
+        threshold : int
             Threshold to remove triangles with bigger height differences in vertices.
-        z_ratio : number
+        z_ratio : int
             Aspect ratio between height axis and spatial ones.
+        zoom_slice : tuple of slices
+            Crop from cube to show.
         show_axes : bool
             Whether to show axes and their labels.
-        width, height : number
+        width, height : int
             Size of the image.
-        margin : number
+        margin : int
             Added margin from below and above along height axis.
         savepath : str
             Path to save interactive html to.
         kwargs : dict
             Other arguments of plot creation.
         """
-        # Take most representative points of a horizon
+        title = f'Horizon `{self.name}` on `{self.cube_name}`'
+        aspect_ratio = (self.i_length / self.x_length, 1, z_ratio)
+        axis_labels = (self.geometry.index_headers[0], self.geometry.index_headers[1], 'DEPTH')
+        if zoom_slice is None:
+            zoom_slice = [slice(0, i) for i in self.geometry.cube_shape]
+        zoom_slice[-1] = slice(self.h_min, self.h_max)
+
+        x, y, z, simplices = self.make_triangulation(n_points, threshold, zoom_slice)
+
+        show_3d(x, y, z, simplices, title, zoom_slice, None, show_axes, aspect_ratio,
+                axis_labels, width, height, margin, savepath, **kwargs)
+
+
+    def make_triangulation(self, n_points, threshold, slices, **kwargs):
+        """ Create triangultaion of horizon.
+
+        Parameters
+        ----------
+        n_points: int
+            Number of points for horizon surface creation.
+            The more, the better the image is and the slower it is displayed.
+        slices : tuple
+            Region to process.
+
+        Returns
+        -------
+        x, y, z, simplices
+            `x`, `y` and `z` are np.ndarrays of triangle vertices, `simplices` is (N, 3) array where each row
+            represent triangle. Elements of row are indices of points that are vertices of triangle.
+        """
+        _ = kwargs
         weights_matrix = self.full_matrix
+
         grad_i = np.diff(weights_matrix, axis=0, prepend=0)
         grad_x = np.diff(weights_matrix, axis=1, prepend=0)
         weights_matrix = (grad_i + grad_x) / 2
         weights_matrix[np.abs(weights_matrix) > 100] = np.nan
 
-        idx = np.nonzero(self.full_matrix > 0)
+        idx = np.stack(np.nonzero(self.full_matrix > 0), axis=0)
+        mask_1 = (idx <= np.array([slices[0].stop, slices[1].stop]).reshape(2, 1)).all(axis=0)
+        mask_2 = (idx >= np.array([slices[0].start, slices[1].start]).reshape(2, 1)).all(axis=0)
+        mask = np.logical_and(mask_1, mask_2)
+        idx = idx[:, mask]
+
         probs = np.abs(weights_matrix[idx[0], idx[1]].flatten())
         probs[np.isnan(probs)] = np.nanmax(probs)
-        indices = np.random.choice(len(probs), size=n, p=probs / probs.sum())
+        indices = np.random.choice(len(probs), size=n_points, p=probs / probs.sum())
 
         # Convert to meshgrid
-        ilines = self.points[:, 0][indices]
-        xlines = self.points[:, 1][indices]
+        ilines = self.points[mask, 0][indices]
+        xlines = self.points[mask, 1][indices]
         ilines, xlines = np.meshgrid(ilines, xlines)
         ilines = ilines.flatten()
         xlines = xlines.flatten()
@@ -2100,49 +2155,7 @@ class Horizon:
         tri = Delaunay(np.vstack([x, y]).T)
         simplices = filter_simplices(simplices=tri.simplices, points=tri.points,
                                      matrix=self.full_matrix, threshold=threshold)
-
-        # Arguments of graph creation
-        kwargs = {
-            'title': f'Horizon `{self.name}` on `{self.cube_name}`',
-            'colormap': plotly.colors.sequential.Viridis[::-1][:4],
-            'edges_color': 'rgb(70, 40, 50)',
-            'show_colorbar': False,
-            'width': width,
-            'height': height,
-            'aspectratio': {'x': self.i_length / self.x_length, 'y': 1, 'z': z_ratio},
-            **kwargs
-        }
-
-        fig = ff.create_trisurf(x=x, y=y, z=z, simplices=simplices, **kwargs)
-
-        # Update scene with title, labels and axes
-        fig.update_layout(
-            {
-                'scene': {
-                    'xaxis': {
-                        'title': self.geometry.index_headers[0] if show_axes else '',
-                        'showticklabels': show_axes,
-                        'autorange': 'reversed',
-                    },
-                    'yaxis': {
-                        'title': self.geometry.index_headers[1] if show_axes else '',
-                        'showticklabels': show_axes,
-                    },
-                    'zaxis': {
-                        'title': 'DEPTH' if show_axes else '',
-                        'showticklabels': show_axes,
-                        'range': [self.h_max + margin, self.h_min - margin],
-                    },
-                    'camera_eye': {
-                        "x": 1.25, "y": 1.5, "z": 1.5
-                    },
-                }
-            }
-        )
-        fig.show()
-
-        if savepath:
-            fig.write_html(savepath)
+        return x, y, z, simplices
 
 
     def show_slide(self, loc, width=3, axis='i', order_axes=None, zoom_slice=None,
@@ -2237,39 +2250,11 @@ class StructuredHorizon(Horizon):
 
 
 @njit(parallel=True)
-def _smoothing_function(src, kernel, fill_value, preserve=False, margin=33):
-    #pylint: disable=not-an-iterable
-    k1 = int(np.floor(kernel.shape[0] / 2))
-    k2 = int(np.floor(kernel.shape[1] / 2))
-    raveled_kernel = kernel.ravel() / np.sum(kernel)
-
-    dst = np.copy(src)
-    for iline in range(k1, src.shape[0]-k1):
-        for xline in prange(k2, src.shape[1]-k2):
-            central = src[iline, xline]
-            if preserve and central == fill_value:
-                continue
-
-            element = src[iline-k1:iline+k1+1, xline-k2:xline+k2+1]
-
-            s, sum_weights = 0.0, 0.0
-            for item, weight in zip(element.ravel(), raveled_kernel):
-                if item != fill_value:
-                    if abs(item - central) <= margin:
-                        s += item * weight
-                        sum_weights += weight
-
-            if sum_weights != 0.0:
-                val = s / sum_weights
-                dst[iline, xline] = val
-    return dst
-
-@njit
 def _filtering_function(points, filtering_matrix):
-    #pylint: disable=consider-using-enumerate
+    #pylint: disable=consider-using-enumerate, not-an-iterable
     mask = np.ones(len(points), dtype=np.int32)
 
-    for i in range(len(points)):
+    for i in prange(len(points)):
         il, xl = points[i, 0], points[i, 1]
         if filtering_matrix[il, xl] == 1:
             mask[i] = 0
