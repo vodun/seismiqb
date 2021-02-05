@@ -348,7 +348,7 @@ class MatplotlibPlotter:
                     'sharex': 'col',
                     'sharey': 'row',
                     'nrows': 1,
-                    'ncols': len(images)}
+                    'ncols': len(sequence)}
 
         updated = {**defaults, **kwargs}
         subplots_kwargs = filter_kwargs(updated, ['nrows', 'ncols', 'sharex', 'sharey',
@@ -360,7 +360,7 @@ class MatplotlibPlotter:
 
         # make and update the sequence of args for plotters if needed
         # make sure that each elem of single_updates is iterable
-        single_defaults = {key: value if isinstance(value, (tuple, list)) else [value] * len(images)
+        single_defaults = {key: value if isinstance(value, (tuple, list)) else [value] * len(sequence)
                            for key, value in single_defaults.items()}
 
         # make final dict of kwargs for each ax
@@ -752,7 +752,7 @@ class PlotlyPlotter:
                 if key == 'xlabel':
                     converted[new_key] = {'title_text': value,
                                           'automargin': True,
-                                          'titlefont': {'size': kwargs.get('fontsize', 30)}
+                                          'titlefont': {'size': kwargs.get('fontsize', 30)}}
                 if key == 'ylabel':
                     converted[new_key] = {'title_text': value,
                                           'titlefont': {'size': kwargs.get('fontsize', 30)},
