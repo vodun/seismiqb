@@ -94,7 +94,7 @@ class BaseMetrics:
         elif 'local' in metric:
             kwargs = {**self.LOCAL_DEFAULTS, **kwargs}
 
-        self._last_evaluation = {}
+        self._last_evaluation = {**kwargs}
         metric_fn = getattr(self, metric)
         metric_val, plot_dict = metric_fn(**kwargs)
 
@@ -605,7 +605,7 @@ class BaseMetrics:
         }
         return quality_map, plot_dict
 
-    def make_grid(self, quality_map, frequencies, iline=True, xline=True, margin=0, **kwargs):
+    def make_grid(self, quality_map, frequencies, iline=True, xline=True, full_lines=True, margin=0, **kwargs):
         """ Create grid with various frequencies based on quality map. """
         _ = kwargs
         if margin:
@@ -620,7 +620,7 @@ class BaseMetrics:
             quality_map[(bad_traces - self.geometry.zero_traces) == 1] = 0.0
 
         pre_grid = np.rint(quality_map)
-        grid = gridify(pre_grid, frequencies, iline, xline)
+        grid = gridify(pre_grid, frequencies, iline, xline, full_lines)
 
         if margin:
             grid[(bad_traces - self.geometry.zero_traces) == 1] = 0

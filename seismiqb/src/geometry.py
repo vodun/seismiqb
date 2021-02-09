@@ -341,7 +341,7 @@ class SeismicGeometry:
             self.make_quality_grid((20, 150))
         return self._quality_grid
 
-    def make_quality_grid(self, frequencies, iline=True, xline=True, margin=0, **kwargs):
+    def make_quality_grid(self, frequencies, iline=True, xline=True, full_lines=True, margin=0, **kwargs):
         """ Create `quality_grid` based on `quality_map`.
 
         Parameters
@@ -357,7 +357,8 @@ class SeismicGeometry:
         """
         from .metrics import GeometryMetrics #pylint: disable=import-outside-toplevel
         quality_grid = GeometryMetrics(self).make_grid(self.quality_map, frequencies,
-                                                       iline=iline, xline=xline, margin=margin, **kwargs)
+                                                       iline=iline, xline=xline, full_lines=full_lines,
+                                                       margin=margin, **kwargs)
         self._quality_grid = quality_grid
         return quality_grid
 
