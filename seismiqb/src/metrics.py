@@ -570,9 +570,9 @@ class BaseMetrics:
         local_params = local_params or self.LOCAL_DEFAULTS
         support_params = support_params or self.SUPPORT_DEFAULTS
 
-        smoothing_params = {**self.SMOOTHING_DEFAULTS, **kwargs, **smoothing_params}
-        local_params = {**self.LOCAL_DEFAULTS, **kwargs, **local_params}
-        support_params = {**self.SUPPORT_DEFAULTS, **kwargs, **support_params}
+        smoothing_params = {**self.SMOOTHING_DEFAULTS, **smoothing_params, **kwargs}
+        local_params = {**self.LOCAL_DEFAULTS, **local_params, **kwargs}
+        support_params = {**self.SUPPORT_DEFAULTS, **support_params, **kwargs}
 
         if metric_names:
             for metric_name in metric_names:
