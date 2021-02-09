@@ -882,27 +882,25 @@ class SeismicCropBatch(Batch):
         return copy_
 
     @apply_parallel
-    def rotate(self, crop, angle_i, angle_x=0, angle_h=0):
+    def rotate(self, crop, angle):
         """ Rotate crop along the first two axes. Angles are defined as Tait-Bryan angles and the sequence of
-        extrinsic rotations axes is (iline axis, xline axis, depth axis).
+        extrinsic rotations axes is (axis_2, axis_0, axis_1).
 
         Parameters
         ----------
-        angle_i : float
-            Angle of rotation about iline axis.
-        angle_x : float
-            Angle of rotation about xline axis.
-        angle_h : float
-            Angle of rotation about depth axis.
+        angle : float or tuple of floats
+            Angles of rotation about each axes (axis_2, axis_0, axis_1). If float, angle of rotation
+            about the last axis.
         """
-        crop = self._rotate(crop, angle_i)
-        if angle_x != 0:
+        angle = angle if isinstance(angle, (tuple, list)) else (angle, 0, 0)
+        crop = self._rotate(crop, angle[0])
+        if angle[1] != 0:
             crop = crop.transpose(1, 2, 0)
-            crop = self._rotate(crop, angle_x)
+            crop = self._rotate(crop, angle[1])
             crop = crop.transpose(2, 0, 1)
-        if angle_h != 0:
+        if angle[2] != 0:
             crop = crop.transpose(2, 0, 1)
-            crop = self._rotate(crop, angle_h)
+            crop = self._rotate(crop, angle[2])
             crop = crop.transpose(1, 2, 0)
         return crop
 
@@ -923,6 +921,19 @@ class SeismicCropBatch(Batch):
         rnd = np.random.RandomState(int(seed*100)).uniform
         if rnd() >= threshold:
             return cv2.flip(crop, axis).reshape(crop.shape)
+        return crop
+
+    @apply_parallel
+    def scale_2d(self, crop, scale):
+        """ Zoom in or zoom out along the first two axis.
+
+        Parameters
+        ----------
+        scale : tuple or float
+            Zooming factor for the first two axis.
+        """
+        scale = scale if isinstance(scale, (list, tuple)) else [scale] * 2
+        crop = self._scale(crop, [scale[0], scale[1]])
         return crop
 
     @apply_parallel
