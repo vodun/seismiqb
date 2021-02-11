@@ -350,6 +350,8 @@ class SeismicGeometry:
             Grid frequencies for individual levels of hardness in `quality_map`.
         iline, xline : bool
             Whether to make lines in grid to account for `ilines`/`xlines`.
+        full_lines : bool
+            Whether to make lines on the whole spatial range.
         margin : int
             Margin of boundaries to not include in the grid.
         kwargs : dict
@@ -1227,6 +1229,8 @@ class SeismicGeometrySEGY(SeismicGeometry):
 
     # Convenient alias
     convert_to_hdf5 = make_hdf5
+
+
 
 class SeismicGeometryHDF5(SeismicGeometry):
     """ Class to infer information about HDF5 cubes and provide convenient methods of working with them.

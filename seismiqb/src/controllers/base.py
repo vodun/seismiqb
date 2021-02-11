@@ -296,8 +296,10 @@ class BaseController:
 
         # Run training procedure
         start_time = perf_counter()
+        self.log(f'Prefetch is: {prefetch}')
         model_pipeline.run(D('size'), n_iters=n_iters + np.random.randint(100),
-                           bar={'bar': self.bar, 'monitors': 'loss_history'}, prefetch=prefetch)
+                           bar={'bar': 'n' if self.bar else False, 'monitors': 'loss_history'},
+                           prefetch=prefetch)
         plot_loss(model_pipeline.v('loss_history'), show=self.show_plots,
                   savepath=self.make_save_path('model_loss.png'))
         self.train_time = perf_counter() - start_time
