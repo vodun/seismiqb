@@ -1175,6 +1175,12 @@ class SeismicCropBatch(Batch):
         corner = crop_shape // 2 - shape // 2
         slices = tuple([slice(start, start+length) for start, length in zip(corner, shape)])
         return crop[slices]
+    
+    @apply_parallel
+    def add_channels(self, crop, channels='first'):
+        """ Add channels dimension (if needed). """
+        axis = 0 if channels in [0, 'first'] else -1
+        return np.expand_dims(crop, axis=axis) if crop.shape[axis] != 1 else crop
 
     def plot_components(self, *components, idx=0, slide=None, mode='overlap', order_axes=None, **kwargs):
         """ Plot components of batch.

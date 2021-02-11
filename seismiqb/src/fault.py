@@ -118,6 +118,7 @@ class Fault(Horizon):
         width = kwargs.get('width', 1)
         triangles = make_triangulation(sticks)
         points = []
+        import tqdm
         for triangle in triangles:
             res = triangle_rasterization(triangle, width)
             points += [res]

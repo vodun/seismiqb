@@ -13,3 +13,4 @@ from .utils import *
 from .utility_classes import *
 from .functional import *
 from .controllers import *
+from .layers import *
