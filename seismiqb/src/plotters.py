@@ -1,4 +1,5 @@
 """ Plot functions. """
+from copy import copy
 import numpy as np
 import cv2
 
@@ -179,7 +180,7 @@ class MatplotlibPlotter:
         tick_params = filter_kwargs(updated, ['labeltop', 'labelright', 'labelcolor', 'direction'])
         colorbar_kwargs = filter_kwargs(updated, ['fraction', 'pad'])
 
-        cm = plt.get_cmap(render_kwargs['cmap'])
+        cm = copy(plt.get_cmap(render_kwargs['cmap']))
         cm.set_bad(color=updated.get('bad_color', updated.get('fill_color', 'white')))
         render_kwargs['cmap'] = cm
 
@@ -589,7 +590,7 @@ class MatplotlibPlotter:
         for i, img in enumerate(images):
             args = {key: (value[i] if isinstance(value, list) else value)
                     for key, value in render_kwargs.items()}
-            cm = plt.get_cmap(args['cmap'])
+            cm = copy(plt.get_cmap(args['cmap']))
             cm.set_bad(color=updated.get('bad_color', updated.get('fill_color', 'white')))
             args['cmap'] = cm
 
