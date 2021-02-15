@@ -110,9 +110,11 @@ class MatplotlibPlotter:
         return converted
 
     @staticmethod
-    def save_and_show(fig, show=True, savepath=None, return_figure=False, **kwargs):
+    def save_and_show(fig, show=True, savepath=None, return_figure=False, pyqt=False, **kwargs):
         """ Save and show plot if needed.
         """
+        if pyqt:
+            return None
         save_kwargs = dict(bbox_inches='tight', pad_inches=0, dpi=100)
         save_kwargs.update(kwargs.get('save', dict()))
 
