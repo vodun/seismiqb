@@ -7,7 +7,7 @@ from copy import copy
 import numpy as np
 import torch
 
-from ...batchflow import Pipeline, B, V, C, D, P, R, L
+from ...batchflow import Pipeline, B, V, C, D, P, R, F
 
 from ..horizon import Horizon
 
@@ -112,7 +112,7 @@ class Extender(Enhancer):
                         low=P(R('uniform', low=0., high=0.4)),
                         length=P(R('uniform', low=0.30, high=0.5)))
             .filter_out(src='prior_masks', dst='prior_masks',
-                        expr=L(functor)(R('uniform', low=15, high=35)), low=0.0, p=0.7)
+                        expr=F(functor)(R('uniform', low=15, high=35)), low=0.0, p=0.7)
             .transpose(src=['masks', 'prior_masks'], order=(2, 0, 1))
         )
 
@@ -125,7 +125,7 @@ class Extender(Enhancer):
             .init_variable('predicted_horizons', default=list())
             .import_model('base', C('model_pipeline'))
             # Load data
-            .make_locations(points=L(D('grid_gen')), shape=L(D('shapes_gen')))
+            .make_locations(points=F(D('grid_gen')), shape=F(D('shapes_gen')))
             .load_cubes(dst='images')
             .create_masks(dst='prior_masks', width=3)
             .adaptive_reshape(src=['images', 'prior_masks'],
@@ -139,7 +139,7 @@ class Extender(Enhancer):
                            save_to=B('predicted_masks', mode='w'))
             .transpose(src='predicted_masks', order=(1, 2, 0))
             .masks_to_horizons(src='predicted_masks', threshold=0.5, minsize=16,
-                               order=L(D('orders_gen')), dst='horizons', skip_merge=True)
+                               order=F(D('orders_gen')), dst='horizons', skip_merge=True)
             .update(V('predicted_horizons', mode='e'), B('horizons'))
         )
         return inference_template
