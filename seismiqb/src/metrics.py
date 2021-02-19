@@ -94,7 +94,7 @@ class BaseMetrics:
         elif 'local' in metric:
             kwargs = {**self.LOCAL_DEFAULTS, **kwargs}
 
-        self._last_evaluation = {}
+        self._last_evaluation = {**kwargs}
         metric_fn = getattr(self, metric)
         metric_val, plot_dict = metric_fn(**kwargs)
 
@@ -570,9 +570,9 @@ class BaseMetrics:
         local_params = local_params or self.LOCAL_DEFAULTS
         support_params = support_params or self.SUPPORT_DEFAULTS
 
-        smoothing_params = {**self.SMOOTHING_DEFAULTS, **kwargs, **smoothing_params}
-        local_params = {**self.LOCAL_DEFAULTS, **kwargs, **local_params}
-        support_params = {**self.SUPPORT_DEFAULTS, **kwargs, **support_params}
+        smoothing_params = {**self.SMOOTHING_DEFAULTS, **smoothing_params, **kwargs}
+        local_params = {**self.LOCAL_DEFAULTS, **local_params, **kwargs}
+        support_params = {**self.SUPPORT_DEFAULTS, **support_params, **kwargs}
 
         if metric_names:
             for metric_name in metric_names:
@@ -605,7 +605,7 @@ class BaseMetrics:
         }
         return quality_map, plot_dict
 
-    def make_grid(self, quality_map, frequencies, iline=True, xline=True, margin=0, **kwargs):
+    def make_grid(self, quality_map, frequencies, iline=True, xline=True, full_lines=True, margin=0, **kwargs):
         """ Create grid with various frequencies based on quality map. """
         _ = kwargs
         if margin:
@@ -620,7 +620,7 @@ class BaseMetrics:
             quality_map[(bad_traces - self.geometry.zero_traces) == 1] = 0.0
 
         pre_grid = np.rint(quality_map)
-        grid = gridify(pre_grid, frequencies, iline, xline)
+        grid = gridify(pre_grid, frequencies, iline, xline, full_lines)
 
         if margin:
             grid[(bad_traces - self.geometry.zero_traces) == 1] = 0
@@ -735,7 +735,7 @@ class HorizonMetrics(BaseMetrics):
             Parameters of individual metric evaluation
         """
         w = self.data.shape[2]
-        window = window or w - 2 * clip
+        window = window or w - 2 * clip - 1
 
         # Compute metrics for multiple perturbed horizons: generate shifts, apply them to data,
         # evaluate metric on the produced array

@@ -329,7 +329,7 @@ class SeismicGeometry:
             Other parameters of metric(s) evaluation.
         """
         from .metrics import GeometryMetrics #pylint: disable=import-outside-toplevel
-        quality_map = GeometryMetrics(self).evaluate('quality_map', quantiles=quantiles, agg=None,
+        quality_map = GeometryMetrics(self).evaluate('quality_map', quantiles=quantiles,
                                                      metric_names=metric_names, **kwargs)
         self._quality_map = quality_map
         return quality_map
@@ -341,7 +341,7 @@ class SeismicGeometry:
             self.make_quality_grid((20, 150))
         return self._quality_grid
 
-    def make_quality_grid(self, frequencies, iline=True, xline=True, margin=0, **kwargs):
+    def make_quality_grid(self, frequencies, iline=True, xline=True, full_lines=True, margin=0, **kwargs):
         """ Create `quality_grid` based on `quality_map`.
 
         Parameters
@@ -350,6 +350,8 @@ class SeismicGeometry:
             Grid frequencies for individual levels of hardness in `quality_map`.
         iline, xline : bool
             Whether to make lines in grid to account for `ilines`/`xlines`.
+        full_lines : bool
+            Whether to make lines on the whole spatial range.
         margin : int
             Margin of boundaries to not include in the grid.
         kwargs : dict
@@ -357,7 +359,8 @@ class SeismicGeometry:
         """
         from .metrics import GeometryMetrics #pylint: disable=import-outside-toplevel
         quality_grid = GeometryMetrics(self).make_grid(self.quality_map, frequencies,
-                                                       iline=iline, xline=xline, margin=margin, **kwargs)
+                                                       iline=iline, xline=xline, full_lines=full_lines,
+                                                       margin=margin, **kwargs)
         self._quality_grid = quality_grid
         return quality_grid
 
@@ -1226,6 +1229,8 @@ class SeismicGeometrySEGY(SeismicGeometry):
 
     # Convenient alias
     convert_to_hdf5 = make_hdf5
+
+
 
 class SeismicGeometryHDF5(SeismicGeometry):
     """ Class to infer information about HDF5 cubes and provide convenient methods of working with them.
