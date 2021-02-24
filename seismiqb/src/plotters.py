@@ -1,4 +1,5 @@
 """ Plot functions. """
+from copy import copy
 import numpy as np
 import cv2
 
@@ -45,56 +46,6 @@ def channelize_image(image, total_channels, color=None, greyscale=False, opacity
     return background
 
 
-def convert_kwargs(mode, backend, kwargs):
-    """ Update kwargs-dict to match chosen backend: update keys of the dict and
-    values in some cases.
-    """
-    if backend == 'matplotlib':
-        # make conversion-dict for kwargs-keys
-        if mode in ['single', 'rgb', 'overlap', 'histogram', 'curve', 'histogram', 'wiggle']:
-            keys_converter = {'title': 'label', 't':'label'}
-        elif mode in ['separate']:
-            keys_converter = {'title': 't', 'label': 't'}
-
-        keys_converter = {
-            **keys_converter,
-            'zmin': 'vmin', 'zmax': 'vmax',
-            'xaxis': 'xlabel', 'yaxis': 'ylabel'
-        }
-        # make conversion-procedure for key-value pairs
-        def converter(k, v):
-            if k in ('xaxis', 'yaxis'):
-                return keys_converter[k], v['title_text']
-            return keys_converter[k], v
-    else:
-        # make conversion-dict for kwargs-keys
-        keys_converter = {
-            'label': 'title', 't': 'title',
-            'xlabel': 'xaxis', 'ylabel': 'yaxis',
-            'vmin': 'zmin', 'vmax': 'zmax',
-        }
-
-        # make conversion-procedure for key-value pairs
-        def converter(k, v):
-            if k == 'xlabel':
-                return keys_converter[k], {'title_text': v,
-                                           'automargin': True,
-                                           'titlefont': {'size': kwargs.get('fontsize', 30)}}
-            if k == 'ylabel':
-                return keys_converter[k], {'title_text': v,
-                                           'titlefont': {'size': kwargs.get('fontsize', 30)},
-                                           'automargin': True,
-                                           'autorange': 'reversed'}
-            return keys_converter[k], v
-
-    # perform conversion inplace
-    for key in keys_converter:
-        if key in kwargs:
-            value = kwargs.get(key)
-            new_k, new_v = converter(key, value)
-            kwargs[new_k] = new_v
-
-
 def filter_kwargs(kwargs, keys):
     """ Filter the dict of kwargs leaving only supplied keys.
     """
@@ -105,12 +56,10 @@ def plot_image(image, mode='single', backend='matplotlib', **kwargs):
     """ Overall plotter function, converting kwarg-names to match chosen backend and redirecting
     plotting task to one of the methods of backend-classes.
     """
-    convert_kwargs(mode, backend, kwargs)
     if backend in ('matplotlib', 'plt', 'mpl', 'm', 'mp'):
-        return getattr(MatplotlibPlotter(), mode)(image, **kwargs)
+        return getattr(MatplotlibPlotter, mode)(image, **kwargs)
     if backend in ('plotly', 'go'):
-        return getattr(PlotlyPlotter(), mode)(image, **kwargs)
-
+        return getattr(PlotlyPlotter, mode)(image, **kwargs)
     raise ValueError('{} backend is not supported!'.format(backend))
 
 
@@ -129,9 +78,43 @@ class MatplotlibPlotter:
     """ Plotting backend for matplotlib.
     """
     @staticmethod
-    def save_and_show(fig, show=True, savepath=None, return_figure=False, **kwargs):
+    def convert_kwargs(mode, kwargs):
+        """ Make a dict of kwargs to match matplotlib-conventions: update keys of the dict and
+        values in some cases.
+        """
+        # make conversion-dict for kwargs-keys
+        if mode in ['single', 'rgb', 'overlap', 'histogram', 'curve', 'histogram']:
+            keys_converter = {'title': 'label', 't':'label'}
+        elif mode == 'separate':
+            keys_converter = {'title': 't', 'label': 't'}
+        elif mode == 'grid':
+            keys_converter = {'title': 't'}
+
+        keys_converter = {
+            **keys_converter,
+            'zmin': 'vmin', 'zmax': 'vmax',
+            'xaxis': 'xlabel', 'yaxis': 'ylabel'
+        }
+
+        # make new dict updating keys and values
+        converted = {}
+        for key, value in kwargs.items():
+            if key in keys_converter:
+                new_key = keys_converter[key]
+                if key in ['xaxis', 'yaxis']:
+                    converted[new_key] = value.get('title_text', '')
+                else:
+                    converted[new_key] = value
+            else:
+                converted[key] = value
+        return converted
+
+    @staticmethod
+    def save_and_show(fig, show=True, savepath=None, return_figure=False, pyqt=False, **kwargs):
         """ Save and show plot if needed.
         """
+        if pyqt:
+            return None
         save_kwargs = dict(bbox_inches='tight', pad_inches=0, dpi=100)
         save_kwargs.update(kwargs.get('save', dict()))
 
@@ -147,7 +130,8 @@ class MatplotlibPlotter:
             return fig
         return None
 
-    def single(self, image, **kwargs):
+    @classmethod
+    def single(cls, image, **kwargs):
         """ Plot single image/heatmap using matplotlib.
 
         Parameters
@@ -176,6 +160,7 @@ class MatplotlibPlotter:
                 applied to the image.
             other
         """
+        kwargs = cls.convert_kwargs('single', kwargs)
         # update defaults
         defaults = {'figsize': (12, 7),
                     'cmap': 'viridis_r',
@@ -197,7 +182,7 @@ class MatplotlibPlotter:
         tick_params = filter_kwargs(updated, ['labeltop', 'labelright', 'labelcolor', 'direction'])
         colorbar_kwargs = filter_kwargs(updated, ['fraction', 'pad'])
 
-        cm = plt.get_cmap(render_kwargs['cmap'])
+        cm = copy(plt.get_cmap(render_kwargs['cmap']))
         cm.set_bad(color=updated.get('bad_color', updated.get('fill_color', 'white')))
         render_kwargs['cmap'] = cm
 
@@ -226,7 +211,7 @@ class MatplotlibPlotter:
             ax.set_yticks(yticks)
 
         if updated['colorbar']:
-            cb = fig.colorbar(ax_img, **colorbar_kwargs)
+            cb = fig.colorbar(ax_img, **colorbar_kwargs, ax=ax)
             cb.ax.yaxis.set_tick_params(color=yaxis_kwargs.get('color', 'black'))
         ax.set_facecolor(updated['facecolor'])
         ax.tick_params(**tick_params)
@@ -234,10 +219,11 @@ class MatplotlibPlotter:
         if kwargs.get('disable_axes'):
             ax.set_axis_off()
 
-        return self.save_and_show(fig, **updated)
+        return cls.save_and_show(fig, **updated)
 
 
-    def wiggle(self, image, **kwargs):
+    @classmethod
+    def wiggle(cls, image, **kwargs):
         """ Make wiggle plot of an image. If needed overlap the wiggle plot with a curve supplied by an
         array of heights.
 
@@ -261,6 +247,7 @@ class MatplotlibPlotter:
                 way, uses the same orientation as other modes.
             other
         """
+        kwargs = cls.convert_kwargs('wiggle', kwargs)
         defaults = {'figsize': (12, 7),
                     'line_color': 'k',
                     'label': '', 'xlabel': '', 'ylabel': '', 'title': '',
@@ -335,10 +322,91 @@ class MatplotlibPlotter:
         ax.set_xlim(xlim)
         ax.set_ylim(ylim)
 
-        self.save_and_show(fig, **updated)
+        return cls.save_and_show(fig, **updated)
 
+    @classmethod
+    def grid(cls, sequence, **kwargs):
+        """ Make grid of plots using range of images and info about how the grid should be organized.
 
-    def overlap(self, images, **kwargs):
+        Parameters
+        ----------
+        sequence : tuple or list of images or dicts
+            sequence of either arrays or dicts with kwargs for plotting.
+        kwargs : dict
+            contains arguments for updating single plots-dicts. Can either contain lists or simple args.
+            In case of lists, each subsequent arg is used for updating corresponding single-plot dict.
+
+            label : str
+                title of rendered image.
+            vmin : float
+                the lowest brightness-level to be rendered.
+            vmax : float
+                the highest brightness-level to be rendered.
+            cmap : str
+                colormap of rendered image.
+            xlabel : str
+                xaxis-label.
+            ylabel : str
+                yaxis-label.
+            order_axes : tuple
+                tuple of ints; defines the order of axes for transposition operation
+                applied to the image.
+            other
+        """
+        kwargs = cls.convert_kwargs('grid', kwargs)
+        defaults = {'figsize': (14, 12),
+                    'sharex': 'col',
+                    'sharey': 'row',
+                    'nrows': 1,
+                    'ncols': len(sequence)}
+
+        updated = {**defaults, **kwargs}
+        subplots_kwargs = filter_kwargs(updated, ['nrows', 'ncols', 'sharex', 'sharey',
+                                                  'figsize', 'fig', 'ax'])
+        single_defaults = filter_kwargs(updated, ['label', 'xlabel', 'ylabel', 'cmap',
+                                                 'order_axes', 'facecolor', 'fontsize',
+                                                 'vmin', 'vmax', 'pad'])
+        title_kwargs = filter_kwargs(updated, ['t', 'y', 'fontsize', 'family', 'color'])
+
+        # make and update the sequence of args for plotters if needed
+        # make sure that each elem of single_updates is iterable
+        single_defaults = {key: value if isinstance(value, (tuple, list)) else [value] * len(sequence)
+                           for key, value in single_defaults.items()}
+
+        # make final dict of kwargs for each ax
+        single_kwargs = []
+        for i, ax_kwargs in enumerate(sequence):
+            if isinstance(ax_kwargs, dict):
+                single_update = filter_kwargs(ax_kwargs, ['label', 'xlabel', 'ylabel', 'cmap',
+                                                          'order_axes', 'facecolor', 'fontsize',
+                                                          'vmin', 'vmax', 'pad'])
+            else:
+                single_update = {}
+            single = {**{key: value[i] for key, value in single_defaults.items()}, **single_update}
+            single_kwargs.append(single)
+
+        # create axes and make the plots
+        nrows, ncols = subplots_kwargs.get('nrows'), subplots_kwargs.get('ncols')
+        if nrows is None or ncols is None:
+            fig, ax = subplots_kwargs.get('fig'), subplots_kwargs.get('ax')
+            if fig is None or ax is None:
+                raise ValueError('Either grid params (nrows and ncols) or grid objects (fig, ax) should be supplied.')
+        else:
+            fig, ax = plt.subplots(**subplots_kwargs)
+            ax = ax.reshape((nrows, ncols))
+        for i in range(nrows):
+            for j in range(ncols):
+                if isinstance(sequence[i * ncols + j], dict):
+                    image = sequence[i * ncols + j]['image']
+                else:
+                    image = sequence[i * ncols + j]
+                cls.single(image, **single_kwargs[i * ncols + j], ax=ax[i, j])
+
+        fig.suptitle(**title_kwargs)
+        return cls.save_and_show(fig)
+
+    @classmethod
+    def overlap(cls, images, **kwargs):
         """ Plot several images on one canvas using matplotlib: render the first one in greyscale
         and the rest ones in 'rgb' channels, one channel for each image.
         Supports up to four images in total.
@@ -369,6 +437,7 @@ class MatplotlibPlotter:
                 applied to the image.
             other
         """
+        kwargs = cls.convert_kwargs('overlap', kwargs)
         defaults = {'figsize': (12, 7),
                     'y' : 1.1,
                     'cmap': 'gray',
@@ -417,9 +486,10 @@ class MatplotlibPlotter:
                       extent=extent, **render_kwargs)
         plt.title(**label_kwargs)
 
-        return self.save_and_show(fig, **updated)
+        return cls.save_and_show(fig, **updated)
 
-    def rgb(self, image, **kwargs):
+    @classmethod
+    def rgb(cls, image, **kwargs):
         """ Plot one image in 'rgb' using matplotlib.
 
         Parameters
@@ -440,6 +510,7 @@ class MatplotlibPlotter:
                 applied to the image.
             other
         """
+        kwargs = cls.convert_kwargs('rgb', kwargs)
         # update defaults
         defaults = {'figsize': (12, 7),
                     'fontsize': 20,
@@ -467,9 +538,10 @@ class MatplotlibPlotter:
         plt.ylabel(**yaxis_kwargs)
         plt.tick_params(**tick_params)
 
-        return self.save_and_show(plt, **updated)
+        return cls.save_and_show(plt, **updated)
 
-    def separate(self, images, **kwargs):
+    @classmethod
+    def separate(cls, images, **kwargs):
         """ Plot several images on a row of canvases using matplotlib.
         TODO: add grid support.
 
@@ -495,6 +567,7 @@ class MatplotlibPlotter:
                 applied to the image.
             other
         """
+        kwargs = cls.convert_kwargs('separate', kwargs)
         # embedded params
         defaults = {'figsize': (6 * len(images), 7),
                     'cmap': 'gray',
@@ -519,7 +592,7 @@ class MatplotlibPlotter:
         for i, img in enumerate(images):
             args = {key: (value[i] if isinstance(value, list) else value)
                     for key, value in render_kwargs.items()}
-            cm = plt.get_cmap(args['cmap'])
+            cm = copy(plt.get_cmap(args['cmap']))
             cm.set_bad(color=updated.get('bad_color', updated.get('fill_color', 'white')))
             args['cmap'] = cm
 
@@ -531,9 +604,10 @@ class MatplotlibPlotter:
 
         fig.suptitle(**label_kwargs)
 
-        return self.save_and_show(plt, **updated)
+        return cls.save_and_show(plt, **updated)
 
-    def histogram(self, image, **kwargs):
+    @classmethod
+    def histogram(cls, image, **kwargs):
         """ Plot histogram using matplotlib.
 
         Parameters
@@ -551,6 +625,7 @@ class MatplotlibPlotter:
                 the number of bins to use.
             other
         """
+        kwargs = cls.convert_kwargs('histogram', kwargs)
         # update defaults
         defaults = {'figsize': (8, 5),
                     'bins': 50,
@@ -580,9 +655,10 @@ class MatplotlibPlotter:
         plt.xlim(xaxis_kwargs.get('xlim'))  # these are positional ones
         plt.ylim(yaxis_kwargs.get('ylim'))
 
-        return self.save_and_show(plt, **updated)
+        return cls.save_and_show(plt, **updated)
 
-    def curve(self, curve, average=True, window=10, **kwargs):
+    @classmethod
+    def curve(cls, curve, average=True, window=10, **kwargs):
         """ Plot a curve.
 
         Parameters
@@ -604,6 +680,7 @@ class MatplotlibPlotter:
                 list/tuple of curve-labels
             other
         """
+        kwargs = cls.convert_kwargs('curve', kwargs)
         # defaults
         defaults = {'figsize': (8, 5),
                     'label': 'Curve plot',
@@ -664,13 +741,45 @@ class MatplotlibPlotter:
         plt.title(**label_kwargs)
         plt.grid(updated['grid'])
 
-        return self.save_and_show(plt, **updated)
+        return cls.save_and_show(plt, **updated)
 
 
 
 class PlotlyPlotter:
     """ Plotting backend for plotly.
     """
+    @staticmethod
+    def convert_kwargs(mode, backend, kwargs):
+        """ Update kwargs-dict to match plotly-conventions: update keys of the dict and
+        values in some cases.
+        """
+        # make conversion-dict for kwargs-keys
+        keys_converter = {
+            'label': 'title', 't': 'title',
+            'xlabel': 'xaxis', 'ylabel': 'yaxis',
+            'vmin': 'zmin', 'vmax': 'zmax',
+        }
+
+        # make new dict updating keys and values
+        converted = {}
+        for key, value in kwargs.items():
+            if key in keys_converter:
+                new_key = keys_converter[key]
+                if key == 'xlabel':
+                    converted[new_key] = {'title_text': value,
+                                          'automargin': True,
+                                          'titlefont': {'size': kwargs.get('fontsize', 30)}}
+                if key == 'ylabel':
+                    converted[new_key] = {'title_text': value,
+                                          'titlefont': {'size': kwargs.get('fontsize', 30)},
+                                          'automargin': True,
+                                          'autorange': 'reversed'}
+                else:
+                    converted[new_key] = value
+            else:
+                converted[key] = value
+        return converted
+
     @staticmethod
     def save_and_show(fig, show=True, savepath=None, **kwargs):
         """ Save and show plot if needed.
@@ -685,7 +794,8 @@ class PlotlyPlotter:
         else:
             fig.close()
 
-    def single(self, image, **kwargs):
+    @classmethod
+    def single(cls, image, **kwargs):
         """ Plot single image/heatmap using plotly.
 
         Parameters
@@ -714,6 +824,7 @@ class PlotlyPlotter:
                 applied to the image.
             other
         """
+        kwargs = cls.convert_kwargs('single', kwargs)
         # update defaults to make total dict of kwargs
         defaults = {'reversescale': True,
                     'colorscale': 'viridis',
@@ -739,9 +850,10 @@ class PlotlyPlotter:
         fig = go.Figure(data=plot_data)
         fig.update_layout(width=width, height=height, **label_kwargs)
 
-        self.save_and_show(fig, **updated)
+        cls.save_and_show(fig, **updated)
 
-    def overlap(self, images, **kwargs):
+    @classmethod
+    def overlap(cls, images, **kwargs):
         """ Plot several images on one canvas using plotly: render the first one in greyscale
         and the rest ones in opaque 'rgb' channels, one channel for each image.
         Supports up to four images in total.
@@ -768,6 +880,7 @@ class PlotlyPlotter:
                 applied to the image.
             other
         """
+        kwargs = cls.convert_kwargs('overlap', kwargs)
         # update defaults to make total dict of kwargs
         defaults = {'coloraxis_colorbar': {'title': 'amplitude'},
                     'colors': ('red', 'green', 'blue'),
@@ -802,9 +915,10 @@ class PlotlyPlotter:
         fig = go.Figure(data=plot_data)
         fig.update_layout(width=width, height=height, **label_kwargs)
 
-        self.save_and_show(fig, **updated)
+        cls.save_and_show(fig, **updated)
 
-    def rgb(self, image, **kwargs):
+    @classmethod
+    def rgb(cls, image, **kwargs):
         """ Plot one image in 'rgb' using plotly.
 
         Parameters
@@ -827,6 +941,7 @@ class PlotlyPlotter:
                 applied to the image.
             other
         """
+        kwargs = cls.convert_kwargs('rgb', kwargs)
         # update defaults to make total dict of kwargs
         defaults = {'coloraxis_colorbar': {'title': 'depth'},
                     'max_size' : 600,
@@ -850,9 +965,10 @@ class PlotlyPlotter:
         fig = go.Figure(data=plot_data)
         fig.update_layout(width=width, height=height, **label_kwargs)
 
-        self.save_and_show(fig, **updated)
+        cls.save_and_show(fig, **updated)
 
-    def separate(self, images, **kwargs):
+    @classmethod
+    def separate(cls, images, **kwargs):
         """ Plot several images on a row of canvases using plotly.
         TODO: add grid support.
 
@@ -876,6 +992,7 @@ class PlotlyPlotter:
                 applied to the image.
             other
         """
+        kwargs = cls.convert_kwargs('separate', kwargs)
         # defaults
         defaults = {'max_size' : 600,
                     'order_axes': (1, 0),
@@ -900,7 +1017,7 @@ class PlotlyPlotter:
             fig.update_yaxes(row=1, col=i + 1, **yaxis_kwargs['yaxis'])
         fig.update_layout(**label_kwargs)
 
-        self.save_and_show(fig, **updated)
+        cls.save_and_show(fig, **updated)
 
 def show_3d(x, y, z, simplices, title, zoom_slice, colors=None, show_axes=True, aspect_ratio=(1, 1, 1),
             axis_labels=None, width=1200, height=1200, margin=(0, 0, 20), savepath=None,
