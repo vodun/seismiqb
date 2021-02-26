@@ -81,7 +81,7 @@ class SeismicCubeset(Dataset):
 
             for horizon in labels:
                 msg += f'        {horizon.name}\n'
-        return msg
+        return msg[:-1]
 
 
     def __getitem__(self, key):
