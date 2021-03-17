@@ -637,7 +637,7 @@ class Horizon:
         """ Init from matrix and location of minimum i, x points. """
         _ = kwargs
 
-        self.matrix = matrix
+        self.matrix = matrix.astype(self.dtype)
         self.i_min, self.x_min = i_min, x_min
         self.i_max, self.x_max = i_min + matrix.shape[0] - 1, x_min + matrix.shape[1] - 1
 
@@ -970,24 +970,18 @@ class Horizon:
         return array
 
 
-    @lru_cache(maxsize=1, apply_by_default=False)
+    @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     def get_cube_values(self, window=23, offset=0, chunk_size=256, **kwargs):
         """ Get values from the cube along the horizon.
 
         Parameters
         ----------
         window : int
-            Width of data to cut.
+            Width of data slice along the horizon.
         offset : int
-            Value to add to each entry in matrix.
-        scale : bool, callable
-            If True, then values are scaled to [0, 1] range.
-            If callable, then it is applied to data cropped along horizon.
+            Offset of data slice with respect to horizon heights matrix.
         chunk_size : int
             Size of data along height axis processed at a time.
-        nan_zero_traces : bool
-            Whether fill zero traces with nans or not.
-            Defaults to True.
         kwargs :
             Passed directly to :meth:`.transform_where_present`.
         """
@@ -1028,7 +1022,7 @@ class Horizon:
         return self.transform_where_present(background, **transform_kwargs)
 
 
-    @lru_cache(maxsize=1, apply_by_default=False)
+    @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     def get_instantaneous_amplitudes(self, window=23, depths=None, **kwargs):
         """ Calculate instantaneous amplitude along the horizon.
 
@@ -1058,7 +1052,7 @@ class Horizon:
         return self.transform_where_present(result, **transform_kwargs)
 
 
-    @lru_cache(maxsize=1, apply_by_default=False)
+    @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     def get_instantaneous_phases(self, window=23, depths=None, **kwargs):
         """ Calculate instantaneous phase along the horizon.
 
@@ -1088,7 +1082,7 @@ class Horizon:
         return self.transform_where_present(result, **transform_kwargs)
 
 
-    @lru_cache(maxsize=1, apply_by_default=False)
+    @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     def get_full_matrix(self, **kwargs):
         """ Transform `matrix` attribute to match cubic coordinates.
 
@@ -1102,7 +1096,7 @@ class Horizon:
         return self.transform_where_present(matrix, **transform_kwargs)
 
 
-    @lru_cache(maxsize=1, apply_by_default=False)
+    @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     def get_full_binary_matrix(self, **kwargs):
         """ Transform `binary_matrix` attribute to match cubic coordinates.
 
@@ -1156,20 +1150,13 @@ class Horizon:
         x_slice, i_slice, h_slice = location if location is not None else (slice(None), slice(None), slice(None))
 
         default_kwargs = {'use_cache': True}
-        # Update `kwargs` with additional default values depending on `src_attribute`
+        # Update `default_kwargs` with extra arguments depending on `src_attribute`
         if src_attribute in ['cube_values', 'amplitudes']:
-            default_kwargs = {
-                'nan_zero_traces': False,
+            if h_slice != slice(None):
                 # `window` arg for `get_cube_values` can be infered from `h_slice`
-                **({'window': h_slice.stop - h_slice.start} if h_slice != slice(None) else {}),
-                **default_kwargs
-            }
-        elif src_attribute in ['masks', 'full_binary_matrix']:
-            default_kwargs = {
-                'fill_value': 0,
-                **default_kwargs
-            }
+                default_kwargs = {'window': h_slice.stop - h_slice.start, **default_kwargs}
         kwargs = {**default_kwargs, **kwargs}
+
         func_name = self.ATTRIBUTE_TO_METHOD.get(src_attribute)
         if func_name is None:
             raise ValueError("Unknown `src_attribute` {}. Expected {}.".format(src_attribute,
@@ -1497,7 +1484,7 @@ class Horizon:
         return None
 
 
-    @lru_cache(maxsize=1, apply_by_default=False)
+    @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     def evaluate_metric(self, metric='support_corrs', supports=50, agg='nanmean', **kwargs):
         """ Cached metrics calcucaltion with disabled plotting option.
 

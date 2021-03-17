@@ -2,6 +2,7 @@
 import string
 import random
 from copy import copy
+from warnings import warn
 
 import numpy as np
 import cv2
@@ -174,6 +175,8 @@ class SeismicCropBatch(Batch):
         SeismicCropBatch
             Batch with positions of crops in specified component.
         """
+        # pylint: disable=protected-access
+
         # Create all the points and shapes
         if isinstance(shape, dict):
             shape = {k: np.asarray(v) for k, v in shape.items()}
@@ -570,10 +573,12 @@ class SeismicCropBatch(Batch):
         """
         if axis != -1:
             raise NotImplementedError("For now function works for `axis=-1` only.")
-        _ = dst
 
-        if not isinstance(src, (list, tuple, np.ndarray)) or len(src) < 2:
-            raise ValueError('Src must contain at least two components to concatenate')
+        if not isinstance(src, (list, tuple, np.ndarray)):
+            raise ValueError()
+        if len(src) == 1:
+            warn("Since `src` contains only one component, concatenation not needed.")
+
         items = [self.get(None, attr) for attr in src]
 
         depth = sum(item.shape[-1] for item in items)

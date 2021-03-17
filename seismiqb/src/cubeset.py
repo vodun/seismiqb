@@ -1,15 +1,13 @@
-""" Contains container for storing dataset of seismic crops. """
+""" Container for storing seismic data and labels. """
 #pylint: disable=too-many-lines
 import os
 from glob import glob
 from warnings import warn
-from collections import defaultdict
 import contextlib
 
 import numpy as np
 import h5py
 from tqdm.auto import tqdm
-from scipy.special import expit
 
 from ..batchflow import FilesIndex, DatasetIndex, Dataset, Sampler, Pipeline
 from ..batchflow import NumpySampler
@@ -160,8 +158,8 @@ class SeismicCubeset(Dataset):
             self.geometries[ix].make_hdf5(postfix=postfix)
 
 
-    def create_labels(self, paths=None, filter_zeros=True, dst='labels', labels_class=None, **kwargs):
-        """ Create labels (horizons, facies, etc) from given paths.
+    def create_labels(self, paths=None, filter_zeros=True, dst='labels', labels_class=None, sort=None, **kwargs):
+        """ Create labels (horizons, facies, etc) from given paths and optionaly sort them.
 
         Parameters
         ----------
@@ -174,6 +172,8 @@ class SeismicCubeset(Dataset):
         labels_class : class
             Class to use for labels creation. If None, infer from `geometries`.
             Defaults to None.
+        sort : 'h_min', 'h_mean', 'h_max' or None
+            Whether sort loaded labels by one of its attributes or not.
         Returns
         -------
         SeismicCubeset
@@ -189,7 +189,8 @@ class SeismicCubeset(Dataset):
                 else:
                     labels_class = UnstructuredHorizon
             label_list = [labels_class(path, self.geometries[idx], **kwargs) for path in paths[idx]]
-            label_list.sort(key=lambda label: label.h_mean)
+            if sort is not None:
+                label_list.sort(key=lambda label: getattr(label, sort))
             if filter_zeros:
                 _ = [getattr(item, 'filter')() for item in label_list]
             self[idx, dst] = [item for item in label_list if len(item.points) > 0]
@@ -197,8 +198,8 @@ class SeismicCubeset(Dataset):
 
 
     def show_labels(self, indices=None, main_labels='labels', overlay_labels=None, attributes=None, correspondence=None,
-                    scale=10, colorbar=True, main_cmap='tab20b', overlay_cmap='autumn', overlay_alpha=0.7,
-                    suptitle_size=20, title_size=15, transpose=True):
+                    scale=10, colorbar=True, main_cmap='viridis', overlay_cmap='autumn', overlay_alpha=0.7,
+                    suptitle_size=20, title_size=15, transpose=True, plot_figures=True, return_figures=False):
         """ Show specific attributes for labels of selected cubes with optional overlay by other attributes.
 
         Parameters
@@ -223,7 +224,7 @@ class SeismicCubeset(Dataset):
             >>>     },
             >>>     {
             >>>         'labels' : dict(attribute='amplitudes', cmap='tab20c'),
-            >>>         'channels': dict(attribute='masks', cmap='Blues, alpha=0.5)
+            >>>         'channels': dict(attribute='masks', cmap='Blues', alpha=0.5)
             >>>     }
             >>> ]
         scale : int
@@ -261,16 +262,18 @@ class SeismicCubeset(Dataset):
 
         indices = indices or self.indices
         if correspondence is None:
-            attributes = 'heights' if attributes is None else attributes
+            attributes = ['heights'] if attributes is None else attributes
             attributes = [attributes] if isinstance(attributes, str) else attributes
             correspondence = [{main_labels: dict(attribute=attribute)} for attribute in attributes]
         elif attributes is not None:
             raise ValueError("Can't use both `correspondence` and `attributes`.")
 
+        figures = []
         for idx in indices:
             for label_num, label in enumerate(self[idx, main_labels]):
                 figaspect = np.array([len(correspondence), 1]) * scale
                 fig, axes = plt.subplots(ncols=len(correspondence), figsize=figaspect)
+                figures.append(fig)
                 axes = axes if isinstance(axes, np.ndarray) else [axes]
 
                 x, y = label.cube_shape[:2]
@@ -283,6 +286,7 @@ class SeismicCubeset(Dataset):
                     if overlay_labels is not None and overlay_labels not in src_params:
                         src_params[overlay_labels] = dict(attribute='masks')
                     attributes = []
+                    title = src_params.pop('title', None)
                     for layer_num, (src, params) in enumerate(src_params.items()):
                         attribute = params['attribute']
                         attributes.append(attribute)
@@ -305,8 +309,12 @@ class SeismicCubeset(Dataset):
                         local_colorbar = params.get('colorbar', colorbar)
                         if local_colorbar and layer_num == 0:
                             add_colorbar(im)
-                    ax.set_title(', '.join(np.unique(attributes)), size=title_size)
-
+                    title = ', '.join(np.unique(attributes)) if title is None else title
+                    ax.set_title(title, size=title_size)
+                if not plot_figures:
+                    plt.close(fig)
+        if return_figures:
+            return figures
 
     def reset_caches(self, attrs=None):
         """ Reset lru cache for cached class attributes.
@@ -741,6 +749,7 @@ class SeismicCubeset(Dataset):
             If float, proportion from the total number of traces in a crop will
             be computed.
         """
+        # pylint: disable=too-many-statements
         if mode == '2d':
             if isinstance(heights, (int, float)):
                 height = int(heights) - crop_shape[2] // 2 # start for heights slices made by `crop` action
@@ -749,6 +758,7 @@ class SeismicCubeset(Dataset):
                 raise ValueError("`heights` should be a single `int` value when `mode` is '2d'")
         elif mode != '3d':
             raise ValueError("`mode` can either be '3d' or '2d'.")
+        cube_name = self.indices[cube_name] if isinstance(cube_name, int) else cube_name
         geometry = self.geometries[cube_name]
 
         if isinstance(overlap_factor, (int, float)):
@@ -856,9 +866,10 @@ class SeismicCubeset(Dataset):
         #pylint: disable=import-outside-toplevel
         from matplotlib import pyplot as plt
 
-        labels_indices = labels_indices if isinstance(labels_indices, (tuple, list)) else [labels_indices]
-        labels_indices = slice(None) if labels_indices[0] is None else labels_indices
-        labels = self[self.grid_info['cube_name'], src_labels, labels_indices]
+        labels = getattr(self, src_labels)[self.grid_info['cube_name']]
+        if labels_indices is not None:
+            labels_indices = [labels_indices] if isinstance(labels_indices, int) else labels_indices
+            labels = [labels[i] for i in labels_indices]
 
         # Calculate grid lines coordinates
         (x_min, x_max), (y_min, y_max) = self.grid_info['range'][:2]
@@ -974,8 +985,8 @@ class SeismicCubeset(Dataset):
                                                                 printer=printer, hist=hist, plot=plot)
 
 
-    def show_slide(self, loc, idx=0, axis='iline', zoom_slice=None, mode='overlap',
-                   n_ticks=5, delta_ticks=100, **kwargs):
+    def show_slide(self, loc, idx=0, axis='iline', zoom_slice=None, src_labels='labels',
+                   mode='overlap', n_ticks=5, delta_ticks=100, **kwargs):
         """ Show full slide of the given cube on the given line.
 
         Parameters
@@ -986,6 +997,8 @@ class SeismicCubeset(Dataset):
             Number of axis to load slide along.
         zoom_slice : tuple
             Tuple of slices to apply directly to 2d images.
+        src_labels : str
+            Dataset components to show as labels.
         idx : str, int
             Number of cube in the index to use.
         mode : str
@@ -994,7 +1007,7 @@ class SeismicCubeset(Dataset):
             Backend to use for render. Can be either 'plotly' or 'matplotlib'. Whenever
             using 'plotly', also use slices to make the rendering take less time.
         """
-        components = ('images', 'masks') if list(self.labels.values())[0] else ('images',)
+        components = ('images', 'masks') if getattr(self, src_labels)[idx] else ('images',)
         cube_name = self.indices[idx]
         geometry = self.geometries[cube_name]
         crop_shape = np.array(geometry.cube_shape)
@@ -1013,7 +1026,7 @@ class SeismicCubeset(Dataset):
             use_labels = kwargs.pop('use_labels', 'all')
             width = kwargs.pop('width', 5)
             labels_pipeline = (Pipeline()
-                               .create_masks(dst='masks', width=width, use_labels=use_labels))
+                               .create_masks(src_labels=src_labels, dst='masks', width=width, use_labels=use_labels))
 
             pipeline = pipeline + labels_pipeline
 
