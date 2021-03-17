@@ -16,8 +16,8 @@ import segyio
 import cv2
 from scipy.ndimage import zoom
 
-from .utils import lru_cache, find_min_max, file_print, \
-                   SafeIO, attr_filter, make_axis_grid, infer_tuple
+from .utils import find_min_max, file_print, attr_filter, make_axis_grid, infer_tuple
+from .utility_classes import lru_cache, SafeIO
 from .plotters import plot_image
 
 
@@ -217,6 +217,8 @@ class SeismicGeometry:
             if value is not None:
                 setattr(self, item, value)
 
+        self.has_stats = True
+
     def load_meta_item(self, item):
         """ Load individual item. """
         with h5py.File(self.path_meta, "r") as file_meta:
@@ -327,7 +329,7 @@ class SeismicGeometry:
             Other parameters of metric(s) evaluation.
         """
         from .metrics import GeometryMetrics #pylint: disable=import-outside-toplevel
-        quality_map = GeometryMetrics(self).evaluate('quality_map', quantiles=quantiles, agg=None,
+        quality_map = GeometryMetrics(self).evaluate('quality_map', quantiles=quantiles,
                                                      metric_names=metric_names, **kwargs)
         self._quality_map = quality_map
         return quality_map
@@ -339,7 +341,7 @@ class SeismicGeometry:
             self.make_quality_grid((20, 150))
         return self._quality_grid
 
-    def make_quality_grid(self, frequencies, iline=True, xline=True, margin=0, **kwargs):
+    def make_quality_grid(self, frequencies, iline=True, xline=True, full_lines=True, margin=0, **kwargs):
         """ Create `quality_grid` based on `quality_map`.
 
         Parameters
@@ -348,6 +350,8 @@ class SeismicGeometry:
             Grid frequencies for individual levels of hardness in `quality_map`.
         iline, xline : bool
             Whether to make lines in grid to account for `ilines`/`xlines`.
+        full_lines : bool
+            Whether to make lines on the whole spatial range.
         margin : int
             Margin of boundaries to not include in the grid.
         kwargs : dict
@@ -355,7 +359,8 @@ class SeismicGeometry:
         """
         from .metrics import GeometryMetrics #pylint: disable=import-outside-toplevel
         quality_grid = GeometryMetrics(self).make_grid(self.quality_map, frequencies,
-                                                       iline=iline, xline=xline, margin=margin, **kwargs)
+                                                       iline=iline, xline=xline, full_lines=full_lines,
+                                                       margin=margin, **kwargs)
         self._quality_grid = quality_grid
         return quality_grid
 
@@ -520,7 +525,7 @@ class SeismicGeometry:
             'labelright': False,
             **kwargs
         }
-        plot_image(slide, mode='single', **kwargs)
+        plot_image(slide, **kwargs)
 
     def show_amplitude_hist(self, scaler=None, bins=50, **kwargs):
         """ Show distribution of amplitudes in `trace_container`. Optionally applies chosen `scaler`. """
@@ -722,6 +727,8 @@ class SeismicGeometry:
         path_meta = os.path.splitext(path_hdf5)[0] + '.meta'
         self.store_meta(path_meta)
 
+
+
 class SeismicGeometrySEGY(SeismicGeometry):
     """ Class to infer information about SEG-Y cubes and provide convenient methods of working with them.
     A wrapper around `segyio` to provide higher-level API.
@@ -779,23 +786,24 @@ class SeismicGeometrySEGY(SeismicGeometry):
 
         self.add_attributes()
 
-        # Create a matrix with ones at fully-zeroes traces
-        if self.index_headers == self.INDEX_POST:
-            try:
-                size = self.depth // 10
-                slc = np.stack([self[:, :, i * size] for i in range(1, 10)], axis=-1)
-                self.zero_traces = np.zeros(self.lens, dtype=np.int)
-                self.zero_traces[np.std(slc, axis=-1) == 0] = 1
-            except ValueError: # can't reshape
-                pass
-
+        # Collect stats, if needed and not collected previously
         path_meta = os.path.splitext(self.path)[0] + '.meta'
         if os.path.exists(path_meta) and not recollect:
             self.load_meta()
         elif collect_stats:
             self.collect_stats(**kwargs)
 
-        # Store additional segy info, that is preserved in HDF5
+        # Create a matrix with ones at fully-zero traces
+        if self.index_headers == self.INDEX_POST and not hasattr(self, 'zero_traces'):
+            try:
+                size = self.depth // 10
+                slc = np.stack([self[:, :, i * size] for i in range(1, 10)], axis=0)
+                self.zero_traces = np.zeros(self.lens, dtype=np.int32)
+                self.zero_traces[np.std(slc, axis=0) == 0] = 1
+            except ValueError: # can't reshape
+                pass
+
+        # Store additional segy info
         self.segy_path = self.path
         self.segy_text = [self.segyfile.text[i] for i in range(1 + self.segyfile.ext_headers)]
         self.add_rotation_matrix()
@@ -1221,6 +1229,8 @@ class SeismicGeometrySEGY(SeismicGeometry):
 
     # Convenient alias
     convert_to_hdf5 = make_hdf5
+
+
 
 class SeismicGeometryHDF5(SeismicGeometry):
     """ Class to infer information about HDF5 cubes and provide convenient methods of working with them.
