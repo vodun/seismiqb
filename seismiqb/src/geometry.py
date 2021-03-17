@@ -871,7 +871,6 @@ class SeismicGeometrySEGY(SeismicGeometry):
 
             ix_points.append(ix)
             cdp_points.append(cdp)
-
         self.rotation_matrix = cv2.getAffineTransform(np.float32(ix_points), np.float32(cdp_points))
 
     def lines_to_cdp(self, points):

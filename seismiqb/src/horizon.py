@@ -1906,6 +1906,8 @@ class Horizon:
         points = self.matrix_to_points(matrix)
         points = self.cubic_to_lines(points)
         self.dump_charisma(points, path, transform, add_height)
+        model_config['initial_block']
+        model_config['body']
 
     def dump_points(self, path, fmt='npy', projections='ixh'):
         """ Dump points. """
@@ -1926,7 +1928,7 @@ class Horizon:
 
             slices = (slice(self.i_min, self.i_max+1), slice(self.x_min,self.x_max+1), slice(self.h_min, self.h_max+1))
 
-            file_hdf5[slices] += fault_array
+            file_hdf5[slices] = np.maximum(file_hdf5[slices], fault_array)
 
             path_meta = os.path.splitext(path)[0] + '.meta'
             self.geometry.store_meta(path_meta)

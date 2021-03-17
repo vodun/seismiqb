@@ -109,7 +109,7 @@ class BaseController:
             self.logger(f'{self.__class__.__name__} ::: {uss:2.4} ::: {msg}')
 
     # Dataset creation: geometries, labels, grids, samplers
-    def make_dataset(self, cube_paths, horizon_paths=None):
+    def make_dataset(self, cube_paths, dst='labels', labels_paths=None, labels_class=None):
         """ Create an instance of :class:`.SeismicCubeset` with cubes and horizons.
 
         Parameters
@@ -134,16 +134,16 @@ class BaseController:
 
         dataset.load_geometries()
 
-        if horizon_paths:
-            if isinstance(horizon_paths, str):
-                horizon_paths = {dataset.indices[0]: glob(horizon_paths)}
-            dataset.create_labels(horizon_paths)
+        if labels_paths:
+            if isinstance(labels_paths, str):
+                labels_paths = {dataset.indices[0]: glob(labels_paths)}
+            dataset.create_labels(labels_paths, dst=dst, labels_class=labels_class)
 
         msg = '\n'
         for idx in dataset.indices:
             msg += f'{idx}\n'
-            for hor in dataset.labels[idx]:
-                msg += f'    {hor.name}'
+            for label in getattr(dataset, dst)[idx]:
+                msg += f'    {label.name}'
         self.log(f'Created dataset ::: {msg}')
         return dataset
 

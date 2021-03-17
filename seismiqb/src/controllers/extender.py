@@ -7,7 +7,7 @@ from copy import copy
 import numpy as np
 import torch
 
-from ...batchflow import Pipeline, B, V, C, D, P, R, L
+from ...batchflow import Pipeline, B, V, C, D, P, R
 
 from ..horizon import Horizon
 
@@ -112,7 +112,7 @@ class Extender(Enhancer):
                         low=P(R('uniform', low=0., high=0.4)),
                         length=P(R('uniform', low=0.30, high=0.5)))
             .filter_out(src='prior_masks', dst='prior_masks',
-                        expr=L(functor)(R('uniform', low=15, high=35)), low=0.0, p=0.7)
+                        expr=F(functor)(R('uniform', low=15, high=35)), low=0.0, p=0.7)
             .transpose(src=['masks', 'prior_masks'], order=(2, 0, 1))
         )
 

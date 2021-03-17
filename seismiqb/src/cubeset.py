@@ -989,7 +989,7 @@ class SeismicCubeset(Dataset):
 
 
     def show_slide(self, loc, idx=0, axis='iline', zoom_slice=None, mode='overlap',
-                   n_ticks=5, delta_ticks=100, **kwargs):
+                   n_ticks=5, delta_ticks=100, src_labels='labels', **kwargs):
         """ Show full slide of the given cube on the given line.
 
         Parameters
@@ -1020,7 +1020,7 @@ class SeismicCubeset(Dataset):
 
         pipeline = (Pipeline()
                     .make_locations(points=point, shape=crop_shape)
-                    .load_cubes(dst='images')
+                    .load_cubes(dst='images', src_labels=src_labels)
                     .normalize(mode='q', src='images'))
 
         if 'masks' in components:
@@ -1214,7 +1214,10 @@ class SeismicCubeset(Dataset):
                     crop_slice.append(slice(-start, None))
                     background_slice.append(slice(None))
 
-            crop = np.transpose(crops[j], order)
+            crop = crops[j]
+            if crop.ndim == 4:
+                crop = crop[0]
+            crop = np.transpose(crop, order)
             crop = crop[tuple(crop_slice)]
             previous = background[tuple(background_slice)]
             background[tuple(background_slice)] = np.maximum(crop, previous)
@@ -1229,7 +1232,7 @@ class SeismicCubeset(Dataset):
         Parameters
         ----------
         dst : str or None
-            Path to save predictions. If None, function returns`np.ndarray` with predictions.
+            Path to save predictions. If None, function returns `np.ndarray` with predictions.
         pipeline : Pipeline
             Pipeline for inference, `run_later` action must be provided.
         crop_shape : tuple

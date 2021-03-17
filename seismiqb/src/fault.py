@@ -52,11 +52,11 @@ class Fault(Horizon):
             points = self.csv_to_points(path, **kwargs)
         self.from_points(points, transform, **kwargs)
 
-    def csv_to_points(self, path, **kwargs):
+    def csv_to_points(self, path, fix=False, **kwargs):
         """ Get point cloud array from file values. """
         df = self.read_file(path)
         df = self.fix_lines(df)
-        sticks = self.read_sticks(df)
+        sticks = self.read_sticks(df, fix)
         sticks = self.sort_sticks(sticks)
         points = self.interpolate_3d(sticks, **kwargs)
         return points
@@ -94,7 +94,7 @@ class Fault(Horizon):
         return df
 
     @classmethod
-    def read_sticks(cls, df):
+    def read_sticks(cls, df, fix=False):
         """ Transform initial fault dataframe to array of sticks. """
         if 'number' in df.columns: # fault file has stick index
             col = 'number'
@@ -104,7 +104,12 @@ class Fault(Horizon):
             col = 'xline'
         else:
             raise ValueError('Wrong format of sticks: there is no column to group points into sticks.')
-        return df.groupby(col).apply(lambda x: x[Horizon.COLUMNS].values).reset_index(drop=True)
+        sticks = df.groupby(col).apply(lambda x: x[Horizon.COLUMNS].values).reset_index(drop=True)
+        if fix:
+            if len(sticks) == 1:
+                sticks = pd.Series()
+            sticks = sticks.loc[sticks.apply(len) > 1]
+        return sticks
 
     def sort_sticks(self, sticks):
         """ Order sticks with respect of fault direction. Is necessary to perform following triangulation. """

@@ -5,9 +5,10 @@ from torch import nn
 from ..batchflow.models.torch import ResBlock
 
 class InstantaneousPhaseLayer(nn.Module):
-    def __init__(self, continuous=False, **kwargs):
+    def __init__(self, inputs=None, continuous=False, enable=True, **kwargs):
         super().__init__()
         self.continuous = continuous
+        self.enable = enable
 
     def _hilbert(self, x):
         N = x.shape[-1]
@@ -38,8 +39,9 @@ class InstantaneousPhaseLayer(nn.Module):
         return res
     
     def forward(self, x):
-        x = self._hilbert(x)
-        x = self._angle(x)
+        if self.enable:
+            x = self._hilbert(x)
+            x = self._angle(x)
         return x
 
 class InputLayer(nn.Module):

@@ -931,7 +931,7 @@ class SeismicCropBatch(Batch):
             starts = [int(rnd(crop.shape[ax] - patch_shape[ax])) for ax in range(3)]
             stops = [starts[ax] + patch_shape[ax] for ax in range(3)]
             slices = [slice(start, stop) for start, stop in zip(starts, stops)]
-            copy_[slices] = 0
+            copy_[tuple(slices)] = 0
         return copy_
 
     @apply_parallel
