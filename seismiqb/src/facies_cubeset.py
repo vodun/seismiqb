@@ -60,6 +60,8 @@ class FaciesSeismicCubeset(SeismicCubeset):
                     label_mask = f"*{label}" if label_affix == 'pre' else f"{label}*" if label_affix == 'post' else None
                     label_mask = '/'.join([cube_dir, label_dir, labels_subdir, label_mask])
                     label_path = glob(label_mask)
+                    if len(label_path) == 0:
+                        raise ValueError(f"No files found for mask `{label_mask}`")
                     if len(label_path) > 1:
                         raise ValueError('Multiple files match pattern')
                     paths[full_cube_name].append(label_path[0])
@@ -68,7 +70,7 @@ class FaciesSeismicCubeset(SeismicCubeset):
             main_labels = dst_labels[0]
             warn("""Cubeset `labels` point now to `{}`.
                     To suppress this warning, explicitly pass value for `main_labels`.""".format(main_labels))
-        self.labels = getattr(self, main_labels)
+        self.labels = getattr(self, main_labels) #pylint: attribute-defined-outside-init
 
     def make_predictions(self, pipeline, crop_shape, overlap_factor, order=(1, 2, 0), src_labels='labels',
                          dst_labels='predictions', pipeline_var='predictions', bar='n', binarize=True):
@@ -108,9 +110,9 @@ class FaciesSeismicCubeset(SeismicCubeset):
                 prediction_name = "{}_predicted".format(label.name)
                 self[idx, dst_labels] += [Horizon(prediction, label.geometry, prediction_name)]
 
-    def evaluate(self, true_src, pred_src, metrics_fn, format='df'):
+    def evaluate(self, true_src, pred_src, metrics_fn, output_format='df'):
         """ TODO """
-        if format == 'dict':
+        if output_format == 'dict':
             results = {}
             for idx in self.indices:
                 results[idx] = []
@@ -119,7 +121,7 @@ class FaciesSeismicCubeset(SeismicCubeset):
                     pred_mask = pred.load_attribute('masks', fill_value=0)
                     result = metrics_fn(true_mask, pred_mask)
                     results[idx].append(result)
-        elif format == 'df':
+        elif output_format == 'df':
             columns = ['cube', 'horizon', 'metrics']
             rows = []
             for idx in self.indices:

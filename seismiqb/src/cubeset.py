@@ -199,7 +199,7 @@ class SeismicCubeset(Dataset):
 
     def show_labels(self, indices=None, main_labels='labels', overlay_labels=None, attributes=None, correspondence=None,
                     scale=10, colorbar=True, main_cmap='viridis', overlay_cmap='autumn', overlay_alpha=0.7,
-                    suptitle_size=20, title_size=15, transpose=True, plot_figures=True, return_figures=False):
+                    suptitle_size=25, title_size=15, transpose=True, plot_figures=True, return_figures=False):
         """ Show specific attributes for labels of selected cubes with optional overlay by other attributes.
 
         Parameters
@@ -227,7 +227,7 @@ class SeismicCubeset(Dataset):
             >>>         'channels': dict(attribute='masks', cmap='Blues', alpha=0.5)
             >>>     }
             >>> ]
-        scale : int
+        scale : number
             How much to scale the figure.
         colorbar : bool
             Whether plot colorbar for every subplot.
@@ -271,22 +271,20 @@ class SeismicCubeset(Dataset):
         figures = []
         for idx in indices:
             for label_num, label in enumerate(self[idx, main_labels]):
-                figaspect = np.array([len(correspondence), 1]) * scale
-                fig, axes = plt.subplots(ncols=len(correspondence), figsize=figaspect)
+                x, y = label.matrix.shape
+                min_shape = min(x, y)
+                figaspect = np.array([x / min_shape * len(correspondence), y / min_shape]) * scale
+                fig, axes = plt.subplots(ncols=len(correspondence), figsize=figaspect, constrained_layout=True)
                 figures.append(fig)
                 axes = axes if isinstance(axes, np.ndarray) else [axes]
 
-                x, y = label.cube_shape[:2]
-                suptitle_y = np.divide(y, x) if transpose else np.divide(x, y)
-                suptitle_y = suptitle_y + 0.1 if suptitle_y < 0.85 else 0.95
-                fig.suptitle(f"`{label.name}` on `{idx}`", size=suptitle_size, y=suptitle_y)
-
+                fig.suptitle(f"`{label.name}` on `{idx}`", size=suptitle_size, y=1.1)
                 main_label_bounds = tuple(slice(*lims) for lims in label.bbox[:2])
                 for ax, src_params in zip(axes, correspondence):
                     if overlay_labels is not None and overlay_labels not in src_params:
                         src_params[overlay_labels] = dict(attribute='masks')
                     attributes = []
-                    title = src_params.pop('title', None)
+                    title = []
                     for layer_num, (src, params) in enumerate(src_params.items()):
                         attribute = params['attribute']
                         attributes.append(attribute)
@@ -309,7 +307,10 @@ class SeismicCubeset(Dataset):
                         local_colorbar = params.get('colorbar', colorbar)
                         if local_colorbar and layer_num == 0:
                             add_colorbar(im)
-                    title = ', '.join(np.unique(attributes)) if title is None else title
+                        layer_title = params.get('title', None)
+                        title += [layer_title] if layer_title else []
+                    title = title or np.unique(attributes)
+                    title = ', '.join(title)
                     ax.set_title(title, size=title_size)
                 if not plot_figures:
                     plt.close(fig)
@@ -1301,46 +1302,6 @@ class SeismicCubeset(Dataset):
                 cube_hdf5[:] = cube_hdf5 / np.expand_dims(aggregation_map, axis=-1)
 
 
-    def make_labels_prediction(self, pipeline, crop_shape, overlap_factor,
-                               src_labels='horizons', dst_labels='predictions', bar='n',
-                               pipeline_var='predictions', order=(1, 2, 0), binarize=True):
-        """
-        Make predictions and put them into dataset attribute.
-
-        Parameters
-        ----------
-        pipeline : Pipeline
-            Inference pipeline.
-        crop_shape : sequence
-            Passed directly to :meth:`.make_grid`.
-        overlap_factor : float or sequence
-            Passed directly to :meth:`.make_grid`.
-        src_labels : str
-            Name of dataset component with items to make grid for.
-        dst_labels : str
-            Name of dataset component to put predictions into.
-        pipeline_var : str
-            Name of pipeline variable to get predictions for assemble from.
-        order : tuple of int
-            Passed directly to :meth:`.assemble_crops`.
-        binarize : bool
-            Whether convert probability to class label or not.
-        """
-        # pylint: disable=blacklisted-name
-        setattr(self, dst_labels, IndexedDict({ix: [] for ix in self.indices}))
-        for idx, labels in getattr(self, src_labels).items():
-            for label in labels:
-                self.make_grid(cube_name=idx, crop_shape=crop_shape, overlap_factor=overlap_factor,
-                               heights=int(label.h_mean), mode='2d')
-                pipeline = pipeline << self
-                pipeline.run(batch_size=self.size, n_iters=self.grid_iters, bar=bar)
-                prediction = self.assemble_crops(pipeline.v(pipeline_var), order=(1, 2, 0)).squeeze()
-                prediction = expit(prediction)
-                prediction = prediction.round() if binarize else prediction
-                prediction_name = "{}_predicted".format(label.name)
-                self[idx, dst_labels] += [Horizon(prediction, label.geometry, prediction_name)]
-
-
     # Task-specific loaders
 
     def load(self, label_dir=None, filter_zeros=True, dst_labels='labels',
@@ -1377,60 +1338,6 @@ class SeismicCubeset(Dataset):
         self.create_labels(paths=paths_txt, filter_zeros=filter_zeros, dst=dst_labels,
                            labels_class=labels_class, **kwargs)
         self._p, self._bins = p, bins # stored for later sampler creation
-
-
-    def load_corresponding_labels(self, info, dst_labels=None, main_labels=None, **kwargs):
-        """ Load corresponding labels into corresponding dataset attributes.
-
-        Parameters
-        ----------
-        correspondence : dict
-            Correspondence between cube name and a list of patterns for its labels.
-        labels_dirs : sequence
-            Paths to folders to look corresponding labels with patterns from `correspondence` values for.
-            Paths must be relative to cube location.
-        dst_labels : sequence
-            Names of dataset components to load corresponding labels into.
-        main_labels : str
-            Which dataset attribute assign to `self.labels`.
-        kwargs :
-            Passed directly to :meth:`.create_labels`.
-
-        Examples
-        --------
-        The following argument values may be used to load for labels for 'CUBE_01_XXX':
-        - from 'INPUTS/FACIES/FANS_HORIZONS/horizon_01_corrected.char' into `horizons` component;
-        - from 'INPUTS/FACIES/FANS/fans_on_horizon_01_corrected_v8.char' into `fans` component,
-        and assign `self.horizons` to `self.labels`.
-
-        >>> correspondence = {'CUBE_01_XXX' : ['horizon_01']}
-        >>> labels_dirs = ['INPUTS/FACIES/FANS_HORIZONS', 'INPUTS/FACIES/FANS']
-        >>> dst_labels = ['horizons', 'fans']
-        >>> main_labels = 'horizons'
-        """
-        self.load_geometries()
-
-        label_dir = info['PATHS']["LABELS"]
-        labels_subdirs = info['PATHS']["SUBDIRS"]
-        dst_labels = dst_labels or [labels_subdir.lower() for labels_subdir in labels_subdirs]
-        for labels_subdir, dst_label in zip(labels_subdirs, dst_labels):
-            paths = defaultdict(list)
-            for cube_name, labels in info['CUBES'].items():
-                full_cube_name = f"amplitudes_{cube_name}"
-                cube_path = self.index.get_fullpath(full_cube_name)
-                cube_dir = cube_path[:cube_path.rfind('/')]
-                for label in labels:
-                    label_mask = '/'.join([cube_dir, label_dir, labels_subdir, f"*{label}"])
-                    label_path = glob(label_mask)
-                    if len(label_path) > 1:
-                        raise ValueError('Multiple files match pattern')
-                    paths[full_cube_name].append(label_path[0])
-            self.create_labels(paths=paths, dst=dst_label, labels_class=Horizon, **kwargs)
-        if main_labels is None:
-            main_labels = dst_labels[0]
-            warn("""Cubeset `labels` point now to `{}`.
-                    To suppress this warning, explicitly pass value for `main_labels`.""".format(main_labels))
-        self.labels = getattr(self, main_labels)
 
 
 class Modificator:
