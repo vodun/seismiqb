@@ -2,104 +2,64 @@
 #pylint: disable=attribute-defined-outside-init
 import numpy as np
 
-from .base import BaseController
+from .horizon import HorizonController
 
 
+class Interpolator(HorizonController):
+    """ Horizon detector with automated choise between Carcass and Grid interpolation. """
 
-class CarcassInterpolator(BaseController):
-    """ Detector with convenient defaults to create a 2D surface from a sparce labeled carcass. """
+    def train(self, dataset=None, cube_paths=None, horizon_paths=None, horizon=None, frequencies=None, **kwargs):
+        """ Either train on a carcass or cut carcass from a full horizon and train on it. """
+        if dataset is None:
+            dataset = self.make_dataset(cube_paths=cube_paths, horizon_paths=horizon_paths, horizon=horizon)
 
-    def train(self, dataset=None, horizon=None, **kwargs):
-        """ Train model on a sparce labeled carcass. """
-        if dataset is None and horizon is not None:
-            dataset = self.make_dataset_from_horizon(horizon)
-
-        horizon = dataset.labels[0][0]
         geometry = dataset.geometries[0]
-
-        horizon_grid = (horizon.full_matrix != horizon.FILL_VALUE).astype(int)
-        grid_coverage = (np.nansum(horizon_grid) /
-                         (np.prod(geometry.cube_shape[:2]) - np.nansum(geometry.zero_traces)))
-        self.log(f'Coverage of carcass is {grid_coverage}')
-
-        self.make_sampler(dataset,
-                          bins=np.array([500, 500, 100]),
-                          use_grid=True, grid_src=horizon_grid)
-
-        return BaseController.train(self, dataset, use_grid=True, grid_src=horizon_grid, **kwargs)
-
-    def inference(self, dataset, version=1, orientation='i', overlap_factor=2, heights_range=None,
-                  batch_size_multiplier=1, **kwargs):
-        """ Keep only the biggest horizon; name it after the carcass. """
-        BaseController.inference(self, dataset=dataset, version=version, orientation=orientation,
-                                 overlap_factor=overlap_factor, heights_range=heights_range,
-                                 batch_size_multiplier=batch_size_multiplier, **kwargs)
-
-        self.predictions = [self.predictions[0]]
-        self.predictions[0].name = f'from_{dataset.labels[0][0].name}'
-
-
-
-class GridInterpolator(BaseController):
-    """ Detector with convenient defaults to create a sparce carcass from a horizon by using a quality
-    grid with supplied frequencies. Then, spread it to the whole cube spatial range.
-    """
-    def train(self, dataset=None, horizon=None, frequencies=(200, 200), **kwargs):
-        """ Create a grid for a horizon, then train model on it. """
-        if dataset is None and horizon is not None:
-            dataset = self.make_dataset_from_horizon(horizon)
-
-        horizon = dataset.labels[0][0]
-
-        grid_coverages = self.make_grid(dataset, frequencies, iline=True, xline=True, margin=30)
-        self.log(f'Coverage of grid with {frequencies} is {grid_coverages}')
-
-        self.make_sampler(dataset,
-                          bins=np.array([500, 500, 100]),
-                          use_grid=True)
-
-        return BaseController.train(self, dataset, use_grid=True, **kwargs)
-
-
-    def inference(self, dataset, version=1, orientation='i', overlap_factor=2, heights_range=None,
-                  batch_size_multiplier=1, **kwargs):
-        """ Keep only the biggest horizon; name it after the gridded horizon. """
-        BaseController.inference(self, dataset=dataset, version=version, orientation=orientation,
-                                 overlap_factor=overlap_factor, heights_range=heights_range,
-                                 batch_size_multiplier=batch_size_multiplier, **kwargs)
-
-        self.predictions = [self.predictions[0]]
-        self.predictions[0].name = f'from_gridded_{dataset.labels[0][0].name}'
-
-
-
-class Interpolator(BaseController):
-    """ Automatic choise between Carcass and Grid interpolation. """
-    def train(self, dataset=None, horizon=None, frequencies=(200, 200), **kwargs):
-        """ Train on a carcass or a grid. """
-        if dataset is None and horizon is not None:
-            dataset = self.make_dataset_from_horizon(horizon)
         horizon = dataset.labels[0][0]
 
         if horizon.is_carcass:
-            self.log('Using CARCASS train')
-            method = CarcassInterpolator.train
-        else:
-            self.log('Using GRID train')
-            method = GridInterpolator.train
-        return method(self, dataset=dataset, horizon=horizon, frequencies=frequencies, **kwargs)
+            # Already a carcass
+            self.from_carcass = True
+            self.log('Using CARCASS mode of Interpolator')
 
-    def inference(self, dataset, version=1, orientation='i', overlap_factor=2, heights_range=None,
-                  batch_size_multiplier=1, **kwargs):
+            grid = (horizon.full_matrix != horizon.FILL_VALUE).astype(int)
+            grid_coverage = (np.nansum(grid) /
+                            (np.prod(geometry.cube_shape[:2]) - np.nansum(geometry.zero_traces)))
+            self.log(f'Coverage of carcass is {grid_coverage}')
+
+            self.make_sampler(dataset,
+                              bins=np.array([500, 500, 100]),
+                              use_grid=True, grid_src=grid)
+        else:
+            # Cut a carcass out of the horizon: used for tests
+            self.from_carcass = False
+            self.log('Using GRID mode of Interpolator')
+            grid = 'quality_grid'
+
+            self.make_grid(dataset=dataset, frequencies=frequencies, iline=True, xline=True, margin=30)
+
+            self.make_sampler(dataset,
+                            bins=np.array([500, 500, 100]),
+                            use_grid=True, grid_src=grid)
+
+        return super().train(dataset=dataset, adaptive_slices=True, grid_src=grid, **kwargs)
+
+    def inference(self, dataset, model, **kwargs):
         """ Inference with different naming conventions. """
-        horizon = dataset.labels[0][0]
+        prediction = super().inference(dataset=dataset, model=model, **kwargs)[0]
 
-        if horizon.is_carcass:
-            self.log('Using CARCASS inference')
-            method = CarcassInterpolator.inference
+        if self.from_carcass:
+            prediction.name = f'from_{dataset.labels[0][0].name}'
         else:
-            self.log('Using GRID inference')
-            method = GridInterpolator.inference
-        method(self, dataset=dataset, version=version, orientation=orientation,
-               overlap_factor=overlap_factor, heights_range=heights_range,
-               batch_size_multiplier=batch_size_multiplier, **kwargs)
+            prediction.name = f'from_gridded_{dataset.labels[0][0].name}'
+        return prediction
+
+    # One method to rule them all
+    def run(self, cube_paths=None, horizon_paths=None, horizon=None, frequencies=None, **kwargs):
+        """ Run the entire procedure of horizon detection: from loading the carcass/grid to outputs. """
+        dataset = self.make_dataset(cube_paths=cube_paths, horizon_paths=horizon_paths, horizon=horizon)
+        model = self.train(dataset=dataset, frequencies=frequencies, **kwargs)
+
+        prediction = self.inference(dataset, model)
+        prediction = self.postprocess(prediction)
+        self.evaluate(prediction, dataset=dataset)
+        return prediction

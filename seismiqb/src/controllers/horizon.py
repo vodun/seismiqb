@@ -6,18 +6,13 @@
     - and more
 """
 #pylint: disable=import-error, no-name-in-module, wrong-import-position, protected-access
-import os
 import gc
-import logging
 
 from time import perf_counter
-from ast import literal_eval
 from textwrap import indent
 from pprint import pformat
 from copy import copy
 from glob import glob
-
-import psutil
 
 import numpy as np
 import torch
@@ -28,19 +23,22 @@ from ...batchflow.models.torch import EncoderDecoder
 
 from ..cubeset import SeismicCubeset, Horizon
 from ..metrics import HorizonMetrics
-from ..plotters import plot_loss, plot_image
+from ..plotters import plot_image
+
+from .base import BaseController
 
 
-
-class BaseController:
-    """ !!. """
+class HorizonController(BaseController):
+    """ Controller for horizon detection tasks. """
     #pylint: disable=attribute-defined-outside-init
     DEFAULTS = Config({
+        # General parameters
         'savedir': None,
         'monitor': True,
+        'logger': None,
         'bar': False,
         'plot': False,
-        'logger': None,
+
         'train': {
             'model_class': EncoderDecoder,
             'model_config': None,
@@ -67,9 +65,15 @@ class BaseController:
             'filtering_matrix': None,
             'filter_threshold': 0.,
 
+            'prefetch': 0,
             'chunk_size': 100,
             'chunk_overlap': 0.1,
         },
+
+        # Make predictions smoother
+        'postprocess': {},
+
+        # Compute metrics
         'evaluate': {
             'supports': 100,
             'device': 'gpu',
@@ -79,68 +83,6 @@ class BaseController:
             'name': '',
         }
     })
-
-    def __init__(self, config):
-        self.config = Config(copy(self.DEFAULTS))
-        self.config += config
-
-        self.monitor = self.config.monitor
-        self.plot = self.config.plot
-
-        gpu_list = literal_eval(os.getenv('CUDA_VISIBLE_DEVICES'))
-        self.gpu_list = list(gpu_list) if isinstance(gpu_list, tuple) else [gpu_list]
-        self.make_filelogger()
-
-    # Utility functions
-    def make_savepath(self, *postfix):
-        """ Create nested path from provided strings.
-        Uses `savedir` config option.
-
-        If `savedir` config option is None, then None is returned: that is used as signal to omit saving
-        of, for example, metric map images, etc.
-        """
-        savedir = self.config['savedir']
-        if savedir is not None:
-            path = os.path.join(savedir, *postfix[:-1])
-            os.makedirs(path, exist_ok=True)
-            return os.path.join(savedir, *postfix)
-        return None
-
-    # Logging
-    def make_filelogger(self):
-        """ Create logger inside `savedir`.
-
-        Note that logging is important.
-        """
-        log_path = self.make_savepath('controller.log')
-        if log_path:
-            handler = logging.FileHandler(log_path, mode='w')
-            handler.setFormatter(logging.Formatter('%(asctime)s      %(message)s'))
-
-            logger = logging.getLogger(str(id(self)))
-            logger.addHandler(handler)
-            self.filelogger = logger.error
-        else:
-            self.filelogger = None
-
-    def log(self, msg):
-        """ Log supplied message into both filelogger and supplied one. """
-        process = psutil.Process(os.getpid())
-        uss = process.memory_full_info().uss / (1024 ** 3)
-        msg = f'{self.__class__.__name__} ::: {uss:2.4f} ::: {msg}'
-
-        logger = self.config.logger
-        if logger:
-            logger(msg)
-        if self.filelogger:
-            self.filelogger(msg)
-
-    def log_to_file(self, msg, path):
-        """ Log message to a separate file. """
-        log_path = self.make_savepath(path)
-        if log_path:
-            with open(log_path, 'w') as file:
-                print(msg, file=file)
 
     # Dataset creation: geometries, labels, grids, samplers
     def make_dataset(self, cube_paths=None, horizon_paths=None, horizon=None):
@@ -154,10 +96,6 @@ class BaseController:
             Horizons for each cube. Either a mapping from cube name to paths, or path only (if only one cube is used).
         horizon : None or Horizon
             If supplied, then the dataset is initialized with a single horizon.
-
-        Logs
-        ----
-        Inferred cubes and horizons for them.
 
         Returns
         -------
@@ -178,8 +116,7 @@ class BaseController:
         return dataset
 
     def make_grid(self, dataset, frequencies, **kwargs):
-        """ Create a grid, based on quality map, for each of the cubes in supplied `dataset`.
-        Works inplace.
+        """ Create a grid, based on quality map, for each of the cubes in supplied `dataset`. Works inplace.
 
         Parameters
         ----------
@@ -189,14 +126,6 @@ class BaseController:
             List of frequencies, corresponding to `easy` and `hard` places in the cube.
         kwargs : dict
             Other arguments, passed directly in quality grid creation function.
-
-        Logs
-        ----
-        Grid coverage: ratio of the number of points inside the grid to the total number of non-bad traces in cube.
-
-        Plots
-        -----
-        Map with quality grid.
         """
         for idx in dataset.indices:
             geometry = dataset.geometries[idx]
@@ -211,15 +140,10 @@ class BaseController:
 
             grid_coverage = (np.nansum(geometry.quality_grid) /
                              (np.prod(geometry.cube_shape[:2]) - np.nansum(geometry.zero_traces)))
-            self.log(f'Created grid on {idx}; coverage is: {grid_coverage:4.4f}')
+            self.log(f'Created {frequencies} grid on {idx}; coverage is: {grid_coverage:4.4f}')
 
     def make_sampler(self, dataset, bins=None, use_grid=False, grid_src='quality_grid', side_view=False, **kwargs):
-        """ Create sampler. Works inplace.
-
-        Plots
-        -----
-        Maps with examples of sampled slices of `crop_shape` size, both normalized and not.
-        """
+        """ Create sampler. Works inplace. """
         dataset.create_sampler(quality_grid=use_grid, bins=bins)
         dataset.modify_sampler('train_sampler', finish=True, **kwargs)
         self.log('Created sampler')
@@ -247,110 +171,15 @@ class BaseController:
                 savepath=self.make_savepath(f'sampled_normalized{postfix}.png')
             )
 
-    # Train
-    def train(self, dataset, **kwargs):
-        """ Train model.
-
-        In order to change architecture of the model, pass different `model_config` to the instance initialization.
-        In order to change training procedure, re-define :meth:`.get_train_template`.
-
-        Logs
-        ----
-        Start of training; end of training; average loss at the last 25 iterations.
-
-        Plots
-        -----
-        Graph of loss over iterations.
-        """
-        # Prepare parameters
-        pipeline_config = Config({**self.config['train'], **kwargs})
-        n_iters, prefetch, rescale = pipeline_config.pop(['n_iters', 'prefetch', 'rescale_batch_size'])
-
-        notifier = {
-            'bar': 'n' if self.config.bar else False,
-            'monitors': 'loss_history',
-            'file': self.make_savepath('末 model_loss.log'),
-        }
-        self.log(f'Train started on device={self.gpu_list}')
-
-        # Start resource tracking
-        if self.monitor:
-            monitor = Monitor(['uss', 'gpu', 'gpu_memory'], frequency=0.05, gpu_list=self.gpu_list)
-            monitor.__enter__()
-
-        # Make pipeline
-        train_pipeline = self.get_train_template(**kwargs) << pipeline_config << dataset
-
-        # Log: pipeline_config to a file
-        self.log_to_file(pformat(pipeline_config.config, depth=2), '末 train_config.txt')
-
-        # Test batch to initialize model and log stats
-        batch = train_pipeline.next_batch(D.size)
-        model = train_pipeline.m('model')
-
-        self.log(f'Target batch size: {pipeline_config["batch_size"]}')
-        self.log(f'Actual batch size: {len(batch)}')
-        self.log(f'Cache sizes: {[item.cache_size for item in dataset.geometries.values()]}')
-        self.log(f'Cache lengths: {[item.cache_length for item in dataset.geometries.values()]}')
-
-        # Log: full model repr
-        self.log_to_file(repr(model.model), '末 model_repr.txt')
-
-        # Log: short model repr
-        model.model.apply(lambda module: setattr(module, 'short_repr', True))
-        msg = repr(model.model)
-        model.model.apply(lambda module: setattr(module, 'short_repr', False))
-        self.log_to_file(msg, '末 model_shortrepr.txt')
-
-        # Rescale batch size, if needed
-        if rescale:
-            scale = pipeline_config['batch_size'] / len(batch)
-            pipeline_config['batch_size'] = int(pipeline_config['batch_size'] * scale)
-            self.log(f'Rescaling batch size to: {pipeline_config["batch_size"]}')
-
-        train_pipeline.set_config(pipeline_config)
-
-        # Run training procedure
-        start_time = perf_counter()
-        self.log(f'Train run: n_iters={n_iters}, prefetch={prefetch}')
-        train_pipeline.run(D.size, n_iters=n_iters, prefetch=prefetch, notifier=notifier)
-        elapsed = perf_counter() - start_time
-
-        # Log: resource graphs
-        if self.monitor:
-            monitor.__exit__(None, None, None)
-            monitor.visualize(savepath=self.make_savepath('末 train_resource.png'), show=self.plot)
-
-        # Log: loss over iteration
-        plot_loss(model.loss_list, show=self.plot,
-                  savepath=self.make_savepath('末 model_loss.png'))
-        finish_loss = np.mean(model.loss_list[-25:])
-
-        # Log: model train information
-        self.log_to_file(model._information(config=True, devices=True, model=False, misc=True), '末 model_info.txt')
-
-        # Log: stats
-        self.log(f'Trained for {model.iteration} iterations in {elapsed:4.1f}s')
-        self.log(f'Average of 25 last loss values: {finish_loss:4.3f}')
-        self.log(f'Cache sizes: {[item.cache_size for item in dataset.geometries.values()]}')
-        self.log(f'Cache lengths: {[item.cache_length for item in dataset.geometries.values()]}')
-
-        # Cleanup
-        torch.cuda.empty_cache()
-        train_pipeline.reset('variables')
-        for item in dataset.geometries.values():
-            item.reset_cache()
-        self.log('')
-
-        self.train_log = {
-            'start_time': start_time,
-            'elapsed': elapsed,
-        }
-        return model
+    # Train method is inherited from BaseController class
 
     # Inference
     def inference(self, dataset, model, **kwargs):
-        """ !!. """
+        """ Make inference on a supplied dataset with a provided model.
+
+        Works by making inference on chunks, splitted into crops.
+        Resulting predictions (horizons) are stitched together.
+        """
         # Prepare parameters
         config = Config({**self.config['inference'], **kwargs})
         orientation = config.pop('orientation')
@@ -361,7 +190,7 @@ class BaseController:
 
         # Start resource tracking
         if self.monitor:
-            monitor = Monitor(['uss', 'gpu', 'gpu_memory'], frequency=0.05, gpu_list=self.gpu_list)
+            monitor = Monitor(['uss', 'gpu', 'gpu_memory'], frequency=0.5, gpu_list=self.gpu_list)
             monitor.__enter__()
 
         horizons = []
@@ -439,11 +268,13 @@ class BaseController:
         # Actual inference
         self.log(f'Starting {orientation}-inference with {len(chunk_iterator)} chunks')
         self.log(f'Inference over {spatial_ranges}, {heights_range}')
-        notifier = Notifier('n' if self.config.bar else False, desc=orientation, update=False,
+        notifier = Notifier('n' if self.config.bar else False,
+                            desc=f'{orientation}-inference', update_total=False,
                             file=self.make_savepath(f'末 inference_chunks_{orientation}.log'))
         chunk_iterator = notifier(chunk_iterator)
 
         horizons = []
+        total_length, total_unfiltered_length = 0, 0
         for chunk in chunk_iterator:
             chunk_spatial_ranges = copy(spatial_ranges)
             chunk_spatial_ranges[axis] = [chunk, min(chunk + chunk_size, spatial_ranges[axis][-1])]
@@ -453,19 +284,25 @@ class BaseController:
                                                  config=config)
             horizons.extend(horizons_)
 
+            total_length += dataset.grid_info['length']
+            total_unfiltered_length += dataset.grid_info['unfiltered_length']
+
+        self.log(f'Inferenced total of {total_length} out of {total_unfiltered_length} crops possible')
+
         # Cleanup
         for item in dataset.geometries.values():
             item.reset_cache()
         gc.collect()
         torch.cuda.empty_cache()
 
-        return horizons
+        return Horizon.merge_list(horizons, mean_threshold=5.5, adjacency=3, minsize=500)
 
     def _inference_on_chunk(self, dataset, model, ranges, config):
+        # Prepare parameters
         overlap_factor, filtering_matrix, filter_threshold = config.get(['overlap_factor',
                                                                          'filtering_matrix',
                                                                          'filter_threshold'])
-        # _ = config.pop('prefetch', None) # TODO: prefetch?
+        prefetch = config.get('prefetch', 0)
 
         # Create grid over chunk ranges
         dataset.make_grid(dataset.indices[0],
@@ -481,10 +318,8 @@ class BaseController:
         inference_pipeline.models.add_model('model', model)
 
         # Make predictions over chunk
-        predictions = []
-        for _ in range(dataset.grid_iters):
-            batch = inference_pipeline.next_batch(D.size)
-            predictions.extend(item for item in batch.predictions)
+        inference_pipeline.run(D.size, n_iters=dataset.grid_iters, prefetch=prefetch)
+        predictions = inference_pipeline.v('predictions')
 
         # Assemble prediction together in accordance to the created grid
         assembled_prediction = dataset.assemble_crops(predictions, order=config.order)
@@ -495,16 +330,23 @@ class BaseController:
 
         # Cleanup
         gc.collect()
+        inference_pipeline.reset('variables')
         return horizons
+
+    # Postprocess
+    def postprocess(self, predictions, **kwargs):
+        """ Modify predictions. """
+        config = Config({**self.config['postprocess'], **kwargs})
+        _ = config, kwargs
+        return predictions
 
     # Evaluate
     def evaluate(self, predictions, targets=None, dataset=None, **kwargs):
-        """ !!. """
+        """ Assess quality of predictions against targets and seismic data. """
         #pylint: disable=cell-var-from-loop
         config = Config({**self.config['evaluate'], **kwargs})
         add_prefix, dump, name = config.pop(['add_prefix', 'dump', 'name'])
         supports, device = config.pop(['supports', 'device'])
-
 
         if targets is None and dataset is not None:
             targets = dataset.labels[0]
@@ -540,8 +382,8 @@ class BaseController:
 
             # Compare to targets
             if targets:
-                _, oinfo = hm.evaluate('find_best_match', agg=None)
-                info = {**info, **oinfo}
+                _, _info = hm.evaluate('find_best_match', agg=None)
+                info = {**info, **_info}
 
                 with open(self.make_savepath(*prefix, name + 'results.txt'), 'w') as result_txt:
                     hm.evaluate('compare', hist=False,
@@ -617,7 +459,7 @@ class BaseController:
     def train_pipeline(self, **kwargs):
         """ Define model initialization and model training pipeline.
 
-        Following parameters are fetched from pipeline config: `model_config`.
+        Following parameters are fetched from pipeline config: `model_class` and `model_config`.
         """
         _ = kwargs
         return (
@@ -645,10 +487,12 @@ class BaseController:
     def get_inference_template(self):
         """ Defines inference procedure.
 
-        Following parameters are fetched from pipeline config: `model_pipeline`, `crop_shape`, `side_view` and `order`.
+        Following parameters are fetched from pipeline config: `crop_shape` and `side_view`.
         """
         inference_template = (
             Pipeline()
+            .init_variable('predictions', [])
+
             # Load data
             .make_locations(points=D('grid_gen')(), shape=C('crop_shape'),
                             side_view=C('side_view'))
@@ -660,7 +504,7 @@ class BaseController:
             .predict_model('model',
                            B('images'),
                            fetches='predictions',
-                           save_to=B('predictions'))
+                           save_to=V('predictions', mode='e'))
         )
         return inference_template
 
