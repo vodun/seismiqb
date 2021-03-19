@@ -14,7 +14,6 @@ class Enhancer(HorizonController):
     """
     Provides interface for train, inference and quality assesment for the task of horizon enhancement.
     """
-    #pylint: disable=unused-argument, logging-fstring-interpolation, no-member
 
     def train(self, horizon, **kwargs):
         """ Train model for horizon enhancement. """
@@ -23,13 +22,13 @@ class Enhancer(HorizonController):
         return super().train(dataset, **kwargs)
 
 
-    def inference(self, horizon, filtering_matrix=None, **kwargs):
+    def inference(self, horizon, model, filtering_matrix=None, **kwargs):
         """ Runs enhancement procedure for a given horizon with provided model. """
-        #pylint: disable=attribute-defined-outside-init
         dataset = self.make_dataset(horizon=horizon)
         if filtering_matrix is None:
             filtering_matrix = 1 - (horizon.full_matrix > 0)
-        prediction = super().inference(dataset, filtering_matrix=filtering_matrix, **kwargs)[0]
+        prediction = super().inference(dataset=dataset, model=model,
+                                       filtering_matrix=filtering_matrix, **kwargs)[0]
         prediction.name = f'enhanced_{horizon.name}'
         return prediction
 
@@ -105,8 +104,8 @@ class Enhancer(HorizonController):
         """ Defines inference pipeline. """
         inference_template = (
             Pipeline()
-            # Init everything
-            .import_model('base', C('model_pipeline'))
+            .init_variable('predictions', [])
+
             # Load data
             .make_locations(points=D('grid_gen')(), shape=C('crop_shape'),
                             side_view=C('side_view', default=False))
@@ -115,12 +114,13 @@ class Enhancer(HorizonController):
             .adaptive_reshape(src=['images', 'prior_masks'],
                               shape=C('crop_shape'))
             .normalize(mode='q', src='images')
+
             # Use model for prediction
             .predict_model('model',
                            B('images'),
                            B('prior_masks'),
                            fetches='predictions',
-                           save_to=B('predictions'))
+                           save_to=V('predictions', mode='e'))
         )
         return inference_template
 

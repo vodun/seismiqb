@@ -21,6 +21,7 @@ from .enhancer import Enhancer
 
 class Extender(Enhancer):
     """ Provides interface for train, inference and quality assesment for the task of horizon extension. """
+    #pylint: disable=attribute-defined-outside-init
     DEFAULTS = Config({
         **Enhancer.DEFAULTS,
         'inference': {
@@ -56,7 +57,7 @@ class Extender(Enhancer):
         horizon = copy(horizon)
         dataset.labels[dataset.indices[0]] = [horizon]
 
-        prev_len = len(horizon)
+        prev_len, initial_len = len(horizon)
         self.log(f'Inference started for {n_steps} steps with stride {stride}')
         notifier = Notifier('n' if self.config.bar else False,
                             desc='Extender inference', update_total=False,
@@ -71,7 +72,7 @@ class Extender(Enhancer):
                                         labels_src=horizon,
                                         batch_size=batch_size)
 
-            #
+            # Create pipeline TODO: make better `add_model`
             inference_pipeline = self.get_inference_template() << config << dataset
             inference_pipeline.models.add_model('model', model)
 
@@ -107,11 +108,14 @@ class Extender(Enhancer):
             monitor.__exit__(None, None, None)
             monitor.visualize(savepath=self.make_savepath('末 inference_resource.png'), show=self.plot)
 
+        self.log(f'Total points added: {curr_len - initial_len}')
+
         torch.cuda.empty_cache()
         horizon.name = f'extended_{horizon.name[8:]}' # get rid of `copy_of_` postfix
 
         self.inference_log = {
             'elapsed': elapsed,
+            'added_points': curr_len - initial_len,
         }
         return horizon
 

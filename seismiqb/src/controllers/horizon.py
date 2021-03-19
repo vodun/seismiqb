@@ -344,6 +344,7 @@ class HorizonController(BaseController):
     def evaluate(self, predictions, targets=None, dataset=None, **kwargs):
         """ Assess quality of predictions against targets and seismic data. """
         #pylint: disable=cell-var-from-loop
+        # Prepare parameters
         config = Config({**self.config['evaluate'], **kwargs})
         add_prefix, dump, name = config.pop(['add_prefix', 'dump', 'name'])
         supports, device = config.pop(['supports', 'device'])
@@ -360,36 +361,36 @@ class HorizonController(BaseController):
             prefix = [horizon.geometry.short_name, f'{i}_horizon'] if add_prefix else []
 
             # Basic demo: depth map and properties
-            horizon.show(show=self.plot, savepath=self.make_savepath(*prefix, name + 'depth_map.png'))
+            horizon.show(show=self.plot, savepath=self.make_savepath(*prefix, name + 'p_depth_map.png'))
 
-            with open(self.make_savepath(*prefix, name + 'results_self.txt'), 'w') as result_txt:
-                horizon.evaluate(compute_metric=False, printer=lambda msg: print(msg, file=result_txt))
-
-            hm = HorizonMetrics((horizon, targets))
+            path = self.make_savepath(*prefix, name + 'p_results_self.txt')
+            horizon.evaluate(compute_metric=False, printer=lambda msg: self.log_to_file(msg, path=path))
 
             # Metric maps
+            hm = HorizonMetrics((horizon, targets))
             corrs = hm.evaluate('support_corrs', supports=supports, device=device,
                                 plot=True, show=self.plot,
-                                savepath=self.make_savepath(*prefix, name + 'corrs.png'))
+                                savepath=self.make_savepath(*prefix, name + 'p_corrs.png'))
 
             phase = hm.evaluate('instantaneous_phase', device=device,
                                 plot=True, show=self.plot,
-                                savepath=self.make_savepath(*prefix, name + 'instantaneous_phase.png'))
+                                savepath=self.make_savepath(*prefix, name + 'p_instantaneous_phase.png'))
 
             perturbed_mean, perturbed_max = hm.evaluate('perturbed', device=device,
                                                         plot=True, show=self.plot,
-                                                        savepath=self.make_savepath(*prefix, name + 'perturbed.png'))
+                                                        savepath=self.make_savepath(*prefix, name + 'p_perturbed.png'))
 
             # Compare to targets
             if targets:
                 _, _info = hm.evaluate('find_best_match', agg=None)
                 info = {**info, **_info}
 
-                with open(self.make_savepath(*prefix, name + 'results.txt'), 'w') as result_txt:
-                    hm.evaluate('compare', hist=False,
-                                plot=True, show=self.plot,
-                                printer=lambda msg: print(msg, file=result_txt),
-                                savepath=self.make_savepath(*prefix, name + 'l1.png'))
+                path = self.make_savepath(*prefix, name + 'p_results.txt')
+                hm.evaluate('compare', hist=False,
+                            plot=True, show=self.plot,
+                            printer=lambda msg: self.log_to_file(msg, path=path),
+                            savepath=self.make_savepath(*prefix, name + 'l1.png'))
+
                 msg = (f'Predicted horizon {i} compared to target:'
                        f'\nwindow_rate={info["window_rate"]:4.3f}\navg error={info["mean"]:4.3f}')
                 self.log(indent(msg, ' '*59))
@@ -399,7 +400,7 @@ class HorizonController(BaseController):
                 dump_name = name + '_' if name else ''
                 dump_name += f'{i}_' if n > 1 else ''
                 dump_name += horizon.name or 'predicted'
-                horizon.dump(path=self.make_savepath(*prefix, dump_name), add_height=False)
+                horizon.dump_float(path=self.make_savepath(*prefix, dump_name), add_height=False)
 
             info['corrs'] = np.nanmean(corrs)
             info['phase'] = np.nanmean(np.abs(phase))
