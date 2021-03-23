@@ -1160,7 +1160,7 @@ class SeismicCubeset(Dataset):
                           'geometry': horizon.geometry}
 
 
-    def assemble_crops(self, crops, grid_info='grid_info', order=None, fill_value=0):
+    def assemble_crops(self, crops, grid_info='grid_info', order=None, fill_value=None):
         """ Glue crops together in accordance to the grid.
 
         Note
@@ -1196,7 +1196,7 @@ class SeismicCubeset(Dataset):
         order = order or (2, 0, 1)
         crops = np.array(crops)
         if len(crops) != 0:
-            fill_value = np.min(crops)
+            fill_value = fill_value or np.nanmin(crops)
 
         grid_array = grid_info['grid_array']
         crop_shape = grid_info['crop_shape']
@@ -1220,7 +1220,7 @@ class SeismicCubeset(Dataset):
             crop = np.transpose(crop, order)
             crop = crop[tuple(crop_slice)]
             previous = background[tuple(background_slice)]
-            background[tuple(background_slice)] = np.maximum(crop, previous)
+            background[tuple(background_slice)] = np.nanmax([crop, previous])
 
         return background
 

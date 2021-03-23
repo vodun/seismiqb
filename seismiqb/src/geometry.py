@@ -857,7 +857,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
         self.store_meta()
 
     def add_rotation_matrix(self):
-        """ Add transform from INLINE/CROSSLINE corrdinates to CDP system. """
+        """ Add transform from INLINE/CROSSLINE coordinates to CDP system. """
         ix_points = []
         cdp_points = []
 
