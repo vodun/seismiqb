@@ -25,9 +25,13 @@ class Extender(Enhancer):
     DEFAULTS = Config({
         **Enhancer.DEFAULTS,
         'inference': {
-            'n_steps': 30,
-            'stride': 16,
-            'threshold': 25,
+            'batch_size': None,
+            'crop_shape': None,
+            'width': 3,
+
+            'n_steps': 100,
+            'stride': 32,
+            'threshold': 10,
 
             'prefetch': 0,
         }

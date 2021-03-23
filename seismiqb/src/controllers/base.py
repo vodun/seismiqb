@@ -71,7 +71,7 @@ class BaseController:
             'rescale_batch_size': True,
 
             'prefetch': 1,
-            'n_iters': 200,
+            'n_iters': 100,
             'early_stopping': True,
         },
         'inference': {},
@@ -84,7 +84,7 @@ class BaseController:
     })
 
     def __init__(self, config=None):
-        self.config = Config(copy(self.DEFAULTS))
+        self.config = Config(self.DEFAULTS)
         self.config += config or {}
 
         self.monitor = self.config.monitor
@@ -186,7 +186,6 @@ class BaseController:
         batch = train_pipeline.next_batch(D.size)
         model = train_pipeline.m('model')
 
-        self.log(f'Model device: {model.device}')
         self.log(f'Target batch size: {pipeline_config["batch_size"]}')
         self.log(f'Actual batch size: {len(batch)}')
         self.log(f'Cache sizes: {[item.cache_size for item in dataset.geometries.values()]}')

@@ -45,18 +45,20 @@ class HorizonController(BaseController):
 
             'batch_size': None,
             'crop_shape': None,
+            'width': 3,
 
             'rebatch_threshold': 0.8,
             'rescale_batch_size': True,
 
             'prefetch': 1,
-            'n_iters': 200,
+            'n_iters': 100,
             'early_stopping': True,
         },
         'inference': {
             'orientation': 'ix',
             'batch_size': None,
             'crop_shape': None,
+            'width': 3,
 
             # Grid making parameters
             'spatial_ranges': None,
