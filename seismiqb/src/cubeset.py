@@ -1145,7 +1145,7 @@ class SeismicCubeset(Dataset):
                           'geometry': horizon.geometry}
 
 
-    def assemble_crops(self, crops, grid_info='grid_info', order=None, fill_value=0):
+    def assemble_crops(self, crops, grid_info='grid_info', order=(0, 1, 2), fill_value=None):
         """ Glue crops together in accordance to the grid.
 
         Note
@@ -1178,14 +1178,13 @@ class SeismicCubeset(Dataset):
         # Do nothing if number of crops differ from number of points in the grid.
         if len(crops) != len(grid_info['grid_array']):
             raise ValueError('Length of crops must be equal to number of crops in a grid')
-        order = order or (2, 0, 1)
-        crops = np.array(crops)
-        if len(crops) != 0:
+
+        if fill_value is None and len(crops) != 0:
             fill_value = np.min(crops)
 
         grid_array = grid_info['grid_array']
         crop_shape = grid_info['crop_shape']
-        background = np.full(grid_info['predict_shape'], fill_value)
+        background = np.full(grid_info['predict_shape'], fill_value, dtype=crops[0].dtype)
 
         for j, (i, x, h) in enumerate(grid_array):
             crop_slice, background_slice = [], []

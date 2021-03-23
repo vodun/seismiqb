@@ -57,9 +57,9 @@ class Extender(Enhancer):
         horizon = copy(horizon)
         dataset.labels[dataset.indices[0]] = [horizon]
 
-        prev_len, initial_len = len(horizon)
+        prev_len = initial_len = len(horizon)
         self.log(f'Inference started for {n_steps} steps with stride {stride}')
-        notifier = Notifier('n' if self.config.bar else False,
+        notifier = Notifier(self.config.bar,
                             desc='Extender inference', update_total=False,
                             file=self.make_savepath('末 inference.log'))
 
@@ -76,7 +76,7 @@ class Extender(Enhancer):
             inference_pipeline = self.get_inference_template() << config << dataset
             inference_pipeline.models.add_model('model', model)
 
-            try:
+            try: # TODO: rethink control flow
                 inference_pipeline.run(D.size, n_iters=dataset.grid_iters, prefetch=prefetch)
             except TypeError:
                 # no additional predicts

@@ -1,7 +1,7 @@
-""" A convenient holder for horizon detection steps:
-    - creating dataset with desired properties
-    - training a model
-    - making an inference on selected data
+""" A convenient class to hold:
+    - dataset creation
+    - model train procedura
+    - inference on dataset
     - evaluating predictions
     - and more
 """
@@ -29,6 +29,7 @@ from ..plotters import plot_loss
 
 class BaseController:
     """ A common interface for train, inference, postprocessing and quality assessment.
+    Supposed to be used in an environment with set `CUDA_VISIBLE_DEVICES` variable.
 
     At initialization, a nested configuration dict should be provided.
 
@@ -121,7 +122,7 @@ class BaseController:
 
             logger = logging.getLogger(str(id(self)))
             logger.addHandler(handler)
-            self.filelogger = logger.error
+            self.filelogger = logger.info
         else:
             self.filelogger = None
 
@@ -146,14 +147,14 @@ class BaseController:
 
     # Dataset creation
     def make_dataset(self, **kwargs):
-        """ Create dataset to train/inference on. """
+        """ Create dataset to train/inference on. Must be implemented in inherited classes. """
         _ = kwargs
 
     # Train
     def train(self, dataset, **kwargs):
         """ Train model on a provided dataset.
 
-        Uses the `get_train_template` to create pipeline of model training.
+        Uses the `get_train_template` method to create pipeline of model training.
 
         Returns
         -------
@@ -164,7 +165,7 @@ class BaseController:
         n_iters, prefetch, rescale = pipeline_config.pop(['n_iters', 'prefetch', 'rescale_batch_size'])
 
         notifier = {
-            'bar': 'n' if self.config.bar else False,
+            'bar': self.config.bar,
             'monitors': 'loss_history',
             'file': self.make_savepath('末 model_loss.log'),
         }
@@ -185,6 +186,7 @@ class BaseController:
         batch = train_pipeline.next_batch(D.size)
         model = train_pipeline.m('model')
 
+        self.log(f'Model device: {model.device}')
         self.log(f'Target batch size: {pipeline_config["batch_size"]}')
         self.log(f'Actual batch size: {len(batch)}')
         self.log(f'Cache sizes: {[item.cache_size for item in dataset.geometries.values()]}')
@@ -249,17 +251,21 @@ class BaseController:
 
     # Inference
     def inference(self, dataset, model, **kwargs):
-        """ Inference: use trained/loaded model for making predictions on the supplied dataset. """
+        """ Inference: use trained/loaded model for making predictions on the supplied dataset.
+        Must be implemented in inherited classes.
+        """
         _ = dataset, model, kwargs
 
     # Postprocess
     def postprocess(self, predictions, **kwargs):
-        """ Optional postprocessing: algorithmic adjustments to predictions. """
+        """ Optional postprocessing: algorithmic adjustments to predictions.
+        Must be implemented in inherited classes.
+        """
         _ = predictions, kwargs
 
     # Evaluate
     def evaluate(self, predictions, targets=None, dataset=None, **kwargs):
-        """ Assess quality of model generated outputs. """
+        """ Assess quality of model generated outputs. Must be implemented in inherited classes. """
         _ = predictions, targets, dataset, kwargs
 
 

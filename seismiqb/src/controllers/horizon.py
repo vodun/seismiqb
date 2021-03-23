@@ -22,7 +22,7 @@ from ...batchflow import B, D, C, V, P, R
 from ...batchflow.models.torch import EncoderDecoder
 
 from ..cubeset import SeismicCubeset, Horizon
-from ..metrics import HorizonMetrics
+from ..metrics import HorizonMetrics, GeometryMetrics
 from ..plotters import plot_image
 
 from .base import BaseController
@@ -114,6 +114,20 @@ class HorizonController(BaseController):
 
         self.log(f'Created dataset\n{indent(str(dataset), " "*4)}')
         return dataset
+
+    def make_carcass(self, horizon, frequencies=(200, 200), regular=True, margin=50, **kwargs):
+        """ Cut carcass out of a horizon. """
+        horizon = copy(horizon)
+
+        if regular:
+            gm = GeometryMetrics(horizon.geometry)
+            grid = 1 - gm.make_grid(1 - horizon.geometry.zero_traces, frequencies=frequencies, margin=margin)
+        else:
+            grid = 1 - horizon.geometry.make_quality_grid(frequencies, margin=margin)
+
+        horizon.filter(filtering_matrix=grid)
+        horizon.smooth_out(preserve_borders=False)
+        return horizon
 
     def make_grid(self, dataset, frequencies, **kwargs):
         """ Create a grid, based on quality map, for each of the cubes in supplied `dataset`. Works inplace.
@@ -268,7 +282,7 @@ class HorizonController(BaseController):
         # Actual inference
         self.log(f'Starting {orientation}-inference with {len(chunk_iterator)} chunks')
         self.log(f'Inference over {spatial_ranges}, {heights_range}')
-        notifier = Notifier('n' if self.config.bar else False,
+        notifier = Notifier(self.config.bar,
                             desc=f'{orientation}-inference', update_total=False,
                             file=self.make_savepath(f'末 inference_chunks_{orientation}.log'))
         chunk_iterator = notifier(chunk_iterator)
@@ -322,7 +336,7 @@ class HorizonController(BaseController):
         predictions = inference_pipeline.v('predictions')
 
         # Assemble prediction together in accordance to the created grid
-        assembled_prediction = dataset.assemble_crops(predictions, order=config.order)
+        assembled_prediction = dataset.assemble_crops(predictions, order=config.order, fill_value=0.0)
 
         # Extract Horizon instances
         horizons = Horizon.from_mask(assembled_prediction, dataset.grid_info,
@@ -337,7 +351,12 @@ class HorizonController(BaseController):
     def postprocess(self, predictions, **kwargs):
         """ Modify predictions. """
         config = Config({**self.config['postprocess'], **kwargs})
-        _ = config, kwargs
+        _ = config
+
+        iterator = predictions if isinstance(predictions, (tuple, list)) else [predictions]
+        for horizon in iterator:
+            horizon.smooth_out(preserve_borders=False)
+            horizon.filter()
         return predictions
 
     # Evaluate
@@ -363,8 +382,8 @@ class HorizonController(BaseController):
             # Basic demo: depth map and properties
             horizon.show(show=self.plot, savepath=self.make_savepath(*prefix, name + 'p_depth_map.png'))
 
-            path = self.make_savepath(*prefix, name + 'p_results_self.txt')
-            horizon.evaluate(compute_metric=False, printer=lambda msg: self.log_to_file(msg, path=path))
+            with open(self.make_savepath(*prefix, name + 'p_results_self.txt'), 'w') as result_txt:
+                horizon.evaluate(compute_metric=False, printer=lambda msg: print(msg, file=result_txt))
 
             # Metric maps
             hm = HorizonMetrics((horizon, targets))
@@ -381,19 +400,20 @@ class HorizonController(BaseController):
                                                         savepath=self.make_savepath(*prefix, name + 'p_perturbed.png'))
 
             # Compare to targets
+            shift = 45 + len(self.__class__.__name__)
             if targets:
                 _, _info = hm.evaluate('find_best_match', agg=None)
                 info = {**info, **_info}
 
-                path = self.make_savepath(*prefix, name + 'p_results.txt')
-                hm.evaluate('compare', hist=False,
-                            plot=True, show=self.plot,
-                            printer=lambda msg: self.log_to_file(msg, path=path),
-                            savepath=self.make_savepath(*prefix, name + 'l1.png'))
+                with open(self.make_savepath(*prefix, name + 'p_results.txt'), 'w') as result_txt:
+                    hm.evaluate('compare', hist=False,
+                                plot=True, show=self.plot,
+                                printer=lambda msg: print(msg, file=result_txt),
+                                savepath=self.make_savepath(*prefix, name + 'l1.png'))
 
-                msg = (f'Predicted horizon {i} compared to target:'
+                msg = (f'\nPredicted horizon {i} compared to target:'
                        f'\nwindow_rate={info["window_rate"]:4.3f}\navg error={info["mean"]:4.3f}')
-                self.log(indent(msg, ' '*59))
+                self.log(indent(msg, ' '*shift))
 
             # Save surface to disk
             if dump:
@@ -408,9 +428,9 @@ class HorizonController(BaseController):
             info['perturbed_max'] = np.nanmean(perturbed_max)
             results.append((info))
 
-            msg = (f'Predicted horizon {i}:\nlen={len(horizon)}\ncoverage={horizon.coverage:4.3f}'
+            msg = (f'\nPredicted horizon {i}:\nlen={len(horizon)}\ncoverage={horizon.coverage:4.3f}'
                    f'\ncorrs={info["corrs"]:4.3f}\nphase={info["phase"]:4.3f}\n avg depth={horizon.h_mean:4.3f}')
-            self.log(indent(msg, ' '*59))
+            self.log(indent(msg, ' '*shift))
         return results
 
     # Pipelines
@@ -504,7 +524,7 @@ class HorizonController(BaseController):
             # Predict with model, then aggregate
             .predict_model('model',
                            B('images'),
-                           fetches='predictions',
+                           fetches='sigmoid',
                            save_to=V('predictions', mode='e'))
         )
         return inference_template
@@ -517,6 +537,6 @@ def generate_shape(_, shape, dynamic_factor=1, dynamic_low=None, dynamic_high=No
     dynamic_high = dynamic_high or dynamic_factor
 
     i, x, h = shape
-    x_ = np.random.randint(x // dynamic_low, x * dynamic_high + 1)
-    h_ = np.random.randint(h // dynamic_low, h * dynamic_high + 1)
-    return (i, x_, h_)
+    x = np.random.randint(x // dynamic_low, x * dynamic_high + 1)
+    h = np.random.randint(h // dynamic_low, h * dynamic_high + 1)
+    return (i, x, h)

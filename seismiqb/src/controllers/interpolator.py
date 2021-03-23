@@ -7,7 +7,6 @@ from .horizon import HorizonController
 
 class Interpolator(HorizonController):
     """ Horizon detector with automated choise between Carcass and Grid interpolation. """
-
     def train(self, dataset=None, cube_paths=None, horizon_paths=None, horizon=None, frequencies=None, **kwargs):
         """ Either train on a carcass or cut carcass from a full horizon and train on it. """
         if dataset is None:
