@@ -190,7 +190,10 @@ class SeismicCubeset(Dataset):
                 else:
                     labels_class = UnstructuredHorizon
             pbar = tqdm(paths[idx], disable=(not bar))
-            label_list = [labels_class(path, self.geometries[idx], **kwargs) for path in pbar]
+            label_list = []
+            for path in pbar:
+                pbar.set_description(os.path.basename(path))
+                label_list += [labels_class(path, self.geometries[idx], **kwargs)]
             label_list.sort(key=lambda label: label.h_mean)
             if filter_zeros:
                 _ = [getattr(item, 'filter')() for item in label_list]

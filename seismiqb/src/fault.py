@@ -2,6 +2,7 @@
 
 import os
 import glob
+import warnings
 
 import numpy as np
 import pandas as pd
@@ -55,11 +56,14 @@ class Fault(Horizon):
     def csv_to_points(self, path, fix=False, **kwargs):
         """ Get point cloud array from file values. """
         df = self.read_file(path)
-        df = self.fix_lines(df)
-        sticks = self.read_sticks(df, fix)
-        sticks = self.sort_sticks(sticks)
-        points = self.interpolate_3d(sticks, **kwargs)
-        return points
+        if df is not None:
+            df = self.recover_lines_from_cdp(df)
+            sticks = self.read_sticks(df, self.name, fix)
+            if len(sticks) > 0:
+                sticks = self.sort_sticks(sticks)
+                points = self.interpolate_3d(sticks, **kwargs)
+                return points
+        return np.zeros((0, 3))
 
     @classmethod
     def read_file(cls, path):
@@ -72,12 +76,14 @@ class Fault(Horizon):
             names = cls.FAULT_STICKS
         elif line_len >= 9:
             names = Horizon.CHARISMA_SPEC
+        elif line_len == 0:
+            return None
         else:
             raise ValueError('Fault labels must be in FAULT_STICKS, CHARISMA or REDUCED_CHARISMA format.')
 
         return pd.read_csv(path, sep=r'\s+', names=names)
 
-    def fix_lines(self, df):
+    def recover_lines_from_cdp(self, df):
         """ Fix broken iline and crossline coordinates. If coordinates are out of the cube, 'iline' and 'xline'
         will be infered from 'cdp_x' and 'cdp_y'. """
         i_bounds = [self.geometry.ilines_offset, self.geometry.ilines_offset + self.geometry.cube_shape[0]]
@@ -94,7 +100,7 @@ class Fault(Horizon):
         return df
 
     @classmethod
-    def read_sticks(cls, df, fix=False):
+    def read_sticks(cls, df, name=None, fix=False):
         """ Transform initial fault dataframe to array of sticks. """
         if 'number' in df.columns: # fault file has stick index
             col = 'number'
@@ -104,17 +110,29 @@ class Fault(Horizon):
             col = 'xline'
         else:
             raise ValueError('Wrong format of sticks: there is no column to group points into sticks.')
+        df = df.sort_values('height')
         sticks = df.groupby(col).apply(lambda x: x[Horizon.COLUMNS].values).reset_index(drop=True)
         if fix:
+            # Remove sticks with horizontal parts.
+            mask = sticks.apply(lambda x: len(np.unique(np.array(x)[:, 2])) == len(x))
+            if not mask.all():
+                warnings.warn(f'{name}: Fault has horizontal parts of sticks.')
+            sticks = sticks.loc[mask]
+            # Remove sticks with one node.
+            mask = sticks.apply(len) > 1
+            if not mask.all():
+                warnings.warn(f'{name}: Fault has one-point sticks.')
+            sticks = sticks.loc[mask]
+            # Filter faults with one stick.
             if len(sticks) == 1:
+                warnings.warn(f'{name}: Fault has an only one stick')
                 sticks = pd.Series()
-            sticks = sticks.loc[sticks.apply(len) > 1]
         return sticks
 
     def sort_sticks(self, sticks):
         """ Order sticks with respect of fault direction. Is necessary to perform following triangulation. """
         pca = PCA(1)
-        coords = pca.fit_transform(pca.fit_transform(np.array([stick[0][:2] for stick in sticks.values])))
+        coords = pca.fit_transform(np.array([stick[0][:2] for stick in sticks.values]))
         indices = np.array([i for _, i in sorted(zip(coords, range(len(sticks))))])
         return sticks.iloc[indices]
 
@@ -123,7 +141,6 @@ class Fault(Horizon):
         width = kwargs.get('width', 1)
         triangles = make_triangulation(sticks)
         points = []
-        import tqdm
         for triangle in triangles:
             res = triangle_rasterization(triangle, width)
             points += [res]
