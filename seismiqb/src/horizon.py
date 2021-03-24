@@ -16,7 +16,6 @@ from scipy.spatial import Delaunay
 from scipy.signal import hilbert
 from skimage.measure import label
 
-from .hdf5_storage import StorageHDF5
 from .utility_classes import HorizonSampler, lru_cache
 from .utils import round_to_array, groupby_mean, groupby_min, groupby_max, filter_simplices
 from .utils import retrieve_function_arguments
@@ -1909,9 +1908,8 @@ class Horizon:
         model_config['initial_block']
         model_config['body']
 
-    def dump_points(self, path, fmt='npy', projections='ixh'):
+    def dump_points(self, path, fmt='npy'):
         """ Dump points. """
-
         if fmt == 'npy':
             if os.path.exists(path):
                 points = np.load(path, allow_pickle=False)
@@ -1920,21 +1918,39 @@ class Horizon:
                 points = self.points
             np.save(path, points, allow_pickle=False)
         elif fmt == 'hdf5':
-            file_hdf5 = StorageHDF5(path, mode='a', projections=projections, shape=self.cube_shape)
+            file_hdf5 = h5py.File(path, "a")
+            if 'cube' not in file_hdf5:
+                cube_hdf5 = file_hdf5.create_dataset('cube', self.geometry.cube_shape)
+                cube_hdf5_x = file_hdf5.create_dataset('cube_x', self.geometry.cube_shape[[1, 2, 0]])
+                cube_hdf5_h = file_hdf5.create_dataset('cube_h', self.geometry.cube_shape[[2, 0, 1]])
+            else:
+                cube_hdf5 = file_hdf5['cube']
+                cube_hdf5_x = file_hdf5['cube_x']
+                cube_hdf5_h = file_hdf5['cube_h']
+
             shape = (self.i_length, self.x_length, self.h_max - self.h_min + 1)
             fault_array = np.zeros(shape)
+
             points = self.points - np.array([self.i_min, self.x_min, self._h_min])
             fault_array[points[:, 0], points[:, 1], points[:, 2]] = 1
 
-            slices = (slice(self.i_min, self.i_max+1), slice(self.x_min,self.x_max+1), slice(self.h_min, self.h_max+1))
+            cube_hdf5[self.i_min:self.i_max+1, self.x_min:self.x_max+1, self.h_min:self.h_max+1] += fault_array
 
-            file_hdf5[slices] = np.maximum(file_hdf5[slices], fault_array)
+            cube_hdf5_x[
+                self.x_min:self.x_max+1,
+                self.h_min:self.h_max+1,
+                self.i_min:self.i_max+1
+            ] += np.transpose(fault_array, (1, 2, 0))
 
-            path_meta = os.path.splitext(path)[0] + '.meta'
-            self.geometry.store_meta(path_meta)
+            cube_hdf5_h[
+                self.h_min:self.h_max+1,
+                self.i_min:self.i_max+1,
+                self.x_min:self.x_max+1
+            ] += np.transpose(fault_array, (2, 0, 1))
+
+            file_hdf5.close()
         else:
             raise ValueError('Unknown format:', fmt)
-
 
     # Methods of (visual) representation of a horizon
     def __repr__(self):

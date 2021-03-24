@@ -16,7 +16,6 @@ from .geometry import SeismicGeometry
 from .crop_batch import SeismicCropBatch
 
 from .horizon import Horizon, UnstructuredHorizon
-from .hdf5_storage import StorageHDF5
 from .metrics import HorizonMetrics
 from .plotters import plot_image, show_3d
 from .utils import round_to_array, gen_crop_coordinates, make_axis_grid, fill_defaults, parse_axis
@@ -1285,8 +1284,8 @@ class SeismicCubeset(Dataset):
                                                             chunk_shape, chunk_stride, crop_shape, crop_stride,
                                                             batch_size, src, pbar, order)
 
-        return StorageHDF5.create_file_from_iterable(predictions_generator, output_shape,
-                                                     chunk_shape, chunk_stride, dst, agg, projection, threshold)
+        return SeismicGeometry.create_file_from_iterable(predictions_generator, output_shape,
+                                                         chunk_shape, chunk_stride, dst, agg, projection, threshold)
 
     def _predictions_generator(self, idx, pipeline, locations, output_shape, chunk_shape, chunk_stride,
                                crop_shape, crop_stride, batch_size, src, pbar, order):
