@@ -42,14 +42,20 @@ class Interpolator(HorizonController):
 
         return super().train(dataset=dataset, adaptive_slices=True, grid_src=grid, **kwargs)
 
-    def inference(self, dataset, model, **kwargs):
+    def inference(self, dataset, model, name=None, **kwargs):
         """ Inference with different naming conventions. """
         prediction = super().inference(dataset=dataset, model=model, **kwargs)[0]
 
+        if name is None:
+            if len(dataset.labels[0]) > 0:
+                name = dataset.labels[0][0].name
+            else:
+                name = f'prediction_{int(prediction.h_mean)}'
+
         if self.from_carcass:
-            prediction.name = f'from_{dataset.labels[0][0].name}'
+            prediction.name = f'from_{name}'
         else:
-            prediction.name = f'from_gridded_{dataset.labels[0][0].name}'
+            prediction.name = f'from_gridded_{name}'
         return prediction
 
     # One method to rule them all

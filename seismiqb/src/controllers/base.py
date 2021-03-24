@@ -13,7 +13,6 @@ import logging
 from time import perf_counter
 from ast import literal_eval
 from pprint import pformat
-from copy import copy
 
 import psutil
 
