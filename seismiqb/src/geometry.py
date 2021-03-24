@@ -563,8 +563,15 @@ class SeismicGeometry:
             spec.sorting = int(segy.sorting)
             spec.format = int(segy.format)
             spec.samples = range(self.depth)
-            spec.ilines = self.ilines
-            spec.xlines = self.xlines
+
+            idx = np.stack(geometry.dataframe.index)
+            ilines, xlines = self.load_meta_item('ilines'), self.load_meta_item('xlines')
+
+            i_enc = {num: k for k, num in enumerate(ilines)}
+            x_enc = {num: k for k, num in enumerate(xlines)}
+
+            spec.ilines = ilines
+            spec.xlines = xlines
 
             with segyio.create(path_segy, spec) as dst_file:
                 # Copy all textual headers, including possible extended
@@ -575,7 +582,7 @@ class SeismicGeometry:
                 for c, (i, x) in enumerate(tqdm(idx, disable=(not pbar))):
                     locs = [i_enc[i], x_enc[x], slice(None)]
                     dst_file.header[c] = segy.header[c]
-                    dst_file.trace[c] = file_hdf5[locs]
+                    dst_file.trace[c] = cube_hdf5[locs]
                 dst_file.bin = segy.bin
                 dst_file.bin[segyio.BinField.Traces] = len(idx)
 
@@ -730,8 +737,8 @@ class SeismicGeometry:
                 if threshold is not None:
                     slide = (slide > threshold).astype(int)
                     dst[i:i+window[0]] = slide
-                file_hdf5['cube_x'][:, :, i:i+window[0]] = slide
-                file_hdf5['cube_h'][:, i:i+window[0]] = slide.T
+                cube_hdf5_x[:, :, i:i+window[0]] = slide
+                cube_hdf5_h[:, i:i+window[0]] = slide.T
         return dst
 
 

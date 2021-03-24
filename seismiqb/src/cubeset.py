@@ -1,5 +1,5 @@
 """ Contains container for storing dataset of seismic crops. """
-#pylint: disable=too-many-lines
+#pylint: disable=too-many-lines, too-many-arguments
 import os
 from glob import glob
 from warnings import warn
