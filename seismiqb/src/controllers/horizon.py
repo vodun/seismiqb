@@ -105,6 +105,8 @@ class HorizonController(BaseController):
         """
         if horizon is not None:
             dataset = SeismicCubeset.from_horizon(horizon)
+
+            self.log(f'Created dataset from {horizon.name}')
         else:
             dataset = SeismicCubeset(cube_paths)
             dataset.load_geometries()
@@ -114,7 +116,7 @@ class HorizonController(BaseController):
                     horizon_paths = {dataset.indices[0]: glob(horizon_paths)}
                 dataset.create_labels(horizon_paths)
 
-        self.log(f'Created dataset\n{indent(str(dataset), " "*4)}')
+            self.log(f'Created dataset\n{indent(str(dataset), " "*4)}')
         return dataset
 
     def make_carcass(self, horizon, frequencies=(200, 200), regular=True, margin=50, **kwargs):
@@ -402,7 +404,7 @@ class HorizonController(BaseController):
                                                         savepath=self.make_savepath(*prefix, name + 'p_perturbed.png'))
 
             # Compare to targets
-            shift = 45 + len(self.__class__.__name__)
+            shift = 41 + len(self.__class__.__name__)
             if targets:
                 _, _info = hm.evaluate('find_best_match', agg=None)
                 info = {**info, **_info}
@@ -414,6 +416,7 @@ class HorizonController(BaseController):
                                 savepath=self.make_savepath(*prefix, name + 'l1.png'))
 
                 msg = (f'\nPredicted horizon {i} compared to target:'
+                       f'\n{horizon.name}'
                        f'\nwindow_rate={info["window_rate"]:4.3f}\navg error={info["mean"]:4.3f}')
                 self.log(indent(msg, ' '*shift))
 
@@ -430,8 +433,9 @@ class HorizonController(BaseController):
             info['perturbed_max'] = np.nanmean(perturbed_max)
             results.append((info))
 
-            msg = (f'\nPredicted horizon {i}:\nlen={len(horizon)}\ncoverage={horizon.coverage:4.3f}'
-                   f'\ncorrs={info["corrs"]:4.3f}\nphase={info["phase"]:4.3f}\n avg depth={horizon.h_mean:4.3f}')
+            msg = (f'\nPredicted horizon {i}:\n{horizon.name}\nlen={len(horizon)}'
+                   f'\ncoverage={horizon.coverage:4.3f}\ncorrs={info["corrs"]:4.3f}'
+                   f'\nphase={info["phase"]:4.3f}\navg depth={horizon.h_mean:4.3f}')
             self.log(indent(msg, ' '*shift))
         return results
 

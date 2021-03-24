@@ -7,7 +7,8 @@ from .horizon import HorizonController
 
 class Interpolator(HorizonController):
     """ Horizon detector with automated choise between Carcass and Grid interpolation. """
-    def train(self, dataset=None, cube_paths=None, horizon_paths=None, horizon=None, frequencies=None, **kwargs):
+    def train(self, dataset=None, cube_paths=None, horizon_paths=None, horizon=None,
+              frequencies=None, mode=None, **kwargs):
         """ Either train on a carcass or cut carcass from a full horizon and train on it. """
         if dataset is None:
             dataset = self.make_dataset(cube_paths=cube_paths, horizon_paths=horizon_paths, horizon=horizon)
@@ -15,7 +16,10 @@ class Interpolator(HorizonController):
         geometry = dataset.geometries[0]
         horizon = dataset.labels[0][0]
 
-        if horizon.is_carcass:
+        if mode is None:
+            mode = 'carcass' if horizon.is_carcass else 'grid'
+
+        if mode == 'carcass':
             # Already a carcass
             self.from_carcass = True
             self.log('Using CARCASS mode of Interpolator')
@@ -28,7 +32,7 @@ class Interpolator(HorizonController):
             self.make_sampler(dataset,
                               bins=np.array([500, 500, 100]),
                               use_grid=True, grid_src=grid)
-        else:
+        elif mode == 'grid':
             # Cut a carcass out of the horizon: used for tests
             self.from_carcass = False
             self.log('Using GRID mode of Interpolator')
