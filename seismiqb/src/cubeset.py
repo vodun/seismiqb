@@ -1197,8 +1197,8 @@ class SeismicCubeset(Dataset):
             raise ValueError('Length of crops must be equal to number of crops in a grid')
         order = order or (2, 0, 1)
         crops = np.array(crops)
-        if len(crops) != 0:
-            fill_value = fill_value or np.nanmin(crops)
+        # if len(crops) != 0:
+        fill_value = fill_value or np.nanmin(crops)
 
         grid_array = grid_info['grid_array']
         crop_shape = grid_info['crop_shape']
@@ -1222,7 +1222,7 @@ class SeismicCubeset(Dataset):
             crop = np.transpose(crop, order)
             crop = crop[tuple(crop_slice)]
             previous = background[tuple(background_slice)]
-            background[tuple(background_slice)] = np.nanmax([crop, previous])
+            background[tuple(background_slice)] = np.nanmax([crop, previous], axis=0)
 
         return background
 
