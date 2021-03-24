@@ -419,8 +419,6 @@ class SeismicCropBatch(Batch):
         elif use_labels in ['nearest', 'nearest_to_center']:
             labels = [self.get_nearest_horizon(ix, src_labels, location[2])]
 
-        crop_orientation = 0 if crop_shape[0] < crop_shape[1] else 1
-
         for label in labels:
             mask = label.add_to_mask(mask, locations=location, width=width)
             if use_labels == 'single' and np.sum(mask) > 0.0:
@@ -568,7 +566,7 @@ class SeismicCropBatch(Batch):
 
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def normalize(self, ix, mode='minmax', stats='geometry', src=None, dst=None):
+    def normalize(self, ix, mode='minmax', stats='geometry', src=None, dst=None, q=(0.01, 0.05)):
         """ Normalize values in crop.
 
         Parameters
@@ -578,35 +576,46 @@ class SeismicCropBatch(Batch):
             If str, then :meth:`~SeismicGeometry.scaler` applied in one of the modes:
             - `minmax`: scaled to [0, 1] via minmax scaling.
             - `q` or `normalize`: divided by the maximum of absolute values
-                                  of the 0.01 and 0.99 quantiles.
+                                  of the 0.01 and 0.99 quantiles. Quantiles can
+                                  be changed by `q` parameter.
             - `q_clip`: clipped to 0.01 and 0.99 quantiles and then divided
-                        by the maximum of absolute values of the two.
+                        by the maximum of absolute values of the two. Quantiles can
+                        be changed by `q` parameter.
+        stats : 'geometry' or 'item'
+            The way to compute stats: 'min', 'max', quantile. If 'geometry', stats will be computed
+            for the whole cubes. Otherwise, for each data item separately.
+        q : tuple
+            What quantiles to compute.
         """
         data = self.get(ix, src)
         if callable(mode):
-            return mode(data)
+            normalized = mode(data)
         if stats == 'geometry':
             geometry = self.get(ix, 'geometries')
-            return geometry.scaler(data, mode=mode)
-        if stats == 'item':
+            normalized = geometry.scaler(data, mode=mode)
+        elif stats == 'item':
             if mode == 'minmax':
                 min_ = data.min()
                 max_ = data.max()
                 if (max_ - min_) > 0:
-                    return (data - min_) / (max_ - min_)
+                    normalized = (data - min_) / (max_ - min_)
                 else:
-                    return np.zeros_like(data)
-            if mode in ['q', 'normalize']:
-                q05 = np.quantile(data, 0.05)
-                q95 = np.quantile(data, 0.95)
-                if (q95 - q05) > 0:
-                    return 2 * (data - q05) / (q95 - q05) - 1
+                    normalized = np.zeros_like(data)
+            else:
+                q_left = np.quantile(data, q[0])
+                q_right = np.quantile(data, q[1])
+                if mode in ['q', 'normalize']:
+                    if (q_right - q_left) > 0:
+                        normalized = 2 * (data - q_left) / (q_right - q_left) - 1
+                    else:
+                        normalized = np.zeros_like(data)
+                elif mode == 'q_clip':
+                    normalized =  np.clip(data, q_left, q_right) / max(abs(q_left), abs(q_right))
                 else:
-                    return np.zeros_like(data)
-            if mode == 'q_clip':
-                return np.clip(data, q01, q99) / max(abs(q01), abs(q99))
-            raise ValueError('Unknown mode')
-
+                    raise ValueError(f'Unknown mode: {mode}')
+        else:
+            raise ValueError(f'Unknown stats: {stats}')
+        return normalized
 
     @action
     def concat_components(self, src, dst, axis=-1):
@@ -1175,7 +1184,7 @@ class SeismicCropBatch(Batch):
         corner = crop_shape // 2 - shape // 2
         slices = tuple([slice(start, start+length) for start, length in zip(corner, shape)])
         return crop[slices]
-    
+
     @apply_parallel
     def add_channels(self, crop, channels='first'):
         """ Add channels dimension (if needed). """

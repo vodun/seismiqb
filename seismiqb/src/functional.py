@@ -137,6 +137,7 @@ def hilbert(array, axis=-1):
     return result
 
 def instantaneous_phase(array, continuous=False, axis=-1):
+    """ Compute instantaneous phase. """
     xp = cp.get_array_module(array) if CUPY_AVAILABLE else np
     array = hilbert(array, axis=axis)
     phase = xp.angle(array) % (2 * xp.pi) - xp.pi

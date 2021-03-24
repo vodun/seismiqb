@@ -698,10 +698,9 @@ class SeismicGeometry:
             dst = np.zeros(shape)
         else:
             file_hdf5 = h5py.File(dst, 'a')
-            cube_hdf5 = file_hdf5.create_dataset('cube', shape)
+            dst = file_hdf5.create_dataset('cube', shape)
             cube_hdf5_x = file_hdf5.create_dataset('cube_x', shape[[1, 2, 0]])
             cube_hdf5_h = file_hdf5.create_dataset('cube_h', shape[[2, 0, 1]])
-            dst = file_hdf5['cube']
 
         lower_bounds = [make_axis_grid((0, shape[i]), stride[i], shape[i], window[i]) for i in range(3)]
         lower_bounds = np.stack(np.meshgrid(*lower_bounds), axis=-1).reshape(-1, 3)
