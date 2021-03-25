@@ -19,6 +19,67 @@ def file_print(msg, path, mode='w'):
         print(msg, file=file)
 
 
+def make_segy_from_array(array, path_segy, zip_result=True, **kwargs):
+    """ Make a segy-cube from an array. Zip it if needed. Segy-headers are filled by defaults/arguments from kwargs.
+
+    Parameters
+    ----------
+    array : np.ndarray
+        Data for the segy-cube.
+    path_segy : str
+        Path to store new cube.
+    zip_result : bool
+        whether to zip the resulting cube or not.
+    """
+    # make and fill up segy-spec using kwargs and array-info
+    spec = segyio.spec()
+    spec.sorting = kwargs.get('sorting', 2) # 1 stands for xlines sorting while 2 for ilines-sorting
+    spec.format = kwargs.get('format', 5) # 5 stands for IEEE-floating point, which is the standard
+    spec.samples = range(array.shape[2])
+    spec.ilines = np.arange(array.shape[0])
+    spec.xlines = np.arange(array.shape[1])
+
+    # parse headers' kwargs
+    sample_rate = int(kwargs.get('sample_rate', 1000))
+    delay = int(kwargs.get('delay', 0))
+
+    lens_of_traces = []
+    with segyio.create(path_segy, spec) as dst_file:
+        # Make all textual headers, including possible extended
+        num_ext_headers = 1
+        for i in range(num_ext_headers):
+            dst_file.text[i] = segyio.tools.create_text_header({1: '...'}) # add header-fetching from kwargs
+
+        # Loop over the array and put all the data into new segy-cube
+        ctr = 0
+        for i, _ in tqdm(enumerate(spec.ilines)):
+            for x, _ in enumerate(spec.xlines):
+                # create header in here
+                header = dst_file.header[ctr]
+
+                # change inline and xline in trace-header
+                header[TraceField.INLINE_3D] = i
+                header[TraceField.CROSSLINE_3D] = x
+
+                # change depth-related fields in trace-header
+                header[TraceField.TRACE_SAMPLE_COUNT] = array.shape[2]
+                header[TraceField.TRACE_SAMPLE_INTERVAL] = sample_rate
+                header[TraceField.DelayRecordingTime] = delay
+
+                # copy the trace from the array
+                trace = array[i, x]
+                dst_file.trace[ctr] = trace
+                lens_of_traces.append([len(dst_file.trace[ctr]), len(trace)])
+                ctr += 1
+
+        dst_file.bin = {BinField.Traces: ctr,
+                        BinField.Samples: array.shape[2],
+                        BinField.Interval: sample_rate}
+
+    if zip_result:
+        dir_name = os.path.dirname(os.path.abspath(path_segy))
+        file_name = os.path.basename(path_segy)
+        shutil.make_archive(os.path.splitext(path_segy)[0], 'zip', dir_name, file_name)
 
 #TODO: rethink
 def make_subcube(path, geometry, path_save, i_range, x_range):
