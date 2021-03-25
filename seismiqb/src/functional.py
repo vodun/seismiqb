@@ -227,7 +227,7 @@ def _smooth_out(src, kernel, preserve, margin):
 
             element = src[iline-k:iline+k+1, xline-k:xline+k+1]
 
-            s, sum_weights = 0.0, 0.0
+            s, sum_weights = np.float32(0), np.float32(0)
             for item, weight in zip(element.ravel(), raveled_kernel):
                 if not isnan(item):
                     if abs(item - central) <= margin or isnan(central):

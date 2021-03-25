@@ -7,7 +7,11 @@ from copy import copy
 import numpy as np
 import torch
 
+<<<<<<< HEAD
 from ...batchflow import Pipeline, B, V, C, D, P, R
+=======
+from ...batchflow import Pipeline, B, V, C, D, P, R, F
+>>>>>>> 483d558b572aa0d6634ccc903caee445169d9936
 
 from ..horizon import Horizon
 
@@ -125,7 +129,7 @@ class Extender(Enhancer):
             .init_variable('predicted_horizons', default=list())
             .import_model('base', C('model_pipeline'))
             # Load data
-            .make_locations(points=L(D('grid_gen')), shape=L(D('shapes_gen')))
+            .make_locations(points=F(D('grid_gen')), shape=F(D('shapes_gen')))
             .load_cubes(dst='images')
             .create_masks(dst='prior_masks', width=3)
             .adaptive_reshape(src=['images', 'prior_masks'],
@@ -139,7 +143,7 @@ class Extender(Enhancer):
                            save_to=B('predicted_masks', mode='w'))
             .transpose(src='predicted_masks', order=(1, 2, 0))
             .masks_to_horizons(src='predicted_masks', threshold=0.5, minsize=16,
-                               order=L(D('orders_gen')), dst='horizons', skip_merge=True)
+                               order=F(D('orders_gen')), dst='horizons', skip_merge=True)
             .update(V('predicted_horizons', mode='e'), B('horizons'))
         )
         return inference_template

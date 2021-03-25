@@ -850,7 +850,10 @@ class Horizon:
             smoothed = smooth_out(matrix, kernel=kernel,
                                   kernel_size=kernel_size, sigma=sigma, margin=margin,
                                   fill_value=self.FILL_VALUE, preserve=preserve_borders, iters=iters)
-            return np.rint(smoothed).astype(np.int32)
+            smoothed = np.rint(smoothed).astype(np.int32)
+            smoothed[self.geometry.zero_traces[self.i_min:self.i_max + 1,
+                                               self.x_min:self.x_max + 1] == 1] = self.FILL_VALUE
+            return smoothed
 
         self.apply_to_matrix(smoothing_function, **kwargs)
 

@@ -1,5 +1,6 @@
 """ SeismicGeometry-class containing geometrical info about seismic-cube."""
 import os
+import re
 import sys
 import shutil
 import itertools
@@ -15,7 +16,11 @@ import h5py
 import segyio
 import cv2
 
+<<<<<<< HEAD
 from .utils import find_min_max, file_print, compute_attribute, make_axis_grid, fill_defaults, parse_axis
+=======
+from .utils import find_min_max, file_print, attr_filter, make_axis_grid, infer_tuple, get_environ_flag
+>>>>>>> 483d558b572aa0d6634ccc903caee445169d9936
 from .utility_classes import lru_cache, SafeIO
 from .plotters import plot_image
 
@@ -160,9 +165,15 @@ class SeismicGeometry:
     def __init__(self, path, *args, process=True, **kwargs):
         _ = args
         self.path = path
+        self.anonymize = get_environ_flag('SEISMIQB_ANONYMIZE')
+
+        name = os.path.basename(self.path)
+        # find span of uppercase letter sequence between '_' and '.' symbols in filename
+        field_span = re.search(r'_([A-Z]+?)\.', name).span(1)
+        self.field = name[slice(*field_span)]
+        self.name = name.replace(f"_{self.field}", "") if self.anonymize else name
 
         # Names of different lengths and format: helpful for outside usage
-        self.name = os.path.basename(self.path)
         self.short_name = self.name.split('.')[0]
         self.long_name = ':'.join(self.path.split('/')[-2:])
         self.format = os.path.splitext(self.path)[1][1:]
@@ -314,7 +325,7 @@ class SeismicGeometry:
             Other parameters of metric(s) evaluation.
         """
         from .metrics import GeometryMetrics #pylint: disable=import-outside-toplevel
-        quality_map = GeometryMetrics(self).evaluate('quality_map', quantiles=quantiles, agg=None,
+        quality_map = GeometryMetrics(self).evaluate('quality_map', quantiles=quantiles,
                                                      metric_names=metric_names, **kwargs)
         self._quality_map = quality_map
         return quality_map
@@ -326,7 +337,7 @@ class SeismicGeometry:
             self.make_quality_grid((20, 150))
         return self._quality_grid
 
-    def make_quality_grid(self, frequencies, iline=True, xline=True, margin=0, **kwargs):
+    def make_quality_grid(self, frequencies, iline=True, xline=True, full_lines=True, margin=0, **kwargs):
         """ Create `quality_grid` based on `quality_map`.
 
         Parameters
@@ -335,6 +346,8 @@ class SeismicGeometry:
             Grid frequencies for individual levels of hardness in `quality_map`.
         iline, xline : bool
             Whether to make lines in grid to account for `ilines`/`xlines`.
+        full_lines : bool
+            Whether to make lines on the whole spatial range.
         margin : int
             Margin of boundaries to not include in the grid.
         kwargs : dict
@@ -342,7 +355,8 @@ class SeismicGeometry:
         """
         from .metrics import GeometryMetrics #pylint: disable=import-outside-toplevel
         quality_grid = GeometryMetrics(self).make_grid(self.quality_map, frequencies,
-                                                       iline=iline, xline=xline, margin=margin, **kwargs)
+                                                       iline=iline, xline=xline, full_lines=full_lines,
+                                                       margin=margin, **kwargs)
         self._quality_grid = quality_grid
         return quality_grid
 
@@ -391,12 +405,17 @@ class SeismicGeometry:
         """ Size of instance in gigabytes. """
         return self.nbytes / (1024**3)
 
+    @property
+    def displayed_path(self):
+        """ Return path with masked field name, if anonymization needed. """
+        return self.path.replace(self.field, "*") if self.anonymize else self.path
+
     def __repr__(self):
-        return 'Inferred geometry for {}: ({}x{}x{})'.format(os.path.basename(self.path), *self.cube_shape)
+        return 'Inferred geometry for {}: ({}x{}x{})'.format(self.name, *self.cube_shape)
 
     def __str__(self):
         msg = f"""
-        Geometry for cube              {self.path}
+        Geometry for cube              {self.displayed_path}
         Current index:                 {self.index_headers}
         Shape:                         {self.cube_shape}
         Time delay and sample rate:    {self.delay}, {self.sample_rate}
@@ -1257,6 +1276,8 @@ class SeismicGeometrySEGY(SeismicGeometry):
 
     # Convenient alias
     convert_to_hdf5 = make_hdf5
+
+
 
 class SeismicGeometryHDF5(SeismicGeometry):
     """ Class to infer information about HDF5 cubes and provide convenient methods of working with them.

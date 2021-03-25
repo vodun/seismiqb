@@ -1,6 +1,7 @@
 """ Utility functions. """
-from math import isnan, atan
+import os
 import inspect
+from math import isnan, atan
 
 from tqdm import tqdm
 import numpy as np
@@ -578,3 +579,10 @@ def retrieve_function_arguments(function, dictionary):
     parameters = inspect.signature(function).parameters
     arguments_with_defaults = {k: v.default for k, v in parameters.items() if v.default != inspect._empty}
     return {k: dictionary.pop(k, v) for k, v in arguments_with_defaults.items()}
+
+def get_environ_flag(flag_name, defaults=('0', '1'), convert=int):
+    """ Retrive environmental variable, check if it matches expected defaults and optionally convert it. """
+    flag = os.environ.get(flag_name, '0')
+    if flag not in defaults:
+        raise ValueError(f"Expected `{flag_name}` env variable value to be from {defaults}, got {flag} instead.")
+    return convert(flag)
