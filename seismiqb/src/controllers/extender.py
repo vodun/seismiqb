@@ -7,12 +7,7 @@ from copy import copy
 import numpy as np
 import torch
 
-<<<<<<< HEAD
-from ...batchflow import Pipeline, B, V, C, D, P, R
-=======
 from ...batchflow import Pipeline, B, V, C, D, P, R, F
->>>>>>> 483d558b572aa0d6634ccc903caee445169d9936
-
 from ..horizon import Horizon
 
 from .enhancer import Enhancer

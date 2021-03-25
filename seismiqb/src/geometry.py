@@ -16,11 +16,8 @@ import h5py
 import segyio
 import cv2
 
-<<<<<<< HEAD
-from .utils import find_min_max, file_print, compute_attribute, make_axis_grid, fill_defaults, parse_axis
-=======
-from .utils import find_min_max, file_print, attr_filter, make_axis_grid, infer_tuple, get_environ_flag
->>>>>>> 483d558b572aa0d6634ccc903caee445169d9936
+from .utils import find_min_max, file_print, compute_attribute, make_axis_grid, \
+                   fill_defaults, parse_axis, get_environ_flag
 from .utility_classes import lru_cache, SafeIO
 from .plotters import plot_image
 
