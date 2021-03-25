@@ -393,6 +393,10 @@ class SeismicGeometry:
             method = self._cached_load
 
         return sum(item.nbytes / (1024 ** 3) for item in method.cache()[self].values())
+    
+    @property
+    def shape(self):
+        return tuple(self.cube_shape)
 
     @property
     def nbytes(self):

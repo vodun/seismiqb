@@ -491,7 +491,14 @@ class Horizon:
                 self._depths = self.matrix[self.matrix != self.FILL_VALUE]
         return self._depths
 
-
+    @property
+    def shape(self):
+        return (self.i_length, self.x_length)
+    
+    @property
+    def size(self):
+        return self.i_length*self.x_length
+    
     @property
     def h_min(self):
         """ Minimum depth value. """
