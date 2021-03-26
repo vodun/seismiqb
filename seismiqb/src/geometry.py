@@ -752,8 +752,8 @@ class SeismicGeometry:
                 if threshold is not None:
                     slide = (slide > threshold).astype(int)
                     dst[i:i+window[0]] = slide
-                cube_hdf5_x[:, :, i:i+window[0]] = slide
-                cube_hdf5_h[:, i:i+window[0]] = slide.T
+                cube_hdf5_x[:, :, i:i+window[0]] = slide.transpose((1, 2, 0))
+                cube_hdf5_h[:, i:i+window[0]] = slide.transpose((2, 0, 1))
         return dst
 
 
