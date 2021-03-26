@@ -89,8 +89,10 @@ class BaseController:
         self.monitor = self.config.monitor
         self.plot = self.config.plot
 
-        gpu_list = literal_eval(os.getenv('CUDA_VISIBLE_DEVICES'))
-        self.gpu_list = list(gpu_list) if isinstance(gpu_list, tuple) else [gpu_list]
+        devices = os.getenv('CUDA_VISIBLE_DEVICES')
+        if devices:
+            gpu_list = literal_eval(devices)
+            self.gpu_list = list(gpu_list) if isinstance(gpu_list, tuple) else [gpu_list]
         self.make_filelogger()
 
     # Utility functions

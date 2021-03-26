@@ -492,7 +492,8 @@ class HorizonController(BaseController):
         return (
             Pipeline()
             .init_variable('loss_history', [])
-            .init_model('dynamic', C('model_class', default=EncoderDecoder), 'model', C('model_config'))
+            .init_model(mode='dynamic', model_class=C('model_class', default=EncoderDecoder),
+                        name='model', config=C('model_config'))
 
             .train_model('model',
                          fetches='loss',
