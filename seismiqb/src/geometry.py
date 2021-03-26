@@ -166,9 +166,11 @@ class SeismicGeometry:
 
         name = os.path.basename(self.path)
         # find span of uppercase letter sequence between '_' and '.' symbols in filename
-        field_span = re.search(r'_([A-Z]+?)\.', name).span(1)
-        self.field = name[slice(*field_span)]
-        self.name = name.replace(f"_{self.field}", "") if self.anonymize else name
+        field_search = re.search(r'_([A-Z]+?)\.', name)
+        self.field = name[slice(*field_search.span(1))] if field_search is not None else ""
+        self.name = name.replace("_" * bool(self.field) + self.field, "") if self.anonymize else name
+        if not self.field and self.anonymize:
+            raise ValueError("Geometry name was not anonymized, since field name cannot be parsed from it.")
 
         # Names of different lengths and format: helpful for outside usage
         self.short_name = self.name.split('.')[0]
@@ -419,7 +421,7 @@ class SeismicGeometry:
     @property
     def displayed_path(self):
         """ Return path with masked field name, if anonymization needed. """
-        return self.path.replace(self.field, "*") if self.anonymize else self.path
+        return self.path.replace(self.field, "*" * bool(self.field)) if self.anonymize else self.path
 
     def __repr__(self):
         return 'Inferred geometry for {}: ({}x{}x{})'.format(self.name, *self.cube_shape)
