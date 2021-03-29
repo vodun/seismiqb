@@ -6,12 +6,13 @@ from textwrap import dedent
 from itertools import product
 
 import numpy as np
+from numpy.random import default_rng
 import pandas as pd
 import h5py
 from numba import njit, prange
 
 from cv2 import dilate
-from scipy.ndimage.morphology import binary_fill_holes, binary_erosion
+from scipy.ndimage.morphology import binary_fill_holes, binary_erosion, binary_dilation
 from scipy.ndimage import find_objects
 from scipy.spatial import Delaunay
 from scipy.signal import hilbert
@@ -19,7 +20,7 @@ from skimage.measure import label
 
 from .utility_classes import HorizonSampler, lru_cache
 from .utils import round_to_array, groupby_mean, groupby_min, groupby_max, filter_simplices
-from .utils import retrieve_function_arguments
+from .utils import retrieve_function_arguments, make_bezier_figure
 from .functional import smooth_out
 from .plotters import plot_image, show_3d
 
@@ -494,11 +495,11 @@ class Horizon:
     @property
     def shape(self):
         return (self.i_length, self.x_length)
-    
+
     @property
     def size(self):
         return self.i_length*self.x_length
-    
+
     @property
     def h_min(self):
         """ Minimum depth value. """
@@ -864,6 +865,102 @@ class Horizon:
 
         self.apply_to_matrix(smoothing_function, **kwargs)
 
+
+    def make_random_holes_matrix(self, n=10, points_proportion=1e-5, points_shape=1, 
+                                 noise_level=0, scale=1.0, max_scale=0.25,
+                                 max_angles_amount=4, max_sharpness=5, locations=None, seed=None):
+        """ Create matrix of random holes for horizon.        
+    
+        Parameters
+        ----------
+        n : int
+            Amount of figured holes on horizon.
+        points_proportion : float
+            Proportion of point holes on the horizon. A number between 0 and 1.
+        points_shape : int or sequence of int
+            Shape of point holes.
+        noise_level : int
+            Radius of noise scattering near the borders of holes.
+        scale : float or sequence of float
+            If float, each figure will have a random scale from exponential distribution with parameter scale.
+            If sequence, each figure will have a provided scale.
+        max_scale : int
+            Maximum figure scale.
+        max_angles_amount : int
+            Maximum amount of angles in each figure.
+        max_sharpness : float
+            Maximum value of figures sharpness.
+        locations : ndarray
+            If provided, an array of desired locations of figures.
+        seed : int, optional
+            Seed the random numbers generator.
+        """  
+        rand_gen = default_rng(seed)
+        filtering_matrix = np.zeros_like(self.matrix)
+
+        # Generate random figures      
+        if isinstance(scale, float):
+            figures_scale = []
+            probability_of_preferable_values = 1 - np.exp(-scale*max_scale)
+            sampling_scale = np.ceil(1.0 / probability_of_preferable_values).astype(int)
+            while len(figures_scale) < n:
+                new_scale = rand_gen.exponential(scale, size=(n-len(figures_scale))*sampling_scale)
+                new_scale = new_scale[new_scale < max_scale]
+                figures_scale.extend(new_scale)
+            scale = figures_scale[:n]
+            
+        if locations is None:
+            locations_idxs = rand_gen.choice(self.points.shape[0], size=n)
+            locations = self.points[locations_idxs, :2]
+
+        holes_coordinates = np.empty(shape=(0,2), dtype=int)
+        for location, figure_scale in zip(locations, scale):
+            key_points_amount = rand_gen.integers(2, max_angles_amount + 1)
+            radius = rand_gen.random()
+            sharpness = rand_gen.random()*rand_gen.integers(1, max_sharpness)
+            
+            figure_coordinates = make_bezier_figure(key_points_amount, radius, sharpness, 
+                                                    figure_scale, self.shape, seed=seed)
+            figure_coordinates += location    
+            holes_coordinates = np.vstack([holes_coordinates, figure_coordinates.astype(int)])
+
+        # Generate random points
+        if points_proportion:
+            #points_filtering_matrix = np.zeros_like(self.matrix)
+            n = int(self.size*points_proportion)
+            x = rand_gen.integers(0, self.i_length, n)
+            y = rand_gen.integers(0, self.x_length, n)
+            
+            filtering_matrix[x, y] = 1
+            if isinstance(points_shape, int):
+                points_shape = (points_shape, points_shape)
+            filtering_matrix = binary_dilation(filtering_matrix, np.ones(points_shape))
+            holes_coordinates = np.vstack([holes_coordinates,
+                                           np.argwhere(filtering_matrix > 0)])
+
+        if noise_level:
+            noise = rand_gen.normal(loc=holes_coordinates, 
+                                    scale=noise_level, 
+                                    size=holes_coordinates.shape)
+            holes_coordinates = np.unique(np.vstack([holes_coordinates, noise.astype(int)]), axis=0)
+
+        # Shift objects
+        nonzero_borders_shift = np.min(holes_coordinates, axis=0)
+        nonzero_borders_shift[nonzero_borders_shift > 0] = 0
+        up_borders_shift = np.max(holes_coordinates, axis=0)
+        up_borders_shift[up_borders_shift <= self.shape] = 0
+        up_borders_shift[up_borders_shift > self.shape] -= np.array(self.shape)[up_borders_shift > self.shape]
+        holes_coordinates -= (up_borders_shift + nonzero_borders_shift + 1)
+
+        # Cut objects if they are too big
+        suited_x = (holes_coordinates[:, 0] < self.i_length) & (holes_coordinates[:, 0] >= 0)
+        suited_y = (holes_coordinates[:, 1] < self.x_length) & (holes_coordinates[:, 1] >= 0)
+        holes_coordinates = holes_coordinates[suited_x & suited_y]
+
+        filtering_matrix[holes_coordinates[:, 0], holes_coordinates[:, 1]] = 1
+        filtering_matrix = binary_fill_holes(filtering_matrix)
+        filtering_matrix = self.put_on_full(filtering_matrix, False)
+        return filtering_matrix
 
     # Horizon usage: point/mask generation
     def create_sampler(self, bins=None, quality_grid=None, **kwargs):

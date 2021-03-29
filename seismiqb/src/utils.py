@@ -4,7 +4,9 @@ import inspect
 
 from tqdm import tqdm
 import numpy as np
+from numpy.random import default_rng
 import pandas as pd
+from scipy.special import binom
 import segyio
 
 from numba import njit, prange
@@ -595,3 +597,92 @@ def retrieve_function_arguments(function, dictionary):
     parameters = inspect.signature(function).parameters
     arguments_with_defaults = {k: v.default for k, v in parameters.items() if v.default != inspect._empty}
     return {k: dictionary.pop(k, v) for k, v in arguments_with_defaults.items()}
+
+def make_bezier_figure(n=7, radius=0.2, sharpness=0.05, scale=1.0, shape=(1, 1), 
+                  resolution=None, unscaled_points_distance=.5, points_search_stop_iter=100, seed=None):
+    """ Bezier closed curve coordinates.        
+    Creates Bezier closed curve which passes through random points.
+    Code based on:  https://stackoverflow.com/questions/50731785/create-random-shape-contour-using-matplotlib    
+
+    Parameters
+    ----------
+    n : int
+        Amount of angles (key points) in the random figure.
+        Must be more than 1.
+    radius : float
+        Distance for control middle points in Bezier algorithm. 
+        Is a number between 0 and 1.
+    sharpness : float
+        Degree of sharpness/edgy.
+        If 0 then a curve will be the smoothest.
+    scale : float
+        Figure scale. 
+        Is a number between 0 and 1. Fits to the shape.
+    shape : sequence int
+        Shape of plotting area.
+    resolution : int
+        Amount of points in one curve between two key points.
+    unscaled_points_distance : float
+        Distance between all key points in a unit square.
+        A number between 0 and 1.
+    points_search_stop_iter : int
+        Stop criterion for search of key points.
+    seed: int, optional
+        Seed the random numbers generator.
+    """
+    rand_gen = default_rng(seed)
+    resolution = resolution or int(scale*max(shape)*100)
+    
+    # Get key points of figure as random points which are far enough each other        
+    key_points = rand_gen.random((n, 2))
+    unscaled_points_distance = unscaled_points_distance**2
+    
+    for i in range(points_search_stop_iter):
+        # Found distances between points and sort key_points by angles         
+        shifted_points = key_points - np.mean(key_points, axis=0)
+        angles = np.arctan2(shifted_points[:, 0], shifted_points[:, 1])
+        key_points = key_points[np.argsort(angles)]
+
+        squared_distances = np.sum(np.diff(key_points, axis=0)**2, axis=1)
+        if np.all(squared_distances >= unscaled_points_distance):
+            break
+        key_points = rand_gen.random((n, 2))
+
+    key_points *= scale*np.array(shape, float)
+    key_points = np.vstack([key_points, key_points[0]]) 
+
+    # Calculate figure angles in key points
+    p = np.arctan(sharpness) / np.pi + .5
+    diff_between_points = np.diff(key_points, axis=0)
+    angles = np.arctan2(diff_between_points[:, 1], diff_between_points[:, 0])    
+    angles = angles + 2*np.pi*(angles < 0)
+    rolled_angles = np.roll(angles, 1)
+    angles = p*angles + (1 - p)*rolled_angles + np.pi*(np.abs(rolled_angles - angles) > np.pi)
+    angles = np.append(angles, angles[0])        
+
+    # Create figure part by part: make curves between each pair of points
+    curve_segments = []
+    # Calculate control points for Bezier curve
+    points_distances = np.sqrt(np.sum(diff_between_points**2, axis=1))
+    radii = radius*points_distances
+    middle_control_points_1 = np.transpose(radii*[np.cos(angles[:-1]), 
+                                                  np.sin(angles[:-1])]) + key_points[:-1]
+    middle_control_points_2 = np.transpose(radii*[np.cos(angles[1:] + np.pi), 
+                                                  np.sin(angles[1:] + np.pi)]) + key_points[1:]
+    curve_main_points_arr = np.hstack([key_points[:-1], middle_control_points_1,
+                                       middle_control_points_2, key_points[1:]]).reshape(n, 4, -1)
+    
+    # Get Bernstein polynomial approximation of each curve
+    for i in range(n):
+        bezier_param_t = np.linspace(0, 1, num=resolution)            
+        current_segment = np.zeros((resolution, 2))
+        for point_num, point in enumerate(curve_main_points_arr[i]):
+            polynomial_degree = np.power(bezier_param_t, point_num)
+            polynomial_degree *= np.power(1 - bezier_param_t, 3 - point_num)
+            bernstein_polynomial = binom(3, point_num)*polynomial_degree
+            current_segment += np.outer(bernstein_polynomial, point)
+        curve_segments.extend(current_segment)
+        
+    curve_segments = np.array(curve_segments)
+    figure_coordinates = np.unique(np.ceil(curve_segments).astype(int), axis=0)
+    return figure_coordinates 
