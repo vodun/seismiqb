@@ -868,11 +868,11 @@ class Horizon:
         self.apply_to_matrix(smoothing_function, **kwargs)
 
 
-    def make_random_holes_matrix(self, n=10, points_proportion=1e-5, points_shape=1, 
+    def make_random_holes_matrix(self, n=10, points_proportion=1e-5, points_shape=1,
                                  noise_level=0, scale=1.0, max_scale=0.25,
                                  max_angles_amount=4, max_sharpness=5, locations=None, seed=None):
-        """ Create matrix of random holes for horizon.        
-    
+        """ Create matrix of random holes for horizon.      
+
         Parameters
         ----------
         n : int
@@ -897,7 +897,7 @@ class Horizon:
         seed : int, optional
             Seed the random numbers generator.
         """  
-        rand_gen = default_rng(seed)
+        rng = default_rng(seed)
         filtering_matrix = np.zeros_like(self.matrix)
 
         # Generate random figures      
@@ -906,32 +906,31 @@ class Horizon:
             probability_of_preferable_values = 1 - np.exp(-scale*max_scale)
             sampling_scale = np.ceil(1.0 / probability_of_preferable_values).astype(int)
             while len(figures_scale) < n:
-                new_scale = rand_gen.exponential(scale, size=(n-len(figures_scale))*sampling_scale)
+                new_scale = rng.exponential(scale, size=(n-len(figures_scale))*sampling_scale)
                 new_scale = new_scale[new_scale < max_scale]
                 figures_scale.extend(new_scale)
             scale = figures_scale[:n]
             
         if locations is None:
-            locations_idxs = rand_gen.choice(self.points.shape[0], size=n)
+            locations_idxs = rng.choice(self.points.shape[0], size=n)
             locations = self.points[locations_idxs, :2]
 
         holes_coordinates = np.empty(shape=(0,2), dtype=int)
         for location, figure_scale in zip(locations, scale):
-            key_points_amount = rand_gen.integers(2, max_angles_amount + 1)
-            radius = rand_gen.random()
-            sharpness = rand_gen.random()*rand_gen.integers(1, max_sharpness)
+            key_points_amount = rng.integers(2, max_angles_amount + 1)
+            radius = rng.random()
+            sharpness = rng.random()*rng.integers(1, max_sharpness)
             
-            figure_coordinates = make_bezier_figure(key_points_amount, radius, sharpness, 
+            figure_coordinates = make_bezier_figure(key_points_amount, radius, sharpness,
                                                     figure_scale, self.shape, seed=seed)
             figure_coordinates += location    
             holes_coordinates = np.vstack([holes_coordinates, figure_coordinates.astype(int)])
 
         # Generate random points
         if points_proportion:
-            #points_filtering_matrix = np.zeros_like(self.matrix)
             n = int(self.size*points_proportion)
-            x = rand_gen.integers(0, self.i_length, n)
-            y = rand_gen.integers(0, self.x_length, n)
+            x = rng.integers(0, self.i_length, n)
+            y = rng.integers(0, self.x_length, n)
             
             filtering_matrix[x, y] = 1
             if isinstance(points_shape, int):
@@ -941,8 +940,8 @@ class Horizon:
                                            np.argwhere(filtering_matrix > 0)])
 
         if noise_level:
-            noise = rand_gen.normal(loc=holes_coordinates, 
-                                    scale=noise_level, 
+            noise = rng.normal(loc=holes_coordinates,
+                                    scale=noise_level,
                                     size=holes_coordinates.shape)
             holes_coordinates = np.unique(np.vstack([holes_coordinates, noise.astype(int)]), axis=0)
 
