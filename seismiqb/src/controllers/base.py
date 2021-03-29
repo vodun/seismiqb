@@ -73,9 +73,13 @@ class BaseController:
             'n_iters': 100,
             'early_stopping': True,
         },
+
         'inference': {},
 
-        # Make predictions smoother
+        # Common keys for both train and inference
+        'common': {},
+
+        # Make predictions better
         'postprocess': {},
 
         # Compute metrics
@@ -152,7 +156,7 @@ class BaseController:
         _ = kwargs
 
     # Train
-    def train(self, dataset, **kwargs):
+    def train(self, dataset, config=None, **kwargs):
         """ Train model on a provided dataset.
 
         Uses the `get_train_template` method to create pipeline of model training.
@@ -162,7 +166,8 @@ class BaseController:
         Model instance
         """
         # Prepare parameters
-        pipeline_config = Config({**self.config['train'], **kwargs})
+        config = config or {}
+        pipeline_config = Config({**self.config['common'], **self.config['train'], **config, **kwargs})
         n_iters, prefetch, rescale = pipeline_config.pop(['n_iters', 'prefetch', 'rescale_batch_size'])
 
         notifier = {
