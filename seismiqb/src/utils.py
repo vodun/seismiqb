@@ -1,12 +1,14 @@
 """ Utility functions. """
 import os
 import inspect
+import shutil
 from math import isnan, atan
 
 from tqdm import tqdm
 import numpy as np
 import pandas as pd
 import segyio
+from segyio import BinField, TraceField
 
 from numba import njit, prange
 
