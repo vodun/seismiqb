@@ -164,11 +164,8 @@ class SeismicGeometry:
         self.path = path
         self.anonymize = get_environ_flag('SEISMIQB_ANONYMIZE')
 
-        name = os.path.basename(self.path)
-        # find span of uppercase letter sequence between '_' and '.' symbols in filename
-        field_span = re.search(r'_([A-Z]+?)\.', name).span(1)
-        self.field = name[slice(*field_span)]
-        self.name = name.replace(f"_{self.field}", "") if self.anonymize else name
+        self.name = os.path.basename(self.path)
+        self.field = self.parse_field()
 
         # Names of different lengths and format: helpful for outside usage
         self.short_name = self.name.split('.')[0]
@@ -190,6 +187,16 @@ class SeismicGeometry:
             return np.prod(self.zero_traces.shape) - self.zero_traces.sum()
         return len(self.dataframe)
 
+    def parse_field(self):
+        """ Try to parse field from geometry name. """
+
+        # search for a sequence of uppercase letters between '_' and '.' symbols
+        field_search = re.search(r'_([A-Z]+?)\.', self.name)
+        if field_search is None:
+            if self.anonymize:
+                raise ValueError(f"Cannot anonymize name {self.name}, because field cannot be parsed from it.")
+            return ""
+        return self.name[slice(*field_search.span(1))]
 
     def store_meta(self, path=None):
         """ Store collected stats on disk. """
@@ -417,12 +424,17 @@ class SeismicGeometry:
         return self.nbytes / (1024**3)
 
     @property
+    def displayed_name(self):
+        """ Return name with masked field name, if anonymization needed. """
+        return self.name.replace(self.field, "*") if self.anonymize else self.name
+
+    @property
     def displayed_path(self):
         """ Return path with masked field name, if anonymization needed. """
         return self.path.replace(self.field, "*") if self.anonymize else self.path
 
     def __repr__(self):
-        return 'Inferred geometry for {}: ({}x{}x{})'.format(self.name, *self.cube_shape)
+        return 'Inferred geometry for {}: ({}x{}x{})'.format(self.displayed_name, *self.cube_shape)
 
     def __str__(self):
         msg = f"""
@@ -466,7 +478,7 @@ class SeismicGeometry:
         """ Show signal-to-noise map. """
         kwargs = {
             'cmap': 'viridis_r',
-            'title': f'Signal-to-noise map of `{self.name}`',
+            'title': f'Signal-to-noise map of `{self.displayed_name}`',
             'xlabel': self.index_headers[0],
             'ylabel': self.index_headers[1],
             **kwargs
@@ -892,7 +904,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
             hist_matrix = np.full((*self.lens, len(bins)-1), np.nan)
 
             # Iterate over traces
-            description = f'Collecting stats for {self.name}'
+            description = f'Collecting stats for {self.displayed_name}'
             for i in tqdm(range(num_traces), desc=description, ncols=1000):
                 trace = self.segyfile.trace[i]
                 header = self.segyfile.header[i]

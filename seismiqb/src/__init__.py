@@ -1,7 +1,7 @@
 """ Init file. """
 # pylint: disable=wildcard-import
 from .cubeset import SeismicCubeset
-from .facies_cubeset import FaciesSeismicCubeset
+from .facies_cubeset import FaciesSeismicCubeset, SeismicCubesetInfo
 from .crop_batch import SeismicCropBatch
 from .geometry import SeismicGeometry
 from .horizon import UnstructuredHorizon, StructuredHorizon, Horizon
