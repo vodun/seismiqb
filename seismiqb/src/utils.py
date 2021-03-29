@@ -619,7 +619,7 @@ def make_bezier_figure(n=7, radius=0.2, sharpness=0.05, scale=1.0, shape=(1, 1),
         Figure scale. 
         Is a number between 0 and 1. Fits to the shape.
     shape : sequence int
-        Shape of plotting area.
+        Shape of figure location area (generally horizon shape).
     resolution : int
         Amount of points in one curve between two key points.
     unscaled_points_distance : float
@@ -686,3 +686,10 @@ def make_bezier_figure(n=7, radius=0.2, sharpness=0.05, scale=1.0, shape=(1, 1),
     curve_segments = np.array(curve_segments)
     figure_coordinates = np.unique(np.ceil(curve_segments).astype(int), axis=0)
     return figure_coordinates 
+
+def get_environ_flag(flag_name, defaults=('0', '1'), convert=int):
+    """ Retrive environmental variable, check if it matches expected defaults and optionally convert it. """
+    flag = os.environ.get(flag_name, '0')
+    if flag not in defaults:
+        raise ValueError(f"Expected `{flag_name}` env variable value to be from {defaults}, got {flag} instead.")
+    return convert(flag)

@@ -494,10 +494,12 @@ class Horizon:
 
     @property
     def shape(self):
+        """ Tuple of horizon dimensions."""
         return (self.i_length, self.x_length)
 
     @property
     def size(self):
+        """ Number of labeled and non-labeled traces."""
         return self.i_length*self.x_length
 
     @property
