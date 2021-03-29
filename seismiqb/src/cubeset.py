@@ -329,7 +329,7 @@ class SeismicCubeset(Dataset):
                 _ = [item.reset_cache() for item in cached_attr]
 
 
-    def dump_labels(self, path, fmt='npy', separate=False, projections='ixh'):
+    def dump_labels(self, path, fmt='npy', separate=False):
         """ Dump points to file. """
         for i in range(len(self.indices)):
             for label in self.labels[i]:
@@ -341,7 +341,7 @@ class SeismicCubeset(Dataset):
                     os.makedirs(dirname)
                 name = label.name if separate else 'faults'
                 save_to = os.path.join(dirname, name + '.' + fmt)
-                label.dump_points(save_to, fmt, projections)
+                label.dump_points(save_to, fmt)
 
 
     @property
