@@ -598,6 +598,13 @@ def retrieve_function_arguments(function, dictionary):
     arguments_with_defaults = {k: v.default for k, v in parameters.items() if v.default != inspect._empty}
     return {k: dictionary.pop(k, v) for k, v in arguments_with_defaults.items()}
 
+def get_environ_flag(flag_name, defaults=('0', '1'), convert=int):
+    """ Retrive environmental variable, check if it matches expected defaults and optionally convert it. """
+    flag = os.environ.get(flag_name, '0')
+    if flag not in defaults:
+        raise ValueError(f"Expected `{flag_name}` env variable value to be from {defaults}, got {flag} instead.")
+    return convert(flag)
+
 def make_bezier_figure(n=7, radius=0.2, sharpness=0.05, scale=1.0, shape=(1, 1),
                   resolution=None, distance=.5, iters=100, seed=None):
     """ Bezier closed curve coordinates.
@@ -674,7 +681,7 @@ def make_bezier_figure(n=7, radius=0.2, sharpness=0.05, scale=1.0, shape=(1, 1),
 
     # Get Bernstein polynomial approximation of each curve
     for i in range(n):
-        bezier_param_t = np.linspace(0, 1, num=resolution)        
+        bezier_param_t = np.linspace(0, 1, num=resolution)
         current_segment = np.zeros((resolution, 2))
         for point_num, point in enumerate(curve_main_points_arr[i]):
             polynomial_degree = np.power(bezier_param_t, point_num)
@@ -686,10 +693,3 @@ def make_bezier_figure(n=7, radius=0.2, sharpness=0.05, scale=1.0, shape=(1, 1),
     curve_segments = np.array(curve_segments)
     figure_coordinates = np.unique(np.ceil(curve_segments).astype(int), axis=0)
     return figure_coordinates
-
-def get_environ_flag(flag_name, defaults=('0', '1'), convert=int):
-    """ Retrive environmental variable, check if it matches expected defaults and optionally convert it. """
-    flag = os.environ.get(flag_name, '0')
-    if flag not in defaults:
-        raise ValueError(f"Expected `{flag_name}` env variable value to be from {defaults}, got {flag} instead.")
-    return convert(flag)

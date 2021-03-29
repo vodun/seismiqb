@@ -871,7 +871,7 @@ class Horizon:
     def make_random_holes_matrix(self, n=10, points_proportion=1e-5, points_shape=1,
                                  noise_level=0, scale=1.0, max_scale=0.25,
                                  max_angles_amount=4, max_sharpness=5, locations=None, seed=None):
-        """ Create matrix of random holes for horizon.      
+        """ Create matrix of random holes for horizon.
 
         Parameters
         ----------
@@ -896,11 +896,11 @@ class Horizon:
             If provided, an array of desired locations of figures.
         seed : int, optional
             Seed the random numbers generator.
-        """  
+        """
         rng = default_rng(seed)
         filtering_matrix = np.zeros_like(self.matrix)
 
-        # Generate random figures      
+        # Generate random figures
         if isinstance(scale, float):
             figures_scale = []
             probability_of_preferable_values = 1 - np.exp(-scale*max_scale)
@@ -910,7 +910,7 @@ class Horizon:
                 new_scale = new_scale[new_scale < max_scale]
                 figures_scale.extend(new_scale)
             scale = figures_scale[:n]
-            
+
         if locations is None:
             locations_idxs = rng.choice(self.points.shape[0], size=n)
             locations = self.points[locations_idxs, :2]
@@ -920,10 +920,10 @@ class Horizon:
             key_points_amount = rng.integers(2, max_angles_amount + 1)
             radius = rng.random()
             sharpness = rng.random()*rng.integers(1, max_sharpness)
-            
+
             figure_coordinates = make_bezier_figure(key_points_amount, radius, sharpness,
                                                     figure_scale, self.shape, seed=seed)
-            figure_coordinates += location    
+            figure_coordinates += location
             holes_coordinates = np.vstack([holes_coordinates, figure_coordinates.astype(int)])
 
         # Generate random points
@@ -931,7 +931,7 @@ class Horizon:
             n = int(self.size*points_proportion)
             x = rng.integers(0, self.i_length, n)
             y = rng.integers(0, self.x_length, n)
-            
+
             filtering_matrix[x, y] = 1
             if isinstance(points_shape, int):
                 points_shape = (points_shape, points_shape)
