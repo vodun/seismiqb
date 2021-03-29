@@ -6,56 +6,31 @@ import numpy as np
 
 from ...batchflow import Pipeline, B, V, C, D, P, R
 
-from ..horizon import Horizon
-
-from .base import BaseController
+from .horizon import HorizonController
 from .torch_models import ExtensionModel
-from .best_practices import MODEL_CONFIG_ENHANCE
 
 
-class Enhancer(BaseController):
+class Enhancer(HorizonController):
     """
     Provides interface for train, inference and quality assesment for the task of horizon enhancement.
     """
-    #pylint: disable=unused-argument, logging-fstring-interpolation, no-member
 
     def train(self, horizon, **kwargs):
-        """ Train model for horizon extension.
-        Creates dataset and sampler for a given horizon and calls `meth:Detector.train`.
-
-        Parameters
-        ----------
-        horizon : an instance of :class:`.Horizon`
-            A horizon to be enhanced.
-        kwargs : dict
-            Other arguments for `.meth:Detector.train`.
-
-        Note
-        ----
-        In order to change training procedure, re-define :meth:`.get_train_template`.
-        """
-        dataset = self.make_dataset_from_horizon(horizon)
-        self.make_sampler(dataset, use_grid=False, bins=np.array([500, 500, 100]))
-        super().train(dataset, **kwargs)
+        """ Train model for horizon enhancement. """
+        dataset = self.make_dataset(horizon=horizon)
+        self.make_sampler(dataset, use_grid=False, side_view=True, bins=np.array([500, 500, 100]))
+        return super().train(dataset, **kwargs)
 
 
-    def inference(self, horizon, filtering_matrix=None, **kwargs):
-        """ Runs enhancement procedure for a given horizon with trained/loaded model.
-
-        Parameters
-        ----------
-        horizon : an instance of :class:`.Horizon`
-            A horizon to be enhanced.
-        kwargs : dict
-            Other arguments for `.meth:Detector.inference`.
-        """
-        #pylint: disable=attribute-defined-outside-init
-        dataset = self.make_dataset_from_horizon(horizon)
+    def inference(self, horizon, model, filtering_matrix=None, **kwargs):
+        """ Runs enhancement procedure for a given horizon with provided model. """
+        dataset = self.make_dataset(horizon=horizon)
         if filtering_matrix is None:
             filtering_matrix = 1 - (horizon.full_matrix > 0)
-        super().inference(dataset, filtering_matrix=filtering_matrix, **kwargs)
-        self.predictions = [self.predictions[0]]
-        self.predictions[0].name = f'enhanced_{horizon.name}'
+        prediction = super().inference(dataset=dataset, model=model,
+                                       filtering_matrix=filtering_matrix, **kwargs)[0]
+        prediction.name = f'enhanced_{horizon.name}'
+        return prediction
 
 
     def load_pipeline(self):
@@ -64,13 +39,13 @@ class Enhancer(BaseController):
         """
         return (
             Pipeline()
-            .make_locations(points=D('train_sampler')(self.batch_size),
-                            shape=self.crop_shape, side_view=True)
+            .make_locations(points=D('train_sampler')(C('batch_size')),
+                            shape=C('crop_shape'), side_view=C('side_view', default=False))
             .create_masks(dst='masks', width=C('width', default=3))
-            .mask_rebatch(src='masks', threshold=C('rebatch_threshold', default=0.99))
+            .mask_rebatch(src='masks', threshold=C('rebatch_threshold', default=0.7))
             .load_cubes(dst='images')
             .adaptive_reshape(src=['images', 'masks'],
-                              shape=self.crop_shape)
+                              shape=C('crop_shape'))
             .normalize(mode='q', src='images')
         )
 
@@ -108,8 +83,9 @@ class Enhancer(BaseController):
         return (
             Pipeline()
             .init_variable('loss_history', default=[])
-            .init_model('dynamic', ExtensionModel, 'base', C('model_config'))
-            .train_model('base', fetches='loss', save_to=V('loss_history', mode='a'),
+            .init_model(mode='dynamic', model_class=C('model_class', default=ExtensionModel),
+                        name='model', config=C('model_config'))
+            .train_model('model', fetches='loss', save_to=V('loss_history', mode='a'),
                          images=B('images'),
                          prior_masks=B('prior_masks'),
                          masks=B('masks'))
@@ -129,75 +105,36 @@ class Enhancer(BaseController):
         """ Defines inference pipeline. """
         inference_template = (
             Pipeline()
-            # Init everything
-            .import_model('base', C('model_pipeline'))
+            .init_variable('predictions', [])
+
             # Load data
-            .make_locations(points=D('grid_gen')(), shape=self.crop_shape,
+            .make_locations(points=D('grid_gen')(), shape=C('crop_shape'),
                             side_view=C('side_view', default=False))
             .load_cubes(dst='images')
             .create_masks(dst='prior_masks', width=3)
             .adaptive_reshape(src=['images', 'prior_masks'],
-                              shape=self.crop_shape)
+                              shape=C('crop_shape'))
             .normalize(mode='q', src='images')
+
             # Use model for prediction
-            .predict_model('base',
+            .predict_model('model',
                            B('images'),
                            B('prior_masks'),
                            fetches='predictions',
-                           save_to=B('predictions'))
+                           save_to=V('predictions', mode='e'))
         )
         return inference_template
 
 
+    # One method to rule them all
+    def run(self, cube_paths=None, horizon_paths=None, horizon=None, **kwargs):
+        """ Run the entire procedure of horizon enhancement. """
+        dataset = self.make_dataset(cube_paths=cube_paths, horizon_paths=horizon_paths, horizon=horizon)
+        horizon = dataset.labels[0][0]
 
-    @staticmethod
-    def run(horizon, cube_path=None, save_dir='.', crop_shape=(1, 64, 64),
-            model_config=None, n_iters=400, batch_size=128, device=None,
-            orientation='ix', return_instance=False):
-        """ Run all steps of the Enhancement procedure including creating dataset for
-        the given horizon, creating instance of the class and running train and inference
-        methods.
+        model = self.train(horizon=horizon, **kwargs)
 
-        Parameters
-        ----------
-        horizon : an instance of :class:`.Horizon` or str
-            A horizon to be extended or a path to load horizon from.
-        cube_path : str, optional
-            Path to cube, used if horizon is str.
-        save_dir : str
-            Path to save images, logs, and other data.
-        crop_shape : tuple of 3 ints
-            Size of sampled crops for train and inference.
-        model_config : dict
-            Neural network architecture.
-        n_iters : int
-            Number of iterations to train model for.
-        batch_size : int
-            Size of batches for train and inference.
-        device : str or int
-            Device specification.
-        orientation : {'i', 'x', 'ix'}
-            Orientation of the inference:
-            If 'i', then cube is split into inline-oriented slices.
-            If 'x', then cube is split into crossline-oriented slices.
-            If 'ix', then both of previous approaches applied, and results are merged.
-        return_instance : bool
-            Whether to return created `.class:Enhancer` instance.
-        """
-        model_config = MODEL_CONFIG_ENHANCE if model_config is None else model_config
-        enhancer = Enhancer(save_dir=save_dir, model_config=model_config, device=device,
-                            crop_shape=crop_shape, batch_size=batch_size)
-        if isinstance(horizon, str) and isinstance(cube_path, str):
-            dataset = enhancer.make_dataset(cube_path, horizon_paths=horizon)
-        elif isinstance(horizon, Horizon):
-            dataset = enhancer.make_dataset_from_horizon(horizon)
-        else:
-            raise TypeError('Pass either instance of Horizon or paths to both cube and horizon.')
-
-        enhancer.make_sampler(dataset, use_grid=False, bins=np.array([500, 500, 100]))
-        enhancer.train(horizon, n_iters=n_iters, use_grid=False)
-        enhancer.inference(horizon, orientation=orientation)
-
-        if return_instance:
-            return enhancer
-        return enhancer.predictions[0]
+        prediction = self.inference(horizon, model, **kwargs)
+        prediction = self.postprocess(prediction)
+        self.evaluate(prediction, dataset=dataset)
+        return prediction

@@ -15,7 +15,7 @@ from utils import str2bool, make_config, safe_mkdir
 
 sys.path.append('..')
 from seismiqb import SeismicGeometry, Horizon, HorizonMetrics
-from seismiqb import METRIC_CMAP, enlarge_carcass_metric, plot_image, save_point_cloud
+from seismiqb import METRIC_CMAP, plot_image, save_point_cloud
 
 
 
@@ -36,7 +36,7 @@ ARGS = [
     ('savedir', 'path to save files to', str, '_placeholder_'),
     ('metrics', 'which metrics to compute. Default is `support_corrs`', str, ['support_corrs']),
     ('add-prefix', 'whether to prepend horizon name to the saved file names. Default is True', str2bool, True),
-    ('save-files', 'whether to save horizons/carcasses to disk. Default is True', str2bool, True),
+    ('save-files', 'whether to save horizons to disk. Default is True', str2bool, True),
     ('save-txt', 'whether to save point cloud of metrics to disk. Default is False', str2bool, False),
     ('save-pdf', 'whether to save pdf with report to disk. Default is True', str2bool, True),
     ('save-zip', 'whether to zip the entire report folder and save next to it. Default is True', str2bool, True),
@@ -136,9 +136,9 @@ if __name__ == '__main__':
                     savepath = os.path.join(config['savedir'],
                                             f'{prefix}{other_prefix}_{metric_name}')
 
-                    metric = om.evaluate(metric_name, **kwargs)
-                    if other.is_carcass:
-                        metric = enlarge_carcass_metric(metric, geometry)
+                    metric = om.evaluate(metric_name, **kwargs,
+                                         plot=True, show_plot=False, title='', figsize=(20, 20),
+                                         savepath=savepath + '.png')
 
                     plot_image(metric, figsize=(20, 20),
                                cmap=METRIC_CMAP, zmin=-1, zmax=1, fill_color='black',
@@ -146,8 +146,6 @@ if __name__ == '__main__':
                                savepath=savepath + '.png')
 
                     row_dict[f'{other_prefix}_{metric_name}'] = np.nanmean(metric)
-                if config['save-files']:
-                    shutil.copy2(other.path, os.path.join(config['savedir'], f'{horizon.name}_{other_prefix}'))
             else:
                 row_dict = {
                     **row_dict,
