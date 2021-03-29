@@ -578,8 +578,8 @@ class SeismicGeometry:
             segy = geometry.segyfile
 
             spec = segyio.spec()
-            spec.sorting = int(segy.sorting)
-            spec.format = int(segy.format)
+            spec.sorting = None if segy.sorting is None else int(segy.sorting)
+            spec.format = None if segy.format is None else int(segy.format)
             spec.samples = range(self.depth)
 
             idx = np.stack(geometry.dataframe.index)
@@ -1368,7 +1368,7 @@ class SeismicGeometryHDF5(SeismicGeometry):
 
     def load_slide(self, loc, axis='iline', **kwargs):
         """ Load desired slide along desired axis. """
-        axis = self.parse_axis(axis)
+        axis = parse_axis(axis)
 
         if axis == 0:
             cube = self.file_hdf5['cube']

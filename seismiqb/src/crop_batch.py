@@ -566,7 +566,7 @@ class SeismicCropBatch(Batch):
 
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def normalize(self, ix, mode='minmax', stats='geometry', src=None, dst=None, q=(0.01, 0.05)):
+    def normalize(self, ix, mode='minmax', stats='geometry', src=None, dst=None, q=(0.01, 0.99)):
         """ Normalize values in crop.
 
         Parameters
