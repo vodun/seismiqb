@@ -598,7 +598,7 @@ class SeismicGeometry:
                 dst_file.bin = segy.bin
 
                 for c, (i, x) in enumerate(tqdm(idx, disable=(not pbar))):
-                    locs = [i_enc[i], x_enc[x], slice(None)]
+                    locs = tuple([i_enc[i], x_enc[x], slice(None)])
                     dst_file.header[c] = segy.header[c]
                     dst_file.trace[c] = cube_hdf5[locs]
                 dst_file.bin = segy.bin
