@@ -199,33 +199,17 @@ class Fault(Horizon):
         """ Save separate fault to csv. """
         df.to_csv(os.path.join(dst, df.name), sep=' ', header=False, index=False)
 
-    def split_faults(self, path, prefix='fault', threshold=None, pbar=False, **kwargs):
+    def split_faults(self, **kwargs):
         """ Split file with faults points into separate connected faults.
 
         Parameters
         ----------
-        path : str
-            Folder to save separate faults.
-        prefix : str, optional
-            Name prefix for each fault, by default 'fault'.
-        threshold : float, optional
-            Drop fault with size less then threshold, by default None.
-        pbar : bool, optional
-            Enable progress bar, by default False.
         **kwargs
             Arguments for `split_faults` function.
         """
         array = np.zeros(self.cube_shape)
         array[self.points[:, 0], self.points[:, 1], self.points[:, 2]] = 1
-        faults, sizes = split_faults(array, cube_shape=tuple(self.cube_shape), pbar=pbar, **kwargs)
-        order = np.argsort(sizes)[::-1]
-        for i in tqdm(range(len(sizes)), disable=(not pbar)):
-            fault = faults[order][i]
-            size = sizes[order][i]
-            if threshold and (size < threshold):
-                break
-            fault_path = os.path.join(path, prefix + '_' + str(i))
-            np.save(fault_path, fault[:, :3], allow_pickle=False)
+        return self.from_mask(array, cube_shape=tuple(self.cube_shape), geometry=self.geometry, **kwargs)
 
     def show_3d(self, n_sticks=100, n_nodes=10, z_ratio=1., zoom_slice=None, show_axes=True,
                 width=1200, height=1200, margin=20, savepath=None, **kwargs):
@@ -297,95 +281,105 @@ class Fault(Horizon):
         coords = np.concatenate(sticks)
         return coords[:, 0], coords[:, 1], coords[:, 2], simplices
 
+    @classmethod
+    def from_mask(cls, array, geometry=None, chunk_size=None, threshold=None, overlap=1, pbar=False,
+                  cube_shape=None, fmt='mask'):
+        """ Label faults in an array.
 
-def split_faults(array, chunk_size=None, overlap=1, pbar=False, cube_shape=None, fmt='mask'):
-    """ Label faults in an array.
+        Parameters
+        ----------
+        array : numpy.ndarray or SeismicGeometry
+            binary mask of faults or array of coordinates.
+        geometry : SeismicGeometry or None
+            geometry instance to create Fault-instance.
+        chunk_size : int
+            size of chunks to apply `measurements.label`.
+        threshold : float or None
+            threshold to drop small faults.
+        overlap : int
+            size of overlap to join faults from different chunks.
+        pbar : bool
+            progress bar
+        cube_shape : tuple
+            shape of cube. If fmt='mask', can be infered from array.
+        fmt : str
+            if 'mask', array is a binary mask of faults. If 'points', array consists of coordinates of fault points.
 
-    Parameters
-    ----------
-    array : numpy.ndarray or SeismicGeometry
-        binary mask of faults or array of coordinates
-    chunk_size : int
-        size of chunks to apply `measurements.label`
-    overlap : int
-        size of overlap to join faults from different chunks
-    pbar : bool
-        progress bar
-    cube_shape : tuple
-        shape of cube. If fmt='mask', can be infered from array.
-    fmt : str
-        If 'mask', array is a binary mask of faults. If 'points', array consists of coordinates of fault points.
+        Returns
+        -------
+        numpy.ndarray
+            array of shape (n_faults, ) where each item is array of fault points of shape (N_i, 3).
+        """
+        # TODO: make chunks along xlines
+        if isinstance(array, SeismicGeometry):
+            array = array.file_hdf5
+        chunk_size = chunk_size or len(array)
+        if chunk_size == len(array):
+            overlap = 0
 
-    Returns
-    -------
-    numpy.ndarray
-        array of shape (N, 4) where the first 3 columns are coordinates of points and the last one
-        is for labels
-    """
-    # TODO: make chunks along xlines
-    if isinstance(array, SeismicGeometry):
-        array = array.file_hdf5
-    chunk_size = chunk_size or len(array)
+        if cube_shape is None and fmt == 'points':
+            raise ValueError("If fmt='points', cube_shape must be specified")
 
-    if cube_shape is None and fmt == 'points':
-        raise ValueError("If fmt='points', cube_shape must be specified")
+        cube_shape = cube_shape or array.shape
 
-    cube_shape = cube_shape or array.shape
+        if fmt == 'mask':
+            chunks = [(start, array[start:start+chunk_size]) for start in range(0, cube_shape[0], chunk_size-overlap)]
+            total = len(chunks)
+        else:
+            def _chunks():
+                for start in range(0, cube_shape[0], chunk_size-overlap):
+                    chunk = np.zeros((chunk_size, *cube_shape[1:]))
+                    points = array[array[:, 0] < start+chunk_size]
+                    points = points[points[:, 0] >= start]
+                    chunk[points[:, 0]-start, points[:, 1], points[:, 2]] = 1
+                    yield (start, chunk)
+            chunks = _chunks()
+            total = len(range(0, cube_shape[0], chunk_size-overlap))
 
-    if fmt == 'mask':
-        chunks = [(start, array[start:start+chunk_size]) for start in range(0, cube_shape[0], chunk_size-overlap)]
-        total = len(chunks)
-    else:
-        def _chunks():
-            for start in range(0, cube_shape[0], chunk_size-overlap):
-                chunk = np.zeros((chunk_size, *cube_shape[1:]))
-                points = array[array[:, 0] < start+chunk_size]
-                points = points[points[:, 0] >= start]
-                chunk[points[:, 0]-start, points[:, 1], points[:, 2]] = 1
-                yield (start, chunk)
-        chunks = _chunks()
-        total = len(range(0, cube_shape[0], chunk_size-overlap))
+        prev_overlap = np.zeros((0, *cube_shape[1:]))
+        labels = np.zeros((0, 4), dtype='int32')
+        n_objects = 0
+        s = np.ones((3, 3, 3))
+        chunks = tqdm(chunks, total=total) if pbar else chunks
+        for start, item in chunks:
+            chunk_labels, new_objects = measurements.label(item, structure=s) # compute labels for new chunk
+            chunk_labels[chunk_labels > 0] += n_objects # shift all values to avoid intersecting with previous labels
+            new_overlap = chunk_labels[:overlap]
 
-    prev_overlap = np.zeros((0, *cube_shape[1:]))
-    labels = np.zeros((0, 4), dtype='int32')
-    n_objects = 0
-    s = np.ones((3, 3, 3))
-    chunks = tqdm(chunks, total=total) if pbar else chunks
-    for start, item in chunks:
-        chunk_labels, new_objects = measurements.label(item, structure=s) # compute labels for new chunk
-        chunk_labels[chunk_labels > 0] += n_objects # shift all values to avoid intersecting with previous labels
-        new_overlap = chunk_labels[:overlap]
+            if len(prev_overlap) > 0:
+                coords = np.where(prev_overlap > 0)
+                if len(coords[0]) > 0:
+                    # while there are the same objects with different labels repeat procedure
+                    while (new_overlap != prev_overlap).any():
+                        # find overlapping objects and change labels in chunk
+                        chunk_transform = {k: v for k, v in zip(new_overlap[coords], prev_overlap[coords]) if k != v}
+                        for k, v in chunk_transform.items():
+                            chunk_labels[chunk_labels == k] = v
+                        new_overlap = chunk_labels[:overlap]
 
-        if len(prev_overlap) > 0:
-            coords = np.where(prev_overlap > 0)
-            if len(coords[0]) > 0:
-                # while there are the same objects with different labels repeat procedure
-                while (new_overlap != prev_overlap).any():
-                    # find overlapping objects and change labels in chunk
-                    chunk_transform = {k: v for k, v in zip(new_overlap[coords], prev_overlap[coords]) if k != v}
-                    for k, v in chunk_transform.items():
-                        chunk_labels[chunk_labels == k] = v
-                    new_overlap = chunk_labels[:overlap]
+                        # find overlapping objects and change labels in processed part of cube
+                        labels_transform = {k: v for k, v in zip(prev_overlap[coords], new_overlap[coords]) if k != v}
+                        for k, v in labels_transform.items():
+                            labels[labels[:, 3] == k, 3] = v
+                            prev_overlap[prev_overlap == k] = v
 
-                    # find overlapping objects and change labels in processed part of cube
-                    labels_transform = {k: v for k, v in zip(prev_overlap[coords], new_overlap[coords]) if k != v}
-                    for k, v in labels_transform.items():
-                        labels[labels[:, 3] == k, 3] = v
-                        prev_overlap[prev_overlap == k] = v
+            prev_overlap = chunk_labels[-overlap:]
+            chunk_labels = chunk_labels[overlap:]
 
-        prev_overlap = chunk_labels[-overlap:]
-        chunk_labels = chunk_labels[overlap:]
+            nonzero_coord = np.where(chunk_labels)
+            chunk_labels = np.stack([*nonzero_coord, chunk_labels[nonzero_coord]], axis = -1)
+            chunk_labels[:, 0] += start
+            labels = np.concatenate([labels, chunk_labels])
+            n_objects += new_objects
 
-        nonzero_coord = np.where(chunk_labels)
-        chunk_labels = np.stack([*nonzero_coord, chunk_labels[nonzero_coord]], axis = -1)
-        chunk_labels[:, 0] += start
-        labels = np.concatenate([labels, chunk_labels])
-        n_objects += new_objects
-
-    labels = labels[np.argsort(labels[:, 3])]
-    labels = np.array(np.split(labels, np.unique(labels[:, 3], return_index=True)[1][1:]))
-    sizes = faults_sizes(labels)
-    return labels, sizes
+        labels = labels[np.argsort(labels[:, 3])]
+        labels = np.array(np.split(labels[:, :-1], np.unique(labels[:, 3], return_index=True)[1][1:]), dtype=object)
+        sizes = faults_sizes(labels)
+        if threshold:
+            labels = labels[sizes >= threshold]
+        if geometry is not None:
+            labels = [Fault(points.astype('int32'), geometry=geometry) for points in labels]
+        return labels
 
 def faults_sizes(labels):
     """ Compute sizes of faults.

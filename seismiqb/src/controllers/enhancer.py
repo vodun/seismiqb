@@ -83,7 +83,8 @@ class Enhancer(HorizonController):
         return (
             Pipeline()
             .init_variable('loss_history', default=[])
-            .init_model('dynamic', C('model_class', default=ExtensionModel), 'model', C('model_config'))
+            .init_model(mode='dynamic', model_class=C('model_class', default=ExtensionModel),
+                        name='model', config=C('model_config'))
             .train_model('model', fetches='loss', save_to=V('loss_history', mode='a'),
                          images=B('images'),
                          prior_masks=B('prior_masks'),

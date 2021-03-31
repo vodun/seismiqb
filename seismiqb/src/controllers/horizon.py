@@ -32,6 +32,7 @@ class HorizonController(BaseController):
     """ Controller for horizon detection tasks. """
     #pylint: disable=attribute-defined-outside-init
     DEFAULTS = Config({
+        **BaseController.DEFAULTS,
         # General parameters
         'savedir': None,
         'monitor': True,
@@ -71,6 +72,9 @@ class HorizonController(BaseController):
             'chunk_size': 100,
             'chunk_overlap': 0.1,
         },
+
+        # Common parameters for train and inference
+        'common': {},
 
         # Make predictions smoother
         'postprocess': {},
@@ -192,14 +196,15 @@ class HorizonController(BaseController):
     # Train method is inherited from BaseController class
 
     # Inference
-    def inference(self, dataset, model, **kwargs):
+    def inference(self, dataset, model, config=None, **kwargs):
         """ Make inference on a supplied dataset with a provided model.
 
         Works by making inference on chunks, splitted into crops.
         Resulting predictions (horizons) are stitched together.
         """
         # Prepare parameters
-        config = Config({**self.config['inference'], **kwargs})
+        config = config or {}
+        config = Config({**self.config['common'], **self.config['inference'], **config, **kwargs})
         orientation = config.pop('orientation')
         self.log(f'Starting {orientation} inference')
 
@@ -364,11 +369,12 @@ class HorizonController(BaseController):
         return predictions
 
     # Evaluate
-    def evaluate(self, predictions, targets=None, dataset=None, **kwargs):
+    def evaluate(self, predictions, targets=None, dataset=None, config=None, **kwargs):
         """ Assess quality of predictions against targets and seismic data. """
         #pylint: disable=cell-var-from-loop
         # Prepare parameters
-        config = Config({**self.config['evaluate'], **kwargs})
+        config = config or {}
+        config = Config({**self.config['evaluate'], **config, **kwargs})
         add_prefix, dump, name = config.pop(['add_prefix', 'dump', 'name'])
         supports, device = config.pop(['supports', 'device'])
 
@@ -492,7 +498,8 @@ class HorizonController(BaseController):
         return (
             Pipeline()
             .init_variable('loss_history', [])
-            .init_model('dynamic', C('model_class', default=EncoderDecoder), 'model', C('model_config'))
+            .init_model(mode='dynamic', model_class=C('model_class', default=EncoderDecoder),
+                        name='model', config=C('model_config'))
 
             .train_model('model',
                          fetches='loss',

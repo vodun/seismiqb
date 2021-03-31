@@ -1,6 +1,6 @@
 """ A convenient class to hold:
     - dataset creation
-    - model train procedura
+    - model train procedure
     - inference on dataset
     - evaluating predictions
     - and more
@@ -49,6 +49,8 @@ class BaseController:
         - `inference`
         - `postprocess`
         - `evaluate`
+    Each of the methods also has the `config` argument to override parameters from that configuration.
+    Keyword arguments are used with the highest priority.
     """
     #pylint: disable=attribute-defined-outside-init
     DEFAULTS = Config({
@@ -73,9 +75,13 @@ class BaseController:
             'n_iters': 100,
             'early_stopping': True,
         },
+
         'inference': {},
 
-        # Make predictions smoother
+        # Common keys for both train and inference
+        'common': {},
+
+        # Make predictions better
         'postprocess': {},
 
         # Compute metrics
@@ -89,8 +95,13 @@ class BaseController:
         self.monitor = self.config.monitor
         self.plot = self.config.plot
 
-        gpu_list = literal_eval(os.getenv('CUDA_VISIBLE_DEVICES'))
-        self.gpu_list = list(gpu_list) if isinstance(gpu_list, tuple) else [gpu_list]
+        devices = os.getenv('CUDA_VISIBLE_DEVICES')
+        if devices:
+            gpu_list = literal_eval(devices)
+            self.gpu_list = list(gpu_list) if isinstance(gpu_list, tuple) else [gpu_list]
+        else:
+            self.gpu_list = []
+
         self.make_filelogger()
 
     # Utility functions
@@ -150,9 +161,8 @@ class BaseController:
         _ = kwargs
 
     # Train
-    def train(self, dataset, **kwargs):
+    def train(self, dataset, config=None, **kwargs):
         """ Train model on a provided dataset.
-
         Uses the `get_train_template` method to create pipeline of model training.
 
         Returns
@@ -160,7 +170,8 @@ class BaseController:
         Model instance
         """
         # Prepare parameters
-        pipeline_config = Config({**self.config['train'], **kwargs})
+        config = config or {}
+        pipeline_config = Config({**self.config['common'], **self.config['train'], **config, **kwargs})
         n_iters, prefetch, rescale = pipeline_config.pop(['n_iters', 'prefetch', 'rescale_batch_size'])
 
         notifier = {
