@@ -370,8 +370,7 @@ class SeismicCropBatch(Batch):
 
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def create_masks(self, ix, dst, src_labels='labels', src_locations='locations',
-                     use_labels='all', width=3):
+    def create_masks(self, ix, dst, src_labels='labels', src_locations='locations', use_labels='all', width=3):
         """ Create masks from labels-dictionary in given positions.
 
         Parameters
@@ -442,8 +441,6 @@ class SeismicCropBatch(Batch):
             Window to compute attribute, by default 10 (for each axis)
         stride : int, optional
             Stride for windows, by default 1 (for each axis)
-        axis : int, optional
-            [description], by default -1
         device : str, optional
             Device to compute attribute, by default 'cpu'
 
@@ -566,7 +563,7 @@ class SeismicCropBatch(Batch):
 
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def normalize(self, ix, mode='minmax', stats='geometry', src=None, dst=None, q=(0.01, 0.99)):
+    def normalize(self, ix, mode='minmax', itemwise=False, src=None, dst=None, q=(0.01, 0.99)):
         """ Normalize values in crop.
 
         Parameters
@@ -581,19 +578,16 @@ class SeismicCropBatch(Batch):
             - `q_clip`: clipped to 0.01 and 0.99 quantiles and then divided
                         by the maximum of absolute values of the two. Quantiles can
                         be changed by `q` parameter.
-        stats : 'geometry' or 'item'
-            The way to compute stats: 'min', 'max', quantile. If 'geometry', stats will be computed
+        itemwise : bool
+            The way to compute 'min', 'max' and quantiles. If False, stats will be computed
             for the whole cubes. Otherwise, for each data item separately.
         q : tuple
-            What quantiles to compute.
+            Left and right quantiles to use.
         """
         data = self.get(ix, src)
         if callable(mode):
             normalized = mode(data)
-        if stats == 'geometry':
-            geometry = self.get(ix, 'geometries')
-            normalized = geometry.scaler(data, mode=mode)
-        elif stats == 'item':
+        if itemwise:
             if mode == 'minmax':
                 min_ = data.min()
                 max_ = data.max()
@@ -614,7 +608,8 @@ class SeismicCropBatch(Batch):
                 else:
                     raise ValueError(f'Unknown mode: {mode}')
         else:
-            raise ValueError(f'Unknown stats: {stats}')
+            geometry = self.get(ix, 'geometries')
+            normalized = geometry.scaler(data, mode=mode)
         return normalized
 
     @action
@@ -1185,11 +1180,18 @@ class SeismicCropBatch(Batch):
         slices = tuple([slice(start, start+length) for start, length in zip(corner, shape)])
         return crop[slices]
 
-    @apply_parallel
-    def add_channels(self, crop, channels='first'):
+    @action
+    def add_channels(self, src, dst=None, channels='first'):
         """ Add channels dimension (if needed). """
-        axis = 0 if channels in [0, 'first'] else -1
-        return np.expand_dims(crop, axis=axis) if crop.shape[axis] != 1 else crop
+        dst = dst or src
+        src = [src] if isinstance(src, str) else src
+        dst = [dst] if isinstance(dst, str) else dst
+        axis = 1 if channels in [0, 'first'] else -1
+        for _src, _dst in zip(src, dst):
+            crop = getattr(self, _src)
+            crop = np.expand_dims(crop, axis=axis) if crop.shape[axis] != 1 else crop
+            setattr(self, _dst, crop)
+        return self
 
     def plot_components(self, *components, idx=0, slide=None, mode='overlap', order_axes=None, **kwargs):
         """ Plot components of batch.

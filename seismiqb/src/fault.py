@@ -215,7 +215,9 @@ class Fault(Horizon):
         **kwargs
             Arguments for `split_faults` function.
         """
-        faults, sizes = split_faults(self.points, cube_shape=tuple(self.cube_shape), pbar=pbar, **kwargs)
+        array = np.zeros(self.cube_shape)
+        array[self.points[:, 0], self.points[:, 1], self.points[:, 2]] = 1
+        faults, sizes = split_faults(array, cube_shape=tuple(self.cube_shape), pbar=pbar, **kwargs)
         order = np.argsort(sizes)[::-1]
         for i in tqdm(range(len(sizes)), disable=(not pbar)):
             fault = faults[order][i]

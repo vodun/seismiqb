@@ -652,7 +652,7 @@ class SeismicCubeset(Dataset):
         """ Plot 2D map of points. """
         map_ = np.zeros(self.geometries[idx].cube_shape[:-1])
         denum = np.zeros(self.geometries[idx].cube_shape[:-1])
-        for label in self[idx, src_labels]:
+        for label in getattr(self, src_labels)[idx]:
             map_[label.points[:, 0], label.points[:, 1]] += label.points[:, 2]
             denum[label.points[:, 0], label.points[:, 1]] += 1
         denum[denum == 0] = 1
@@ -780,9 +780,10 @@ class SeismicCubeset(Dataset):
         xlines = (0, geometry.xlines_len) if xlines is None else xlines
         heights = (0, geometry.depth) if heights is None else heights
         #pylint: disable=too-many-branches
-        ilines_grid, xlines_grid, heights_grid, grid = self._crop_positions(cube_name, crop_shape, ilines, xlines,
-                                                                            heights, strides, overlap, overlap_factor,
-                                                                            filtering_matrix, filter_threshold)
+        ilines_grid, xlines_grid, heights_grid, grid = self._make_regular_grid(cube_name, crop_shape, ilines, xlines,
+                                                                               heights, strides, overlap,
+                                                                               overlap_factor, filtering_matrix,
+                                                                               filter_threshold)
         # Creating and storing all the necessary things
         # Check if grid is not empty
         shifts = np.array([ilines[0], xlines[0], heights[0]])
@@ -813,9 +814,9 @@ class SeismicCubeset(Dataset):
             'unfiltered_length': len(ilines_grid) * len(xlines_grid) * len(heights_grid)
         }
 
-    def _crop_positions(self, cube_name, crop_shape, ilines=None, xlines=None, heights=None,
-                       strides=None, overlap=None, overlap_factor=None,
-                       filtering_matrix=None, filter_threshold=0):
+    def _make_regular_grid(self, cube_name, crop_shape, ilines=None, xlines=None, heights=None,
+                           strides=None, overlap=None, overlap_factor=None,
+                           filtering_matrix=None, filter_threshold=0):
         """ Create grid for each axis and array of crop positions. """
         geometry = self.geometries[cube_name]
 
@@ -1203,6 +1204,10 @@ class SeismicCubeset(Dataset):
         crop_shape = grid_info['crop_shape']
         background = np.full(grid_info['predict_shape'], fill_value, dtype=crops[0].dtype)
 
+        if crops.ndim == 5:
+            crops = crops[:, 0]
+        crops = np.nan_to_num(crops, nan=fill_value)
+
         for j, (i, x, h) in enumerate(grid_array):
             crop_slice, background_slice = [], []
 
@@ -1216,12 +1221,10 @@ class SeismicCubeset(Dataset):
                     background_slice.append(slice(None))
 
             crop = crops[j]
-            if crop.ndim == 4:
-                crop = crop[0]
             crop = np.transpose(crop, order)
             crop = crop[tuple(crop_slice)]
             previous = background[tuple(background_slice)]
-            background[tuple(background_slice)] = np.nanmax([crop, previous], axis=0)
+            background[tuple(background_slice)] = np.maximum(crop, previous)
 
         return background
 
@@ -1292,9 +1295,9 @@ class SeismicCubeset(Dataset):
         geometry = self.geometries[idx]
         cube_shape = geometry.cube_shape
 
-        chunk_grid = self._crop_positions(idx, chunk_shape, ilines=locations[0], xlines=locations[1],
-                                          heights=locations[2], filtering_matrix=geometry.zero_traces,
-                                          strides=chunk_stride)[-1][:, 1:]
+        chunk_grid = self._make_regular_grid(idx, chunk_shape, ilines=locations[0], xlines=locations[1],
+                                             heights=locations[2], filtering_matrix=geometry.zero_traces,
+                                             strides=chunk_stride)[-1][:, 1:]
 
         if pbar:
             total = self._compute_total_batches_in_all_chunks(idx, chunk_grid, chunk_shape,
