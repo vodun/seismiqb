@@ -339,10 +339,9 @@ class Fault(Horizon):
         prev_overlap = np.zeros((0, *cube_shape[1:]))
         labels = np.zeros((0, 4), dtype='int32')
         n_objects = 0
-        s = np.ones((3, 3, 3))
         chunks = tqdm(chunks, total=total) if pbar else chunks
         for start, item in chunks:
-            chunk_labels, new_objects = measurements.label(item, structure=s) # compute labels for new chunk
+            chunk_labels, new_objects = measurements.label(item, structure=np.ones((3, 3, 3))) # labels for new chunk
             chunk_labels[chunk_labels > 0] += n_objects # shift all values to avoid intersecting with previous labels
             new_overlap = chunk_labels[:overlap]
 
