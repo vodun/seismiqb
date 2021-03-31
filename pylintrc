@@ -17,7 +17,7 @@ disable=no-value-for-parameter, no-self-use, too-few-public-methods, unsubscript
         no-member, arguments-differ, len-as-condition, keyword-arg-before-vararg, too-many-locals, too-many-lines,
         logging-format-interpolation, no-name-in-module, import-error, cyclic-import, duplicate-code, import-self,
         abstract-method, relative-beyond-top-level, unused-argument, too-many-public-methods, too-many-instance-attributes,
-        invalid-name
+        invalid-name, consider-using-generator
 
 [TYPECHECK]
 ignored-modules=numpy, numba

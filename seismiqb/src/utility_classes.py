@@ -276,6 +276,10 @@ class IndexedDict(OrderedDict):
             key = list(self.keys())[key]
         return super().__getitem__(key)
 
+    def __setitem__(self, key, value):
+        if isinstance(key, int):
+            key = list(self.keys())[key]
+        super().__setitem__(key, value)
 
 
 class lru_cache:
