@@ -1,6 +1,6 @@
 """ A convenient class to hold:
     - dataset creation
-    - model train procedura
+    - model train procedure
     - inference on dataset
     - evaluating predictions
     - and more
@@ -49,6 +49,8 @@ class BaseController:
         - `inference`
         - `postprocess`
         - `evaluate`
+    Each of the methods also has the `config` argument to override parameters from that configuration.
+    Keyword arguments are used with the highest priority.
     """
     #pylint: disable=attribute-defined-outside-init
     DEFAULTS = Config({
@@ -97,6 +99,9 @@ class BaseController:
         if devices:
             gpu_list = literal_eval(devices)
             self.gpu_list = list(gpu_list) if isinstance(gpu_list, tuple) else [gpu_list]
+        else:
+            self.gpu_list = []
+
         self.make_filelogger()
 
     # Utility functions
@@ -158,7 +163,6 @@ class BaseController:
     # Train
     def train(self, dataset, config=None, **kwargs):
         """ Train model on a provided dataset.
-
         Uses the `get_train_template` method to create pipeline of model training.
 
         Returns

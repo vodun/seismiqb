@@ -32,6 +32,7 @@ class HorizonController(BaseController):
     """ Controller for horizon detection tasks. """
     #pylint: disable=attribute-defined-outside-init
     DEFAULTS = Config({
+        **BaseController.DEFAULTS,
         # General parameters
         'savedir': None,
         'monitor': True,
