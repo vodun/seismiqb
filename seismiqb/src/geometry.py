@@ -1,5 +1,6 @@
 """ SeismicGeometry-class containing geometrical info about seismic-cube."""
 import os
+import re
 import sys
 import shutil
 import itertools
@@ -16,7 +17,7 @@ import segyio
 import cv2
 from scipy.ndimage import zoom
 
-from .utils import find_min_max, file_print, attr_filter, make_axis_grid, infer_tuple
+from .utils import find_min_max, file_print, attr_filter, make_axis_grid, infer_tuple, get_environ_flag
 from .utility_classes import lru_cache, SafeIO
 from .plotters import plot_image
 
@@ -161,9 +162,17 @@ class SeismicGeometry:
     def __init__(self, path, *args, process=True, **kwargs):
         _ = args
         self.path = path
+        self.anonymize = get_environ_flag('SEISMIQB_ANONYMIZE')
+
+        name = os.path.basename(self.path)
+        # find span of uppercase letter sequence between '_' and '.' symbols in filename
+        field_search = re.search(r'_([A-Z]+?)\.', name)
+        self.field = name[slice(*field_search.span(1))] if field_search is not None else ""
+        self.name = name.replace("_" * bool(self.field) + self.field, "") if self.anonymize else name
+        if not self.field and self.anonymize:
+            raise ValueError("Geometry name was not anonymized, since field name cannot be parsed from it.")
 
         # Names of different lengths and format: helpful for outside usage
-        self.name = os.path.basename(self.path)
         self.short_name = self.name.split('.')[0]
         self.long_name = ':'.join(self.path.split('/')[-2:])
         self.format = os.path.splitext(self.path)[1][1:]
@@ -409,12 +418,17 @@ class SeismicGeometry:
         """ Size of instance in gigabytes. """
         return self.nbytes / (1024**3)
 
+    @property
+    def displayed_path(self):
+        """ Return path with masked field name, if anonymization needed. """
+        return self.path.replace(self.field, "*" * bool(self.field)) if self.anonymize else self.path
+
     def __repr__(self):
-        return 'Inferred geometry for {}: ({}x{}x{})'.format(os.path.basename(self.path), *self.cube_shape)
+        return 'Inferred geometry for {}: ({}x{}x{})'.format(self.name, *self.cube_shape)
 
     def __str__(self):
         msg = f"""
-        Geometry for cube              {self.path}
+        Geometry for cube              {self.displayed_path}
         Current index:                 {self.index_headers}
         Shape:                         {self.cube_shape}
         Time delay and sample rate:    {self.delay}, {self.sample_rate}
