@@ -426,7 +426,7 @@ class SeismicCropBatch(Batch):
 
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def compute_attr(self, ix, dst, src='images', attribute='semblance', window=10, stride=1, device='cpu'):
+    def compute_attribute(self, ix, dst, src='images', attribute='semblance', window=10, stride=1, device='cpu'):
         """ Compute geological attribute.
 
         Parameters
