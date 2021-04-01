@@ -10,7 +10,7 @@ import datetime
 import numpy as np
 import torch
 
-from ...batchflow import Config, Pipeline
+from ...batchflow import Config, Pipeline, Notifier
 from ...batchflow import B, C, D, P, R, V, F
 from ...batchflow.models.torch import TorchModel, ResBlock, EncoderDecoder
 from .base import BaseController
@@ -18,6 +18,7 @@ from ..cubeset import SeismicCubeset
 from ..fault import Fault
 from ..layers import InputLayer
 from ..utils import adjust_shape_3d, fill_defaults
+from ..plotters import plot_image
 
 class FaultController(BaseController):
     DEFAULTS = Config({
@@ -48,6 +49,9 @@ class FaultController(BaseController):
             'loss': 'bce',
             'output': 'sigmoid',
             'slicing': 'native',
+            'prefetch': 0,
+            'rescale_batch_size': False,
+            'n_iters': 2000,
         },
 
         'inference': {
@@ -213,14 +217,32 @@ class FaultController(BaseController):
         model_config = F(self.get_model_config)(C('model'))
         return (Pipeline()
             .init_variable('loss_history', [])
+            .init_variable('loss', [])
             .init_model('dynamic', model_class, 'model', model_config)
             .add_channels(src=['images', 'masks'])
             .train_model('model',
                          fetches=['loss', C('output')],
                          images=B('images'),
                          masks=B('masks'),
-                         save_to=[V('loss_history', mode='w'), B('predictions')])
+                         save_to=[V('loss', mode='w'), B('predictions')])
+            .update(V('loss_history', mode='a'), V('loss'))
         )
+
+    def custom_plotter(self, ax=None, container=None, **kwargs):
+        """ Zero-out center area of the image, change plot parameters. """
+        ax.imshow(container['data'][0][0].T)
+        ax.set_title(container['name'], fontsize=18)
+
+        ax.set_xlabel('axis one', fontsize=18)
+        ax.set_ylabel('axis two', fontsize=18)
+
+    def make_notifier(self):
+        return Notifier(None, graphs=[
+            'loss_history',
+            {'source': B('images'), 'name': 'images', 'plot_function': self.custom_plotter},
+            {'source': B('masks'), 'name': 'masks', 'plot_function': self.custom_plotter},
+            {'source': B('predictions').astype('float32'), 'name': 'predictions', 'plot_function': self.custom_plotter}
+        ])
 
     def get_train_template(self, **kwargs):
         """ Define the whole training procedure pipeline including data loading, augmentation and model training. """
@@ -325,15 +347,30 @@ class FaultController(BaseController):
                 for _ in range(dataset.grid_iters):
                     _ = ppl.next_batch(D('size'))
                 prediction = dataset.assemble_crops(ppl.v('predictions'), order=order).astype('float32')
+                print(slices)
                 image = geometry.file_hdf5['cube'][
                     slices[0][0]:slices[0][1],
                     slices[1][0]:slices[1][1],
                     slices[2][0]:slices[2][1]
                 ]
-                outputs[cube_idx] += [[image, prediction]]
+                outputs[cube_idx] += [[slices, image, prediction]]
                 if create_mask:
-                    outputs[cube_idx][-1] += dataset.assemble_crops(ppl.v('target'), order=order).astype('float32')
+                    outputs[cube_idx][-1] += [dataset.assemble_crops(ppl.v('target'), order=order).astype('float32')]
         return outputs
+
+    def plot_inference(self, *args, savepath=None, overlap=True, threshold=0.05, **kwargs):
+        results = self.inference_on_slides(*args, **kwargs)
+        for cube in results:
+            for item in results[cube]:
+                slices, image, prediction = item[:3]
+                print(image.shape, prediction.shape)
+                _savepath = None if savepath is None else (savepath + '_' + str(slices) + '.png')
+                prediction = prediction[0]
+                prediction[prediction < threshold] = 0
+                if overlap:
+                    plot_image([image[0], prediction], mode='overlap', cmap='gray', figsize=(20, 20), savepath=_savepath)
+                else:
+                    plot_image(prediction, figsize=(20, 20), savepath=_savepath)
 
     def get_model_config(self, name):
         if name == 'UNet':
@@ -344,6 +381,9 @@ class FaultController(BaseController):
         if name == 'UNet':
             return EncoderDecoder
         return TorchModel
+
+    def dump_model(self, model, path):
+        model.save(os.path.join(self.config['savedir'], path))
 
     def amplitudes_path(self, cube):
         return glob.glob(self.config['dataset/path'] + 'CUBE_' + cube + '/amplitudes*.hdf5')[0]
