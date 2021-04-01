@@ -1204,6 +1204,7 @@ class SeismicCubeset(Dataset):
         crop_shape = grid_info['crop_shape']
         background = np.full(grid_info['predict_shape'], fill_value, dtype=crops[0].dtype)
 
+        crops = np.array(crops)
         if crops.ndim == 5:
             crops = crops[:, 0]
         crops = np.nan_to_num(crops, nan=fill_value)
