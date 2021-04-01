@@ -230,7 +230,11 @@ class FaultController(BaseController):
 
     def custom_plotter(self, ax=None, container=None, **kwargs):
         """ Zero-out center area of the image, change plot parameters. """
-        ax.imshow(container['data'][0][0].T)
+        data = container['data']
+        data = data[0, 0]
+        if data.ndim == 3:
+            data = data[0]
+        ax.imshow(data.T)
         ax.set_title(container['name'], fontsize=18)
 
         ax.set_xlabel('axis one', fontsize=18)
