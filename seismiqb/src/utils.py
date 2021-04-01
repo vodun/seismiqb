@@ -8,7 +8,6 @@ from tqdm import tqdm
 import numpy as np
 import pandas as pd
 import segyio
-from segyio import BinField, TraceField
 
 from numba import njit, prange
 
@@ -21,7 +20,7 @@ def file_print(msg, path, mode='w'):
         print(msg, file=file)
 
 
-def make_segy_from_array(array, path_segy, zip_result=True, **kwargs):
+def make_segy_from_array(array, path_segy, zip=True, remove_segy=None, **kwargs):
     """ Make a segy-cube from an array. Zip it if needed. Segy-headers are filled by defaults/arguments from kwargs.
 
     Parameters
@@ -30,22 +29,40 @@ def make_segy_from_array(array, path_segy, zip_result=True, **kwargs):
         Data for the segy-cube.
     path_segy : str
         Path to store new cube.
-    zip_result : bool
+    zip : bool
         whether to zip the resulting cube or not.
+    remove_segy : bool
+        whether to remove the cube or not. If supplied (not None), the supplied value is used.
+        Otherwise, True if option `zip` is True (so that not to create both the archive and the segy-cube)
+        False, whenever `zip` is set to False.
+    kwargs : dict
+        sorting : int
+            2 stands for ilines-sorting while 1 stands for xlines-sorting.
+            The default is 2.
+        format : int
+            floating-point mode. 5 stands for IEEE-floating point, which is the standard -
+            it is set as the default.
+        sample_rate : int
+            sampling frequency of the seismic in microseconds. Most commonly is equal to 2000
+            microseconds for on-land seismic.
+        delay : int
+            delay time of the seismic in microseconds. The default is 0.
     """
+    if remove_segy is None:
+        remove_segy = zip
+
     # make and fill up segy-spec using kwargs and array-info
     spec = segyio.spec()
-    spec.sorting = kwargs.get('sorting', 2) # 1 stands for xlines sorting while 2 for ilines-sorting
-    spec.format = kwargs.get('format', 5) # 5 stands for IEEE-floating point, which is the standard
+    spec.sorting = kwargs.get('sorting', 2)
+    spec.format = kwargs.get('format', 5)
     spec.samples = range(array.shape[2])
     spec.ilines = np.arange(array.shape[0])
     spec.xlines = np.arange(array.shape[1])
 
     # parse headers' kwargs
-    sample_rate = int(kwargs.get('sample_rate', 1000))
+    sample_rate = int(kwargs.get('sample_rate', 2000))
     delay = int(kwargs.get('delay', 0))
 
-    lens_of_traces = []
     with segyio.create(path_segy, spec) as dst_file:
         # Make all textual headers, including possible extended
         num_ext_headers = 1
@@ -60,28 +77,29 @@ def make_segy_from_array(array, path_segy, zip_result=True, **kwargs):
                 header = dst_file.header[ctr]
 
                 # change inline and xline in trace-header
-                header[TraceField.INLINE_3D] = i
-                header[TraceField.CROSSLINE_3D] = x
+                header[segyio.TraceField.INLINE_3D] = i
+                header[segyio.TraceField.CROSSLINE_3D] = x
 
                 # change depth-related fields in trace-header
-                header[TraceField.TRACE_SAMPLE_COUNT] = array.shape[2]
-                header[TraceField.TRACE_SAMPLE_INTERVAL] = sample_rate
-                header[TraceField.DelayRecordingTime] = delay
+                header[segyio.TraceField.TRACE_SAMPLE_COUNT] = array.shape[2]
+                header[segyio.TraceField.TRACE_SAMPLE_INTERVAL] = sample_rate
+                header[segyio.TraceField.DelayRecordingTime] = delay
 
                 # copy the trace from the array
                 trace = array[i, x]
                 dst_file.trace[ctr] = trace
-                lens_of_traces.append([len(dst_file.trace[ctr]), len(trace)])
                 ctr += 1
 
-        dst_file.bin = {BinField.Traces: ctr,
-                        BinField.Samples: array.shape[2],
-                        BinField.Interval: sample_rate}
+        dst_file.bin = {segyio.BinField.Traces: array.shape[0] * array.shape[1],
+                        segyio.BinField.Samples: array.shape[2],
+                        segyio.BinField.Interval: sample_rate}
 
-    if zip_result:
+    if zip:
         dir_name = os.path.dirname(os.path.abspath(path_segy))
         file_name = os.path.basename(path_segy)
         shutil.make_archive(os.path.splitext(path_segy)[0], 'zip', dir_name, file_name)
+    if remove_segy:
+        os.remove(path_segy)
 
 #TODO: rethink
 def make_subcube(path, geometry, path_save, i_range, x_range):
