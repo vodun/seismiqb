@@ -6,7 +6,6 @@ from textwrap import dedent
 from itertools import product
 
 import numpy as np
-from numpy.random import default_rng
 import pandas as pd
 import h5py
 from numba import njit, prange
@@ -499,7 +498,7 @@ class Horizon:
 
     @property
     def size(self):
-        """ Number of labeled and non-labeled traces."""
+        """ Number of traces inside the hull of the horizon."""
         return self.i_length*self.x_length
 
     @property
@@ -868,98 +867,106 @@ class Horizon:
         self.apply_to_matrix(smoothing_function, **kwargs)
 
 
-    def make_random_holes_matrix(self, n=10, points_proportion=1e-5, points_shape=1,
-                                 noise_level=0, scale=1.0, max_scale=0.25,
-                                 max_angles_amount=4, max_sharpness=5, locations=None, seed=None):
+    def make_random_holes_matrix(self, n=10, scale=1.0, max_scale=.25,
+                                 max_angles_amount=4, max_sharpness=5.0, locations=None,                 
+                                 points_proportion=1e-5, points_shape=1,
+                                 noise_level=0, seed=None):
         """ Create matrix of random holes for horizon.
+
+        Holes can be bezier-like figures or points-like.
+        We can control:
+            - bezier-like and points-like holes amount by `n` and `points_proportion` parameters respectively.
+            - bezier-like holes scales and locations by `scale` and `locations` parameters.
+            - points-like holes shape `points_shape`.
+        We also do some noise amplifying with `noise_level` parameter.
 
         Parameters
         ----------
         n : int
-            Amount of figured holes on horizon.
+            Amount of bezier-like holes on horizon.
         points_proportion : float
-            Proportion of point holes on the horizon. A number between 0 and 1.
+            Proportion of point-like holes on the horizon. A number between 0 and 1.
         points_shape : int or sequence of int
-            Shape of point holes.
+            Shape of point-like holes.
         noise_level : int
             Radius of noise scattering near the borders of holes.
         scale : float or sequence of float
-            If float, each figure will have a random scale from exponential distribution with parameter scale.
-            If sequence, each figure will have a provided scale.
-        max_scale : int
-            Maximum figure scale.
+            If float, each bezier-like hole will have a random scale from exponential distribution with parameter scale.
+            If sequence, each bezier-like hole will have a provided scale.
+        max_scale : float
+            Maximum bezier-like hole scale.
         max_angles_amount : int
-            Maximum amount of angles in each figure.
+            Maximum amount of angles in each bezier-like hole.
         max_sharpness : float
-            Maximum value of figures sharpness.
+            Maximum value of bezier-like holes sharpness.
         locations : ndarray
-            If provided, an array of desired locations of figures.
+            If provided, an array of desired locations of bezier-like holes.
         seed : int, optional
             Seed the random numbers generator.
         """
-        rng = default_rng(seed)
+        rng = np.random.default_rng(seed)
         filtering_matrix = np.zeros_like(self.matrix)
 
         # Generate random figures
         if isinstance(scale, float):
-            figures_scale = []
-            probability_of_preferable_values = 1 - np.exp(-scale*max_scale)
-            sampling_scale = np.ceil(1.0 / probability_of_preferable_values).astype(int)
-            while len(figures_scale) < n:
-                new_scale = rng.exponential(scale, size=(n-len(figures_scale))*sampling_scale)
-                new_scale = new_scale[new_scale < max_scale]
-                figures_scale.extend(new_scale)
-            scale = figures_scale[:n]
+            scales = []
+            sampling_scale = int(np.ceil(1.0 / (1 - np.exp(-scale*max_scale)))) # inverse probability of scales < max_scales
+            while len(scales) < n:
+                new_scales = rng.exponential(scale, size=(n-len(scales))*sampling_scale)
+                new_scales = new_scales[new_scales <= max_scale]
+                scales.extend(new_scales)
+            scales = scales[:n]
 
         if locations is None:
-            locations_idxs = rng.choice(self.points.shape[0], size=n)
-            locations = self.points[locations_idxs, :2]
+            idxs = rng.choice(len(self), size=n)
+            locations = self.points[idxs, :2]
 
-        holes_coordinates = np.empty(shape=(0,2), dtype=int)
-        for location, figure_scale in zip(locations, scale):
-            key_points_amount = rng.integers(2, max_angles_amount + 1)
+        coordinates = [] # container for all types of holes, represented by their coordinates
+        for location, figure_scale in zip(locations, scales):
+            n_key_points = rng.integers(2, max_angles_amount + 1)
             radius = rng.random()
             sharpness = rng.random()*rng.integers(1, max_sharpness)
 
-            figure_coordinates = make_bezier_figure(key_points_amount, radius, sharpness,
-                                                    figure_scale, self.shape, seed=seed)
+            figure_coordinates = make_bezier_figure(n=n_key_points, radius=radius, sharpness=sharpness,
+                                                    scale=figure_scale, shape=self.shape, seed=seed)
             figure_coordinates += location
-            holes_coordinates = np.vstack([holes_coordinates, figure_coordinates.astype(int)])
+            coordinates.append(figure_coordinates)
+        coordinates = np.concatenate(coordinates)
 
         # Generate random points
         if points_proportion:
-            n = int(self.size*points_proportion)
-            x = rng.integers(0, self.i_length, n)
-            y = rng.integers(0, self.x_length, n)
+            idxs = rng.choice(len(self), size=n)
+            locations = self.points[idxs, :2]
 
-            filtering_matrix[x, y] = 1
+            filtering_matrix[locations[:, 0], locations[:, 1]] = 1
             if isinstance(points_shape, int):
                 points_shape = (points_shape, points_shape)
             filtering_matrix = binary_dilation(filtering_matrix, np.ones(points_shape))
-            holes_coordinates = np.vstack([holes_coordinates,
-                                           np.argwhere(filtering_matrix > 0)])
+            coordinates = np.vstack([coordinates,
+                                     np.argwhere(filtering_matrix > 0)])
 
         if noise_level:
-            noise = rng.normal(loc=holes_coordinates,
-                                    scale=noise_level,
-                                    size=holes_coordinates.shape)
-            holes_coordinates = np.unique(np.vstack([holes_coordinates, noise.astype(int)]), axis=0)
+            noise = rng.normal(loc=coordinates,
+                               scale=noise_level,
+                               size=coordinates.shape)
+            coordinates = np.unique(np.vstack([coordinates, noise.astype(int)]), axis=0)
 
         # Shift objects
-        nonzero_borders_shift = np.min(holes_coordinates, axis=0)
-        nonzero_borders_shift[nonzero_borders_shift > 0] = 0
-        up_borders_shift = np.max(holes_coordinates, axis=0)
-        up_borders_shift[up_borders_shift <= self.shape] = 0
-        up_borders_shift[up_borders_shift > self.shape] -= np.array(self.shape)[up_borders_shift > self.shape]
-        holes_coordinates -= (up_borders_shift + nonzero_borders_shift + 1)
+        negative_coords_shift = np.min(coordinates, axis=0)
+        negative_coords_shift[negative_coords_shift > 0] = 0
+        huge_coords_shift = np.max(coordinates, axis=0)
+        huge_coords_shift[huge_coords_shift <= self.shape] = 0
+        huge_coords_shift[huge_coords_shift > self.shape] -= np.array(self.shape)[huge_coords_shift > self.shape]
+        coordinates -= (huge_coords_shift + negative_coords_shift + 1)
 
         # Cut objects if they are too big
-        suited_x = (holes_coordinates[:, 0] < self.i_length) & (holes_coordinates[:, 0] >= 0)
-        suited_y = (holes_coordinates[:, 1] < self.x_length) & (holes_coordinates[:, 1] >= 0)
-        holes_coordinates = holes_coordinates[suited_x & suited_y]
+        suited_ilines = (coordinates[:, 0] >= 0) & (coordinates[:, 0] < self.i_length)
+        suited_xlines = (coordinates[:, 1] >= 0) & (coordinates[:, 1] < self.x_length)
+        coordinates = coordinates[suited_ilines & suited_xlines]
 
-        filtering_matrix[holes_coordinates[:, 0], holes_coordinates[:, 1]] = 1
+        filtering_matrix[coordinates[:, 0], coordinates[:, 1]] = 1
         filtering_matrix = binary_fill_holes(filtering_matrix)
+        filtering_matrix = binary_dilation(filtering_matrix, iterations=4)
         filtering_matrix = self.put_on_full(filtering_matrix, False)
         return filtering_matrix
 

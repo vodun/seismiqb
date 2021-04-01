@@ -1,10 +1,10 @@
 """ Utility functions. """
+import os
 from math import isnan, atan
 import inspect
 
 from tqdm import tqdm
 import numpy as np
-from numpy.random import default_rng
 import pandas as pd
 from scipy.special import binom
 import segyio
@@ -606,7 +606,7 @@ def get_environ_flag(flag_name, defaults=('0', '1'), convert=int):
     return convert(flag)
 
 def make_bezier_figure(n=7, radius=0.2, sharpness=0.05, scale=1.0, shape=(1, 1),
-                  resolution=None, distance=.5, iters=100, seed=None):
+                       resolution=None, distance=.5, seed=None):
     """ Bezier closed curve coordinates.
     Creates Bezier closed curve which passes through random points.
     Code based on:  https://stackoverflow.com/questions/50731785/create-random-shape-contour-using-matplotlib
@@ -614,45 +614,38 @@ def make_bezier_figure(n=7, radius=0.2, sharpness=0.05, scale=1.0, shape=(1, 1),
     Parameters
     ----------
     n : int
-        Amount of angles (key points) in the random figure.
+        Number more than 1 to control amount of angles (key points) in the random figure.
         Must be more than 1.
     radius : float
-        Distance for control middle points in Bezier algorithm.
-        Is a number between 0 and 1.
+        Number between 0 and 1 to control the distance of middle points in Bezier algorithm.
     sharpness : float
-        Degree of sharpness/edgy.
-        If 0 then a curve will be the smoothest.
+        Degree of sharpness/edgy. If 0 then a curve will be the smoothest.
     scale : float
-        Figure scale.
-        Is a number between 0 and 1. Fits to the shape.
+        Number between 0 and 1 to control figure scale. Fits to the shape.
     shape : sequence int
-        Shape of figure location area (generally horizon shape).
+        Shape of figure location area.
     resolution : int
         Amount of points in one curve between two key points.
     distance : float
-        Distance between all key points in a unit square.
-        A number between 0 and 1.
-    iters : int
-        Stop criterion for search of key points.
+        Number between 0 and 1 to control distance between all key points in a unit square.
     seed: int, optional
         Seed the random numbers generator.
     """
-    rng = default_rng(seed)
+    rng = np.random.default_rng(seed)
     resolution = resolution or int(scale*max(shape)*100)
 
     # Get key points of figure as random points which are far enough each other
     key_points = rng.random((n, 2))
-    distance = distance**2
+    squared_distance = distance**2
 
-    for i in range(iters):
+    squared_distances = squared_distance - 1
+    while np.any(squared_distances < squared_distance):
         # Found distances between points and sort key_points by angles
         shifted_points = key_points - np.mean(key_points, axis=0)
         angles = np.arctan2(shifted_points[:, 0], shifted_points[:, 1])
         key_points = key_points[np.argsort(angles)]
 
         squared_distances = np.sum(np.diff(key_points, axis=0)**2, axis=1)
-        if np.all(squared_distances >= distance):
-            break
         key_points = rng.random((n, 2))
 
     key_points *= scale*np.array(shape, float)
