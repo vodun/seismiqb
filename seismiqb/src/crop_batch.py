@@ -1181,15 +1181,37 @@ class SeismicCropBatch(Batch):
         return crop[slices]
 
     @action
-    def add_channels(self, src, dst=None, channels='first'):
-        """ Add channels dimension (if needed). """
+    def adaptive_expand(self, src, dst=None, channels='first'):
+        """ Add channels dimension to 4D components if needed. If component data has shape `(batch_size, 1, n_x, n_d)`,
+        it will be keeped. If shape is `(batch_size, n_i, n_x, n_d)` and `n_i > 1`, channels axis
+        at position `axis` will be created.
+        """
         dst = dst or src
         src = [src] if isinstance(src, str) else src
         dst = [dst] if isinstance(dst, str) else dst
         axis = 1 if channels in [0, 'first'] else -1
         for _src, _dst in zip(src, dst):
             crop = getattr(self, _src)
-            crop = np.expand_dims(crop, axis=axis) if crop.shape[axis] != 1 else crop
+            if crop.ndim == 4 and crop.shape[1] != 1:
+                crop = np.expand_dims(crop, axis=axis)
+            setattr(self, _dst, crop)
+        return self
+
+    @action
+    def adaptive_squeeze(self, src, dst=None, channels='first'):
+        """ Remove channels dimension from 5D components if needed. If component data has shape
+        `(batch_size, n_c, n_i, n_x, n_d)` for `channels='first'` or `(batch_size, n_i, n_x, n_d, n_c)`
+        for `channels='last'` and `n_c > 1`, shape will be keeped. If `n_c == 1` , channels axis at position `axis`
+        will be squeezed.
+        """
+        dst = dst or src
+        src = [src] if isinstance(src, str) else src
+        dst = [dst] if isinstance(dst, str) else dst
+        axis = 1 if channels in [0, 'first'] else -1
+        for _src, _dst in zip(src, dst):
+            crop = getattr(self, _src)
+            if crop.ndim == 5 and crop.shape[axis] == 1:
+                crop = np.squeeze(crop, axis=axis)
             setattr(self, _dst, crop)
         return self
 
