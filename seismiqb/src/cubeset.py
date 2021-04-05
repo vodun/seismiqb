@@ -1198,16 +1198,11 @@ class SeismicCubeset(Dataset):
             raise ValueError('Length of crops must be equal to number of crops in a grid')
 
         if fill_value is None and len(crops) != 0:
-            fill_value = np.nanmin(crops)
+            fill_value = np.min(crops)
 
         grid_array = grid_info['grid_array']
         crop_shape = grid_info['crop_shape']
         background = np.full(grid_info['predict_shape'], fill_value, dtype=crops[0].dtype)
-
-        crops = np.array(crops)
-        if crops.ndim == 5:
-            crops = crops[:, 0]
-        crops = np.nan_to_num(crops, nan=fill_value)
 
         for j, (i, x, h) in enumerate(grid_array):
             crop_slice, background_slice = [], []
