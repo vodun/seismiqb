@@ -6,6 +6,7 @@
 import os
 import glob
 import datetime
+import tqdm
 
 import numpy as np
 import torch
@@ -55,9 +56,7 @@ class FaultController(BaseController):
         },
 
         'inference': {
-            'cubes': {
-                '21_AYA': [],
-            },
+            'cubes': dict(),
             'batch_size': 32,
             'side_view': False,
             'crop_shape': [1, 128, 512],
@@ -311,14 +310,15 @@ class FaultController(BaseController):
         if isinstance(cubes, (list, tuple)):
             cubes = {cube: (0, None, None, None) for cube in cubes}
         for cube in cubes:
-            cubes[cube] = [cubes[cube]] if isinstance(cubes[cube], (list, tuple)) else cubes[cube]
+            cubes[cube] = [cubes[cube]] if isinstance(cubes[cube][0], int) else cubes[cube]
         return cubes
 
-    def inference_on_slides(self, train_pipeline=None, model_path=None, create_mask=False, **kwargs):
+    def inference_on_slides(self, train_pipeline=None, model_path=None, create_mask=False, pbar=False, **kwargs):
         config = {**self.config['inference'], **kwargs}
         strides = config['stride'] if isinstance(config['stride'], tuple) else [config['stride']] * 3
         batch_size = config['batch_size']
 
+        self.log(f'Create test pipeline and dataset.')
         dataset = self.make_inference_dataset(create_mask)
         inference_pipeline = self.get_inference_template(train_pipeline, model_path, create_mask)
         inference_pipeline.set_config(config)
@@ -333,8 +333,11 @@ class FaultController(BaseController):
             geometry = dataset.geometries[cube_idx]
             shape = geometry.cube_shape
             for item in inference_cubes[cube_idx]:
+                self.log(f'Create prediction for {cube_idx}: {item[1:]}. axis={item[0]}.')
                 axis = item[0]
                 slices = item[1:]
+                if len(slices) != 3:
+                    slices = (None, None, None)
                 if axis in [0, 'i', 'ilines']:
                     crop_shape = config['crop_shape']
                     order = (0, 1, 2)
@@ -344,14 +347,12 @@ class FaultController(BaseController):
                 inference_pipeline.set_config({'test_crop_shape': crop_shape})
                 _strides = np.maximum(np.array(crop_shape) * np.array(strides), 1).astype(int)
                 slices = fill_defaults(slices, [[0, i] for i in shape])
-
                 dataset.make_grid(cube_idx, crop_shape, *slices, strides=_strides, batch_size=batch_size)
 
                 ppl = (inference_pipeline << dataset)
-                for _ in range(dataset.grid_iters):
+                for _ in tqdm.tqdm(range(dataset.grid_iters), disable=(not pbar)):
                     _ = ppl.next_batch(D('size'))
                 prediction = dataset.assemble_crops(ppl.v('predictions'), order=order).astype('float32')
-                print(slices)
                 image = geometry.file_hdf5['cube'][
                     slices[0][0]:slices[0][1],
                     slices[1][0]:slices[1][1],
@@ -367,7 +368,6 @@ class FaultController(BaseController):
         for cube in results:
             for item in results[cube]:
                 slices, image, prediction = item[:3]
-                print(image.shape, prediction.shape)
                 _savepath = None if savepath is None else (savepath + '_' + str(slices) + '.png')
                 prediction = prediction[0]
                 prediction[prediction < threshold] = 0
@@ -375,6 +375,76 @@ class FaultController(BaseController):
                     plot_image([image[0], prediction], mode='overlap', cmap='gray', figsize=(20, 20), savepath=_savepath)
                 else:
                     plot_image(prediction, figsize=(20, 20), savepath=_savepath)
+
+    def inference_on_cube(self, pipeline=None, model_path=None, fmt='npy', save_to=None, prefix=None, threshold=0.5, bar=True, **kwargs):
+        config = {**self.config['inference'], **kwargs}
+        strides = config['stride'] if isinstance(config['stride'], tuple) else [config['stride']] * 3
+        batch_size = config['batch_size']
+        chunk_shape = config['chunk_shape']
+
+        self.log(f'Create test pipeline and dataset.')
+        dataset = self.make_inference_dataset(create_mask)
+        inference_pipeline = self.get_inference_template(train_pipeline, model_path, create_mask)
+        inference_pipeline.set_config(config)
+
+        inference_cubes = {
+            self.cube_name_from_path(self.amplitudes_path(k)): v for k, v in self.parse_locations(config['cubes']).items()
+        }
+
+        if save_to:
+            dirname = save_to
+        else:
+            dirname = os.path.join(
+                    os.path.dirname(dataset.geometries[0].path),
+                    'PREDICTIONS/FAULTS',
+            )
+            if not os.path.exists(os.path.dirname(dirname)):
+                os.makedirs(os.path.dirname(dirname))
+            if not os.path.exists(dirname):
+                os.makedirs(dirname)
+
+        prefix = prefix or ''
+
+        for cube_idx in dataset.indices:
+            geometry = dataset.geometries[cube_idx]
+            shape = geometry.cube_shape
+            for item in inference_cubes[cube_idx]:
+                self.log(f'Create prediction for {cube_idx}: {item[1:]}. axis={item[1]}.')
+                axis = item[0]
+                slices = item[1:]
+                locations = [slice(item[0], item[1]) if item else slice(None) for item in slices]
+                if axis in [0, 'i', 'ilines']:
+                    crop_shape = config['crop_shape']
+                    order = (0, 1, 2)
+                    _chunk_shape = chunk_shape
+                else:
+                    crop_shape = np.array(config['crop_shape'])[[1, 0, 2]]
+                    order = (1, 0, 2)
+                    _chunk_shape = (chunk_shape[1], chunk_shape[0], chunk_shape[2])
+                inference_pipeline.set_config({'test_crop_shape': crop_shape})
+                _strides = np.maximum(np.array(crop_shape) * np.array(strides), 1).astype(int)
+                slices = fill_defaults(slices, [[0, i] for i in shape])
+
+                filename = {ext: os.path.join(dirname, self.make_filename(prefix, 'x' if t else 'i', ext)) for ext in ['hdf5', 'sgy', 'npy', 'meta']}
+                if fmt == 'npy':
+                    _filename = None
+                elif fmt in ['hdf5', 'sgy']:
+                    _filename = filename['hdf5']
+
+                prediction = dataset.make_prediction(_filename, inference_pipeline, crop_shape, _strides, locations,
+                                                    batch_size=batch_size, chunk_shape=_chunk_shape, pbar=bar,
+                                                    threshold=None, order=order, agg='mean')
+                if fmt == 'npy':
+                    np.save(filename, np.stack(np.where(prediction > threshold), axis=1), allow_pickle=False)
+                elif fmt == 'sgy':
+                    prediction_cube = SeismicGeometry(filename['hdf5'])
+                    copyfile(dataset.geometries[0].path_meta, filename['meta'])
+                    dataset.geometries[0].make_sgy(
+                        path_hdf5=filename['hdf5'],
+                        path_spec=dataset.geometries[0].segy_path.decode('utf-8'),
+                        path_segy=filename['sgy'],
+                        remove_hdf5=True, zip_result=True, pbar=True
+                    )
 
     def get_model_config(self, name):
         if name == 'UNet':
@@ -431,3 +501,6 @@ class FaultController(BaseController):
                 _mask = np.expand_dims(_mask, axes[i])
                 mask = mask * _mask
         return mask
+
+    def make_filename(self, prefix, orientation, ext):
+        return (prefix + datetime.now().strftime("%Y%m%d%H%M%S") + '_{}.{}').format(orientation, ext)
