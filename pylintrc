@@ -22,5 +22,9 @@ disable=no-value-for-parameter, no-self-use, too-few-public-methods, unsubscript
 [TYPECHECK]
 ignored-modules=numpy, numba
 
+[BASIC]
+class-rgx=[A-Z_][a-zA-Z0-9_]+$
+good-names=bar,df,fn
+
 [MISCELLANEOUS]
 notes=

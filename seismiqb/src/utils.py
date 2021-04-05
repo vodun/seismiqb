@@ -7,6 +7,8 @@ from tqdm import tqdm
 import numpy as np
 import pandas as pd
 import segyio
+import torch
+import torch.nn.functional as F
 
 from numba import njit, prange
 
@@ -224,7 +226,7 @@ def make_axis_grid(axis_range, stride, length, crop_shape):
         grid_ += [axis_range[1] - crop_shape]
     return sorted(grid_)
 
-def infer_tuple(value, default):
+def fill_defaults(value, default):
     """ Transform int or tuple with Nones to tuple with values from default.
 
     Parameters
@@ -250,6 +252,19 @@ def infer_tuple(value, default):
     elif isinstance(value, tuple):
         value = tuple([item if item else default[i] for i, item in enumerate(value)])
     return value
+
+def parse_axis(axis, index_headers=None):
+    """ Convert string representation of an axis into integer, if needed. """
+    if isinstance(axis, str):
+        if index_headers and axis in index_headers:
+            axis = index_headers.index(axis)
+        elif axis in ['i', 'il', 'iline']:
+            axis = 0
+        elif axis in ['x', 'xl', 'xline']:
+            axis = 1
+        elif axis in ['h', 'height', 'depth']:
+            axis = 2
+    return axis
 
 def _adjust_shape_for_rotation(shape, angle):
     """ Compute adjusted 2D crop shape to rotate it and get central crop without padding.
@@ -532,62 +547,30 @@ def filter_simplices(simplices, points, matrix, threshold=5.):
 
     return simplices[mask == 1]
 
-
-@njit(parallel=True)
-def attr_filter(array, result, window, stride, points, attribute='semblance'):
+def compute_attribute(array, window, device='cuda:0', attribute='semblance'):
     """ Compute semblance for the cube. """
-    l = points.shape[0]
-    for index in prange(l): # pylint: disable=not-an-iterable
-        i, j, k = points[index]
-        if (i % stride[0] == 0) and (j % stride[1] == 0) and (k % stride[2] == 0):
-            region = array[
-                max(i - window[0] // 2, 0):min(i + window[0] // 2 + window[0] % 2, array.shape[0]),
-                max(j - window[1] // 2, 0):min(j + window[1] // 2 + window[1] % 2, array.shape[1]),
-                max(k - window[2] // 2, 0):min(k + window[2] // 2 + window[2] % 2, array.shape[2])
-            ]
-            if attribute == 'semblance':
-                val = semblance(region.copy())
-            elif attribute == 'semblance_2':
-                val = semblance_2(region.copy())
-            elif attribute == 'corr':
-                val = local_correlation(region.copy())
-            result[i // stride[0], j // stride[1], k // stride[2]] = val
-    return result
+    if isinstance(window, int):
+        window = np.ones(3, dtype=np.int32) * window
+    window = np.minimum(np.array(window), array.shape)
 
-@njit
-def semblance(region):
-    """ Marfurt semblance based on paper Marfurt et al.
-    `3-D seismic attributes using a semblance-based coherency algorithm
-    <http://mcee.ou.edu/aaspi/publications/1998/marfurt_etal_GPHY1998b.pdf>`__. """
-    denum = np.sum(region**2) * region.shape[0] * region.shape[1]
-    if denum != 0:
-        return ((np.sum(np.sum(region, axis=0), axis=0)**2).sum()) / denum
-    return 0.
+    inputs = torch.Tensor(array).to(device)
+    inputs = inputs.view(1, 1, *inputs.shape)
+    padding = [(w // 2, w - w // 2 - 1) for w in window]
 
-@njit(parallel=True)
-def semblance_2(region):
-    """ Marfurt semblance v2. """
-    region = region.reshape(-1, region.shape[-1])
-    covariation = region.dot(region.T)
-    s = 0.
-    for i in prange(covariation.shape[0]): # pylint: disable=not-an-iterable
-        s += covariation[i, i]
-    if s != 0:
-        return covariation.sum() / (s * len(region))
-    return 0.
+    num = F.pad(inputs, (0, 0, *padding[1], *padding[0], 0, 0, 0, 0))
+    num = F.conv3d(num, torch.ones((1, 1, window[0], window[1], 1), dtype=torch.float32).to(device)) ** 2
+    num = F.pad(num, (*padding[2], 0, 0, 0, 0, 0, 0, 0, 0))
+    num = F.conv3d(num, torch.ones((1, 1, 1, 1, window[2]), dtype=torch.float32).to(device))
 
-@njit(parallel=True)
-def local_correlation(region):
-    """ Correlation in window. """
-    center = region[region.shape[0] // 2, region.shape[1] // 2]
-    corr = np.zeros((region.shape[0], region.shape[1]))
-    for i in range(region.shape[0]): # pylint: disable=not-an-iterable
-        for j in range(region.shape[1]):
-            cov = np.mean((center - np.mean(center)) * (region[i, j] - np.mean(region[i, j])))
-            den = np.std(center) / np.std(region[i, j])
-            if den != 0:
-                corr[i, j] = cov / den
-    return np.mean(corr)
+    denum = F.pad(inputs, (*padding[2], *padding[1], *padding[0], 0, 0, 0, 0))
+    denum = F.conv3d(denum ** 2, torch.ones((1, 1, *window), dtype=torch.float32).to(device))
+
+    normilizing = torch.ones(inputs.shape[:-1], dtype=torch.float32).to(device)
+    normilizing = F.pad(normilizing, (*padding[1], *padding[0], 0, 0, 0, 0))
+    normilizing = F.conv2d(normilizing, torch.ones((1, 1, window[0], window[1]), dtype=torch.float32).to(device))
+
+    denum *= normilizing.view(*normilizing.shape, 1)
+    return np.nan_to_num((num / denum).cpu().numpy()[0, 0], nan=1.)
 
 def retrieve_function_arguments(function, dictionary):
     """ Retrieve both positional and keyword arguments for a passed `function` from a `dictionary`.
