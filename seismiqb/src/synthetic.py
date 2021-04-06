@@ -33,14 +33,22 @@ def make_curves_v1(num_curves, num_points, shape=(100, 100),
 
     return results
 
-def make_surfaces_v1(num_surfaces, grid_shape, shape=(100, 100, 400),
-                     kind='cubic', perturbation_share=0.25, shares=None):
+def make_surfaces(num_surfaces, grid_shape, shape=(100, 100, 400), kind='cubic',
+                  perturbation_share=0.25, shares=None):
     """ First param is num_surfaces while the second controls how volatile is the curve. Might wanna
     try changing the parameter with curve.
     """
-    # make an array of curve-supports
-    grid_x = np.linspace(0, 1, grid_shape[0])
-    grid_y = np.linspace(0, 1, grid_shape[1])
+    # select interpolation-method based on the cube-shape
+    if len(shape) == 2:
+        method = interp1d
+    elif len(shape) == 3:
+        method = interp2d
+    else:
+        raise ValueError('The function only supports the generation of 2d ans 3d seismic.')
+
+    # make the grid
+    grid_shape = (grid_shape, ) if isinstance(grid_shape, int) else grid_shape
+    grid = [np.linspace(0, 1, num_points) for num_points in grid_shape]
 
     # make the first curve
     curves = [np.zeros(grid_shape)]
@@ -50,20 +58,20 @@ def make_surfaces_v1(num_surfaces, grid_shape, shape=(100, 100, 400),
         delta_h = shares[i]
         epsilon = perturbation_share * delta_h
 
-        # make each curve in unit-terms then scale it to cube-shape
+        # make each curve in unit-terms
         curves.append(curves[-1] + delta_h * np.ones_like(curves[0])
                       + np.random.uniform(low=-epsilon, high=epsilon, size=curves[0].shape))
 
     # make an array of interpolations
     funcs = []
     for curve in curves:
-        funcs.append(interp2d(grid_x, grid_y, curve, kind=kind))
+        funcs.append(method(*grid, curve, kind=kind))
 
-    # compute in integers
+    #  scale each curve to cube-shape
     results = []
     for func in funcs:
-        results.append((func(np.arange(shape[1]) / shape[1],
-                             np.arange(shape[0]) / shape[0]) * shape[2]).astype(np.int))
+        results.append((func(*[np.arange(num_points) / num_points for num_points in shape[:-1]])
+                        * shape[-1]).astype(np.int))
 
     return results
 
@@ -121,7 +129,7 @@ def convolve_3d(rc, w):
 
 def make_synthetic_3d(shape=(50, 400, 800), num_reflections=200, vel_limits=(900, 5400), horizon_heights=(1/4, 1/2, 2/3),
                       horizon_jumps=(7, 5, 4), grid_shape=(10, 10), perturbation_share=.2, rho_noise_lims=(0.97, 1.3),
-                      ricker_rate=2/3e3, ricker_frequency=30, sigma=1.1, noise=0.5):
+                      ricker_rate=2/3e3, ricker_frequency=30, sigma=1.1, noise_mul=0.5):
     """ Generate synthetic 3d-cube.
 
     Parameters
@@ -165,7 +173,7 @@ def make_synthetic_3d(shape=(50, 400, 800), num_reflections=200, vel_limits=(900
         colors[int(colors.shape[0] * height_share)] += llim * jump_mul
 
     # make velocity model
-    curves = make_surfaces_v1(num_reflections, grid_shape, perturbation_share=perturbation_share, shape=shape)
+    curves = make_surfaces(num_reflections, grid_shape, perturbation_share=perturbation_share, shape=shape)
     vel_model = np.zeros(shape=shape)
     for i in range(vel_model.shape[0]):
         for x in range(vel_model.shape[1]):
