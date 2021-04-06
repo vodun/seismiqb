@@ -218,7 +218,7 @@ class FaultController(BaseController):
             .init_variable('loss_history', [])
             .init_variable('loss', [])
             .init_model('dynamic', model_class, 'model', model_config)
-            .add_channels(src=['images', 'masks'])
+            .adaptive_expand(src=['images', 'masks'])
             .train_model('model',
                          fetches=['loss', C('output')],
                          images=B('images'),
@@ -271,10 +271,11 @@ class FaultController(BaseController):
         test_pipeline += (
             Pipeline()
             .adaptive_reshape(src=comp, shape=C('crop_shape'))
-            .add_channels(src=comp)
+            .adaptive_expand(src='images')
             .init_variable('predictions', [])
             .init_variable('target', [])
             .predict_model('model', B('images'), fetches=C('output'), save_to=B('predictions'))
+            .adaptive_squeeze(src='predictions')
             .run_later(D('size'))
         )
 
