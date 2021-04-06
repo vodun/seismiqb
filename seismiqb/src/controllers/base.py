@@ -88,9 +88,10 @@ class BaseController:
         'evaluate': {}
     })
 
-    def __init__(self, config=None):
+    def __init__(self, config=None, **kwargs):
         self.config = Config(self.DEFAULTS)
         self.config += config or {}
+        self.config += kwargs
 
         self.monitor = self.config.monitor
         self.plot = self.config.plot
