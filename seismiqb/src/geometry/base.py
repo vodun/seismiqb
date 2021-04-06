@@ -6,19 +6,15 @@ import shutil
 import itertools
 
 from textwrap import dedent
-from random import random
-from itertools import product
 from tqdm.auto import tqdm
 
 import numpy as np
-import pandas as pd
 import h5py
 import segyio
-import cv2
 
-from ..utils import find_min_max, file_print, compute_attribute, make_axis_grid, \
-                   fill_defaults, parse_axis, get_environ_flag
-from ..utility_classes import lru_cache, SafeIO
+from ..utils import file_print, compute_attribute, make_axis_grid, \
+                    fill_defaults, get_environ_flag
+from ..utility_classes import lru_cache
 from ..plotters import plot_image
 
 
@@ -125,11 +121,14 @@ class SeismicGeometry:
         'segy_path', 'segy_text', 'rotation_matrix',
         'byte_no', 'offsets', 'ranges', 'lens', # `uniques` can't be saved due to different lenghts of arrays
         'ilines', 'xlines', 'ilines_offset', 'xlines_offset', 'ilines_len', 'xlines_len',
-        'value_min', 'value_max', 'q01', 'q99', 'q001', 'q999', 'bins', 'zero_traces', '_quality_map',
+        'v_min', 'v_max', 'v_mean', 'v_std',
+        'v_q01', 'v_q99', 'v_q001', 'v_q999',
+        'bins', 'zero_traces', '_quality_map',
     ]
 
     PRESERVED_LAZY = [
-        'trace_container', 'min_matrix', 'max_matrix', 'mean_matrix', 'std_matrix', 'hist_matrix',
+        'trace_container', 'hist_matrix',
+        'min_matrix', 'max_matrix', 'mean_matrix', 'std_matrix',
     ]
 
     # Headers to load from SEG-Y cube
@@ -169,7 +168,7 @@ class SeismicGeometry:
         self.anonymize = get_environ_flag('SEISMIQB_ANONYMIZE')
 
         name = os.path.basename(self.path)
-        # find span of uppercase letter sequence between '_' and '.' symbols in filename
+        # Find span of uppercase letter sequence between '_' and '.' symbols in filename
         field_search = re.search(r'_([A-Z]+?)\.', name)
         self.field = name[slice(*field_search.span(1))] if field_search is not None else ""
         self.name = name.replace("_" * bool(self.field) + self.field, "") if self.anonymize else name
@@ -181,6 +180,7 @@ class SeismicGeometry:
         self.long_name = ':'.join(self.path.split('/')[-2:])
         self.format = os.path.splitext(self.path)[1][1:]
 
+        # Property holders
         self._quality_map = None
         self._quality_grid = None
 
@@ -193,10 +193,34 @@ class SeismicGeometry:
     def __len__(self):
         """ Number of meaningful traces. """
         if hasattr(self, 'zero_traces'):
-            return np.prod(self.zero_traces.shape) - self.zero_traces.sum()
-        return len(self.dataframe)
+            return self.nonzero_traces
+        return self.total_traces
 
 
+    # Utility functions
+    def parse_axis(self, axis):
+        """ Convert string representation of an axis into integer, if needed. """
+        if isinstance(axis, str):
+            if axis in self.index_headers:
+                axis = self.index_headers.index(axis)
+            elif axis in ['i', 'il', 'iline']:
+                axis = 0
+            elif axis in ['x', 'xl', 'xline']:
+                axis = 1
+            elif axis in ['h', 'height', 'depth']:
+                axis = 2
+        return axis
+
+    def make_slide_locations(self, loc, axis=0):
+        """ Create locations (sequence of locations for each axis) for desired slide along desired axis. """
+        axis = self.parse_axis(axis)
+
+        locations = [slice(0, item) for item in self.cube_shape]
+        locations[axis] = slice(loc, loc + 1)
+        return locations
+
+
+    # Meta information: storing / retrieving attributes
     def store_meta(self, path=None):
         """ Store collected stats on disk. """
         path_meta = path or os.path.splitext(self.path)[0] + '.meta'
@@ -220,7 +244,7 @@ class SeismicGeometry:
         """ Retrieve stored stats from disk. """
         path_meta = os.path.splitext(self.path)[0] + '.meta'
 
-        # Backward compatibility
+        # Backward compatibility: if absent in meta-file, try getting from file itself
         if not os.path.exists(path_meta):
             path_meta = os.path.splitext(self.path)[0] + '.hdf5'
         self.path_meta = path_meta
@@ -249,7 +273,8 @@ class SeismicGeometry:
         return object.__getattribute__(self, key)
 
 
-    def scaler(self, array, mode='minmax'):
+    # Normalization
+    def normalize(self, array, mode='minmax'):
         """ Normalize array of amplitudes cut from the cube.
 
         Parameters
@@ -272,16 +297,13 @@ class SeismicGeometry:
             return (array - self.value_min) / scale
         raise ValueError('Wrong mode', mode)
 
-    def make_slide_locations(self, loc, axis=0):
-        """ Create locations (sequence of locations for each axis) for desired slide along desired axis. """
-        axis = parse_axis(axis, self.index_headers)
-
-        locations = [slice(0, item) for item in self.cube_shape]
-        locations[axis] = slice(loc, loc + 1)
-        return locations
-
 
     # Spatial matrices
+    @property
+    def snr(self):
+        """ Signal-to-noise ratio. """
+        return np.log(self.mean_matrix**2 / self.std_matrix**2)
+
     @lru_cache(100)
     def get_quantile_matrix(self, q):
         """ Restore the quantile matrix for desired `q` from `hist_matrix`.
@@ -327,7 +349,7 @@ class SeismicGeometry:
         kwargs : dict
             Other parameters of metric(s) evaluation.
         """
-        from .metrics import GeometryMetrics #pylint: disable=import-outside-toplevel
+        from ..metrics import GeometryMetrics #pylint: disable=import-outside-toplevel
         quality_map = GeometryMetrics(self).evaluate('quality_map', quantiles=quantiles,
                                                      metric_names=metric_names, **kwargs)
         self._quality_map = quality_map
@@ -337,7 +359,7 @@ class SeismicGeometry:
     def quality_grid(self):
         """ Spatial grid based on `quality_map`. """
         if self._quality_grid is None:
-            self.make_quality_grid((20, 150))
+            self.make_quality_grid((100, 200))
         return self._quality_grid
 
     def make_quality_grid(self, frequencies, iline=True, xline=True, full_lines=True, margin=0, **kwargs):
@@ -356,7 +378,7 @@ class SeismicGeometry:
         kwargs : dict
             Other parameters of grid making.
         """
-        from .metrics import GeometryMetrics #pylint: disable=import-outside-toplevel
+        from ..metrics import GeometryMetrics #pylint: disable=import-outside-toplevel
         quality_grid = GeometryMetrics(self).make_grid(self.quality_map, frequencies,
                                                        iline=iline, xline=xline, full_lines=full_lines,
                                                        margin=margin, **kwargs)
@@ -364,7 +386,7 @@ class SeismicGeometry:
         return quality_grid
 
 
-    # Instance introspection and visualization methods
+    # Cache: introspection and reset
     def reset_cache(self):
         """ Clear cached slides. """
         if self.structured is False:
@@ -393,6 +415,37 @@ class SeismicGeometry:
 
         return sum(item.nbytes / (1024 ** 3) for item in method.cache()[self].values())
 
+
+    # Properties
+    @property
+    def axis_names(self):
+        """ Names of the axis: multiple headers and `DEPTH` as the last one. """
+        return self.index_headers + ['DEPTH']
+
+    @property
+    def textual(self):
+        """ Wrapped textual header of SEG-Y file. """
+        txt = ''.join([chr(item) for item in self.segy_text[0]])
+        txt = '\n#'.join(txt.split('C'))
+        return txt.replace('26 \n#', '26 C').strip()
+
+    @property
+    def displayed_path(self):
+        """ Return path with masked field name, if anonymization needed. """
+        return self.path.replace(self.field, "*" * bool(self.field)) if self.anonymize else self.path
+
+    @property
+    def nonzero_traces(self):
+        """ Amount of meaningful traces in a cube. """
+        return np.prod(self.zero_traces.shape) - self.zero_traces.sum()
+
+    @property
+    def total_traces(self):
+        """ Total amount of traces in a cube. """
+        if hasattr(self, 'zero_traces'):
+            return np.prod(self.zero_traces.shape)
+        return len(self.dataframe)
+
     @property
     def nbytes(self):
         """ Size of instance in bytes. """
@@ -408,11 +461,8 @@ class SeismicGeometry:
         """ Size of instance in gigabytes. """
         return self.nbytes / (1024**3)
 
-    @property
-    def displayed_path(self):
-        """ Return path with masked field name, if anonymization needed. """
-        return self.path.replace(self.field, "*" * bool(self.field)) if self.anonymize else self.path
 
+    # Textual representation
     def __repr__(self):
         return 'Inferred geometry for {}: ({}x{}x{})'.format(self.name, *self.cube_shape)
 
@@ -420,51 +470,90 @@ class SeismicGeometry:
         msg = f"""
         Geometry for cube              {self.displayed_path}
         Current index:                 {self.index_headers}
-        Shape:                         {self.cube_shape}
-        Time delay and sample rate:    {self.delay}, {self.sample_rate}
+        Cube shape:                    {self.cube_shape}
+        Time delay:                    {self.delay}
+        Sample rate:                   {self.sample_rate}
 
-        Cube size:                     {os.path.getsize(self.path) / (1024**3):4.3} GB
-        Size of the instance:          {self.ngbytes:4.3} GB
+        Cube size:                     {os.path.getsize(self.path) / (1024**3):4.3f} GB
+        Size of the instance:          {self.ngbytes:4.3f} GB
 
-        Number of traces:              {np.prod(self.cube_shape[:-1])}
+        Number of traces:              {self.total_traces}
         """
+
         if hasattr(self, 'zero_traces'):
-            msg += f"""Number of non-zero traces:     {np.prod(self.cube_shape[:-1]) - np.sum(self.zero_traces)}
+            msg += f"""Number of non-zero traces:     {self.nonzero_traces}
             """
 
         if self.has_stats:
             msg += f"""
-        Num of unique amplitudes:      {len(np.unique(self.trace_container))}
-        Mean/std of amplitudes:        {np.mean(self.trace_container):6.6}/{np.std(self.trace_container):6.6}
-        Min/max amplitudes:            {self.value_min:6.6}/{self.value_max:6.6}
-        q01/q99 amplitudes:            {self.q01:6.6}/{self.q99:6.6}
-            """
+        Num of unique amplitudes:      {self.v_uniques:>10}
+        Mean/std of amplitudes:        {self.v_mean:>10.2f} | {self.v_std:<10.2f}
+        Min/max amplitudes:            {self.v_min:>10.2f} | {self.v_max:<10.2f}
+        q01/q99 amplitudes:            {self.v_q01:>10.2f} | {self.v_q99:<10.2f}
+        """
         return dedent(msg)
 
-    @property
-    def axis_names(self):
-        """ Names of the axis: multiple headers and `DEPTH` as the last one. """
-        return self.index_headers + ['DEPTH']
+    def print(self, printer=print):
+        """ Show textual representation. """
+        printer(self)
+
+    def print_textual(self, printer=print):
+        """ Show textual header from original SEG-Y. """
+        printer(self.textual)
+
+    def print_location(self, printer=print):
+        """ Show ranges for each of the headers. """
+        msg = ''
+        for i, name in enumerate(self.index_headers):
+            name += ':'
+            msg += f'\n{name:<30} [{self.uniques[i][0]}, {self.uniques[i][-1]}]'
+        printer(msg)
 
     def log(self, printer=None):
         """ Log info about cube into desired stream. By default, creates a file next to the cube. """
         if not callable(printer):
-            path_log = '/'.join(self.path.split('/')[:-1]) + '/CUBE_INFO.log'
+            path_log = os.path.dirname(self.path) + '/CUBE_INFO.log'
             printer = lambda msg: file_print(msg, path_log)
         printer(str(self))
 
 
-    def show_snr(self, **kwargs):
-        """ Show signal-to-noise map. """
+    # Visual representation
+    def show(self, matrix='snr', **kwargs):
+        """ Show geometry-related map. """
         kwargs = {
             'cmap': 'viridis_r',
-            'title': f'Signal-to-noise map of `{self.name}`',
+            'title': f'{matrix if isinstance(matrix, str) else ""} map of `{self.name}`',
             'xlabel': self.index_headers[0],
             'ylabel': self.index_headers[1],
             **kwargs
             }
-        matrix = np.log(self.mean_matrix**2 / self.std_matrix**2)
+        matrix = getattr(self, matrix) if isinstance(matrix, str) else matrix
         plot_image(matrix, mode='single', **kwargs)
+
+    def show_quality_map(self, **kwargs):
+        """ Show quality map. """
+        self.show(matrix=self.quality_map, cmap='Reds', title=f'Quality map of `{self.name}`')
+
+    def show_quality_grid(self, **kwargs):
+        """ Show quality grid. """
+        self.show(matrix=self.quality_grid, cmap='Reds', interpolation='bilinear',
+                  title=f'Quality map of `{self.name}`')
+
+    def show_histogram(self, scaler=None, bins=50, **kwargs):
+        """ Show distribution of amplitudes in `trace_container`. Optionally applies chosen `scaler`. """
+        data = np.copy(self.trace_container)
+        if scaler:
+            data = self.scaler(data, mode=scaler)
+
+        kwargs = {
+            'title': (f'Amplitude distribution for {self.short_name}' +
+                      f'\n Mean/std: {np.mean(data):3.3}/{np.std(data):3.3}'),
+            'label': 'Amplitudes histogram',
+            'xlabel': 'amplitude',
+            'ylabel': 'density',
+            **kwargs
+        }
+        plot_image(data, backend='matplotlib', bins=bins, mode='histogram', **kwargs)
 
     def show_slide(self, loc=None, start=None, end=None, step=1, axis=0, zoom_slice=None,
                    n_ticks=5, delta_ticks=100, stable=True, **kwargs):
@@ -483,7 +572,7 @@ class SeismicGeometry:
         stable : bool
             Whether or not to use the same sorting order as in the segyfile.
         """
-        axis = parse_axis(axis, self.index_headers)
+        axis = self.parse_axis(axis)
         slide = self.load_slide(loc=loc, start=start, end=end, step=step, axis=axis, stable=stable)
         xticks = list(range(slide.shape[0]))
         yticks = list(range(slide.shape[1]))
@@ -531,90 +620,11 @@ class SeismicGeometry:
         }
         plot_image(slide, **kwargs)
 
-    def show_amplitude_hist(self, scaler=None, bins=50, **kwargs):
-        """ Show distribution of amplitudes in `trace_container`. Optionally applies chosen `scaler`. """
-        data = np.copy(self.trace_container)
-        if scaler:
-            data = self.scaler(data, mode=scaler)
 
-        kwargs = {
-            'title': (f'Amplitude distribution for {self.short_name}' +
-                      f'\n Mean/std: {np.mean(data):3.3}/{np.std(data):3.3}'),
-            'label': 'Amplitudes histogram',
-            'xlabel': 'amplitude',
-            'ylabel': 'density',
-            **kwargs
-        }
-        plot_image(data, backend='matplotlib', bins=bins, mode='histogram', **kwargs)
-
-
-    # Convert HDF5 to SEG-Y
-    def make_sgy(self, path_hdf5=None, path_spec=None, postfix='',
-                 remove_hdf5=False, zip_result=True, path_segy=None, pbar=False):
-        """ Convert POST-STACK HDF5 cube to SEG-Y format with current geometry spec.
-
-        Parameters
-        ----------
-        path_hdf5 : str
-            Path to load hdf5 file from.
-        path_spec : str
-            Path to load segy file from with geometry spec.
-        path_segy : str
-            Path to store converted cube. By default, new cube is stored right next to original.
-        postfix : str
-            Postfix to add to the name of resulting cube.
-        """
-        path_segy = path_segy or (os.path.splitext(path_hdf5)[0] + postfix + '.sgy')
-        if not path_spec:
-            if hasattr(self, 'segy_path'):
-                path_spec = self.segy_path
-            else:
-                path_spec = os.path.splitext(self.path) + '.sgy'
-
-        # By default, if path_hdf5 is not provided, `temp.hdf5` next to self.path will be used
-        if path_hdf5 is None:
-            path_hdf5 = os.path.join(os.path.dirname(self.path), 'temp.hdf5')
-
-        with h5py.File(path_hdf5, 'r') as src:
-            cube_hdf5 = src['cube']
-
-            geometry = SeismicGeometry(path_spec)
-            segy = geometry.segyfile
-
-            spec = segyio.spec()
-            spec.sorting = None if segy.sorting is None else int(segy.sorting)
-            spec.format = None if segy.format is None else int(segy.format)
-            spec.samples = range(self.depth)
-
-            idx = np.stack(geometry.dataframe.index)
-            ilines, xlines = self.load_meta_item('ilines'), self.load_meta_item('xlines')
-
-            i_enc = {num: k for k, num in enumerate(ilines)}
-            x_enc = {num: k for k, num in enumerate(xlines)}
-
-            spec.ilines = ilines
-            spec.xlines = xlines
-
-            with segyio.create(path_segy, spec) as dst_file:
-                # Copy all textual headers, including possible extended
-                for i in range(1 + segy.ext_headers):
-                    dst_file.text[i] = segy.text[i]
-                dst_file.bin = segy.bin
-
-                for c, (i, x) in enumerate(tqdm(idx, disable=(not pbar))):
-                    locs = tuple([i_enc[i], x_enc[x], slice(None)])
-                    dst_file.header[c] = segy.header[c]
-                    dst_file.trace[c] = cube_hdf5[locs]
-                dst_file.bin = segy.bin
-                dst_file.bin[segyio.BinField.Traces] = len(idx)
-
-        if remove_hdf5:
-            os.remove(path_hdf5)
-
-        if zip_result:
-            dir_name = os.path.dirname(os.path.abspath(path_segy))
-            file_name = os.path.basename(path_segy)
-            shutil.make_archive(os.path.splitext(path_segy)[0], 'zip', dir_name, file_name)
+    # Coordinate conversion
+    def lines_to_cdp(self, points):
+        """ Convert lines to CDP. """
+        return (self.rotation_matrix[:, :2] @ points.T + self.rotation_matrix[:, 2].reshape(2, -1)).T
 
     def cdp_to_lines(self, points):
         """ Convert CDP to lines. """
@@ -622,6 +632,8 @@ class SeismicGeometry:
         lines = (inverse_matrix @ points.T - inverse_matrix @ self.rotation_matrix[:, 2].reshape(2, -1)).T
         return np.rint(lines)
 
+
+    # Attributes
     def compute_attribute(self, locations=None, window=10, attribute='semblance', device='cpu'):
         """ Compute attribute on cube.
 
@@ -687,6 +699,7 @@ class SeismicGeometry:
 
         # self.store_meta(path_meta)
 
+    # Misc
     @classmethod
     def create_file_from_iterable(cls, src, shape, window, stride, dst=None,
                                   agg=None, projection='ixh', threshold=None):
@@ -761,3 +774,71 @@ class SeismicGeometry:
                 cube_hdf5_x[:, :, i:i+window[0]] = slide.transpose((1, 2, 0))
                 cube_hdf5_h[:, i:i+window[0]] = slide.transpose((2, 0, 1))
         return dst
+
+
+    def make_sgy(self, path_hdf5=None, path_spec=None, postfix='',
+                 remove_hdf5=False, zip_result=True, path_segy=None, pbar=False):
+        """ Convert POST-STACK HDF5 cube to SEG-Y format with current geometry spec.
+
+        Parameters
+        ----------
+        path_hdf5 : str
+            Path to load hdf5 file from.
+        path_spec : str
+            Path to load segy file from with geometry spec.
+        path_segy : str
+            Path to store converted cube. By default, new cube is stored right next to original.
+        postfix : str
+            Postfix to add to the name of resulting cube.
+        """
+        path_segy = path_segy or (os.path.splitext(path_hdf5)[0] + postfix + '.sgy')
+        if not path_spec:
+            if hasattr(self, 'segy_path'):
+                path_spec = self.segy_path
+            else:
+                path_spec = os.path.splitext(self.path) + '.sgy'
+
+        # By default, if path_hdf5 is not provided, `temp.hdf5` next to self.path will be used
+        if path_hdf5 is None:
+            path_hdf5 = os.path.join(os.path.dirname(self.path), 'temp.hdf5')
+
+        with h5py.File(path_hdf5, 'r') as src:
+            cube_hdf5 = src['cube']
+
+            geometry = SeismicGeometry(path_spec)
+            segy = geometry.segyfile
+
+            spec = segyio.spec()
+            spec.sorting = None if segy.sorting is None else int(segy.sorting)
+            spec.format = None if segy.format is None else int(segy.format)
+            spec.samples = range(self.depth)
+
+            idx = np.stack(geometry.dataframe.index)
+            ilines, xlines = self.load_meta_item('ilines'), self.load_meta_item('xlines')
+
+            i_enc = {num: k for k, num in enumerate(ilines)}
+            x_enc = {num: k for k, num in enumerate(xlines)}
+
+            spec.ilines = ilines
+            spec.xlines = xlines
+
+            with segyio.create(path_segy, spec) as dst_file:
+                # Copy all textual headers, including possible extended
+                for i in range(1 + segy.ext_headers):
+                    dst_file.text[i] = segy.text[i]
+                dst_file.bin = segy.bin
+
+                for c, (i, x) in enumerate(tqdm(idx, disable=(not pbar))):
+                    locs = tuple([i_enc[i], x_enc[x], slice(None)])
+                    dst_file.header[c] = segy.header[c]
+                    dst_file.trace[c] = cube_hdf5[locs]
+                dst_file.bin = segy.bin
+                dst_file.bin[segyio.BinField.Traces] = len(idx)
+
+        if remove_hdf5:
+            os.remove(path_hdf5)
+
+        if zip_result:
+            dir_name = os.path.dirname(os.path.abspath(path_segy))
+            file_name = os.path.basename(path_segy)
+            shutil.make_archive(os.path.splitext(path_segy)[0], 'zip', dir_name, file_name)

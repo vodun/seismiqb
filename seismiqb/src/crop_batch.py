@@ -609,7 +609,7 @@ class SeismicCropBatch(Batch):
                     raise ValueError(f'Unknown mode: {mode}')
         else:
             geometry = self.get(ix, 'geometries')
-            normalized = geometry.scaler(data, mode=mode)
+            normalized = geometry.normalize(data, mode=mode)
         return normalized
 
     @action

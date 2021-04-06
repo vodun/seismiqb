@@ -253,18 +253,6 @@ def fill_defaults(value, default):
         value = tuple([item if item else default[i] for i, item in enumerate(value)])
     return value
 
-def parse_axis(axis, index_headers=None):
-    """ Convert string representation of an axis into integer, if needed. """
-    if isinstance(axis, str):
-        if index_headers and axis in index_headers:
-            axis = index_headers.index(axis)
-        elif axis in ['i', 'il', 'iline']:
-            axis = 0
-        elif axis in ['x', 'xl', 'xline']:
-            axis = 1
-        elif axis in ['h', 'height', 'depth']:
-            axis = 2
-    return axis
 
 def _adjust_shape_for_rotation(shape, angle):
     """ Compute adjusted 2D crop shape to rotate it and get central crop without padding.
