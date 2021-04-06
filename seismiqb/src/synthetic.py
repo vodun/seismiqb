@@ -3,51 +3,23 @@ from scipy.interpolate import interp1d, interp2d
 from scipy.ndimage import gaussian_filter
 
 
-def make_curves_v1(num_curves, num_points, shape=(100, 100),
-                   kind='cubic', perturbation_share=0.4, shares=None):
-    """ First param is num_curves the second controls how volatile is the curve. Might wanna
-    try changing the parameter with curve.
-    """
-    # make an array of curve-supports
-    grid_x = np.linspace(0, 1, num_points)
-    curves = [np.zeros_like(grid_x)]
-    shares = shares if shares is not None else np.ones((num_curves, ))
-    shares = np.array(shares) / np.sum(shares)
-    for i in range(num_curves):
-        delta_h = shares[i]
-        epsilon = perturbation_share * delta_h
-
-        # make each curve in unit-terms then scale it to cube-shape
-        curves.append(curves[-1] + delta_h * np.ones_like(grid_x)
-                      + np.random.uniform(low=-epsilon, high=epsilon, size=(num_points, )))
-
-    # make an array of interpolations
-    funcs = []
-    for curve in curves:
-        funcs.append(interp1d(grid_x, curve, kind=kind))
-
-    # compute in integers
-    results = []
-    for func in funcs:
-        results.append((func(np.arange(shape[0]) / shape[0]) * shape[1]).astype(np.int))
-
-    return results
-
-def make_surfaces(num_surfaces, grid_shape, shape=(100, 100, 400), kind='cubic',
-                  perturbation_share=0.25, shares=None):
+def make_surfaces(num_surfaces, grid_shape, shape, kind='cubic', perturbation_share=0.25, shares=None):
     """ First param is num_surfaces while the second controls how volatile is the curve. Might wanna
     try changing the parameter with curve.
     """
-    # select interpolation-method based on the cube-shape
+    # check shapes and select interpolation-method
+    grid_shape = (grid_shape, ) if isinstance(grid_shape, int) else grid_shape
+    if len(shape) != len(grid_shape) + 1:
+        raise ValueError('`shape` and `grid_shape` parameters should match.')
+
     if len(shape) == 2:
-        method = interp1d
+        interp = interp1d
     elif len(shape) == 3:
-        method = interp2d
+        interp = interp2d
     else:
-        raise ValueError('The function only supports the generation of 2d ans 3d seismic.')
+        raise ValueError('The function only supports the generation of 1d curves and 2d-surfaces.')
 
     # make the grid
-    grid_shape = (grid_shape, ) if isinstance(grid_shape, int) else grid_shape
     grid = [np.linspace(0, 1, num_points) for num_points in grid_shape]
 
     # make the first curve
@@ -65,14 +37,13 @@ def make_surfaces(num_surfaces, grid_shape, shape=(100, 100, 400), kind='cubic',
     # make an array of interpolations
     funcs = []
     for curve in curves:
-        funcs.append(method(*grid, curve, kind=kind))
+        funcs.append(interp(*grid, curve, kind=kind))
 
     #  scale each curve to cube-shape
     results = []
     for func in funcs:
         results.append((func(*[np.arange(num_points) / num_points for num_points in shape[:-1]])
-                        * shape[-1]).astype(np.int))
-
+                        * shape[-1]).astype(np.int).T)
     return results
 
 
@@ -127,9 +98,9 @@ def convolve_3d(rc, w):
     return synth_l
 
 
-def make_synthetic_3d(shape=(50, 400, 800), num_reflections=200, vel_limits=(900, 5400), horizon_heights=(1/4, 1/2, 2/3),
-                      horizon_jumps=(7, 5, 4), grid_shape=(10, 10), perturbation_share=.2, rho_noise_lims=(0.97, 1.3),
-                      ricker_rate=2/3e3, ricker_frequency=30, sigma=1.1, noise_mul=0.5):
+def make_synthetic(shape=(50, 400, 800), num_reflections=200, vel_limits=(900, 5400), horizon_heights=(1/4, 1/2, 2/3),
+                   horizon_jumps=(7, 5, 4), grid_shape=(10, 10), perturbation_share=.2, rho_noise_lims=(0.97, 1.3),
+                   ricker_rate=2/3e3, ricker_frequency=30, sigma=1.1, noise_mul=0.5):
     """ Generate synthetic 3d-cube.
 
     Parameters
@@ -161,8 +132,13 @@ def make_synthetic_3d(shape=(50, 400, 800), num_reflections=200, vel_limits=(900
     sigma : float or None
         sigma used for gaussian blur of the synthetic seismic.
     noise_mul : float or None
-        If not None, gaussian noise scale by this number is applied to the synthetic. 
+        If not None, gaussian noise scale by this number is applied to the synthetic.
     """
+    if len(shape) in (2, 3):
+        dim = len(shape)
+    else:
+        raise ValueError('The function only supports the generation of 2d and 3d synthetic seismic.')
+
     # generate array of velocities
     low, high = vel_limits
     llim = (high - low) / num_reflections
@@ -170,17 +146,24 @@ def make_synthetic_3d(shape=(50, 400, 800), num_reflections=200, vel_limits=(900
                   np.random.uniform(low=-llim, high=llim, size=(num_reflections, )))
 
     for height_share, jump_mul in zip(horizon_heights, horizon_jumps):
-        colors[int(colors.shape[0] * height_share)] += llim * jump_mul
+        velocities[int(velocities.shape[0] * height_share)] += llim * jump_mul
 
     # make velocity model
     curves = make_surfaces(num_reflections, grid_shape, perturbation_share=perturbation_share, shape=shape)
     vel_model = np.zeros(shape=shape)
-    for i in range(vel_model.shape[0]):
-        for x in range(vel_model.shape[1]):
-            trace = vel_model[i, x, :]
+    if dim == 2:
+        for i in range(vel_model.shape[0]):
+            trace = vel_model[i, :]
             for j in range(num_reflections):
-                low = np.minimum(curves[j][i, x], vel_model.shape[-1])
+                low = np.minimum(curves[j][i], vel_model.shape[-1])
                 trace[low : ] = velocities[j]
+    else:
+        for i in range(vel_model.shape[0]):
+            for x in range(vel_model.shape[1]):
+                trace = vel_model[i, x, :]
+                for j in range(num_reflections):
+                    low = np.minimum(curves[j][i, x], vel_model.shape[-1])
+                    trace[low : ] = velocities[j]
 
     # make density model
     if rho_noise_lims is not None:
@@ -191,7 +174,8 @@ def make_synthetic_3d(shape=(50, 400, 800), num_reflections=200, vel_limits=(900
     # obtain synthetic
     ref_coeffs = reflectivity(vel_model, rho)
     wavelet = rickerwave(ricker_frequency, ricker_rate)
-    result = convolve_3d(ref_coeffs, wavelet)
+    convolve = convolve_2d if dim == 2 else convolve_3d
+    result = convolve(ref_coeffs, wavelet)
 
     # add blur and noise if needed for a more realistic image
     if sigma is not None:
@@ -199,45 +183,3 @@ def make_synthetic_3d(shape=(50, 400, 800), num_reflections=200, vel_limits=(900
     if noise_mul is not None:
         result += noise_mul * np.random.random(result.shape) * result.std()
     return result
-
-
-def make_synthetic_2d():
-    # set up params of the synthetic:
-    shape = 600, 2000 # [n_traces_i X n_samples]
-    num_reflections = 200
-
-    # generate array of velocities
-    low, high = 0.3, 1.8
-    llim = (high - low) / num_reflections
-    colors = np.linspace(low, high, num_reflections) + np.random.uniform(low=-llim, high=llim, size=(num_reflections, ))
-    colors[100:] += llim * 15
-    colors[150:] += llim * 10
-    colors[50:] -= llim*8
-
-    num_points = 10
-    curves = make_curves_v1(num_reflections, num_points, shape=shape, perturbation_share=.2)
-
-    # make velocity model
-    vm = np.zeros(shape=shape)
-    for i in range(vm.shape[0]):
-        trace = vm[i, :]
-        for j in range(num_reflections):
-            low = np.minimum(curves[j][i], vm.shape[-1])
-            trace[low : ] = colors[j]
-    mul = 3000
-    vm = vm * mul
-
-    # make density model
-    l, h = 0.95, 1.05
-    rho_mults = np.random.uniform(low=l, high=h, size=vm.shape)
-    rho = vm * rho_mults
-
-    # obtain synthetic
-    dt = 0.002 / 3
-    rc = reflectivity(vm, rho)
-    w = rickerwave(30, dt)
-    synt = convolve_2d(rc, w)
-
-    # add blur and noise for a more realistic image
-    blurred = gaussian_filter(synt, sigma=1.1)
-    noised = blurred + .7* np.random.random(blurred.shape) * blurred.std()
