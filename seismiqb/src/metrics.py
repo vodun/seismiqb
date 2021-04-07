@@ -893,7 +893,13 @@ class GeometryMetrics(BaseSeismicMetric):
 
         block_indices = [np.arange(0, self.geometries[0].cube_shape[0], block_size[0]-window[0]),
                          np.arange(0, self.geometries[0].cube_shape[1], block_size[1]-window[1])]
-        heights = np.arange(self.geometries[0].cube_shape[2]) if heights is None else np.arange(*heights)
+
+        max_height = self.geometries[0].cube_shape[2]
+        if heights is None:
+            heights = np.arange(max_height)
+        else:
+            heights[1] = min(heights[1], max_height)
+            heights = np.arange(*heights)
 
         with pbar(total=total) as prog_bar:
             for il_block in block_indices[0]:
