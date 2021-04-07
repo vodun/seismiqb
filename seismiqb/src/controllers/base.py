@@ -162,11 +162,13 @@ class BaseController:
         _ = kwargs
 
     def make_notifier(self):
-        return {
-            'bar': self.config.bar,
-            'monitors': 'loss_history',
-            'file': self.make_savepath('末 model_loss.log'),
-        }
+        if self.config['plot']:
+            return {
+                'bar': self.config.bar,
+                'monitors': 'loss_history',
+                'file': self.make_savepath('末 model_loss.log'),
+            }
+        return None
 
     # Train
     def train(self, dataset, config=None, **kwargs):

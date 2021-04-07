@@ -366,6 +366,7 @@ class FaultController(BaseController):
 
     def plot_inference(self, *args, savepath=None, overlap=True, threshold=0.05, **kwargs):
         results = self.inference_on_slides(*args, **kwargs)
+        savepath = os.path.join(self.config['savedir'], savepath)
         for cube in results:
             for item in results[cube]:
                 slices, image, prediction = item[:3]
