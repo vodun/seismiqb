@@ -112,8 +112,8 @@ class SeismicGeometry:
     """
     #TODO: add separate class for cube-like labels
     SEGY_ALIASES = ['sgy', 'segy', 'seg']
-    HDF5_ALIASES = ['hdf5', 'h5py']
-    BLOSC_ALIASES = ['blosc']
+    HDF5_ALIASES = ['hdf5', 'qhdf5']
+    BLOSC_ALIASES = ['blosc', 'qblosc']
     NPZ_ALIASES = ['npz']
 
     # Attributes to store during SEG-Y -> HDF5 conversion
@@ -501,6 +501,11 @@ class SeismicGeometry:
         if hasattr(self, 'zero_traces'):
             return self.nonzero_traces
         return self.total_traces
+
+    @property
+    def file_size(self):
+        """ Storage size in GB."""
+        return round(os.path.getsize(self.path) / (1024**3), 3)
 
     @property
     def nbytes(self):

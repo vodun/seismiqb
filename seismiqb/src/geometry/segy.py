@@ -590,7 +590,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
 
                 progress_bar.set_description(f'Converting {self.name}; {p}-projection')
                 for idx in range(self.cube_shape[axis]):
-                    slide = self.load_slide(idx, stable=False)
+                    slide = self.load_slide(idx, axis=axis, stable=False)
                     slide = slide.T if axis == 1 else slide
                     slide = transform(slide)
 
@@ -610,13 +610,15 @@ class SeismicGeometrySEGY(SeismicGeometry):
     def convert_to_hdf5(self, path=None, postfix='', projections='ixh',
                         quantize=True, ranges='q99', clip=True, center=False, store_meta=True, pbar=True, **kwargs):
         """ Convenient alias for HDF5 conversion. """
-        kwargs = {**locals(), **kwargs}
-        kwargs.pop('self')
-        return self.convert(format='hdf5', **kwargs)
+        kwargs_ = locals()
+        kwargs_.pop('self')
+        kwargs_.pop('kwargs')
+        return self.convert(format='hdf5', **kwargs_, **kwargs)
 
     def convert_to_blosc(self, path=None, postfix='', projections='ixh',
                          quantize=True, ranges='q99', clip=True, center=False, store_meta=True, pbar=True, **kwargs):
         """ Convenient alias for BLOSC conversion. """
-        kwargs = {**locals(), **kwargs}
-        kwargs.pop('self')
-        return self.convert(format='blosc', **kwargs)
+        kwargs_ = locals()
+        kwargs_.pop('self')
+        kwargs_.pop('kwargs')
+        return self.convert(format='blosc', **kwargs_, **kwargs)
