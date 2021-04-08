@@ -113,17 +113,30 @@ class SeismicGeometry:
     #TODO: add separate class for cube-like labels
     SEGY_ALIASES = ['sgy', 'segy', 'seg']
     HDF5_ALIASES = ['hdf5', 'h5py']
+    BLOSC_ALIASES = ['blosc']
     NPZ_ALIASES = ['npz']
 
     # Attributes to store during SEG-Y -> HDF5 conversion
     PRESERVED = [
+        # Crucial geometry properties
         'depth', 'delay', 'sample_rate', 'cube_shape',
-        'segy_path', 'segy_text', 'rotation_matrix',
         'byte_no', 'offsets', 'ranges', 'lens', # `uniques` can't be saved due to different lenghts of arrays
-        'ilines', 'xlines', 'ilines_offset', 'xlines_offset', 'ilines_len', 'xlines_len',
-        'v_min', 'v_max', 'v_mean', 'v_std',
-        'v_q01', 'v_q99', 'v_q001', 'v_q999',
         'bins', 'zero_traces', '_quality_map',
+
+        # Additional info from SEG-Y
+        'segy_path', 'segy_text', 'rotation_matrix', 'area',
+
+        # Convenient aliases for post-stack cubes
+        'ilines', 'xlines', 'ilines_offset', 'xlines_offset', 'ilines_len', 'xlines_len',
+
+        # Value-stats
+        'v_uniques', 'v_min', 'v_max', 'v_mean', 'v_std',
+        'v_q001', 'v_q01', 'v_q05', 'v_q95', 'v_q99', 'v_q999',
+
+        # Parameters of quantization and quantized stats
+        'qnt_ranges', 'qnt_bins', 'qnt_clip', 'qnt_center', 'qnt_error',
+        'qnt_min', 'qnt_max', 'qnt_mean', 'qnt_std',
+        'qnt_q001', 'qnt_q01', 'qnt_q05', 'qnt_q95', 'qnt_q99', 'qnt_q999',
     ]
 
     PRESERVED_LAZY = [
@@ -153,6 +166,9 @@ class SeismicGeometry:
         elif fmt in cls.HDF5_ALIASES:
             from .hdf5 import SeismicGeometryHDF5
             new_cls = SeismicGeometryHDF5
+        elif fmt in cls.BLOSC_ALIASES:
+            from .blosc import SeismicGeometryBLOSC
+            new_cls = SeismicGeometryBLOSC
         elif fmt in cls.NPZ_ALIASES:
             from .npz import SeismicGeometryNPZ
             new_cls = SeismicGeometryNPZ
@@ -162,7 +178,7 @@ class SeismicGeometry:
         instance = super().__new__(new_cls)
         return instance
 
-    def __init__(self, path, *args, process=True, **kwargs):
+    def __init__(self, path, *args, process=True, path_meta=None, **kwargs):
         _ = args
         self.path = path
         self.anonymize = get_environ_flag('SEISMIQB_ANONYMIZE')
@@ -184,17 +200,11 @@ class SeismicGeometry:
         self._quality_map = None
         self._quality_grid = None
 
-        self.path_meta = None
+        self.path_meta = path_meta or os.path.splitext(self.path)[0] + '.meta'
         self.loaded = []
         self.has_stats = False
         if process:
             self.process(**kwargs)
-
-    def __len__(self):
-        """ Number of meaningful traces. """
-        if hasattr(self, 'zero_traces'):
-            return self.nonzero_traces
-        return self.total_traces
 
 
     # Utility functions
@@ -223,7 +233,7 @@ class SeismicGeometry:
     # Meta information: storing / retrieving attributes
     def store_meta(self, path=None):
         """ Store collected stats on disk. """
-        path_meta = path or os.path.splitext(self.path)[0] + '.meta'
+        path_meta = path or self.path_meta
 
         # Remove file, if exists: h5py can't do that
         if os.path.exists(path_meta):
@@ -242,13 +252,6 @@ class SeismicGeometry:
 
     def load_meta(self):
         """ Retrieve stored stats from disk. """
-        path_meta = os.path.splitext(self.path)[0] + '.meta'
-
-        # Backward compatibility: if absent in meta-file, try getting from file itself
-        if not os.path.exists(path_meta):
-            path_meta = os.path.splitext(self.path)[0] + '.hdf5'
-        self.path_meta = path_meta
-
         for item in self.PRESERVED:
             value = self.load_meta_item(item)
             if value is not None:
@@ -273,28 +276,73 @@ class SeismicGeometry:
         return object.__getattribute__(self, key)
 
 
-    # Normalization
-    def normalize(self, array, mode='minmax'):
+    # Data loading
+    def process_key(self, key):
+        """ Convert multiple slices into locations. """
+        key_ = list(key)
+        if len(key_) != len(self.cube_shape):
+            key_ += [slice(None)] * (len(self.cube_shape) - len(key_))
+
+        key, shape, squeeze = [], [], []
+        for i, item in enumerate(key_):
+            max_size = self.cube_shape[i]
+
+            if isinstance(item, slice):
+                slc = slice(item.start or 0, item.stop or max_size)
+            elif isinstance(item, int):
+                item = item if item >= 0 else max_size - item
+                slc = slice(item, item + 1)
+                squeeze.append(i)
+            key.append(slc)
+            shape.append(slc.stop - slc.start)
+
+        return key, shape, squeeze
+
+    def __getitem__(self, key):
+        """ Get sub-cube be slices. Can be re-implemented in child classes. """
+        key, _, squeeze = self.process_key(key)
+
+        crop = self.load_crop(key)
+        if squeeze:
+            crop = np.squeeze(crop, axis=tuple(squeeze))
+        return crop
+
+    def normalize(self, array, mode=None):
         """ Normalize array of amplitudes cut from the cube.
+        Constants for normalization are automatically chosen depending on the quantization of the cube.
 
         Parameters
         ----------
         array : ndarray
             Crop of amplitudes.
         mode : str
+            If `std`, then data is divided by standard deviation.
+            If `meanstd`, then data is centered and divided by standard deviation.
             If `minmax`, then data is scaled to [0, 1] via minmax scaling.
-            If `q` or `normalize`, then data is divided by the maximum of absolute values of the
-            0.01 and 0.99 quantiles.
-            If `q_clip`, then data is clipped to 0.01 and 0.99 quantiles and then divided by the
-            maximum of absolute values of the two.
+            If `q` or `normalize`, then data is divided by the
+            maximum of absolute values of the 0.01 and 0.99 quantiles.
+            If `q_clip`, then data is clipped to 0.01 and 0.99 quantiles and then divided
+            by the maximum of absolute values of the two.
         """
-        if mode in ['q', 'normalize']:
-            return array / max(abs(self.q01), abs(self.q99))
-        if mode in ['q_clip']:
-            return np.clip(array, self.q01, self.q99) / max(abs(self.q01), abs(self.q99))
+        if mode is None or mode == 'auto':
+            mode = 'std' if self.quantized else 'q'
+
+        if mode == 'std':
+            return array / (self.qnt_std if self.quantized else self.v_std)
+        if mode == 'meanstd':
+            array -= self.qnt_mean if self.quantized else self.v_mean
+            return array / (self.qnt_std if self.quantized else self.v_std)
+
+        if mode == 'q':
+            return array / max(abs(self.v_q01), abs(self.v_q99))
+        if mode == 'q_clip':
+            array = np.clip(array, self.v_q01, self.v_q99)
+            return array / max(abs(self.v_q01), abs(self.v_q99))
+
         if mode == 'minmax':
-            scale = (self.value_max - self.value_min)
-            return (array - self.value_min) / scale
+            min_ = self.qnt_min if self.quantized else self.v_min
+            max_ = self.qnt_max if self.quantized else self.v_max
+            return (array - min_) / (max_ - min_)
         raise ValueError('Wrong mode', mode)
 
 
@@ -444,7 +492,15 @@ class SeismicGeometry:
         """ Total amount of traces in a cube. """
         if hasattr(self, 'zero_traces'):
             return np.prod(self.zero_traces.shape)
-        return len(self.dataframe)
+        elif hasattr(self, 'dataframe'):
+            return len(self.dataframe)
+        return self.cube_shape[0] * self.cube_shape[1]
+
+    def __len__(self):
+        """ Number of meaningful traces. """
+        if hasattr(self, 'zero_traces'):
+            return self.nonzero_traces
+        return self.total_traces
 
     @property
     def nbytes(self):
@@ -464,7 +520,7 @@ class SeismicGeometry:
 
     # Textual representation
     def __repr__(self):
-        return 'Inferred geometry for {}: ({}x{}x{})'.format(self.name, *self.cube_shape)
+        return f'<Inferred geometry for {self.name}: {tuple(self.cube_shape)}>'
 
     def __str__(self):
         msg = f"""
@@ -486,10 +542,18 @@ class SeismicGeometry:
 
         if self.has_stats:
             msg += f"""
-        Num of unique amplitudes:      {self.v_uniques:>10}
-        Mean/std of amplitudes:        {self.v_mean:>10.2f} | {self.v_std:<10.2f}
-        Min/max amplitudes:            {self.v_min:>10.2f} | {self.v_max:<10.2f}
-        q01/q99 amplitudes:            {self.v_q01:>10.2f} | {self.v_q99:<10.2f}
+        Original cube values:
+        Number of uniques:             {self.v_uniques:>10}
+        mean | std:                    {self.v_mean:>10.2f} | {self.v_std:<10.2f}
+        min | max:                     {self.v_min:>10.2f} | {self.v_max:<10.2f}
+        q01 | q99:                     {self.v_q01:>10.2f} | {self.v_q99:<10.2f}
+        """
+
+        if self.quantized:
+            msg += f"""
+        Quantized cube info:
+        Error of quantization:         {self.qnt_error:>10.3f}
+        Ranges:                        {self.qnt_ranges[0]:>10.2f} | {self.qnt_ranges[1]:<10.2f}
         """
         return dedent(msg)
 
@@ -529,15 +593,6 @@ class SeismicGeometry:
             }
         matrix = getattr(self, matrix) if isinstance(matrix, str) else matrix
         plot_image(matrix, mode='single', **kwargs)
-
-    def show_quality_map(self, **kwargs):
-        """ Show quality map. """
-        self.show(matrix=self.quality_map, cmap='Reds', title=f'Quality map of `{self.name}`')
-
-    def show_quality_grid(self, **kwargs):
-        """ Show quality grid. """
-        self.show(matrix=self.quality_grid, cmap='Reds', interpolation='bilinear',
-                  title=f'Quality map of `{self.name}`')
 
     def show_histogram(self, scaler=None, bins=50, **kwargs):
         """ Show distribution of amplitudes in `trace_container`. Optionally applies chosen `scaler`. """
@@ -620,6 +675,15 @@ class SeismicGeometry:
         }
         plot_image(slide, **kwargs)
 
+    def show_quality_map(self, **kwargs):
+        """ Show quality map. """
+        self.show(matrix=self.quality_map, cmap='Reds', title=f'Quality map of `{self.name}`')
+
+    def show_quality_grid(self, **kwargs):
+        """ Show quality grid. """
+        self.show(matrix=self.quality_grid, cmap='Reds', interpolation='bilinear',
+                  title=f'Quality map of `{self.name}`')
+
 
     # Coordinate conversion
     def lines_to_cdp(self, points):
@@ -696,8 +760,6 @@ class SeismicGeometry:
         chunks = tqdm(chunks, total=total) if pbar else chunks
         return self.create_file_from_iterable(chunks, self.cube_shape, chunk_shape,
                                                      chunk_stride, dst=dst, agg=agg, projection='ixh')
-
-        # self.store_meta(path_meta)
 
     # Misc
     @classmethod
