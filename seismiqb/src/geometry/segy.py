@@ -1,25 +1,17 @@
+""" SEG-Y geometry. """
 import os
-import re
-import sys
-import shutil
-import itertools
 
-from textwrap import dedent
-from random import random
 from itertools import product
 from tqdm.auto import tqdm
 
 import numpy as np
 import pandas as pd
-import h5py
+import h5pickle as h5py
 import segyio
 import cv2
 
-from ..utils import find_min_max, file_print, compute_attribute, make_axis_grid, \
-                   fill_defaults, parse_axis, get_environ_flag
+from ..utils import find_min_max
 from ..utility_classes import lru_cache, SafeIO
-from ..plotters import plot_image
-
 
 from .base import SeismicGeometry
 
@@ -51,6 +43,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
     #pylint: disable=attribute-defined-outside-init, too-many-instance-attributes
     def __init__(self, path, headers=None, index_headers=None, **kwargs):
         self.structured = False
+        self.quantized = False
         self.dataframe = None
         self.segyfile = None
 
@@ -58,6 +51,15 @@ class SeismicGeometrySEGY(SeismicGeometry):
         self.index_headers = index_headers or self.INDEX_POST
 
         super().__init__(path, **kwargs)
+
+    def set_index(self, index_headers, sortby=None):
+        """ Change current index to a subset of loaded headers. """
+        self.dataframe.reset_index(inplace=True)
+        if sortby:
+            self.dataframe.sort_values(index_headers, inplace=True, kind='mergesort')# the only stable sorting algorithm
+        self.dataframe.set_index(index_headers, inplace=True)
+        self.index_headers = index_headers
+        self.add_attributes()
 
 
     # Methods of inferring dataframe and amplitude stats
@@ -84,8 +86,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
         self.add_attributes()
 
         # Collect stats, if needed and not collected previously
-        path_meta = os.path.splitext(self.path)[0] + '.meta'
-        if os.path.exists(path_meta) and not recollect:
+        if os.path.exists(self.path_meta) and not recollect:
             self.load_meta()
         elif collect_stats:
             self.collect_stats(**kwargs)
@@ -103,7 +104,10 @@ class SeismicGeometrySEGY(SeismicGeometry):
         # Store additional segy info
         self.segy_path = self.path
         self.segy_text = [self.segyfile.text[i] for i in range(1 + self.segyfile.ext_headers)]
-        self.add_rotation_matrix()
+
+        # Computed from CDP_X/CDO_Y information
+        self.rotation_matrix = self.compute_rotation_matrix()
+        self.area = self.compute_area()
 
     def add_attributes(self):
         """ Infer info about curent index from `dataframe` attribute. """
@@ -120,15 +124,15 @@ class SeismicGeometrySEGY(SeismicGeometry):
         self.byte_no = [getattr(segyio.TraceField, h) for h in self.index_headers]
         self.offsets = [np.min(item) for item in self.uniques]
         self.lens = [len(item) for item in self.uniques]
-        self.ranges = [(np.max(item) - np.min(item) + 1) for item in self.uniques]
+        self.ranges = [(np.min(item), np.max(item)) for item in self.uniques]
 
         self.cube_shape = np.asarray([*self.lens, self.depth])
 
-    def collect_stats(self, spatial=True, bins=25, num_keep=5000, pbar=True, **kwargs):
+    def collect_stats(self, spatial=True, bins=25, num_keep=10000, pbar=True, **kwargs):
         """ Pass through file data to collect stats:
             - min/max values.
             - q01/q99 quantiles of amplitudes in the cube.
-            - certain amount of traces are stored to `trace_container` attribute.
+            - certain amount of traces are stored in a `trace_container` attribute.
 
         If `spatial` is True, makes an additional pass through the cube to obtain following:
             - min/max/mean/std for every trace - `min_matrix`, `max_matrix` and so on.
@@ -148,12 +152,13 @@ class SeismicGeometrySEGY(SeismicGeometry):
         _ = kwargs
 
         num_traces = len(self.segyfile.header)
+        frequency = num_traces // num_keep
 
         # Get min/max values, store some of the traces
         trace_container = []
         value_min, value_max = np.inf, -np.inf
 
-        for i in tqdm(range(num_traces), desc='Finding min/max', ncols=1000, disable=(not pbar)):
+        for i in tqdm(range(num_traces), desc='Finding min/max', ncols=800, disable=(not pbar)):
             trace = self.segyfile.trace[i]
 
             trace_min, trace_max = find_min_max(trace)
@@ -162,7 +167,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
             if trace_max > value_max:
                 value_max = trace_max
 
-            if random() < (num_keep / num_traces) and trace_min != trace_max:
+            if i % frequency == 0 and trace_min != trace_max:
                 trace_container.extend(trace.tolist())
                 #TODO: add dtype for storing
 
@@ -178,7 +183,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
 
             # Iterate over traces
             description = f'Collecting stats for {self.name}'
-            for i in tqdm(range(num_traces), desc=description, ncols=1000, disable=(not pbar)):
+            for i in tqdm(range(num_traces), desc=description, ncols=800, disable=(not pbar)):
                 trace = self.segyfile.trace[i]
                 header = self.segyfile.header[i]
 
@@ -202,7 +207,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
 
             mean_matrix = np.sum(probs * midpoints, axis=-1)
             std_matrix = np.sqrt(np.sum((np.broadcast_to(midpoints, (*mean_matrix.shape, len(midpoints))) - \
-                                            mean_matrix.reshape(*mean_matrix.shape, 1))**2 * probs,
+                                         mean_matrix.reshape(*mean_matrix.shape, 1))**2 * probs,
                                         axis=-1))
 
             # Store everything into instance
@@ -212,14 +217,19 @@ class SeismicGeometrySEGY(SeismicGeometry):
             self.zero_traces = (min_matrix == max_matrix).astype(np.int)
             self.zero_traces[np.isnan(min_matrix)] = 1
 
-        self.value_min, self.value_max = value_min, value_max
         self.trace_container = np.array(trace_container)
-        self.q001, self.q01, self.q99, self.q999 = np.quantile(trace_container, [0.001, 0.01, 0.99, 0.999])
+        self.v_uniques = len(np.unique(trace_container))
+        self.v_min, self.v_max = value_min, value_max
+        self.v_mean, self.v_std = np.mean(trace_container), np.std(trace_container)
+        self.v_q001, self.v_q01, self.v_q05 = np.quantile(trace_container, [0.001, 0.01, 0.05])
+        self.v_q999, self.v_q99, self.v_q95 = np.quantile(trace_container, [0.999, 0.99, 0.95])
         self.has_stats = True
         self.store_meta()
 
-    def add_rotation_matrix(self):
-        """ Add transform from INLINE/CROSSLINE coordinates to CDP system. """
+
+    # Compute stats from CDP/LINES correspondence
+    def compute_rotation_matrix(self):
+        """ Compute transform from INLINE/CROSSLINE coordinates to CDP system. """
         ix_points = []
         cdp_points = []
 
@@ -233,11 +243,8 @@ class SeismicGeometrySEGY(SeismicGeometry):
 
             ix_points.append(ix)
             cdp_points.append(cdp)
-        self.rotation_matrix = cv2.getAffineTransform(np.float32(ix_points), np.float32(cdp_points))
-
-    def lines_to_cdp(self, points):
-        """ Convert lines to CDP. """
-        return (self.rotation_matrix[:, :2] @ points.T + self.rotation_matrix[:, 2].reshape(2, -1)).T
+        rotation_matrix = cv2.getAffineTransform(np.float32(ix_points), np.float32(cdp_points))
+        return rotation_matrix
 
     def compute_area(self, correct=True, shift=50):
         """ Compute approximate area of the cube in square kilometres.
@@ -247,19 +254,32 @@ class SeismicGeometrySEGY(SeismicGeometry):
         correct : bool
             Whether to correct computed area for zero traces.
         """
-        if self.headers != self.HEADERS_POST_FULL:
-            raise TypeError('Geometry index must be `POST_FULL`')
-
         i = self.ilines[self.ilines_len // 2]
         x = self.xlines[self.xlines_len // 2]
 
-        cdp_x, cdp_y = self.dataframe[['CDP_X', 'CDP_Y']].ix[(i, x)]
-        cdp_x_delta = abs(self.dataframe[['CDP_X']].ix[(i, x + shift)][0] - cdp_x)
-        cdp_y_delta = abs(self.dataframe[['CDP_Y']].ix[(i + shift, x)][0] - cdp_y)
+        # Central trace coordinates
+        idx = self.dataframe['trace_index'][(i, x)]
+        trace = self.segyfile.header[idx]
+        cdp_x, cdp_y = (trace[segyio.TraceField.CDP_X], trace[segyio.TraceField.CDP_Y])
 
+        # Two shifted traces
+        idx_dx = self.dataframe['trace_index'][(i, x + shift)]
+        trace_dx = self.segyfile.header[idx_dx]
+        cdp_x_delta = abs(trace_dx[segyio.TraceField.CDP_X] - cdp_x)
+
+        idx_dy = self.dataframe['trace_index'][(i + shift, x)]
+        trace_dy = self.segyfile.header[idx_dy]
+        cdp_y_delta = abs(trace_dy[segyio.TraceField.CDP_Y] - cdp_y)
+
+        # Traces if CDP_X/CDP_Y coordinate system is rotated on 90 degrees with respect to ILINES/CROSSLINES
         if cdp_x_delta == 0 and cdp_y_delta == 0:
-            cdp_x_delta = abs(self.dataframe[['CDP_X']].ix[(i + shift, x)][0] - cdp_x)
-            cdp_y_delta = abs(self.dataframe[['CDP_Y']].ix[(i, x + shift)][0] - cdp_y)
+            idx_dx = self.dataframe['trace_index'][(i + shift, x)]
+            trace_dx = self.segyfile.header[idx_dx]
+            cdp_x_delta = abs(trace_dx[segyio.TraceField.CDP_X] - cdp_x)
+
+            idx_dy = self.dataframe['trace_index'][(i, x + shift)]
+            trace_dy = self.segyfile.header[idx_dy]
+            cdp_y_delta = abs(trace_dy[segyio.TraceField.CDP_Y] - cdp_y)
 
         cdp_x_delta /= shift
         cdp_y_delta /= shift
@@ -270,19 +290,11 @@ class SeismicGeometrySEGY(SeismicGeometry):
 
         if correct and hasattr(self, 'zero_traces'):
             area -= (cdp_x_delta / 1000) * (cdp_y_delta / 1000) * np.sum(self.zero_traces)
-        return area
+        return round(area, 2)
 
-
-    def set_index(self, index_headers, sortby=None):
-        """ Change current index to a subset of loaded headers. """
-        self.dataframe.reset_index(inplace=True)
-        if sortby:
-            self.dataframe.sort_values(index_headers, inplace=True, kind='mergesort')# the only stable sorting algorithm
-        self.dataframe.set_index(index_headers, inplace=True)
-        self.index_headers = index_headers
-        self.add_attributes()
 
     # Methods to load actual data from SEG-Y
+    # 1D
     def load_trace(self, index):
         """ Load individual trace from segyfile.
         If passed `np.nan`, returns trace of zeros.
@@ -295,7 +307,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
         """ Stack multiple traces together. """
         return np.stack([self.load_trace(idx) for idx in trace_indices])
 
-
+    # 2D
     @lru_cache(128, attributes='index_headers')
     def load_slide(self, loc=None, axis=0, start=None, end=None, step=1, stable=True):
         """ Create indices and load actual traces for one slide.
@@ -387,7 +399,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
             return indices, iterator
         return indices
 
-
+    # 3D
     def _load_crop(self, locations):
         """ Load 3D crop from the cube.
 
@@ -450,83 +462,139 @@ class SeismicGeometrySEGY(SeismicGeometry):
         return self._load_crop(locations)
 
 
-    def __getitem__(self, key):
-        """ Retrieve amplitudes from cube. Uses the usual `Numpy` semantics for indexing 3D array. """
-        key_ = list(key)
-        if len(key_) != len(self.cube_shape):
-            key_ += [slice(None)] * (len(self.cube_shape) - len(key_))
-
-        key, squeeze = [], []
-        for i, item in enumerate(key_):
-            max_size = self.cube_shape[i]
-
-            if isinstance(item, slice):
-                slc = slice(item.start or 0, item.stop or max_size)
-            elif isinstance(item, int):
-                item = item if item >= 0 else max_size - item
-                slc = slice(item, item + 1)
-                squeeze.append(i)
-            key.append(slc)
-
-        crop = self.load_crop(key)
-        if squeeze:
-            crop = np.squeeze(crop, axis=tuple(squeeze))
-        return crop
-
-    # Convert SEG-Y to HDF5
-    def make_hdf5(self, path_hdf5=None, postfix='', unsafe=True, store_meta=True, projections='ixh', pbar=True):
-        """ Converts `.segy` cube to `.hdf5` format.
+    # Quantization
+    def set_quantization_parameters(self, ranges='q99', clip=True, center=False):
+        """ Make bins for int8 quantization and convert value-stats.
 
         Parameters
         ----------
-        path_hdf5 : str
-            Path to store converted cube. By default, new cube is stored right next to original.
-        postfix : str
-            Postfix to add to the name of resulting cube.
+        ranges : str
+            Ranges to quantize data to. Available options are:
+                - `q95`, `q99`, `q999` to clip data to respective quantiles.
+                - `same` keep the same range of data.
+        clip : bool
+            Whether to clip data to selected ranges.
+        center : bool
+            Whether to make data have 0-mean before quantization.
         """
+        ranges_dict = {
+            'q95': min(abs(self.v_q05), abs(self.v_q95)),
+            'q99': min(abs(self.v_q01), abs(self.v_q99)),
+            'q999': min(abs(self.v_q001), abs(self.v_q999)),
+            'same': max(abs(self.v_min), abs(self.v_max)),
+        }
+        if ranges in ranges_dict:
+            ranges = ranges_dict[ranges]
+            ranges = (-ranges, +ranges)
 
-        cube_keys = {'i': 'cube', 'x': 'cube_x', 'h': 'cube_h'}
-        axes = {'i': [0, 1, 2], 'x': [1, 2, 0], 'h': [2, 0, 1]}
+        if center:
+            ranges = tuple([item - self.v_mean for item in ranges])
 
-        if self.index_headers != self.INDEX_POST and not unsafe:
-            # Currently supports only INLINE/CROSSLINE cubes
-            raise TypeError(f'Either set `unsafe=True` or set index to {self.INDEX_POST}')
+        self.qnt_ranges = ranges
+        self.qnt_bins = np.histogram_bin_edges(None, bins=254, range=ranges).astype(np.float)
+        self.qnt_clip = clip
+        self.qnt_center = center
 
-        path_hdf5 = path_hdf5 or (os.path.splitext(self.path)[0] + postfix + '.hdf5')
+        # Compute quantized statistics
+        quantized_tc = self.quantize(self.trace_container)
+        self.qnt_min, self.qnt_max = self.quantize(self.v_min), self.quantize(self.v_max)
+        self.qnt_mean, self.qnt_std = np.mean(quantized_tc), np.std(quantized_tc)
+        self.qnt_q001, self.qnt_q01, self.qnt_q05 = np.quantile(quantized_tc, [0.001, 0.01, 0.05])
+        self.qnt_q999, self.qnt_q99, self.qnt_q95 = np.quantile(quantized_tc, [0.999, 0.99, 0.95])
 
-        # Remove file, if exists: h5py can't do that
-        if os.path.exists(path_hdf5):
-            os.remove(path_hdf5)
+        # Estimate difference after quantization
+        quantized_tc += 127
+        restored_tc = self.qnt_bins[quantized_tc]
+        self.qnt_error = np.mean(np.abs(restored_tc - self.trace_container)) / self.v_std
+
+    def quantize(self, array):
+        """ Convert array of floats to int8 values. """
+        if self.qnt_center:
+            array -= self.v_mean
+        if self.qnt_clip:
+            array = np.clip(array, *self.qnt_ranges)
+        array = np.digitize(array, self.qnt_bins) - 128
+        return array.astype(np.int8)
+
+
+    # Convert SEG-Y
+    def convert(self, format='blosc', path=None, postfix='', projections='ixh',
+                quantize=True, ranges='q99', clip=True, center=False, store_meta=True, pbar=True, **kwargs):
+        """ Convert SEG-Y file to a more effective storage.
+
+        Parameters
+        ----------
+        format : {'hdf5', 'blosc'}
+            Format of storage to convert to: `blosc` takes less space, but a touch slower, than `hdf5`.
+        path : str
+            If provided, then path to save file to.
+            Otherwise, file is saved under the same name with different extension.
+        postfix : str
+            Optional string to add before extension. Used only if the `path` is not provided.
+        projections : str
+            Which projections of data to store: `i` for iline one, `x` for the crossline, `h` for depth.
+        quantize : bool
+            Whether to binarize data to `int8` dtype. `ranges`, `clip` and `center` define parameters of quantization.
+            Binarization is done uniformly over selected `ranges` of values.
+            If True, then `q` is appended to extension.
+        ranges : str
+            Ranges to quantize data to. Available options are:
+                - `q95`, `q99`, `q999` to clip data to respective quantiles.
+                - `same` keep the same range of data.
+        clip : bool
+            Whether to clip data to selected ranges.
+        center : bool
+            Whether to make data have 0-mean before quantization.
+        store_meta : bool
+            Whether to store meta near the save file.
+        pbar : bool
+            Whether to show progress bar during conversion.
+        kwargs : dict
+            Other parameters, passed directly to the file constructor of chosen format.
+        """
+        # Select format
+        from .converted import SeismicGeometryConverted
+        if format == 'blosc':
+            from .blosc import BloscFile
+            constructor, mode = BloscFile, 'w'
+        elif format == 'hdf5':
+            constructor, mode = h5py.File, 'w-'
+
+        # Quantization
+        if quantize:
+            self.set_quantization_parameters(ranges=ranges, clip=clip, center=center)
+            dtype, transform = np.int8, self.quantize
+        else:
+            dtype, transform = np.float32, lambda array: array
+
+        if path is None:
+            fmt_prefix = 'q' if quantize else ''
+            path = os.path.join(os.path.dirname(self.path), f'{self.short_name}{postfix}.{fmt_prefix}{format}')
+
+        # Remove file, if exists
+        if os.path.exists(path):
+            os.remove(path)
 
         # Create file and datasets inside
-        with h5py.File(path_hdf5, "w-") as file_hdf5:
-            cube_hdf5 = {
-                cube_keys[p]: file_hdf5.create_dataset(cube_keys[p], self.cube_shape[axes[p]]) for p in projections
-            }
+        with constructor(path, mode=mode, **kwargs) as file:
+            total = (('i' in projections) * self.cube_shape[0] +
+                     ('x' in projections) * self.cube_shape[1] +
+                     ('h' in projections) * self.cube_shape[2])
+            progress_bar = tqdm(total=total, ncols=800, disable=(not pbar))
 
-            # Default projection (ilines, xlines, depth) and depth-projection (depth, ilines, xlines)
-            total = 0
-            if 'i' in projections:
-                total += self.cube_shape[0]
-            if 'x' in projections:
-                total += self.cube_shape[1]
-            progress_bar = tqdm(total=total, ncols=1000, disable=(not pbar))
+            for p in projections:
+                axis = self.parse_axis(p)
+                cube_name = SeismicGeometryConverted.AXIS_TO_NAME[axis]
+                order = SeismicGeometryConverted.AXIS_TO_ORDER[axis]
+                cube = file.create_dataset(cube_name, shape=self.cube_shape[order], dtype=dtype)
 
-            progress_bar.set_description(f'Converting {self.long_name}; ilines projection')
-            for i in range(self.cube_shape[0]):
-                slide = self.load_slide(i, stable=False)
-                if 'i' in projections:
-                    cube_hdf5['cube'][i, :, :] = slide.reshape(1, self.cube_shape[1], self.cube_shape[2])
-                if 'h' in projections:
-                    cube_hdf5['cube_h'][:, i, :] = slide.T
-                progress_bar.update()
+                progress_bar.set_description(f'Converting {self.name}; {p}-projection')
+                for idx in range(self.cube_shape[axis]):
+                    slide = self.load_slide(idx, stable=False)
+                    slide = slide.T if axis == 1 else slide
+                    slide = transform(slide)
 
-            # xline-oriented projection: (xlines, depth, ilines)
-            if 'x' in projections:
-                progress_bar.set_description(f'Converting {self.long_name} to hdf5; xlines projection')
-                for x in range(self.cube_shape[1]):
-                    slide = self.load_slide(x, axis=1, stable=False).T
-                    cube_hdf5['cube_x'][x, :, :,] = slide
+                    cube[idx, :, :] = slide
                     progress_bar.update()
             progress_bar.close()
 
@@ -534,12 +602,21 @@ class SeismicGeometrySEGY(SeismicGeometry):
             if not self.has_stats:
                 self.collect_stats(pbar=pbar)
 
-            path_meta = os.path.splitext(path_hdf5)[0] + '.meta'
+            path_meta = os.path.splitext(path)[0] + '.meta'
             self.store_meta(path_meta)
 
+        return SeismicGeometry(path)
 
+    def convert_to_hdf5(self, path=None, postfix='', projections='ixh',
+                        quantize=True, ranges='q99', clip=True, center=False, store_meta=True, pbar=True, **kwargs):
+        """ Convenient alias for HDF5 conversion. """
+        kwargs = {**locals(), **kwargs}
+        kwargs.pop('self')
+        return self.convert(format='hdf5', **kwargs)
 
-    # Convenient alias
-    convert_to_hdf5 = make_hdf5
-
-
+    def convert_to_blosc(self, path=None, postfix='', projections='ixh',
+                         quantize=True, ranges='q99', clip=True, center=False, store_meta=True, pbar=True, **kwargs):
+        """ Convenient alias for BLOSC conversion. """
+        kwargs = {**locals(), **kwargs}
+        kwargs.pop('self')
+        return self.convert(format='blosc', **kwargs)

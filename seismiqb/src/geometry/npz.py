@@ -1,25 +1,7 @@
-import os
-import re
+""" NPZ geometry. """
 import sys
-import shutil
-import itertools
-
-from textwrap import dedent
-from random import random
-from itertools import product
-from tqdm.auto import tqdm
 
 import numpy as np
-import pandas as pd
-import h5py
-import segyio
-import cv2
-
-from ..utils import find_min_max, file_print, compute_attribute, make_axis_grid, \
-                   fill_defaults, parse_axis, get_environ_flag
-from ..utility_classes import lru_cache, SafeIO
-from ..plotters import plot_image
-
 
 from .base import SeismicGeometry
 
