@@ -171,7 +171,7 @@ class Extractor(BaseController):
                             side_view=C('side_view', default=False))
             .load_cubes(dst='images')
             .adaptive_reshape(src='images', shape=self.crop_shape)
-            .normalize(mode='q', src='images')
+            .normalize(src='images')
         )
 
     def augmentation_pipeline(self):

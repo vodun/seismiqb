@@ -147,7 +147,7 @@ class SeismicCubeset(Dataset):
             Same instance with loaded geometries.
         """
         for ix in self.indices:
-            self.geometries[ix].process(**kwargs)
+            self.geometries[ix].process(collect_stats=True, spatial=True, **kwargs)
             if logs:
                 self.geometries[ix].log()
 
@@ -1024,7 +1024,7 @@ class SeismicCubeset(Dataset):
         pipeline = (Pipeline()
                     .make_locations(points=point, shape=crop_shape)
                     .load_cubes(dst='images', src_labels=src_labels)
-                    .normalize(mode='q', src='images'))
+                    .normalize(src='images'))
 
         if 'masks' in components:
             use_labels = kwargs.pop('use_labels', 'all')

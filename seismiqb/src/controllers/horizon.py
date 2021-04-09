@@ -118,7 +118,7 @@ class HorizonController(BaseController):
             if horizon_paths:
                 if isinstance(horizon_paths, str):
                     horizon_paths = {dataset.indices[0]: glob(horizon_paths)}
-                dataset.create_labels(horizon_paths)
+                dataset.create_labels(horizon_paths, labels_class=Horizon)
 
             self.log(f'Created dataset\n{indent(str(dataset), " "*4)}')
         return dataset
@@ -469,7 +469,7 @@ class HorizonController(BaseController):
             .mask_rebatch(src='masks', threshold=C('rebatch_threshold', default=0.1))
             .load_cubes(dst='images')
             .adaptive_reshape(src=['images', 'masks'], shape=V('shape'))
-            .normalize(mode='q', src='images')
+            .normalize(src='images')
         )
 
     def augmentation_pipeline(self, **kwargs):
@@ -532,7 +532,7 @@ class HorizonController(BaseController):
                             side_view=C('side_view'))
             .load_cubes(dst='images')
             .adaptive_reshape(src='images', shape=C('crop_shape'))
-            .normalize(mode='q', src='images')
+            .normalize(src='images')
 
             # Predict with model, then aggregate
             .predict_model('model',

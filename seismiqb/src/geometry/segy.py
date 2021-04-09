@@ -105,7 +105,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
         self.segy_path = self.path
         self.segy_text = [self.segyfile.text[i] for i in range(1 + self.segyfile.ext_headers)]
 
-        # Computed from CDP_X/CDO_Y information
+        # Computed from CDP_X/CDP_Y information
         self.rotation_matrix = self.compute_rotation_matrix()
         self.area = self.compute_area()
 
