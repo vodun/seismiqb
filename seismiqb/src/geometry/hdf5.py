@@ -4,8 +4,6 @@ import os
 import numpy as np
 import h5pickle as h5py
 
-from ..utility_classes import lru_cache
-
 from .converted import SeismicGeometryConverted
 
 

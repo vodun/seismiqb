@@ -492,7 +492,7 @@ class SeismicGeometry:
         """ Total amount of traces in a cube. """
         if hasattr(self, 'zero_traces'):
             return np.prod(self.zero_traces.shape)
-        elif hasattr(self, 'dataframe'):
+        if hasattr(self, 'dataframe'):
             return len(self.dataframe)
         return self.cube_shape[0] * self.cube_shape[1]
 

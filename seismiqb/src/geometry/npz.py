@@ -79,4 +79,3 @@ class SeismicGeometryNPZ(SeismicGeometry):
     def __getitem__(self, key):
         """ Get data from the first named array. """
         return self.data[self.names[0]][key]
-

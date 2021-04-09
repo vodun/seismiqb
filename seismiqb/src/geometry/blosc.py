@@ -1,14 +1,12 @@
 """ Blosc sliced geometry. """
-import os
-
-import numpy as np
-import blosc
 from zipfile import ZipFile
-import dill
 
-from ..utility_classes import lru_cache
+import dill
+import blosc
+import numpy as np
 
 from .converted import SeismicGeometryConverted
+
 
 
 class BloscFile:
@@ -44,7 +42,7 @@ class BloscFile:
             self.key_to_dataset = {}
 
         elif mode == 'r':
-            available_keys = list(set([name.split('/')[0] for name in self.zipfile.namelist()]))
+            available_keys = {name.split('/')[0] for name in self.zipfile.namelist()}
 
             self.key_to_dataset = {}
             for key in available_keys:

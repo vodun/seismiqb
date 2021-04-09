@@ -40,7 +40,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
     the cube in order to analyze distribution of amplitudes. It also collects a number of trace examples
     into `trace_container` attribute, that can be used for later evaluation of various statistics.
     """
-    #pylint: disable=attribute-defined-outside-init, too-many-instance-attributes
+    #pylint: disable=attribute-defined-outside-init, too-many-instance-attributes, redefined-builtin
     def __init__(self, path, headers=None, index_headers=None, **kwargs):
         self.structured = False
         self.quantized = False
@@ -552,6 +552,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
         kwargs : dict
             Other parameters, passed directly to the file constructor of chosen format.
         """
+        #pylint: disable=import-outside-toplevel
         # Select format
         from .converted import SeismicGeometryConverted
         if format == 'blosc':
