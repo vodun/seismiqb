@@ -1,6 +1,9 @@
+""" Functions for generation of 2d and 2d synthetic seismic arrays.
+"""
 import numpy as np
 from scipy.interpolate import interp1d, interp2d
 from scipy.ndimage import gaussian_filter
+from numba import njit
 
 
 def make_surfaces(num_surfaces, grid_shape, shape, kind='cubic', perturbation_share=0.25, shares=None):
@@ -44,7 +47,7 @@ def make_surfaces(num_surfaces, grid_shape, shape, kind='cubic', perturbation_sh
     for func in funcs:
         results.append((func(*[np.arange(num_points) / num_points for num_points in shape[:-1]])
                         * shape[-1]).astype(np.int).T)
-    return results
+    return np.array(results)
 
 
 def reflectivity(v, rho):
@@ -72,30 +75,61 @@ def rickerwave(f, dt):
     ricker = (1 - beta * 2) * np.exp(-beta)
     return ricker
 
-def convolve_2d(rc, w):
-    """ Generate synthetic seismic given reflectivity series and ricker wavelet.
-    """
-    synth_l = np.zeros_like(rc)
-    for i in range(rc.shape[0]):
-        if rc.shape[-1] >= len(w):
-            synth_l[i, :] = np.convolve(rc[i, :], w, mode='same')
-        else:
-            aux = int(len(w) / 2.0)
-            synth_l[i, :] = np.convolve(rc[i, :], w, mode='full')[aux:-aux]
-    return synth_l
 
-def convolve_3d(rc, w):
-    """ Generate synthetic seismic given reflectivity series and ricker wavelet.
+@njit
+def convolve_2d(array, kernel):
+    """ Shape-preserving vector-wise convolution on 2d-arrays.
     """
-    synth_l = np.zeros_like(rc)
-    for i in range(rc.shape[0]):
-        for x in range(rc.shape[1]):
-            if rc.shape[-1] >= len(w):
-                synth_l[i, x, :] = np.convolve(rc[i, x, :], w, mode='same')
-            else:
-                aux = int(len(w) / 2.0)
-                synth_l[i, x, :] = np.convolve(rc[i, x, :], w, mode='full')[aux:-aux]
-    return synth_l
+    # calculate offsets to trim arrays resulting from the convolution
+    result = np.zeros_like(array)
+    left_offset = (len(kernel) - 1) // 2
+    right_offset = len(kernel) - 1 - left_offset
+
+    for i in range(array.shape[0]):
+        result[i, :] = np.convolve(array[i], kernel)[left_offset:-right_offset]
+    return result
+
+
+@njit
+def convolve_3d(array, kernel):
+    """ Shape-preserving vector-wise convolution on 3d-arrays.
+    """
+    # calculate offsets to trim arrays resulting from the convolution
+    result = np.zeros_like(array)
+    left_offset = (len(kernel) - 1) // 2
+    right_offset = len(kernel) - 1 - left_offset
+
+    for i in range(array.shape[0]):
+        for j in range(array.shape[1]):
+            result[i, j, :] = np.convolve(array[i, j], kernel)[left_offset:-right_offset]
+    return result
+
+
+@njit
+def make_colors_array_2d(colors, levels, shape):
+    """ Color 2d-array in colors according to given levels.
+    """
+    array = np.zeros(shape=shape)
+    for i in range(array.shape[0]):
+        vec = array[i, :]
+        for j in range(len(colors)):
+            low = np.minimum(levels[j][i], array.shape[-1])
+            vec[low : ] = colors[j]
+    return array
+
+
+@njit
+def make_colors_array_3d(colors, levels, shape):
+    """ Color 3d-array in colors according to given levels.
+    """
+    array = np.zeros(shape=shape)
+    for i in range(array.shape[0]):
+        for j in range(array.shape[1]):
+            vec = array[i, j, :]
+            for k in range(len(colors)):
+                low = np.minimum(levels[k][i, j], array.shape[-1])
+                vec[low : ] = colors[k]
+    return array
 
 
 def make_synthetic(shape=(50, 400, 800), num_reflections=200, vel_limits=(900, 5400), horizon_heights=(1/4, 1/2, 2/3),
@@ -150,20 +184,8 @@ def make_synthetic(shape=(50, 400, 800), num_reflections=200, vel_limits=(900, 5
 
     # make velocity model
     curves = make_surfaces(num_reflections, grid_shape, perturbation_share=perturbation_share, shape=shape)
-    vel_model = np.zeros(shape=shape)
-    if dim == 2:
-        for i in range(vel_model.shape[0]):
-            trace = vel_model[i, :]
-            for j in range(num_reflections):
-                low = np.minimum(curves[j][i], vel_model.shape[-1])
-                trace[low : ] = velocities[j]
-    else:
-        for i in range(vel_model.shape[0]):
-            for x in range(vel_model.shape[1]):
-                trace = vel_model[i, x, :]
-                for j in range(num_reflections):
-                    low = np.minimum(curves[j][i, x], vel_model.shape[-1])
-                    trace[low : ] = velocities[j]
+    make_colors_array = make_colors_array_2d if dim == 2 else make_colors_array_3d
+    vel_model = make_colors_array(velocities, curves, shape)
 
     # make density model
     if rho_noise_lims is not None:
