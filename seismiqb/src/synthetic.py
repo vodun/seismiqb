@@ -3,6 +3,7 @@
 import numpy as np
 from scipy.interpolate import interp1d, interp2d
 from scipy.ndimage import gaussian_filter
+from scipy.signal import ricker
 from numba import njit
 
 
@@ -58,23 +59,6 @@ def reflectivity(v, rho):
     rc[..., 1:] = ((v[..., 1:] * rho[..., 1:] - v[..., :-1] * rho[..., :-1]) /
                    (v[..., 1:] * rho[..., 1:] + v[..., :-1] * rho[..., :-1]))
     return rc
-
-def rickerwave(f, dt):
-    """ Generate RickerWave given frequency and time-sample rate.
-    """
-    if not f < 0.2 * (1 / (2 * dt)):
-        raise ValueError("Frequency too high for the dt chosen.")
-
-    nw = 2.2 / (f * dt)
-    nw = 2 * int(nw / 2) + 1
-    nc = int(nw / 2)
-
-    k = np.arange(1, nw + 1)
-    alpha = (nc - k + 1) * f * dt * np.pi
-    beta = alpha ** 2
-    ricker = (1 - beta * 2) * np.exp(-beta)
-    return ricker
-
 
 @njit
 def convolve_2d(array, kernel):
@@ -134,7 +118,7 @@ def make_colors_array_3d(colors, levels, shape):
 
 def make_synthetic(shape=(50, 400, 800), num_reflections=200, vel_limits=(900, 5400), horizon_heights=(1/4, 1/2, 2/3),
                    horizon_jumps=(7, 5, 4), grid_shape=(10, 10), perturbation_share=.2, rho_noise_lims=(0.97, 1.3),
-                   ricker_rate=2/3e3, ricker_frequency=30, sigma=1.1, noise_mul=0.5):
+                   ricker_width=5, ricker_points=50, sigma=1.1, noise_mul=0.5):
     """ Generate synthetic 3d-cube.
 
     Parameters
@@ -159,10 +143,10 @@ def make_synthetic(shape=(50, 400, 800), num_reflections=200, vel_limits=(900, 5
     rho_noise_lims : tuple or None
         Density (rho)-model is given by (velocity model * noise). The param sets the limits for noise.
         If set to None, rho-model is equal to velocity-model.
-    ricker_rate : float
-        Time-sampling rate of the ricker-wave.
-    ricker_frequency : int
-        Frequency of the ricker-wave.
+    ricker_width : float
+        Width of the ricker-wave - `a`-parameter of `scipy.signal.ricker`.
+    ricker_points : int
+        Number of points in the ricker-wave - `points`-parameter of `scipy.signal.ricker`.
     sigma : float or None
         sigma used for gaussian blur of the synthetic seismic.
     noise_mul : float or None
@@ -195,7 +179,7 @@ def make_synthetic(shape=(50, 400, 800), num_reflections=200, vel_limits=(900, 5
 
     # obtain synthetic
     ref_coeffs = reflectivity(vel_model, rho)
-    wavelet = rickerwave(ricker_frequency, ricker_rate)
+    wavelet = ricker(ricker_points, ricker_width)
     convolve = convolve_2d if dim == 2 else convolve_3d
     result = convolve(ref_coeffs, wavelet)
 
