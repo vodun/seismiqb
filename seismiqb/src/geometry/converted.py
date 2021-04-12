@@ -67,7 +67,7 @@ class SeismicGeometryConverted(SeismicGeometry):
         for axis in np.argsort(shape):
             if axis in self.available_axis:
                 return axis
-        return
+        return None
 
     def load_crop(self, locations, axis=None, **kwargs):
         """ Load 3D crop from the cube.
