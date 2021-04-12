@@ -270,7 +270,7 @@ class SeismicGeometry:
                 return None
 
     def __getattr__(self, key):
-        """ Load item from stored meta, if needed. """
+        """ Load item from stored meta, if possible. """
         if key in self.PRESERVED_LAZY and self.path_meta is not None and key not in self.__dict__:
             return self.load_meta_item(key)
         return object.__getattribute__(self, key)
@@ -299,7 +299,9 @@ class SeismicGeometry:
         return key, shape, squeeze
 
     def __getitem__(self, key):
-        """ Get sub-cube be slices. Can be re-implemented in child classes. """
+        """ Assuming that cube is POST-STACK, get sub-volume using the usual `NumPy`-like semantics.
+        Can be re-implemented in child classes.
+        """
         key, _, squeeze = self.process_key(key)
 
         crop = self.load_crop(key)

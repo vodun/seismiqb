@@ -34,9 +34,9 @@ class BloscFile:
         self.mode = mode
         self.zipfile = ZipFile(path, mode=mode)
 
-        self.clevel = 6
-        self.cname = 'lz4'
-        self.shuffle = 0
+        self.clevel = clevel
+        self.cname = cname
+        self.shuffle = shuffle
 
         if mode == 'w':
             self.key_to_dataset = {}
@@ -174,7 +174,6 @@ class BloscDataset:
         key = key if isinstance(key, int) else key[0]
         with self.zipfile.open(f'{self.key}/{key}', mode='r') as file:
             slide = self.load(file)
-
         return slide
 
 
@@ -183,7 +182,7 @@ class SeismicGeometryBLOSC(SeismicGeometryConverted):
     """ Infer `BloscFile` with multiple projections of the same data inside. """
     #pylint: disable=attribute-defined-outside-init
     def process(self, **kwargs):
-        """ Detect available projections in the cube and store them. """
+        """ Detect available projections in the cube and store handlers to them in attributes. """
         self.file = BloscFile(self.path, mode='r')
 
         # Check available projections
@@ -202,8 +201,3 @@ class SeismicGeometryBLOSC(SeismicGeometryConverted):
 
         # Parse attributes from meta / set defaults
         self.add_attributes(**kwargs)
-
-
-    def __getitem__(self, key):
-        """ Reuse `load_crop` to get sub-volume of data. """
-        return self.load_crop(key)

@@ -11,7 +11,7 @@ class SeismicGeometryHDF5(SeismicGeometryConverted):
     """ Infer or create an `HDF5` file with multiple projections of the same data inside. """
     #pylint: disable=attribute-defined-outside-init
     def process(self, mode='r', projections='ixh', shape=None, **kwargs):
-        """ Detect available projections in the cube and store them. """
+        """ Detect available projections in the cube and store handlers to them in attributes. """
         if mode == 'a':
             mode = 'r+' if os.path.exists(self.path) else 'w-'
         self.mode = mode

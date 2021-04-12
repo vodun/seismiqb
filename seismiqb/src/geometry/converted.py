@@ -64,9 +64,10 @@ class SeismicGeometryConverted(SeismicGeometry):
     # Methods to load actual data from underlying storage
     def get_optimal_axis(self, shape):
         """ Choose the fastest axis from available projections, based on shape. """
-        indices = np.argsort(shape)
-        available = [axis for axis in indices if axis in self.available_axis]
-        return available[0]
+        for axis in np.argsort(shape):
+            if axis in self.available_axis:
+                return axis
+        return
 
     def load_crop(self, locations, axis=None, **kwargs):
         """ Load 3D crop from the cube.

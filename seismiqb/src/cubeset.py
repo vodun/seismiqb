@@ -133,7 +133,7 @@ class SeismicCubeset(Dataset):
                                  drop_last=drop_last, bar=bar, bar_desc=bar_desc, iter_params=iter_params)
 
 
-    def load_geometries(self, logs=True, **kwargs):
+    def load_geometries(self, logs=True, collect_stats=True, spatial=True, **kwargs):
         """ Load geometries into dataset-attribute.
 
         Parameters
@@ -147,15 +147,9 @@ class SeismicCubeset(Dataset):
             Same instance with loaded geometries.
         """
         for ix in self.indices:
-            self.geometries[ix].process(collect_stats=True, spatial=True, **kwargs)
+            self.geometries[ix].process(collect_stats=collect_stats, spatial=spatial, **kwargs)
             if logs:
                 self.geometries[ix].log()
-
-
-    def convert_to_hdf5(self, postfix=''):
-        """ Converts every cube in dataset from `.segy` to `.hdf5`. """
-        for ix in self.indices:
-            self.geometries[ix].make_hdf5(postfix=postfix)
 
 
     def create_labels(self, paths=None, filter_zeros=True, dst='labels', labels_class=None, bar=False, **kwargs):
