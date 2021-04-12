@@ -923,13 +923,13 @@ class Horizon:
             locations = self.points[idxs, :2]
 
         coordinates = [] # container for all types of holes, represented by their coordinates
-        for location, scale in zip(locations, scales):
+        for location, figure_scale in zip(locations, scales):
             n_key_points = rng.integers(2, max_angles_amount + 1)
             radius = rng.random()
             sharpness = rng.random() * rng.integers(1, max_sharpness)
 
             figure_coordinates = make_bezier_figure(n=n_key_points, radius=radius, sharpness=sharpness,
-                                                    scale=scale, shape=self.shape, seed=seed)
+                                                    scale=figure_scale, shape=self.shape, seed=seed)
             figure_coordinates += location
 
             negative_coords_shift = np.min(np.vstack([figure_coordinates, [0, 0]]), axis=0)
@@ -937,7 +937,6 @@ class Horizon:
             figure_coordinates -= (huge_coords_shift + negative_coords_shift + 1)
 
             coordinates.append(figure_coordinates)
-        coordinates = np.concatenate(coordinates)
 
         # Generate points-like holes
         if points_proportion:
@@ -949,16 +948,16 @@ class Horizon:
             if isinstance(points_shape, int):
                 points_shape = (points_shape, points_shape)
             filtering_matrix = binary_dilation(filtering_matrix, np.ones(points_shape))
-            coordinates = np.vstack([coordinates,
-                                     np.argwhere(filtering_matrix > 0)])
+            coordinates.append(np.argwhere(filtering_matrix > 0))
+        coordinates = np.concatenate(coordinates)
 
+        # Add noise and filtering matrix transformations
         if noise_level:
             noise = rng.normal(loc=coordinates,
                                scale=noise_level,
                                size=coordinates.shape)
             coordinates = np.unique(np.vstack([coordinates, noise.astype(int)]), axis=0)
 
-        # Filtering matrix transformations
         idx = np.where((coordinates[:, 0] >= 0) &
                        (coordinates[:, 1] >= 0) &
                        (coordinates[:, 0] < self.i_length) &
