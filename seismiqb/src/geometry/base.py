@@ -2,18 +2,15 @@
 import os
 import re
 import sys
-import shutil
-import itertools
 
 from textwrap import dedent
-from tqdm.auto import tqdm
 
 import numpy as np
-import h5py
-import segyio
+import h5pickle as h5py
 
-from ..utils import file_print, compute_attribute, make_axis_grid, \
-                    fill_defaults, get_environ_flag
+from .export import ExportMixin
+
+from ..utils import file_print, get_environ_flag
 from ..utility_classes import lru_cache
 from ..plotters import plot_image
 
@@ -81,9 +78,21 @@ def add_descriptors(cls):
 
 
 @add_descriptors
-class SeismicGeometry:
-    """ This class selects which type of geometry to initialize: the SEG-Y or the HDF5 one,
-    depending on the passed path.
+class SeismicGeometry(ExportMixin):
+    """ Class to infer information about seismic cube in various formats, and provide API for data loading.
+
+    During the SEG-Y processing, a number of statistics are computed. They are saved next to the cube under the
+    `.meta` extension, so that subsequent loads (in, possibly, other formats) don't have to recompute them.
+    Most of them (`SeismicGeometry.PRESERVED`) are loaded at initialization; yet, the most memory-intensive ones
+    (`SeismicGeometry.PRESERVED_LAZY`) are loaded on demand.
+
+    Based on the extension of path, a different subclass is used to implement key methods for data indexing.
+    Currently support extensions:
+        - `segy`
+        - `hdf5`
+        - `blosc`
+    The last two are created by converting the original SEG-Y cube.
+    During the conversion, an extra step of int8 quantization can be performed to reduce the space taken.
 
     Independent of exact format, `SeismicGeometry` provides following:
         - Attributes to describe shape and structure of the cube like `cube_shape` and `lens`,
@@ -105,10 +114,24 @@ class SeismicGeometry:
         - `quality_map` attribute is a spatial matrix that estimates cube hardness;
           `quality_grid` attribute contains a grid of locations to train model on, based on `quality_map`.
 
-        - `show_slide` method allows to do exactly what the name says, and has the same API as `load_slide`.
-          `repr` allows to get a quick summary of the cube statistics.
+        - textual representation of cube geometry: method `print` shows the summary of an instance with
+        information about its location and values; `print_textual` allows to see textual header from a SEG-Y.
 
-    Refer to the documentation of respective classes to learn more about their structure, attributes and methods.
+        - visual representation of cube geometry: methods `show` and  `show_quality_map` display top view on
+        cube with computed statistics; `show_slide` can be used for front view on various axis of data.
+
+    Parameters
+    ----------
+    path : str
+        Path to seismic cube. Supported formats are `segy`, `hdf5`, `blosc`.
+    path_meta : str, optional
+        Path to pre-computed statistics. If not provided, use the same as `path` with `.meta` extension.
+    process : bool
+        Whether to process the data: open the file and infer initial stats.
+    collect_stats : bool
+        If cube is in `segy` format, collect more stats about values.
+    spatial : bool
+        If cube is in `segy` format and `collect_stats` is True, collect stats as if the cube is POST-STACK.
     """
     #TODO: add separate class for cube-like labels
     SEGY_ALIASES = ['sgy', 'segy', 'seg']
@@ -702,148 +725,3 @@ class SeismicGeometry:
         inverse_matrix = np.linalg.inv(self.rotation_matrix[:, :2])
         lines = (inverse_matrix @ points.T - inverse_matrix @ self.rotation_matrix[:, 2].reshape(2, -1)).T
         return np.rint(lines)
-
-
-    # Misc
-    @classmethod
-    def create_file_from_iterable(cls, src, shape, window, stride, dst=None,
-                                  agg=None, projection='ixh', threshold=None):
-        """ Aggregate multiple chunks into file with 3D cube.
-
-        Parameters
-        ----------
-        src : iterable
-            Each item is a tuple (position, array) where position is a 3D coordinate of the left upper array corner.
-        shape : tuple
-            Shape of the resulting array.
-        window : tuple
-            Chunk shape.
-        stride : tuple
-            Stride for chunks. Values in overlapped regions will be aggregated.
-        dst : str or None, optional
-            Path to the resulting .hdf5. If None, function will return array with predictions
-        agg : 'mean', 'min' or 'max' or None, optional
-            The way to aggregate values in overlapped regions. None means that new chunk will rewrite
-            previous value in cube.
-        projection : str, optional
-            Projections to create in hdf5 file, by default 'ixh'
-        threshold : float or None, optional
-            If not None, threshold to transform values into [0, 1], by default None
-        """
-        shape = np.array(shape)
-        window = np.array(window)
-        stride = np.array(stride)
-
-        if dst is None:
-            dst = np.zeros(shape)
-        else:
-            file_hdf5 = h5py.File(dst, 'a')
-            dst = file_hdf5.create_dataset('cube', shape)
-            cube_hdf5_x = file_hdf5.create_dataset('cube_x', shape[[1, 2, 0]])
-            cube_hdf5_h = file_hdf5.create_dataset('cube_h', shape[[2, 0, 1]])
-
-        lower_bounds = [make_axis_grid((0, shape[i]), stride[i], shape[i], window[i]) for i in range(3)]
-        lower_bounds = np.stack(np.meshgrid(*lower_bounds), axis=-1).reshape(-1, 3)
-        upper_bounds = lower_bounds + window
-        grid = np.stack([lower_bounds, upper_bounds], axis=-1)
-
-        for position, chunk in src:
-            slices = tuple([slice(position[i], position[i]+chunk.shape[i]) for i in range(3)])
-            _chunk = dst[slices]
-            if agg in ('max', 'min'):
-                chunk = np.maximum(chunk, _chunk) if agg == 'max' else np.minimum(chunk, _chunk)
-            elif agg == 'mean':
-                grid_mask = np.logical_and(
-                    grid[..., 1] >= np.expand_dims(position, axis=0),
-                    grid[..., 0] < np.expand_dims(position + window, axis=0)
-                ).all(axis=1)
-                agg_map = np.zeros_like(chunk)
-                for chunk_slc in grid[grid_mask]:
-                    _slices = [slice(
-                        max(chunk_slc[i, 0], position[i]) - position[i],
-                        min(chunk_slc[i, 1], position[i] + window[i]) - position[i]
-                    ) for i in range(3)]
-                    agg_map[tuple(_slices)] += 1
-                chunk /= agg_map
-                chunk = _chunk + chunk
-            dst[slices] = chunk
-        if isinstance(dst, np.ndarray):
-            if threshold is not None:
-                dst = (dst > threshold).astype(int)
-        else:
-            for i in range(0, dst.shape[0], window[0]):
-                slide = dst[i:i+window[0]]
-                if threshold is not None:
-                    slide = (slide > threshold).astype(int)
-                    dst[i:i+window[0]] = slide
-                cube_hdf5_x[:, :, i:i+window[0]] = slide.transpose((1, 2, 0))
-                cube_hdf5_h[:, i:i+window[0]] = slide.transpose((2, 0, 1))
-        return dst
-
-
-    def make_sgy(self, path_hdf5=None, path_spec=None, postfix='',
-                 remove_hdf5=False, zip_result=True, path_segy=None, pbar=False):
-        """ Convert POST-STACK HDF5 cube to SEG-Y format with current geometry spec.
-
-        Parameters
-        ----------
-        path_hdf5 : str
-            Path to load hdf5 file from.
-        path_spec : str
-            Path to load segy file from with geometry spec.
-        path_segy : str
-            Path to store converted cube. By default, new cube is stored right next to original.
-        postfix : str
-            Postfix to add to the name of resulting cube.
-        """
-        path_segy = path_segy or (os.path.splitext(path_hdf5)[0] + postfix + '.sgy')
-        if not path_spec:
-            if hasattr(self, 'segy_path'):
-                path_spec = self.segy_path
-            else:
-                path_spec = os.path.splitext(self.path) + '.sgy'
-
-        # By default, if path_hdf5 is not provided, `temp.hdf5` next to self.path will be used
-        if path_hdf5 is None:
-            path_hdf5 = os.path.join(os.path.dirname(self.path), 'temp.hdf5')
-
-        with h5py.File(path_hdf5, 'r') as src:
-            cube_hdf5 = src['cube']
-
-            geometry = SeismicGeometry(path_spec)
-            segy = geometry.segyfile
-
-            spec = segyio.spec()
-            spec.sorting = None if segy.sorting is None else int(segy.sorting)
-            spec.format = None if segy.format is None else int(segy.format)
-            spec.samples = range(self.depth)
-
-            idx = np.stack(geometry.dataframe.index)
-            ilines, xlines = self.load_meta_item('ilines'), self.load_meta_item('xlines')
-
-            i_enc = {num: k for k, num in enumerate(ilines)}
-            x_enc = {num: k for k, num in enumerate(xlines)}
-
-            spec.ilines = ilines
-            spec.xlines = xlines
-
-            with segyio.create(path_segy, spec) as dst_file:
-                # Copy all textual headers, including possible extended
-                for i in range(1 + segy.ext_headers):
-                    dst_file.text[i] = segy.text[i]
-                dst_file.bin = segy.bin
-
-                for c, (i, x) in enumerate(tqdm(idx, disable=(not pbar))):
-                    locs = tuple([i_enc[i], x_enc[x], slice(None)])
-                    dst_file.header[c] = segy.header[c]
-                    dst_file.trace[c] = cube_hdf5[locs]
-                dst_file.bin = segy.bin
-                dst_file.bin[segyio.BinField.Traces] = len(idx)
-
-        if remove_hdf5:
-            os.remove(path_hdf5)
-
-        if zip_result:
-            dir_name = os.path.dirname(os.path.abspath(path_segy))
-            file_name = os.path.basename(path_segy)
-            shutil.make_archive(os.path.splitext(path_segy)[0], 'zip', dir_name, file_name)
