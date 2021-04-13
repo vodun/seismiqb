@@ -156,7 +156,7 @@ class BaseMetrics:
             Progress bar to use.
         """
         i_range, x_range = data.shape[:2]
-        k = kernel_size // 2
+        k = kernel_size // 2 + 1
 
         # Transfer to GPU, if needed
         data = to_device(data, device)
@@ -172,8 +172,8 @@ class BaseMetrics:
             data_n = data
 
         # Pad everything
-        padded_data = xp.pad(data_n, ((k, k), (k, k), (0, 0)), constant_values=xp.nan)
-        padded_stds = xp.pad(data_stds, k, constant_values=0.0)
+        padded_data = xp.pad(data_n, ((0, k), (k, k), (0, 0)), constant_values=xp.nan)
+        padded_stds = xp.pad(data_stds, ((0, k), (k, k)), constant_values=0.0)
         padded_bad_traces = xp.pad(bad_traces, k, constant_values=1)
 
         # Compute metric by shifting arrays
@@ -181,20 +181,29 @@ class BaseMetrics:
         pbar = Notifier(pbar, total=total) if pbar else None
 
         accumulator = Accumulator(agg=agg, amortize=amortize, axis=axis, total=total)
-        for i in range(kernel_size):
-            for j in range(kernel_size):
-                if i == j == k:
+        for i in range(k):
+            for j in range(-k+1, k):
+                if (i == 0) and (j <= 0):
                     continue
+                shifted_data = padded_data[i:i+i_range, k+j:k+j+x_range]
+                shifted_stds = padded_stds[i:i+i_range, k+j:k+j+x_range]
+                shifted_bad_traces = padded_bad_traces[k+i:k+i+i_range, k+j:k+j+x_range]
+                symmetric_bad_traces = padded_bad_traces[k-i:k-i+i_range, k-j:k-j+x_range]
 
-                shifted_data = padded_data[i:i+i_range, j:j+x_range]
-                shifted_stds = padded_stds[i:i+i_range, j:j+x_range]
-                shifted_bad_traces = padded_bad_traces[i:i+i_range, j:j+x_range]
+                computed = function(data, shifted_data, data_stds, shifted_stds)
+                # using symmetry property:
+                symmetric_computed = computed[:i_range-i, max(0, -j):min(x_range, x_range-j)]
+                symmetric_computed = xp.pad(symmetric_computed,
+                                            ((i, 0), (max(0, j), -min(0, j))),
+                                            constant_values=xp.nan)
 
-                computed = function(data_n, shifted_data, data_stds, shifted_stds)
                 computed[shifted_bad_traces == 1] = xp.nan
+                symmetric_computed[symmetric_bad_traces == 1] = xp.nan
                 accumulator.update(computed)
+                accumulator.update(symmetric_computed)
                 if pbar:
-                    pbar.update()
+                    pbar.update(2)
+
         if pbar:
             pbar.close()
 
