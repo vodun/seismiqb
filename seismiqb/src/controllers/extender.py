@@ -57,9 +57,8 @@ class Extender(Enhancer):
             monitor.__enter__()
 
         # Make dataset and copy horizon
-        dataset = self.make_dataset(horizon=horizon)
         horizon = copy(horizon)
-        dataset.labels[dataset.indices[0]] = [horizon]
+        dataset = self.make_dataset(horizon=horizon)
 
         prev_len = initial_len = len(horizon)
         self.log(f'Inference started for {n_steps} steps with stride {stride}')
