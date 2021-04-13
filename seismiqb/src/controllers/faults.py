@@ -7,6 +7,7 @@ import os
 import glob
 import datetime
 import tqdm
+import copy
 
 import numpy as np
 import torch
@@ -208,7 +209,7 @@ class FaultController(BaseController):
             .scale_2d(scale=P(R('uniform', C('scale')[0], C('scale')[1])), src=['images', 'masks'], p=0.3)
             .transpose(src=['images', 'masks'], order=(2, 0, 1))
             .central_crop(C('crop_shape'), src=['images', 'masks'])
-            .cutout_2d(src=['images', 'masks'], patch_shape=np.array((1, 40, 40)), n=3, p=0.2)
+            .cutout_2d(src=['images'], patch_shape=np.array((1, 40, 40)), n=3, p=0.2)
         )
 
     def train_pipeline(self, **kwargs):
@@ -230,7 +231,7 @@ class FaultController(BaseController):
     def custom_plotter(self, ax=None, container=None, **kwargs):
         """ Zero-out center area of the image, change plot parameters. """
         data = container['data']
-        data = data[0, 0]
+        data = data[0][0]
         if data.ndim == 3:
             data = data[0]
         ax.imshow(data.T)
@@ -240,12 +241,31 @@ class FaultController(BaseController):
         ax.set_ylabel('axis two', fontsize=18)
 
     def make_notifier(self):
-        return Notifier(None, graphs=[
-            'loss_history',
+        # return Notifier(None, graphs=[
+        #     'loss_history',
+        #     {'source': B('images'), 'name': 'images', 'plot_function': self.custom_plotter},
+        #     {'source': B('masks'), 'name': 'masks', 'plot_function': self.custom_plotter},
+        #     {'source': B('predictions').astype('float32'), 'name': 'predictions', 'plot_function': self.custom_plotter}
+        # ])
+        # self.visdom = VisdomMonitor(self.config['experiment_id'])
+        return Notifier(None, graphs=['loss_history',
+            # {'source': , 'name': 'loss', 'plot_function': self.custom_plotter},
             {'source': B('images'), 'name': 'images', 'plot_function': self.custom_plotter},
             {'source': B('masks'), 'name': 'masks', 'plot_function': self.custom_plotter},
-            {'source': B('predictions').astype('float32'), 'name': 'predictions', 'plot_function': self.custom_plotter}
+            {'source': B('predictions').astype('float32'), 'name': 'predictions', 'plot_function': self.custom_plotter},
         ])
+
+    # def loss_plotter(self, ax=None, container=None, **kwargs):
+    #     loss_history = copy.copy(container['data'])
+    #     self.visdom.plot(np.arange(len(loss_history)), loss_history, 'loss')
+
+    # def image_plotter(self, ax=None, container=None, **kwargs):
+    #     image = container['data'][0]
+    #     if image.ndim == 4:
+    #         image = image[0]
+    #     image = image.transpose(0, 2, 1)
+    #     image = np.clip(image, 0, 1) * 255
+    #     self.visdom.imshow(image, container['name'])
 
     def get_train_template(self, **kwargs):
         """ Define the whole training procedure pipeline including data loading, augmentation and model training. """
@@ -353,7 +373,7 @@ class FaultController(BaseController):
                 ppl = (inference_pipeline << dataset)
                 for _ in tqdm.tqdm(range(dataset.grid_iters), disable=(not pbar)):
                     _ = ppl.next_batch(D('size'))
-                prediction = dataset.assemble_crops(ppl.v('predictions'), order=order).astype('float32')
+                prediction = dataset.assemble_crops(ppl.v('predictions'), order=order, fill_value=0).astype('float32')
                 image = geometry.file_hdf5['cube'][
                     slices[0][0]:slices[0][1],
                     slices[1][0]:slices[1][1],
@@ -361,7 +381,7 @@ class FaultController(BaseController):
                 ]
                 outputs[cube_idx] += [[slices, image, prediction]]
                 if create_mask:
-                    outputs[cube_idx][-1] += [dataset.assemble_crops(ppl.v('target'), order=order).astype('float32')]
+                    outputs[cube_idx][-1] += [dataset.assemble_crops(ppl.v('target'), order=order, fill_value=0).astype('float32')]
         return outputs
 
     def plot_inference(self, *args, savepath=None, overlap=True, threshold=0.05, **kwargs):
@@ -506,3 +526,28 @@ class FaultController(BaseController):
 
     def make_filename(self, prefix, orientation, ext):
         return (prefix + datetime.now().strftime("%Y%m%d%H%M%S") + '_{}.{}').format(orientation, ext)
+
+# from visdom import Visdom
+# import numpy as np
+
+# class VisdomMonitor:
+#     def __init__(self, env_name):
+#         self.viz = Visdom()
+#         self.env = env_name
+#         self.plots = {}
+
+#     def plot(self, x, y, var_name):
+#         if var_name not in self.plots:
+#             if len(x) == 1:
+#                 x = [x[0], x[0]]
+#                 y = [y[0], y[0]]
+#             self.plots[var_name] = self.viz.line(X = x, Y = y, opts=dict(title=var_name, xlabel='Iteration'), env=self.env)
+#         else:
+#             self.viz.line(X = x, Y = y, win=self.plots[var_name], opts=dict(title=var_name, xlabel='Iteration'), update='replace', env=self.env)
+
+#     def imshow(self, image, var_name):
+#         image = image[0].astype('uint8')
+#         if var_name not in self.plots:
+#             self.plots[var_name] = self.viz.image(image, opts=dict(caption=self.env), env=self.env)
+#         else:
+#             self.viz.image(image, win=self.plots[var_name], env=self.env, opts=dict(caption=self.env))

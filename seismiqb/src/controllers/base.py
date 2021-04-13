@@ -162,13 +162,11 @@ class BaseController:
         _ = kwargs
 
     def make_notifier(self):
-        if self.config['plot']:
-            return {
-                'bar': self.config.bar,
-                'monitors': 'loss_history',
-                'file': self.make_savepath('末 model_loss.log'),
-            }
-        return None
+        return {
+            'bar': self.config.bar,
+            'monitors': 'loss_history',
+            'file': self.make_savepath('末 model_loss.log'),
+        }
 
     # Train
     def train(self, dataset, config=None, **kwargs):
@@ -184,7 +182,7 @@ class BaseController:
         pipeline_config = Config({**self.config['common'], **self.config['train'], **config, **kwargs})
         n_iters, prefetch, rescale = pipeline_config.pop(['n_iters', 'prefetch', 'rescale_batch_size'])
 
-        notifier = self.make_notifier()
+        notifier = self.make_notifier() if self.config['plot'] else None
         self.log(f'Train started on device={self.gpu_list}')
 
         # Start resource tracking
