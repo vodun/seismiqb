@@ -6,7 +6,7 @@ import sys
 from textwrap import dedent
 
 import numpy as np
-import h5pickle as h5py
+import h5py
 
 from .export import ExportMixin
 
@@ -579,7 +579,7 @@ class SeismicGeometry(ExportMixin):
         q01 | q99:                     {self.v_q01:>10.2f} | {self.v_q99:<10.2f}
         """
 
-        if self.quantized:
+        if self.quantized or hasattr(self, 'qnt_error'):
             msg += f"""
         Quantized cube info:
         Error of quantization:         {self.qnt_error:>10.3f}

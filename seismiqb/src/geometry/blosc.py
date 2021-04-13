@@ -29,7 +29,7 @@ class BloscFile:
     The drawback of `ZipFile` is being unable to remove individual sub-files without recreating the archive or
     very dirty hacks. Therefore, this file container is not supposed to be appended to after creation.
     """
-    def __init__(self, path, mode='r', clevel=6, cname='lz4', shuffle=0):
+    def __init__(self, path, mode='r', clevel=6, cname='lz4hc', shuffle=0):
         self.path = path
         self.mode = mode
         self.zipfile = ZipFile(path, mode=mode)

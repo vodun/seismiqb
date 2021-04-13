@@ -185,7 +185,7 @@ class SeismicCubeset(Dataset):
             pbar = tqdm(paths[idx], disable=(not bar))
             label_list = []
             for path in pbar:
-                if '.dvc' in path:
+                if path.endswith('.dvc'):
                     continue
                 pbar.set_description(os.path.basename(path))
                 label_list += [labels_class(path, self.geometries[idx], **kwargs)]

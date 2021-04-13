@@ -468,7 +468,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
 
         Parameters
         ----------
-        ranges : str
+        ranges : str or sequence of two numbers
             Ranges to quantize data to. Available options are:
                 - `q95`, `q99`, `q999` to clip data to respective quantiles.
                 - `same` keep the same range of data.
@@ -551,6 +551,10 @@ class SeismicGeometrySEGY(SeismicGeometry):
             Whether to show progress bar during conversion.
         kwargs : dict
             Other parameters, passed directly to the file constructor of chosen format.
+            If format is `blosc`:
+                - `cname` for algorithm of compression. Default is `lz4hc`.
+                - `clevel` for level of compression. Default is 6.
+                - `shuffle` for bitshuffle during compression. Default is False.
         """
         #pylint: disable=import-outside-toplevel
         # Select format
