@@ -118,7 +118,7 @@ def make_colors_array_3d(colors, levels, shape):
 
 def make_synthetic(shape=(50, 400, 800), num_reflections=200, vel_limits=(900, 5400), horizon_heights=(1/4, 1/2, 2/3),
                    horizon_jumps=(7, 5, 4), grid_shape=(10, 10), perturbation_share=.2, rho_noise_lims=(0.97, 1.3),
-                   ricker_width=5, ricker_points=50, sigma=1.1, noise_mul=0.5):
+                   ricker_width=5, ricker_points=50, sigma=1.1, noise_mul=0.5, fetch_surfaces='horizons'):
     """ Generate synthetic 3d-cube.
 
     Parameters
@@ -151,6 +151,11 @@ def make_synthetic(shape=(50, 400, 800), num_reflections=200, vel_limits=(900, 5
         sigma used for gaussian blur of the synthetic seismic.
     noise_mul : float or None
         If not None, gaussian noise scale by this number is applied to the synthetic.
+    fetch_surfaces : str
+        Can be either 'horizons', 'all' or None. When 'horizons', only horizon-surfaces
+        (option `horizon_heights`) are returned. Choosing 'all' allows to return all of
+        the reflections, while 'topK' option leads to fetching K surfaces correpsonding
+        to K largest jumps in velocities-array.
     """
     if len(shape) in (2, 3):
         dim = len(shape)
@@ -160,8 +165,8 @@ def make_synthetic(shape=(50, 400, 800), num_reflections=200, vel_limits=(900, 5
     # generate array of velocities
     low, high = vel_limits
     llim = (high - low) / num_reflections
-    velocities = (np.linspace(low, high, num_reflections) +
-                  np.random.uniform(low=-llim, high=llim, size=(num_reflections, )))
+    velocities = (np.linspace(low, high, num_reflections + 1) +
+                  np.random.uniform(low=-llim, high=llim, size=(num_reflections + 1, )))
 
     for height_share, jump_mul in zip(horizon_heights, horizon_jumps):
         velocities[int(velocities.shape[0] * height_share)] += llim * jump_mul
@@ -188,4 +193,15 @@ def make_synthetic(shape=(50, 400, 800), num_reflections=200, vel_limits=(900, 5
         result = gaussian_filter(result, sigma=sigma)
     if noise_mul is not None:
         result += noise_mul * np.random.random(result.shape) * result.std()
+
+    # fetch horizons if needed
+    if isinstance(fetch_surfaces, str):
+        if fetch_surfaces == 'all':
+            return result, curves
+        if fetch_surfaces == 'horizons':
+            return result, curves[[int(curves.shape[0] * height_share) for height_share in horizon_heights]]
+        if 'top' in fetch_surfaces:
+            top_k = int(fetch_surfaces.replace('top', ''))
+            ixs = np.argsort(velocities)[::-1][top_k]
+            return result, curves[ixs]
     return result

@@ -12,12 +12,28 @@ import segyio
 from numba import njit, prange
 
 
-
 def file_print(msg, path, mode='w'):
     """ Print to file. """
     # pylint: disable=redefined-outer-name
     with open(path, mode) as file:
         print(msg, file=file)
+
+
+def make_charisma_from_surface(heights, path):
+    """ Make file in charisma-format using array of heights.
+
+    Parameters
+    ----------
+    heights : np.ndarray
+        heights-array of shape n_ilines X n_xlines.
+    path : str
+        path to resulting file.
+    """
+    n_ilines, n_xlines = surface.shape[0], surface.shape[1]
+    ilines_xlines = np.array([(il, xl) for il in range(n_ilines) for xl in range(n_xlines)])
+    df = pd.DataFrame(ilines_xlines, columns=['ILINE', 'XLINE'])
+    df['HEIGHT'] = surface.reshape(-1).astype(np.int)
+    df.to_csv(path)
 
 
 def make_segy_from_array(array, path_segy, zip=True, remove_segy=None, **kwargs):
