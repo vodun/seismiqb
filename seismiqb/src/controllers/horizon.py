@@ -32,6 +32,7 @@ class HorizonController(BaseController):
     """ Controller for horizon detection tasks. """
     #pylint: disable=attribute-defined-outside-init
     DEFAULTS = Config({
+        **BaseController.DEFAULTS,
         # General parameters
         'savedir': None,
         'monitor': True,
@@ -71,6 +72,9 @@ class HorizonController(BaseController):
             'chunk_size': 100,
             'chunk_overlap': 0.1,
         },
+
+        # Common parameters for train and inference
+        'common': {},
 
         # Make predictions smoother
         'postprocess': {},
@@ -114,7 +118,7 @@ class HorizonController(BaseController):
             if horizon_paths:
                 if isinstance(horizon_paths, str):
                     horizon_paths = {dataset.indices[0]: glob(horizon_paths)}
-                dataset.create_labels(horizon_paths)
+                dataset.create_labels(horizon_paths, labels_class=Horizon)
 
             self.log(f'Created dataset\n{indent(str(dataset), " "*4)}')
         return dataset
@@ -192,14 +196,15 @@ class HorizonController(BaseController):
     # Train method is inherited from BaseController class
 
     # Inference
-    def inference(self, dataset, model, **kwargs):
+    def inference(self, dataset, model, config=None, **kwargs):
         """ Make inference on a supplied dataset with a provided model.
 
         Works by making inference on chunks, splitted into crops.
         Resulting predictions (horizons) are stitched together.
         """
         # Prepare parameters
-        config = Config({**self.config['inference'], **kwargs})
+        config = config or {}
+        config = Config({**self.config['common'], **self.config['inference'], **config, **kwargs})
         orientation = config.pop('orientation')
         self.log(f'Starting {orientation} inference')
 
@@ -364,11 +369,12 @@ class HorizonController(BaseController):
         return predictions
 
     # Evaluate
-    def evaluate(self, predictions, targets=None, dataset=None, **kwargs):
+    def evaluate(self, predictions, targets=None, dataset=None, config=None, **kwargs):
         """ Assess quality of predictions against targets and seismic data. """
         #pylint: disable=cell-var-from-loop
         # Prepare parameters
-        config = Config({**self.config['evaluate'], **kwargs})
+        config = config or {}
+        config = Config({**self.config['evaluate'], **config, **kwargs})
         add_prefix, dump, name = config.pop(['add_prefix', 'dump', 'name'])
         supports, device = config.pop(['supports', 'device'])
 
@@ -463,7 +469,7 @@ class HorizonController(BaseController):
             .mask_rebatch(src='masks', threshold=C('rebatch_threshold', default=0.1))
             .load_cubes(dst='images')
             .adaptive_reshape(src=['images', 'masks'], shape=V('shape'))
-            .normalize(mode='q', src='images')
+            .normalize(src='images')
         )
 
     def augmentation_pipeline(self, **kwargs):
@@ -526,7 +532,7 @@ class HorizonController(BaseController):
                             side_view=C('side_view'))
             .load_cubes(dst='images')
             .adaptive_reshape(src='images', shape=C('crop_shape'))
-            .normalize(mode='q', src='images')
+            .normalize(src='images')
 
             # Predict with model, then aggregate
             .predict_model('model',

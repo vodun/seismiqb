@@ -37,13 +37,14 @@ class Extender(Enhancer):
         }
     })
 
-    def inference(self, horizon, model, **kwargs):
+    def inference(self, horizon, model, config=None, **kwargs):
         """ Fill the holes of a given horizon with the supplied model.
 
         Works by making predictions near the horizon boundaries and stitching them to the original one.
         """
         # Prepare parameters
-        config = Config({**self.config['inference'], **kwargs})
+        config = config or {}
+        config = Config({**self.config['common'], **self.config['inference'], **config, **kwargs})
         n_steps, stride, batch_size, crop_shape = config.get(['n_steps', 'stride', 'batch_size', 'crop_shape'])
         threshold = config.get('threshold', 25)
         prefetch = config.get('prefetch', 0)
@@ -155,7 +156,7 @@ class Extender(Enhancer):
             .create_masks(dst='prior_masks', width=C('width', default=3))
             .adaptive_reshape(src=['images', 'prior_masks'],
                               shape=C('crop_shape'))
-            .normalize(mode='q', src='images')
+            .normalize(src='images')
 
             # Use model for prediction
             .predict_model('model',

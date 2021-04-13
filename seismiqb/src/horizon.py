@@ -5,9 +5,9 @@ from copy import copy
 from textwrap import dedent
 from itertools import product
 
+import h5py
 import numpy as np
 import pandas as pd
-import h5py
 from numba import njit, prange
 
 from cv2 import dilate
@@ -2066,7 +2066,6 @@ class Horizon:
         else:
             raise ValueError('Unknown format:', fmt)
 
-
     # Methods of (visual) representation of a horizon
     def __repr__(self):
         return f"""<horizon {self.name} for {self.cube_name} at {hex(id(self))}>"""
@@ -2271,7 +2270,6 @@ class Horizon:
         simplices = filter_simplices(simplices=tri.simplices, points=tri.points,
                                      matrix=self.full_matrix, threshold=threshold)
         return x, y, z, simplices
-
 
     def show_slide(self, loc, width=3, axis='i', order_axes=None, zoom_slice=None,
                    n_ticks=5, delta_ticks=100, **kwargs):
