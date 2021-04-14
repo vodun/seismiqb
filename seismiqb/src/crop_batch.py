@@ -598,7 +598,7 @@ class SeismicCropBatch(Batch):
                 if mode in ['q', 'normalize']:
                     normalized = 2 * (data - left) / (right - left) - 1 if right != left else np.zeros_like(data)
                 elif mode == 'q_clip':
-                    normalized =  np.clip(data, q_left, q_right) / max(abs(q_left), abs(q_right))
+                    normalized =  np.clip(data, left, right) / max(abs(left), abs(right))
                 else:
                     raise ValueError(f'Unknown mode: {mode}')
         else:

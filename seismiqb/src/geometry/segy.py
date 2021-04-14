@@ -559,7 +559,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
         #pylint: disable=import-outside-toplevel
         # Select format
         if format.startswith('q'):
-            quantized = True
+            quantize = True
             format = format[1:]
 
         from .converted import SeismicGeometryConverted
