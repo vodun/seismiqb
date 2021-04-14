@@ -29,11 +29,11 @@ def make_charisma_from_surface(heights, path):
     path : str
         path to resulting file.
     """
-    n_ilines, n_xlines = surface.shape[0], surface.shape[1]
+    n_ilines, n_xlines = heights.shape[0], heights.shape[1]
     ilines_xlines = np.array([(il, xl) for il in range(n_ilines) for xl in range(n_xlines)])
     df = pd.DataFrame(ilines_xlines, columns=['ILINE', 'XLINE'])
-    df['HEIGHT'] = surface.reshape(-1).astype(np.int)
-    df.to_csv(path)
+    df['HEIGHT'] = heights.reshape(-1).astype(np.int)
+    df.to_csv(path, sep=' ')
 
 
 def make_segy_from_array(array, path_segy, zip=True, remove_segy=None, **kwargs):

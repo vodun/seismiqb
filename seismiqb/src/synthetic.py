@@ -1,4 +1,4 @@
-""" Functions for generation of 2d and 2d synthetic seismic arrays.
+""" Functions for generation of 2d and 3d synthetic seismic arrays.
 """
 import numpy as np
 from scipy.interpolate import interp1d, interp2d
@@ -8,8 +8,28 @@ from numba import njit
 
 
 def make_surfaces(num_surfaces, grid_shape, shape, kind='cubic', perturbation_share=0.25, shares=None):
-    """ First param is num_surfaces while the second controls how volatile is the curve. Might wanna
-    try changing the parameter with curve.
+    """ Make arrays representing heights of surfaces in a 3d/2d-array.
+
+    Parameters
+    ----------
+    num_surfaces : int
+        The number of resulting surfaces.
+    grid_shape : tuple
+        Shape of a grid of points used for interpolating surfaces.
+    shape : tuple
+        Shape of a 3d/2d array inside which the surfaces are created.
+    kind : str
+        Surfaces are interpolated from values on the grid of points. This is the type of interpolation
+        to use (see `scipy.interpolate.intepr1d` for all possible options).
+    perturbation_share : float
+        Maximum allowed surface-perturbation w.r.t. the distance between subsequent surfaces.
+    shares : np.ndarray
+        Array representing height-distances between subsequent surfaces as shares of unit-interval.
+    
+    Returns
+    -------
+    np.ndarray
+        Array of size num_surfaces X shape[:2] representing resulting surfaces-heights.
     """
     # check shapes and select interpolation-method
     grid_shape = (grid_shape, ) if isinstance(grid_shape, int) else grid_shape
@@ -38,31 +58,27 @@ def make_surfaces(num_surfaces, grid_shape, shape, kind='cubic', perturbation_sh
         curves.append(curves[-1] + delta_h * np.ones_like(curves[0])
                       + np.random.uniform(low=-epsilon, high=epsilon, size=curves[0].shape))
 
-    # make an array of interpolations
-    funcs = []
-    for curve in curves:
-        funcs.append(interp(*grid, curve, kind=kind))
-
-    #  scale each curve to cube-shape
+    # interpolate and scale each curve to cube-shape
     results = []
-    for func in funcs:
+    for curve in curves:
+        func = interp(*grid, curve, kind=kind)
         results.append((func(*[np.arange(num_points) / num_points for num_points in shape[:-1]])
                         * shape[-1]).astype(np.int).T)
     return np.array(results)
 
 
 def reflectivity(v, rho):
-    """ Compute reflectivity coeficcients given velocity and density models.
+    """ Compute reflectivity coefficients given velocity and density models.
     Velocities and reflectivity coefficients can be either 2d or 3d.
     """
     rc = np.zeros_like(v)
-    rc[..., 1:] = ((v[..., 1:] * rho[..., 1:] - v[..., :-1] * rho[..., :-1]) /
-                   (v[..., 1:] * rho[..., 1:] + v[..., :-1] * rho[..., :-1]))
+    v_rho = v * rho
+    rc[..., 1:] = (v_rho[..., 1:] - v_rho[..., :-1]) / (v_rho[..., 1:] + v_rho[..., :-1])
     return rc
 
 @njit
 def convolve_2d(array, kernel):
-    """ Shape-preserving vector-wise convolution on 2d-arrays.
+    """ Shape-preserving vector-wise convolution of a 2d-array with a kernel-vector.
     """
     # calculate offsets to trim arrays resulting from the convolution
     result = np.zeros_like(array)
@@ -76,7 +92,7 @@ def convolve_2d(array, kernel):
 
 @njit
 def convolve_3d(array, kernel):
-    """ Shape-preserving vector-wise convolution on 3d-arrays.
+    """ Shape-preserving vector-wise convolution of a 3d-array with a kernel-vector.
     """
     # calculate offsets to trim arrays resulting from the convolution
     result = np.zeros_like(array)
