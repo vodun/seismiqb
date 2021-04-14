@@ -17,7 +17,6 @@ from .base import SeismicGeometry
 
 
 
-
 class SeismicGeometrySEGY(SeismicGeometry):
     """ Class to infer information about SEG-Y cubes and provide convenient methods of working with them.
     A wrapper around `segyio` to provide higher-level API.

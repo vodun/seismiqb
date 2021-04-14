@@ -24,13 +24,12 @@ class SeismicGeometryConverted(SeismicGeometry):
     AXIS_TO_ORDER = {0: [0, 1, 2], 1: [1, 2, 0], 2: [2, 0, 1]}
     AXIS_TO_TRANSPOSE = {0: [0, 1, 2], 1: [2, 0, 1], 2: [1, 2, 0]}
 
-    def process(self, **kwargs):
-        """ Create file handler. Must be implemented in the child classes. """
-        _ = kwargs
+    def process(self):
+        """ Create and process file handler. Must be implemented in the child classes. """
 
 
     def add_attributes(self, **kwargs):
-        """ If meta is available, then retrieve values from it. Otherwise, use defaults.
+        """ If meta is available, retrieves values from it. Otherwise, uses defaults.
         Also infers some values from the data itself. No passing through data.
         """
         self.structured = True
