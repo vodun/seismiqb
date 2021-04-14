@@ -463,7 +463,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
 
 
     # Quantization
-    def set_quantization_parameters(self, ranges='q99', clip=True, center=False):
+    def compute_quantization_parameters(self, ranges='q99', clip=True, center=False):
         """ Make bins for int8 quantization and convert value-stats.
 
         Parameters
@@ -558,6 +558,10 @@ class SeismicGeometrySEGY(SeismicGeometry):
         """
         #pylint: disable=import-outside-toplevel
         # Select format
+        if format.startswith('q'):
+            quantized = True
+            format = format[1:]
+
         from .converted import SeismicGeometryConverted
         if format == 'blosc':
             from .blosc import BloscFile
@@ -567,7 +571,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
 
         # Quantization
         if quantize:
-            self.set_quantization_parameters(ranges=ranges, clip=clip, center=center)
+            self.compute_quantization_parameters(ranges=ranges, clip=clip, center=center)
             dtype, transform = np.int8, self.quantize
         else:
             dtype, transform = np.float32, lambda array: array
