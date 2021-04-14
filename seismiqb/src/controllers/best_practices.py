@@ -52,12 +52,14 @@ MODEL_CONFIG = {
     'loss': 'bdice',
     'optimizer': {'name': 'Adam', 'lr': 0.01,},
     'decay': {'name': 'exp', 'gamma': 0.1, 'frequency': 150},
-    'microbatch': 4,
+    'microbatch': 8,
     }
 
 MODEL_CONFIG_DETECTION = {**MODEL_CONFIG}
 
-MODEL_CONFIG_EXTENSION = {key: value for key, value in MODEL_CONFIG.items()
-                          if key != 'initial_block'}
-MODEL_CONFIG_ENHANCE = {key: value for key, value in MODEL_CONFIG.items()
-                        if key != 'initial_block'}
+MODEL_CONFIG_EXTENSION = {
+    **MODEL_CONFIG,
+    'initial_block': {},
+    'optimizer': {'name': 'Adam', 'lr': 0.005,},
+}
+MODEL_CONFIG_ENHANCE = {**MODEL_CONFIG_EXTENSION}
