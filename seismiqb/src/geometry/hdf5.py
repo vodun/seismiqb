@@ -43,6 +43,7 @@ class SeismicGeometryHDF5(SeismicGeometryConverted):
 
     def add_projection(self):
         """ TODO. """
+        raise NotImplementedError
 
     def __getitem__(self, key):
         """ Select the fastest axis and use native `HDF5` slicing to retrieve data. """
@@ -64,3 +65,4 @@ class SeismicGeometryHDF5(SeismicGeometryConverted):
 
     def __setitem__(self, key, value):
         """ TODO. """
+        raise NotImplementedError

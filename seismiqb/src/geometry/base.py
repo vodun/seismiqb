@@ -87,10 +87,10 @@ class SeismicGeometry(ExportMixin):
     (`SeismicGeometry.PRESERVED_LAZY`) are loaded on demand.
 
     Based on the extension of path, a different subclass is used to implement key methods for data indexing.
-    Currently support extensions:
+    Currently supported extensions:
         - `segy`
-        - `hdf5`
-        - `blosc`
+        - `hdf5` and its quantized version
+        - `blosc` and its quantized version
     The last two are created by converting the original SEG-Y cube.
     During the conversion, an extra step of int8 quantization can be performed to reduce the space taken.
 
@@ -123,7 +123,7 @@ class SeismicGeometry(ExportMixin):
     Parameters
     ----------
     path : str
-        Path to seismic cube. Supported formats are `segy`, `hdf5`, `blosc`.
+        Path to seismic cube. Supported formats are `segy`, `hdf5`, `qhdf5`, `blosc` `qblosc`.
     path_meta : str, optional
         Path to pre-computed statistics. If not provided, use the same as `path` with `.meta` extension.
     process : bool
@@ -196,7 +196,7 @@ class SeismicGeometry(ExportMixin):
             from .npz import SeismicGeometryNPZ
             new_cls = SeismicGeometryNPZ
         else:
-            raise TypeError('Unknown format of the cube.')
+            raise TypeError(f'Unknown format of the cube: {fmt}')
 
         instance = super().__new__(new_cls)
         return instance
@@ -432,10 +432,10 @@ class SeismicGeometry(ExportMixin):
     def quality_grid(self):
         """ Spatial grid based on `quality_map`. """
         if self._quality_grid is None:
-            self.make_quality_grid((100, 200))
+            self.make_quality_grid()
         return self._quality_grid
 
-    def make_quality_grid(self, frequencies, iline=True, xline=True, full_lines=True, margin=0, **kwargs):
+    def make_quality_grid(self, frequencies=(100, 200), iline=True, xline=True, full_lines=True, margin=0, **kwargs):
         """ Create `quality_grid` based on `quality_map`.
 
         Parameters
