@@ -48,8 +48,8 @@ class SeismicGeometryConverted(SeismicGeometry):
         cube = self.axis_to_cube[axis]
 
         self.cube_shape = np.array(cube.shape)[self.AXIS_TO_ORDER[axis]]
+        self.lens = self.cube_shape[:2]
         self.depth = self.cube_shape[-1]
-        self.lens = self.cube_shape
         self.dtype = cube.dtype
         self.quantized = cube.dtype == np.int8
 
@@ -155,7 +155,3 @@ class SeismicGeometryConverted(SeismicGeometry):
         if axis == 1:
             slide = slide.T
         return slide
-
-    def __getitem__(self, key):
-        """ Convenient API for data loading with square brackets. Must be implemented in child classes. """
-        _ = key

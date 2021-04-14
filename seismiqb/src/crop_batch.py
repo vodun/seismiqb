@@ -594,12 +594,9 @@ class SeismicCropBatch(Batch):
                 min_, max_ = data.min(), data.max()
                 normalized = (data - min_) / (max_ - min_) if (max_ != min_) else np.zeros_like(data)
             else:
-                q_left, q_right = np.quantile(data, q)
+                left, right = np.quantile(data, q)
                 if mode in ['q', 'normalize']:
-                    if q_right != q_left:
-                        normalized = 2 * (data - q_left) / (q_right - q_left) - 1
-                    else:
-                        normalized = np.zeros_like(data)
+                    normalized = 2 * (data - left) / (right - left) - 1 if right != left else np.zeros_like(data)
                 elif mode == 'q_clip':
                     normalized =  np.clip(data, q_left, q_right) / max(abs(q_left), abs(q_right))
                 else:
