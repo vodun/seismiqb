@@ -25,7 +25,7 @@ class SeismicGeometryHDF5(SeismicGeometryConverted):
 
         # Check available projections
         self.available_axis = [axis for axis, name in self.AXIS_TO_NAME.items()
-                                if name in self.file]
+                               if name in self.file]
         self.available_names = [self.AXIS_TO_NAME[axis] for axis in self.available_axis]
 
         # Save cube handlers to instance

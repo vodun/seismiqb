@@ -28,14 +28,14 @@ class ExportMixin:
         stride : tuple
             Stride for chunks. Values in overlapped regions will be aggregated.
         dst : str or None, optional
-            Path to the resulting .hdf5. If None, function will return array with predictions
+            Path to the resulting .hdf5. If None, function will return array with predictions.
         agg : 'mean', 'min' or 'max' or None, optional
             The way to aggregate values in overlapped regions. None means that new chunk will rewrite
             previous value in cube.
         projection : str, optional
-            Projections to create in hdf5 file, by default 'ixh'
+            Projections to create in hdf5 file, by default 'ixh'.
         threshold : float or None, optional
-            If not None, threshold to transform values into [0, 1], by default None
+            If not None, threshold to transform values into [0, 1]. Default is None.
         """
         shape = np.array(shape)
         window = np.array(window)

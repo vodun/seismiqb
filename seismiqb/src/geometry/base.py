@@ -86,7 +86,7 @@ class SeismicGeometry(ExportMixin):
     Most of them (`SeismicGeometry.PRESERVED`) are loaded at initialization; yet, the most memory-intensive ones
     (`SeismicGeometry.PRESERVED_LAZY`) are loaded on demand.
 
-    Based on the extension of path, a different subclass is used to implement key methods for data indexing.
+    Based on the extension of the path, a different subclass is used to implement key methods for data indexing.
     Currently support extensions:
         - `segy`
         - `hdf5`
@@ -94,7 +94,7 @@ class SeismicGeometry(ExportMixin):
     The last two are created by converting the original SEG-Y cube.
     During the conversion, an extra step of int8 quantization can be performed to reduce the space taken.
 
-    Independent of exact format, `SeismicGeometry` provides following:
+    Independent of exact format, `SeismicGeometry` provides the following:
         - Attributes to describe shape and structure of the cube like `cube_shape` and `lens`,
         as well as exact values of file-wide headers, for example, `time_delay` and `sample_rate`.
 
@@ -102,7 +102,7 @@ class SeismicGeometry(ExportMixin):
           `trace_container` attribute contains examples of amplitudes inside the cube and allows to compute statistics.
 
         - If needed, spatial stats can also be inferred: attributes `min_matrix`, `mean_matrix`, etc
-          allow to create a complete spatial map (that is view from above) of the desired statistic for the whole cube.
+          allow creating a complete spatial map (that is a view from above) of the desired statistic for the whole cube.
           `hist_matrix` contains a histogram of values for each trace in the cube, and can be used as
           a proxy for amplitudes in each trace for evaluating aggregated statistics.
 
@@ -245,7 +245,7 @@ class SeismicGeometry(ExportMixin):
         return axis
 
     def make_slide_locations(self, loc, axis=0):
-        """ Create locations (sequence of locations for each axis) for desired slide along desired axis. """
+        """ Create locations (sequence of slices for each axis) for desired slide along given axis. """
         axis = self.parse_axis(axis)
 
         locations = [slice(0, item) for item in self.cube_shape]
@@ -648,8 +648,8 @@ class SeismicGeometry(ExportMixin):
         ----------
         loc : int
             Number of slide to load.
-        axis : int
-            Number of axis to load slide along.
+        axis : int or str
+            Axis to load slide along.
         zoom_slice : tuple
             Tuple of slices to apply directly to 2d images.
         start, end, step : int

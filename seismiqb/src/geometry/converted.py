@@ -12,10 +12,10 @@ class SeismicGeometryConverted(SeismicGeometry):
     Underlying data storage must contain cube projections under the `cube_i`, `cube_x` and `cube_h` keys,
     which allow indexing with square brackets to get actual data: for example, to get the 100-iline slice::
         slide = hdf5_file['cube_i'][100, :, :]
-    Some of the projections may be missing: in this case, other (possibly, slower) projections are used to load data.
+    Some of the projections may be missing — in this case, other (possibly, slower) projections are used to load data.
     Projections msut be stored in the `axis_to_cube` attribute
 
-    The storage itself contains only data: attributes, stats and relevant geological info are stored in the `.meta`.
+    The storage itself contains only data; attributes, stats and relevant geological info are stored in the `.meta`.
 
     This class provides API for loading data: `load_slide` and `load_crop` methods.
     """
