@@ -41,7 +41,7 @@ def make_surfaces(num_surfaces, grid_shape, shape, kind='cubic', perturbation_sh
     # check shapes and select interpolation-method
     grid_shape = (grid_shape, ) if isinstance(grid_shape, int) else grid_shape
     if len(shape) != len(grid_shape) + 1:
-        raise ValueError('`shape` and `grid_shape` parameters should match.')
+        raise ValueError(("`(len(shape) - 1)` should be equal to `len(grid_shape)`.")
 
     if len(shape) == 2:
         interp = interp1d
@@ -142,7 +142,7 @@ def make_synthetic(shape=(50, 400, 800), num_reflections=200, vel_limits=(900, 5
                    horizon_jumps=(7, 5, 4), grid_shape=(10, 10), perturbation_share=.2, rho_noise_lims=(0.97, 1.3),
                    ricker_width=5, ricker_points=50, sigma=1.1, noise_mul=0.5, fetch_surfaces='horizons', rng=None,
                    seed=None):
-    """ Generate synthetic 3d-cube.
+    """ Generate synthetic 3d-cube along with most prominient reflective surfaces.
 
     Parameters
     ----------
@@ -183,6 +183,11 @@ def make_synthetic(shape=(50, 400, 800), num_reflections=200, vel_limits=(900, 5
         generator of random numbers.
     seed : int or None
         sees used for creation of random generator (check out `np.random.default_rng`).
+    
+    Returns
+    -------
+    tuple
+        tuple (cube, horizons); horizons can be None if `fetch_surfaces` is set to None.
     """
     if len(shape) in (2, 3):
         dim = len(shape)
@@ -232,4 +237,4 @@ def make_synthetic(shape=(50, 400, 800), num_reflections=200, vel_limits=(900, 5
             top_k = int(fetch_surfaces.replace('top', ''))
             ixs = np.argsort(velocities)[::-1][:top_k]
             return result, curves[ixs]
-    return result
+    return result, None
