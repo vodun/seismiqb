@@ -563,7 +563,7 @@ class SeismicCropBatch(Batch):
 
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def normalize(self, ix, mode='minmax', itemwise=False, src=None, dst=None, q=(0.01, 0.99)):
+    def normalize(self, ix, mode=None, itemwise=False, src=None, dst=None, q=(0.01, 0.99)):
         """ Normalize values in crop.
 
         Parameters
@@ -587,29 +587,23 @@ class SeismicCropBatch(Batch):
         data = self.get(ix, src)
         if callable(mode):
             normalized = mode(data)
+
         if itemwise:
+            # Adjust data based on the current item only
             if mode == 'minmax':
-                min_ = data.min()
-                max_ = data.max()
-                if (max_ - min_) > 0:
-                    normalized = (data - min_) / (max_ - min_)
-                else:
-                    normalized = np.zeros_like(data)
+                min_, max_ = data.min(), data.max()
+                normalized = (data - min_) / (max_ - min_) if (max_ != min_) else np.zeros_like(data)
             else:
-                q_left = np.quantile(data, q[0])
-                q_right = np.quantile(data, q[1])
+                left, right = np.quantile(data, q)
                 if mode in ['q', 'normalize']:
-                    if (q_right - q_left) > 0:
-                        normalized = 2 * (data - q_left) / (q_right - q_left) - 1
-                    else:
-                        normalized = np.zeros_like(data)
+                    normalized = 2 * (data - left) / (right - left) - 1 if right != left else np.zeros_like(data)
                 elif mode == 'q_clip':
-                    normalized =  np.clip(data, q_left, q_right) / max(abs(q_left), abs(q_right))
+                    normalized =  np.clip(data, left, right) / max(abs(left), abs(right))
                 else:
                     raise ValueError(f'Unknown mode: {mode}')
         else:
             geometry = self.get(ix, 'geometries')
-            normalized = geometry.scaler(data, mode=mode)
+            normalized = geometry.normalize(data, mode=mode)
         return normalized
 
     @action

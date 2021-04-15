@@ -58,9 +58,8 @@ class Extender(Enhancer):
             monitor.__enter__()
 
         # Make dataset and copy horizon
-        dataset = self.make_dataset(horizon=horizon)
         horizon = copy(horizon)
-        dataset.labels[dataset.indices[0]] = [horizon]
+        dataset = self.make_dataset(horizon=horizon)
 
         prev_len = initial_len = len(horizon)
         self.log(f'Inference started for {n_steps} steps with stride {stride}')
@@ -157,7 +156,7 @@ class Extender(Enhancer):
             .create_masks(dst='prior_masks', width=C('width', default=3))
             .adaptive_reshape(src=['images', 'prior_masks'],
                               shape=C('crop_shape'))
-            .normalize(mode='q', src='images')
+            .normalize(src='images')
 
             # Use model for prediction
             .predict_model('model',
