@@ -183,15 +183,18 @@ class BaseMetrics:
         accumulator = Accumulator(agg=agg, amortize=amortize, axis=axis, total=total)
         for i in range(k):
             for j in range(-k+1, k):
+                # Comparison between (x, y) and (x+i, y+j) vectors is the same as comparison between (x+i, y+j)
+                # and (x, y). So, we can compare (x, y) with (x+i, y+j) and save computed result twice:
+                # matrix associated with vector (x, y) and matrix associated with (x+i, y+j) vector.
                 if (i == 0) and (j <= 0):
                     continue
                 shifted_data = padded_data[i:i+i_range, k+j:k+j+x_range]
                 shifted_stds = padded_stds[i:i+i_range, k+j:k+j+x_range]
                 shifted_bad_traces = padded_bad_traces[k+i:k+i+i_range, k+j:k+j+x_range]
-                symmetric_bad_traces = padded_bad_traces[k-i:k-i+i_range, k-j:k-j+x_range]
 
                 computed = function(data, shifted_data, data_stds, shifted_stds)
-                # using symmetry property:
+                # Using symmetry property:
+                symmetric_bad_traces = padded_bad_traces[k-i:k-i+i_range, k-j:k-j+x_range]
                 symmetric_computed = computed[:i_range-i, max(0, -j):min(x_range, x_range-j)]
                 symmetric_computed = xp.pad(symmetric_computed,
                                             ((i, 0), (max(0, j), -min(0, j))),
