@@ -7,17 +7,18 @@ from .base import SeismicGeometry
 
 
 class SeismicGeometryConverted(SeismicGeometry):
-    """ Contains common methods and logic for converted formats of seismic storages: currently, `HDF5` and `BLOSC`.
+    """ Contains common methods and logic for converted formats of seismic storages:
+    currently, `HDF5`, `BLOSC` and their quantized versions.
 
     Underlying data storage must contain cube projections under the `cube_i`, `cube_x` and `cube_h` keys,
     which allow indexing with square brackets to get actual data: for example, to get the 100-iline slice::
         slide = hdf5_file['cube_i'][100, :, :]
     Some of the projections may be missing — in this case, other (possibly, slower) projections are used to load data.
-    Projections msut be stored in the `axis_to_cube` attribute
+    Projections must be stored in the `axis_to_cube` attribute
 
     The storage itself contains only data; attributes, stats and relevant geological info are stored in the `.meta`.
 
-    This class provides API for loading data: `load_slide` and `load_crop` methods.
+    This class provides API for loading data: `load_slide`, `load_crop` and `__getitem__` methods.
     """
     #pylint: disable=attribute-defined-outside-init
     AXIS_TO_NAME = {0: 'cube_i', 1: 'cube_x', 2: 'cube_h'}
@@ -30,7 +31,8 @@ class SeismicGeometryConverted(SeismicGeometry):
 
     def add_attributes(self, **kwargs):
         """ If meta is available, retrieves values from it. Otherwise, uses defaults.
-        Also infers some values from the data itself. No passing through data.
+        Infers shape and dtype from the data itself.
+        No passing through data whatsoever.
         """
         self.structured = True
         self.index_headers = self.INDEX_POST

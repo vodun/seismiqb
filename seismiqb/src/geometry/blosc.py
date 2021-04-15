@@ -28,11 +28,14 @@ class BloscFile:
 
     The drawback of `ZipFile` is being unable to remove individual sub-files without recreating the archive or
     very dirty hacks. Therefore, this file container is not supposed to be appended to after creation.
+
+    Semantics and namings are the same, as in `h5py` to provide identical API:
+    this way, we can make storage-agnostic code.
     """
     def __init__(self, path, mode='r', clevel=6, cname='lz4hc', shuffle=0):
         self.path = path
         self.mode = mode
-        self.zipfile = ZipFile(path, mode=mode)
+        self.open_handler()
 
         self.clevel = clevel
         self.cname = cname
@@ -48,6 +51,9 @@ class BloscFile:
             for key in available_keys:
                 self.key_to_dataset[key] = BloscDataset(key, parent=self)
 
+    def open_handler(self):
+        """ Open the ZipFile handler. Can be re-used when the same file is accessed from multiple processes. """
+        self.zipfile = ZipFile(self.path, mode=self.mode)
 
     # Utilities
     def namelist(self):
@@ -56,7 +62,7 @@ class BloscFile:
         return [name for name in namelist if '_meta' not in name]
 
     def __contains__(self, key):
-        """ Available projections. """
+        """ Check if projections is available. """
         return key in self.key_to_dataset
 
     def __repr__(self):
@@ -87,7 +93,7 @@ class BloscFile:
     # Instance manager
     def close(self):
         """ Close the underlying `ZipFile`.
-        Unlike most other file formats in Python, actually needed: without that, files become corrupted.
+        Unlike most other file formats in Python, actually needed: without that, file becomes corrupted.
         """
         self.zipfile.close()
 
@@ -141,6 +147,7 @@ class BloscDataset:
     """ A dataset inside `BloscFile`. Essentially, a subdirectory.
     Contains a reference to the original `BloscFile`.
     """
+    RETRIES = 5
     def __init__(self, key, parent):
         self.key = key
         self.parent = parent
@@ -155,7 +162,7 @@ class BloscDataset:
 
     # Utility
     def __getattr__(self, name):
-        """ Re-direct to the parent. """
+        """ Re-direct everything to the parent. """
         return getattr(self.parent, name)
 
     def __repr__(self):
@@ -172,8 +179,15 @@ class BloscDataset:
     def __getitem__(self, key):
         """ Load the file, named as the number of a slide. """
         key = key if isinstance(key, int) else key[0]
-        with self.zipfile.open(f'{self.key}/{key}', mode='r') as file:
-            slide = self.load(file)
+        for _ in range(self.RETRIES):
+            # In a multi-processing setting, the ZipFile can be (somehow) closed from other process
+            # We can mitigate that by re-opening the handler, if needed.
+            try:
+                with self.zipfile.open(f'{self.key}/{key}', mode='r') as file:
+                    slide = self.load(file)
+                break
+            except ValueError:
+                self.parent.open_handler()
         return slide
 
 
