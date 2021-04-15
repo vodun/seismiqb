@@ -118,9 +118,9 @@ def make_colors_array_2d(colors, levels, shape):
     array = np.zeros(shape=shape)
     for i in range(array.shape[0]):
         vec = array[i, :]
-        for j in range(len(colors)):
+        for j, color in enumerate(colors):
             low = np.minimum(levels[j][i], array.shape[-1])
-            vec[low : ] = colors[j]
+            vec[low : ] = color
     return array
 
 
@@ -132,9 +132,9 @@ def make_colors_array_3d(colors, levels, shape):
     for i in range(array.shape[0]):
         for j in range(array.shape[1]):
             vec = array[i, j, :]
-            for k in range(len(colors)):
+            for k, color in enumerate(colors):
                 low = np.minimum(levels[k][i, j], array.shape[-1])
-                vec[low : ] = colors[k]
+                vec[low : ] = color
     return array
 
 
