@@ -7,7 +7,8 @@ from scipy.signal import ricker
 from numba import njit
 
 
-def make_surfaces(num_surfaces, grid_shape, shape, kind='cubic', perturbation_share=0.25, shares=None):
+def make_surfaces(num_surfaces, grid_shape, shape, kind='cubic', perturbation_share=0.25, shares=None,
+                  rng=None, seed=None):
     """ Make arrays representing heights of surfaces in a 3d/2d-array.
 
     Parameters
@@ -25,12 +26,18 @@ def make_surfaces(num_surfaces, grid_shape, shape, kind='cubic', perturbation_sh
         Maximum allowed surface-perturbation w.r.t. the distance between subsequent surfaces.
     shares : np.ndarray
         Array representing height-distances between subsequent surfaces as shares of unit-interval.
-    
+    rng : np.random.Generator or None
+        generator of random numbers.
+    seed : int or None
+        seed used for creation of random generator (check out `np.random.default_rng`).
+
     Returns
     -------
     np.ndarray
         Array of size num_surfaces X shape[:2] representing resulting surfaces-heights.
     """
+    rng = rng or np.random.default_rng(seed)
+
     # check shapes and select interpolation-method
     grid_shape = (grid_shape, ) if isinstance(grid_shape, int) else grid_shape
     if len(shape) != len(grid_shape) + 1:
@@ -50,13 +57,12 @@ def make_surfaces(num_surfaces, grid_shape, shape, kind='cubic', perturbation_sh
     curves = [np.zeros(grid_shape)]
     shares = shares if shares is not None else np.ones((num_surfaces, ))
     shares = np.array(shares) / np.sum(shares)
-    for i in range(num_surfaces):
-        delta_h = shares[i]
+    for delta_h in shares:
         epsilon = perturbation_share * delta_h
 
         # make each curve in unit-terms
         curves.append(curves[-1] + delta_h * np.ones_like(curves[0])
-                      + np.random.uniform(low=-epsilon, high=epsilon, size=curves[0].shape))
+                      + rng.uniform(low=-epsilon, high=epsilon, size=curves[0].shape))
 
     # interpolate and scale each curve to cube-shape
     results = []
@@ -134,7 +140,8 @@ def make_colors_array_3d(colors, levels, shape):
 
 def make_synthetic(shape=(50, 400, 800), num_reflections=200, vel_limits=(900, 5400), horizon_heights=(1/4, 1/2, 2/3),
                    horizon_jumps=(7, 5, 4), grid_shape=(10, 10), perturbation_share=.2, rho_noise_lims=(0.97, 1.3),
-                   ricker_width=5, ricker_points=50, sigma=1.1, noise_mul=0.5, fetch_surfaces='horizons'):
+                   ricker_width=5, ricker_points=50, sigma=1.1, noise_mul=0.5, fetch_surfaces='horizons', rng=None,
+                   seed=None):
     """ Generate synthetic 3d-cube.
 
     Parameters
@@ -172,29 +179,34 @@ def make_synthetic(shape=(50, 400, 800), num_reflections=200, vel_limits=(900, 5
         (option `horizon_heights`) are returned. Choosing 'all' allows to return all of
         the reflections, while 'topK' option leads to fetching K surfaces correpsonding
         to K largest jumps in velocities-array.
+    rng : np.random.Generator or None
+        generator of random numbers.
+    seed : int or None
+        sees used for creation of random generator (check out `np.random.default_rng`).
     """
     if len(shape) in (2, 3):
         dim = len(shape)
     else:
         raise ValueError('The function only supports the generation of 2d and 3d synthetic seismic.')
+    rng = rng or np.random.default_rng(seed)
 
     # generate array of velocities
     low, high = vel_limits
     llim = (high - low) / num_reflections
     velocities = (np.linspace(low, high, num_reflections + 1) +
-                  np.random.uniform(low=-llim, high=llim, size=(num_reflections + 1, )))
+                  rng.uniform(low=-llim, high=llim, size=(num_reflections + 1, )))
 
     for height_share, jump_mul in zip(horizon_heights, horizon_jumps):
         velocities[int(velocities.shape[0] * height_share)] += llim * jump_mul
 
     # make velocity model
-    curves = make_surfaces(num_reflections, grid_shape, perturbation_share=perturbation_share, shape=shape)
+    curves = make_surfaces(num_reflections, grid_shape, perturbation_share=perturbation_share, shape=shape, rng=rng)
     make_colors_array = make_colors_array_2d if dim == 2 else make_colors_array_3d
     vel_model = make_colors_array(velocities, curves, shape)
 
     # make density model
     if rho_noise_lims is not None:
-        rho = vel_model * np.random.uniform(*rho_noise_lims, size=vel_model.shape)
+        rho = vel_model * rng.uniform(*rho_noise_lims, size=vel_model.shape)
     else:
         rho = vel_model
 
@@ -208,7 +220,7 @@ def make_synthetic(shape=(50, 400, 800), num_reflections=200, vel_limits=(900, 5
     if sigma is not None:
         result = gaussian_filter(result, sigma=sigma)
     if noise_mul is not None:
-        result += noise_mul * np.random.random(result.shape) * result.std()
+        result += noise_mul * rng.random(result.shape) * result.std()
 
     # fetch horizons if needed
     if isinstance(fetch_surfaces, str):
@@ -218,6 +230,6 @@ def make_synthetic(shape=(50, 400, 800), num_reflections=200, vel_limits=(900, 5
             return result, curves[[int(curves.shape[0] * height_share) for height_share in horizon_heights]]
         if 'top' in fetch_surfaces:
             top_k = int(fetch_surfaces.replace('top', ''))
-            ixs = np.argsort(velocities)[::-1][top_k]
+            ixs = np.argsort(velocities)[::-1][:top_k]
             return result, curves[ixs]
     return result
