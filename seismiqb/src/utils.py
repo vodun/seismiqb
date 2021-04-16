@@ -70,11 +70,10 @@ def make_segy_from_array(array, path_segy, zip_segy=True, remove_segy=None, **kw
             dst_file.text[i] = segyio.tools.create_text_header({1: '...'}) # add header-fetching from kwargs
 
         # Loop over the array and put all the data into new segy-cube
-        ctr = 0
-        for i, _ in tqdm(enumerate(spec.ilines)):
-            for x, _ in enumerate(spec.xlines):
+        for i in tqdm(range(array.shape[0])):
+            for x in range(array.shape[1]):
                 # create header in here
-                header = dst_file.header[ctr]
+                header = dst_file.header[i * array.shape[1] + x]
 
                 # change inline and xline in trace-header
                 header[segyio.TraceField.INLINE_3D] = i
@@ -87,8 +86,7 @@ def make_segy_from_array(array, path_segy, zip_segy=True, remove_segy=None, **kw
 
                 # copy the trace from the array
                 trace = array[i, x]
-                dst_file.trace[ctr] = trace
-                ctr += 1
+                dst_file.trace[i * array.shape[1] + x] = trace
 
         dst_file.bin = {segyio.BinField.Traces: array.shape[0] * array.shape[1],
                         segyio.BinField.Samples: array.shape[2],
