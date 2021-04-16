@@ -87,6 +87,7 @@ class HorizonController(BaseController):
             'add_prefix': False,
             'dump': False,
             'name': '',
+            'rename': False,
         }
     })
 
@@ -375,7 +376,7 @@ class HorizonController(BaseController):
         # Prepare parameters
         config = config or {}
         config = Config({**self.config['evaluate'], **config, **kwargs})
-        add_prefix, dump, name = config.pop(['add_prefix', 'dump', 'name'])
+        add_prefix, dump, name, rename = config.pop(['add_prefix', 'dump', 'name', 'rename'])
         supports, device = config.pop(['supports', 'device'])
 
         if targets is None and dataset is not None:
@@ -412,7 +413,7 @@ class HorizonController(BaseController):
             # Compare to targets
             shift = 41 + len(self.__class__.__name__)
             if targets:
-                _, _info = hm.evaluate('find_best_match', agg=None)
+                other, _info = hm.evaluate('find_best_match', agg=None)
                 info = {**info, **_info}
 
                 with open(self.make_savepath(*prefix, name + 'p_results.txt'), 'w') as result_txt:
@@ -425,6 +426,10 @@ class HorizonController(BaseController):
                        f'\n{horizon.name}'
                        f'\nwindow_rate={info["window_rate"]:4.3f}\navg error={info["mean"]:4.3f}')
                 self.log(indent(msg, ' '*shift))
+
+                if rename:
+                    horizon.name = f'from_{other.name}'
+                    self.log(f'Renamed to {horizon.name}')
 
             # Save surface to disk
             if dump:
