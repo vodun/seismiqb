@@ -87,6 +87,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
         # Collect stats, if needed and not collected previously
         if os.path.exists(self.path_meta) and not recollect:
             self.load_meta()
+            self.has_stats = True
         elif collect_stats:
             self.collect_stats(**kwargs)
 
@@ -130,7 +131,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
     def collect_stats(self, spatial=True, bins=25, num_keep=10000, pbar=True, **kwargs):
         """ Pass through file data to collect stats:
             - min/max values.
-            - q01/q99 quantiles of amplitudes in the cube.
+            - a number of quantiles of values in the cube.
             - certain amount of traces are stored in a `trace_container` attribute.
 
         If `spatial` is True, makes an additional pass through the cube to obtain following:
@@ -298,12 +299,14 @@ class SeismicGeometrySEGY(SeismicGeometry):
         """ Load individual trace from segyfile.
         If passed `np.nan`, returns trace of zeros.
         """
+        # TODO: can be improved by creating buffer and writing directly to it
         if not np.isnan(index):
             return self.segyfile.trace.raw[int(index)]
         return self._zero_trace
 
     def load_traces(self, trace_indices):
         """ Stack multiple traces together. """
+        # TODO: can be improved by preallocating memory and passing it as a buffer to `load_trace`
         return np.stack([self.load_trace(idx) for idx in trace_indices])
 
     # 2D
@@ -333,7 +336,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
         return slide
 
     def make_slide_indices(self, loc=None, axis=0, start=None, end=None, step=1, stable=True, return_iterator=False):
-        """ Choose appropriate version of index creation for various lengths of current index.
+        """ Choose appropriate version of index creation, depending on length of the current index.
 
         Parameters
         ----------
@@ -523,8 +526,9 @@ class SeismicGeometrySEGY(SeismicGeometry):
 
         Parameters
         ----------
-        format : {'hdf5', 'blosc'}
+        format : {'hdf5', 'qhdf5', 'blosc', 'qblosc}
             Format of storage to convert to: `blosc` takes less space, but a touch slower, than `hdf5`.
+            Prefix `q` sets the `quantize` parameter to True.
         path : str
             If provided, then path to save file to.
             Otherwise, file is saved under the same name with different extension.
@@ -589,6 +593,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
                      ('x' in projections) * self.cube_shape[1] +
                      ('h' in projections) * self.cube_shape[2])
             progress_bar = tqdm(total=total, ncols=800, disable=(not pbar))
+            name = os.path.basename(path)
 
             for p in projections:
                 axis = self.parse_axis(p)
@@ -596,7 +601,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
                 order = SeismicGeometryConverted.AXIS_TO_ORDER[axis]
                 cube = file.create_dataset(cube_name, shape=self.cube_shape[order], dtype=dtype)
 
-                progress_bar.set_description(f'Converting {self.name}; {p}-projection')
+                progress_bar.set_description(f'Creating {name}; {p}-projection')
                 for idx in range(self.cube_shape[axis]):
                     slide = self.load_slide(idx, axis=axis, stable=False)
                     slide = slide.T if axis == 1 else slide

@@ -140,6 +140,10 @@ class SeismicCubeset(Dataset):
         ----------
         logs : bool
             Whether to create logs. If True, .log file is created next to .sgy-cube location.
+        collect_stats : bool
+            Whether to collect stats for cubes in SEG-Y format.
+        spatial : bool
+            Whether to collect additional stats for POST-STACK cubes.
 
         Returns
         -------

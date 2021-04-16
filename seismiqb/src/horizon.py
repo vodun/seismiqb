@@ -971,7 +971,7 @@ class Horizon:
         return filtering_matrix
 
     # Horizon usage: point/mask generation
-    def create_sampler(self, bins=None, quality_grid=None, **kwargs):
+    def create_sampler(self, bins=None, quality_grid=None, weights=None, threshold=0, **kwargs):
         """ Create sampler based on horizon location.
 
         Parameters
@@ -981,6 +981,9 @@ class Horizon:
         quality_grid : ndarray or None
             If not None, then must be a matrix with zeroes in locations to keep, ones in locations to remove.
             Applied to `points` before sampler creation.
+        weights : ndarray or bool
+            Weights matrix with shape (ilines_len, xlines_len) for weights of sampling.
+            If True support correlation metric will be used.
         """
         _ = kwargs
         default_bins = self.cube_shape // np.array([5, 20, 20])
@@ -992,7 +995,16 @@ class Horizon:
         else:
             points = self.points
 
-        self.sampler = HorizonSampler(np.histogramdd(points/self.cube_shape, bins=bins), **kwargs)
+        if weights:
+            if not isinstance(weights, np.ndarray):
+                corrs_matrix = self.evaluate_metric()
+                weights = corrs_matrix[points[:, 0], points[:, 1]]
+            points = points[~np.isnan(weights)]
+            weights = weights[~np.isnan(weights)]
+            points = points[weights > threshold]
+            weights = weights[weights > threshold]
+
+        self.sampler = HorizonSampler(np.histogramdd(points/self.cube_shape, bins=bins, weights=weights), **kwargs)
 
     def add_to_mask(self, mask, locations=None, width=3, alpha=1, **kwargs):
         """ Add horizon to a background.

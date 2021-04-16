@@ -1,4 +1,4 @@
-""" SeismicGeometry-class containing geometrical info about seismic-cube."""
+""" Base class for seismic cube geometrical and geological info. """
 import os
 import re
 import sys
@@ -246,16 +246,16 @@ class SeismicGeometry(ExportMixin):
 
     def make_slide_locations(self, loc, axis=0):
         """ Create locations (sequence of slices for each axis) for desired slide along given axis. """
-        axis = self.parse_axis(axis)
-
         locations = [slice(0, item) for item in self.cube_shape]
+
+        axis = self.parse_axis(axis)
         locations[axis] = slice(loc, loc + 1)
         return locations
 
 
     # Meta information: storing / retrieving attributes
     def store_meta(self, path=None):
-        """ Store collected stats on disk. """
+        """ Store collected stats on disk. Uses either provided `path` or `path_meta` attribute. """
         path_meta = path or self.path_meta
 
         # Remove file, if exists: h5py can't do that
@@ -274,7 +274,7 @@ class SeismicGeometry(ExportMixin):
                     pass
 
     def load_meta(self):
-        """ Retrieve stored stats from disk. """
+        """ Retrieve stored stats from disk. Uses `path_meta` attribute. """
         for item in self.PRESERVED:
             value = self.load_meta_item(item)
             if value is not None:
@@ -293,7 +293,7 @@ class SeismicGeometry(ExportMixin):
                 return None
 
     def __getattr__(self, key):
-        """ Load item from stored meta, if possible. """
+        """ Load item from stored meta. """
         if key in self.PRESERVED_LAZY and self.path_meta is not None and key not in self.__dict__:
             return self.load_meta_item(key)
         return object.__getattribute__(self, key)
@@ -333,7 +333,8 @@ class SeismicGeometry(ExportMixin):
         return crop
 
     def normalize(self, array, mode=None):
-        """ Normalize array of amplitudes cut from the cube.
+        """ Normalize array of values cut from the cube.
+        Constants are computed from the entire volume.
         Constants for normalization are automatically chosen depending on the quantization of the cube.
 
         Parameters
@@ -500,7 +501,7 @@ class SeismicGeometry(ExportMixin):
         """ Wrapped textual header of SEG-Y file. """
         txt = ''.join([chr(item) for item in self.segy_text[0]])
         txt = '\n#'.join(txt.split('C'))
-        return txt.replace('26 \n#', '26 C').strip()
+        return txt.strip()
 
     @property
     def displayed_path(self):
@@ -535,12 +536,19 @@ class SeismicGeometry(ExportMixin):
     @property
     def nbytes(self):
         """ Size of instance in bytes. """
-        attrs = [
-            'dataframe', 'trace_container', 'zero_traces',
-            *[attr for attr in self.__dict__
-              if 'matrix' in attr or '_quality' in attr],
-        ]
-        return sum(sys.getsizeof(getattr(self, attr)) for attr in attrs if hasattr(self, attr)) + self.cache_size
+        names = set()
+        if self.structured is False:
+            names.add('dataframe')
+            if self.has_stats:
+                names.add('trace_container')
+                names.add('zero_traces')
+        else:
+            for name in ['trace_container', 'zero_traces']:
+                names.add(name)
+        names.update({name for name in self.__dict__
+                      if 'matrix' in name or '_quality' in name})
+
+        return sum(sys.getsizeof(getattr(self, name)) for name in names if hasattr(self, name)) + self.cache_size
 
     @property
     def ngbytes(self):
@@ -613,7 +621,7 @@ class SeismicGeometry(ExportMixin):
 
     # Visual representation
     def show(self, matrix='snr', **kwargs):
-        """ Show geometry-related map. """
+        """ Show geometry related top-view map. """
         kwargs = {
             'cmap': 'viridis_r',
             'title': f'{matrix if isinstance(matrix, str) else ""} map of `{self.name}`',
@@ -624,11 +632,11 @@ class SeismicGeometry(ExportMixin):
         matrix = getattr(self, matrix) if isinstance(matrix, str) else matrix
         plot_image(matrix, mode='single', **kwargs)
 
-    def show_histogram(self, scaler=None, bins=50, **kwargs):
-        """ Show distribution of amplitudes in `trace_container`. Optionally applies chosen `scaler`. """
+    def show_histogram(self, normalize=None, bins=50, **kwargs):
+        """ Show distribution of amplitudes in `trace_container`. Optionally applies chosen normalization. """
         data = np.copy(self.trace_container)
-        if scaler:
-            data = self.scaler(data, mode=scaler)
+        if normalize:
+            data = self.normalize(data, mode=normalize)
 
         kwargs = {
             'title': (f'Amplitude distribution for {self.short_name}' +
@@ -642,7 +650,8 @@ class SeismicGeometry(ExportMixin):
 
     def show_slide(self, loc=None, start=None, end=None, step=1, axis=0, zoom_slice=None,
                    n_ticks=5, delta_ticks=100, stable=True, **kwargs):
-        """ Show seismic slide in desired place. Works with both SEG-Y and HDF5 files.
+        """ Show seismic slide in desired place.
+        Under the hood relies on :meth:`load_slide`, so works with geometries in any formats.
 
         Parameters
         ----------
