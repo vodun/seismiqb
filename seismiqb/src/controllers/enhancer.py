@@ -46,7 +46,7 @@ class Enhancer(HorizonController):
             .load_cubes(dst='images')
             .adaptive_reshape(src=['images', 'masks'],
                               shape=C('crop_shape'))
-            .normalize(mode='q', src='images')
+            .normalize(src='images')
         )
 
     def distortion_pipeline(self):
@@ -114,7 +114,7 @@ class Enhancer(HorizonController):
             .create_masks(dst='prior_masks', width=3)
             .adaptive_reshape(src=['images', 'prior_masks'],
                               shape=C('crop_shape'))
-            .normalize(mode='q', src='images')
+            .normalize(src='images')
 
             # Use model for prediction
             .predict_model('model',
