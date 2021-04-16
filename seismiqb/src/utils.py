@@ -13,14 +13,11 @@ import torch.nn.functional as F
 from numba import njit, prange
 
 
-
 def file_print(msg, path, mode='w'):
     """ Print to file. """
     # pylint: disable=redefined-outer-name
     with open(path, mode) as file:
         print(msg, file=file)
-
-
 
 #TODO: rethink
 def make_subcube(path, geometry, path_save, i_range, x_range):
