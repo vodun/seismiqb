@@ -536,12 +536,19 @@ class SeismicGeometry(ExportMixin):
     @property
     def nbytes(self):
         """ Size of instance in bytes. """
-        attrs = [
-            'dataframe', 'trace_container', 'zero_traces',
-            *[attr for attr in self.__dict__
-              if 'matrix' in attr or '_quality' in attr],
-        ]
-        return sum(sys.getsizeof(getattr(self, attr)) for attr in attrs if hasattr(self, attr)) + self.cache_size
+        names = set()
+        if self.structured is False:
+            names.add('dataframe')
+            if self.has_stats:
+                names.add('trace_container')
+                names.add('zero_traces')
+        else:
+            for name in ['trace_container', 'zero_traces']:
+                names.add(name)
+        names.update({name for name in self.__dict__
+                      if 'matrix' in name or '_quality' in name})
+
+        return sum(sys.getsizeof(getattr(self, name)) for name in names if hasattr(self, name)) + self.cache_size
 
     @property
     def ngbytes(self):

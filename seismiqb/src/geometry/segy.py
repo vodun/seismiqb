@@ -87,6 +87,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
         # Collect stats, if needed and not collected previously
         if os.path.exists(self.path_meta) and not recollect:
             self.load_meta()
+            self.has_stats = True
         elif collect_stats:
             self.collect_stats(**kwargs)
 
