@@ -183,7 +183,7 @@ def make_synthetic(shape=(50, 400, 800), num_reflections=200, vel_limits=(900, 5
         generator of random numbers.
     seed : int or None
         sees used for creation of random generator (check out `np.random.default_rng`).
-    
+
     Returns
     -------
     tuple
