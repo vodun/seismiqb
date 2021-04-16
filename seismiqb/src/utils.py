@@ -1,196 +1,24 @@
 """ Utility functions. """
-from math import isnan
-from collections import OrderedDict
-from threading import RLock
-from functools import wraps
-from hashlib import blake2b
+import os
+import inspect
+from math import isnan, atan
 
 from tqdm import tqdm
 import numpy as np
 import pandas as pd
 import segyio
+import torch
+import torch.nn.functional as F
 
 from numba import njit, prange
-from ..batchflow import Sampler
 
 
 
-def file_print(msg, path):
+def file_print(msg, path, mode='w'):
     """ Print to file. """
-    with open(path, 'w') as file:
+    # pylint: disable=redefined-outer-name
+    with open(path, mode) as file:
         print(msg, file=file)
-
-
-
-class SafeIO:
-    """ Opens the file handler with desired `open` function, closes it at destruction.
-    Can log open and close actions to the `log_file`.
-    getattr, getitem and `in` operator are directed to the `handler`.
-    """
-    def __init__(self, path, opener=open, log_file=None, **kwargs):
-        self.path = path
-        self.log_file = log_file
-        self.handler = opener(path, **kwargs)
-
-        if self.log_file:
-            self._info(self.log_file, f'Opened {self.path}')
-
-    def _info(self, log_file, msg):
-        with open(log_file, 'a') as f:
-            f.write('\n' + msg)
-
-    def __getattr__(self, key):
-        return getattr(self.handler, key)
-
-    def __getitem__(self, key):
-        return self.handler[key]
-
-    def __contains__(self, key):
-        return key in self.handler
-
-    def __del__(self):
-        self.handler.close()
-
-        if self.log_file:
-            self._info(self.log_file, f'Closed {self.path}')
-
-
-class IndexedDict(OrderedDict):
-    """ Allows to use both indices and keys to subscript. """
-    def __getitem__(self, key):
-        if isinstance(key, int):
-            key = list(self.keys())[key]
-        return super().__getitem__(key)
-
-
-
-def stable_hash(key):
-    """ Hash that stays the same between different runs of Python interpreter. """
-    if not isinstance(key, (str, bytes)):
-        key = ''.join(sorted(str(key)))
-    if not isinstance(key, bytes):
-        key = key.encode('ascii')
-    return str(blake2b(key).hexdigest())
-
-class Singleton:
-    """ There must be only one!"""
-    instance = None
-    def __init__(self):
-        if not Singleton.instance:
-            Singleton.instance = self
-
-class lru_cache:
-    """ Thread-safe least recent used cache. Must be applied to class methods.
-
-    Parameters
-    ----------
-    maxsize : int
-        Maximum amount of stored values.
-    storage : None, OrderedDict or PickleDict
-        Storage to use.
-        If None, then no caching is applied.
-    classwide : bool
-        If True, then first argument of a method (self) is changed to class name for the purposes on hashing.
-    anchor : bool
-        If True, then code of the whole directory this file is located is used to create a persistent hash
-        for the purposes of storing.
-    attributes: None, str or sequence of str
-        Attributes to get from object and use as additions to key.
-    pickle_module: str
-        Module to use to save/load files on disk. Used only if `storage` is :class:`.PickleDict`.
-
-    Examples
-    --------
-    Store loaded slides::
-
-    @lru_cache(maxsize=128)
-    def load_slide(cube_name, slide_no):
-        pass
-
-    Notes
-    -----
-    All arguments to the decorated method must be hashable.
-    """
-    #pylint: disable=invalid-name, attribute-defined-outside-init
-    def __init__(self, maxsize=None, classwide=False, attributes=None):
-        self.maxsize = maxsize
-        self.classwide = classwide
-
-        # Make `attributes` always a list
-        if isinstance(attributes, str):
-            self.attributes = [attributes]
-        elif isinstance(attributes, (tuple, list)):
-            self.attributes = attributes
-        else:
-            self.attributes = False
-
-        self.default = Singleton()
-        self.lock = RLock()
-        self.reset()
-
-
-    def reset(self):
-        """ Clear cache and stats. """
-        self.cache = OrderedDict()
-        self.is_full = False
-        self.stats = {'hit': 0, 'miss': 0}
-
-    def make_key(self, args, kwargs):
-        """ Create a key from a combination of instance reference or class reference,
-        method args, and instance attributes.
-        """
-        key = list(args)
-        # key[0] is `instance` if applied to a method
-        if kwargs:
-            for k, v in sorted(kwargs.items()):
-                key.append((k, v))
-
-        if self.attributes:
-            for attr in self.attributes:
-                attr_hash = stable_hash(getattr(key[0], attr))
-                key.append(attr_hash)
-
-        if self.classwide:
-            key[0] = key[0].__class__
-        return tuple(key)
-
-
-    def __call__(self, func):
-        """ Add the cache to the function. """
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            key = self.make_key(args, kwargs)
-
-            # If result is already in cache, just retrieve it and update its timings
-            with self.lock:
-                result = self.cache.get(key, self.default)
-                if result is not self.default:
-                    del self.cache[key]
-                    self.cache[key] = result
-                    self.stats['hit'] += 1
-                    return result
-
-            # The result was not found in cache: evaluate function
-            result = func(*args, **kwargs)
-
-            # Add the result to cache
-            with self.lock:
-                self.stats['miss'] += 1
-                if key in self.cache:
-                    pass
-                elif self.is_full:
-                    self.cache.popitem(last=False)
-                    self.cache[key] = result
-                else:
-                    self.cache[key] = result
-                    self.is_full = (len(self.cache) >= self.maxsize)
-            return result
-
-        wrapper.__name__ = func.__name__
-        wrapper.cache = lambda: self.cache
-        wrapper.stats = lambda: self.stats
-        wrapper.reset = self.reset
-        return wrapper
 
 
 
@@ -290,8 +118,25 @@ def convert_point_cloud(path, path_save, names=None, order=None, transform=None)
     data.to_csv(path_save, sep=' ', index=False, header=False)
 
 
+def save_point_cloud(metric, save_path, geometry=None):
+    """ Save 2D map as a .txt point cloud. Can be opened by GENERAL format reader in geological software. """
+    idx_1, idx_2 = np.asarray(~np.isnan(metric)).nonzero()
+    points = np.hstack([idx_1.reshape(-1, 1),
+                        idx_2.reshape(-1, 1),
+                        metric[idx_1, idx_2].reshape(-1, 1)])
+
+    if geometry is not None:
+        points[:, 0] += geometry.ilines_offset
+        points[:, 1] += geometry.xlines_offset
+
+    df = pd.DataFrame(points, columns=['iline', 'xline', 'metric_value'])
+    df.sort_values(['iline', 'xline'], inplace=True)
+    df.to_csv(save_path, sep=' ', columns=['iline', 'xline', 'metric_value'],
+              index=False, header=False)
+
+
 def gen_crop_coordinates(point, horizon_matrix, zero_traces,
-                         stride, shape, fill_value, zeros_threshold=0,
+                         stride, shape, depth, fill_value, zeros_threshold=0,
                          empty_threshold=5, safe_stripe=0, num_points=2):
     """ Generate crop coordinates next to the point with maximum horizon covered area.
 
@@ -337,7 +182,7 @@ def gen_crop_coordinates(point, horizon_matrix, zero_traces,
                 num_empty = np.sum(horizon_patch == fill_value)
                 if num_empty > empty_threshold:
                     candidates.append([il, point[1],
-                                       hor_height - shape[2] // 2])
+                                       min(hor_height - shape[2] // 2, depth - shape[2] - 1)])
                     shapes.append([shape[1], shape[0], shape[2]])
                     orders.append([0, 2, 1])
                     intersections.append(shape[1] - num_empty)
@@ -355,7 +200,7 @@ def gen_crop_coordinates(point, horizon_matrix, zero_traces,
                 num_empty = np.sum(horizon_patch == fill_value)
                 if num_empty > empty_threshold:
                     candidates.append([point[0], xl,
-                                       hor_height - shape[2] // 2])
+                                       min(hor_height - shape[2] // 2, depth - shape[2] - 1)])
                     shapes.append(shape)
                     orders.append([2, 0, 1])
                     intersections.append(shape[1] - num_empty)
@@ -372,6 +217,101 @@ def gen_crop_coordinates(point, horizon_matrix, zero_traces,
                 shapes_array[top], \
                 orders_array[top])
 
+
+def make_axis_grid(axis_range, stride, length, crop_shape):
+    """ Make separate grids for every axis. """
+    grid = np.arange(*axis_range, stride)
+    grid_ = [x for x in grid if x + crop_shape < length]
+    if len(grid) != len(grid_):
+        grid_ += [axis_range[1] - crop_shape]
+    return sorted(grid_)
+
+def fill_defaults(value, default):
+    """ Transform int or tuple with Nones to tuple with values from default.
+
+    Parameters
+    ----------
+    value : None, int or tuple
+        value to transform
+    default : tuple
+
+    Returns
+    -------
+    tuple
+
+    Examples
+    --------
+        None --> default
+        5 --> (5, 5, 5)
+        (None, None, 3) --> (default[0], default[1], 3)
+    """
+    if value is None:
+        value = default
+    elif isinstance(value, int):
+        value = tuple([value] * 3)
+    elif isinstance(value, tuple):
+        value = tuple([item if item else default[i] for i, item in enumerate(value)])
+    return value
+
+
+def _adjust_shape_for_rotation(shape, angle):
+    """ Compute adjusted 2D crop shape to rotate it and get central crop without padding.
+
+    Parameters
+    ----------
+    shape : tuple
+        Target сrop shape.
+    angle : float
+
+    Returns
+    -------
+    tuple
+        Adjusted crop shape.
+    """
+    angle = abs(2 * np.pi * angle / 360)
+    limit = atan(shape[1] / shape[0])
+    x_max, y_max = shape
+    if angle != 0:
+        if angle < limit:
+            x_max = shape[0] * np.cos(angle) + shape[1] * np.sin(angle) + 1
+        else:
+            x_max = (shape[0] ** 2 + shape[1] ** 2) ** 0.5 + 1
+
+        if angle < np.pi / 2 - limit:
+            y_max = shape[0] * np.sin(angle) + shape[1] * np.cos(angle) + 1
+        else:
+            y_max = (shape[0] ** 2 + shape[1] ** 2) ** 0.5 + 1
+    return (int(np.ceil(x_max)), int(np.ceil(y_max)))
+
+def adjust_shape_3d(shape, angle, scale=(1, 1, 1)):
+    """ Compute adjusted 3D crop shape to rotate it and get central crop without padding. Adjustments is based on
+    proposition that rotation angles are defined as Tait-Bryan angles and the sequence of extrinsic rotations axes
+    is (axis_2, axis_0, axis_1) and scale performed after rotation.
+
+    Parameters
+    ----------
+    shape : tuple
+        Target сrop shape.
+    angle : float or tuple of floats
+        Rotation angles about each axis.
+    scale : int or tuple, optional
+        Scale for each axis.
+
+    Returns
+    -------
+    tuple
+        Adjusted crop shape.
+    """
+    angle = angle if isinstance(angle, (tuple, list)) else (angle, 0, 0)
+    scale = scale if isinstance(scale, (tuple, list)) else (scale, scale, 1)
+    shape = np.ceil(np.array(shape) / np.array(scale)).astype(int)
+    if angle[2] != 0:
+        shape[2], shape[0] = _adjust_shape_for_rotation((shape[2], shape[0]), angle[2])
+    if angle[1] != 0:
+        shape[2], shape[1] = _adjust_shape_for_rotation((shape[2], shape[1]), angle[1])
+    if angle[0] != 0:
+        shape[0], shape[1] = _adjust_shape_for_rotation((shape[0], shape[1]), angle[0])
+    return tuple(shape)
 
 @njit
 def groupby_mean(array):
@@ -468,8 +408,6 @@ def groupby_max(array):
     output[position, -1] = s
     position += 1
     return output[:position]
-
-
 
 
 @njit
@@ -578,46 +516,144 @@ def nb_mode(array, mask):
     return temp
 
 
-class HorizonSampler(Sampler):
-    """ Compact version of histogram-based sampler for 3D points structure. """
-    def __init__(self, histogram, seed=None, **kwargs):
-        super().__init__(histogram, seed, **kwargs)
-        # Bins and their probabilities: keep only non-zero ones
-        bins = histogram[0]
-        probs = (bins / np.sum(bins)).reshape(-1)
-        self.nonzero_probs_idx = np.asarray(probs != 0.0).nonzero()[0]
-        self.nonzero_probs = probs[self.nonzero_probs_idx]
-
-        # Edges of bins: keep lengths and diffs between successive edges
-        self.edges = histogram[1]
-        self.lens_edges = np.array([len(edge) - 1 for edge in self.edges])
-        self.divisors = [np.array(self.lens_edges[i+1:]).astype(np.int64)
-                         for i, _ in enumerate(self.edges)]
-        self.shifts_edges = [np.diff(edge)[0] for edge in self.edges]
-
-        # Uniform sampler
-        self.state = np.random.RandomState(seed=seed)
-        self.state_sampler = self.state.uniform
-
-    def sample(self, size):
-        """ Generate random sample from histogram distribution. """
-        # Choose bin indices
-        indices = np.random.choice(self.nonzero_probs_idx, p=self.nonzero_probs, size=size)
-
-        # Convert bin indices to its starting coordinates
-        low = generate_points(self.edges, divisors=self.divisors, lengths=self.lens_edges, indices=indices)
-        high = low + self.shifts_edges
-        return self.state_sampler(low=low, high=high)
-
 @njit
-def generate_points(edges, divisors, lengths, indices):
-    """ Accelerate sampling method of `HorizonSampler`. """
-    low = np.zeros((len(indices), len(lengths)))
+def filter_simplices(simplices, points, matrix, threshold=5.):
+    """ Remove simplices outside of matrix. """
+    #pylint: disable=consider-using-enumerate
+    mask = np.ones(len(simplices), dtype=np.int32)
 
-    for i, idx in enumerate(indices):
-        for j, (edge, divisors_, length) in enumerate(zip(edges, divisors, lengths)):
-            idx_copy = idx
-            for divisor in divisors_:
-                idx_copy //= divisor
-            low[i, j] = edge[idx_copy % length]
-    return low
+    for i in range(len(simplices)):
+        tri = points[simplices[i]].astype(np.int32)
+
+        middle_i, middle_x = np.mean(tri[:, 0]), np.mean(tri[:, 1])
+        heights = np.array([matrix[tri[0, 0], tri[0, 1]],
+                            matrix[tri[1, 0], tri[1, 1]],
+                            matrix[tri[2, 0], tri[2, 1]]])
+
+        if matrix[int(middle_i), int(middle_x)] < 0 or np.std(heights) > threshold:
+            mask[i] = 0
+
+    return simplices[mask == 1]
+
+def compute_attribute(array, window, device='cuda:0', attribute='semblance'):
+    """ Compute semblance for the cube. """
+    if isinstance(window, int):
+        window = np.ones(3, dtype=np.int32) * window
+    window = np.minimum(np.array(window), array.shape)
+
+    inputs = torch.Tensor(array).to(device)
+    inputs = inputs.view(1, 1, *inputs.shape)
+    padding = [(w // 2, w - w // 2 - 1) for w in window]
+
+    num = F.pad(inputs, (0, 0, *padding[1], *padding[0], 0, 0, 0, 0))
+    num = F.conv3d(num, torch.ones((1, 1, window[0], window[1], 1), dtype=torch.float32).to(device)) ** 2
+    num = F.pad(num, (*padding[2], 0, 0, 0, 0, 0, 0, 0, 0))
+    num = F.conv3d(num, torch.ones((1, 1, 1, 1, window[2]), dtype=torch.float32).to(device))
+
+    denum = F.pad(inputs, (*padding[2], *padding[1], *padding[0], 0, 0, 0, 0))
+    denum = F.conv3d(denum ** 2, torch.ones((1, 1, *window), dtype=torch.float32).to(device))
+
+    normilizing = torch.ones(inputs.shape[:-1], dtype=torch.float32).to(device)
+    normilizing = F.pad(normilizing, (*padding[1], *padding[0], 0, 0, 0, 0))
+    normilizing = F.conv2d(normilizing, torch.ones((1, 1, window[0], window[1]), dtype=torch.float32).to(device))
+
+    denum *= normilizing.view(*normilizing.shape, 1)
+    return np.nan_to_num((num / denum).cpu().numpy()[0, 0], nan=1.)
+
+def retrieve_function_arguments(function, dictionary):
+    """ Retrieve both positional and keyword arguments for a passed `function` from a `dictionary`.
+    Note that retrieved values are removed from the passed `dictionary` in-place. """
+    # pylint: disable=protected-access
+    parameters = inspect.signature(function).parameters
+    arguments_with_defaults = {k: v.default for k, v in parameters.items() if v.default != inspect._empty}
+    return {k: dictionary.pop(k, v) for k, v in arguments_with_defaults.items()}
+
+def get_environ_flag(flag_name, defaults=('0', '1'), convert=int):
+    """ Retrive environmental variable, check if it matches expected defaults and optionally convert it. """
+    flag = os.environ.get(flag_name, '0')
+    if flag not in defaults:
+        raise ValueError(f"Expected `{flag_name}` env variable value to be from {defaults}, got {flag} instead.")
+    return convert(flag)
+
+def make_bezier_figure(n=7, radius=0.2, sharpness=0.05, scale=1.0, shape=(1, 1),
+                       resolution=None, distance=.5, seed=None):
+    """ Bezier closed curve coordinates.
+    Creates Bezier closed curve which passes through random points.
+    Code based on:  https://stackoverflow.com/questions/50731785/create-random-shape-contour-using-matplotlib
+
+    Parameters
+    ----------
+    n : int
+        Number more than 1 to control amount of angles (key points) in the random figure.
+        Must be more than 1.
+    radius : float
+        Number between 0 and 1 to control the distance of middle points in Bezier algorithm.
+    sharpness : float
+        Degree of sharpness/edgy. If 0 then a curve will be the smoothest.
+    scale : float
+        Number between 0 and 1 to control figure scale. Fits to the shape.
+    shape : sequence int
+        Shape of figure location area.
+    resolution : int
+        Amount of points in one curve between two key points.
+    distance : float
+        Number between 0 and 1 to control distance between all key points in a unit square.
+    seed: int, optional
+        Seed the random numbers generator.
+    """
+    rng = np.random.default_rng(seed)
+    resolution = resolution or int(100 * scale * max(shape))
+
+    # Get key points of figure as random points which are far enough each other
+    key_points = rng.random((n, 2))
+    squared_distance = distance ** 2
+
+    squared_distances = squared_distance - 1
+    while np.any(squared_distances < squared_distance):
+        shifted_points = key_points - np.mean(key_points, axis=0)
+        angles = np.arctan2(shifted_points[:, 0], shifted_points[:, 1])
+        key_points = key_points[np.argsort(angles)]
+
+        squared_distances = np.sum(np.diff(key_points, axis=0)**2, axis=1)
+        key_points = rng.random((n, 2))
+
+    key_points *= scale * np.array(shape, float)
+    key_points = np.vstack([key_points, key_points[0]])
+
+    # Calculate figure angles in key points
+    p = np.arctan(sharpness) / np.pi + .5
+    diff_between_points = np.diff(key_points, axis=0)
+    angles = np.arctan2(diff_between_points[:, 1], diff_between_points[:, 0])
+    angles = angles + 2 * np.pi * (angles < 0)
+    rolled_angles = np.roll(angles, 1)
+    angles = p * angles + (1 - p) * rolled_angles + np.pi * (np.abs(rolled_angles - angles) > np.pi)
+    angles = np.append(angles, angles[0])
+
+    # Create figure part by part: make curves between each pair of points
+    curve_segments = []
+    # Calculate control points for Bezier curve
+    points_distances = np.sqrt(np.sum(diff_between_points ** 2, axis=1))
+    radii = radius * points_distances
+    middle_control_points_1 = np.transpose(radii * [np.cos(angles[:-1]),
+                                                    np.sin(angles[:-1])]) + key_points[:-1]
+    middle_control_points_2 = np.transpose(radii * [np.cos(angles[1:] + np.pi),
+                                                    np.sin(angles[1:] + np.pi)]) + key_points[1:]
+    curve_main_points_arr = np.hstack([key_points[:-1], middle_control_points_1,
+                                       middle_control_points_2, key_points[1:]]).reshape(n, 4, -1)
+
+    # Get Bernstein polynomial approximation of each curve
+    binom_coefficients = [1, 3, 3, 1]
+    for i in range(n):
+        bezier_param_t = np.linspace(0, 1, num=resolution)
+        current_segment = np.zeros((resolution, 2))
+        for point_num, point in enumerate(curve_main_points_arr[i]):
+            binom_coefficient = binom_coefficients[point_num]
+            polynomial_degree = np.power(bezier_param_t, point_num)
+            polynomial_degree *= np.power(1 - bezier_param_t, 3 - point_num)
+            bernstein_polynomial = binom_coefficient * polynomial_degree
+            current_segment += np.outer(bernstein_polynomial, point)
+        curve_segments.extend(current_segment)
+
+    curve_segments = np.array(curve_segments)
+    figure_coordinates = np.unique(np.ceil(curve_segments).astype(int), axis=0)
+    return figure_coordinates
