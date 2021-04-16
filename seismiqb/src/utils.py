@@ -1,7 +1,6 @@
 """ Utility functions. """
 import os
 import inspect
-import shutil
 from math import isnan, atan
 
 from tqdm import tqdm
