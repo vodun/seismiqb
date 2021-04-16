@@ -971,7 +971,7 @@ class Horizon:
         return filtering_matrix
 
     # Horizon usage: point/mask generation
-    def create_sampler(self, bins=None, quality_grid=None, **kwargs):
+    def create_sampler(self, bins=None, quality_grid=None, weights=None, threshold=0, **kwargs):
         """ Create sampler based on horizon location.
 
         Parameters
