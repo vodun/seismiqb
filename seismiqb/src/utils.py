@@ -20,25 +20,7 @@ def file_print(msg, path, mode='w'):
     with open(path, mode) as file:
         print(msg, file=file)
 
-
-def make_charisma_from_surface(heights, path):
-    """ Make file in charisma-format using array of heights.
-
-    Parameters
-    ----------
-    heights : np.ndarray
-        heights-array of shape n_ilines X n_xlines.
-    path : str
-        path to resulting file.
-    """
-    n_ilines, n_xlines = heights.shape[0], heights.shape[1]
-    ilines_xlines = np.array([(il, xl) for il in range(n_ilines) for xl in range(n_xlines)])
-    df = pd.DataFrame(ilines_xlines, columns=['ILINE', 'XLINE'])
-    df['HEIGHT'] = heights.reshape(-1).astype(np.int)
-    df.to_csv(path, sep=' ')
-
-
-def make_segy_from_array(array, path_segy, zip=True, remove_segy=None, **kwargs):
+def make_segy_from_array(array, path_segy, zip_segy=True, remove_segy=None, **kwargs):
     """ Make a segy-cube from an array. Zip it if needed. Segy-headers are filled by defaults/arguments from kwargs.
 
     Parameters
@@ -47,7 +29,7 @@ def make_segy_from_array(array, path_segy, zip=True, remove_segy=None, **kwargs)
         Data for the segy-cube.
     path_segy : str
         Path to store new cube.
-    zip : bool
+    zip_segy : bool
         whether to zip the resulting cube or not.
     remove_segy : bool
         whether to remove the cube or not. If supplied (not None), the supplied value is used.
@@ -67,7 +49,7 @@ def make_segy_from_array(array, path_segy, zip=True, remove_segy=None, **kwargs)
             delay time of the seismic in microseconds. The default is 0.
     """
     if remove_segy is None:
-        remove_segy = zip
+        remove_segy = zip_segy
 
     # make and fill up segy-spec using kwargs and array-info
     spec = segyio.spec()
@@ -112,7 +94,7 @@ def make_segy_from_array(array, path_segy, zip=True, remove_segy=None, **kwargs)
                         segyio.BinField.Samples: array.shape[2],
                         segyio.BinField.Interval: sample_rate}
 
-    if zip:
+    if zip_segy:
         dir_name = os.path.dirname(os.path.abspath(path_segy))
         file_name = os.path.basename(path_segy)
         shutil.make_archive(os.path.splitext(path_segy)[0], 'zip', dir_name, file_name)

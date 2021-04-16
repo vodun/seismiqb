@@ -41,7 +41,7 @@ def make_surfaces(num_surfaces, grid_shape, shape, kind='cubic', perturbation_sh
     # check shapes and select interpolation-method
     grid_shape = (grid_shape, ) if isinstance(grid_shape, int) else grid_shape
     if len(shape) != len(grid_shape) + 1:
-        raise ValueError(("`(len(shape) - 1)` should be equal to `len(grid_shape)`.")
+        raise ValueError("`(len(shape) - 1)` should be equal to `len(grid_shape)`.")
 
     if len(shape) == 2:
         interp = interp1d
@@ -238,3 +238,19 @@ def make_synthetic(shape=(50, 400, 800), num_reflections=200, vel_limits=(900, 5
             ixs = np.argsort(velocities)[::-1][:top_k]
             return result, curves[ixs]
     return result, None
+
+
+def surface_to_points(surface):
+    """ Make points-array by adding ilines-xlines columns and flattening the surface-column.
+    No offset is added: ilines and xlines are assumed to be simple ranges 0..ilines_len.
+
+    Parameters
+    ----------
+    surface : np.ndarray
+        array of heights representing the reflective surface in a generated cube.
+    """
+    n_ilines, n_xlines = surface.shape
+    mesh = np.meshgrid(range(n_ilines), range(n_xlines), indexing='ij')
+    points = np.stack([mesh[0].reshape(-1), mesh[1].reshape(-1),
+                       surface.reshape(-1)], axis=1).astype(np.int)
+    return points
