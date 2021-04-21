@@ -130,7 +130,7 @@ class SeismicCropBatch(Batch):
     def make_locations(self, points, shape=None, direction=(0, 0, 0), eps=3,
                        side_view=False, adaptive_slices=False, passdown=None,
                        grid_src='quality_grid', dst='locations',
-                       dst_points='points', dst_shapes='shapes'):
+                       dst_points='points', dst_shapes='shapes', padding=None):
         """ Generate positions of crops. Creates new instance of :class:`.SeismicCropBatch`
         with crop positions in one of the components (`locations` by default).
 
@@ -197,7 +197,7 @@ class SeismicCropBatch(Batch):
             indices = points[:, 0]
             shapes = self._make_shapes(points, shape, side_view)
 
-        locations = [self._make_location(point, shape, direction) for point, shape in zip(points, shapes)]
+        locations = [self._make_location(point, shape, direction, padding) for point, shape in zip(points, shapes)]
 
         # Create a new Batch instance, if needed
         if not hasattr(self, 'transformed'):
@@ -243,7 +243,7 @@ class SeismicCropBatch(Batch):
         shapes = np.array(shapes)
         return shapes
 
-    def _make_location(self, point, shape, direction=(0, 0, 0)):
+    def _make_location(self, point, shape, direction=(0, 0, 0), padding=None):
         """ Creates list of slices for desired location. """
         if isinstance(point[1], float) or isinstance(point[2], float) or isinstance(point[3], float):
             ix = point[0]
@@ -256,6 +256,10 @@ class SeismicCropBatch(Batch):
         for i in range(3):
             start = int(max(anchor_point[i] - direction[i]*shape[i], 0))
             stop = start + shape[i]
+            if i == 2 and padding is not None:
+                cube_shape = self.get(point[0], 'geometries').cube_shape
+                start = max(0, start - (padding - padding // 2))
+                stop = min(cube_shape[-1], stop + padding // 2) - 1
             location.append(slice(start, stop))
         return location
 
@@ -425,8 +429,8 @@ class SeismicCropBatch(Batch):
         return mask
 
     @action
-    @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def compute_attribute(self, ix, dst, src='images', attribute='semblance', window=10, stride=1, device='cpu'):
+    #@inbatch_parallel(init='indices', post='_assemble', target='for')
+    def compute_attribute(self, dst, src='images', attribute='semblance', window=10, device='cpu'):
         """ Compute geological attribute.
 
         Parameters
@@ -449,9 +453,10 @@ class SeismicCropBatch(Batch):
         SeismicCropBatch
             Batch with loaded masks in desired components.
         """
-        image = self.get(ix, src)
-        result = compute_attribute(image, window, device, attribute)
-        return result
+        images = getattr(self, src)
+        result = compute_attribute(images, window, device, attribute)
+        setattr(self, dst, result)
+        return self
 
     @action
     @inbatch_parallel(init='indices', post='_post_mask_rebatch', target='for',
@@ -563,7 +568,7 @@ class SeismicCropBatch(Batch):
 
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def normalize(self, ix, mode='minmax', itemwise=False, src=None, dst=None, q=(0.01, 0.99)):
+    def normalize(self, ix, mode=None, itemwise=False, src=None, dst=None, q=(0.01, 0.99), window=100, device='cpu'):
         """ Normalize values in crop.
 
         Parameters
@@ -587,30 +592,39 @@ class SeismicCropBatch(Batch):
         data = self.get(ix, src)
         if callable(mode):
             normalized = mode(data)
-        if itemwise:
-            if mode == 'minmax':
-                min_ = data.min()
-                max_ = data.max()
-                if (max_ - min_) > 0:
-                    normalized = (data - min_) / (max_ - min_)
-                else:
-                    normalized = np.zeros_like(data)
-            else:
-                q_left = np.quantile(data, q[0])
-                q_right = np.quantile(data, q[1])
-                if mode in ['q', 'normalize']:
-                    if (q_right - q_left) > 0:
-                        normalized = 2 * (data - q_left) / (q_right - q_left) - 1
-                    else:
-                        normalized = np.zeros_like(data)
-                elif mode == 'q_clip':
-                    normalized =  np.clip(data, q_left, q_right) / max(abs(q_left), abs(q_right))
-                else:
-                    raise ValueError(f'Unknown mode: {mode}')
+
+        if mode == 'moving':
+            normalized = compute_attribute(data, window=(1, 1, window), device=device, attribute='moving_normalization')
         else:
-            geometry = self.get(ix, 'geometries')
-            normalized = geometry.scaler(data, mode=mode)
+            if itemwise:
+                # Adjust data based on the current item only
+                if mode == 'minmax':
+                    min_, max_ = data.min(), data.max()
+                    normalized = (data - min_) / (max_ - min_) if (max_ != min_) else np.zeros_like(data)
+                else:
+                    left, right = np.quantile(data, q)
+                    if mode in ['q', 'normalize']:
+                        normalized = 2 * (data - left) / (right - left) - 1 if right != left else np.zeros_like(data)
+                    elif mode == 'q_clip':
+                        normalized =  np.clip(data, left, right) / max(abs(left), abs(right))
+                    else:
+                        raise ValueError(f'Unknown mode: {mode}')
+            else:
+                geometry = self.get(ix, 'geometries')
+                normalized = geometry.normalize(data, mode=mode)
         return normalized
+
+    @action
+    def moving_normalization(self, src, dst=None, window=100, batch_size=8, device='cuda:0'):
+        data = getattr(self, src)
+        dst = dst or src
+        res = []
+        for i in range(0, data.shape[0], batch_size):
+            _data = data[i:min(i+batch_size, data.shape[0])]
+            res += [compute_attribute(_data, window=(1, 1, window), device=device, attribute='moving_normalization', padding=True)]
+        res = np.concatenate(res, axis=0)
+        setattr(self, dst, res)
+        return self
 
     @action
     def concat_components(self, src, dst, axis=-1):
@@ -716,7 +730,7 @@ class SeismicCropBatch(Batch):
 
 
     @apply_parallel
-    def adaptive_reshape(self, crop, shape):
+    def adaptive_reshape(self, crop, shape=None):
         """ Changes axis of view to match desired shape.
         Must be used in combination with `side_view` argument of `crop` action.
 
@@ -725,8 +739,13 @@ class SeismicCropBatch(Batch):
         shape : sequence
             Desired shape of resulting crops.
         """
-        if (np.array(crop.shape) != np.array(shape)).any():
+        if shape is not None and (np.array(crop.shape) != np.array(shape)).any():
+            if set(crop.shape) != set(shape):
+                raise ValueError(f'`adaptive_reshape` is not applicable for shapes {crop.shape} and {shape}')
             return crop.transpose(1, 0, 2)
+        if shape is None and crop.shape[0] > crop.shape[1]:
+            return crop.transpose(1, 0, 2)
+
         return crop
 
     @apply_parallel

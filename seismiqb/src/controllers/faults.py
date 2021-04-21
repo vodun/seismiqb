@@ -32,6 +32,7 @@ class FaultController(BaseController):
             'transposed_cubes': [],
             'label_dir': '/INPUTS/FAULTS/NPY_WIDTH_{}/*',
             'width': 3,
+            'ext': 'qblosc'
         },
 
         # Model parameters
@@ -47,6 +48,8 @@ class FaultController(BaseController):
             'itemwise': True,
             'phase': True,
             'continuous_phase': False,
+            'normalization_layer': False,
+            'normalization_window': 100,
             'model': 'UNet',
             'loss': 'bce',
             'output': 'sigmoid',
@@ -84,7 +87,9 @@ class FaultController(BaseController):
             'downsample': False,
             'attention': 'scse',
             'phases': C('phase'),
-            'continuous': C('continuous_phase')
+            'continuous': C('continuous_phase'),
+            'window': C('normalization_window'),
+            'normalization': C('normalization_layer')
         },
         'loss': C('loss')
     }
@@ -374,7 +379,7 @@ class FaultController(BaseController):
                 for _ in tqdm.tqdm(range(dataset.grid_iters), disable=(not pbar)):
                     _ = ppl.next_batch(D('size'))
                 prediction = dataset.assemble_crops(ppl.v('predictions'), order=order, fill_value=0).astype('float32')
-                image = geometry.file_hdf5['cube'][
+                image = geometry[
                     slices[0][0]:slices[0][1],
                     slices[1][0]:slices[1][1],
                     slices[2][0]:slices[2][1]
@@ -482,7 +487,8 @@ class FaultController(BaseController):
         model.save(os.path.join(self.config['savedir'], path))
 
     def amplitudes_path(self, cube):
-        return glob.glob(self.config['dataset/path'] + 'CUBE_' + cube + '/amplitudes*.hdf5')[0]
+        ext = self.config['dataset/ext']
+        return glob.glob(self.config['dataset/path'] + 'CUBE_' + cube + f'/amplitudes*.{ext}')[0]
 
     def cube_name_from_alias(self, path):
         return os.path.splitext(self.amplitudes_path(path).split('/')[-1])[0]

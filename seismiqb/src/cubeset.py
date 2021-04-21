@@ -18,7 +18,7 @@ from .crop_batch import SeismicCropBatch
 from .horizon import Horizon, UnstructuredHorizon
 from .metrics import HorizonMetrics
 from .plotters import plot_image, show_3d
-from .utils import round_to_array, gen_crop_coordinates, make_axis_grid, fill_defaults, parse_axis
+from .utils import round_to_array, gen_crop_coordinates, make_axis_grid, fill_defaults
 from .utility_classes import IndexedDict
 
 
@@ -133,13 +133,17 @@ class SeismicCubeset(Dataset):
                                  drop_last=drop_last, bar=bar, bar_desc=bar_desc, iter_params=iter_params)
 
 
-    def load_geometries(self, logs=True, **kwargs):
+    def load_geometries(self, logs=True, collect_stats=True, spatial=True, **kwargs):
         """ Load geometries into dataset-attribute.
 
         Parameters
         ----------
         logs : bool
             Whether to create logs. If True, .log file is created next to .sgy-cube location.
+        collect_stats : bool
+            Whether to collect stats for cubes in SEG-Y format.
+        spatial : bool
+            Whether to collect additional stats for POST-STACK cubes.
 
         Returns
         -------
@@ -147,15 +151,9 @@ class SeismicCubeset(Dataset):
             Same instance with loaded geometries.
         """
         for ix in self.indices:
-            self.geometries[ix].process(**kwargs)
+            self.geometries[ix].process(collect_stats=collect_stats, spatial=spatial, **kwargs)
             if logs:
                 self.geometries[ix].log()
-
-
-    def convert_to_hdf5(self, postfix=''):
-        """ Converts every cube in dataset from `.segy` to `.hdf5`. """
-        for ix in self.indices:
-            self.geometries[ix].make_hdf5(postfix=postfix)
 
 
     def create_labels(self, paths=None, filter_zeros=True, dst='labels', labels_class=None, bar=False, **kwargs):
@@ -191,6 +189,8 @@ class SeismicCubeset(Dataset):
             pbar = tqdm(paths[idx], disable=(not bar))
             label_list = []
             for path in pbar:
+                if path.endswith('.dvc'):
+                    continue
                 pbar.set_description(os.path.basename(path))
                 label_list += [labels_class(path, self.geometries[idx], **kwargs)]
             label_list.sort(key=lambda label: label.h_mean)
@@ -1016,7 +1016,7 @@ class SeismicCubeset(Dataset):
         geometry = self.geometries[cube_name]
         crop_shape = np.array(geometry.cube_shape)
 
-        axis = parse_axis(axis, geometry.index_headers)
+        axis = geometry.parse_axis(axis)
         point = np.array([[cube_name, 0, 0, 0]], dtype=object)
         point[0, axis + 1] = loc
         crop_shape[axis] = 1
@@ -1024,7 +1024,7 @@ class SeismicCubeset(Dataset):
         pipeline = (Pipeline()
                     .make_locations(points=point, shape=crop_shape)
                     .load_cubes(dst='images', src_labels=src_labels)
-                    .normalize(mode='q', src='images'))
+                    .normalize(src='images'))
 
         if 'masks' in components:
             use_labels = kwargs.pop('use_labels', 'all')

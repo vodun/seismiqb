@@ -87,6 +87,7 @@ class HorizonController(BaseController):
             'add_prefix': False,
             'dump': False,
             'name': '',
+            'rename': False,
         }
     })
 
@@ -118,7 +119,7 @@ class HorizonController(BaseController):
             if horizon_paths:
                 if isinstance(horizon_paths, str):
                     horizon_paths = {dataset.indices[0]: glob(horizon_paths)}
-                dataset.create_labels(horizon_paths)
+                dataset.create_labels(horizon_paths, labels_class=Horizon)
 
             self.log(f'Created dataset\n{indent(str(dataset), " "*4)}')
         return dataset
@@ -375,7 +376,7 @@ class HorizonController(BaseController):
         # Prepare parameters
         config = config or {}
         config = Config({**self.config['evaluate'], **config, **kwargs})
-        add_prefix, dump, name = config.pop(['add_prefix', 'dump', 'name'])
+        add_prefix, dump, name, rename = config.pop(['add_prefix', 'dump', 'name', 'rename'])
         supports, device = config.pop(['supports', 'device'])
 
         if targets is None and dataset is not None:
@@ -412,7 +413,7 @@ class HorizonController(BaseController):
             # Compare to targets
             shift = 41 + len(self.__class__.__name__)
             if targets:
-                _, _info = hm.evaluate('find_best_match', agg=None)
+                other, _info = hm.evaluate('find_best_match', agg=None)
                 info = {**info, **_info}
 
                 with open(self.make_savepath(*prefix, name + 'p_results.txt'), 'w') as result_txt:
@@ -425,6 +426,10 @@ class HorizonController(BaseController):
                        f'\n{horizon.name}'
                        f'\nwindow_rate={info["window_rate"]:4.3f}\navg error={info["mean"]:4.3f}')
                 self.log(indent(msg, ' '*shift))
+
+                if rename:
+                    horizon.name = f'from_{other.name}'
+                    self.log(f'Renamed to {horizon.name}')
 
             # Save surface to disk
             if dump:
@@ -469,7 +474,7 @@ class HorizonController(BaseController):
             .mask_rebatch(src='masks', threshold=C('rebatch_threshold', default=0.1))
             .load_cubes(dst='images')
             .adaptive_reshape(src=['images', 'masks'], shape=V('shape'))
-            .normalize(mode='q', src='images')
+            .normalize(src='images')
         )
 
     def augmentation_pipeline(self, **kwargs):
@@ -532,7 +537,7 @@ class HorizonController(BaseController):
                             side_view=C('side_view'))
             .load_cubes(dst='images')
             .adaptive_reshape(src='images', shape=C('crop_shape'))
-            .normalize(mode='q', src='images')
+            .normalize(src='images')
 
             # Predict with model, then aggregate
             .predict_model('model',
