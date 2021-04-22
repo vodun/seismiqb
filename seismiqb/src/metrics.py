@@ -1015,7 +1015,6 @@ class GeometryMetrics(BaseMetrics):
 
         title = f"tracewise {func}"
         plot_dict = {
-            'spatial': self.spatial,
             'title': f'{title} for {self.name} on cube {self.cube_name}',
             'cmap': 'seismic',
             'zmin': None, 'zmax': None,
@@ -1043,7 +1042,6 @@ class GeometryMetrics(BaseMetrics):
 
         title = f"tracewise unsafe {func}"
         plot_dict = {
-            'spatial': self.spatial,
             'title': f'{title} for {self.name} on cube {self.cube_name}',
             'cmap': 'seismic',
             'zmin': None, 'zmax': None,
@@ -1093,7 +1091,6 @@ class GeometryMetrics(BaseMetrics):
 
         title = f"Blockwise {func}"
         plot_dict = {
-            'spatial': self.spatial,
             'title': f'{title} for {self.name} on cube {self.cube_name}',
             'cmap': 'seismic',
             'zmin': None, 'zmax': None,
