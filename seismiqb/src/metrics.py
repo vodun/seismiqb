@@ -145,7 +145,7 @@ class BaseMetrics:
             Progress bar to use.
         """
         i_range, x_range = data.shape[:2]
-        k = kernel_size // 2
+        k = kernel_size // 2 + 1
 
         # Transfer to GPU, if needed
         data = to_device(data, device)
@@ -161,8 +161,8 @@ class BaseMetrics:
             data_n = data
 
         # Pad everything
-        padded_data = xp.pad(data_n, ((k, k), (k, k), (0, 0)), constant_values=xp.nan)
-        padded_stds = xp.pad(data_stds, k, constant_values=0.0)
+        padded_data = xp.pad(data_n, ((0, k), (k, k), (0, 0)), constant_values=xp.nan)
+        padded_stds = xp.pad(data_stds, ((0, k), (k, k)), constant_values=0.0)
         padded_bad_traces = xp.pad(bad_traces, k, constant_values=1)
 
         # Compute metric by shifting arrays
@@ -170,20 +170,32 @@ class BaseMetrics:
         pbar = Notifier(pbar, total=total) if pbar else None
 
         accumulator = Accumulator(agg=agg, amortize=amortize, axis=axis, total=total)
-        for i in range(kernel_size):
-            for j in range(kernel_size):
-                if i == j == k:
+        for i in range(k):
+            for j in range(-k+1, k):
+                # Comparison between (x, y) and (x+i, y+j) vectors is the same as comparison between (x+i, y+j)
+                # and (x, y). So, we can compare (x, y) with (x+i, y+j) and save computed result twice:
+                # matrix associated with vector (x, y) and matrix associated with (x+i, y+j) vector.
+                if (i == 0) and (j <= 0):
                     continue
+                shifted_data = padded_data[i:i+i_range, k+j:k+j+x_range]
+                shifted_stds = padded_stds[i:i+i_range, k+j:k+j+x_range]
+                shifted_bad_traces = padded_bad_traces[k+i:k+i+i_range, k+j:k+j+x_range]
 
-                shifted_data = padded_data[i:i+i_range, j:j+x_range]
-                shifted_stds = padded_stds[i:i+i_range, j:j+x_range]
-                shifted_bad_traces = padded_bad_traces[i:i+i_range, j:j+x_range]
+                computed = function(data, shifted_data, data_stds, shifted_stds)
+                # Using symmetry property:
+                symmetric_bad_traces = padded_bad_traces[k-i:k-i+i_range, k-j:k-j+x_range]
+                symmetric_computed = computed[:i_range-i, max(0, -j):min(x_range, x_range-j)]
+                symmetric_computed = xp.pad(symmetric_computed,
+                                            ((i, 0), (max(0, j), -min(0, j))),
+                                            constant_values=xp.nan)
 
-                computed = function(data_n, shifted_data, data_stds, shifted_stds)
                 computed[shifted_bad_traces == 1] = xp.nan
+                symmetric_computed[symmetric_bad_traces == 1] = xp.nan
                 accumulator.update(computed)
+                accumulator.update(symmetric_computed)
                 if pbar:
-                    pbar.update()
+                    pbar.update(2)
+
         if pbar:
             pbar.close()
 
@@ -973,7 +985,7 @@ class GeometryMetrics(BaseMetrics):
     def tracewise(self, func, l=3, pbar=True, **kwargs):
         """ Apply `func` to compare two cubes tracewise. """
         pbar = tqdm if pbar else lambda iterator, *args, **kwargs: iterator
-        metric = np.full((*self.geometry.ranges, l), np.nan)
+        metric = np.full((*self.geometry.lens, l), np.nan)
 
         indices = [geometry.dataframe['trace_index'] for geometry in self.geometries]
 
@@ -992,7 +1004,6 @@ class GeometryMetrics(BaseMetrics):
 
         title = f"tracewise {func}"
         plot_dict = {
-            'spatial': self.spatial,
             'title': f'{title} for `{self.name}` on cube `{self.cube_name}`',
             'cmap': 'seismic',
             'zmin': None, 'zmax': None,
@@ -1007,7 +1018,7 @@ class GeometryMetrics(BaseMetrics):
         structure of cubes is assumed to be identical.
         """
         pbar = tqdm if pbar else lambda iterator, *args, **kwargs: iterator
-        metric = np.full((*self.geometry.ranges, l), np.nan)
+        metric = np.full((*self.geometry.lens, l), np.nan)
 
         for idx in pbar(range(len(self.geometries[0].dataframe))):
             header = self.geometries[0].segyfile.header[idx]
@@ -1020,7 +1031,6 @@ class GeometryMetrics(BaseMetrics):
 
         title = f"tracewise unsafe {func}"
         plot_dict = {
-            'spatial': self.spatial,
             'title': f'{title} for {self.name} on cube {self.cube_name}',
             'cmap': 'seismic',
             'zmin': None, 'zmax': None,
@@ -1039,21 +1049,21 @@ class GeometryMetrics(BaseMetrics):
         low = window // 2
         high = window - low
 
-        total = np.product(self.geometries[0].ranges-window)
+        total = np.product(self.geometries[0].lens - window)
         prep_func = prep_func if prep_func else lambda x: x
 
         pbar = tqdm if pbar else lambda iterator, *args, **kwargs: iterator
-        metric = np.full((*self.geometries[0].ranges, l), np.nan)
+        metric = np.full((*self.geometries[0].lens, l), np.nan)
 
-        heights = np.arange(self.geometries[0].cube_shape[2]) if heights is None else np.arange(*heights)
+        heights = slice(0, self.geometries[0].depth) if heights is None else slice(*heights)
 
         with pbar(total=total) as prog_bar:
             for il_block in np.arange(0, self.geometries[0].cube_shape[0], block_size[0]-window[0]):
                 for xl_block in np.arange(0, self.geometries[0].cube_shape[1], block_size[1]-window[1]):
-                    block_len = np.min((np.array(self.geometries[0].ranges) - (il_block, xl_block),
+                    block_len = np.min((np.array(self.geometries[0].lens) - (il_block, xl_block),
                                         block_size), axis=0)
-                    locations = [np.arange(il_block, il_block + block_len[0]),
-                                 np.arange(xl_block, xl_block + block_len[1]),
+                    locations = [slice(il_block, il_block + block_len[0]),
+                                 slice(xl_block, xl_block + block_len[1]),
                                  heights]
 
                     blocks = [prep_func(geometry.load_crop(locations)) for geometry in self.geometries]
@@ -1070,7 +1080,6 @@ class GeometryMetrics(BaseMetrics):
 
         title = f"Blockwise {func}"
         plot_dict = {
-            'spatial': self.spatial,
             'title': f'{title} for {self.name} on cube {self.cube_name}',
             'cmap': 'seismic',
             'zmin': None, 'zmax': None,

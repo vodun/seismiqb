@@ -5,13 +5,13 @@ from copy import copy
 from textwrap import dedent
 from itertools import product
 
+import h5py
 import numpy as np
 import pandas as pd
-import h5py
 from numba import njit, prange
 
 from cv2 import dilate
-from scipy.ndimage.morphology import binary_fill_holes, binary_erosion
+from scipy.ndimage.morphology import binary_fill_holes, binary_erosion, binary_dilation
 from scipy.ndimage import find_objects
 from scipy.spatial import Delaunay
 from scipy.signal import hilbert
@@ -19,7 +19,7 @@ from skimage.measure import label
 
 from .utility_classes import HorizonSampler, lru_cache
 from .utils import round_to_array, groupby_mean, groupby_min, groupby_max, filter_simplices
-from .utils import retrieve_function_arguments, get_class_methods
+from .utils import retrieve_function_arguments, get_class_methods, make_bezier_figure
 from .functional import smooth_out
 from .plotters import plot_image, show_3d
 
@@ -497,6 +497,15 @@ class Horizon:
                 self._depths = self.matrix[self.matrix != self.FILL_VALUE]
         return self._depths
 
+    @property
+    def shape(self):
+        """ Tuple of horizon dimensions."""
+        return (self.i_length, self.x_length)
+
+    @property
+    def size(self):
+        """ Number of elements in the full horizon matrix."""
+        return self.i_length*self.x_length
 
     @property
     def h_min(self):
@@ -868,8 +877,111 @@ class Horizon:
         self.apply_to_matrix(smoothing_function, **kwargs)
 
 
+    def make_random_holes_matrix(self, n=10, scale=1.0, max_scale=.25,
+                                 max_angles_amount=4, max_sharpness=5.0, locations=None,
+                                 points_proportion=1e-5, points_shape=1,
+                                 noise_level=0, seed=None):
+        """ Create matrix of random holes for horizon.
+
+        Holes can be bezier-like figures or points-like.
+        We can control bezier-like and points-like holes amount by `n` and `points_proportion` parameters respectively.
+        We also do some noise amplifying with `noise_level` parameter.
+
+        Parameters
+        ----------
+        n : int
+            Amount of bezier-like holes on horizon.
+        points_proportion : float
+            Proportion of point-like holes on the horizon. A number between 0 and 1.
+        points_shape : int or sequence of int
+            Shape of point-like holes.
+        noise_level : int
+            Radius of noise scattering near the borders of holes.
+        scale : float or sequence of float
+            If float, each bezier-like hole will have a random scale from exponential distribution with parameter scale.
+            If sequence, each bezier-like hole will have a provided scale.
+        max_scale : float
+            Maximum bezier-like hole scale.
+        max_angles_amount : int
+            Maximum amount of angles in each bezier-like hole.
+        max_sharpness : float
+            Maximum value of bezier-like holes sharpness.
+        locations : ndarray
+            If provided, an array of desired locations of bezier-like holes.
+        seed : int, optional
+            Seed the random numbers generator.
+        """
+        rng = np.random.default_rng(seed)
+        filtering_matrix = np.zeros_like(self.matrix)
+
+        # Generate bezier-like holes
+        if isinstance(scale, float):
+            scales = []
+            sampling_scale = int(
+                np.ceil(1.0 / (1 - np.exp(-scale * max_scale)))
+            ) # inverse probability of scales < max_scales
+            while len(scales) < n:
+                new_scales = rng.exponential(scale, size=sampling_scale*(n - len(scales)))
+                new_scales = new_scales[new_scales <= max_scale]
+                scales.extend(new_scales)
+            scales = scales[:n]
+        else:
+            scales = scale
+
+        if locations is None:
+            idxs = rng.choice(len(self), size=n)
+            locations = self.points[idxs, :2]
+
+        coordinates = [] # container for all types of holes, represented by their coordinates
+        for location, figure_scale in zip(locations, scales):
+            n_key_points = rng.integers(2, max_angles_amount + 1)
+            radius = rng.random()
+            sharpness = rng.random() * rng.integers(1, max_sharpness)
+
+            figure_coordinates = make_bezier_figure(n=n_key_points, radius=radius, sharpness=sharpness,
+                                                    scale=figure_scale, shape=self.shape, seed=seed)
+            figure_coordinates += location
+
+            negative_coords_shift = np.min(np.vstack([figure_coordinates, [0, 0]]), axis=0)
+            huge_coords_shift = np.max(np.vstack([figure_coordinates - self.shape, [0, 0]]), axis=0)
+            figure_coordinates -= (huge_coords_shift + negative_coords_shift + 1)
+
+            coordinates.append(figure_coordinates)
+
+        # Generate points-like holes
+        if points_proportion:
+            points_n = int(points_proportion * len(self))
+            idxs = rng.choice(len(self), size=points_n)
+            locations = self.points[idxs, :2]
+
+            filtering_matrix[locations[:, 0], locations[:, 1]] = 1
+            if isinstance(points_shape, int):
+                points_shape = (points_shape, points_shape)
+            filtering_matrix = binary_dilation(filtering_matrix, np.ones(points_shape))
+            coordinates.append(np.argwhere(filtering_matrix > 0))
+        coordinates = np.concatenate(coordinates)
+
+        # Add noise and filtering matrix transformations
+        if noise_level:
+            noise = rng.normal(loc=coordinates,
+                               scale=noise_level,
+                               size=coordinates.shape)
+            coordinates = np.unique(np.vstack([coordinates, noise.astype(int)]), axis=0)
+
+        idx = np.where((coordinates[:, 0] >= 0) &
+                       (coordinates[:, 1] >= 0) &
+                       (coordinates[:, 0] < self.i_length) &
+                       (coordinates[:, 1] < self.x_length))[0]
+        coordinates = coordinates[idx]
+
+        filtering_matrix[coordinates[:, 0], coordinates[:, 1]] = 1
+        filtering_matrix = binary_fill_holes(filtering_matrix)
+        filtering_matrix = binary_dilation(filtering_matrix, iterations=4)
+        filtering_matrix = self.put_on_full(filtering_matrix, False)
+        return filtering_matrix
+
     # Horizon usage: point/mask generation
-    def create_sampler(self, bins=None, quality_grid=None, **kwargs):
+    def create_sampler(self, bins=None, quality_grid=None, weights=None, threshold=0, **kwargs):
         """ Create sampler based on horizon location.
 
         Parameters
@@ -879,6 +991,9 @@ class Horizon:
         quality_grid : ndarray or None
             If not None, then must be a matrix with zeroes in locations to keep, ones in locations to remove.
             Applied to `points` before sampler creation.
+        weights : ndarray or bool
+            Weights matrix with shape (ilines_len, xlines_len) for weights of sampling.
+            If True support correlation metric will be used.
         """
         _ = kwargs
         default_bins = self.cube_shape // np.array([5, 20, 20])
@@ -890,7 +1005,16 @@ class Horizon:
         else:
             points = self.points
 
-        self.sampler = HorizonSampler(np.histogramdd(points/self.cube_shape, bins=bins), **kwargs)
+        if weights:
+            if not isinstance(weights, np.ndarray):
+                corrs_matrix = self.evaluate_metric()
+                weights = corrs_matrix[points[:, 0], points[:, 1]]
+            points = points[~np.isnan(weights)]
+            weights = weights[~np.isnan(weights)]
+            points = points[weights > threshold]
+            weights = weights[weights > threshold]
+
+        self.sampler = HorizonSampler(np.histogramdd(points/self.cube_shape, bins=bins, weights=weights), **kwargs)
 
     def add_to_mask(self, mask, locations=None, width=3, alpha=1, zero_to_nan=False, **kwargs):
         """ Add horizon to a background.
@@ -1954,7 +2078,6 @@ class Horizon:
         else:
             raise ValueError('Unknown format:', fmt)
 
-
     # Methods of (visual) representation of a horizon
     def __repr__(self):
         return f"""<horizon {self.name} for {self.displayed_cube_name} at {hex(id(self))}>"""
@@ -2158,7 +2281,6 @@ class Horizon:
         simplices = filter_simplices(simplices=tri.simplices, points=tri.points,
                                      matrix=self.full_matrix, threshold=threshold)
         return x, y, z, simplices
-
 
     def show_slide(self, loc, width=3, axis='i', order_axes=None, zoom_slice=None,
                    n_ticks=5, delta_ticks=100, **kwargs):

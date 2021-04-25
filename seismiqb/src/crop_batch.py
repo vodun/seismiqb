@@ -14,6 +14,7 @@ from ..batchflow import FilesIndex, Batch, action, inbatch_parallel, SkipBatchEx
 
 from .horizon import Horizon
 from .plotters import plot_image
+from .utils import compute_attribute
 
 
 AFFIX = '___'
@@ -158,7 +159,7 @@ class SeismicCropBatch(Batch):
         passdown : str of list of str
             Components of batch to keep in the new one.
         grid_src : str
-            Attribut of geometry to get the grid from.
+            Attribute of geometry to get the grid from.
         dst : str, optional
             Component of batch to put positions of crops in.
         dst_points, dst_shapes : str
@@ -428,6 +429,34 @@ class SeismicCropBatch(Batch):
                 break
         return mask
 
+    @action
+    @inbatch_parallel(init='indices', post='_assemble', target='for')
+    def compute_attribute(self, ix, dst, src='images', attribute='semblance', window=10, stride=1, device='cpu'):
+        """ Compute geological attribute.
+
+        Parameters
+        ----------
+        dst : str
+            Destination batch component
+        src : str, optional
+            Source batch component, by default 'images'
+        attribute : str, optional
+            Attribute to compute, by default 'semblance'
+        window : int or tuple, optional
+            Window to compute attribute, by default 10 (for each axis)
+        stride : int, optional
+            Stride for windows, by default 1 (for each axis)
+        device : str, optional
+            Device to compute attribute, by default 'cpu'
+
+        Returns
+        -------
+        SeismicCropBatch
+            Batch with loaded masks in desired components.
+        """
+        image = self.get(ix, src)
+        result = compute_attribute(image, window, device, attribute)
+        return result
 
     @action
     @inbatch_parallel(init='indices', post='_post_mask_rebatch', target='for',
@@ -539,7 +568,7 @@ class SeismicCropBatch(Batch):
 
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def normalize(self, ix, mode='minmax', src=None, dst=None):
+    def normalize(self, ix, mode=None, itemwise=False, src=None, dst=None, q=(0.01, 0.99)):
         """ Normalize values in crop.
 
         Parameters
@@ -549,16 +578,38 @@ class SeismicCropBatch(Batch):
             If str, then :meth:`~SeismicGeometry.scaler` applied in one of the modes:
             - `minmax`: scaled to [0, 1] via minmax scaling.
             - `q` or `normalize`: divided by the maximum of absolute values
-                                  of the 0.01 and 0.99 quantiles.
+                                  of the 0.01 and 0.99 quantiles. Quantiles can
+                                  be changed by `q` parameter.
             - `q_clip`: clipped to 0.01 and 0.99 quantiles and then divided
-                        by the maximum of absolute values of the two.
+                        by the maximum of absolute values of the two. Quantiles can
+                        be changed by `q` parameter.
+        itemwise : bool
+            The way to compute 'min', 'max' and quantiles. If False, stats will be computed
+            for the whole cubes. Otherwise, for each data item separately.
+        q : tuple
+            Left and right quantiles to use.
         """
         data = self.get(ix, src)
         if callable(mode):
-            return mode(data)
-        geometry = self.get(ix, 'geometries')
-        return geometry.scaler(data, mode=mode)
+            normalized = mode(data)
 
+        if itemwise:
+            # Adjust data based on the current item only
+            if mode == 'minmax':
+                min_, max_ = data.min(), data.max()
+                normalized = (data - min_) / (max_ - min_) if (max_ != min_) else np.zeros_like(data)
+            else:
+                left, right = np.quantile(data, q)
+                if mode in ['q', 'normalize']:
+                    normalized = 2 * (data - left) / (right - left) - 1 if right != left else np.zeros_like(data)
+                elif mode == 'q_clip':
+                    normalized =  np.clip(data, left, right) / max(abs(left), abs(right))
+                else:
+                    raise ValueError(f'Unknown mode: {mode}')
+        else:
+            geometry = self.get(ix, 'geometries')
+            normalized = geometry.normalize(data, mode=mode)
+        return normalized
 
     @action
     def concat_components(self, src, dst, axis=-1):
@@ -885,7 +936,7 @@ class SeismicCropBatch(Batch):
             starts = [int(rnd(crop.shape[ax] - patch_shape[ax])) for ax in range(3)]
             stops = [starts[ax] + patch_shape[ax] for ax in range(3)]
             slices = [slice(start, stop) for start, stop in zip(starts, stops)]
-            copy_[slices] = 0
+            copy_[tuple(slices)] = 0
         return copy_
 
     @apply_parallel
@@ -1129,6 +1180,41 @@ class SeismicCropBatch(Batch):
         corner = crop_shape // 2 - shape // 2
         slices = tuple([slice(start, start+length) for start, length in zip(corner, shape)])
         return crop[slices]
+
+    @action
+    def adaptive_expand(self, src, dst=None, channels='first'):
+        """ Add channels dimension to 4D components if needed. If component data has shape `(batch_size, 1, n_x, n_d)`,
+        it will be keeped. If shape is `(batch_size, n_i, n_x, n_d)` and `n_i > 1`, channels axis
+        at position `axis` will be created.
+        """
+        dst = dst or src
+        src = [src] if isinstance(src, str) else src
+        dst = [dst] if isinstance(dst, str) else dst
+        axis = 1 if channels in [0, 'first'] else -1
+        for _src, _dst in zip(src, dst):
+            crop = getattr(self, _src)
+            if crop.ndim == 4 and crop.shape[1] != 1:
+                crop = np.expand_dims(crop, axis=axis)
+            setattr(self, _dst, crop)
+        return self
+
+    @action
+    def adaptive_squeeze(self, src, dst=None, channels='first'):
+        """ Remove channels dimension from 5D components if needed. If component data has shape
+        `(batch_size, n_c, n_i, n_x, n_d)` for `channels='first'` or `(batch_size, n_i, n_x, n_d, n_c)`
+        for `channels='last'` and `n_c > 1`, shape will be keeped. If `n_c == 1` , channels axis at position `axis`
+        will be squeezed.
+        """
+        dst = dst or src
+        src = [src] if isinstance(src, str) else src
+        dst = [dst] if isinstance(dst, str) else dst
+        axis = 1 if channels in [0, 'first'] else -1
+        for _src, _dst in zip(src, dst):
+            crop = getattr(self, _src)
+            if crop.ndim == 5 and crop.shape[axis] == 1:
+                crop = np.squeeze(crop, axis=axis)
+            setattr(self, _dst, crop)
+        return self
 
     def plot_components(self, *components, idx=0, slide=None, mode='overlap', order_axes=None, **kwargs):
         """ Plot components of batch.
