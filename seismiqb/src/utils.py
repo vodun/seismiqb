@@ -603,3 +603,16 @@ def get_environ_flag(flag_name, defaults=('0', '1'), convert=int):
     if flag not in defaults:
         raise ValueError(f"Expected `{flag_name}` env variable value to be from {defaults}, got {flag} instead.")
     return convert(flag)
+
+def to_list(obj, default=None):
+    """ Cast an object to a list.
+    When default value provided, cast it instead if object value is None.
+    Almost identical to `list(obj)` for 1-D objects, except for `str` instances,
+    which won't be split into separate letters but transformed into a list of a single element.
+    """
+    if (obj is None) and (default is not None):
+        obj = default
+    return np.array(obj).ravel().tolist()
+
+def get_class_methods(cls):
+    return {func for func in dir(cls) if not func.startswith("__") and callable(getattr(cls, func))}

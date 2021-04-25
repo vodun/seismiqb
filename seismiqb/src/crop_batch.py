@@ -30,7 +30,7 @@ class SeismicCropBatch(Batch):
         'post': '_assemble'
     }
     # When an attribute containing one of keywords from list it accessed via `get`, firstly search it in `self.dataset`.
-    DATASET_ATTRIBUTES = ['label', 'geom', 'fan', 'channel']
+    DATASET_ATTRIBUTES = ['label', 'geom', 'fan', 'channel', 'horizon']
 
 
     def _init_component(self, *args, **kwargs):
@@ -362,7 +362,7 @@ class SeismicCropBatch(Batch):
         """
         location = self.get(ix, locations)
         nearest_horizon = self.get_nearest_horizon(ix, src_labels, location[2])
-        crop = nearest_horizon.load_attribute(src_attribute, location, **kwargs)
+        crop = nearest_horizon.load_attribute(src_attribute=src_attribute, location=location, **kwargs)
         if final_ndim == 3 and crop.ndim == 2:
             crop = crop[..., np.newaxis]
         elif final_ndim != crop.ndim:
@@ -372,7 +372,8 @@ class SeismicCropBatch(Batch):
 
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def create_masks(self, ix, dst, src_labels='labels', src_locations='locations', use_labels='all', width=3):
+    def create_masks(self, ix, dst, src_labels='labels', src_locations='locations',
+                     use_labels='all', width=3, zero_to_nan=False):
         """ Create masks from labels-dictionary in given positions.
 
         Parameters
@@ -402,6 +403,7 @@ class SeismicCropBatch(Batch):
         -----
         Can be run only after labels-dict is loaded into labels-component.
         """
+
         location = self.get(ix, src_locations)
         crop_shape = self.get(ix, 'shapes')
         mask = np.zeros(crop_shape, dtype='float32')
@@ -421,7 +423,7 @@ class SeismicCropBatch(Batch):
             labels = [self.get_nearest_horizon(ix, src_labels, location[2])]
 
         for label in labels:
-            mask = label.add_to_mask(mask, locations=location, width=width)
+            mask = label.add_to_mask(mask, locations=location, width=width, zero_to_nan=zero_to_nan)
             if use_labels == 'single' and np.sum(mask) > 0.0:
                 break
         return mask

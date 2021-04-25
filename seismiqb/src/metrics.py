@@ -20,18 +20,7 @@ from .utility_classes import Accumulator
 from .functional import to_device, from_device
 from .functional import correlation, crosscorrelation, btch, kl, js, hellinger, tv, hilbert
 from .functional import smooth_out, digitize, gridify, perturb, histo_reduce
-from .plotters import plot_image
-
-
-
-CDICT = {
-    'red': [[0.0, None, 1.0], [0.33, 1.0, 1.0], [0.66, 1.0, 1.0], [1.0, 0.0, None]],
-    'green': [[0.0, None, 0.0], [0.33, 0.0, 0.0], [0.66, 1.0, 1.0], [1.0, 0.5, None]],
-    'blue': [[0.0, None, 0.0], [0.33, 0.0, 0.0], [0.66, 0.0, 0.0], [1.0, 0.0, None]]
-}
-METRIC_CMAP = LinearSegmentedColormap('MetricMap', CDICT)
-METRIC_CMAP.set_bad(color='black')
-register_cmap(name='Metric', cmap=METRIC_CMAP)
+from .plotters import plot_image, METRIC_CMAP
 
 
 
@@ -41,7 +30,7 @@ class BaseMetrics:
     """
     # pylint: disable=attribute-defined-outside-init, blacklisted-name
     PLOT_DEFAULTS = {
-        'cmap': 'Metric',
+        'cmap': METRIC_CMAP,
         'fill_color': 'black'
     }
 
@@ -667,8 +656,8 @@ class HorizonMetrics(BaseMetrics):
 
         # The first horizon is used to evaluate metrics
         self.horizon = horizons[0]
-        self.name = self.horizon.name
-        self.cube_name = self.horizon.cube_name.replace('amplitudes_', '')
+        self.name = self.horizon.short_name
+        self.cube_name = self.horizon.displayed_cube_name.replace('amplitudes_', '')
 
         # Properties
         self._data = None
@@ -678,7 +667,7 @@ class HorizonMetrics(BaseMetrics):
 
     def get_plot_defaults(self):
         """ Axis labels and horizon/cube names in the title. """
-        title = f'{self.name} on cube {self.cube_name}'
+        title = f'`{self.name}` on cube `{self.cube_name}`'
         return title, {
             'xlabel': self.horizon.geometry.axis_names[0],
             'ylabel': self.horizon.geometry.axis_names[1],
@@ -948,11 +937,11 @@ class GeometryMetrics(BaseMetrics):
         self._bad_traces = None
 
         self.name = 'hist_matrix'
-        self.cube_name = self.geometry.name
+        self.cube_name = self.geometry.displayed_name
 
     def get_plot_defaults(self):
         """ Axis labels and horizon/cube names in the title. """
-        title = f'{self.name} on cube {self.cube_name}'
+        title = f'`{self.name}` on cube `{self.cube_name}`'
         return title, {
             'xlabel': self.geometry.axis_names[0],
             'ylabel': self.geometry.axis_names[1],
@@ -1004,7 +993,7 @@ class GeometryMetrics(BaseMetrics):
         title = f"tracewise {func}"
         plot_dict = {
             'spatial': self.spatial,
-            'title': f'{title} for {self.name} on cube {self.cube_name}',
+            'title': f'{title} for `{self.name}` on cube `{self.cube_name}`',
             'cmap': 'seismic',
             'zmin': None, 'zmax': None,
             'ignore_value': np.nan,

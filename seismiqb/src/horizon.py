@@ -19,9 +19,10 @@ from skimage.measure import label
 
 from .utility_classes import HorizonSampler, lru_cache
 from .utils import round_to_array, groupby_mean, groupby_min, groupby_max, filter_simplices
-from .utils import retrieve_function_arguments
+from .utils import retrieve_function_arguments, get_class_methods
 from .functional import smooth_out
 from .plotters import plot_image, show_3d
+
 
 
 class UnstructuredHorizon:
@@ -64,6 +65,7 @@ class UnstructuredHorizon:
         # Attributes from geometry
         self.geometry = geometry
         self.cube_name = geometry.name
+        self.displayed_cube_name = geometry.displayed_name
 
         # Check format of storage, then use it to populate attributes
         if isinstance(storage, str):
@@ -162,7 +164,7 @@ class UnstructuredHorizon:
         self.attached = True
 
 
-    def add_to_mask(self, mask, locations=None, width=3, alpha=1, iterator=None, **kwargs):
+    def add_to_mask(self, mask, locations=None, width=3, alpha=1, iterator=None, zero_to_nan=False, **kwargs):
         """ Add horizon to a background.
         Note that background is changed in-place.
 
@@ -225,6 +227,9 @@ class UnstructuredHorizon:
         for _ in range(width):
             mask[idx_1, idx_2, heights] = alpha
             heights += 1
+
+        if zero_to_nan:
+            mask[mask == 0] = np.nan
         return mask
 
     # Methods to implement in the future
@@ -244,7 +249,7 @@ class UnstructuredHorizon:
 
     def __str__(self):
         msg = f"""
-        Horizon {self.name} for {self.cube_name}
+        Horizon {self.name} for {self.displayed_cube_name}
         Depths range:           {self.h_min} to {self.h_max}
         Depths mean:            {self.h_mean:.6}
         Depths std:             {self.h_std:.6}
@@ -279,13 +284,13 @@ class UnstructuredHorizon:
 
         # Create mask with horizon
         mask = np.zeros_like(seismic_slide.reshape(shape))
-        mask = self.add_to_mask(mask, locations, width=width, iterator=iterator if stable else None)
+        mask = self.add_to_mask(mask, locations, width=width, iterator=iterator if stable else None, zero_to_nan=True)
         seismic_slide, mask = np.squeeze(seismic_slide), np.squeeze(mask)
 
         # set defaults if needed and plot the slide
         kwargs = {
             'mode': 'overlap',
-            'title': (f'U-horizon `{self.name}` on `{self.geometry.name}`' + '\n ' +
+            'title': (f'U-horizon `{self.name}` on `{self.cube_name}`' + '\n ' +
                       f'{self.geometry.index_headers[axis]} {loc} out of {self.geometry.lens[axis]}'),
             'xlabel': self.geometry.index_headers[1 - axis],
             'ylabel': 'Depth', 'y': 1.015,
@@ -368,7 +373,7 @@ class Horizon:
     # Correspondence between attribute alias and the class function that calculates it
     METHOD_TO_ATTRIBUTE = {
         'get_cube_values': ['cube_values', 'amplitudes'],
-        'get_full_matrix': ['full_matrix', 'heights'],
+        'get_full_matrix': ['full_matrix', 'heights', 'depths'],
         'evaluate_metric': ['metrics'],
         'get_instantaneous_phases': ['instant_phases'],
         'get_instantaneous_amplitudes': ['instant_amplitudes'],
@@ -403,7 +408,8 @@ class Horizon:
 
         # Attributes from geometry
         self.geometry = geometry
-        self.cube_name = geometry.name
+        self.cube_name = geometry.displayed_name
+        self.displayed_cube_name = geometry.displayed_name
         self.cube_shape = geometry.cube_shape
 
         self.sampler = None
@@ -520,6 +526,10 @@ class Horizon:
             self._h_std = np.std(self.depths)
         return self._h_std
 
+    @property
+    def short_name(self):
+        return self.name.split('.')[0]
+
     def __len__(self):
         """ Number of labeled traces. """
         if self._len is None:
@@ -538,6 +548,18 @@ class Horizon:
 
         if storage == 'matrix':
             self._matrix = None
+            if len(self.points) > 0:
+                self._h_min = self.points[:, 2].min().astype(self.dtype)
+                self._h_max = self.points[:, 2].max().astype(self.dtype)
+                self.i_min, self.x_min, _ = np.min(self.points, axis=0).astype(np.int32)
+                self.i_max, self.x_max, _ = np.max(self.points, axis=0).astype(np.int32)
+
+                self.i_length = (self.i_max - self.i_min) + 1
+                self.x_length = (self.x_max - self.x_min) + 1
+                self.bbox = np.array([[self.i_min, self.i_max],
+                                    [self.x_min, self.x_max],
+                                    [self.h_min, self.h_max]],
+                                    dtype=np.int32)
         elif storage == 'points':
             self._points = None
 
@@ -593,18 +615,6 @@ class Horizon:
 
         # Collect stats on separate axes. Note that depth stats are properties
         self.reset_storage('matrix')
-        if len(self.points) > 0:
-            self.i_min, self.x_min, _ = np.min(self.points, axis=0).astype(np.int32)
-            self.i_max, self.x_max, _ = np.max(self.points, axis=0).astype(np.int32)
-            self._h_min = self.points[:, 2].min().astype(self.dtype)
-            self._h_max = self.points[:, 2].max().astype(self.dtype)
-
-            self.i_length = (self.i_max - self.i_min) + 1
-            self.x_length = (self.x_max - self.x_min) + 1
-            self.bbox = np.array([[self.i_min, self.i_max],
-                                  [self.x_min, self.x_max],
-                                  [self.h_min, self.h_max]],
-                                 dtype=np.int32)
 
 
     def from_file(self, path, transform=True, **kwargs):
@@ -882,7 +892,7 @@ class Horizon:
 
         self.sampler = HorizonSampler(np.histogramdd(points/self.cube_shape, bins=bins), **kwargs)
 
-    def add_to_mask(self, mask, locations=None, width=3, alpha=1, **kwargs):
+    def add_to_mask(self, mask, locations=None, width=3, alpha=1, zero_to_nan=False, **kwargs):
         """ Add horizon to a background.
         Note that background is changed in-place.
 
@@ -927,6 +937,9 @@ class Horizon:
 
             for shift in range(width):
                 mask[idx_i, idx_x, heights + shift] = alpha
+
+        if zero_to_nan:
+            mask[mask == 0] = np.nan
         return mask
 
 
@@ -1041,7 +1054,7 @@ class Horizon:
         -----
         Keep in mind, that Hilbert transform produces artifacts at signal start and end. Therefore if you want to get
         an attribute with `N` channels along depth axis, you should provide `window` broader then `N`. E.g. in call
-        `label.get_instantaneous_amplitudes(channels=range(10, 21), window=41)` the attribute will be first calculated
+        `label.get_instantaneous_amplitudes(depths=range(10, 21), window=41)` the attribute will be first calculated
         by array of `(xlines, ilines, 41)` shape and then the slice `[..., ..., 10:21]` of them will be returned.
         """
         transform_kwargs = retrieve_function_arguments(self.transform_where_present, kwargs)
@@ -1071,7 +1084,7 @@ class Horizon:
         -----
         Keep in mind, that Hilbert transform produces artifacts at signal start and end. Therefore if you want to get
         an attribute with `N` channels along depth axis, you should provide `window` broader then `N`. E.g. in call
-        `label.get_instantaneous_phases(channels=range(10, 21), window=41)` the attribute will be first calculated
+        `label.get_instantaneous_phases(depths=range(10, 21), window=41)` the attribute will be first calculated
         by array of `(xlines, ilines, 41)` shape and then the slice `[..., ..., 10:21]` of them will be returned.
         """
         transform_kwargs = retrieve_function_arguments(self.transform_where_present, kwargs)
@@ -1117,7 +1130,7 @@ class Horizon:
         src_attribute : str
             A keyword defining horizon attribute to make crops from:
             - 'cube_values' or 'amplitudes': cube values cut along the horizon;
-            - 'heights' or 'full_matrix': horizon depth map in cubic coordinates;
+            - 'depths' or 'full_matrix': horizon depth map in cubic coordinates;
             - 'metrics': random support metrics matrix.
             - 'instant_phases': instantaneous phase along the horizon;
             - 'instant_amplitudes': instantaneous amplitude along the horizon;
@@ -1135,7 +1148,7 @@ class Horizon:
 
         >>> horizon.load_attribute('cube_values', (x_slice, i_slice, h_slice), window=10)
 
-        >>> horizon.load_attribute('heights')
+        >>> horizon.load_attribute('depths')
 
         >>> horizon.load_attribute('metrics', metrics='hilbert', normalize='min-max')
 
@@ -1944,11 +1957,11 @@ class Horizon:
 
     # Methods of (visual) representation of a horizon
     def __repr__(self):
-        return f"""<horizon {self.name} for {self.cube_name} at {hex(id(self))}>"""
+        return f"""<horizon {self.name} for {self.displayed_cube_name} at {hex(id(self))}>"""
 
     def __str__(self):
         msg = f"""
-        Horizon {self.name} for {self.cube_name} loaded from {self.format}
+        Horizon {self.name} for {self.displayed_cube_name} loaded from {self.format}
         Ilines range:      {self.i_min} to {self.i_max}
         Xlines range:      {self.x_min} to {self.x_max}
         Depth range:       {self.h_min} to {self.h_max}
@@ -1995,9 +2008,8 @@ class Horizon:
 
         # defaults for plotting if not supplied in kwargs
         kwargs = {
-            'cmap': 'viridis_r',
             'title': '{} {} of `{}` on `{}`'.format(src if isinstance(src, str) else '',
-                                                    'on full'*on_full, self.name, self.cube_name),
+                                                    'on full'*on_full, self.name, self.displayed_cube_name),
             'xlabel': self.geometry.index_headers[0],
             'ylabel': self.geometry.index_headers[1],
             **kwargs
@@ -2040,7 +2052,7 @@ class Horizon:
 
         # defaults for plotting if not supplied in kwargs
         kwargs = {
-            'title': 'RGB amplitudes of {} on cube {}'.format(self.name, self.cube_name),
+            'title': 'RGB amplitudes of {} on cube {}'.format(self.name, self.displayed_cube_name),
             'xlabel': self.geometry.index_headers[0],
             'ylabel': self.geometry.index_headers[1],
             **kwargs
@@ -2079,7 +2091,7 @@ class Horizon:
         kwargs : dict
             Other arguments of plot creation.
         """
-        title = f'Horizon `{self.name}` on `{self.cube_name}`'
+        title = f'Horizon `{self.short_name}` on `{self.displayed_cube_name}`'
         aspect_ratio = (self.i_length / self.x_length, 1, z_ratio)
         axis_labels = (self.geometry.index_headers[0], self.geometry.index_headers[1], 'DEPTH')
         if zoom_slice is None:
@@ -2171,7 +2183,7 @@ class Horizon:
         # Load seismic and mask
         seismic_slide = self.geometry.load_slide(loc=loc, axis=axis)
         mask = np.zeros(shape)
-        mask = self.add_to_mask(mask, locations=locations, width=width)
+        mask = self.add_to_mask(mask, locations=locations, width=width, zero_to_nan=True)
         seismic_slide, mask = np.squeeze(seismic_slide), np.squeeze(mask)
         xticks = list(range(seismic_slide.shape[0]))
         yticks = list(range(seismic_slide.shape[1]))
@@ -2206,7 +2218,7 @@ class Horizon:
 
         kwargs = {
             'mode': 'overlap',
-            'title': f'Horizon `{self.name}` on `{self.geometry.name}`\n {header} {loc} out of {total}',
+            'title_label': f'Horizon `{self.name}` on `{self.cube_name}`\n {header} {loc} out of {total}',
             'xlabel': xlabel,
             'ylabel': ylabel,
             'xticks': xticks,
@@ -2220,8 +2232,9 @@ class Horizon:
 
     def reset_cache(self):
         """ Clear cached data. """
-        for attr in self._cached_attributes:
-            getattr(self, attr).reset_instance(self)
+        for method in get_class_methods(self):
+            if hasattr(method, 'cache'):
+                method.reset_instance(self)
 
 
     def __copy__(self):
@@ -2231,8 +2244,8 @@ class Horizon:
         -------
         A horizon object with new matrix object and a reference to the old geometry attribute.
         """
-        return Horizon(np.copy(self.matrix), self.geometry, i_min=self.i_min, x_min=self.x_min,
-                       name=f'copy_of_{self.name}')
+        return type(self)(np.copy(self.matrix), self.geometry, i_min=self.i_min, x_min=self.x_min,
+                          name=f"copy_of_{self.name}")
 
 
 class StructuredHorizon(Horizon):

@@ -431,7 +431,7 @@ class SeismicCubeset(Dataset):
 
     def show_3d(self, idx=0, src='labels', aspect_ratio=None, zoom_slice=None,
                  n_points=100, threshold=100, n_sticks=100, n_nodes=10,
-                 slides=None, margin=(0, 0, 20), colors_mapping=None, **kwargs):
+                 slides=None, margin=(0, 0, 20), colors=None, **kwargs):
         """ Interactive 3D plot for some elements of cube. Roughly, does the following:
             - take some faults and/or horizons
             - select `n` points to represent the horizon surface and `n_sticks` and `n_nodes` for each fault
@@ -464,7 +464,7 @@ class SeismicCubeset(Dataset):
             Each tuple is pair of location and axis to load slide from seismic cube.
         margin : tuple of ints
             Added margin for each axis, by default, (0, 0, 20).
-        colors_mapping : dict
+        colors : dict or list
             Mapping of label class name to color defined as str, by default, all labels will be shown in green.
         show_axes : bool
             Whether to show axes and their labels.
@@ -477,10 +477,8 @@ class SeismicCubeset(Dataset):
         """
         src = src if isinstance(src, (tuple, list)) else [src]
         geometry = self.geometries[idx]
-        colors_mapping = colors_mapping or {'all': 'green'}
         coords = []
         simplices = []
-        colors = []
 
         if zoom_slice is None:
             zoom_slice = [slice(0, geometry.cube_shape[i]) for i in range(3)]
@@ -499,18 +497,22 @@ class SeismicCubeset(Dataset):
 
         labels = [getattr(self, src_)[idx] if isinstance(src_, str) else [src_] for src_ in src]
         labels = sum(labels, [])
-        for label in labels:
+
+        if isinstance(colors, dict):
+            colors = [colors.get(type(label).__name__, colors.get('all', 'green')) for label in labels]
+
+        simplices_colors = []
+        for label, color in zip(labels, colors):
             x, y, z, simplices_ = label.make_triangulation(**triangulation_kwargs)
             if x is not None:
                 simplices += [simplices_ + sum([len(item) for item in coords])]
-                color = colors_mapping.get(type(label).__name__, colors_mapping.get('all', 'green'))
-                colors += [[color] * len(simplices_)]
+                simplices_colors += [[color] * len(simplices_)]
                 coords += [np.stack([x, y, z], axis=1)]
 
         simplices = np.concatenate(simplices, axis=0)
         coords = np.concatenate(coords, axis=0)
-        colors = np.concatenate(colors)
-        title = geometry.name
+        simplices_colors = np.concatenate(simplices_colors)
+        title = geometry.displayed_name
 
         default_aspect_ratio = (geometry.cube_shape[0] / geometry.cube_shape[1], 1, 1)
         aspect_ratio = [None] * 3 if aspect_ratio is None else aspect_ratio
@@ -530,7 +532,7 @@ class SeismicCubeset(Dataset):
                     image = image[zoom_slice[:-1]]
                 images += [(image, loc, axis)]
 
-        show_3d(coords[:, 0], coords[:, 1], coords[:, 2], simplices, title, zoom_slice, colors, margin=margin,
+        show_3d(coords[:, 0], coords[:, 1], coords[:, 2], simplices, title, zoom_slice, simplices_colors, margin=margin,
                 aspect_ratio=aspect_ratio, axis_labels=axis_labels, images=images, **kwargs)
 
     def show_points(self, idx=0, src_labels='labels', **kwargs):
@@ -790,7 +792,8 @@ class SeismicCubeset(Dataset):
             use_labels = kwargs.pop('use_labels', 'all')
             width = kwargs.pop('width', 5)
             labels_pipeline = (Pipeline()
-                               .create_masks(src_labels=src_labels, dst='masks', width=width, use_labels=use_labels))
+                               .create_masks(src_labels=src_labels, dst='masks', width=width,
+                                             use_labels=use_labels, zero_to_nan=True))
 
             pipeline = pipeline + labels_pipeline
 
@@ -827,7 +830,7 @@ class SeismicCubeset(Dataset):
 
         kwargs = {
             'mode': mode,
-            'title': f'Data slice on `{geometry.name}\n {header} {loc} out of {total}',
+            'title_label': f'Data slice on cube `{geometry.displayed_name}`\n {header} {loc} out of {total}',
             'xlabel': xlabel,
             'ylabel': ylabel,
             'xticks': xticks,

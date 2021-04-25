@@ -194,7 +194,11 @@ class SeismicGeometry:
         field_search = re.search(r'_([A-Z]+?)\.', self.name)
         if field_search is None:
             if self.anonymize:
-                raise ValueError(f"Cannot anonymize name {self.name}, because field cannot be parsed from it.")
+                msg = f"""
+                Cannot anonymize name {self.name}, because field cannot be parsed from it.
+                Expected name in `<attribute>_<NUM>_<FIELD>.<extension>` format.
+                """
+                raise ValueError(msg)
             return ""
         return self.name[slice(*field_search.span(1))]
 
@@ -426,7 +430,7 @@ class SeismicGeometry:
     @property
     def displayed_name(self):
         """ Return name with masked field name, if anonymization needed. """
-        return self.name.replace(self.field, "*") if self.anonymize else self.name
+        return self.short_name.replace(f"_{self.field}", "") if self.anonymize else self.short_name
 
     @property
     def displayed_path(self):
@@ -587,9 +591,9 @@ class SeismicGeometry:
         path_segy = path_segy or (os.path.splitext(path_hdf5)[0] + postfix + '.sgy')
         if not path_spec:
             if hasattr(self, 'segy_path'):
-                path_spec = self.segy_path
+                path_spec = self.segy_path.decode('ascii')
             else:
-                path_spec = os.path.splitext(self.path) + '.sgy'
+                path_spec = os.path.splitext(self.path)[0] + '.sgy'
 
         # By default, if path_hdf5 is not provided, `temp.hdf5` next to self.path will be used
         if path_hdf5 is None:
