@@ -4,12 +4,32 @@ import numpy as np
 import cv2
 
 import matplotlib.pyplot as plt
+from matplotlib.cm import get_cmap, register_cmap
+from matplotlib.patches import Patch
 from matplotlib.colors import ColorConverter
+from matplotlib.colors import ListedColormap, LinearSegmentedColormap
+from mpl_toolkits import axes_grid1
 
-import plotly
 import plotly.figure_factory as ff
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+
+from .utils import to_list
+
+
+
+CDICT = {
+    'red': [[0.0, None, 1.0], [0.33, 1.0, 1.0], [0.66, 1.0, 1.0], [1.0, 0.0, None]],
+    'green': [[0.0, None, 0.0], [0.33, 0.0, 0.0], [0.66, 1.0, 1.0], [1.0, 0.5, None]],
+    'blue': [[0.0, None, 0.0], [0.33, 0.0, 0.0], [0.66, 0.0, 0.0], [1.0, 0.0, None]]
+}
+METRIC_CMAP = LinearSegmentedColormap('Metric', CDICT)
+METRIC_CMAP.set_bad(color='black')
+register_cmap(name='Metric', cmap=METRIC_CMAP)
+
+DEPTHS_CMAP = ListedColormap(get_cmap('viridis_r')(np.linspace(0.0, 0.5, 100)))
+register_cmap(name='Depths', cmap=DEPTHS_CMAP)
+
 
 
 def channelize_image(image, total_channels, color=None, greyscale=False, opacity=None):
@@ -46,10 +66,16 @@ def channelize_image(image, total_channels, color=None, greyscale=False, opacity
     return background
 
 
-def filter_kwargs(kwargs, keys):
-    """ Filter the dict of kwargs leaving only supplied keys.
-    """
-    return {key: kwargs[key] for key in keys if key in kwargs}
+def filter_kwargs(kwargs, keys, index=slice(None), prefix=''):
+    """ Filter the dict of kwargs leaving only supplied keys. """
+    result = {}
+    for key in keys:
+        value = kwargs.get(prefix + key, kwargs.get(key))
+        if isinstance(value, (tuple, list, np.ndarray)):
+            result[key] = value[index]
+        elif value is not None:
+            result[key] = value
+    return result
 
 
 def plot_image(image, mode='single', backend='matplotlib', **kwargs):
@@ -75,8 +101,29 @@ def plot_loss(*data, title=None, **kwargs):
 
 
 class MatplotlibPlotter:
-    """ Plotting backend for matplotlib.
-    """
+    """ Plotting backend for matplotlib. """
+    @staticmethod
+    def color_to_cmap(color):
+        if isinstance(color, str):
+            color = ColorConverter().to_rgb(color)
+        return ListedColormap(color)
+
+    @staticmethod
+    def add_colorbar(image, aspect=30, fraction=0.5, color='black', **kwargs):
+        divider = axes_grid1.make_axes_locatable(image.axes)
+        width = axes_grid1.axes_size.AxesY(image.axes, aspect=1./aspect)
+        pad = axes_grid1.axes_size.Fraction(fraction, width)
+        cax = divider.append_axes("right", size=width, pad=pad)
+        colorbar = image.axes.figure.colorbar(image, cax=cax, **kwargs)
+        colorbar.ax.yaxis.set_tick_params(color=color)
+
+    @staticmethod
+    def add_legend(axis, color, label, size=20):
+        handles = getattr(axis.get_legend(), 'legendHandles', [])
+        new_patch = Patch(color=color, label=label)
+        handles.append(new_patch)
+        axis.legend(handles=handles, loc=0, prop={'size': size})
+
     @staticmethod
     def convert_kwargs(mode, kwargs):
         """ Make a dict of kwargs to match matplotlib-conventions: update keys of the dict and
@@ -163,24 +210,27 @@ class MatplotlibPlotter:
         kwargs = cls.convert_kwargs('single', kwargs)
         # update defaults
         defaults = {'figsize': (12, 7),
-                    'cmap': 'viridis_r',
-                    'colorbar': True,
+                    'cmap': DEPTHS_CMAP,
                     'fontsize': 20,
                     'fraction': 0.022, 'pad': 0.07,
                     'labeltop': True, 'labelright': True, 'direction': 'inout',
                     'facecolor': 'white',
                     'label': '', 'title': '', 'xlabel': '', 'ylabel': '',
-                    'order_axes': (1, 0)}
+                    'order_axes': (1, 0),
+                    # colorbar
+                    'colorbar': True,
+                    'colorbar_fraction': 0.5,
+                    'colorbar_aspect': 30}
         updated = {**defaults, **kwargs}
 
         # form different groups of kwargs
         figure_kwargs = filter_kwargs(updated, ['figsize', 'facecolor', 'dpi'])
         render_kwargs = filter_kwargs(updated, ['cmap', 'vmin', 'vmax', 'alpha', 'interpolation'])
-        label_kwargs = filter_kwargs(updated, ['label', 'y', 'fontsize', 'family', 'color'])
+        title_kwargs = filter_kwargs(updated, ['label', 'y', 'fontsize', 'family', 'color'], prefix='title_')
         xaxis_kwargs = filter_kwargs(updated, ['xlabel', 'fontsize', 'family', 'color'])
         yaxis_kwargs = filter_kwargs(updated, ['ylabel', 'fontsize', 'family', 'color'])
         tick_params = filter_kwargs(updated, ['labeltop', 'labelright', 'labelcolor', 'direction'])
-        colorbar_kwargs = filter_kwargs(updated, ['fraction', 'pad'])
+        colorbar_kwargs = filter_kwargs(updated, ['fraction', 'pad'], prefix='colorbar_')
 
         cm = copy(plt.get_cmap(render_kwargs['cmap']))
         cm.set_bad(color=updated.get('bad_color', updated.get('fill_color', 'white')))
@@ -201,7 +251,7 @@ class MatplotlibPlotter:
         ax_img = ax.imshow(img, extent=extent, **render_kwargs)
 
         # add titles and labels
-        ax.set_title(**label_kwargs)
+        ax.set_title(**title_kwargs)
         ax.set_xlabel(**xaxis_kwargs)
         ax.set_ylabel(**yaxis_kwargs)
 
@@ -211,8 +261,7 @@ class MatplotlibPlotter:
             ax.set_yticks(yticks)
 
         if updated['colorbar']:
-            cb = fig.colorbar(ax_img, **colorbar_kwargs, ax=ax)
-            cb.ax.yaxis.set_tick_params(color=yaxis_kwargs.get('color', 'black'))
+            cls.add_colorbar(ax_img, color=yaxis_kwargs.get('color', 'black'), **colorbar_kwargs)
         ax.set_facecolor(updated['facecolor'])
         ax.tick_params(**tick_params)
 
@@ -439,23 +488,29 @@ class MatplotlibPlotter:
         """
         kwargs = cls.convert_kwargs('overlap', kwargs)
         defaults = {'figsize': (12, 7),
-                    'y' : 1.1,
                     'cmap': 'gray',
                     'fontsize': 20,
-                    'colors': ('red', 'green', 'blue'),
-                    'opacity': 1.0,
+                    'color': ('red', 'green', 'blue'),
+                    'alpha': 1.0,
                     'label': '', 'title': '', 'xlabel': '', 'ylabel': '',
-                    'order_axes': (1, 0)}
+                    'order_axes': (1, 0),
+                    # title
+                    'title_y' : 1.1,
+                    # colorbar
+                    'colorbar': True,
+                    'colorbar_fraction': 0.5,
+                    'colorbar_aspect': 30,
+                    # legend
+                    'legend_size': 10}
         updated = {**defaults, **kwargs}
-        if isinstance(updated['opacity'], (int, float)):
-            updated['opacity'] = [updated['opacity']] * (len(images) - 1)
 
         # form different groups of kwargs
         figure_kwargs = filter_kwargs(updated, ['figsize', 'facecolor', 'dpi'])
         render_kwargs = filter_kwargs(updated, ['cmap', 'vmin', 'vmax', 'interpolation'])
-        label_kwargs = filter_kwargs(updated, ['label', 'fontsize', 'family', 'color', 'y'])
-        xaxis_kwargs = filter_kwargs(updated, ['xlabel', 'fontsize', 'family', 'color'])
-        yaxis_kwargs = filter_kwargs(updated, ['ylabel', 'fontsize', 'family', 'color'])
+        title_kwargs = filter_kwargs(updated, ['label', 'fontsize', 'family', 'y'], prefix='title_')
+        xaxis_kwargs = filter_kwargs(updated, ['xlabel', 'fontsize', 'family'])
+        yaxis_kwargs = filter_kwargs(updated, ['ylabel', 'fontsize', 'family'])
+        colorbar_kwargs = filter_kwargs(updated, ['fraction', 'aspect'])
 
         # Create figure and axes
         if 'ax' in kwargs:
@@ -469,7 +524,9 @@ class MatplotlibPlotter:
         xticks, yticks = updated.get('xticks', [0, img.shape[1]]), updated.get('yticks', [img.shape[0], 0])
         extent = [xticks[0], xticks[-1], yticks[0], yticks[-1]]
 
-        ax.imshow(img, extent=extent, **render_kwargs)
+        img = ax.imshow(img, extent=extent, **render_kwargs)
+        if updated['colorbar']:
+            cls.add_colorbar(img, color=yaxis_kwargs.get('color', 'black'), **colorbar_kwargs)
         ax.set_xlabel(**xaxis_kwargs)
         ax.set_ylabel(**yaxis_kwargs)
 
@@ -479,14 +536,89 @@ class MatplotlibPlotter:
             ax.set_yticks(yticks)
 
         for i, img in enumerate(images[1:]):
-            color = updated['colors'][i]
-            opacity = updated['opacity'][i]
-            ax.imshow(channelize_image(np.transpose(img.squeeze(), axes=updated['order_axes']), total_channels=4,
-                                       color=color, opacity=opacity),
-                      extent=extent, **render_kwargs)
-        plt.title(**label_kwargs)
+            image = np.transpose(img.squeeze(), axes=updated['order_axes'])
+            render_kwargs = filter_kwargs(updated, ['color', 'alpha'], index=i)
+            layer_color = render_kwargs.pop('color')
+            render_kwargs['cmap'] = cls.color_to_cmap(layer_color)
+            ax.imshow(image, extent=extent, **render_kwargs)
+            if updated['legend']:
+                legend_kwargs = filter_kwargs(updated, ['label', 'size', 'color'], index=i, prefix='legend_')
+                cls.add_legend(ax, **legend_kwargs)
+        ax.set_title(**title_kwargs)
 
         return cls.save_and_show(fig, **updated)
+
+
+    @classmethod
+    def hist(cls, images, **kwargs):
+        """ Plot several images on one canvas using matplotlib: render the first one in greyscale
+        and the rest ones in 'rgb' channels, one channel for each image.
+        Supports up to four images in total.
+
+        Parameters
+        ----------
+        images : tuple or list
+            sequence of 2d-arrays for plotting. Supports up to 4 images.
+        kwargs : dict
+            figsize : tuple
+                tuple of two ints containing the size of the rendered image.
+            label : str
+                title of rendered image.
+            y : float
+                height of the title
+            cmap : str
+                colormap to render the first image in.
+            vmin : float
+                the lowest brightness-level to be rendered.
+            vmax : float
+                the highest brightness-level to be rendered.
+            xlabel : str
+                xaxis-label.
+            ylabel : str
+                yaxis-label.
+            order_axes : tuple
+                tuple of ints; defines the order of axes for transposition operation
+                applied to the image.
+            other
+        """
+        defaults = {'figsize': (12, 7),
+                    'fontsize': 20,
+                    'color': ('red', 'green', 'blue'),
+                    'alpha': 1.0,
+                    'label': '', 'title': '', 'xlabel': '', 'ylabel': '',
+                    # title
+                    'title_y': 1.1,
+                    # legend
+                    'size': 20}
+        updated = {**defaults, **kwargs}
+
+
+        # form different groups of kwargs
+        figure_kwargs = filter_kwargs(updated, ['figsize', 'facecolor', 'dpi'])
+        title_kwargs = filter_kwargs(updated, ['label', 'fontsize', 'family', 'color', 'y'], prefix='title_')
+        xaxis_kwargs = filter_kwargs(updated, ['xlabel', 'fontsize', 'family', 'color'])
+        yaxis_kwargs = filter_kwargs(updated, ['ylabel', 'fontsize', 'family', 'color'])
+
+        # Create figure and axes
+        if 'ax' in kwargs:
+            ax = kwargs['ax']
+            fig = ax.figure
+        else:
+            fig, ax = plt.subplots(**figure_kwargs)
+
+        for i, img in enumerate(images):
+            render_kwargs = filter_kwargs(updated, ['bins', 'color', 'alpha'], index=i)
+            ax.hist(img, **render_kwargs)
+            if updated['legend']:
+                legend_kwargs = filter_kwargs(updated, ['label', 'size', 'color'], index=i, prefix='legend_')
+                cls.add_legend(ax, **legend_kwargs)
+
+        ax.set_title(**title_kwargs)
+        ax.set_xlabel(**xaxis_kwargs)
+        ax.set_ylabel(**yaxis_kwargs)
+
+        return cls.save_and_show(fig, **updated)
+
 
     @classmethod
     def rgb(cls, image, **kwargs):
@@ -571,38 +703,48 @@ class MatplotlibPlotter:
         # embedded params
         defaults = {'figsize': (6 * len(images), 7),
                     'cmap': 'gray',
-                    'fontsize': 20,
-                    'y': 0.9,
-                    'label': ''*len(images), 'title': '', 'xlabel': '', 'ylabel': '',
-                    'order_axes': (1, 0)}
+                    'suptitle_fontsize': 20,
+                    'suptitle_y': 0.9,
+                    'title_label': '',
+                    'xlabel': '',
+                    'ylabel': '',
+                    'order_axes': (1, 0),
+                    'colorbar': True,
+                    'colorbar_fraction': 0.5,
+                    'colorbar_aspect': 30}
         updated = {**defaults, **kwargs}
 
         # form different groups of kwargs
         figure_kwargs = filter_kwargs(updated, ['figsize', 'facecolor', 'dpi'])
-        render_kwargs = filter_kwargs(updated, ['cmap', 'vmin', 'vmax', 'interpolation'])
-        label_kwargs = filter_kwargs(updated, ['t', 'y', 'fontsize', 'family', 'color'])
-        xaxis_kwargs = filter_kwargs(updated, ['xlabel', 'fontsize', 'family', 'color'])
-        yaxis_kwargs = filter_kwargs(updated, ['ylabel', 'fontsize', 'family', 'color'])
-        titles_kwargs = filter_kwargs(updated, ['label', 'fontsize', 'family', 'color'])
-
         grid = (1, len(images))
         fig, ax = plt.subplots(*grid, **figure_kwargs)
+        ax = to_list(ax)
 
         # plot image
         for i, img in enumerate(images):
-            args = {key: (value[i] if isinstance(value, list) else value)
-                    for key, value in render_kwargs.items()}
-            cm = copy(plt.get_cmap(args['cmap']))
+            render_kwargs = filter_kwargs(updated, ['cmap', 'vmin', 'vmax', 'interpolation'], index=i)
+            cm = copy(plt.get_cmap(render_kwargs['cmap']))
             cm.set_bad(color=updated.get('bad_color', updated.get('fill_color', 'white')))
-            args['cmap'] = cm
+            render_kwargs['cmap'] = cm
 
-            ax[i].imshow(np.transpose(img.squeeze(), axes=updated['order_axes']), **args)
+            img = np.transpose(img.squeeze(), axes=updated['order_axes'])
+            ax_img = ax[i].imshow(img, **render_kwargs)
+            if filter_kwargs(updated, ['colorbar'], index=i)['colorbar']:
+                colorbar_kwargs = filter_kwargs(updated, ['fraction', 'pad'], prefix='colorbar_', index=i)
+                cls.add_colorbar(ax_img, **colorbar_kwargs)
 
+            xaxis_kwargs = filter_kwargs(updated, ['xlabel', 'fontsize', 'family', 'color'], index=i)
             ax[i].set_xlabel(**xaxis_kwargs)
-            ax[i].set_ylabel(**yaxis_kwargs)
-            ax[i].set_title(**dict(titles_kwargs, **{'label': updated.get('titles', ' '*(len(images)+1))[i]}))
 
-        fig.suptitle(**label_kwargs)
+            yaxis_kwargs = filter_kwargs(updated, ['ylabel', 'fontsize', 'family', 'color'], index=i)
+            ax[i].set_ylabel(**yaxis_kwargs)
+
+            title_kwargs = filter_kwargs(updated, ['label', 'fontsize', 'family', 'color', 'y'],
+                                         prefix='title_', index=i)
+            ax[i].set_title(**title_kwargs)
+
+        suptitle_kwargs = filter_kwargs(updated, ['t', 'y', 'fontsize', 'family', 'color'], prefix='suptitle_')
+        fig.suptitle(**suptitle_kwargs)
 
         return cls.save_and_show(plt, **updated)
 
@@ -1062,7 +1204,7 @@ def show_3d(x, y, z, simplices, title, zoom_slice, colors=None, show_axes=True, 
     # Arguments of graph creation
     kwargs = {
         'title': title,
-        'colormap': plotly.colors.sequential.Viridis[::-1][:4],
+        'colormap': [DEPTHS_CMAP(x) for x in np.linspace(0, 1, 10)],
         'edges_color': 'rgb(70, 40, 50)',
         'show_colorbar': False,
         'width': width,

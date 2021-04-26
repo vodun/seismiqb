@@ -461,7 +461,7 @@ class GeoBody:
 
         kwargs = {
             'mode': 'overlap',
-            'opacity': 0.25,
+            'alpha': 0.25,
             'title': (f'GeoBody `{self.name}` on `{self.geometry.name}`' +
                       f'\n {header} {loc} out of {total}'),
             'xlabel': xlabel,

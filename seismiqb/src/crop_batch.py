@@ -2,6 +2,7 @@
 import string
 import random
 from copy import copy
+from warnings import warn
 
 import numpy as np
 import cv2
@@ -30,7 +31,7 @@ class SeismicCropBatch(Batch):
         'post': '_assemble'
     }
     # When an attribute containing one of keywords from list it accessed via `get`, firstly search it in `self.dataset`.
-    DATASET_ATTRIBUTES = ['label', 'geom', 'fan', 'channel']
+    DATASET_ATTRIBUTES = ['label', 'geom', 'fan', 'channel', 'horizon']
 
 
     def _init_component(self, *args, **kwargs):
@@ -175,6 +176,8 @@ class SeismicCropBatch(Batch):
         SeismicCropBatch
             Batch with positions of crops in specified component.
         """
+        # pylint: disable=protected-access
+
         # Create all the points and shapes
         if isinstance(shape, dict):
             shape = {k: np.asarray(v) for k, v in shape.items()}
@@ -360,7 +363,7 @@ class SeismicCropBatch(Batch):
         """
         location = self.get(ix, locations)
         nearest_horizon = self.get_nearest_horizon(ix, src_labels, location[2])
-        crop = nearest_horizon.load_attribute(src_attribute, location, **kwargs)
+        crop = nearest_horizon.load_attribute(src_attribute=src_attribute, location=location, **kwargs)
         if final_ndim == 3 and crop.ndim == 2:
             crop = crop[..., np.newaxis]
         elif final_ndim != crop.ndim:
@@ -370,7 +373,8 @@ class SeismicCropBatch(Batch):
 
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def create_masks(self, ix, dst, src_labels='labels', src_locations='locations', use_labels='all', width=3):
+    def create_masks(self, ix, dst, src_labels='labels', src_locations='locations',
+                     use_labels='all', width=3, zero_to_nan=False):
         """ Create masks from labels-dictionary in given positions.
 
         Parameters
@@ -400,6 +404,7 @@ class SeismicCropBatch(Batch):
         -----
         Can be run only after labels-dict is loaded into labels-component.
         """
+
         location = self.get(ix, src_locations)
         crop_shape = self.get(ix, 'shapes')
         mask = np.zeros(crop_shape, dtype='float32')
@@ -419,7 +424,7 @@ class SeismicCropBatch(Batch):
             labels = [self.get_nearest_horizon(ix, src_labels, location[2])]
 
         for label in labels:
-            mask = label.add_to_mask(mask, locations=location, width=width)
+            mask = label.add_to_mask(mask, locations=location, width=width, zero_to_nan=zero_to_nan)
             if use_labels == 'single' and np.sum(mask) > 0.0:
                 break
         return mask
@@ -621,10 +626,12 @@ class SeismicCropBatch(Batch):
         """
         if axis != -1:
             raise NotImplementedError("For now function works for `axis=-1` only.")
-        _ = dst
 
-        if not isinstance(src, (list, tuple, np.ndarray)) or len(src) < 2:
-            raise ValueError('Src must contain at least two components to concatenate')
+        if not isinstance(src, (list, tuple, np.ndarray)):
+            raise ValueError()
+        if len(src) == 1:
+            warn("Since `src` contains only one component, concatenation not needed.")
+
         items = [self.get(None, attr) for attr in src]
 
         depth = sum(item.shape[-1] for item in items)
