@@ -129,7 +129,7 @@ class FaciesInfo():
 
     DEFAULT_INFO = {
         'cubes_dir': '/data/seismic_data/seismic_interpretation',
-        'cubes_extension': '.hdf5',
+        'cubes_extension': '.qblosc',
         'labels_extension': '.char',
         'main_labels': None,
         'subsets': {},
@@ -334,16 +334,15 @@ class FaciesCubeset(SeismicCubeset):
         default_dst_labels = [labels_subdir.lower() for labels_subdir in labels_subdirs]
         dst_labels = to_list(dst_labels, default=default_dst_labels)
 
-        if main_labels is not None:
-            if not getattr(self, main_labels, False):
-                alt_main_labels = dst_labels[0]
-                msg = f"""
-                Attribute `{main_labels}` does not exist in dataset.
-                Cubeset `labels` automatically set to point to `{alt_main_labels}`.
-                To avoid this behaviour specify attribute existing in dataset.
-                """
-                warn(msg)
-                main_labels = alt_main_labels
+        if main_labels not in dst_labels:
+            alt_main_labels = dst_labels[0]
+            msg = f"""
+            Provided `main_labels={main_labels}` are not in `dst_labels` and set automatically to `{alt_main_labels}`.
+            That means, that dataset `labels` attribute will point to `{alt_main_labels}`.
+            To override this behaviour provide `main_labels` from `dst_labels`.
+            """
+            warn(msg)
+            main_labels = alt_main_labels
 
         for labels_subdir, dst_label in zip(labels_subdirs, dst_labels):
             paths = defaultdict(list)
@@ -525,7 +524,7 @@ class FaciesCubeset(SeismicCubeset):
 
     def make_predictions(self, pipeline, crop_shape, overlap_factor, order=(1, 2, 0), src_labels='labels',
                          dst_labels='predictions', prefix='_predicted', add_subsets=True,
-                         pipeline_variable='predictions', bar='n', binarize=True):
+                         pipeline_variable='predictions', bar='n'):
         """
         Make predictions and put them into dataset attribute.
 
@@ -545,8 +544,6 @@ class FaciesCubeset(SeismicCubeset):
             Name of pipeline variable to get predictions for assemble from.
         order : tuple of int
             Passed directly to :meth:`.assemble_crops`.
-        binarize : bool
-            Whether convert probability to class label or not.
         """
         # pylint: disable=blacklisted-name
         results = IndexedDict({ix: [] for ix in self.indices})
@@ -563,7 +560,7 @@ class FaciesCubeset(SeismicCubeset):
             pipeline.run(batch_size=self.size, n_iters=self.grid_iters, bar=bar)
             predicted_matrix = expit(self.assemble_crops(pipeline.v(pipeline_variable), order=order).squeeze())
             prediction.filter_matrix(~(predicted_matrix.round().astype(bool)))
-            setattr(prediction, "predicted_matrix", predicted_matrix)
+            setattr(prediction, "probability_matrix", predicted_matrix)
             results[cube_name].append(prediction)
         setattr(self, dst_labels, results)
         if add_subsets:
