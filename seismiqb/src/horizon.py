@@ -537,6 +537,10 @@ class Horizon:
 
     @property
     def short_name(self):
+<<<<<<< HEAD
+=======
+        """ Name without extension. """
+>>>>>>> plotter_upgrade
         return self.name.split('.')[0]
 
     def __len__(self):
@@ -2341,11 +2345,12 @@ class Horizon:
         kwargs = {
             'mode': 'overlap',
             'title_label': f'Horizon `{self.name}` on `{self.cube_name}`\n {header} {loc} out of {total}',
+            'title_y': 1.02,
             'xlabel': xlabel,
             'ylabel': ylabel,
             'xticks': xticks,
             'yticks': yticks,
-            'y': 1.02,
+            'legend': False,
             **kwargs
         }
 

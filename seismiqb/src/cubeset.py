@@ -3,7 +3,6 @@
 import os
 from glob import glob
 from warnings import warn
-import contextlib
 
 import numpy as np
 from tqdm.auto import tqdm
@@ -155,7 +154,8 @@ class SeismicCubeset(Dataset):
                 self.geometries[ix].log()
 
 
-    def create_labels(self, paths=None, filter_zeros=True, dst='labels', labels_class=None, sort=False, bar=False, **kwargs):
+    def create_labels(self, paths=None, filter_zeros=True, dst='labels', labels_class=None,
+                      sort=False, bar=False, **kwargs):
         """ Create labels (horizons, facies, etc) from given paths and optionaly sort them.
 
         Parameters
@@ -936,11 +936,12 @@ class SeismicCubeset(Dataset):
         kwargs = {
             'mode': mode,
             'title_label': f'Data slice on cube `{geometry.displayed_name}`\n {header} {loc} out of {total}',
+            'title_y': 1.01,
             'xlabel': xlabel,
             'ylabel': ylabel,
             'xticks': xticks,
             'yticks': yticks,
-            'y': 1.02,
+            'legend': False, # TODO: Make every horizon mask creation individual to allow their distinction while plot.
             **kwargs
         }
 

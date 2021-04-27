@@ -666,4 +666,5 @@ def to_list(obj, default=None):
     return np.array(obj).ravel().tolist()
 
 def get_class_methods(cls):
-    return {func for func in dir(cls) if not func.startswith("__") and callable(getattr(cls, func))}
+    """ Get a list of non-private class methods. """
+    return [func for func in dir(cls) if not func.startswith("__") and callable(getattr(cls, func))]

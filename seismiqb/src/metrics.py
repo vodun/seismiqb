@@ -10,8 +10,6 @@ except ImportError:
     cp = np
 
 import cv2
-from matplotlib.colors import LinearSegmentedColormap
-from matplotlib.cm import register_cmap
 
 from ..batchflow.notifier import Notifier
 
