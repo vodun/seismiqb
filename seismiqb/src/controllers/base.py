@@ -197,7 +197,7 @@ class BaseController:
         self.log_to_file(pformat(pipeline_config.config, depth=2), '末 train_config.txt')
 
         # Test batch to initialize model and log stats
-        batch = train_pipeline.next_batch(D.size)
+        batch = train_pipeline.next_batch(D.size, n_epochs=None)
         model = train_pipeline.m('model')
 
         self.log(f'Target batch size: {pipeline_config["batch_size"]}')
@@ -225,7 +225,7 @@ class BaseController:
         # Run training procedure
         start_time = perf_counter()
         self.log(f'Train run: n_iters={n_iters}, prefetch={prefetch}')
-        train_pipeline.run(D.size, n_iters=n_iters, prefetch=prefetch, notifier=notifier)
+        train_pipeline.run(D.size, n_iters=n_iters, n_epochs=None, prefetch=prefetch, notifier=notifier)
         elapsed = perf_counter() - start_time
 
         # Log: resource graphs

@@ -13,7 +13,7 @@ import numpy as np
 import torch
 
 from ...batchflow import Config, Pipeline, Notifier
-from ...batchflow import B, C, D, P, R, V, F
+from ...batchflow import B, C, D, P, R, V, F, I
 from ...batchflow.models.torch import TorchModel, ResBlock, EncoderDecoder
 from .base import BaseController
 from ..cubeset import SeismicCubeset
@@ -43,13 +43,14 @@ class FaultController(BaseController):
             'side_view': False,
             'angle': 25,
             'scale': (0.7, 1.5),
+            'adjust': True,
             'crop_shape': [1, 128, 512],
             'filters': [64, 96, 128, 192, 256],
-            'itemwise': True,
+            'itemwise': False,
             'phase': True,
             'continuous_phase': False,
             'normalization_layer': False,
-            'normalization_window': 100,
+            'normalization_window': (1, 1, 100),
             'model': 'UNet',
             'loss': 'bce',
             'output': 'sigmoid',
@@ -57,6 +58,7 @@ class FaultController(BaseController):
             'prefetch': 0,
             'rescale_batch_size': False,
             'n_iters': 2000,
+            'callback/each': 100,
         },
 
         'inference': {
@@ -71,7 +73,7 @@ class FaultController(BaseController):
             'orientation': 'ilines',
             'slicing': 'native',
             'output': 'sigmoid',
-            'itemwise': True
+            'itemwise': False
         }
     })
     # .run_later(D('size'), n_iters=C('n_iters'), n_epochs=None, prefetch=0, profile=False, bar=C('bar')
@@ -182,7 +184,8 @@ class FaultController(BaseController):
         -------
         batchflow.Pipeline
         """
-        load_shape = F(np.array)(F(self.adjust_shape)(C('crop_shape'), C('angle'), C('scale')[0])) if train else C('crop_shape')
+        load_shape = F(self.adjust_shape)(C('crop_shape'), C('angle'), C('scale')[0]) if train and self.config['train/adjust'] else C('crop_shape')
+        load_shape = F(np.array)(load_shape)
         shape = {self.cube_name_from_alias(k): load_shape for k in self.config['dataset/train_cubes']}
         shape.update({self.cube_name_from_alias(k): load_shape[[1, 0, 2]] for k in self.config['dataset/transposed_cubes']})
 
@@ -223,13 +226,14 @@ class FaultController(BaseController):
         return (Pipeline()
             .init_variable('loss_history', [])
             .init_variable('loss', [])
-            .init_model('dynamic', model_class, 'model', model_config)
+            .init_model('model', model_class, 'dynamic', model_config)
             .adaptive_expand(src=['images', 'masks'])
             .train_model('model',
                          fetches=['loss', C('output')],
                          images=B('images'),
                          masks=B('masks'),
                          save_to=[V('loss', mode='w'), B('predictions')])
+            .call(self.plot_inference, train_pipeline=B().pipeline, savepath='prediction', each=self.config['train/callback/each'], iteration=I())
             .update(V('loss_history', mode='a'), V('loss'))
         )
 
@@ -276,7 +280,7 @@ class FaultController(BaseController):
         """ Define the whole training procedure pipeline including data loading, augmentation and model training. """
         return (
             self.load_pipeline(create_masks=True, train=True, **kwargs) +
-            self.augmentation_pipeline(**kwargs) +
+            (self.augmentation_pipeline(**kwargs) if self.config['train/adjust'] else Pipeline()) +
             self.train_pipeline(**kwargs)
         )
 
@@ -377,7 +381,7 @@ class FaultController(BaseController):
 
                 ppl = (inference_pipeline << dataset)
                 for _ in tqdm.tqdm(range(dataset.grid_iters), disable=(not pbar)):
-                    _ = ppl.next_batch(D('size'))
+                    _ = ppl.next_batch(D('size'), n_epochs=None)
                 prediction = dataset.assemble_crops(ppl.v('predictions'), order=order, fill_value=0).astype('float32')
                 image = geometry[
                     slices[0][0]:slices[0][1],
@@ -389,19 +393,20 @@ class FaultController(BaseController):
                     outputs[cube_idx][-1] += [dataset.assemble_crops(ppl.v('target'), order=order, fill_value=0).astype('float32')]
         return outputs
 
-    def plot_inference(self, *args, savepath=None, overlap=True, threshold=0.05, **kwargs):
-        results = self.inference_on_slides(*args, **kwargs)
-        savepath = os.path.join(self.config['savedir'], savepath)
-        for cube in results:
-            for item in results[cube]:
-                slices, image, prediction = item[:3]
-                _savepath = None if savepath is None else (savepath + '_' + str(slices) + '.png')
-                prediction = prediction[0]
-                prediction[prediction < threshold] = 0
-                if overlap:
-                    plot_image([image[0], prediction], mode='overlap', cmap='gray', figsize=(20, 20), savepath=_savepath)
-                else:
-                    plot_image(prediction, figsize=(20, 20), savepath=_savepath)
+    def plot_inference(self, *args, savepath=None, overlap=True, threshold=0.05, each=100, iteration=0, **kwargs):
+        if iteration % each == 0:
+            results = self.inference_on_slides(*args, **kwargs)
+            savepath = os.path.join(self.config['savedir'], savepath)
+            for cube in results:
+                for item in results[cube]:
+                    slices, image, prediction = item[:3]
+                    _savepath = None if savepath is None else (savepath + '_' + str(slices) + '_' + str(iteration) + '.png')
+                    prediction = prediction[0]
+                    prediction[prediction < threshold] = 0
+                    if overlap:
+                        plot_image([image[0], prediction], mode='overlap', cmap='gray', figsize=(20, 20), savepath=_savepath)
+                    else:
+                        plot_image(prediction, figsize=(20, 20), savepath=_savepath)
 
     def inference_on_cube(self, pipeline=None, model_path=None, fmt='npy', save_to=None, prefix=None, threshold=0.5, bar=True, **kwargs):
         config = {**self.config['inference'], **kwargs}

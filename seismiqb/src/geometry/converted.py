@@ -155,4 +155,7 @@ class SeismicGeometryConverted(SeismicGeometry):
 
         if axis == 1:
             slide = slide.T
+
+        if self.dtype == np.int8:
+            slide = slide.astype(np.float32)
         return slide

@@ -430,7 +430,7 @@ class SeismicCropBatch(Batch):
 
     @action
     #@inbatch_parallel(init='indices', post='_assemble', target='for')
-    def compute_attribute(self, dst, src='images', attribute='semblance', window=10, device='cpu'):
+    def compute_attribute(self, dst, src='images', attribute='semblance', window=10, device='cpu', **kwargs):
         """ Compute geological attribute.
 
         Parameters
@@ -454,7 +454,7 @@ class SeismicCropBatch(Batch):
             Batch with loaded masks in desired components.
         """
         images = getattr(self, src)
-        result = compute_attribute(images, window, device, attribute)
+        result = compute_attribute(images, window, device, attribute, **kwargs)
         setattr(self, dst, result)
         return self
 

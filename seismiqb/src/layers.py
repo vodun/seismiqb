@@ -59,34 +59,31 @@ class MovingNormalizationLayer(nn.Module):
         self.window = window
         self.padding = padding
         self.fill_value = fill_value
+        self.ndim = inputs.ndim
+        self.kernel = torch.ones((1, 1, *window), dtype=torch.float32, requires_grad=False).to(inputs.device)
 
     def forward(self, x):
         ndim = x.ndim
         device = x.device
         window = self.window
-        if ndim == 4:
-            x = x.view(x.shape[0], 1, *x.shape[-3:])
-        elif ndim == 3:
-            x = x.view(1, 1, *x.shape)
+        x = expand_dims(x)
         pad = [(w // 2, w - w // 2 - 1) for w in self.window]
         if self.padding == 'same':
             num = F.pad(x, (*pad[2], *pad[1], *pad[0], 0, 0, 0, 0))
-            n = np.prod(self.window)
         else:
             num = x
-            n = torch.ones_like(x, dtype=torch.float32, device=device, requires_grad=False)
-            n = F.conv3d(n, torch.ones((1, 1, *window), dtype=torch.float32, requires_grad=False).to(device))
-        mean = F.conv3d(num, torch.ones((1, 1, *window), dtype=torch.float32).to(device)) / n
-        mean_2 = F.conv3d(num ** 2, torch.ones((1, 1, *window), dtype=torch.float32).to(device)) / n
-        std = (mean_2 - mean ** 2) ** 0.5
+            # n = torch.ones_like(x, dtype=torch.float32, device=device, requires_grad=False)
+            # n = F.conv3d(n, torch.ones((1, 1, *window), dtype=torch.float32, requires_grad=False).to(device))
+        n = np.prod(self.window)
+        num = (num - num.min()) / (num.max() - num.min())
+        mean = F.conv3d(num, self.kernel / n)
+        mean_2 = F.conv3d(num ** 2, self.kernel / n)
+        std = torch.clip(mean_2 - mean ** 2, min=0) ** 0.5
+        print(x.shape, x.min(), x.max(), std.min(), std.max())
         if self.padding == 'valid':
             x = x[:, :, pad[0][0]:x.shape[2]-pad[0][1], pad[1][0]:x.shape[3]-pad[1][1], pad[2][0]:x.shape[4]-pad[2][1]]
         result = torch.nan_to_num((x - mean) / std, nan=self.fill_value)
-        if ndim == 4:
-            return result[:, 0]
-        if ndim == 3:
-            return result[0, 0]
-        return result
+        return squueze(result, self.ndim)
 
 class SemblanceLayer(nn.Module):
     def __init__(self, inputs=None, window=(1, 5, 20), fill_value=1):
@@ -98,10 +95,7 @@ class SemblanceLayer(nn.Module):
     def forward(self, x):
         device = x.device
         window = self.window
-        if self.ndim == 4:
-            x = x.view(x.shape[0], 1, *x.shape[-3:])
-        elif self.ndim == 3:
-            x = x.view(1, 1, *x.shape)
+        x = expand_dims(x)
 
         padding = [(w // 2, w - w // 2 - 1) for w in window]
         num = F.pad(x, (0, 0, *padding[1], *padding[0], 0, 0, 0, 0))
@@ -120,28 +114,39 @@ class SemblanceLayer(nn.Module):
 
         result = torch.nan_to_num(num / denum, nan=self.fill_value)
 
-        if self.ndim == 4:
-            return result[:, 0]
-        if self.ndim == 3:
-            return result[0, 0]
-        return result
+        return squueze(result, self.ndim)
 
-# def moving_normalization(inputs, window, device, padding=False, fill_value=0):
-#     _padding = [(w // 2, w - w // 2 - 1) for w in window]
-#     if padding:
-#         num = F.pad(inputs, (*_padding[2], *_padding[1], *_padding[0], 0, 0, 0, 0))
-#         n = window[0] * window[1] * window[2]
-#     else:
-#         num = inputs
-#         n = torch.ones_like(inputs, dtype=torch.float32, device=device)
-#         n = F.conv3d(n, torch.ones((1, 1, *window), dtype=torch.float32).to(device))
-#     mean = F.conv3d(num, torch.ones((1, 1, *window), dtype=torch.float32).to(device)) / n
-#     mean_2 = F.conv3d(num ** 2, torch.ones((1, 1, *window), dtype=torch.float32).to(device)) / n
-#     std = (mean_2 - mean ** 2) ** 0.5
-#     if not padding:
-#         inputs = inputs[:, :, _padding[0][0]:inputs.shape[2]-_padding[0][1], _padding[1][0]:inputs.shape[3]-_padding[1][1], _padding[2][0]:inputs.shape[4]-_padding[2][1]]
-#     return torch.nan_to_num((inputs - mean) / std, nan=fill_value)
+class FrequenciesFilterLayer(nn.Module):
+    def __init__(self, inputs, q=0.1, window=200):
+        super().__init__()
+        self.q = q
+        self.window = window
 
+    def forward(self, inputs):
+        inputs = inputs.view(-1, inputs.shape[-1])
+        sfft = torch.stft(inputs, self.window, return_complex=True)
+        q_ = int(sfft.shape[-2] * self.q)
+        sfft[:, :q_] = 0
+        sfft[:, -q_:] = 0
+        return torch.istft(sfft, self.window).view(*inputs.shape)
+
+def expand_dims(x):
+    if x.ndim == 4:
+        x = x.view(x.shape[0], 1, *x.shape[-3:])
+    elif x.ndim == 3:
+        x = x.view(1, 1, *x.shape)
+    elif x.ndim == 2:
+        x = x.view(1, 1, 1, *x.shape)
+    return x
+
+def squueze(x, ndim):
+    if ndim == 4:
+        return x[:, 0]
+    if ndim == 3:
+        return x[0, 0]
+    if ndim == 2:
+        return x[0, 0, 0]
+    return x
 
 class InputLayer(nn.Module):
     """ Input layer with possibility of instantaneous phase concatenation. """
@@ -167,15 +172,9 @@ class InputLayer(nn.Module):
         if self.normalization:
             i = x
             x = self.normalization_layer(x)
-            x = torch.clip(x,  -10, 10)
-            if torch.isnan(x).cpu().numpy().any():
-                raise ValueError('NORM FAILED')
+            x = torch.clip(x,  -10, 10) # TODO: remove clipping
         if self.phases:
             phases = self.phase_layer(x)
-            if torch.isnan(phases).cpu().numpy().any():
-                np.save('phases.npy', phases.cpu().numpy())
-                np.save('seismic.npy', i.cpu().numpy())
-                raise ValueError('PHASES FAILED')
             x = self._concat(x, phases)
         x = self.base_block(x)
         return x

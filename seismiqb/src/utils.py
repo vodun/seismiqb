@@ -547,6 +547,8 @@ def compute_attribute(array, window=None, device='cuda:0', attribute='semblance'
         layer = MovingNormalizationLayer(array, window=window, fill_value=fill_value or 1, **kwargs)
     elif attribute == 'phase':
         layer = InstantaneousPhaseLayer(array, **kwargs)
+    elif attribute == 'frequencies_filter':
+        layer = FrequenciesFilterLayer(array, window=window, **kwargs)
     result = layer(inputs)
     return result.cpu().numpy()
 
