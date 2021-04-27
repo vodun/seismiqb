@@ -1,17 +1,43 @@
 """ Geometry stored in memory """
-import os
+import tempfile
+
 
 import numpy as np
-import h5pickle as h5py
 
 from .hdf5 import SeismicGeometryHDF5
+from .base import SeismicGeometry
+
+
+class DummyFile:
+    """ Object that allows creating a SeismicCubeset from an aray in memory.
+        creates a temporary dummy file to be used in index and links it to the array in memory
+
+        Parameters
+        ----------
+        data : np. array
+            seismic cube stored in a numpy array
+    """
+    SUFFIX = '.' + SeismicGeometry.ARRAY_ALIASES[0]
+
+    def __init__(self, data):
+        self.data =  data
+        self.__file = tempfile.NamedTemporaryFile(suffix=self.SUFFIX)
+        self.path = self.__file.name
+
+    def close(self):
+        """ closes (and deletes) underlying temporary file """
+        if self.__file:
+            try:
+                self.__file.close()
+            finally:
+                self.__file = None
 
 
 class SeismicGeometryArray(SeismicGeometryHDF5):
     """ Numpy array stored in memory as a  SeismicGeometry"""
     #pylint: disable=attribute-defined-outside-init
-    def process(self, arrays, **kwargs):
-        self.array = arrays[self.path]
+    def process(self, dummyfile, **kwargs):
+        self.array = dummyfile.data
 
         self.available_axis = [0]
         self.available_names = ['cube_i']
@@ -26,4 +52,3 @@ class SeismicGeometryArray(SeismicGeometryHDF5):
             self.zero_traces = np.zeros(self.cube_shape[:2], dtype=np.int32)
             self.zero_traces[np.std(self.array, axis=2) == 0] = 1
             self.has_stats = True
-            self.store_meta()
