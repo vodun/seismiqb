@@ -537,10 +537,7 @@ class Horizon:
 
     @property
     def short_name(self):
-<<<<<<< HEAD
-=======
         """ Name without extension. """
->>>>>>> plotter_upgrade
         return self.name.split('.')[0]
 
     def __len__(self):

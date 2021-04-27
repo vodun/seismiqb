@@ -32,42 +32,6 @@ register_cmap(name='Depths', cmap=DEPTHS_CMAP)
 
 
 
-
-
-CDICT = {
-    'red': [[0.0, None, 1.0], [0.33, 1.0, 1.0], [0.66, 1.0, 1.0], [1.0, 0.0, None]],
-    'green': [[0.0, None, 0.0], [0.33, 0.0, 0.0], [0.66, 1.0, 1.0], [1.0, 0.5, None]],
-    'blue': [[0.0, None, 0.0], [0.33, 0.0, 0.0], [0.66, 0.0, 0.0], [1.0, 0.0, None]]
-}
-METRIC_CMAP = LinearSegmentedColormap('Metric', CDICT)
-METRIC_CMAP.set_bad(color='black')
-
-DEPTHS_CMAP = ListedColormap(get_cmap('viridis_r')(np.linspace(0.0, 0.5, 100)))
-
-
-
-def color_to_cmap(color):
-    if isinstance(color, str):
-        color = ColorConverter().to_rgb(color)
-    return ListedColormap(color)
-
-
-def add_colorbar(image, aspect=30, fraction=0.5, color='black', **kwargs):
-    divider = axes_grid1.make_axes_locatable(image.axes)
-    width = axes_grid1.axes_size.AxesY(image.axes, aspect=1./aspect)
-    pad = axes_grid1.axes_size.Fraction(fraction, width)
-    cax = divider.append_axes("right", size=width, pad=pad)
-    colorbar = image.axes.figure.colorbar(image, cax=cax, **kwargs)
-    colorbar.ax.yaxis.set_tick_params(color=color)
-
-
-def add_legend(axis, color, label, size=20):
-    handles = getattr(axis.get_legend(), 'legendHandles', [])
-    new_patch = Patch(color=color, label=label)
-    handles.append(new_patch)
-    axis.legend(handles=handles, loc=0, prop={'size': size})
-
-
 def channelize_image(image, total_channels, color=None, greyscale=False, opacity=None):
     """ Channelize an image. Can be used to make an opaque rgb or grayscale image.
     """
