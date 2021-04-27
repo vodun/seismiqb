@@ -129,40 +129,41 @@ class FaciesInfo():
 
     DEFAULT_INFO = {
         'cubes_dir': '/data/seismic_data/seismic_interpretation',
+        'cubes': [],
         'cubes_extension': '.qblosc',
+
+        'labels_dir': "INPUTS/FACIES",
+        'labels': ["HORIZONS"]
         'labels_extension': '.char',
         'main_labels': None,
+
         'subsets': {},
         'apply': {}
     }
 
     def __init__(self, json_path=None, **kwargs):
-        info = self.DEFAULT_INFO
+        """ Info from json file has lower priority than from kwargs, so one can easily redefine required arguments."""
         if json_path is not None:
-            with open(json_path, 'r') as json_info:
-                info = {**info, **json.load(json_info)}
-        else:
-            info = {**info, **kwargs}
+            with open(json_path, 'r') as f:
+                info = json.load(f)
+        info.update(kwargs)
 
-        self.cubes_dir = info.pop("cubes_dir")
-        self.cubes = info.pop("cubes")
-        self.cubes_extension = info.pop("cubes_extension")
+        # Pop any unexpected keys from `info`
+        unrecognized_keys = [info.pop(key) for key in info if key not in self.DEFAULT_INFO]
+        if unrecognized_keys:
+            warn(f"Unknown arguments ignored:\n{unrecognized_keys}")
 
-        self.labels_dir = info.pop("labels_dir")
-        self.labels = info.pop("labels")
-        self.labels_extension = info.pop("labels_extension")
+        self.info = {self.DEFAULT_INFO, **info}
+        self._subsets = None
 
-        self.main_labels = self.infer_main_labels(info.pop("main_labels"))
-        self.subsets = self.make_subsets_storage(info.pop("subsets"))
+    def __getattr__(self, name):
+        """ If attribute is not present in dataset, try retrieving it from dict-like storage. """
+        return getattr(self, name, self.info[name])
 
-        self.apply = info.pop("apply")
-
-        if info:
-            arguments_source = os.path.basename(json_path) if json_path is not None else 'kwargs'
-            warn(f"Unknown arguments ignored in {arguments_source}:\n{list(info.keys())}")
-
-    def infer_main_labels(self, main_labels):
+    @property
+    def main_labels(self):
         """ If not provided explicitly, choose main labels folder name from the list of given labels subfolders. """
+        main_labels = self.info['main_labels']
         if main_labels is None:
             if len(self.labels) > 1:
                 horizon_labels = [label for label in self.labels if 'HORIZON' in label]
@@ -178,30 +179,44 @@ class FaciesInfo():
             warn(f"Main labels automatically inferred as `{main_labels}`")
         return main_labels
 
-    def list_main_labels(self, cube):
+    def get_cube_labels(self, cube):
         """ Make a list of existing labels for cube. """
         main_labels_path = f"{self.cubes_dir}/CUBE_{cube}/{self.labels_dir}/{self.main_labels}"
+
         main_labels = []
-        try:
+        if os.path.exists(main_labels_path):
             for file in os.listdir(main_labels_path):
                 if file.endswith(self.labels_extension):
                     main_labels.append(file)
-        except FileNotFoundError:
-            warn(f"Path {main_labels_path} does not exits.")
+        else:
+            warn(f"Path {main_labels_path} does not exist.")
+
         if not main_labels:
             msg = f"No labels with {self.labels_extension} extension found in {main_labels_path}."
             warn(msg)
+
         return main_labels
 
-    def make_subsets_storage(self, subsets):
+    @property
+    def subsets(self):
+        if self._subsets is None:
+            self._subsets = self.make_subsets_storage()
+        return self._subsets
+
+    def make_subsets_storage(self):
         """ Wrap subsets linkage info with flexible nested structure.
-        Besides given `subsets` cubes-labels linkage create 'all' subset,
-        containing all possible labels for every provided cube name.
+        Besides cubes-labels linkage given in `self.info['subsets']`,
+        create subset containing all possible labels for every cube name under 'all' key.
         """
-        storage = {'all': {cube: self.list_main_labels(cube) for cube in self.cubes}}
-        for k, v in subsets.items():
-            storage[k] = defaultdict(list, v)
-        return UpdatableDict(lambda: defaultdict(list), storage)
+        result = UpdatableDict(lambda: defaultdict(list))
+
+        for cube in self.cubes:
+            result['all'][cube] = self.get_cube_labels(cube)
+        for subset, correspondence in self.info['subsets'].items():
+            result[subset] = defaultdict(list, correspondence)
+
+        return result
+
 
     def interactive_split(self, subsets=('train', 'infer'), main_subset='all'):
         """ Render interactive menu to include/exclude labels for every name in `subsets`. """
@@ -247,10 +262,11 @@ class FaciesInfo():
             if labels
             }
 
-        if not sum(list(linkage.values()), []):
+        if not sum(linkage.values(), []):
             msg = f"""
             No labels were selected for subset `{subset}`.
-            Either define split in loaded json or via `FaciesInfo.interactive_split`.
+            Either choose non-empty subset or add some labels current one.
+            Labels can be added in either loaded json or via `FaciesInfo.interactive_split`.
             """
             raise ValueError(msg)
 
@@ -964,7 +980,7 @@ class FaciesHorizon(Horizon):
             raise ValueError(f"Horizons have different depths where present.")
         result = minuend.copy()
         result[presence] = self.FILL_VALUE
-        name = f"{other.name}_inv"
+        name = f"~{other.name}"
         return type(self)(result, self.geometry, name)
 
     def invert_subset(self, subset):
