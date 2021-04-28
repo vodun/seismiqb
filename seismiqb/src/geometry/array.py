@@ -51,9 +51,9 @@ class SeismicGeometryArray(SeismicGeometryHDF5):
             self.zero_traces = np.zeros(self.cube_shape[:2], dtype=np.int8)
             self.zero_traces[(np.min(self.array, axis=2) == 0) & (np.max(self.array, axis=2) == 0)] = 1
 
-            count_nonzero = np.prod(self.cube_shape[:2]) - np.sum(self.zero_traces)
-            step_traces = max(1, count_nonzero // num_keep)
-            traces = self.array[self.zero_traces == 0][::step_traces]
+            nonzero_indices = np.nonzero(self.zero_traces == 0)
+            step_traces = max(1, len(nonzero_indices[0]) // num_keep)
+            traces = self.array[nonzero_indices[0][::step_traces], nonzero_indices[1][::step_traces]]
 
             self.v_q01, self.v_q99 = np.quantile(traces, [0.01, 0.99])
 
