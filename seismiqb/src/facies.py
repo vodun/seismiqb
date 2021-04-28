@@ -1,5 +1,6 @@
 """ Containers for storing seismic data and labels with facies-specific interaction model. """
 import os
+import re
 import json
 from copy import copy
 from warnings import warn
@@ -12,8 +13,6 @@ from scipy.special import expit
 from tqdm.notebook import tqdm
 
 import matplotlib.pyplot as plt
-from matplotlib import cm
-from matplotlib import colors
 import seaborn as sns
 
 from .cubeset import SeismicCubeset
@@ -26,17 +25,6 @@ from .utils import get_environ_flag, to_list
 from .plotters import plot_image
 from ..batchflow import Config
 
-class UpdatableDict(defaultdict):
-    """ Dictionary extended with ability to be updated on interactive events. """
-    def interactive_update(self, update):
-        """ Method to pass to ipywidgets `observe` call. """
-        # pylint: disable=protected-access
-        owner = update['owner']
-        subset = owner._subset
-        cube = owner._cube
-        label = owner._label
-        interact = 'append' if update['new'] else 'remove'
-        getattr(self[subset][cube], interact)(label)
 
 
 class FaciesInfo():
@@ -132,10 +120,10 @@ class FaciesInfo():
         'cubes': [],
         'cubes_extension': '.qblosc',
 
-        'labels_dir': "INPUTS/FACIES",
-        'labels': ["HORIZONS"]
+        'labels_dir': "INPUTS/HORIZONS",
+        'labels': ["RAW"],
         'labels_extension': '.char',
-        'main_labels': None,
+        'main_labels': "RAW",
 
         'subsets': {},
         'apply': {}
@@ -143,40 +131,56 @@ class FaciesInfo():
 
     def __init__(self, json_path=None, **kwargs):
         """ Info from json file has lower priority than from kwargs, so one can easily redefine required arguments."""
+        info = {}
         if json_path is not None:
             with open(json_path, 'r') as f:
                 info = json.load(f)
         info.update(kwargs)
 
         # Pop any unexpected keys from `info`
-        unrecognized_keys = [info.pop(key) for key in info if key not in self.DEFAULT_INFO]
+        provided_keys = info.keys()
+        unrecognized_keys = [info.pop(key) for key in provided_keys if key not in self.DEFAULT_INFO]
         if unrecognized_keys:
             warn(f"Unknown arguments ignored:\n{unrecognized_keys}")
 
-        self.info = {self.DEFAULT_INFO, **info}
-        self._subsets = None
+        self.info = {**self.DEFAULT_INFO, **info}
+        self.cubes = self.make_cubes_list(self.info['cubes'])
+
+        self.main_labels = self.infer_main_labels()
+        self.subsets = self.make_subsets_storage()
 
     def __getattr__(self, name):
         """ If attribute is not present in dataset, try retrieving it from dict-like storage. """
-        return getattr(self, name, self.info[name])
+        return self.info[name]
 
-    @property
-    def main_labels(self):
+    def make_cubes_list(self, cubes):
+        cubes = to_list(cubes)
+        all_cubes = [dir.split('CUBE_')[1] for dir in os.listdir(self.cubes_dir) if dir.startswith('CUBE_')]
+        if not cubes:
+            cubes = all_cubes
+        elif isinstance(cubes[0], int):
+            # extract cube numbers from their names
+            cubes_nums = [int(re.findall(r'\d+', cube)[0]) in cubes for cube in all_cubes]
+            cubes = np.array(all_cubes)[cubes_nums].tolist()
+        return cubes
+
+    def infer_main_labels(self):
         """ If not provided explicitly, choose main labels folder name from the list of given labels subfolders. """
         main_labels = self.info['main_labels']
-        if main_labels is None:
+        if main_labels not in self.labels:
+            warn(f"Main labels {main_labels} are not in {self.labels}.")
             if len(self.labels) > 1:
                 horizon_labels = [label for label in self.labels if 'HORIZON' in label]
                 if not horizon_labels:
                     msg = f"""
-                    Cannot automatically choose main labels directory from {self.labels}.
+                    Cannot automatically choose new main labels directory from {self.labels}.
                     Please specify it explicitly.
                     """
                     raise ValueError(msg)
                 main_labels = horizon_labels[0]
             else:
                 main_labels = self.labels[0]
-            warn(f"Main labels automatically inferred as `{main_labels}`")
+            warn(f"Main labels automatically inferred as `{main_labels}`,")
         return main_labels
 
     def get_cube_labels(self, cube):
@@ -197,18 +201,13 @@ class FaciesInfo():
 
         return main_labels
 
-    @property
-    def subsets(self):
-        if self._subsets is None:
-            self._subsets = self.make_subsets_storage()
-        return self._subsets
 
     def make_subsets_storage(self):
         """ Wrap subsets linkage info with flexible nested structure.
         Besides cubes-labels linkage given in `self.info['subsets']`,
         create subset containing all possible labels for every cube name under 'all' key.
         """
-        result = UpdatableDict(lambda: defaultdict(list))
+        result = defaultdict(lambda: defaultdict(list))
 
         for cube in self.cubes:
             result['all'][cube] = self.get_cube_labels(cube)
@@ -216,6 +215,26 @@ class FaciesInfo():
             result[subset] = defaultdict(list, correspondence)
 
         return result
+
+    def _update_on_event(self, event):
+        """ Method to pass to ipywidgets `observe` call. """
+        # pylint: disable=protected-access
+        event_name = type(event).__name__
+        if event_name == 'Bunch':
+            subset = event['owner']._subset
+            cube = event['owner']._cube
+            label = event['owner']._label
+            interact = 'append' if event['new'] else 'remove'
+            getattr(self.subsets[subset][cube], interact)(label)
+        elif event_name == 'Button':
+            cubes = getattr(event, '_cubes', None)
+            if cubes is None:
+                boxes = getattr(event, '_labels', None)
+            else:
+                boxes = sum([cube._labels for cube in cubes], [])
+            first_box_value = boxes[0].value
+            for box in boxes:
+                box.value = not first_box_value
 
 
     def interactive_split(self, subsets=('train', 'infer'), main_subset='all'):
@@ -231,13 +250,20 @@ class FaciesInfo():
 
         vboxes = []
         for subset in subsets:
-            subset_controls = [Button(description=subset, button_style='info')]
+            subset_controls = []
+            subset_button = Button(description=subset, button_style='info')
+            subset_button._cubes = []
+            subset_button.on_click(self._update_on_event)
+            subset_controls.append(subset_button)
             for cube in self.cubes:
 
                 displayed_cube_name = cube[:cube.rfind('_')] if anonymize else cube
                 cube_button = Button(description=displayed_cube_name)
+                cube_button._labels = []
+                cube_button._controls = subset_controls
                 cube_button._subset = subset
-                cube_button.observe(self.subsets.interactive_update, names='value')
+                cube_button.on_click(self._update_on_event)
+                subset_button._cubes.append(cube_button)
                 subset_controls.append(cube_button)
 
                 for label in self.subsets[main_subset][cube]:
@@ -247,7 +273,8 @@ class FaciesInfo():
                     label_box._subset = subset
                     label_box._cube = cube
                     label_box._label = label
-                    label_box.observe(self.subsets.interactive_update, names='value')
+                    label_box.observe(self._update_on_event, names='value')
+                    cube_button._labels.append(label_box)
                     subset_controls.append(label_box)
             vboxes.append(VBox(subset_controls, layout=box_layout))
 
@@ -277,7 +304,7 @@ class FaciesInfo():
         linkage = self.get_subset_linkage(subset)
 
         cubes_paths = [
-            f"{self.cubes_dir}/CUBE_{cube}/amplitudes_{cube}{self.cubes_extension}"
+            f"{self.cubes_dir}/CUBE_{cube}/{cube}{self.cubes_extension}"
             for cube in linkage.keys()
         ]
         dataset = FaciesCubeset(cubes_paths)
@@ -287,13 +314,17 @@ class FaciesInfo():
                             linkage=linkage, dst_labels=dst_labels, **kwargs)
 
         for function, arguments in self.apply.items():
-            indices = [f'amplitudes_{cube}' for cube in arguments['cubes'] if cube in linkage.keys()]
+            cubes = self.make_cubes_list(arguments['cubes'])
+            indices = [cube for cube in cubes if cube in linkage.keys()]
             arguments = copy(arguments)
             arguments.pop('cubes')
             dataset.apply_to_labels(function=function, indices=indices, src_labels=dst_labels, **arguments)
 
         return dataset
 
+    def dump(self, path):
+        with open(path, 'w') as f:
+            json.dump(self.info, f)
 
 class FaciesCubeset(SeismicCubeset):
     """ Storage extending `SeismicCubeset` functionality with methods for interaction with labels and their subsets.
@@ -363,12 +394,11 @@ class FaciesCubeset(SeismicCubeset):
         for labels_subdir, dst_label in zip(labels_subdirs, dst_labels):
             paths = defaultdict(list)
             for cube_name, labels in linkage.items():
-                full_cube_name = f"amplitudes_{cube_name}"
-                cube_path = self.index.get_fullpath(full_cube_name)
+                cube_path = self.index.get_fullpath(cube_name)
                 cube_dir = cube_path[:cube_path.rfind('/')]
                 for label in labels:
                     label_path = f"{cube_dir}/{label_dir}/{labels_subdir}/{label}"
-                    paths[full_cube_name].append(label_path)
+                    paths[cube_name].append(label_path)
             self.create_labels(paths=paths, dst=dst_label, labels_class=FaciesHorizon, **kwargs)
             if add_subsets and (dst_label != main_labels):
                 self.add_subsets(subset_labels=dst_label, main_labels=main_labels)
@@ -416,8 +446,8 @@ class FaciesCubeset(SeismicCubeset):
         for src in src_labels:
             results[src] = {}
             for label in self.flatten_labels(src_labels=src, indices=indices):
-                    res = function(label, **kwargs) if callable(function) else getattr(label, function)(**kwargs)
-                    results[src][label.short_name] = res
+                res = function(label, **kwargs) if callable(function) else getattr(label, function)(**kwargs)
+                results[src][label.short_name] = res
         return results
 
     def show_labels(self, attributes=None, src_labels='labels', indices=None, linkage=None,
@@ -446,7 +476,8 @@ class FaciesCubeset(SeismicCubeset):
             # make a copy of first horizon in list to save merge into its instance
             container = copy(to_merge[0])
             container.name = f"Merged {'/'.join([horizon.short_name for horizon in to_merge])}"
-            [container.adjacent_merge(horizon, inplace=True, mean_threshold=999, adjacency=999) for horizon in to_merge]
+            _ = [container.adjacent_merge(horizon, inplace=True, mean_threshold=999, adjacency=999)
+                 for horizon in to_merge]
             container.reset_cache()
             results[idx].append(container)
         setattr(self, dst_labels, results)
@@ -478,9 +509,6 @@ class FaciesCubeset(SeismicCubeset):
                 crop_* : any parameter for `plt.hlines` and `plt.vlines`
                     Passed to corners crops plotter
         """
-        #pylint: disable=import-outside-toplevel
-        from matplotlib import pyplot as plt
-
         labels = getattr(self, src_labels)[self.grid_info['cube_name']]
         if labels_indices is not None:
             labels_indices = [labels_indices] if isinstance(labels_indices, int) else labels_indices
@@ -520,7 +548,7 @@ class FaciesCubeset(SeismicCubeset):
                 underlay = underlay[:, :, underlay.shape[2] // 2].squeeze()
             underlay = underlay.T
             ax.imshow(underlay, **attr_plot_dict)
-            ax.set_title("Grid over `{}` on `{}`".format(attribute, label.short_name), fontsize=plot_dict['title_fontsize'])
+            ax.set_title(f"Grid over `{attribute}` on `{label.short_name}`", fontsize=plot_dict['title_fontsize'])
 
             # Set limits
             ax.set_xlim([x_min, x_max])
@@ -539,8 +567,7 @@ class FaciesCubeset(SeismicCubeset):
             ax.hlines(y=y_lines[-1], xmin=x_max - y_crop, xmax=x_max, **crop_plot_dict)
 
     def make_predictions(self, pipeline, crop_shape, overlap_factor, order=(1, 2, 0), src_labels='labels',
-                         dst_labels='predictions', prefix='_predicted', add_subsets=True,
-                         pipeline_variable='predictions', bar='n'):
+                         dst_labels='predictions', add_subsets=True, pipeline_variable='predictions', bar='n'):
         """
         Make predictions and put them into dataset attribute.
 
@@ -566,8 +593,8 @@ class FaciesCubeset(SeismicCubeset):
         pbar = tqdm(self.flatten_labels(src_labels))
         pbar.set_description("General progress")
         for label in pbar:
-            prediction_name = f"{label.short_name}{prefix}"
-            prediction = FaciesHorizon(label.full_matrix, label.geometry, prediction_name)
+            prediction = copy(label)
+            prediction.name = label.name
             cube_name = label.geometry.short_name
             self.make_grid(cube_name=cube_name, crop_shape=crop_shape, overlap_factor=overlap_factor,
                            heights=int(label.h_mean), mode='2d')
@@ -602,7 +629,7 @@ class FaciesCubeset(SeismicCubeset):
                     true_mask = true.load_attribute('masks', fill_value=0)
                     pred_mask = pred.load_attribute('masks', fill_value=0)
                     metrics_value = metrics_fn(true_mask, pred_mask)
-                    row = np.array([idx.lstrip('amplitudes_'), true.short_name, metrics_value])
+                    row = np.array([idx, true.short_name, metrics_value])
                     rows.append(row)
             data = np.stack(rows)
             results = pd.DataFrame(data=data, columns=columns)
@@ -610,10 +637,10 @@ class FaciesCubeset(SeismicCubeset):
         return results
 
     def dump_labels(self, path, src_labels, postfix=None, indices=None):
+        """ TODO """
         postfix = src_labels if postfix is None else postfix
         timestamp = datetime.now().strftime('%b-%d_%H-%M-%S')
         path = f"{path}/{timestamp}_{postfix}/"
-        os.makedirs(path)
         self.apply_to_labels(function='dump', indices=indices, src_labels=src_labels, path=path)
 
 
@@ -695,8 +722,7 @@ class FaciesHorizon(Horizon):
             mask = subset.load_attribute(src_attribute='masks', location=location, fill_value=0).astype(bool)
             data[~mask] = kwargs.get('fill_value', self.FILL_VALUE)
             return data
-        if len(nested_name) > 2:
-            raise NotImplementedError("Name nestedness greater than 1 is not currently supported.")
+        raise NotImplementedError("Name nestedness greater than 1 is not currently supported.")
 
     def show_label(self, attributes=None, linkage=None, show=True, save=False, return_figure=False, **figure_params):
         """ Show attributes or their histograms of horizon and its subsets.
@@ -867,7 +893,7 @@ class FaciesHorizon(Horizon):
                 postprocess_func = postprocess_params.pop('func')
                 data = postprocess_func(data, **postprocess_params)
             else:
-                msg = f"Postprocess can be either `callable` or `dict` with callable under 'func' key and its kwargs."
+                msg = "Postprocess can be either `callable` or `dict` with callable under 'func' key and its kwargs."
                 raise ValueError(msg)
 
             if plot_params['mode'] == 'hist':
@@ -925,7 +951,8 @@ class FaciesHorizon(Horizon):
             secondary_params = []
             if mode == 'overlap':
                 if layer_num == 0:
-                    primary_params = base_primary_params + ['cmap', 'colorbar', 'aspect', 'fraction', 'xlabel', 'ylabel']
+                    primary_params = base_primary_params
+                    primary_params += ['cmap', 'colorbar', 'aspect', 'fraction', 'xlabel', 'ylabel']
                 else:
                     secondary_params = base_secondary_params
             elif mode == 'hist':
@@ -934,13 +961,13 @@ class FaciesHorizon(Horizon):
                     secondary_params = base_secondary_params
                 else:
                     secondary_params = base_secondary_params
-            [plot_params.update({param: show[param]}) for param in primary_params if param in show]
-            [plot_params[param].append(show[param]) for param in secondary_params if param in show]
+            _ = [plot_params.update({param: show[param]}) for param in primary_params if param in show]
+            _ = [plot_params[param].append(show[param]) for param in secondary_params if param in show]
 
             return plot_params
 
         if (attributes is not None) and (linkage is not None):
-                raise ValueError("Can't use both `attributes` and `linkage`.")
+            raise ValueError("Can't use both `attributes` and `linkage`.")
 
         if linkage is None:
             attributes = attributes or 'depths'
@@ -962,7 +989,7 @@ class FaciesHorizon(Horizon):
             plot_params['ax'] = axis
             plot_params['show'] = show
             plot_params['savepath'] = save.replace('*', self.short_name) if save else None
-            [plot_params.update({k: v}) for k, v in subplot_params.items()]
+            _ = [plot_params.update({k: v}) for k, v in subplot_params.items()]
             for layer_num, layer in enumerate(subplot_layers):
                 data, data_name = make_data(label=self, layer=layer, plot_params=plot_params)
                 plot_params = update_plot_params(plot_params=plot_params, layer=layer, layer_num=layer_num,
@@ -971,13 +998,13 @@ class FaciesHorizon(Horizon):
         return fig if return_figure else None
 
     def __sub__(self, other):
-        if type(self) != type(other):
+        if not isinstance(other, type(self)):
             raise TypeError(f"Subtrahend expected to be of {type(self)} type, but appeared to be {type(other)}.")
         minuend, subtrahend = self.full_matrix, other.full_matrix
         presence = other.presence_matrix
         discrepancies = minuend[presence] != subtrahend[presence]
         if discrepancies.any():
-            raise ValueError(f"Horizons have different depths where present.")
+            raise ValueError("Horizons have different depths where present.")
         result = minuend.copy()
         result[presence] = self.FILL_VALUE
         name = f"~{other.name}"
@@ -986,10 +1013,11 @@ class FaciesHorizon(Horizon):
     def invert_subset(self, subset):
         return self - self.get_subset(subset)
 
-    def dump(self, path):
-        if os.path.isdir(path):
-            path = f"{path}/{self.name}"
-        super().dump(path)
+    def dump(self, path, name=None):
+        path = path.replace('*', self.geometry.short_name)
+        os.makedirs(path, exist_ok=True)
+        file_path = f"{path}/{name or self.name}"
+        super().dump(file_path)
 
     def reset_cache(self):
         """ Clear cached data. """
