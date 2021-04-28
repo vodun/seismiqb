@@ -36,7 +36,7 @@ class DummyFile:
 class SeismicGeometryArray(SeismicGeometryHDF5):
     """ Numpy array stored in memory as a  SeismicGeometry"""
     #pylint: disable=attribute-defined-outside-init
-    def process(self, dummyfile, **kwargs):
+    def process(self, dummyfile, num_keep=10000, **kwargs):
         self.array = dummyfile.data
 
         self.available_axis = [0]
@@ -48,7 +48,13 @@ class SeismicGeometryArray(SeismicGeometryHDF5):
         self.add_attributes(**kwargs)
 
         if not self.has_stats:
-            self.v_q01, self.v_q99 = np.quantile(self.array, [0.01, 0.99])
-            self.zero_traces = np.zeros(self.cube_shape[:2], dtype=np.int32)
-            self.zero_traces[np.std(self.array, axis=2) == 0] = 1
+            self.zero_traces = np.zeros(self.cube_shape[:2], dtype=np.int8)
+            self.zero_traces[(np.min(self.array, axis=2) == 0) & (np.max(self.array, axis=2) == 0)] = 1
+
+            count_nonzero = np.prod(self.cube_shape[:2]) - np.sum(self.zero_traces)
+            step_traces = max(1, count_nonzero // num_keep)
+            traces = self.array[self.zero_traces == 0][::step_traces]
+
+            self.v_q01, self.v_q99 = np.quantile(traces, [0.01, 0.99])
+
             self.has_stats = True
