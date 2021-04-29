@@ -338,7 +338,7 @@ class SeismicCropBatch(Batch):
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
     def load_attribute(self, ix, dst, src_attribute=None, src_labels='labels',
-                       locations='locations', final_ndim=3, **kwargs):
+                       locations='locations', final_ndim=3, horizon=None, **kwargs):
         """ Load attribute for depth-nearest label and crop in given locations.
 
         Parameters
@@ -362,8 +362,8 @@ class SeismicCropBatch(Batch):
         to horizon and will form a straight plane in the resulting crop.
         """
         location = self.get(ix, locations)
-        nearest_horizon = self.get_nearest_horizon(ix, src_labels, location[2])
-        crop = nearest_horizon.load_attribute(src_attribute=src_attribute, location=location, **kwargs)
+        horizon = horizon or self.get_nearest_horizon(ix, src_labels, location[2])
+        crop = horizon.load_attribute(src_attribute=src_attribute, location=location, **kwargs)
         if final_ndim == 3 and crop.ndim == 2:
             crop = crop[..., np.newaxis]
         elif final_ndim != crop.ndim:

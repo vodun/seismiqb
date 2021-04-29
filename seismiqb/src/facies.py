@@ -143,44 +143,61 @@ class FaciesInfo():
         if unrecognized_keys:
             warn(f"Unknown arguments ignored:\n{unrecognized_keys}")
 
-        self.info = {**self.DEFAULT_INFO, **info}
-        self.cubes = self.make_cubes_list(self.info['cubes'])
+        info = {**self.DEFAULT_INFO, **info}
+        info['labels'] = to_list(info['labels'])
+        info['cubes'] = self.process_cubes_list(info['cubes'], info['cubes_dir'])
+        info['main_labels'] = self.process_main_labels(info['main_labels'], info['labels'])
 
-        self.main_labels = self.infer_main_labels()
+        self.info = info
         self.subsets = self.make_subsets_storage()
 
     def __getattr__(self, name):
         """ If attribute is not present in dataset, try retrieving it from dict-like storage. """
         return self.info[name]
 
-    def make_cubes_list(self, cubes):
+    @classmethod
+    def process_cubes_list(cls, cubes, cubes_dir):
         cubes = to_list(cubes)
-        all_cubes = [dir.split('CUBE_')[1] for dir in os.listdir(self.cubes_dir) if dir.startswith('CUBE_')]
+        all_cubes = [dir.split('CUBE_')[1] for dir in os.listdir(cubes_dir) if dir.startswith('CUBE_')]
         if not cubes:
-            cubes = all_cubes
+            chosen_cubes = all_cubes
         elif isinstance(cubes[0], int):
-            # extract cube numbers from their names
-            cubes_nums = [int(re.findall(r'\d+', cube)[0]) in cubes for cube in all_cubes]
-            cubes = np.array(all_cubes)[cubes_nums].tolist()
-        return cubes
+            chosen_cubes = []
+            for cube in all_cubes:
+                # extract cube numbers from their names
+                numbers = re.findall(r'\d+', cube)
+                if len(numbers) == 0:
+                    warn(f"No numbers occured in cube name {cube}. Skipping.")
+                elif len(numbers) != 1:
+                    warn(f"Multiple numbers occured in cube name {cube}. Skipping.")
+                elif int(numbers[0]) in cubes:
+                    chosen_cubes.append(cube)
+        else:
+            chosen_cubes = cubes
+        return chosen_cubes
 
-    def infer_main_labels(self):
+    @classmethod
+    def process_main_labels(cls, main_labels, labels):
         """ If not provided explicitly, choose main labels folder name from the list of given labels subfolders. """
-        main_labels = self.info['main_labels']
-        if main_labels not in self.labels:
-            warn(f"Main labels {main_labels} are not in {self.labels}.")
-            if len(self.labels) > 1:
-                horizon_labels = [label for label in self.labels if 'HORIZON' in label]
+        if main_labels not in labels:
+            msg = f"""
+            Main labels {main_labels} are not in {labels}.
+            """
+            if len(labels) > 1:
+                horizon_labels = [label for label in labels if 'HORIZON' in label]
                 if not horizon_labels:
-                    msg = f"""
-                    Cannot automatically choose new main labels directory from {self.labels}.
+                    msg += f"""
+                    Cannot automatically choose new main labels directory from {labels}.
                     Please specify it explicitly.
                     """
                     raise ValueError(msg)
                 main_labels = horizon_labels[0]
             else:
-                main_labels = self.labels[0]
-            warn(f"Main labels automatically inferred as `{main_labels}`,")
+                main_labels = labels[0]
+            msg += f"""
+            Main labels automatically inferred as `{main_labels}`.
+            """
+            warn(msg)
         return main_labels
 
     def get_cube_labels(self, cube):
@@ -200,7 +217,6 @@ class FaciesInfo():
             warn(msg)
 
         return main_labels
-
 
     def make_subsets_storage(self):
         """ Wrap subsets linkage info with flexible nested structure.
@@ -235,7 +251,6 @@ class FaciesInfo():
             first_box_value = boxes[0].value
             for box in boxes:
                 box.value = not first_box_value
-
 
     def interactive_split(self, subsets=('train', 'infer'), main_subset='all'):
         """ Render interactive menu to include/exclude labels for every name in `subsets`. """
@@ -299,14 +314,16 @@ class FaciesInfo():
 
         return linkage
 
-    def make_cubeset(self, subset='all', dst_labels=None, **kwargs):
+    def make_cubeset(self, subset='all', dst_labels=None, cube_file_prefix='', **kwargs):
         """ Create `FaciesCubeset` instance from cube-labels linkage defined by `subset`. """
         linkage = self.get_subset_linkage(subset)
 
         cubes_paths = [
-            f"{self.cubes_dir}/CUBE_{cube}/{cube}{self.cubes_extension}"
+            f"{self.cubes_dir}/CUBE_{cube}/{cube_file_prefix}{cube}{self.cubes_extension}"
             for cube in linkage.keys()
         ]
+
+        linkage = {f"{cube_file_prefix}{k}": v for k, v in linkage.items()}
         dataset = FaciesCubeset(cubes_paths)
 
         dst_labels = dst_labels or [label.lower() for label in self.labels]
@@ -546,6 +563,7 @@ class FaciesCubeset(SeismicCubeset):
             underlay = label.load_attribute(attribute, transform={'fill_value': np.nan})
             if len(underlay.shape) == 3:
                 underlay = underlay[:, :, underlay.shape[2] // 2].squeeze()
+            underlay = underlay[label.bbox]
             underlay = underlay.T
             ax.imshow(underlay, **attr_plot_dict)
             ax.set_title(f"Grid over `{attribute}` on `{label.short_name}`", fontsize=plot_dict['title_fontsize'])
@@ -599,7 +617,7 @@ class FaciesCubeset(SeismicCubeset):
             self.make_grid(cube_name=cube_name, crop_shape=crop_shape, overlap_factor=overlap_factor,
                            heights=int(label.h_mean), mode='2d')
             pipeline = pipeline << self
-            pipeline.update_config({'src_labels': src_labels})
+            pipeline.update_config({'src_labels': src_labels, 'master_horizon': label})
             pipeline.run(batch_size=self.size, n_iters=self.grid_iters, bar=bar)
             predicted_matrix = expit(self.assemble_crops(pipeline.v(pipeline_variable), order=order).squeeze())
             prediction.filter_matrix(~(predicted_matrix.round().astype(bool)))
