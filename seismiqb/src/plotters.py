@@ -493,6 +493,7 @@ class MatplotlibPlotter:
                     'color': ('red', 'green', 'blue'),
                     'alpha': 1.0,
                     'label': '', 'title': '', 'xlabel': '', 'ylabel': '',
+                    'size': 20,
                     'order_axes': (1, 0),
                     # title
                     'title_y' : 1.1,
@@ -501,6 +502,7 @@ class MatplotlibPlotter:
                     'colorbar_fraction': 0.5,
                     'colorbar_aspect': 30,
                     # legend
+                    'legend': True,
                     'legend_size': 10}
         updated = {**defaults, **kwargs}
 
@@ -586,10 +588,12 @@ class MatplotlibPlotter:
                     'color': ('red', 'green', 'blue'),
                     'alpha': 1.0,
                     'label': '', 'title': '', 'xlabel': '', 'ylabel': '',
+                    'size': 20,
                     # title
                     'title_y': 1.1,
                     # legend
-                    'size': 20}
+                    'legend': True,
+                    'legend_size': 10}
         updated = {**defaults, **kwargs}
 
 
