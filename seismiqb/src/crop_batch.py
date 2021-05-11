@@ -328,48 +328,6 @@ class SeismicCropBatch(Batch):
             raise ValueError(f"slicing must be 'native' or 'custom' but {slicing} were given.")
         return crop
 
-    def get_nearest_horizon(self, ix, src_labels, heights_slice):
-        """ Get horizon with its `h_mean` closest to mean of `heights_slice`. """
-        location_h_mean = (heights_slice.start + heights_slice.stop) // 2
-        nearest_horizon_ind = np.argmin([abs(horizon.h_mean - location_h_mean) for horizon in self.get(ix, src_labels)])
-        return self.get(ix, src_labels)[nearest_horizon_ind]
-
-
-    @action
-    @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def load_attribute(self, ix, dst, src_attribute=None, src_labels='labels',
-                       locations='locations', final_ndim=3, horizon=None, **kwargs):
-        """ Load attribute for depth-nearest label and crop in given locations.
-
-        Parameters
-        ----------
-        src_attribute : str
-            A keyword from :attr:`~Horizon.ATTRIBUTE_TO_METHOD` keys, defining label attribute to make crops from.
-        src_labels : str
-            Dataset attribute with labels dict.
-        locations : str
-            Component of batch with locations of crops to load.
-        final_ndim : 2 or 3
-            Number of dimensions returned crop should have.
-        kwargs :
-            Passed directly to either:
-            - one of attribute-evaluating methods from :attr:`~Horizon.ATTRIBUTE_TO_METHOD` depending on `src_attribute`
-            - or attribute-transforming method :meth:`~Horizon.transform_where_present`.
-
-        Notes
-        -----
-        This method loads rectified data, e.g. amplitudes are croped relative
-        to horizon and will form a straight plane in the resulting crop.
-        """
-        location = self.get(ix, locations)
-        horizon = horizon or self.get_nearest_horizon(ix, src_labels, location[2])
-        crop = horizon.load_attribute(src_attribute=src_attribute, location=location, **kwargs)
-        if final_ndim == 3 and crop.ndim == 2:
-            crop = crop[..., np.newaxis]
-        elif final_ndim != crop.ndim:
-            raise ValueError("Crop returned by `Horizon.get_attribute` has {} dimensions, but shape conversion "
-                             "to expected {} dimensions is not implemented.".format(crop.ndim, final_ndim))
-        return crop
 
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')

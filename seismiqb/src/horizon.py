@@ -14,7 +14,6 @@ from cv2 import dilate
 from scipy.ndimage.morphology import binary_fill_holes, binary_erosion, binary_dilation
 from scipy.ndimage import find_objects
 from scipy.spatial import Delaunay
-from scipy.signal import hilbert
 from skimage.measure import label
 
 from .utility_classes import HorizonSampler, lru_cache
@@ -369,17 +368,6 @@ class Horizon:
 
     # Value to place into blank spaces
     FILL_VALUE = -999999
-
-    # Correspondence between attribute alias and the class function that calculates it
-    METHOD_TO_ATTRIBUTE = {
-        'get_cube_values': ['cube_values', 'amplitudes'],
-        'get_full_matrix': ['full_matrix', 'heights', 'depths'],
-        'evaluate_metric': ['metrics'],
-        'get_instantaneous_phases': ['instant_phases'],
-        'get_instantaneous_amplitudes': ['instant_amplitudes'],
-        'get_full_binary_matrix': ['full_binary_matrix', 'masks']
-    }
-    ATTRIBUTE_TO_METHOD = {attr: func for func, attrs in METHOD_TO_ATTRIBUTE.items() for attr in attrs}
 
 
     def __init__(self, storage, geometry, name=None, dtype=np.int32, **kwargs):
@@ -1161,66 +1149,6 @@ class Horizon:
 
 
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
-    def get_instantaneous_amplitudes(self, window=23, depths=None, **kwargs):
-        """ Calculate instantaneous amplitude along the horizon.
-
-        Parameters
-        ----------
-        window : int
-            Width of cube values cutout along horizon to use for attribute calculation.
-        depths : slice, sequence of int or None
-            Which depth channels of resulted array to return.
-            If slice or sequence of int, used for slicing calculated attribute along last axis.
-            If None, infer middle channel index from 'window' and slice at it calculated attribute along last axis.
-        kwargs :
-            Passed directly to :meth:`.get_cube_values` and :meth:`.transform_where_present``.
-
-        Notes
-        -----
-        Keep in mind, that Hilbert transform produces artifacts at signal start and end. Therefore if you want to get
-        an attribute with `N` channels along depth axis, you should provide `window` broader then `N`. E.g. in call
-        `label.get_instantaneous_amplitudes(depths=range(10, 21), window=41)` the attribute will be first calculated
-        by array of `(xlines, ilines, 41)` shape and then the slice `[..., ..., 10:21]` of them will be returned.
-        """
-        transform_kwargs = retrieve_function_arguments(self.transform_where_present, kwargs)
-        depths = [window // 2] if depths is None else depths
-        amplitudes = self.get_cube_values(window, use_cache=False, **kwargs) #pylint: disable=unexpected-keyword-arg
-        result = np.abs(hilbert(amplitudes))[:, :, depths]
-        # result[self.full_matrix == self.FILL_VALUE] = np.nan
-        return self.transform_where_present(result, **transform_kwargs)
-
-
-    @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
-    def get_instantaneous_phases(self, window=23, depths=None, **kwargs):
-        """ Calculate instantaneous phase along the horizon.
-
-        Parameters
-        ----------
-        window : int
-            Width of cube values cutout along horizon to use for attribute calculation.
-        depths : slice, sequence of int or None
-            Which depth channels of resulted array to return.
-            If slice or sequence of int, used for slicing calculated attribute along last axis.
-            If None, infer middle channel index from 'window' and slice at it calculated attribute along last axis.
-        kwargs :
-            Passed directly to :meth:`.get_cube_values` and :meth:`.transform_where_present`.
-
-        Notes
-        -----
-        Keep in mind, that Hilbert transform produces artifacts at signal start and end. Therefore if you want to get
-        an attribute with `N` channels along depth axis, you should provide `window` broader then `N`. E.g. in call
-        `label.get_instantaneous_phases(depths=range(10, 21), window=41)` the attribute will be first calculated
-        by array of `(xlines, ilines, 41)` shape and then the slice `[..., ..., 10:21]` of them will be returned.
-        """
-        transform_kwargs = retrieve_function_arguments(self.transform_where_present, kwargs)
-        depths = [window // 2] if depths is None else depths
-        amplitudes = self.get_cube_values(window, use_cache=False, **kwargs) #pylint: disable=unexpected-keyword-arg
-        result = np.angle(hilbert(amplitudes))[:, :, depths]
-        # result[self.full_matrix == self.FILL_VALUE] = np.nan
-        return self.transform_where_present(result, **transform_kwargs)
-
-
-    @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     def get_full_matrix(self, **kwargs):
         """ Transform `matrix` attribute to match cubic coordinates.
 
@@ -1232,75 +1160,6 @@ class Horizon:
         transform_kwargs = retrieve_function_arguments(self.transform_where_present, kwargs)
         matrix = self.put_on_full(self.matrix, **kwargs)
         return self.transform_where_present(matrix, **transform_kwargs)
-
-
-    @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
-    def get_full_binary_matrix(self, **kwargs):
-        """ Transform `binary_matrix` attribute to match cubic coordinates.
-
-        Parameters
-        ----------
-        kwargs :
-            Passed directly to :meth:`.put_on_full` and :meth:`.transform_where_present`.
-        """
-        transform_kwargs = retrieve_function_arguments(self.transform_where_present, kwargs)
-        full_binary_matrix = self.put_on_full(self.binary_matrix, **kwargs)
-        return self.transform_where_present(full_binary_matrix, **transform_kwargs)
-
-    def load_attribute(self, src_attribute, location=None, **kwargs):
-        """ Make crops from `src_attribute` of horizon at `location`.
-
-        Parameters
-        ----------
-        src_attribute : str
-            A keyword defining horizon attribute to make crops from:
-            - 'cube_values' or 'amplitudes': cube values cut along the horizon;
-            - 'depths' or 'full_matrix': horizon depth map in cubic coordinates;
-            - 'metrics': random support metrics matrix.
-            - 'instant_phases': instantaneous phase along the horizon;
-            - 'instant_amplitudes': instantaneous amplitude along the horizon;
-            - 'masks' or 'full_binary_matrix': mask of horizon;
-        location : sequence of 3 slices or None
-            First two slices are used as `iline` and `xline` ranges to cut crop from.
-            Last 'depth' slice is used to infer `window` parameter when `src_attribute` is 'cube_values'.
-            If None, `src_attribute` is returned uncropped.
-        kwargs :
-            Passed directly to either:
-            - one of attribute-evaluating methods from :attr:`.ATTRIBUTE_TO_METHOD` depending on `src_attribute`;
-            - or attribute-transforming method :meth:`.transform_where_present`.
-        Examples
-        --------
-
-        >>> horizon.load_attribute('cube_values', (x_slice, i_slice, h_slice), window=10)
-
-        >>> horizon.load_attribute('depths')
-
-        >>> horizon.load_attribute('metrics', metrics='hilbert', normalize='min-max')
-
-        Notes
-        -----
-
-        Although the function can be used in a straightforward way as described above, its main purpose is to act
-        as an interface for accessing :class:`.Horizon` attributes from :class:`~SeismicCropBatch` to allow calls like:
-
-        >>> Pipeline().load_attribute('cube_values', dst='amplitudes')
-        """
-        x_slice, i_slice, h_slice = location if location is not None else (slice(None), slice(None), slice(None))
-
-        default_kwargs = {'use_cache': True}
-        # Update `default_kwargs` with extra arguments depending on `src_attribute`
-        if src_attribute in ['cube_values', 'amplitudes']:
-            if h_slice != slice(None):
-                # `window` arg for `get_cube_values` can be infered from `h_slice`
-                default_kwargs = {'window': h_slice.stop - h_slice.start, **default_kwargs}
-        kwargs = {**default_kwargs, **kwargs}
-
-        func_name = self.ATTRIBUTE_TO_METHOD.get(src_attribute)
-        if func_name is None:
-            raise ValueError("Unknown `src_attribute` {}. Expected {}.".format(src_attribute,
-                                                                               self.ATTRIBUTE_TO_METHOD.keys()))
-        data = getattr(self, func_name)(**kwargs)
-        return data[x_slice, i_slice]
 
 
     def get_array_values(self, array, shifts=None, grid_info=None, width=5, axes=(2, 1, 0)):
@@ -1620,24 +1479,6 @@ class Horizon:
             return self.horizon_metrics.evaluate('support_corrs', supports=supports, agg='nanmean',
                                                  plot=plot, savepath=savepath, **kwargs)
         return None
-
-
-    @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
-    def evaluate_metric(self, metric='support_corrs', supports=50, agg='nanmean', **kwargs):
-        """ Cached metrics calcucaltion with disabled plotting option.
-
-        Parameters
-        ----------
-        metric, supports, agg :
-            Passed directly to :meth:`.HorizonMetrics.evaluate`.
-        kwargs :
-            Passed directly to :meth:`.HorizonMetrics.evaluate` and :meth:`.transform_where_present`.
-        """
-        transform_kwargs = retrieve_function_arguments(self.transform_where_present, kwargs)
-        metrics = self.horizon_metrics.evaluate(metric=metric, supports=supports, agg=agg,
-                                                plot=False, savepath=None, **kwargs)
-        metrics = np.nan_to_num(metrics)
-        return self.transform_where_present(metrics, **transform_kwargs)
 
 
     def check_proximity(self, other, offset=0):

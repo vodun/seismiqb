@@ -475,3 +475,18 @@ class SafeIO:
 
         if self.log_file:
             self._info(self.log_file, f'Closed {self.path}')
+
+class AttachStr:
+    """ Converts array to `object` dtype and prepends/appends str column. Picklable, unlike inline lambda function. """
+    def __init__(self, string, mode='prepend'):
+        self.string = string
+        self.mode = mode
+
+    def __call__(self, points):
+        points = points.astype(np.object)
+        str_col = np.full((len(points), 1), self.string)
+        if self.mode == 'prepend':
+            result = [str_col, points]
+        elif self.mode == 'append':
+            result = [points, str_col]
+        return np.concatenate(result, axis=1)

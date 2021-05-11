@@ -17,7 +17,7 @@ from .horizon import Horizon, UnstructuredHorizon
 from .metrics import HorizonMetrics
 from .plotters import plot_image, show_3d
 from .utils import round_to_array, gen_crop_coordinates, make_axis_grid, fill_defaults
-from .utility_classes import IndexedDict
+from .utility_classes import IndexedDict, AttachStr
 
 
 class SeismicCubeset(Dataset):
@@ -287,7 +287,7 @@ class SeismicCubeset(Dataset):
             elif mode[ix] == 'hist' or mode[ix] == 'horizon':
                 sampler = 0 & NumpySampler('n', dim=3)
                 labels = getattr(self, src_labels)[ix]
-                for i, label in enumerate(labels):
+                for label in labels:
                     label.create_sampler(**kwargs)
                     sampler = sampler | label.sampler
             else:
@@ -302,7 +302,7 @@ class SeismicCubeset(Dataset):
 
         sampler = 0 & NumpySampler('n', dim=4)
         for i, ix in enumerate(self.indices):
-            sampler_ = samplers[ix].apply(Modificator(cube_name=ix))
+            sampler_ = samplers[ix].apply(AttachStr(string=ix))
             sampler = sampler | (p[i] & sampler_)
         setattr(self, dst, sampler)
 
@@ -709,91 +709,6 @@ class SeismicCubeset(Dataset):
                         point = [cube_name, il, xl, h]
                         grid.append(point)
         return ilines_grid, xlines_grid, heights_grid, np.array(grid, dtype=object)
-
-    def show_grid(self, src_labels='labels', labels_indices=None, attribute='cube_values', plot_dict=None):
-        """ Plot grid over selected surface to visualize how it overlaps data.
-
-        Parameters
-        ----------
-        src_labels : str
-            Labels to show below the grid.
-            Defaults to `labels`.
-        labels_indices : str
-            Indices of items from `src_labels` to show below the grid.
-        attribute : str
-            Alias from :attr:`~Horizon.FUNC_BY_ATTR` to show below the grid.
-        plot_dict : dict, optional
-            Dict of plot parameters, such as:
-                figsize : tuple
-                    Size of resulted figure.
-                title_fontsize : int
-                    Font size of title over the figure.
-                attr_* : any parameter for `plt.imshow`
-                    Passed to attribute plotter
-                grid_* : any parameter for `plt.hlines` and `plt.vlines`
-                    Passed to grid plotter
-                crop_* : any parameter for `plt.hlines` and `plt.vlines`
-                    Passed to corners crops plotter
-        """
-        #pylint: disable=import-outside-toplevel
-        from matplotlib import pyplot as plt
-
-        labels_indices = labels_indices if isinstance(labels_indices, (tuple, list)) else [labels_indices]
-        labels_indices = slice(None) if labels_indices[0] is None else labels_indices
-        labels = self[self.grid_info['cube_name'], src_labels, labels_indices]
-
-        # Calculate grid lines coordinates
-        (x_min, x_max), (y_min, y_max) = self.grid_info['range'][:2]
-        x_stride, y_stride = self.grid_info['strides'][:2]
-        x_crop, y_crop = self.grid_info['crop_shape'][:2]
-        x_lines = list(np.arange(0, x_max, x_stride)) + [x_max - x_crop]
-        y_lines = list(np.arange(0, y_max, y_stride)) + [y_max - y_crop]
-
-        default_plot_dict = {
-            'figsize': (20 * x_max // y_max, 10),
-            'title_fontsize': 18,
-            'attr_cmap' : 'tab20b',
-            'grid_color': 'darkslategray',
-            'grid_linestyle': 'dashed',
-            'crop_color': 'crimson',
-            'crop_linewidth': 3
-        }
-        plot_dict = default_plot_dict if plot_dict is None else {**default_plot_dict, **plot_dict}
-        attr_plot_dict = {k.split('attr_')[-1]: v for k, v in plot_dict.items() if k.startswith('attr_')}
-        attr_plot_dict['zorder'] = 0
-        grid_plot_dict = {k.split('grid_')[-1]: v for k, v in plot_dict.items() if k.startswith('grid_')}
-        grid_plot_dict['zorder'] = 1
-        crop_plot_dict = {k.split('crop_')[-1]: v for k, v in plot_dict.items() if k.startswith('crop_')}
-        crop_plot_dict['zorder'] = 2
-
-        _fig, axes = plt.subplots(ncols=len(labels), figsize=plot_dict['figsize'])
-        axes = axes if isinstance(axes, np.ndarray) else [axes]
-
-        for ax, label in zip(axes, labels):
-            # Plot underlaying attribute
-            underlay = label.load_attribute(attribute, transform={'fill_value': np.nan})
-            if len(underlay.shape) == 3:
-                underlay = underlay[:, :, underlay.shape[2] // 2].squeeze()
-            underlay = underlay.T
-            ax.imshow(underlay, **attr_plot_dict)
-            ax.set_title("Grid over `{}` on `{}`".format(attribute, label.name), fontsize=plot_dict['title_fontsize'])
-
-            # Set limits
-            ax.set_xlim([x_min, x_max])
-            ax.set_ylim([y_max, y_min])
-
-            # Plot grid
-            ax.vlines(x_lines, y_min, y_max, **grid_plot_dict)
-            ax.hlines(y_lines, x_min, x_max, **grid_plot_dict)
-
-            # Plot first crop
-            ax.vlines(x=x_lines[0] + x_crop, ymin=y_min, ymax=y_crop, **crop_plot_dict)
-            ax.hlines(y=y_lines[0] + y_crop, xmin=x_min, xmax=x_crop, **crop_plot_dict)
-
-            # Plot last crop
-            ax.vlines(x=x_lines[-1], ymin=y_max - x_crop, ymax=y_max, **crop_plot_dict)
-            ax.hlines(y=y_lines[-1], xmin=x_max - y_crop, xmax=x_max, **crop_plot_dict)
-
 
     def mask_to_horizons(self, src, cube_name, threshold=0.5, averaging='mean', minsize=0,
                          dst='predicted_horizons', prefix='predict', src_grid_info='grid_info'):
@@ -1254,15 +1169,3 @@ class SeismicCubeset(Dataset):
         self.create_labels(paths=paths_txt, filter_zeros=filter_zeros, dst=dst_labels,
                            labels_class=labels_class, **kwargs)
         self._p, self._bins = p, bins # stored for later sampler creation
-
-
-class Modificator:
-    """ Converts array to `object` dtype and prepends the `cube_name` column.
-    Picklable, unlike inline lambda function.
-    """
-    def __init__(self, cube_name):
-        self.cube_name = cube_name
-
-    def __call__(self, points):
-        points = points.astype(np.object)
-        return np.concatenate([np.full((len(points), 1), self.cube_name), points], axis=1)
