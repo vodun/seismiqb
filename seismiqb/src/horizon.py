@@ -1921,7 +1921,7 @@ class Horizon:
                     else:
                         j += 1
                 i += 1
-        return horizons
+        return sorted(horizons, key=len, reverse=True)
 
 
     @staticmethod
