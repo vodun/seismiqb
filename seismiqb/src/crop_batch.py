@@ -1275,17 +1275,17 @@ class BaseAggregationContainer:
         ilines, xlines, heights : sequence of two int or None
             locations used in :meth:`~.SeismcCubeset.make_grid`
         """
-        
+
         if shape is None and (ilines is None or xlines is None or heights is None):
             raise ValueError('Either shape, or all of ilines, xlines, heights should be provided')
-            
+
         if shape:
             self.shape = shape
             self.origin = np.zeros(3)
         else:
             self.origin = np.asarray([ilines[0], xlines[0], heights[0]])
             self.shape = np.asarray([ilines[1], xlines[1], heights[1]]) - self.origin
-        
+
         self.dirty = False
 
     def put(self, crop, location):
@@ -1299,11 +1299,9 @@ class BaseAggregationContainer:
         """
         if self.dirty:
             raise RuntimeError('Aggregated data has been already computed and the container is in dirty state!')
-        
-        loc = [slice(max(0, slc.start - x0), min(xlen, slc.stop - x0)) for x0, slc, xlen in zip(self.origin, location, self.shape)]       
+
+        loc = [slice(max(0, slc.start - x0), min(xlen, slc.stop - x0)) for x0, slc, xlen in zip(self.origin, location, self.shape)]
         loc_crop = [slice(max(0, x0 - slc.start), min(xlen + x0 - slc.start , slc.stop - slc.start)) for x0, slc, xlen in zip(self.origin, location, self.shape)]
-        
-#         print(loc_crop, loc, np.array([slc.stop-slc.start for slc in loc_crop]) - np.array([slc.stop-slc.start for slc in loc]))
 
         self._put(crop[loc_crop], loc)
 
@@ -1337,9 +1335,9 @@ class AvgContainer(BaseAggregationContainer):
 
 class MaxContainer(BaseAggregationContainer):
     """ Maximum aggregation of crops """
-    
+
     FILL_VAL = -np.inf
-    
+
     def __init__(self, fill_val=None, shape=None, ilines=None, xlines=None, heights=None, dtype=np.float32):
         super().__init__(shape, ilines, xlines, heights)
         self.fill_val = fill_val or self.FILL_VAL
@@ -1350,4 +1348,3 @@ class MaxContainer(BaseAggregationContainer):
 
     def _aggregate(self):
         return self.data
-
