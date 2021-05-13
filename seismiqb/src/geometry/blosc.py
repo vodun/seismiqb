@@ -53,6 +53,7 @@ class BloscFile:
 
     def open_handler(self):
         """ Open the ZipFile handler. Can be re-used when the same file is accessed from multiple processes. """
+        #pylint: disable=consider-using-with
         self.zipfile = ZipFile(self.path, mode=self.mode)
 
     # Utilities
