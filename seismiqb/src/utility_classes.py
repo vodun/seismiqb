@@ -534,25 +534,25 @@ class AvgContainer(BaseAggregationContainer):
     def __init__(self, shape=None, ilines=None, xlines=None, heights=None, dtype=np.float32):
         super().__init__(shape, ilines, xlines, heights)
         self.data = np.zeros(self.shape, dtype=dtype)
-        self.counters = np.zeros(self.shape, dtype=np.int8)
+        self.counts = np.zeros(self.shape, dtype=np.int8)
 
     def _put(self, crop, location):
         self.data[location] += crop
-        self.counters[location] += 1
+        self.counts[location] += 1
 
     def _aggregate(self):
-        self.counters[self.counters == 0] = 1
-        self.data /= self.counters
+        self.counts[self.counts == 0] = 1
+        self.data /= self.counts
         return self.data
 
 class MaxContainer(BaseAggregationContainer):
     """ Maximum aggregation of crops """
 
-    FILL_VAL = -np.inf
+    FILL_VALUE = -np.inf
 
     def __init__(self, fill_val=None, shape=None, ilines=None, xlines=None, heights=None, dtype=np.float32):
         super().__init__(shape, ilines, xlines, heights)
-        self.fill_val = fill_val or self.FILL_VAL
+        self.fill_val = fill_val or self.FILL_VALUE
         self.data = np.full(self.shape, -np.inf, dtype=dtype)
 
     def _put(self, crop, location):
