@@ -2348,6 +2348,7 @@ class Horizon:
             'xticks': xticks,
             'yticks': yticks,
             'legend': False,
+            'horizon_width': width,
             **kwargs
         }
 

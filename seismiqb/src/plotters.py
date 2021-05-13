@@ -301,9 +301,15 @@ class MatplotlibPlotter:
             yticks : sequence
                 For `plt.set_yticks`
             arguments for following methods:
-                `plt.subplots`, `plt.imshow`, `plt.set_title`, `plt.set_xlabel`,
-                `plt.set_ylabel`, `cls.add_colorbar`, `plt.tick_params`.
-                See class defaults for arguments names.
+                `plt.subplots` — with 'figure_' prefix
+                `plt.imshow` — with 'imshow_' prefix
+                `plt.set_title` — with 'title_' prefix
+                `plt.set_xlabel`— with 'xlabel_' prefix
+                `plt.set_ylabel` — with 'ylabel_' prefix
+                `cls.add_colorbar` — with 'colorbar' prefix
+                `plt.tick_params` — with 'tick_' prefix
+                See class docs for details on prefixes usage.
+                See class and method defaults for arguments names.
         """
         defaults = {# figure
                     'figsize': (12, 7),
@@ -356,35 +362,41 @@ class MatplotlibPlotter:
 
     @classmethod
     def wiggle(cls, image, **kwargs):
-        """ Make wiggle plot of an image. If needed overlap the wiggle plot with a curve supplied by an
-        array of heights.
+        """ Make wiggle plot of signals array. Optionally overlap it with a curve.
 
         Parameters
         ----------
-        image : np.ndarray or list
-            either 2d-array or a list of 2d-array and a 1d-curve to plot atop the array.
+        image : np.ndarray or list of np.ndarray
+            If array, must be 2d.
+            If list, must contain image and curve arrays.
+            Curve, in turn must be either 1d array of heights or 2d array mask.
+                If 1d heights, its shape must match correposnding image dimension.
+                If 2d mask, its shape must match image shape.
+                In both cases it is expected, that there must be `np.nan` where curve is not defined.
         kwargs : dict
-            figsize : tuple
-                tuple of two ints containing the size of the rendered image.
-            label : str
-                title of rendered image.
-            xlabel : str
-                xaxis-label.
-            ylabel : str
-                yaxis-label.
-            title : str
-                title of the plot.
-            reverse : bool
-                whether to reverse the plot in y-axis. True by default. In that
-                way, uses the same orientation as other modes.
-            other
+            step : int, optional
+                Step to take signals from the array with.
+            reverse : bool, optional
+                Whether reverse the plot wrt y-axis or not.
+            width_multiplier : float, optional
+                Scale factor for signals amplitudes.
+            arguments for following methods:
+                `plt.subplots` — with 'figure_' prefix
+                `plt.plot` — with 'wiggle_' and 'curve_' prefixes
+                `plt.set_title` — with 'title_' prefix
+                `plt.set_xlabel`— with 'xlabel_' prefix
+                `plt.set_ylabel` — with 'ylabel_' prefix
+                `plt.set_xlim`— with 'xlim_' prefix
+                `plt.set_ylim` — with 'ylim_' prefix
+                See class docs for details on prefixes usage.
+                See class and method defaults for arguments names.
         """
-        defaults = {# figure
-                    'figsize': (12, 7),
-                    # general
-                    'width_multiplier': 2,
-                    'xstep': 15,
+        defaults = {# general
+                    'step': 15,
                     'reverse': True,
+                    'width_multiplier': 1,
+                    # figure
+                    'figsize': (12, 7),
                     # wiggle
                     'wiggle_color': 'k',
                     'wiggle_linestyle': '-',
@@ -407,36 +419,41 @@ class MatplotlibPlotter:
         curve = None
         if isinstance(image, (list, tuple)):
             image, *curve = image
+            curve = curve[0] if curve else None
 
         # Creating wiggle-curves and adding height-points if needed
-        offsets = np.arange(0, image.shape[0], updated['xstep'])
+        offsets = np.arange(0, image.shape[0], updated['step'])
 
-        y_range = np.arange(0, image.shape[1])
-        if updated['reverse']:
-            y_range = y_range[::-1]
-        x_range = []
+        y_order = -1 if updated['reverse'] else 1
+        y_range = np.arange(0, image.shape[1])[::y_order]
+        x_range = [] # accumulate traces to draw curve above them later
         for ix, k in enumerate(offsets):
             x = k + updated['width_multiplier'] * image[k] / np.std(image)
             wiggle_kwargs = filter_kwargs(updated, cls.PLOT_KEYS, prefix='wiggle_', index=ix)
             ax.plot(x, y_range, **wiggle_kwargs)
             ax.fill_betweenx(y_range, k, x, where=(x > k), color=wiggle_kwargs['color'])
             x_range.append(x)
-        x_range = np.r_[x_range]
+        x_range = np.r_[x_range][:, ::y_order]
 
         if 'xlim' not in updated:
             updated['xlim'] = (x_range[0].min(), x_range[-1].max())
         if 'ylim' not in updated:
             updated['ylim'] = (y_range.min(), y_range.max())
 
-        # Not yet implemented
-        if curve:
-            pass
-        #     curve = curve[0][offsets, ::-1]
-        #     # transform height-mask to heights if needed
-        #     if curve.ndim == 2:
-        #         curve = np.nanmax(curve, axis=1)
-        #     curve_kwargs = filter_kwargs(updated, cls.PLOT_KEYS, prefix='curve_')
-        #     ax.plot(offsets, curve, **curve_kwargs)
+        if curve is not None:
+            curve = curve[offsets]
+            if curve.ndim == 1:
+                curve_x = (~np.isnan(curve)).nonzero()
+                curve_y = curve[curve_x]
+            # transform height-mask to heights if needed
+            elif curve.ndim == 2:
+                curve = curve[:, ::y_order]
+                curve = (~np.isnan(curve)).nonzero()
+                width = updated['horizon_width']
+                curve_x = curve[0][width // 2::width]
+                curve_y = curve[1][width // 2::width]
+            curve_kwargs = filter_kwargs(updated, cls.PLOT_KEYS, prefix='curve_')
+            ax.plot(x_range[curve_x, curve_y], curve_y, **curve_kwargs)
 
         # manage title, axis labels, colorbar, ticks
         cls.annotate_image(ax, updated, ['set_title', 'set_xlabel', 'set_ylabel', 'set_xlim', 'set_ylim'])
