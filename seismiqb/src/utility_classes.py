@@ -490,8 +490,8 @@ class BaseAggregationContainer:
             raise ValueError('Either shape, or all of ilines, xlines, heights should be provided')
 
         if shape:
-            self.shape = np.asarray(shape)
-            self.origin = np.zeros_like(shape)
+            self.shape = np.asarray(shape, dtype=np.int8)
+            self.origin = np.zeros_like(self.shape)
         else:
             self.origin = np.asarray([ilines[0], xlines[0], heights[0]])
             self.shape = np.asarray([ilines[1], xlines[1], heights[1]]) - self.origin
@@ -514,11 +514,12 @@ class BaseAggregationContainer:
         if not self.valid:
             raise RuntimeError('All data in the container has already been cleared!')
 
-        for crop_x, slc, cube_x in zip(crop.shape, location, self.origin + self.shape):
-            beg, end, step = slc.indices(cube_x)
-            if step and step != 1:
+        for crop_x, slc in zip(crop.shape, location):
+            if slc.step and slc.step != 1:
                 raise ValueError(f"Invalid step in location {location}")
-            if crop_x != end - beg:
+
+            beg, end, _ = slc.indices(slc.stop)
+            if crop_x < end - beg:
                 raise ValueError(f"Inconsistent crop_shape {crop.shape} and location {location}")
 
         loc = [slice(max(0, slc.start - x0), min(xlen, slc.stop - x0))
