@@ -490,13 +490,14 @@ class BaseAggregationContainer:
             raise ValueError('Either shape, or all of ilines, xlines, heights should be provided')
 
         if shape:
-            self.shape = shape
-            self.origin = np.zeros(3)
+            self.shape = np.asarray(shape)
+            self.origin = np.zeros_like(shape)
         else:
             self.origin = np.asarray([ilines[0], xlines[0], heights[0]])
             self.shape = np.asarray([ilines[1], xlines[1], heights[1]]) - self.origin
 
-        self.dirty = False
+        self.res = None
+        self.valid = True
 
     def put(self, crop, location):
         """ add crop for aggregation
@@ -507,8 +508,18 @@ class BaseAggregationContainer:
         location : tuple of slices
             coordinates of crop
         """
-        if self.dirty:
-            raise RuntimeError('Aggregated data has been already computed and the container is in dirty state!')
+        if self.res is not None:
+            raise RuntimeError('Aggregated data has been already computed!')
+
+        if not self.valid:
+            raise RuntimeError('All data in the container has already been cleared!')
+
+        for crop_x, slc, cube_x in zip(crop.shape, location, self.origin + self.shape):
+            beg, end, step = slc.indices(cube_x)
+            if step and step != 1:
+                raise ValueError(f"Invalid step in location {location}")
+            if crop_x != end - beg:
+                raise ValueError(f"Inconsistent crop_shape {crop.shape} and location {location}")
 
         loc = [slice(max(0, slc.start - x0), min(xlen, slc.stop - x0))
                for x0, slc, xlen in zip(self.origin, location, self.shape)]
@@ -522,12 +533,30 @@ class BaseAggregationContainer:
 
     def aggregate(self):
         """ Computes and returns aggregated cube.
-        Can leave the container in dirty state, so it should be called only once """
-        self.dirty = True
-        return self._aggregate()
+        Data updates are not possible after calling `aggregate` """
+
+        if not self.valid:
+            raise RuntimeError('All data in the container has already been cleared!')
+
+        if self.res is None:
+            self.res = self._aggregate()
+            self._clear()
+        return self.res
 
     def _aggregate(self):
         raise NotImplementedError
+
+    def clear(self):
+        """ Clears all data """
+        self.valid = False
+        if self.res is not None:
+            self.res = None
+        self._clear()
+
+    def _clear(self):
+        """ clear data for aggregation process """
+        raise NotImplementedError
+
 
 class AvgContainer(BaseAggregationContainer):
     """ Average aggregation of crops """
@@ -545,6 +574,11 @@ class AvgContainer(BaseAggregationContainer):
         self.data /= self.counts
         return self.data
 
+    def _clear(self):
+        self.counts = None
+        self.data = None
+
+
 class MaxContainer(BaseAggregationContainer):
     """ Maximum aggregation of crops """
 
@@ -560,3 +594,6 @@ class MaxContainer(BaseAggregationContainer):
 
     def _aggregate(self):
         return self.data
+
+    def _clear(self):
+        self.data = None
