@@ -572,7 +572,7 @@ class SeismicGeometry(ExportMixin):
 
     # Textual representation
     def __repr__(self):
-        return f'<Inferred geometry for {self.displayed_name}: {tuple(self.cube_shape)}>'
+        return f'<Inferred geometry for cube {self.displayed_name}: {tuple(self.cube_shape)}>'
 
     def __str__(self):
         msg = f"""
@@ -636,11 +636,13 @@ class SeismicGeometry(ExportMixin):
     # Visual representation
     def show(self, matrix='snr', **kwargs):
         """ Show geometry related top-view map. """
+        matrix_name = matrix if isinstance(matrix, str) else kwargs.get('matrix_name', 'custom matrix')
         kwargs = {
             'cmap': 'viridis_r',
-            'title': f'{matrix if isinstance(matrix, str) else ""} map of `{self.displayed_name}`',
+            'title': f'`{matrix_name}` map of cube `{self.displayed_name}`',
             'xlabel': self.index_headers[0],
             'ylabel': self.index_headers[1],
+            'colorbar_fraction': 2.5,
             **kwargs
             }
         matrix = getattr(self, matrix) if isinstance(matrix, str) else matrix
