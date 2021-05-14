@@ -1247,7 +1247,7 @@ class SeismicCropBatch(Batch):
 
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def dump(self, ix, src, container, src_locations='locations', order=(1, 2, 0)):
+    def update_container(self, ix, src, container, src_locations='locations', order=(0, 1, 2)):
         """ Aggregate crops to form resulting cube
         Parameters
         ----------
@@ -1262,5 +1262,5 @@ class SeismicCropBatch(Batch):
         """
         crop = self.get(ix, src)
         location = self.get(ix, src_locations)
-        container.put(crop.transpose(order), tuple(location))
+        container.put(crop.transpose(order), location)
 
