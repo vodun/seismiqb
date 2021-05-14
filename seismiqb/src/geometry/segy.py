@@ -581,6 +581,10 @@ class SeismicGeometrySEGY(SeismicGeometry):
 
         if path is None:
             fmt_prefix = 'q' if quantize else ''
+
+            if postfix == '' and len(projections) < 3:
+                postfix = '_' + projections
+
             path = os.path.join(os.path.dirname(self.path), f'{self.short_name}{postfix}.{fmt_prefix}{format}')
 
         # Remove file, if exists
