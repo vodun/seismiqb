@@ -476,31 +476,34 @@ class SafeIO:
 
 class BaseAggregationContainer:
     """ Container for on-line aggregation of crops """
-    def __init__(self, shape=None, ilines=None, xlines=None, heights=None):
+
+    def __init__(self, shape=None, grid_range=None):
         """ initialize inner storages
+
         Parameters
         ----------
         shape : tuple or None
             shape of the processed cube - if it is fully covered
-        ilines, xlines, heights : sequence of two int or None
-            locations used in :meth:`~.SeismcCubeset.make_grid`
+        grid_range: list of tuples
+            ilines, xlines, heights as in `~.SeismcCubeset.grid_info['range']`
         """
 
-        if shape is None and (ilines is None or xlines is None or heights is None):
-            raise ValueError('Either shape, or all of ilines, xlines, heights should be provided')
-
         if shape:
-            self.shape = np.asarray(shape, dtype=np.int8)
+            self.shape = np.asarray(shape, dtype=np.int16)
             self.origin = np.zeros_like(self.shape)
+        elif grid_range:
+            grid_range = np.asarray(grid_range, dtype=np.int16)
+            self.origin = grid_range[:, 0]
+            self.shape = grid_range[:, 1] - self.origin
         else:
-            self.origin = np.asarray([ilines[0], xlines[0], heights[0]])
-            self.shape = np.asarray([ilines[1], xlines[1], heights[1]]) - self.origin
+            raise ValueError('Either shape, or grid_range should be provided')
 
         self.res = None
         self.valid = True
 
     def put(self, crop, location):
         """ add crop for aggregation
+
         Parameters
         ----------
         crop : np.ndarray
@@ -561,8 +564,9 @@ class BaseAggregationContainer:
 
 class AvgContainer(BaseAggregationContainer):
     """ Average aggregation of crops """
-    def __init__(self, shape=None, ilines=None, xlines=None, heights=None, dtype=np.float32):
-        super().__init__(shape, ilines, xlines, heights)
+
+    def __init__(self, shape=None, grid_range=None, dtype=np.float32):
+        super().__init__(shape, grid_range)
         self.data = np.zeros(self.shape, dtype=dtype)
         self.counts = np.zeros(self.shape, dtype=np.int8)
 
@@ -583,12 +587,9 @@ class AvgContainer(BaseAggregationContainer):
 class MaxContainer(BaseAggregationContainer):
     """ Maximum aggregation of crops """
 
-    FILL_VALUE = -np.inf
-
-    def __init__(self, fill_val=None, shape=None, ilines=None, xlines=None, heights=None, dtype=np.float32):
-        super().__init__(shape, ilines, xlines, heights)
-        self.fill_val = fill_val or self.FILL_VALUE
-        self.data = np.full(self.shape, -np.inf, dtype=dtype)
+    def __init__(self, shape=None, grid_range=None, fill_value=-np.inf, dtype=np.float32):
+        super().__init__(shape, grid_range)
+        self.data = np.full(self.shape, fill_value, dtype=dtype)
 
     def _put(self, crop, location):
         self.data[location] = np.maximum(self.data[location], crop)
