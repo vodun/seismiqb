@@ -1263,4 +1263,4 @@ class SeismicCropBatch(Batch):
         crop = self.get(ix, src)
         location = self.get(ix, src_locations)
         container.put(crop.transpose(order), location)
-
+        return self
