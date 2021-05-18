@@ -404,7 +404,6 @@ class SeismicCropBatch(Batch):
         -----
         Can be run only after labels-dict is loaded into labels-component.
         """
-
         location = self.get(ix, src_locations)
         crop_shape = self.get(ix, 'shapes')
         mask = np.zeros(crop_shape, dtype='float32')

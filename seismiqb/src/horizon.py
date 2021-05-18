@@ -65,7 +65,6 @@ class UnstructuredHorizon:
         # Attributes from geometry
         self.geometry = geometry
         self.cube_name = geometry.name
-        self.displayed_cube_name = geometry.displayed_name
 
         # Check format of storage, then use it to populate attributes
         if isinstance(storage, str):
@@ -290,7 +289,7 @@ class UnstructuredHorizon:
         # set defaults if needed and plot the slide
         kwargs = {
             'mode': 'overlap',
-            'title': (f'U-horizon `{self.name}` on `{self.cube_name}`' + '\n ' +
+            'title_label': (f'U-horizon `{self.name}` on `{self.cube_name}`' + '\n ' +
                       f'{self.geometry.index_headers[axis]} {loc} out of {self.geometry.lens[axis]}'),
             'xlabel': self.geometry.index_headers[1 - axis],
             'ylabel': 'Depth', 'y': 1.015,
@@ -2132,14 +2131,14 @@ class Horizon:
 
         # defaults for plotting if not supplied in kwargs
         kwargs = {
-            'title': '{} {} of `{}` on `{}`'.format(src if isinstance(src, str) else '',
-                                                    'on full'*on_full, self.name, self.displayed_cube_name),
+            'title_label': f"{src} {'on full'*on_full} of `{self.name}` on `{self.geometry.displayed_name}`",
             'xlabel': self.geometry.index_headers[0],
             'ylabel': self.geometry.index_headers[1],
+            'cmap': 'Depths',
             **kwargs
             }
         matrix[matrix == fill_value] = np.nan
-        plot_image(matrix, mode='single', **kwargs)
+        plot_image(matrix, **kwargs)
 
 
     def show_amplitudes_rgb(self, width=3, channel_weights=(1, 0.5, 0.25), to_uint8=True,
@@ -2284,7 +2283,7 @@ class Horizon:
         return x, y, z, simplices
 
     def show_slide(self, loc, width=3, axis='i', order_axes=None, zoom_slice=None,
-                   n_ticks=5, delta_ticks=100, **kwargs):
+                   n_ticks=5, delta_ticks=100, mode='show', separate=False, **kwargs):
         """ Show slide with horizon on it.
 
         Parameters
@@ -2340,7 +2339,6 @@ class Horizon:
             yticks.pop(1)
 
         kwargs = {
-            'mode': 'overlap',
             'title_label': f'Horizon `{self.name}` on `{self.cube_name}`\n {header} {loc} out of {total}',
             'title_y': 1.02,
             'xlabel': xlabel,
@@ -2348,11 +2346,14 @@ class Horizon:
             'xticks': xticks,
             'yticks': yticks,
             'legend': False,
-            'horizon_width': width,
+            'labeltop': False,
+            'labelright': False,
+            'order_axes': order_axes,
+            'curve_width': width,
             **kwargs
         }
 
-        plot_image([seismic_slide, mask], order_axes=order_axes, **kwargs)
+        plot_image(image=[seismic_slide, mask], mode=mode, separate=separate, **kwargs)
 
 
     def reset_cache(self):

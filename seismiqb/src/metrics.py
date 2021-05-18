@@ -18,7 +18,7 @@ from .utility_classes import Accumulator
 from .functional import to_device, from_device
 from .functional import correlation, crosscorrelation, btch, kl, js, hellinger, tv, hilbert
 from .functional import smooth_out, digitize, gridify, perturb, histo_reduce
-from .plotters import plot_image, METRIC_CMAP
+from .plotters import plot_image
 
 
 
@@ -28,7 +28,7 @@ class BaseMetrics:
     """
     # pylint: disable=attribute-defined-outside-init, blacklisted-name
     PLOT_DEFAULTS = {
-        'cmap': METRIC_CMAP,
+        'cmap': 'Metric',
         'fill_color': 'black'
     }
 
@@ -318,7 +318,7 @@ class BaseMetrics:
         title = f'Support correlation with {n_supports} supports with `{agg}` aggregation\nfor {title}'
         plot_dict = {
             **plot_defaults,
-            'title': title,
+            'title_label': title,
             'zmin': -1.0, 'zmax': 1.0,
             **kwargs
         }
@@ -902,7 +902,7 @@ class HorizonMetrics(BaseMetrics):
                 'bins': 100,
                 'xlabel': 'l1-values',
                 'ylabel': 'N',
-                'label': 'Histogram of l1 differences',
+                'title_label': 'Histogram of l1 differences',
             }
             plot_image(metric, mode='histogram', **hist_dict)
 
