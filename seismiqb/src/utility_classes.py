@@ -525,10 +525,10 @@ class BaseAggregationContainer:
             if crop_x < end - beg:
                 raise ValueError(f"Inconsistent crop_shape {crop.shape} and location {location}")
 
-        loc = [slice(max(0, slc.start - x0), min(xlen, slc.stop - x0))
-               for x0, slc, xlen in zip(self.origin, location, self.shape)]
-        loc_crop = [slice(max(0, x0 - slc.start), min(xlen + x0 - slc.start , slc.stop - slc.start))
-                    for x0, slc, xlen in zip(self.origin, location, self.shape)]
+        loc = tuple(slice(max(0, slc.start - x0), min(xlen, slc.stop - x0))
+               for x0, slc, xlen in zip(self.origin, location, self.shape))
+        loc_crop = tuple(slice(max(0, x0 - slc.start), min(xlen + x0 - slc.start , slc.stop - slc.start))
+                    for x0, slc, xlen in zip(self.origin, location, self.shape))
 
         self._put(crop[loc_crop], loc)
 
