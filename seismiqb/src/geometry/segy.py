@@ -595,7 +595,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
         with constructor(path, mode=mode, **kwargs) as file:
             total = (('i' in projections) * self.cube_shape[0] +
                      ('x' in projections) * self.cube_shape[1] +
-                     ('h' in projections) * self.cube_shape[2])
+                     ('h' in projections) * self.cube_shape[0])
             progress_bar = tqdm(total=total, ncols=800, disable=(not pbar))
             name = os.path.basename(path)
 
@@ -605,13 +605,18 @@ class SeismicGeometrySEGY(SeismicGeometry):
                 order = SeismicGeometryConverted.AXIS_TO_ORDER[axis]
                 cube = file.create_dataset(cube_name, shape=self.cube_shape[order], dtype=dtype)
 
+                load_axis = 0 if axis == 2 else axis
+
                 progress_bar.set_description(f'Creating {name}; {p}-projection')
-                for idx in range(self.cube_shape[axis]):
-                    slide = self.load_slide(idx, axis=axis, stable=False)
-                    slide = slide.T if axis == 1 else slide
+                for idx in range(self.cube_shape[load_axis]):
+                    slide = self.load_slide(idx, axis=load_axis, stable=False)
+                    slide = slide if axis == 0 else slide.T
                     slide = transform(slide)
 
-                    cube[idx, :, :] = slide
+                    if axis == 2:
+                        cube[:, idx, :] = slide
+                    else:
+                        cube[idx, :, :] = slide
                     progress_bar.update()
             progress_bar.close()
 
