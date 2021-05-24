@@ -1246,7 +1246,7 @@ class SeismicCropBatch(Batch):
         plot_image(imgs, mode=mode, order_axes=order_axes, **kwargs)
 
     @action
-    @inbatch_parallel(init='indices', post='_assemble', target='for')
+    @inbatch_parallel(init='indices', post=None, target='for')
     def update_container(self, ix, src, container, src_locations='locations', order=(0, 1, 2)):
         """ Aggregate crops to form resulting cube
         Parameters

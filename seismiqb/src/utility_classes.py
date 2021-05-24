@@ -488,10 +488,10 @@ class BaseAggregationContainer:
             ilines, xlines, heights as in `~.SeismcCubeset.grid_info['range']`
         """
 
-        if shape:
+        if shape is not None:
             self.shape = np.asarray(shape, dtype=np.int16)
             self.origin = np.zeros_like(self.shape)
-        elif grid_range:
+        elif grid_range is not None:
             grid_range = np.asarray(grid_range, dtype=np.int16)
             self.origin = grid_range[:, 0]
             self.shape = grid_range[:, 1] - self.origin
