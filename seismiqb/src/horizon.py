@@ -2135,6 +2135,7 @@ class Horizon:
             'xlabel': self.geometry.index_headers[0],
             'ylabel': self.geometry.index_headers[1],
             'cmap': 'Depths',
+            'colorbar': True,
             **kwargs
             }
         matrix[matrix == fill_value] = np.nan
@@ -2175,13 +2176,14 @@ class Horizon:
 
         # defaults for plotting if not supplied in kwargs
         kwargs = {
-            'title': 'RGB amplitudes of {} on cube {}'.format(self.name, self.displayed_cube_name),
+            'title_label': 'RGB amplitudes of {} on cube {}'.format(self.name, self.displayed_cube_name),
             'xlabel': self.geometry.index_headers[0],
             'ylabel': self.geometry.index_headers[1],
+            'order_axes': (1, 0, 2),
             **kwargs
             }
 
-        plot_image(amplitudes, mode='rgb', **kwargs)
+        plot_image(amplitudes, mode='imshow', **kwargs)
 
 
     def show_3d(self, n_points=100, threshold=100., z_ratio=1., zoom_slice=None, show_axes=True,
@@ -2350,6 +2352,7 @@ class Horizon:
             'labelright': False,
             'order_axes': order_axes,
             'curve_width': width,
+            'colorbar': [True, False],
             **kwargs
         }
 

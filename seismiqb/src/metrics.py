@@ -299,7 +299,7 @@ class BaseMetrics:
         title = f'Local correlation, k={kernel_size}, with `{agg}` aggregation\nfor {title}'
         plot_dict = {
             **plot_defaults,
-            'title': title,
+            'title_label': title,
             'zmin': -1.0, 'zmax': 1.0,
             **kwargs
         }
@@ -320,6 +320,8 @@ class BaseMetrics:
             **plot_defaults,
             'title_label': title,
             'zmin': -1.0, 'zmax': 1.0,
+            'colorbar': True,
+            'bad_color': 'k',
             **kwargs
         }
         return metric, plot_dict
@@ -337,7 +339,7 @@ class BaseMetrics:
         title = f'Local cross-correlation, k={kernel_size}, with `{agg}` aggregation\nfor {title}'
         plot_dict = {
             **plot_defaults,
-            'title': title,
+            'title_label': title,
             'cmap': 'seismic_r',
             'zmin': -zvalue, 'zmax': zvalue,
             **kwargs
@@ -357,7 +359,7 @@ class BaseMetrics:
         title = f'Support cross-correlation with {n_supports} supports with `{agg}` aggregation\nfor {title}'
         plot_dict = {
             **plot_defaults,
-            'title': title,
+            'title_label': title,
             'cmap': 'seismic_r',
             'zmin': -zvalue, 'zmax': zvalue,
             **kwargs
@@ -376,7 +378,7 @@ class BaseMetrics:
         title = f'Local Bhattacharyya divergence, k={kernel_size}, with `{agg}` aggregation\nfor {title}'
         plot_dict = {
             **plot_defaults,
-            'title': title,
+            'title_label': title,
             'zmin': 0.0, 'zmax': 1.0,
             **kwargs
         }
@@ -394,7 +396,7 @@ class BaseMetrics:
         title = f'Support Bhattacharyya divergence with {n_supports} supports with `{agg}` aggregation\nfor {title}'
         plot_dict = {
             **plot_defaults,
-            'title': title,
+            'title_label': title,
             'zmin': 0.0, 'zmax': 1.0,
             **kwargs
         }
@@ -412,7 +414,7 @@ class BaseMetrics:
         title = f'Local KL divergence, k={kernel_size}, with `{agg}` aggregation\nfor {title}'
         plot_dict = {
             **plot_defaults,
-            'title': title,
+            'title_label': title,
             'zmin': None, 'zmax': None,
             **kwargs
         }
@@ -431,7 +433,7 @@ class BaseMetrics:
         title = f'Support KL divergence with {n_supports} supports with `{agg}` aggregation\nfor {title}'
         plot_dict = {
             **plot_defaults,
-            'title': title,
+            'title_label': title,
             'zmin': None, 'zmax': None,
             **kwargs
         }
@@ -448,7 +450,7 @@ class BaseMetrics:
         title = f'Local JS divergence, k={kernel_size}, with `{agg}` aggregation\nfor {title}'
         plot_dict = {
             **plot_defaults,
-            'title': title,
+            'title_label': title,
             'zmin': None, 'zmax': None,
             **kwargs
         }
@@ -467,7 +469,7 @@ class BaseMetrics:
         title = f'Support JS divergence with {n_supports} supports with `{agg}` aggregation\nfor {title}'
         plot_dict = {
             **plot_defaults,
-            'title': title,
+            'title_label': title,
             'zmin': None, 'zmax': None,
             **kwargs
         }
@@ -485,7 +487,7 @@ class BaseMetrics:
         title = f'Local Hellinger distance, k={kernel_size}, with `{agg}` aggregation\nfor {title}'
         plot_dict = {
             **plot_defaults,
-            'title': title,
+            'title_label': title,
             'zmin': None, 'zmax': None,
             **kwargs
         }
@@ -504,7 +506,7 @@ class BaseMetrics:
         title = f'Support Hellinger distance with {n_supports} supports with `{agg}` aggregation\nfor {title}'
         plot_dict = {
             **plot_defaults,
-            'title': title,
+            'title_label': title,
             'zmin': None, 'zmax': None,
             **kwargs
         }
@@ -521,7 +523,7 @@ class BaseMetrics:
         title = f'Local total variation, k={kernel_size}, with `{agg}` aggregation\nfor {title}'
         plot_dict = {
             **plot_defaults,
-            'title': title,
+            'title_label': title,
             'zmin': None, 'zmax': None,
             **kwargs
         }
@@ -540,7 +542,7 @@ class BaseMetrics:
         title = f'Support total variation with {n_supports} supports with `{agg}` aggregation\nfor {title}'
         plot_dict = {
             **plot_defaults,
-            'title': title,
+            'title_label': title,
             'zmin': None, 'zmax': None,
             **kwargs
         }
@@ -597,7 +599,7 @@ class BaseMetrics:
         title, plot_defaults = self.get_plot_defaults()
         plot_dict = {
             **plot_defaults,
-            'title': f'Quality map for {title}',
+            'title_label': f'Quality map for {title}',
             'cmap': 'Reds',
             'zmin': 0.0, 'zmax': np.nanmax(quality_map),
             **kwargs
@@ -810,7 +812,7 @@ class HorizonMetrics(BaseMetrics):
         title = f'Instantaneous phase\nfor {title}'
         plot_dict = {
             **plot_defaults,
-            'title': title,
+            'title_label': title,
             'cmap': 'seismic',
             'zmin': -np.pi, 'zmax': np.pi,
             **kwargs
@@ -909,7 +911,7 @@ class HorizonMetrics(BaseMetrics):
         title = 'Height differences between {} and {}'.format(self.horizon.name, other.name)
         plot_dict = {
             'spatial': True,
-            'title': '{} on cube {}'.format(title, self.horizon.cube_name),
+            'title_label': '{} on cube {}'.format(title, self.horizon.cube_name),
             'cmap': 'Reds',
             'zmin': 0, 'zmax': np.nanmax(metric),
             'ignore_value': np.nan,
@@ -1002,7 +1004,7 @@ class GeometryMetrics(BaseMetrics):
 
         title = f"tracewise {func}"
         plot_dict = {
-            'title': f'{title} for `{self.name}` on cube `{self.cube_name}`',
+            'title_label': f'{title} for `{self.name}` on cube `{self.cube_name}`',
             'cmap': 'seismic',
             'zmin': None, 'zmax': None,
             'ignore_value': np.nan,
@@ -1029,7 +1031,7 @@ class GeometryMetrics(BaseMetrics):
 
         title = f"tracewise unsafe {func}"
         plot_dict = {
-            'title': f'{title} for {self.name} on cube {self.cube_name}',
+            'title_label': f'{title} for {self.name} on cube {self.cube_name}',
             'cmap': 'seismic',
             'zmin': None, 'zmax': None,
             'ignore_value': np.nan,
@@ -1078,7 +1080,7 @@ class GeometryMetrics(BaseMetrics):
 
         title = f"Blockwise {func}"
         plot_dict = {
-            'title': f'{title} for {self.name} on cube {self.cube_name}',
+            'title_label': f'{title} for {self.name} on cube {self.cube_name}',
             'cmap': 'seismic',
             'zmin': None, 'zmax': None,
             'ignore_value': np.nan,

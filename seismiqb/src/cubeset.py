@@ -426,7 +426,7 @@ class SeismicCubeset(Dataset):
             background = (background > 0).astype(int)
 
         kwargs = {
-            'title': f'Sampled slices on {self.indices[idx]}',
+            'title_label': f'Sampled slices on {self.indices[idx]}',
             'xlabel': 'ilines', 'ylabel': 'xlines',
             'cmap': 'Reds', 'interpolation': 'bilinear',
             **kwargs
@@ -553,7 +553,7 @@ class SeismicCubeset(Dataset):
 
         labels_class = type(getattr(self, src_labels)[idx][0]).__name__
         kwargs = {
-            'title': f'{labels_class} on {self.indices[idx]}',
+            'title_label': f'{labels_class} on {self.indices[idx]}',
             'xlabel': self.geometries[idx].index_headers[0],
             'ylabel': self.geometries[idx].index_headers[1],
             'cmap': 'Reds',
