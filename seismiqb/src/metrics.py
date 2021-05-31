@@ -815,6 +815,7 @@ class HorizonMetrics(BaseMetrics):
             'title_label': title,
             'cmap': 'seismic',
             'zmin': -np.pi, 'zmax': np.pi,
+            'colorbar': True,
             **kwargs
         }
         return from_device(shifted_slice), plot_dict
