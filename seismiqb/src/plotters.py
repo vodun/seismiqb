@@ -8,7 +8,8 @@ import cv2
 import matplotlib.pyplot as plt
 from matplotlib.cm import get_cmap, register_cmap
 from matplotlib.patches import Patch
-from matplotlib.colors import ColorConverter, ListedColormap, LinearSegmentedColormap, cnames
+from matplotlib.colors import ColorConverter, ListedColormap, LinearSegmentedColormap
+from matplotlib.colors import BASE_COLORS, TABLEAU_COLORS, CSS4_COLORS
 from mpl_toolkits import axes_grid1
 
 import plotly.figure_factory as ff
@@ -31,40 +32,6 @@ register_cmap(name='Metric', cmap=METRIC_CMAP)
 DEPTHS_CMAP = ListedColormap(get_cmap('viridis_r')(np.linspace(0.0, 0.5, 100)))
 register_cmap(name='Depths', cmap=DEPTHS_CMAP)
 
-
-
-def channelize_image(image, total_channels, color=None, greyscale=False, opacity=None):
-    """ Channelize an image. Can be used to make an opaque rgb or grayscale image.
-    """
-    # case of a partially channelized image
-    if image.ndim == 3:
-        if image.shape[-1] == total_channels:
-            return image
-
-        background = np.zeros((*image.shape[:-1], total_channels))
-        background[:, :, :image.shape[-1]] = image
-
-        if opacity is not None:
-            background[:, :, -1] = opacity
-        return background
-
-    # case of non-channelized image
-    if isinstance(color, str):
-        color = ColorConverter().to_rgb(color)
-    background = np.zeros((*image.shape, total_channels))
-    for i, value in enumerate(color):
-        background[:, :, i] = image * value
-
-    # in case of greyscale make all 3 channels equal to supplied image
-    if greyscale:
-        for i in range(3):
-            background[:, :, i] = image
-
-    # add opacity if needed
-    if opacity is not None:
-        background[:, :, -1] = opacity * (image != 0).astype(int)
-
-    return background
 
 
 def filter_parameters(kwargs, keys, prefix='', index=None, main_index=None):
@@ -93,7 +60,7 @@ def filter_parameters(kwargs, keys, prefix='', index=None, main_index=None):
     indexable = lambda x: isinstance(x, (tuple, list))
 
     for key in keys:
-        value = kwargs.get(prefix + key) or kwargs.get(key)
+        value = kwargs.get(prefix + key, kwargs.get(key))
         if value is None:
             continue
         if inner_index is not None:
@@ -153,11 +120,11 @@ class MatplotlibPlotter:
     # `plt.subplots`
     FIGURE_KEYS = ['figsize', 'facecolor', 'dpi', 'ncols', 'nrows']
     # `plt.plot`
-    PLOT_KEYS = ['color', 'linestyle', 'marker']
+    PLOT_KEYS = ['color', 'linestyle', 'marker', 'markersize']
     # `plt.imshow`
     IMSHOW_KEYS = ['cmap', 'vmin', 'vmax', 'interpolation', 'alpha']
     # `plt.hist`
-    HIST_KEYS = ['bins', 'color', 'density', 'alpha']
+    HIST_KEYS = ['bins', 'color', 'density', 'alpha', 'range', 'weights', 'cumulative', 'log', 'histtype']
     # auxiliary
     TEXT_KEYS = ['fontsize', 'family', 'color']
     # `plt.set_title`
@@ -173,7 +140,7 @@ class MatplotlibPlotter:
     # `plt.tick_params`
     TICK_KEYS = ['labeltop', 'labelright', 'labelcolor', 'direction']
     # `cls.add_legend`
-    LEGEND_KEYS = ['label', 'size', 'cmap', 'loc']
+    LEGEND_KEYS = ['label', 'size', 'cmap', 'color', 'loc']
 
     # Supplementary methods
 
@@ -285,7 +252,7 @@ class MatplotlibPlotter:
         if len(labels) == 1:
             labels = labels * len(colors)
         new_patches = [Patch(color=color, label=label) for color, label in zip(colors, labels)
-                       if (color in cnames) and (label is not None)]
+                       if (color in {**BASE_COLORS, **TABLEAU_COLORS, **CSS4_COLORS}) and (label is not None)]
         handles += new_patches
         if handles:
             axis.legend(handles=handles, loc=loc, prop={'size': size})
@@ -295,7 +262,7 @@ class MatplotlibPlotter:
         """ Make necessary annotations. """
         if 'set_title' in actions:
             params = filter_parameters(all_kwargs, cls.TITLE_KEYS, prefix='title_', index=ax_num)
-            params['label'] = params.pop('title', None) or params.get('label')
+            params['label'] = params.pop('title', params.get('label'))
             ax.set_title(**params)
         if 'set_suptitle' in actions:
             params = filter_parameters(all_kwargs, cls.SUPTITLE_KEYS, prefix='suptitle_', index=ax_num)
@@ -375,6 +342,8 @@ class MatplotlibPlotter:
         axes = cls.make_axes(plot_method=plot_method, n_subplots=len(arrays), **kwargs)
         for ax_num, (axis, ax_arrays) in enumerate(zip(axes, arrays)):
             plot_method(axis=axis, arrays=ax_arrays, ax_num=ax_num, separate=separate, **kwargs)
+
+        [axis.set_axis_off() for axis in axes[len(arrays):]] # pylint: disable=expression-not-assigned
 
         return cls.save_and_show(fig=axes[0].figure, **kwargs)
 
@@ -485,15 +454,20 @@ class MatplotlibPlotter:
         """
         defaults = {# wiggle
                     'wiggle_color': 'k',
-                    'wiggle_linestyle': '-',
                     # curve
-                    'curve_color': 'r',
-                    'curve_marker': 'o',
+                    'color': 'r',
+                    'marker': 'o',
                     'curve_linestyle': '',
+                    #
+                    'title_color': 'k',
                     # axis labels
                     'xlabel': '', 'ylabel': '',
+                    'xlabel_color': 'k', 'ylabel_color': 'k',
+                    # legend
+                    'legend_loc': 1,
+                    'legend_size': 15,
                     # common
-                    'fontsize': 20, 'label': '', 'title': ''}
+                    'fontsize': 20, 'label': ''}
 
         all_kwargs = {**defaults, **kwargs}
 
@@ -506,9 +480,11 @@ class MatplotlibPlotter:
         x_range = [] # accumulate traces to draw curve above them if needed
         for ix, k in enumerate(offsets):
             x = k + width_multiplier * image[k] / np.std(image)
-            wiggle_kwargs = filter_parameters(all_kwargs, cls.PLOT_KEYS, prefix='wiggle_', index=ix)
+            wiggle_kwargs = filter_parameters(all_kwargs, ['color'], prefix='wiggle_', index=ix)
             axis.plot(x, y_range, **wiggle_kwargs)
-            axis.fill_betweenx(y_range, k, x, where=(x > k), color=wiggle_kwargs['color'])
+
+            fill_color = all_kwargs.get('fill_color') or wiggle_kwargs['color']
+            axis.fill_betweenx(y_range, k, x, where=(x > k), color=fill_color)
             x_range.append(x)
         x_range = np.r_[x_range][:, ::y_order]
 
@@ -517,7 +493,7 @@ class MatplotlibPlotter:
         if 'ylim' not in all_kwargs:
             all_kwargs['ylim'] = (y_range.min(), y_range.max())[::y_order]
 
-        for curve in curves:
+        for curve_num, curve in enumerate(curves):
             curve = curve[offsets]
             if curve.ndim == 1:
                 curve_x = (~np.isnan(curve)).nonzero()[0]
@@ -528,11 +504,11 @@ class MatplotlibPlotter:
                 curve = (~np.isnan(curve)).nonzero()
                 curve_x = curve[0][(curve_width // 2)::curve_width]
                 curve_y = curve[1][(curve_width // 2)::curve_width]
-            curve_kwargs = filter_parameters(all_kwargs, cls.PLOT_KEYS, prefix='curve_')
+            curve_kwargs = filter_parameters(all_kwargs, cls.PLOT_KEYS, prefix='curve_', index=(curve_num))
             axis.plot(x_range[curve_x, curve_y], curve_y, **curve_kwargs)
 
         # manage title, axis labels, colorbar, ticks
-        actions = ['set_title', 'set_xlabel', 'set_ylabel', 'set_xlim', 'set_ylim']
+        actions = ['set_title', 'set_xlabel', 'set_ylabel', 'set_xlim', 'set_ylim', 'add_legend']
         cls.annotate_axis(axis, all_kwargs, actions, ax_num)
 
 
@@ -594,7 +570,7 @@ class MatplotlibPlotter:
 
         for image_num, array in enumerate(arrays):
             main_index = image_num if separate else ax_num
-            params = filter_parameters(all_kwargs, cls.HIST_KEYS, index=(ax_num, image_num), main_index=main_index)
+            params = filter_parameters(all_kwargs, cls.PLOT_KEYS, index=(ax_num, image_num), main_index=main_index)
             axis.plot(array, **params)
 
             if average:
@@ -645,6 +621,40 @@ class PlotlyPlotter:
             else:
                 converted[key] = value
         return converted
+
+    @staticmethod
+    def channelize_image(image, total_channels, color=None, greyscale=False, opacity=None):
+        """ Channelize an image. Can be used to make an opaque rgb or grayscale image.
+        """
+        # case of a partially channelized image
+        if image.ndim == 3:
+            if image.shape[-1] == total_channels:
+                return image
+
+            background = np.zeros((*image.shape[:-1], total_channels))
+            background[:, :, :image.shape[-1]] = image
+
+            if opacity is not None:
+                background[:, :, -1] = opacity
+            return background
+
+        # case of non-channelized image
+        if isinstance(color, str):
+            color = ColorConverter().to_rgb(color)
+        background = np.zeros((*image.shape, total_channels))
+        for i, value in enumerate(color):
+            background[:, :, i] = image * value
+
+        # in case of greyscale make all 3 channels equal to supplied image
+        if greyscale:
+            for i in range(3):
+                background[:, :, i] = image
+
+        # add opacity if needed
+        if opacity is not None:
+            background[:, :, -1] = opacity * (image != 0).astype(int)
+
+        return background
 
     @staticmethod
     def save_and_show(fig, show=True, savepath=None, **kwargs):
@@ -769,11 +779,11 @@ class PlotlyPlotter:
         height = coeff * height
 
         # manually combine first image in greyscale and the rest ones colored differently
-        combined = channelize_image(255 * np.transpose(images[0], axes=all_kwargs['order_axes']),
+        combined = cls.channelize_image(255 * np.transpose(images[0], axes=all_kwargs['order_axes']),
                                     total_channels=4, greyscale=True)
         for i, img in enumerate(images[1:]):
             color = all_kwargs['colors'][i]
-            combined += channelize_image(255 * np.transpose(img, axes=all_kwargs['order_axes']),
+            combined += cls.channelize_image(255 * np.transpose(img, axes=all_kwargs['order_axes']),
                                          total_channels=4, color=color, opacity=all_kwargs['opacity'])
         plot_data = go.Image(z=combined[slc], **render_kwargs) # plot manually combined image
 
@@ -876,7 +886,7 @@ class PlotlyPlotter:
         # make sure that the images are greyscale and put them each on separate canvas
         fig = make_subplots(rows=grid[0], cols=grid[1])
         for i in range(grid[1]):
-            img = channelize_image(255 * np.transpose(images[i], axes=all_kwargs['order_axes']),
+            img = cls.channelize_image(255 * np.transpose(images[i], axes=all_kwargs['order_axes']),
                                    total_channels=4, greyscale=True, opacity=1)
             fig.add_trace(go.Image(z=img[slc], **render_kwargs), row=1, col=i + 1)
             fig.update_xaxes(row=1, col=i + 1, **xaxis_kwargs['xaxis'])
