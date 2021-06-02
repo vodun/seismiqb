@@ -43,15 +43,14 @@ def filter_parameters(kwargs, keys, prefix='', index=None, main_index=None):
         Arguments to filter.
     keys : sequence
         Keys to retrieve.
-    index : int or sequence of int, optional
-        Number of argument value component to get.
-        If none provided, get whole argument value.
-        If value is non-indexable, get it without indexing.
-        Defaults to `slice(None)`, i.e. values are not indexed.
     prefix : str, optional
         If a key with prefix is in kwargs, get its value.
         If not, try to get value by the key itself.
         Defaults to `''`, i.e. no prefix used.
+    index : int or sequence of 2 ints, optional
+        Indices of component to retrieve.
+        If none provided, get whole component value.
+        If value is non-indexable, get it without indexing.
     """
     result = {}
     index = to_list(index)
@@ -76,14 +75,14 @@ def filter_parameters(kwargs, keys, prefix='', index=None, main_index=None):
     return result
 
 
-def plot_image(arrays, mode='imshow', backend='matplotlib', **kwargs):
+def plot_image(data, mode='imshow', backend='matplotlib', **kwargs):
     """ Overall plotter function, converting kwarg-names to match chosen backend and redirecting
     plotting task to one of the methods of backend-classes.
     """
     if backend in ('matplotlib', 'plt'):
-        return MatplotlibPlotter.plot(arrays=arrays, mode=mode, **kwargs)
+        return MatplotlibPlotter.plot(data=data, mode=mode, **kwargs)
     if backend in ('plotly', 'go'):
-        return getattr(PlotlyPlotter, mode)(arrays, **kwargs)
+        return getattr(PlotlyPlotter, mode)(data, **kwargs)
     raise ValueError('{} backend is not supported!'.format(backend))
 
 
@@ -114,33 +113,6 @@ class MatplotlibPlotter:
 
     To see all acceptable rendering parameters address class defaults.
     """
-
-    # Keys to expect for different plotting functions
-
-    # `plt.subplots`
-    FIGURE_KEYS = ['figsize', 'facecolor', 'dpi', 'ncols', 'nrows']
-    # `plt.plot`
-    PLOT_KEYS = ['color', 'linestyle', 'marker', 'markersize']
-    # `plt.imshow`
-    IMSHOW_KEYS = ['cmap', 'vmin', 'vmax', 'interpolation', 'alpha']
-    # `plt.hist`
-    HIST_KEYS = ['bins', 'color', 'density', 'alpha', 'range', 'weights', 'cumulative', 'log', 'histtype']
-    # auxiliary
-    TEXT_KEYS = ['fontsize', 'family', 'color']
-    # `plt.set_title`
-    TITLE_KEYS = ['title', 'label', 'y'] + TEXT_KEYS
-    # `plt.suptitle`
-    SUPTITLE_KEYS = ['t', 'y'] + TEXT_KEYS
-    # `plt.set_xlabel`
-    XLABEL_KEYS = ['xlabel'] + TEXT_KEYS
-    # `plt.set_ylabel`
-    YLABEL_KEYS = ['ylabel'] + TEXT_KEYS
-    # `cls.add_colorbar`
-    COLORBAR_KEYS = ['colorbar', 'fraction', 'aspect', 'fake']
-    # `plt.tick_params`
-    TICK_KEYS = ['labeltop', 'labelright', 'labelcolor', 'direction']
-    # `cls.add_legend`
-    LEGEND_KEYS = ['label', 'size', 'cmap', 'color', 'loc']
 
     # Supplementary methods
 
@@ -176,31 +148,32 @@ class MatplotlibPlotter:
         return converted
 
     @staticmethod
-    def make_nested_arrays(arrays, separate):
-        """ Construct nested list of arrays for plotting. """
-        if isinstance(arrays, np.ndarray):
-            return [[arrays]]
-        if all([isinstance(item, np.ndarray) for item in arrays]):
-            return [[item] for item in arrays] if separate else [arrays]
+    def make_nested_data(data, separate):
+        """ Construct nested list of data arrays for plotting. """
+        if isinstance(data, np.ndarray):
+            return [[data]]
+        if all([isinstance(item, np.ndarray) for item in data]):
+            return [[item] for item in data] if separate else [data]
         if separate:
             raise ValueError("Arrays list must be flat, when `separate` option is True.")
-        return [[item] if isinstance(item, np.ndarray) else item for item in arrays]
+        return [[item] if isinstance(item, np.ndarray) else item for item in data]
 
     @classmethod
-    def make_axes(cls, plot_method, n_subplots, **kwargs):
+    def make_axes(cls, plot_method, n_subplots, all_params):
         """ Create figure and axes if needed, else use provided. """
-        METHOD_TO_FIGSIZE = {cls.imshow : (12, 7),
+        METHOD_TO_FIGSIZE = {cls.imshow : (12, 12),
                              cls.hist : (8, 5),
                              cls.wiggle : (12, 7),
                              cls.curve: (15, 5)}
 
-        axes = kwargs.get('ax') or kwargs.get('axis') or kwargs.get('axes')
+        axes = all_params.get('ax') or all_params.get('axis') or all_params.get('axes')
         if axes is None:
-            figure_kwargs = filter_parameters(kwargs, cls.FIGURE_KEYS)
-            figure_kwargs['figsize'] = figure_kwargs.get('figsize', METHOD_TO_FIGSIZE[plot_method])
-            if ('ncols' not in figure_kwargs) and ('nrows' not in figure_kwargs):
-                figure_kwargs['ncols'] = n_subplots
-            _, axes = plt.subplots(**figure_kwargs)
+            FIGURE_KEYS = ['figsize', 'facecolor', 'dpi', 'ncols', 'nrows']
+            params = filter_parameters(all_params, FIGURE_KEYS)
+            params['figsize'] = params.get('figsize', METHOD_TO_FIGSIZE[plot_method])
+            if ('ncols' not in params) and ('nrows' not in params):
+                params['ncols'] = n_subplots
+            _, axes = plt.subplots(**params)
 
         axes = to_list(axes)
         n_axes = len(axes)
@@ -231,7 +204,7 @@ class MatplotlibPlotter:
         return colorsys.hls_to_rgb(h, min(1, l * scale), s = s)
 
     @staticmethod
-    def add_colorbar(image, aspect=30, fraction=0.5, color='black', fake=False, **kwargs):
+    def add_colorbar(image, aspect=30, fraction=0.5, color='black', fake=False):
         """ Append colorbar to the image on the right. """
         divider = axes_grid1.make_axes_locatable(image.axes)
         width = axes_grid1.axes_size.AxesY(image.axes, aspect=1./aspect)
@@ -240,66 +213,75 @@ class MatplotlibPlotter:
         if fake:
             cax.set_axis_off()
         else:
-            colorbar = image.axes.figure.colorbar(image, cax=cax, **kwargs)
+            colorbar = image.axes.figure.colorbar(image, cax=cax)
             colorbar.ax.yaxis.set_tick_params(color=color)
 
     @staticmethod
-    def add_legend(axis, color, label, size=20, loc=0):
+    def add_legend(ax, color, label, size, loc):
         """ Add a patch to legend. """
-        handles = getattr(axis.get_legend(), 'legendHandles', [])
+        handles = getattr(ax.get_legend(), 'legendHandles', [])
         colors = to_list(color)
         labels = to_list(label)
         if len(labels) == 1:
             labels = labels * len(colors)
+        VALID_COLORS = {**BASE_COLORS, **TABLEAU_COLORS, **CSS4_COLORS}
         new_patches = [Patch(color=color, label=label) for color, label in zip(colors, labels)
-                       if (color in {**BASE_COLORS, **TABLEAU_COLORS, **CSS4_COLORS}) and (label is not None)]
+                       if (color in VALID_COLORS) and (label is not None)]
         handles += new_patches
         if handles:
-            axis.legend(handles=handles, loc=loc, prop={'size': size})
+            ax.legend(handles=handles, loc=loc, prop={'size': size})
 
     @classmethod
-    def annotate_axis(cls, ax, all_kwargs, actions, ax_num):
+    def annotate_axis(cls, ax, ax_num, actions, all_params):
         """ Make necessary annotations. """
+        TEXT_KEYS = ['fontsize', 'family', 'color']
         if 'set_title' in actions:
-            params = filter_parameters(all_kwargs, cls.TITLE_KEYS, prefix='title_', index=ax_num)
-            params['label'] = params.pop('title', params.get('label'))
+            TITLE_KEYS = ['title', 'label', 'y'] + TEXT_KEYS
+            params = filter_parameters(all_params, TITLE_KEYS, prefix='title_', index=ax_num)
+            params['label'] = params.pop('title') or params.get('label')
             ax.set_title(**params)
         if 'set_suptitle' in actions:
-            params = filter_parameters(all_kwargs, cls.SUPTITLE_KEYS, prefix='suptitle_', index=ax_num)
+            SUPTITLE_KEYS = ['t', 'y'] + TEXT_KEYS
+            params = filter_parameters(all_params, SUPTITLE_KEYS, prefix='suptitle_', index=ax_num)
             params['t'] = params.get('t') or params.get('suptitle') or params.get('label')
             ax.figure.suptitle(**params)
         if 'set_xlabel' in actions:
-            params = filter_parameters(all_kwargs, cls.XLABEL_KEYS, prefix='xlabel_', index=ax_num)
+            XLABEL_KEYS = ['xlabel'] + TEXT_KEYS
+            params = filter_parameters(all_params, XLABEL_KEYS, prefix='xlabel_', index=ax_num)
             ax.set_xlabel(**params)
         if 'set_ylabel' in actions:
-            params = filter_parameters(all_kwargs, cls.YLABEL_KEYS, prefix='ylabel_', index=ax_num)
+            YLABEL_KEYS = ['ylabel'] + TEXT_KEYS
+            params = filter_parameters(all_params, YLABEL_KEYS, prefix='ylabel_', index=ax_num)
             ax.set_ylabel(**params)
-        if 'set_xticks' in actions and 'xticks' in all_kwargs:
-            ax.set_xticks(all_kwargs['xticks'])
-        if 'set_yticks' in actions and 'yticks' in all_kwargs:
-            ax.set_yticks(all_kwargs['yticks'])
-        if 'add_colorbar' in actions and all_kwargs.get('colorbar', False):
-            params = filter_parameters(all_kwargs, cls.COLORBAR_KEYS, prefix='colorbar_', index=ax_num)
+        if 'set_xticks' in actions and 'xticks' in all_params:
+            ax.set_xticks(all_params['xticks'])
+        if 'set_yticks' in actions and 'yticks' in all_params:
+            ax.set_yticks(all_params['yticks'])
+        if 'set_facecolor' in actions and all_params.get('facecolor'):
+            ax.set_facecolor(all_params['facecolor'])
+        if 'tick_params' in actions:
+            TICK_KEYS = ['labeltop', 'labelright', 'labelcolor', 'direction']
+            params = filter_parameters(all_params, TICK_KEYS, index=ax_num)
+            ax.tick_params(**params)
+        if 'set_xlim' in actions:
+            ax.set_xlim(all_params['xlim'])
+        if 'set_ylim' in actions:
+            ax.set_ylim(all_params['ylim'])
+        if 'add_colorbar' in actions and all_params.get('colorbar', False):
+            COLORBAR_KEYS = ['colorbar', 'fraction', 'aspect', 'fake']
+            params = filter_parameters(all_params, COLORBAR_KEYS, prefix='colorbar_', index=ax_num)
             # if colorbar is disabled for subplot, add param to plot fake axis instead to keep proportions
             params['fake'] = not params.pop('colorbar', True)
-            cls.add_colorbar(all_kwargs['base_image_axis'], **params)
-        if 'set_facecolor' in actions and all_kwargs.get('facecolor'):
-            ax.set_facecolor(all_kwargs['facecolor'])
-        if 'tick_params' in actions:
-            params = filter_parameters(all_kwargs, cls.TICK_KEYS, index=ax_num)
-            ax.tick_params(**params)
-        if 'disable_axes' in actions and all_kwargs.get('disable_axes'):
-            ax.set_axis_off()
-        if 'set_xlim' in actions:
-            ax.set_xlim(all_kwargs['xlim'])
-        if 'set_ylim' in actions:
-            ax.set_ylim(all_kwargs['ylim'])
+            cls.add_colorbar(all_params['base_image_ax'], **params)
         if 'add_legend' in actions:
-            params = filter_parameters(all_kwargs, cls.LEGEND_KEYS, prefix='legend_',
+            LEGEND_KEYS = ['label', 'size', 'cmap', 'color', 'loc']
+            params = filter_parameters(all_params, LEGEND_KEYS, prefix='legend_',
                                        index=(ax_num, slice(None)), main_index=slice(None))
             params['color'] = params.pop('cmap', None) or params.get('color')
             if params.get('label') is not None:
                 cls.add_legend(ax, **params)
+        if all_params.get('disable_axes'):
+            ax.set_axis_off()
 
     @staticmethod
     def save_and_show(fig, show=True, savepath=None, return_figure=False, pyqt=False, **kwargs):
@@ -324,7 +306,7 @@ class MatplotlibPlotter:
     # Rendering methods
 
     @classmethod
-    def plot(cls, arrays, mode='imshow', separate=False, **kwargs):
+    def plot(cls, data, mode='imshow', separate=False, **kwargs):
         """ Plot manager. Parses axes from kwargs if provided, else creates them. """
         METHOD_TO_MODE = {
             cls.imshow : ['show', 'imshow', 'single', 'overlap'],
@@ -338,23 +320,23 @@ class MatplotlibPlotter:
         if plot_method == cls.wiggle and separate: # pylint: disable=comparison-with-callable
             raise ValueError("Can't use `separate` option with `wiggle` mode.")
 
-        arrays = cls.make_nested_arrays(arrays=arrays, separate=separate)
-        axes = cls.make_axes(plot_method=plot_method, n_subplots=len(arrays), **kwargs)
-        for ax_num, (axis, ax_arrays) in enumerate(zip(axes, arrays)):
-            plot_method(axis=axis, arrays=ax_arrays, ax_num=ax_num, separate=separate, **kwargs)
+        data = cls.make_nested_data(data=data, separate=separate)
+        axes = cls.make_axes(plot_method=plot_method, n_subplots=len(data), **kwargs)
+        for ax_num, (ax, ax_data) in enumerate(zip(axes, data)):
+            plot_method(ax=ax, data=ax_data, ax_num=ax_num, separate=separate, **kwargs)
 
-        [axis.set_axis_off() for axis in axes[len(arrays):]] # pylint: disable=expression-not-assigned
+        [ax.set_axis_off() for ax in axes[len(data):]] # pylint: disable=expression-not-assigned
 
         return cls.save_and_show(fig=axes[0].figure, **kwargs)
 
 
     @classmethod
-    def imshow(cls, axis, arrays, ax_num, separate, **kwargs):
+    def imshow(cls, ax, data, ax_num, separate, **kwargs):
         """ Plot arrays as images one over another on given axis.
 
         Parameters
         ----------
-        arrays : list of np.ndarray
+        data : list of np.ndarray
             Every image must be a 2d array.
         kwargs : dict
             order_axes : tuple of ints
@@ -397,37 +379,37 @@ class MatplotlibPlotter:
                     'order_axes': (1, 0),
                     'bad_color': (.0,.0,.0,.0)}
 
-        all_kwargs = {**defaults, **kwargs}
+        all_params = {**defaults, **kwargs}
 
-        for image_num, array in enumerate(arrays):
-            image = np.transpose(array.squeeze(), axes=all_kwargs['order_axes'])
-            xticks = all_kwargs.get('xticks') or [0, image.shape[1]]
-            yticks = all_kwargs.get('yticks') or [image.shape[0], 0]
+        for image_num, image in enumerate(data):
+            image = np.transpose(image.squeeze(), axes=all_params['order_axes'])
+            xticks = all_params.get('xticks') or [0, image.shape[1]]
+            yticks = all_params.get('yticks') or [image.shape[0], 0]
             extent = [xticks[0], xticks[-1], yticks[0], yticks[-1]]
 
             main_index = ax_num if separate else image_num
-            params = filter_parameters(all_kwargs, cls.IMSHOW_KEYS, index=(ax_num, image_num), main_index=main_index)
-            params['cmap'] = cls.make_cmap(params.pop('cmap'), all_kwargs['bad_color'])
-            image_axis = axis.imshow(image, extent=extent, **params)
+            IMSHOW_KEYS = ['cmap', 'vmin', 'vmax', 'interpolation', 'alpha']
+            params = filter_parameters(all_params, IMSHOW_KEYS, index=(ax_num, image_num), main_index=main_index)
+            params['cmap'] = cls.make_cmap(params.pop('cmap'), all_params['bad_color'])
+            image_ax = ax.imshow(image, extent=extent, **params)
             if image_num == 0:
-                all_kwargs['base_image_axis'] = image_axis
+                all_params['base_image_ax'] = image_ax
 
         actions = ['set_title', 'set_suptitle',
                    'set_xlabel', 'set_ylabel',
                    'set_xticks', 'set_yticks',
-                   'set_facecolor', 'tick_params', 'disable_axes',
+                   'set_facecolor', 'tick_params',
                    'add_legend', 'add_colorbar']
-        cls.annotate_axis(axis, all_kwargs, actions, ax_num)
+        cls.annotate_axis(ax=ax, ax_num=ax_num, actions=actions, all_params=all_params)
 
 
     @classmethod
-    def wiggle(cls, axis, arrays, ax_num, curve=None, step=15, reverse=True,
-               width_multiplier=1, curve_width=1, **kwargs):
+    def wiggle(cls, ax, data, ax_num, curve=None, step=15, reverse=True, width_multiplier=1, curve_width=1, **kwargs):
         """ Make wiggle plot of signals array. Optionally overlap it with a curve.
 
         Parameters
         ----------
-        image : np.ndarray or list of np.ndarray
+        data : np.ndarray or list of np.ndarray
             If array, must be 2d.
             If list, must contain image and curve arrays.
             Curve, in turn must be either 1d array of heights or 2d array mask.
@@ -469,9 +451,9 @@ class MatplotlibPlotter:
                     # common
                     'fontsize': 20, 'label': ''}
 
-        all_kwargs = {**defaults, **kwargs}
+        all_params = {**defaults, **kwargs}
 
-        image, *curves = arrays
+        image, *curves = data
 
         offsets = np.arange(0, image.shape[0], step)
         y_order = -1 if reverse else 1
@@ -480,18 +462,18 @@ class MatplotlibPlotter:
         x_range = [] # accumulate traces to draw curve above them if needed
         for ix, k in enumerate(offsets):
             x = k + width_multiplier * image[k] / np.std(image)
-            wiggle_kwargs = filter_parameters(all_kwargs, ['color'], prefix='wiggle_', index=ix)
-            axis.plot(x, y_range, **wiggle_kwargs)
+            params = filter_parameters(all_params, ['color'], prefix='wiggle_', index=ix)
+            ax.plot(x, y_range, **params)
 
-            fill_color = all_kwargs.get('fill_color') or wiggle_kwargs['color']
-            axis.fill_betweenx(y_range, k, x, where=(x > k), color=fill_color)
+            fill_color = all_params.get('fill_color') or params['color']
+            ax.fill_betweenx(y_range, k, x, where=(x > k), color=fill_color)
             x_range.append(x)
         x_range = np.r_[x_range][:, ::y_order]
 
-        if 'xlim' not in all_kwargs:
-            all_kwargs['xlim'] = (x_range[0].min(), x_range[-1].max())
-        if 'ylim' not in all_kwargs:
-            all_kwargs['ylim'] = (y_range.min(), y_range.max())[::y_order]
+        if 'xlim' not in all_params:
+            all_params['xlim'] = (x_range[0].min(), x_range[-1].max())
+        if 'ylim' not in all_params:
+            all_params['ylim'] = (y_range.min(), y_range.max())[::y_order]
 
         for curve_num, curve in enumerate(curves):
             curve = curve[offsets]
@@ -504,16 +486,17 @@ class MatplotlibPlotter:
                 curve = (~np.isnan(curve)).nonzero()
                 curve_x = curve[0][(curve_width // 2)::curve_width]
                 curve_y = curve[1][(curve_width // 2)::curve_width]
-            curve_kwargs = filter_parameters(all_kwargs, cls.PLOT_KEYS, prefix='curve_', index=(curve_num))
-            axis.plot(x_range[curve_x, curve_y], curve_y, **curve_kwargs)
+            PLOT_KEYS = ['color', 'linestyle', 'marker', 'markersize']
+            params = filter_parameters(all_params, PLOT_KEYS, prefix='curve_', index=(curve_num))
+            ax.plot(x_range[curve_x, curve_y], curve_y, **params)
 
         # manage title, axis labels, colorbar, ticks
         actions = ['set_title', 'set_xlabel', 'set_ylabel', 'set_xlim', 'set_ylim', 'add_legend']
-        cls.annotate_axis(axis, all_kwargs, actions, ax_num)
+        cls.annotate_axis(ax=ax, ax_num=ax_num, actions=actions, all_params=all_params)
 
 
     @classmethod
-    def hist(cls, axis, arrays, ax_num, separate, **kwargs):
+    def hist(cls, ax, data, ax_num, separate, **kwargs):
         """ Plot histograms on given axis. """
         defaults = {# hist
                     'bins': 50,
@@ -531,24 +514,25 @@ class MatplotlibPlotter:
                     'fontsize': 20
         }
 
-        all_kwargs = {**defaults, **kwargs}
+        all_params = {**defaults, **kwargs}
 
-        for image_num, array in enumerate(arrays):
+        for image_num, array in enumerate(data):
             array = array.flatten()
             main_index = image_num if separate else ax_num
-            params = filter_parameters(all_kwargs, cls.HIST_KEYS, index=(ax_num, image_num), main_index=main_index)
-            axis.hist(array, **params)
+            HIST_KEYS = ['bins', 'color', 'density', 'alpha', 'range', 'weights', 'cumulative', 'log', 'histtype']
+            params = filter_parameters(all_params, HIST_KEYS, index=(ax_num, image_num), main_index=main_index)
+            ax.hist(array, **params)
 
         actions = ['set_title', 'set_suptitle',
                    'set_xlabel', 'set_ylabel',
                    'set_xticks', 'set_yticks',
                    'set_facecolor', 'tick_params', 'add_legend']
-        cls.annotate_axis(axis, all_kwargs, actions, ax_num)
+        cls.annotate_axis(ax=ax, ax_num=ax_num, actions=actions, all_params=all_params)
 
 
     @classmethod
-    def curve(cls, axis, arrays, ax_num, separate, average=False, window=10, **kwargs):
-        """ Plot histograms on given axis. """
+    def curve(cls, ax, data, ax_num, separate, average=False, window=10, **kwargs):
+        """ Plot curves on given axis. """
         defaults = {# curve
                     'color': ['firebrick', 'forestgreen', 'royalblue'],
                     'facecolor': 'white',
@@ -566,24 +550,25 @@ class MatplotlibPlotter:
                     'grid': True
         }
 
-        all_kwargs = {**defaults, **kwargs}
+        all_params = {**defaults, **kwargs}
 
-        for image_num, array in enumerate(arrays):
+        for image_num, array in enumerate(data):
             main_index = image_num if separate else ax_num
-            params = filter_parameters(all_kwargs, cls.PLOT_KEYS, index=(ax_num, image_num), main_index=main_index)
-            axis.plot(array, **params)
+            PLOT_KEYS = ['color', 'linestyle']
+            params = filter_parameters(all_params, PLOT_KEYS, index=(ax_num, image_num), main_index=main_index)
+            ax.plot(array, **params)
 
             if average:
                 averaged = array.copy()
                 averaged[(window // 2):(-window // 2 + 1)] = np.convolve(array, np.ones(window) / window, mode='valid')
                 averaged_color = cls.scale_lightness(params['color'], scale=1.5)
-                axis.plot(averaged, color=averaged_color, linestyle='--')
+                ax.plot(averaged, color=averaged_color, linestyle='--')
 
         actions = ['set_title', 'set_suptitle',
                    'set_xlabel', 'set_ylabel',
                    'set_xticks', 'set_yticks',
                    'tick_params', 'add_legend', 'add_grid']
-        cls.annotate_axis(axis, all_kwargs, actions, ax_num)
+        cls.annotate_axis(ax=ax, ax_num=ax_num, actions=actions, all_params=all_params)
 
 
 
@@ -708,25 +693,25 @@ class PlotlyPlotter:
                     'max_size' : 600,
                     'order_axes': (1, 0),
                     'slice': (slice(None, None), slice(None, None))}
-        all_kwargs = {**defaults, **kwargs}
+        all_params = {**defaults, **kwargs}
 
         # form different groups of kwargs
-        render_kwargs = filter_parameters(all_kwargs, ['reversescale', 'colorscale', 'opacity', 'showscale'])
-        label_kwargs = filter_parameters(all_kwargs, ['xaxis', 'yaxis', 'coloraxis_colorbar', 'title'])
-        slc = all_kwargs['slice']
+        render_kwargs = filter_parameters(all_params, ['reversescale', 'colorscale', 'opacity', 'showscale'])
+        label_kwargs = filter_parameters(all_params, ['xaxis', 'yaxis', 'coloraxis_colorbar', 'title'])
+        slc = all_params['slice']
 
         # calculate canvas sizes
         width, height = image.shape[1], image.shape[0]
-        coeff = all_kwargs['max_size'] / max(width, height)
+        coeff = all_params['max_size'] / max(width, height)
         width = coeff * width
         height = coeff * height
 
         # plot the image and set titles
-        plot_data = go.Heatmap(z=np.transpose(image, axes=all_kwargs['order_axes'])[slc], **render_kwargs)
+        plot_data = go.Heatmap(z=np.transpose(image, axes=all_params['order_axes'])[slc], **render_kwargs)
         fig = go.Figure(data=plot_data)
         fig.update_layout(width=width, height=height, **label_kwargs)
 
-        cls.save_and_show(fig, **all_kwargs)
+        cls.save_and_show(fig, **all_params)
 
     @classmethod
     def overlap(cls, images, **kwargs):
@@ -765,33 +750,33 @@ class PlotlyPlotter:
                     'max_size' : 600,
                     'order_axes': (1, 0),
                     'slice': (slice(None, None), slice(None, None))}
-        all_kwargs = {**defaults, **kwargs}
+        all_params = {**defaults, **kwargs}
 
         # form different groups of kwargs
-        render_kwargs = filter_parameters(all_kwargs, ['zmin', 'zmax'])
-        label_kwargs = filter_parameters(all_kwargs, ['xaxis', 'yaxis', 'coloraxis_colorbar', 'title'])
-        slc = all_kwargs['slice']
+        render_kwargs = filter_parameters(all_params, ['zmin', 'zmax'])
+        label_kwargs = filter_parameters(all_params, ['xaxis', 'yaxis', 'coloraxis_colorbar', 'title'])
+        slc = all_params['slice']
 
         # calculate canvas sizes
         width, height = images[0].shape[1], images[0].shape[0]
-        coeff = all_kwargs['max_size'] / max(width, height)
+        coeff = all_params['max_size'] / max(width, height)
         width = coeff * width
         height = coeff * height
 
         # manually combine first image in greyscale and the rest ones colored differently
-        combined = cls.channelize_image(255 * np.transpose(images[0], axes=all_kwargs['order_axes']),
+        combined = cls.channelize_image(255 * np.transpose(images[0], axes=all_params['order_axes']),
                                     total_channels=4, greyscale=True)
         for i, img in enumerate(images[1:]):
-            color = all_kwargs['colors'][i]
-            combined += cls.channelize_image(255 * np.transpose(img, axes=all_kwargs['order_axes']),
-                                         total_channels=4, color=color, opacity=all_kwargs['opacity'])
+            color = all_params['colors'][i]
+            combined += cls.channelize_image(255 * np.transpose(img, axes=all_params['order_axes']),
+                                         total_channels=4, color=color, opacity=all_params['opacity'])
         plot_data = go.Image(z=combined[slc], **render_kwargs) # plot manually combined image
 
         # plot the figure
         fig = go.Figure(data=plot_data)
         fig.update_layout(width=width, height=height, **label_kwargs)
 
-        cls.save_and_show(fig, **all_kwargs)
+        cls.save_and_show(fig, **all_params)
 
     @classmethod
     def rgb(cls, image, **kwargs):
@@ -823,25 +808,25 @@ class PlotlyPlotter:
                     'max_size' : 600,
                     'order_axes': (1, 0, 2),
                     'slice': (slice(None, None), slice(None, None))}
-        all_kwargs = {**defaults, **kwargs}
+        all_params = {**defaults, **kwargs}
 
         # form different groups of kwargs
-        render_kwargs = filter_parameters(all_kwargs, [])
-        label_kwargs = filter_parameters(all_kwargs, ['xaxis', 'yaxis', 'coloraxis_colorbar', 'title'])
-        slc = all_kwargs['slice']
+        render_kwargs = filter_parameters(all_params, [])
+        label_kwargs = filter_parameters(all_params, ['xaxis', 'yaxis', 'coloraxis_colorbar', 'title'])
+        slc = all_params['slice']
 
         # calculate canvas sizes
         width, height = image.shape[1], image.shape[0]
-        coeff = all_kwargs['max_size'] / max(width, height)
+        coeff = all_params['max_size'] / max(width, height)
         width = coeff * width
         height = coeff * height
 
         # plot the image and set titles
-        plot_data = go.Image(z=np.transpose(image, axes=all_kwargs['order_axes'])[slc], **render_kwargs)
+        plot_data = go.Image(z=np.transpose(image, axes=all_params['order_axes'])[slc], **render_kwargs)
         fig = go.Figure(data=plot_data)
         fig.update_layout(width=width, height=height, **label_kwargs)
 
-        cls.save_and_show(fig, **all_kwargs)
+        cls.save_and_show(fig, **all_params)
 
     @classmethod
     def separate(cls, images, **kwargs):
@@ -874,26 +859,26 @@ class PlotlyPlotter:
                     'order_axes': (1, 0),
                     'slice': (slice(None, None), slice(None, None))}
         grid = (1, len(images))
-        all_kwargs = {**defaults, **kwargs}
+        all_params = {**defaults, **kwargs}
 
         # form different groups of kwargs
-        render_kwargs = filter_parameters(all_kwargs, [])
-        label_kwargs = filter_parameters(all_kwargs, ['title'])
-        xaxis_kwargs = filter_parameters(all_kwargs, ['xaxis'])
-        yaxis_kwargs = filter_parameters(all_kwargs, ['yaxis'])
-        slc = all_kwargs['slice']
+        render_kwargs = filter_parameters(all_params, [])
+        label_kwargs = filter_parameters(all_params, ['title'])
+        xaxis_kwargs = filter_parameters(all_params, ['xaxis'])
+        yaxis_kwargs = filter_parameters(all_params, ['yaxis'])
+        slc = all_params['slice']
 
         # make sure that the images are greyscale and put them each on separate canvas
         fig = make_subplots(rows=grid[0], cols=grid[1])
         for i in range(grid[1]):
-            img = cls.channelize_image(255 * np.transpose(images[i], axes=all_kwargs['order_axes']),
+            img = cls.channelize_image(255 * np.transpose(images[i], axes=all_params['order_axes']),
                                    total_channels=4, greyscale=True, opacity=1)
             fig.add_trace(go.Image(z=img[slc], **render_kwargs), row=1, col=i + 1)
             fig.update_xaxes(row=1, col=i + 1, **xaxis_kwargs['xaxis'])
             fig.update_yaxes(row=1, col=i + 1, **yaxis_kwargs['yaxis'])
         fig.update_layout(**label_kwargs)
 
-        cls.save_and_show(fig, **all_kwargs)
+        cls.save_and_show(fig, **all_params)
 
 def show_3d(x, y, z, simplices, title, zoom_slice, colors=None, show_axes=True, aspect_ratio=(1, 1, 1),
             axis_labels=None, width=1200, height=1200, margin=(0, 0, 20), savepath=None,
