@@ -18,6 +18,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 from .utils import to_list
+from ..batchflow import deprecated
 
 
 
@@ -94,7 +95,7 @@ def plot_loss(*data, title=None, **kwargs):
         'label': title or 'Loss graph',
         **kwargs
     }
-    plot_image(data, mode='curve', backend='mpl', **kwargs)
+    return plot_image(data, mode='curve', backend='mpl', **kwargs)
 
 
 class MatplotlibPlotter:
@@ -299,6 +300,9 @@ class MatplotlibPlotter:
             params['b'] = params.pop('grid', None) or params.get('b')
             ax.grid(**params)
 
+        if all_params.get('set_axisbelow'):
+            ax.set_axisbelow(True)
+
         if all_params.get('disable_axes'):
             ax.set_axis_off()
 
@@ -318,6 +322,7 @@ class MatplotlibPlotter:
         else:
             plt.close()
 
+        plot_image.last_figure = fig
         if return_figure:
             return fig
         return None
@@ -378,7 +383,7 @@ class MatplotlibPlotter:
                 See class and method defaults for arguments names.
         """
         defaults = {# image imshow
-                    'cmap': ['Greys_r', 'firebrick', 'forestgreen', 'royalblue'],
+                    'cmap': ['Greys_r', 'firebrick', 'forestgreen', 'royalblue', 'sandybrown', 'darkorchid'],
                     'facecolor': 'white',
                     # axis labels
                     'xlabel': '', 'ylabel': '',
@@ -390,6 +395,7 @@ class MatplotlibPlotter:
                     'labelright': True,
                     'direction': 'inout',
                     # legend
+                    'legend_loc': 0,
                     'legend_size': 10,
                     'legend_label': None,
                     # common
@@ -455,19 +461,27 @@ class MatplotlibPlotter:
         """
         defaults = {# wiggle
                     'wiggle_color': 'k',
+                    'wiggle_linestyle': '-',
                     # curve
                     'color': 'r',
                     'marker': 'o',
-                    'curve_linestyle': '',
-                    #
+                    'linestyle': '',
+                    # title
                     'title_color': 'k',
                     # axis labels
                     'xlabel': '', 'ylabel': '',
                     'xlabel_color': 'k', 'ylabel_color': 'k',
+                    # ticks
+                    'labeltop': True,
+                    'labelright': True,
+                    'direction': 'inout',
                     # legend
                     'legend_loc': 1,
                     'legend_size': 15,
+                    # grid
+                    'grid_axis': 'y',
                     # common
+                    'set_axisbelow': True,
                     'fontsize': 20, 'label': ''}
 
         all_params = {**defaults, **kwargs}
@@ -509,7 +523,10 @@ class MatplotlibPlotter:
             ax.plot(x_range[curve_x, curve_y], curve_y, **params)
 
         # manage title, axis labels, colorbar, ticks
-        actions = ['set_title', 'set_xlabel', 'set_ylabel', 'set_xlim', 'set_ylim', 'add_legend']
+        actions = ['set_title', 'set_suptitle',
+                   'set_xlabel', 'set_ylabel',
+                   'set_xlim', 'set_ylim',
+                   'tick_params', 'add_legend', 'add_grid']
         cls.annotate_axis(ax=ax, ax_num=ax_num, actions=actions, all_params=all_params)
 
 
@@ -518,7 +535,8 @@ class MatplotlibPlotter:
         """ Plot histograms on given axis. """
         defaults = {# hist
                     'bins': 50,
-                    'color': ['firebrick', 'forestgreen', 'royalblue'],
+                    'color': ['firebrick', 'forestgreen', 'royalblue', 'sandybrown', 'darkorchid'],
+                    'alpha': 0.8,
                     'facecolor': 'white',
                     # title
                     'title_color' : 'k',
@@ -529,7 +547,10 @@ class MatplotlibPlotter:
                     'legend_size': 10,
                     'legend_label': None,
                     'legend_loc': 0,
+                    # grid
+                    'grid': True,
                     # common
+                    'set_axisbelow': True,
                     'fontsize': 20
         }
 
@@ -538,7 +559,8 @@ class MatplotlibPlotter:
         for image_num, array in enumerate(data):
             array = array.flatten()
             main_index = ax_num if separate else image_num
-            keys = ['bins', 'color', 'density', 'alpha', 'range', 'weights', 'cumulative', 'log', 'histtype']
+            keys = ['bins', 'color', 'density', 'alpha', 'range',
+                    'weights', 'cumulative', 'log', 'histtype', 'orientation']
             params = filter_parameters(all_params, keys, index=(ax_num, image_num), main_index=main_index)
             ax.hist(array, **params)
 
@@ -546,7 +568,7 @@ class MatplotlibPlotter:
         actions = ['set_title', 'set_suptitle',
                    'set_xlabel', 'set_ylabel',
                    'set_xticks', 'set_yticks',
-                   'tick_params', 'add_legend']
+                   'tick_params', 'add_legend', 'add_grid']
         cls.annotate_axis(ax=ax, ax_num=ax_num, actions=actions, all_params=all_params)
 
 
@@ -590,12 +612,13 @@ class MatplotlibPlotter:
         cls.annotate_axis(ax=ax, ax_num=ax_num, actions=actions, all_params=all_params)
 
 
-
 class PlotlyPlotter:
-    """ Plotting backend for plotly.
-    """
+    """ Plotting backend for plotly. """
+
+    DEPRECATION_MESSAGE = "Plotly backend is deprecated."
+
     @staticmethod
-    def convert_kwargs(mode, backend, kwargs):
+    def convert_kwargs(mode, kwargs):
         """ Update kwargs-dict to match plotly-conventions: update keys of the dict and
         values in some cases.
         """
@@ -675,6 +698,7 @@ class PlotlyPlotter:
             fig.close()
 
     @classmethod
+    @deprecated(DEPRECATION_MESSAGE)
     def single(cls, image, **kwargs):
         """ Plot single image/heatmap using plotly.
 
@@ -733,6 +757,7 @@ class PlotlyPlotter:
         cls.save_and_show(fig, **all_params)
 
     @classmethod
+    @deprecated(DEPRECATION_MESSAGE)
     def overlap(cls, images, **kwargs):
         """ Plot several images on one canvas using plotly: render the first one in greyscale
         and the rest ones in opaque 'rgb' channels, one channel for each image.
@@ -798,6 +823,7 @@ class PlotlyPlotter:
         cls.save_and_show(fig, **all_params)
 
     @classmethod
+    @deprecated(DEPRECATION_MESSAGE)
     def rgb(cls, image, **kwargs):
         """ Plot one image in 'rgb' using plotly.
 
@@ -848,6 +874,7 @@ class PlotlyPlotter:
         cls.save_and_show(fig, **all_params)
 
     @classmethod
+    @deprecated(DEPRECATION_MESSAGE)
     def separate(cls, images, **kwargs):
         """ Plot several images on a row of canvases using plotly.
         TODO: add grid support.

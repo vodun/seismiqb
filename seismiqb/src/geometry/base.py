@@ -646,7 +646,7 @@ class SeismicGeometry(ExportMixin):
             **kwargs
             }
         matrix = getattr(self, matrix) if isinstance(matrix, str) else matrix
-        plot_image(matrix, mode='single', **kwargs)
+        return plot_image(matrix, mode='single', **kwargs)
 
     def show_histogram(self, normalize=None, bins=50, **kwargs):
         """ Show distribution of amplitudes in `trace_container`. Optionally applies chosen normalization. """
@@ -662,7 +662,7 @@ class SeismicGeometry(ExportMixin):
             'ylabel': 'density',
             **kwargs
         }
-        plot_image(data, backend='matplotlib', bins=bins, mode='histogram', **kwargs)
+        return plot_image(data, backend='matplotlib', bins=bins, mode='histogram', **kwargs)
 
     def show_slide(self, loc=None, start=None, end=None, step=1, axis=0, zoom_slice=None,
                    n_ticks=5, delta_ticks=100, stable=True, **kwargs):
@@ -728,7 +728,7 @@ class SeismicGeometry(ExportMixin):
             'labelright': False,
             **kwargs
         }
-        plot_image(slide, **kwargs)
+        return plot_image(slide, **kwargs)
 
     def show_quality_map(self, **kwargs):
         """ Show quality map. """

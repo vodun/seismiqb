@@ -295,7 +295,7 @@ class UnstructuredHorizon:
             'ylabel': 'Depth', 'y': 1.015,
             **kwargs
         }
-        plot_image([seismic_slide, mask], order_axes=order_axes, **kwargs)
+        return plot_image([seismic_slide, mask], order_axes=order_axes, **kwargs)
 
 
 
@@ -2139,7 +2139,7 @@ class Horizon:
             **kwargs
             }
         matrix[matrix == fill_value] = np.nan
-        plot_image(matrix, **kwargs)
+        return plot_image(matrix, **kwargs)
 
 
     def show_amplitudes_rgb(self, width=3, channel_weights=(1, 0.5, 0.25), to_uint8=True,
@@ -2183,7 +2183,7 @@ class Horizon:
             **kwargs
             }
 
-        plot_image(amplitudes, mode='imshow', **kwargs)
+        return plot_image(amplitudes, mode='imshow', **kwargs)
 
 
     def show_3d(self, n_points=100, threshold=100., z_ratio=1., zoom_slice=None, show_axes=True,
@@ -2356,7 +2356,7 @@ class Horizon:
             **kwargs
         }
 
-        plot_image(image=[seismic_slide, mask], mode=mode, separate=separate, **kwargs)
+        return plot_image(image=[seismic_slide, mask], mode=mode, separate=separate, **kwargs)
 
 
     def reset_cache(self):

@@ -559,7 +559,7 @@ class SeismicCubeset(Dataset):
             'cmap': 'Reds',
             **kwargs
         }
-        plot_image(map_, **kwargs)
+        return plot_image(map_, **kwargs)
 
     def make_grid(self, cube_name, crop_shape, ilines=None, xlines=None, heights=None, mode='3d',
                   strides=None, overlap=None, overlap_factor=None,
