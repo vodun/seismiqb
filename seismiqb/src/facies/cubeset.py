@@ -297,8 +297,7 @@ class FaciesCubeset(SeismicCubeset):
             prediction = copy(label)
             prediction.name = label.name
             cube_name = label.geometry.short_name
-            self.make_grid(cube_name=cube_name, crop_shape=crop_shape, overlap_factor=overlap_factor,
-                           heights=int(label.h_mean), mode='2d')
+            self.make_grid(cube_name=cube_name, crop_shape=crop_shape, overlap_factor=overlap_factor, label=label)
             pipeline = pipeline << self
             pipeline.update_config({'src_labels': src_labels, 'base_horizon': label})
             pipeline.run(batch_size=self.size, n_iters=self.grid_iters, bar=bar)

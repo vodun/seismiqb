@@ -127,7 +127,7 @@ class FaciesInfo():
         info.update(kwargs)
 
         # Pop any unexpected keys from `info`
-        provided_keys = info.keys()
+        provided_keys = list(info.keys())
         unrecognized_keys = [info.pop(key) for key in provided_keys if key not in cls.DEFAULT_INFO]
         if unrecognized_keys:
             warn(f"Unknown arguments ignored:\n{unrecognized_keys}")
