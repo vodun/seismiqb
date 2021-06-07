@@ -117,10 +117,6 @@ class SeismicCubeset(Dataset):
         """ Allows to pass `sampler` directly to `next_batch` method to avoid re-creating of batch
         during pipeline run.
         """
-        #pylint: disable=blacklisted-name
-        if n_epochs is not None or shuffle or drop_last:
-            raise ValueError('SeismicCubeset does not comply with `n_epochs`, `shuffle`\
-                              and `drop_last`. Use `n_iters` instead! ')
         if sampler:
             sampler = sampler if callable(sampler) else sampler.sample
             points = sampler(batch_size * n_iters)
@@ -1309,7 +1305,7 @@ class SeismicCubeset(Dataset):
             )
             chunk_pipeline = pipeline << self
             for _ in range(self.grid_iters):
-                _ = chunk_pipeline.next_batch(len(self))
+                batch = chunk_pipeline.next_batch(len(self), n_epochs=None, n_iters=None)
                 if pbar:
                     progress_bar.update(1)
             prediction = self.assemble_crops(chunk_pipeline.v(src), order=order, fill_value=fill_value)

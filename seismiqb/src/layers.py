@@ -3,6 +3,7 @@ import torch
 import numpy as np
 from torch import nn
 import torch.nn.functional as F
+from torch.cuda.amp import autocast
 
 from ..batchflow.models.torch import ResBlock
 
@@ -62,6 +63,7 @@ class MovingNormalizationLayer(nn.Module):
         self.ndim = inputs.ndim
         self.kernel = torch.ones((1, 1, *window), dtype=torch.float32, requires_grad=False).to(inputs.device)
 
+    @autocast(enabled=False)
     def forward(self, x):
         ndim = x.ndim
         device = x.device
@@ -75,11 +77,9 @@ class MovingNormalizationLayer(nn.Module):
             # n = torch.ones_like(x, dtype=torch.float32, device=device, requires_grad=False)
             # n = F.conv3d(n, torch.ones((1, 1, *window), dtype=torch.float32, requires_grad=False).to(device))
         n = np.prod(self.window)
-        num = (num - num.min()) / (num.max() - num.min())
         mean = F.conv3d(num, self.kernel / n)
         mean_2 = F.conv3d(num ** 2, self.kernel / n)
         std = torch.clip(mean_2 - mean ** 2, min=0) ** 0.5
-        print(x.shape, x.min(), x.max(), std.min(), std.max())
         if self.padding == 'valid':
             x = x[:, :, pad[0][0]:x.shape[2]-pad[0][1], pad[1][0]:x.shape[3]-pad[1][1], pad[2][0]:x.shape[4]-pad[2][1]]
         result = torch.nan_to_num((x - mean) / std, nan=self.fill_value)
@@ -170,7 +170,6 @@ class InputLayer(nn.Module):
     def forward(self, x):
         """ Forward pass. """
         if self.normalization:
-            i = x
             x = self.normalization_layer(x)
             x = torch.clip(x,  -10, 10) # TODO: remove clipping
         if self.phases:

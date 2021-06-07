@@ -374,10 +374,11 @@ class Fault(Horizon):
         labels = labels[np.argsort(labels[:, 3])]
         labels = np.array(np.split(labels[:, :-1], np.unique(labels[:, 3], return_index=True)[1][1:]), dtype=object)
         sizes = faults_sizes(labels)
+        labels = sorted(zip(sizes, labels), key=lambda x: x[0], reverse=True)
         if threshold:
-            labels = labels[sizes >= threshold]
+            labels = [item for item in labels if item[0] >= threshold]
         if geometry is not None:
-            labels = [Fault(points.astype('int32'), geometry=geometry) for points in labels]
+            labels = [Fault(item[1].astype('int32'), geometry=geometry) for item in labels]
         return labels
 
 def faults_sizes(labels):

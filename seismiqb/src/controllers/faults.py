@@ -4,10 +4,9 @@
     - making an inference on selected data
 """
 import os
-import glob
-import datetime
+from datetime import datetime
 import tqdm
-import copy
+from shutil import copyfile
 
 import numpy as np
 import torch
@@ -16,10 +15,10 @@ from ...batchflow import Config, Pipeline, Notifier
 from ...batchflow import B, C, D, P, R, V, F, I
 from ...batchflow.models.torch import TorchModel, ResBlock, EncoderDecoder
 from .base import BaseController
-from ..cubeset import SeismicCubeset
+from ..cubeset import SeismicCubeset, SeismicGeometry
 from ..fault import Fault
 from ..layers import InputLayer
-from ..utils import adjust_shape_3d, fill_defaults
+from ..utils import adjust_shape_3d, fill_defaults, compute_attribute
 from ..plotters import plot_image
 
 class FaultController(BaseController):
@@ -164,6 +163,8 @@ class FaultController(BaseController):
         weights = weights.clip(min=0.1)
         weights /= weights.sum()
 
+        self.weights = weights
+        
         dataset.create_sampler(p=list(weights))
         dataset.modify_sampler(dst='train_sampler', finish=True, low=0.0, high=1.0)
 
@@ -288,7 +289,7 @@ class FaultController(BaseController):
         if train_pipeline is not None:
             test_pipeline = Pipeline().import_model('model', train_pipeline)
         else:
-            test_pipeline = Pipeline().load_model(mode='dynamic', model_class=TorchModel, name='model', path=model_path)
+            test_pipeline = Pipeline().load_model('model', TorchModel, 'dynamic', path=model_path)
 
         test_pipeline += self.load_pipeline(create_masks=create_masks, train=False)
 
@@ -319,7 +320,18 @@ class FaultController(BaseController):
         if create_masks:
             test_pipeline += Pipeline().update(V('target', mode='e'), B('masks'))
         test_pipeline += Pipeline().update(V('predictions', mode='e'), B('predictions'))
+        test_pipeline += self.metrics_pipeline_template()
         return test_pipeline
+
+    def metrics_pipeline_template(self, n_bins=1000):
+        return (Pipeline()
+            .init_variable('metric', [])
+            .init_variable('semblance_hist', np.zeros(n_bins))
+            .compute_attribute(src='images', dst='semblance', attribute='semblance', window=(1, 5, 20))
+            .update(V('metric', mode='e'), F(similarity_metric)(B('semblance'), B('predictions')))
+            .update(V('semblance_hist'), V('semblance_hist') + F(np.histogram)(B('semblance').flatten(),
+                    bins=n_bins, range=(0, 1))[0])
+        )
 
     def make_inference_dataset(self, labels=False, **kwargs):
         config = {**self.config['inference'], **self.config['dataset'], **kwargs}
@@ -388,7 +400,7 @@ class FaultController(BaseController):
                     slices[1][0]:slices[1][1],
                     slices[2][0]:slices[2][1]
                 ]
-                outputs[cube_idx] += [[slices, image, prediction]]
+                outputs[cube_idx] += [[slices, image, prediction, np.nanmean(ppl.v('metric')), np.argmax(ppl.v('semblance_hist')) / 1000]]
                 if create_mask:
                     outputs[cube_idx][-1] += [dataset.assemble_crops(ppl.v('target'), order=order, fill_value=0).astype('float32')]
         return outputs
@@ -396,27 +408,29 @@ class FaultController(BaseController):
     def plot_inference(self, *args, savepath=None, overlap=True, threshold=0.05, each=100, iteration=0, **kwargs):
         if iteration % each == 0:
             results = self.inference_on_slides(*args, **kwargs)
-            savepath = os.path.join(self.config['savedir'], savepath)
+            savepath = os.path.join(self.config['savedir'], savepath) if savepath is not None else None
             for cube in results:
                 for item in results[cube]:
-                    slices, image, prediction = item[:3]
-                    _savepath = None if savepath is None else (savepath + '_' + str(slices) + '_' + str(iteration) + '.png')
+                    slices, image, prediction, faults_metric, noise_metric = item[:5]
+                    _savepath = None if savepath is None else f'{savepath}_{slices}_{iteration}_{faults_metric:.03f}_{noise_metric:.03f}.png'
                     prediction = prediction[0]
                     prediction[prediction < threshold] = 0
                     if overlap:
                         plot_image([image[0], prediction], mode='overlap', cmap='gray', figsize=(20, 20), savepath=_savepath)
                     else:
                         plot_image(prediction, figsize=(20, 20), savepath=_savepath)
+            return faults_metric, noise_metric
+        return None, None
 
     def inference_on_cube(self, pipeline=None, model_path=None, fmt='npy', save_to=None, prefix=None, threshold=0.5, bar=True, **kwargs):
         config = {**self.config['inference'], **kwargs}
         strides = config['stride'] if isinstance(config['stride'], tuple) else [config['stride']] * 3
         batch_size = config['batch_size']
-        chunk_shape = config['chunk_shape']
+        chunk_shape = config['inference_chunk_shape']
 
         self.log(f'Create test pipeline and dataset.')
-        dataset = self.make_inference_dataset(create_mask)
-        inference_pipeline = self.get_inference_template(train_pipeline, model_path, create_mask)
+        dataset = self.make_inference_dataset(create_mask=False)
+        inference_pipeline = self.get_inference_template(pipeline, model_path, create_masks=False)
         inference_pipeline.set_config(config)
 
         inference_cubes = {
@@ -449,15 +463,17 @@ class FaultController(BaseController):
                     crop_shape = config['crop_shape']
                     order = (0, 1, 2)
                     _chunk_shape = chunk_shape
+                    t = False
                 else:
                     crop_shape = np.array(config['crop_shape'])[[1, 0, 2]]
                     order = (1, 0, 2)
                     _chunk_shape = (chunk_shape[1], chunk_shape[0], chunk_shape[2])
+                    t = True
                 inference_pipeline.set_config({'test_crop_shape': crop_shape})
                 _strides = np.maximum(np.array(crop_shape) * np.array(strides), 1).astype(int)
                 slices = fill_defaults(slices, [[0, i] for i in shape])
 
-                filename = {ext: os.path.join(dirname, self.make_filename(prefix, 'x' if t else 'i', ext)) for ext in ['hdf5', 'sgy', 'npy', 'meta']}
+                filename = {ext: os.path.join(dirname, self.make_filename(prefix, 'x' if t else 'i', ext)) for ext in ['hdf5', 'sgy', 'qblosc', 'npy', 'meta']}
                 if fmt == 'npy':
                     _filename = None
                 elif fmt in ['hdf5', 'sgy']:
@@ -493,7 +509,10 @@ class FaultController(BaseController):
 
     def amplitudes_path(self, cube):
         ext = self.config['dataset/ext']
-        return glob.glob(self.config['dataset/path'] + 'CUBE_' + cube + f'/amplitudes*.{ext}')[0]
+        filename = self.config['dataset/path'] + 'CUBE_' + cube + f'/amplitudes_{cube}.{ext}'
+        if os.path.exists(filename):
+            return filename
+        raise ValueError(f"File doesn't exist: {filename}")
 
     def cube_name_from_alias(self, path):
         return os.path.splitext(self.amplitudes_path(path).split('/')[-1])[0]
@@ -562,3 +581,64 @@ class FaultController(BaseController):
 #             self.plots[var_name] = self.viz.image(image, opts=dict(caption=self.env), env=self.env)
 #         else:
 #             self.viz.image(image, win=self.plots[var_name], env=self.env, opts=dict(caption=self.env))
+
+def sum_with_axes(array, axes=None):
+    if axes is None:
+        return array.sum()
+    if isinstance(axes, int):
+        axes = [axes]
+    res = array
+    axes = sorted(axes)
+    for i, axis in enumerate(axes):
+        res = res.sum(axis=axis-i)
+    return res
+
+def mean(array, axes=None):
+    if axes is None:
+        return array.mean()
+    if isinstance(axes, int):
+        axes = [axes]
+    res = array
+    axes = sorted(axes)
+    for i, axis in enumerate(axes):
+        res = res.mean(axis=axis-i)
+    return res
+
+def similarity_metric(semblance, masks, threshold=None):
+    SHIFTS = [-20, -15, -5, 5, 15, 20]
+    if threshold:
+        masks = masks > threshold
+    if semblance.ndim == 2:
+        semblance = np.expand_dims(semblance, axis=0)
+    if semblance.ndim == 3:
+        semblance = np.expand_dims(semblance, axis=0)
+
+    if masks.ndim == 2:
+        masks = np.expand_dims(masks, axis=0)
+    if masks.ndim == 3:
+        masks = np.expand_dims(masks, axis=0)
+
+    res = []
+    m = sum_with_axes(masks * (1 - semblance), axes=[1,2,3])
+    weights = np.ones((len(SHIFTS), 1))
+    weights = weights / weights.sum()
+    for i in SHIFTS:
+        random_mask = shift(masks, shift=i)
+        rm = sum_with_axes(random_mask * (1 - semblance), axes=[1,2,3])
+        ratio = m/rm
+        res += [np.log(ratio)]
+    res = np.stack(res, axis=0)
+    res = (res * weights).sum(axis=0)
+    res = np.clip(res, -2, 2)
+    return res
+
+def shift(array, shift=20):
+    result = np.zeros_like(array)
+    for i, _array in enumerate(array):
+        if shift > 0:
+            result[i][:, shift:] = _array[:, :-shift]
+        elif shift < 0:
+            result[i][:, :shift] = _array[:, -shift:]
+        else:
+            result[i] = _array
+    return result
