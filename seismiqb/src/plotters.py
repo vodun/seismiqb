@@ -36,23 +36,24 @@ register_cmap(name='Depths', cmap=DEPTHS_CMAP)
 
 
 
-def filter_parameters(kwargs, keys, prefix='', index=None, main_index=None):
+def filter_parameters(params, keys, prefix='', index=None, main_index=None):
     """ Make a subdictionary of arguments with required keys.
 
     Parameters
     ----------
-    kwargs : dict
+    params : dict
         Arguments to filter.
     keys : sequence
         Keys to retrieve.
     prefix : str, optional
-        If a key with prefix is in kwargs, get its value.
-        If not, try to get value by the key itself.
+        Arguments with keys starting with given prefix will also be retrieved.
         Defaults to `''`, i.e. no prefix used.
     index : int or sequence of 2 ints, optional
-        Indices of component to retrieve.
-        If none provided, get whole component value.
+        Indices of argument value to retrieve.
+        If none provided, get whole argument value.
         If value is non-indexable, get it without indexing.
+    main_index : int, optional
+        Index to use if component is non-indexable twice.
     """
     result = {}
     index = to_list(index)
@@ -60,8 +61,10 @@ def filter_parameters(kwargs, keys, prefix='', index=None, main_index=None):
     main_index = main_index or outer_index
     indexable = lambda x: isinstance(x, (tuple, list))
 
+    if prefix:
+        keys += [key.split(prefix)[1] for key in params if key.startswith(prefix)]
     for key in keys:
-        value = kwargs.get(prefix + key, kwargs.get(key))
+        value = params.get(prefix + key, params.get(key))
         if value is None:
             continue
         if indexable(value):
@@ -87,15 +90,16 @@ def plot_image(data, mode='imshow', backend='matplotlib', **kwargs):
     raise ValueError('{} backend is not supported!'.format(backend))
 
 
-def plot_loss(*data, title=None, **kwargs):
+def plot_loss(data, title=None, **kwargs):
     """ Shorthand for loss plotting. """
     kwargs = {
         'xlabel': 'Iterations',
         'ylabel': 'Loss',
         'label': title or 'Loss graph',
+        'xlim': [0, None],
         **kwargs
     }
-    return plot_image(data, mode='curve', backend='mpl', **kwargs)
+    return plot_image(data, mode='curve', backend='matplotlib', **kwargs)
 
 
 class MatplotlibPlotter:
@@ -103,11 +107,12 @@ class MatplotlibPlotter:
 
     Consists of supplementary and rendering methods. The latter make heavy use of the following logic:
     1. Recieve a dict of kwargs for all plotting steps.
-    2. Using `filter_parameters` split this dict into subdicts for every plotting function:
-      a. First try to look for keys with specific prefix, if provided.
-      b. If no key with such prefix found, look for key without a prefix.
+    2. Via `filter_parameters` extract a subdict of parameters for used plotting function:
+       Parameter is retrieved if:
+       a. It is explicitly requested.
+       b. Its name starts with given prefix.
 
-    This trick allows one to pass arguments of the same name for different plotting steps.
+    This allows one to pass arguments of the same name for different plotting steps.
     E.g. `plt.set_title` and `plt.set_xlabel` both require `fontsize` argument.
     Providing `{'fontsize': 30}` in kwargs will affect both title and x-axis labels.
     To change parameter for title only, one can provide {'title_fontsize': 30}` instead.
@@ -116,37 +121,6 @@ class MatplotlibPlotter:
     """
 
     # Supplementary methods
-
-    @staticmethod
-    def convert_kwargs(mode, kwargs):
-        """ Make a dict of kwargs to match matplotlib-conventions: update keys of the dict and
-        values in some cases.
-        """
-        # make conversion-dict for kwargs-keys
-        keys_converter = {
-            'zmin': 'vmin', 'zmax': 'vmax',
-            'xaxis': 'xlabel', 'yaxis': 'ylabel'
-        }
-
-        if mode in ['single', 'rgb', 'overlap', 'histogram', 'curve', 'histogram']:
-            keys_converter.update({'title': 'label', 't': 'label'})
-        elif mode == 'separate':
-            keys_converter.update({'title': 't', 'label': 't'})
-        elif mode == 'grid':
-            keys_converter.update({'title': 't'})
-
-        # make new dict updating keys and values
-        converted = {}
-        for key, value in kwargs.items():
-            if key in keys_converter:
-                new_key = keys_converter[key]
-                if key in ['xaxis', 'yaxis']:
-                    converted[new_key] = value.get('title_text', '')
-                else:
-                    converted[new_key] = value
-            else:
-                converted[key] = value
-        return converted
 
     @staticmethod
     def make_nested_data(data, separate):
@@ -219,22 +193,19 @@ class MatplotlibPlotter:
 
     @staticmethod
     def add_legend(ax, color, label, size, loc):
-        """ Add a patch to legend. """
+        """ Add patches to legend. All invalid colors are filtered. """
         handles = getattr(ax.get_legend(), 'legendHandles', [])
-        colors = to_list(color)
-        labels = to_list(label)
-        if len(labels) == 1:
-            labels = labels * len(colors)
         VALID_COLORS = {**BASE_COLORS, **TABLEAU_COLORS, **CSS4_COLORS}
-        new_patches = [Patch(color=color, label=label) for color, label in zip(colors, labels)
-                       if (color in VALID_COLORS) and label]
+        colors = [color for color in to_list(color) if color in VALID_COLORS]
+        labels = to_list(label)
+        new_patches = [Patch(color=color, label=label) for color, label in zip(colors, labels) if label]
         handles += new_patches
         if handles:
             ax.legend(handles=handles, loc=loc, prop={'size': size})
 
     @classmethod
     def annotate_axis(cls, ax, ax_num, actions, all_params):
-        """ Make necessary annotations. """
+        """ Apply requested annotation functions to given axis with chosen parameters. """
         TEXT_KEYS = ['fontsize', 'family', 'color']
 
         if 'set_title' in actions:
@@ -273,12 +244,6 @@ class MatplotlibPlotter:
             params = filter_parameters(all_params, keys, index=ax_num)
             ax.tick_params(**params)
 
-        if 'set_xlim' in actions:
-            ax.set_xlim(all_params['xlim'])
-
-        if 'set_ylim' in actions:
-            ax.set_ylim(all_params['ylim'])
-
         if 'add_colorbar' in actions and all_params.get('colorbar', False):
             keys = ['colorbar', 'fraction', 'aspect', 'fake']
             params = filter_parameters(all_params, keys, prefix='colorbar_', index=ax_num)
@@ -299,6 +264,12 @@ class MatplotlibPlotter:
             params = filter_parameters(all_params, keys, prefix='grid_', index=ax_num)
             params['b'] = params.pop('grid', None) or params.get('b')
             ax.grid(**params)
+
+        if 'xlim' in all_params:
+            ax.set_xlim(all_params['xlim'])
+
+        if 'ylim' in all_params:
+            ax.set_ylim(all_params['ylim'])
 
         if all_params.get('set_axisbelow'):
             ax.set_axisbelow(True)
@@ -331,7 +302,24 @@ class MatplotlibPlotter:
 
     @classmethod
     def plot(cls, data, mode='imshow', separate=False, **kwargs):
-        """ Plot manager. Parses axes from kwargs if provided, else creates them. """
+        """ Plot manager. Parses axes from kwargs if provided, else creates them.
+
+        Parameters
+        ----------
+        data : np.ndarray or a list of np.ndarray objects (possibly nested)
+            If list has level 1 nestedness, 'overlaid/separate' logic is handled via `separate` parameter.
+            If list has level 2 nestedness, outer level defines subplots order while inner one defines layers order.
+        mode : 'imshow', 'wiggle', 'hist', 'curve'
+            If 'imshow' plot given arrays as images.
+            If 'wiggle' plot 1d subarrays of given array as signals.
+            Subarrays are extracted from given data with fixed step along vertical axis.
+            If 'hist' plot histogram of flattened array.
+            If 'curve' plot given arrays as curves.
+        separate : bool
+            Whether plot images on separate axes instead of putting them all together on a single one.
+            Incompatible with 'wiggle' mode.
+        kwargs : parameters for method corresponding to `mode`
+        """
         METHOD_TO_MODE = {
             cls.imshow : ['show', 'imshow', 'single', 'overlap'],
             cls.hist : ['hist', 'histogram'],
@@ -339,6 +327,9 @@ class MatplotlibPlotter:
             cls.curve : ['curve', 'plot', 'line']
         }
         MODE_TO_METHOD = {mode: method for method, modes in METHOD_TO_MODE.items() for mode in modes}
+
+        plotly_to_pyplot = {'zmin': 'vmin', 'zmax': 'vmax', 'xaxis': 'xlabel', 'yaxis': 'ylabel'}
+        [kwargs.update({new: kwargs[old]}) for old, new in plotly_to_pyplot.items() if old in kwargs] # pylint: disable=expression-not-assigned
 
         plot_method = MODE_TO_METHOD[mode]
         if plot_method == cls.wiggle and separate: # pylint: disable=comparison-with-callable
@@ -360,8 +351,12 @@ class MatplotlibPlotter:
 
         Parameters
         ----------
+        ax : matplotlib axis
+            Axis to plot images on.
         data : list of np.ndarray
-            Every image must be a 2d array.
+            Every item must be a valid matplotlib image.
+        ax_num : int
+            Number of axis on the whole figure. Required to obtain axis parameters from all parameters dict.
         kwargs : dict
             order_axes : tuple of ints
                 Order of image axes.
@@ -401,20 +396,33 @@ class MatplotlibPlotter:
                     # common
                     'fontsize': 20,
                     # other
-                    'order_axes': (1, 0),
-                    'bad_color': (.0,.0,.0,.0)}
+                    'order_axes': (1, 0, 2),
+                    'bad_color': (.0,.0,.0,.0),
+                    }
 
         all_params = {**defaults, **kwargs}
 
         for image_num, image in enumerate(data):
-            image = np.transpose(image.squeeze(), axes=all_params['order_axes'])
+            image = np.transpose(image, axes=all_params['order_axes'][:image.ndim]).astype(float)
+
+            unique_values = np.unique(image)
+            is_mask = len(unique_values) == 2 and unique_values[0] == 0
+            # if an image is a binary mask and no bad values list passed
+            # initialize it with zero (which is expected to be a background class)
+            bad_values = all_params.get('bad_values', [0] if is_mask else [])
+            bad_masks = [image == value for value in bad_values]
+            if bad_masks:
+                bads_mask = np.logical_or(*bad_masks) if len(bad_masks) > 1 else bad_masks[0]
+                image[bads_mask] = np.nan
+
             xticks = all_params.get('xticks') or [0, image.shape[1]]
             yticks = all_params.get('yticks') or [image.shape[0], 0]
             extent = [xticks[0], xticks[-1], yticks[0], yticks[-1]]
 
             main_index = ax_num if separate else image_num
             keys = ['cmap', 'vmin', 'vmax', 'interpolation', 'alpha']
-            params = filter_parameters(all_params, keys, index=(ax_num, image_num), main_index=main_index)
+            params = filter_parameters(all_params, keys, prefix='imshow_',
+                                       index=(ax_num, image_num), main_index=main_index)
             params['cmap'] = cls.make_cmap(params.pop('cmap'), all_params['bad_color'])
             image_ax = ax.imshow(image, extent=extent, **params)
             if image_num == 0:
@@ -525,7 +533,6 @@ class MatplotlibPlotter:
         # manage title, axis labels, colorbar, ticks
         actions = ['set_title', 'set_suptitle',
                    'set_xlabel', 'set_ylabel',
-                   'set_xlim', 'set_ylim',
                    'tick_params', 'add_legend', 'add_grid']
         cls.annotate_axis(ax=ax, ax_num=ax_num, actions=actions, all_params=all_params)
 
@@ -559,9 +566,8 @@ class MatplotlibPlotter:
         for image_num, array in enumerate(data):
             array = array.flatten()
             main_index = ax_num if separate else image_num
-            keys = ['bins', 'color', 'density', 'alpha', 'range',
-                    'weights', 'cumulative', 'log', 'histtype', 'orientation']
-            params = filter_parameters(all_params, keys, index=(ax_num, image_num), main_index=main_index)
+            params = filter_parameters(all_params, ['bins', 'color', 'alpha'], prefix='hist_',
+                                       index=(ax_num, image_num), main_index=main_index)
             ax.hist(array, **params)
 
 
@@ -573,7 +579,7 @@ class MatplotlibPlotter:
 
 
     @classmethod
-    def curve(cls, ax, data, ax_num, separate, average=False, window=10, **kwargs):
+    def curve(cls, ax, data, ax_num, separate, rolling_mean=None, final_mean=None, **kwargs):
         """ Plot curves on given axis. """
         defaults = {# curve
                     'color': ['skyblue', 'sandybrown', 'lightcoral'],
@@ -595,15 +601,35 @@ class MatplotlibPlotter:
 
         for image_num, array in enumerate(data):
             main_index = ax_num if separate else image_num
-            keys = ['color', 'linestyle']
-            params = filter_parameters(all_params, keys, index=(ax_num, image_num), main_index=main_index)
+            keys = ['color', 'linestyle', 'alpha']
+            params = filter_parameters(all_params, keys, prefix='curve_',
+                                       index=(ax_num, image_num), main_index=main_index)
             ax.plot(array, **params)
 
-            if average:
+            mean_color = cls.scale_lightness(params['color'], scale=.5)
+
+            if rolling_mean:
                 averaged = array.copy()
+                window = 10 if rolling_mean is True else rolling_mean
                 averaged[(window // 2):(-window // 2 + 1)] = np.convolve(array, np.ones(window) / window, mode='valid')
-                averaged_color = cls.scale_lightness(params['color'], scale=.5)
-                ax.plot(averaged, color=averaged_color, linestyle='--')
+                ax.plot(averaged, color=mean_color, linestyle='--')
+
+            if final_mean:
+                window = 100 if final_mean is True else final_mean
+                mean = np.mean(array[-window:])
+
+                line_len = 50
+                curve_len = len(array)
+                line_x = np.arange(line_len) + curve_len
+                line_y = [mean] * line_len
+                ax.plot(line_x, line_y, linestyle='--', linewidth=1.2, color=mean_color)
+
+                fontsize = 10
+                text_x = line_x[-1] + fontsize / 3
+                text_y = mean - fontsize / 300
+                ax.text(text_x, text_y, f"{mean:.3f}", fontsize=fontsize)
+
+                all_params['xlim'] = (0, curve_len + line_len)
 
         actions = ['set_title', 'set_suptitle',
                    'set_xlabel', 'set_ylabel',
