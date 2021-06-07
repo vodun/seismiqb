@@ -332,7 +332,14 @@ class SeismicGeometrySEGY(SeismicGeometry):
             indices = self.make_slide_indices(loc=loc, start=start, end=end, step=step, axis=axis, stable=stable)
             slide = self.load_traces(indices)
         elif axis == 2:
-            slide = self.segyfile.depth_slice[loc].reshape(self.lens)
+            slide = self.segyfile.depth_slice[loc]
+
+            if slide.shape[0] == np.prod(self.lens):
+                slide = slide.reshape(self.lens)
+            else:
+                buffer = np.zeros_like(self.zero_traces, dtype=np.float32)
+                buffer[self.zero_traces == 0] = slide
+                slide = buffer
         return slide
 
     def make_slide_indices(self, loc=None, axis=0, start=None, end=None, step=1, stable=True, return_iterator=False):
@@ -595,7 +602,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
         with constructor(path, mode=mode, **kwargs) as file:
             total = (('i' in projections) * self.cube_shape[0] +
                      ('x' in projections) * self.cube_shape[1] +
-                     ('h' in projections) * self.cube_shape[0])
+                     ('h' in projections) * self.cube_shape[2])
             progress_bar = tqdm(total=total, ncols=800, disable=(not pbar))
             name = os.path.basename(path)
 
@@ -605,18 +612,12 @@ class SeismicGeometrySEGY(SeismicGeometry):
                 order = SeismicGeometryConverted.AXIS_TO_ORDER[axis]
                 cube = file.create_dataset(cube_name, shape=self.cube_shape[order], dtype=dtype)
 
-                load_axis = 0 if axis == 2 else axis
-
                 progress_bar.set_description(f'Creating {name}; {p}-projection')
-                for idx in range(self.cube_shape[load_axis]):
-                    slide = self.load_slide(idx, axis=load_axis, stable=False)
-                    slide = slide if axis == 0 else slide.T
+                for idx in range(self.cube_shape[axis]):
+                    slide = self.load_slide(idx, axis=axis, stable=False)
+                    slide = slide.T if axis == 1 else slide
                     slide = transform(slide)
-
-                    if axis == 2:
-                        cube[:, idx, :] = slide
-                    else:
-                        cube[idx, :, :] = slide
+                    cube[idx, :, :] = slide
                     progress_bar.update()
             progress_bar.close()
 
