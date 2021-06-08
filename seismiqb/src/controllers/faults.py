@@ -455,9 +455,11 @@ class FaultController(BaseController):
             geometry = dataset.geometries[cube_idx]
             shape = geometry.cube_shape
             for item in inference_cubes[cube_idx]:
-                self.log(f'Create prediction for {cube_idx}: {item[1:]}. axis={item[1]}.')
+                self.log(f'Create prediction for {cube_idx}: {item[1:]}. axis={item[0]}.')
                 axis = item[0]
                 slices = item[1:]
+                if len(slices) != 3:
+                    slices = (None, None, None)
                 locations = [slice(item[0], item[1]) if item else slice(None) for item in slices]
                 if axis in [0, 'i', 'ilines']:
                     crop_shape = config['crop_shape']
@@ -485,7 +487,6 @@ class FaultController(BaseController):
                 if fmt == 'npy':
                     np.save(filename, np.stack(np.where(prediction > threshold), axis=1), allow_pickle=False)
                 elif fmt == 'sgy':
-                    prediction_cube = SeismicGeometry(filename['hdf5'])
                     copyfile(dataset.geometries[0].path_meta, filename['meta'])
                     dataset.geometries[0].make_sgy(
                         path_hdf5=filename['hdf5'],
