@@ -20,6 +20,7 @@ class DummyFile:
     SUFFIX = '.' + SeismicGeometry.ARRAY_ALIASES[0]
 
     def __init__(self, data):
+        #pylint: disable=consider-using-with
         self.data =  data
         self.__file = tempfile.NamedTemporaryFile(suffix=self.SUFFIX)
         self.path = self.__file.name
