@@ -7,6 +7,7 @@ import cv2
 
 
 import matplotlib.pyplot as plt
+from matplotlib import patheffects
 from matplotlib.cm import get_cmap, register_cmap
 from matplotlib.patches import Patch
 from matplotlib.colors import ColorConverter, ListedColormap, LinearSegmentedColormap
@@ -55,8 +56,6 @@ def filter_parameters(params, keys=None, prefix='', index=None, index_condition=
     index_condition : callable
         Function that takes indexed argument value and returns a bool specifying whether should it be really indexed.
     """
-    if index_condition is None:
-        index_condition = lambda x: True
     result = {}
 
     keys = keys or list(params.keys())
@@ -67,14 +66,16 @@ def filter_parameters(params, keys=None, prefix='', index=None, index_condition=
         value = params.get(prefix + key, params.get(key))
         if value is None:
             continue
+        # check if parameter value indexing is requested and possible
         if index is not None and isinstance(value, list):
-            if index_condition(value[index]):
+            # check if there is no index condition or there is one and it is satisfied
+            if index_condition is None or index_condition(value[index]):
                 value = value[index]
         result[key] = value
     return result
 
 
-def plot_image(data, mode='imshow', backend='matplotlib', **kwargs):
+def plot_image(data=None, mode='imshow', backend='matplotlib', **kwargs):
     """ Overall plotter function, converting kwarg-names to match chosen backend and redirecting
     plotting task to one of the methods of backend-classes.
     """
@@ -118,8 +119,10 @@ class MatplotlibPlotter:
     # Supplementary methods
 
     @staticmethod
-    def make_nested_data(data, separate):
+    def nest_data(data, separate):
         """ Construct nested list of data arrays for plotting. """
+        if data is None:
+            return []
         if isinstance(data, np.ndarray):
             return [[data]]
         if all([isinstance(item, np.ndarray) for item in data]):
@@ -191,7 +194,6 @@ class MatplotlibPlotter:
         """ Add patches to legend. All invalid colors are filtered. """
         handles = getattr(ax.get_legend(), 'legendHandles', [])
         VALID_COLORS = {**BASE_COLORS, **TABLEAU_COLORS, **CSS4_COLORS}
-        # import pdb; pdb.set_trace()
         colors = [color for color in to_list(color) if color in VALID_COLORS]
         labels = to_list(label)
         new_patches = [Patch(color=color, label=label) for color, label in zip(colors, labels) if label]
@@ -202,6 +204,7 @@ class MatplotlibPlotter:
     @classmethod
     def annotate_axis(cls, ax, ax_num, ax_params, all_params):
         """ Apply requested annotation functions to given axis with chosen parameters. """
+        # pylint: disable=too-many-branches
         TEXT_KEYS = ['fontsize', 'family', 'color']
 
         # title
@@ -230,26 +233,44 @@ class MatplotlibPlotter:
         if params:
             ax.set_ylabel(**params)
 
-        # ticks
-        if 'xticks' in ax_params:
-            ax.set_xticks(ax_params['xticks'])
-        if 'yticks' in ax_params:
-            ax.set_yticks(ax_params['yticks'])
+        # aspect
+        params = filter_parameters(ax_params, ['aspect'], prefix='aspect_', index=ax_num)
+        if params:
+            ax.set_aspect(**params)
 
+        # xticks
+        params = filter_parameters(ax_params, ['xticks'], prefix='xticks_', index=ax_num)
+        if 'xticks' in params:
+            params['ticks'] = params.get('ticks', params.pop('xticks'))
+        if params:
+            ax.set_xticks(**params)
+
+        # yticks
+        params = filter_parameters(ax_params, ['yticks'], prefix='yticks_', index=ax_num)
+        if 'yticks' in params:
+            params['ticks'] = params.get('ticks', params.pop('yticks'))
+        if params:
+            ax.set_yticks(**params)
+
+        # ticks
         keys = ['labeltop', 'labelright', 'labelcolor', 'direction']
-        params = filter_parameters(ax_params, keys, index=ax_num)
+        params = filter_parameters(ax_params, keys, prefix='tick_', index=ax_num)
         if params:
             ax.tick_params(**params)
 
-        # lims
-        if 'xlim' in ax_params:
-            ax.set_xlim(ax_params['xlim'])
-        if 'ylim' in ax_params:
-            ax.set_ylim(ax_params['ylim'])
+        # xlim
+        params = filter_parameters(ax_params, ['xlim'], prefix='xlim_', index=ax_num)
+        if 'xlim' in params:
+            params['left'] = params.get('left', params.pop('xlim'))
+        if params:
+            ax.set_xlim(**params)
 
-        # facecolor
-        if ax_params.get('facecolor'):
-            ax.set_facecolor(ax_params['facecolor'])
+        # ylim
+        params = filter_parameters(ax_params, ['ylim'], prefix='ylim_', index=ax_num)
+        if 'ylim' in params:
+            params['bottom'] = params.get('bottom', params.pop('ylim'))
+        if params:
+            ax.set_ylim(**params)
 
         # colorbar
         if all_params.get('colorbar', False):
@@ -273,11 +294,16 @@ class MatplotlibPlotter:
         if params:
             ax.grid(**params)
 
+        if ax_params.get('facecolor'):
+            ax.set_facecolor(ax_params['facecolor'])
+
         if ax_params.get('set_axisbelow'):
             ax.set_axisbelow(True)
 
         if ax_params.get('disable_axes'):
             ax.set_axis_off()
+        elif not ax.axison:
+            ax.set_axis_on()
 
     @staticmethod
     def save_and_show(fig, show=True, savepath=None, return_figure=False, pyqt=False, **kwargs):
@@ -329,6 +355,10 @@ class MatplotlibPlotter:
     }
 
     WIGGLE_DEFAULTS = {
+        # main
+        'step': 15,
+        'width_multiplier': 1,
+        'curve_width': 1,
         # wiggle
         'wiggle_color': 'k',
         'wiggle_linestyle': '-',
@@ -378,6 +408,9 @@ class MatplotlibPlotter:
     }
 
     CURVE_DEFAULTS = {
+        # main
+        'rolling_mean': None,
+        'rolling_final': None,
         # curve
         'color': ['skyblue', 'sandybrown', 'lightcoral'],
         'facecolor': 'white',
@@ -400,13 +433,17 @@ class MatplotlibPlotter:
 
     @classmethod
     def plot(cls, data, mode='imshow', separate=False, **kwargs):
-        """ Plot manager. Parses axes from kwargs if provided, else creates them.
+        """ Plot manager.
+
+        Parses axes from kwargs if provided, else creates them.
+        Filters parameters and calls chosen plot method for every axis-data pair.
 
         Parameters
         ----------
         data : np.ndarray or a list of np.ndarray objects (possibly nested)
             If list has level 1 nestedness, 'overlaid/separate' logic is handled via `separate` parameter.
             If list has level 2 nestedness, outer level defines subplots order while inner one defines layers order.
+            Shape of data items depends on chosen mode (see below).
         mode : 'imshow', 'wiggle', 'hist', 'curve'
             If 'imshow' plot given arrays as images.
             If 'wiggle' plot 1d subarrays of given array as signals.
@@ -416,8 +453,18 @@ class MatplotlibPlotter:
         separate : bool
             Whether plot images on separate axes instead of putting them all together on a single one.
             Incompatible with 'wiggle' mode.
-        kwargs : parameters for method corresponding to `mode`
+        kwargs :
+            - For one of `imshow`, 'wiggle`, `hist` or `curve` (depending on chosen mode).
+              Parameters and data nestedness levels must match.
+              Every param with 'imshow_', 'wiggle_', 'hist_' or 'curve_' prefix is redirected to corresponding method.
+            - For `annotate_axis`.
+              Every param with 'title_', 'suptitle_', 'xlabel_', 'ylabel_', 'xticks_', 'yticks_', 'ticks_', 'xlim_',
+              'ylim_', colorbar_', 'legend_' or 'grid_' prefix is redirected to corresponding matplotlib method.
+              Also 'facecolor', 'set_axisbelow', 'disable_axes' arguments are accepted.
         """
+        if mode == 'wiggle' and separate:
+            raise ValueError("Can't use `separate` option with `wiggle` mode.")
+
         PLOTLY_TO_PYPLOT = {'zmin': 'vmin', 'zmax': 'vmax', 'xaxis': 'xlabel', 'yaxis': 'ylabel'}
         # pylint: disable=expression-not-assigned
         [kwargs.update({new: kwargs[old]}) for old, new in PLOTLY_TO_PYPLOT.items() if old in kwargs]
@@ -429,18 +476,15 @@ class MatplotlibPlotter:
             cls.curve : ['curve', 'plot', 'line']
         }
         MODE_TO_METHOD = {mode: method for method, modes in METHOD_TO_MODE.items() for mode in modes}
-
         plot_method = MODE_TO_METHOD[mode]
-        # pylint: disable=comparison-with-callable
-        if plot_method == cls.wiggle and separate:
-            raise ValueError("Can't use `separate` option with `wiggle` mode.")
 
         METHOD_TO_DEFAULTS = {cls.imshow: cls.IMSHOW_DEFAULTS, cls.wiggle: cls.WIGGLE_DEFAULTS,
                               cls.hist: cls.HIST_DEFAULTS, cls.curve: cls.CURVE_DEFAULTS}
         all_params = {**METHOD_TO_DEFAULTS[plot_method], **kwargs}
 
-        data = cls.make_nested_data(data=data, separate=separate)
+        data = cls.nest_data(data=data, separate=separate)
         axes = cls.make_axes(plot_method=plot_method, n_subplots=len(data), all_params=all_params)
+
         for ax_num, (ax_data, ax) in enumerate(zip(data, axes)):
             index_condition = None if separate else lambda x: isinstance(x, list)
             ax_params = filter_parameters(all_params, index=ax_num, index_condition=index_condition)
@@ -462,25 +506,20 @@ class MatplotlibPlotter:
             Axis to plot images on.
         data : list of np.ndarray
             Every item must be a valid matplotlib image.
-        kwargs : dict
+        kwargs :
             order_axes : tuple of ints
                 Order of image axes.
-            disable_axes : bool
-                Whether call `set_axis_off` or not.
-            xticks : sequence
-                For `plt.set_xticks`
-            yticks : sequence
-                For `plt.set_yticks`
-            arguments for following methods:
-                `plt.imshow` — with 'imshow_' and 'mask_' prefixes
-                `plt.set_title` — with 'title_' prefix
-                `plt.set_xlabel`— with 'xlabel_' prefix
-                `plt.set_ylabel` — with 'ylabel_' prefix
-                `cls.add_colorbar` — with 'colorbar' prefix
-                `plt.tick_params` — with 'tick_' prefix
-                `cls.add_legend` — with 'legend_' prefix
-                See class docs for details on prefixes usage.
-                See class and method defaults for arguments names.
+            bad_values : list of numbers
+                Data values that should be displayed with 'bad_color'.
+
+            params for images drawn by `plt.imshow`:
+                - 'cmap', 'vmin', 'vmax', 'interpolation', 'alpha', 'extent'
+                - params with 'imshow_' prefix
+
+        Notes
+        -----
+        See class docs for details on prefixes usage.
+        See class and method defaults for arguments examples.
         """
         for image_num, image in enumerate(data):
             image = np.transpose(image, axes=kwargs['order_axes'][:image.ndim]).astype(float)
@@ -495,14 +534,11 @@ class MatplotlibPlotter:
                 bads_mask = np.logical_or(*bad_masks) if len(bad_masks) > 1 else bad_masks[0]
                 image[bads_mask] = np.nan
 
-            xticks = kwargs.get('xticks') or [0, image.shape[1]]
-            yticks = kwargs.get('yticks') or [image.shape[0], 0]
-            extent = [xticks[0], xticks[-1], yticks[0], yticks[-1]]
-
-            keys = ['cmap', 'vmin', 'vmax', 'interpolation', 'alpha']
+            keys = ['cmap', 'vmin', 'vmax', 'interpolation', 'alpha', 'extent']
             params = filter_parameters(kwargs, keys, prefix='imshow_', index=image_num)
             params['cmap'] = cls.make_cmap(params.pop('cmap'), kwargs['bad_color'])
-            image_ax = ax.imshow(image, extent=extent, **params)
+            params['extent'] = params.get('extent') or [0, image.shape[1], image.shape[0], 0]
+            image_ax = ax.imshow(image, **params)
             if image_num == 0:
                 kwargs['base_image_ax'] = image_ax
 
@@ -510,11 +546,13 @@ class MatplotlibPlotter:
 
 
     @classmethod
-    def wiggle(cls, ax, data, curve=None, step=15, width_multiplier=1, curve_width=1, **kwargs):
+    def wiggle(cls, ax, data, **kwargs):
         """ Make wiggle plot of signals array. Optionally overlap it with a curve.
 
         Parameters
         ----------
+        ax : matplotlib axis
+            Axis to plot images on.
         data : np.ndarray or list of np.ndarray
             If array, must be 2d.
             If list, must contain image and curve arrays.
@@ -522,32 +560,35 @@ class MatplotlibPlotter:
                 If 1d heights, its shape must match correposnding image dimension.
                 If 2d mask, its shape must match image shape.
                 In both cases it is expected, that there must be `np.nan` where curve is not defined.
-        kwargs : dict
+        kwargs :
             step : int, optional
                 Step to take signals from the array with.
-            reverse : bool, optional
-                Whether reverse the plot wrt y-axis or not.
             width_multiplier : float, optional
                 Scale factor for signals amplitudes.
-            arguments for following methods:
-                `plt.subplots` — with 'figure_' prefix
-                `plt.plot` — with 'wiggle_' and 'curve_' prefixes
-                `plt.set_title` — with 'title_' prefix
-                `plt.set_xlabel`— with 'xlabel_' prefix
-                `plt.set_ylabel` — with 'ylabel_' prefix
-                `plt.set_xlim`— with 'xlim_' prefix
-                `plt.set_ylim` — with 'ylim_' prefix
-                See class docs for details on prefixes usage.
-                See class and method defaults for arguments names.
+            color : matplotlib color
+                Wiggle lines color.
+            fill_color : matplotlib color
+                Wiggle fill color.
+            xlim, ylims : tuples of int
+                Define displayed data limits.
+
+            params for overlaid curves drawn by `plt.plot`:
+                - 'color', 'linestyle', 'marker', 'markersize'
+                - params with 'curve_' prefix
+
+        Notes
+        -----
+        See class docs for details on prefixes usage.
+        See class and method defaults for arguments examples.
         """
         image, *curves = data
 
-        offsets = np.arange(0, image.shape[0], step)
+        offsets = np.arange(0, image.shape[0], kwargs['step'])
         y_range = np.arange(0, image.shape[1])
 
         x_range = [] # accumulate traces to draw curve above them if needed
         for offset in offsets:
-            x = offset + width_multiplier * image[offset] / np.std(image)
+            x = offset + kwargs['width_multiplier'] * image[offset] / np.std(image)
             params = filter_parameters(kwargs, ['color'], prefix='wiggle_')
             ax.plot(x, y_range, **params)
 
@@ -561,8 +602,11 @@ class MatplotlibPlotter:
         if 'ylim' not in kwargs:
             kwargs['ylim'] = (y_range.max(), y_range.min())
 
-        # pylint: disable=redefined-argument-from-local
         for curve_num, curve in enumerate(curves):
+            keys = ['color', 'linestyle', 'marker', 'markersize']
+            params = filter_parameters(kwargs, keys, prefix='curve_', index=curve_num)
+            width = params.pop('width', 1)
+
             curve = curve[offsets]
             if curve.ndim == 1:
                 curve_x = (~np.isnan(curve)).nonzero()[0]
@@ -570,10 +614,9 @@ class MatplotlibPlotter:
             # transform height-mask to heights if needed
             elif curve.ndim == 2:
                 curve = (~np.isnan(curve)).nonzero()
-                curve_x = curve[0][(curve_width // 2)::curve_width]
-                curve_y = curve[1][(curve_width // 2)::curve_width]
-            keys = ['color', 'linestyle', 'marker', 'markersize']
-            params = filter_parameters(kwargs, keys, prefix='curve_', index=curve_num)
+                curve_x = curve[0][(width // 2)::width]
+                curve_y = curve[1][(width // 2)::width]
+
             ax.plot(x_range[curve_x, curve_y], curve_y, **params)
 
         return kwargs
@@ -581,7 +624,24 @@ class MatplotlibPlotter:
 
     @classmethod
     def hist(cls, ax, data, **kwargs):
-        """ Plot histograms on given axis. """
+        """ Plot histograms on given axis.
+
+        Parameters
+        ----------
+        ax : matplotlib axis
+            Axis to plot images on.
+        data : np.ndarray or list of np.ndarray
+            Arrays to build histograms. Can be of any shape since they are flattened.
+        kwargs :
+            params for overlaid histograms drawn by `plt.hist`:
+                - 'bins', 'color', 'alpha'
+                - params with 'hist_' prefix
+
+        Notes
+        -----
+        See class docs for details on prefixes usage.
+        See class and method defaults for arguments examples.
+        """
         for image_num, array in enumerate(data):
             array = array.flatten()
             params = filter_parameters(kwargs, ['bins', 'color', 'alpha'], prefix='hist_', index=image_num)
@@ -591,8 +651,29 @@ class MatplotlibPlotter:
 
 
     @classmethod
-    def curve(cls, ax, data, rolling_mean=None, final_mean=None, **kwargs):
-        """ Plot curves on given axis. """
+    def curve(cls, ax, data, **kwargs):
+        """ Plot curves on given axis.
+
+        Parameters
+        ----------
+        ax : matplotlib axis
+            Axis to plot images on.
+        data : np.ndarray or list of np.ndarray
+            Arrays to plot. Must be 1d.
+        kwargs :
+            rolling_mean : int or None
+                If int, calculate and display rolling mean with window `rolling_mean` size.
+            rolling_final : int or None
+                If int, calculate an display mean over last `rolling_final` array elements.
+            params for overlaid curves drawn by `plt.plot`:
+                - 'color', 'linestyle', 'alpha'
+                - params with 'curve_' prefix
+
+        Notes
+        -----
+        See class docs for details on prefixes usage.
+        See class and method defaults for arguments examples.
+        """
         for image_num, array in enumerate(data):
             keys = ['color', 'linestyle', 'alpha']
             params = filter_parameters(kwargs, keys, prefix='curve_', index=image_num)
@@ -600,12 +681,14 @@ class MatplotlibPlotter:
 
             mean_color = cls.scale_lightness(params['color'], scale=.5)
 
+            rolling_mean = kwargs.get('rolling_mean')
             if rolling_mean:
                 averaged = array.copy()
                 window = 10 if rolling_mean is True else rolling_mean
                 averaged[(window // 2):(-window // 2 + 1)] = np.convolve(array, np.ones(window) / window, mode='valid')
                 ax.plot(averaged, color=mean_color, linestyle='--')
 
+            final_mean = kwargs.get('final_mean')
             if final_mean:
                 window = 100 if final_mean is True else final_mean
                 mean = np.mean(array[-window:])
@@ -619,7 +702,8 @@ class MatplotlibPlotter:
                 fontsize = 10
                 text_x = line_x[-1] + fontsize / 3
                 text_y = mean - fontsize / 300
-                ax.text(text_x, text_y, f"{mean:.3f}", fontsize=fontsize)
+                text = ax.text(text_x, text_y, f"{mean:.3f}", fontsize=fontsize)
+                text.set_path_effects([patheffects.Stroke(linewidth=3, foreground='white'), patheffects.Normal()])
 
                 kwargs['xlim'] = (0, curve_len + line_len)
 
