@@ -195,7 +195,7 @@ class MatplotlibPlotter:
         handles = getattr(ax.get_legend(), 'legendHandles', [])
         VALID_COLORS = {**BASE_COLORS, **TABLEAU_COLORS, **CSS4_COLORS}
         colors = [color for color in to_list(color) if color in VALID_COLORS]
-        labels = to_list(label)
+        labels = to_list(label, dtype='object' if any(isinstance(item, list) for item in label) else None)
         new_patches = [Patch(color=color, label=label) for color, label in zip(colors, labels) if label]
         handles += new_patches
         if handles:
