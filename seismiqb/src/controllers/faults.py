@@ -164,7 +164,7 @@ class FaultController(BaseController):
         weights /= weights.sum()
 
         self.weights = weights
-        
+
         dataset.create_sampler(p=list(weights))
         dataset.modify_sampler(dst='train_sampler', finish=True, low=0.0, high=1.0)
 
@@ -556,7 +556,7 @@ class FaultController(BaseController):
         return mask
 
     def make_filename(self, prefix, orientation, ext):
-        return (prefix + datetime.now().strftime("%Y%m%d%H%M%S") + '_{}.{}').format(orientation, ext)
+        return (prefix + datetime.now().strftime("%Y-%m-%d-%H-%M-%S") + '_{}.{}').format(orientation, ext)
 
 # from visdom import Visdom
 # import numpy as np

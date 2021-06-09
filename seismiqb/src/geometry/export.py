@@ -45,7 +45,7 @@ class ExportMixin:
             dst = np.zeros(shape)
         else:
             file_hdf5 = h5py.File(dst, 'a')
-            dst = file_hdf5.create_dataset('cube', shape)
+            dst = file_hdf5.create_dataset('cube_i', shape)
             cube_hdf5_x = file_hdf5.create_dataset('cube_x', shape[[1, 2, 0]])
             cube_hdf5_h = file_hdf5.create_dataset('cube_h', shape[[2, 0, 1]])
 
@@ -115,7 +115,7 @@ class ExportMixin:
             path_hdf5 = os.path.join(os.path.dirname(self.path), 'temp.hdf5')
 
         with h5py.File(path_hdf5, 'r') as src:
-            cube_hdf5 = src['cube']
+            cube_hdf5 = src['cube_i']
 
             from .base import SeismicGeometry #pylint: disable=import-outside-toplevel
             geometry = SeismicGeometry(path_spec)
