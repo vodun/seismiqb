@@ -642,7 +642,7 @@ class SeismicGeometry(ExportMixin):
             'title': f'`{matrix_name}` map of cube `{self.displayed_name}`',
             'xlabel': self.index_headers[0],
             'ylabel': self.index_headers[1],
-            'colorbar_fraction': 2.5,
+            'colorbar': True,
             **kwargs
             }
         matrix = getattr(self, matrix) if isinstance(matrix, str) else matrix

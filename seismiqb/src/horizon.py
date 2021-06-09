@@ -248,7 +248,7 @@ class UnstructuredHorizon:
 
     def __str__(self):
         msg = f"""
-        Horizon {self.name} for {self.displayed_cube_name}
+        Horizon {self.name} for {self.geometry.displayed_name}
         Depths range:           {self.h_min} to {self.h_max}
         Depths mean:            {self.h_mean:.6}
         Depths std:             {self.h_std:.6}
@@ -258,7 +258,7 @@ class UnstructuredHorizon:
 
 
     # Visualization
-    def show_slide(self, loc, width=3, axis=0, stable=True, order_axes=None, **kwargs):
+    def show_slide(self, loc, width=3, axis=0, stable=True, **kwargs):
         """ Show slide with horizon on it.
 
         Parameters
@@ -295,7 +295,7 @@ class UnstructuredHorizon:
             'ylabel': 'Depth', 'y': 1.015,
             **kwargs
         }
-        return plot_image([seismic_slide, mask], order_axes=order_axes, **kwargs)
+        return plot_image([seismic_slide, mask], **kwargs)
 
 
 
@@ -408,7 +408,6 @@ class Horizon:
         # Attributes from geometry
         self.geometry = geometry
         self.cube_name = geometry.displayed_name
-        self.displayed_cube_name = geometry.displayed_name
         self.cube_shape = geometry.cube_shape
 
         self.sampler = None
@@ -2080,11 +2079,11 @@ class Horizon:
 
     # Methods of (visual) representation of a horizon
     def __repr__(self):
-        return f"""<horizon {self.name} for {self.displayed_cube_name} at {hex(id(self))}>"""
+        return f"""<horizon {self.name} for {self.geometry.displayed_name} at {hex(id(self))}>"""
 
     def __str__(self):
         msg = f"""
-        Horizon {self.name} for {self.displayed_cube_name} loaded from {self.format}
+        Horizon {self.name} for {self.geometry.displayed_name} loaded from {self.format}
         Ilines range:      {self.i_min} to {self.i_max}
         Xlines range:      {self.x_min} to {self.x_max}
         Depth range:       {self.h_min} to {self.h_max}
@@ -2130,8 +2129,9 @@ class Horizon:
             matrix = self.enlarge_carcass_image(matrix, width)
 
         # defaults for plotting if not supplied in kwargs
+        title = f"{src} {'on full'*on_full} of horizon `{self.name}` on cube `{self.geometry.displayed_name}`"
         kwargs = {
-            'title_label': f"{src} {'on full'*on_full} of `{self.name}` on `{self.geometry.displayed_name}`",
+            'title_label': title,
             'xlabel': self.geometry.index_headers[0],
             'ylabel': self.geometry.index_headers[1],
             'cmap': 'Depths',
@@ -2142,8 +2142,7 @@ class Horizon:
         return plot_image(matrix, **kwargs)
 
 
-    def show_amplitudes_rgb(self, width=3, channel_weights=(1, 0.5, 0.25), to_uint8=True,
-                            channels=None, **kwargs):
+    def show_amplitudes_rgb(self, width=3, channel_weights=(1, 0.5, 0.25), channels=None, **kwargs):
         """ Show trace values on the horizon and surfaces directly under it.
 
         Parameters
@@ -2169,14 +2168,11 @@ class Horizon:
         amplitudes[self.full_matrix == self.FILL_VALUE, :] = np.nan
         amplitudes = amplitudes[:, :, ::-1]
         amplitudes *= np.asarray(channel_weights).reshape(1, 1, -1)
-
-        # cast values to uint8 if needed
-        if to_uint8:
-            amplitudes = (amplitudes * 255).astype(np.uint8)
+        amplitudes /= np.nanmax(amplitudes, axis=(0,1))
 
         # defaults for plotting if not supplied in kwargs
         kwargs = {
-            'title_label': 'RGB amplitudes of {} on cube {}'.format(self.name, self.displayed_cube_name),
+            'title_label': f'RGB amplitudes of horizon {self.name} on cube {self.geometry.displayed_name}',
             'xlabel': self.geometry.index_headers[0],
             'ylabel': self.geometry.index_headers[1],
             'order_axes': (1, 0, 2),
@@ -2216,7 +2212,7 @@ class Horizon:
         kwargs : dict
             Other arguments of plot creation.
         """
-        title = f'Horizon `{self.short_name}` on `{self.displayed_cube_name}`'
+        title = f'Horizon `{self.short_name}` on `{self.geometry.displayed_name}`'
         aspect_ratio = (self.i_length / self.x_length, 1, z_ratio)
         axis_labels = (self.geometry.index_headers[0], self.geometry.index_headers[1], 'DEPTH')
         if zoom_slice is None:
@@ -2284,8 +2280,7 @@ class Horizon:
                                      matrix=self.full_matrix, threshold=threshold)
         return x, y, z, simplices
 
-    def show_slide(self, loc, width=3, axis='i', order_axes=None, zoom_slice=None,
-                   n_ticks=5, delta_ticks=100, mode='show', separate=False, **kwargs):
+    def show_slide(self, loc, width=3, axis='i', zoom_slice=None, n_ticks=5, delta_ticks=100, **kwargs):
         """ Show slide with horizon on it.
 
         Parameters
@@ -2340,23 +2335,27 @@ class Horizon:
         if len(yticks) > 2 and (yticks[0] - yticks[1]) < delta_ticks:
             yticks.pop(1)
 
+        title = f'Horizon `{self.name}` on cube `{self.geometry.displayed_name}`\n {header} {loc} out of {total}'
+
         kwargs = {
-            'title_label': f'Horizon `{self.name}` on `{self.cube_name}`\n {header} {loc} out of {total}',
+            'figsize': (16, 8),
+            'title_label': title,
             'title_y': 1.02,
             'xlabel': xlabel,
             'ylabel': ylabel,
-            'xticks': xticks,
-            'yticks': yticks,
+            'xticks': tuple(xticks),
+            'yticks': tuple(yticks),
+            'extent': (xticks[0], xticks[-1], yticks[0], yticks[-1]),
             'legend': False,
             'labeltop': False,
             'labelright': False,
-            'order_axes': order_axes,
             'curve_width': width,
+            'grid': [False, True],
             'colorbar': [True, False],
             **kwargs
         }
 
-        return plot_image(image=[seismic_slide, mask], mode=mode, separate=separate, **kwargs)
+        return plot_image(data=[seismic_slide, mask], **kwargs)
 
 
     def reset_cache(self):

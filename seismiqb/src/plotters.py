@@ -134,7 +134,7 @@ class MatplotlibPlotter:
     @classmethod
     def make_axes(cls, plot_method, n_subplots, all_params):
         """ Create figure and axes if needed, else use provided. """
-        METHOD_TO_FIGSIZE = {cls.imshow : (8, 8),
+        METHOD_TO_FIGSIZE = {cls.imshow : (12, 12),
                              cls.hist : (8, 5),
                              cls.wiggle : (12, 7),
                              cls.curve: (15, 5)}
@@ -297,8 +297,7 @@ class MatplotlibPlotter:
         if ax_params.get('facecolor'):
             ax.set_facecolor(ax_params['facecolor'])
 
-        if ax_params.get('set_axisbelow'):
-            ax.set_axisbelow(True)
+        ax.set_axisbelow(ax_params.get('set_axisbelow', False))
 
         if ax_params.get('disable_axes'):
             ax.set_axis_off()
