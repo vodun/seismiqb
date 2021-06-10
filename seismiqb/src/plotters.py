@@ -41,6 +41,8 @@ def plot_loss(data, title=None, **kwargs):
         'ylabel': 'Loss',
         'label': title or 'Loss graph',
         'xlim': (0, None),
+        'rolling_mean': 10,
+        'final_mean': 100,
         **kwargs
     }
     return plot_image(data, mode='curve', backend='matplotlib', **kwargs)
