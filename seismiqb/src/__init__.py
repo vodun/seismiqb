@@ -7,7 +7,7 @@ from .horizon import UnstructuredHorizon, StructuredHorizon, Horizon
 from .geobody import GeoBody
 from .fault import Fault
 from .metrics import HorizonMetrics, GeometryMetrics
-from .plotters import plot_image, plot_loss, METRIC_CMAP, DEPTHS_CMAP
+from .plotters import plot_image, plot_loss
 from .utils import *
 from .utility_classes import *
 from .functional import *

@@ -669,7 +669,6 @@ class HorizonMetrics(BaseMetrics):
         # The first horizon is used to evaluate metrics
         self.horizon = horizons[0]
         self.name = self.horizon.short_name
-        self.cube_name = self.horizon.displayed_cube_name.replace('amplitudes_', '')
 
         # Properties
         self._data = None
@@ -679,7 +678,7 @@ class HorizonMetrics(BaseMetrics):
 
     def get_plot_defaults(self):
         """ Axis labels and horizon/cube names in the title. """
-        title = f'`{self.name}` on cube `{self.cube_name}`'
+        title = f'horizon `{self.name}` on cube `{self.horizon.geometry.displayed_name}`'
         return title, {
             'xlabel': self.horizon.geometry.axis_names[0],
             'ylabel': self.horizon.geometry.axis_names[1],
@@ -768,11 +767,11 @@ class HorizonMetrics(BaseMetrics):
         title = f'Perturbed metrics\nfor {title}'
         plot_dict = {
             **plot_defaults,
-            'mode': 'separate',
-            't': title,
-            'titles': ['mean', 'max'],
+            'separate': True,
+            'suptitle_label': title,
+            'title_label': ['mean', 'max'],
             'cmap': 'Reds_r',
-            'zmin': [0.0, -0.5], 'zmax': 0.5,
+            'zmin': (0.0, -0.5), 'zmax': 0.5,
             **kwargs
         }
         return (diff_mean, diff_max), plot_dict
@@ -795,8 +794,8 @@ class HorizonMetrics(BaseMetrics):
         phase_slice[np.isnan(xp.std(data, axis=-1))] = xp.nan
 
         # Evaluate mode value
-        values = phase_slice[~np.isnan(phase_slice)].round(2)
-        _, counts = xp.unique(values, return_counts=True)
+        phase_slice = phase_slice[~np.isnan(phase_slice)].round(2)
+        values, counts = xp.unique(phase_slice, return_counts=True)
         mode = values[xp.argmax(counts)]
 
         shifted_slice = phase_slice - mode
@@ -907,7 +906,7 @@ class HorizonMetrics(BaseMetrics):
                 'ylabel': 'N',
                 'title_label': 'Histogram of l1 differences',
             }
-            plot_image(metric, mode='histogram', **hist_dict)
+            plot_image(metric, mode='hist', **hist_dict)
 
         title = 'Height differences between {} and {}'.format(self.horizon.name, other.name)
         plot_dict = {
@@ -917,7 +916,8 @@ class HorizonMetrics(BaseMetrics):
             'zmin': 0, 'zmax': np.nanmax(metric),
             'ignore_value': np.nan,
             'xlabel': 'INLINE_3D', 'ylabel': 'CROSSLINE_3D',
-            'fill_color': 'black',
+            'bad_color': 'black',
+            'colorbar': True,
             **kwargs
         }
         return metric, plot_dict
@@ -950,11 +950,10 @@ class GeometryMetrics(BaseMetrics):
         self._bad_traces = None
 
         self.name = 'hist_matrix'
-        self.cube_name = self.geometry.displayed_name
 
     def get_plot_defaults(self):
         """ Axis labels and horizon/cube names in the title. """
-        title = f'`{self.name}` on cube `{self.cube_name}`'
+        title = f'`{self.name}` on cube `{self.geometry.displayed_name}`'
         return title, {
             'xlabel': self.geometry.axis_names[0],
             'ylabel': self.geometry.axis_names[1],
@@ -1005,7 +1004,7 @@ class GeometryMetrics(BaseMetrics):
 
         title = f"tracewise {func}"
         plot_dict = {
-            'title_label': f'{title} for `{self.name}` on cube `{self.cube_name}`',
+            'title_label': f'{title} for `{self.name}` on cube `{self.geometry.displayed_name}`',
             'cmap': 'seismic',
             'zmin': None, 'zmax': None,
             'ignore_value': np.nan,
@@ -1032,7 +1031,7 @@ class GeometryMetrics(BaseMetrics):
 
         title = f"tracewise unsafe {func}"
         plot_dict = {
-            'title_label': f'{title} for {self.name} on cube {self.cube_name}',
+            'title_label': f'{title} for {self.name} on cube {self.geometry.displayed_name}',
             'cmap': 'seismic',
             'zmin': None, 'zmax': None,
             'ignore_value': np.nan,
@@ -1081,7 +1080,7 @@ class GeometryMetrics(BaseMetrics):
 
         title = f"Blockwise {func}"
         plot_dict = {
-            'title_label': f'{title} for {self.name} on cube {self.cube_name}',
+            'title_label': f'{title} for {self.name} on cube {self.geometry.displayed_name}',
             'cmap': 'seismic',
             'zmin': None, 'zmax': None,
             'ignore_value': np.nan,

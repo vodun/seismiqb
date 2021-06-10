@@ -163,7 +163,7 @@ class UnstructuredHorizon:
         self.attached = True
 
 
-    def add_to_mask(self, mask, locations=None, width=3, alpha=1, iterator=None, zero_to_nan=False, **kwargs):
+    def add_to_mask(self, mask, locations=None, width=3, alpha=1, iterator=None, **kwargs):
         """ Add horizon to a background.
         Note that background is changed in-place.
 
@@ -227,8 +227,6 @@ class UnstructuredHorizon:
             mask[idx_1, idx_2, heights] = alpha
             heights += 1
 
-        if zero_to_nan:
-            mask[mask == 0] = np.nan
         return mask
 
     # Methods to implement in the future
@@ -283,12 +281,11 @@ class UnstructuredHorizon:
 
         # Create mask with horizon
         mask = np.zeros_like(seismic_slide.reshape(shape))
-        mask = self.add_to_mask(mask, locations, width=width, iterator=iterator if stable else None, zero_to_nan=True)
+        mask = self.add_to_mask(mask, locations, width=width, iterator=iterator if stable else None)
         seismic_slide, mask = np.squeeze(seismic_slide), np.squeeze(mask)
 
         # set defaults if needed and plot the slide
         kwargs = {
-            'mode': 'overlap',
             'title_label': (f'U-horizon `{self.name}` on `{self.cube_name}`' + '\n ' +
                       f'{self.geometry.index_headers[axis]} {loc} out of {self.geometry.lens[axis]}'),
             'xlabel': self.geometry.index_headers[1 - axis],
@@ -1015,7 +1012,7 @@ class Horizon:
 
         self.sampler = HorizonSampler(np.histogramdd(points/self.cube_shape, bins=bins, weights=weights), **kwargs)
 
-    def add_to_mask(self, mask, locations=None, width=3, alpha=1, zero_to_nan=False, **kwargs):
+    def add_to_mask(self, mask, locations=None, width=3, alpha=1, **kwargs):
         """ Add horizon to a background.
         Note that background is changed in-place.
 
@@ -1061,8 +1058,6 @@ class Horizon:
             for shift in range(width):
                 mask[idx_i, idx_x, heights + shift] = alpha
 
-        if zero_to_nan:
-            mask[mask == 0] = np.nan
         return mask
 
 
@@ -2302,7 +2297,7 @@ class Horizon:
         # Load seismic and mask
         seismic_slide = self.geometry.load_slide(loc=loc, axis=axis)
         mask = np.zeros(shape)
-        mask = self.add_to_mask(mask, locations=locations, width=width, zero_to_nan=True)
+        mask = self.add_to_mask(mask, locations=locations, width=width)
         seismic_slide, mask = np.squeeze(seismic_slide), np.squeeze(mask)
         xticks = list(range(seismic_slide.shape[0]))
         yticks = list(range(seismic_slide.shape[1]))

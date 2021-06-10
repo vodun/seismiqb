@@ -646,7 +646,7 @@ class SeismicGeometry(ExportMixin):
             **kwargs
             }
         matrix = getattr(self, matrix) if isinstance(matrix, str) else matrix
-        return plot_image(matrix, mode='single', **kwargs)
+        return plot_image(matrix, **kwargs)
 
     def show_histogram(self, normalize=None, bins=50, **kwargs):
         """ Show distribution of amplitudes in `trace_container`. Optionally applies chosen normalization. """

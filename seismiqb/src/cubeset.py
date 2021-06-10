@@ -856,7 +856,7 @@ class SeismicCubeset(Dataset):
                                                                 printer=printer, hist=hist, plot=plot)
 
 
-    def show_slide(self, loc, idx=0, axis='iline', zoom_slice=None, mode='overlap',
+    def show_slide(self, loc, idx=0, axis='iline', zoom_slice=None,
                    n_ticks=5, delta_ticks=100, src_labels='labels', **kwargs):
         """ Show full slide of the given cube on the given line.
 
@@ -872,8 +872,6 @@ class SeismicCubeset(Dataset):
             Dataset components to show as labels.
         idx : str, int
             Number of cube in the index to use.
-        mode : str
-            Way of showing results. Can be either `overlap` or `separate`.
         backend : str
             Backend to use for render. Can be either 'plotly' or 'matplotlib'. Whenever
             using 'plotly', also use slices to make the rendering take less time.
@@ -897,8 +895,7 @@ class SeismicCubeset(Dataset):
             use_labels = kwargs.pop('use_labels', 'all')
             width = kwargs.pop('width', 5)
             labels_pipeline = (Pipeline()
-                               .create_masks(src_labels=src_labels, dst='masks', width=width,
-                                             use_labels=use_labels, zero_to_nan=True))
+                               .create_masks(src_labels=src_labels, dst='masks', width=width, use_labels=use_labels))
 
             pipeline = pipeline + labels_pipeline
 
@@ -934,7 +931,6 @@ class SeismicCubeset(Dataset):
             yticks.pop(1)
 
         kwargs = {
-            'mode': mode,
             'title_label': f'Data slice on cube `{geometry.displayed_name}`\n {header} {loc} out of {total}',
             'title_y': 1.01,
             'xlabel': xlabel,
