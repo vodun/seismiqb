@@ -2,7 +2,7 @@
 """
 import numpy as np
 from scipy.interpolate import interp1d, interp2d
-from scipy.ndimage import gaussian_filter
+from scipy.ndimage import gaussian_filter, map_coordinates
 from scipy.signal import ricker
 from numba import njit
 
@@ -138,106 +138,172 @@ def make_colors_array_3d(colors, levels, shape):
     return array
 
 
+def make_coords_shift(rng=None, seed=None, n_points=10, zeros_share=0.6, kind='cubic', perturb_values=True,
+                      perturb_peak=True, peak_value=0.05, random_invert=True):
+    """ Make randomized map [0, 1] -> [0, 1] to use it later as a coordinate-shift.
+    """
+    rng = rng or np.random.default_rng(seed)
+    xs = np.linspace(0, 1, n_points)
+
+    # make zeros-containing postfix and prefix
+    n_zeros = int(n_points * zeros_share)
+    if perturb_peak:
+        delta_position = np.random.randint(-n_zeros // 4, n_zeros // 4 + 1)
+    else:
+        delta_position = 0
+    zeros_prefix = [0] * (n_zeros // 2 + delta_position)
+    zeros_postfix = [0] * (n_zeros - len(zeros_prefix))
+
+    # form the values-hump and perturb it if needed
+    n_values = n_points - n_zeros
+    half = np.linspace(0, peak_value, n_values // 2 + 1 + n_values % 2)[1:]
+    values = half.tolist() + half.tolist()[::-1][n_values % 2:]
+    if perturb_values:
+        step = 2 * peak_value / (n_values)
+        values = (rng.uniform(-step / 2, step / 2, (n_values, )) + np.array(values)).tolist()
+    spl = interp1d(xs, zeros_prefix + values + zeros_postfix, kind=kind)
+
+    # possibly invert and fetch the coordinates shift
+    if random_invert:
+        if rng.choice([True, False]):
+            return lambda x: x - spl(x)
+        else:
+            return lambda x: x + spl(x)
+
+class SyntheticGenerator():
+    def __init__(self, rng=None, seed=None):
+        self.rng = rng or np.random.default_rng(seed)
+        self.velocities = None
+        self.velocity_model = None
+        self.synthetic = None
+        self._curves = None
+        self._horizon_heights = None
+
+    def generate_velocities(self, num_reflections=200, vel_limits=(900, 5400), horizon_heights=(1/4, 1/2, 2/3), horizon_jumps=(7, 5, 4)):
+        """ Generate and store array of velocities.
+        """
+        low, high = vel_limits
+        llim = (high - low) / num_reflections
+        self.velocities = (np.linspace(low, high, num_reflections + 1) +
+                           self.rng.uniform(low=-llim, high=llim, size=(num_reflections + 1, )))
+
+        for height_share, jump_mul in zip(horizon_heights, horizon_jumps):
+            self.velocities[int(self.velocities.shape[0] * height_share)] += llim * jump_mul
+
+        self._horizon_heights = horizon_heights
+
+    def generate_velocity_model(self, shape=(50, 400, 800), grid_shape=(10, 10), perturbation_share=.2):
+        """ Generate velocity model and store it in the class-instance.
+        """
+        if len(shape) in (2, 3):
+            self.dim = len(shape)
+        else:
+            raise ValueError('The function only supports the generation of 2d and 3d synthetic seismic.')
+
+        num_reflections = len(self.velocities) - 1
+        curves = make_surfaces(num_reflections, grid_shape, perturbation_share=perturbation_share,
+                               shape=shape, rng=self.rng)
+        make_colors_array = make_colors_array_2d if self.dim == 2 else make_colors_array_3d
+        self.velocity_model = make_colors_array(self.velocities, curves, shape)
+
+        # store curves-list to later use them as horizons
+        self._curves = curves
+
+    def add_faults(self, faults=(((100, 50), (100, 370)),
+                                 ((50, 320), (50, 470)),
+                                 ((150, 320), (150, 470))),
+                   num_points=10, zeros_share=0.6, kind='cubic', perturb_values=True,
+                   perturb_peak=True, peak_value=0.05, random_invert=True):
+        """ Add faults to the velocity model.
+        """
+        if self.velocity_model is None:
+            raise ValueError("Velocity-model has not been created yet. You need to do this first to add ruptures later.")
+
+        for fault in faults:
+            x = fault[0][0]
+            y_low, y_high = fault[0][1], fault[1][1]
+            crop = self.velocity_model[:x, y_low:y_high]
+            func = make_coords_shift(self.rng, n_points=num_points, peak_value=peak_value,
+                                     zeros_share=zeros_share, random_invert=random_invert)
+            new_coords = func(np.arange(crop.shape[-1]) / (crop.shape[-1] - 1)) * (crop.shape[-1] - 1)
+            crop_elastic = np.array([map_coordinates(trace, [new_coords]) for trace in crop])
+            self.velocity_model[:x, y_low:y_high] = crop_elastic
+
+    def generate_density_model(self, rho_noise_lims=(0.97, 1.3)):
+        """ Generate density model and store it in the class-instance.
+        """
+        if rho_noise_lims is not None:
+            self.rho_model = self.velocity_model * self.rng.uniform(*rho_noise_lims, size=self.velocity_model.shape)
+        else:
+            self.rho_model = self.velocity_model
+
+    def generate_synthetic(self, ricker_width=5, ricker_points=50):
+        """ Generate and store synthetic-model.
+        """
+        ref_coeffs = reflectivity(self.velocity_model, self.rho_model)
+        wavelet = ricker(ricker_points, ricker_width)
+        convolve = convolve_2d if self.dim == 2 else convolve_3d
+        self.synthetic = convolve(ref_coeffs, wavelet)
+
+    def postprocess_synthetic(self, sigma=1.1, noise_mul=0.5):
+        """ Simple postprocessing function for a seismic seismic, containing blur and noise.
+        """
+        if sigma is not None:
+            self.synthetic = gaussian_filter(self.synthetic, sigma=sigma)
+        if noise_mul is not None:
+            self.synthetic += noise_mul * self.rng.random(self.synthetic.shape) * self.synthetic.std()
+
+    def fetch_horizons(self, mode='horizons'):
+        """ Fetch some (or all) reflective surfaces.
+        """
+        if mode is None:
+            return None
+        if isinstance(mode, str):
+            if mode == 'all':
+                return self._curves
+            if mode == 'horizons':
+                return self._curves[[int(self._curves.shape[0] * height_share) for height_share in self._horizon_heights]]
+            if 'top' in mode:
+                top_k = int(mode.replace('top', ''))
+                ixs = np.argsort(np.abs(np.diff(self.velocities)))[::-1][:top_k]
+                return self._curves[ixs]
+            else:
+                raise ValueError('Mode can be one of `horizons`, `all` or `top[k]`')
+        else:
+            raise ValueError('Mode must be str and can be one of `horizons`, `all` or `top[k]`')
+
 def make_synthetic(shape=(50, 400, 800), num_reflections=200, vel_limits=(900, 5400), horizon_heights=(1/4, 1/2, 2/3),
-                   horizon_jumps=(7, 5, 4), grid_shape=(10, 10), perturbation_share=.2, rho_noise_lims=(0.97, 1.3),
-                   ricker_width=5, ricker_points=50, sigma=1.1, noise_mul=0.5, fetch_surfaces='horizons', rng=None,
-                   seed=None):
+                    horizon_jumps=(7, 5, 4), grid_shape=(10, 10), perturbation_share=.2, rho_noise_lims=(0.97, 1.3),
+                    ricker_width=5, ricker_points=50, sigma=1.1, noise_mul=0.5,
+                    faults=(((100, 50), (100, 370)),
+                            ((50, 320), (50, 470)),
+                            ((150, 320), (150, 470))),
+                    num_points_faults=10, zeros_share_faults=0.6, fault_shift_interpolation='cubic',
+                    perturb_values=True, perturb_peak=True, peak_value=0.05, random_invert=True,
+                    fetch_surfaces='horizons', rng=None, seed=None):
     """ Generate synthetic 3d-cube along with most prominient reflective surfaces.
-
-    Parameters
-    ----------
-    shape : tuple
-        [n_ilines X n_xlines X n_samples].
-    num_reflections : int
-        The number of reflective surfaces.
-    vel_limits : tuple
-        Contains two floats. Velocities of layers in velocity model gradually change from the
-        lower limit (first number) to the upper limit (second number) with some noise added.
-    horizon_heights : tuple
-        Some reflections are sharper than the others - they represent seismic horizons. The tuple contains
-        heights (in [0, 1]-interval) of sharp reflections.
-    horizon_jumps : tuple
-        Mutipliers controling the magnitide of sharp jumps. Should have the same length as `horizon_heights`-arg.
-    grid_shapes : tuple
-        Sets the shape of grid of support points for surfaces' interpolation (surfaces represent horizons).
-    perturbation_share : float
-        Sets the limit of random perturbation for surfaces' creation. The limit is set relative to the depth
-        of a layer of constant velocity. The larger the value, more 'curved' are the horizons.
-    rho_noise_lims : tuple or None
-        Density (rho)-model is given by (velocity model * noise). The param sets the limits for noise.
-        If set to None, rho-model is equal to velocity-model.
-    ricker_width : float
-        Width of the ricker-wave - `a`-parameter of `scipy.signal.ricker`.
-    ricker_points : int
-        Number of points in the ricker-wave - `points`-parameter of `scipy.signal.ricker`.
-    sigma : float or None
-        sigma used for gaussian blur of the synthetic seismic.
-    noise_mul : float or None
-        If not None, gaussian noise scale by this number is applied to the synthetic.
-    fetch_surfaces : str
-        Can be either 'horizons', 'all' or None. When 'horizons', only horizon-surfaces
-        (option `horizon_heights`) are returned. Choosing 'all' allows to return all of
-        the reflections, while 'topK' option leads to fetching K surfaces correpsonding
-        to K largest jumps in velocities-array.
-    rng : np.random.Generator or None
-        generator of random numbers.
-    seed : int or None
-        sees used for creation of random generator (check out `np.random.default_rng`).
-
-    Returns
-    -------
-    tuple
-        tuple (cube, horizons); horizons can be None if `fetch_surfaces` is set to None.
     """
     if len(shape) in (2, 3):
         dim = len(shape)
     else:
         raise ValueError('The function only supports the generation of 2d and 3d synthetic seismic.')
-    rng = rng or np.random.default_rng(seed)
 
-    # generate array of velocities
-    low, high = vel_limits
-    llim = (high - low) / num_reflections
-    velocities = (np.linspace(low, high, num_reflections + 1) +
-                  rng.uniform(low=-llim, high=llim, size=(num_reflections + 1, )))
+    gen = SyntheticGenerator(rng, seed)
+    gen.generate_velocities(num_reflections, vel_limits, horizon_heights, horizon_jumps)
+    gen.generate_velocity_model(shape, grid_shape, perturbation_share)
+    gen.generate_density_model(rho_noise_lims)
 
-    for height_share, jump_mul in zip(horizon_heights, horizon_jumps):
-        velocities[int(velocities.shape[0] * height_share)] += llim * jump_mul
+    # add faults if needed and possible
+    if faults is not None:
+        if dim == 2:
+            gen.add_faults(faults, num_points_faults, zeros_share_faults, fault_shift_interpolation,
+                            perturb_values, perturb_peak, peak_value, random_invert)
+        else:
+            raise ValueError("For now, faults are only supported for dim = 2.")
 
-    # make velocity model
-    curves = make_surfaces(num_reflections, grid_shape, perturbation_share=perturbation_share, shape=shape, rng=rng)
-    make_colors_array = make_colors_array_2d if dim == 2 else make_colors_array_3d
-    vel_model = make_colors_array(velocities, curves, shape)
-
-    # make density model
-    if rho_noise_lims is not None:
-        rho = vel_model * rng.uniform(*rho_noise_lims, size=vel_model.shape)
-    else:
-        rho = vel_model
-
-    # obtain synthetic
-    ref_coeffs = reflectivity(vel_model, rho)
-    wavelet = ricker(ricker_points, ricker_width)
-    convolve = convolve_2d if dim == 2 else convolve_3d
-    result = convolve(ref_coeffs, wavelet)
-
-    # add blur and noise if needed for a more realistic image
-    if sigma is not None:
-        result = gaussian_filter(result, sigma=sigma)
-    if noise_mul is not None:
-        result += noise_mul * rng.random(result.shape) * result.std()
-
-    # fetch horizons if needed
-    if isinstance(fetch_surfaces, str):
-        if fetch_surfaces == 'all':
-            return result, curves
-        if fetch_surfaces == 'horizons':
-            return result, curves[[int(curves.shape[0] * height_share) for height_share in horizon_heights]]
-        if 'top' in fetch_surfaces:
-            top_k = int(fetch_surfaces.replace('top', ''))
-            ixs = np.argsort(velocities)[::-1][:top_k]
-            return result, curves[ixs]
-    return result, None
+    gen.generate_synthetic(ricker_width, ricker_points)
+    gen.postprocess_synthetic(sigma, noise_mul)
+    return gen.synthetic, gen.fetch_horizons(fetch_surfaces)
 
 
 def surface_to_points(surface):
