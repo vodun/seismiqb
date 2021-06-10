@@ -167,19 +167,23 @@ def make_coords_shift(rng=None, seed=None, n_points=10, zeros_share=0.6, kind='c
     if random_invert:
         if rng.choice([True, False]):
             return lambda x: x - spl(x)
-        else:
-            return lambda x: x + spl(x)
+    return lambda x: x + spl(x)
 
 class SyntheticGenerator():
+    """ Class for generation of syhthetic velocity and density models and synthetic seismic - 2D/3D.
+    """
     def __init__(self, rng=None, seed=None):
+        self.dim = None
         self.rng = rng or np.random.default_rng(seed)
         self.velocities = None
         self.velocity_model = None
+        self.rho_model = None
         self.synthetic = None
         self._curves = None
         self._horizon_heights = None
 
-    def generate_velocities(self, num_reflections=200, vel_limits=(900, 5400), horizon_heights=(1/4, 1/2, 2/3), horizon_jumps=(7, 5, 4)):
+    def generate_velocities(self, num_reflections=200, vel_limits=(900, 5400), horizon_heights=(1/4, 1/2, 2/3),
+                            horizon_jumps=(7, 5, 4)):
         """ Generate and store array of velocities.
         """
         low, high = vel_limits
@@ -217,7 +221,7 @@ class SyntheticGenerator():
         """ Add faults to the velocity model.
         """
         if self.velocity_model is None:
-            raise ValueError("Velocity-model has not been created yet. You need to do this first to add ruptures later.")
+            raise ValueError("You need to create velocity model first to add ruptures later.")
 
         for fault in faults:
             x = fault[0][0]
@@ -262,17 +266,16 @@ class SyntheticGenerator():
             if mode == 'all':
                 return self._curves
             if mode == 'horizons':
-                return self._curves[[int(self._curves.shape[0] * height_share) for height_share in self._horizon_heights]]
+                return self._curves[[int(self._curves.shape[0] * height_share)
+                                    for height_share in self._horizon_heights]]
             if 'top' in mode:
                 top_k = int(mode.replace('top', ''))
                 ixs = np.argsort(np.abs(np.diff(self.velocities)))[::-1][:top_k]
                 return self._curves[ixs]
-            else:
-                raise ValueError('Mode can be one of `horizons`, `all` or `top[k]`')
-        else:
-            raise ValueError('Mode must be str and can be one of `horizons`, `all` or `top[k]`')
+            raise ValueError('Mode can be one of `horizons`, `all` or `top[k]`')
+        raise ValueError('Mode must be str and can be one of `horizons`, `all` or `top[k]`')
 
-def make_synthetic(shape=(50, 400, 800), num_reflections=200, vel_limits=(900, 5400), horizon_heights=(1/4, 1/2, 2/3),
+def make_synthetic(shape=(50, 400, 800), num_reflections=200, vel_limits=(900, 5400), horizon_heights=(1/4, 1/2, 2/3), #pylint: disable=too-many-arguments
                     horizon_jumps=(7, 5, 4), grid_shape=(10, 10), perturbation_share=.2, rho_noise_lims=(0.97, 1.3),
                     ricker_width=5, ricker_points=50, sigma=1.1, noise_mul=0.5,
                     faults=(((100, 50), (100, 370)),
