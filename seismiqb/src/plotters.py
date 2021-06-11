@@ -1,11 +1,11 @@
 """ Plot functions. """
 # pylint: disable=too-many-statements
+from numbers import Number
 from copy import copy
 import colorsys
-import numpy as np
-import cv2
-from numbers import Number
 
+import cv2
+import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import patheffects
 from matplotlib.cm import get_cmap, register_cmap

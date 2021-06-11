@@ -794,8 +794,8 @@ class HorizonMetrics(BaseMetrics):
         phase_slice[np.isnan(xp.std(data, axis=-1))] = xp.nan
 
         # Evaluate mode value
-        phase_slice = phase_slice[~np.isnan(phase_slice)].round(2)
-        values, counts = xp.unique(phase_slice, return_counts=True)
+        phase_values = phase_slice[~np.isnan(phase_slice)].round(2)
+        values, counts = xp.unique(phase_values, return_counts=True)
         mode = values[xp.argmax(counts)]
 
         shifted_slice = phase_slice - mode
