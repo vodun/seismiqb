@@ -332,7 +332,14 @@ class SeismicGeometrySEGY(SeismicGeometry):
             indices = self.make_slide_indices(loc=loc, start=start, end=end, step=step, axis=axis, stable=stable)
             slide = self.load_traces(indices)
         elif axis == 2:
-            slide = self.segyfile.depth_slice[loc].reshape(self.lens)
+            slide = self.segyfile.depth_slice[loc]
+
+            if slide.shape[0] == np.prod(self.lens):
+                slide = slide.reshape(self.lens)
+            else:
+                buffer = np.zeros_like(self.zero_traces, dtype=np.float32)
+                buffer[self.zero_traces == 0] = slide
+                slide = buffer
         return slide
 
     def make_slide_indices(self, loc=None, axis=0, start=None, end=None, step=1, stable=True, return_iterator=False):
@@ -581,6 +588,10 @@ class SeismicGeometrySEGY(SeismicGeometry):
 
         if path is None:
             fmt_prefix = 'q' if quantize else ''
+
+            if postfix == '' and len(projections) < 3:
+                postfix = '_' + projections
+
             path = os.path.join(os.path.dirname(self.path), f'{self.short_name}{postfix}.{fmt_prefix}{format}')
 
         # Remove file, if exists
@@ -606,7 +617,6 @@ class SeismicGeometrySEGY(SeismicGeometry):
                     slide = self.load_slide(idx, axis=axis, stable=False)
                     slide = slide.T if axis == 1 else slide
                     slide = transform(slide)
-
                     cube[idx, :, :] = slide
                     progress_bar.update()
             progress_bar.close()

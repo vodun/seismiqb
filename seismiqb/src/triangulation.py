@@ -220,7 +220,6 @@ def distance_to_triangle(triangle, node):
                         sqrdistance = s * (a * s + b * t + 2.0 * d) + t * (b * s + c * t + 2.0 * e) + f
 
     # account for numerical round-off error
-    if sqrdistance < 0:
-        sqrdistance = 0
+    sqrdistance = max(sqrdistance, 0)
     dist = np.sqrt(sqrdistance)
     return dist

@@ -218,6 +218,7 @@ class HorizonController(BaseController):
             monitor.__enter__()
 
         horizons = []
+        largest = []
 
         start_time = perf_counter()
         for letter in orientation:
@@ -225,8 +226,19 @@ class HorizonController(BaseController):
                                         orientation=letter, config=config)
             self.log(f'Done {letter}-inference')
             horizons.extend(horizons_)
+            largest.append(horizons_[0])
         elapsed = perf_counter() - start_time
 
+        # Compare two largest horizons from each orientation
+        if len(orientation) == 2:
+            with open(self.make_savepath('inference_ix', 'results.txt'), 'w') as result_txt:
+                hm = HorizonMetrics(largest)
+                hm.evaluate('compare', hist=False,
+                            plot=True, show=self.plot,
+                            printer=lambda msg: print(msg, file=result_txt),
+                            savepath=self.make_savepath('inference_ix', 'l1.png'))
+
+        # Merge all the predictions
         horizons = Horizon.merge_list(horizons, minsize=1000)
         self.log(f'Inference done in {elapsed:4.1f}')
 
@@ -392,6 +404,11 @@ class HorizonController(BaseController):
 
             # Basic demo: depth map and properties
             horizon.show(show=self.plot, savepath=self.make_savepath(*prefix, name + 'p_depth_map.png'))
+
+            horizon.show_slide(horizon.geometry.lens[0]//2, axis=0, width=5,
+                               savepath=self.make_savepath(*prefix, name + 'p_slide_i.png'))
+            horizon.show_slide(horizon.geometry.lens[1]//2, axis=1, width=5,
+                               savepath=self.make_savepath(*prefix, name + 'p_slide_x.png'))
 
             with open(self.make_savepath(*prefix, name + 'p_results_self.txt'), 'w') as result_txt:
                 horizon.evaluate(compute_metric=False, printer=lambda msg: print(msg, file=result_txt))

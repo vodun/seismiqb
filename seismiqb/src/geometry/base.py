@@ -138,6 +138,7 @@ class SeismicGeometry(ExportMixin):
     HDF5_ALIASES = ['hdf5', 'qhdf5']
     BLOSC_ALIASES = ['blosc', 'qblosc']
     NPZ_ALIASES = ['npz']
+    ARRAY_ALIASES = ['dummyarray']
 
     # Attributes to store during SEG-Y -> HDF5 conversion
     PRESERVED = [
@@ -195,6 +196,9 @@ class SeismicGeometry(ExportMixin):
         elif fmt in cls.NPZ_ALIASES:
             from .npz import SeismicGeometryNPZ
             new_cls = SeismicGeometryNPZ
+        elif fmt in cls.ARRAY_ALIASES:
+            from .array import SeismicGeometryArray
+            new_cls = SeismicGeometryArray
         else:
             raise TypeError(f'Unknown format of the cube: {fmt}')
 
