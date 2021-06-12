@@ -167,7 +167,12 @@ class HorizonController(BaseController):
 
     def make_sampler(self, dataset, bins=None, use_grid=False, grid_src='quality_grid', side_view=False, **kwargs):
         """ Create sampler. Works inplace. """
-        dataset.create_sampler(quality_grid=use_grid, bins=bins)
+        if use_grid:
+            quality_grid = True if isinstance(grid_src, str) else grid_src
+        else:
+            quality_grid = None
+
+        dataset.create_sampler(quality_grid=quality_grid, bins=bins)
         dataset.modify_sampler('train_sampler', finish=True, **kwargs)
         self.log('Created sampler')
 
