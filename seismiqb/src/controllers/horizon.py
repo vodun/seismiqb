@@ -405,9 +405,9 @@ class HorizonController(BaseController):
             # Basic demo: depth map and properties
             horizon.show(show=self.plot, savepath=self.make_savepath(*prefix, name + 'p_depth_map.png'))
 
-            horizon.show_slide(horizon.geometry.lens[0]//2, axis=0, width=5,
+            horizon.show_slide(horizon.geometry.lens[0]//2, axis=0,
                                savepath=self.make_savepath(*prefix, name + 'p_slide_i.png'))
-            horizon.show_slide(horizon.geometry.lens[1]//2, axis=1, width=5,
+            horizon.show_slide(horizon.geometry.lens[1]//2, axis=1,
                                savepath=self.make_savepath(*prefix, name + 'p_slide_x.png'))
 
             with open(self.make_savepath(*prefix, name + 'p_results_self.txt'), 'w') as result_txt:

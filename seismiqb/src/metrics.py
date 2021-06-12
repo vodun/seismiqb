@@ -767,11 +767,12 @@ class HorizonMetrics(BaseMetrics):
         title = f'Perturbed metrics\nfor {title}'
         plot_dict = {
             **plot_defaults,
+            'figsize': (20, 7),
             'separate': True,
             'suptitle_label': title,
             'title_label': ['mean', 'max'],
             'cmap': 'Reds_r',
-            'zmin': (0.0, -0.5), 'zmax': 0.5,
+            'zmin': [0.0, -0.5], 'zmax': 0.5,
             **kwargs
         }
         return (diff_mean, diff_max), plot_dict

@@ -2275,7 +2275,7 @@ class Horizon:
                                      matrix=self.full_matrix, threshold=threshold)
         return x, y, z, simplices
 
-    def show_slide(self, loc, width=3, axis='i', zoom_slice=None, n_ticks=5, delta_ticks=100, **kwargs):
+    def show_slide(self, loc, width=None, axis='i', zoom_slice=None, n_ticks=5, delta_ticks=100, **kwargs):
         """ Show slide with horizon on it.
 
         Parameters
@@ -2283,7 +2283,7 @@ class Horizon:
         loc : int
             Number of slide to load.
         width : int
-            Horizon thickness.
+            Horizon thickness. If None given, set to 1% of seismic slide height.
         axis : int
             Number of axis to load slide along.
         zoom_slice : tuple
@@ -2296,7 +2296,9 @@ class Horizon:
 
         # Load seismic and mask
         seismic_slide = self.geometry.load_slide(loc=loc, axis=axis)
+
         mask = np.zeros(shape)
+        width = width or seismic_slide.shape[1] // 100
         mask = self.add_to_mask(mask, locations=locations, width=width)
         seismic_slide, mask = np.squeeze(seismic_slide), np.squeeze(mask)
         xticks = list(range(seismic_slide.shape[0]))

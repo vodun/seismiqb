@@ -663,19 +663,19 @@ class MatplotlibPlotter:
                 window = 100 if final_mean is True else final_mean
                 mean = np.mean(array[-window:])
 
-                line_len = 50
+                line_len = len(array) // 20
                 curve_len = len(array)
                 line_x = np.arange(line_len) + curve_len
                 line_y = [mean] * line_len
                 ax.plot(line_x, line_y, linestyle='--', linewidth=1.2, color=mean_color)
 
                 fontsize = 10
-                text_x = line_x[-1] + fontsize / 3
+                text_x = curve_len + line_len
                 text_y = mean - fontsize / 300
                 text = ax.text(text_x, text_y, f"{mean:.3f}", fontsize=fontsize)
                 text.set_path_effects([patheffects.Stroke(linewidth=3, foreground='white'), patheffects.Normal()])
 
-                kwargs['xlim'] = (0, curve_len + line_len)
+                kwargs['xlim'] = (0, text_x)
 
         return kwargs
 
