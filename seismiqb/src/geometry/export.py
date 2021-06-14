@@ -13,8 +13,7 @@ from ..utils import make_axis_grid
 class ExportMixin:
     """ Container for methods to save data as seismic cubes in different formats. """
     @classmethod
-    def create_file_from_iterable(cls, src, shape, window, stride, dst=None,
-                                  agg=None, projection='ixh', threshold=None):
+    def create_file_from_iterable(cls, src, shape, window, stride, dst=None, agg=None, threshold=None):
         """ Aggregate multiple chunks into file with 3D cube.
 
         Parameters
@@ -28,12 +27,10 @@ class ExportMixin:
         stride : tuple
             Stride for chunks. Values in overlapped regions will be aggregated.
         dst : str or None, optional
-            Path to the resulting .hdf5. If None, function will return array with predictions.
+            Path to the resulting hdf5 or blosc file. If None, function will return numpy array with predictions.
         agg : 'mean', 'min' or 'max' or None, optional
             The way to aggregate values in overlapped regions. None means that new chunk will rewrite
             previous value in cube.
-        projection : str, optional
-            Projections to create in hdf5 file, by default 'ixh'.
         threshold : float or None, optional
             If not None, threshold to transform values into [0, 1]. Default is None.
         """
@@ -44,10 +41,18 @@ class ExportMixin:
         if dst is None:
             dst = np.zeros(shape)
         else:
-            file_hdf5 = h5py.File(dst, 'a')
-            dst = file_hdf5.create_dataset('cube_i', shape)
-            cube_hdf5_x = file_hdf5.create_dataset('cube_x', shape[[1, 2, 0]])
-            cube_hdf5_h = file_hdf5.create_dataset('cube_h', shape[[2, 0, 1]])
+            ext = os.path.splitext(dst)[1][1:]
+            if ext == 'hdf5':
+                file, dtype, transform = h5py.File(dst, 'a'), np.float32, lambda array: array
+            else:
+                from .blosc import BloscFile
+                if ext == 'blosc':
+                    file, dtype, transform = BloscFile(dst, 'w'), np.float32, lambda array: array
+                elif ext == 'qblosc':
+                    file, dtype, transform = BloscFile(dst, 'w'), np.int8, cls.proba_to_int
+            dst = file.create_dataset('cube_i', shape, dtype=dtype)
+            cube_x = file.create_dataset('cube_x', shape[[1, 2, 0]], dtype=dtype)
+            cube_h = file.create_dataset('cube_h', shape[[2, 0, 1]], dtype=dtype)
 
         lower_bounds = [make_axis_grid((0, shape[i]), stride[i], shape[i], window[i]) for i in range(3)]
         lower_bounds = np.stack(np.meshgrid(*lower_bounds), axis=-1).reshape(-1, 3)
@@ -55,6 +60,7 @@ class ExportMixin:
         grid = np.stack([lower_bounds, upper_bounds], axis=-1)
 
         for position, chunk in src:
+            chunk = transform(chunk)
             slices = tuple([slice(position[i], position[i]+chunk.shape[i]) for i in range(3)])
             _chunk = dst[slices]
             if agg in ('max', 'min'):
@@ -71,20 +77,21 @@ class ExportMixin:
                         min(chunk_slc[i, 1], position[i] + window[i]) - position[i]
                     ) for i in range(3)]
                     agg_map[tuple(_slices)] += 1
-                chunk /= agg_map
-                chunk = _chunk + chunk
+                chunk = chunk / agg_map + _chunk
+                if dtype == np.int8:
+                    chunk = np.clip(chunk, -128, 127).astype(np.int8)
             dst[slices] = chunk
         if isinstance(dst, np.ndarray):
             if threshold is not None:
                 dst = (dst > threshold).astype(int)
-        else:
+        elif ext == 'hdf5':
             for i in range(0, dst.shape[0], window[0]):
                 slide = dst[i:i+window[0]]
                 if threshold is not None:
                     slide = (slide > threshold).astype(int)
                     dst[i:i+window[0]] = slide
-                cube_hdf5_x[:, :, i:i+window[0]] = slide.transpose((1, 2, 0))
-                cube_hdf5_h[:, i:i+window[0]] = slide.transpose((2, 0, 1))
+                cube_x[:, :, i:i+window[0]] = slide.transpose((1, 2, 0))
+                cube_h[:, i:i+window[0]] = slide.transpose((2, 0, 1))
         return dst
 
 
@@ -155,3 +162,7 @@ class ExportMixin:
             dir_name = os.path.dirname(os.path.abspath(path_segy))
             file_name = os.path.basename(path_segy)
             shutil.make_archive(os.path.splitext(path_segy)[0], 'zip', dir_name, file_name)
+
+    @classmethod
+    def proba_to_int(cls, array):
+        return (array * 255 - 128).astype(np.int8)

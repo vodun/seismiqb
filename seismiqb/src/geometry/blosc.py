@@ -171,20 +171,34 @@ class BloscDataset:
     # Item management
     def __setitem__(self, key, slide):
         """ Save slide to a sub-directory. Number of slide is used as the filename. """
-        key = key if isinstance(key, int) else key[0]
+        key = key if isinstance(key, (int, slice)) else key[0]
+        if isinstance(key, slice):
+            for i, pos in enumerate(np.arange(self.shape[0])[key]):
+                self[int(pos)] = slide[i]
+        else: # int
+            with self.zipfile.open(f'{self.key}/{key}', mode='w') as file:
+                self.dump(slide, file)
 
-        with self.zipfile.open(f'{self.key}/{key}', mode='w') as file:
-            self.dump(slide, file)
 
     def __getitem__(self, key):
         """ Load the file, named as the number of a slide. """
-        key = key if isinstance(key, int) else key[0]
+        key = key if isinstance(key, (int, slice)) else key[0]
+        if isinstance(key, slice):
+            array = []
+            for i in np.arange(self.shape[0])[key]:
+                array.append(self[int(i)])
+            return np.stack(array, axis=0)
+
         for _ in range(self.RETRIES):
             # In a multi-processing setting, the ZipFile can be (somehow) closed from other process
             # We can mitigate that by re-opening the handler, if needed.
             try:
-                with self.zipfile.open(f'{self.key}/{key}', mode='r') as file:
-                    slide = self.load(file)
+                name = f'{self.key}/{key}'
+                if name in self.namelist():
+                    with self.zipfile.open(name, mode='r') as file:
+                        slide = self.load(file)
+                else:
+                    slide = np.zeros(self.shape[1:], dtype=self.dtype)
                 break
             except ValueError:
                 self.parent.open_handler()

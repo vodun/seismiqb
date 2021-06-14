@@ -11,6 +11,10 @@ from shutil import copyfile
 import numpy as np
 import torch
 
+from skimage.morphology import skeletonize, skeletonize_3d
+from scipy.ndimage import binary_erosion, binary_dilation, generate_binary_structure, binary_fill_holes
+
+
 from ...batchflow import Config, Pipeline, Notifier
 from ...batchflow import B, C, D, P, R, V, F, I
 from ...batchflow.models.torch import TorchModel, ResBlock, EncoderDecoder
@@ -422,7 +426,8 @@ class FaultController(BaseController):
             return faults_metric, noise_metric
         return None, None
 
-    def inference_on_cube(self, pipeline=None, model_path=None, fmt='npy', save_to=None, prefix=None, threshold=0.5, bar=True, **kwargs):
+    def inference_on_cube(self, pipeline=None, model_path=None, fmt='sgy', save_to=None, prefix=None,
+                          tmp='blosc', bar=True, **kwargs):
         config = {**self.config['inference'], **kwargs}
         strides = config['stride'] if isinstance(config['stride'], tuple) else [config['stride']] * 3
         batch_size = config['batch_size']
@@ -475,21 +480,24 @@ class FaultController(BaseController):
                 _strides = np.maximum(np.array(crop_shape) * np.array(strides), 1).astype(int)
                 slices = fill_defaults(slices, [[0, i] for i in shape])
 
-                filename = {ext: os.path.join(dirname, self.make_filename(prefix, 'x' if t else 'i', ext)) for ext in ['hdf5', 'sgy', 'qblosc', 'npy', 'meta']}
+                filename = {ext: os.path.join(dirname, self.make_filename(prefix, 'x' if t else 'i', ext))
+                            for ext in ['hdf5', 'sgy', 'blosc', 'qblosc', 'npy', 'meta']}
                 if fmt == 'npy':
                     _filename = None
-                elif fmt in ['hdf5', 'sgy']:
-                    _filename = filename['hdf5']
+                elif fmt in ['hdf5', 'blosc', 'qblosc']:
+                    _filename = filename[fmt]
+                elif fmt in ['sgy', 'segy']:
+                    _filename = filename[tmp]
 
                 prediction = dataset.make_prediction(_filename, inference_pipeline, crop_shape, _strides, locations,
                                                     batch_size=batch_size, chunk_shape=_chunk_shape, pbar=bar,
                                                     threshold=None, order=order, agg='mean')
                 if fmt == 'npy':
-                    np.save(filename, np.stack(np.where(prediction > threshold), axis=1), allow_pickle=False)
+                    np.save(filename, prediction, allow_pickle=False)
                 elif fmt == 'sgy':
                     copyfile(dataset.geometries[0].path_meta, filename['meta'])
                     dataset.geometries[0].make_sgy(
-                        path_hdf5=filename['hdf5'],
+                        path_hdf5=filename[tmp],
                         path_spec=dataset.geometries[0].segy_path.decode('utf-8'),
                         path_segy=filename['sgy'],
                         remove_hdf5=True, zip_result=True, pbar=True
@@ -557,6 +565,32 @@ class FaultController(BaseController):
 
     def make_filename(self, prefix, orientation, ext):
         return (prefix + datetime.now().strftime("%Y-%m-%d-%H-%M-%S") + '_{}.{}').format(orientation, ext)
+
+    def skeletonize_faults(self, prediction, axis=0, bar=True):
+        prediction_cube = SeismicGeometry(prediction) if isinstance(prediction, str) else prediction
+        processed_faults = np.zeros(prediction_cube.cube_shape)
+        for i in tqdm.tqdm_notebook(range(prediction_cube.cube_shape[axis]), disable=(not bar)):
+            prediction = prediction_cube.load_slide(i, axis=axis)
+
+            struct = generate_binary_structure(2, 10)
+
+            dilation = binary_dilation(prediction > 0.3, struct)
+            holes = binary_fill_holes(dilation, struct)
+            erosion = binary_erosion(holes, generate_binary_structure(2, 1))
+
+            slices = [slice(None)] * 2
+            slices[axis] = i
+            slices = tuple(slices)
+
+            processed_faults[slices] = erosion
+
+        for i in tqdm.tqdm_notebook(range(prediction_cube.cube_shape[axis]), disable=(not bar)):
+            slices = [slice(None)] * 2
+            slices[axis] = i
+            slices = tuple(slices)
+            processed_faults[slices] = binary_dilation(skeletonize(processed_faults[slices], method='lee'))
+
+        return Fault.from_mask(processed_faults, prediction_cube, chunk_size=100, pbar=bar)
 
 # from visdom import Visdom
 # import numpy as np

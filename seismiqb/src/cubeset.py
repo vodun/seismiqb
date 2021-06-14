@@ -1279,7 +1279,7 @@ class SeismicCubeset(Dataset):
                                                             batch_size, src, pbar, order, fill_value)
 
         return SeismicGeometry.create_file_from_iterable(predictions_generator, output_shape,
-                                                         chunk_shape, chunk_stride, dst, agg, projection, threshold)
+                                                         chunk_shape, chunk_stride, dst, agg, threshold)
 
     def _predictions_generator(self, idx, pipeline, locations, output_shape, chunk_shape, chunk_stride,
                                crop_shape, crop_stride, batch_size, src, pbar, order, fill_value):
