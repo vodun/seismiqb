@@ -182,7 +182,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
             hist_matrix = np.full((*self.lens, len(bins)-1), np.nan)
 
             # Iterate over traces
-            description = f'Collecting stats for {self.name}'
+            description = f'Collecting stats for {self.displayed_name}'
             for i in tqdm(range(num_traces), desc=description, ncols=800, disable=(not pbar)):
                 trace = self.segyfile.trace[i]
                 header = self.segyfile.header[i]

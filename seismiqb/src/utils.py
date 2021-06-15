@@ -654,3 +654,17 @@ def make_bezier_figure(n=7, radius=0.2, sharpness=0.05, scale=1.0, shape=(1, 1),
     curve_segments = np.array(curve_segments)
     figure_coordinates = np.unique(np.ceil(curve_segments).astype(int), axis=0)
     return figure_coordinates
+
+def to_list(obj, default=None, dtype=None):
+    """ Cast an object to a list.
+    When default value provided, cast it instead if object value is None.
+    Almost identical to `list(obj)` for 1-D objects, except for `str` instances,
+    which won't be split into separate letters but transformed into a list of a single element.
+    """
+    if (obj is None) and (default is not None):
+        obj = default
+    return np.array(obj, dtype=dtype).ravel().tolist()
+
+def get_class_methods(cls):
+    """ Get a list of non-private class methods. """
+    return [func for func in dir(cls) if not func.startswith("__") and callable(getattr(cls, func))]

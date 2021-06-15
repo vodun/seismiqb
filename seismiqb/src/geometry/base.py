@@ -210,15 +210,9 @@ class SeismicGeometry(ExportMixin):
         self.path = path
         self.anonymize = get_environ_flag('SEISMIQB_ANONYMIZE')
 
-        name = os.path.basename(self.path)
-        # Find span of uppercase letter sequence between '_' and '.' symbols in filename
-        field_search = re.search(r'_([A-Z]+?)\.', name)
-        self.field = name[slice(*field_search.span(1))] if field_search is not None else ""
-        self.name = name.replace("_" * bool(self.field) + self.field, "") if self.anonymize else name
-        if not self.field and self.anonymize:
-            raise ValueError("Geometry name was not anonymized, since field name cannot be parsed from it.")
-
         # Names of different lengths and format: helpful for outside usage
+        self.name = os.path.basename(self.path)
+        self.field = self.parse_field()
         self.short_name = self.name.split('.')[0]
         self.long_name = ':'.join(self.path.split('/')[-2:])
         self.format = os.path.splitext(self.path)[1][1:]
@@ -233,6 +227,21 @@ class SeismicGeometry(ExportMixin):
         if process:
             self.process(**kwargs)
 
+
+    def parse_field(self):
+        """ Try to parse field from geometry name. """
+
+        # search for a sequence of uppercase letters between '_' and '.' symbols
+        field_search = re.search(r'_([A-Z]+?)\.', self.name)
+        if field_search is None:
+            if self.anonymize:
+                msg = f"""
+                Cannot anonymize name {self.name}, because field cannot be parsed from it.
+                Expected name in `<attribute>_<NUM>_<FIELD>.<extension>` format.
+                """
+                raise ValueError(msg)
+            return ""
+        return self.name[slice(*field_search.span(1))]
 
     # Utility functions
     def parse_axis(self, axis):
@@ -508,9 +517,14 @@ class SeismicGeometry(ExportMixin):
         return txt.strip()
 
     @property
+    def displayed_name(self):
+        """ Return name with masked field name, if anonymization needed. """
+        return self.short_name.replace(f"_{self.field}", "") if self.anonymize else self.short_name
+
+    @property
     def displayed_path(self):
         """ Return path with masked field name, if anonymization needed. """
-        return self.path.replace(self.field, "*" * bool(self.field)) if self.anonymize else self.path
+        return self.path.replace(self.field, "*") if self.anonymize else self.path
 
     @property
     def nonzero_traces(self):
@@ -562,7 +576,7 @@ class SeismicGeometry(ExportMixin):
 
     # Textual representation
     def __repr__(self):
-        return f'<Inferred geometry for {self.name}: {tuple(self.cube_shape)}>'
+        return f'<Inferred geometry for cube {self.displayed_name}: {tuple(self.cube_shape)}>'
 
     def __str__(self):
         msg = f"""
@@ -626,15 +640,17 @@ class SeismicGeometry(ExportMixin):
     # Visual representation
     def show(self, matrix='snr', **kwargs):
         """ Show geometry related top-view map. """
+        matrix_name = matrix if isinstance(matrix, str) else kwargs.get('matrix_name', 'custom matrix')
         kwargs = {
             'cmap': 'viridis_r',
-            'title': f'{matrix if isinstance(matrix, str) else ""} map of `{self.name}`',
+            'title': f'`{matrix_name}` map of cube `{self.displayed_name}`',
             'xlabel': self.index_headers[0],
             'ylabel': self.index_headers[1],
+            'colorbar': True,
             **kwargs
             }
         matrix = getattr(self, matrix) if isinstance(matrix, str) else matrix
-        plot_image(matrix, mode='single', **kwargs)
+        return plot_image(matrix, **kwargs)
 
     def show_histogram(self, normalize=None, bins=50, **kwargs):
         """ Show distribution of amplitudes in `trace_container`. Optionally applies chosen normalization. """
@@ -650,7 +666,7 @@ class SeismicGeometry(ExportMixin):
             'ylabel': 'density',
             **kwargs
         }
-        plot_image(data, backend='matplotlib', bins=bins, mode='histogram', **kwargs)
+        return plot_image(data, backend='matplotlib', bins=bins, mode='histogram', **kwargs)
 
     def show_slide(self, loc=None, start=None, end=None, step=1, axis=0, zoom_slice=None,
                    n_ticks=5, delta_ticks=100, stable=True, **kwargs):
@@ -716,16 +732,16 @@ class SeismicGeometry(ExportMixin):
             'labelright': False,
             **kwargs
         }
-        plot_image(slide, **kwargs)
+        return plot_image(slide, **kwargs)
 
     def show_quality_map(self, **kwargs):
         """ Show quality map. """
-        self.show(matrix=self.quality_map, cmap='Reds', title=f'Quality map of `{self.name}`')
+        self.show(matrix=self.quality_map, cmap='Reds', title=f'Quality map of `{self.displayed_name}`')
 
     def show_quality_grid(self, **kwargs):
         """ Show quality grid. """
         self.show(matrix=self.quality_grid, cmap='Reds', interpolation='bilinear',
-                  title=f'Quality map of `{self.name}`')
+                  title=f'Quality map of `{self.displayed_name}`')
 
 
     # Coordinate conversion

@@ -4,6 +4,7 @@ from collections import OrderedDict, defaultdict
 from threading import RLock
 from functools import wraps
 from hashlib import blake2b
+from copy import copy
 
 import numpy as np
 try:
@@ -309,9 +310,10 @@ class lru_cache:
     All arguments to the decorated method must be hashable.
     """
     #pylint: disable=invalid-name, attribute-defined-outside-init
-    def __init__(self, maxsize=None, attributes=None, apply_by_default=True):
+    def __init__(self, maxsize=None, attributes=None, apply_by_default=True, copy_on_return=False):
         self.maxsize = maxsize
         self.apply_by_default = apply_by_default
+        self.copy_on_return = copy_on_return
 
         # Make `attributes` always a list
         if isinstance(attributes, str):
@@ -374,7 +376,7 @@ class lru_cache:
                     del self.cache[instance][key]
                     self.cache[instance][key] = result
                     self.stats[instance]['hit'] += 1
-                    return result
+                    return copy(result) if self.copy_on_return else result
 
             # The result was not found in cache: evaluate function
             result = func(instance, *args, **kwargs)
@@ -390,7 +392,7 @@ class lru_cache:
                 else:
                     self.cache[instance][key] = result
                     self.is_full[instance] = (len(self.cache[instance]) >= self.maxsize)
-            return result
+            return copy(result) if self.copy_on_return else result
 
         wrapper.__name__ = func.__name__
         wrapper.cache = lambda: self.cache
