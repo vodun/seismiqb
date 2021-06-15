@@ -204,7 +204,7 @@ class MatplotlibPlotter:
             return [[data]]
         if isinstance(data[0], Number):
             return [[np.array(data)]]
-        if all([isinstance(item, np.ndarray) for item in data]):
+        if all(isinstance(item, np.ndarray) for item in data):
             return [[item] for item in data] if separate else [data]
         if separate:
             raise ValueError("Arrays list must be flat, when `separate` option is True.")
