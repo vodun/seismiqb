@@ -491,7 +491,7 @@ class FaultController(BaseController):
 
                 prediction = dataset.make_prediction(_filename, inference_pipeline, crop_shape, _strides, locations,
                                                     batch_size=batch_size, chunk_shape=_chunk_shape, pbar=bar,
-                                                    threshold=None, order=order, agg='mean')
+                                                    order=order, agg='mean')
                 if fmt == 'npy':
                     np.save(filename, prediction, allow_pickle=False)
                 elif fmt == 'sgy':

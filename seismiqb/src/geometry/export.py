@@ -9,11 +9,48 @@ import segyio
 
 from ..utils import make_axis_grid
 
+class NumpyAsHDF5:
+    def __init__(self, dst, mode):
+        self.dst = dst
+        self.mode = mode
+        self.datasets = {}
+
+    def create_dataset(self, name, shape, dtype):
+        if len(self.datasets) == 0:
+            self.datasets[name] = np.zeros(shape, dtype=dtype)
+        else:
+            if name == 'cube_x' and 'cube_i' in self.datasets:
+                self.datasets[name] = self.datasets['cube_i'].transpose((1, 2, 0))
+            elif name == 'cube_i' and 'cube_x' in self.datasets:
+                self.datasets[name] = self.datasets['cube_x'].transpose((2, 0, 1))
+            elif name == 'cube_h' and 'cube_i' in self.datasets:
+                self.datasets[name] = self.datasets['cube_i'].transpose((2, 0, 1))
+            elif name == 'cube_h' and 'cube_x' in self.datasets:
+                self.datasets[name] = self.datasets['cube_x'].transpose((1, 2, 0))
+            else:
+                raise NotImplementedError
+
+        if shape != self.datasets[name]:
+            raise ValueError(f'Wrong shape: {shape} but must be {self.datasets[name].shape}')
+        if dtype != self.datasets[name].dtype:
+            raise ValueError(f'Wrong dtype: {dtype} but must be {self.datasets[name].dtype}')
+
+        return self.datasets[name]
+
+    # Instance manager
+    def close(self):
+        pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, _, __, ___):
+        self.close()
 
 class ExportMixin:
     """ Container for methods to save data as seismic cubes in different formats. """
     @classmethod
-    def create_file_from_iterable(cls, src, shape, window, stride, dst=None, agg=None, threshold=None):
+    def create_file_from_iterable(cls, src, shape, window, stride, dst=None, agg=None):
         """ Aggregate multiple chunks into file with 3D cube.
 
         Parameters
@@ -39,59 +76,85 @@ class ExportMixin:
         stride = np.array(stride)
 
         if dst is None:
-            dst = np.zeros(shape)
+            constructor, mode, dtype, transform = NumpyAsHDF5, 'w', np.float32, lambda array: array
         else:
             ext = os.path.splitext(dst)[1][1:]
             if ext == 'hdf5':
-                file, dtype, transform = h5py.File(dst, 'a'), np.float32, lambda array: array
+                constructor, mode, dtype, transform = h5py.File, 'a', np.float32, lambda array: array
             else:
                 from .blosc import BloscFile
                 if ext == 'blosc':
-                    file, dtype, transform = BloscFile(dst, 'w'), np.float32, lambda array: array
+                    constructor, mode, dtype, transform = BloscFile, 'w', np.float32, lambda array: array
                 elif ext == 'qblosc':
-                    file, dtype, transform = BloscFile(dst, 'w'), np.int8, cls.proba_to_int
-            dst = file.create_dataset('cube_i', shape, dtype=dtype)
-            cube_x = file.create_dataset('cube_x', shape[[1, 2, 0]], dtype=dtype)
-            cube_h = file.create_dataset('cube_h', shape[[2, 0, 1]], dtype=dtype)
+                    constructor, mode, dtype, transform = BloscFile, 'w', np.int8, cls.proba_to_int
+
 
         lower_bounds = [make_axis_grid((0, shape[i]), stride[i], shape[i], window[i]) for i in range(3)]
         lower_bounds = np.stack(np.meshgrid(*lower_bounds), axis=-1).reshape(-1, 3)
         upper_bounds = lower_bounds + window
         grid = np.stack([lower_bounds, upper_bounds], axis=-1)
 
-        for position, chunk in src:
-            chunk = transform(chunk)
-            slices = tuple([slice(position[i], position[i]+chunk.shape[i]) for i in range(3)])
-            _chunk = dst[slices]
-            if agg in ('max', 'min'):
-                chunk = np.maximum(chunk, _chunk) if agg == 'max' else np.minimum(chunk, _chunk)
-            elif agg == 'mean':
-                grid_mask = np.logical_and(
-                    grid[..., 1] >= np.expand_dims(position, axis=0),
-                    grid[..., 0] < np.expand_dims(position + window, axis=0)
-                ).all(axis=1)
-                agg_map = np.zeros_like(chunk)
-                for chunk_slc in grid[grid_mask]:
-                    _slices = [slice(
-                        max(chunk_slc[i, 0], position[i]) - position[i],
-                        min(chunk_slc[i, 1], position[i] + window[i]) - position[i]
-                    ) for i in range(3)]
-                    agg_map[tuple(_slices)] += 1
-                chunk = chunk / agg_map + _chunk
-                if dtype == np.int8:
-                    chunk = np.clip(chunk, -128, 127).astype(np.int8)
-            dst[slices] = chunk
-        if isinstance(dst, np.ndarray):
-            if threshold is not None:
-                dst = (dst > threshold).astype(int)
-        elif ext == 'hdf5':
-            for i in range(0, dst.shape[0], window[0]):
-                slide = dst[i:i+window[0]]
-                if threshold is not None:
-                    slide = (slide > threshold).astype(int)
-                    dst[i:i+window[0]] = slide
-                cube_x[:, :, i:i+window[0]] = slide.transpose((1, 2, 0))
-                cube_h[:, i:i+window[0]] = slide.transpose((2, 0, 1))
+        with constructor(dst, mode) as file:
+            cube_i = file.create_dataset('cube_i', shape, dtype=dtype)
+            cube_x = file.create_dataset('cube_x', shape[[1, 2, 0]], dtype=dtype)
+            cube_h = file.create_dataset('cube_h', shape[[2, 0, 1]], dtype=dtype)
+
+            for position, chunk in src:
+                chunk = transform(chunk)
+                slices = tuple([slice(position[i], position[i]+chunk.shape[i]) for i in range(3)])
+
+                if sum(chunk.shape != shape) > 1 and ext in ['blosc', 'qblosc']:
+                    raise ValueError("BloscFile of shape {shape} doesn't support setitem for shape {chunk.shape}")
+
+                if chunk.shape[0] != shape[0]:
+                    save_to = 'i'
+                    order = [0, 1, 2]
+                    projection = cube_i
+                elif chunk.shape[1] != shape[1]:
+                    save_to = 'x'
+                    order = [1, 2, 0]
+                    projection = cube_x
+                else:
+                    raise NotImplementedError
+
+                _chunk = projection[np.array(slices)[[order]]]
+
+                if agg in ('max', 'min'):
+                    chunk = np.maximum(chunk, _chunk) if agg == 'max' else np.minimum(chunk, _chunk)
+                elif agg == 'mean':
+                    grid_mask = np.logical_and(
+                        grid[..., 1] >= np.expand_dims(position, axis=0),
+                        grid[..., 0] < np.expand_dims(position + window, axis=0)
+                    ).all(axis=1)
+                    agg_map = np.zeros_like(chunk)
+                    for chunk_slc in grid[grid_mask]:
+                        _slices = [slice(
+                            max(chunk_slc[i, 0], position[i]) - position[i],
+                            min(chunk_slc[i, 1], position[i] + window[i]) - position[i]
+                        ) for i in range(3)]
+                        agg_map[_slices] += 1
+                    chunk = chunk / agg_map
+                    chunk = chunk.transpose(order) + _chunk
+                    if dtype == np.int8:
+                        chunk = np.clip(chunk, -128, 127).astype(np.int8)
+                projection[np.array(slices)[[order]]] = chunk
+
+            if ext == 'hdf5':
+                if save_to == 'i':
+                    for i in range(0, cube_i.shape[0], window[0]):
+                        slide = cube_i[i:i+window[0]]
+                        cube_x[:, :, i:i+window[0]] = slide.transpose((1, 2, 0))
+                        cube_h[:, i:i+window[0]] = slide.transpose((2, 0, 1))
+                elif save_to == 'x':
+                    for i in range(0, cube_x.shape[0], window[1]):
+                        slide = cube_x[i:i+window[1]]
+                        cube_i[:, i:i+window[1], :] = slide.transpose((2, 0, 1))
+                        cube_h[:, :, i:i+window[1]] = slide.transpose((1, 2, 0))
+                else:
+                    raise NotImplementedError
+            elif dst is None: #TODO: save result from manager
+                dst = file.datasets['cube_i']
+
         return dst
 
 
