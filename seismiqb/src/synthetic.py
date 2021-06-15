@@ -185,6 +185,19 @@ class SyntheticGenerator():
     def generate_velocities(self, num_reflections=200, vel_limits=(900, 5400), horizon_heights=(1/4, 1/2, 2/3),
                             horizon_jumps=(7, 5, 4)):
         """ Generate and store array of velocities.
+
+        Parameters
+        ----------
+        num_reflections : int
+            The number of reflective surfaces.
+        vel_limits : tuple
+            Contains two floats. Velocities of layers in velocity model gradually change from the
+            lower limit (first number) to the upper limit (second number) with some noise added.
+        horizon_heights : tuple
+            Some reflections are sharper than the others - they represent seismic horizons. The tuple contains
+            heights (in [0, 1]-interval) of sharp reflections.
+        horizon_jumps : tuple
+            Mutipliers controling the magnitide of sharp jumps. Should have the same length as `horizon_heights`-arg.
         """
         low, high = vel_limits
         llim = (high - low) / num_reflections
@@ -195,9 +208,29 @@ class SyntheticGenerator():
             self.velocities[int(self.velocities.shape[0] * height_share)] += llim * jump_mul
 
         self._horizon_heights = horizon_heights
+        return self
 
     def generate_velocity_model(self, shape=(50, 400, 800), grid_shape=(10, 10), perturbation_share=.2):
         """ Generate velocity model and store it in the class-instance.
+
+        Parameters
+        ----------
+        grid_shapes : tuple
+            Sets the shape of grid of support points for surfaces' interpolation (surfaces represent horizons).
+        perturbation_share : float
+            Sets the limit of random perturbation for surfaces' creation. The limit is set relative to the depth
+            of a layer of constant velocity. The larger the value, more 'curved' are the horizons.
+        rho_noise_lims : tuple or None
+            Density (rho)-model is given by (velocity model * noise). The param sets the limits for noise.
+            If set to None, rho-model is equal to velocity-model.
+        ricker_width : float
+            Width of the ricker-wave - `a`-parameter of `scipy.signal.ricker`.
+        ricker_points : int
+            Number of points in the ricker-wave - `points`-parameter of `scipy.signal.ricker`.
+        sigma : float or None
+            sigma used for gaussian blur of the synthetic seismic.
+        noise_mul : float or None
+            If not None, gaussian noise scale by this number is applied to the synthetic.
         """
         if len(shape) in (2, 3):
             self.dim = len(shape)
@@ -212,13 +245,39 @@ class SyntheticGenerator():
 
         # store curves-list to later use them as horizons
         self._curves = curves
+        return self
 
     def add_faults(self, faults=(((100, 50), (100, 370)),
                                  ((50, 320), (50, 470)),
                                  ((150, 320), (150, 470))),
                    num_points=10, zeros_share=0.6, kind='cubic', perturb_values=True,
                    perturb_peak=True, peak_value=0.05, random_invert=True):
-        """ Add faults to the velocity model.
+        """ Add faults to the velocity model. Faults are basically elastic transforms of patches of
+        generated seismic images. Elastic transforms are performed through coordinates-transformation
+        in depth-projection. Those are smooth maps [0, 1] -> [0, 1] described as f(x) = x + "hump".
+        Almost all parameters of the function are used to define properties of the "hump".
+
+        Parameters
+        ----------
+        faults : tuple or list
+            iterable containing faults-coordinates in form ((x0, y0), (x1, y1)).
+        num_points : int
+            number of points used for making coordinate-shifts for faults.
+        zeros_share : float
+            left and right tails of humps are set to zeros. This is needed to make
+            transformations that are identical on the tails. The parameter controls the share
+            of zero-values for tails.
+        kind : str
+            kind of interpolation used for building coordinate-shifts.
+        perturb_values : bool
+            add random perturbations to a coordinate-shift hump.
+        perturb_peak : bool
+            if set True, the position of hump's peak is randomly moved.
+        peak_value : float
+            value of a coordinate-shift transform in the peak of a hump
+            (before random perturbation).
+        random_invert : bool
+            if True, the coordinate-shift is defined as x - "hump" rather than x + "hump".
         """
         if self.velocity_model is None:
             raise ValueError("You need to create velocity model first to add ruptures later.")
@@ -232,25 +291,48 @@ class SyntheticGenerator():
             new_coords = func(np.arange(crop.shape[-1]) / (crop.shape[-1] - 1)) * (crop.shape[-1] - 1)
             crop_elastic = np.array([map_coordinates(trace, [new_coords]) for trace in crop])
             self.velocity_model[:x, y_low:y_high] = crop_elastic
+        return self
 
     def generate_density_model(self, rho_noise_lims=(0.97, 1.3)):
         """ Generate density model and store it in the class-instance.
+
+        Parameters
+        ----------
+        rho_noise_lims : tuple or None
+            Density (rho)-model is given by (velocity model * noise). The param sets the limits for noise.
+            If set to None, rho-model is equal to velocity-model.
         """
         if rho_noise_lims is not None:
             self.rho_model = self.velocity_model * self.rng.uniform(*rho_noise_lims, size=self.velocity_model.shape)
         else:
             self.rho_model = self.velocity_model
+        return self
 
     def generate_synthetic(self, ricker_width=5, ricker_points=50):
         """ Generate and store synthetic-model.
+
+        Parameters
+        ----------
+        ricker_width : float
+            Width of the ricker-wave - `a`-parameter of `scipy.signal.ricker`.
+        ricker_points : int
+            Number of points in the ricker-wave - `points`-parameter of `scipy.signal.ricker`.
         """
         ref_coeffs = reflectivity(self.velocity_model, self.rho_model)
         wavelet = ricker(ricker_points, ricker_width)
         convolve = convolve_2d if self.dim == 2 else convolve_3d
         self.synthetic = convolve(ref_coeffs, wavelet)
+        return self
 
     def postprocess_synthetic(self, sigma=1.1, noise_mul=0.5):
         """ Simple postprocessing function for a seismic seismic, containing blur and noise.
+
+        Parameters
+        ----------
+        sigma : float or None
+            sigma used for gaussian blur of the synthetic seismic.
+        noise_mul : float or None
+            If not None, gaussian noise scale by this number is applied to the synthetic.
         """
         if sigma is not None:
             self.synthetic = gaussian_filter(self.synthetic, sigma=sigma)
@@ -285,27 +367,91 @@ def make_synthetic(shape=(50, 400, 800), num_reflections=200, vel_limits=(900, 5
                     perturb_values=True, perturb_peak=True, peak_value=0.05, random_invert=True,
                     fetch_surfaces='horizons', rng=None, seed=None):
     """ Generate synthetic 3d-cube along with most prominient reflective surfaces.
+
+    Parameters
+    ----------
+    shape : tuple
+        [n_ilines X n_xlines X n_samples].
+    num_reflections : int
+        The number of reflective surfaces.
+    vel_limits : tuple
+        Contains two floats. Velocities of layers in velocity model gradually change from the
+        lower limit (first number) to the upper limit (second number) with some noise added.
+    horizon_heights : tuple
+        Some reflections are sharper than the others - they represent seismic horizons. The tuple contains
+        heights (in [0, 1]-interval) of sharp reflections.
+    horizon_jumps : tuple
+        Mutipliers controling the magnitide of sharp jumps. Should have the same length as `horizon_heights`-arg.
+    grid_shapes : tuple
+        Sets the shape of grid of support points for surfaces' interpolation (surfaces represent horizons).
+    perturbation_share : float
+        Sets the limit of random perturbation for surfaces' creation. The limit is set relative to the depth
+        of a layer of constant velocity. The larger the value, more 'curved' are the horizons.
+    rho_noise_lims : tuple or None
+        Density (rho)-model is given by (velocity model * noise). The param sets the limits for noise.
+        If set to None, rho-model is equal to velocity-model.
+    ricker_width : float
+        Width of the ricker-wave - `a`-parameter of `scipy.signal.ricker`.
+    ricker_points : int
+        Number of points in the ricker-wave - `points`-parameter of `scipy.signal.ricker`.
+    sigma : float or None
+        sigma used for gaussian blur of the synthetic seismic.
+    noise_mul : float or None
+        If not None, gaussian noise scale by this number is applied to the synthetic.
+    faults : tuple or list
+        iterable containing faults-coordinates in form ((x0, y0), (x1, y1)).
+    num_points_faults : int
+        number of points used for making coordinate-shifts for faults.
+    zeros_share_faults : float
+        left and right tails of humps are set to zeros. This is needed to make
+        transformations that are identical on the tails. The parameter controls the share
+        of zero-values for tails.
+    fault_shift_interpolation : str
+        kind of interpolation used for building coordinate-shifts.
+    perturb_values : bool
+        add random perturbations to a coordinate-shift hump.
+    perturb_peak : bool
+        if set True, the position of hump's peak is randomly moved.
+    peak_value : float
+        value of a coordinate-shift transform in the peak of a hump
+        (before random perturbation).
+    random_invert : bool
+        if True, the coordinate-shift is defined as x - "hump" rather than x + "hump".
+    fetch_surfaces : str
+        Can be either 'horizons', 'all' or None. When 'horizons', only horizon-surfaces
+        (option `horizon_heights`) are returned. Choosing 'all' allows to return all of
+        the reflections, while 'topK' option leads to fetching K surfaces correpsonding
+        to K largest jumps in velocities-array.
+    rng : np.random.Generator or None
+        generator of random numbers.
+    seed : int or None
+        sees used for creation of random generator (check out `np.random.default_rng`).
+
+    Returns
+    -------
+    tuple
+        tuple (cube, horizons); horizons can be None if `fetch_surfaces` is set to None.
     """
     if len(shape) in (2, 3):
         dim = len(shape)
     else:
         raise ValueError('The function only supports the generation of 2d and 3d synthetic seismic.')
 
-    gen = SyntheticGenerator(rng, seed)
-    gen.generate_velocities(num_reflections, vel_limits, horizon_heights, horizon_jumps)
-    gen.generate_velocity_model(shape, grid_shape, perturbation_share)
-    gen.generate_density_model(rho_noise_lims)
+    gen = (gen.SyntheticGenerator(rng, seed)
+              .generate_velocities(num_reflections, vel_limits, horizon_heights, horizon_jumps)
+              .generate_velocity_model(shape, grid_shape, perturbation_share)
+              .generate_density_model(rho_noise_lims))
 
     # add faults if needed and possible
     if faults is not None:
         if dim == 2:
             gen.add_faults(faults, num_points_faults, zeros_share_faults, fault_shift_interpolation,
-                            perturb_values, perturb_peak, peak_value, random_invert)
+                           perturb_values, perturb_peak, peak_value, random_invert)
         else:
             raise ValueError("For now, faults are only supported for dim = 2.")
 
-    gen.generate_synthetic(ricker_width, ricker_points)
-    gen.postprocess_synthetic(sigma, noise_mul)
+    gen = (gen.generate_synthetic(ricker_width, ricker_points)
+              .postprocess_synthetic(sigma, noise_mul))
     return gen.synthetic, gen.fetch_horizons(fetch_surfaces)
 
 
