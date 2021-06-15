@@ -566,29 +566,21 @@ class FaultController(BaseController):
     def make_filename(self, prefix, orientation, ext):
         return (prefix + datetime.now().strftime("%Y-%m-%d-%H-%M-%S") + '_{}.{}').format(orientation, ext)
 
-    def skeletonize_faults(self, prediction, axis=0, bar=True):
+    def skeletonize_faults(self, prediction, axis=0, threshold=0.1, bar=True):
         prediction_cube = SeismicGeometry(prediction) if isinstance(prediction, str) else prediction
         processed_faults = np.zeros(prediction_cube.cube_shape)
         for i in tqdm.tqdm_notebook(range(prediction_cube.cube_shape[axis]), disable=(not bar)):
-            prediction = prediction_cube.load_slide(i, axis=axis)
-
+            slices = [slice(None)] * 2
+            slices[axis] = i
+            slices = tuple(slices)
             struct = generate_binary_structure(2, 10)
 
-            dilation = binary_dilation(prediction > 0.3, struct)
+            prediction = prediction_cube.load_slide(i, axis=axis)
+            dilation = binary_dilation(prediction > threshold, struct)
             holes = binary_fill_holes(dilation, struct)
             erosion = binary_erosion(holes, generate_binary_structure(2, 1))
 
-            slices = [slice(None)] * 2
-            slices[axis] = i
-            slices = tuple(slices)
-
-            processed_faults[slices] = erosion
-
-        for i in tqdm.tqdm_notebook(range(prediction_cube.cube_shape[axis]), disable=(not bar)):
-            slices = [slice(None)] * 2
-            slices[axis] = i
-            slices = tuple(slices)
-            processed_faults[slices] = binary_dilation(skeletonize(processed_faults[slices], method='lee'))
+            processed_faults[slices] = binary_dilation(skeletonize(erosion, method='lee'))
 
         return Fault.from_mask(processed_faults, prediction_cube, chunk_size=100, pbar=bar)
 

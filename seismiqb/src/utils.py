@@ -19,8 +19,6 @@ def file_print(msg, path, mode='w'):
     with open(path, mode) as file:
         print(msg, file=file)
 
-
-
 #TODO: rethink
 def make_subcube(path, geometry, path_save, i_range, x_range):
     """ Make subcube from .sgy cube by removing some of its first and

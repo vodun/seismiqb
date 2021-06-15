@@ -48,7 +48,7 @@ class SeismicGeometryConverted(SeismicGeometry):
         axis = self.available_axis[0]
         cube = self.axis_to_cube[axis]
 
-        self.cube_shape = np.array(cube.shape)[self.AXIS_TO_ORDER[axis]]
+        self.cube_shape = np.array(cube.shape)[self.AXIS_TO_TRANSPOSE[axis]]
         self.lens = self.cube_shape[:2]
         self.depth = self.cube_shape[-1]
         self.dtype = cube.dtype
@@ -153,7 +153,7 @@ class SeismicGeometryConverted(SeismicGeometry):
         else:
             slide = self._cached_construct(loc, axis, **kwargs)
 
-        if axis == 1:
+        if axis == 1 and axis in self.available_axis:
             slide = slide.T
 
         if self.dtype == np.int8:

@@ -1269,3 +1269,23 @@ class SeismicCropBatch(Batch):
         }
 
         plot_image(imgs, mode=mode, order_axes=order_axes, **kwargs)
+
+    @action
+    @inbatch_parallel(init='indices', post=None, target='for')
+    def update_container(self, ix, src, container, src_locations='locations', order=(0, 1, 2)):
+        """ Aggregate crops to form resulting cube
+        Parameters
+        ----------
+        src : str
+            Component with crops
+        container : BaseAggregationContainer
+            Container for resulting cube aggregation.
+        src_locations : src
+            Component with crop location, default: locations
+        order : tuple
+            The order of axes of the crop which corresponds to natural iline-xline-depth order
+        """
+        crop = self.get(ix, src)
+        location = self.get(ix, src_locations)
+        container.put(crop.transpose(order), location)
+        return self

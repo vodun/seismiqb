@@ -378,7 +378,8 @@ class Fault(Horizon):
         if threshold:
             labels = [item for item in labels if item[0] >= threshold]
         if geometry is not None:
-            labels = [Fault(item[1].astype('int32'), geometry=geometry) for item in labels]
+            labels = [Fault(item[1].astype('int32'), name=f'fault_{i}', geometry=geometry)
+                      for i, item in enumerate(labels)]
         return labels
 
 def faults_sizes(labels):

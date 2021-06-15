@@ -1,18 +1,18 @@
 [![License](https://img.shields.io/github/license/analysiscenter/batchflow.svg)](https://www.apache.org/licenses/LICENSE-2.0)
-[![Python](https://img.shields.io/badge/python-3.5-blue.svg)](https://python.org)
-[![TensorFlow](https://img.shields.io/badge/TensorFlow-1.14-orange.svg)](https://tensorflow.org)
+[![Python](https://img.shields.io/badge/python-3.6.10-blue.svg)](https://python.org)
+[![PyTorch](https://img.shields.io/badge/PyTorch-1.7-green.svg)](https://pytorch.org)
 
 # SeismiQB
 
-`seismiQB` is a framework for deep learning research on 3d-cubes of seismic data. It allows to
+`seismiQB` is a framework for research and deployment of deep learning models on post-stack seismic data. It allows to
 
-* `sample` and `load` crops of `SEG-Y` cubes for training neural networks
-* convert `SEG-Y` cubes to `HDF5`-format for even faster `load`
-* `create_masks` of different types from horizon labels for segmenting horizons, facies and other seismic bodies
-* build augmentation pipelines using custom augmentations for seismic data as well as `rotate`, `noise` and `elastic_transform`
-* segment horizons and interlayers using [`UNet`](https://arxiv.org/abs/1505.04597) and [`Tiramisu`](https://arxiv.org/abs/1611.09326)
-* extend horizons from a couple of seismic `ilines` in spirit of classic autocorrelation tools but with deep learning
-* convert predicted masks into horizons for convenient validation by geophysicists
+* convert `SEG-Y` to a compressed and quantized data formats, that take 5x less disk space and load slices up to 40 times faster
+* work with a number of labels: horizons, faults, facies (both 2d and 3d)
+* load crops of data and create segmentation masks to train neural networks, following defined distribution of location generation
+* augment seismic images and masks with both usual CV methods like `flip`, `rotate` and `elastic_transform`, as well as to compute geological attributes: `phases`, `frequencies`, `instantaneous_amplitudes`
+* define complex neural networks with simple and intuitive configurations: just a few lines of code are enough to define models ranging from vanilla `UNet` to most sophisticated versions of modern `EfficientNets`
+* apply ready-to-use models and pipelines to detect horizons, faults, alluvial fans and fluvial channels
+* export predicted entities to a convenient formats like CHARISMA and FAULT_STICKS for an easy validation by geophysicists
 
 
 ## Installation
@@ -35,7 +35,7 @@ To get the developer version, run
 git clone --recursive https://github.com/gazprom-neft/seismiqb.git
 ```
 
-## Turorials
+## Tutorials
 
 ### [Cube processing](tutorials/01_Geometry.ipynb)
 Working with SEG-Y cubes with various indexing headers (e.g. pre-stack and post-stack).

@@ -996,7 +996,7 @@ class GeometryMetrics(BaseMetrics):
     def tracewise(self, func, l=3, pbar=True, **kwargs):
         """ Apply `func` to compare two cubes tracewise. """
         pbar = tqdm if pbar else lambda iterator, *args, **kwargs: iterator
-        metric = np.full((*self.geometry.ranges, l), np.nan)
+        metric = np.full((*self.geometry.lens, l), np.nan)
 
         indices = [geometry.dataframe['trace_index'] for geometry in self.geometries]
 
@@ -1015,7 +1015,6 @@ class GeometryMetrics(BaseMetrics):
 
         title = f"tracewise {func}"
         plot_dict = {
-            'spatial': self.spatial,
             'title': f'{title} for {self.name} on cube {self.cube_name}',
             'cmap': 'seismic',
             'zmin': None, 'zmax': None,
@@ -1030,7 +1029,7 @@ class GeometryMetrics(BaseMetrics):
         structure of cubes is assumed to be identical.
         """
         pbar = tqdm if pbar else lambda iterator, *args, **kwargs: iterator
-        metric = np.full((*self.geometry.ranges, l), np.nan)
+        metric = np.full((*self.geometry.lens, l), np.nan)
 
         for idx in pbar(range(len(self.geometries[0].dataframe))):
             header = self.geometries[0].segyfile.header[idx]
@@ -1043,7 +1042,6 @@ class GeometryMetrics(BaseMetrics):
 
         title = f"tracewise unsafe {func}"
         plot_dict = {
-            'spatial': self.spatial,
             'title': f'{title} for {self.name} on cube {self.cube_name}',
             'cmap': 'seismic',
             'zmin': None, 'zmax': None,
@@ -1062,21 +1060,21 @@ class GeometryMetrics(BaseMetrics):
         low = window // 2
         high = window - low
 
-        total = np.product(self.geometries[0].ranges-window)
+        total = np.product(self.geometries[0].lens - window)
         prep_func = prep_func if prep_func else lambda x: x
 
         pbar = tqdm if pbar else lambda iterator, *args, **kwargs: iterator
-        metric = np.full((*self.geometries[0].ranges, l), np.nan)
+        metric = np.full((*self.geometries[0].lens, l), np.nan)
 
-        heights = np.arange(self.geometries[0].cube_shape[2]) if heights is None else np.arange(*heights)
+        heights = slice(0, self.geometries[0].depth) if heights is None else slice(*heights)
 
         with pbar(total=total) as prog_bar:
             for il_block in np.arange(0, self.geometries[0].cube_shape[0], block_size[0]-window[0]):
                 for xl_block in np.arange(0, self.geometries[0].cube_shape[1], block_size[1]-window[1]):
-                    block_len = np.min((np.array(self.geometries[0].ranges) - (il_block, xl_block),
+                    block_len = np.min((np.array(self.geometries[0].lens) - (il_block, xl_block),
                                         block_size), axis=0)
-                    locations = [np.arange(il_block, il_block + block_len[0]),
-                                 np.arange(xl_block, xl_block + block_len[1]),
+                    locations = [slice(il_block, il_block + block_len[0]),
+                                 slice(xl_block, xl_block + block_len[1]),
                                  heights]
 
                     blocks = [prep_func(geometry.load_crop(locations)) for geometry in self.geometries]
@@ -1093,7 +1091,6 @@ class GeometryMetrics(BaseMetrics):
 
         title = f"Blockwise {func}"
         plot_dict = {
-            'spatial': self.spatial,
             'title': f'{title} for {self.name} on cube {self.cube_name}',
             'cmap': 'seismic',
             'zmin': None, 'zmax': None,
