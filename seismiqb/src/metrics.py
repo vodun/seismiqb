@@ -789,15 +789,16 @@ class HorizonMetrics(BaseMetrics):
         analytic = hilbert(data, axis=2)
 
         phase = xp.angle(analytic)
-        phase = phase % (2 * xp.pi) - xp.pi
 
         phase_slice = phase[:, :, phase.shape[-1] // 2]
         phase_slice[np.isnan(xp.std(data, axis=-1))] = xp.nan
+        phase_slice[self.horizon.full_matrix == self.horizon.FILL_VALUE] = xp.nan
 
         # Evaluate mode value
-        phase_values = phase_slice[~np.isnan(phase_slice)].round(2)
-        values, counts = xp.unique(phase_values, return_counts=True)
-        mode = values[xp.argmax(counts)]
+        values = phase_slice[~xp.isnan(phase_slice)].round(2)
+        uniques, counts = xp.unique(values, return_counts=True)
+        # 3rd most frequent value is chosen to skip the first two (they are highly likely -pi/2 and pi/2)
+        mode = uniques[xp.argpartition(counts, -3)[-3]]
 
         shifted_slice = phase_slice - mode
         shifted_slice[shifted_slice >= xp.pi] -= 2 * xp.pi
@@ -816,6 +817,7 @@ class HorizonMetrics(BaseMetrics):
             'cmap': 'seismic',
             'zmin': -np.pi, 'zmax': np.pi,
             'colorbar': True,
+            'bad_color': 'k',
             **kwargs
         }
         return from_device(shifted_slice), plot_dict
