@@ -364,6 +364,10 @@ class Accumulator3D:
         if self.type == 'hdf5':
             self.file.close()
 
+    def clear(self):
+        """ Remove references to placeholders. """
+        self.data = None
+
     @property
     def result(self):
         """ Reference to the aggregated result. """
