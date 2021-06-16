@@ -61,7 +61,7 @@ class Enhancer(HorizonController):
             .elastic_transform(alpha=P(R('uniform', 30, 50)), sigma=P(R('uniform', 6, 7)),
                                src='prior_masks', p=0.5)
             .bend_masks(src='prior_masks', angle=P(R('uniform', -15, 15)))
-            .call(binarize)
+            .call(binarize, B())
             .transpose(src='prior_masks', order=(2, 0, 1))
         )
 
