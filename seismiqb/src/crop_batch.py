@@ -331,8 +331,7 @@ class SeismicCropBatch(Batch):
 
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def create_masks(self, ix, dst, src_labels='labels', src_locations='locations',
-                     use_labels='all', width=3, zero_to_nan=False):
+    def create_masks(self, ix, dst, src_labels='labels', src_locations='locations', use_labels='all', width=3):
         """ Create masks from labels-dictionary in given positions.
 
         Parameters
@@ -362,7 +361,6 @@ class SeismicCropBatch(Batch):
         -----
         Can be run only after labels-dict is loaded into labels-component.
         """
-
         location = self.get(ix, src_locations)
         crop_shape = self.get(ix, 'shapes')
         mask = np.zeros(crop_shape, dtype='float32')
@@ -382,7 +380,7 @@ class SeismicCropBatch(Batch):
             labels = [self.get_nearest_horizon(ix, src_labels, location[2])]
 
         for label in labels:
-            mask = label.add_to_mask(mask, locations=location, width=width, zero_to_nan=zero_to_nan)
+            mask = label.add_to_mask(mask, locations=location, width=width)
             if use_labels == 'single' and np.sum(mask) > 0.0:
                 break
         return mask
@@ -1174,7 +1172,7 @@ class SeismicCropBatch(Batch):
             setattr(self, _dst, crop)
         return self
 
-    def plot_components(self, *components, idx=0, slide=None, mode='overlap', order_axes=None, **kwargs):
+    def plot_components(self, *components, idx=0, slide=None, **kwargs):
         """ Plot components of batch.
 
         Parameters
@@ -1184,28 +1182,45 @@ class SeismicCropBatch(Batch):
             If None, then no indexing is applied.
         components : str or sequence of str
             Components to get from batch and draw.
-        plot_mode : bool
-            If 'overlap', then images are drawn one over the other with transparency.
-            If 'separate', then images are drawn on separate layouts.
-        order_axes : sequence of int
-            Determines desired order of the axis. The first two are plotted.
         """
         if idx is not None:
-            imgs = [getattr(self, comp)[idx] for comp in components]
+            data = [getattr(self, comp)[idx] for comp in components]
         else:
-            imgs = [getattr(self, comp) for comp in components]
+            data = [getattr(self, comp) for comp in components]
 
         if slide is not None:
-            imgs = [img[slide] for img in imgs]
+            data = [item[slide] for item in data]
 
         # set some defaults
         kwargs = {
-            'label': 'Batch components',
-            'titles': components,
+            'figsize': (8 * len(components), 8),
+            'suptitle_label': 'Batch components',
+            'title': list(components),
             'xlabel': 'xlines',
             'ylabel': 'depth',
-            'cmap': ['gray'] + ['viridis']*len(components) if mode == 'separate' else 'gray',
+            'cmap': ['gray'] + ['viridis'] * len(components),
+            'bad_values': (),
             **kwargs
         }
 
-        plot_image(imgs, mode=mode, order_axes=order_axes, **kwargs)
+        plot_image(data, **kwargs)
+
+    @action
+    @inbatch_parallel(init='indices', post=None, target='for')
+    def update_container(self, ix, src, container, src_locations='locations', order=(0, 1, 2)):
+        """ Aggregate crops to form resulting cube
+        Parameters
+        ----------
+        src : str
+            Component with crops
+        container : BaseAggregationContainer
+            Container for resulting cube aggregation.
+        src_locations : src
+            Component with crop location, default: locations
+        order : tuple
+            The order of axes of the crop which corresponds to natural iline-xline-depth order
+        """
+        crop = self.get(ix, src)
+        location = self.get(ix, src_locations)
+        container.put(crop.transpose(order), location)
+        return self

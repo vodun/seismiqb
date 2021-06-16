@@ -138,6 +138,7 @@ class SeismicGeometry(ExportMixin):
     HDF5_ALIASES = ['hdf5', 'qhdf5']
     BLOSC_ALIASES = ['blosc', 'qblosc']
     NPZ_ALIASES = ['npz']
+    ARRAY_ALIASES = ['dummyarray']
 
     # Attributes to store during SEG-Y -> HDF5 conversion
     PRESERVED = [
@@ -195,6 +196,9 @@ class SeismicGeometry(ExportMixin):
         elif fmt in cls.NPZ_ALIASES:
             from .npz import SeismicGeometryNPZ
             new_cls = SeismicGeometryNPZ
+        elif fmt in cls.ARRAY_ALIASES:
+            from .array import SeismicGeometryArray
+            new_cls = SeismicGeometryArray
         else:
             raise TypeError(f'Unknown format of the cube: {fmt}')
 
@@ -572,7 +576,7 @@ class SeismicGeometry(ExportMixin):
 
     # Textual representation
     def __repr__(self):
-        return f'<Inferred geometry for {self.displayed_name}: {tuple(self.cube_shape)}>'
+        return f'<Inferred geometry for cube {self.displayed_name}: {tuple(self.cube_shape)}>'
 
     def __str__(self):
         msg = f"""
@@ -636,15 +640,17 @@ class SeismicGeometry(ExportMixin):
     # Visual representation
     def show(self, matrix='snr', **kwargs):
         """ Show geometry related top-view map. """
+        matrix_name = matrix if isinstance(matrix, str) else kwargs.get('matrix_name', 'custom matrix')
         kwargs = {
             'cmap': 'viridis_r',
-            'title': f'{matrix if isinstance(matrix, str) else ""} map of `{self.displayed_name}`',
+            'title': f'`{matrix_name}` map of cube `{self.displayed_name}`',
             'xlabel': self.index_headers[0],
             'ylabel': self.index_headers[1],
+            'colorbar': True,
             **kwargs
             }
         matrix = getattr(self, matrix) if isinstance(matrix, str) else matrix
-        plot_image(matrix, mode='single', **kwargs)
+        return plot_image(matrix, **kwargs)
 
     def show_histogram(self, normalize=None, bins=50, **kwargs):
         """ Show distribution of amplitudes in `trace_container`. Optionally applies chosen normalization. """
@@ -660,7 +666,7 @@ class SeismicGeometry(ExportMixin):
             'ylabel': 'density',
             **kwargs
         }
-        plot_image(data, backend='matplotlib', bins=bins, mode='histogram', **kwargs)
+        return plot_image(data, backend='matplotlib', bins=bins, mode='histogram', **kwargs)
 
     def show_slide(self, loc=None, start=None, end=None, step=1, axis=0, zoom_slice=None,
                    n_ticks=5, delta_ticks=100, stable=True, **kwargs):
@@ -726,7 +732,7 @@ class SeismicGeometry(ExportMixin):
             'labelright': False,
             **kwargs
         }
-        plot_image(slide, **kwargs)
+        return plot_image(slide, **kwargs)
 
     def show_quality_map(self, **kwargs):
         """ Show quality map. """

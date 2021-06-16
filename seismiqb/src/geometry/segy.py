@@ -128,6 +128,14 @@ class SeismicGeometrySEGY(SeismicGeometry):
 
         self.cube_shape = np.asarray([*self.lens, self.depth])
 
+    def _get_store_key(self, traceseqno):
+        """ get trace lateral coordinates from header """
+        header = self.segyfile.header[traceseqno]
+        # i -> id in a dataframe
+        keys = [header.get(field) for field in self.byte_no]
+        store_key = tuple(self.uniques_inversed[j][item] for j, item in enumerate(keys))
+        return store_key
+
     def collect_stats(self, spatial=True, bins=25, num_keep=10000, pbar=True, **kwargs):
         """ Pass through file data to collect stats:
             - min/max values.
@@ -157,19 +165,27 @@ class SeismicGeometrySEGY(SeismicGeometry):
         # Get min/max values, store some of the traces
         trace_container = []
         value_min, value_max = np.inf, -np.inf
+        min_matrix, max_matrix = np.full(self.lens, np.nan), np.full(self.lens, np.nan)
 
         for i in tqdm(range(num_traces), desc='Finding min/max', ncols=800, disable=(not pbar)):
             trace = self.segyfile.trace[i]
+            store_key = self._get_store_key(i)
 
             trace_min, trace_max = find_min_max(trace)
-            if trace_min < value_min:
-                value_min = trace_min
-            if trace_max > value_max:
-                value_max = trace_max
+            min_matrix[store_key] = trace_min
+            max_matrix[store_key] = trace_max
 
             if i % frequency == 0 and trace_min != trace_max:
                 trace_container.extend(trace.tolist())
                 #TODO: add dtype for storing
+
+        # Store everything into instance
+        self.min_matrix, self.max_matrix = min_matrix, max_matrix
+        self.zero_traces = (min_matrix == max_matrix).astype(np.int)
+        self.zero_traces[np.isnan(min_matrix)] = 1
+
+        value_min = np.nanmin(min_matrix)
+        value_max = np.nanmax(max_matrix)
 
         # Collect more spatial stats: min, max, mean, std, histograms matrices
         if spatial:
@@ -178,25 +194,16 @@ class SeismicGeometrySEGY(SeismicGeometry):
             self.bins = bins
 
             # Create containers
-            min_matrix, max_matrix = np.full(self.lens, np.nan), np.full(self.lens, np.nan)
             hist_matrix = np.full((*self.lens, len(bins)-1), np.nan)
 
             # Iterate over traces
             description = f'Collecting stats for {self.displayed_name}'
             for i in tqdm(range(num_traces), desc=description, ncols=800, disable=(not pbar)):
                 trace = self.segyfile.trace[i]
-                header = self.segyfile.header[i]
-
-                # i -> id in a dataframe
-                keys = [header.get(field) for field in self.byte_no]
-                store_key = [self.uniques_inversed[j][item] for j, item in enumerate(keys)]
-                store_key = tuple(store_key)
+                store_key = self._get_store_key(i)
 
                 # For each trace, we store an entire histogram of amplitudes
                 val_min, val_max = find_min_max(trace)
-                min_matrix[store_key] = val_min
-                max_matrix[store_key] = val_max
-
                 if val_min != val_max:
                     histogram = np.histogram(trace, bins=bins)[0]
                     hist_matrix[store_key] = histogram
@@ -211,11 +218,8 @@ class SeismicGeometrySEGY(SeismicGeometry):
                                         axis=-1))
 
             # Store everything into instance
-            self.min_matrix, self.max_matrix = min_matrix, max_matrix
             self.mean_matrix, self.std_matrix = mean_matrix, std_matrix
             self.hist_matrix = hist_matrix
-            self.zero_traces = (min_matrix == max_matrix).astype(np.int)
-            self.zero_traces[np.isnan(min_matrix)] = 1
 
         self.trace_container = np.array(trace_container)
         self.v_uniques = len(np.unique(trace_container))
@@ -225,7 +229,6 @@ class SeismicGeometrySEGY(SeismicGeometry):
         self.v_q999, self.v_q99, self.v_q95 = np.quantile(trace_container, [0.999, 0.99, 0.95])
         self.has_stats = True
         self.store_meta()
-
 
     # Compute stats from CDP/LINES correspondence
     def compute_rotation_matrix(self):
@@ -332,7 +335,14 @@ class SeismicGeometrySEGY(SeismicGeometry):
             indices = self.make_slide_indices(loc=loc, start=start, end=end, step=step, axis=axis, stable=stable)
             slide = self.load_traces(indices)
         elif axis == 2:
-            slide = self.segyfile.depth_slice[loc].reshape(self.lens)
+            slide = self.segyfile.depth_slice[loc]
+
+            if slide.shape[0] == np.prod(self.lens):
+                slide = slide.reshape(self.lens)
+            else:
+                buffer = np.zeros_like(self.zero_traces, dtype=np.float32)
+                buffer[self.zero_traces == 0] = slide
+                slide = buffer
         return slide
 
     def make_slide_indices(self, loc=None, axis=0, start=None, end=None, step=1, stable=True, return_iterator=False):
@@ -581,6 +591,10 @@ class SeismicGeometrySEGY(SeismicGeometry):
 
         if path is None:
             fmt_prefix = 'q' if quantize else ''
+
+            if postfix == '' and len(projections) < 3:
+                postfix = '_' + projections
+
             path = os.path.join(os.path.dirname(self.path), f'{self.short_name}{postfix}.{fmt_prefix}{format}')
 
         # Remove file, if exists
@@ -606,7 +620,6 @@ class SeismicGeometrySEGY(SeismicGeometry):
                     slide = self.load_slide(idx, axis=axis, stable=False)
                     slide = slide.T if axis == 1 else slide
                     slide = transform(slide)
-
                     cube[idx, :, :] = slide
                     progress_bar.update()
             progress_bar.close()

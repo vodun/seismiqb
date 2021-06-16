@@ -76,8 +76,10 @@ if __name__ == '__main__':
     geometry = SeismicGeometry(config['cube-path'])
     safe_mkdir(config['savedir'])
 
-    horizons = [Horizon(path, geometry=geometry) for path in config['horizon-path']]
-    others = [Horizon(path, geometry=geometry) for path in config['other-path']]
+    horizons = [Horizon(path, geometry=geometry) for path in config['horizon-path']
+                if '.dvc' not in path]
+    others = [Horizon(path, geometry=geometry) for path in config['other-path']
+              if '.dvc' not in path]
     dataframe = []
 
     for horizon in horizons:

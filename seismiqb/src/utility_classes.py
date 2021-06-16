@@ -476,6 +476,8 @@ class SafeIO:
         if self.log_file:
             self._info(self.log_file, f'Closed {self.path}')
 
+
+
 class AttachStr:
     """ Converts array to `object` dtype and prepends/appends str column. Picklable, unlike inline lambda function. """
     def __init__(self, string, mode='prepend'):
@@ -490,3 +492,131 @@ class AttachStr:
         elif self.mode == 'append':
             result = [points, str_col]
         return np.concatenate(result, axis=1)
+
+
+
+class BaseAggregationContainer:
+    """ Container for on-line aggregation of crops """
+
+    def __init__(self, shape=None, grid_range=None):
+        """ initialize inner storages
+
+        Parameters
+        ----------
+        shape : tuple or None
+            shape of the processed cube - if it is fully covered
+        grid_range: list of tuples
+            ilines, xlines, heights as in `~.SeismcCubeset.grid_info['range']`
+        """
+
+        if shape is not None:
+            self.shape = np.asarray(shape, dtype=np.int16)
+            self.origin = np.zeros_like(self.shape)
+        elif grid_range is not None:
+            grid_range = np.asarray(grid_range, dtype=np.int16)
+            self.origin = grid_range[:, 0]
+            self.shape = grid_range[:, 1] - self.origin
+        else:
+            raise ValueError('Either shape, or grid_range should be provided')
+
+        self.res = None
+        self.valid = True
+
+    def put(self, crop, location):
+        """ add crop for aggregation
+
+        Parameters
+        ----------
+        crop : np.ndarray
+            single crop
+        location : tuple of slices
+            coordinates of crop
+        """
+        if self.res is not None:
+            raise RuntimeError('Aggregated data has been already computed!')
+
+        if not self.valid:
+            raise RuntimeError('All data in the container has already been cleared!')
+
+        for crop_x, slc in zip(crop.shape, location):
+            if slc.step and slc.step != 1:
+                raise ValueError(f"Invalid step in location {location}")
+
+            beg, end, _ = slc.indices(slc.stop)
+            if crop_x < end - beg:
+                raise ValueError(f"Inconsistent crop_shape {crop.shape} and location {location}")
+
+        loc = tuple(slice(max(0, slc.start - x0), min(xlen, slc.stop - x0))
+               for x0, slc, xlen in zip(self.origin, location, self.shape))
+        loc_crop = tuple(slice(max(0, x0 - slc.start), min(xlen + x0 - slc.start , slc.stop - slc.start))
+                    for x0, slc, xlen in zip(self.origin, location, self.shape))
+
+        self._put(crop[loc_crop], loc)
+
+    def _put(self, crop, location):
+        raise NotImplementedError
+
+    def aggregate(self):
+        """ Computes and returns aggregated cube.
+        Data updates are not possible after calling `aggregate` """
+
+        if not self.valid:
+            raise RuntimeError('All data in the container has already been cleared!')
+
+        if self.res is None:
+            self.res = self._aggregate()
+            self._clear()
+        return self.res
+
+    def _aggregate(self):
+        raise NotImplementedError
+
+    def clear(self):
+        """ Clears all data """
+        self.valid = False
+        if self.res is not None:
+            self.res = None
+        self._clear()
+
+    def _clear(self):
+        """ clear data for aggregation process """
+        raise NotImplementedError
+
+
+class AvgContainer(BaseAggregationContainer):
+    """ Average aggregation of crops """
+
+    def __init__(self, shape=None, grid_range=None, dtype=np.float32):
+        super().__init__(shape, grid_range)
+        self.data = np.zeros(self.shape, dtype=dtype)
+        self.counts = np.zeros(self.shape, dtype=np.int8)
+
+    def _put(self, crop, location):
+        self.data[location] += crop
+        self.counts[location] += 1
+
+    def _aggregate(self):
+        self.counts[self.counts == 0] = 1
+        self.data /= self.counts
+        return self.data
+
+    def _clear(self):
+        self.counts = None
+        self.data = None
+
+
+class MaxContainer(BaseAggregationContainer):
+    """ Maximum aggregation of crops """
+
+    def __init__(self, shape=None, grid_range=None, fill_value=-np.inf, dtype=np.float32):
+        super().__init__(shape, grid_range)
+        self.data = np.full(self.shape, fill_value, dtype=dtype)
+
+    def _put(self, crop, location):
+        self.data[location] = np.maximum(self.data[location], crop)
+
+    def _aggregate(self):
+        return self.data
+
+    def _clear(self):
+        self.data = None

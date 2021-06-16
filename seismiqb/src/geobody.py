@@ -414,7 +414,7 @@ class GeoBody:
             **kwargs
             }
         matrix[matrix == fill_value] = np.nan
-        plot_image(matrix, mode='single', **kwargs)
+        return plot_image(matrix, **kwargs)
 
     def show_slide(self, loc, width=3, axis='i', order_axes=None, zoom_slice=None, **kwargs):
         """ Show slide with geobody on it.
@@ -459,17 +459,19 @@ class GeoBody:
             ylabel = self.geometry.index_headers[1]
             total = self.geometry.depth
 
+        xticks = tuple(xticks[::max(1, round(len(xticks)//8/100))*100])
+        yticks = tuple(yticks[::max(1, round(len(yticks)//10/100))*100][::-1])
+
         kwargs = {
-            'mode': 'overlap',
             'alpha': 0.25,
             'title': (f'GeoBody `{self.name}` on `{self.geometry.name}`' +
                       f'\n {header} {loc} out of {total}'),
             'xlabel': xlabel,
             'ylabel': ylabel,
-            'xticks': xticks[::max(1, round(len(xticks)//8/100))*100],
-            'yticks': yticks[::max(1, round(len(yticks)//10/100))*100][::-1],
+            'xticks': xticks,
+            'yticks': yticks,
             'y': 1.02,
             **kwargs
             }
 
-        plot_image([seismic_slide, mask], order_axes=order_axes, **kwargs)
+        return plot_image([seismic_slide, mask], order_axes=order_axes, **kwargs)
