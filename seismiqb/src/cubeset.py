@@ -116,9 +116,6 @@ class SeismicCubeset(Dataset):
         during pipeline run.
         """
         #pylint: disable=blacklisted-name
-        if n_epochs is not None or shuffle or drop_last:
-            raise ValueError('SeismicCubeset does not comply with `n_epochs`, `shuffle`\
-                              and `drop_last`. Use `n_iters` instead! ')
         if sampler:
             sampler = sampler if callable(sampler) else sampler.sample
             points = sampler(batch_size * n_iters)

@@ -571,7 +571,7 @@ class HorizonController(BaseController):
 
 
 
-def generate_shape(_, shape, dynamic_factor=1, dynamic_low=None, dynamic_high=None):
+def generate_shape(shape, dynamic_factor=1, dynamic_low=None, dynamic_high=None):
     """ Dynamically generate shape of a crop to get. """
     dynamic_low = dynamic_low or dynamic_factor
     dynamic_high = dynamic_high or dynamic_factor
