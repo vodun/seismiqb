@@ -609,7 +609,7 @@ class SeismicCubeset(Dataset):
             If float, proportion from the total number of traces in a crop will
             be computed.
         """
-        # pylint: disable=too-many-statements
+        # pylint: disable=too-many-statements, too-many-branches
         if mode == '2d':
             if isinstance(heights, (int, float)):
                 height = int(heights) - crop_shape[2] // 2 # start for heights slices made by `crop` action
@@ -621,6 +621,7 @@ class SeismicCubeset(Dataset):
         cube_name = self.indices[cube_name] if isinstance(cube_name, int) else cube_name
         geometry = self.geometries[cube_name]
 
+        # Parse `strides` from parameters
         if isinstance(overlap_factor, (int, float)):
             overlap_factor = [overlap_factor] * 3
         if strides is None:
@@ -631,6 +632,7 @@ class SeismicCubeset(Dataset):
             else:
                 strides = crop_shape
 
+        # Matrix to remove unnecessary crops from grid
         if 0 < filter_threshold < 1:
             filter_threshold = int(filter_threshold * np.prod(crop_shape[:2]))
 
@@ -638,10 +640,10 @@ class SeismicCubeset(Dataset):
         if (filtering_matrix.shape != geometry.cube_shape[:2]).all():
             raise ValueError('Filtering_matrix shape must be equal to (ilines_len, xlines_len)')
 
+        # Default for ranges
         ilines = (0, geometry.ilines_len) if ilines is None else ilines
         xlines = (0, geometry.xlines_len) if xlines is None else xlines
         heights = (0, geometry.depth) if heights is None else heights
-        #pylint: disable=too-many-branches
         ilines_grid, xlines_grid, heights_grid, grid = self._make_regular_grid(cube_name, crop_shape, ilines, xlines,
                                                                                heights, strides, overlap,
                                                                                overlap_factor, filtering_matrix,
@@ -665,13 +667,13 @@ class SeismicCubeset(Dataset):
         self.grid_iters = - (-len(grid) // batch_size)
         self.grid_info = {
             'grid_array': grid_array,
-            'predict_shape': predict_shape,
+            'predict_shape': predict_shape, 'shape': predict_shape,
             'crop_shape': crop_shape,
             'strides': strides,
             'cube_name': cube_name,
             'geometry': geometry,
             'range': [ilines, xlines, heights],
-            'shifts': shifts,
+            'shifts': shifts, 'origin': shifts,
             'length': len(grid_array),
             'unfiltered_length': len(ilines_grid) * len(xlines_grid) * len(heights_grid)
         }
@@ -1212,7 +1214,6 @@ class SeismicCubeset(Dataset):
 
 
     # Task-specific loaders
-
     def load(self, label_dir=None, filter_zeros=True, dst_labels='labels',
              labels_class=None, p=None, bins=None, **kwargs):
         """ Load everything: geometries, point clouds, labels, samplers.
