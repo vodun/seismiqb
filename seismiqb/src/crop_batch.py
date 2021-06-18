@@ -607,7 +607,7 @@ class SeismicCropBatch(Batch):
         return normalized
 
     @action
-    def concat_components(self, src, dst, axis=-1):
+        def concat_components(self, src, dst, axis=-1):
         """ Concatenate a list of components and save results to `dst` component.
 
         Parameters
@@ -619,9 +619,11 @@ class SeismicCropBatch(Batch):
         axis : int
             The axis along which the arrays will be joined.
         """
-        _ = dst
-        if not isinstance(src, (list, tuple, np.ndarray)) or len(src) < 2:
-            raise ValueError('Src must contain at least two components to concatenate')
+        if not isinstance(src, (list, tuple, np.ndarray)):
+            raise ValueError()
+        if len(src) == 1:
+            warn("Since `src` contains only one component, concatenation not needed.")
+
         items = [self.get(None, attr) for attr in src]
 
         concat_axis_length = sum(item.shape[axis] for item in items)
