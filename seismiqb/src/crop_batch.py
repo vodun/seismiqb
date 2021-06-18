@@ -607,7 +607,7 @@ class SeismicCropBatch(Batch):
         return normalized
 
     @action
-        def concat_components(self, src, dst, axis=-1):
+    def concat_components(self, src, dst, axis=-1):
         """ Concatenate a list of components and save results to `dst` component.
 
         Parameters
