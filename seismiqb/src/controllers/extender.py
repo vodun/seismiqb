@@ -144,9 +144,6 @@ class Extender(Enhancer):
 
     def get_inference_template(self):
         """ Defines inference pipeline. """
-        def concat_inputs(batch):
-            batch.images = np.concatenate((batch.images, batch.prior_masks), axis=1)
-
         inference_template = (
             Pipeline()
 
@@ -160,7 +157,7 @@ class Extender(Enhancer):
             .adaptive_reshape(src=['images', 'prior_masks'],
                               shape=C('crop_shape'))
             .normalize(src='images')
-            .call(concat_inputs)
+            .concat_components(src=['images', 'prior_masks'], dst='images', axis=1)
 
             # Use model for prediction
             .predict_model('model',

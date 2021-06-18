@@ -619,23 +619,25 @@ class SeismicCropBatch(Batch):
         axis : int
             The axis along which the arrays will be joined.
         """
-        if axis != -1:
-            raise NotImplementedError("For now function works for `axis=-1` only.")
         _ = dst
-
         if not isinstance(src, (list, tuple, np.ndarray)) or len(src) < 2:
             raise ValueError('Src must contain at least two components to concatenate')
         items = [self.get(None, attr) for attr in src]
 
-        depth = sum(item.shape[-1] for item in items)
-        final_shape = (*items[0].shape[:3], depth)
+        concat_axis_length = sum(item.shape[axis] for item in items)
+        final_shape = [*items[0].shape]
+        final_shape[axis] = concat_axis_length
+        if axis < 0:
+            axis = len(final_shape) + axis
         prealloc = np.empty(final_shape, dtype=np.float32)
 
-        start_depth = 0
+        length_counter = 0
+        slicing = [slice(None) for _ in range(axis + 1)]
         for item in items:
-            depth_shift = item.shape[-1]
-            prealloc[..., start_depth:start_depth + depth_shift] = item
-            start_depth += depth_shift
+            length_shift = item.shape[axis]
+            slicing[-1] = slice(length_counter, length_counter + length_shift)
+            prealloc[slicing] = item
+            length_counter += length_shift
         setattr(self, dst, prealloc)
         return self
 
