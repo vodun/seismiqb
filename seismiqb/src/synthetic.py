@@ -251,7 +251,7 @@ class SyntheticGenerator():
                                  ((50, 320), (50, 470)),
                                  ((150, 320), (150, 470))),
                    num_points=10, zeros_share=0.6, kind='cubic', perturb_values=True,
-                   perturb_peak=True, peak_value=0.05, random_invert=True):
+                   perturb_peak=False, peak_value=0.05, random_invert=False):
         """ Add faults to the velocity model. Faults are basically elastic transforms of patches of
         generated seismic images. Elastic transforms are performed through coordinates-transformation
         in depth-projection. Those are smooth maps [0, 1] -> [0, 1] described as f(x) = x + "hump".
@@ -286,8 +286,9 @@ class SyntheticGenerator():
             x = fault[0][0]
             y_low, y_high = fault[0][1], fault[1][1]
             crop = self.velocity_model[:x, y_low:y_high]
-            func = make_coords_shift(self.rng, n_points=num_points, peak_value=peak_value,
-                                     zeros_share=zeros_share, random_invert=random_invert)
+            func = make_coords_shift(self.rng, n_points=num_points, peak_value=peak_value, perturb_peak=perturb_peak,
+                                     perturb_values=perturb_values, kind=kind, zeros_share=zeros_share,
+                                     random_invert=random_invert)
             new_coords = func(np.arange(crop.shape[-1]) / (crop.shape[-1] - 1)) * (crop.shape[-1] - 1)
             crop_elastic = np.array([map_coordinates(trace, [new_coords]) for trace in crop])
             self.velocity_model[:x, y_low:y_high] = crop_elastic
@@ -338,6 +339,7 @@ class SyntheticGenerator():
             self.synthetic = gaussian_filter(self.synthetic, sigma=sigma)
         if noise_mul is not None:
             self.synthetic += noise_mul * self.rng.random(self.synthetic.shape) * self.synthetic.std()
+        return self
 
     def fetch_horizons(self, mode='horizons'):
         """ Fetch some (or all) reflective surfaces.
@@ -364,7 +366,7 @@ def make_synthetic(shape=(50, 400, 800), num_reflections=200, vel_limits=(900, 5
                             ((50, 320), (50, 470)),
                             ((150, 320), (150, 470))),
                     num_points_faults=10, zeros_share_faults=0.6, fault_shift_interpolation='cubic',
-                    perturb_values=True, perturb_peak=True, peak_value=0.05, random_invert=True,
+                    perturb_values=True, perturb_peak=False, peak_value=0.05, random_invert=False,
                     fetch_surfaces='horizons', rng=None, seed=None):
     """ Generate synthetic 3d-cube along with most prominient reflective surfaces.
 
@@ -437,10 +439,9 @@ def make_synthetic(shape=(50, 400, 800), num_reflections=200, vel_limits=(900, 5
     else:
         raise ValueError('The function only supports the generation of 2d and 3d synthetic seismic.')
 
-    gen = (gen.SyntheticGenerator(rng, seed)
-              .generate_velocities(num_reflections, vel_limits, horizon_heights, horizon_jumps)
-              .generate_velocity_model(shape, grid_shape, perturbation_share)
-              .generate_density_model(rho_noise_lims))
+    gen = (SyntheticGenerator(rng, seed)
+           .generate_velocities(num_reflections, vel_limits, horizon_heights, horizon_jumps)
+           .generate_velocity_model(shape, grid_shape, perturbation_share))
 
     # add faults if needed and possible
     if faults is not None:
@@ -450,7 +451,8 @@ def make_synthetic(shape=(50, 400, 800), num_reflections=200, vel_limits=(900, 5
         else:
             raise ValueError("For now, faults are only supported for dim = 2.")
 
-    gen = (gen.generate_synthetic(ricker_width, ricker_points)
+    gen = (gen.generate_density_model(rho_noise_lims)
+              .generate_synthetic(ricker_width, ricker_points)
               .postprocess_synthetic(sigma, noise_mul))
     return gen.synthetic, gen.fetch_horizons(fetch_surfaces)
 
