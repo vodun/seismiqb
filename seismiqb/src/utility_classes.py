@@ -270,7 +270,7 @@ class Accumulator3D:
 
         # Properties of storages
         self.dtype = dtype
-        min_value = np.finfo(dtype).min if 'float' in dtype.__name__ else np.iinfo(dtype)
+        min_value = np.finfo(dtype).min if 'float' in dtype.__name__ else np.iinfo(dtype).min
         self.fill_value = fill_value if fill_value is not None else min_value
         self.transform = transform if transform is not None else lambda array: array
 
@@ -304,7 +304,7 @@ class Accumulator3D:
 
         if name != 'data':
             self.names.append(name)
-        return placeholder
+        setattr(self, name, placeholder)
 
     def update(self, crop, location):
         """ Update underlying storages in supplied `location` with data from `crop`. """
@@ -397,7 +397,7 @@ class Accumulator3D:
 class MaxAccumulator3D(Accumulator3D):
     """ Accumulator that takes maximum value of overlapping crops. """
     def _init(self):
-        self.data = self.create_placeholder(name='data', dtype=self.dtype, fill_value=self.fill_value)
+        self.create_placeholder(name='data', dtype=self.dtype, fill_value=self.fill_value)
 
     def _update(self, crop, location):
         self.data[location] = np.maximum(crop, self.data[location])
@@ -409,8 +409,8 @@ class MaxAccumulator3D(Accumulator3D):
 class MeanAccumulator3D(Accumulator3D):
     """ Accumulator that takes mean value of overlapping crops. """
     def _init(self):
-        self.data = self.create_placeholder(name='data', dtype=self.dtype, fill_value=0)
-        self.counts = self.create_placeholder(name='counts', dtype=np.int8, fill_value=0)
+        self.create_placeholder(name='data', dtype=self.dtype, fill_value=0)
+        self.create_placeholder(name='counts', dtype=np.int8, fill_value=0)
 
     def _update(self, crop, location):
         self.data[location] += crop
@@ -438,8 +438,8 @@ class MeanAccumulator3D(Accumulator3D):
 class GMeanAccumulator3D(Accumulator3D):
     """ Accumulator that takes geometric mean value of overlapping crops. """
     def _init(self):
-        self.data = self.create_placeholder(name='data', dtype=self.dtype, fill_value=0)
-        self.counts = self.create_placeholder(name='counts', dtype=np.int8, fill_value=0)
+        self.create_placeholder(name='data', dtype=self.dtype, fill_value=0)
+        self.create_placeholder(name='counts', dtype=np.int8, fill_value=0)
 
     def _update(self, crop, location):
         self.data[location] *= crop
