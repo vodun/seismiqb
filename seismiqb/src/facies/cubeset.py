@@ -147,13 +147,10 @@ class FaciesCubeset(SeismicCubeset):
                 results[src][label.short_name] = res
         return results
 
-    def show(self, attributes=None, src_labels='labels', indices=None, linkage=None,
-                    plot=True, save=None, return_figures=False, **figure_params):
+    def show(self, load='depths', src_labels='labels', indices=None, **kwargs):
         """ Show attributes of multiple dataset labels. """
-        figures = self.apply_to_labels(function='show', src_labels=src_labels, indices=indices,
-                                       attributes=attributes, linkage=linkage, plot=plot, save=save,
-                                       return_figure=return_figures, **figure_params)
-        return figures if return_figures else None
+        res = self.apply_to_labels(function='show', src_labels=src_labels, indices=indices, load=load, **kwargs)
+        return res if kwargs.get('return_figure') else None
 
     def invert_subsets(self, subset, indices=None, src_labels='labels', dst_labels=None, add_subsets=True):
         """ Apply `invert_subset` for every given label and put it into cubeset. """
@@ -183,89 +180,6 @@ class FaciesCubeset(SeismicCubeset):
         setattr(self, dst_labels, results)
         if add_subsets_to:
             self.add_subsets(subset_labels=dst_labels, base_labels=add_subsets_to)
-
-    def show_grid(self, src_labels='labels', labels_indices=None, attribute='cube_values', plot_dict=None):
-        """ Plot grid over selected surface to visualize how it overlaps data.
-
-        Parameters
-        ----------
-        src_labels : str
-            Labels to show below the grid.
-            Defaults to `labels`.
-        labels_indices : str
-            Indices of items from `src_labels` to show below the grid.
-        attribute : str
-            Alias from :attr:`~Horizon.FUNC_BY_ATTR` to show below the grid.
-        plot_dict : dict, optional
-            Dict of plot parameters, such as:
-                figsize : tuple
-                    Size of resulted figure.
-                title_fontsize : int
-                    Font size of title over the figure.
-                attr_* : any parameter for `plt.imshow`
-                    Passed to attribute plotter
-                grid_* : any parameter for `plt.hlines` and `plt.vlines`
-                    Passed to grid plotter
-                crop_* : any parameter for `plt.hlines` and `plt.vlines`
-                    Passed to corners crops plotter
-        """
-        labels = getattr(self, src_labels)[self.grid_info['cube_name']]
-        if labels_indices is not None:
-            labels_indices = [labels_indices] if isinstance(labels_indices, int) else labels_indices
-            labels = [labels[i] for i in labels_indices]
-
-        # Calculate grid lines coordinates
-        (x_min, x_max), (y_min, y_max) = self.grid_info['range'][:2]
-        x_stride, y_stride = self.grid_info['strides'][:2]
-        x_crop, y_crop = self.grid_info['crop_shape'][:2]
-        x_lines = list(np.arange(0, x_max, x_stride)) + [x_max - x_crop]
-        y_lines = list(np.arange(0, y_max, y_stride)) + [y_max - y_crop]
-
-        default_plot_dict = {
-            'figsize': (20 * x_max // y_max, 10),
-            'title_fontsize': 18,
-            'attr_cmap' : 'tab20b',
-            'grid_color': 'darkslategray',
-            'grid_linestyle': 'dashed',
-            'crop_color': 'crimson',
-            'crop_linewidth': 3
-        }
-        plot_dict = default_plot_dict if plot_dict is None else {**default_plot_dict, **plot_dict}
-        attr_plot_dict = {k.split('attr_')[-1]: v for k, v in plot_dict.items() if k.startswith('attr_')}
-        attr_plot_dict['zorder'] = 0
-        grid_plot_dict = {k.split('grid_')[-1]: v for k, v in plot_dict.items() if k.startswith('grid_')}
-        grid_plot_dict['zorder'] = 1
-        crop_plot_dict = {k.split('crop_')[-1]: v for k, v in plot_dict.items() if k.startswith('crop_')}
-        crop_plot_dict['zorder'] = 2
-
-        _fig, axes = plt.subplots(ncols=len(labels), figsize=plot_dict['figsize'])
-        axes = axes if isinstance(axes, np.ndarray) else [axes]
-
-        for ax, label in zip(axes, labels):
-            # Plot underlaying attribute
-            underlay = label.load_attribute(attribute, transform={'fill_value': np.nan})
-            if len(underlay.shape) == 3:
-                underlay = underlay[:, :, underlay.shape[2] // 2].squeeze()
-            underlay = underlay[label.bbox]
-            underlay = underlay.T
-            ax.imshow(underlay, **attr_plot_dict)
-            ax.set_title(f"Grid over `{attribute}` on `{label.short_name}`", fontsize=plot_dict['title_fontsize'])
-
-            # Set limits
-            ax.set_xlim([x_min, x_max])
-            ax.set_ylim([y_max, y_min])
-
-            # Plot grid
-            ax.vlines(x_lines, y_min, y_max, **grid_plot_dict)
-            ax.hlines(y_lines, x_min, x_max, **grid_plot_dict)
-
-            # Plot first crop
-            ax.vlines(x=x_lines[0] + x_crop, ymin=y_min, ymax=y_crop, **crop_plot_dict)
-            ax.hlines(y=y_lines[0] + y_crop, xmin=x_min, xmax=x_crop, **crop_plot_dict)
-
-            # Plot last crop
-            ax.vlines(x=x_lines[-1], ymin=y_max - x_crop, ymax=y_max, **crop_plot_dict)
-            ax.hlines(y=y_lines[-1], xmin=x_max - y_crop, xmax=x_max, **crop_plot_dict)
 
     def make_predictions(self, pipeline, crop_shape, overlap_factor, order=(1, 2, 0), src_labels='labels',
                          dst_labels='predictions', add_subsets=True, pipeline_variable='predictions', bar='n'):

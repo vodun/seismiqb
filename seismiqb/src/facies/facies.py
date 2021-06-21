@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 
-from ..plotters import filter_kwargs, plot_image
+from ..plotters import filter_parameters, plot_image
 from ..horizon import Horizon, _filtering_function
 from ..utils import to_list, retrieve_function_arguments, exec_callable
 from ..utility_classes import lru_cache, AttachStr, HorizonSampler
@@ -83,12 +83,12 @@ class Facies(Horizon):
             raise KeyError(msg) from e
 
 
-    def _load_attribute(self, src_attribute, location=None, **kwargs):
-        """ Make crops from `src_attribute` of horizon at `location`.
+    def _load_attribute(self, src, location=None, **kwargs):
+        """ Make crops from `src` of horizon at `location`.
 
         Parameters
         ----------
-        src_attribute : str
+        src : str
             A keyword defining horizon attribute to make crops from:
             - 'cube_values' or 'amplitudes': cube values cut along the horizon;
             - 'depths' or 'full_matrix': horizon depth map in cubic coordinates;
@@ -98,11 +98,11 @@ class Facies(Horizon):
             - 'masks' or 'full_binary_matrix': mask of horizon;
         location : sequence of 3 slices or None
             First two slices are used as `iline` and `xline` ranges to cut crop from.
-            Last 'depth' slice is used to infer `window` parameter when `src_attribute` is 'cube_values'.
-            If None, `src_attribute` is returned uncropped.
+            Last 'depth' slice is used to infer `window` parameter when `src` is 'cube_values'.
+            If None, `src` is returned uncropped.
         kwargs :
             Passed directly to either:
-            - one of attribute-evaluating methods from :attr:`.ATTRIBUTE_TO_METHOD` depending on `src_attribute`;
+            - one of attribute-evaluating methods from :attr:`.ATTRIBUTE_TO_METHOD` depending on `src`;
             - or attribute-transforming method :meth:`.transform_where_present`.
         Examples
         --------
@@ -124,48 +124,47 @@ class Facies(Horizon):
         x_slice, i_slice, h_slice = location if location is not None else (slice(None), slice(None), slice(None))
 
         default_kwargs = {'use_cache': True}
-        # Update `default_kwargs` with extra arguments depending on `src_attribute`
-        if src_attribute in ['cube_values', 'amplitudes']:
+        # Update `default_kwargs` with extra arguments depending on `src`
+        if src in ['cube_values', 'amplitudes']:
             if h_slice != slice(None):
                 # `window` arg for `get_cube_values` can be infered from `h_slice`
                 default_kwargs = {'window': h_slice.stop - h_slice.start, **default_kwargs}
         kwargs = {**default_kwargs, **kwargs}
 
-        func_name = self.ATTRIBUTE_TO_METHOD.get(src_attribute)
+        func_name = self.ATTRIBUTE_TO_METHOD.get(src)
         if func_name is None:
-            raise ValueError("Unknown `src_attribute` {}. Expected {}.".format(src_attribute,
+            raise ValueError("Unknown `src` {}. Expected {}.".format(src,
                                                                                self.ATTRIBUTE_TO_METHOD.keys()))
         data = getattr(self, func_name)(**kwargs)
         return data[x_slice, i_slice]
 
 
-    def load_attribute(self, src_attribute, **kwargs):
+    def load_attribute(self, src, **kwargs):
         """ Get attribute for horizon or its subset.
 
         Parameters
         ----------
-        src_attribute : str
+        src : str
             Key of the desired attribute. If attribute is from horizon subset, key must be like "subset/attribute".
         kwargs : for `Horizon.load_attribute`
 
         Examples
         --------
         To load "depths" attribute from "channels" subset of `horizon` one should do the following:
-        >>> horizon.load_attribute(src_attribute="channels/depths")
+        >>> horizon.load_attribute(src="channels/depths")
         """
-        *subsets, src_attribute = src_attribute.split('/')
+        *subsets, src = src.split('/')
 
-        if src_attribute == 'amplitudes':
+        if src == 'amplitudes':
             kwargs['window'] = kwargs.get('window', 1)
-        elif src_attribute == 'grid':
+        elif src == 'grid':
             kwargs['iterations'] = 5
 
-        data = self._load_attribute(src_attribute=src_attribute, **kwargs)
+        data = self._load_attribute(src=src, **kwargs)
         if subsets:
             subset = self.get_subset(subsets[0])
-            src_mask = '/'.join(subsets + ['masks'])
             location = kwargs.get('location', None)
-            mask = subset.load_attribute(src_attribute=src_mask, location=location, fill_value=0).astype(bool)
+            mask = subset.load_attribute(src='masks', location=location, fill_value=0).astype(bool)
             data[~mask] = kwargs.get('fill_value', self.FILL_VALUE)
         return data
 
@@ -261,301 +260,149 @@ class Facies(Horizon):
         metrics = np.nan_to_num(metrics)
         return self.transform_where_present(metrics, **transform_kwargs)
 
+    def show(self, load='depths', mode='imshow', draw=None, return_figure=False, **kwargs):
+        """ Display facies attributes with predefined defaults.
 
-    def show(self, attributes=None, linkage=None, show=True, save=False, return_figure=False, **figure_params):
-        """ Show attributes or their histograms of horizon and its subsets.
+        Loads requested data, constructs default parameters wrt to that data and delegates plot to `plot_image`.
 
         Parameters
         ----------
-        attributes : str or list of str or list of lists of str
-            Attributes names to visualize. If of str type, single attribute will be shown. If list of str, several
-            attributes will be shown on separate subplots. If list of lists of str, attributes from each inner list
-            will be shown overlapped in corresponding subplots. See `Usage` section 1 for examples.
-            Note, that this argument can't be used with `linkage`.
-        linkage : list of lists of dicts
-            Contains subplot parameters:
-            >>> linkage = [subplot_0, subplot_1, …, subplot_n]
-            Each of which in turn is a list that contains layers parameters:
-            >>> subplot = [layer_0, layer_1, …, layer_m]
-            Each of which in turn is a dict, that has mandatory 'load' and optional 'show' keys:
-            >>> layer = {'load': load_parameters, 'show': show_parameters}
-            Load parameters are either a dict of arguments meant for `load_attribute` or `np.ndarray` to show.
-            Show parameters are from the following:
-            TODO
-            See `Usage` section 2 for examples.
-        show : bool
-            Whether display plotted images or not.
-        save : str or False
-            Whether save plotter images or not. If str, must be a path for image saving.
-            If path contains '*' symbol, it will be substited by `short_name` attribute of horizon.
+        load : str or dict or np.ndarray, or a list of objects of those types
+            Defines data to display.
+            If str, a name of attribute to load. Address `Facies.METHOD_TO_ATTRIBUTE` values for details.
+            If dict, arguments for `Facies.load_attribute` and optional callable param under 'postprocess` key.
+            If np.ndarray, must be 2d and match facies full matrix shape.
+            If list, defines several data object to display. For details about nestedness address `plot_image` docs.
+        mode : 'imshow' or 'hist'
+            Mode to display images in.
         return_figure : bool
-            Whether return figure or not.
-        figure_params : TODO
+            Whether return resulted figure or not.
+        draw : str, None or list of objects of those types
+            Aliases for actions applied to resulting figure axes.
+            E.g., if `draw='grid'`, than `Facies.draw_grid` is applied to first axis.
+            If `draw=[None, 'grid']`, than `Facies.draw_grid` is applied to second axis.
+        kwargs : for `plot_image`
 
-        Usage
+        Examples
+        --------
+        Display depth attribute:
+        >>> facies.show()
+        Display several attributes one over another:
+        >>> facies.show(load=['amplitudes', 'channels/masks'])
+        Display several attributes separately:
+        >>> facies.show(load=['amplitudes', 'instant_amplitudes'], separate=True)
+        Display several attributes in mixed manner:
+        >>> facies.show(load=['amplitudes', ['amplitudes', 'channels/masks']])
+        Display attribute with additional postprocessing:
+        >>> facies.show(load={'src': 'amplitudes', 'fill_value': 0, 'normalize': 'min-max'})
+
+        Notes
         -----
-        1. How to compose `attributes` argument:
-
-        Show 'amplitudes' attribute of horizon:
-        >>> attributes = 'amplitudes'
-
-        Show 'amplitudes' and 'instant_amplitudes' attributes of horizon on separate subplots:
-        >>> attributes = ['amplitudes', 'instant_amplitudes']
-
-        Show 'amplitudes' and 'instant_amplitudes' attributes of horizon and its 'channels' subset on separate subplots:
-        >>> attributes = ['amplitudes', 'channels/amplitudes', 'instant_amplitudes', 'channels/instant_amplitudes']
-
-        Show 'amplitudes' attribute of horizon and overlay it with 'channels' subset `masks` attribute:
-        >>> attributes = [['amplitudes', 'channels/masks']]
-
-        Show 'amplitudes' attribute of horizon and overlay it with 'channels' subset `masks` attribute
-        on a separate subplot:
-        >>> attributes=[['amplitudes'], ['amplitudes', 'channels/masks']]
-
-        2. How to compose `linkage` argument:
-
-        Show 'amplitudes' attribute of horizon with 'min/max' normalization and 'tab20c' colormap:
-        >>> linkage = [
-            [
-                {
-                    'load': dict(src_attribute='amplitudes', normalize='min/max'),
-                    'show': dict(cmap='tab20c')
-                }
-            ]
-        ]
-
-        Show 'amplitudes' and 'instant_amplitudes' attributes of horizon with 'min/max' normalization
-        and 'tab20c' colormap on separate subplots:
-        >>> linkage = [
-            [
-                {
-                    'load': dict(src_attribute='amplitudes', normalize='min/max'),
-                    'show': dict(cmap='tab20c')
-                }
-            ],
-            [
-                {
-                    'load': dict(src_attribute='instant_amplitudes', normalize='min/max'),
-                    'show': dict(cmap='tab20c')
-                }
-            ]
-        ]
-
-        Show 'amplitudes' and 'instant_amplitudes' attributes of horizon with 'min/max' normalization
-        and 'tab20c' colormap on separate subplots and overlay them with `masks` attribute of 'channels` subset:
-        >>> linkage = [
-            [
-                {
-                    'load': dict(src_attribute='amplitudes', normalize='min/max'),
-                    'show': dict(cmap='tab20c')
-                },
-                {
-                    'load': dict(src_attribute='channels/masks')
-                }
-            ],
-            [
-                {
-                    'load': dict(src_attribute='instant_amplitudes', normalize='min/max'),
-                    'show': dict(cmap='tab20c')
-                },
-                {
-                    'load': dict(src_attribute='channels/masks')
-                }
-            ]
-        ]
+        Asterisks in title-like and 'savepath' parameters are replaced by label displayed name.
         """
-        # pylint: disable=too-many-statements
-        def make_figure(label, figure_params, linkage):
-
-            default_figure_params = {
-                # general parameters
-                'scale': 10,
-                'mode': 'overlap',
-                # for `plt.subplots`
-                'figure/tight_layout': True,
-                # for `plt.suptitle`
-                'suptitle/y': 1.1,
-                'suptitle/size': 25,
-                # for every subplot
-                'subplot/mode': 'overlap',
-            }
-
-            figure_params = Config({**default_figure_params, **figure_params})
-            mode = figure_params['mode']
-            if mode == 'overlap':
-                x, y = label.matrix.shape
-                min_ax = min(x, y)
-                figsize = [(x / min_ax) * len(linkage), y / min_ax]
-            elif mode == 'hist':
-                figsize = [len(linkage), 0.5]
+        def apply_by_scenario(action, params):
+            """ Generic method that applies given action to params depending on their type. """
+            if not isinstance(params, list):
+                res = action(params)
+            elif all(not isinstance(item, list) for item in params):
+                res = [action(subplot_params) for subplot_params in params]
             else:
-                raise ValueError(f"Expected `subplot/mode` from `['overlap', 'hist']`, but {mode} was given.")
-            figure_params['figure/figsize'] = np.array(figsize) * figure_params['scale']
-            figure_params['figure/ncols'] = len(linkage)
+                res = []
+                for subplot_params in params:
+                    subplot_res = [action(layer_params) for layer_params in to_list(subplot_params)]
+                    res.append(subplot_res)
+            return res
 
-            fig, axes = plt.subplots(**figure_params['figure'])
-            axes = to_list(axes)
-
-            default_suptitle = f"attributes for `{label.short_name}` horizon on `{label.geometry.displayed_name}` cube"
-            if mode == 'hist':
-                default_suptitle = f"histogram of {default_suptitle}"
-
-            figure_params['suptitle/t'] = figure_params.get('suptitle/t', default_suptitle)
-            fig.suptitle(**figure_params['suptitle'])
-
-            figure_params['subplot/mode'] = mode
-            return fig, axes, figure_params['subplot']
-
-        def update_data_params(params, layer, label):
-            default_load_params = {'fill_value': np.nan}
-            load = layer.get('load')
+        # Load attributes and put obtained data in a list with same nestedness as `load`
+        def load_data(load):
+            """ Manage data loading depending on load params type. """
             if isinstance(load, np.ndarray):
-                data = load
-                data_name = 'user data'
+                return load
+            if isinstance(load, str):
+                load = {'src': load}
+            postprocess = load.pop('postprocess', lambda x: x)
+            load_defaults = {'fill_value': np.nan}
+            load = {**load_defaults, **load}
+            data = self.load_attribute(**load)
+            return postprocess(data)
+
+        data = apply_by_scenario(load_data, load)
+
+        # Make titles
+        def extract_data_name(load):
+            if isinstance(load, np.ndarray):
+                name = 'custom'
             elif isinstance(load, dict):
-                load = {**default_load_params, **load}
-                data_name = load['src_attribute']
-                if data_name.startswith('apply:'):
-                    layer['apply'] = getattr(label, data_name.split('apply:')[1])
-                    data = np.array(np.nan)
-                    data_name = None
-                else:
-                    data = label.load_attribute(**load).squeeze()
-                    params['xlim'], params['ylim'] = label.bbox[:2]
-            else:
-                msg = f"Data to load can be either `np.array` or `dict` of params for `{type(label)}.load_attribute`."
-                raise ValueError(msg)
+                name = load['src']
+            elif isinstance(load, str):
+                name = load
+            return name
 
-            postprocess = layer.get('postprocess', None)
-            if postprocess is not None:
-                exec_callable(postprocess)
+        names = apply_by_scenario(extract_data_name, load)
+        n_subplots = len(data) if isinstance(data, list) else 1
 
-            if params['mode'] == 'hist':
-                data = data.flatten()
+        def make_titles(names):
+            if any(isinstance(item, list) for item in load):
+                return [', '.join(subplot_names) for subplot_names in names]
+            return names
 
-            if data_name:
-                params['image'].append(data)
-            params['data_name'] = data_name
+        defaults = {
+            'title_label': make_titles(names),
+            'suptitle_label': f"`{self.short_name}` of cube `{self.geometry.displayed_name}`",
+            'colorbar': mode == 'imshow',
+            'tight_layout': True,
+            'return_figure': True,
+        }
 
-        def update_show_params(params, layer, layer_num):
-            data_name = params.pop('data_name')
-            if data_name is None:
-                return None
+        # Infer defaults for `mode`: generate cmaps according to requested data, set axis labels as index headers
+        def make_cmap(name):
+            attr = name.split('/')[-1]
+            if attr == 'depths':
+                return 'Depths'
+            if attr == 'masks':
+                return 'firebrick'
+            return 'ocean'
 
-            def generate_default_color(layer_num, mode):
-                colors_order = [3, 2, 1, 0, 4, 5, 6, 8, 9, 7]
-                default_colors = np.array(sns.color_palette('muted', as_cmap=True))[colors_order]
-                color_num = layer_num - 1 if mode == 'overlap' else layer_num
-                return default_colors[color_num % len(default_colors)]
+        if mode == 'imshow':
+            x, y = self.matrix.shape
+            min_ax = min(x, y)
+            defaults['figsize'] = (x / min_ax * n_subplots * 10, y / min_ax * 10)
 
-            default_cmaps = {
-                'depths': 'Depths',
-                'metrics': 'Metrics'
-            }
+            defaults['cmap'] = apply_by_scenario(make_cmap, names)
+            defaults['xlabel'] = self.geometry.index_headers[0]
+            defaults['ylabel'] = self.geometry.index_headers[1]
+        elif mode == 'hist':
+            defaults['figsize'] = (n_subplots * 10, 5)
+        else:
+            raise ValueError(f"Valid modes are 'imshow' or 'hist', but '{mode}' was given.")
 
-            mode = params['mode']
-            layer_label = ' '.join(data_name.split('/'))
-            layer_color = generate_default_color(layer_num, mode)
+        # Merge default and given params
+        params = {**defaults, **kwargs}
+        # Substitute asterisks with label name
+        for text in ['suptitle_label', 'suptitle', 'title_label', 'title', 't', 'savepath']:
+            if text in params:
+                params[text] = apply_by_scenario(lambda s: s.replace('*', defaults['suptitle_label']), params[text])
 
-            defaults = {
-                'base': {
-                    'title_label': layer_label, 'legend_label': layer_label,
-                    'color': layer_color, 'legend_color': layer_color,
-                },
-                'overlap': {
-                    'cmap': default_cmaps.get(data_name.split('/')[-1], 'ocean'),
-                    'colorbar': True,
-                    'alpha': 0.8,
-                    'legend_size': 20,
-                    'xlabel': self.geometry.index_headers[0],
-                    'ylabel': self.geometry.index_headers[1],
-                    },
-                'hist': {
-                    'bins': 50,
-                    'colorbar': False,
-                    'alpha': 0.9,
-                    'legend_size': 10
-                    }
-            }
+        # Plot image with given params and return resulting figure
+        figure = plot_image(data=data, mode=mode, **params)
 
-            show = {
-                **defaults['base'],
-                **defaults[mode],
-                **layer.get('show', {}),
-            }
+        # Display additional info over axes via `Facies` methods starting with 'draw_' prefix
+        draw = to_list(draw, default=[])
+        for ax_draw, ax in zip(draw, figure.axes):
+            if ax_draw is not None:
+                getattr(self, f"draw_{ax_draw}")(ax, **kwargs)
 
-            base_primary_params = ['title_label', 'title_y']
-            primary_params = []
-            base_secondary_params = ['alpha', 'color', 'legend_label', 'legend_size', 'legend_color']
-            secondary_params = []
-            if mode == 'overlap':
-                if layer_num == 0:
-                    primary_params = base_primary_params
-                    primary_params += ['cmap', 'colorbar', 'aspect', 'fraction', 'xlabel', 'ylabel']
-                else:
-                    secondary_params = base_secondary_params
-            elif mode == 'hist':
-                if layer_num == 0:
-                    primary_params = base_primary_params + ['bins']
-                    secondary_params = base_secondary_params
-                else:
-                    secondary_params = base_secondary_params
-            _ = [params.update({param: show[param]}) for param in primary_params if param in show]
-            _ = [params[param].append(show[param]) for param in secondary_params if param in show]
-
-            return None
-
-        def apply_extra_actions(params, layer):
-            apply = layer.get('apply', None)
-            if apply is None:
-                return None
-            if isinstance(apply, str):
-                return getattr(self, apply)(**params)
-            return exec_callable(apply, **params)
-
-
-        if (attributes is not None) and (linkage is not None):
-            raise ValueError("Can't use both `attributes` and `linkage`.")
-
-        if linkage is None:
-            attributes = attributes or 'depths'
-            if isinstance(attributes, str):
-                subplots_attributes = [[attributes]]
-            elif isinstance(attributes, list):
-                subplots_attributes = [to_list(item) for item in attributes]
-            else:
-                raise ValueError("`attributes` can be only str or list")
-
-            linkage = []
-            for layer_attributes in subplots_attributes:
-                subplot = [{'load': dict(src_attribute=attribute)} for attribute in layer_attributes]
-                linkage.append(subplot)
-
-        fig, axes, subplot_params = make_figure(label=self, figure_params=figure_params, linkage=linkage)
-        for axis, subplot_layers in zip(axes, linkage):
-            params = defaultdict(list)
-            params['ax'] = axis
-            params['show'] = show
-            params['savepath'] = save.replace('*', self.short_name) if save else None
-            _ = [params.update({k: v}) for k, v in subplot_params.items()]
-            for layer_num, layer in enumerate(subplot_layers):
-                update_data_params(params=params, layer=layer, label=self)
-                update_show_params(params=params, layer=layer, layer_num=layer_num)
-            plot_image(**params)
-            for layer in subplot_layers:
-                apply_extra_actions(params=params, layer=layer)
-        return fig if return_figure else None
+        return figure if return_figure else None
 
 
     def __sub__(self, other):
         if not isinstance(other, type(self)):
-            raise TypeError(f"Subtrahend expected to be of {type(self)} type, but appeared to be {type(other)}.")
-        minuend, subtrahend = self.full_matrix, other.full_matrix
+            raise TypeError(f"Operands types do not match. Got {type(self)} and {type(other)}.")
         presence = other.presence_matrix
-        discrepancies = minuend[presence] != subtrahend[presence]
+        discrepancies = self.full_matrix[presence] != other.full_matrix[presence]
         if discrepancies.any():
             raise ValueError("Horizons have different depths where present.")
-        result = minuend.copy()
+        result = self.full_matrix.copy()
         result[presence] = self.FILL_VALUE
         name = f"~{other.name}"
         return type(self)(result, self.geometry, name)
@@ -621,7 +468,10 @@ class Facies(Horizon):
 
     def draw_grid(self, ax, **kwargs):
         """ Draw grid on given axis using grid info. """
-        info = self.grid_info # added to Facies in `FaciesCubeset.make_grid`
+        try:
+            info = self.grid_info
+        except AttributeError as e:
+            raise AttributeError("To draw a grid, one must create it via `FaciesCubeset.make_grid`.") from e
         xrange, yrange = info['range'][:2]
 
         default_kwargs = {
@@ -641,9 +491,9 @@ class Facies(Horizon):
             lines = np.r_[np.arange(0, lines_max, stride), [lines_max - crop_shape]]
 
             filtered_keys = ['colors', 'linestyles', 'linewidth']
-            grid_kwargs = filter_kwargs(kwargs, filtered_keys, prefix='grid_')
+            grid_kwargs = filter_parameters(kwargs, filtered_keys, prefix='grid_')
             draw_lines(lines, *lines_range, **grid_kwargs)
 
-            crop_kwargs = filter_kwargs(kwargs, filtered_keys, prefix='crop_')
+            crop_kwargs = filter_parameters(kwargs, filtered_keys, prefix='crop_')
             draw_lines(lines[0] + crop_shape, lines_range[0], crop_shape, **crop_kwargs) # draw first crop
             draw_lines(lines[-1], lines_range[1] - crop_shape, lines_range[1], **crop_kwargs) # draw last crop

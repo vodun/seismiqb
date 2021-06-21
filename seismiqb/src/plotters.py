@@ -259,88 +259,88 @@ class MatplotlibPlotter:
         if params:
             ax.figure.suptitle(**params)
 
-        # xlabel
-        keys = ['xlabel'] + TEXT_KEYS
-        params = filter_parameters(ax_params, keys, prefix='xlabel_', index=ax_num)
-        if params:
-            ax.set_xlabel(**params)
+        # # xlabel
+        # keys = ['xlabel'] + TEXT_KEYS
+        # params = filter_parameters(ax_params, keys, prefix='xlabel_', index=ax_num)
+        # if params:
+        #     ax.set_xlabel(**params)
 
-        # ylabel
-        keys = ['ylabel'] + TEXT_KEYS
-        params = filter_parameters(ax_params, keys, prefix='ylabel_', index=ax_num)
-        if params:
-            ax.set_ylabel(**params)
+        # # ylabel
+        # keys = ['ylabel'] + TEXT_KEYS
+        # params = filter_parameters(ax_params, keys, prefix='ylabel_', index=ax_num)
+        # if params:
+        #     ax.set_ylabel(**params)
 
-        # aspect
-        params = filter_parameters(ax_params, ['aspect'], prefix='aspect_', index=ax_num)
-        if params:
-            ax.set_aspect(**params)
+        # # aspect
+        # params = filter_parameters(ax_params, ['aspect'], prefix='aspect_', index=ax_num)
+        # if params:
+        #     ax.set_aspect(**params)
 
-        # xticks
-        params = filter_parameters(ax_params, ['xticks'], prefix='xticks_', index=ax_num)
-        if 'xticks' in params:
-            params['ticks'] = params.get('ticks', params.pop('xticks'))
-        if params:
-            ax.set_xticks(**params)
+        # # xticks
+        # params = filter_parameters(ax_params, ['xticks'], prefix='xticks_', index=ax_num)
+        # if 'xticks' in params:
+        #     params['ticks'] = params.get('ticks', params.pop('xticks'))
+        # if params:
+        #     ax.set_xticks(**params)
 
-        # yticks
-        params = filter_parameters(ax_params, ['yticks'], prefix='yticks_', index=ax_num)
-        if 'yticks' in params:
-            params['ticks'] = params.get('ticks', params.pop('yticks'))
-        if params:
-            ax.set_yticks(**params)
+        # # yticks
+        # params = filter_parameters(ax_params, ['yticks'], prefix='yticks_', index=ax_num)
+        # if 'yticks' in params:
+        #     params['ticks'] = params.get('ticks', params.pop('yticks'))
+        # if params:
+        #     ax.set_yticks(**params)
 
-        # ticks
-        keys = ['labeltop', 'labelright', 'labelcolor', 'direction']
-        params = filter_parameters(ax_params, keys, prefix='tick_', index=ax_num)
-        if params:
-            ax.tick_params(**params)
+        # # ticks
+        # keys = ['labeltop', 'labelright', 'labelcolor', 'direction']
+        # params = filter_parameters(ax_params, keys, prefix='tick_', index=ax_num)
+        # if params:
+        #     ax.tick_params(**params)
 
-        # xlim
-        params = filter_parameters(ax_params, ['xlim'], prefix='xlim_', index=ax_num)
-        if 'xlim' in params:
-            params['left'] = params.get('left', params.pop('xlim'))
-        if params:
-            ax.set_xlim(**params)
+        # # xlim
+        # params = filter_parameters(ax_params, ['xlim'], prefix='xlim_', index=ax_num)
+        # if 'xlim' in params:
+        #     params['left'] = params.get('left', params.pop('xlim'))
+        # if params:
+        #     ax.set_xlim(**params)
 
-        # ylim
-        params = filter_parameters(ax_params, ['ylim'], prefix='ylim_', index=ax_num)
-        if 'ylim' in params:
-            params['bottom'] = params.get('bottom', params.pop('ylim'))
-        if params:
-            ax.set_ylim(**params)
+        # # ylim
+        # params = filter_parameters(ax_params, ['ylim'], prefix='ylim_', index=ax_num)
+        # if 'ylim' in params:
+        #     params['bottom'] = params.get('bottom', params.pop('ylim'))
+        # if params:
+        #     ax.set_ylim(**params)
 
-        # colorbar
-        if all_params.get('colorbar', False) and mode == 'imshow':
-            keys = ['colorbar', 'fraction', 'aspect', 'fake', 'ax_image']
-            params = filter_parameters(ax_params, keys, prefix='colorbar_', index=ax_num)
-            # if colorbar is disabled for subplot, add param to plot fake axis instead to keep proportions
-            params['fake'] = not params.pop('colorbar', True)
-            cls.add_colorbar(**params)
+        # # colorbar
+        # if all_params.get('colorbar', False) and mode == 'imshow':
+        #     keys = ['colorbar', 'fraction', 'aspect', 'fake', 'ax_image']
+        #     params = filter_parameters(ax_params, keys, prefix='colorbar_', index=ax_num)
+        #     # if colorbar is disabled for subplot, add param to plot fake axis instead to keep proportions
+        #     params['fake'] = not params.pop('colorbar', True)
+        #     cls.add_colorbar(**params)
 
-        # legend
-        keys = ['label', 'size', 'cmap', 'color', 'loc']
-        params = filter_parameters(ax_params, keys, prefix='legend_')
-        params['color'] = params.pop('cmap', None) or params.get('color')
-        if params.get('label') is not None:
-            cls.add_legend(ax, **params)
+        # # legend
+        # keys = ['label', 'size', 'cmap', 'color', 'loc']
+        # params = filter_parameters(ax_params, keys, prefix='legend_')
+        # params['color'] = params.pop('cmap', None) or params.get('color')
+        # if params.get('label') is not None:
+        #     cls.add_legend(ax, **params)
 
-        # grid
-        keys = ['grid', 'b', 'which', 'axis']
-        params = filter_parameters(ax_params, keys, prefix='grid_', index=ax_num)
-        params['b'] = params.pop('grid', params.pop('b', 'False'))
-        if params:
-            ax.grid(**params)
+        # # grid
+        # keys = ['grid', 'b', 'which', 'axis']
+        # params = filter_parameters(ax_params, keys, prefix='grid_', index=ax_num)
+        # params['b'] = params.pop('grid', params.pop('b', 'False'))
+        # if params:
+        #     ax.grid(**params)
 
-        if ax_params.get('facecolor'):
-            ax.set_facecolor(ax_params['facecolor'])
+        # if ax_params.get('facecolor'):
+        #     ax.set_facecolor(ax_params['facecolor'])
 
-        ax.set_axisbelow(ax_params.get('set_axisbelow', False))
+        # ax.set_axisbelow(ax_params.get('set_axisbelow', False))
 
-        if ax_params.get('disable_axes'):
-            ax.set_axis_off()
-        elif not ax.axison:
-            ax.set_axis_on()
+        # if ax_params.get('disable_axes'):
+        #     ax.set_axis_off()
+        # elif not ax.axison:
+        #     ax.set_axis_on()
 
 
     @staticmethod
@@ -453,6 +453,8 @@ class MatplotlibPlotter:
         'color': 'r',
         'marker': 'o',
         'linestyle': '',
+        # suptitle
+        'suptitle_color': 'k',
         # title
         'title_color': 'k',
         # axis labels
@@ -555,6 +557,9 @@ class MatplotlibPlotter:
         'color': ['firebrick', 'forestgreen', 'royalblue', 'sandybrown', 'darkorchid'],
         'alpha': 0.8,
         'facecolor': 'white',
+        # suptitle
+        'suptitle_color': 'k',
+        'suptitle_y': 1.01,
         # title
         'title_color' : 'k',
         # axis labels
