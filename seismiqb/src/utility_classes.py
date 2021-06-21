@@ -368,6 +368,9 @@ class Accumulator3D:
         """ Remove references to placeholders. """
         self.data = None
 
+        if self.type == 'hdf5':
+            os.remove(self.path)
+
     @property
     def result(self):
         """ Reference to the aggregated result. """
@@ -439,7 +442,7 @@ class GMeanAccumulator3D(Accumulator3D):
         self.counts = self.create_placeholder(name='counts', dtype=np.int8, fill_value=0)
 
     def _update(self, crop, location):
-        self.data[location] += crop
+        self.data[location] *= crop
         self.counts[location] += 1
 
     def _aggregate(self):
