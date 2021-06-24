@@ -582,11 +582,19 @@ class SeismicGeometry(ExportMixin):
         msg = f"""
         Geometry for cube              {self.displayed_path}
         Current index:                 {self.index_headers}
-        Cube shape:                    {self.cube_shape}
+        Cube shape:                    {tuple(self.cube_shape)}
         Time delay:                    {self.delay}
         Sample rate:                   {self.sample_rate}
+        Area:                          {self.area:4.1f} km²
+        """
 
-        Cube size:                     {os.path.getsize(self.path) / (1024**3):4.3f} GB
+        if os.path.exists(self.segy_path):
+            segy_size = os.path.getsize(self.segy_path) / (1024 ** 3)
+            msg += f"""
+        SEG-Y original size:           {segy_size:4.3f} GB
+        """
+
+        msg += f"""Current cube size:             {self.file_size:4.3f} GB
         Size of the instance:          {self.ngbytes:4.3f} GB
 
         Number of traces:              {self.total_traces}
@@ -594,7 +602,8 @@ class SeismicGeometry(ExportMixin):
 
         if hasattr(self, 'zero_traces'):
             msg += f"""Number of non-zero traces:     {self.nonzero_traces}
-            """
+        Fullness:                      {self.nonzero_traces / self.total_traces:2.2f}
+        """
 
         if self.has_stats:
             msg += f"""

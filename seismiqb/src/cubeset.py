@@ -7,7 +7,7 @@ from warnings import warn
 import numpy as np
 from tqdm.auto import tqdm
 
-from ..batchflow import FilesIndex, DatasetIndex, Dataset, Sampler, Pipeline
+from ..batchflow import FilesIndex, Dataset, Sampler, Pipeline
 from ..batchflow import NumpySampler
 
 from .geometry import SeismicGeometry
@@ -110,22 +110,15 @@ class SeismicCubeset(Dataset):
         getattr(self, attr)[idx][item_num] = value
 
 
-    def gen_batch(self, batch_size, shuffle=False, n_iters=None, n_epochs=None, drop_last=False,
-                  bar=False, bar_desc=None, iter_params=None, sampler=None):
-        """ Allows to pass `sampler` directly to `next_batch` method to avoid re-creating of batch
-        during pipeline run.
-        """
+    def gen_batch(self, batch_size, shuffle=False, n_iters=1, n_epochs=None, drop_last=False,
+                  bar=False, iter_params=None, **kwargs):
+        """ Remove `n_epochs`, `shuffle` and `drop_last` from passed arguments. """
         #pylint: disable=blacklisted-name
-        if sampler:
-            sampler = sampler if callable(sampler) else sampler.sample
-            points = sampler(batch_size * n_iters)
+        if (n_epochs is not None and n_epochs != 1) or shuffle or drop_last:
+            raise TypeError(f'`SeismicCubeset` does not work with `n_epochs`, `shuffle` or `drop_last`!'
+                            f'`{n_epochs}`, `{shuffle}`, `{drop_last}`')
 
-            self.crop_points = points
-            self.crop_index = DatasetIndex(points[:, 0])
-            return self.crop_index.gen_batch(batch_size, n_iters=n_iters, iter_params=iter_params,
-                                             bar=bar, bar_desc=bar_desc)
-        return super().gen_batch(batch_size, shuffle=shuffle, n_iters=n_iters, n_epochs=n_epochs,
-                                 drop_last=drop_last, bar=bar, bar_desc=bar_desc, iter_params=iter_params)
+        return super().gen_batch(batch_size, n_iters=n_iters, bar=bar, iter_params=iter_params, **kwargs)
 
 
     def load_geometries(self, logs=True, collect_stats=True, spatial=True, **kwargs):
@@ -400,35 +393,42 @@ class SeismicCubeset(Dataset):
             setattr(self, dst, sampler)
 
     def show_slices(self, idx=0, src_sampler='sampler', n=10000, normalize=False, shape=None,
-                    adaptive_slices=False, grid_src='quality_grid', side_view=False, **kwargs):
+                    adaptive_slices=False, grid_src='quality_grid', side_view=False,
+                    rebatch_threshold=0.0, src_labels='labels', **kwargs):
         """ Show actually sampled slices of desired shape. """
+        geometry = self.geometries[idx]
         sampler = getattr(self, src_sampler)
-        if callable(sampler):
-            #pylint: disable=not-callable
-            points = sampler(n)
-        else:
-            points = sampler.sample(n)
-        batch = (self.p.make_locations(points=points, shape=shape, side_view=side_view,
-                                       adaptive_slices=adaptive_slices, grid_src=grid_src)
-                 .next_batch(self.size))
+        sample_func = sampler if callable(sampler) else sampler.sample
+        background = np.zeros_like(geometry.zero_traces)
 
-        unsalted = np.array([batch.unsalt(item) for item in batch.indices])
-        background = np.zeros_like(self.geometries[idx].zero_traces)
+        for _ in range(n // 100 + 1):
+            points = sample_func(100)
+            ppl = (self.p.make_locations(points=points, shape=shape, side_view=side_view,
+                                        adaptive_slices=adaptive_slices, grid_src=grid_src))
 
-        for slice_ in np.array(batch.locations)[unsalted == self.indices[idx]]:
-            idx_i, idx_x, _ = slice_
-            background[idx_i, idx_x] += 1
+            if rebatch_threshold and hasattr(self, src_labels):
+                ppl += (self.p.create_masks(src_labels=src_labels, dst='masks', width=3)
+                            .mask_rebatch(src='masks', threshold=rebatch_threshold))
+
+            batch = ppl.next_batch(self.size)
+            unsalted = np.array([batch.unsalt(item) for item in batch.indices])
+
+            for (idx_i, idx_x, _) in np.array(batch.locations)[unsalted == self.indices[idx]]:
+                background[idx_i, idx_x] += 1
 
         if normalize:
             background = (background > 0).astype(int)
+            background[0, 0] = 2
+            kwargs.setdefault('zmax', 1.0)
 
         kwargs = {
-            'title_label': f'Sampled slices on {self.indices[idx]}',
-            'xlabel': 'ilines', 'ylabel': 'xlines',
-            'cmap': 'Reds', 'interpolation': 'bilinear',
+            'matrix_name': 'Sampled slices',
+            'cmap': ['Reds', 'black'],
+            'alpha': [1., 0.1],
+            'interpolation': 'bilinear',
             **kwargs
         }
-        plot_image(background, **kwargs)
+        geometry.show((background, geometry.zero_traces), **kwargs)
         return batch
 
     def show_3d(self, idx=0, src='labels', aspect_ratio=None, zoom_slice=None,
@@ -609,7 +609,7 @@ class SeismicCubeset(Dataset):
             If float, proportion from the total number of traces in a crop will
             be computed.
         """
-        # pylint: disable=too-many-statements
+        # pylint: disable=too-many-statements, too-many-branches
         if mode == '2d':
             if isinstance(heights, (int, float)):
                 height = int(heights) - crop_shape[2] // 2 # start for heights slices made by `crop` action
@@ -621,6 +621,7 @@ class SeismicCubeset(Dataset):
         cube_name = self.indices[cube_name] if isinstance(cube_name, int) else cube_name
         geometry = self.geometries[cube_name]
 
+        # Parse `strides` from parameters
         if isinstance(overlap_factor, (int, float)):
             overlap_factor = [overlap_factor] * 3
         if strides is None:
@@ -631,6 +632,7 @@ class SeismicCubeset(Dataset):
             else:
                 strides = crop_shape
 
+        # Matrix to remove unnecessary crops from grid
         if 0 < filter_threshold < 1:
             filter_threshold = int(filter_threshold * np.prod(crop_shape[:2]))
 
@@ -638,10 +640,10 @@ class SeismicCubeset(Dataset):
         if (filtering_matrix.shape != geometry.cube_shape[:2]).all():
             raise ValueError('Filtering_matrix shape must be equal to (ilines_len, xlines_len)')
 
+        # Default for ranges
         ilines = (0, geometry.ilines_len) if ilines is None else ilines
         xlines = (0, geometry.xlines_len) if xlines is None else xlines
         heights = (0, geometry.depth) if heights is None else heights
-        #pylint: disable=too-many-branches
         ilines_grid, xlines_grid, heights_grid, grid = self._make_regular_grid(cube_name, crop_shape, ilines, xlines,
                                                                                heights, strides, overlap,
                                                                                overlap_factor, filtering_matrix,
@@ -665,13 +667,13 @@ class SeismicCubeset(Dataset):
         self.grid_iters = - (-len(grid) // batch_size)
         self.grid_info = {
             'grid_array': grid_array,
-            'predict_shape': predict_shape,
+            'predict_shape': predict_shape, 'shape': predict_shape,
             'crop_shape': crop_shape,
             'strides': strides,
             'cube_name': cube_name,
             'geometry': geometry,
             'range': [ilines, xlines, heights],
-            'shifts': shifts,
+            'shifts': shifts, 'origin': shifts,
             'length': len(grid_array),
             'unfiltered_length': len(ilines_grid) * len(xlines_grid) * len(heights_grid)
         }
@@ -1212,7 +1214,6 @@ class SeismicCubeset(Dataset):
 
 
     # Task-specific loaders
-
     def load(self, label_dir=None, filter_zeros=True, dst_labels='labels',
              labels_class=None, p=None, bins=None, **kwargs):
         """ Load everything: geometries, point clouds, labels, samplers.
