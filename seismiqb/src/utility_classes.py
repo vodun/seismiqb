@@ -458,6 +458,8 @@ class GMeanAccumulator3D(Accumulator3D):
 
         elif self.type == 'numpy':
             self.counts[self.counts == 0] = 1
+
+            self.counts = self.counts.astype(np.float32)
             self.counts **= -1
             self.data **= self.counts
 
