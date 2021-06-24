@@ -267,6 +267,9 @@ class Accumulator3D:
         Other parameters are passed to HDF5 dataset creation.
     """
     def __init__(self, shape=None, origin=None, dtype=np.float32, transform=None, path=None, **kwargs):
+        # Main attribute to store results
+        self.data = None
+
         # Dimensionality and location
         self.shape = shape
         self.origin = origin
@@ -339,7 +342,7 @@ class Accumulator3D:
             raise RuntimeError('All data in the container has already been cleared!')
         self._aggregate()
 
-        # Re-open the HDF5 file to optionally repack it
+        # Re-open the HDF5 file to force flush changes and release disk space from deleted datasets
         if self.type == 'hdf5':
             self.file.close()
             self.file = h5py.File(self.path, 'r')
