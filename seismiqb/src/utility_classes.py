@@ -256,7 +256,7 @@ class Accumulator3D:
         Dtype of storage. Must be either integer or float.
     transform : callable, optional
         Additional function to call before storing the crop data.
-    path : str, optional
+    path : str or file-like object, optional
         If provided, then we use HDF5 datasets instead of regular Numpy arrays, storing the data directly on disk.
         After the initialization, we keep the file handle in `w-` mode during the update phase.
         After aggregation, we re-open the file to automatically repack it in `r` mode.
@@ -274,7 +274,7 @@ class Accumulator3D:
 
         # Container definition
         if path is not None:
-            if os.path.exists(path):
+            if isinstance(path, str) and os.path.exists(path):
                 os.remove(path)
             self.path = path
 
@@ -282,7 +282,6 @@ class Accumulator3D:
             self.options = {**kwargs}
         self.type = 'hdf5' if path is not None else 'numpy'
 
-        self.names = []
         self.aggregated = False
 
 
@@ -294,9 +293,13 @@ class Accumulator3D:
         elif self.type == 'numpy':
             placeholder = np.full(shape=self.shape, fill_value=fill_value, dtype=dtype)
 
-        if name != 'data':
-            self.names.append(name)
         setattr(self, name, placeholder)
+
+    def remove_placeholder(self, name=None):
+        """ Remove created placeholder. """
+        if self.type == 'hdf5':
+            del self.file[name]
+        setattr(self, name, None)
 
     def update(self, crop, location):
         """ Update underlying storages in supplied `location` with data from `crop`. """
@@ -333,12 +336,6 @@ class Accumulator3D:
             raise RuntimeError('All data in the container has already been cleared!')
         self._aggregate()
 
-        # Cleanup
-        for name in self.names:
-            setattr(self, name, None)
-            if self.type == 'hdf5':
-                del self.file[name]
-
         # Re-open the HDF5 file to optionally repack it
         if self.type == 'hdf5':
             self.file.close()
@@ -357,7 +354,7 @@ class Accumulator3D:
             self.file.close()
 
     def clear(self):
-        """ Remove references to placeholders. """
+        """ Remove placeholders from memory and disk. """
         self.data = None
 
         if self.type == 'hdf5':
@@ -432,6 +429,9 @@ class MeanAccumulator3D(Accumulator3D):
             else:
                 self.data //= self.counts
 
+        # Cleanup
+        self.remove_placeholder('counts')
+
 
 class GMeanAccumulator3D(Accumulator3D):
     """ Accumulator that takes geometric mean value of overlapping crops. """
@@ -461,6 +461,8 @@ class GMeanAccumulator3D(Accumulator3D):
             self.counts **= -1
             self.data **= self.counts
 
+        # Cleanup
+        self.remove_placeholder('counts')
 
 
 class HorizonSampler(Sampler):
