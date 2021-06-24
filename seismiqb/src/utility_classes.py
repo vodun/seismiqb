@@ -230,14 +230,17 @@ class Accumulator3D:
     """ Base class to aggregate predicted sub-volumes into a larger 3D cube.
     Can accumulate data in memory (Numpy arrays) or on disk (HDF5 datasets).
 
-    Type of aggregation is defined in subclasses, that must implement `_init`, `_update` and `_aggregate` methods.
+    Type of aggregation is defined in subclasses, that must implement `__init__`, `_update` and `_aggregate` methods.
+    The main result in subclsses should be stored in `data` attribute, which is accessed by base class.
 
-    Supposed to be used in combination with `:meth:.~SeismicCubeset.make_grid` in a following manner:
+    Supposed to be used in combination with `:meth:.~SeismicCubeset.make_grid` and
+    `:meth:.~SeismicCropBatch.update_accumulator` in a following manner:
         - `make_grid` defines how to split desired cube range into small crops
         - `Accumulator3D` creates necessary placeholders for a desired type of aggregation
         - `update_accumulator` action of pipeline passes individual crops (and their locations) to
         update those placeholders (see `:meth:~.update`)
         - `:meth:~.aggregate` is used to get the resulting volume
+        - `:meth:~.clear` can be optionally used to remove array references and HDF5 file from disk
 
     This class is an alternative to `:meth:.~SeismicCubeset.assemble_crops`, but allows to
     greatly reduce memory footprint of crop aggregation by up to `overlap_factor` times.
@@ -412,6 +415,7 @@ class MeanAccumulator3D(Accumulator3D):
         self.counts[location] += 1
 
     def _aggregate(self):
+        #pylint: disable=access-member-before-definition
         if self.type == 'hdf5':
             # Amortized updates for HDF5
             for i in range(self.data.shape[0]):
@@ -438,7 +442,7 @@ class GMeanAccumulator3D(Accumulator3D):
     def __init__(self, shape=None, origin=None, dtype=np.float32, transform=None, path=None, **kwargs):
         super().__init__(shape=shape, origin=origin, dtype=dtype, transform=transform, path=path, **kwargs)
 
-        self.create_placeholder(name='data', dtype=self.dtype, fill_value=0)
+        self.create_placeholder(name='data', dtype=self.dtype, fill_value=1)
         self.create_placeholder(name='counts', dtype=np.int8, fill_value=0)
 
     def _update(self, crop, location):
@@ -446,6 +450,7 @@ class GMeanAccumulator3D(Accumulator3D):
         self.counts[location] += 1
 
     def _aggregate(self):
+        #pylint: disable=access-member-before-definition
         if self.type == 'hdf5':
             # Amortized updates for HDF5
             for i in range(self.data.shape[0]):
