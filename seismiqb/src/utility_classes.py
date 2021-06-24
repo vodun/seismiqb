@@ -263,15 +263,13 @@ class Accumulator3D:
     kwargs : dict
         Other parameters are passed to HDF5 dataset creation.
     """
-    def __init__(self, shape=None, origin=None, dtype=np.float32, fill_value=None, transform=None, path=None, **kwargs):
+    def __init__(self, shape=None, origin=None, dtype=np.float32, transform=None, path=None, **kwargs):
         # Dimensionality and location
         self.shape = shape
         self.origin = origin
 
         # Properties of storages
         self.dtype = dtype
-        min_value = np.finfo(dtype).min if 'float' in dtype.__name__ else np.iinfo(dtype).min
-        self.fill_value = fill_value if fill_value is not None else min_value
         self.transform = transform if transform is not None else lambda array: array
 
         # Container definition
@@ -287,12 +285,6 @@ class Accumulator3D:
         self.names = []
         self.aggregated = False
 
-        # Create underlying storages
-        self._init()
-
-    def _init(self):
-        """ Initialize placeholders. """
-        raise NotImplementedError
 
     def create_placeholder(self, name=None, dtype=None, fill_value=None):
         """ Create named storage as a dataset of HDF5 or plain array. """
@@ -396,7 +388,11 @@ class Accumulator3D:
 
 class MaxAccumulator3D(Accumulator3D):
     """ Accumulator that takes maximum value of overlapping crops. """
-    def _init(self):
+    def __init__(self, shape=None, origin=None, dtype=np.float32, fill_value=None, transform=None, path=None, **kwargs):
+        super().__init__(shape=shape, origin=origin, dtype=dtype, transform=transform, path=path, **kwargs)
+
+        min_value = np.finfo(dtype).min if 'float' in dtype.__name__ else np.iinfo(dtype).min
+        self.fill_value = fill_value if fill_value is not None else min_value
         self.create_placeholder(name='data', dtype=self.dtype, fill_value=self.fill_value)
 
     def _update(self, crop, location):
@@ -408,7 +404,9 @@ class MaxAccumulator3D(Accumulator3D):
 
 class MeanAccumulator3D(Accumulator3D):
     """ Accumulator that takes mean value of overlapping crops. """
-    def _init(self):
+    def __init__(self, shape=None, origin=None, dtype=np.float32, transform=None, path=None, **kwargs):
+        super().__init__(shape=shape, origin=origin, dtype=dtype, transform=transform, path=path, **kwargs)
+
         self.create_placeholder(name='data', dtype=self.dtype, fill_value=0)
         self.create_placeholder(name='counts', dtype=np.int8, fill_value=0)
 
@@ -437,7 +435,9 @@ class MeanAccumulator3D(Accumulator3D):
 
 class GMeanAccumulator3D(Accumulator3D):
     """ Accumulator that takes geometric mean value of overlapping crops. """
-    def _init(self):
+    def __init__(self, shape=None, origin=None, dtype=np.float32, transform=None, path=None, **kwargs):
+        super().__init__(shape=shape, origin=origin, dtype=dtype, transform=transform, path=path, **kwargs)
+
         self.create_placeholder(name='data', dtype=self.dtype, fill_value=0)
         self.create_placeholder(name='counts', dtype=np.int8, fill_value=0)
 
@@ -451,11 +451,15 @@ class GMeanAccumulator3D(Accumulator3D):
             for i in range(self.data.shape[0]):
                 counts = self.counts[i]
                 counts[counts == 0] = 1
-                self.data[i] = np.pow(self.data[i], 1/counts)
+
+                counts = counts.astype(np.float32)
+                counts **= -1
+                self.data[i] **= counts
 
         elif self.type == 'numpy':
             self.counts[self.counts == 0] = 1
-            self.data = np.pow(self.data, 1/self.counts)
+            self.counts **= -1
+            self.data **= self.counts
 
 
 
