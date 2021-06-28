@@ -128,10 +128,9 @@ class SeismicCropBatch(Batch):
         return getattr(self, component)
 
     @action
-    def make_locations(self, points, shape=None, direction=(0, 0, 0), eps=3,
-                       side_view=False, adaptive_slices=False, passdown=None,
-                       grid_src='quality_grid', dst='locations',
-                       dst_points='points', dst_shapes='shapes'):
+    def make_locations(self, points, shape=None, direction=(0, 0, 0),
+                       side_view=False, adaptive_slices=False, grid_src='quality_grid', eps=3,
+                       dst='locations', passdown=None, dst_points='points', dst_shapes='shapes'):
         """ Generate positions of crops. Creates new instance of :class:`.SeismicCropBatch`
         with crop positions in one of the components (`locations` by default).
 
@@ -147,19 +146,19 @@ class SeismicCropBatch(Batch):
             as `points`, and each row contains a shape for corresponding point.
         direction : sequence of numbers
             Direction of the cut crop relative to the point. Must be a vector on unit cube.
-        eps : int
-            Initial length of slice, that is used to find the closest grid point.
         side_view : bool or float
-            Determines whether to generate crops of transposed shape (xline, iline, height).
+            Whether to generate crops of transposed shape (xline, iline, height).
             If False, then shape is never transposed.
             If True, then shape is transposed with 0.5 probability.
             If float, then shape is transposed with that probability.
         adaptive_slices: bool or str
             If True, then slices are created so that crops are cut only along the grid.
-        passdown : str of list of str
-            Components of batch to keep in the new one.
         grid_src : str
             Attribute of geometry to get the grid from.
+        eps : int
+            Initial length of slice, that is used to find the closest grid point.
+        passdown : str of list of str
+            Components of batch to keep in the new one.
         dst : str, optional
             Component of batch to put positions of crops in.
         dst_points, dst_shapes : str
@@ -248,12 +247,16 @@ class SeismicCropBatch(Batch):
 
     def _make_location(self, point, shape, direction=(0, 0, 0)):
         """ Creates list of slices for desired location. """
-        if isinstance(point[1], float) or isinstance(point[2], float) or isinstance(point[3], float):
-            ix = point[0]
-            cube_shape = np.array(self.get(ix, 'geometries').cube_shape)
-            anchor_point = np.rint(point[1:].astype(float) * (cube_shape - np.array(shape))).astype(int)
+        ix = point[0]
+        cube_shape = self.get(ix, 'geometries').cube_shape
+
+        if isinstance(point[1], float):
+            anchor_point = np.rint(point[1:] * cube_shape).astype(int)
         else:
             anchor_point = point[1:]
+
+        # TODO: test inference, add comment
+        anchor_point = np.minimum(anchor_point + shape, cube_shape) - shape
 
         location = []
         for i in range(3):
@@ -266,12 +269,10 @@ class SeismicCropBatch(Batch):
         """ Move the point to the closest location in the quality grid. """
         #pylint: disable=too-many-return-statements
         ix = point[0]
+        pnt = point[1:]
+        shape_t = shape[[1, 0, 2]]
         geometry = self.get(ix, 'geometries')
         grid = getattr(geometry, grid_src) if isinstance(grid_src, str) else grid_src
-        shape_t = shape[[1, 0, 2]]
-
-        pnt = (point[1:] * geometry.cube_shape)
-        pnt = np.rint(pnt.astype(float)).astype(int)
 
         # Point is already in grid
         if grid[pnt[0], pnt[1]] == 1:
@@ -286,7 +287,7 @@ class SeismicCropBatch(Batch):
             if grid[pnt[0], pnt_] == 1:
                 sum_i = np.nansum(grid[pnt[0], max(pnt_-eps, 0):pnt_+eps])
                 sum_x = np.nansum(grid[max(pnt[0]-eps, 0):pnt[0]+eps, pnt_])
-                point[1:3] = np.array((pnt[0], pnt_)) / geometry.cube_shape[:2]
+                point[1:3] = np.array((pnt[0], pnt_))
                 if sum_i >= sum_x:
                     return point, shape
                 return point, shape_t
@@ -296,7 +297,7 @@ class SeismicCropBatch(Batch):
             if grid[pnt_, pnt[1]] == 1:
                 sum_i = np.nansum(grid[pnt_, max(pnt[1]-eps, 0) : pnt[1]+eps])
                 sum_x = np.nansum(grid[max(pnt_-eps, 0) : pnt_+eps, pnt[1]])
-                point[1:3] = np.array((pnt_, pnt[1])) / geometry.cube_shape[:2]
+                point[1:3] = np.array((pnt_, pnt[1]))
                 if sum_i >= sum_x:
                     return point, shape
                 return point, shape_t
@@ -304,6 +305,18 @@ class SeismicCropBatch(Batch):
         # Double the search radius
         return self._correct_point_to_grid(point, shape, grid_src, 2*eps)
 
+    @action
+    def store_locations(self, src_locations='locations', src_geometry='geometries'):
+        """ !!. """
+        for ix in self.indices:
+            geometry = self.get(ix, src_geometry)
+            location = self.get(ix, src_locations)
+
+            if not hasattr(geometry, 'sampled_locations'):
+                geometry.sampled_locations = []
+
+            geometry.sampled_locations.append(location)
+        return self
 
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
@@ -488,7 +501,7 @@ class SeismicCropBatch(Batch):
             raise SkipBatchException
 
         passdown = passdown or []
-        passdown.extend([src, 'locations', 'shapes'])
+        passdown.extend([src, 'locations', 'shapes', 'points'])
         passdown = list(set(passdown))
 
         for compo in passdown:
@@ -1178,6 +1191,13 @@ class SeismicCropBatch(Batch):
         corner = crop_shape // 2 - shape // 2
         slices = tuple([slice(start, start+length) for start, length in zip(corner, shape)])
         return crop[slices]
+
+    @apply_parallel
+    def translate(self, crop, shift=5, scale=0.0):
+        """ Add and multiply amplitude values. """
+        shift = self.random.uniform(-shift, shift)
+        scale = self.random.uniform(1-scale, 1+scale)
+        return (crop + shift)*scale
 
     @action
     def adaptive_expand(self, src, dst=None, channels='first'):

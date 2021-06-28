@@ -8,7 +8,7 @@ import numpy as np
 from tqdm.auto import tqdm
 
 from ..batchflow import FilesIndex, Dataset, Sampler, Pipeline
-from ..batchflow import NumpySampler
+from ..batchflow import NumpySampler, ConstantSampler
 
 from .geometry import SeismicGeometry
 from .crop_batch import SeismicCropBatch
@@ -260,7 +260,6 @@ class SeismicCubeset(Dataset):
         Passed `dataset` must have `geometries` and `labels` attributes if you want to create HistoSampler.
         """
         #pylint: disable=cell-var-from-loop
-        lowcut, highcut = [0, 0, 0], [1, 1, 1]
         transforms = transforms or dict()
 
         samplers = {}
@@ -268,6 +267,8 @@ class SeismicCubeset(Dataset):
             mode = {ix: mode for ix in self.indices}
 
         for ix in self.indices:
+            geometry = self.geometries[ix]
+
             if isinstance(mode[ix], Sampler):
                 sampler = mode[ix]
 
@@ -275,22 +276,24 @@ class SeismicCubeset(Dataset):
                 sampler = NumpySampler(**kwargs)
 
             elif mode[ix] == 'hist' or mode[ix] == 'horizon':
-                sampler = 0 & NumpySampler('n', dim=3)
+                sampler = 0 & ConstantSampler(0, dim=3)
                 labels = getattr(self, src_labels)[ix]
                 for i, label in enumerate(labels):
                     label.create_sampler(**kwargs)
                     sampler = sampler | label.sampler
             else:
+                # TODO: rework
                 sampler = NumpySampler('u', low=0, high=1, dim=3)
+                sampler = sampler.apply(lambda array: np.rint(array * geometry.cube_shape).astype(np.int32))
 
-            sampler = sampler.truncate(low=lowcut, high=highcut)
+            sampler = sampler.truncate(low=[0, 0, 0], high=geometry.cube_shape)
             samplers.update({ix: sampler})
         self.samplers = samplers
 
         # One sampler to rule them all
         p = p or [1/len(self) for _ in self.indices]
 
-        sampler = 0 & NumpySampler('n', dim=4)
+        sampler = 0 & ConstantSampler(0, dim=4)
         for i, ix in enumerate(self.indices):
             sampler_ = samplers[ix].apply(Modificator(cube_name=ix))
             sampler = sampler | (p[i] & sampler_)

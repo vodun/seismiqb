@@ -440,7 +440,7 @@ class Horizon:
         If the horizon is created not from (N, 3) array, evaluated at the time of the first access.
         """
         if self._points is None and self.matrix is not None:
-            points = self.matrix_to_points(self.matrix)
+            points = self.matrix_to_points(self.matrix).astype(self.dtype)
             points += np.array([self.i_min, self.x_min, 0])
             self._points = points
         return self._points
@@ -873,6 +873,24 @@ class Horizon:
         self.apply_to_matrix(smoothing_function, **kwargs)
 
 
+    def make_carcass(self, frequencies=100, regular=True, margin=50, apply_smoothing=False, **kwargs):
+        """ Cut carcass out of a horizon. Returns a new instance. """
+        frequencies = frequencies if isinstance(frequencies, (tuple, list)) else [frequencies]
+        carcass = copy(self)
+        carcass.name = carcass.name.replace('copy', 'carcass')
+
+        if regular:
+            from .metrics import GeometryMetrics
+            gm = GeometryMetrics(self.geometry)
+            grid = gm.make_grid(1 - self.geometry.zero_traces, frequencies=frequencies, margin=margin, **kwargs)
+        else:
+            grid = self.geometry.make_quality_grid(frequencies, margin=margin, **kwargs)
+
+        carcass.filter(filtering_matrix=1-grid)
+        if apply_smoothing:
+            carcass.smooth_out(preserve_borders=False)
+        return carcass
+
     def make_random_holes_matrix(self, n=10, scale=1.0, max_scale=.25,
                                  max_angles_amount=4, max_sharpness=5.0, locations=None,
                                  points_proportion=1e-5, points_shape=1,
@@ -1010,7 +1028,8 @@ class Horizon:
             points = points[weights > threshold]
             weights = weights[weights > threshold]
 
-        self.sampler = HorizonSampler(np.histogramdd(points/self.cube_shape, bins=bins, weights=weights), **kwargs)
+        sampler = HorizonSampler(np.histogramdd(points, bins=bins, weights=weights), **kwargs)
+        self.sampler = sampler.apply(lambda array: np.rint(array).astype(np.int32))
 
     def add_to_mask(self, mask, locations=None, width=3, alpha=1, **kwargs):
         """ Add horizon to a background.
@@ -1516,6 +1535,24 @@ class Horizon:
         return self.horizon_metrics.evaluate('instantaneous_phase')
 
     @property
+    def number_of_holes(self):
+        """ Number of holes inside horizon borders. """
+        holes_array = self.filled_matrix != self.binary_matrix
+        _, num = label(holes_array, connectivity=2, return_num=True, background=0)
+        return num
+
+    @property
+    def perimeter(self):
+        """ Number of points in the borders. """
+        return np.sum((self.borders_matrix == 1).astype(np.int32))
+
+    @property
+    def solidity(self):
+        """ Ratio of area covered by horizon to total area inside borders. """
+        return len(self) / np.sum(self.filled_matrix)
+
+    # Carcass properties
+    @property
     def is_carcass(self):
         """ Check if the horizon is a sparse carcass. """
         return len(self) / self.filled_matrix.sum() < 0.5
@@ -1533,21 +1570,9 @@ class Horizon:
         return uniques[counts > 256]
 
     @property
-    def number_of_holes(self):
-        """ Number of holes inside horizon borders. """
-        holes_array = self.filled_matrix != self.binary_matrix
-        _, num = label(holes_array, connectivity=2, return_num=True, background=0)
-        return num
-
-    @property
-    def perimeter(self):
-        """ Number of points in the borders. """
-        return np.sum((self.borders_matrix == 1).astype(np.int32))
-
-    @property
-    def solidity(self):
-        """ Ratio of area covered by horizon to total area inside borders. """
-        return len(self) / np.sum(self.filled_matrix)
+    def carcass_grid(self):
+        """ Full matrix with present lines. """
+        return self.put_on_full(self.binary_matrix, fill_value=0.0)
 
 
     def grad_along_axis(self, axis=0):
