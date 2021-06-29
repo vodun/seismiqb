@@ -115,11 +115,11 @@ class Enhancer(HorizonController):
             .adaptive_reshape(src=['images', 'prior_masks'],
                               shape=C('crop_shape'))
             .normalize(src='images')
+            .concat_components(src=['images', 'prior_masks'], dst='images', axis=1)
 
             # Use model for prediction
             .predict_model('model',
                            B('images'),
-                           B('prior_masks'),
                            fetches='predictions',
                            save_to=V('predictions', mode='e'))
         )
