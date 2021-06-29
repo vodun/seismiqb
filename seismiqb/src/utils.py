@@ -668,13 +668,3 @@ def to_list(obj, default=None, dtype=None):
 def get_class_methods(cls):
     """ Get a list of non-private class methods. """
     return [func for func in dir(cls) if not func.startswith("__") and callable(getattr(cls, func))]
-
-def exec_callable(obj, *args, **kwargs):
-    """ Execute callable with given arguments. If `obj` is a dictionary callable is expected to be under 'func' key. """
-    if callable(obj):
-        return obj(*args, **kwargs)
-    if isinstance(obj, dict):
-        params = {**obj, **kwargs}
-        func = params.pop('func')
-        return func(*args, **params)
-    raise ValueError(f"`obj` can be either `callable` or a `dict` with callable under 'func', got {type(obj)} instead.")

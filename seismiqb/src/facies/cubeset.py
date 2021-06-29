@@ -9,8 +9,6 @@ import pandas as pd
 from scipy.special import expit
 from tqdm.notebook import tqdm
 
-import matplotlib.pyplot as plt
-
 from .facies import Facies
 from .batch import FaciesBatch
 from ..cubeset import SeismicCubeset
@@ -102,24 +100,12 @@ class FaciesCubeset(SeismicCubeset):
 
     def add_subsets(self, subset_labels, base_labels='labels'):
         """ Add nested labels. """
-        flatten_base_labels = self.flatten_labels(src_labels=base_labels)
-        flatten_subset_labels = self.flatten_labels(src_labels=subset_labels)
-        if len(flatten_base_labels) != len(flatten_subset_labels):
+        flat_base_labels = getattr(self, base_labels).flat
+        flat_subset_labels = getattr(self, subset_labels).flat
+        if len(flat_base_labels) != len(flat_subset_labels):
             raise ValueError(f"Labels `{subset_labels}` and `{base_labels}` have different lengths.")
-        for base_label, subset_label in zip(flatten_base_labels, flatten_subset_labels):
+        for base_label, subset_label in zip(flat_base_labels, flat_subset_labels):
             base_label.add_subset(subset_labels, subset_label)
-
-    def flatten_labels(self, src_labels='labels', indices=None):
-        """ Convert given labels attribute from `IndexedDict` to `list`. Optionally filter out required indices. """
-        indices = to_list(indices, default=self.indices)
-        indices = [idx if isinstance(idx, str) else self.indices[idx] for idx in indices]
-        labels_lists = [self[idx, src_labels] for idx in indices]
-        return sum(labels_lists, [])
-
-    @property
-    def flat_labels(self):
-        """ Return flatten base labels. """
-        return self.flatten_labels()
 
     def apply_to_labels(self, function, indices=None, src_labels='labels', **kwargs):
         """ Call specific function for labels attributes of specific cubes.
@@ -142,7 +128,7 @@ class FaciesCubeset(SeismicCubeset):
         results = {}
         for src in src_labels:
             results[src] = {}
-            for label in self.flatten_labels(src_labels=src, indices=indices):
+            for label in getattr(self, src).flatten(keys=indices):
                 res = function(label, **kwargs) if callable(function) else getattr(label, function)(**kwargs)
                 results[src][label.short_name] = res
         return results
@@ -205,7 +191,7 @@ class FaciesCubeset(SeismicCubeset):
         """
         # pylint: disable=blacklisted-name
         results = IndexedDict({ix: [] for ix in self.indices})
-        pbar = tqdm(self.flatten_labels(src_labels))
+        pbar = tqdm(getattr(self, src_labels).flat)
         pbar.set_description("General progress")
         for label in pbar:
             prediction = copy(label)

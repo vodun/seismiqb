@@ -15,6 +15,7 @@ except ImportError:
     CUPY_AVAILABLE = False
 from numba import njit
 
+from .utils import to_list
 from ..batchflow import Sampler
 
 
@@ -271,7 +272,12 @@ def generate_points(edges, divisors, lengths, indices):
 
 
 class IndexedDict(OrderedDict):
-    """ Allows to use both indices and keys to subscript. """
+    """ `OrderedDict` that allows integer indexing and values flattening.
+
+    - Both keys and their indices might be used to subscript. Therefore `int` keys are not supported.
+    - Flatten values list of requested keys can be obtained via `flatten` method.
+    - Flatten list of all values is also available via `flat` property.
+    """
     def __getitem__(self, key):
         if isinstance(key, int):
             key = list(self.keys())[key]
@@ -281,6 +287,23 @@ class IndexedDict(OrderedDict):
         if isinstance(key, int):
             key = list(self.keys())[key]
         super().__setitem__(key, value)
+
+    def flatten(self, keys=None):
+        """ Get dict values for requested keys in a single list. """
+        all_keys = list(self.keys())
+        keys = to_list(keys, default=all_keys)
+        keys = [key if isinstance(key, str) else all_keys[key] for key in keys]
+        lists = [to_list(self[key]) for key in keys]
+        return sum(lists, [])
+
+    def __iter__(self):
+        return (x for x in self.flatten())
+
+    @property
+    def flat(self):
+        """ List of all dictionary values. """
+        return list(self)
+
 
 
 class lru_cache:

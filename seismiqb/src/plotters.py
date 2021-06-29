@@ -10,8 +10,7 @@ import matplotlib.pyplot as plt
 from matplotlib import patheffects
 from matplotlib.cm import get_cmap, register_cmap
 from matplotlib.patches import Patch
-from matplotlib.colors import ColorConverter, ListedColormap, LinearSegmentedColormap
-from matplotlib.colors import BASE_COLORS, TABLEAU_COLORS, CSS4_COLORS
+from matplotlib.colors import ColorConverter, ListedColormap, LinearSegmentedColormap, is_color_like
 from mpl_toolkits import axes_grid1
 
 import plotly.figure_factory as ff
@@ -259,88 +258,88 @@ class MatplotlibPlotter:
         if params:
             ax.figure.suptitle(**params)
 
-        # # xlabel
-        # keys = ['xlabel'] + TEXT_KEYS
-        # params = filter_parameters(ax_params, keys, prefix='xlabel_', index=ax_num)
-        # if params:
-        #     ax.set_xlabel(**params)
+        # xlabel
+        keys = ['xlabel'] + TEXT_KEYS
+        params = filter_parameters(ax_params, keys, prefix='xlabel_', index=ax_num)
+        if params:
+            ax.set_xlabel(**params)
 
-        # # ylabel
-        # keys = ['ylabel'] + TEXT_KEYS
-        # params = filter_parameters(ax_params, keys, prefix='ylabel_', index=ax_num)
-        # if params:
-        #     ax.set_ylabel(**params)
+        # ylabel
+        keys = ['ylabel'] + TEXT_KEYS
+        params = filter_parameters(ax_params, keys, prefix='ylabel_', index=ax_num)
+        if params:
+            ax.set_ylabel(**params)
 
-        # # aspect
-        # params = filter_parameters(ax_params, ['aspect'], prefix='aspect_', index=ax_num)
-        # if params:
-        #     ax.set_aspect(**params)
+        # aspect
+        params = filter_parameters(ax_params, ['aspect'], prefix='aspect_', index=ax_num)
+        if params:
+            ax.set_aspect(**params)
 
-        # # xticks
-        # params = filter_parameters(ax_params, ['xticks'], prefix='xticks_', index=ax_num)
-        # if 'xticks' in params:
-        #     params['ticks'] = params.get('ticks', params.pop('xticks'))
-        # if params:
-        #     ax.set_xticks(**params)
+        # xticks
+        params = filter_parameters(ax_params, ['xticks'], prefix='xticks_', index=ax_num)
+        if 'xticks' in params:
+            params['ticks'] = params.get('ticks', params.pop('xticks'))
+        if params:
+            ax.set_xticks(**params)
 
-        # # yticks
-        # params = filter_parameters(ax_params, ['yticks'], prefix='yticks_', index=ax_num)
-        # if 'yticks' in params:
-        #     params['ticks'] = params.get('ticks', params.pop('yticks'))
-        # if params:
-        #     ax.set_yticks(**params)
+        # yticks
+        params = filter_parameters(ax_params, ['yticks'], prefix='yticks_', index=ax_num)
+        if 'yticks' in params:
+            params['ticks'] = params.get('ticks', params.pop('yticks'))
+        if params:
+            ax.set_yticks(**params)
 
-        # # ticks
-        # keys = ['labeltop', 'labelright', 'labelcolor', 'direction']
-        # params = filter_parameters(ax_params, keys, prefix='tick_', index=ax_num)
-        # if params:
-        #     ax.tick_params(**params)
+        # ticks
+        keys = ['labeltop', 'labelright', 'labelcolor', 'direction']
+        params = filter_parameters(ax_params, keys, prefix='tick_', index=ax_num)
+        if params:
+            ax.tick_params(**params)
 
-        # # xlim
-        # params = filter_parameters(ax_params, ['xlim'], prefix='xlim_', index=ax_num)
-        # if 'xlim' in params:
-        #     params['left'] = params.get('left', params.pop('xlim'))
-        # if params:
-        #     ax.set_xlim(**params)
+        # xlim
+        params = filter_parameters(ax_params, ['xlim'], prefix='xlim_', index=ax_num)
+        if 'xlim' in params:
+            params['left'] = params.get('left', params.pop('xlim'))
+        if params:
+            ax.set_xlim(**params)
 
-        # # ylim
-        # params = filter_parameters(ax_params, ['ylim'], prefix='ylim_', index=ax_num)
-        # if 'ylim' in params:
-        #     params['bottom'] = params.get('bottom', params.pop('ylim'))
-        # if params:
-        #     ax.set_ylim(**params)
+        # ylim
+        params = filter_parameters(ax_params, ['ylim'], prefix='ylim_', index=ax_num)
+        if 'ylim' in params:
+            params['bottom'] = params.get('bottom', params.pop('ylim'))
+        if params:
+            ax.set_ylim(**params)
 
-        # # colorbar
-        # if all_params.get('colorbar', False) and mode == 'imshow':
-        #     keys = ['colorbar', 'fraction', 'aspect', 'fake', 'ax_image']
-        #     params = filter_parameters(ax_params, keys, prefix='colorbar_', index=ax_num)
-        #     # if colorbar is disabled for subplot, add param to plot fake axis instead to keep proportions
-        #     params['fake'] = not params.pop('colorbar', True)
-        #     cls.add_colorbar(**params)
+        # colorbar
+        if all_params.get('colorbar', False) and mode == 'imshow':
+            keys = ['colorbar', 'fraction', 'aspect', 'fake', 'ax_image']
+            params = filter_parameters(ax_params, keys, prefix='colorbar_', index=ax_num)
+            # if colorbar is disabled for subplot, add param to plot fake axis instead to keep proportions
+            params['fake'] = not params.pop('colorbar', True)
+            cls.add_colorbar(**params)
 
-        # # legend
-        # keys = ['label', 'size', 'cmap', 'color', 'loc']
-        # params = filter_parameters(ax_params, keys, prefix='legend_')
-        # params['color'] = params.pop('cmap', None) or params.get('color')
-        # if params.get('label') is not None:
-        #     cls.add_legend(ax, **params)
+        # legend
+        keys = ['label', 'size', 'cmap', 'color', 'loc']
+        params = filter_parameters(ax_params, keys, prefix='legend_')
+        params['color'] = params.pop('cmap', None) or params.get('color')
+        if params.get('label') is not None:
+            cls.add_legend(ax, **params)
 
-        # # grid
-        # keys = ['grid', 'b', 'which', 'axis']
-        # params = filter_parameters(ax_params, keys, prefix='grid_', index=ax_num)
-        # params['b'] = params.pop('grid', params.pop('b', 'False'))
-        # if params:
-        #     ax.grid(**params)
+        # grid
+        keys = ['grid', 'b', 'which', 'axis']
+        params = filter_parameters(ax_params, keys, prefix='grid_', index=ax_num)
+        params['b'] = params.pop('grid', params.pop('b', 'False'))
+        if params:
+            ax.grid(**params)
 
-        # if ax_params.get('facecolor'):
-        #     ax.set_facecolor(ax_params['facecolor'])
+        if ax_params.get('facecolor'):
+            ax.set_facecolor(ax_params['facecolor'])
 
-        # ax.set_axisbelow(ax_params.get('set_axisbelow', False))
+        ax.set_axisbelow(ax_params.get('set_axisbelow', False))
 
-        # if ax_params.get('disable_axes'):
-        #     ax.set_axis_off()
-        # elif not ax.axison:
-        #     ax.set_axis_on()
+        if ax_params.get('disable_axes'):
+            ax.set_axis_off()
+        elif not ax.axison:
+            ax.set_axis_on()
 
 
     @staticmethod
@@ -390,6 +389,7 @@ class MatplotlibPlotter:
         # other
         'order_axes': (1, 0, 2),
         'bad_color': (.0,.0,.0,.0),
+        'transparize_masks': False,
     }
 
     @classmethod
@@ -407,7 +407,9 @@ class MatplotlibPlotter:
                 Order of image axes.
             bad_values : list of numbers
                 Data values that should be displayed with 'bad_color'.
-
+            transparize_masks : bool
+                Whether treat zeros in binary masks as bad values or not.
+                If True, makes zero values in binary masks transparent on display.
             params for images drawn by `plt.imshow`:
                 - 'cmap', 'vmin', 'vmax', 'interpolation', 'alpha', 'extent'
                 - params with 'imshow_' prefix
@@ -420,15 +422,14 @@ class MatplotlibPlotter:
         for image_num, image in enumerate(data):
             image = np.transpose(image, axes=kwargs['order_axes'][:image.ndim]).astype(float)
 
-            unique_values = np.unique(image)
-            is_mask = len(unique_values) == 2 and unique_values[0] == 0
-            # if an image is a binary mask and no bad values list passed
-            # initialize it with zero (which is expected to be a background class)
-            bad_values = kwargs.get('bad_values', [0] if is_mask else [])
-            bad_masks = [image == value for value in bad_values]
-            if bad_masks:
-                bads_mask = np.logical_or(*bad_masks) if len(bad_masks) > 1 else bad_masks[0]
-                image[bads_mask] = np.nan
+            # fill some values with nans to display them with `bad_color`
+            bad_values = kwargs.get('bad_values', [])
+            if kwargs['transparize_masks']:
+                unique_values = np.unique(image)
+                if len(unique_values) == 2 and all(unique_values == (0, 1)):
+                    bad_values = [0]
+            for bad_value in bad_values:
+                image[image == bad_value] = np.nan
 
             keys = ['cmap', 'vmin', 'vmax', 'interpolation', 'alpha', 'extent']
             params = filter_parameters(kwargs, keys, prefix='imshow_', index=image_num)
@@ -738,8 +739,7 @@ class MatplotlibPlotter:
     def add_legend(ax, color, label, size, loc):
         """ Add patches to legend. All invalid colors are filtered. """
         handles = getattr(ax.get_legend(), 'legendHandles', [])
-        VALID_COLORS = {**BASE_COLORS, **TABLEAU_COLORS, **CSS4_COLORS}
-        colors = [color for color in to_list(color) if color in VALID_COLORS]
+        colors = [color for color in to_list(color) if is_color_like(color)]
         labels = to_list(label, dtype='object' if any(isinstance(item, list) for item in label) else None)
         new_patches = [Patch(color=color, label=label) for color, label in zip(colors, labels) if label]
         handles += new_patches

@@ -2,9 +2,11 @@
 import os
 import re
 import json
+
 from copy import copy
 from warnings import warn
 from collections import defaultdict
+from pandas import DataFrame
 
 from .cubeset import FaciesCubeset
 from ..utils import get_environ_flag, to_list
@@ -101,7 +103,7 @@ class FaciesInfo():
     DEFAULT_INFO = {
         'cubes_dir': '/data/seismic_data/seismic_interpretation',
         'cubes': [],
-        'cubes_extension': '.qblosc',
+        'cubes_extension': '.blosc',
 
         'labels_dir': "INPUTS/HORIZONS",
         'labels': ["RAW"],
@@ -128,9 +130,9 @@ class FaciesInfo():
 
         # Pop any unexpected keys from `info`
         provided_keys = list(info.keys())
-        unrecognized_keys = [info.pop(key) for key in provided_keys if key not in cls.DEFAULT_INFO]
-        if unrecognized_keys:
-            warn(f"Unknown arguments ignored:\n{unrecognized_keys}")
+        unrecognized = {key: info.pop(key) for key in provided_keys if key not in cls.DEFAULT_INFO}
+        if unrecognized:
+            warn(f"Unknown arguments ignored:\n{unrecognized}")
 
         info = {**cls.DEFAULT_INFO, **info}
         info['cubes'] = cls._process_cubes_list(info['cubes'], info['cubes_dir'])
@@ -182,7 +184,7 @@ class FaciesInfo():
         """ If not provided explicitly, choose base labels folder name from the list of given labels subfolders. """
         if base_labels not in labels:
             msg = f"""
-            Main labels {base_labels} are not in {labels}.
+            Base labels '{base_labels}' are not in {labels}.
             """
             if len(labels) > 1:
                 horizon_labels = [label for label in labels if 'HORIZON' in label]
@@ -196,7 +198,7 @@ class FaciesInfo():
             else:
                 base_labels = labels[0]
             msg += f"""
-            Main labels automatically inferred as `{base_labels}`.
+            Base labels automatically inferred as `{base_labels}`.
             """
             warn(msg)
         return base_labels
@@ -261,6 +263,18 @@ class FaciesInfo():
             first_box_value = boxes[0].value
             for box in boxes:
                 box.value = not first_box_value
+
+    def show_subsets(self):
+        """ Display predefined subsets as a dataframe. """
+        data = {}
+        for cube, labels in self.subsets['all'].items():
+            for label in labels:
+                data[(cube, label)] = [label in values[cube] for values in self.subsets.values()]
+        df = DataFrame(data=data, index=self.subsets.keys()).T
+        df = df.replace([False, True], ['ㅤㅤ❌ㅤㅤ', 'ㅤㅤ✅ㅤㅤ'])
+        style = [dict(selector="th", props=[('text-align', 'center')]),
+                 dict(selector="caption", props=[('font-size', '15px'), ('font-weight', 'bold')])]
+        return df.style.set_caption("PREDEFINED SUBSETS").set_table_styles(style)
 
     def interactive_split(self, subsets=('train', 'infer'), main_subset='all'):
         """ Render interactive menu to include/exclude labels for every name in `subsets`. """

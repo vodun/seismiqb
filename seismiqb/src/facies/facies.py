@@ -1,19 +1,17 @@
 """ Seismic facies container. """
 import os
-from collections import defaultdict
 
 import numpy as np
 
 from scipy.signal import hilbert
-import matplotlib.pyplot as plt
-import seaborn as sns
+from scipy.fft import fft
+from sklearn.decomposition import PCA
 
 
 from ..plotters import filter_parameters, plot_image
 from ..horizon import Horizon, _filtering_function
-from ..utils import to_list, retrieve_function_arguments, exec_callable
+from ..utils import to_list, retrieve_function_arguments
 from ..utility_classes import lru_cache, AttachStr, HorizonSampler
-from ...batchflow import Config
 
 
 
@@ -29,8 +27,7 @@ class Facies(Horizon):
     - Method for getting desired attributes is `load_attribute`. It works with nested keys, i.e. one can get attributes
     of horizon susbsets. Address method documentation for further details.
 
-    - Method `show_label` serves to visualizing horizon and its attribute both in separate and overlap styles,
-    as well as these histograms in similar manner. Address method documentation for further details.
+    - Method `show` visualizes horizon and its attributes in both separate and overlap manners.
     """
 
     # Correspondence between attribute alias and the class function that calculates it
@@ -41,7 +38,7 @@ class Facies(Horizon):
         'get_instantaneous_phases': ['instant_phases'],
         'get_instantaneous_amplitudes': ['instant_amplitudes'],
         'get_full_binary_matrix': ['full_binary_matrix', 'masks'],
-        '_get_grid_matrix': ['grid_matrix', 'grid']
+        'fourier_transform': ['fourier', 'fourier_transform']
     }
     ATTRIBUTE_TO_METHOD = {attr: func for func, attrs in METHOD_TO_ATTRIBUTE.items() for attr in attrs}
 
@@ -157,8 +154,6 @@ class Facies(Horizon):
 
         if src == 'amplitudes':
             kwargs['window'] = kwargs.get('window', 1)
-        elif src == 'grid':
-            kwargs['iterations'] = 5
 
         data = self._load_attribute(src=src, **kwargs)
         if subsets:
@@ -260,6 +255,41 @@ class Facies(Horizon):
         metrics = np.nan_to_num(metrics)
         return self.transform_where_present(metrics, **transform_kwargs)
 
+    @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
+    def fourier_transform(self, window=50, n_components=3, norm_axis=(0, 1), **kwargs):
+        """ Cached fourier transform calculation follower by dimensionaluty reduction via PCA.
+
+        Parameters
+        ----------
+        window : int
+            Width of amplitudes slice to calculate fourier transform on.
+        n_components : int
+            Number of components to keep after PCA.
+        norm_axis: valid numpy axis
+            Axis to calculate min and max values along that are used for result normalization.
+        kwargs :
+            For `sklearn.decomposition.PCA`.
+        """
+        transform_kwargs = retrieve_function_arguments(self.transform_where_present, kwargs)
+
+        amplitudes = self.load_attribute('amplitudes', window=window)
+        transformed = np.abs(fft(amplitudes))[:, :, window // 2:]
+
+        flattened = transformed.reshape(-1, transformed.shape[-1])
+        flattened[np.isnan(flattened).any(axis=-1)] = 0
+        pca = PCA(n_components, **kwargs)
+        reduced = pca.fit_transform(flattened)
+        result = reduced.reshape((*self.cube_shape[:2], -1))
+
+        min_ = np.nanmin(result, axis=norm_axis)
+        max_ = np.nanmax(result, axis=norm_axis)
+        result = (result - min_) / (max_ - min_)
+
+        alpha = np.ones((*self.cube_shape[:2], 1))
+        result = np.concatenate([result, alpha], axis=-1)
+
+        return self.transform_where_present(result, **transform_kwargs)
+
     def show(self, load='depths', mode='imshow', draw=None, return_figure=False, **kwargs):
         """ Display facies attributes with predefined defaults.
 
@@ -279,8 +309,8 @@ class Facies(Horizon):
             Whether return resulted figure or not.
         draw : str, None or list of objects of those types
             Aliases for actions applied to resulting figure axes.
-            E.g., if `draw='grid'`, than `Facies.draw_grid` is applied to first axis.
-            If `draw=[None, 'grid']`, than `Facies.draw_grid` is applied to second axis.
+            E.g., if `draw='crop_grid'`, than `Facies.draw_crop_grid` is applied to first axis.
+            If `draw=[None, 'crop_grid']`, than `Facies.draw_crop_grid` is applied to second axis.
         kwargs : for `plot_image`
 
         Examples
@@ -359,20 +389,29 @@ class Facies(Horizon):
             attr = name.split('/')[-1]
             if attr == 'depths':
                 return 'Depths'
+            if attr == 'metrics':
+                return 'Metric'
             if attr == 'masks':
                 return 'firebrick'
             return 'ocean'
 
+        def make_alpha(name):
+            return 0.7 if name.split('/')[-1] == 'masks' else 1.0
+
         if mode == 'imshow':
             x, y = self.matrix.shape
-            min_ax = min(x, y)
-            defaults['figsize'] = (x / min_ax * n_subplots * 10, y / min_ax * 10)
-
-            defaults['cmap'] = apply_by_scenario(make_cmap, names)
-            defaults['xlabel'] = self.geometry.index_headers[0]
-            defaults['ylabel'] = self.geometry.index_headers[1]
+            defaults = {
+                **defaults,
+                'figsize': (x / min(x, y) * n_subplots * 10, y / min(x, y) * 10),
+                'xlim': self.bbox[0],
+                'ylim': self.bbox[1][::-1],
+                'cmap': apply_by_scenario(make_cmap, names),
+                'alpha': apply_by_scenario(make_alpha, names),
+                'xlabel': self.geometry.index_headers[0],
+                'ylabel': self.geometry.index_headers[1],
+            }
         elif mode == 'hist':
-            defaults['figsize'] = (n_subplots * 10, 5)
+            defaults = {**defaults, 'figsize': (n_subplots * 10, 5)}
         else:
             raise ValueError(f"Valid modes are 'imshow' or 'hist', but '{mode}' was given.")
 
@@ -382,7 +421,6 @@ class Facies(Horizon):
         for text in ['suptitle_label', 'suptitle', 'title_label', 'title', 't', 'savepath']:
             if text in params:
                 params[text] = apply_by_scenario(lambda s: s.replace('*', defaults['suptitle_label']), params[text])
-
         # Plot image with given params and return resulting figure
         figure = plot_image(data=data, mode=mode, **params)
 
@@ -466,8 +504,8 @@ class Facies(Horizon):
         self.sampler = sampler
 
 
-    def draw_grid(self, ax, **kwargs):
-        """ Draw grid on given axis using grid info. """
+    def draw_crop_grid(self, ax, **kwargs):
+        """ Draw crops grid on given axis using grid info. """
         try:
             info = self.grid_info
         except AttributeError as e:
@@ -475,10 +513,10 @@ class Facies(Horizon):
         xrange, yrange = info['range'][:2]
 
         default_kwargs = {
-            'grid_colors': 'darkslategray',
-            'grid_linestyles': 'dashed',
-            'crop_colors': 'crimson',
-            'crop_linewidth': 3
+            'crop_grid_colors': 'darkslategray',
+            'crop_grid_linestyles': 'dashed',
+            'crop_corner_colors': 'crimson',
+            'crop_corner_linewidth': 3
         }
 
         kwargs = {**default_kwargs, **kwargs}
@@ -491,9 +529,9 @@ class Facies(Horizon):
             lines = np.r_[np.arange(0, lines_max, stride), [lines_max - crop_shape]]
 
             filtered_keys = ['colors', 'linestyles', 'linewidth']
-            grid_kwargs = filter_parameters(kwargs, filtered_keys, prefix='grid_')
+            grid_kwargs = filter_parameters(kwargs, filtered_keys, prefix='crop_grid_')
             draw_lines(lines, *lines_range, **grid_kwargs)
 
-            crop_kwargs = filter_parameters(kwargs, filtered_keys, prefix='crop_')
+            crop_kwargs = filter_parameters(kwargs, filtered_keys, prefix='crop_corner_')
             draw_lines(lines[0] + crop_shape, lines_range[0], crop_shape, **crop_kwargs) # draw first crop
             draw_lines(lines[-1], lines_range[1] - crop_shape, lines_range[1], **crop_kwargs) # draw last crop
