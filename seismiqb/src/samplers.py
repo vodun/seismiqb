@@ -9,7 +9,31 @@ from ..batchflow import Sampler, ConstantSampler
 
 
 class HorizonSampler(Sampler):
-    """ !!. """
+    """ Generator of crop locations, based on a single horizon.
+    Makes locations that:
+        - start from the labeled point on horizon, exluding those marked by `filtering_matrix`
+        - contain more than `threshold` labeled pixels inside
+        - don't go beyond cube limits
+
+    Locations are produced as np.ndarray of (size, 7) shape with following columns:
+        (cube_id, i_start, x_start, h_start, i_stop, x_stop, h_stop).
+    Depth location is randomized in (0.1*shape, 0.9*shape) range.
+
+    Under the hood, we prepare `locations` attribute, that contains all already-filtered possible locations,
+    and then randomly choose `size` rows for sampling. If some of the sampled locations does not fit the `threshold`
+    constraint, resample until we get exactly `size` locations.
+
+    Parameters
+    ----------
+    horizon : Horizon
+        Horizon to base sampler on.
+    shape : tuple
+        Shape of crop locations to generate.
+    threshold : float
+        Minimum proportion of labeled points in each sampled location.
+    filtering_matrix : np.ndarray, optional
+        Map of points to remove from potentially generated locations.
+    """
     dim = 7 # dimensionality of sampled points
 
     def __init__(self, horizon, shape, threshold=0.05, filtering_matrix=None, **kwargs):
@@ -46,7 +70,8 @@ class HorizonSampler(Sampler):
         buffer[points[:, 3] == 1, 3:] = shape_t
         buffer[:, 3:] += points[:, :3]
 
-        self.points = buffer
+        # Store attributes
+        self.locations = buffer
         self.n = len(buffer)
 
         self.shape = shape
@@ -63,7 +88,7 @@ class HorizonSampler(Sampler):
         super().__init__()
 
     def sample(self, size):
-        """ !!. """
+        """ Get exactly `size` locations. """
         if self.threshold == 0.0:
             sampled = self._sample(size)
         else:
@@ -77,6 +102,7 @@ class HorizonSampler(Sampler):
                 sampled_list.append(sampled[condition])
                 accumulated += condition.sum()
             sampled = np.concatenate(sampled_list)[:size]
+            self._counter = len(sampled_list)
 
         buffer = np.empty((size, 7), dtype=object)
         buffer[:, 0] = self.name
@@ -85,29 +111,38 @@ class HorizonSampler(Sampler):
 
     def _sample(self, size):
         idx = np.random.randint(self.n, size=size)
-        sampled = self.points[idx]
+        sampled = self.locations[idx]
 
         shift = np.random.randint(low=-int(self.height*0.9), high=-int(self.height*0.1),
                                   size=(size, 1), dtype=np.int32)
         sampled[:, [2, 5]] += shift
         return sampled
 
+    def __repr__(self):
+        return f'<HorizonSampler for {self.horizon.short_name}: '\
+               f'shape={tuple(self.shape)}, threshold={self.threshold}>'
+
     @property
     def flags(self):
-        """ !!. """
-        shapes = self.points[:, 3:] - self.points[:, :3]
+        """ False for iline-locations, True for xline-locations. """
+        shapes = self.locations[:, 3:] - self.locations[:, :3]
         return (shapes == self.shape_t).all(axis=1)
 
     @property
     def matrix(self):
-        """ !!. """
+        """ Possible locations, mapped on geometry.
+            - 0 where no locations can be sampled.
+            - 1 where only iline-oriented crops can be sampled.
+            - 2 where only xline-oriented crops can be sampled.
+            - 3 where both types of crop orientations can be sampled.
+        """
         flags = self.flags
         i_matrix = np.full_like(self.horizon.full_matrix, 0.0)
-        i_points = self.points[~flags]
+        i_points = self.locations[~flags]
         i_matrix[i_points[:, 0], i_points[:, 1]] = 1
 
         x_matrix = np.full_like(self.horizon.full_matrix, 0.0)
-        x_points = self.points[flags]
+        x_points = self.locations[flags]
         x_matrix[x_points[:, 0], x_points[:, 1]] = 2
 
         matrix = i_matrix + x_matrix
@@ -117,7 +152,27 @@ class HorizonSampler(Sampler):
 
 
 class SeismicSampler(Sampler):
-    """ !!. """
+    """ Mixture of samplers on multiple cubes with label-samplers.
+    Used to sample crop locations in (cube_id, i_start, x_start, h_start, i_stop, x_stop, h_stop) format, 
+    potentially with additional colums.
+
+    Parameters
+    ----------
+    labels : dict
+        Dictionary with nested lists that contains labels.
+    shape : tuple
+        Shape of crop locations to generate.
+    proportions : sequence, optional
+        Proportion of each cube in the resulting mixture.
+    baseclass : type
+        Class for label samplers.
+    threshold : float
+        Minimum proportion of labeled points in each sampled location.
+    filtering_matrix : np.ndarray, optional
+        Map of points to remove from potentially generated locations.
+    kwargs : dict
+        Other parameters of initializing label samplers.
+    """
     def __init__(self, labels, shape, proportions=None, baseclass=HorizonSampler,
                  threshold=0.05, filtering_matrix=None, **kwargs):
 
@@ -141,17 +196,25 @@ class SeismicSampler(Sampler):
 
         self.sampler = sampler
         self.samplers = samplers
+        self.proportions = proportions
 
     def sample(self, size):
-        """ !!. """
+        """ Generate exactly `size` locations. """
         return self.sampler.sample(size)
 
     def __call__(self, size):
         return self.sampler.sample(size)
 
+    def __repr__(self):
+        msg = 'SeismicSampler:'
+        for list_samplers, p in zip(self.samplers.values(), self.proportions):
+            msg += f'\n    {list_samplers[0].geometry.short_name} @ {p}'
+            for sampler in list_samplers:
+                msg += f'\n        {sampler}'
+        return msg
 
     def show(self, ncols=2, **kwargs):
-        """ !!. """
+        """ Visualize on geometry map by using underlying `points` structure. """
         for idx, samplers in self.samplers.items():
             geometry = samplers[0].geometry
             images = [sampler.horizon.enlarge_carcass_image(sampler.matrix, 9)
@@ -180,7 +243,7 @@ class SeismicSampler(Sampler):
             geometry.show(images, **kwargs)
 
     def visualize(self, n=10000, binary=False, **kwargs):
-        """ !!. """
+        """ Visualize on geometry map by sampling `n` crop locations. """
         sampled = self.sample(n)
 
         names = np.unique(sampled[:, 0])
@@ -210,8 +273,27 @@ class SeismicSampler(Sampler):
 
 @njit
 def check_points(points, matrix, shape, mask_i, mask_x, threshold):
-    """ !!. """
-    # shape is (i, x) only
+    """ Compute points, which would generate crops with more than `threshold` labeled pixels.
+    For each point, we test two possible shapes (i-oriented and x-oriented) and check `matrix` to compute the
+    number of present points. Therefore, each of the initial points can result in up to two points in the output.
+
+    Used as one of the filters for points creation at sampler initialization.
+
+    Parameters
+    ----------
+    points : np.ndarray
+        Points in (i_start, x_start, h_start) format.
+    matrix : np.ndarray
+        Depth map in cube coordinates.
+    shape : tuple of two ints
+        Spatial shape of crops to generate: (i_shape, x_shape).
+    mask_i : np.ndarray
+        For each point, whether to test i-oriented shape.
+    mask_x : np.ndarray
+        For each point, whether to test x-oriented shape.
+    threshold : int
+        Minimum amount of points in a generated crop.
+    """
     shape_i, shape_x = shape
 
     # Return inline, crossline, corrected_depth (mean across crop), and 0/1 as i/x flag
@@ -240,7 +322,19 @@ def check_points(points, matrix, shape, mask_i, mask_x, threshold):
 
 @njit
 def check_sampled(points, matrix, threshold):
-    """ !!. """
+    """ Remove points, which correspond to crops with less than `threshold` labeled pixels.
+    Used as a final filter for already sampled points: they can generate crops with
+    smaller than `threshold` mask due to depth randomization.
+
+    Parameters
+    ----------
+    points : np.ndarray
+        Points in (i_start, x_start, h_start, i_stop, x_stop, h_stop) format.
+    matrix : np.ndarray
+        Depth map in cube coordinates.
+    threshold : int
+        Minimum amount of labeled pixels in a crop.
+    """
     condition = np.ones(len(points), dtype=np.bool_)
 
     for i, (point_i_start, point_x_start, point_h_start,
