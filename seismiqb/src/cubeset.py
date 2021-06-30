@@ -7,8 +7,7 @@ from warnings import warn
 import numpy as np
 from tqdm.auto import tqdm
 
-from ..batchflow import FilesIndex, Dataset, Sampler, Pipeline
-from ..batchflow import NumpySampler, ConstantSampler
+from ..batchflow import FilesIndex, Dataset, Pipeline
 
 from .geometry import SeismicGeometry
 from .crop_batch import SeismicCropBatch
@@ -16,7 +15,8 @@ from .crop_batch import SeismicCropBatch
 from .horizon import Horizon, UnstructuredHorizon
 from .metrics import HorizonMetrics
 from .plotters import plot_image, show_3d
-from .utils import round_to_array, gen_crop_coordinates, make_axis_grid, fill_defaults
+from .utils import gen_crop_coordinates, make_axis_grid, fill_defaults
+from .samplers import SeismicSampler
 from .utility_classes import IndexedDict
 
 
@@ -236,164 +236,13 @@ class SeismicCubeset(Dataset):
         self._sampler = sampler
 
 
-    def create_sampler(self, mode='hist', p=None, transforms=None, dst='sampler', src_labels='labels', **kwargs):
-        """ Create samplers for every cube and store it in `samplers`
-        attribute of passed dataset. Also creates one combined sampler
-        and stores it in `sampler` attribute of passed dataset.
-
-        Parameters
-        ----------
-        mode : str or Sampler
-            Type of sampler to be created.
-            If 'hist' or 'horizon', then sampler is estimated from given labels.
-            If 'numpy', then sampler is created with `kwargs` parameters.
-            If instance of Sampler is provided, it must generate points from unit cube.
-        p : list
-            Weights for each mixture in final sampler.
-        transforms : dict
-            Mapping from indices to callables. Each callable should define
-            way to map point from absolute coordinates (X, Y world-wise) to
-            cube local specific and take array of shape (N, 4) as input.
-
-        Notes
-        -----
-        Passed `dataset` must have `geometries` and `labels` attributes if you want to create HistoSampler.
-        """
-        #pylint: disable=cell-var-from-loop
-        transforms = transforms or dict()
-
-        samplers = {}
-        if not isinstance(mode, dict):
-            mode = {ix: mode for ix in self.indices}
-
-        for ix in self.indices:
-            geometry = self.geometries[ix]
-
-            if isinstance(mode[ix], Sampler):
-                sampler = mode[ix]
-
-            elif mode[ix] == 'numpy':
-                sampler = NumpySampler(**kwargs)
-
-            elif mode[ix] == 'hist' or mode[ix] == 'horizon':
-                sampler = 0 & ConstantSampler(0, dim=3)
-                labels = getattr(self, src_labels)[ix]
-                for i, label in enumerate(labels):
-                    label.create_sampler(**kwargs)
-                    sampler = sampler | label.sampler
-            else:
-                # TODO: rework
-                sampler = NumpySampler('u', low=0, high=1, dim=3)
-                sampler = sampler.apply(lambda array: np.rint(array * geometry.cube_shape).astype(np.int32))
-
-            sampler = sampler.truncate(low=[0, 0, 0], high=geometry.cube_shape)
-            samplers.update({ix: sampler})
-        self.samplers = samplers
-
-        # One sampler to rule them all
-        p = p or [1/len(self) for _ in self.indices]
-
-        sampler = 0 & ConstantSampler(0, dim=4)
-        for i, ix in enumerate(self.indices):
-            sampler_ = samplers[ix].apply(Modificator(cube_name=ix))
-            sampler = sampler | (p[i] & sampler_)
+    def create_sampler(self, dst='sampler', src_labels='labels', **kwargs):
+        """ Create instance of `SeismicSampler`, based on current labels. """
+        labels = getattr(self, src_labels)
+        sampler = SeismicSampler(labels, **kwargs)
         setattr(self, dst, sampler)
+        return sampler
 
-    def modify_sampler(self, dst, mode='iline', low=None, high=None,
-                       each=None, each_start=None,
-                       to_cube=False, post=None, finish=False, src='sampler'):
-        """ Change given sampler to generate points from desired regions.
-
-        Parameters
-        ----------
-        src : str
-            Attribute with Sampler to change.
-        dst : str
-            Attribute to store created Sampler.
-        mode : str
-            Axis to modify: ilines/xlines/heights.
-        low : float
-            Lower bound for truncating.
-        high : float
-            Upper bound for truncating.
-        each : int
-            Keep only i-th value along axis.
-        each_start : int
-            Shift grid for previous parameter.
-        to_cube : bool
-            Transform sampled values to each cube coordinates.
-        post : callable
-            Additional function to apply to sampled points.
-        finish : bool
-            If False, instance of Sampler is put into `dst` and can be modified later.
-            If True, `sample` method is put into `dst` and can be called via `D` named-expressions.
-
-        Examples
-        --------
-        Split into train / test along ilines in 80/20 ratio:
-
-        >>> cubeset.modify_sampler(dst='train_sampler', mode='i', high=0.8)
-        >>> cubeset.modify_sampler(dst='test_sampler', mode='i', low=0.9)
-
-        Sample only every 50-th point along xlines starting from 70-th xline:
-
-        >>> cubeset.modify_sampler(dst='train_sampler', mode='x', each=50, each_start=70)
-
-        Notes
-        -----
-        It is advised to have gap between `high` for train sampler and `low` for test sampler.
-        That is done in order to take into account additional seen entries due to crop shape.
-        """
-
-        # Parsing arguments
-        sampler = getattr(self, src)
-
-        mapping = {'ilines': 0, 'xlines': 1, 'heights': 2,
-                   'iline': 0, 'xline': 1, 'i': 0, 'x': 1, 'h': 2}
-        axis = mapping[mode]
-
-        low, high = low or 0, high or 1
-        each_start = each_start or each
-
-        # Keep only points from region
-        if (low != 0) or (high != 1):
-            sampler = sampler.truncate(low=low, high=high, prob=high-low,
-                                       expr=lambda p: p[:, axis+1])
-
-        # Keep only every `each`-th point
-        if each is not None:
-            def filter_out(array):
-                for cube_name in np.unique(array[:, 0]):
-                    shape = self.geometries[cube_name].cube_shape[axis]
-                    ticks = np.arange(each_start, shape, each)
-                    name_idx = np.asarray(array[:, 0] == cube_name).nonzero()
-
-                    arr = np.rint(array[array[:, 0] == cube_name][:, axis+1].astype(float)*shape).astype(int)
-                    array[name_idx, np.full_like(name_idx, axis+1)] = round_to_array(arr, ticks).astype(float) / shape
-                return array
-
-            sampler = sampler.apply(filter_out)
-
-        # Change representation of points from unit cube to cube coordinates
-        if to_cube:
-            def get_shapes(name):
-                return self.geometries[name].cube_shape
-
-            def coords_to_cube(array):
-                shapes = np.array(list(map(get_shapes, array[:, 0])))
-                array[:, 1:] = np.rint(array[:, 1:].astype(float) * shapes).astype(int)
-                return array
-
-            sampler = sampler.apply(coords_to_cube)
-
-        # Apply additional transformations to points
-        if callable(post):
-            sampler = sampler.apply(post)
-
-        if finish:
-            setattr(self, dst, sampler.sample)
-        else:
-            setattr(self, dst, sampler)
 
     def show_slices(self, idx=0, src_sampler='sampler', n=10000, normalize=False, shape=None,
                     adaptive_slices=False, grid_src='quality_grid', side_view=False,

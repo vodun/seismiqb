@@ -198,6 +198,9 @@ class SeismicSampler(Sampler):
         self.samplers = samplers
         self.proportions = proportions
 
+        self.shape = shape
+        self.threshold = threshold
+
     def sample(self, size):
         """ Generate exactly `size` locations. """
         return self.sampler.sample(size)

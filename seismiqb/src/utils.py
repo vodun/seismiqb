@@ -407,6 +407,19 @@ def groupby_max(array):
     return output[:position]
 
 
+
+@njit(parallel=True)
+def _filtering_function(points, filtering_matrix):
+    #pylint: disable=consider-using-enumerate, not-an-iterable
+    mask = np.ones(len(points), dtype=np.int32)
+
+    for i in prange(len(points)):
+        il, xl = points[i, 0], points[i, 1]
+        if filtering_matrix[il, xl] == 1:
+            mask[i] = 0
+    return points[mask == 1, :]
+
+
 @njit
 def round_to_array(values, ticks):
     """ Jit-accelerated function to round values from one array to the

@@ -8,7 +8,6 @@ from itertools import product
 import h5py
 import numpy as np
 import pandas as pd
-from numba import njit, prange
 
 from cv2 import dilate
 from scipy.ndimage.morphology import binary_fill_holes, binary_erosion, binary_dilation
@@ -17,8 +16,9 @@ from scipy.spatial import Delaunay
 from scipy.signal import hilbert
 from skimage.measure import label
 
-from .utility_classes import HorizonSampler, lru_cache
-from .utils import round_to_array, groupby_mean, groupby_min, groupby_max, filter_simplices
+from .utility_classes import lru_cache
+from .samplers import HorizonSampler
+from .utils import round_to_array, groupby_mean, groupby_min, groupby_max, filter_simplices, _filtering_function
 from .utils import retrieve_function_arguments, get_class_methods, make_bezier_figure
 from .functional import smooth_out
 from .plotters import plot_image, show_3d
@@ -995,41 +995,9 @@ class Horizon:
         return filtering_matrix
 
     # Horizon usage: point/mask generation
-    def create_sampler(self, bins=None, quality_grid=None, weights=None, threshold=0, **kwargs):
-        """ Create sampler based on horizon location.
-
-        Parameters
-        ----------
-        bins : sequence
-            Size of ticks alongs each respective axis.
-        quality_grid : ndarray or None
-            If not None, then must be a matrix with zeroes in locations to keep, ones in locations to remove.
-            Applied to `points` before sampler creation.
-        weights : ndarray or bool
-            Weights matrix with shape (ilines_len, xlines_len) for weights of sampling.
-            If True support correlation metric will be used.
-        """
-        _ = kwargs
-        default_bins = self.cube_shape // np.array([5, 20, 20])
-        bins = bins if bins is not None else default_bins
-        quality_grid = self.geometry.quality_grid if quality_grid is True else quality_grid
-
-        if isinstance(quality_grid, np.ndarray):
-            points = _filtering_function(np.copy(self.points), 1 - quality_grid)
-        else:
-            points = self.points
-
-        if weights:
-            if not isinstance(weights, np.ndarray):
-                corrs_matrix = self.evaluate_metric()
-                weights = corrs_matrix[points[:, 0], points[:, 1]]
-            points = points[~np.isnan(weights)]
-            weights = weights[~np.isnan(weights)]
-            points = points[weights > threshold]
-            weights = weights[weights > threshold]
-
-        sampler = HorizonSampler(np.histogramdd(points, bins=bins, weights=weights), **kwargs)
-        self.sampler = sampler.apply(lambda array: np.rint(array).astype(np.int32))
+    def create_sampler(self, **kwargs):
+        """ Create sampler, based on self. """
+        return HorizonSampler(self, **kwargs)
 
     def add_to_mask(self, mask, locations=None, width=3, alpha=1, **kwargs):
         """ Add horizon to a background.
@@ -2400,15 +2368,3 @@ class Horizon:
 
 class StructuredHorizon(Horizon):
     """ Convenient alias for :class:`.Horizon` class. """
-
-
-@njit(parallel=True)
-def _filtering_function(points, filtering_matrix):
-    #pylint: disable=consider-using-enumerate, not-an-iterable
-    mask = np.ones(len(points), dtype=np.int32)
-
-    for i in prange(len(points)):
-        il, xl = points[i, 0], points[i, 1]
-        if filtering_matrix[il, xl] == 1:
-            mask[i] = 0
-    return points[mask == 1, :]

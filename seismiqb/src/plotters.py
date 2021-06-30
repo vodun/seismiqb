@@ -224,7 +224,7 @@ class MatplotlibPlotter:
         axes = all_params.pop('ax', axes)
 
         if axes is None:
-            FIGURE_KEYS = ['figsize', 'facecolor', 'dpi', 'ncols', 'nrows']
+            FIGURE_KEYS = ['figsize', 'facecolor', 'dpi', 'ncols', 'nrows', 'constrained_layout']
             params = filter_parameters(all_params, FIGURE_KEYS)
             params['figsize'] = params.get('figsize', MODE_TO_FIGSIZE[mode])
             if ('ncols' not in params) and ('nrows' not in params):
@@ -692,6 +692,11 @@ class MatplotlibPlotter:
 
     DEPTHS_CMAP = ListedColormap(get_cmap('viridis_r')(np.linspace(0.0, 0.5, 100)))
     register_cmap(name='Depths', cmap=DEPTHS_CMAP)
+
+    SAMPLER_CMAP = ListedColormap([ColorConverter().to_rgb('blue'),
+                                   ColorConverter().to_rgb('red'),
+                                   ColorConverter().to_rgb('purple')])
+    register_cmap(name='Sampler', cmap=SAMPLER_CMAP)
 
     # Supplementary methods
 
