@@ -2103,7 +2103,7 @@ class Horizon:
         return background
 
 
-    def show(self, src='matrix', fill_value=None, on_full=True, enlarge=True, width=3, **kwargs):
+    def show(self, src='matrix', fill_value=None, on_full=True, enlarge=True, width=9, **kwargs):
         """ Nice visualization of a horizon-related matrix. """
         matrix = getattr(self, src) if isinstance(src, str) else src
         fill_value = fill_value if fill_value is not None else self.FILL_VALUE

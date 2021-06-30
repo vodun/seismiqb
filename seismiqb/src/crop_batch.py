@@ -1094,6 +1094,7 @@ class SeismicCropBatch(Batch):
         components : str or sequence of str
             Components to get from batch and draw.
         """
+        # Get components data
         if idx is not None:
             data = [getattr(self, comp)[idx].squeeze() for comp in components]
         else:
@@ -1102,10 +1103,19 @@ class SeismicCropBatch(Batch):
         if slide is not None:
             data = [item[slide] for item in data]
 
-        # set some defaults
+        # Get location
+        l = self.locations[idx]
+        if (l[0].stop - l[0].start) == 1:
+            suptitle = f'INLINE {l[0].start}   CROSSLINES {l[1].start}:{l[1].stop}   DEPTH {l[2].start}:{l[2].stop}'
+        elif (l[1].stop - l[1].start) == 1:
+            suptitle = f'CROSSLINE {l[1].start}   INLINES {l[0].start}:{l[0].stop}   DEPTH {l[2].start}:{l[2].stop}'
+        else:
+            suptitle = f'DEPTH {l[2].start}  INLINES {l[0].start}:{l[0].stop}   CROSSLINES {l[1].start}:{l[1].stop}'
+
+        # Plot parameters
         kwargs = {
             'figsize': (8 * len(components), 8),
-            'suptitle_label': 'Batch components',
+            'suptitle_label': suptitle,
             'title': list(components),
             'xlabel': 'xlines',
             'ylabel': 'depth',

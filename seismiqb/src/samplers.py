@@ -48,20 +48,20 @@ class HorizonSampler(Sampler):
         full_matrix = horizon.full_matrix
 
         # Keep only points, that can be a starting point for a crop of given shape
-        mask_i = ((points[:, :2] + shape[:2]) < geometry.cube_shape[:2]).all(axis=1)
-        mask_x = ((points[:, :2] + shape_t[:2]) < geometry.cube_shape[:2]).all(axis=1)
-        mask = mask_i | mask_x
+        i_mask = ((points[:, :2] + shape[:2]) < geometry.cube_shape[:2]).all(axis=1)
+        x_mask = ((points[:, :2] + shape_t[:2]) < geometry.cube_shape[:2]).all(axis=1)
+        mask = i_mask | x_mask
 
         points = points[mask]
-        mask_i = mask_i[mask]
-        mask_x = mask_x[mask]
+        i_mask = i_mask[mask]
+        x_mask = x_mask[mask]
 
         # Apply filtration
         if filtering_matrix is not None:
             points = _filtering_function(points, filtering_matrix)
 
         # Keep only points, that produce crops with horizon larger than threshold
-        points = check_points(points, full_matrix, shape[:2], mask_i, mask_x, n_threshold)
+        points = check_points(points, full_matrix, shape[:2], i_mask, x_mask, n_threshold)
 
         # Transform points to (i_start, x_start, h_start, i_stop, x_stop, h_stop)
         buffer = np.empty((len(points), 6), dtype=np.int32)
@@ -153,7 +153,7 @@ class HorizonSampler(Sampler):
 
 class SeismicSampler(Sampler):
     """ Mixture of samplers on multiple cubes with label-samplers.
-    Used to sample crop locations in (cube_id, i_start, x_start, h_start, i_stop, x_stop, h_stop) format, 
+    Used to sample crop locations in (cube_id, i_start, x_start, h_start, i_stop, x_stop, h_stop) format,
     potentially with additional colums.
 
     Parameters
@@ -275,7 +275,7 @@ class SeismicSampler(Sampler):
 
 
 @njit
-def check_points(points, matrix, shape, mask_i, mask_x, threshold):
+def check_points(points, matrix, shape, i_mask, x_mask, threshold):
     """ Compute points, which would generate crops with more than `threshold` labeled pixels.
     For each point, we test two possible shapes (i-oriented and x-oriented) and check `matrix` to compute the
     number of present points. Therefore, each of the initial points can result in up to two points in the output.
@@ -290,9 +290,9 @@ def check_points(points, matrix, shape, mask_i, mask_x, threshold):
         Depth map in cube coordinates.
     shape : tuple of two ints
         Spatial shape of crops to generate: (i_shape, x_shape).
-    mask_i : np.ndarray
+    i_mask : np.ndarray
         For each point, whether to test i-oriented shape.
-    mask_x : np.ndarray
+    x_mask : np.ndarray
         For each point, whether to test x-oriented shape.
     threshold : int
         Minimum amount of points in a generated crop.
@@ -303,8 +303,8 @@ def check_points(points, matrix, shape, mask_i, mask_x, threshold):
     buffer = np.empty((2 * len(points), 4), dtype=np.int32)
     counter = 0
 
-    for (point_i, point_x, _), mask_i_, mask_x_ in zip(points, mask_i, mask_x):
-        if mask_i_:
+    for (point_i, point_x, _), i_mask_, x_mask_ in zip(points, i_mask, x_mask):
+        if i_mask_:
             sliced = matrix[point_i:point_i+shape_i, point_x:point_x+shape_x].ravel()
             present_mask = (sliced > 0)
 
@@ -313,7 +313,7 @@ def check_points(points, matrix, shape, mask_i, mask_x, threshold):
                 buffer[counter, :] = point_i, point_x, np.int32(h_mean), np.int32(0)
                 counter += 1
 
-        if mask_x_:
+        if x_mask_:
             sliced = matrix[point_i:point_i+shape_x, point_x:point_x+shape_i].ravel()
             present_mask = (sliced > 0)
 
