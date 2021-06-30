@@ -348,3 +348,173 @@ def check_sampled(points, matrix, threshold):
         if present_mask.sum() < threshold:
             condition[i] = False
     return condition
+
+
+class BaseGrid:
+    """ !!. """
+    def __init__(self, crop_shape, batch_size=64):
+        self.crop_shape = np.array(crop_shape)
+        self.batch_size = batch_size
+
+        self._make_locations()
+
+    def _make_locations(self):
+        raise NotImplementedError('Must be implemented in sub-classes')
+
+    def __len__(self):
+        return len(self.locations)
+
+    @property
+    def origin(self):
+        """ !!. """
+        return self.locations[:, [1, 2, 3]].min(axis=0)
+
+    @property
+    def endpoint(self):
+        """ !!. """
+        return self.locations[:, [1, 2, 3]].max(axis=0) + self.crop_shape
+
+    @property
+    def actual_shape(self):
+        """ !!. """
+        return self.endpoint - self.origin
+
+    @property
+    def actual_ranges(self):
+        """ !!. """
+        return np.array(tuple(zip(self.origin, self.endpoint)))
+
+    @property
+    def n_iters(self):
+        """ !!. """
+        return np.ceil(len(self) / self.batch_size).astype(np.int32)
+
+
+
+from itertools import product
+
+class RegularGrid(BaseGrid):
+    """ !!. """
+    def __init__(self, geometry, ranges, crop_shape, threshold=0,
+                 strides=None, overlap=None, overlap_factor=None, batch_size=64):
+        # Make ranges
+        ranges = [item if item is not None else [0, c]
+                  for item, c in zip(ranges, geometry.cube_shape)]
+        ranges = np.array(ranges)
+
+        if (ranges[:, 0] < 0).any():
+            raise ValueError('Grid ranges must contain in the geometry!')
+        if (ranges[:, 1] > geometry.cube_shape).any():
+            raise ValueError('Grid ranges must contain in the geometry!')
+        self.ranges = ranges
+        self.shape = ranges[:, 1] - ranges[:, 0]
+
+        # Make `strides`
+        if (strides is not None) + (overlap is not None) + (overlap_factor is not None) > 1:
+            raise ValueError('Only one of `strides`, `overlap` or `overlap_factor` should be specified!')
+        overlap_factor = [overlap_factor] * 3 if isinstance(overlap_factor, (int, float)) else overlap_factor
+
+        if strides is None:
+            if overlap is not None:
+                strides = [c - o for c, o in zip(crop_shape, overlap)]
+            elif overlap_factor is not None:
+                strides = [max(1, c // f) for c, f in zip(crop_shape, overlap_factor)]
+            else:
+                strides = crop_shape
+        self.strides = np.array(strides)
+
+        # Update threshold: minimum amount of non-empty traces
+        if 0 < threshold < 1:
+            threshold = int(threshold * crop_shape[0] * crop_shape[1])
+        self.threshold = threshold
+
+        self.geometry = geometry
+        self.name = geometry.short_name
+        self.unfiltered_length = None
+        super().__init__(crop_shape=crop_shape, batch_size=batch_size)
+
+    @staticmethod
+    def _arange(start, stop, stride, limit):
+        grid = np.arange(start, stop, stride)
+        grid = np.unique(np.clip(grid, 0, limit))
+        return np.sort(grid)
+
+    def _make_locations(self):
+        i_args, x_args, h_args = tuple(zip(self.ranges[:, 0],
+                                           self.ranges[:, 1],
+                                           self.strides,
+                                           self.geometry.cube_shape - self.crop_shape))
+        i_grid = self._arange(*i_args)
+        x_grid = self._arange(*x_args)
+        h_grid = self._arange(*h_args)
+        self.unfiltered_length = len(i_grid) * len(x_grid) * len(h_grid)
+
+        # Create points: origins for each crop
+        points = []
+        for i, x in product(i_grid, x_grid):
+            sliced = self.geometry.zero_traces[i:i+self.crop_shape[0],
+                                               x:x+self.crop_shape[1]]
+            # Number of non-dead traces
+            if (np.prod(sliced.shape) - sliced.sum()) > self.threshold: 
+                for h in h_grid:
+                    points.append((i, x, h))
+        points = np.array(points, dtype=np.int32)
+
+        # Buffer: (cube_id, i_start, x_start, h_start, i_stop, x_stop, h_stop)
+        buffer = np.empty((len(points), 7), dtype=object)
+        buffer[:, 0] = self.name
+        buffer[:, [1, 2, 3]] = points
+        buffer[:, [4, 5, 6]] = points
+        buffer[:, [4, 5, 6]] += self.crop_shape
+        self.locations = buffer
+
+        if len(buffer) > 0:
+            iterator = (buffer[i:i+self.batch_size]
+                        for i in range(0, len(buffer), self.batch_size))
+        else:
+            iterator = iter(())
+        self.iterator = iterator
+
+    def __call__(self):
+        """ !!. """
+        return next(self.iterator)
+
+    def next_batch(self):
+        """ !!. """
+        return next(self.iterator)
+
+
+    def show(self, grid=True, markers=False, n_patches=None, **kwargs):
+        """ !!. """
+        n_patches = n_patches or int(np.sqrt(len(self))) // 5
+        fig = self.geometry.show('zero_traces', cmap='Gray', colorbar=False, return_figure=True, **kwargs)
+        ax = fig.axes
+
+        if grid:
+            spatial = self.locations[:, [1, 2]]
+            for i in np.unique(spatial[:, 0]):
+                sliced = spatial[spatial[:, 0] == i][:, 1]
+                ax[0].vlines(i, sliced.min(), sliced.max(), colors='pink')
+
+            spatial = self.locations[:, [1, 2]]
+            for x in np.unique(spatial[:, 1]):
+                sliced = spatial[spatial[:, 1] == x][:, 0]
+                ax[0].hlines(x, sliced.min(), sliced.max(), colors='pink')
+
+        if markers:
+            ax[0].scatter(self.locations[:, 1], self.locations[:, 2], marker='x', linewidth=0.1, color='r')
+
+        overlay = np.zeros_like(self.geometry.zero_traces)
+        for n in range(0, len(self), len(self)//n_patches - 1):
+            slc = tuple(slice(o, e) for o, e in zip(self.locations[n, [1, 2]], self.locations[n, [4, 5]]))
+            overlay[slc] = 1
+            ax[0].scatter(*self.locations[n, [1, 2]], marker='x', linewidth=3, color='g')
+
+        kwargs = {
+            'cmap': 'green',
+            'alpha': 0.3,
+            'colorbar': False,
+            'matrix_name': 'Grid visualization',
+            'ax': ax[0],
+        }
+        self.geometry.show(overlay, **kwargs)
