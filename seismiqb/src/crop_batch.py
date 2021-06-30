@@ -128,182 +128,31 @@ class SeismicCropBatch(Batch):
         return getattr(self, component)
 
     @action
-    def make_locations(self, points, shape=None, direction=(0, 0, 0),
-                       side_view=False, adaptive_slices=False, grid_src='quality_grid', eps=3,
-                       dst='locations', passdown=None, dst_points='points', dst_shapes='shapes'):
-        """ Generate positions of crops. Creates new instance of :class:`.SeismicCropBatch`
-        with crop positions in one of the components (`locations` by default).
-
-        Parameters
-        ----------
-        points : array-like
-            Upper rightmost points for every crop and name of cube to
-            cut it from. Order is: name, iline, xline, height. For example,
-            ['Cube.sgy', 13, 500, 200] stands for crop has [13, 500, 200]
-            as its upper rightmost point and must be cut from 'Cube.sgy' file.
-        shape : sequence, ndarray
-            Desired shape of crops along (iline, xline, height) axis. If ndarray, then must have the same length,
-            as `points`, and each row contains a shape for corresponding point.
-        direction : sequence of numbers
-            Direction of the cut crop relative to the point. Must be a vector on unit cube.
-        side_view : bool or float
-            Whether to generate crops of transposed shape (xline, iline, height).
-            If False, then shape is never transposed.
-            If True, then shape is transposed with 0.5 probability.
-            If float, then shape is transposed with that probability.
-        adaptive_slices: bool or str
-            If True, then slices are created so that crops are cut only along the grid.
-        grid_src : str
-            Attribute of geometry to get the grid from.
-        eps : int
-            Initial length of slice, that is used to find the closest grid point.
-        passdown : str of list of str
-            Components of batch to keep in the new one.
-        dst : str, optional
-            Component of batch to put positions of crops in.
-        dst_points, dst_shapes : str
-            Components to put points and crop shapes in.
-
-        Notes
-        -----
-        Based on the first column of `points`, new instance of SeismicCropBatch is created.
-        In order to keep multiple references to the same cube, each index is augmented
-        with prefix of fixed length (check `salt` method for details).
-
-        Returns
-        -------
-        SeismicCropBatch
-            Batch with positions of crops in specified component.
-        """
+    def make_locations(self, points, dst='locations', dst_points='points', dst_shapes='shapes', passdown=None):
+        """ !!. """
         # pylint: disable=protected-access
+        indices = points[:, 0]
+        shapes = points[:, [4, 5, 6]] - points[:, [1, 2, 3]]
+        locations = [[slice(point_i_start, point_i_stop),
+                      slice(point_x_start, point_x_stop),
+                      slice(point_h_start, point_h_stop)]
+                      for point_i_start, point_x_start, point_h_start,
+                          point_i_stop,  point_x_stop,  point_h_stop in points[:, 1:7]]
 
-        # Create all the points and shapes
-        if isinstance(shape, dict):
-            shape = {k: np.asarray(v) for k, v in shape.items()}
-        else:
-            shape = np.asarray(shape)
+        # Create a new SeismicCropBatch instance
+        new_index = [self.salt(ix) for ix in indices]
+        new_parths = {ix: self.index.get_fullpath(self.unsalt(ix)) for ix in new_index}
+        new_batch = type(self)(FilesIndex.from_index(index=new_index, paths=new_parths, dirs=False))
 
-        if adaptive_slices:
-            indices, points_, shapes = [], [], []
-            for point in points:
-                try:
-                    shape_ = shape[points[0]] if isinstance(shape, dict) else shape
-                    point_, shape_ = self._correct_point_to_grid(point, shape_, grid_src, eps)
-                    indices.append(point[0])
-                    points_.append(point_)
-                    shapes.append(shape_)
-                except RecursionError:
-                    pass
-            points = points_
-        else:
-            indices = points[:, 0]
-            shapes = self._make_shapes(points, shape, side_view)
-
-        locations = [self._make_location(point, shape, direction) for point, shape in zip(points, shapes)]
-
-        # Create a new Batch instance, if needed
-        if not hasattr(self, 'transformed'):
-            new_index = [self.salt(ix) for ix in indices]
-            new_dict = {ix: self.index.get_fullpath(self.unsalt(ix)) for ix in new_index}
-            new_batch = type(self)(FilesIndex.from_index(index=new_index, paths=new_dict, dirs=False))
-            new_batch.transformed = True
-
-            passdown = passdown or []
+        # Keep components in the new batch
+        if passdown:
             passdown = [passdown] if isinstance(passdown, str) else passdown
-
             for component in passdown:
                 if hasattr(self, component):
                     new_batch.add_components(component, getattr(self, component))
-        else:
-            if len(points) != len(self):
-                raise ValueError('Subsequent usage of `crop` must have the same number of points!')
-            new_batch = self
 
-        new_batch.add_components((dst_points, dst_shapes), (points, shapes))
-        new_batch.add_components(dst, locations)
+        new_batch.add_components((dst, dst_points, dst_shapes), (locations, points, shapes))
         return new_batch
-
-    def _make_shapes(self, points, shape, side_view):
-        """ Make an array of shapes to cut. """
-        # If already array of desired shapes
-        if isinstance(shape, np.ndarray) and shape.ndim == 2 and len(shape) == len(points):
-            return shape
-
-        if side_view:
-            side_view = side_view if isinstance(side_view, float) else 0.5
-        shapes = []
-        for point in points:
-            shape_ = shape[point[0]] if isinstance(shape, dict) else shape
-            if not side_view:
-                shapes.append(shape_)
-            else:
-                flag = np.random.random() > side_view
-                if flag:
-                    shapes.append(shape_)
-                else:
-                    shapes.append(shape_[[1, 0, 2]])
-        shapes = np.array(shapes)
-        return shapes
-
-    def _make_location(self, point, shape, direction=(0, 0, 0)):
-        """ Creates list of slices for desired location. """
-        ix = point[0]
-        cube_shape = self.get(ix, 'geometries').cube_shape
-
-        if isinstance(point[1], float):
-            anchor_point = np.rint(point[1:] * cube_shape).astype(int)
-        else:
-            anchor_point = point[1:]
-
-        # TODO: test inference, add comment
-        anchor_point = np.minimum(anchor_point + shape, cube_shape) - shape
-
-        location = []
-        for i in range(3):
-            start = int(max(anchor_point[i] - direction[i]*shape[i], 0))
-            stop = start + shape[i]
-            location.append(slice(start, stop))
-        return location
-
-    def _correct_point_to_grid(self, point, shape, grid_src='quality_grid', eps=3):
-        """ Move the point to the closest location in the quality grid. """
-        #pylint: disable=too-many-return-statements
-        ix = point[0]
-        pnt = point[1:]
-        shape_t = shape[[1, 0, 2]]
-        geometry = self.get(ix, 'geometries')
-        grid = getattr(geometry, grid_src) if isinstance(grid_src, str) else grid_src
-
-        # Point is already in grid
-        if grid[pnt[0], pnt[1]] == 1:
-            sum_i = np.nansum(grid[pnt[0], max(pnt[1]-eps, 0) : pnt[1]+eps])
-            sum_x = np.nansum(grid[max(pnt[0]-eps, 0) : pnt[0]+eps, pnt[1]])
-            if sum_i >= sum_x:
-                return point, shape
-            return point, shape_t
-
-        # Horizontal search: xline changes, shape is x-oriented
-        for pnt_ in range(max(pnt[1]-eps, 0), min(pnt[1]+eps, geometry.cube_shape[1])):
-            if grid[pnt[0], pnt_] == 1:
-                sum_i = np.nansum(grid[pnt[0], max(pnt_-eps, 0):pnt_+eps])
-                sum_x = np.nansum(grid[max(pnt[0]-eps, 0):pnt[0]+eps, pnt_])
-                point[1:3] = np.array((pnt[0], pnt_))
-                if sum_i >= sum_x:
-                    return point, shape
-                return point, shape_t
-
-        # Vertical search: inline changes, shape is i-oriented
-        for pnt_ in range(max(pnt[0]-eps, 0), min(pnt[0]+eps, geometry.cube_shape[0])):
-            if grid[pnt_, pnt[1]] == 1:
-                sum_i = np.nansum(grid[pnt_, max(pnt[1]-eps, 0) : pnt[1]+eps])
-                sum_x = np.nansum(grid[max(pnt_-eps, 0) : pnt_+eps, pnt[1]])
-                point[1:3] = np.array((pnt_, pnt[1]))
-                if sum_i >= sum_x:
-                    return point, shape
-                return point, shape_t
-
-        # Double the search radius
-        return self._correct_point_to_grid(point, shape, grid_src, 2*eps)
 
     @action
     def store_locations(self, src_locations='locations', src_geometry='geometries'):
@@ -1246,9 +1095,9 @@ class SeismicCropBatch(Batch):
             Components to get from batch and draw.
         """
         if idx is not None:
-            data = [getattr(self, comp)[idx] for comp in components]
+            data = [getattr(self, comp)[idx].squeeze() for comp in components]
         else:
-            data = [getattr(self, comp) for comp in components]
+            data = [getattr(self, comp).squeeze() for comp in components]
 
         if slide is not None:
             data = [item[slide] for item in data]
