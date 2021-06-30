@@ -3,7 +3,7 @@ import os
 
 import numpy as np
 
-from scipy.signal import hilbert
+from scipy.signal import hilbert, cwt, ricker
 from scipy.fft import fft
 from sklearn.decomposition import PCA
 
@@ -38,7 +38,8 @@ class Facies(Horizon):
         'get_instantaneous_phases': ['instant_phases'],
         'get_instantaneous_amplitudes': ['instant_amplitudes'],
         'get_full_binary_matrix': ['full_binary_matrix', 'masks'],
-        'fourier_transform': ['fourier', 'fourier_transform']
+        'fourier_decompose': ['fourier', 'fourier_decompose'],
+        'wavelet_decompose': ['wavelet', 'wavelet_decompose']
     }
     ATTRIBUTE_TO_METHOD = {attr: func for func, attrs in METHOD_TO_ATTRIBUTE.items() for attr in attrs}
 
@@ -255,40 +256,86 @@ class Facies(Horizon):
         metrics = np.nan_to_num(metrics)
         return self.transform_where_present(metrics, **transform_kwargs)
 
+    @staticmethod
+    def reduce_dimensionality(data, n_components=3, **kwargs):
+        flattened = data.reshape(-1, data.shape[-1])
+        flattened[np.isnan(flattened).any(axis=-1)] = 0
+        pca = PCA(n_components, **kwargs)
+        reduced = pca.fit_transform(flattened)
+        return reduced.reshape(*data.shape[:2], -1)
+
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
-    def fourier_transform(self, window=50, n_components=3, norm_axis=(0, 1), **kwargs):
+    def fourier_decompose(self, window=50, n_components=3, add_alpha=True, **kwargs):
         """ Cached fourier transform calculation follower by dimensionaluty reduction via PCA.
 
         Parameters
         ----------
         window : int
             Width of amplitudes slice to calculate fourier transform on.
-        n_components : int
+        n_components : int or None
             Number of components to keep after PCA.
-        norm_axis: valid numpy axis
-            Axis to calculate min and max values along that are used for result normalization.
+            If None, do not perform dimensionality reduction.
+        add_alpha : bool
+            Whether add extra opacity layer or to result or not. Needed for plotting.
         kwargs :
             For `sklearn.decomposition.PCA`.
         """
         transform_kwargs = retrieve_function_arguments(self.transform_where_present, kwargs)
 
         amplitudes = self.load_attribute('amplitudes', window=window)
-        transformed = np.abs(fft(amplitudes))[:, :, window // 2:]
+        result = np.abs(fft(amplitudes))[:, :, window // 2:]
 
-        flattened = transformed.reshape(-1, transformed.shape[-1])
-        flattened[np.isnan(flattened).any(axis=-1)] = 0
-        pca = PCA(n_components, **kwargs)
-        reduced = pca.fit_transform(flattened)
-        result = reduced.reshape((*self.cube_shape[:2], -1))
+        if n_components is not None:
+            result = self.reduce_dimensionality(result, n_components, **kwargs)
 
-        min_ = np.nanmin(result, axis=norm_axis)
-        max_ = np.nanmax(result, axis=norm_axis)
-        result = (result - min_) / (max_ - min_)
+        result = self.transform_where_present(result, **transform_kwargs)
 
-        alpha = np.ones((*self.cube_shape[:2], 1))
-        result = np.concatenate([result, alpha], axis=-1)
+        if add_alpha:
+            alpha = np.ones((*result.shape[:2], 1))
+            alpha[np.isnan(result).any(axis=-1)] = np.nan
+            result = np.concatenate([result, alpha], axis=-1)
 
-        return self.transform_where_present(result, **transform_kwargs)
+        return result
+
+    @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
+    def wavelet_decompose(self, widths, window=50, n_components=None, add_alpha=True, **kwargs):
+        """ Cached wavelet transform calculation follower by dimensionaluty reduction via PCA.
+
+        Parameters
+        ----------
+        widths : list of numbers
+            Widths of wavelets to calculate decomposition for.
+        window : int
+            Width of amplitudes slice to calculate wavelet transform on.
+        n_components : int
+            Number of components to keep after PCA.
+            If None, do not perform dimensionality reduction.
+        add_alpha : bool
+            Whether add extra opacity layer or to result or not. Needed for plotting.
+        kwargs :
+            For `sklearn.decomposition.PCA`.
+        """
+        transform_kwargs = retrieve_function_arguments(self.transform_where_present, kwargs)
+
+        transform_trace = lambda trace, widths: cwt(trace, ricker, widths)[:, len(trace) // 2]
+        amplitudes = self.load_attribute('amplitudes', window=window)
+        widths = [w * self.geometry.sample_rate for w in widths]
+        result = np.apply_along_axis(transform_trace, axis=-1, arr=amplitudes, widths=widths)
+
+        # if amp:
+        #     result = np.abs(hilbert(result, axis=-1))
+
+        if n_components is not None:
+            result = self.reduce_dimensionality(result, n_components, **kwargs)
+
+        result = self.transform_where_present(result, **transform_kwargs)
+
+        if add_alpha:
+            alpha = np.ones((*result.shape[:2], 1))
+            alpha[np.isnan(result).any(axis=-1)] = np.nan
+            result = np.concatenate([result, alpha], axis=-1)
+
+        return result
 
     def show(self, load='depths', mode='imshow', draw=None, return_figure=False, **kwargs):
         """ Display facies attributes with predefined defaults.
