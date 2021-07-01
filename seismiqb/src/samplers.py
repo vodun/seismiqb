@@ -518,3 +518,136 @@ class RegularGrid(BaseGrid):
             **kwargs,
         }
         self.geometry.show(overlay, **kwargs)
+
+
+
+class ExtensionGrid(BaseGrid):
+    """ !!. """
+    def __init__(self, horizon, crop_shape, stride=16, batch_size=64, top=1, threshold=4):
+        self.stride = stride
+        self.top = top
+        self.threshold = threshold
+
+        self.horizon = horizon
+        self.geometry = horizon.geometry
+        self.name = horizon.geometry.short_name
+
+        self.uncovered_before = None
+
+        super().__init__(crop_shape=crop_shape, batch_size=batch_size)
+
+
+    def _make_locations(self):
+        # Get border points (N, 3)
+        # Create locations for all four possible directions, stack into (4*N, 6)
+        # Compute potential added area for each of the locations, while updating coverage matrix
+        # For each point, keep two of the best (potentially add more points) locations
+        # Keep only those locations that potentially add more than `threshold` points
+
+        crop_shape = self.crop_shape
+        crop_shape_t = crop_shape[[1, 0, 2]]
+
+        # True where dead trace / already covered
+        coverage_matrix = self.geometry.zero_traces.copy().astype(np.bool_)
+        coverage_matrix[self.horizon.full_matrix > 0] = True
+        self.uncovered_before = np.prod(coverage_matrix.shape) - coverage_matrix.sum()
+
+        # TODO: can use the same boundary_matrix_on_full here and for coverage; also less computations here
+        # Compute boundary points of horizon: both inner and outer borders
+        border_points = np.stack(np.where(self.horizon.boundaries_matrix), axis=-1)
+        heights = self.horizon.matrix[border_points[:, 0], border_points[:, 1]]
+
+        # Shift heights up
+        border_points += (predicted_horizon.i_min, predicted_horizon.x_min)
+        heights -= crop_shape[2] // 2
+
+        # Buffer for locations
+        buffer = np.empty((len(border_points), 6), dtype=np.int32)
+        buffer[:, [0, 1]] = border_points
+        buffer[:, 2] = heights
+        buffer[:, [3, 4]] = border_points
+        buffer[:, 5] = heights
+
+        # Repeat the same data along new 0-th axis: shift origins/endpoints
+        buffer = np.repeat(buffer[np.newaxis, ...], 4, axis=0)
+
+        # Crops with fixed INLINE, moving CROSSLINE: [-stride:-stride + shape]
+        buffer[0, :, [1, 4]] -= self.stride
+        np.clip(buffer[0, :, 1], 0, self.geometry.cube_shape[0], out=buffer[0, :, 1])
+        np.clip(buffer[0, :, 4], 0, self.geometry.cube_shape[0], out=buffer[0, :, 4])
+        buffer[0, :, [3, 4, 5]] += crop_shape.reshape(-1, 1)
+
+        # Crops with fixed INLINE, moving CROSSLINE: [-shape + stride:+stride]
+        buffer[1, :, [1, 4]] -= (crop_shape[1] - self.stride)
+        np.clip(buffer[1, :, 1], 0, self.geometry.cube_shape[0] - crop_shape[1], out=buffer[1, :, 1])
+        np.clip(buffer[1, :, 4], 0, self.geometry.cube_shape[0] - crop_shape[1], out=buffer[1, :, 4])
+        buffer[1, :, [3, 4, 5]] += crop_shape.reshape(-1, 1)
+
+        # Crops with fixed CROSSLINE, moving INLINE: [-stride:-stride + shape]
+        buffer[2, :, [0, 3]] -= self.stride
+        np.clip(buffer[2, :, 0], 0, self.geometry.cube_shape[0], out=buffer[2, :, 0])
+        np.clip(buffer[2, :, 3], 0, self.geometry.cube_shape[0], out=buffer[2, :, 3])
+        buffer[2, :, [3, 4, 5]] += crop_shape_t.reshape(-1, 1)
+
+        # Crops with fixed CROSSLINE, moving INLINE: [-shape + stride:+stride]
+        buffer[3, :, [0, 3]] -= (crop_shape[1] - self.stride)
+        np.clip(buffer[3, :, 0], 0, self.geometry.cube_shape[0] - crop_shape[1], out=buffer[3, :, 0])
+        np.clip(buffer[3, :, 3], 0, self.geometry.cube_shape[0] - crop_shape[1], out=buffer[3, :, 3])
+        buffer[3, :, [3, 4, 5]] += crop_shape_t.reshape(-1, 1)
+
+        # Array with locations for each of the directions
+        # Each 4 consecutive rows are location variants for each point on the boundary
+        buffer = buffer.transpose((1, 0, 2)).reshape(-1, 6)
+
+        # Compute potential addition for each location
+        potential = compute_potential(buffer, coverage_matrix, crop_shape)
+        self.uncovered_best = np.prod(coverage_matrix.shape) - coverage_matrix.sum()
+
+        # Get argsort for each group of four
+        argsort = potential.reshape(-1, 4).argsort(axis=-1)[:, -self.top:].reshape(-1)
+
+        # Shift argsorts to original indices
+        shifts = np.repeat(np.arange(0, len(buffer), 4, dtype=np.int32), self.top)
+        indices = argsort + shifts
+
+        # Keep only top locations; remove too locations with small potential
+        potential = potential[indices]
+        buffer = buffer[indices, :]
+
+        mask = potential > self.threshold
+        buffer = buffer[mask]
+
+        locations = np.empty((len(buffer), 7), dtype=object)
+        locations[:, 0] = self.name
+        locations[:, 1:] = buffer
+        self.locations = locations
+
+        self.iterator = (locations[i:i+self.batch_size]
+                         for i in range(0, len(locations), self.batch_size))
+
+    @property
+    def uncovered_after(self):
+        """ !!. """
+        coverage_matrix = self.geometry.zero_traces.copy().astype(np.bool_)
+        coverage_matrix[self.horizon.full_matrix > 0] = True
+
+        for (i_start, x_start, _, i_stop, x_stop, _) in self.locations[:, 1:]:
+            coverage_matrix[i_start:i_stop, x_start:x_stop] = True
+        return np.prod(coverage_matrix.shape) - coverage_matrix.sum()
+
+@njit
+def compute_potential(locations, coverage_matrix, shape):
+    # For each location, compute the amount of points it would potentially add to the horizon
+    area = shape[0] * shape[1]
+    buffer = np.empty((len(locations)), dtype=np.int32)
+
+    for i, (i_start, x_start, h_start, i_stop, x_stop, h_stop) in enumerate(locations):
+        sliced = coverage_matrix[i_start:i_stop, x_start:x_stop].ravel()
+        covered = sliced.sum()
+        if len(sliced) == area:
+            buffer[i] = area - covered
+            coverage_matrix[i_start:i_stop, x_start:x_stop] = True
+        else:
+            buffer[i] = -1
+
+    return buffer
