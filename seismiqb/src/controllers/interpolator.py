@@ -46,7 +46,7 @@ class Interpolator(HorizonController):
 
         return super().train(dataset=dataset, adaptive_slices=True, grid_src=grid, **kwargs)
 
-    def inference(self, dataset, model, name=None, **kwargs):
+    def inference(self, dataset, model, config=None, name=None, **kwargs):
         """ Inference with different naming conventions. """
         prediction = super().inference(dataset=dataset, model=model, **kwargs)[0]
 

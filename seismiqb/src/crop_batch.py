@@ -141,8 +141,8 @@ class SeismicCropBatch(Batch):
 
         # Create a new SeismicCropBatch instance
         new_index = [self.salt(ix) for ix in indices]
-        new_parths = {ix: self.index.get_fullpath(self.unsalt(ix)) for ix in new_index}
-        new_batch = type(self)(FilesIndex.from_index(index=new_index, paths=new_parths, dirs=False))
+        new_paths = {ix: self.index.get_fullpath(self.unsalt(ix)) for ix in new_index}
+        new_batch = type(self)(FilesIndex.from_index(index=new_index, paths=new_paths, dirs=False))
 
         # Keep components in the new batch
         if passdown:

@@ -1,8 +1,10 @@
 """ !!. """
+from itertools import product
+
 import numpy as np
 from numba import njit
 
-from .utils import _filtering_function
+from .utils import filtering_function
 from .utility_classes import IndexedDict
 from ..batchflow import Sampler, ConstantSampler
 
@@ -48,6 +50,7 @@ class HorizonSampler(Sampler):
         full_matrix = horizon.full_matrix
 
         # Keep only points, that can be a starting point for a crop of given shape
+        # TODO: check if < or <=
         i_mask = ((points[:, :2] + shape[:2]) < geometry.cube_shape[:2]).all(axis=1)
         x_mask = ((points[:, :2] + shape_t[:2]) < geometry.cube_shape[:2]).all(axis=1)
         mask = i_mask | x_mask
@@ -58,7 +61,7 @@ class HorizonSampler(Sampler):
 
         # Apply filtration
         if filtering_matrix is not None:
-            points = _filtering_function(points, filtering_matrix)
+            points = filtering_function(points, filtering_matrix)
 
         # Keep only points, that produce crops with horizon larger than threshold
         points = check_points(points, full_matrix, shape[:2], i_mask, x_mask, n_threshold)
@@ -131,7 +134,7 @@ class HorizonSampler(Sampler):
     @property
     def matrix(self):
         """ Possible locations, mapped on geometry.
-            - 0 where no locations can be sampled.
+            - np.nan where no locations can be sampled.
             - 1 where only iline-oriented crops can be sampled.
             - 2 where only xline-oriented crops can be sampled.
             - 3 where both types of crop orientations can be sampled.
@@ -208,7 +211,7 @@ class SeismicSampler(Sampler):
     def __call__(self, size):
         return self.sampler.sample(size)
 
-    def __repr__(self):
+    def __str__(self):
         msg = 'SeismicSampler:'
         for list_samplers, p in zip(self.samplers.values(), self.proportions):
             msg += f'\n    {list_samplers[0].geometry.short_name} @ {p}'
@@ -306,33 +309,28 @@ def check_points(points, matrix, shape, i_mask, x_mask, threshold):
     for (point_i, point_x, _), i_mask_, x_mask_ in zip(points, i_mask, x_mask):
         if i_mask_:
             sliced = matrix[point_i:point_i+shape_i, point_x:point_x+shape_x].ravel()
-            present_mask = (sliced > 0)
-
-            if present_mask.sum() >= threshold:
-                h_mean = np.rint(sliced[present_mask].mean())
-                buffer[counter, :] = point_i, point_x, np.int32(h_mean), np.int32(0)
-                counter += 1
-
+            flag = np.int32(0)
         if x_mask_:
             sliced = matrix[point_i:point_i+shape_x, point_x:point_x+shape_i].ravel()
-            present_mask = (sliced > 0)
+            flag = np.int32(1)
 
-            if present_mask.sum() >= threshold:
-                h_mean = np.rint(sliced[present_mask].mean())
-                buffer[counter, :] = point_i, point_x, np.int32(h_mean), np.int32(1)
-                counter += 1
+        present_mask = (sliced > 0)
+        if present_mask.sum() >= threshold:
+            h_mean = np.rint(sliced[present_mask].mean())
+            buffer[counter, :] = point_i, point_x, np.int32(h_mean), flag
+            counter += 1
     return buffer[:counter]
 
 @njit
-def check_sampled(points, matrix, threshold):
+def check_sampled(locations, matrix, threshold):
     """ Remove points, which correspond to crops with less than `threshold` labeled pixels.
     Used as a final filter for already sampled points: they can generate crops with
     smaller than `threshold` mask due to depth randomization.
 
     Parameters
     ----------
-    points : np.ndarray
-        Points in (i_start, x_start, h_start, i_stop, x_stop, h_stop) format.
+    locations : np.ndarray
+        Locations in (i_start, x_start, h_start, i_stop, x_stop, h_stop) format.
     matrix : np.ndarray
         Depth map in cube coordinates.
     threshold : int
@@ -340,8 +338,7 @@ def check_sampled(points, matrix, threshold):
     """
     condition = np.ones(len(points), dtype=np.bool_)
 
-    for i, (point_i_start, point_x_start, point_h_start,
-            point_i_stop,  point_x_stop,  point_h_stop) in enumerate(points):
+    for i, (i_start, x_start, h_start, i_stop,  x_stop,  h_stop) in enumerate(locations):
         sliced = matrix[point_i_start:point_i_stop, point_x_start:point_x_stop].ravel()
         present_mask = (point_h_start < sliced) & (sliced < point_h_stop)
 
@@ -361,18 +358,34 @@ class BaseGrid:
     def _make_locations(self):
         raise NotImplementedError('Must be implemented in sub-classes')
 
+
+    def __call__(self):
+        """ !!. """
+        return next(self.iterator)
+
+    def next_batch(self):
+        """ !!. """
+        return next(self.iterator)
+
+
     def __len__(self):
         return len(self.locations)
 
     @property
+    def n_iters(self):
+        """ !!. """
+        return np.ceil(len(self) / self.batch_size).astype(np.int32)
+
+
+    @property
     def origin(self):
         """ !!. """
-        return self.locations[:, [1, 2, 3]].min(axis=0)
+        return self.locations[:, [1, 2, 3]].min(axis=0).astype(np.int32)
 
     @property
     def endpoint(self):
         """ !!. """
-        return self.locations[:, [1, 2, 3]].max(axis=0) + self.crop_shape
+        return self.locations[:, [1, 2, 3]].max(axis=0).astype(np.int32) + self.crop_shape
 
     @property
     def actual_shape(self):
@@ -384,14 +397,8 @@ class BaseGrid:
         """ !!. """
         return np.array(tuple(zip(self.origin, self.endpoint)))
 
-    @property
-    def n_iters(self):
-        """ !!. """
-        return np.ceil(len(self) / self.batch_size).astype(np.int32)
 
 
-
-from itertools import product
 
 class RegularGrid(BaseGrid):
     """ !!. """
@@ -455,7 +462,7 @@ class RegularGrid(BaseGrid):
             sliced = self.geometry.zero_traces[i:i+self.crop_shape[0],
                                                x:x+self.crop_shape[1]]
             # Number of non-dead traces
-            if (np.prod(sliced.shape) - sliced.sum()) > self.threshold: 
+            if (np.prod(sliced.shape) - sliced.sum()) > self.threshold:
                 for h in h_grid:
                     points.append((i, x, h))
         points = np.array(points, dtype=np.int32)
@@ -474,14 +481,6 @@ class RegularGrid(BaseGrid):
         else:
             iterator = iter(())
         self.iterator = iterator
-
-    def __call__(self):
-        """ !!. """
-        return next(self.iterator)
-
-    def next_batch(self):
-        """ !!. """
-        return next(self.iterator)
 
 
     def show(self, grid=True, markers=False, n_patches=None, **kwargs):
@@ -516,5 +515,6 @@ class RegularGrid(BaseGrid):
             'colorbar': False,
             'matrix_name': 'Grid visualization',
             'ax': ax[0],
+            **kwargs,
         }
         self.geometry.show(overlay, **kwargs)

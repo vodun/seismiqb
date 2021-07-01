@@ -211,9 +211,9 @@ class SeismicCubeset(Dataset):
 
     def dump_labels(self, path, fmt='npy', separate=False):
         """ Dump points to file. """
-        for i in range(len(self.indices)):
-            for label in self.labels[i]:
-                dirname = os.path.dirname(self.index.get_fullpath(self.indices[i]))
+        for idx, labels_list in self.labels.items():
+            for label in labels_list:
+                dirname = os.path.dirname(self.index.get_fullpath(idx))
                 if path[0] == '/':
                     path = path[1:]
                 dirname = os.path.join(dirname, path)
@@ -561,131 +561,6 @@ class SeismicCubeset(Dataset):
                         grid.append(point)
         return ilines_grid, xlines_grid, heights_grid, np.array(grid, dtype=object)
 
-    def show_grid(self, src_labels='labels', labels_indices=None, attribute='cube_values', plot_dict=None):
-        """ Plot grid over selected surface to visualize how it overlaps data.
-
-        Parameters
-        ----------
-        src_labels : str
-            Labels to show below the grid.
-            Defaults to `labels`.
-        labels_indices : str
-            Indices of items from `src_labels` to show below the grid.
-        attribute : str
-            Alias from :attr:`~Horizon.FUNC_BY_ATTR` to show below the grid.
-        plot_dict : dict, optional
-            Dict of plot parameters, such as:
-                figsize : tuple
-                    Size of resulted figure.
-                title_fontsize : int
-                    Font size of title over the figure.
-                attr_* : any parameter for `plt.imshow`
-                    Passed to attribute plotter
-                grid_* : any parameter for `plt.hlines` and `plt.vlines`
-                    Passed to grid plotter
-                crop_* : any parameter for `plt.hlines` and `plt.vlines`
-                    Passed to corners crops plotter
-        """
-        #pylint: disable=import-outside-toplevel
-        from matplotlib import pyplot as plt
-
-        labels_indices = labels_indices if isinstance(labels_indices, (tuple, list)) else [labels_indices]
-        labels_indices = slice(None) if labels_indices[0] is None else labels_indices
-        labels = self[self.grid_info['cube_name'], src_labels, labels_indices]
-
-        # Calculate grid lines coordinates
-        (x_min, x_max), (y_min, y_max) = self.grid_info['range'][:2]
-        x_stride, y_stride = self.grid_info['strides'][:2]
-        x_crop, y_crop = self.grid_info['crop_shape'][:2]
-        x_lines = list(np.arange(0, x_max, x_stride)) + [x_max - x_crop]
-        y_lines = list(np.arange(0, y_max, y_stride)) + [y_max - y_crop]
-
-        default_plot_dict = {
-            'figsize': (20 * x_max // y_max, 10),
-            'title_fontsize': 18,
-            'attr_cmap' : 'tab20b',
-            'grid_color': 'darkslategray',
-            'grid_linestyle': 'dashed',
-            'crop_color': 'crimson',
-            'crop_linewidth': 3
-        }
-        plot_dict = default_plot_dict if plot_dict is None else {**default_plot_dict, **plot_dict}
-        attr_plot_dict = {k.split('attr_')[-1]: v for k, v in plot_dict.items() if k.startswith('attr_')}
-        attr_plot_dict['zorder'] = 0
-        grid_plot_dict = {k.split('grid_')[-1]: v for k, v in plot_dict.items() if k.startswith('grid_')}
-        grid_plot_dict['zorder'] = 1
-        crop_plot_dict = {k.split('crop_')[-1]: v for k, v in plot_dict.items() if k.startswith('crop_')}
-        crop_plot_dict['zorder'] = 2
-
-        _fig, axes = plt.subplots(ncols=len(labels), figsize=plot_dict['figsize'])
-        axes = axes if isinstance(axes, np.ndarray) else [axes]
-
-        for ax, label in zip(axes, labels):
-            # Plot underlaying attribute
-            underlay = label.load_attribute(attribute, transform={'fill_value': np.nan})
-            if len(underlay.shape) == 3:
-                underlay = underlay[:, :, underlay.shape[2] // 2].squeeze()
-            underlay = underlay.T
-            ax.imshow(underlay, **attr_plot_dict)
-            ax.set_title("Grid over `{}` on `{}`".format(attribute, label.name), fontsize=plot_dict['title_fontsize'])
-
-            # Set limits
-            ax.set_xlim([x_min, x_max])
-            ax.set_ylim([y_max, y_min])
-
-            # Plot grid
-            ax.vlines(x_lines, y_min, y_max, **grid_plot_dict)
-            ax.hlines(y_lines, x_min, x_max, **grid_plot_dict)
-
-            # Plot first crop
-            ax.vlines(x=x_lines[0] + x_crop, ymin=y_min, ymax=y_crop, **crop_plot_dict)
-            ax.hlines(y=y_lines[0] + y_crop, xmin=x_min, xmax=x_crop, **crop_plot_dict)
-
-            # Plot last crop
-            ax.vlines(x=x_lines[-1], ymin=y_max - x_crop, ymax=y_max, **crop_plot_dict)
-            ax.hlines(y=y_lines[-1], xmin=x_max - y_crop, xmax=x_max, **crop_plot_dict)
-
-
-    def mask_to_horizons(self, src, cube_name, threshold=0.5, averaging='mean', minsize=0,
-                         dst='predicted_horizons', prefix='predict', src_grid_info='grid_info'):
-        """ Convert mask to a list of horizons.
-
-        Parameters
-        ----------
-        src : str or array
-            Source-mask. Can be either a name of attribute or mask itself.
-        dst : str
-            Attribute to write the horizons in.
-        threshold : float
-            Parameter of mask-thresholding.
-        averaging : str
-            Method of pandas.groupby used for finding the center of a horizon
-            for each (iline, xline).
-        minsize : int
-            Minimum length of a horizon to be saved.
-        prefix : str
-            Name of horizon to use.
-        """
-        #TODO: add `chunks` mode
-        mask = getattr(self, src) if isinstance(src, str) else src
-
-        grid_info = getattr(self, src_grid_info)
-
-        horizons = Horizon.from_mask(mask, grid_info,
-                                     threshold=threshold, averaging=averaging, minsize=minsize, prefix=prefix)
-        if not hasattr(self, dst):
-            setattr(self, dst, IndexedDict({ix: [] for ix in self.indices}))
-
-        self[cube_name, dst] = horizons
-
-
-    def merge_horizons(self, src, mean_threshold=2.0, adjacency=3, minsize=50):
-        """ Iteratively try to merge every horizon in a list to every other, until there are no possible merges. """
-        horizons = getattr(self, src)
-        horizons = Horizon.merge_list(horizons, mean_threshold=mean_threshold, adjacency=adjacency, minsize=minsize)
-        if isinstance(src, str):
-            setattr(self, src, horizons)
-
 
     def compare_to_labels(self, horizon, src_labels='labels', offset=0, absolute=True,
                           printer=print, hist=True, plot=True):
@@ -698,6 +573,7 @@ class SeismicCubeset(Dataset):
         offset : number
             Value to shift horizon down. Can be used to take into account different counting bases.
         """
+        # TODO: move to `Horizon` class
         for idx in self.indices:
             if horizon.geometry.name == self.geometries[idx].name:
                 horizons_to_compare = self[idx, src_labels]

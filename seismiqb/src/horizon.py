@@ -18,7 +18,7 @@ from skimage.measure import label
 
 from .utility_classes import lru_cache
 from .samplers import HorizonSampler
-from .utils import round_to_array, groupby_mean, groupby_min, groupby_max, filter_simplices, _filtering_function
+from .utils import round_to_array, groupby_mean, groupby_min, groupby_max, filter_simplices, filtering_function
 from .utils import retrieve_function_arguments, get_class_methods, make_bezier_figure
 from .functional import smooth_out
 from .plotters import plot_image, show_3d
@@ -794,11 +794,11 @@ class Horizon:
         if filtering_matrix is None:
             filtering_matrix = self.geometry.zero_traces
 
-        def filtering_function(points, **kwds):
+        def _filtering_function(points, **kwds):
             _ = kwds
-            return _filtering_function(points, filtering_matrix)
+            return filtering_function(points, filtering_matrix)
 
-        self.apply_to_points(filtering_function, **kwargs)
+        self.apply_to_points(_filtering_function, **kwargs)
 
     def filter_matrix(self, filtering_matrix=None, **kwargs):
         """ Remove points that correspond to 1's in `filtering_matrix` from matrix storage. """
@@ -808,12 +808,12 @@ class Horizon:
         idx_i, idx_x = np.asarray(filtering_matrix[self.i_min:self.i_max + 1,
                                                    self.x_min:self.x_max + 1] == 1).nonzero()
 
-        def filtering_function(matrix, **kwds):
+        def _filtering_function(matrix, **kwds):
             _ = kwds
             matrix[idx_i, idx_x] = self.FILL_VALUE
             return matrix
 
-        self.apply_to_matrix(filtering_function, **kwargs)
+        self.apply_to_matrix(_filtering_function, **kwargs)
 
     filter = filter_points
 
@@ -1453,6 +1453,13 @@ class Horizon:
         structure = np.ones((3, 3))
         eroded = binary_erosion(binary_matrix, structure, border_value=0)
         return binary_matrix ^ eroded # binary difference operation
+
+    @property
+    def boundaries_points(self):
+        """ !!. """
+        points = np.stack(np.where(self.boundaries_matrix), axis=-1)
+        points += (self.i_min, self.x_min)
+        return points
 
     @property
     def coverage(self):

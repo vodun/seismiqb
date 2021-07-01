@@ -409,7 +409,8 @@ def groupby_max(array):
 
 
 @njit(parallel=True)
-def _filtering_function(points, filtering_matrix):
+def filtering_function(points, filtering_matrix):
+    """ Remove points where `filtering_matrix` is 1. """
     #pylint: disable=consider-using-enumerate, not-an-iterable
     mask = np.ones(len(points), dtype=np.int32)
 
