@@ -36,9 +36,10 @@ class HorizonSampler(Sampler):
     filtering_matrix : np.ndarray, optional
         Map of points to remove from potentially generated locations.
     """
-    dim = 7 # dimensionality of sampled points
+    dim = 2 + 1 + 6 # dimensionality of sampled points: geometry_id, label_id, orientation, locations
 
-    def __init__(self, horizon, shape, threshold=0.05, filtering_matrix=None, **kwargs):
+    def __init__(self, horizon, shape, threshold=0.05, filtering_matrix=None,
+                 geometry_id=0, label_id=0, **kwargs):
 
         geometry = horizon.geometry
 
@@ -63,15 +64,16 @@ class HorizonSampler(Sampler):
         if filtering_matrix is not None:
             points = filtering_function(points, filtering_matrix)
 
-        # Keep only points, that produce crops with horizon larger than threshold
+        # Keep only points, that produce crops with horizon larger than threshold; append flag
         points = check_points(points, full_matrix, shape[:2], i_mask, x_mask, n_threshold)
 
-        # Transform points to (i_start, x_start, h_start, i_stop, x_stop, h_stop)
-        buffer = np.empty((len(points), 6), dtype=np.int32)
-        buffer[:, :3] = points[:, :3]
-        buffer[points[:, 3] == 0, 3:] = shape
-        buffer[points[:, 3] == 1, 3:] = shape_t
-        buffer[:, 3:] += points[:, :3]
+        # Transform points to (orientation, i_start, x_start, h_start, i_stop, x_stop, h_stop)
+        buffer = np.empty((len(points), 7), dtype=np.int32)
+        buffer[:, 0] = points[:, 3]
+        buffer[:, [1, 2, 3]] = points[:, [0, 1, 2]]
+        buffer[:, [4, 5, 6]] = points[:, [0, 1, 2]]
+        buffer[buffer[:, 0] == 0, 4:7] += shape
+        buffer[buffer[:, 0] == 1, 4:7] += shape_t
 
         # Store attributes
         self.locations = buffer
@@ -83,6 +85,9 @@ class HorizonSampler(Sampler):
         self.threshold = threshold
         self.n_threshold = n_threshold
         self.kwargs = kwargs
+
+        self.geometry_id = geometry_id
+        self.label_id = label_id
 
         self.horizon = horizon
         self.geometry = horizon.geometry
@@ -107,9 +112,10 @@ class HorizonSampler(Sampler):
             sampled = np.concatenate(sampled_list)[:size]
             self._counter = len(sampled_list)
 
-        buffer = np.empty((size, 7), dtype=object)
-        buffer[:, 0] = self.name
-        buffer[:, 1:] = sampled
+        buffer = np.empty((size, 9), dtype=np.int32)
+        buffer[:, 0] = self.geometry_id
+        buffer[:, 1] = self.label_id
+        buffer[:, 2:] = sampled
         return buffer
 
     def _sample(self, size):
@@ -118,18 +124,13 @@ class HorizonSampler(Sampler):
 
         shift = np.random.randint(low=-int(self.height*0.9), high=-int(self.height*0.1),
                                   size=(size, 1), dtype=np.int32)
-        sampled[:, [2, 5]] += shift
+        sampled[:, [3, 6]] += shift
         return sampled
 
     def __repr__(self):
         return f'<HorizonSampler for {self.horizon.short_name}: '\
                f'shape={tuple(self.shape)}, threshold={self.threshold}>'
 
-    @property
-    def flags(self):
-        """ False for iline-locations, True for xline-locations. """
-        shapes = self.locations[:, 3:] - self.locations[:, :3]
-        return (shapes == self.shape_t).all(axis=1)
 
     @property
     def matrix(self):
@@ -139,142 +140,17 @@ class HorizonSampler(Sampler):
             - 2 where only xline-oriented crops can be sampled.
             - 3 where both types of crop orientations can be sampled.
         """
-        flags = self.flags
-        i_matrix = np.full_like(self.horizon.full_matrix, 0.0)
-        i_points = self.locations[~flags]
-        i_matrix[i_points[:, 0], i_points[:, 1]] = 1
+        matrix = np.zeros_like(self.horizon.full_matrix)
+        orientations = self.locations[:, 0].astype(np.bool_)
 
-        x_matrix = np.full_like(self.horizon.full_matrix, 0.0)
-        x_points = self.locations[flags]
-        x_matrix[x_points[:, 0], x_points[:, 1]] = 2
+        i_locations = self.locations[~orientations]
+        matrix[i_locations[:, 1], i_locations[:, 2]] += 1
 
-        matrix = i_matrix + x_matrix
-        matrix[matrix == 0.0] = np.nan
+        x_locations = self.locations[orientations]
+        matrix[x_locations[:, 1], x_locations[:, 2]] += 2
+
+        matrix[matrix == 0] = np.nan
         return matrix
-
-
-
-class SeismicSampler(Sampler):
-    """ Mixture of samplers on multiple cubes with label-samplers.
-    Used to sample crop locations in (cube_id, i_start, x_start, h_start, i_stop, x_stop, h_stop) format,
-    potentially with additional colums.
-
-    Parameters
-    ----------
-    labels : dict
-        Dictionary with nested lists that contains labels.
-    shape : tuple
-        Shape of crop locations to generate.
-    proportions : sequence, optional
-        Proportion of each cube in the resulting mixture.
-    baseclass : type
-        Class for label samplers.
-    threshold : float
-        Minimum proportion of labeled points in each sampled location.
-    filtering_matrix : np.ndarray, optional
-        Map of points to remove from potentially generated locations.
-    kwargs : dict
-        Other parameters of initializing label samplers.
-    """
-    def __init__(self, labels, shape, proportions=None, baseclass=HorizonSampler,
-                 threshold=0.05, filtering_matrix=None, **kwargs):
-
-        sampler = 0 & ConstantSampler(0, dim=baseclass.dim)
-        samplers = IndexedDict({idx: [] for idx in labels.keys()})
-        proportions = proportions or [1 / len(labels) for _ in labels]
-
-        for (idx, list_labels), p in zip(labels.items(), proportions):
-            cube_sampler = 0 & ConstantSampler(0, dim=baseclass.dim)
-            shape_ = shape[idx] if isinstance(shape, dict) else shape
-            threshold_ = threshold[idx] if isinstance(threshold, dict) else threshold
-            filtering_matrix_ = filtering_matrix[idx] if isinstance(filtering_matrix, dict) else filtering_matrix
-
-            for label in list_labels:
-                label_sampler = baseclass(label, shape=shape_, threshold=threshold_,
-                                          filtering_matrix=filtering_matrix_, **kwargs)
-                cube_sampler = cube_sampler | label_sampler
-                samplers[idx].append(label_sampler)
-
-            sampler = sampler | (p & cube_sampler)
-
-        self.sampler = sampler
-        self.samplers = samplers
-        self.proportions = proportions
-
-        self.shape = shape
-        self.threshold = threshold
-
-    def sample(self, size):
-        """ Generate exactly `size` locations. """
-        return self.sampler.sample(size)
-
-    def __call__(self, size):
-        return self.sampler.sample(size)
-
-    def __str__(self):
-        msg = 'SeismicSampler:'
-        for list_samplers, p in zip(self.samplers.values(), self.proportions):
-            msg += f'\n    {list_samplers[0].geometry.short_name} @ {p}'
-            for sampler in list_samplers:
-                msg += f'\n        {sampler}'
-        return msg
-
-    def show(self, ncols=2, **kwargs):
-        """ Visualize on geometry map by using underlying `points` structure. """
-        for idx, samplers in self.samplers.items():
-            geometry = samplers[0].geometry
-            images = [sampler.horizon.enlarge_carcass_image(sampler.matrix, 9)
-                      if sampler.horizon.is_carcass else sampler.matrix
-                      for sampler in samplers]
-            images = [[image, geometry.zero_traces] for image in images]
-
-            ncols_ = min(ncols, len(samplers))
-            nrows = len(samplers) // ncols_ or 1
-
-            kwargs = {
-                'cmap': [['Sampler', 'black']] * len(samplers),
-                'alpha': [[1.0, 0.4]] * len(samplers),
-                'ncols': ncols_, 'nrows': nrows,
-                'figsize': (16, 5*nrows),
-                'title': [sampler.horizon.short_name for sampler in samplers],
-                'suptitle_label': idx if len(samplers)>1 else '',
-                'constrained_layout': True,
-                'colorbar': False,
-                'legend_label': ['ILINES and CROSSLINES', 'only ILINES', 'only CROSSLINES',
-                                 'restricted', 'dead traces'],
-                'legend_cmap': ['purple','blue','red', 'white', 'gray'],
-                'legend_loc': 10,
-                **kwargs
-            }
-            geometry.show(images, **kwargs)
-
-    def visualize(self, n=10000, binary=False, **kwargs):
-        """ Visualize on geometry map by sampling `n` crop locations. """
-        sampled = self.sample(n)
-
-        names = np.unique(sampled[:, 0])
-        for name in names:
-            geometry = self.samplers[name][0].geometry
-            matrix = np.zeros_like(geometry.zero_traces, dtype=np.int32)
-
-            sampled_ = sampled[sampled[:, 0] == name]
-            for (_, point_i_start, point_x_start, _,
-                    point_i_stop, point_x_stop, _) in sampled_:
-                matrix[point_i_start:point_i_stop, point_x_start:point_x_stop] += 1
-            if binary:
-                matrix[matrix > 0] = 1
-                kwargs['bad_values'] = ()
-
-            kwargs = {
-                'matrix_name': 'Sampled slices',
-                'cmap': ['Reds', 'black'],
-                'alpha': [1.0, 0.4],
-                'figsize': (16, 8),
-                'title': f'{name}: {len(sampled_)} points',
-                'interpolation': 'bilinear',
-                **kwargs
-            }
-            geometry.show((matrix, geometry.zero_traces), **kwargs)
 
 
 @njit
@@ -309,16 +185,21 @@ def check_points(points, matrix, shape, i_mask, x_mask, threshold):
     for (point_i, point_x, _), i_mask_, x_mask_ in zip(points, i_mask, x_mask):
         if i_mask_:
             sliced = matrix[point_i:point_i+shape_i, point_x:point_x+shape_x].ravel()
-            flag = np.int32(0)
+            present_mask = (sliced > 0)
+
+            if present_mask.sum() >= threshold:
+                h_mean = np.rint(sliced[present_mask].mean())
+                buffer[counter, :] = point_i, point_x, np.int32(h_mean), np.int32(0)
+                counter += 1
+
         if x_mask_:
             sliced = matrix[point_i:point_i+shape_x, point_x:point_x+shape_i].ravel()
-            flag = np.int32(1)
+            present_mask = (sliced > 0)
 
-        present_mask = (sliced > 0)
-        if present_mask.sum() >= threshold:
-            h_mean = np.rint(sliced[present_mask].mean())
-            buffer[counter, :] = point_i, point_x, np.int32(h_mean), flag
-            counter += 1
+            if present_mask.sum() >= threshold:
+                h_mean = np.rint(sliced[present_mask].mean())
+                buffer[counter, :] = point_i, point_x, np.int32(h_mean), np.int32(1)
+                counter += 1
     return buffer[:counter]
 
 @njit
@@ -336,15 +217,153 @@ def check_sampled(locations, matrix, threshold):
     threshold : int
         Minimum amount of labeled pixels in a crop.
     """
-    condition = np.ones(len(points), dtype=np.bool_)
+    condition = np.ones(len(locations), dtype=np.bool_)
 
-    for i, (i_start, x_start, h_start, i_stop,  x_stop,  h_stop) in enumerate(locations):
-        sliced = matrix[point_i_start:point_i_stop, point_x_start:point_x_stop].ravel()
-        present_mask = (point_h_start < sliced) & (sliced < point_h_stop)
+    for i, (_, i_start, x_start, h_start, i_stop,  x_stop,  h_stop) in enumerate(locations):
+        sliced = matrix[i_start:i_stop, x_start:x_stop].ravel()
+        present_mask = (h_start < sliced) & (sliced < h_stop)
 
         if present_mask.sum() < threshold:
             condition[i] = False
     return condition
+
+
+
+class SeismicSampler(Sampler):
+    """ Mixture of samplers on multiple cubes with label-samplers.
+    Used to sample crop locations in (cube_id, i_start, x_start, h_start, i_stop, x_stop, h_stop) format,
+    potentially with additional colums.
+
+    Parameters
+    ----------
+    labels : dict
+        Dictionary with nested lists that contains labels.
+    shape : tuple
+        Shape of crop locations to generate.
+    proportions : sequence, optional
+        Proportion of each cube in the resulting mixture.
+    baseclass : type
+        Class for label samplers.
+    threshold : float
+        Minimum proportion of labeled points in each sampled location.
+    filtering_matrix : np.ndarray, optional
+        Map of points to remove from potentially generated locations.
+    kwargs : dict
+        Other parameters of initializing label samplers.
+    """
+    def __init__(self, labels, shape, proportions=None, baseclass=HorizonSampler,
+                 threshold=0.05, filtering_matrix=None, **kwargs):
+
+        names, geometry_names = {}, {}
+        sampler = 0 & ConstantSampler(np.int32(0), dim=baseclass.dim)
+        samplers = IndexedDict({idx: [] for idx in labels.keys()})
+        proportions = proportions or [1 / len(labels) for _ in labels]
+
+        for (geometry_id, ((idx, list_labels), p)) in enumerate(zip(labels.items(), proportions)):
+            cube_sampler = 0 & ConstantSampler(np.int32(0), dim=baseclass.dim)
+
+            # Unpack parameters
+            shape_ = shape[idx] if isinstance(shape, dict) else shape
+            threshold_ = threshold[idx] if isinstance(threshold, dict) else threshold
+            filtering_matrix_ = filtering_matrix[idx] if isinstance(filtering_matrix, dict) else filtering_matrix
+
+            for label_id, label in enumerate(list_labels):
+                label_sampler = baseclass(label, shape=shape_, threshold=threshold_,
+                                          filtering_matrix=filtering_matrix_,
+                                          geometry_id=geometry_id, label_id=label_id, **kwargs)
+                cube_sampler = cube_sampler | label_sampler
+
+                samplers[idx].append(label_sampler)
+                names[(geometry_id, label_id)] = (idx, label.short_name)
+
+            sampler = sampler | (p & cube_sampler)
+            geometry_names[geometry_id] = idx
+
+        self.sampler = sampler
+        self.samplers = samplers
+        self.names = names
+        self.geometry_names = geometry_names
+
+        self.shape = shape
+        self.threshold = threshold
+        self.proportions = proportions
+
+    def sample(self, size):
+        """ Generate exactly `size` locations. """
+        return self.sampler.sample(size)
+
+    def __call__(self, size):
+        return self.sampler.sample(size)
+
+    def to_names(self, id_array):
+        """ !!. """
+        return np.array([self.names[tuple(ids)] for ids in id_array])
+
+    def __str__(self):
+        msg = 'SeismicSampler:'
+        for list_samplers, p in zip(self.samplers.values(), self.proportions):
+            msg += f'\n    {list_samplers[0].geometry.short_name} @ {p}'
+            for sampler in list_samplers:
+                msg += f'\n        {sampler}'
+        return msg
+
+    def show_locations(self, ncols=2, **kwargs):
+        """ Visualize on geometry map by using underlying `points` structure. """
+        for idx, samplers_lst in self.samplers.items():
+            geometry = samplers_lst[0].geometry
+            images = [sampler.horizon.enlarge_carcass_image(sampler.matrix, 9)
+                      if sampler.horizon.is_carcass else sampler.matrix
+                      for sampler in samplers_lst]
+            images = [[image, geometry.zero_traces] for image in images]
+
+            ncols_ = min(ncols, len(samplers_lst))
+            nrows = len(samplers_lst) // ncols_ or 1
+
+            kwargs = {
+                'cmap': [['Sampler', 'black']] * len(samplers_lst),
+                'alpha': [[1.0, 0.4]] * len(samplers_lst),
+                'ncols': ncols_, 'nrows': nrows,
+                'figsize': (16, 5*nrows),
+                'title': [sampler.horizon.short_name for sampler in samplers_lst],
+                'suptitle_label': idx if len(samplers_lst)>1 else '',
+                'constrained_layout': True,
+                'colorbar': False,
+                'legend_label': ['ILINES and CROSSLINES', 'only ILINES', 'only CROSSLINES',
+                                 'restricted', 'dead traces'],
+                'legend_cmap': ['purple','blue','red', 'white', 'gray'],
+                'legend_loc': 10,
+                **kwargs
+            }
+            geometry.show(images, **kwargs)
+
+    def show_sampled(self, n=10000, binary=False, **kwargs):
+        """ Visualize on geometry map by sampling `n` crop locations. """
+        sampled = self.sample(n)
+
+        ids = np.unique(sampled[:, 0])
+        for geometry_id in ids:
+            geometry = self.samplers[geometry_id][0].geometry
+            matrix = np.zeros_like(geometry.zero_traces, dtype=np.int32)
+
+            sampled_ = sampled[sampled[:, 0] == geometry_id]
+            for (_, _, _, point_i_start, point_x_start, _,
+                          point_i_stop,  point_x_stop,  _) in sampled_:
+                matrix[point_i_start:point_i_stop, point_x_start:point_x_stop] += 1
+            if binary:
+                matrix[matrix > 0] = 1
+                kwargs['bad_values'] = ()
+
+            kwargs = {
+                'matrix_name': 'Sampled slices',
+                'cmap': ['Reds', 'black'],
+                'alpha': [1.0, 0.4],
+                'figsize': (16, 8),
+                'title': f'{self.geometry_names[geometry_id]}: {len(sampled_)} points',
+                'interpolation': 'bilinear',
+                **kwargs
+            }
+            geometry.show((matrix, geometry.zero_traces), **kwargs)
+
 
 
 class BaseGrid:
@@ -359,16 +378,23 @@ class BaseGrid:
         raise NotImplementedError('Must be implemented in sub-classes')
 
 
-    def __call__(self):
+    def __call__(self, batch_size=None):
         """ !!. """
+        _ = batch_size
         return next(self.iterator)
 
-    def next_batch(self):
+    def next_batch(self, batch_size=None):
         """ !!. """
+        _ = batch_size
         return next(self.iterator)
 
 
     def __len__(self):
+        return len(self.locations)
+
+    @property
+    def length(self):
+        """ !!. """
         return len(self.locations)
 
     @property
@@ -380,12 +406,12 @@ class BaseGrid:
     @property
     def origin(self):
         """ !!. """
-        return self.locations[:, [1, 2, 3]].min(axis=0).astype(np.int32)
+        return self.locations[:, [3, 4, 5]].min(axis=0).astype(np.int32)
 
     @property
     def endpoint(self):
         """ !!. """
-        return self.locations[:, [1, 2, 3]].max(axis=0).astype(np.int32) + self.crop_shape
+        return self.locations[:, [6, 7, 8]].max(axis=0).astype(np.int32)
 
     @property
     def actual_shape(self):
@@ -396,7 +422,6 @@ class BaseGrid:
     def actual_ranges(self):
         """ !!. """
         return np.array(tuple(zip(self.origin, self.endpoint)))
-
 
 
 
@@ -442,7 +467,7 @@ class RegularGrid(BaseGrid):
 
     @staticmethod
     def _arange(start, stop, stride, limit):
-        grid = np.arange(start, stop, stride)
+        grid = np.arange(start, stop, stride, dtype=np.int32)
         grid = np.unique(np.clip(grid, 0, limit))
         return np.sort(grid)
 
@@ -468,11 +493,12 @@ class RegularGrid(BaseGrid):
         points = np.array(points, dtype=np.int32)
 
         # Buffer: (cube_id, i_start, x_start, h_start, i_stop, x_stop, h_stop)
-        buffer = np.empty((len(points), 7), dtype=object)
-        buffer[:, 0] = self.name
-        buffer[:, [1, 2, 3]] = points
-        buffer[:, [4, 5, 6]] = points
-        buffer[:, [4, 5, 6]] += self.crop_shape
+        buffer = np.empty((len(points), 9), dtype=np.int32)
+        buffer[:, [0, 1]] = -1
+        buffer[:, 2] = 0
+        buffer[:, [3, 4, 5]] = points
+        buffer[:, [6, 7, 8]] = points
+        buffer[:, [6, 7, 8]] += self.crop_shape
         self.locations = buffer
 
         if len(buffer) > 0:
@@ -481,6 +507,10 @@ class RegularGrid(BaseGrid):
         else:
             iterator = iter(())
         self.iterator = iterator
+
+    def to_names(self, id_array):
+        """ !!. """
+        return np.array([(self.name, 'unknown') for ids in id_array])
 
 
     def show(self, grid=True, markers=False, n_patches=None, **kwargs):
@@ -523,14 +553,16 @@ class RegularGrid(BaseGrid):
 
 class ExtensionGrid(BaseGrid):
     """ !!. """
-    def __init__(self, horizon, crop_shape, stride=16, batch_size=64, top=1, threshold=4):
-        self.stride = stride
+    def __init__(self, horizon, crop_shape, stride=16, batch_size=64, top=1, threshold=4, randomize=True):
         self.top = top
+        self.stride = stride
         self.threshold = threshold
+        self.randomize = randomize
 
         self.horizon = horizon
         self.geometry = horizon.geometry
-        self.name = horizon.geometry.short_name
+        self.geometry_name = horizon.geometry.short_name
+        self.horizon_name = horizon.short_name
 
         self.uncovered_before = None
 
@@ -543,6 +575,7 @@ class ExtensionGrid(BaseGrid):
         # Compute potential added area for each of the locations, while updating coverage matrix
         # For each point, keep two of the best (potentially add more points) locations
         # Keep only those locations that potentially add more than `threshold` points
+        #pylint: disable=too-many-statements
 
         crop_shape = self.crop_shape
         crop_shape_t = crop_shape[[1, 0, 2]]
@@ -558,46 +591,51 @@ class ExtensionGrid(BaseGrid):
         heights = self.horizon.matrix[border_points[:, 0], border_points[:, 1]]
 
         # Shift heights up
-        border_points += (predicted_horizon.i_min, predicted_horizon.x_min)
+        border_points += (self.horizon.i_min, self.horizon.x_min)
         heights -= crop_shape[2] // 2
 
         # Buffer for locations
-        buffer = np.empty((len(border_points), 6), dtype=np.int32)
-        buffer[:, [0, 1]] = border_points
-        buffer[:, 2] = heights
-        buffer[:, [3, 4]] = border_points
-        buffer[:, 5] = heights
+        buffer = np.empty((len(border_points), 7), dtype=np.int32)
+        buffer[:, 0] = 0
+        buffer[:, [1, 2]] = border_points
+        buffer[:, 3] = heights
+        buffer[:, [4, 5]] = border_points
+        buffer[:, 6] = heights
 
         # Repeat the same data along new 0-th axis: shift origins/endpoints
         buffer = np.repeat(buffer[np.newaxis, ...], 4, axis=0)
 
         # Crops with fixed INLINE, moving CROSSLINE: [-stride:-stride + shape]
-        buffer[0, :, [1, 4]] -= self.stride
-        np.clip(buffer[0, :, 1], 0, self.geometry.cube_shape[0], out=buffer[0, :, 1])
-        np.clip(buffer[0, :, 4], 0, self.geometry.cube_shape[0], out=buffer[0, :, 4])
-        buffer[0, :, [3, 4, 5]] += crop_shape.reshape(-1, 1)
+        buffer[0, :, [2, 5]] -= self.stride
+        np.clip(buffer[0, :, 2], 0, self.geometry.cube_shape[0], out=buffer[0, :, 2])
+        np.clip(buffer[0, :, 5], 0, self.geometry.cube_shape[0], out=buffer[0, :, 5])
+        buffer[0, :, [4, 5, 6]] += crop_shape.reshape(-1, 1)
 
         # Crops with fixed INLINE, moving CROSSLINE: [-shape + stride:+stride]
-        buffer[1, :, [1, 4]] -= (crop_shape[1] - self.stride)
-        np.clip(buffer[1, :, 1], 0, self.geometry.cube_shape[0] - crop_shape[1], out=buffer[1, :, 1])
-        np.clip(buffer[1, :, 4], 0, self.geometry.cube_shape[0] - crop_shape[1], out=buffer[1, :, 4])
-        buffer[1, :, [3, 4, 5]] += crop_shape.reshape(-1, 1)
+        buffer[1, :, [2, 5]] -= (crop_shape[1] - self.stride)
+        np.clip(buffer[1, :, 2], 0, self.geometry.cube_shape[0] - crop_shape[1], out=buffer[1, :, 2])
+        np.clip(buffer[1, :, 5], 0, self.geometry.cube_shape[0] - crop_shape[1], out=buffer[1, :, 5])
+        buffer[1, :, [4, 5, 6]] += crop_shape.reshape(-1, 1)
 
         # Crops with fixed CROSSLINE, moving INLINE: [-stride:-stride + shape]
-        buffer[2, :, [0, 3]] -= self.stride
-        np.clip(buffer[2, :, 0], 0, self.geometry.cube_shape[0], out=buffer[2, :, 0])
-        np.clip(buffer[2, :, 3], 0, self.geometry.cube_shape[0], out=buffer[2, :, 3])
-        buffer[2, :, [3, 4, 5]] += crop_shape_t.reshape(-1, 1)
+        buffer[2, :, [1, 4]] -= self.stride
+        np.clip(buffer[2, :, 1], 0, self.geometry.cube_shape[0], out=buffer[2, :, 1])
+        np.clip(buffer[2, :, 4], 0, self.geometry.cube_shape[0], out=buffer[2, :, 4])
+        buffer[2, :,  [4, 5, 6]] += crop_shape_t.reshape(-1, 1)
+        buffer[2, :, 0] = 1
 
         # Crops with fixed CROSSLINE, moving INLINE: [-shape + stride:+stride]
-        buffer[3, :, [0, 3]] -= (crop_shape[1] - self.stride)
-        np.clip(buffer[3, :, 0], 0, self.geometry.cube_shape[0] - crop_shape[1], out=buffer[3, :, 0])
-        np.clip(buffer[3, :, 3], 0, self.geometry.cube_shape[0] - crop_shape[1], out=buffer[3, :, 3])
-        buffer[3, :, [3, 4, 5]] += crop_shape_t.reshape(-1, 1)
+        buffer[3, :, [1, 4]] -= (crop_shape[1] - self.stride)
+        np.clip(buffer[3, :, 1], 0, self.geometry.cube_shape[0] - crop_shape[1], out=buffer[3, :, 1])
+        np.clip(buffer[3, :, 4], 0, self.geometry.cube_shape[0] - crop_shape[1], out=buffer[3, :, 4])
+        buffer[3, :,  [4, 5, 6]] += crop_shape_t.reshape(-1, 1)
+        buffer[3, :, 0] = 1
 
+        if self.randomize:
+            buffer = buffer[np.random.permutation(4)]
         # Array with locations for each of the directions
         # Each 4 consecutive rows are location variants for each point on the boundary
-        buffer = buffer.transpose((1, 0, 2)).reshape(-1, 6)
+        buffer = buffer.transpose((1, 0, 2)).reshape(-1, 7)
 
         # Compute potential addition for each location
         potential = compute_potential(buffer, coverage_matrix, crop_shape)
@@ -617,13 +655,17 @@ class ExtensionGrid(BaseGrid):
         mask = potential > self.threshold
         buffer = buffer[mask]
 
-        locations = np.empty((len(buffer), 7), dtype=object)
-        locations[:, 0] = self.name
-        locations[:, 1:] = buffer
+        locations = np.empty((len(buffer), 9), dtype=object)
+        locations[:, [0, 1]] = -1
+        locations[:, 2:9] = buffer
         self.locations = locations
 
         self.iterator = (locations[i:i+self.batch_size]
                          for i in range(0, len(locations), self.batch_size))
+
+    def to_names(self, id_array):
+        """ !!. """
+        return np.array([(self.geometry_name, self.horizon_name) for ids in id_array])
 
     @property
     def uncovered_after(self):
@@ -631,17 +673,46 @@ class ExtensionGrid(BaseGrid):
         coverage_matrix = self.geometry.zero_traces.copy().astype(np.bool_)
         coverage_matrix[self.horizon.full_matrix > 0] = True
 
-        for (i_start, x_start, _, i_stop, x_stop, _) in self.locations[:, 1:]:
+        for (i_start, x_start, _, i_stop, x_stop, _) in self.locations[:, 3:]:
             coverage_matrix[i_start:i_stop, x_start:x_stop] = True
         return np.prod(coverage_matrix.shape) - coverage_matrix.sum()
 
+    def show(self, markers=False, overlay=True, frequency=1, **kwargs):
+        """ !!. """
+        hm = self.horizon.full_matrix
+        hm[hm < 0] = np.nan
+        fig = self.geometry.show(hm, cmap='Depths', colorbar=False, return_figure=True, **kwargs)
+        ax = fig.axes
+
+        self.geometry.show('zero_traces', ax=ax[0], cmap='Grey', colorbar=False, **kwargs)
+
+        if markers:
+            ax[0].scatter(self.locations[:, 3], self.locations[:, 4], marker='x', linewidth=0.1, color='r')
+
+        if overlay:
+            overlay = np.zeros_like(self.geometry.zero_traces)
+            for n in range(0, len(self), frequency):
+                slc = tuple(slice(o, e) for o, e in zip(self.locations[n, [3, 4]], self.locations[n, [6, 7]]))
+                overlay[slc] = 1
+
+            kwargs = {
+                'cmap': 'blue',
+                'alpha': 0.3,
+                'colorbar': False,
+                'title': f'Extension Grid on `{self.horizon_name}`',
+                'ax': ax[0],
+                **kwargs,
+            }
+            self.geometry.show(overlay, **kwargs)
+
 @njit
 def compute_potential(locations, coverage_matrix, shape):
+    """ !!. """
     # For each location, compute the amount of points it would potentially add to the horizon
     area = shape[0] * shape[1]
     buffer = np.empty((len(locations)), dtype=np.int32)
 
-    for i, (i_start, x_start, h_start, i_stop, x_stop, h_stop) in enumerate(locations):
+    for i, (_, i_start, x_start, _, i_stop, x_stop, _) in enumerate(locations):
         sliced = coverage_matrix[i_start:i_stop, x_start:x_stop].ravel()
         covered = sliced.sum()
         if len(sliced) == area:

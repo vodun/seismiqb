@@ -128,30 +128,31 @@ class SeismicCropBatch(Batch):
         return getattr(self, component)
 
     @action
-    def make_locations(self, points, dst='locations', dst_points='points', dst_shapes='shapes', passdown=None):
+    def make_locations(self, generator, batch_size=None,
+                       dst='locations', dst_generated='points', dst_shapes='shapes', passdown=None):
         """ !!. """
         # pylint: disable=protected-access
-        indices = points[:, 0]
-        shapes = points[:, [4, 5, 6]] - points[:, [1, 2, 3]]
-        locations = [[slice(point_i_start, point_i_stop),
-                      slice(point_x_start, point_x_stop),
-                      slice(point_h_start, point_h_stop)]
-                      for point_i_start, point_x_start, point_h_start,
-                          point_i_stop,  point_x_stop,  point_h_stop in points[:, 1:7]]
+        generated = generator(batch_size)
+
+        names = generator.to_names(generated[:, [0, 1]])
+        indices = names[:, 0]
+        shapes = generated[:, [6, 7, 8]] - generated[:, [3, 4, 5]]
+        locations = [[slice(i_start, i_stop), slice(x_start, x_stop), slice(h_start, h_stop)]
+                      for i_start, x_start, h_start, i_stop,  x_stop,  h_stop in generated[:, 3:9]]
 
         # Create a new SeismicCropBatch instance
         new_index = [self.salt(ix) for ix in indices]
         new_paths = {ix: self.index.get_fullpath(self.unsalt(ix)) for ix in new_index}
         new_batch = type(self)(FilesIndex.from_index(index=new_index, paths=new_paths, dirs=False))
 
-        # Keep components in the new batch
+        # Keep chosen components in the new batch
         if passdown:
             passdown = [passdown] if isinstance(passdown, str) else passdown
             for component in passdown:
                 if hasattr(self, component):
                     new_batch.add_components(component, getattr(self, component))
 
-        new_batch.add_components((dst, dst_points, dst_shapes), (locations, points, shapes))
+        new_batch.add_components((dst, dst_generated, dst_shapes), (locations, generated, shapes))
         return new_batch
 
     @action

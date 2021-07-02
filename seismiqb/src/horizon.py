@@ -749,6 +749,7 @@ class Horizon:
                     horizons.append(Horizon(points, geometry, name=f'{prefix}_{i}'))
 
         horizons.sort(key=len)
+        horizons = [horizon for horizon in horizons if len(horizon) != 0]
         return horizons
 
 
