@@ -50,6 +50,7 @@ class SeismicCropBatch(Batch):
         return self.indices
 
 
+    # Core
     @staticmethod
     def salt(path):
         """ Adds random postfix of predefined length to string.
@@ -128,20 +129,25 @@ class SeismicCropBatch(Batch):
         return getattr(self, component)
 
     @action
-    def make_locations(self, generator, batch_size=None,
-                       dst='locations', dst_generated='points', dst_shapes='shapes', passdown=None):
+    def make_locations(self, generator, batch_size=None, passdown=None):
         """ !!. """
         # pylint: disable=protected-access
         generated = generator(batch_size)
 
+        # Convert IDs to names, that are used in dataset
         names = generator.to_names(generated[:, [0, 1]])
-        indices = names[:, 0]
-        shapes = generated[:, [6, 7, 8]] - generated[:, [3, 4, 5]]
+        geometry_names, label_names = names[:, 0], names[:, 1]
+
+        # Locations: 3D slices in the cube coordinates
         locations = [[slice(i_start, i_stop), slice(x_start, x_stop), slice(h_start, h_stop)]
                       for i_start, x_start, h_start, i_stop,  x_stop,  h_stop in generated[:, 3:9]]
 
+        # Additional info
+        orientations = generated[:, 2]
+        shapes = generated[:, [6, 7, 8]] - generated[:, [3, 4, 5]]
+
         # Create a new SeismicCropBatch instance
-        new_index = [self.salt(ix) for ix in indices]
+        new_index = [self.salt(ix) for ix in geometry_names]
         new_paths = {ix: self.index.get_fullpath(self.unsalt(ix)) for ix in new_index}
         new_batch = type(self)(FilesIndex.from_index(index=new_index, paths=new_paths, dirs=False))
 
@@ -152,25 +158,33 @@ class SeismicCropBatch(Batch):
                 if hasattr(self, component):
                     new_batch.add_components(component, getattr(self, component))
 
-        new_batch.add_components((dst, dst_generated, dst_shapes), (locations, generated, shapes))
+        new_batch.add_components(('locations', 'generated', 'shapes', 'orientations', 'label_names'),
+                                 (locations, generated, shapes, orientations, label_names))
         return new_batch
 
     @action
-    def store_locations(self, src_locations='locations', src_geometry='geometries'):
+    def adaptive_reshape(self, src=None, dst=None):
         """ !!. """
-        for ix in self.indices:
-            geometry = self.get(ix, src_geometry)
-            location = self.get(ix, src_locations)
+        src = src if isinstance(src, (tuple, list)) else [src]
+        if dst is None:
+            dst = src
+        dst = dst if isinstance(dst, (tuple, list)) else [dst]
 
-            if not hasattr(geometry, 'sampled_locations'):
-                geometry.sampled_locations = []
-
-            geometry.sampled_locations.append(location)
+        for src_, dst_ in zip(src, dst):
+            result = []
+            for ix in self.indices:
+                item = self.get(ix, src_)
+                if self.get(ix, 'orientations'):
+                    item = item.transpose(1, 0, 2)
+                result.append(item)
+            setattr(self, dst_, np.stack(result))
         return self
 
+
+    # Loading of cube data and its derivatives
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def load_cubes(self, ix, dst, src_locations='locations', src_geometry='geometries', slicing='custom', **kwargs):
+    def load_cubes(self, ix, dst, src_geometry='geometries', slicing='custom', **kwargs):
         """ Load data from cube in given positions.
 
         Parameters
@@ -182,7 +196,7 @@ class SeismicCropBatch(Batch):
             The 'native' option is prefered to 3D crops to speed up loading.
         """
         geometry = self.get(ix, src_geometry)
-        location = self.get(ix, src_locations)
+        location = self.get(ix, 'locations')
         if slicing == 'native':
             crop = geometry[tuple(location)]
         elif slicing == 'custom':
@@ -191,104 +205,51 @@ class SeismicCropBatch(Batch):
             raise ValueError(f"slicing must be 'native' or 'custom' but {slicing} were given.")
         return crop
 
-    def get_nearest_horizon(self, ix, src_labels, heights_slice):
-        """ Get horizon with its `h_mean` closest to mean of `heights_slice`. """
-        location_h_mean = (heights_slice.start + heights_slice.stop) // 2
-        nearest_horizon_ind = np.argmin([abs(horizon.h_mean - location_h_mean) for horizon in self.get(ix, src_labels)])
-        return self.get(ix, src_labels)[nearest_horizon_ind]
-
-
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def load_attribute(self, ix, dst, src_attribute=None, src_labels='labels',
-                       locations='locations', final_ndim=3, **kwargs):
-        """ Load attribute for depth-nearest label and crop in given locations.
+    def normalize(self, ix, mode=None, itemwise=False, src=None, dst=None, q=(0.01, 0.99)):
+        """ Normalize values in crop.
 
         Parameters
         ----------
-        src_attribute : str
-            A keyword from :attr:`~Horizon.ATTRIBUTE_TO_METHOD` keys, defining label attribute to make crops from.
-        src_labels : str
-            Dataset attribute with labels dict.
-        locations : str
-            Component of batch with locations of crops to load.
-        final_ndim : 2 or 3
-            Number of dimensions returned crop should have.
-        kwargs :
-            Passed directly to either:
-            - one of attribute-evaluating methods from :attr:`~Horizon.ATTRIBUTE_TO_METHOD` depending on `src_attribute`
-            - or attribute-transforming method :meth:`~Horizon.transform_where_present`.
-
-        Notes
-        -----
-        This method loads rectified data, e.g. amplitudes are croped relative
-        to horizon and will form a straight plane in the resulting crop.
+        mode : callable or str
+            If callable, then directly applied to data.
+            If str, then :meth:`~SeismicGeometry.scaler` applied in one of the modes:
+            - `minmax`: scaled to [0, 1] via minmax scaling.
+            - `q` or `normalize`: divided by the maximum of absolute values
+                                  of the 0.01 and 0.99 quantiles. Quantiles can
+                                  be changed by `q` parameter.
+            - `q_clip`: clipped to 0.01 and 0.99 quantiles and then divided
+                        by the maximum of absolute values of the two. Quantiles can
+                        be changed by `q` parameter.
+        itemwise : bool
+            The way to compute 'min', 'max' and quantiles. If False, stats will be computed
+            for the whole cubes. Otherwise, for each data item separately.
+        q : tuple
+            Left and right quantiles to use.
         """
-        location = self.get(ix, locations)
-        nearest_horizon = self.get_nearest_horizon(ix, src_labels, location[2])
-        crop = nearest_horizon.load_attribute(src_attribute=src_attribute, location=location, **kwargs)
-        if final_ndim == 3 and crop.ndim == 2:
-            crop = crop[..., np.newaxis]
-        elif final_ndim != crop.ndim:
-            raise ValueError("Crop returned by `Horizon.get_attribute` has {} dimensions, but shape conversion "
-                             "to expected {} dimensions is not implemented.".format(crop.ndim, final_ndim))
-        return crop
+        data = self.get(ix, src)
+        if callable(mode):
+            normalized = mode(data)
 
-    @action
-    @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def create_masks(self, ix, dst, src_labels='labels', src_locations='locations', use_labels='all', width=3):
-        """ Create masks from labels-dictionary in given positions.
+        if itemwise:
+            # Adjust data based on the current item only
+            if mode == 'minmax':
+                min_, max_ = data.min(), data.max()
+                normalized = (data - min_) / (max_ - min_) if (max_ != min_) else np.zeros_like(data)
+            else:
+                left, right = np.quantile(data, q)
+                if mode in ['q', 'normalize']:
+                    normalized = 2 * (data - left) / (right - left) - 1 if right != left else np.zeros_like(data)
+                elif mode == 'q_clip':
+                    normalized =  np.clip(data, left, right) / max(abs(left), abs(right))
+                else:
+                    raise ValueError(f'Unknown mode: {mode}')
+        else:
+            geometry = self.get(ix, 'geometries')
+            normalized = geometry.normalize(data, mode=mode)
+        return normalized
 
-        Parameters
-        ----------
-        dst : str
-            Component of batch to put loaded masks in.
-        src_labels : str
-            Dataset attribute with labels dict.
-        src_locations : str
-            Component of batch that stores locations of crops.
-        use_labels : str, int or sequence of ints
-            Which labels to use in mask creation.
-            If 'all', use all labels.
-            If 'single', use one random label.
-            If 'nearest' or 'nearest_to_center', use one label closest to height from `src_locations`.
-            If int or array-like then element(s) are interpreted as indices of
-            desired labels and must be ints in range [0, len(horizons) - 1].
-        width : int
-            How much to thicken the horizon.
-
-        Returns
-        -------
-        SeismicCropBatch
-            Batch with loaded masks in desired components.
-
-        Notes
-        -----
-        Can be run only after labels-dict is loaded into labels-component.
-        """
-        location = self.get(ix, src_locations)
-        crop_shape = self.get(ix, 'shapes')
-        mask = np.zeros(crop_shape, dtype='float32')
-
-        labels = self.get(ix, src_labels) if isinstance(src_labels, str) else src_labels
-        labels = [labels] if not isinstance(labels, (tuple, list)) else labels
-        if len(labels) == 0:
-            return mask
-
-        use_labels = [use_labels] if isinstance(use_labels, int) else use_labels
-
-        if isinstance(use_labels, (tuple, list, np.ndarray)):
-            labels = [labels[idx] for idx in use_labels]
-        elif use_labels == 'single':
-            np.random.shuffle(labels)
-        elif use_labels in ['nearest', 'nearest_to_center']:
-            labels = [self.get_nearest_horizon(ix, src_labels, location[2])]
-
-        for label in labels:
-            mask = label.add_to_mask(mask, locations=location, width=width)
-            if use_labels == 'single' and np.sum(mask) > 0.0:
-                break
-        return mask
 
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
@@ -319,6 +280,103 @@ class SeismicCropBatch(Batch):
         result = compute_attribute(image, window, device, attribute)
         return result
 
+    @action
+    @inbatch_parallel(init='indices', post='_assemble', target='for')
+    def load_attribute(self, ix, dst, src_attribute=None, src_labels='labels', final_ndim=3, **kwargs):
+        """ Load attribute for depth-nearest label and crop in given locations.
+
+        Parameters
+        ----------
+        src_attribute : str
+            A keyword from :attr:`~Horizon.ATTRIBUTE_TO_METHOD` keys, defining label attribute to make crops from.
+        src_labels : str
+            Dataset attribute with labels dict.
+        final_ndim : 2 or 3
+            Number of dimensions returned crop should have.
+        kwargs :
+            Passed directly to either:
+            - one of attribute-evaluating methods from :attr:`~Horizon.ATTRIBUTE_TO_METHOD` depending on `src_attribute`
+            - or attribute-transforming method :meth:`~Horizon.transform_where_present`.
+
+        Notes
+        -----
+        This method loads rectified data, e.g. amplitudes are croped relative
+        to horizon and will form a straight plane in the resulting crop.
+        """
+        location = self.get(ix, 'locations')
+        nearest_horizon = self.get_nearest_horizon(ix, src_labels, location[2])
+        crop = nearest_horizon.load_attribute(src_attribute=src_attribute, location=location, **kwargs)
+        if final_ndim == 3 and crop.ndim == 2:
+            crop = crop[..., np.newaxis]
+        elif final_ndim != crop.ndim:
+            raise ValueError("Crop returned by `Horizon.get_attribute` has {} dimensions, but shape conversion "
+                             "to expected {} dimensions is not implemented.".format(crop.ndim, final_ndim))
+        return crop
+
+
+    # Loading of labels
+    @action
+    @inbatch_parallel(init='indices', post='_assemble', target='for')
+    def create_masks(self, ix, dst, src_labels='labels', use_labels='all', width=3):
+        """ Create masks from labels-dictionary in given positions.
+
+        Parameters
+        ----------
+        dst : str
+            Component of batch to put loaded masks in.
+        src_labels : str
+            Dataset attribute with labels dict.
+        use_labels : str, int or sequence of ints
+            Which labels to use in mask creation.
+            If 'all', use all labels.
+            If 'single', use one random label.
+            If 'nearest' or 'nearest_to_center', use one label closest to height from `src_locations`.
+            If int or array-like then element(s) are interpreted as indices of
+            desired labels and must be ints in range [0, len(horizons) - 1].
+        width : int
+            How much to thicken the horizon.
+
+        Returns
+        -------
+        SeismicCropBatch
+            Batch with loaded masks in desired components.
+
+        Notes
+        -----
+        Can be run only after labels-dict is loaded into labels-component.
+        """
+        location = self.get(ix, 'locations')
+        crop_shape = self.get(ix, 'shapes')
+        mask = np.zeros(crop_shape, dtype='float32')
+
+        labels = self.get(ix, src_labels) if isinstance(src_labels, str) else src_labels
+        labels = [labels] if not isinstance(labels, (tuple, list)) else labels
+        if len(labels) == 0:
+            return mask
+
+        use_labels = [use_labels] if isinstance(use_labels, int) else use_labels
+
+        if isinstance(use_labels, (tuple, list, np.ndarray)):
+            labels = [labels[idx] for idx in use_labels]
+        elif use_labels == 'single':
+            np.random.shuffle(labels)
+        elif use_labels in ['nearest', 'nearest_to_center']:
+            labels = [self.get_nearest_horizon(ix, src_labels, location[2])]
+
+        for label in labels:
+            mask = label.add_to_mask(mask, locations=location, width=width)
+            if use_labels == 'single' and np.sum(mask) > 0.0:
+                break
+        return mask
+
+    def get_nearest_horizon(self, ix, src_labels, heights_slice):
+        """ Get horizon with its `h_mean` closest to mean of `heights_slice`. """
+        location_h_mean = (heights_slice.start + heights_slice.stop) // 2
+        nearest_horizon_ind = np.argmin([abs(horizon.h_mean - location_h_mean) for horizon in self.get(ix, src_labels)])
+        return self.get(ix, src_labels)[nearest_horizon_ind]
+
+
+    # More methods to work with labels
     @action
     @inbatch_parallel(init='indices', post='_post_mask_rebatch', target='for',
                       src='masks', threshold=0.8, passdown=None, axis=-1)
@@ -351,7 +409,7 @@ class SeismicCropBatch(Batch):
             raise SkipBatchException
 
         passdown = passdown or []
-        passdown.extend([src, 'locations', 'shapes', 'points'])
+        passdown.extend([src, 'locations', 'shapes', 'generated', 'orientations', 'label_names'])
         passdown = list(set(passdown))
 
         for compo in passdown:
@@ -362,8 +420,7 @@ class SeismicCropBatch(Batch):
 
     @action
     @inbatch_parallel(init='_init_component', post='_assemble', target='for')
-    def filter_out(self, ix, src=None, dst=None, mode=None, expr=None, low=None, high=None,
-                   length=None, p=1.0):
+    def filter_out(self, ix, src=None, dst=None, mode=None, expr=None, low=None, high=None, length=None, p=1.0):
         """ Zero out mask for horizon extension task.
 
         Parameters
@@ -425,170 +482,6 @@ class SeismicCropBatch(Batch):
         else:
             new_mask = mask
         return new_mask
-
-
-    @action
-    @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def normalize(self, ix, mode=None, itemwise=False, src=None, dst=None, q=(0.01, 0.99)):
-        """ Normalize values in crop.
-
-        Parameters
-        ----------
-        mode : callable or str
-            If callable, then directly applied to data.
-            If str, then :meth:`~SeismicGeometry.scaler` applied in one of the modes:
-            - `minmax`: scaled to [0, 1] via minmax scaling.
-            - `q` or `normalize`: divided by the maximum of absolute values
-                                  of the 0.01 and 0.99 quantiles. Quantiles can
-                                  be changed by `q` parameter.
-            - `q_clip`: clipped to 0.01 and 0.99 quantiles and then divided
-                        by the maximum of absolute values of the two. Quantiles can
-                        be changed by `q` parameter.
-        itemwise : bool
-            The way to compute 'min', 'max' and quantiles. If False, stats will be computed
-            for the whole cubes. Otherwise, for each data item separately.
-        q : tuple
-            Left and right quantiles to use.
-        """
-        data = self.get(ix, src)
-        if callable(mode):
-            normalized = mode(data)
-
-        if itemwise:
-            # Adjust data based on the current item only
-            if mode == 'minmax':
-                min_, max_ = data.min(), data.max()
-                normalized = (data - min_) / (max_ - min_) if (max_ != min_) else np.zeros_like(data)
-            else:
-                left, right = np.quantile(data, q)
-                if mode in ['q', 'normalize']:
-                    normalized = 2 * (data - left) / (right - left) - 1 if right != left else np.zeros_like(data)
-                elif mode == 'q_clip':
-                    normalized =  np.clip(data, left, right) / max(abs(left), abs(right))
-                else:
-                    raise ValueError(f'Unknown mode: {mode}')
-        else:
-            geometry = self.get(ix, 'geometries')
-            normalized = geometry.normalize(data, mode=mode)
-        return normalized
-
-    @action
-    def concat_components(self, src, dst, axis=-1):
-        """ Concatenate a list of components and save results to `dst` component.
-
-        Parameters
-        ----------
-        src : array-like
-            List of components to concatenate of length more than one.
-        dst : str
-            Component of batch to put results in.
-        axis : int
-            The axis along which the arrays will be joined.
-        """
-        if axis != -1:
-            raise NotImplementedError("For now function works for `axis=-1` only.")
-
-        if not isinstance(src, (list, tuple, np.ndarray)):
-            raise ValueError()
-        if len(src) == 1:
-            warn("Since `src` contains only one component, concatenation not needed.")
-
-        items = [self.get(None, attr) for attr in src]
-
-        depth = sum(item.shape[-1] for item in items)
-        final_shape = (*items[0].shape[:3], depth)
-        prealloc = np.empty(final_shape, dtype=np.float32)
-
-        start_depth = 0
-        for item in items:
-            depth_shift = item.shape[-1]
-            prealloc[..., start_depth:start_depth + depth_shift] = item
-            start_depth += depth_shift
-        setattr(self, dst, prealloc)
-        return self
-
-
-    @action
-    @inbatch_parallel(init='indices', target='for', post='_masks_to_horizons_post')
-    def masks_to_horizons(self, ix, src_masks='masks', locations='locations', dst='predicted_labels',
-                          threshold=0.5, mode='mean', minsize=0, mean_threshold=2.0,
-                          adjacency=1, shape=None, skip_merge=False, prefix='predict'):
-        """ Convert predicted segmentation mask to a list of Horizon instances.
-
-        Parameters
-        ----------
-        src_masks : str
-            Component of batch that stores masks.
-        locations : str
-            Component of batch that stores locations of crops.
-        dst : str/object
-            Component of batch to store the resulting horizons.
-        order : tuple of int
-            Axes-param for `transpose`-operation, applied to a mask before fetching point clouds.
-            Default value of (2, 0, 1) is applicable to standart pipeline with one `rotate_axes`
-            applied to images-tensor.
-        threshold, mode, minsize, mean_threshold, adjacency, prefix
-            Passed directly to :meth:`Horizon.from_mask`.
-        """
-        _ = dst, mean_threshold, adjacency, skip_merge
-
-        # Threshold the mask, transpose and rotate the mask if needed
-        mask = self.get(ix, src_masks)
-        if (mask.shape != self.get(ix, 'shapes')).any():
-            mask = np.transpose(mask, (1, 0, 2))
-
-        geometry = self.get(ix, 'geometries')
-        shifts = [self.get(ix, locations)[k].start for k in range(3)]
-        horizons = Horizon.from_mask(mask, geometry=geometry, shifts=shifts, threshold=threshold,
-                                     mode=mode, minsize=minsize, prefix=prefix)
-        return horizons
-
-
-    def _masks_to_horizons_post(self, horizons_lists, *args, dst=None, skip_merge=False,
-                                mean_threshold=2.0, adjacency=1, **kwargs):
-        """ Flatten list of lists of horizons, attempting to merge what can be merged. """
-        _, _ = args, kwargs
-        if dst is None:
-            raise ValueError("dst should be initialized with empty list.")
-
-        if skip_merge:
-            setattr(self, dst, [hor for hor_list in horizons_lists for hor in hor_list])
-            return self
-
-        for horizons in horizons_lists:
-            for horizon_candidate in horizons:
-                for horizon_target in dst:
-                    merge_code, _ = Horizon.verify_merge(horizon_target, horizon_candidate,
-                                                         mean_threshold=mean_threshold,
-                                                         adjacency=adjacency)
-                    if merge_code == 3:
-                        merged = Horizon.overlap_merge(horizon_target, horizon_candidate, inplace=True)
-                    elif merge_code == 2:
-                        merged = Horizon.adjacent_merge(horizon_target, horizon_candidate, inplace=True,
-                                                        adjacency=adjacency, mean_threshold=mean_threshold)
-                    else:
-                        merged = False
-                    if merged:
-                        break
-                else:
-                    # If a horizon can't be merged to any of the previous ones, we append it as it is
-                    dst.append(horizon_candidate)
-        return self
-
-
-    @apply_parallel
-    def adaptive_reshape(self, crop, shape):
-        """ Changes axis of view to match desired shape.
-        Must be used in combination with `side_view` argument of `crop` action.
-
-        Parameters
-        ----------
-        shape : sequence
-            Desired shape of resulting crops.
-        """
-        if (np.array(crop.shape) != np.array(shape)).any():
-            return crop.transpose(1, 0, 2)
-        return crop
 
     @apply_parallel
     def shift_masks(self, crop, n_segments=3, max_shift=4, max_len=10):
@@ -717,6 +610,132 @@ class SeismicCropBatch(Batch):
         structure = np.ones((1, 3), dtype=np.uint8)
         return cv2.dilate(mask_, structure, iterations=width)
 
+
+    # Predictions
+    @action
+    @inbatch_parallel(init='indices', post=None, target='for')
+    def update_accumulator(self, ix, src, accumulator, src_locations='locations', order=(0, 1, 2)):
+        """ Update accumulator with data from crops.
+
+        Parameters
+        ----------
+        src : str
+            Component with crops.
+        accumulator : Accumulator3D
+            Container for cube aggregation.
+        src_locations : src
+            Component with crop location.
+        order : sequence
+            The order of axes of the crop which corresponds to natural iline-xline-depth order
+        """
+        crop = self.get(ix, src)
+        location = self.get(ix, src_locations)
+        accumulator.update(crop.transpose(order), location)
+        return self
+
+    @action
+    @inbatch_parallel(init='indices', target='for', post='_masks_to_horizons_post')
+    def masks_to_horizons(self, ix, src_masks='masks', dst='predicted_labels',
+                          threshold=0.5, mode='mean', minsize=0, mean_threshold=2.0,
+                          adjacency=1, shape=None, skip_merge=False, prefix='predict'):
+        """ Convert predicted segmentation mask to a list of Horizon instances.
+
+        Parameters
+        ----------
+        src_masks : str
+            Component of batch that stores masks.
+        locations : str
+            Component of batch that stores locations of crops.
+        dst : str/object
+            Component of batch to store the resulting horizons.
+        order : tuple of int
+            Axes-param for `transpose`-operation, applied to a mask before fetching point clouds.
+            Default value of (2, 0, 1) is applicable to standart pipeline with one `rotate_axes`
+            applied to images-tensor.
+        threshold, mode, minsize, mean_threshold, adjacency, prefix
+            Passed directly to :meth:`Horizon.from_mask`.
+        """
+        _ = dst, mean_threshold, adjacency, skip_merge
+
+        # Threshold the mask, transpose and rotate the mask if needed
+        mask = self.get(ix, src_masks)
+        if self.get(ix, 'orientations'):
+            mask = np.transpose(mask, (1, 0, 2))
+
+        geometry = self.get(ix, 'geometries')
+        shifts = [self.get(ix, 'locations')[k].start for k in range(3)]
+        horizons = Horizon.from_mask(mask, geometry=geometry, shifts=shifts, threshold=threshold,
+                                     mode=mode, minsize=minsize, prefix=prefix)
+        return horizons
+
+    def _masks_to_horizons_post(self, horizons_lists, *args, dst=None, skip_merge=False,
+                                mean_threshold=2.0, adjacency=1, **kwargs):
+        """ Flatten list of lists of horizons, attempting to merge what can be merged. """
+        _, _ = args, kwargs
+        if dst is None:
+            raise ValueError("dst should be initialized with empty list.")
+
+        if skip_merge:
+            setattr(self, dst, [hor for hor_list in horizons_lists for hor in hor_list])
+            return self
+
+        for horizons in horizons_lists:
+            for horizon_candidate in horizons:
+                for horizon_target in dst:
+                    merge_code, _ = Horizon.verify_merge(horizon_target, horizon_candidate,
+                                                         mean_threshold=mean_threshold,
+                                                         adjacency=adjacency)
+                    if merge_code == 3:
+                        merged = Horizon.overlap_merge(horizon_target, horizon_candidate, inplace=True)
+                    elif merge_code == 2:
+                        merged = Horizon.adjacent_merge(horizon_target, horizon_candidate, inplace=True,
+                                                        adjacency=adjacency, mean_threshold=mean_threshold)
+                    else:
+                        merged = False
+                    if merged:
+                        break
+                else:
+                    # If a horizon can't be merged to any of the previous ones, we append it as it is
+                    dst.append(horizon_candidate)
+        return self
+
+
+    # More component actions
+    @action
+    def concat_components(self, src, dst, axis=-1):
+        """ Concatenate a list of components and save results to `dst` component.
+
+        Parameters
+        ----------
+        src : array-like
+            List of components to concatenate of length more than one.
+        dst : str
+            Component of batch to put results in.
+        axis : int
+            The axis along which the arrays will be joined.
+        """
+        if axis != -1:
+            raise NotImplementedError("For now function works for `axis=-1` only.")
+
+        if not isinstance(src, (list, tuple, np.ndarray)):
+            raise ValueError()
+        if len(src) == 1:
+            warn("Since `src` contains only one component, concatenation not needed.")
+
+        items = [self.get(None, attr) for attr in src]
+
+        depth = sum(item.shape[-1] for item in items)
+        final_shape = (*items[0].shape[:3], depth)
+        prealloc = np.empty(final_shape, dtype=np.float32)
+
+        start_depth = 0
+        for item in items:
+            depth_shift = item.shape[-1]
+            prealloc[..., start_depth:start_depth + depth_shift] = item
+            start_depth += depth_shift
+        setattr(self, dst, prealloc)
+        return self
+
     @action
     def transpose(self, src, order):
         """ Change order of axis. """
@@ -740,6 +759,8 @@ class SeismicCropBatch(Batch):
         crop_ = np.swapaxes(crop_, 1, 2)
         return crop_
 
+
+    # Augmentations
     @apply_parallel
     def add_axis(self, crop):
         """ Add new axis.
@@ -1125,24 +1146,3 @@ class SeismicCropBatch(Batch):
         }
 
         plot_image(data, **kwargs)
-
-    @action
-    @inbatch_parallel(init='indices', post=None, target='for')
-    def update_accumulator(self, ix, src, accumulator, src_locations='locations', order=(0, 1, 2)):
-        """ Update accumulator with data from crops.
-
-        Parameters
-        ----------
-        src : str
-            Component with crops.
-        accumulator : Accumulator3D
-            Container for cube aggregation.
-        src_locations : src
-            Component with crop location.
-        order : sequence
-            The order of axes of the crop which corresponds to natural iline-xline-depth order
-        """
-        crop = self.get(ix, src)
-        location = self.get(ix, src_locations)
-        accumulator.update(crop.transpose(order), location)
-        return self
