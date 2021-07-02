@@ -3,7 +3,8 @@ import os
 
 import numpy as np
 
-from scipy.signal import hilbert, cwt, ricker
+from scipy.signal import hilbert, ricker
+from scipy.ndimage import convolve
 from scipy.fft import fft
 from sklearn.decomposition import PCA
 
@@ -258,6 +259,7 @@ class Facies(Horizon):
 
     @staticmethod
     def reduce_dimensionality(data, n_components=3, **kwargs):
+        """ Reduce number of channels along the depth axis. """
         flattened = data.reshape(-1, data.shape[-1])
         flattened[np.isnan(flattened).any(axis=-1)] = 0
         pca = PCA(n_components, **kwargs)
@@ -265,7 +267,7 @@ class Facies(Horizon):
         return reduced.reshape(*data.shape[:2], -1)
 
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
-    def fourier_decompose(self, window=50, n_components=3, add_alpha=True, **kwargs):
+    def fourier_decompose(self, window=50, n_components=3, add_alpha=False, **kwargs):
         """ Cached fourier transform calculation follower by dimensionaluty reduction via PCA.
 
         Parameters
@@ -276,7 +278,7 @@ class Facies(Horizon):
             Number of components to keep after PCA.
             If None, do not perform dimensionality reduction.
         add_alpha : bool
-            Whether add extra opacity layer or to result or not. Needed for plotting.
+            Whether add extra opacity layer to result or not. Needed for plotting.
         kwargs :
             For `sklearn.decomposition.PCA`.
         """
@@ -298,7 +300,7 @@ class Facies(Horizon):
         return result
 
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
-    def wavelet_decompose(self, widths, window=50, n_components=None, add_alpha=True, **kwargs):
+    def wavelet_decompose(self, widths=range(1, 14, 3), window=50, n_components=3, add_alpha=False, **kwargs):
         """ Cached wavelet transform calculation follower by dimensionaluty reduction via PCA.
 
         Parameters
@@ -311,19 +313,18 @@ class Facies(Horizon):
             Number of components to keep after PCA.
             If None, do not perform dimensionality reduction.
         add_alpha : bool
-            Whether add extra opacity layer or to result or not. Needed for plotting.
+            Whether add extra opacity layer to result or not. Needed for plotting.
         kwargs :
             For `sklearn.decomposition.PCA`.
         """
         transform_kwargs = retrieve_function_arguments(self.transform_where_present, kwargs)
 
-        transform_trace = lambda trace, widths: cwt(trace, ricker, widths)[:, len(trace) // 2]
         amplitudes = self.load_attribute('amplitudes', window=window)
-        widths = [w * self.geometry.sample_rate for w in widths]
-        result = np.apply_along_axis(transform_trace, axis=-1, arr=amplitudes, widths=widths)
-
-        # if amp:
-        #     result = np.abs(hilbert(result, axis=-1))
+        result_shape = *amplitudes.shape[:2], len(widths)
+        result = np.empty(result_shape, dtype=np.float32)
+        for idx, width in enumerate(widths):
+            wavelet = ricker(window, width).reshape(1, 1, -1)
+            result[:, :, idx] = convolve(amplitudes, wavelet, mode='constant')[:, :, window // 2]
 
         if n_components is not None:
             result = self.reduce_dimensionality(result, n_components, **kwargs)
@@ -399,6 +400,9 @@ class Facies(Horizon):
                 load = {'src': load}
             postprocess = load.pop('postprocess', lambda x: x)
             load_defaults = {'fill_value': np.nan}
+            if load['src'].split('/')[-1] in ['fourier', 'wavelet']:
+                load_defaults['add_alpha'] = True
+                load_defaults['normalize'] = 'min-max'
             load = {**load_defaults, **load}
             data = self.load_attribute(**load)
             return postprocess(data)
@@ -520,7 +524,7 @@ class Facies(Horizon):
         ----------
         bins : sequence
             Size of ticks alongs each respective axis.
-        quality_grid : ndarray or None
+        anomaly_grid : ndarray or None
             If not None, then must be a matrix with zeroes in locations to keep, ones in locations to remove.
             Applied to `points` before sampler creation.
         weights : ndarray or bool
