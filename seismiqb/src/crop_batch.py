@@ -614,7 +614,7 @@ class SeismicCropBatch(Batch):
     # Predictions
     @action
     @inbatch_parallel(init='indices', post=None, target='for')
-    def update_accumulator(self, ix, src, accumulator, src_locations='locations', order=(0, 1, 2)):
+    def update_accumulator(self, ix, src, accumulator, order=(0, 1, 2)):
         """ Update accumulator with data from crops.
 
         Parameters
@@ -623,13 +623,11 @@ class SeismicCropBatch(Batch):
             Component with crops.
         accumulator : Accumulator3D
             Container for cube aggregation.
-        src_locations : src
-            Component with crop location.
         order : sequence
             The order of axes of the crop which corresponds to natural iline-xline-depth order
         """
         crop = self.get(ix, src)
-        location = self.get(ix, src_locations)
+        location = self.get(ix, 'locations')
         accumulator.update(crop.transpose(order), location)
         return self
 
@@ -637,21 +635,15 @@ class SeismicCropBatch(Batch):
     @inbatch_parallel(init='indices', target='for', post='_masks_to_horizons_post')
     def masks_to_horizons(self, ix, src_masks='masks', dst='predicted_labels',
                           threshold=0.5, mode='mean', minsize=0, mean_threshold=2.0,
-                          adjacency=1, shape=None, skip_merge=False, prefix='predict'):
+                          adjacency=1, skip_merge=False, prefix='predict'):
         """ Convert predicted segmentation mask to a list of Horizon instances.
 
         Parameters
         ----------
         src_masks : str
             Component of batch that stores masks.
-        locations : str
-            Component of batch that stores locations of crops.
         dst : str/object
             Component of batch to store the resulting horizons.
-        order : tuple of int
-            Axes-param for `transpose`-operation, applied to a mask before fetching point clouds.
-            Default value of (2, 0, 1) is applicable to standart pipeline with one `rotate_axes`
-            applied to images-tensor.
         threshold, mode, minsize, mean_threshold, adjacency, prefix
             Passed directly to :meth:`Horizon.from_mask`.
         """

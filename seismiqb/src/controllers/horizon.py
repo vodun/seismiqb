@@ -445,13 +445,12 @@ class HorizonController(BaseController):
         return results
 
     # Pipelines
-    def load_pipeline(self, dynamic_factor=1, dynamic_low=None, dynamic_high=None, **kwargs):
+    def load_pipeline(self, **kwargs):
         """ Define data loading pipeline.
 
-        Following parameters are fetched from pipeline config: `adaptive_slices`, 'grid_src' and `rebatch_threshold`.
+        Following parameters are fetched from pipeline config: `sampler`, `batch_size` `width` and `rebatch_threshold`.
         """
         _ = kwargs
-        self.log(f'Generating data with dynamic factor of {dynamic_factor}')
         return (
             Pipeline()
             .make_locations(generator=C('sampler'), batch_size=C('batch_size'))
@@ -459,7 +458,7 @@ class HorizonController(BaseController):
             .create_masks(dst='masks', width=C('width', default=3))
             .mask_rebatch(src='masks', threshold=C('rebatch_threshold', default=0.1))
             .load_cubes(dst='images')
-            .adaptive_reshape(src=['images', 'masks'], shape=C('crop_shape'))
+            .adaptive_reshape(src=['images', 'masks'])
             .normalize(src='images')
         )
 
@@ -520,7 +519,7 @@ class HorizonController(BaseController):
             # Load data
             .make_locations(generator=C('grid'))
             .load_cubes(dst='images')
-            .adaptive_reshape(src='images', shape=C('crop_shape'))
+            .adaptive_reshape(src='images')
             .normalize(src='images')
 
             # Predict with model, then aggregate

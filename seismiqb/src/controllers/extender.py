@@ -150,7 +150,7 @@ class Extender(Enhancer):
             .make_locations(generator=C('grid'))
             .load_cubes(dst='images')
             .create_masks(dst='prior_masks', width=C('width', default=3))
-            .adaptive_reshape(src=['images', 'prior_masks'], shape=C('crop_shape'))
+            .adaptive_reshape(src=['images', 'prior_masks'])
             .normalize(src='images')
 
             # Use model for prediction
@@ -159,9 +159,8 @@ class Extender(Enhancer):
                            B('prior_masks'),
                            fetches='predictions',
                            save_to=B('predicted_masks', mode='w'))
-            # .transpose(src='predicted_masks', order=(1, 2, 0))
             .masks_to_horizons(src_masks='predicted_masks', threshold=0.5, minsize=16,
-                               shape=C('crop_shape'), dst='horizons', skip_merge=True)
+                               dst='horizons', skip_merge=True)
             .update(V('predicted_horizons', mode='e'), B('horizons'))
         )
         return inference_template

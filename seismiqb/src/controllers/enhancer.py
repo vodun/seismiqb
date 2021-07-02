@@ -45,7 +45,7 @@ class Enhancer(HorizonController):
             .create_masks(dst='masks', width=C('width', default=3))
             .mask_rebatch(src='masks', threshold=C('rebatch_threshold', default=0.7))
             .load_cubes(dst='images')
-            .adaptive_reshape(src=['images', 'masks'], shape=C('crop_shape'))
+            .adaptive_reshape(src=['images', 'masks'])
             .normalize(src='images')
         )
 
@@ -111,7 +111,7 @@ class Enhancer(HorizonController):
             .make_locations(generator=C('sampler'), batch_size=C('batch_size'))
             .load_cubes(dst='images')
             .create_masks(dst='prior_masks', width=3)
-            .adaptive_reshape(src=['images', 'prior_masks'], shape=C('crop_shape'))
+            .adaptive_reshape(src=['images', 'prior_masks'])
             .normalize(src='images')
 
             # Use model for prediction
