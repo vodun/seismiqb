@@ -1056,7 +1056,7 @@ class SeismicCropBatch(Batch):
 
     @apply_parallel
     def translate(self, crop, shift=5, scale=0.0):
-        """ Add and multiply amplitude values. """
+        """ Add and multiply values by uniformly sampled values. """
         shift = self.random.uniform(-shift, shift)
         scale = self.random.uniform(1-scale, 1+scale)
         return (crop + shift)*scale

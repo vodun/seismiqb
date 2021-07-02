@@ -259,14 +259,14 @@ class HorizonController(BaseController):
             axis = 0
             config.update({
                 'crop_shape_grid': config.crop_shape,
-                'side_view': 0.0,
+                'orientation': 0,
                 'order': (0, 1, 2),
             })
         elif orientation == 'x':
             axis = 1
             config.update({
                 'crop_shape_grid': np.array(config.crop_shape)[[1, 0, 2]],
-                'side_view': 1.0,
+                'orientation': 1,
                 'order': (1, 0, 2),
             })
 
@@ -309,7 +309,7 @@ class HorizonController(BaseController):
 
     def _inference_on_chunk(self, dataset, model, ranges, config):
         # Prepare parameters
-        overlap_factor, threshold = config.get(['overlap_factor', 'threshold'])
+        orientation, overlap_factor, threshold = config.get(['orientation', 'overlap_factor', 'threshold'])
         prefetch = config.get('prefetch', 0)
         crop_shape = np.array(config.crop_shape)[list(config.order)]
 
@@ -318,6 +318,7 @@ class HorizonController(BaseController):
         grid = RegularGrid(geometry=geometry,
                            ranges=ranges,
                            crop_shape=crop_shape,
+                           orientation=orientation,
                            threshold=threshold,
                            batch_size=config.batch_size,
                            overlap_factor=overlap_factor)

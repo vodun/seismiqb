@@ -17,8 +17,8 @@ class HorizonSampler(Sampler):
         - contain more than `threshold` labeled pixels inside
         - don't go beyond cube limits
 
-    Locations are produced as np.ndarray of (size, 7) shape with following columns:
-        (cube_id, i_start, x_start, h_start, i_stop, x_stop, h_stop).
+    Locations are produced as np.ndarray of (size, 9) shape with following columns:
+        (geometry_id, label_id, orientation, i_start, x_start, h_start, i_stop, x_stop, h_stop).
     Depth location is randomized in (0.1*shape, 0.9*shape) range.
 
     Under the hood, we prepare `locations` attribute, that contains all already-filtered possible locations,
@@ -35,11 +35,13 @@ class HorizonSampler(Sampler):
         Minimum proportion of labeled points in each sampled location.
     filtering_matrix : np.ndarray, optional
         Map of points to remove from potentially generated locations.
+    geometry_id, label_id : int
+        Used as the first two columns of sampled values.
     """
-    dim = 2 + 1 + 6 # dimensionality of sampled points: geometry_id, label_id, orientation, locations
+    #TODO: add `ranges` parameter
+    dim = 2 + 1 + 6 # dimensionality of sampled points: geometry_id and label_id, orientation, locations
 
-    def __init__(self, horizon, shape, threshold=0.05, filtering_matrix=None,
-                 geometry_id=0, label_id=0, **kwargs):
+    def __init__(self, horizon, shape, threshold=0.05, filtering_matrix=None, geometry_id=0, label_id=0, **kwargs):
 
         geometry = horizon.geometry
 
@@ -211,7 +213,7 @@ def check_sampled(locations, matrix, threshold):
     Parameters
     ----------
     locations : np.ndarray
-        Locations in (i_start, x_start, h_start, i_stop, x_stop, h_stop) format.
+        Locations in (orientation, i_start, x_start, h_start, i_stop, x_stop, h_stop) format.
     matrix : np.ndarray
         Depth map in cube coordinates.
     threshold : int
@@ -231,13 +233,13 @@ def check_sampled(locations, matrix, threshold):
 
 class SeismicSampler(Sampler):
     """ Mixture of samplers on multiple cubes with label-samplers.
-    Used to sample crop locations in (cube_id, i_start, x_start, h_start, i_stop, x_stop, h_stop) format,
-    potentially with additional colums.
+    Used to sample crop locations in the format of
+    (geometry_id, label_id, orientation, i_start, x_start, h_start, i_stop, x_stop, h_stop).
 
     Parameters
     ----------
     labels : dict
-        Dictionary with nested lists that contains labels.
+        Dictionary where keys are cube names and values are lists of labels.
     shape : tuple
         Shape of crop locations to generate.
     proportions : sequence, optional
@@ -427,16 +429,14 @@ class BaseGrid:
 
 class RegularGrid(BaseGrid):
     """ !!. """
-    def __init__(self, geometry, ranges, crop_shape, threshold=0,
+    def __init__(self, geometry, ranges, crop_shape, orientation=0, threshold=0,
                  strides=None, overlap=None, overlap_factor=None, batch_size=64):
         # Make ranges
         ranges = [item if item is not None else [0, c]
                   for item, c in zip(ranges, geometry.cube_shape)]
         ranges = np.array(ranges)
 
-        if (ranges[:, 0] < 0).any():
-            raise ValueError('Grid ranges must contain in the geometry!')
-        if (ranges[:, 1] > geometry.cube_shape).any():
+        if (ranges[:, 0] < 0).any() or (ranges[:, 1] > geometry.cube_shape).any():
             raise ValueError('Grid ranges must contain in the geometry!')
         self.ranges = ranges
         self.shape = ranges[:, 1] - ranges[:, 0]
@@ -460,6 +460,7 @@ class RegularGrid(BaseGrid):
             threshold = int(threshold * crop_shape[0] * crop_shape[1])
         self.threshold = threshold
 
+        self.orientation = orientation
         self.geometry = geometry
         self.name = geometry.short_name
         self.unfiltered_length = None
@@ -487,7 +488,7 @@ class RegularGrid(BaseGrid):
             sliced = self.geometry.zero_traces[i:i+self.crop_shape[0],
                                                x:x+self.crop_shape[1]]
             # Number of non-dead traces
-            if (np.prod(sliced.shape) - sliced.sum()) > self.threshold:
+            if (sliced.size - sliced.sum()) > self.threshold:
                 for h in h_grid:
                     points.append((i, x, h))
         points = np.array(points, dtype=np.int32)
@@ -495,7 +496,7 @@ class RegularGrid(BaseGrid):
         # Buffer: (cube_id, i_start, x_start, h_start, i_stop, x_stop, h_stop)
         buffer = np.empty((len(points), 9), dtype=np.int32)
         buffer[:, [0, 1]] = -1
-        buffer[:, 2] = 0
+        buffer[:, 2] = self.orientation
         buffer[:, [3, 4, 5]] = points
         buffer[:, [6, 7, 8]] = points
         buffer[:, [6, 7, 8]] += self.crop_shape
@@ -583,7 +584,7 @@ class ExtensionGrid(BaseGrid):
         # True where dead trace / already covered
         coverage_matrix = self.geometry.zero_traces.copy().astype(np.bool_)
         coverage_matrix[self.horizon.full_matrix > 0] = True
-        self.uncovered_before = np.prod(coverage_matrix.shape) - coverage_matrix.sum()
+        self.uncovered_before = coverage_matrix.size - coverage_matrix.sum()
 
         # TODO: can use the same boundary_matrix_on_full here and for coverage; also less computations here
         # Compute boundary points of horizon: both inner and outer borders
@@ -639,7 +640,7 @@ class ExtensionGrid(BaseGrid):
 
         # Compute potential addition for each location
         potential = compute_potential(buffer, coverage_matrix, crop_shape)
-        self.uncovered_best = np.prod(coverage_matrix.shape) - coverage_matrix.sum()
+        self.uncovered_best = coverage_matrix.size - coverage_matrix.sum()
 
         # Get argsort for each group of four
         argsort = potential.reshape(-1, 4).argsort(axis=-1)[:, -self.top:].reshape(-1)
@@ -675,7 +676,7 @@ class ExtensionGrid(BaseGrid):
 
         for (i_start, x_start, _, i_stop, x_stop, _) in self.locations[:, 3:]:
             coverage_matrix[i_start:i_stop, x_start:x_stop] = True
-        return np.prod(coverage_matrix.shape) - coverage_matrix.sum()
+        return coverage_matrix.size - coverage_matrix.sum()
 
     def show(self, markers=False, overlay=True, frequency=1, **kwargs):
         """ !!. """
