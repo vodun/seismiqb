@@ -103,6 +103,7 @@ class BaseController:
             self.gpu_list = []
 
         self.make_filelogger()
+        self.log(f'Initialized {self.__class__.__name__}')
 
     # Utility functions
     def make_savepath(self, *postfix):
@@ -161,7 +162,7 @@ class BaseController:
         _ = kwargs
 
     # Train
-    def train(self, dataset, config=None, **kwargs):
+    def train(self, dataset, sampler, config=None, **kwargs):
         """ Train model on a provided dataset.
         Uses the `get_train_template` method to create pipeline of model training.
 
@@ -187,6 +188,7 @@ class BaseController:
             monitor.__enter__()
 
         # Make pipeline
+        pipeline_config['sampler'] = sampler
         train_pipeline = self.get_train_template(**kwargs) << pipeline_config << dataset
 
         # Log: pipeline_config to a file

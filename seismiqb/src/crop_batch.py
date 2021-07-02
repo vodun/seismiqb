@@ -512,7 +512,7 @@ class SeismicCropBatch(Batch):
     @inbatch_parallel(init='indices', target='for', post='_masks_to_horizons_post')
     def masks_to_horizons(self, ix, src_masks='masks', locations='locations', dst='predicted_labels',
                           threshold=0.5, mode='mean', minsize=0, mean_threshold=2.0,
-                          adjacency=1, order=(2, 0, 1), skip_merge=False, prefix='predict'):
+                          adjacency=1, shape=None, skip_merge=False, prefix='predict'):
         """ Convert predicted segmentation mask to a list of Horizon instances.
 
         Parameters
@@ -534,9 +534,8 @@ class SeismicCropBatch(Batch):
 
         # Threshold the mask, transpose and rotate the mask if needed
         mask = self.get(ix, src_masks)
-        if np.array(order).reshape(-1, 3).shape[0] > 0:
-            order = self.get(ix, np.array(order).reshape(-1, 3))
-        mask = np.transpose(mask, axes=order)
+        if (mask.shape != self.get(ix, 'shapes')).any():
+            mask = np.transpose(mask, (1, 0, 2))
 
         geometry = self.get(ix, 'geometries')
         shifts = [self.get(ix, locations)[k].start for k in range(3)]

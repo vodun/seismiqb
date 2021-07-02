@@ -4,7 +4,7 @@
 """
 import numpy as np
 
-from ...batchflow import Pipeline, B, V, C, D, P, R
+from ...batchflow import Pipeline, B, V, C, P, R
 
 from .horizon import HorizonController
 from .torch_models import ExtensionModel
@@ -14,21 +14,23 @@ class Enhancer(HorizonController):
     """
     Provides interface for train, inference and quality assesment for the task of horizon enhancement.
     """
+    #pylint: disable=arguments-renamed
 
     def train(self, horizon, **kwargs):
         """ Train model for horizon enhancement. """
         dataset = self.make_dataset(horizon=horizon)
-        self.make_sampler(dataset, use_grid=False, side_view=True, bins=np.array([500, 500, 100]))
-        return super().train(dataset, **kwargs)
+        sampler = self.make_sampler(dataset)
+        return super().train(dataset, sampler=sampler, **kwargs)
 
 
-    def inference(self, horizon, model, filtering_matrix=None, **kwargs):
+    def inference(self, horizon, model, config=None, **kwargs):
         """ Runs enhancement procedure for a given horizon with provided model. """
         dataset = self.make_dataset(horizon=horizon)
-        if filtering_matrix is None:
-            filtering_matrix = 1 - (horizon.full_matrix > 0)
-        prediction = super().inference(dataset=dataset, model=model,
-                                       filtering_matrix=filtering_matrix, **kwargs)[0]
+
+        #TODO: return filtering matrix to grid?
+        # if filtering_matrix is None:
+        #     filtering_matrix = 1 - (horizon.full_matrix > 0)
+        prediction = super().inference(dataset=dataset, model=model, config=config, **kwargs)[0]
         prediction.name = f'enhanced_{horizon.name}'
         return prediction
 
@@ -39,13 +41,11 @@ class Enhancer(HorizonController):
         """
         return (
             Pipeline()
-            .make_locations(points=D('train_sampler')(C('batch_size')),
-                            shape=C('crop_shape'), side_view=C('side_view', default=False))
+            .make_locations(generator=C('sampler'), batch_size=C('batch_size'))
             .create_masks(dst='masks', width=C('width', default=3))
             .mask_rebatch(src='masks', threshold=C('rebatch_threshold', default=0.7))
             .load_cubes(dst='images')
-            .adaptive_reshape(src=['images', 'masks'],
-                              shape=C('crop_shape'))
+            .adaptive_reshape(src=['images', 'masks'], shape=C('crop_shape'))
             .normalize(src='images')
         )
 
@@ -108,12 +108,10 @@ class Enhancer(HorizonController):
             .init_variable('predictions', [])
 
             # Load data
-            .make_locations(points=D('grid_gen')(), shape=C('crop_shape'),
-                            side_view=C('side_view', default=False))
+            .make_locations(generator=C('sampler'), batch_size=C('batch_size'))
             .load_cubes(dst='images')
             .create_masks(dst='prior_masks', width=3)
-            .adaptive_reshape(src=['images', 'prior_masks'],
-                              shape=C('crop_shape'))
+            .adaptive_reshape(src=['images', 'prior_masks'], shape=C('crop_shape'))
             .normalize(src='images')
 
             # Use model for prediction

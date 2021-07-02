@@ -14,6 +14,7 @@ from ...batchflow import Pipeline, Config, Notifier, Monitor
 from ...batchflow import D, B, F, C, V, P, R
 
 from ..horizon import Horizon
+from ..samplers import ExtensionGrid
 
 from .enhancer import Enhancer
 
@@ -68,36 +69,31 @@ class Extender(Enhancer):
                             file=self.make_savepath('末 inference.log'))
 
         start_time = perf_counter()
-        for _ in notifier(range(n_steps)):
+        for i in notifier(range(n_steps)):
             # Create grid of crops near horizon holes
-            dataset.make_extension_grid(dataset.indices[0],
-                                        crop_shape=crop_shape,
-                                        stride=stride,
-                                        labels_src=horizon,
-                                        batch_size=batch_size)
+            grid = ExtensionGrid(horizon=horizon, crop_shape=crop_shape,
+                                 batch_size=batch_size, stride=stride,
+                                 top=1, threshold=5)
+            config['grid'] = grid
 
             # Create pipeline TODO: make better `add_model`
             inference_pipeline = self.get_inference_template() << config << dataset
             inference_pipeline.models.add_model('model', model)
-
-            try: # TODO: rethink control flow
-                inference_pipeline.run(D.size, n_iters=dataset.grid_iters, prefetch=prefetch)
-            except TypeError:
-                # no additional predicts
-                break
+            inference_pipeline.run(D.size, n_iters=grid.n_iters, prefetch=prefetch)
 
             # Merge surfaces on crops to the horizon itself
             for patch_horizon in inference_pipeline.v('predicted_horizons'):
                 merge_code, _ = Horizon.verify_merge(horizon, patch_horizon,
                                                      mean_threshold=5.5, adjacency=5)
                 if merge_code == 3:
+                    # print('merging!')
                     _ = horizon.overlap_merge(patch_horizon, inplace=True)
 
             # Log length increase
             curr_len = len(horizon)
             if (curr_len - prev_len) < threshold:
                 break
-            self.log(f'Extended from {prev_len} to {curr_len}, + {curr_len - prev_len}')
+            self.log(f'Iteration{i}:  extended from {prev_len} to {curr_len}, + {curr_len - prev_len}')
             prev_len = curr_len
 
             # Cleanup
@@ -151,11 +147,10 @@ class Extender(Enhancer):
             .init_variable('predicted_horizons', default=[])
 
             # Load data
-            .make_locations(points=D('grid_gen')(), shape=D('shapes_gen')())
+            .make_locations(generator=C('grid'))
             .load_cubes(dst='images')
             .create_masks(dst='prior_masks', width=C('width', default=3))
-            .adaptive_reshape(src=['images', 'prior_masks'],
-                              shape=C('crop_shape'))
+            .adaptive_reshape(src=['images', 'prior_masks'], shape=C('crop_shape'))
             .normalize(src='images')
 
             # Use model for prediction
@@ -164,9 +159,9 @@ class Extender(Enhancer):
                            B('prior_masks'),
                            fetches='predictions',
                            save_to=B('predicted_masks', mode='w'))
-            .transpose(src='predicted_masks', order=(1, 2, 0))
+            # .transpose(src='predicted_masks', order=(1, 2, 0))
             .masks_to_horizons(src_masks='predicted_masks', threshold=0.5, minsize=16,
-                               order=D('orders_gen')(), dst='horizons', skip_merge=True)
+                               shape=C('crop_shape'), dst='horizons', skip_merge=True)
             .update(V('predicted_horizons', mode='e'), B('horizons'))
         )
         return inference_template
