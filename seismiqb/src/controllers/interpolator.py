@@ -11,10 +11,12 @@ class Interpolator(HorizonController):
             dataset = self.make_dataset(cube_paths=cube_paths, horizon_paths=horizon_paths, horizon=horizon)
 
         horizon = dataset.labels[0][0]
-        self.log(f'Coverage of carcass is {horizon.coverage}')
+        horizon.show(show=self.plot, savepath=self.make_savepath('carcass_image.png'))
+        self.log(f'Coverage of carcass is {horizon.coverage:2.5f}')
 
         sampler = self.make_sampler(dataset)
         return super().train(dataset=dataset, sampler=sampler, **kwargs)
+
 
     def inference(self, dataset, model, config=None, name=None, **kwargs):
         """ !!. """

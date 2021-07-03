@@ -1,4 +1,19 @@
-""" !!. """
+""" Generator of locations of two types: Samplers and Grids.
+
+Samplers are making random (label-dependant) locations to train models, while
+Grids are used for inference and create locations based on geometry or current state of labeled surface.
+
+Locations describe the cube and the exact place to load from, and come in the format of:
+(geometry_id, label_id, orientation, i_start, x_start, h_start, i_stop, x_stop, h_stop).
+
+Locations are passed to `make_locations` method of `SeismicCropBatch`, which
+transforms them into 3D slices to index the data and other useful info like origin points, shapes and orientation.
+
+Each of the classes provides:
+    - `call` method (aliased to either `sample` or `next_batch`), that generates given amount of locations
+    - `to_names` method to convert the first two columns of sampled locations into string names of geometry and label
+    - convinient visualization to explore underlying `locations` structure
+"""
 from itertools import product
 
 import numpy as np
@@ -11,7 +26,7 @@ from ..batchflow import Sampler, ConstantSampler
 
 
 class HorizonSampler(Sampler):
-    """ Generator of crop locations, based on a single horizon.
+    """ Generator of crop locations, based on a single horizon. Not intended to be used directly, see `SeismicSampler`.
     Makes locations that:
         - start from the labeled point on horizon, exluding those marked by `filtering_matrix`
         - contain more than `threshold` labeled pixels inside
@@ -21,9 +36,14 @@ class HorizonSampler(Sampler):
         (geometry_id, label_id, orientation, i_start, x_start, h_start, i_stop, x_stop, h_stop).
     Depth location is randomized in (0.1*shape, 0.9*shape) range.
 
-    Under the hood, we prepare `locations` attribute, that contains all already-filtered possible locations,
-    and then randomly choose `size` rows for sampling. If some of the sampled locations does not fit the `threshold`
-    constraint, resample until we get exactly `size` locations.
+    Under the hood, we prepare `locations` attribute:
+        - filter horizon points so that only points that can generate
+        either inline or crossline oriented crop (or both) remain
+        - apply `filtering_matrix` to remove more points
+        - keep only those points and directions which create crops with more than `threshold` labels
+        - store all possible locations for each of the remaining points
+    For sampling, we randomly choose `size` rows from `locations`. If some of the sampled locations does not fit the
+    `threshold` constraint, resample until we get exactly `size` locations.
 
     Parameters
     ----------
@@ -53,7 +73,6 @@ class HorizonSampler(Sampler):
         full_matrix = horizon.full_matrix
 
         # Keep only points, that can be a starting point for a crop of given shape
-        # TODO: check if < or <=
         i_mask = ((points[:, :2] + shape[:2]) < geometry.cube_shape[:2]).all(axis=1)
         x_mask = ((points[:, :2] + shape_t[:2]) < geometry.cube_shape[:2]).all(axis=1)
         mask = i_mask | x_mask
@@ -207,8 +226,8 @@ def check_points(points, matrix, shape, i_mask, x_mask, threshold):
 @njit
 def check_sampled(locations, matrix, threshold):
     """ Remove points, which correspond to crops with less than `threshold` labeled pixels.
-    Used as a final filter for already sampled points: they can generate crops with
-    smaller than `threshold` mask due to depth randomization.
+    Used as a final filter for already sampled locations: they can generate crops with
+    smaller than `threshold` mask only due to the depth randomization.
 
     Parameters
     ----------
@@ -232,7 +251,7 @@ def check_sampled(locations, matrix, threshold):
 
 
 class SeismicSampler(Sampler):
-    """ Mixture of samplers on multiple cubes with label-samplers.
+    """ Mixture of samplers for multiple cubes with multiple labels.
     Used to sample crop locations in the format of
     (geometry_id, label_id, orientation, i_start, x_start, h_start, i_stop, x_stop, h_stop).
 
@@ -240,12 +259,12 @@ class SeismicSampler(Sampler):
     ----------
     labels : dict
         Dictionary where keys are cube names and values are lists of labels.
-    shape : tuple
-        Shape of crop locations to generate.
     proportions : sequence, optional
         Proportion of each cube in the resulting mixture.
     baseclass : type
-        Class for label samplers.
+        Class for initializing individual label samplers.
+    shape : tuple
+        Shape of crop locations to generate.
     threshold : float
         Minimum proportion of labeled points in each sampled location.
     filtering_matrix : np.ndarray, optional
@@ -298,8 +317,9 @@ class SeismicSampler(Sampler):
         return self.sampler.sample(size)
 
     def to_names(self, id_array):
-        """ !!. """
+        """ Convert the first two columns of sampled locations into geometry and label string names. """
         return np.array([self.names[tuple(ids)] for ids in id_array])
+
 
     def __str__(self):
         msg = 'SeismicSampler:'
@@ -310,7 +330,7 @@ class SeismicSampler(Sampler):
         return msg
 
     def show_locations(self, ncols=2, **kwargs):
-        """ Visualize on geometry map by using underlying `points` structure. """
+        """ Visualize on geometry map by using underlying `locations` structure. """
         for idx, samplers_lst in self.samplers.items():
             geometry = samplers_lst[0].geometry
             images = [sampler.horizon.enlarge_carcass_image(sampler.matrix, 9)
@@ -369,7 +389,7 @@ class SeismicSampler(Sampler):
 
 
 class BaseGrid:
-    """ !!. """
+    """ Determenistic generator of crop locations. """
     def __init__(self, crop_shape, batch_size=64):
         self.crop_shape = np.array(crop_shape)
         self.batch_size = batch_size
@@ -381,59 +401,84 @@ class BaseGrid:
 
 
     def __call__(self, batch_size=None):
-        """ !!. """
         _ = batch_size
         return next(self.iterator)
 
     def next_batch(self, batch_size=None):
-        """ !!. """
+        """ Yield the next batch of locations. """
         _ = batch_size
         return next(self.iterator)
 
 
     def __len__(self):
+        """ Total number of locations to be generated. """
         return len(self.locations)
 
     @property
     def length(self):
-        """ !!. """
+        """ Total number of locations to be generated. """
         return len(self.locations)
 
     @property
     def n_iters(self):
-        """ !!. """
+        """ Total number of iterations. """
         return np.ceil(len(self) / self.batch_size).astype(np.int32)
 
 
     @property
     def origin(self):
-        """ !!. """
+        """ The upper leftmost point of all locations. """
         return self.locations[:, [3, 4, 5]].min(axis=0).astype(np.int32)
 
     @property
     def endpoint(self):
-        """ !!. """
+        """ The lower rightmost point of all locations. """
         return self.locations[:, [6, 7, 8]].max(axis=0).astype(np.int32)
 
     @property
     def actual_shape(self):
-        """ !!. """
+        """ Shape of the covered by the grid locations. """
         return self.endpoint - self.origin
 
     @property
     def actual_ranges(self):
-        """ !!. """
+        """ Ranges of covered by the grid locations. """
         return np.array(tuple(zip(self.origin, self.endpoint)))
 
 
 
 class RegularGrid(BaseGrid):
-    """ !!. """
+    """ Regular grid over the selected `ranges` of cube, covering it with overlapping locations.
+    Filters locations with less than `threshold` meaningful traces.
+
+    Parameters
+    ----------
+    geometry : SeismicGeometry
+        Geometry to create grid for.
+    ranges : sequence
+        Nested sequence, where each element is either None or sequence of two ints.
+        Defines ranges to create grid for: iline, crossline, heights.
+    crop_shape : sequence
+        Shape of crop locations to generate.
+    orientation : int
+        Either 0 or 1. Defines orientation of a grid. Used in `locations` directly.
+    threshold : number
+        Minimum amount of non-dead traces in a crop to keep it in locations.
+        If number in 0 to 1 range, then used as percentage.
+    strides : sequence, optional
+        Strides between consecutive crops. Only one of `strides`, `overlap` or `overlap_factor` should be specified.
+    overlap : sequence, optional
+        Overlaps between consecutive crops. Only one of `strides`, `overlap` or `overlap_factor` should be specified.
+    overlap_factor : sequence, optional
+        Ratio of overlap between cosecutive crops.
+        Only one of `strides`, `overlap` or `overlap_factor` should be specified.
+    batch_size : int
+        Number of batches to generate on demand.
+    """
     def __init__(self, geometry, ranges, crop_shape, orientation=0, threshold=0,
                  strides=None, overlap=None, overlap_factor=None, batch_size=64):
         # Make ranges
-        ranges = [item if item is not None else [0, c]
-                  for item, c in zip(ranges, geometry.cube_shape)]
+        ranges = [item if item is not None else [0, c] for item, c in zip(ranges, geometry.cube_shape)]
         ranges = np.array(ranges)
 
         if (ranges[:, 0] < 0).any() or (ranges[:, 1] > geometry.cube_shape).any():
@@ -510,12 +555,24 @@ class RegularGrid(BaseGrid):
         self.iterator = iterator
 
     def to_names(self, id_array):
-        """ !!. """
+        """ Convert the first two columns of sampled locations into geometry and label string names. """
         return np.array([(self.name, 'unknown') for ids in id_array])
 
 
     def show(self, grid=True, markers=False, n_patches=None, **kwargs):
-        """ !!. """
+        """ Display the grid over geometry overlay.
+
+        Parameters
+        ----------
+        grid : bool
+            Whether to show grid lines.
+        markers : bool
+            Whether to show markers at location origins.
+        n_patches : int
+            Number of locations to display with overlayed mask.
+        kwargs : dict
+            Other parameters to pass to the plotting function.
+        """
         n_patches = n_patches or int(np.sqrt(len(self))) // 5
         fig = self.geometry.show('zero_traces', cmap='Gray', colorbar=False, return_figure=True, **kwargs)
         ax = fig.axes
@@ -553,7 +610,31 @@ class RegularGrid(BaseGrid):
 
 
 class ExtensionGrid(BaseGrid):
-    """ !!. """
+    """ Generate locations to enlarge horizon from its boundaries both inwards and outwards.
+
+    For each point on the boundary of a horizon, we test 4 possible directions and pick `top` best of them.
+    Each location is created so that the original point is `stride` units away from the left/right edge of a crop.
+    Only the locaitons that would potentially add more than `threshold` pixels remain.
+
+    Refer to `_make_locations` method and comments for more info about inner workings.
+
+    Parameters
+    ----------
+    horizon : Horizon
+        Surface to extend.
+    crop_shape : sequence
+        Shape of crop locations to generate. Note that both iline and crossline orientations are used.
+    stride : int
+        Overlap with already known horizon for each location.
+    top : int
+        Number of the best locations to keep for each point.
+    threshold : int
+        Minimum amount of potentially added pixels for each locaiton.
+    randomize : bool
+        Whether to randomize the loop for computing the potential of each location.
+    batch_size : int
+        Number of batches to generate on demand.
+    """
     def __init__(self, horizon, crop_shape, stride=16, batch_size=64, top=1, threshold=4, randomize=True):
         self.top = top
         self.stride = stride
@@ -573,8 +654,8 @@ class ExtensionGrid(BaseGrid):
     def _make_locations(self):
         # Get border points (N, 3)
         # Create locations for all four possible directions, stack into (4*N, 6)
-        # Compute potential added area for each of the locations, while updating coverage matrix
-        # For each point, keep two of the best (potentially add more points) locations
+        # Compute potential added area for each of the locations, while also updating coverage matrix
+        # For each point, keep `top` of the best (potentially add more points) locations
         # Keep only those locations that potentially add more than `threshold` points
         #pylint: disable=too-many-statements
 
@@ -586,7 +667,6 @@ class ExtensionGrid(BaseGrid):
         coverage_matrix[self.horizon.full_matrix > 0] = True
         self.uncovered_before = coverage_matrix.size - coverage_matrix.sum()
 
-        # TODO: can use the same boundary_matrix_on_full here and for coverage; also less computations here
         # Compute boundary points of horizon: both inner and outer borders
         border_points = np.stack(np.where(self.horizon.boundaries_matrix), axis=-1)
         heights = self.horizon.matrix[border_points[:, 0], border_points[:, 1]]
@@ -665,12 +745,14 @@ class ExtensionGrid(BaseGrid):
                          for i in range(0, len(locations), self.batch_size))
 
     def to_names(self, id_array):
-        """ !!. """
+        """ Convert the first two columns of sampled locations into geometry and label string names. """
         return np.array([(self.geometry_name, self.horizon_name) for ids in id_array])
 
     @property
     def uncovered_after(self):
-        """ !!. """
+        """ Number of points not covered in the horizon, if all of the locations would
+        add their maximum potential amount of pixels to the labeling.
+        """
         coverage_matrix = self.geometry.zero_traces.copy().astype(np.bool_)
         coverage_matrix[self.horizon.full_matrix > 0] = True
 
@@ -679,7 +761,19 @@ class ExtensionGrid(BaseGrid):
         return coverage_matrix.size - coverage_matrix.sum()
 
     def show(self, markers=False, overlay=True, frequency=1, **kwargs):
-        """ !!. """
+        """ Display the grid over horizon overlay.
+
+        Parameters
+        ----------
+        markers : bool
+            Whether to show markers at location origins.
+        overlay : bool
+            Whether to show overlayed mask for locations.
+        frequency : int
+            Frequency of shown overlayed masks.
+        kwargs : dict
+            Other parameters to pass to the plotting function.
+        """
         hm = self.horizon.full_matrix
         hm[hm < 0] = np.nan
         fig = self.geometry.show(hm, cmap='Depths', colorbar=False, return_figure=True, **kwargs)
@@ -708,14 +802,17 @@ class ExtensionGrid(BaseGrid):
 
 @njit
 def compute_potential(locations, coverage_matrix, shape):
-    """ !!. """
-    # For each location, compute the amount of points it would potentially add to the horizon
+    """ For each location, compute the amount of points it would potentially add to the labeling.
+    If the shape of a location is not the same, as requested at grid initialization, we place `-1` value instead:
+    that is filtered out later.
+    """
     area = shape[0] * shape[1]
     buffer = np.empty((len(locations)), dtype=np.int32)
 
     for i, (_, i_start, x_start, _, i_stop, x_stop, _) in enumerate(locations):
         sliced = coverage_matrix[i_start:i_stop, x_start:x_stop].ravel()
         covered = sliced.sum()
+
         if len(sliced) == area:
             buffer[i] = area - covered
             coverage_matrix[i_start:i_stop, x_start:x_stop] = True

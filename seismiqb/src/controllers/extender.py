@@ -86,14 +86,13 @@ class Extender(Enhancer):
                 merge_code, _ = Horizon.verify_merge(horizon, patch_horizon,
                                                      mean_threshold=5.5, adjacency=5)
                 if merge_code == 3:
-                    # print('merging!')
                     _ = horizon.overlap_merge(patch_horizon, inplace=True)
 
             # Log length increase
             curr_len = len(horizon)
             if (curr_len - prev_len) < threshold:
                 break
-            self.log(f'Iteration{i}:  extended from {prev_len} to {curr_len}, + {curr_len - prev_len}')
+            self.log(f'Iteration {i}:  extended from {prev_len} to {curr_len}, + {curr_len - prev_len}')
             prev_len = curr_len
 
             # Cleanup
