@@ -443,6 +443,7 @@ class HorizonController(BaseController):
                    f'\ncoverage={horizon.coverage:4.3f}\ncorrs={info["corrs"]:4.3f}'
                    f'\nphase={info["phase"]:4.3f}\navg depth={horizon.h_mean:4.3f}')
             self.log(indent(msg, ' '*shift))
+            self.log(f'Done evaluation for {horizon.name}')
         return results
 
     # Pipelines

@@ -146,7 +146,11 @@ class HorizonSampler(Sampler):
         shift = np.random.randint(low=-int(self.height*0.9), high=-int(self.height*0.1),
                                   size=(size, 1), dtype=np.int32)
         sampled[:, [3, 6]] += shift
+
+        np.clip(sampled[:, 3], 0, self.geometry.cube_shape[2] - self.shape[2], out=sampled[:, 3])
+        np.clip(sampled[:, 6], 0, self.geometry.cube_shape[2], out=sampled[:, 6])
         return sampled
+
 
     def __repr__(self):
         return f'<HorizonSampler for {self.horizon.short_name}: '\
