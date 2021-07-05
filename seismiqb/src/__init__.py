@@ -6,7 +6,7 @@ from .geometry import SeismicGeometry
 from .horizon import UnstructuredHorizon, StructuredHorizon, Horizon
 from .geobody import GeoBody
 from .fault import Fault
-from .samplers import SeismicSampler, HorizonSampler, BaseGrid, RegularGrid, ExtensionGrid
+from .samplers import GeometrySampler, HorizonSampler, SeismicSampler, BaseGrid, RegularGrid, ExtensionGrid
 from .metrics import HorizonMetrics, GeometryMetrics
 from .functional import *
 from .layers import *

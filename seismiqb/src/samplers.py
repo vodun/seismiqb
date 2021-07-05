@@ -24,8 +24,157 @@ from .utility_classes import IndexedDict
 from ..batchflow import Sampler, ConstantSampler
 
 
+class BaseSampler(Sampler):
+    """ Common logic of making locations. Refer to the documentation of inherited classes for more details. """
+    def _make_locations(self, points, matrix, shape, ranges, threshold, filtering_matrix):
+        # Parse parameters
+        shape = np.array(shape)
+        shape_t = shape[[1, 0, 2]]
+        n_threshold = np.int32(shape[0] * shape[1] * threshold)
 
-class HorizonSampler(Sampler):
+        # Keep only points, that can be a starting point for a crop of given shape
+        i_mask = ((ranges[:2, 0] < points[:, :2]).all(axis=1) &
+                  ((points[:, :2] + shape[:2]) < ranges[:2, 1]).all(axis=1))
+        x_mask = ((ranges[:2, 0] < points[:, :2]).all(axis=1) &
+                  ((points[:, :2] + shape_t[:2]) < ranges[:2, 1]).all(axis=1))
+        mask = i_mask | x_mask
+
+        points = points[mask]
+        i_mask = i_mask[mask]
+        x_mask = x_mask[mask]
+
+        # Apply filtration
+        if filtering_matrix is not None:
+            points = filtering_function(points, filtering_matrix)
+
+        # Keep only points, that produce crops with horizon larger than threshold; append flag
+        points = check_points(points, matrix, shape[:2], i_mask, x_mask, n_threshold)
+
+        # Transform points to (orientation, i_start, x_start, h_start, i_stop, x_stop, h_stop)
+        buffer = np.empty((len(points), 7), dtype=np.int32)
+        buffer[:, 0] = points[:, 3]
+        buffer[:, [1, 2, 3]] = points[:, [0, 1, 2]]
+        buffer[:, [4, 5, 6]] = points[:, [0, 1, 2]]
+        buffer[buffer[:, 0] == 0, 4:7] += shape
+        buffer[buffer[:, 0] == 1, 4:7] += shape_t
+
+        self.n = len(buffer)
+        self.shape = shape
+        self.shape_t = shape_t
+        self.height = shape[2]
+        self.ranges = ranges
+        self.threshold = threshold
+        self.n_threshold = n_threshold
+        return buffer
+
+
+    @property
+    def orientation_matrix(self):
+        """ Possible locations, mapped on geometry.
+            - np.nan where no locations can be sampled.
+            - 1 where only iline-oriented crops can be sampled.
+            - 2 where only xline-oriented crops can be sampled.
+            - 3 where both types of crop orientations can be sampled.
+        """
+        matrix = np.zeros_like(self.matrix)
+        orientations = self.locations[:, 0].astype(np.bool_)
+
+        i_locations = self.locations[~orientations]
+        matrix[i_locations[:, 1], i_locations[:, 2]] += 1
+
+        x_locations = self.locations[orientations]
+        matrix[x_locations[:, 1], x_locations[:, 2]] += 2
+
+        matrix[matrix == 0] = np.nan
+        return matrix
+
+
+class GeometrySampler(BaseSampler):
+    """ Generator of crop locations, based on a geometry. Not intended to be used directly, see `SeismicSampler`.
+    Makes locations that:
+        - start from the non-dead trace on a geometry, exluding those marked by `filtering_matrix`
+        - contain more than `threshold` non-dead traces inside
+        - don't go beyond cube limits
+
+    Locations are produced as np.ndarray of (size, 9) shape with following columns:
+        (geometry_id, geometry_id, orientation, i_start, x_start, h_start, i_stop, x_stop, h_stop).
+    Depth location is randomized in desired `ranges`.
+
+    Under the hood, we prepare `locations` attribute:
+        - filter non-dead trace coordinates so that only points that can generate
+        either inline or crossline oriented crop (or both) remain
+        - apply `filtering_matrix` to remove more points
+        - keep only those points and directions which create crops with more than `threshold` non-dead traces
+        - store all possible locations for each of the remaining points
+    For sampling, we randomly choose `size` rows from `locations` and generate height in desired range.
+
+    Parameters
+    ----------
+    geometry : SeismicGeometry
+        Geometry to base sampler on.
+    shape : tuple
+        Shape of crop locations to generate.
+    threshold : float
+        Minimum proportion of labeled points in each sampled location.
+    ranges : sequence, optional
+        Sequence of three tuples of two ints or `None`s.
+        If tuple of two ints, then defines ranges of sampling along this axis.
+        If None, then geometry limits are used (no constraints).
+    filtering_matrix : np.ndarray, optional
+        Map of points to remove from potentially generated locations.
+    geometry_id, label_id : int
+        Used as the first two columns of sampled values.
+    """
+    dim = 2 + 1 + 6 # dimensionality of sampled points: geometry_id and label_id, orientation, locations
+
+    def __init__(self, geometry, shape, threshold=0.05, ranges=None, filtering_matrix=None,
+                 geometry_id=0, label_id=0, **kwargs):
+        ranges = ranges or [None, None, None]
+        ranges = [item if item is not None else [0, c]
+                  for item, c in zip(ranges, geometry.cube_shape)]
+        ranges = np.array(ranges)
+
+        matrix = (1 - geometry.zero_traces).astype(np.float32)
+        idx = np.nonzero(matrix != 0)
+        points = np.hstack([idx[0].reshape(-1, 1),
+                            idx[1].reshape(-1, 1),
+                            np.zeros((len(idx[0]), 1), dtype=np.int32)]).astype(np.int32)
+
+        self.locations = self._make_locations(points=points, matrix=matrix,
+                                              shape=shape, ranges=ranges, threshold=threshold,
+                                              filtering_matrix=filtering_matrix)
+        self.kwargs = kwargs
+
+        self.geometry_id = geometry_id
+        self.label_id = label_id
+
+        self.geometry = geometry
+        self.matrix = matrix
+        self.name = geometry.short_name
+        self.displayed_name = geometry.short_name
+        super().__init__()
+
+
+    def sample(self, size):
+        """ Get exactly `size` locations. """
+        idx = np.random.randint(self.n, size=size)
+        sampled = self.locations[idx]
+
+        heights = np.random.randint(low=self.ranges[2, 0],
+                                    high=self.ranges[2, 1] - self.height,
+                                    size=size, dtype=np.int32)
+
+        buffer = np.empty((size, 9), dtype=np.int32)
+        buffer[:, 0] = self.geometry_id
+        buffer[:, 1] = self.label_id
+
+        buffer[:, [2, 3, 4, 6, 7]] = sampled[:, [0, 1, 2, 4, 5]]
+        buffer[:, 5] = heights
+        buffer[:, 8] = heights + self.height
+        return buffer
+
+
+class HorizonSampler(BaseSampler):
     """ Generator of crop locations, based on a single horizon. Not intended to be used directly, see `SeismicSampler`.
     Makes locations that:
         - start from the labeled point on horizon, exluding those marked by `filtering_matrix`
@@ -68,54 +217,17 @@ class HorizonSampler(Sampler):
     def __init__(self, horizon, shape, threshold=0.05, ranges=None, filtering_matrix=None,
                  geometry_id=0, label_id=0, **kwargs):
         geometry = horizon.geometry
-
-        shape = np.array(shape)
-        shape_t = shape[[1, 0, 2]]
-        n_threshold = np.int32(shape[0] * shape[1] * threshold)
-
-        ranges = ranges or [None, None, None]
-        ranges = [item if item is not None else [0, c] for item, c in zip(ranges, geometry.cube_shape)]
-        ranges = np.array(ranges)
-
-        points = horizon.points.copy()
         full_matrix = horizon.full_matrix
 
-        # Keep only points, that can be a starting point for a crop of given shape
-        i_mask = ((ranges[:2, 0] < points[:, :2]).all(axis=1) &
-                  ((points[:, :2] + shape[:2]) < ranges[:2, 1]).all(axis=1))
-        x_mask = ((ranges[:2, 0] < points[:, :2]).all(axis=1) &
-                  ((points[:, :2] + shape_t[:2]) < ranges[:2, 1]).all(axis=1))
-        mask = i_mask | x_mask
+        ranges = ranges or [None, None, None]
+        ranges = [item if item is not None else [0, c]
+                  for item, c in zip(ranges, geometry.cube_shape)]
+        ranges = np.array(ranges)
 
-        points = points[mask]
-        i_mask = i_mask[mask]
-        x_mask = x_mask[mask]
-
-        # Apply filtration
-        if filtering_matrix is not None:
-            points = filtering_function(points, filtering_matrix)
-
-        # Keep only points, that produce crops with horizon larger than threshold; append flag
-        points = check_points(points, full_matrix, shape[:2], i_mask, x_mask, n_threshold)
-
-        # Transform points to (orientation, i_start, x_start, h_start, i_stop, x_stop, h_stop)
-        buffer = np.empty((len(points), 7), dtype=np.int32)
-        buffer[:, 0] = points[:, 3]
-        buffer[:, [1, 2, 3]] = points[:, [0, 1, 2]]
-        buffer[:, [4, 5, 6]] = points[:, [0, 1, 2]]
-        buffer[buffer[:, 0] == 0, 4:7] += shape
-        buffer[buffer[:, 0] == 1, 4:7] += shape_t
-
-        # Store attributes
-        self.locations = buffer
-        self.n = len(buffer)
-
-        self.shape = shape
-        self.shape_t = shape_t
-        self.height = shape[2]
-        self.ranges = ranges
-        self.threshold = threshold
-        self.n_threshold = n_threshold
+        self.locations = self._make_locations(points=horizon.points.copy(),
+                                              matrix=full_matrix,
+                                              shape=shape, ranges=ranges, threshold=threshold,
+                                              filtering_matrix=filtering_matrix)
         self.kwargs = kwargs
 
         self.geometry_id = geometry_id
@@ -123,8 +235,9 @@ class HorizonSampler(Sampler):
 
         self.horizon = horizon
         self.geometry = horizon.geometry
-        self.full_matrix = full_matrix
+        self.matrix = full_matrix
         self.name = horizon.geometry.short_name
+        self.displayed_name = horizon.short_name
         super().__init__()
 
     def sample(self, size):
@@ -137,7 +250,7 @@ class HorizonSampler(Sampler):
 
             while accumulated < size:
                 sampled = self._sample(size*2)
-                condition = check_sampled(sampled, self.full_matrix, self.n_threshold)
+                condition = check_sampled(sampled, self.matrix, self.n_threshold)
 
                 sampled_list.append(sampled[condition])
                 accumulated += condition.sum()
@@ -167,26 +280,12 @@ class HorizonSampler(Sampler):
         return f'<HorizonSampler for {self.horizon.short_name}: '\
                f'shape={tuple(self.shape)}, threshold={self.threshold}>'
 
-
     @property
-    def matrix(self):
-        """ Possible locations, mapped on geometry.
-            - np.nan where no locations can be sampled.
-            - 1 where only iline-oriented crops can be sampled.
-            - 2 where only xline-oriented crops can be sampled.
-            - 3 where both types of crop orientations can be sampled.
-        """
-        matrix = np.zeros_like(self.horizon.full_matrix)
-        orientations = self.locations[:, 0].astype(np.bool_)
-
-        i_locations = self.locations[~orientations]
-        matrix[i_locations[:, 1], i_locations[:, 2]] += 1
-
-        x_locations = self.locations[orientations]
-        matrix[x_locations[:, 1], x_locations[:, 2]] += 2
-
-        matrix[matrix == 0] = np.nan
-        return matrix
+    def orientation_matrix(self):
+        orientation_matrix = super().orientation_matrix
+        if self.horizon.is_carcass:
+            orientation_matrix = self.horizon.enlarge_carcass_image(orientation_matrix, 9)
+        return orientation_matrix
 
 
 @njit
@@ -301,7 +400,7 @@ class SeismicSampler(Sampler):
         proportions = proportions or [1 / len(labels) for _ in labels]
 
         for (geometry_id, ((idx, list_labels), p)) in enumerate(zip(labels.items(), proportions)):
-            cube_sampler = 0 & ConstantSampler(np.int32(0), dim=baseclass.dim)
+            list_labels = list_labels if isinstance(list_labels, (tuple, list)) else [list_labels]
 
             # Unpack parameters
             shape_ = shape[idx] if isinstance(shape, dict) else shape
@@ -309,6 +408,8 @@ class SeismicSampler(Sampler):
             filtering_matrix_ = filtering_matrix[idx] if isinstance(filtering_matrix, dict) else filtering_matrix
             ranges_ = ranges[idx] if isinstance(ranges, dict) else ranges
 
+            # Mixture for each cube
+            cube_sampler = 0 & ConstantSampler(np.int32(0), dim=baseclass.dim)
             for label_id, label in enumerate(list_labels):
                 label_sampler = baseclass(label, shape=shape_, threshold=threshold_,
                                           ranges=ranges_, filtering_matrix=filtering_matrix_,
@@ -318,6 +419,7 @@ class SeismicSampler(Sampler):
                 samplers[idx].append(label_sampler)
                 names[(geometry_id, label_id)] = (idx, label.short_name)
 
+            # Resulting mixture
             sampler = sampler | (p & cube_sampler)
             geometry_names[geometry_id] = idx
 
@@ -329,6 +431,7 @@ class SeismicSampler(Sampler):
         self.shape = shape
         self.threshold = threshold
         self.proportions = proportions
+        self.baseclass = baseclass
 
     def sample(self, size):
         """ Generate exactly `size` locations. """
@@ -352,23 +455,23 @@ class SeismicSampler(Sampler):
 
     def show_locations(self, ncols=2, **kwargs):
         """ Visualize on geometry map by using underlying `locations` structure. """
-        for idx, samplers_lst in self.samplers.items():
-            geometry = samplers_lst[0].geometry
-            images = [sampler.horizon.enlarge_carcass_image(sampler.matrix, 9)
-                      if sampler.horizon.is_carcass else sampler.matrix
-                      for sampler in samplers_lst]
+        #TODO: don't use `horizon` here
+        for idx, samplers_list in self.samplers.items():
+            geometry = samplers_list[0].geometry
+
+            images = [sampler.orientation_matrix for sampler in samplers_list]
             images = [[image, geometry.zero_traces] for image in images]
 
-            ncols_ = min(ncols, len(samplers_lst))
-            nrows = len(samplers_lst) // ncols_ or 1
+            ncols_ = min(ncols, len(samplers_list))
+            nrows = len(samplers_list) // ncols_ or 1
 
             kwargs = {
-                'cmap': [['Sampler', 'black']] * len(samplers_lst),
-                'alpha': [[1.0, 0.4]] * len(samplers_lst),
+                'cmap': [['Sampler', 'black']] * len(samplers_list),
+                'alpha': [[1.0, 0.4]] * len(samplers_list),
                 'ncols': ncols_, 'nrows': nrows,
                 'figsize': (16, 5*nrows),
-                'title': [sampler.horizon.short_name for sampler in samplers_lst],
-                'suptitle_label': idx if len(samplers_lst)>1 else '',
+                'title': [sampler.displayed_name for sampler in samplers_list],
+                'suptitle_label': idx if len(samplers_list) > 1 else '',
                 'constrained_layout': True,
                 'colorbar': False,
                 'legend_label': ['ILINES and CROSSLINES', 'only ILINES', 'only CROSSLINES',
