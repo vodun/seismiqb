@@ -26,17 +26,22 @@ from ..batchflow import Sampler, ConstantSampler
 
 class BaseSampler(Sampler):
     """ Common logic of making locations. Refer to the documentation of inherited classes for more details. """
-    def _make_locations(self, points, matrix, shape, ranges, threshold, filtering_matrix):
+    def _make_locations(self, geometry, points, matrix, crop_shape, ranges, threshold, filtering_matrix):
         # Parse parameters
-        shape = np.array(shape)
-        shape_t = shape[[1, 0, 2]]
-        n_threshold = np.int32(shape[0] * shape[1] * threshold)
+        ranges = ranges or [None, None, None]
+        ranges = [item if item is not None else [0, c]
+                  for item, c in zip(ranges, geometry.cube_shape)]
+        ranges = np.array(ranges)
+
+        crop_shape = np.array(crop_shape)
+        crop_shape_t = crop_shape[[1, 0, 2]]
+        n_threshold = np.int32(crop_shape[0] * crop_shape[1] * threshold)
 
         # Keep only points, that can be a starting point for a crop of given shape
         i_mask = ((ranges[:2, 0] < points[:, :2]).all(axis=1) &
-                  ((points[:, :2] + shape[:2]) < ranges[:2, 1]).all(axis=1))
+                  ((points[:, :2] + crop_shape[:2]) < ranges[:2, 1]).all(axis=1))
         x_mask = ((ranges[:2, 0] < points[:, :2]).all(axis=1) &
-                  ((points[:, :2] + shape_t[:2]) < ranges[:2, 1]).all(axis=1))
+                  ((points[:, :2] + crop_shape_t[:2]) < ranges[:2, 1]).all(axis=1))
         mask = i_mask | x_mask
 
         points = points[mask]
@@ -48,20 +53,20 @@ class BaseSampler(Sampler):
             points = filtering_function(points, filtering_matrix)
 
         # Keep only points, that produce crops with horizon larger than threshold; append flag
-        points = check_points(points, matrix, shape[:2], i_mask, x_mask, n_threshold)
+        points = check_points(points, matrix, crop_shape[:2], i_mask, x_mask, n_threshold)
 
         # Transform points to (orientation, i_start, x_start, h_start, i_stop, x_stop, h_stop)
         buffer = np.empty((len(points), 7), dtype=np.int32)
         buffer[:, 0] = points[:, 3]
         buffer[:, 1:4] = points[:, 0:3]
         buffer[:, 4:7] = points[:, 0:3]
-        buffer[buffer[:, 0] == 0, 4:7] += shape
-        buffer[buffer[:, 0] == 1, 4:7] += shape_t
+        buffer[buffer[:, 0] == 0, 4:7] += crop_shape
+        buffer[buffer[:, 0] == 1, 4:7] += crop_shape_t
 
         self.n = len(buffer)
-        self.shape = shape
-        self.shape_t = shape_t
-        self.height = shape[2]
+        self.crop_shape = crop_shape
+        self.crop_shape_t = crop_shape_t
+        self.crop_height = crop_shape[2]
         self.ranges = ranges
         self.threshold = threshold
         self.n_threshold = n_threshold
@@ -112,13 +117,13 @@ class GeometrySampler(BaseSampler):
     ----------
     geometry : SeismicGeometry
         Geometry to base sampler on.
-    shape : tuple
+    crop_shape : tuple
         Shape of crop locations to generate.
     threshold : float
         Minimum proportion of labeled points in each sampled location.
     ranges : sequence, optional
         Sequence of three tuples of two ints or `None`s.
-        If tuple of two ints, then defines ranges of sampling along this axis.
+        If tuple of two ints, then defines ranges of sampling along corresponding axis.
         If None, then geometry limits are used (no constraints).
     filtering_matrix : np.ndarray, optional
         Map of points to remove from potentially generated locations.
@@ -127,21 +132,16 @@ class GeometrySampler(BaseSampler):
     """
     dim = 2 + 1 + 6 # dimensionality of sampled points: geometry_id and label_id, orientation, locations
 
-    def __init__(self, geometry, shape, threshold=0.05, ranges=None, filtering_matrix=None,
+    def __init__(self, geometry, crop_shape, threshold=0.05, ranges=None, filtering_matrix=None,
                  geometry_id=0, label_id=0, **kwargs):
-        ranges = ranges or [None, None, None]
-        ranges = [item if item is not None else [0, c]
-                  for item, c in zip(ranges, geometry.cube_shape)]
-        ranges = np.array(ranges)
-
         matrix = (1 - geometry.zero_traces).astype(np.float32)
         idx = np.nonzero(matrix != 0)
         points = np.hstack([idx[0].reshape(-1, 1),
                             idx[1].reshape(-1, 1),
                             np.zeros((len(idx[0]), 1), dtype=np.int32)]).astype(np.int32)
 
-        self.locations = self._make_locations(points=points, matrix=matrix,
-                                              shape=shape, ranges=ranges, threshold=threshold,
+        self.locations = self._make_locations(geometry=geometry, points=points, matrix=matrix,
+                                              crop_shape=crop_shape, ranges=ranges, threshold=threshold,
                                               filtering_matrix=filtering_matrix)
         self.kwargs = kwargs
 
@@ -154,14 +154,13 @@ class GeometrySampler(BaseSampler):
         self.displayed_name = geometry.short_name
         super().__init__()
 
-
     def sample(self, size):
         """ Get exactly `size` locations. """
         idx = np.random.randint(self.n, size=size)
         sampled = self.locations[idx]
 
         heights = np.random.randint(low=self.ranges[2, 0],
-                                    high=self.ranges[2, 1] - self.height,
+                                    high=self.ranges[2, 1] - self.crop_height,
                                     size=size, dtype=np.int32)
 
         buffer = np.empty((size, 9), dtype=np.int32)
@@ -170,8 +169,13 @@ class GeometrySampler(BaseSampler):
 
         buffer[:, [2, 3, 4, 6, 7]] = sampled[:, [0, 1, 2, 4, 5]]
         buffer[:, 5] = heights
-        buffer[:, 8] = heights + self.height
+        buffer[:, 8] = heights + self.crop_height
         return buffer
+
+    def __repr__(self):
+        return f'<GeometrySampler for {self.displayed_name}: '\
+               f'crop_shape={tuple(self.crop_shape)}, threshold={self.threshold}>'
+
 
 
 class HorizonSampler(BaseSampler):
@@ -198,7 +202,7 @@ class HorizonSampler(BaseSampler):
     ----------
     horizon : Horizon
         Horizon to base sampler on.
-    shape : tuple
+    crop_shape : tuple
         Shape of crop locations to generate.
     threshold : float
         Minimum proportion of labeled points in each sampled location.
@@ -214,19 +218,13 @@ class HorizonSampler(BaseSampler):
     """
     dim = 2 + 1 + 6 # dimensionality of sampled points: geometry_id and label_id, orientation, locations
 
-    def __init__(self, horizon, shape, threshold=0.05, ranges=None, filtering_matrix=None,
+    def __init__(self, horizon, crop_shape, threshold=0.05, ranges=None, filtering_matrix=None,
                  geometry_id=0, label_id=0, **kwargs):
         geometry = horizon.geometry
-        full_matrix = horizon.full_matrix
+        matrix = horizon.full_matrix
 
-        ranges = ranges or [None, None, None]
-        ranges = [item if item is not None else [0, c]
-                  for item, c in zip(ranges, geometry.cube_shape)]
-        ranges = np.array(ranges)
-
-        self.locations = self._make_locations(points=horizon.points.copy(),
-                                              matrix=full_matrix,
-                                              shape=shape, ranges=ranges, threshold=threshold,
+        self.locations = self._make_locations(geometry=geometry, points=horizon.points.copy(), matrix=matrix,
+                                              crop_shape=crop_shape, ranges=ranges, threshold=threshold,
                                               filtering_matrix=filtering_matrix)
         self.kwargs = kwargs
 
@@ -235,7 +233,7 @@ class HorizonSampler(BaseSampler):
 
         self.horizon = horizon
         self.geometry = horizon.geometry
-        self.matrix = full_matrix
+        self.matrix = matrix
         self.name = horizon.geometry.short_name
         self.displayed_name = horizon.short_name
         super().__init__()
@@ -267,18 +265,18 @@ class HorizonSampler(BaseSampler):
         idx = np.random.randint(self.n, size=size)
         sampled = self.locations[idx]
 
-        shift = np.random.randint(low=-int(self.height*0.9), high=-int(self.height*0.1),
+        shift = np.random.randint(low=-int(self.crop_height*0.9), high=-int(self.crop_height*0.1),
                                   size=(size, 1), dtype=np.int32)
         sampled[:, [3, 6]] += shift
 
-        np.clip(sampled[:, 3], 0, self.geometry.cube_shape[2] - self.shape[2], out=sampled[:, 3])
+        np.clip(sampled[:, 3], 0, self.geometry.cube_shape[2] - self.crop_height, out=sampled[:, 3])
         np.clip(sampled[:, 6], 0, self.geometry.cube_shape[2], out=sampled[:, 6])
         return sampled
 
 
     def __repr__(self):
-        return f'<HorizonSampler for {self.horizon.short_name}: '\
-               f'shape={tuple(self.shape)}, threshold={self.threshold}>'
+        return f'<HorizonSampler for {self.displayed_name}: '\
+               f'crop_shape={tuple(self.crop_shape)}, threshold={self.threshold}>'
 
     @property
     def orientation_matrix(self):
@@ -289,7 +287,7 @@ class HorizonSampler(BaseSampler):
 
 
 @njit
-def check_points(points, matrix, shape, i_mask, x_mask, threshold):
+def check_points(points, matrix, crop_shape, i_mask, x_mask, threshold):
     """ Compute points, which would generate crops with more than `threshold` labeled pixels.
     For each point, we test two possible shapes (i-oriented and x-oriented) and check `matrix` to compute the
     number of present points. Therefore, each of the initial points can result in up to two points in the output.
@@ -302,7 +300,7 @@ def check_points(points, matrix, shape, i_mask, x_mask, threshold):
         Points in (i_start, x_start, h_start) format.
     matrix : np.ndarray
         Depth map in cube coordinates.
-    shape : tuple of two ints
+    crop_shape : tuple of two ints
         Spatial shape of crops to generate: (i_shape, x_shape).
     i_mask : np.ndarray
         For each point, whether to test i-oriented shape.
@@ -311,7 +309,7 @@ def check_points(points, matrix, shape, i_mask, x_mask, threshold):
     threshold : int
         Minimum amount of points in a generated crop.
     """
-    shape_i, shape_x = shape
+    shape_i, shape_x = crop_shape
 
     # Return inline, crossline, corrected_depth (mean across crop), and 0/1 as i/x flag
     buffer = np.empty((2 * len(points), 4), dtype=np.int32)
@@ -377,7 +375,7 @@ class SeismicSampler(Sampler):
         Proportion of each cube in the resulting mixture.
     baseclass : type
         Class for initializing individual label samplers.
-    shape : tuple
+    crop_shape : tuple
         Shape of crop locations to generate.
     threshold : float
         Minimum proportion of labeled points in each sampled location.
@@ -391,8 +389,17 @@ class SeismicSampler(Sampler):
     kwargs : dict
         Other parameters of initializing label samplers.
     """
-    def __init__(self, labels, shape, proportions=None, baseclass=HorizonSampler,
+    CLASS_TO_MODE = {
+        GeometrySampler: ['geometry', 'cube'],
+        HorizonSampler: ['horizon', 'surface'],
+    }
+    MODE_TO_CLASS = {mode : class_
+                     for class_, mode_list in CLASS_TO_MODE.items()
+                     for mode in mode_list}
+
+    def __init__(self, labels, crop_shape, proportions=None, mode='geometry',
                  threshold=0.05, ranges=None, filtering_matrix=None, **kwargs):
+        baseclass = self.MODE_TO_CLASS[mode]
 
         names, geometry_names = {}, {}
         sampler = 0 & ConstantSampler(np.int32(0), dim=baseclass.dim)
@@ -403,7 +410,7 @@ class SeismicSampler(Sampler):
             list_labels = list_labels if isinstance(list_labels, (tuple, list)) else [list_labels]
 
             # Unpack parameters
-            shape_ = shape[idx] if isinstance(shape, dict) else shape
+            crop_shape_ = crop_shape[idx] if isinstance(crop_shape, dict) else crop_shape
             threshold_ = threshold[idx] if isinstance(threshold, dict) else threshold
             filtering_matrix_ = filtering_matrix[idx] if isinstance(filtering_matrix, dict) else filtering_matrix
             ranges_ = ranges[idx] if isinstance(ranges, dict) else ranges
@@ -411,7 +418,7 @@ class SeismicSampler(Sampler):
             # Mixture for each cube
             cube_sampler = 0 & ConstantSampler(np.int32(0), dim=baseclass.dim)
             for label_id, label in enumerate(list_labels):
-                label_sampler = baseclass(label, shape=shape_, threshold=threshold_,
+                label_sampler = baseclass(label, crop_shape=crop_shape_, threshold=threshold_,
                                           ranges=ranges_, filtering_matrix=filtering_matrix_,
                                           geometry_id=geometry_id, label_id=label_id, **kwargs)
                 cube_sampler = cube_sampler | label_sampler
@@ -428,9 +435,10 @@ class SeismicSampler(Sampler):
         self.names = names
         self.geometry_names = geometry_names
 
-        self.shape = shape
+        self.crop_shape = crop_shape
         self.threshold = threshold
         self.proportions = proportions
+        self.mode = mode
         self.baseclass = baseclass
 
     def sample(self, size):
@@ -519,10 +527,23 @@ class BaseGrid:
         self.batch_size = batch_size
 
         self._make_locations()
+        self._iterator = None
 
     def _make_locations(self):
         raise NotImplementedError('Must be implemented in sub-classes')
 
+
+    # Iteration protocol
+    @property
+    def iterator(self):
+        """ Iterator that generates batches of locations. """
+        if self._iterator is None:
+            self._iterator = self.make_iterator()
+        return self._iterator
+
+    def make_iterator(self):
+        """ Iterator that generates batches of locations. """
+        return (self.locations[i:i+self.batch_size] for i in range(0, len(self), self.batch_size))
 
     def __call__(self, batch_size=None):
         _ = batch_size
@@ -532,7 +553,6 @@ class BaseGrid:
         """ Yield the next batch of locations. """
         _ = batch_size
         return next(self.iterator)
-
 
     def __len__(self):
         """ Total number of locations to be generated. """
@@ -549,6 +569,25 @@ class BaseGrid:
         return np.ceil(len(self) / self.batch_size).astype(np.int32)
 
 
+    # Concatenate multiple grids into one
+    def update(self, other):
+        """ Update locations of a current grid with locations from other instance of BaseGrid. """
+        #pylint: disable=access-member-before-definition
+        if not isinstance(other, BaseGrid):
+            raise TypeError('Other should be an instance of `BaseGrid`')
+        if self.name != other.name:
+            raise ValueError('Grids should be for the same geometry!')
+        locations = np.concatenate([self.locations, other.locations], axis=0)
+        self.locations = np.unique(locations, axis=0)
+        self._iterator = None
+
+    def __add__(self, other):
+        self.update(other)
+
+    def __and__(self, other):
+        self.update(other)
+
+    # Useful info
     @property
     def origin(self):
         """ The upper leftmost point of all locations. """
@@ -671,17 +710,14 @@ class RegularGrid(BaseGrid):
         buffer[:, [6, 7, 8]] += self.crop_shape
         self.locations = buffer
 
-        if len(buffer) > 0:
-            iterator = (buffer[i:i+self.batch_size]
-                        for i in range(0, len(buffer), self.batch_size))
-        else:
-            iterator = iter(())
-        self.iterator = iterator
-
     def to_names(self, id_array):
         """ Convert the first two columns of sampled locations into geometry and label string names. """
         return np.array([(self.name, 'unknown') for ids in id_array])
 
+
+    def __repr__(self):
+        return f'<RegularGrid for {self.geometry.short_name}: '\
+               f'origin={tuple(self.origin)}, endpoint={tuple(self.endpoint)}, crop_shape={tuple(self.crop_shape)}>'
 
     def show(self, grid=True, markers=False, n_patches=None, **kwargs):
         """ Display the grid over geometry overlay.
@@ -864,9 +900,6 @@ class ExtensionGrid(BaseGrid):
         locations[:, [0, 1]] = -1
         locations[:, 2:9] = buffer
         self.locations = locations
-
-        self.iterator = (locations[i:i+self.batch_size]
-                         for i in range(0, len(locations), self.batch_size))
 
     def to_names(self, id_array):
         """ Convert the first two columns of sampled locations into geometry and label string names. """

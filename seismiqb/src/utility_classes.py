@@ -477,7 +477,7 @@ class GMeanAccumulator3D(Accumulator3D):
 class IndexedDict(OrderedDict):
     """ Allows to use both indices and keys to subscript. """
     def __getitem__(self, key):
-        if isinstance(key, (int, np.int8, np.int32, np.int64)):
+        if isinstance(key, (int, np.integer)):
             key = list(self.keys())[key]
         return super().__getitem__(key)
 

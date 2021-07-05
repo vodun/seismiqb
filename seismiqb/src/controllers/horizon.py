@@ -158,10 +158,11 @@ class HorizonController(BaseController):
             self.log(f'Created {frequencies} grid on {idx}; coverage is: {grid_coverage:4.4f}')
 
     def make_sampler(self, dataset, **kwargs):
-        """ Create sampler. Works inplace. """
+        """ Create sampler for generating locations to train on. """
         crop_shape = self.config['train']['crop_shape']
         rebatch_threshold = self.config['train']['rebatch_threshold']
-        sampler = SeismicSampler(labels=dataset.labels, shape=crop_shape, threshold=rebatch_threshold)
+        sampler = SeismicSampler(labels=dataset.labels, crop_shape=crop_shape,
+                                 threshold=rebatch_threshold, mode='horizon')
 
         sampler.show_locations(show=self.plot, savepath=self.make_savepath('sampler_locations.png'))
         sampler.show_sampled(show=self.plot, savepath=self.make_savepath('sampler_generated.png'))

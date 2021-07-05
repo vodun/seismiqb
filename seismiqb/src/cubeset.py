@@ -110,14 +110,14 @@ class SeismicCubeset(Dataset):
         getattr(self, attr)[idx][item_num] = value
 
 
-    def gen_batch(self, batch_size, shuffle=False, n_iters=1, n_epochs=None, drop_last=False,
+    def gen_batch(self, batch_size=None, shuffle=False, n_iters=None, n_epochs=None, drop_last=False,
                   bar=False, iter_params=None, **kwargs):
         """ Remove `n_epochs`, `shuffle` and `drop_last` from passed arguments. """
         #pylint: disable=blacklisted-name
+        batch_size = batch_size or len(self)
         if (n_epochs is not None and n_epochs != 1) or shuffle or drop_last:
             raise TypeError(f'`SeismicCubeset` does not work with `n_epochs`, `shuffle` or `drop_last`!'
                             f'`{n_epochs}`, `{shuffle}`, `{drop_last}`')
-
         return super().gen_batch(batch_size, n_iters=n_iters, bar=bar, iter_params=iter_params, **kwargs)
 
 
