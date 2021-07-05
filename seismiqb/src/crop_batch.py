@@ -135,8 +135,7 @@ class SeismicCropBatch(Batch):
         generated = generator(batch_size)
 
         # Convert IDs to names, that are used in dataset
-        names = generator.to_names(generated[:, [0, 1]])
-        geometry_names, label_names = names[:, 0], names[:, 1]
+        geometry_names, label_names = generator.to_names(generated[:, [0, 1]]).T
 
         # Locations: 3D slices in the cube coordinates
         locations = [[slice(i_start, i_stop), slice(x_start, x_stop), slice(h_start, h_stop)]

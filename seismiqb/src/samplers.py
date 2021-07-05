@@ -1,9 +1,9 @@
 """ Generator of locations of two types: Samplers and Grids.
 
 Samplers are making random (label-dependant) locations to train models, while
-Grids are used for inference and create locations based on geometry or current state of labeled surface.
+Grids create predetermined locations based on geometry or current state of labeled surface and are used for inference.
 
-Locations describe the cube and the exact place to load from, and come in the format of:
+Locations describe the cube and the exact place to load from in the following format:
 (geometry_id, label_id, orientation, i_start, x_start, h_start, i_stop, x_stop, h_stop).
 
 Locations are passed to `make_locations` method of `SeismicCropBatch`, which
@@ -53,8 +53,8 @@ class BaseSampler(Sampler):
         # Transform points to (orientation, i_start, x_start, h_start, i_stop, x_stop, h_stop)
         buffer = np.empty((len(points), 7), dtype=np.int32)
         buffer[:, 0] = points[:, 3]
-        buffer[:, [1, 2, 3]] = points[:, [0, 1, 2]]
-        buffer[:, [4, 5, 6]] = points[:, [0, 1, 2]]
+        buffer[:, 1:4] = points[:, 0:3]
+        buffer[:, 4:7] = points[:, 0:3]
         buffer[buffer[:, 0] == 0, 4:7] += shape
         buffer[buffer[:, 0] == 1, 4:7] += shape_t
 

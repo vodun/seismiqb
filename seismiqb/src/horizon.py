@@ -875,7 +875,21 @@ class Horizon:
 
 
     def make_carcass(self, frequencies=100, regular=True, margin=50, apply_smoothing=False, **kwargs):
-        """ Cut carcass out of a horizon. Returns a new instance. """
+        """ Cut carcass out of a horizon. Returns a new instance.
+
+        Parameters
+        ----------
+        frequencies : int or sequence of ints
+            Frequencies of carcass lines.
+        regular : bool
+            Whether to make regular lines or base lines on geometry quality map.
+        margin : int
+            Margin from geometry edges to exclude from carcass.
+        apply_smoothing : bool
+            Whether to smooth out the result.
+        kwargs : dict
+            Other parameters for grid creation, see `:meth:~.SeismicGeometry.make_grid`.
+        """
         frequencies = frequencies if isinstance(frequencies, (tuple, list)) else [frequencies]
         carcass = copy(self)
         carcass.name = carcass.name.replace('copy', 'carcass')
