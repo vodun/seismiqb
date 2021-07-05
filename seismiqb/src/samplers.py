@@ -53,28 +53,38 @@ class HorizonSampler(Sampler):
         Shape of crop locations to generate.
     threshold : float
         Minimum proportion of labeled points in each sampled location.
+    ranges : sequence, optional
+        Sequence of three tuples of two ints or `None`s.
+        If tuple of two ints, then defines ranges of sampling along this axis.
+        If None, then geometry limits are used (no constraints).
+        Note that we actually use only the first two elements, corresponding to spatial ranges.
     filtering_matrix : np.ndarray, optional
         Map of points to remove from potentially generated locations.
     geometry_id, label_id : int
         Used as the first two columns of sampled values.
     """
-    #TODO: add `ranges` parameter
     dim = 2 + 1 + 6 # dimensionality of sampled points: geometry_id and label_id, orientation, locations
 
-    def __init__(self, horizon, shape, threshold=0.05, filtering_matrix=None, geometry_id=0, label_id=0, **kwargs):
-
+    def __init__(self, horizon, shape, threshold=0.05, ranges=None, filtering_matrix=None,
+                 geometry_id=0, label_id=0, **kwargs):
         geometry = horizon.geometry
 
         shape = np.array(shape)
         shape_t = shape[[1, 0, 2]]
         n_threshold = np.int32(shape[0] * shape[1] * threshold)
 
+        ranges = ranges or [None, None, None]
+        ranges = [item if item is not None else [0, c] for item, c in zip(ranges, geometry.cube_shape)]
+        ranges = np.array(ranges)
+
         points = horizon.points.copy()
         full_matrix = horizon.full_matrix
 
         # Keep only points, that can be a starting point for a crop of given shape
-        i_mask = ((points[:, :2] + shape[:2]) < geometry.cube_shape[:2]).all(axis=1)
-        x_mask = ((points[:, :2] + shape_t[:2]) < geometry.cube_shape[:2]).all(axis=1)
+        i_mask = ((ranges[:2, 0] < points[:, :2]).all(axis=1) &
+                  ((points[:, :2] + shape[:2]) < ranges[:2, 1]).all(axis=1))
+        x_mask = ((ranges[:2, 0] < points[:, :2]).all(axis=1) &
+                  ((points[:, :2] + shape_t[:2]) < ranges[:2, 1]).all(axis=1))
         mask = i_mask | x_mask
 
         points = points[mask]
@@ -103,6 +113,7 @@ class HorizonSampler(Sampler):
         self.shape = shape
         self.shape_t = shape_t
         self.height = shape[2]
+        self.ranges = ranges
         self.threshold = threshold
         self.n_threshold = n_threshold
         self.kwargs = kwargs
@@ -271,13 +282,18 @@ class SeismicSampler(Sampler):
         Shape of crop locations to generate.
     threshold : float
         Minimum proportion of labeled points in each sampled location.
+    ranges : sequence, optional
+        Sequence of three tuples of two ints or `None`s.
+        If tuple of two ints, then defines ranges of sampling along this axis.
+        If None, then geometry limits are used (no constraints).
+        Note that we actually use only the first two elements, corresponding to spatial ranges.
     filtering_matrix : np.ndarray, optional
         Map of points to remove from potentially generated locations.
     kwargs : dict
         Other parameters of initializing label samplers.
     """
     def __init__(self, labels, shape, proportions=None, baseclass=HorizonSampler,
-                 threshold=0.05, filtering_matrix=None, **kwargs):
+                 threshold=0.05, ranges=None, filtering_matrix=None, **kwargs):
 
         names, geometry_names = {}, {}
         sampler = 0 & ConstantSampler(np.int32(0), dim=baseclass.dim)
@@ -291,10 +307,11 @@ class SeismicSampler(Sampler):
             shape_ = shape[idx] if isinstance(shape, dict) else shape
             threshold_ = threshold[idx] if isinstance(threshold, dict) else threshold
             filtering_matrix_ = filtering_matrix[idx] if isinstance(filtering_matrix, dict) else filtering_matrix
+            ranges_ = ranges[idx] if isinstance(ranges, dict) else ranges
 
             for label_id, label in enumerate(list_labels):
                 label_sampler = baseclass(label, shape=shape_, threshold=threshold_,
-                                          filtering_matrix=filtering_matrix_,
+                                          ranges=ranges_, filtering_matrix=filtering_matrix_,
                                           geometry_id=geometry_id, label_id=label_id, **kwargs)
                 cube_sampler = cube_sampler | label_sampler
 
