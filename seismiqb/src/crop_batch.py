@@ -2,6 +2,7 @@
 import string
 import random
 from copy import copy
+from warnings import warn
 
 import numpy as np
 import cv2
@@ -30,7 +31,7 @@ class SeismicCropBatch(Batch):
         'post': '_assemble'
     }
     # When an attribute containing one of keywords from list it accessed via `get`, firstly search it in `self.dataset`.
-    DATASET_ATTRIBUTES = ['label', 'geom', 'fan', 'channel']
+    DATASET_ATTRIBUTES = ['label', 'geom', 'fan', 'channel', 'horizon']
 
 
     def _init_component(self, *args, **kwargs):
@@ -175,6 +176,8 @@ class SeismicCropBatch(Batch):
         SeismicCropBatch
             Batch with positions of crops in specified component.
         """
+        # pylint: disable=protected-access
+
         # Create all the points and shapes
         if isinstance(shape, dict):
             shape = {k: np.asarray(v) for k, v in shape.items()}
@@ -364,7 +367,7 @@ class SeismicCropBatch(Batch):
         """
         location = self.get(ix, locations)
         nearest_horizon = self.get_nearest_horizon(ix, src_labels, location[2])
-        crop = nearest_horizon.load_attribute(src_attribute, location, **kwargs)
+        crop = nearest_horizon.load_attribute(src_attribute=src_attribute, location=location, **kwargs)
         if final_ndim == 3 and crop.ndim == 2:
             crop = crop[..., np.newaxis]
         elif final_ndim != crop.ndim:
@@ -641,10 +644,12 @@ class SeismicCropBatch(Batch):
         """
         if axis != -1:
             raise NotImplementedError("For now function works for `axis=-1` only.")
-        _ = dst
 
-        if not isinstance(src, (list, tuple, np.ndarray)) or len(src) < 2:
-            raise ValueError('Src must contain at least two components to concatenate')
+        if not isinstance(src, (list, tuple, np.ndarray)):
+            raise ValueError()
+        if len(src) == 1:
+            warn("Since `src` contains only one component, concatenation not needed.")
+
         items = [self.get(None, attr) for attr in src]
 
         depth = sum(item.shape[-1] for item in items)
@@ -1234,7 +1239,7 @@ class SeismicCropBatch(Batch):
             setattr(self, _dst, crop)
         return self
 
-    def plot_components(self, *components, idx=0, slide=None, mode='overlap', order_axes=None, **kwargs):
+    def plot_components(self, *components, idx=0, slide=None, **kwargs):
         """ Plot components of batch.
 
         Parameters
@@ -1244,48 +1249,46 @@ class SeismicCropBatch(Batch):
             If None, then no indexing is applied.
         components : str or sequence of str
             Components to get from batch and draw.
-        plot_mode : bool
-            If 'overlap', then images are drawn one over the other with transparency.
-            If 'separate', then images are drawn on separate layouts.
-        order_axes : sequence of int
-            Determines desired order of the axis. The first two are plotted.
         """
         if idx is not None:
-            imgs = [getattr(self, comp)[idx] for comp in components]
+            data = [getattr(self, comp)[idx] for comp in components]
         else:
-            imgs = [getattr(self, comp) for comp in components]
+            data = [getattr(self, comp) for comp in components]
 
         if slide is not None:
-            imgs = [img[slide] for img in imgs]
+            data = [item[slide] for item in data]
 
         # set some defaults
         kwargs = {
-            'label': 'Batch components',
-            'titles': components,
+            'figsize': (8 * len(components), 8),
+            'suptitle_label': 'Batch components',
+            'title': list(components),
             'xlabel': 'xlines',
             'ylabel': 'depth',
-            'cmap': ['gray'] + ['viridis']*len(components) if mode == 'separate' else 'gray',
+            'cmap': ['gray'] + ['viridis'] * len(components),
+            'bad_values': (),
             **kwargs
         }
 
-        plot_image(imgs, mode=mode, order_axes=order_axes, **kwargs)
+        plot_image(data, **kwargs)
 
     @action
     @inbatch_parallel(init='indices', post=None, target='for')
-    def update_container(self, ix, src, container, src_locations='locations', order=(0, 1, 2)):
-        """ Aggregate crops to form resulting cube
+    def update_accumulator(self, ix, src, accumulator, src_locations='locations', order=(0, 1, 2)):
+        """ Update accumulator with data from crops.
+
         Parameters
         ----------
         src : str
-            Component with crops
-        container : BaseAggregationContainer
-            Container for resulting cube aggregation.
+            Component with crops.
+        accumulator : Accumulator3D
+            Container for cube aggregation.
         src_locations : src
-            Component with crop location, default: locations
-        order : tuple
+            Component with crop location.
+        order : sequence
             The order of axes of the crop which corresponds to natural iline-xline-depth order
         """
         crop = self.get(ix, src)
         location = self.get(ix, src_locations)
-        container.put(crop.transpose(order), location)
+        accumulator.update(crop.transpose(order), location)
         return self

@@ -176,9 +176,9 @@ class ExportMixin:
         path_segy = path_segy or (os.path.splitext(path_hdf5)[0] + postfix + '.sgy')
         if not path_spec:
             if hasattr(self, 'segy_path'):
-                path_spec = self.segy_path
+                path_spec = self.segy_path.decode('ascii')
             else:
-                path_spec = os.path.splitext(self.path) + '.sgy'
+                path_spec = os.path.splitext(self.path)[0] + '.sgy'
 
         # By default, if path_hdf5 is not provided, `temp.hdf5` next to self.path will be used
         if path_hdf5 is None:

@@ -24,6 +24,7 @@ from ...batchflow.models.torch import EncoderDecoder
 from ..cubeset import SeismicCubeset, Horizon
 from ..metrics import HorizonMetrics, GeometryMetrics
 from ..plotters import plot_image
+from ..utility_classes import Accumulator3D
 
 from .base import BaseController
 
@@ -167,7 +168,12 @@ class HorizonController(BaseController):
 
     def make_sampler(self, dataset, bins=None, use_grid=False, grid_src='quality_grid', side_view=False, **kwargs):
         """ Create sampler. Works inplace. """
-        dataset.create_sampler(quality_grid=use_grid, bins=bins)
+        if use_grid:
+            quality_grid = True if isinstance(grid_src, str) else grid_src
+        else:
+            quality_grid = None
+
+        dataset.create_sampler(quality_grid=quality_grid, bins=bins)
         dataset.modify_sampler('train_sampler', finish=True, **kwargs)
         self.log('Created sampler')
 
@@ -176,13 +182,15 @@ class HorizonController(BaseController):
         dataset.samplers = None
 
         crop_shape = self.config['train']['crop_shape']
+        rebatch_threshold = self.config['train']['rebatch_threshold']
         for i, idx in enumerate(dataset.indices):
             postfix = f'_{idx}' if len(dataset.indices) > 1 else ''
             dataset.show_slices(
                 src_sampler='train_sampler', idx=i, normalize=False,
                 shape=crop_shape, side_view=side_view,
                 adaptive_slices=use_grid, grid_src=grid_src,
-                show=self.plot, cmap='Reds', interpolation='bilinear', figsize=(15, 15),
+                rebatch_threshold=rebatch_threshold,
+                show=self.plot, figsize=(15, 15),
                 savepath=self.make_savepath(f'sampled{postfix}.png')
             )
 
@@ -190,7 +198,8 @@ class HorizonController(BaseController):
                 src_sampler='train_sampler', idx=i, normalize=True,
                 shape=crop_shape, side_view=side_view,
                 adaptive_slices=use_grid, grid_src=grid_src,
-                show=self.plot, cmap='Reds', interpolation='bilinear', figsize=(15, 15),
+                rebatch_threshold=rebatch_threshold,
+                show=self.plot, figsize=(15, 15),
                 savepath=self.make_savepath(f'sampled_normalized{postfix}.png')
             )
 
@@ -348,6 +357,11 @@ class HorizonController(BaseController):
                           overlap_factor=overlap_factor,
                           filtering_matrix=filtering_matrix,
                           filter_threshold=filter_threshold)
+        accumulator = Accumulator3D.from_aggregation(aggregation='max',
+                                                     shape=dataset.grid_info['shape'],
+                                                     origin=dataset.grid_info['origin'],
+                                                     fill_value=0.0)
+        config['accumulator'] = accumulator
 
         # Create pipeline TODO: make better `add_model`
         inference_pipeline = self.get_inference_template() << config << dataset
@@ -355,10 +369,7 @@ class HorizonController(BaseController):
 
         # Make predictions over chunk
         inference_pipeline.run(D.size, n_iters=dataset.grid_iters, prefetch=prefetch)
-        predictions = inference_pipeline.v('predictions')
-
-        # Assemble prediction together in accordance to the created grid
-        assembled_prediction = dataset.assemble_crops(predictions, order=config.order, fill_value=0.0)
+        assembled_prediction = accumulator.aggregate()
 
         # Extract Horizon instances
         horizons = Horizon.from_mask(assembled_prediction, dataset.grid_info,
@@ -366,6 +377,7 @@ class HorizonController(BaseController):
 
         # Cleanup
         gc.collect()
+        accumulator.clear()
         inference_pipeline.reset('variables')
         return horizons
 
@@ -405,9 +417,9 @@ class HorizonController(BaseController):
             # Basic demo: depth map and properties
             horizon.show(show=self.plot, savepath=self.make_savepath(*prefix, name + 'p_depth_map.png'))
 
-            horizon.show_slide(horizon.geometry.lens[0]//2, axis=0, width=5,
+            horizon.show_slide(horizon.geometry.lens[0]//2, axis=0,
                                savepath=self.make_savepath(*prefix, name + 'p_slide_i.png'))
-            horizon.show_slide(horizon.geometry.lens[1]//2, axis=1, width=5,
+            horizon.show_slide(horizon.geometry.lens[1]//2, axis=1,
                                savepath=self.make_savepath(*prefix, name + 'p_slide_x.png'))
 
             with open(self.make_savepath(*prefix, name + 'p_results_self.txt'), 'w') as result_txt:
@@ -547,7 +559,6 @@ class HorizonController(BaseController):
         """
         inference_template = (
             Pipeline()
-            .init_variable('predictions', [])
 
             # Load data
             .make_locations(points=D('grid_gen')(), shape=C('crop_shape'),
@@ -560,13 +571,14 @@ class HorizonController(BaseController):
             .predict_model('model',
                            B('images'),
                            fetches='sigmoid',
-                           save_to=V('predictions', mode='e'))
+                           save_to=B('predictions'))
+            .update_accumulator(src='predictions', accumulator=C('accumulator'), order=C('order'))
         )
         return inference_template
 
 
 
-def generate_shape(_, shape, dynamic_factor=1, dynamic_low=None, dynamic_high=None):
+def generate_shape(shape, dynamic_factor=1, dynamic_low=None, dynamic_high=None):
     """ Dynamically generate shape of a crop to get. """
     dynamic_low = dynamic_low or dynamic_factor
     dynamic_high = dynamic_high or dynamic_factor

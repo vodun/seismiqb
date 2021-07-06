@@ -90,7 +90,7 @@ class SeismicGeometryConverted(SeismicGeometry):
         else:
             axis = self.parse_axis(axis)
             if axis not in self.available_axis:
-                raise ValueError(f'Axis {axis} is not available in the {self.name}!')
+                raise ValueError(f'Axis {axis} is not available in the {self.displayed_name}!')
 
         # Retrieve cube handler and ordering for axis
         cube = self.axis_to_cube[axis]
