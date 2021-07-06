@@ -735,8 +735,8 @@ class SeismicGeometry(ExportMixin):
             'xlabel': xlabel,
             'ylabel': ylabel,
             'cmap': 'gray',
-            'xticks': xticks,
-            'yticks': yticks,
+            'xticks': tuple(xticks),
+            'yticks': tuple(yticks),
             'labeltop': False,
             'labelright': False,
             **kwargs
