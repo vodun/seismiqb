@@ -8,7 +8,6 @@ from itertools import product
 import h5py
 import numpy as np
 import pandas as pd
-from numba import njit, prange
 
 from cv2 import dilate
 from scipy.ndimage.morphology import binary_fill_holes, binary_erosion, binary_dilation
@@ -17,8 +16,8 @@ from scipy.spatial import Delaunay
 from scipy.signal import hilbert
 from skimage.measure import label
 
-from .utility_classes import HorizonSampler, lru_cache
-from .utils import round_to_array, groupby_mean, groupby_min, groupby_max, filter_simplices
+from .utility_classes import lru_cache
+from .utils import round_to_array, groupby_mean, groupby_min, groupby_max, filter_simplices, filtering_function
 from .utils import retrieve_function_arguments, get_class_methods, make_bezier_figure
 from .functional import smooth_out
 from .plotters import plot_image, show_3d
@@ -330,9 +329,6 @@ class Horizon:
           these methods must be used instead of manually permuting `matrix` and `points` attributes.
           For example, filtration or smoothing of a horizon can be done with their help.
 
-        - `sampler` instance to generate points that are close to the horizon.
-          Note that these points are scaled into [0, 1] range along each of the coordinate.
-
         - Method `add_to_mask` puts 1's on the location of a horizon inside provided `background`.
 
         - `get_cube_values` allows to cut seismic data along the horizon: that data can be used to evaluate
@@ -407,8 +403,6 @@ class Horizon:
         self.cube_name = geometry.displayed_name
         self.cube_shape = geometry.cube_shape
 
-        self.sampler = None
-
         # Check format of storage, then use it to populate attributes
         if isinstance(storage, str):
             # path to csv-like file
@@ -440,7 +434,7 @@ class Horizon:
         If the horizon is created not from (N, 3) array, evaluated at the time of the first access.
         """
         if self._points is None and self.matrix is not None:
-            points = self.matrix_to_points(self.matrix)
+            points = self.matrix_to_points(self.matrix).astype(self.dtype)
             points += np.array([self.i_min, self.x_min, 0])
             self._points = points
         return self._points
@@ -749,6 +743,7 @@ class Horizon:
                     horizons.append(Horizon(points, geometry, name=f'{prefix}_{i}'))
 
         horizons.sort(key=len)
+        horizons = [horizon for horizon in horizons if len(horizon) != 0]
         return horizons
 
 
@@ -794,11 +789,11 @@ class Horizon:
         if filtering_matrix is None:
             filtering_matrix = self.geometry.zero_traces
 
-        def filtering_function(points, **kwds):
+        def _filtering_function(points, **kwds):
             _ = kwds
-            return _filtering_function(points, filtering_matrix)
+            return filtering_function(points, filtering_matrix)
 
-        self.apply_to_points(filtering_function, **kwargs)
+        self.apply_to_points(_filtering_function, **kwargs)
 
     def filter_matrix(self, filtering_matrix=None, **kwargs):
         """ Remove points that correspond to 1's in `filtering_matrix` from matrix storage. """
@@ -808,12 +803,12 @@ class Horizon:
         idx_i, idx_x = np.asarray(filtering_matrix[self.i_min:self.i_max + 1,
                                                    self.x_min:self.x_max + 1] == 1).nonzero()
 
-        def filtering_function(matrix, **kwds):
+        def _filtering_function(matrix, **kwds):
             _ = kwds
             matrix[idx_i, idx_x] = self.FILL_VALUE
             return matrix
 
-        self.apply_to_matrix(filtering_function, **kwargs)
+        self.apply_to_matrix(_filtering_function, **kwargs)
 
     filter = filter_points
 
@@ -872,6 +867,38 @@ class Horizon:
 
         self.apply_to_matrix(smoothing_function, **kwargs)
 
+
+    def make_carcass(self, frequencies=100, regular=True, margin=50, apply_smoothing=False, **kwargs):
+        """ Cut carcass out of a horizon. Returns a new instance.
+
+        Parameters
+        ----------
+        frequencies : int or sequence of ints
+            Frequencies of carcass lines.
+        regular : bool
+            Whether to make regular lines or base lines on geometry quality map.
+        margin : int
+            Margin from geometry edges to exclude from carcass.
+        apply_smoothing : bool
+            Whether to smooth out the result.
+        kwargs : dict
+            Other parameters for grid creation, see `:meth:~.SeismicGeometry.make_grid`.
+        """
+        frequencies = frequencies if isinstance(frequencies, (tuple, list)) else [frequencies]
+        carcass = copy(self)
+        carcass.name = carcass.name.replace('copy', 'carcass')
+
+        if regular:
+            from .metrics import GeometryMetrics
+            gm = GeometryMetrics(self.geometry)
+            grid = gm.make_grid(1 - self.geometry.zero_traces, frequencies=frequencies, margin=margin, **kwargs)
+        else:
+            grid = self.geometry.make_quality_grid(frequencies, margin=margin, **kwargs)
+
+        carcass.filter(filtering_matrix=1-grid)
+        if apply_smoothing:
+            carcass.smooth_out(preserve_borders=False)
+        return carcass
 
     def make_random_holes_matrix(self, n=10, scale=1.0, max_scale=.25,
                                  max_angles_amount=4, max_sharpness=5.0, locations=None,
@@ -976,42 +1003,7 @@ class Horizon:
         filtering_matrix = self.put_on_full(filtering_matrix, False)
         return filtering_matrix
 
-    # Horizon usage: point/mask generation
-    def create_sampler(self, bins=None, quality_grid=None, weights=None, threshold=0, **kwargs):
-        """ Create sampler based on horizon location.
-
-        Parameters
-        ----------
-        bins : sequence
-            Size of ticks alongs each respective axis.
-        quality_grid : ndarray or None
-            If not None, then must be a matrix with zeroes in locations to keep, ones in locations to remove.
-            Applied to `points` before sampler creation.
-        weights : ndarray or bool
-            Weights matrix with shape (ilines_len, xlines_len) for weights of sampling.
-            If True support correlation metric will be used.
-        """
-        _ = kwargs
-        default_bins = self.cube_shape // np.array([5, 20, 20])
-        bins = bins if bins is not None else default_bins
-        quality_grid = self.geometry.quality_grid if quality_grid is True else quality_grid
-
-        if isinstance(quality_grid, np.ndarray):
-            points = _filtering_function(np.copy(self.points), 1 - quality_grid)
-        else:
-            points = self.points
-
-        if weights:
-            if not isinstance(weights, np.ndarray):
-                corrs_matrix = self.evaluate_metric()
-                weights = corrs_matrix[points[:, 0], points[:, 1]]
-            points = points[~np.isnan(weights)]
-            weights = weights[~np.isnan(weights)]
-            points = points[weights > threshold]
-            weights = weights[weights > threshold]
-
-        self.sampler = HorizonSampler(np.histogramdd(points/self.cube_shape, bins=bins, weights=weights), **kwargs)
-
+    # Horizon usage: mask generation and cutting data along self
     def add_to_mask(self, mask, locations=None, width=3, alpha=1, **kwargs):
         """ Add horizon to a background.
         Note that background is changed in-place.
@@ -1516,6 +1508,24 @@ class Horizon:
         return self.horizon_metrics.evaluate('instantaneous_phase')
 
     @property
+    def number_of_holes(self):
+        """ Number of holes inside horizon borders. """
+        holes_array = self.filled_matrix != self.binary_matrix
+        _, num = label(holes_array, connectivity=2, return_num=True, background=0)
+        return num
+
+    @property
+    def perimeter(self):
+        """ Number of points in the borders. """
+        return np.sum((self.borders_matrix == 1).astype(np.int32))
+
+    @property
+    def solidity(self):
+        """ Ratio of area covered by horizon to total area inside borders. """
+        return len(self) / np.sum(self.filled_matrix)
+
+    # Carcass properties
+    @property
     def is_carcass(self):
         """ Check if the horizon is a sparse carcass. """
         return len(self) / self.filled_matrix.sum() < 0.5
@@ -1533,21 +1543,9 @@ class Horizon:
         return uniques[counts > 256]
 
     @property
-    def number_of_holes(self):
-        """ Number of holes inside horizon borders. """
-        holes_array = self.filled_matrix != self.binary_matrix
-        _, num = label(holes_array, connectivity=2, return_num=True, background=0)
-        return num
-
-    @property
-    def perimeter(self):
-        """ Number of points in the borders. """
-        return np.sum((self.borders_matrix == 1).astype(np.int32))
-
-    @property
-    def solidity(self):
-        """ Ratio of area covered by horizon to total area inside borders. """
-        return len(self) / np.sum(self.filled_matrix)
+    def carcass_grid(self):
+        """ Full matrix with present lines. """
+        return self.put_on_full(self.binary_matrix, fill_value=0.0)
 
 
     def grad_along_axis(self, axis=0):
@@ -2110,7 +2108,7 @@ class Horizon:
         return background
 
 
-    def show(self, src='matrix', fill_value=None, on_full=True, enlarge=True, width=3, **kwargs):
+    def show(self, src='matrix', fill_value=None, on_full=True, enlarge=True, width=9, **kwargs):
         """ Nice visualization of a horizon-related matrix. """
         matrix = getattr(self, src) if isinstance(src, str) else src
         fill_value = fill_value if fill_value is not None else self.FILL_VALUE
@@ -2375,15 +2373,3 @@ class Horizon:
 
 class StructuredHorizon(Horizon):
     """ Convenient alias for :class:`.Horizon` class. """
-
-
-@njit(parallel=True)
-def _filtering_function(points, filtering_matrix):
-    #pylint: disable=consider-using-enumerate, not-an-iterable
-    mask = np.ones(len(points), dtype=np.int32)
-
-    for i in prange(len(points)):
-        il, xl = points[i, 0], points[i, 1]
-        if filtering_matrix[il, xl] == 1:
-            mask[i] = 0
-    return points[mask == 1, :]
