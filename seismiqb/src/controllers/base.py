@@ -19,7 +19,7 @@ import psutil
 import numpy as np
 import torch
 
-from ...batchflow import Config, Monitor, D
+from ...batchflow import Config, Monitor
 from ...batchflow.models.torch import EncoderDecoder
 
 from ..plotters import plot_loss
@@ -133,6 +133,7 @@ class BaseController:
 
             logger = logging.getLogger(str(id(self)))
             logger.addHandler(handler)
+            logger.setLevel(logging.INFO)
             self.filelogger = logger.info
         else:
             self.filelogger = None
@@ -145,7 +146,9 @@ class BaseController:
 
         logger = self.config.logger
         if logger:
-            logger(msg)
+            logger = logger if isinstance(logger, (tuple, list)) else [logger]
+            for logger_ in logger:
+                logger_(msg)
         if self.filelogger:
             self.filelogger(msg)
 
@@ -195,7 +198,7 @@ class BaseController:
         self.log_to_file(pformat(pipeline_config.config, depth=2), '末 train_config.txt')
 
         # Test batch to initialize model and log stats
-        batch = train_pipeline.next_batch(D.size)
+        batch = train_pipeline.next_batch()
         model = train_pipeline.m('model')
 
         self.log(f'Target batch size: {pipeline_config["batch_size"]}')
@@ -218,7 +221,7 @@ class BaseController:
         # Run training procedure
         start_time = perf_counter()
         self.log(f'Train run: n_iters={n_iters}, prefetch={prefetch}')
-        train_pipeline.run(D.size, n_iters=n_iters, prefetch=prefetch, notifier=notifier)
+        train_pipeline.run(n_iters=n_iters, prefetch=prefetch, notifier=notifier)
         elapsed = perf_counter() - start_time
 
         # Log: resource graphs

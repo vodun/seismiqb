@@ -11,7 +11,7 @@ import numpy as np
 import torch
 
 from ...batchflow import Pipeline, Config, Notifier, Monitor
-from ...batchflow import D, B, F, C, V, P, R
+from ...batchflow import B, F, C, V, P, R
 
 from ..horizon import Horizon
 from ..samplers import ExtensionGrid
@@ -79,7 +79,7 @@ class Extender(Enhancer):
             # Create pipeline TODO: make better `add_model`
             inference_pipeline = self.get_inference_template() << config << dataset
             inference_pipeline.models.add_model('model', model)
-            inference_pipeline.run(D.size, n_iters=grid.n_iters, prefetch=prefetch)
+            inference_pipeline.run(n_iters=grid.n_iters, prefetch=prefetch)
 
             # Merge surfaces on crops to the horizon itself
             for patch_horizon in inference_pipeline.v('predicted_horizons'):

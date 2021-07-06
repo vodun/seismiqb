@@ -18,7 +18,7 @@ import numpy as np
 import torch
 
 from ...batchflow import Config, Pipeline, Monitor, Notifier
-from ...batchflow import B, D, C, V, P, R
+from ...batchflow import B, C, V, P, R
 from ...batchflow.models.torch import EncoderDecoder
 
 from ..cubeset import SeismicCubeset, Horizon
@@ -162,7 +162,7 @@ class HorizonController(BaseController):
         crop_shape = self.config['train']['crop_shape']
         rebatch_threshold = self.config['train']['rebatch_threshold']
         sampler = SeismicSampler(labels=dataset.labels, crop_shape=crop_shape,
-                                 threshold=rebatch_threshold, mode='horizon')
+                                 threshold=rebatch_threshold, mode='horizon', **kwargs)
 
         sampler.show_locations(show=self.plot, savepath=self.make_savepath('sampler_locations.png'))
         sampler.show_sampled(show=self.plot, savepath=self.make_savepath('sampler_generated.png'))
@@ -314,7 +314,7 @@ class HorizonController(BaseController):
         prefetch = config.get('prefetch', 0)
         crop_shape = np.array(config.crop_shape)[list(config.order)]
 
-        #
+        # Create regular grid over desired ranges
         geometry = dataset.geometries[0]
         grid = RegularGrid(geometry=geometry,
                            ranges=ranges,
@@ -335,7 +335,7 @@ class HorizonController(BaseController):
         inference_pipeline.models.add_model('model', model)
 
         # Make predictions over chunk
-        inference_pipeline.run(D.size, n_iters=grid.n_iters, prefetch=prefetch)
+        inference_pipeline.run(n_iters=grid.n_iters, prefetch=prefetch)
         assembled_prediction = accumulator.aggregate()
 
         # Extract Horizon instances

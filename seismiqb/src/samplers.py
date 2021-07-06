@@ -912,7 +912,7 @@ class ExtensionGrid(BaseGrid):
         mask = potential > self.threshold
         buffer = buffer[mask]
 
-        locations = np.empty((len(buffer), 9), dtype=object)
+        locations = np.empty((len(buffer), 9), dtype=np.int32)
         locations[:, [0, 1]] = -1
         locations[:, 2:9] = buffer
         self.locations = locations
