@@ -393,12 +393,18 @@ class SeismicCubeset(Dataset):
         crop_shape = np.array(geometry.cube_shape)
 
         axis = geometry.parse_axis(axis)
-        point = np.array([[cube_name, 0, 0, 0]], dtype=object)
-        point[0, axis + 1] = loc
         crop_shape[axis] = 1
 
+        location = np.zeros((1, 9), dtype=np.int32)
+        location[0, axis + 3] = loc
+        location[0, axis + 6] = loc
+        location[0, [6, 7, 8]] += crop_shape
+
+        generator = lambda batch_size: location
+        generator.to_names = lambda array: np.array([[cube_name, 'unknown']])
+
         pipeline = (Pipeline()
-                    .make_locations(points=point, shape=crop_shape)
+                    .make_locations(generator=generator)
                     .load_cubes(dst='images', src_labels=src_labels)
                     .normalize(src='images'))
 
