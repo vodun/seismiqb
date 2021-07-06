@@ -446,8 +446,8 @@ class SeismicCubeset(Dataset):
             'title_y': 1.01,
             'xlabel': xlabel,
             'ylabel': ylabel,
-            'xticks': xticks,
-            'yticks': yticks,
+            'xticks': tuple(xticks),
+            'yticks': tuple(yticks),
             'legend': False, # TODO: Make every horizon mask creation individual to allow their distinction while plot.
             **kwargs
         }
