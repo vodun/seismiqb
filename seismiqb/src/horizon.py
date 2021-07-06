@@ -17,7 +17,6 @@ from scipy.signal import hilbert
 from skimage.measure import label
 
 from .utility_classes import lru_cache
-from .samplers import HorizonSampler
 from .utils import round_to_array, groupby_mean, groupby_min, groupby_max, filter_simplices, filtering_function
 from .utils import retrieve_function_arguments, get_class_methods, make_bezier_figure
 from .functional import smooth_out
@@ -330,9 +329,6 @@ class Horizon:
           these methods must be used instead of manually permuting `matrix` and `points` attributes.
           For example, filtration or smoothing of a horizon can be done with their help.
 
-        - `sampler` instance to generate points that are close to the horizon.
-          Note that these points are scaled into [0, 1] range along each of the coordinate.
-
         - Method `add_to_mask` puts 1's on the location of a horizon inside provided `background`.
 
         - `get_cube_values` allows to cut seismic data along the horizon: that data can be used to evaluate
@@ -406,8 +402,6 @@ class Horizon:
         self.geometry = geometry
         self.cube_name = geometry.displayed_name
         self.cube_shape = geometry.cube_shape
-
-        self.sampler = None
 
         # Check format of storage, then use it to populate attributes
         if isinstance(storage, str):
@@ -1009,11 +1003,7 @@ class Horizon:
         filtering_matrix = self.put_on_full(filtering_matrix, False)
         return filtering_matrix
 
-    # Horizon usage: point/mask generation
-    def create_sampler(self, **kwargs):
-        """ Create sampler, based on self. """
-        return HorizonSampler(self, **kwargs)
-
+    # Horizon usage: mask generation and cutting data along self
     def add_to_mask(self, mask, locations=None, width=3, alpha=1, **kwargs):
         """ Add horizon to a background.
         Note that background is changed in-place.

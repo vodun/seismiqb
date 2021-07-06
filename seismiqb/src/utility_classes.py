@@ -482,7 +482,7 @@ class IndexedDict(OrderedDict):
         return super().__getitem__(key)
 
     def __setitem__(self, key, value):
-        if isinstance(key, (int, np.int8, np.int32, np.int64)):
+        if isinstance(key, (int, np.integer)):
             key = list(self.keys())[key]
         super().__setitem__(key, value)
 
