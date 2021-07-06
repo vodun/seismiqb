@@ -203,14 +203,9 @@ class BaseController:
         self.log(f'Cache sizes: {[item.cache_size for item in dataset.geometries.values()]}')
         self.log(f'Cache lengths: {[item.cache_length for item in dataset.geometries.values()]}')
 
-        # Log: full model repr
+        # Log: full and short model repr
         self.log_to_file(repr(model.model), '末 model_repr.txt')
-
-        # Log: short model repr
-        model.model.apply(lambda module: setattr(module, 'short_repr', True))
-        msg = repr(model.model)
-        model.model.apply(lambda module: setattr(module, 'short_repr', False))
-        self.log_to_file(msg, '末 model_shortrepr.txt')
+        self.log_to_file(model._short_repr(), '末 model_shortrepr.txt')
 
         # Rescale batch size, if needed
         if rescale:

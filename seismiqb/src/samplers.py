@@ -467,8 +467,8 @@ class SeismicSampler(Sampler):
         for idx, samplers_list in self.samplers.items():
             geometry = samplers_list[0].geometry
 
-            images = [sampler.orientation_matrix for sampler in samplers_list]
-            images = [[image, geometry.zero_traces] for image in images]
+            images = [[sampler.orientation_matrix, geometry.zero_traces]
+                      for sampler in samplers_list]
 
             ncols_ = min(ncols, len(samplers_list))
             nrows = len(samplers_list) // ncols_ or 1
@@ -522,12 +522,17 @@ class SeismicSampler(Sampler):
 
 class BaseGrid:
     """ Determenistic generator of crop locations. """
-    def __init__(self, crop_shape, batch_size=64):
-        self.crop_shape = np.array(crop_shape)
+    def __init__(self, crop_shape, batch_size=64, locations=None, geometry=None):
+        self._iterator = None
         self.batch_size = batch_size
 
-        self._make_locations()
-        self._iterator = None
+        if locations is None:
+            self.crop_shape = np.array(crop_shape)
+            self._make_locations()
+        else:
+            self.locations = locations
+            self.geometry = geometry
+            self.name = geometry.short_name
 
     def _make_locations(self):
         raise NotImplementedError('Must be implemented in sub-classes')
@@ -570,22 +575,32 @@ class BaseGrid:
 
 
     # Concatenate multiple grids into one
-    def update(self, other):
+    def join(self, other):
         """ Update locations of a current grid with locations from other instance of BaseGrid. """
-        #pylint: disable=access-member-before-definition
         if not isinstance(other, BaseGrid):
             raise TypeError('Other should be an instance of `BaseGrid`')
         if self.name != other.name:
             raise ValueError('Grids should be for the same geometry!')
+
         locations = np.concatenate([self.locations, other.locations], axis=0)
-        self.locations = np.unique(locations, axis=0)
-        self._iterator = None
+        locations = np.unique(locations, axis=0)
+        batch_size = min(self.batch_size, other.batch_size)
+        return BaseGrid(locations=locations, batch_size=batch_size, geometry=self.geometry)
 
     def __add__(self, other):
-        self.update(other)
+        self.join(other)
 
     def __and__(self, other):
-        self.update(other)
+        self.join(other)
+
+    def to_names(self, id_array):
+        """ Convert the first two columns of sampled locations into geometry and label string names. """
+        return np.array([(self.name, 'unknown') for ids in id_array])
+
+    def __repr__(self):
+        return f'<BaseGrid for {self.name}: '\
+               f'origin={tuple(self.origin)}, endpoint={tuple(self.endpoint)}>'
+
 
     # Useful info
     @property
@@ -607,6 +622,54 @@ class BaseGrid:
     def actual_ranges(self):
         """ Ranges of covered by the grid locations. """
         return np.array(tuple(zip(self.origin, self.endpoint)))
+
+    def show(self, grid=True, markers=False, n_patches=None, **kwargs):
+        """ Display the grid over geometry overlay.
+
+        Parameters
+        ----------
+        grid : bool
+            Whether to show grid lines.
+        markers : bool
+            Whether to show markers at location origins.
+        n_patches : int
+            Number of locations to display with overlayed mask.
+        kwargs : dict
+            Other parameters to pass to the plotting function.
+        """
+        n_patches = n_patches or int(np.sqrt(len(self))) // 5
+        fig = self.geometry.show('zero_traces', cmap='Gray', colorbar=False, return_figure=True, **kwargs)
+        ax = fig.axes
+
+        if grid:
+            spatial = self.locations[:, [3, 4]]
+            for i in np.unique(spatial[:, 0]):
+                sliced = spatial[spatial[:, 0] == i][:, 1]
+                ax[0].vlines(i, sliced.min(), sliced.max(), colors='pink')
+
+            spatial = self.locations[:, [3, 4]]
+            for x in np.unique(spatial[:, 1]):
+                sliced = spatial[spatial[:, 1] == x][:, 0]
+                ax[0].hlines(x, sliced.min(), sliced.max(), colors='pink')
+
+        if markers:
+            ax[0].scatter(self.locations[:, 3], self.locations[:, 3], marker='x', linewidth=0.1, color='r')
+
+        overlay = np.zeros_like(self.geometry.zero_traces)
+        for n in range(0, len(self), len(self)//n_patches - 1):
+            slc = tuple(slice(o, e) for o, e in zip(self.locations[n, [3, 4]], self.locations[n, [6, 7]]))
+            overlay[slc] = 1
+            ax[0].scatter(*self.locations[n, [3, 4]], marker='x', linewidth=3, color='g')
+
+        kwargs = {
+            'cmap': 'green',
+            'alpha': 0.3,
+            'colorbar': False,
+            'matrix_name': 'Grid visualization',
+            'ax': ax[0],
+            **kwargs,
+        }
+        self.geometry.show(overlay, **kwargs)
 
 
 
@@ -719,54 +782,6 @@ class RegularGrid(BaseGrid):
         return f'<RegularGrid for {self.geometry.short_name}: '\
                f'origin={tuple(self.origin)}, endpoint={tuple(self.endpoint)}, crop_shape={tuple(self.crop_shape)}>'
 
-    def show(self, grid=True, markers=False, n_patches=None, **kwargs):
-        """ Display the grid over geometry overlay.
-
-        Parameters
-        ----------
-        grid : bool
-            Whether to show grid lines.
-        markers : bool
-            Whether to show markers at location origins.
-        n_patches : int
-            Number of locations to display with overlayed mask.
-        kwargs : dict
-            Other parameters to pass to the plotting function.
-        """
-        n_patches = n_patches or int(np.sqrt(len(self))) // 5
-        fig = self.geometry.show('zero_traces', cmap='Gray', colorbar=False, return_figure=True, **kwargs)
-        ax = fig.axes
-
-        if grid:
-            spatial = self.locations[:, [1, 2]]
-            for i in np.unique(spatial[:, 0]):
-                sliced = spatial[spatial[:, 0] == i][:, 1]
-                ax[0].vlines(i, sliced.min(), sliced.max(), colors='pink')
-
-            spatial = self.locations[:, [1, 2]]
-            for x in np.unique(spatial[:, 1]):
-                sliced = spatial[spatial[:, 1] == x][:, 0]
-                ax[0].hlines(x, sliced.min(), sliced.max(), colors='pink')
-
-        if markers:
-            ax[0].scatter(self.locations[:, 1], self.locations[:, 2], marker='x', linewidth=0.1, color='r')
-
-        overlay = np.zeros_like(self.geometry.zero_traces)
-        for n in range(0, len(self), len(self)//n_patches - 1):
-            slc = tuple(slice(o, e) for o, e in zip(self.locations[n, [1, 2]], self.locations[n, [4, 5]]))
-            overlay[slc] = 1
-            ax[0].scatter(*self.locations[n, [1, 2]], marker='x', linewidth=3, color='g')
-
-        kwargs = {
-            'cmap': 'green',
-            'alpha': 0.3,
-            'colorbar': False,
-            'matrix_name': 'Grid visualization',
-            'ax': ax[0],
-            **kwargs,
-        }
-        self.geometry.show(overlay, **kwargs)
-
 
 
 class ExtensionGrid(BaseGrid):
@@ -805,6 +820,7 @@ class ExtensionGrid(BaseGrid):
         self.geometry = horizon.geometry
         self.geometry_name = horizon.geometry.short_name
         self.horizon_name = horizon.short_name
+        self.name = self.geometry_name
 
         self.uncovered_before = None
 
