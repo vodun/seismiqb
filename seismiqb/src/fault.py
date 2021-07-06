@@ -339,8 +339,8 @@ class Fault(Horizon):
         prev_overlap = np.zeros((0, *cube_shape[1:]))
         labels = np.zeros((0, 4), dtype='int32')
         n_objects = 0
-        chunks = tqdm(chunks, total=total) if pbar else chunks
-        for start, item in chunks:
+
+        for start, item in tqdm(chunks, total=total, disable=(not pbar)):
             chunk_labels, new_objects = measurements.label(item, structure=np.ones((3, 3, 3))) # labels for new chunk
             chunk_labels[chunk_labels > 0] += n_objects # shift all values to avoid intersecting with previous labels
             new_overlap = chunk_labels[:overlap]
@@ -379,7 +379,7 @@ class Fault(Horizon):
             labels = [item for item in labels if item[0] >= threshold]
         if geometry is not None:
             labels = [Fault(item[1].astype('int32'), name=f'fault_{i}', geometry=geometry)
-                      for i, item in enumerate(labels)]
+                      for i, item in tqdm(enumerate(labels), disable=(not pbar))]
         return labels
 
 def faults_sizes(labels):
