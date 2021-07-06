@@ -4,14 +4,14 @@ from .horizon import HorizonController
 
 
 class Interpolator(HorizonController):
-    """ !!. """
+    """ Convenient class for carcass interpolation. """
     def train(self, dataset=None, cube_paths=None, horizon_paths=None, horizon=None, **kwargs):
-        """ !!. """
+        """ Make sampler and run train process with it. """
         if dataset is None:
             dataset = self.make_dataset(cube_paths=cube_paths, horizon_paths=horizon_paths, horizon=horizon)
 
         horizon = dataset.labels[0][0]
-        horizon.show(show=self.plot, savepath=self.make_savepath('carcass_image.png'))
+        horizon.show(show=self.plot, savepath=self.make_savepath('input_image.png'))
         self.log(f'Coverage of carcass is {horizon.coverage:2.5f}')
 
         sampler = self.make_sampler(dataset)
@@ -19,7 +19,7 @@ class Interpolator(HorizonController):
 
 
     def inference(self, dataset, model, config=None, name=None, **kwargs):
-        """ !!. """
+        """ Prediction with custom naming schema. """
         prediction = super().inference(dataset=dataset, model=model, **kwargs)[0]
 
         if name is None:

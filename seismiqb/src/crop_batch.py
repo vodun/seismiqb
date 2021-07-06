@@ -195,7 +195,7 @@ class SeismicCropBatch(Batch):
 
     @action
     def adaptive_reshape(self, src=None, dst=None):
-        """ !!. """
+        """ Transpose crops with crossline orientation into (x, i, h) order. """
         src = src if isinstance(src, (tuple, list)) else [src]
         if dst is None:
             dst = src

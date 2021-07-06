@@ -126,7 +126,7 @@ class HorizonController(BaseController):
         return dataset
 
     def make_carcass(self, dataset, frequencies=200, **kwargs):
-        """ !!. """
+        """ Cut a grid from the passed horizon. """
         carcass = dataset.labels[0][0].make_carcass(frequencies=frequencies, **kwargs)
         return carcass, SeismicCubeset.from_horizon(carcass)
 

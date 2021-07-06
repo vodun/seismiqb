@@ -1470,13 +1470,6 @@ class Horizon:
         return binary_matrix ^ eroded # binary difference operation
 
     @property
-    def boundaries_points(self):
-        """ !!. """
-        points = np.stack(np.where(self.boundaries_matrix), axis=-1)
-        points += (self.i_min, self.x_min)
-        return points
-
-    @property
     def coverage(self):
         """ Ratio between number of present values and number of good traces in cube. """
         return len(self) / (np.prod(self.cube_shape[:2]) - np.sum(self.geometry.zero_traces))
