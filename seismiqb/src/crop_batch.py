@@ -130,7 +130,39 @@ class SeismicCropBatch(Batch):
 
     @action
     def make_locations(self, generator, batch_size=None, passdown=None):
-        """ !!. """
+        """ Use `generator` to create `batch_size` locations.
+        Each location defines position in a cube and can be used to retrieve data/create masks at this place.
+
+        Generator can be either Sampler or Grid to make locations in a random or deterministic fashion.
+        `generator` must be a callable and return (batch_size, 9+) array, where the first nine columns should be:
+        (geometry_id, label_id, orientation, i_start, x_start, h_start, i_stop, x_stop, h_stop).
+
+        Geometry and label ids are transformed into names of actual cubes and labels (horizons, faults, facies, etc).
+        Then we create a completely new instance of `SeismicCropBatch`, where the new index is set to
+        cube names with additional postfixes (see `:meth:.salt`), which is returned as the result of this action.
+
+        After parsing contents of generated (batch_size, 9+) array we add following attributes:
+            - `locations` with triplets of slices
+            - `orientations` with crop orientation
+            - `shapes`
+            - `label_names`
+            - `generated` with originally generated data
+        If `generator` creates more than 9 columns, they are not used, but stored in the  `generated` attribute.
+
+        Parameters
+        ----------
+        generator : callable
+            Sampler or Grid to retrieve locations. Must be a callable from positive integer.
+        batch_size : int
+            Number of locations to generate.
+        passdown : str or sequence of str
+            Components to pass down to a newly created batch.
+
+        Returns
+        -------
+        SeismicCropBatch
+            A completely new instance of Batch.
+        """
         # pylint: disable=protected-access
         generated = generator(batch_size)
 
