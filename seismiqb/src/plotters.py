@@ -406,9 +406,11 @@ class MatplotlibPlotter:
                 Order of image axes.
             bad_values : list of numbers
                 Data values that should be displayed with 'bad_color'.
-            transparize_masks : bool
+            transparize_masks : bool, optional
                 Whether treat zeros in binary masks as bad values or not.
-                If True, makes zero values in binary masks transparent on display.
+                If True, make zero values in all binary masks transparent on display.
+                If False, do not make zero values in any binary masks transparent on display.
+                If not provided, make zero values transparent in all masks that overlay an image.
             params for images drawn by `plt.imshow`:
                 - 'cmap', 'vmin', 'vmax', 'interpolation', 'alpha', 'extent'
                 - params with 'imshow_' prefix
