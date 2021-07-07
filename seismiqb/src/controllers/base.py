@@ -259,7 +259,9 @@ class BaseController:
         return model
 
     def finetune(self, dataset, sampler, model, config=None, **kwargs):
-        """ !!. """
+        """ Train given model for a couple more iterations on a specific sampler.
+        Used to fine-tune the model on specific range during inference stage.
+        """
         # Prepare parameters
         config = config or {}
         pipeline_config = Config({**self.config['common'], **self.config['train'],
