@@ -2,7 +2,7 @@
 TODO: make separate configs for branches
 TODO: make it work with N branches and N configs
 """
-import torch.nn as nn
+from torch import nn
 
 from ...batchflow.batchflow.models.torch.layers import ConvBlock
 from ...batchflow.batchflow.models.torch import EncoderDecoder

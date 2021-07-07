@@ -1,4 +1,5 @@
 """ Blosc sliced geometry. """
+#pylint: disable=unpacking-non-sequence
 from zipfile import ZipFile
 
 import dill

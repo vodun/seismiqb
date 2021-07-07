@@ -132,89 +132,6 @@ def save_point_cloud(metric, save_path, geometry=None):
               index=False, header=False)
 
 
-def gen_crop_coordinates(point, horizon_matrix, zero_traces,
-                         stride, shape, depth, fill_value, zeros_threshold=0,
-                         empty_threshold=5, safe_stripe=0, num_points=2):
-    """ Generate crop coordinates next to the point with maximum horizon covered area.
-
-    Parameters
-    ----------
-    point : array-like
-        Coordinates of the point.
-    horizon_matrix : ndarray
-        `Full_matrix` attribute of the horizon.
-    zero_traces : ndarray
-        A boolean ndarray indicating zero traces in the cube.
-    stride : int
-        Distance between the point and a corner of a crop.
-    shape : array-like
-        The desired shape of the crops.
-        Note that final shapes are made in both xline and iline directions. So if
-        crop_shape is (1, 64, 64), crops of both (1, 64, 64) and (64, 1, 64) shape
-        will be defined.    fill_value : int
-    zeros_threshold : int
-        A maximum number of bad traces in a crop.
-    empty_threshold : int
-        A minimum number of points with unknown horizon per crop.
-    safe_stripe : int
-        Distance between a crop and the ends of the cube.
-    num_points : int
-        Returned number of crops. The maximum is four.
-    """
-    candidates, shapes = [], []
-    orders, intersections = [], []
-    hor_height = horizon_matrix[point[0], point[1]]
-    ilines_len, xlines_len = horizon_matrix.shape
-
-    tested_iline_positions = [max(0, point[0] - stride),
-                              min(point[0] - shape[1] + stride, ilines_len - shape[1])]
-
-    for il in tested_iline_positions:
-        if (il > safe_stripe) and (il + shape[1] < ilines_len - safe_stripe):
-            num_missing_traces = np.sum(zero_traces[il: il + shape[1],
-                                                    point[1]: point[1] + shape[0]])
-            if num_missing_traces <= zeros_threshold:
-                horizon_patch = horizon_matrix[il: il + shape[1],
-                                               point[1]:point[1] + shape[0]]
-                num_empty = np.sum(horizon_patch == fill_value)
-                if num_empty > empty_threshold:
-                    candidates.append([il, point[1],
-                                       min(hor_height - shape[2] // 2, depth - shape[2] - 1)])
-                    shapes.append([shape[1], shape[0], shape[2]])
-                    orders.append([0, 2, 1])
-                    intersections.append(shape[1] - num_empty)
-
-    tested_xline_positions = [max(0, point[1] - stride),
-                              min(point[1] - shape[1] + stride, xlines_len - shape[1])]
-
-    for xl in tested_xline_positions:
-        if (xl > safe_stripe) and (xl + shape[1] < xlines_len - safe_stripe):
-            num_missing_traces = np.sum(zero_traces[point[0]: point[0] + shape[0],
-                                                    xl: xl + shape[1]])
-            if num_missing_traces <= zeros_threshold:
-                horizon_patch = horizon_matrix[point[0]:point[0] + shape[0],
-                                               xl: xl + shape[1]]
-                num_empty = np.sum(horizon_patch == fill_value)
-                if num_empty > empty_threshold:
-                    candidates.append([point[0], xl,
-                                       min(hor_height - shape[2] // 2, depth - shape[2] - 1)])
-                    shapes.append(shape)
-                    orders.append([2, 0, 1])
-                    intersections.append(shape[1] - num_empty)
-
-    if len(candidates) == 0:
-        return None
-
-    candidates_array = np.array(candidates)
-    shapes_array = np.array(shapes)
-    orders_array = np.array(orders)
-
-    top = np.argsort(np.array(intersections))[:num_points]
-    return (candidates_array[top], \
-                shapes_array[top], \
-                orders_array[top])
-
-
 def make_axis_grid(axis_range, stride, length, crop_shape):
     """ Make separate grids for every axis. """
     grid = np.arange(*axis_range, stride)
@@ -405,6 +322,20 @@ def groupby_max(array):
     output[position, -1] = s
     position += 1
     return output[:position]
+
+
+
+@njit(parallel=True)
+def filtering_function(points, filtering_matrix):
+    """ Remove points where `filtering_matrix` is 1. """
+    #pylint: disable=consider-using-enumerate, not-an-iterable
+    mask = np.ones(len(points), dtype=np.int32)
+
+    for i in prange(len(points)):
+        il, xl = points[i, 0], points[i, 1]
+        if filtering_matrix[il, xl] == 1:
+            mask[i] = 0
+    return points[mask == 1, :]
 
 
 @njit
@@ -654,3 +585,17 @@ def make_bezier_figure(n=7, radius=0.2, sharpness=0.05, scale=1.0, shape=(1, 1),
     curve_segments = np.array(curve_segments)
     figure_coordinates = np.unique(np.ceil(curve_segments).astype(int), axis=0)
     return figure_coordinates
+
+def to_list(obj, default=None, dtype=None):
+    """ Cast an object to a list.
+    When default value provided, cast it instead if object value is None.
+    Almost identical to `list(obj)` for 1-D objects, except for `str` instances,
+    which won't be split into separate letters but transformed into a list of a single element.
+    """
+    if (obj is None) and (default is not None):
+        obj = default
+    return np.array(obj, dtype=dtype).ravel().tolist()
+
+def get_class_methods(cls):
+    """ Get a list of non-private class methods. """
+    return [func for func in dir(cls) if not func.startswith("__") and callable(getattr(cls, func))]

@@ -1,9 +1,11 @@
 """ Helper classes. """
+import os
 from time import perf_counter
 from collections import OrderedDict, defaultdict
 from threading import RLock
 from functools import wraps
 from hashlib import blake2b
+from copy import copy
 
 import numpy as np
 try:
@@ -12,9 +14,8 @@ try:
 except ImportError:
     cp = np
     CUPY_AVAILABLE = False
-from numba import njit
 
-from ..batchflow import Sampler
+import h5py
 
 
 
@@ -223,61 +224,265 @@ class Accumulator:
 
 
 
-class HorizonSampler(Sampler):
-    """ Compact version of histogram-based sampler for 3D points structure. """
-    def __init__(self, histogram, seed=None, **kwargs):
-        super().__init__(histogram, seed, **kwargs)
-        # Bins and their probabilities: keep only non-zero ones
-        bins = histogram[0]
-        probs = (bins / np.sum(bins)).reshape(-1)
-        self.nonzero_probs_idx = np.asarray(probs != 0.0).nonzero()[0]
-        self.nonzero_probs = probs[self.nonzero_probs_idx]
+class Accumulator3D:
+    """ Base class to aggregate predicted sub-volumes into a larger 3D cube.
+    Can accumulate data in memory (Numpy arrays) or on disk (HDF5 datasets).
 
-        # Edges of bins: keep lengths and diffs between successive edges
-        self.edges = histogram[1]
-        self.lens_edges = np.array([len(edge) - 1 for edge in self.edges])
-        self.divisors = [np.array(self.lens_edges[i+1:]).astype(np.int64)
-                         for i, _ in enumerate(self.edges)]
-        self.shifts_edges = [np.diff(edge)[0] for edge in self.edges]
+    Type of aggregation is defined in subclasses, that must implement `__init__`, `_update` and `_aggregate` methods.
+    The main result in subclsses should be stored in `data` attribute, which is accessed by base class.
 
-        # Uniform sampler
-        self.state = np.random.RandomState(seed=seed)
-        self.state_sampler = self.state.uniform
+    Supposed to be used in combination with `:meth:.~SeismicCubeset.make_grid` and
+    `:meth:.~SeismicCropBatch.update_accumulator` in a following manner:
+        - `make_grid` defines how to split desired cube range into small crops
+        - `Accumulator3D` creates necessary placeholders for a desired type of aggregation
+        - `update_accumulator` action of pipeline passes individual crops (and their locations) to
+        update those placeholders (see `:meth:~.update`)
+        - `:meth:~.aggregate` is used to get the resulting volume
+        - `:meth:~.clear` can be optionally used to remove array references and HDF5 file from disk
 
-    def sample(self, size):
-        """ Generate random sample from histogram distribution. """
-        # Choose bin indices
-        indices = np.random.choice(self.nonzero_probs_idx, p=self.nonzero_probs, size=size)
+    This class is an alternative to `:meth:.~SeismicCubeset.assemble_crops`, but allows to
+    greatly reduce memory footprint of crop aggregation by up to `overlap_factor` times.
+    Also, as this class updates rely on `location`s of crops, it can take crops in any order.
 
-        # Convert bin indices to its starting coordinates
-        low = generate_points(self.edges, divisors=self.divisors, lengths=self.lens_edges, indices=indices)
-        high = low + self.shifts_edges
-        return self.state_sampler(low=low, high=high)
+    Note that not all pixels of placeholders will be updated with data due to removal of dead traces,
+    so we have to be careful with initialization!
 
-@njit
-def generate_points(edges, divisors, lengths, indices):
-    """ Accelerate sampling method of `HorizonSampler`. """
-    low = np.zeros((len(indices), len(lengths)))
+    Parameters
+    ----------
+    shape : sequence
+        Shape of the placeholder.
+    origin : sequence
+        The upper left point of the volume: used to shift crop's locations.
+    dtype : np.dtype
+        Dtype of storage. Must be either integer or float.
+    transform : callable, optional
+        Additional function to call before storing the crop data.
+    path : str or file-like object, optional
+        If provided, then we use HDF5 datasets instead of regular Numpy arrays, storing the data directly on disk.
+        After the initialization, we keep the file handle in `w-` mode during the update phase.
+        After aggregation, we re-open the file to automatically repack it in `r` mode.
+    kwargs : dict
+        Other parameters are passed to HDF5 dataset creation.
+    """
+    def __init__(self, shape=None, origin=None, dtype=np.float32, transform=None, path=None, **kwargs):
+        # Main attribute to store results
+        self.data = None
 
-    for i, idx in enumerate(indices):
-        for j, (edge, divisors_, length) in enumerate(zip(edges, divisors, lengths)):
-            idx_copy = idx
-            for divisor in divisors_:
-                idx_copy //= divisor
-            low[i, j] = edge[idx_copy % length]
-    return low
+        # Dimensionality and location
+        self.shape = shape
+        self.origin = origin
+
+        # Properties of storages
+        self.dtype = dtype
+        self.transform = transform if transform is not None else lambda array: array
+
+        # Container definition
+        if path is not None:
+            if isinstance(path, str) and os.path.exists(path):
+                os.remove(path)
+            self.path = path
+
+            self.file = h5py.File(path, mode='w-')
+            self.options = {**kwargs}
+        self.type = 'hdf5' if path is not None else 'numpy'
+
+        self.aggregated = False
+
+
+    def create_placeholder(self, name=None, dtype=None, fill_value=None):
+        """ Create named storage as a dataset of HDF5 or plain array. """
+        if self.type == 'hdf5':
+            options = {'fillvalue': fill_value, **self.options}
+            placeholder = self.file.create_dataset(name, shape=self.shape, dtype=dtype, **options)
+        elif self.type == 'numpy':
+            placeholder = np.full(shape=self.shape, fill_value=fill_value, dtype=dtype)
+
+        setattr(self, name, placeholder)
+
+    def remove_placeholder(self, name=None):
+        """ Remove created placeholder. """
+        if self.type == 'hdf5':
+            del self.file[name]
+        setattr(self, name, None)
+
+    def update(self, crop, location):
+        """ Update underlying storages in supplied `location` with data from `crop`. """
+        if self.aggregated:
+            raise RuntimeError('Aggregated data has been already computed!')
+
+        # Check all shapes for compatibility
+        for s, slc in zip(crop.shape, location):
+            if slc.step and slc.step != 1:
+                raise ValueError(f"Invalid step in location {location}")
+
+            if s < slc.stop - slc.start:
+                raise ValueError(f"Inconsistent crop_shape {crop.shape} and location {location}")
+
+        # Compute correct shapes
+        loc, loc_crop = [], []
+        for xmin, slc, xmax in zip(self.origin, location, self.shape):
+            loc.append(slice(max(0, slc.start - xmin), min(xmax, slc.stop - xmin)))
+            loc_crop.append(slice(max(0, xmin - slc.start), min(xmax + xmin - slc.start , slc.stop - slc.start)))
+
+        # Actual update
+        crop = self.transform(crop[tuple(loc_crop)])
+        location = tuple(loc)
+        self._update(crop, location)
+
+    def _update(self, crop, location):
+        """ Update placeholders with data from `crop` at `locations`. """
+        _ = crop, location
+        raise NotImplementedError
+
+    def aggregate(self):
+        """ Finalize underlying storages to create required aggregation. """
+        if self.aggregated:
+            raise RuntimeError('All data in the container has already been cleared!')
+        self._aggregate()
+
+        # Re-open the HDF5 file to force flush changes and release disk space from deleted datasets
+        if self.type == 'hdf5':
+            self.file.close()
+            self.file = h5py.File(self.path, 'r')
+            self.data = self.file['data']
+
+        self.aggregated = True
+        return self.data
+
+    def _aggregate(self):
+        """ Aggregate placeholders into resulting array. Changes `data` placeholder inplace. """
+        raise NotImplementedError
+
+    def __del__(self):
+        if self.type == 'hdf5':
+            self.file.close()
+
+    def clear(self):
+        """ Remove placeholders from memory and disk. """
+        self.data = None
+
+        if self.type == 'hdf5':
+            os.remove(self.path)
+
+    @property
+    def result(self):
+        """ Reference to the aggregated result. """
+        if not self.aggregated:
+            self.aggregate()
+        return self.data
+
+    @classmethod
+    def from_aggregation(cls, aggregation='max', shape=None, origin=None, dtype=np.float32, fill_value=None,
+                         transform=None, path=None, **kwargs):
+        """ Initialize chosen type of accumulator aggregation. """
+        class_to_aggregation = {
+            MaxAccumulator3D: ['max', 'maximum'],
+            MeanAccumulator3D: ['mean', 'avg', 'average'],
+            GMeanAccumulator3D: ['gmean', 'geometric'],
+        }
+        aggregation_to_class = {alias: class_ for class_, lst in class_to_aggregation.items()
+                                for alias in lst}
+
+        return aggregation_to_class[aggregation](shape=shape, origin=origin, dtype=dtype, fill_value=fill_value,
+                                                 transform=transform, path=path, **kwargs)
+
+
+class MaxAccumulator3D(Accumulator3D):
+    """ Accumulator that takes maximum value of overlapping crops. """
+    def __init__(self, shape=None, origin=None, dtype=np.float32, fill_value=None, transform=None, path=None, **kwargs):
+        super().__init__(shape=shape, origin=origin, dtype=dtype, transform=transform, path=path, **kwargs)
+
+        min_value = np.finfo(dtype).min if 'float' in dtype.__name__ else np.iinfo(dtype).min
+        self.fill_value = fill_value if fill_value is not None else min_value
+        self.create_placeholder(name='data', dtype=self.dtype, fill_value=self.fill_value)
+
+    def _update(self, crop, location):
+        self.data[location] = np.maximum(crop, self.data[location])
+
+    def _aggregate(self):
+        pass
+
+
+class MeanAccumulator3D(Accumulator3D):
+    """ Accumulator that takes mean value of overlapping crops. """
+    def __init__(self, shape=None, origin=None, dtype=np.float32, transform=None, path=None, **kwargs):
+        super().__init__(shape=shape, origin=origin, dtype=dtype, transform=transform, path=path, **kwargs)
+
+        self.create_placeholder(name='data', dtype=self.dtype, fill_value=0)
+        self.create_placeholder(name='counts', dtype=np.int8, fill_value=0)
+
+    def _update(self, crop, location):
+        self.data[location] += crop
+        self.counts[location] += 1
+
+    def _aggregate(self):
+        #pylint: disable=access-member-before-definition
+        if self.type == 'hdf5':
+            # Amortized updates for HDF5
+            for i in range(self.data.shape[0]):
+                counts = self.counts[i]
+                counts[counts == 0] = 1
+                if 'float' in self.dtype.__name__:
+                    self.data[i] /= counts
+                else:
+                    self.data[i] //= counts
+
+        elif self.type == 'numpy':
+            self.counts[self.counts == 0] = 1
+            if 'float' in self.dtype.__name__:
+                self.data /= self.counts
+            else:
+                self.data //= self.counts
+
+        # Cleanup
+        self.remove_placeholder('counts')
+
+
+class GMeanAccumulator3D(Accumulator3D):
+    """ Accumulator that takes geometric mean value of overlapping crops. """
+    def __init__(self, shape=None, origin=None, dtype=np.float32, transform=None, path=None, **kwargs):
+        super().__init__(shape=shape, origin=origin, dtype=dtype, transform=transform, path=path, **kwargs)
+
+        self.create_placeholder(name='data', dtype=self.dtype, fill_value=1)
+        self.create_placeholder(name='counts', dtype=np.int8, fill_value=0)
+
+    def _update(self, crop, location):
+        self.data[location] *= crop
+        self.counts[location] += 1
+
+    def _aggregate(self):
+        #pylint: disable=access-member-before-definition
+        if self.type == 'hdf5':
+            # Amortized updates for HDF5
+            for i in range(self.data.shape[0]):
+                counts = self.counts[i]
+                counts[counts == 0] = 1
+
+                counts = counts.astype(np.float32)
+                counts **= -1
+                self.data[i] **= counts
+
+        elif self.type == 'numpy':
+            self.counts[self.counts == 0] = 1
+
+            self.counts = self.counts.astype(np.float32)
+            self.counts **= -1
+            self.data **= self.counts
+
+        # Cleanup
+        self.remove_placeholder('counts')
 
 
 
 class IndexedDict(OrderedDict):
     """ Allows to use both indices and keys to subscript. """
     def __getitem__(self, key):
-        if isinstance(key, int):
+        if isinstance(key, (int, np.integer)):
             key = list(self.keys())[key]
         return super().__getitem__(key)
 
     def __setitem__(self, key, value):
-        if isinstance(key, int):
+        if isinstance(key, (int, np.integer)):
             key = list(self.keys())[key]
         super().__setitem__(key, value)
 
@@ -309,9 +514,10 @@ class lru_cache:
     All arguments to the decorated method must be hashable.
     """
     #pylint: disable=invalid-name, attribute-defined-outside-init
-    def __init__(self, maxsize=None, attributes=None, apply_by_default=True):
+    def __init__(self, maxsize=None, attributes=None, apply_by_default=True, copy_on_return=False):
         self.maxsize = maxsize
         self.apply_by_default = apply_by_default
+        self.copy_on_return = copy_on_return
 
         # Make `attributes` always a list
         if isinstance(attributes, str):
@@ -374,7 +580,7 @@ class lru_cache:
                     del self.cache[instance][key]
                     self.cache[instance][key] = result
                     self.stats[instance]['hit'] += 1
-                    return result
+                    return copy(result) if self.copy_on_return else result
 
             # The result was not found in cache: evaluate function
             result = func(instance, *args, **kwargs)
@@ -390,7 +596,7 @@ class lru_cache:
                 else:
                     self.cache[instance][key] = result
                     self.is_full[instance] = (len(self.cache[instance]) >= self.maxsize)
-            return result
+            return copy(result) if self.copy_on_return else result
 
         wrapper.__name__ = func.__name__
         wrapper.cache = lambda: self.cache
@@ -473,129 +679,3 @@ class SafeIO:
 
         if self.log_file:
             self._info(self.log_file, f'Closed {self.path}')
-
-class BaseAggregationContainer:
-    """ Container for on-line aggregation of crops """
-
-    def __init__(self, shape=None, grid_range=None):
-        """ initialize inner storages
-
-        Parameters
-        ----------
-        shape : tuple or None
-            shape of the processed cube - if it is fully covered
-        grid_range: list of tuples
-            ilines, xlines, heights as in `~.SeismcCubeset.grid_info['range']`
-        """
-
-        if shape is not None:
-            self.shape = np.asarray(shape, dtype=np.int16)
-            self.origin = np.zeros_like(self.shape)
-        elif grid_range is not None:
-            grid_range = np.asarray(grid_range, dtype=np.int16)
-            self.origin = grid_range[:, 0]
-            self.shape = grid_range[:, 1] - self.origin
-        else:
-            raise ValueError('Either shape, or grid_range should be provided')
-
-        self.res = None
-        self.valid = True
-
-    def put(self, crop, location):
-        """ add crop for aggregation
-
-        Parameters
-        ----------
-        crop : np.ndarray
-            single crop
-        location : tuple of slices
-            coordinates of crop
-        """
-        if self.res is not None:
-            raise RuntimeError('Aggregated data has been already computed!')
-
-        if not self.valid:
-            raise RuntimeError('All data in the container has already been cleared!')
-
-        for crop_x, slc in zip(crop.shape, location):
-            if slc.step and slc.step != 1:
-                raise ValueError(f"Invalid step in location {location}")
-
-            beg, end, _ = slc.indices(slc.stop)
-            if crop_x < end - beg:
-                raise ValueError(f"Inconsistent crop_shape {crop.shape} and location {location}")
-
-        loc = tuple(slice(max(0, slc.start - x0), min(xlen, slc.stop - x0))
-               for x0, slc, xlen in zip(self.origin, location, self.shape))
-        loc_crop = tuple(slice(max(0, x0 - slc.start), min(xlen + x0 - slc.start , slc.stop - slc.start))
-                    for x0, slc, xlen in zip(self.origin, location, self.shape))
-
-        self._put(crop[loc_crop], loc)
-
-    def _put(self, crop, location):
-        raise NotImplementedError
-
-    def aggregate(self):
-        """ Computes and returns aggregated cube.
-        Data updates are not possible after calling `aggregate` """
-
-        if not self.valid:
-            raise RuntimeError('All data in the container has already been cleared!')
-
-        if self.res is None:
-            self.res = self._aggregate()
-            self._clear()
-        return self.res
-
-    def _aggregate(self):
-        raise NotImplementedError
-
-    def clear(self):
-        """ Clears all data """
-        self.valid = False
-        if self.res is not None:
-            self.res = None
-        self._clear()
-
-    def _clear(self):
-        """ clear data for aggregation process """
-        raise NotImplementedError
-
-
-class AvgContainer(BaseAggregationContainer):
-    """ Average aggregation of crops """
-
-    def __init__(self, shape=None, grid_range=None, dtype=np.float32):
-        super().__init__(shape, grid_range)
-        self.data = np.zeros(self.shape, dtype=dtype)
-        self.counts = np.zeros(self.shape, dtype=np.int8)
-
-    def _put(self, crop, location):
-        self.data[location] += crop
-        self.counts[location] += 1
-
-    def _aggregate(self):
-        self.counts[self.counts == 0] = 1
-        self.data /= self.counts
-        return self.data
-
-    def _clear(self):
-        self.counts = None
-        self.data = None
-
-
-class MaxContainer(BaseAggregationContainer):
-    """ Maximum aggregation of crops """
-
-    def __init__(self, shape=None, grid_range=None, fill_value=-np.inf, dtype=np.float32):
-        super().__init__(shape, grid_range)
-        self.data = np.full(self.shape, fill_value, dtype=dtype)
-
-    def _put(self, crop, location):
-        self.data[location] = np.maximum(self.data[location], crop)
-
-    def _aggregate(self):
-        return self.data
-
-    def _clear(self):
-        self.data = None

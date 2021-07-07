@@ -8,7 +8,6 @@ from itertools import product
 import h5py
 import numpy as np
 import pandas as pd
-from numba import njit, prange
 
 from cv2 import dilate
 from scipy.ndimage.morphology import binary_fill_holes, binary_erosion, binary_dilation
@@ -17,11 +16,12 @@ from scipy.spatial import Delaunay
 from scipy.signal import hilbert
 from skimage.measure import label
 
-from .utility_classes import HorizonSampler, lru_cache
-from .utils import round_to_array, groupby_mean, groupby_min, groupby_max, filter_simplices
-from .utils import retrieve_function_arguments, make_bezier_figure
+from .utility_classes import lru_cache
+from .utils import round_to_array, groupby_mean, groupby_min, groupby_max, filter_simplices, filtering_function
+from .utils import retrieve_function_arguments, get_class_methods, make_bezier_figure
 from .functional import smooth_out
 from .plotters import plot_image, show_3d
+
 
 
 class UnstructuredHorizon:
@@ -225,6 +225,7 @@ class UnstructuredHorizon:
         for _ in range(width):
             mask[idx_1, idx_2, heights] = alpha
             heights += 1
+
         return mask
 
     # Methods to implement in the future
@@ -244,7 +245,7 @@ class UnstructuredHorizon:
 
     def __str__(self):
         msg = f"""
-        Horizon {self.name} for {self.cube_name}
+        Horizon {self.name} for {self.geometry.displayed_name}
         Depths range:           {self.h_min} to {self.h_max}
         Depths mean:            {self.h_mean:.6}
         Depths std:             {self.h_std:.6}
@@ -254,7 +255,7 @@ class UnstructuredHorizon:
 
 
     # Visualization
-    def show_slide(self, loc, width=3, axis=0, stable=True, order_axes=None, **kwargs):
+    def show_slide(self, loc, width=3, axis=0, stable=True, **kwargs):
         """ Show slide with horizon on it.
 
         Parameters
@@ -284,14 +285,13 @@ class UnstructuredHorizon:
 
         # set defaults if needed and plot the slide
         kwargs = {
-            'mode': 'overlap',
-            'title': (f'U-horizon `{self.name}` on `{self.geometry.name}`' + '\n ' +
+            'title_label': (f'U-horizon `{self.name}` on `{self.cube_name}`' + '\n ' +
                       f'{self.geometry.index_headers[axis]} {loc} out of {self.geometry.lens[axis]}'),
             'xlabel': self.geometry.index_headers[1 - axis],
             'ylabel': 'Depth', 'y': 1.015,
             **kwargs
         }
-        plot_image([seismic_slide, mask], order_axes=order_axes, **kwargs)
+        return plot_image([seismic_slide, mask], **kwargs)
 
 
 
@@ -329,9 +329,6 @@ class Horizon:
           these methods must be used instead of manually permuting `matrix` and `points` attributes.
           For example, filtration or smoothing of a horizon can be done with their help.
 
-        - `sampler` instance to generate points that are close to the horizon.
-          Note that these points are scaled into [0, 1] range along each of the coordinate.
-
         - Method `add_to_mask` puts 1's on the location of a horizon inside provided `background`.
 
         - `get_cube_values` allows to cut seismic data along the horizon: that data can be used to evaluate
@@ -368,7 +365,7 @@ class Horizon:
     # Correspondence between attribute alias and the class function that calculates it
     METHOD_TO_ATTRIBUTE = {
         'get_cube_values': ['cube_values', 'amplitudes'],
-        'get_full_matrix': ['full_matrix', 'heights'],
+        'get_full_matrix': ['full_matrix', 'heights', 'depths'],
         'evaluate_metric': ['metrics'],
         'get_instantaneous_phases': ['instant_phases'],
         'get_instantaneous_amplitudes': ['instant_amplitudes'],
@@ -403,10 +400,8 @@ class Horizon:
 
         # Attributes from geometry
         self.geometry = geometry
-        self.cube_name = geometry.name
+        self.cube_name = geometry.displayed_name
         self.cube_shape = geometry.cube_shape
-
-        self.sampler = None
 
         # Check format of storage, then use it to populate attributes
         if isinstance(storage, str):
@@ -439,7 +434,7 @@ class Horizon:
         If the horizon is created not from (N, 3) array, evaluated at the time of the first access.
         """
         if self._points is None and self.matrix is not None:
-            points = self.matrix_to_points(self.matrix)
+            points = self.matrix_to_points(self.matrix).astype(self.dtype)
             points += np.array([self.i_min, self.x_min, 0])
             self._points = points
         return self._points
@@ -529,6 +524,11 @@ class Horizon:
             self._h_std = np.std(self.depths)
         return self._h_std
 
+    @property
+    def short_name(self):
+        """ Name without extension. """
+        return self.name.split('.')[0]
+
     def __len__(self):
         """ Number of labeled traces. """
         if self._len is None:
@@ -547,6 +547,18 @@ class Horizon:
 
         if storage == 'matrix':
             self._matrix = None
+            if len(self.points) > 0:
+                self._h_min = self.points[:, 2].min().astype(self.dtype)
+                self._h_max = self.points[:, 2].max().astype(self.dtype)
+                self.i_min, self.x_min, _ = np.min(self.points, axis=0).astype(np.int32)
+                self.i_max, self.x_max, _ = np.max(self.points, axis=0).astype(np.int32)
+
+                self.i_length = (self.i_max - self.i_min) + 1
+                self.x_length = (self.x_max - self.x_min) + 1
+                self.bbox = np.array([[self.i_min, self.i_max],
+                                    [self.x_min, self.x_max],
+                                    [self.h_min, self.h_max]],
+                                    dtype=np.int32)
         elif storage == 'points':
             self._points = None
 
@@ -602,18 +614,6 @@ class Horizon:
 
         # Collect stats on separate axes. Note that depth stats are properties
         self.reset_storage('matrix')
-        if len(self.points) > 0:
-            self.i_min, self.x_min, _ = np.min(self.points, axis=0).astype(np.int32)
-            self.i_max, self.x_max, _ = np.max(self.points, axis=0).astype(np.int32)
-            self._h_min = self.points[:, 2].min().astype(self.dtype)
-            self._h_max = self.points[:, 2].max().astype(self.dtype)
-
-            self.i_length = (self.i_max - self.i_min) + 1
-            self.x_length = (self.x_max - self.x_min) + 1
-            self.bbox = np.array([[self.i_min, self.i_max],
-                                  [self.x_min, self.x_max],
-                                  [self.h_min, self.h_max]],
-                                 dtype=np.int32)
 
 
     def from_file(self, path, transform=True, **kwargs):
@@ -646,7 +646,7 @@ class Horizon:
         """ Init from matrix and location of minimum i, x points. """
         _ = kwargs
 
-        self.matrix = matrix
+        self.matrix = matrix.astype(self.dtype)
         self.i_min, self.x_min = i_min, x_min
         self.i_max, self.x_max = i_min + matrix.shape[0] - 1, x_min + matrix.shape[1] - 1
 
@@ -743,6 +743,7 @@ class Horizon:
                     horizons.append(Horizon(points, geometry, name=f'{prefix}_{i}'))
 
         horizons.sort(key=len)
+        horizons = [horizon for horizon in horizons if len(horizon) != 0]
         return horizons
 
 
@@ -788,11 +789,11 @@ class Horizon:
         if filtering_matrix is None:
             filtering_matrix = self.geometry.zero_traces
 
-        def filtering_function(points, **kwds):
+        def _filtering_function(points, **kwds):
             _ = kwds
-            return _filtering_function(points, filtering_matrix)
+            return filtering_function(points, filtering_matrix)
 
-        self.apply_to_points(filtering_function, **kwargs)
+        self.apply_to_points(_filtering_function, **kwargs)
 
     def filter_matrix(self, filtering_matrix=None, **kwargs):
         """ Remove points that correspond to 1's in `filtering_matrix` from matrix storage. """
@@ -802,12 +803,12 @@ class Horizon:
         idx_i, idx_x = np.asarray(filtering_matrix[self.i_min:self.i_max + 1,
                                                    self.x_min:self.x_max + 1] == 1).nonzero()
 
-        def filtering_function(matrix, **kwds):
+        def _filtering_function(matrix, **kwds):
             _ = kwds
             matrix[idx_i, idx_x] = self.FILL_VALUE
             return matrix
 
-        self.apply_to_matrix(filtering_function, **kwargs)
+        self.apply_to_matrix(_filtering_function, **kwargs)
 
     filter = filter_points
 
@@ -866,6 +867,38 @@ class Horizon:
 
         self.apply_to_matrix(smoothing_function, **kwargs)
 
+
+    def make_carcass(self, frequencies=100, regular=True, margin=50, apply_smoothing=False, **kwargs):
+        """ Cut carcass out of a horizon. Returns a new instance.
+
+        Parameters
+        ----------
+        frequencies : int or sequence of ints
+            Frequencies of carcass lines.
+        regular : bool
+            Whether to make regular lines or base lines on geometry quality map.
+        margin : int
+            Margin from geometry edges to exclude from carcass.
+        apply_smoothing : bool
+            Whether to smooth out the result.
+        kwargs : dict
+            Other parameters for grid creation, see `:meth:~.SeismicGeometry.make_grid`.
+        """
+        frequencies = frequencies if isinstance(frequencies, (tuple, list)) else [frequencies]
+        carcass = copy(self)
+        carcass.name = carcass.name.replace('copy', 'carcass')
+
+        if regular:
+            from .metrics import GeometryMetrics
+            gm = GeometryMetrics(self.geometry)
+            grid = gm.make_grid(1 - self.geometry.zero_traces, frequencies=frequencies, margin=margin, **kwargs)
+        else:
+            grid = self.geometry.make_quality_grid(frequencies, margin=margin, **kwargs)
+
+        carcass.filter(filtering_matrix=1-grid)
+        if apply_smoothing:
+            carcass.smooth_out(preserve_borders=False)
+        return carcass
 
     def make_random_holes_matrix(self, n=10, scale=1.0, max_scale=.25,
                                  max_angles_amount=4, max_sharpness=5.0, locations=None,
@@ -970,42 +1003,7 @@ class Horizon:
         filtering_matrix = self.put_on_full(filtering_matrix, False)
         return filtering_matrix
 
-    # Horizon usage: point/mask generation
-    def create_sampler(self, bins=None, quality_grid=None, weights=None, threshold=0, **kwargs):
-        """ Create sampler based on horizon location.
-
-        Parameters
-        ----------
-        bins : sequence
-            Size of ticks alongs each respective axis.
-        quality_grid : ndarray or None
-            If not None, then must be a matrix with zeroes in locations to keep, ones in locations to remove.
-            Applied to `points` before sampler creation.
-        weights : ndarray or bool
-            Weights matrix with shape (ilines_len, xlines_len) for weights of sampling.
-            If True support correlation metric will be used.
-        """
-        _ = kwargs
-        default_bins = self.cube_shape // np.array([5, 20, 20])
-        bins = bins if bins is not None else default_bins
-        quality_grid = self.geometry.quality_grid if quality_grid is True else quality_grid
-
-        if isinstance(quality_grid, np.ndarray):
-            points = _filtering_function(np.copy(self.points), 1 - quality_grid)
-        else:
-            points = self.points
-
-        if weights:
-            if not isinstance(weights, np.ndarray):
-                corrs_matrix = self.evaluate_metric()
-                weights = corrs_matrix[points[:, 0], points[:, 1]]
-            points = points[~np.isnan(weights)]
-            weights = weights[~np.isnan(weights)]
-            points = points[weights > threshold]
-            weights = weights[weights > threshold]
-
-        self.sampler = HorizonSampler(np.histogramdd(points/self.cube_shape, bins=bins, weights=weights), **kwargs)
-
+    # Horizon usage: mask generation and cutting data along self
     def add_to_mask(self, mask, locations=None, width=3, alpha=1, **kwargs):
         """ Add horizon to a background.
         Note that background is changed in-place.
@@ -1051,6 +1049,7 @@ class Horizon:
 
             for shift in range(width):
                 mask[idx_i, idx_x, heights + shift] = alpha
+
         return mask
 
 
@@ -1094,24 +1093,18 @@ class Horizon:
         return array
 
 
-    @lru_cache(maxsize=1, apply_by_default=False)
+    @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     def get_cube_values(self, window=23, offset=0, chunk_size=256, **kwargs):
         """ Get values from the cube along the horizon.
 
         Parameters
         ----------
         window : int
-            Width of data to cut.
+            Width of data slice along the horizon.
         offset : int
-            Value to add to each entry in matrix.
-        scale : bool, callable
-            If True, then values are scaled to [0, 1] range.
-            If callable, then it is applied to data cropped along horizon.
+            Offset of data slice with respect to horizon heights matrix.
         chunk_size : int
             Size of data along height axis processed at a time.
-        nan_zero_traces : bool
-            Whether fill zero traces with nans or not.
-            Defaults to True.
         kwargs :
             Passed directly to :meth:`.transform_where_present`.
         """
@@ -1152,7 +1145,7 @@ class Horizon:
         return self.transform_where_present(background, **transform_kwargs)
 
 
-    @lru_cache(maxsize=1, apply_by_default=False)
+    @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     def get_instantaneous_amplitudes(self, window=23, depths=None, **kwargs):
         """ Calculate instantaneous amplitude along the horizon.
 
@@ -1171,7 +1164,7 @@ class Horizon:
         -----
         Keep in mind, that Hilbert transform produces artifacts at signal start and end. Therefore if you want to get
         an attribute with `N` channels along depth axis, you should provide `window` broader then `N`. E.g. in call
-        `label.get_instantaneous_amplitudes(channels=range(10, 21), window=41)` the attribute will be first calculated
+        `label.get_instantaneous_amplitudes(depths=range(10, 21), window=41)` the attribute will be first calculated
         by array of `(xlines, ilines, 41)` shape and then the slice `[..., ..., 10:21]` of them will be returned.
         """
         transform_kwargs = retrieve_function_arguments(self.transform_where_present, kwargs)
@@ -1182,7 +1175,7 @@ class Horizon:
         return self.transform_where_present(result, **transform_kwargs)
 
 
-    @lru_cache(maxsize=1, apply_by_default=False)
+    @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     def get_instantaneous_phases(self, window=23, depths=None, **kwargs):
         """ Calculate instantaneous phase along the horizon.
 
@@ -1201,7 +1194,7 @@ class Horizon:
         -----
         Keep in mind, that Hilbert transform produces artifacts at signal start and end. Therefore if you want to get
         an attribute with `N` channels along depth axis, you should provide `window` broader then `N`. E.g. in call
-        `label.get_instantaneous_phases(channels=range(10, 21), window=41)` the attribute will be first calculated
+        `label.get_instantaneous_phases(depths=range(10, 21), window=41)` the attribute will be first calculated
         by array of `(xlines, ilines, 41)` shape and then the slice `[..., ..., 10:21]` of them will be returned.
         """
         transform_kwargs = retrieve_function_arguments(self.transform_where_present, kwargs)
@@ -1212,7 +1205,7 @@ class Horizon:
         return self.transform_where_present(result, **transform_kwargs)
 
 
-    @lru_cache(maxsize=1, apply_by_default=False)
+    @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     def get_full_matrix(self, **kwargs):
         """ Transform `matrix` attribute to match cubic coordinates.
 
@@ -1226,7 +1219,7 @@ class Horizon:
         return self.transform_where_present(matrix, **transform_kwargs)
 
 
-    @lru_cache(maxsize=1, apply_by_default=False)
+    @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     def get_full_binary_matrix(self, **kwargs):
         """ Transform `binary_matrix` attribute to match cubic coordinates.
 
@@ -1247,7 +1240,7 @@ class Horizon:
         src_attribute : str
             A keyword defining horizon attribute to make crops from:
             - 'cube_values' or 'amplitudes': cube values cut along the horizon;
-            - 'heights' or 'full_matrix': horizon depth map in cubic coordinates;
+            - 'depths' or 'full_matrix': horizon depth map in cubic coordinates;
             - 'metrics': random support metrics matrix.
             - 'instant_phases': instantaneous phase along the horizon;
             - 'instant_amplitudes': instantaneous amplitude along the horizon;
@@ -1265,7 +1258,7 @@ class Horizon:
 
         >>> horizon.load_attribute('cube_values', (x_slice, i_slice, h_slice), window=10)
 
-        >>> horizon.load_attribute('heights')
+        >>> horizon.load_attribute('depths')
 
         >>> horizon.load_attribute('metrics', metrics='hilbert', normalize='min-max')
 
@@ -1280,20 +1273,13 @@ class Horizon:
         x_slice, i_slice, h_slice = location if location is not None else (slice(None), slice(None), slice(None))
 
         default_kwargs = {'use_cache': True}
-        # Update `kwargs` with additional default values depending on `src_attribute`
+        # Update `default_kwargs` with extra arguments depending on `src_attribute`
         if src_attribute in ['cube_values', 'amplitudes']:
-            default_kwargs = {
-                'nan_zero_traces': False,
+            if h_slice != slice(None):
                 # `window` arg for `get_cube_values` can be infered from `h_slice`
-                **({'window': h_slice.stop - h_slice.start} if h_slice != slice(None) else {}),
-                **default_kwargs
-            }
-        elif src_attribute in ['masks', 'full_binary_matrix']:
-            default_kwargs = {
-                'fill_value': 0,
-                **default_kwargs
-            }
+                default_kwargs = {'window': h_slice.stop - h_slice.start, **default_kwargs}
         kwargs = {**default_kwargs, **kwargs}
+
         func_name = self.ATTRIBUTE_TO_METHOD.get(src_attribute)
         if func_name is None:
             raise ValueError("Unknown `src_attribute` {}. Expected {}.".format(src_attribute,
@@ -1522,6 +1508,24 @@ class Horizon:
         return self.horizon_metrics.evaluate('instantaneous_phase')
 
     @property
+    def number_of_holes(self):
+        """ Number of holes inside horizon borders. """
+        holes_array = self.filled_matrix != self.binary_matrix
+        _, num = label(holes_array, connectivity=2, return_num=True, background=0)
+        return num
+
+    @property
+    def perimeter(self):
+        """ Number of points in the borders. """
+        return np.sum((self.borders_matrix == 1).astype(np.int32))
+
+    @property
+    def solidity(self):
+        """ Ratio of area covered by horizon to total area inside borders. """
+        return len(self) / np.sum(self.filled_matrix)
+
+    # Carcass properties
+    @property
     def is_carcass(self):
         """ Check if the horizon is a sparse carcass. """
         return len(self) / self.filled_matrix.sum() < 0.5
@@ -1539,21 +1543,9 @@ class Horizon:
         return uniques[counts > 256]
 
     @property
-    def number_of_holes(self):
-        """ Number of holes inside horizon borders. """
-        holes_array = self.filled_matrix != self.binary_matrix
-        _, num = label(holes_array, connectivity=2, return_num=True, background=0)
-        return num
-
-    @property
-    def perimeter(self):
-        """ Number of points in the borders. """
-        return np.sum((self.borders_matrix == 1).astype(np.int32))
-
-    @property
-    def solidity(self):
-        """ Ratio of area covered by horizon to total area inside borders. """
-        return len(self) / np.sum(self.filled_matrix)
+    def carcass_grid(self):
+        """ Full matrix with present lines. """
+        return self.put_on_full(self.binary_matrix, fill_value=0.0)
 
 
     def grad_along_axis(self, axis=0):
@@ -1621,7 +1613,7 @@ class Horizon:
         return None
 
 
-    @lru_cache(maxsize=1, apply_by_default=False)
+    @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     def evaluate_metric(self, metric='support_corrs', supports=50, agg='nanmean', **kwargs):
         """ Cached metrics calcucaltion with disabled plotting option.
 
@@ -2080,11 +2072,11 @@ class Horizon:
 
     # Methods of (visual) representation of a horizon
     def __repr__(self):
-        return f"""<horizon {self.name} for {self.cube_name} at {hex(id(self))}>"""
+        return f"""<horizon {self.name} for {self.geometry.displayed_name} at {hex(id(self))}>"""
 
     def __str__(self):
         msg = f"""
-        Horizon {self.name} for {self.cube_name} loaded from {self.format}
+        Horizon {self.name} for {self.geometry.displayed_name} loaded from {self.format}
         Ilines range:      {self.i_min} to {self.i_max}
         Xlines range:      {self.x_min} to {self.x_max}
         Depth range:       {self.h_min} to {self.h_max}
@@ -2116,7 +2108,7 @@ class Horizon:
         return background
 
 
-    def show(self, src='matrix', fill_value=None, on_full=True, enlarge=True, width=3, **kwargs):
+    def show(self, src='matrix', fill_value=None, on_full=True, enlarge=True, width=9, **kwargs):
         """ Nice visualization of a horizon-related matrix. """
         matrix = getattr(self, src) if isinstance(src, str) else src
         fill_value = fill_value if fill_value is not None else self.FILL_VALUE
@@ -2130,20 +2122,20 @@ class Horizon:
             matrix = self.enlarge_carcass_image(matrix, width)
 
         # defaults for plotting if not supplied in kwargs
+        title = f"{src} {'on full'*on_full} of horizon `{self.name}` on cube `{self.geometry.displayed_name}`"
         kwargs = {
-            'cmap': 'viridis_r',
-            'title': '{} {} of `{}` on `{}`'.format(src if isinstance(src, str) else '',
-                                                    'on full'*on_full, self.name, self.cube_name),
+            'title_label': title,
             'xlabel': self.geometry.index_headers[0],
             'ylabel': self.geometry.index_headers[1],
+            'cmap': 'Depths',
+            'colorbar': True,
             **kwargs
             }
         matrix[matrix == fill_value] = np.nan
-        plot_image(matrix, mode='single', **kwargs)
+        return plot_image(matrix, **kwargs)
 
 
-    def show_amplitudes_rgb(self, width=3, channel_weights=(1, 0.5, 0.25), to_uint8=True,
-                            channels=None, **kwargs):
+    def show_amplitudes_rgb(self, width=3, channel_weights=(1, 0.5, 0.25), channels=None, **kwargs):
         """ Show trace values on the horizon and surfaces directly under it.
 
         Parameters
@@ -2169,20 +2161,18 @@ class Horizon:
         amplitudes[self.full_matrix == self.FILL_VALUE, :] = np.nan
         amplitudes = amplitudes[:, :, ::-1]
         amplitudes *= np.asarray(channel_weights).reshape(1, 1, -1)
-
-        # cast values to uint8 if needed
-        if to_uint8:
-            amplitudes = (amplitudes * 255).astype(np.uint8)
+        amplitudes /= np.nanmax(amplitudes, axis=(0,1))
 
         # defaults for plotting if not supplied in kwargs
         kwargs = {
-            'title': 'RGB amplitudes of {} on cube {}'.format(self.name, self.cube_name),
+            'title_label': f'RGB amplitudes of horizon {self.name} on cube {self.geometry.displayed_name}',
             'xlabel': self.geometry.index_headers[0],
             'ylabel': self.geometry.index_headers[1],
+            'order_axes': (1, 0, 2),
             **kwargs
             }
 
-        plot_image(amplitudes, mode='rgb', **kwargs)
+        return plot_image(amplitudes, mode='imshow', **kwargs)
 
 
     def show_3d(self, n_points=100, threshold=100., z_ratio=1., zoom_slice=None, show_axes=True,
@@ -2215,7 +2205,7 @@ class Horizon:
         kwargs : dict
             Other arguments of plot creation.
         """
-        title = f'Horizon `{self.name}` on `{self.cube_name}`'
+        title = f'Horizon `{self.short_name}` on `{self.geometry.displayed_name}`'
         aspect_ratio = (self.i_length / self.x_length, 1, z_ratio)
         axis_labels = (self.geometry.index_headers[0], self.geometry.index_headers[1], 'DEPTH')
         if zoom_slice is None:
@@ -2283,8 +2273,7 @@ class Horizon:
                                      matrix=self.full_matrix, threshold=threshold)
         return x, y, z, simplices
 
-    def show_slide(self, loc, width=3, axis='i', order_axes=None, zoom_slice=None,
-                   n_ticks=5, delta_ticks=100, **kwargs):
+    def show_slide(self, loc, width=None, axis='i', zoom_slice=None, **kwargs):
         """ Show slide with horizon on it.
 
         Parameters
@@ -2292,7 +2281,7 @@ class Horizon:
         loc : int
             Number of slide to load.
         width : int
-            Horizon thickness.
+            Horizon thickness. If None given, set to 1% of seismic slide height.
         axis : int
             Number of axis to load slide along.
         zoom_slice : tuple
@@ -2305,17 +2294,20 @@ class Horizon:
 
         # Load seismic and mask
         seismic_slide = self.geometry.load_slide(loc=loc, axis=axis)
+        xmin, xmax, ymin, ymax = 0, seismic_slide.shape[0], seismic_slide.shape[1], 0
+
         mask = np.zeros(shape)
+        width = width or seismic_slide.shape[1] // 100
         mask = self.add_to_mask(mask, locations=locations, width=width)
         seismic_slide, mask = np.squeeze(seismic_slide), np.squeeze(mask)
-        xticks = list(range(seismic_slide.shape[0]))
-        yticks = list(range(seismic_slide.shape[1]))
 
         if zoom_slice:
             seismic_slide = seismic_slide[zoom_slice]
             mask = mask[zoom_slice]
-            xticks = xticks[zoom_slice[0]]
-            yticks = yticks[zoom_slice[1]]
+            xmin = zoom_slice[0].start or xmin
+            xmax = zoom_slice[0].stop or xmax
+            ymin = zoom_slice[1].stop or xmin
+            ymax = zoom_slice[1].start or xmax
 
         # defaults for plotting if not supplied in kwargs
         header = self.geometry.axis_names[axis]
@@ -2329,34 +2321,31 @@ class Horizon:
             ylabel = self.geometry.index_headers[1]
             total = self.geometry.depth
 
-        xticks = xticks[::max(1, round(len(xticks) // (n_ticks - 1) / delta_ticks)) * delta_ticks] + [xticks[-1]]
-        xticks = sorted(list(set(xticks)))
-        yticks = yticks[::max(1, round(len(xticks) // (n_ticks - 1) / delta_ticks)) * delta_ticks] + [yticks[-1]]
-        yticks = sorted(list(set(yticks)), reverse=True)
-
-        if len(xticks) > 2 and (xticks[-1] - xticks[-2]) < delta_ticks:
-            xticks.pop(-2)
-        if len(yticks) > 2 and (yticks[0] - yticks[1]) < delta_ticks:
-            yticks.pop(1)
+        title = f'Horizon `{self.name}` on cube `{self.geometry.displayed_name}`\n {header} {loc} out of {total}'
 
         kwargs = {
-            'mode': 'overlap',
-            'title': f'Horizon `{self.name}` on `{self.geometry.name}`\n {header} {loc} out of {total}',
+            'figsize': (16, 8),
+            'title_label': title,
+            'title_y': 1.02,
             'xlabel': xlabel,
             'ylabel': ylabel,
-            'xticks': xticks,
-            'yticks': yticks,
-            'y': 1.02,
+            'extent': (xmin, xmax, ymin, ymax),
+            'legend': False,
+            'labeltop': False,
+            'labelright': False,
+            'curve_width': width,
+            'grid': [False, True],
+            'colorbar': [True, False],
             **kwargs
         }
-
-        plot_image([seismic_slide, mask], order_axes=order_axes, **kwargs)
+        return plot_image(data=[seismic_slide, mask], **kwargs)
 
 
     def reset_cache(self):
         """ Clear cached data. """
-        for attr in self._cached_attributes:
-            getattr(self, attr).reset_instance(self)
+        for method in get_class_methods(self):
+            if hasattr(method, 'cache'):
+                method.reset_instance(self)
 
 
     def __copy__(self):
@@ -2366,21 +2355,9 @@ class Horizon:
         -------
         A horizon object with new matrix object and a reference to the old geometry attribute.
         """
-        return Horizon(np.copy(self.matrix), self.geometry, i_min=self.i_min, x_min=self.x_min,
-                       name=f'copy_of_{self.name}')
+        return type(self)(np.copy(self.matrix), self.geometry, i_min=self.i_min, x_min=self.x_min,
+                          name=f"copy_of_{self.name}")
 
 
 class StructuredHorizon(Horizon):
     """ Convenient alias for :class:`.Horizon` class. """
-
-
-@njit(parallel=True)
-def _filtering_function(points, filtering_matrix):
-    #pylint: disable=consider-using-enumerate, not-an-iterable
-    mask = np.ones(len(points), dtype=np.int32)
-
-    for i in prange(len(points)):
-        il, xl = points[i, 0], points[i, 1]
-        if filtering_matrix[il, xl] == 1:
-            mask[i] = 0
-    return points[mask == 1, :]
