@@ -504,7 +504,7 @@ class HorizonController(BaseController):
             Pipeline()
             .init_variable('loss_history', [])
             .init_model(mode='dynamic', model_class=C('model_class', default=EncoderDecoder),
-                        name='model', config=C('model_config'), source=kwargs.get('source_model'))
+                        name='model', config=C('model_config'), source=C('source_model', default=None))
 
             .train_model('model',
                          fetches='loss',

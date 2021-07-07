@@ -267,8 +267,8 @@ class BaseController:
         n_iters, prefetch = pipeline_config.pop(['n_iters', 'prefetch'])
 
         pipeline_config['sampler'] = sampler
-        # pipeline_config['source_model'] = model # TODO: CHANGE TO BETTER
-        train_pipeline = self.get_train_template(source_model=model, **kwargs) << pipeline_config << dataset
+        pipeline_config['source_model'] = model
+        train_pipeline = self.get_train_template(**kwargs) << pipeline_config << dataset
         train_pipeline.run(n_iters=n_iters, prefetch=prefetch)
 
         torch.cuda.empty_cache()
