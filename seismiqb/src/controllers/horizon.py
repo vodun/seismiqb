@@ -57,6 +57,9 @@ class HorizonController(BaseController):
             'n_iters': 100,
             'early_stopping': True,
         },
+        'finetune': {
+            'n_iters': 10,
+        },
         'inference': {
             'orientation': 'ix',
             'batch_size': None,
@@ -72,6 +75,8 @@ class HorizonController(BaseController):
             'prefetch': 0,
             'chunk_size': 100,
             'chunk_overlap': 0.1,
+
+            'finetune': True,
         },
 
         # Common parameters for train and inference
@@ -163,10 +168,6 @@ class HorizonController(BaseController):
         rebatch_threshold = self.config['train']['rebatch_threshold']
         sampler = SeismicSampler(labels=dataset.labels, crop_shape=crop_shape,
                                  threshold=rebatch_threshold, mode='horizon', **kwargs)
-
-        sampler.show_locations(show=self.plot, savepath=self.make_savepath('sampler_locations.png'))
-        sampler.show_sampled(show=self.plot, savepath=self.make_savepath('sampler_generated.png'))
-        self.log(f'Created sampler\n{indent(str(sampler), " "*4)}')
         return sampler
 
     # Train method is inherited from BaseController class
@@ -286,13 +287,13 @@ class HorizonController(BaseController):
 
         horizons = []
         n_crops, unfiltered_n_crops = 0, 0
-        for chunk in chunk_iterator:
+        for i, chunk in enumerate(chunk_iterator):
             chunk_spatial_ranges = copy(spatial_ranges)
             chunk_spatial_ranges[axis] = [chunk, min(chunk + chunk_size, spatial_ranges[axis][-1])]
 
             horizons_, length, u_length = self._inference_on_chunk(dataset=dataset, model=model,
                                                                    ranges=(*chunk_spatial_ranges, heights_range),
-                                                                   config=config)
+                                                                   config=config, iteration=i)
             horizons.extend(horizons_)
 
             n_crops += length
@@ -308,11 +309,22 @@ class HorizonController(BaseController):
 
         return Horizon.merge_list(horizons, mean_threshold=5.5, adjacency=3, minsize=500)
 
-    def _inference_on_chunk(self, dataset, model, ranges, config):
+    def _inference_on_chunk(self, dataset, model, ranges, config, iteration):
         # Prepare parameters
         orientation, overlap_factor, threshold = config.get(['orientation', 'overlap_factor', 'threshold'])
         prefetch = config.get('prefetch', 0)
         crop_shape = np.array(config.crop_shape)[list(config.order)]
+
+        if config.get('finetune', True):
+            sampler = self.make_sampler(dataset, ranges=ranges,)
+            if sampler.samplers[0][0].n > 0:
+                sampler.show_locations(show=self.plot,
+                                       savepath=self.make_savepath('chunk', str(iteration), 'sampler_locations.png'))
+                sampler.show_sampled(show=self.plot,
+                                     savepath=self.make_savepath('chunk', str(iteration), 'sampler_generated.png'))
+
+                self.finetune(dataset=dataset, sampler=sampler, model=model)
+                self.log(f'Finetuned! {model.iteration}')
 
         # Create regular grid over desired ranges
         geometry = dataset.geometries[0]
@@ -492,7 +504,7 @@ class HorizonController(BaseController):
             Pipeline()
             .init_variable('loss_history', [])
             .init_model(mode='dynamic', model_class=C('model_class', default=EncoderDecoder),
-                        name='model', config=C('model_config'))
+                        name='model', config=C('model_config'), source=kwargs.get('source_model'))
 
             .train_model('model',
                          fetches='loss',

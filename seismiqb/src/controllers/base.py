@@ -258,6 +258,22 @@ class BaseController:
         }
         return model
 
+    def finetune(self, dataset, sampler, model, config=None, **kwargs):
+        """ !!. """
+        # Prepare parameters
+        config = config or {}
+        pipeline_config = Config({**self.config['common'], **self.config['train'],
+                                  **self.config['finetune'], **config, **kwargs})
+        n_iters, prefetch = pipeline_config.pop(['n_iters', 'prefetch'])
+
+        pipeline_config['sampler'] = sampler
+        # pipeline_config['source_model'] = model # TODO: CHANGE TO BETTER
+        train_pipeline = self.get_train_template(source_model=model, **kwargs) << pipeline_config << dataset
+        train_pipeline.run(n_iters=n_iters, prefetch=prefetch)
+
+        torch.cuda.empty_cache()
+
+
     # Inference
     def inference(self, dataset, model, **kwargs):
         """ Inference: use trained/loaded model for making predictions on the supplied dataset.
