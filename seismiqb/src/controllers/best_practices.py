@@ -1,11 +1,17 @@
 """ Collection of good architectures for the tasks of horizon detection. """
+import torch
+from torch import nn
+from torch import functional as F
+
 from ...batchflow.batchflow.models.torch import ResBlock
+from ...batchflow.models.torch.losses.binary import Dice
+
 
 class DepthSoftmax(nn.Module):
     def __init__(self, width=3):
         super().__init__()
         self.width_weights = torch.ones((1, 1, 1, width))
-        
+
     @torch.cuda.amp.autocast(enabled=False)
     def forward(self, x):
         x = torch.nn.functional.softmax(x, dim=-1)
