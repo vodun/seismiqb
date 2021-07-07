@@ -443,7 +443,6 @@ class SeismicCubeset(Dataset):
             'xlabel': xlabel,
             'ylabel': ylabel,
             'extent': (xmin, xmax, ymin, ymax),
-            'transparize_masks': True,
             'legend': False, # TODO: Make every horizon mask creation individual to allow their distinction while plot.
             **kwargs
         }

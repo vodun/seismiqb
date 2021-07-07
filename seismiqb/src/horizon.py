@@ -2273,7 +2273,7 @@ class Horizon:
                                      matrix=self.full_matrix, threshold=threshold)
         return x, y, z, simplices
 
-    def show_slide(self, loc, width=None, axis='i', zoom_slice=None, n_ticks=5, delta_ticks=100, **kwargs):
+    def show_slide(self, loc, width=None, axis='i', zoom_slice=None, **kwargs):
         """ Show slide with horizon on it.
 
         Parameters
@@ -2336,10 +2336,8 @@ class Horizon:
             'curve_width': width,
             'grid': [False, True],
             'colorbar': [True, False],
-            'transparize_masks': True,
             **kwargs
         }
-
         return plot_image(data=[seismic_slide, mask], **kwargs)
 
 

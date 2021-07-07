@@ -389,7 +389,6 @@ class MatplotlibPlotter:
         # other
         'order_axes': (1, 0, 2),
         'bad_color': (.0,.0,.0,.0),
-        'transparize_masks': False,
     }
 
     @classmethod
@@ -420,13 +419,14 @@ class MatplotlibPlotter:
         See class and method defaults for arguments examples.
         """
         for image_num, image in enumerate(data):
-            image = np.transpose(image, axes=kwargs['order_axes'][:image.ndim]).astype(float)
+            image = np.transpose(image, axes=kwargs['order_axes'][:image.ndim]).astype(np.float32)
 
             # fill some values with nans to display them with `bad_color`
             bad_values = filter_parameters(kwargs, ['bad_values'], index=image_num).get('bad_values', [])
-            if kwargs['transparize_masks']:
+            if kwargs.get('transparize_masks', image_num > 0):
                 unique_values = tuple(np.unique(image))
-                if unique_values == (0,) or unique_values == (0, 1):
+                if unique_values == (0,) or unique_values == (0, 1): # pylint: disable=consider-using-in
+                    kwargs['vmin'] = params.get('vmin', 0)
                     bad_values = [0]
             for bad_value in bad_values:
                 image[image == bad_value] = np.nan
@@ -702,16 +702,17 @@ class MatplotlibPlotter:
     # Supplementary methods
 
     @staticmethod
-    def make_cmap(color, bad_color):
-        """ Make colormap from color, if needed. """
+    def make_cmap(color, bad_color=None):
+        """ Make listed colormap from 'white' and provided color. """
         try:
             cmap = copy(plt.get_cmap(color))
         except ValueError: # if not a valid cmap name, expect it to be a matplotlib color
             if isinstance(color, str):
                 color = ColorConverter().to_rgb(color)
-            cmap = ListedColormap(color)
+            cmap = ListedColormap([(1, 1, 1, 1), color])
 
-        cmap.set_bad(color=bad_color)
+        if bad_color is not None:
+            cmap.set_bad(color=bad_color)
         return cmap
 
     @staticmethod
