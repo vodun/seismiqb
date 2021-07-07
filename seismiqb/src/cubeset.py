@@ -367,8 +367,7 @@ class SeismicCubeset(Dataset):
                                                                 printer=printer, hist=hist, plot=plot)
 
 
-    def show_slide(self, loc, idx=0, axis='iline', zoom_slice=None,
-                   n_ticks=5, delta_ticks=100, src_labels='labels', **kwargs):
+    def show_slide(self, loc, idx=0, axis='iline', zoom_slice=None, src_labels='labels', **kwargs):
         """ Show full slide of the given cube on the given line.
 
         Parameters
@@ -410,7 +409,7 @@ class SeismicCubeset(Dataset):
 
         if 'masks' in components:
             use_labels = kwargs.pop('use_labels', 'all')
-            width = kwargs.pop('width', 5)
+            width = kwargs.pop('width', crop_shape[-1] // 100)
             labels_pipeline = (Pipeline()
                                .create_masks(src_labels=src_labels, dst='masks', width=width, use_labels=use_labels))
 
@@ -418,13 +417,14 @@ class SeismicCubeset(Dataset):
 
         batch = (pipeline << self).next_batch(len(self), n_epochs=None)
         imgs = [np.squeeze(getattr(batch, comp)) for comp in components]
-        xticks = list(range(imgs[0].shape[0]))
-        yticks = list(range(imgs[0].shape[1]))
+        xmin, xmax, ymin, ymax = 0, imgs[0].shape[0], imgs[0].shape[1], 0
 
         if zoom_slice:
             imgs = [img[zoom_slice] for img in imgs]
-            xticks = xticks[zoom_slice[0]]
-            yticks = yticks[zoom_slice[1]]
+            xmin = zoom_slice[0].start or xmin
+            xmax = zoom_slice[0].stop or xmax
+            ymin = zoom_slice[1].stop or xmin
+            ymax = zoom_slice[1].start or xmax
 
         # Plotting defaults
         header = geometry.axis_names[axis]
@@ -437,23 +437,12 @@ class SeismicCubeset(Dataset):
             xlabel = geometry.index_headers[0]
             ylabel = geometry.index_headers[1]
 
-        xticks = xticks[::max(1, round(len(xticks) // (n_ticks - 1) / delta_ticks)) * delta_ticks] + [xticks[-1]]
-        xticks = sorted(list(set(xticks)))
-        yticks = yticks[::max(1, round(len(xticks) // (n_ticks - 1) / delta_ticks)) * delta_ticks] + [yticks[-1]]
-        yticks = sorted(list(set(yticks)), reverse=True)
-
-        if len(xticks) > 2 and (xticks[-1] - xticks[-2]) < delta_ticks:
-            xticks.pop(-2)
-        if len(yticks) > 2 and (yticks[0] - yticks[1]) < delta_ticks:
-            yticks.pop(1)
-
         kwargs = {
             'title_label': f'Data slice on cube `{geometry.displayed_name}`\n {header} {loc} out of {total}',
             'title_y': 1.01,
             'xlabel': xlabel,
             'ylabel': ylabel,
-            'xticks': tuple(xticks),
-            'yticks': tuple(yticks),
+            'extent': (xmin, xmax, ymin, ymax),
             'legend': False, # TODO: Make every horizon mask creation individual to allow their distinction while plot.
             **kwargs
         }

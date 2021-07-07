@@ -2273,7 +2273,7 @@ class Horizon:
                                      matrix=self.full_matrix, threshold=threshold)
         return x, y, z, simplices
 
-    def show_slide(self, loc, width=None, axis='i', zoom_slice=None, n_ticks=5, delta_ticks=100, **kwargs):
+    def show_slide(self, loc, width=None, axis='i', zoom_slice=None, **kwargs):
         """ Show slide with horizon on it.
 
         Parameters
@@ -2294,19 +2294,20 @@ class Horizon:
 
         # Load seismic and mask
         seismic_slide = self.geometry.load_slide(loc=loc, axis=axis)
+        xmin, xmax, ymin, ymax = 0, seismic_slide.shape[0], seismic_slide.shape[1], 0
 
         mask = np.zeros(shape)
         width = width or seismic_slide.shape[1] // 100
         mask = self.add_to_mask(mask, locations=locations, width=width)
         seismic_slide, mask = np.squeeze(seismic_slide), np.squeeze(mask)
-        xticks = list(range(seismic_slide.shape[0]))
-        yticks = list(range(seismic_slide.shape[1]))
 
         if zoom_slice:
             seismic_slide = seismic_slide[zoom_slice]
             mask = mask[zoom_slice]
-            xticks = xticks[zoom_slice[0]]
-            yticks = yticks[zoom_slice[1]]
+            xmin = zoom_slice[0].start or xmin
+            xmax = zoom_slice[0].stop or xmax
+            ymin = zoom_slice[1].stop or xmin
+            ymax = zoom_slice[1].start or xmax
 
         # defaults for plotting if not supplied in kwargs
         header = self.geometry.axis_names[axis]
@@ -2320,16 +2321,6 @@ class Horizon:
             ylabel = self.geometry.index_headers[1]
             total = self.geometry.depth
 
-        xticks = xticks[::max(1, round(len(xticks) // (n_ticks - 1) / delta_ticks)) * delta_ticks] + [xticks[-1]]
-        xticks = sorted(list(set(xticks)))
-        yticks = yticks[::max(1, round(len(xticks) // (n_ticks - 1) / delta_ticks)) * delta_ticks] + [yticks[-1]]
-        yticks = sorted(list(set(yticks)), reverse=True)
-
-        if len(xticks) > 2 and (xticks[-1] - xticks[-2]) < delta_ticks:
-            xticks.pop(-2)
-        if len(yticks) > 2 and (yticks[0] - yticks[1]) < delta_ticks:
-            yticks.pop(1)
-
         title = f'Horizon `{self.name}` on cube `{self.geometry.displayed_name}`\n {header} {loc} out of {total}'
 
         kwargs = {
@@ -2338,9 +2329,7 @@ class Horizon:
             'title_y': 1.02,
             'xlabel': xlabel,
             'ylabel': ylabel,
-            'xticks': tuple(xticks),
-            'yticks': tuple(yticks),
-            'extent': (xticks[0], xticks[-1], yticks[0], yticks[-1]),
+            'extent': (xmin, xmax, ymin, ymax),
             'legend': False,
             'labeltop': False,
             'labelright': False,
@@ -2349,7 +2338,6 @@ class Horizon:
             'colorbar': [True, False],
             **kwargs
         }
-
         return plot_image(data=[seismic_slide, mask], **kwargs)
 
 
