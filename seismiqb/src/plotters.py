@@ -182,7 +182,6 @@ class MatplotlibPlotter:
 
         data = cls.make_nested_data(data=data, separate=separate)
         axes = cls.make_or_parse_axes(mode=mode, n_subplots=len(data), all_params=all_params)
-
         for ax_num, (ax_data, ax) in enumerate(zip(data, axes)):
             index_condition = None if separate else lambda x: isinstance(x, list)
             ax_params = filter_parameters(all_params, index=ax_num, index_condition=index_condition)
@@ -390,6 +389,7 @@ class MatplotlibPlotter:
         # other
         'order_axes': (1, 0, 2),
         'bad_color': (.0,.0,.0,.0),
+        'transparize_masks': False,
     }
 
     @classmethod
@@ -407,7 +407,9 @@ class MatplotlibPlotter:
                 Order of image axes.
             bad_values : list of numbers
                 Data values that should be displayed with 'bad_color'.
-
+            transparize_masks : bool
+                Whether treat zeros in binary masks as bad values or not.
+                If True, makes zero values in binary masks transparent on display.
             params for images drawn by `plt.imshow`:
                 - 'cmap', 'vmin', 'vmax', 'interpolation', 'alpha', 'extent'
                 - params with 'imshow_' prefix
@@ -420,15 +422,14 @@ class MatplotlibPlotter:
         for image_num, image in enumerate(data):
             image = np.transpose(image, axes=kwargs['order_axes'][:image.ndim]).astype(float)
 
-            unique_values = np.unique(image)
-            is_mask = len(unique_values) == 2 and unique_values[0] == 0
-            # if an image is a binary mask and no bad values list passed
-            # initialize it with zero (which is expected to be a background class)
-            bad_values = kwargs.get('bad_values', [0] if is_mask else [])
-            bad_masks = [image == value for value in bad_values]
-            if bad_masks:
-                bads_mask = np.logical_or(*bad_masks) if len(bad_masks) > 1 else bad_masks[0]
-                image[bads_mask] = np.nan
+            # fill some values with nans to display them with `bad_color`
+            bad_values = filter_parameters(kwargs, ['bad_values'], index=image_num).get('bad_values', [])
+            if kwargs['transparize_masks']:
+                unique_values = tuple(np.unique(image))
+                if unique_values == (0,) or unique_values == (0, 1):
+                    bad_values = [0]
+            for bad_value in bad_values:
+                image[image == bad_value] = np.nan
 
             keys = ['cmap', 'vmin', 'vmax', 'interpolation', 'alpha', 'extent']
             params = filter_parameters(kwargs, keys, prefix='imshow_', index=image_num)
