@@ -45,13 +45,18 @@ class Fault(Horizon):
         if ext == 'npy':
             points = np.load(path, allow_pickle=False)
             transform = False
+            nodes = None
         elif ext == 'hdf5':
             cube = SeismicGeometry(path, **kwargs).file_hdf5['cube']
             points = np.stack(np.where(np.array(cube) == 1)).T #TODO: get points in chunks
             transform = False
+            nodes = None
         else:
-            points = self.csv_to_points(path, **kwargs)
+            points, nodes = self.csv_to_points(path, **kwargs)
         self.from_points(points, transform, **kwargs)
+        self.direction = 0 if self.points[:, 0].ptp() > self.points[:, 1].ptp() else 1
+        if nodes is not None:
+            self.from_points(nodes, transform, dst='nodes', reset=None, **kwargs)
 
     def csv_to_points(self, path, fix=False, **kwargs):
         """ Get point cloud array from file values. """
@@ -62,8 +67,9 @@ class Fault(Horizon):
             if len(sticks) > 0:
                 sticks = self.sort_sticks(sticks)
                 points = self.interpolate_3d(sticks, **kwargs)
-                return points
-        return np.zeros((0, 3))
+                nodes = np.concatenate(sticks.values)
+                return points, nodes
+        return np.zeros((0, 3)), np.zeros((0, 3))
 
     @classmethod
     def read_file(cls, path):
@@ -136,9 +142,8 @@ class Fault(Horizon):
         indices = np.array([i for _, i in sorted(zip(coords, range(len(sticks))))])
         return sticks.iloc[indices]
 
-    def interpolate_3d(self, sticks, **kwargs):
+    def interpolate_3d(self, sticks, width=1, **kwargs):
         """ Interpolate fault sticks as a surface. """
-        width = kwargs.get('width', 1)
         triangles = make_triangulation(sticks)
         points = []
         for triangle in triangles:

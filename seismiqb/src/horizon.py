@@ -582,7 +582,7 @@ class Horizon:
 
 
     # Initialization from different containers
-    def from_points(self, points, transform=False, verify=True, **kwargs):
+    def from_points(self, points, transform=False, verify=True, dst='points', reset='matrix', **kwargs):
         """ Base initialization: from point cloud array of (N, 3) shape.
 
         Parameters
@@ -593,6 +593,10 @@ class Horizon:
             Whether transform from line coordinates (ilines, xlines) to cubic system.
         verify : bool
             Whether to remove points outside of the cube range.
+        dst : str
+            Attribute to save result.
+        reset : str or None
+            Storage to reset.
         """
         _ = kwargs
 
@@ -610,10 +614,11 @@ class Horizon:
 
         if self.dtype == np.int32:
             points = np.rint(points)
-        self.points = points.astype(self.dtype)
+        setattr(self, dst, points.astype(self.dtype))
 
         # Collect stats on separate axes. Note that depth stats are properties
-        self.reset_storage('matrix')
+        if reset:
+            self.reset_storage(reset)
 
 
     def from_file(self, path, transform=True, **kwargs):
