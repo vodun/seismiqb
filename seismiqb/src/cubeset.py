@@ -13,7 +13,6 @@ from .geometry import SeismicGeometry
 from .crop_batch import SeismicCropBatch
 
 from .horizon import Horizon, UnstructuredHorizon
-from .metrics import HorizonMetrics
 from .plotters import plot_image, show_3d
 from .utils import fill_defaults
 from .utility_classes import IndexedDict
@@ -88,7 +87,6 @@ class SeismicCubeset(Dataset):
         item_num = item_num[0] if len(item_num) == 1 else slice(None)
         return getattr(self, attr)[idx][item_num]
 
-
     def __setitem__(self, key, value):
         """ Set attribute or its item for specific cube.
 
@@ -137,7 +135,6 @@ class SeismicCubeset(Dataset):
             if logs:
                 self.geometries[ix].log()
 
-
     def create_labels(self, paths=None, filter_zeros=True, dst='labels', labels_class=None,
                       sort=False, bar=False, **kwargs):
         """ Create labels (horizons, facies, etc) from given paths and optionaly sort them.
@@ -185,6 +182,7 @@ class SeismicCubeset(Dataset):
             self[idx, dst] = [item for item in label_list if len(item.points) > 0]
             self._cached_attributes.add(dst)
 
+
     def reset_caches(self, attrs=None):
         """ Reset lru cache for cached class attributes.
 
@@ -218,6 +216,7 @@ class SeismicCubeset(Dataset):
                 label.dump_points(save_to, fmt)
 
 
+    # Visualization
     def show_3d(self, idx=0, src='labels', aspect_ratio=None, zoom_slice=None,
                  n_points=100, threshold=100, n_sticks=100, n_nodes=10,
                  slides=None, margin=(0, 0, 20), colors=None, **kwargs):
@@ -346,27 +345,6 @@ class SeismicCubeset(Dataset):
         return plot_image(map_, **kwargs)
 
 
-    def compare_to_labels(self, horizon, src_labels='labels', offset=0, absolute=True,
-                          printer=print, hist=True, plot=True):
-        """ Compare given horizon to labels in dataset.
-
-        Parameters
-        ----------
-        horizon : :class:`.Horizon`
-            Horizon to evaluate.
-        offset : number
-            Value to shift horizon down. Can be used to take into account different counting bases.
-        """
-        # TODO: move to `Horizon` class
-        for idx in self.indices:
-            if horizon.geometry.name == self.geometries[idx].name:
-                horizons_to_compare = self[idx, src_labels]
-                break
-        HorizonMetrics([horizon, horizons_to_compare]).evaluate('compare', agg=None,
-                                                                absolute=absolute, offset=offset,
-                                                                printer=printer, hist=hist, plot=plot)
-
-
     def show_slide(self, loc, idx=0, axis='iline', zoom_slice=None, src_labels='labels', **kwargs):
         """ Show full slide of the given cube on the given line.
 
@@ -450,6 +428,8 @@ class SeismicCubeset(Dataset):
         plot_image(imgs, **kwargs)
         return batch
 
+
+    # Predictions
     def assemble_crops(self, crops, grid_info='grid_info', order=(0, 1, 2), fill_value=None):
         """ Glue crops together in accordance to the grid.
 
