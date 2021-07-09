@@ -618,7 +618,7 @@ class SeismicCubeset(Dataset):
 
     # Task-specific loaders
     def load(self, label_dir=None, filter_zeros=True, dst_labels='labels',
-             labels_class=None, p=None, bins=None, **kwargs):
+             labels_class=None, direction=None, **kwargs):
         """ Load everything: geometries, point clouds, labels, samplers.
 
         Parameters
@@ -632,9 +632,8 @@ class SeismicCubeset(Dataset):
         labels_class : class
             Class to use for labels creation.
             See details in :meth:`.create_labels`.
-        p : sequence of numbers
-            Proportions of different cubes in sampler.
-        bins : TODO
+        direction : int or None
+            Faults direction, 0 or 1. If None, will be infered automatically.
         """
         _ = kwargs
         label_dir = label_dir or '/INPUTS/HORIZONS/RAW/*'
@@ -649,5 +648,4 @@ class SeismicCubeset(Dataset):
             paths_txt[idx] = dir_
         self.load_geometries(**kwargs)
         self.create_labels(paths=paths_txt, filter_zeros=filter_zeros, dst=dst_labels,
-                           labels_class=labels_class, **kwargs)
-        self._p, self._bins = p, bins # stored for later sampler creation
+                           labels_class=labels_class, direction=direction, **kwargs)

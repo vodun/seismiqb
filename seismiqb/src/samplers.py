@@ -655,7 +655,7 @@ class SeismicSampler(Sampler):
                 matrix[matrix > 0] = 1
                 kwargs['bad_values'] = ()
 
-            kwargs = {
+            _kwargs = {
                 'matrix_name': 'Sampled slices',
                 'cmap': ['Reds', 'black'],
                 'alpha': [1.0, 0.4],
@@ -664,7 +664,7 @@ class SeismicSampler(Sampler):
                 'interpolation': 'bilinear',
                 **kwargs
             }
-            geometry.show((matrix, geometry.zero_traces), **kwargs)
+            geometry.show((matrix, geometry.zero_traces), **_kwargs)
 
 
 
