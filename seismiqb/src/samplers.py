@@ -292,6 +292,8 @@ class HorizonSampler(BaseSampler):
 
 class FaultSampler(BaseSampler):
     """ !!. """
+    dim = 2 + 1 + 6 # dimensionality of sampled points: geometry_id and label_id, orientation, locations
+
     def __init__(self, fault, crop_shape, threshold=0.05, ranges=None, geometry_id=0, label_id=0,
                  extend=True, transpose=False, **kwargs):
         geometry = fault.geometry
