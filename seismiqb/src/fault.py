@@ -42,10 +42,11 @@ class Fault(Horizon):
         """
         self.name = os.path.basename(path)
         ext = os.path.splitext(path)[1][1:]
-        if ext == 'npy':
-            points = np.load(path, allow_pickle=False)
+        if ext == 'npz':
+            npzfile = np.load(path, allow_pickle=False)
+            points = npzfile['points']
             transform = False
-            nodes = None
+            nodes = None if len(npzfile['nodes']) == 0 else npzfile['nodes']
         elif ext == 'hdf5':
             cube = SeismicGeometry(path, **kwargs).file_hdf5['cube']
             points = np.stack(np.where(np.array(cube) == 1)).T #TODO: get points in chunks
@@ -203,6 +204,17 @@ class Fault(Horizon):
     def fault_to_csv(cls, df, dst):
         """ Save separate fault to csv. """
         df.to_csv(os.path.join(dst, df.name), sep=' ', header=False, index=False)
+
+    def dump_points(self, path):
+        """ Dump points. """
+        if os.path.exists(path):
+            npzfile = np.load(path, allow_pickle=False)
+            points = np.concatenate([npzfile['points'], self.points], axis=0)
+            nodes = np.concatenate([nodes, self.nodes], axis=0) if self.nodes is not None else npzfile['nodes']
+        else:
+            points = self.points
+            nodes = self.nodes if self.nodes is not None else np.zeros((0, 3), dtype=np.int32)
+        np.savez(path, points=points, nodes=nodes, allow_pickle=False)
 
     def split_faults(self, **kwargs):
         """ Split file with faults points into separate connected faults.

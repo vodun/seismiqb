@@ -176,8 +176,8 @@ class SeismicCubeset(Dataset):
         self._cached_attributes.add(dst)
 
 
-    def dump_labels(self, path, fmt='npy', separate=False):
-        """ Dump points to file. """
+    def dump_labels(self, path, name='points', separate=True):
+        """ Dump label points to file. """
         for idx, labels_list in self.labels.items():
             for label in labels_list:
                 dirname = os.path.dirname(self.index.get_fullpath(idx))
@@ -186,9 +186,9 @@ class SeismicCubeset(Dataset):
                 dirname = os.path.join(dirname, path)
                 if not os.path.exists(dirname):
                     os.makedirs(dirname)
-                name = label.name if separate else 'faults'
-                save_to = os.path.join(dirname, name + '.' + fmt)
-                label.dump_points(save_to, fmt)
+                name = label.name if separate else name
+                save_to = os.path.join(dirname, name + '.npz')
+                label.dump_points(save_to)
 
     def reset_caches(self, attributes=None):
         """ Reset lru cache for cached class attributes.
