@@ -48,8 +48,8 @@ class Accumulator:
             - 'stack' just stores the matrices and concatenates them along (new) last axis
             - 'mode' stores supplied matrices and computes mode along the last axis during the `get` call
     amortize : bool
-        If True, then supplied matrices are stacked into ndarray, and then aggregation is applied.
-        If False, then accumulation logic is applied.
+        If False, then supplied matrices are stacked into ndarray, and then aggregation is applied.
+        If True, then accumulation logic is applied.
         Allows for trade-off between memory usage and speed: `amortize=False` is faster,
         but takes more memory resources.
     total : int or None
@@ -229,11 +229,11 @@ class Accumulator3D:
     Can accumulate data in memory (Numpy arrays) or on disk (HDF5 datasets).
 
     Type of aggregation is defined in subclasses, that must implement `__init__`, `_update` and `_aggregate` methods.
-    The main result in subclsses should be stored in `data` attribute, which is accessed by base class.
+    The main result in subclasses should be stored in `data` attribute, which is accessed by the base class.
 
-    Supposed to be used in combination with `:meth:.~SeismicCubeset.make_grid` and
+    Supposed to be used in combination with `:class:.~RegularGrid` and
     `:meth:.~SeismicCropBatch.update_accumulator` in a following manner:
-        - `make_grid` defines how to split desired cube range into small crops
+        - `RegularGrid` defines how to split desired cube range into small crops
         - `Accumulator3D` creates necessary placeholders for a desired type of aggregation
         - `update_accumulator` action of pipeline passes individual crops (and their locations) to
         update those placeholders (see `:meth:~.update`)
@@ -288,7 +288,7 @@ class Accumulator3D:
 
         self.aggregated = False
 
-
+    # Placeholder management
     def create_placeholder(self, name=None, dtype=None, fill_value=None):
         """ Create named storage as a dataset of HDF5 or plain array. """
         if self.type == 'hdf5':
@@ -304,6 +304,7 @@ class Accumulator3D:
         if self.type == 'hdf5':
             del self.file[name]
         setattr(self, name, None)
+
 
     def update(self, crop, location):
         """ Update underlying storages in supplied `location` with data from `crop`. """
@@ -475,7 +476,7 @@ class GMeanAccumulator3D(Accumulator3D):
 
 
 class IndexedDict(OrderedDict):
-    """ Allows to use both indices and keys to subscript. """
+    """ Allows to use both indices and ordinal integer keys to subscript. """
     def __getitem__(self, key):
         if isinstance(key, (int, np.integer)):
             key = list(self.keys())[key]
@@ -500,6 +501,8 @@ class lru_cache:
         Attributes to get from object and use as additions to key.
     apply_by_default : bool
         Whether the cache logic is on by default.
+    copy_on_return : bool
+        Whether to copy the object on retrieving from cache.
 
     Examples
     --------
@@ -519,7 +522,7 @@ class lru_cache:
         self.apply_by_default = apply_by_default
         self.copy_on_return = copy_on_return
 
-        # Make `attributes` always a list
+        # Parse `attributes`
         if isinstance(attributes, str):
             self.attributes = [attributes]
         elif isinstance(attributes, (tuple, list)):
