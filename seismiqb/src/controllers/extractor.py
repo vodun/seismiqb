@@ -9,7 +9,8 @@ from ...batchflow import HistoSampler, NumpySampler
 from ...batchflow import Pipeline, B, V, C, D, P, R
 from ...batchflow.models.torch import EncoderDecoder
 
-from ..cubeset import Horizon, HorizonMetrics
+from ..cubeset import Horizon
+from ..metrics import HorizonMetrics
 
 from .base import BaseController
 

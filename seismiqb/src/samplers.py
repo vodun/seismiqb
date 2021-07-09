@@ -273,7 +273,7 @@ class HorizonSampler(BaseSampler):
         sampled[:, [3, 6]] += shift
 
         np.clip(sampled[:, 3], 0, self.geometry.cube_shape[2] - self.crop_height, out=sampled[:, 3])
-        np.clip(sampled[:, 6], 0, self.geometry.cube_shape[2], out=sampled[:, 6])
+        np.clip(sampled[:, 6], 0 + self.crop_height, self.geometry.cube_shape[2], out=sampled[:, 6])
         return sampled
 
 

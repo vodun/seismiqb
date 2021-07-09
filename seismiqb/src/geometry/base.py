@@ -677,8 +677,7 @@ class SeismicGeometry(ExportMixin):
         }
         return plot_image(data, backend='matplotlib', bins=bins, mode='histogram', **kwargs)
 
-    def show_slide(self, loc=None, start=None, end=None, step=1, axis=0, zoom_slice=None,
-                   n_ticks=5, delta_ticks=100, stable=True, **kwargs):
+    def show_slide(self, loc=None, start=None, end=None, step=1, axis=0, zoom_slice=None, stable=True, **kwargs):
         """ Show seismic slide in desired place.
         Under the hood relies on :meth:`load_slide`, so works with geometries in any formats.
 
@@ -697,13 +696,14 @@ class SeismicGeometry(ExportMixin):
         """
         axis = self.parse_axis(axis)
         slide = self.load_slide(loc=loc, start=start, end=end, step=step, axis=axis, stable=stable)
-        xticks = list(range(slide.shape[0]))
-        yticks = list(range(slide.shape[1]))
+        xmin, xmax, ymin, ymax = 0, slide.shape[0], slide.shape[1], 0
 
         if zoom_slice:
             slide = slide[zoom_slice]
-            xticks = xticks[zoom_slice[0]]
-            yticks = yticks[zoom_slice[1]]
+            xmin = zoom_slice[0].start or xmin
+            xmax = zoom_slice[0].stop or xmax
+            ymin = zoom_slice[1].stop or xmin
+            ymax = zoom_slice[1].start or xmax
 
         # Plot params
         if len(self.index_headers) > 1:
@@ -720,23 +720,12 @@ class SeismicGeometry(ExportMixin):
             xlabel = self.index_headers[0]
             ylabel = 'DEPTH'
 
-        xticks = xticks[::max(1, round(len(xticks) // (n_ticks - 1) / delta_ticks)) * delta_ticks] + [xticks[-1]]
-        xticks = sorted(list(set(xticks)))
-        yticks = yticks[::max(1, round(len(xticks) // (n_ticks - 1) / delta_ticks)) * delta_ticks] + [yticks[-1]]
-        yticks = sorted(list(set(yticks)), reverse=True)
-
-        if len(xticks) > 2 and (xticks[-1] - xticks[-2]) < delta_ticks:
-            xticks.pop(-2)
-        if len(yticks) > 2 and (yticks[0] - yticks[1]) < delta_ticks:
-            yticks.pop(1)
-
         kwargs = {
             'title': title,
             'xlabel': xlabel,
             'ylabel': ylabel,
             'cmap': 'gray',
-            'xticks': tuple(xticks),
-            'yticks': tuple(yticks),
+            'extent': (xmin, xmax, ymin, ymax),
             'labeltop': False,
             'labelright': False,
             **kwargs
