@@ -5,7 +5,6 @@ from copy import copy
 from textwrap import dedent
 from itertools import product
 
-import h5py
 import numpy as np
 import pandas as pd
 
