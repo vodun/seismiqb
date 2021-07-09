@@ -36,7 +36,7 @@ class Fault(Horizon):
     FAULT_STICKS = ['INLINE', 'iline', 'xline', 'cdp_x', 'cdp_y', 'height', 'name', 'number']
     COLUMNS = ['iline', 'xline', 'height', 'name', 'number']
 
-    def from_file(self, path, transform=True, **kwargs):
+    def from_file(self, path, transform=True, direction=None, **kwargs):
         """ Init from path to either CHARISMA, REDUCED_CHARISMA or FAULT_STICKS csv-like file
         from .npy or .hdf5 file with points.
         """
@@ -55,9 +55,18 @@ class Fault(Horizon):
         else:
             points, nodes = self.csv_to_points(path, **kwargs)
         self.from_points(points, transform, **kwargs)
-        self.direction = 0 if self.points[:, 0].ptp() > self.points[:, 1].ptp() else 1
         if nodes is not None:
             self.from_points(nodes, transform, dst='nodes', reset=None, **kwargs)
+
+        if direction is None:
+            self.direction = 0 if self.points[:, 0].ptp() > self.points[:, 1].ptp() else 1
+        elif isinstance(direction, int):
+            self.direction = direction
+        elif isinstance(direction[self.geometry.short_name], int):
+            self.direction = direction[self.geometry.short_name]
+        else:
+            self.direction = direction[self.geometry.short_name][self.name]
+
 
     def csv_to_points(self, path, fix=False, **kwargs):
         """ Get point cloud array from file values. """

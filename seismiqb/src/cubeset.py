@@ -544,7 +544,7 @@ class SeismicCubeset(Dataset):
 
     # Convenient loader
     def load(self, label_dir=None, filter_zeros=True, dst_labels='labels',
-             labels_class=Horizon, **kwargs):
+             labels_class=Horizon, direction=None, **kwargs):
         """ Load geometries and labels, stored on disk in a predefined format:
 
         Parameters
@@ -557,6 +557,8 @@ class SeismicCubeset(Dataset):
             Class attribute to put loaded data into.
         labels_class : class
             Class to use for labels creation.
+        direction : int or None
+            Faults direction, 0 or 1. If None, will be infered automatically.
         """
         self.load_geometries(**kwargs)
 
@@ -573,4 +575,4 @@ class SeismicCubeset(Dataset):
             paths_txt[idx] = dir_
 
         self.create_labels(paths=paths_txt, filter_zeros=filter_zeros, dst=dst_labels,
-                           labels_class=labels_class, **kwargs)
+                           labels_class=labels_class, direction=direction, **kwargs)
