@@ -182,7 +182,6 @@ class MatplotlibPlotter:
 
         data = cls.make_nested_data(data=data, separate=separate)
         axes = cls.make_or_parse_axes(mode=mode, n_subplots=len(data), all_params=all_params)
-
         for ax_num, (ax_data, ax) in enumerate(zip(data, axes)):
             index_condition = None if separate else lambda x: isinstance(x, list)
             ax_params = filter_parameters(all_params, index=ax_num, index_condition=index_condition)
@@ -407,7 +406,11 @@ class MatplotlibPlotter:
                 Order of image axes.
             bad_values : list of numbers
                 Data values that should be displayed with 'bad_color'.
-
+            transparize_masks : bool, optional
+                Whether treat zeros in binary masks as bad values or not.
+                If True, make zero values in all binary masks transparent on display.
+                If False, do not make zero values in any binary masks transparent on display.
+                If not provided, make zero values transparent in all masks that overlay an image.
             params for images drawn by `plt.imshow`:
                 - 'cmap', 'vmin', 'vmax', 'interpolation', 'alpha', 'extent'
                 - params with 'imshow_' prefix
@@ -418,17 +421,17 @@ class MatplotlibPlotter:
         See class and method defaults for arguments examples.
         """
         for image_num, image in enumerate(data):
-            image = np.transpose(image, axes=kwargs['order_axes'][:image.ndim]).astype(float)
+            image = np.transpose(image, axes=kwargs['order_axes'][:image.ndim]).astype(np.float32)
 
-            unique_values = np.unique(image)
-            is_mask = len(unique_values) == 2 and unique_values[0] == 0
-            # if an image is a binary mask and no bad values list passed
-            # initialize it with zero (which is expected to be a background class)
-            bad_values = kwargs.get('bad_values', [0] if is_mask else [])
-            bad_masks = [image == value for value in bad_values]
-            if bad_masks:
-                bads_mask = np.logical_or(*bad_masks) if len(bad_masks) > 1 else bad_masks[0]
-                image[bads_mask] = np.nan
+            # fill some values with nans to display them with `bad_color`
+            bad_values = filter_parameters(kwargs, ['bad_values'], index=image_num).get('bad_values', [])
+            if kwargs.get('transparize_masks', image_num > 0):
+                unique_values = tuple(np.unique(image))
+                if unique_values == (0,) or unique_values == (0, 1): # pylint: disable=consider-using-in
+                    kwargs['vmin'] = params.get('vmin', 0)
+                    bad_values = [0]
+            for bad_value in bad_values:
+                image[image == bad_value] = np.nan
 
             keys = ['cmap', 'vmin', 'vmax', 'interpolation', 'alpha', 'extent']
             params = filter_parameters(kwargs, keys, prefix='imshow_', index=image_num)
@@ -701,16 +704,17 @@ class MatplotlibPlotter:
     # Supplementary methods
 
     @staticmethod
-    def make_cmap(color, bad_color):
-        """ Make colormap from color, if needed. """
+    def make_cmap(color, bad_color=None):
+        """ Make listed colormap from 'white' and provided color. """
         try:
             cmap = copy(plt.get_cmap(color))
         except ValueError: # if not a valid cmap name, expect it to be a matplotlib color
             if isinstance(color, str):
                 color = ColorConverter().to_rgb(color)
-            cmap = ListedColormap(color)
+            cmap = ListedColormap([(1, 1, 1, 1), color])
 
-        cmap.set_bad(color=bad_color)
+        if bad_color is not None:
+            cmap.set_bad(color=bad_color)
         return cmap
 
     @staticmethod

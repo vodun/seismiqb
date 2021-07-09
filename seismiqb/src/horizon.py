@@ -5,7 +5,6 @@ from copy import copy
 from textwrap import dedent
 from itertools import product
 
-import h5py
 import numpy as np
 import pandas as pd
 
@@ -582,7 +581,7 @@ class Horizon:
 
 
     # Initialization from different containers
-    def from_points(self, points, transform=False, verify=True, **kwargs):
+    def from_points(self, points, transform=False, verify=True, dst='points', reset='matrix', **kwargs):
         """ Base initialization: from point cloud array of (N, 3) shape.
 
         Parameters
@@ -593,6 +592,10 @@ class Horizon:
             Whether transform from line coordinates (ilines, xlines) to cubic system.
         verify : bool
             Whether to remove points outside of the cube range.
+        dst : str
+            Attribute to save result.
+        reset : str or None
+            Storage to reset.
         """
         _ = kwargs
 
@@ -610,10 +613,11 @@ class Horizon:
 
         if self.dtype == np.int32:
             points = np.rint(points)
-        self.points = points.astype(self.dtype)
+        setattr(self, dst, points.astype(self.dtype))
 
         # Collect stats on separate axes. Note that depth stats are properties
-        self.reset_storage('matrix')
+        if reset:
+            self.reset_storage(reset)
 
 
     def from_file(self, path, transform=True, **kwargs):
@@ -1630,6 +1634,11 @@ class Horizon:
         metrics = np.nan_to_num(metrics)
         return self.transform_where_present(metrics, **transform_kwargs)
 
+    def compare(self, other, offset=0, absolute=True, printer=print, hist=True, plot=True):
+        """ Compare quality of self against another horizon or sequence of horizons. """
+        from .metrics import HorizonMetrics
+        HorizonMetrics([self, other]).evaluate('compare', absolute=absolute, offset=offset,
+                                               printer=printer, hist=hist, plot=plot)
 
     def check_proximity(self, other, offset=0):
         """ Compute a number of stats on location of `self` relative to the `other` Horizons.
@@ -2026,50 +2035,6 @@ class Horizon:
         points = self.cubic_to_lines(points)
         self.dump_charisma(points, path, transform, add_height)
 
-    def dump_points(self, path, fmt='npy'):
-        """ Dump points. """
-        if fmt == 'npy':
-            if os.path.exists(path):
-                points = np.load(path, allow_pickle=False)
-                points = np.concatenate([points, self.points], axis=0)
-            else:
-                points = self.points
-            np.save(path, points, allow_pickle=False)
-        elif fmt == 'hdf5':
-            file_hdf5 = h5py.File(path, "a")
-            if 'cube' not in file_hdf5:
-                cube_hdf5 = file_hdf5.create_dataset('cube', self.geometry.cube_shape)
-                cube_hdf5_x = file_hdf5.create_dataset('cube_x', self.geometry.cube_shape[[1, 2, 0]])
-                cube_hdf5_h = file_hdf5.create_dataset('cube_h', self.geometry.cube_shape[[2, 0, 1]])
-            else:
-                cube_hdf5 = file_hdf5['cube']
-                cube_hdf5_x = file_hdf5['cube_x']
-                cube_hdf5_h = file_hdf5['cube_h']
-
-            shape = (self.i_length, self.x_length, self.h_max - self.h_min + 1)
-            fault_array = np.zeros(shape)
-
-            points = self.points - np.array([self.i_min, self.x_min, self._h_min])
-            fault_array[points[:, 0], points[:, 1], points[:, 2]] = 1
-
-            cube_hdf5[self.i_min:self.i_max+1, self.x_min:self.x_max+1, self.h_min:self.h_max+1] += fault_array
-
-            cube_hdf5_x[
-                self.x_min:self.x_max+1,
-                self.h_min:self.h_max+1,
-                self.i_min:self.i_max+1
-            ] += np.transpose(fault_array, (1, 2, 0))
-
-            cube_hdf5_h[
-                self.h_min:self.h_max+1,
-                self.i_min:self.i_max+1,
-                self.x_min:self.x_max+1
-            ] += np.transpose(fault_array, (2, 0, 1))
-
-            file_hdf5.close()
-        else:
-            raise ValueError('Unknown format:', fmt)
-
     # Methods of (visual) representation of a horizon
     def __repr__(self):
         return f"""<horizon {self.name} for {self.geometry.displayed_name} at {hex(id(self))}>"""
@@ -2273,7 +2238,7 @@ class Horizon:
                                      matrix=self.full_matrix, threshold=threshold)
         return x, y, z, simplices
 
-    def show_slide(self, loc, width=None, axis='i', zoom_slice=None, n_ticks=5, delta_ticks=100, **kwargs):
+    def show_slide(self, loc, width=None, axis='i', zoom_slice=None, **kwargs):
         """ Show slide with horizon on it.
 
         Parameters
@@ -2294,19 +2259,20 @@ class Horizon:
 
         # Load seismic and mask
         seismic_slide = self.geometry.load_slide(loc=loc, axis=axis)
+        xmin, xmax, ymin, ymax = 0, seismic_slide.shape[0], seismic_slide.shape[1], 0
 
         mask = np.zeros(shape)
         width = width or seismic_slide.shape[1] // 100
         mask = self.add_to_mask(mask, locations=locations, width=width)
         seismic_slide, mask = np.squeeze(seismic_slide), np.squeeze(mask)
-        xticks = list(range(seismic_slide.shape[0]))
-        yticks = list(range(seismic_slide.shape[1]))
 
         if zoom_slice:
             seismic_slide = seismic_slide[zoom_slice]
             mask = mask[zoom_slice]
-            xticks = xticks[zoom_slice[0]]
-            yticks = yticks[zoom_slice[1]]
+            xmin = zoom_slice[0].start or xmin
+            xmax = zoom_slice[0].stop or xmax
+            ymin = zoom_slice[1].stop or xmin
+            ymax = zoom_slice[1].start or xmax
 
         # defaults for plotting if not supplied in kwargs
         header = self.geometry.axis_names[axis]
@@ -2320,16 +2286,6 @@ class Horizon:
             ylabel = self.geometry.index_headers[1]
             total = self.geometry.depth
 
-        xticks = xticks[::max(1, round(len(xticks) // (n_ticks - 1) / delta_ticks)) * delta_ticks] + [xticks[-1]]
-        xticks = sorted(list(set(xticks)))
-        yticks = yticks[::max(1, round(len(xticks) // (n_ticks - 1) / delta_ticks)) * delta_ticks] + [yticks[-1]]
-        yticks = sorted(list(set(yticks)), reverse=True)
-
-        if len(xticks) > 2 and (xticks[-1] - xticks[-2]) < delta_ticks:
-            xticks.pop(-2)
-        if len(yticks) > 2 and (yticks[0] - yticks[1]) < delta_ticks:
-            yticks.pop(1)
-
         title = f'Horizon `{self.name}` on cube `{self.geometry.displayed_name}`\n {header} {loc} out of {total}'
 
         kwargs = {
@@ -2338,9 +2294,7 @@ class Horizon:
             'title_y': 1.02,
             'xlabel': xlabel,
             'ylabel': ylabel,
-            'xticks': tuple(xticks),
-            'yticks': tuple(yticks),
-            'extent': (xticks[0], xticks[-1], yticks[0], yticks[-1]),
+            'extent': (xmin, xmax, ymin, ymax),
             'legend': False,
             'labeltop': False,
             'labelright': False,
@@ -2349,7 +2303,6 @@ class Horizon:
             'colorbar': [True, False],
             **kwargs
         }
-
         return plot_image(data=[seismic_slide, mask], **kwargs)
 
 
