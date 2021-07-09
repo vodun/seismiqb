@@ -251,7 +251,7 @@ class HorizonSampler(BaseSampler):
 
             while accumulated < size:
                 sampled = self._sample(size*2)
-                condition = check_sampled(sampled, self.matrix, self.n_threshold)
+                condition = check_sampled_horizons(sampled, self.matrix, self.n_threshold)
 
                 sampled_list.append(sampled[condition])
                 accumulated += condition.sum()
@@ -292,8 +292,6 @@ class HorizonSampler(BaseSampler):
 
 class FaultSampler(BaseSampler):
     """ !!. """
-    dim = 2 + 1 + 6 # dimensionality of sampled points: geometry_id and label_id, orientation, locations
-
     def __init__(self, fault, crop_shape, threshold=0.05, ranges=None, geometry_id=0, label_id=0,
                  extend=True, transpose=False, **kwargs):
         geometry = fault.geometry
@@ -314,7 +312,7 @@ class FaultSampler(BaseSampler):
         self.geometry = geometry
         self.name = fault.geometry.short_name
         self.displayed_name = fault.short_name
-        super().__init__()
+        super().__init__(self)
 
         self.weight = len(self.locations)
 
@@ -398,6 +396,9 @@ class FaultSampler(BaseSampler):
 
         return sampled
 
+    def __repr__(self):
+        return f'<FaultSampler for {self.displayed_name}: '\
+               f'crop_shape={tuple(self.crop_shape)}, threshold={self.threshold}>'
 
 @njit
 def check_horizon_points(points, matrix, crop_shape, i_mask, x_mask, threshold):
@@ -449,20 +450,21 @@ def check_horizon_points(points, matrix, crop_shape, i_mask, x_mask, threshold):
     return buffer[:counter]
 
 def extend_nodes(nodes, direction):
+    """ !!. """
     slides = np.unique(nodes[:, direction])
     locations = []
     for i, slide in enumerate(slides):
         left = slides[max(i-1, 0)]
         right = slides[min(i+1, len(slides)-1)]
         chunk = nodes[nodes[:, direction] == slide]
-        for i in range(left, right):
-            chunk[:, direction] = i
+        for j in range(left, right):
+            chunk[:, direction] = j
             locations += [chunk.copy()]
     return np.concatenate(locations, axis=0)
 
 
 @njit
-def check_sampled(locations, matrix, threshold):
+def check_sampled_horizons(locations, matrix, threshold):
     """ Remove points, which correspond to crops with less than `threshold` labeled pixels.
     Used as a final filter for already sampled locations: they can generate crops with
     smaller than `threshold` mask only due to the depth randomization.
@@ -488,19 +490,7 @@ def check_sampled(locations, matrix, threshold):
 
 @njit
 def check_sampled_faults(locations, points, crop_shape, crop_shape_t, threshold):
-    """ Remove points, which correspond to crops with less than `threshold` labeled pixels.
-    Used as a final filter for already sampled locations: they can generate crops with
-    smaller than `threshold` mask only due to the depth randomization.
-
-    Parameters
-    ----------
-    locations : np.ndarray
-        Locations in (orientation, i_start, x_start, h_start, i_stop, x_stop, h_stop) format.
-    matrix : np.ndarray
-        Depth map in cube coordinates.
-    threshold : int
-        Minimum amount of labeled pixels in a crop.
-    """
+    """ !!. """
     condition = np.ones(len(locations), dtype=np.bool_)
 
     for i, (orientation, i_start, x_start, h_start, i_stop,  x_stop, h_stop) in enumerate(locations):
@@ -510,13 +500,6 @@ def check_sampled_faults(locations, points, crop_shape, crop_shape_t, threshold)
         elif threshold > 0:
             mask_bbox = np.array([[i_start, i_stop], [x_start, x_stop], [h_start, h_stop]], dtype=np.int32)
             mask = np.zeros((_crop_shape[0], _crop_shape[1], _crop_shape[2]), dtype=np.int32)
-
-            # _points = points
-            # for i in range(3):
-            #     _points = _points[_points[:, i] >= mask_bbox[i][0]]
-            #     _points = _points[_points[:, i] < mask_bbox[i][1]]
-            # if len(_points) < threshold:
-            #     condition[i] = False
 
             insert_fault_into_mask(mask, points, mask_bbox)
             if mask.sum() < threshold:
