@@ -400,35 +400,6 @@ class SeismicCropBatch(Batch):
                 break
         return mask
 
-    @action
-    #@inbatch_parallel(init='indices', post='_assemble', target='for')
-    def compute_attribute(self, dst, src='images', attribute='semblance', window=10, device='cpu', **kwargs):
-        """ Compute geological attribute.
-
-        Parameters
-        ----------
-        dst : str
-            Destination batch component
-        src : str, optional
-            Source batch component, by default 'images'
-        attribute : str, optional
-            Attribute to compute, by default 'semblance'
-        window : int or tuple, optional
-            Window to compute attribute, by default 10 (for each axis)
-        stride : int, optional
-            Stride for windows, by default 1 (for each axis)
-        device : str, optional
-            Device to compute attribute, by default 'cpu'
-
-        Returns
-        -------
-        SeismicCropBatch
-            Batch with loaded masks in desired components.
-        """
-        images = getattr(self, src)
-        result = compute_attribute(images, window, device, attribute, **kwargs)
-        setattr(self, dst, result)
-        return self
     def get_nearest_horizon(self, ix, src_labels, heights_slice):
         """ Get horizon with its `h_mean` closest to mean of `heights_slice`. """
         location_h_mean = (heights_slice.start + heights_slice.stop) // 2

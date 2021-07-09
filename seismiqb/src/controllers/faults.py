@@ -20,9 +20,11 @@ from ...batchflow import B, C, D, P, R, V, F, I
 from ...batchflow.models.torch import TorchModel, ResBlock, EncoderDecoder
 from .base import BaseController
 from ..cubeset import SeismicCubeset, SeismicGeometry
+from ..samplers import SeismicSampler, RegularGrid
 from ..fault import Fault
 from ..layers import InputLayer
 from ..utils import adjust_shape_3d, fill_defaults, compute_attribute
+from ..utility_classes import Accumulator3D
 from ..plotters import plot_image
 
 class FaultController(BaseController):
@@ -139,42 +141,21 @@ class FaultController(BaseController):
         'loss': C('loss')
     }
 
-    def make_dataset(self, ratios=None, **kwargs):
+    def make_dataset(self, **kwargs):
         config = {**self.config['dataset'], **kwargs}
         width = config['width']
         label_dir = config['label_dir']
         paths = [self.amplitudes_path(item) for item in config['train_cubes']]
+        transposed = config['transposed_cubes']
+        direction = {f'amplitudes_{cube}': 0 if cube not in transposed else 1 for cube in config['train_cubes']}
 
         dataset = SeismicCubeset(index=paths)
-        dataset.load(label_dir=label_dir.format(width), labels_class=Fault, transform=True, verify=True)
-        dataset.modify_sampler(dst='train_sampler', finish=True, low=0.0, high=1.0)
-
-        if ratios is None:
-            ratios = {}
-
-            if len(dataset) > 0:
-                for i in range(len(dataset)):
-                    faults = dataset.labels[i]
-                    fault_area = sum([len(np.unique(faults[j].points)) for j in range(len(faults))])
-                    cube_area = np.prod(dataset.geometries[i].cube_shape)
-                    ratios[dataset.indices[i]] = fault_area / cube_area
-            else:
-                ratios[dataset.indices[0]] = 1
-
-        weights = np.array([ratios[i] for i in dataset.indices])
-        weights /= weights.sum()
-        weights = weights.clip(max=0.3)
-        weights = weights.clip(min=0.1)
-        weights /= weights.sum()
-
-        self.weights = weights
-
-        dataset.create_sampler(p=list(weights))
-        dataset.modify_sampler(dst='train_sampler', finish=True, low=0.0, high=1.0)
+        dataset.load(label_dir=label_dir.format(width), labels_class=Fault, transform=True,
+                     direction=direction, verify=True)
 
         return dataset
 
-    def load_pipeline(self, create_masks=True, train=True, **kwargs):
+    def load_pipeline(self, train=True, create_masks=True, **kwargs):
         """ Create loading pipeline common for train and inference stages.
 
         Parameters
@@ -194,12 +175,10 @@ class FaultController(BaseController):
         shape = {self.cube_name_from_alias(k): load_shape for k in self.config['dataset/train_cubes']}
         shape.update({self.cube_name_from_alias(k): load_shape[[1, 0, 2]] for k in self.config['dataset/transposed_cubes']})
 
-        if train:
-            ppl = Pipeline().make_locations(points=D('train_sampler')(C('batch_size')), shape=shape, side_view=C('side_view'))
-        else:
-            ppl = Pipeline().make_locations(points=D('grid_gen')(), shape=C('test_crop_shape'))
-
-        ppl += Pipeline().load_cubes(dst='images', slicing=C('slicing'))
+        ppl = (Pipeline()
+            .make_locations(batch_size=C('batch_size'), generator=C('sampler'))
+            .load_cubes(dst='images', slicing=C('slicing'))
+        )
 
         if create_masks:
             ppl +=  Pipeline().create_masks(dst='masks')
@@ -208,7 +187,7 @@ class FaultController(BaseController):
             components = ['images']
 
         ppl += (Pipeline()
-            .adaptive_reshape(src=components, shape=load_shape)
+            .adaptive_reshape(src=components)
             .normalize(mode='q', itemwise=C('itemwise'), src='images')
         )
         return ppl
@@ -284,7 +263,7 @@ class FaultController(BaseController):
     def get_train_template(self, **kwargs):
         """ Define the whole training procedure pipeline including data loading, augmentation and model training. """
         return (
-            self.load_pipeline(create_masks=True, train=True, **kwargs) +
+            self.load_pipeline(create_masks=True, **kwargs) +
             (self.augmentation_pipeline(**kwargs) if self.config['train/adjust'] else Pipeline()) +
             self.train_pipeline(**kwargs)
         )
@@ -304,7 +283,6 @@ class FaultController(BaseController):
 
         test_pipeline += (
             Pipeline()
-            .adaptive_reshape(src=comp, shape=C('crop_shape'))
             .adaptive_expand(src='images')
             .init_variable('predictions', [])
             .init_variable('target', [])
@@ -321,10 +299,15 @@ class FaultController(BaseController):
                 step = smooth_borders
             test_pipeline += Pipeline().update(B('predictions') , F(self.smooth_borders)(B('predictions'), step))
 
-        if create_masks:
-            test_pipeline += Pipeline().update(V('target', mode='e'), B('masks'))
-        test_pipeline += Pipeline().update(V('predictions', mode='e'), B('predictions'))
+        # if create_masks:
+        #     test_pipeline += Pipeline().update(V('target', mode='e'), B('masks'))
+
         test_pipeline += self.metrics_pipeline_template()
+        test_pipeline += (Pipeline()
+            .adaptive_reshape(src='predictions')
+            .update_accumulator(src='predictions', accumulator=C('accumulator'))
+        )
+
         return test_pipeline
 
     def metrics_pipeline_template(self, n_bins=1000):
@@ -359,10 +342,64 @@ class FaultController(BaseController):
             cubes[cube] = [cubes[cube]] if isinstance(cubes[cube][0], int) else cubes[cube]
         return cubes
 
+    def make_sampler(self, dataset, ratios=None, threshold=0, **kwargs):
+        """ Create sampler for generating locations to train on. """
+        crop_shape = self.config['train']['crop_shape']
+
+        if ratios is None:
+            ratios = {}
+
+            if len(dataset) > 0:
+                for i in range(len(dataset)):
+                    faults = dataset.labels[i]
+                    fault_area = sum([len(np.unique(faults[j].points)) for j in range(len(faults))])
+                    cube_area = np.prod(dataset.geometries[i].cube_shape)
+                    ratios[dataset.indices[i]] = fault_area / cube_area
+            else:
+                ratios[dataset.indices[0]] = 1
+
+        weights = np.array([ratios[i] for i in dataset.indices])
+        weights /= weights.sum()
+        weights = weights.clip(max=0.3)
+        weights = weights.clip(min=0.1)
+        weights /= weights.sum()
+
+        self.weights = weights.tolist()
+
+        sampler = SeismicSampler(labels=dataset.labels, crop_shape=crop_shape, mode='fault',
+                                 threshold=threshold, proportions=self.weights, **kwargs)
+
+        return sampler
+
+    def make_accumulator(self, geometry, slices, crop_shape, strides, orientation=0, path=None):
+        batch_size = self.config['inference']['inference_batch_size']
+        if orientation == 1:
+            crop_shape = np.array(crop_shape)[[1, 0, 2]]
+        name = 'cube_i' if orientation == 0 else 'cube_x'
+
+        grid = RegularGrid(geometry=geometry,
+                            threshold=0,
+                            orientation=orientation,
+                            ranges=slices,
+                            batch_size=batch_size,
+                            crop_shape=crop_shape, strides=strides)
+
+        accumulator = Accumulator3D.from_aggregation(aggregation='mean',
+                                                     origin=grid.origin,
+                                                     shape=grid.shape,
+                                                     fill_value=0.0,
+                                                     name=name,
+                                                     path=path)
+
+        return grid, accumulator
+
     def inference_on_slides(self, train_pipeline=None, model_path=None, create_mask=False, pbar=False, **kwargs):
         config = {**self.config['inference'], **kwargs}
         strides = config['stride'] if isinstance(config['stride'], tuple) else [config['stride']] * 3
         batch_size = config['batch_size']
+
+        crop_shape = config['crop_shape']
+        strides = np.maximum(np.array(crop_shape) * np.array(strides), 1).astype(int)
 
         self.log(f'Create test pipeline and dataset.')
         dataset = self.make_inference_dataset(create_mask)
@@ -384,26 +421,23 @@ class FaultController(BaseController):
                 slices = item[1:]
                 if len(slices) != 3:
                     slices = (None, None, None)
-                if axis in [0, 'i', 'ilines']:
-                    crop_shape = config['crop_shape']
-                    order = (0, 1, 2)
-                else:
-                    crop_shape = np.array(config['crop_shape'])[[1, 0, 2]]
-                    order = (1, 0, 2)
-                inference_pipeline.set_config({'test_crop_shape': crop_shape})
-                _strides = np.maximum(np.array(crop_shape) * np.array(strides), 1).astype(int)
-                slices = fill_defaults(slices, [[0, i] for i in shape])
-                dataset.make_grid(cube_idx, crop_shape, *slices, strides=_strides, batch_size=batch_size)
 
-                ppl = (inference_pipeline << dataset)
-                for _ in tqdm.tqdm(range(dataset.grid_iters), disable=(not pbar)):
-                    _ = ppl.next_batch(D('size'), n_epochs=None)
-                prediction = dataset.assemble_crops(ppl.v('predictions'), order=order, fill_value=0).astype('float32')
+                slices = fill_defaults(slices, [[0, i] for i in shape])
+                grid, accumulator = self.make_accumulator(geometry, slices, crop_shape, strides, axis)
+                ppl = inference_pipeline << dataset << {'sampler': grid, 'accumulator': accumulator}
+
+                ppl.run(n_iters=grid.n_iters, bar=pbar)
+                prediction = accumulator.aggregate()
+
                 image = geometry[
                     slices[0][0]:slices[0][1],
                     slices[1][0]:slices[1][1],
                     slices[2][0]:slices[2][1]
                 ]
+                if axis == 1:
+                    image = image.transpose([1, 0, 2])
+                    prediction = prediction.transpose([1, 0, 2])
+
                 outputs[cube_idx] += [[slices, image, prediction, np.nanmean(ppl.v('metric')), np.argmax(ppl.v('semblance_hist')) / 1000]]
                 if create_mask:
                     outputs[cube_idx][-1] += [dataset.assemble_crops(ppl.v('target'), order=order, fill_value=0).astype('float32')]
@@ -420,22 +454,24 @@ class FaultController(BaseController):
                     prediction = prediction[0]
                     prediction[prediction < threshold] = 0
                     if overlap:
-                        plot_image([image[0], prediction], mode='overlap', cmap='gray', figsize=(20, 20), savepath=_savepath)
+                        plot_image([image[0], prediction], separate=False, cmap='gray', figsize=(20, 20), savepath=_savepath)
                     else:
                         plot_image(prediction, figsize=(20, 20), savepath=_savepath)
             return faults_metric, noise_metric
         return None, None
 
-    def inference_on_cube(self, pipeline=None, model_path=None, fmt='sgy', save_to=None, prefix=None,
-                          tmp='blosc', bar=True, **kwargs):
+    def inference_on_cube(self, train_pipeline=None, model_path=None, fmt='sgy', save_to=None, prefix=None,
+                          tmp='hdf5', bar=True, **kwargs):
         config = {**self.config['inference'], **kwargs}
         strides = config['stride'] if isinstance(config['stride'], tuple) else [config['stride']] * 3
         batch_size = config['batch_size']
-        chunk_shape = config['inference_chunk_shape']
+
+        crop_shape = config['crop_shape']
+        strides = np.maximum(np.array(crop_shape) * np.array(strides), 1).astype(int)
 
         self.log(f'Create test pipeline and dataset.')
         dataset = self.make_inference_dataset(create_mask=False)
-        inference_pipeline = self.get_inference_template(pipeline, model_path, create_masks=False)
+        inference_pipeline = self.get_inference_template(train_pipeline, model_path, create_masks=False)
         inference_pipeline.set_config(config)
 
         inference_cubes = {
@@ -462,38 +498,30 @@ class FaultController(BaseController):
             for item in inference_cubes[cube_idx]:
                 self.log(f'Create prediction for {cube_idx}: {item[1:]}. axis={item[0]}.')
                 axis = item[0]
-                slices = item[1:]
-                if len(slices) != 3:
-                    slices = (None, None, None)
-                locations = [slice(item[0], item[1]) if item else slice(None) for item in slices]
-                if axis in [0, 'i', 'ilines']:
-                    crop_shape = config['crop_shape']
-                    order = (0, 1, 2)
-                    _chunk_shape = chunk_shape
-                    t = False
-                else:
-                    crop_shape = np.array(config['crop_shape'])[[1, 0, 2]]
-                    order = (1, 0, 2)
-                    _chunk_shape = (chunk_shape[1], chunk_shape[0], chunk_shape[2])
-                    t = True
-                inference_pipeline.set_config({'test_crop_shape': crop_shape})
-                _strides = np.maximum(np.array(crop_shape) * np.array(strides), 1).astype(int)
-                slices = fill_defaults(slices, [[0, i] for i in shape])
+                ranges = item[1:]
+                if len(ranges) != 3:
+                    ranges = (None, None, None)
+                locations = [slice(item[0], item[1]) if item else slice(None) for item in ranges]
+                ranges = fill_defaults(ranges, [[0, i] for i in shape])
 
-                filename = {ext: os.path.join(dirname, self.make_filename(prefix, 'x' if t else 'i', ext))
-                            for ext in ['hdf5', 'sgy', 'blosc', 'qblosc', 'npy', 'meta']}
-                if fmt == 'npy':
-                    _filename = None
-                elif fmt in ['hdf5', 'blosc', 'qblosc']:
-                    _filename = filename[fmt]
+                filenames = {ext: os.path.join(dirname, self.make_filename(prefix, 'x' if axis==1 else 'i', ext))
+                             for ext in ['hdf5', 'sgy', 'blosc', 'qblosc', 'npy', 'meta']}
+
+                if fmt in ['hdf5', 'blosc', 'qblosc']:
+                    path = filenames[fmt]
                 elif fmt in ['sgy', 'segy']:
-                    _filename = filename[tmp]
+                    path = filename[tmp]
+                elif fmt == 'npy':
+                    path = None
 
-                prediction = dataset.make_prediction(_filename, inference_pipeline, crop_shape, _strides, locations,
-                                                    batch_size=batch_size, chunk_shape=_chunk_shape, pbar=bar,
-                                                    order=order, agg='mean')
+                grid, accumulator = self.make_accumulator(geometry, ranges, crop_shape, strides, axis, path)
+                ppl = inference_pipeline << dataset << {'sampler': grid, 'accumulator': accumulator}
+
+                ppl.run(n_iters=grid.n_iters, bar=bar)
+                prediction = accumulator.aggregate()
+
                 if fmt == 'npy':
-                    np.save(filename, prediction, allow_pickle=False)
+                    return prediction
                 elif fmt == 'sgy':
                     copyfile(dataset.geometries[0].path_meta, filename['meta'])
                     dataset.geometries[0].make_sgy(
