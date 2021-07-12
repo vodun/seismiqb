@@ -510,7 +510,7 @@ class FaultController(BaseController):
                 if fmt in ['hdf5', 'blosc', 'qblosc']:
                     path = filenames[fmt]
                 elif fmt in ['sgy', 'segy']:
-                    path = filename[tmp]
+                    path = filenames[tmp]
                 elif fmt == 'npy':
                     path = None
 
@@ -523,11 +523,11 @@ class FaultController(BaseController):
                 if fmt == 'npy':
                     return prediction
                 elif fmt == 'sgy':
-                    copyfile(dataset.geometries[0].path_meta, filename['meta'])
+                    copyfile(dataset.geometries[0].path_meta, filenames['meta'])
                     dataset.geometries[0].make_sgy(
-                        path_hdf5=filename[tmp],
+                        path_hdf5=filenames[tmp],
                         path_spec=dataset.geometries[0].segy_path.decode('utf-8'),
-                        path_segy=filename['sgy'],
+                        path_segy=filenames['sgy'],
                         remove_hdf5=True, zip_result=True, pbar=True
                     )
 
