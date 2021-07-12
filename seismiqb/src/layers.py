@@ -7,6 +7,8 @@ from torch.cuda.amp import autocast
 
 from ..batchflow.models.torch import ResBlock
 
+
+
 class InstantaneousPhaseLayer(nn.Module):
     """ Instantaneous phase comnputation. """
     def __init__(self, inputs=None, continuous=False, **kwargs):

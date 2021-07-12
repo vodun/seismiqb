@@ -290,10 +290,42 @@ class HorizonSampler(BaseSampler):
 
 
 class FaultSampler(BaseSampler):
-    """ !!. """
+    """ Generator of crop locations, based on a single fault. Not intended to be used directly, see `SeismicSampler`.
+    Makes locations that:
+        - start from the labeled point on fault
+        - don't go beyond cube limits
+
+    Locations are produced as np.ndarray of (size, 9) shape with following columns:
+        (geometry_id, label_id, orientation, i_start, x_start, h_start, i_stop, x_stop, h_stop).
+    Location is randomized in (0.1*shape, 0.9*shape) range.
+
+    For sampling, we randomly choose `size` rows from `locations`. If some of the sampled locations does not fit the
+    `threshold` constraint or it is imposible to make crop of defined shape, resample until we get exactly
+    `size` locations.
+
+    Parameters
+    ----------
+    fault : Fault
+        Fault to base sampler on.
+    crop_shape : tuple
+        Shape of crop locations to generate.
+    threshold : float
+        Minimum proportion of labeled points in each sampled location.
+    ranges : sequence, optional
+        Sequence of three tuples of two ints or `None`s.
+        If tuple of two ints, then defines ranges of sampling along this axis.
+        If None, then geometry limits are used (no constraints).
+        Note that we actually use only the first two elements, corresponding to spatial ranges.
+    geometry_id, label_id : int
+        Used as the first two columns of sampled values.
+    extend : bool
+        Create locations in non-labeled slides between labeled slides.
+    transpose : bool
+        Create transposed crop locations or not.
+    """
     dim = 2 + 1 + 6 # dimensionality of sampled points: geometry_id and label_id, orientation, locations
 
-    def __init__(self, fault, crop_shape, threshold=0.05, ranges=None, geometry_id=0, label_id=0,
+    def __init__(self, fault, crop_shape, threshold=0, ranges=None, geometry_id=0, label_id=0,
                  extend=True, transpose=False, **kwargs):
         geometry = fault.geometry
 
@@ -390,8 +422,8 @@ class FaultSampler(BaseSampler):
             sampled[mask, 1:4] += shift
             sampled[mask, 4:] += shift
 
-            np.clip(sampled[mask, 1:4], 0, self.geometry.cube_shape - shape, out=sampled[mask, 1:4])
-            np.clip(sampled[mask, 4:7], shape, self.geometry.cube_shape, out=sampled[mask, 4:7])
+            sampled[mask, 1:4] = np.clip(sampled[mask, 1:4], 0, self.geometry.cube_shape - shape)
+            sampled[mask, 4:7] = np.clip(sampled[mask, 4:7], shape, self.geometry.cube_shape)
         return sampled
 
     def __repr__(self):
@@ -448,7 +480,7 @@ def spatial_check_points(points, matrix, crop_shape, i_mask, x_mask, threshold):
     return buffer[:counter]
 
 def extend_nodes(nodes, direction):
-    """ !!. """
+    """ Create locations in non-labeled slides between labeled slides. """
     slides = np.unique(nodes[:, direction])
     locations = []
     for i, slide in enumerate(slides):
@@ -475,6 +507,11 @@ def spatial_check_sampled(locations, matrix, threshold):
         Depth map in cube coordinates.
     threshold : int
         Minimum amount of labeled pixels in a crop.
+
+    Returns
+    -------
+    condition : np.ndarray
+        Boolean mask for locations.
     """
     condition = np.ones(len(locations), dtype=np.bool_)
 
@@ -488,7 +525,28 @@ def spatial_check_sampled(locations, matrix, threshold):
 
 @njit
 def vertical_check_sampled(locations, points, crop_shape, crop_shape_t, threshold):
-    """ !!. """
+    """ Remove points, which correspond to crops with less than `threshold` labeled pixels.
+    Used as a final filter for already sampled locations: they can generate crops with
+    smaller than `threshold`.
+
+    Parameters
+    ----------
+    locations : np.ndarray
+        Locations in (orientation, i_start, x_start, h_start, i_stop, x_stop, h_stop) format.
+    points : points
+        Fault points.
+    crop_shape : np.ndarray
+        Crop shape
+    crop_shape_t : np.ndarray
+        Tranposed crop shape
+    threshold : int
+        Minimum amount of labeled pixels in a crop.
+
+    Returns
+    -------
+    condition : np.ndarray
+        Boolean mask for locations.
+    """
     condition = np.ones(len(locations), dtype=np.bool_)
 
     if threshold > 0:

@@ -542,6 +542,6 @@ class HorizonController(BaseController):
                            B('images'),
                            fetches='sigmoid',
                            save_to=B('predictions'))
-            .update_accumulator(src='predictions', accumulator=C('accumulator'), order=C('order'))
+            .update_accumulator(src='predictions', accumulator=C('accumulator'))
         )
         return inference_template
