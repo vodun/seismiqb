@@ -85,7 +85,7 @@ class BaseMetrics:
         metric_fn = getattr(self, metric)
         metric_val, plot_dict = metric_fn(**kwargs)
 
-        if cp is not np:
+        if cp is not np and cp.cuda.is_available():
             # pylint: disable=protected-access
             cp._default_memory_pool.free_all_blocks()
 
@@ -690,7 +690,7 @@ class HorizonMetrics(BaseMetrics):
         if self._data is None:
             self._data = self.horizon.get_cube_values(window=self.window, offset=self.offset,
                                                       normalize=self.normalize, chunk_size=self.chunk_size)
-        self._data[self._data == Horizon.FILL_VALUE] = np.nan
+            self._data[self._data == Horizon.FILL_VALUE] = np.nan
         return self._data
 
     @property

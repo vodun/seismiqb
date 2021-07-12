@@ -856,7 +856,9 @@ class Horizon:
             h_end = min(h_start + chunk_size, self.h_max + 1)
 
             # Get chunk from the cube (depth-wise)
-            data_chunk = self.geometry[:, :, (h_start - low) : min(h_end + high, self.geometry.depth)]
+            location = (slice(None), slice(None),
+                        slice(h_start - low, min(h_end + high, self.geometry.depth)))
+            data_chunk = self.geometry.load_crop(location, use_cache=False)
 
             # Check which points of the horizon are in the current chunk (and present)
             idx_i, idx_x = np.asarray((self.matrix != self.FILL_VALUE) &
@@ -1503,7 +1505,6 @@ class Horizon:
         overlap_info['spatial_position'] = spatial_position
         return merge_code, overlap_info
 
-
     def overlap_merge(self, other, inplace=False):
         """ Merge two horizons into one.
         Note that this function can either merge horizons in-place of the first one (`self`), or create a new instance.
@@ -1553,7 +1554,6 @@ class Horizon:
             merged = Horizon(background, self.geometry, self.name,
                              i_min=shared_i_min, x_min=shared_x_min, length=length)
         return merged
-
 
     def adjacent_merge(self, other, mean_threshold=3.0, adjacency=3, inplace=False):
         """ Check if adjacent merge (that is merge with some margin) is possible, and, if needed, merge horizons.
@@ -1633,7 +1633,6 @@ class Horizon:
                                  i_min=shared_i_min, x_min=shared_x_min, length=length)
             return merged
         return False
-
 
     @staticmethod
     def merge_list(horizons, mean_threshold=2.0, adjacency=3, minsize=50):
