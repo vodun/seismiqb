@@ -54,7 +54,7 @@ class BaseSampler(Sampler):
             points = filtering_function(points, filtering_matrix)
 
         # Keep only points, that produce crops with horizon larger than threshold; append flag
-        points = check_horizon_points(points, matrix, crop_shape[:2], i_mask, x_mask, n_threshold)
+        points = spatial_check_points(points, matrix, crop_shape[:2], i_mask, x_mask, n_threshold)
 
         # Transform points to (orientation, i_start, x_start, h_start, i_stop, x_stop, h_stop)
         buffer = np.empty((len(points), 7), dtype=np.int32)
@@ -251,12 +251,11 @@ class HorizonSampler(BaseSampler):
 
             while accumulated < size:
                 sampled = self._sample(size*2)
-                condition = check_sampled_horizons(sampled, self.matrix, self.n_threshold)
+                condition = spatial_check_sampled(sampled, self.matrix, self.n_threshold)
 
                 sampled_list.append(sampled[condition])
                 accumulated += condition.sum()
             sampled = np.concatenate(sampled_list)[:size]
-            self._counter = len(sampled_list)
 
         buffer = np.empty((size, 9), dtype=np.int32)
         buffer[:, 0] = self.geometry_id
@@ -310,7 +309,6 @@ class FaultSampler(BaseSampler):
         self.geometry_id = geometry_id
         self.label_id = label_id
 
-        self.horizon = fault
         self.geometry = geometry
         self.name = fault.geometry.short_name
         self.displayed_name = fault.short_name
@@ -327,7 +325,7 @@ class FaultSampler(BaseSampler):
 
         crop_shape = np.array(crop_shape)
         crop_shape_t = crop_shape[[1, 0, 2]]
-        n_threshold = np.int32(crop_shape[0] * crop_shape[1] * crop_shape[2] * threshold)
+        n_threshold = np.int32(np.prod(crop_shape) * threshold)
 
         if nodes is not None and extend:
             nodes = extend_nodes(nodes, self.direction)
@@ -342,7 +340,7 @@ class FaultSampler(BaseSampler):
             start, end = i * len(nodes), (i+1) * len(nodes)
             shape = crop_shape if direction == 0 else crop_shape_t
             buffer[start:end, 1:4] = nodes - shape // 2
-            buffer[start:end, 4:7] = nodes + shape - shape // 2
+            buffer[start:end, 4:7] = buffer[start:end, 1:4] + shape
             buffer[start:end, 0] = direction
 
         self.n = len(buffer)
@@ -363,12 +361,11 @@ class FaultSampler(BaseSampler):
 
         while accumulated < size:
             sampled = self._sample(size*4)
-            condition = check_sampled_faults(sampled, self.points, self.crop_shape, self.crop_shape_t, self.n_threshold)
+            condition = vertical_check_sampled(sampled, self.points, self.crop_shape, self.crop_shape_t, self.n_threshold)
 
             sampled_list.append(sampled[condition])
             accumulated += condition.sum()
         sampled = np.concatenate(sampled_list)[:size]
-        self._counter = len(sampled_list)
 
         buffer = np.empty((size, 9), dtype=np.int32)
         buffer[:, 0] = self.geometry_id
@@ -392,10 +389,8 @@ class FaultSampler(BaseSampler):
             sampled[mask, 1:4] += shift
             sampled[mask, 4:] += shift
 
-            for i in range(3):
-                sampled[mask, 1+i] = np.clip(sampled[mask, 1+i], 0, self.geometry.cube_shape[i] - shape[i])
-                sampled[mask, 4+i] = np.clip(sampled[mask, 4+i], shape[i], self.geometry.cube_shape[i])
-
+            np.clip(sampled[mask, 1:4], 0, self.geometry.cube_shape - shape, out=sampled[mask, 1:4])
+            np.clip(sampled[mask, 4:7], shape, self.geometry.cube_shape, out=sampled[mask, 4:7])
         return sampled
 
     def __repr__(self):
@@ -403,7 +398,7 @@ class FaultSampler(BaseSampler):
                f'crop_shape={tuple(self.crop_shape)}, threshold={self.threshold}>'
 
 @njit
-def check_horizon_points(points, matrix, crop_shape, i_mask, x_mask, threshold):
+def spatial_check_points(points, matrix, crop_shape, i_mask, x_mask, threshold):
     """ Compute points, which would generate crops with more than `threshold` labeled pixels.
     For each point, we test two possible shapes (i-oriented and x-oriented) and check `matrix` to compute the
     number of present points. Therefore, each of the initial points can result in up to two points in the output.
@@ -466,7 +461,7 @@ def extend_nodes(nodes, direction):
 
 
 @njit
-def check_sampled_horizons(locations, matrix, threshold):
+def spatial_check_sampled(locations, matrix, threshold):
     """ Remove points, which correspond to crops with less than `threshold` labeled pixels.
     Used as a final filter for already sampled locations: they can generate crops with
     smaller than `threshold` mask only due to the depth randomization.
@@ -491,17 +486,15 @@ def check_sampled_horizons(locations, matrix, threshold):
     return condition
 
 @njit
-def check_sampled_faults(locations, points, crop_shape, crop_shape_t, threshold):
+def vertical_check_sampled(locations, points, crop_shape, crop_shape_t, threshold):
     """ !!. """
     condition = np.ones(len(locations), dtype=np.bool_)
 
-    for i, (orientation, i_start, x_start, h_start, i_stop,  x_stop, h_stop) in enumerate(locations):
-        _crop_shape = crop_shape if orientation == 0 else crop_shape_t
-        if (np.array([i_stop - i_start, x_stop - x_start, h_stop - h_start]) != _crop_shape).any():
-            condition[i] = False
-        elif threshold > 0:
+    if threshold > 0:
+        for i, (orientation, i_start, x_start, h_start, i_stop,  x_stop, h_stop) in enumerate(locations):
+            shape = crop_shape if orientation == 0 else crop_shape_t
             mask_bbox = np.array([[i_start, i_stop], [x_start, x_stop], [h_start, h_stop]], dtype=np.int32)
-            mask = np.zeros((_crop_shape[0], _crop_shape[1], _crop_shape[2]), dtype=np.int32)
+            mask = np.zeros((shape[0], shape[1], shape[2]), dtype=np.int32)
 
             insert_fault_into_mask(mask, points, mask_bbox)
             if mask.sum() < threshold:
