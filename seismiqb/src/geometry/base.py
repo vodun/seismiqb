@@ -89,14 +89,14 @@ class SeismicGeometry(ExportMixin):
     Based on the extension of the path, a different subclass is used to implement key methods for data indexing.
     Currently supported extensions:
         - `segy`
-        - `hdf5` and its quantized version
-        - `blosc` and its quantized version
+        - `hdf5` and its quantized version `qhdf5`
+        - `blosc` and its quantized version `qblosc`
     The last two are created by converting the original SEG-Y cube.
-    During the conversion, an extra step of int8 quantization can be performed to reduce the space taken.
+    During the conversion, an extra step of `int8` quantization can be performed to reduce the disk usage.
 
-    Independent of exact format, `SeismicGeometry` provides the following:
+    Independent of the exact format, `SeismicGeometry` provides the following:
         - Attributes to describe shape and structure of the cube like `cube_shape` and `lens`,
-        as well as exact values of file-wide headers, for example, `time_delay` and `sample_rate`.
+        as well as exact values of file-wide headers, for example, `delay` and `sample_rate`.
 
         - Ability to infer information about the cube amplitudes:
           `trace_container` attribute contains examples of amplitudes inside the cube and allows to compute statistics.
@@ -140,8 +140,8 @@ class SeismicGeometry(ExportMixin):
     NPZ_ALIASES = ['npz']
     ARRAY_ALIASES = ['dummyarray']
 
-    # Attributes to store during SEG-Y -> HDF5 conversion
-    PRESERVED = [
+    # Attributes to store in a separate `.meta` file
+    PRESERVED = [ # loaded at instance initialization
         # Crucial geometry properties
         'depth', 'delay', 'sample_rate', 'cube_shape',
         'byte_no', 'offsets', 'ranges', 'lens', # `uniques` can't be saved due to different lenghts of arrays
@@ -163,7 +163,7 @@ class SeismicGeometry(ExportMixin):
         'qnt_q001', 'qnt_q01', 'qnt_q05', 'qnt_q95', 'qnt_q99', 'qnt_q999',
     ]
 
-    PRESERVED_LAZY = [
+    PRESERVED_LAZY = [ # loaded at the time of the first access
         'trace_container', 'hist_matrix',
         'min_matrix', 'max_matrix', 'mean_matrix', 'std_matrix',
     ]
@@ -179,7 +179,9 @@ class SeismicGeometry(ExportMixin):
     INDEX_CDP = ['CDP_Y', 'CDP_X']
 
     def __new__(cls, path, *args, **kwargs):
-        """ Select the type of geometry based on file extension. """
+        """ Select the type of geometry based on file extension.
+        Breaks the autoreload magic (but only for this class).
+        """
         #pylint: disable=import-outside-toplevel
         _ = args, kwargs
         fmt = os.path.splitext(path)[1][1:]
@@ -582,11 +584,19 @@ class SeismicGeometry(ExportMixin):
         msg = f"""
         Geometry for cube              {self.displayed_path}
         Current index:                 {self.index_headers}
-        Cube shape:                    {self.cube_shape}
+        Cube shape:                    {tuple(self.cube_shape)}
         Time delay:                    {self.delay}
         Sample rate:                   {self.sample_rate}
+        Area:                          {self.area:4.1f} km²
+        """
 
-        Cube size:                     {os.path.getsize(self.path) / (1024**3):4.3f} GB
+        if os.path.exists(self.segy_path):
+            segy_size = os.path.getsize(self.segy_path) / (1024 ** 3)
+            msg += f"""
+        SEG-Y original size:           {segy_size:4.3f} GB
+        """
+
+        msg += f"""Current cube size:             {self.file_size:4.3f} GB
         Size of the instance:          {self.ngbytes:4.3f} GB
 
         Number of traces:              {self.total_traces}
@@ -594,7 +604,8 @@ class SeismicGeometry(ExportMixin):
 
         if hasattr(self, 'zero_traces'):
             msg += f"""Number of non-zero traces:     {self.nonzero_traces}
-            """
+        Fullness:                      {self.nonzero_traces / self.total_traces:2.2f}
+        """
 
         if self.has_stats:
             msg += f"""
@@ -668,8 +679,7 @@ class SeismicGeometry(ExportMixin):
         }
         return plot_image(data, backend='matplotlib', bins=bins, mode='histogram', **kwargs)
 
-    def show_slide(self, loc=None, start=None, end=None, step=1, axis=0, zoom_slice=None,
-                   n_ticks=5, delta_ticks=100, stable=True, **kwargs):
+    def show_slide(self, loc=None, start=None, end=None, step=1, axis=0, zoom_slice=None, stable=True, **kwargs):
         """ Show seismic slide in desired place.
         Under the hood relies on :meth:`load_slide`, so works with geometries in any formats.
 
@@ -688,13 +698,14 @@ class SeismicGeometry(ExportMixin):
         """
         axis = self.parse_axis(axis)
         slide = self.load_slide(loc=loc, start=start, end=end, step=step, axis=axis, stable=stable)
-        xticks = list(range(slide.shape[0]))
-        yticks = list(range(slide.shape[1]))
+        xmin, xmax, ymin, ymax = 0, slide.shape[0], slide.shape[1], 0
 
         if zoom_slice:
             slide = slide[zoom_slice]
-            xticks = xticks[zoom_slice[0]]
-            yticks = yticks[zoom_slice[1]]
+            xmin = zoom_slice[0].start or xmin
+            xmax = zoom_slice[0].stop or xmax
+            ymin = zoom_slice[1].stop or xmin
+            ymax = zoom_slice[1].start or xmax
 
         # Plot params
         if len(self.index_headers) > 1:
@@ -711,23 +722,12 @@ class SeismicGeometry(ExportMixin):
             xlabel = self.index_headers[0]
             ylabel = 'DEPTH'
 
-        xticks = xticks[::max(1, round(len(xticks) // (n_ticks - 1) / delta_ticks)) * delta_ticks] + [xticks[-1]]
-        xticks = sorted(list(set(xticks)))
-        yticks = yticks[::max(1, round(len(xticks) // (n_ticks - 1) / delta_ticks)) * delta_ticks] + [yticks[-1]]
-        yticks = sorted(list(set(yticks)), reverse=True)
-
-        if len(xticks) > 2 and (xticks[-1] - xticks[-2]) < delta_ticks:
-            xticks.pop(-2)
-        if len(yticks) > 2 and (yticks[0] - yticks[1]) < delta_ticks:
-            yticks.pop(1)
-
         kwargs = {
             'title': title,
             'xlabel': xlabel,
             'ylabel': ylabel,
             'cmap': 'gray',
-            'xticks': xticks,
-            'yticks': yticks,
+            'extent': (xmin, xmax, ymin, ymax),
             'labeltop': False,
             'labelright': False,
             **kwargs
