@@ -2,6 +2,8 @@
 import numpy as np
 from numba import njit
 
+
+
 @njit
 def triangle_rasterization(points, width=1):
     """ Transform triangle to surface of the fixed thickness.

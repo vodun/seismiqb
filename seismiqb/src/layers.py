@@ -5,6 +5,8 @@ from torch import nn
 
 from ..batchflow.models.torch import ResBlock
 
+
+
 class InstantaneousPhaseLayer(nn.Module):
     """ Instantaneous phase comnputation. """
     def __init__(self, inputs=None, continuous=False, enable=True, **kwargs):
