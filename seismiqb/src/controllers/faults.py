@@ -304,8 +304,7 @@ class FaultController(BaseController):
 
         test_pipeline += self.metrics_pipeline_template()
         test_pipeline += (Pipeline()
-            .adaptive_reshape(src='predictions')
-            .update_accumulator(src='predictions', accumulator=C('accumulator'))
+            .update_accumulator(src='images', accumulator=C('accumulator'))
         )
 
         return test_pipeline
@@ -378,11 +377,11 @@ class FaultController(BaseController):
         name = 'cube_i' if orientation == 0 else 'cube_x'
 
         grid = RegularGrid(geometry=geometry,
-                            threshold=0,
-                            orientation=orientation,
-                            ranges=slices,
-                            batch_size=batch_size,
-                            crop_shape=crop_shape, strides=strides)
+                           threshold=0,
+                           orientation=orientation,
+                           ranges=slices,
+                           batch_size=batch_size,
+                           crop_shape=crop_shape, strides=strides)
 
         accumulator = Accumulator3D.from_aggregation(aggregation='mean',
                                                      origin=grid.origin,
