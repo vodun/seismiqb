@@ -361,7 +361,8 @@ class FaultSampler(BaseSampler):
 
         while accumulated < size:
             sampled = self._sample(size*4)
-            condition = vertical_check_sampled(sampled, self.points, self.crop_shape, self.crop_shape_t, self.n_threshold)
+            condition = vertical_check_sampled(sampled, self.points, self.crop_shape,
+                                               self.crop_shape_t, self.n_threshold)
 
             sampled_list.append(sampled[condition])
             accumulated += condition.sum()

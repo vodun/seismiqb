@@ -264,8 +264,9 @@ class Accumulator3D:
     kwargs : dict
         Other parameters are passed to HDF5 dataset creation.
     """
-    def __init__(self, shape=None, origin=None, dtype=np.float32, transform=None, path=None, **kwargs):
+    def __init__(self, shape=None, origin=None, dtype=np.float32, transform=None, path=None, name='data', **kwargs):
         # Main attribute to store results
+        self.name = name
         self.data = None
 
         # Dimensionality and location
@@ -293,11 +294,20 @@ class Accumulator3D:
         """ Create named storage as a dataset of HDF5 or plain array. """
         if self.type == 'hdf5':
             options = {'fillvalue': fill_value, **self.options}
+            options.pop('fill_value')
             placeholder = self.file.create_dataset(name, shape=self.shape, dtype=dtype, **options)
         elif self.type == 'numpy':
             placeholder = np.full(shape=self.shape, fill_value=fill_value, dtype=dtype)
 
         setattr(self, name, placeholder)
+
+    @property
+    def data(self):
+        return getattr(self, self.name)
+
+    @data.setter
+    def data(self, value):
+        setattr(self, self.name, value)
 
     def remove_placeholder(self, name=None):
         """ Remove created placeholder. """
@@ -345,7 +355,7 @@ class Accumulator3D:
         if self.type == 'hdf5':
             self.file.close()
             self.file = h5py.File(self.path, 'r')
-            self.data = self.file['data']
+            self.data = self.file[self.name]
 
         self.aggregated = True
         return self.data
@@ -390,12 +400,13 @@ class Accumulator3D:
 
 class MaxAccumulator3D(Accumulator3D):
     """ Accumulator that takes maximum value of overlapping crops. """
-    def __init__(self, shape=None, origin=None, dtype=np.float32, fill_value=None, transform=None, path=None, **kwargs):
-        super().__init__(shape=shape, origin=origin, dtype=dtype, transform=transform, path=path, **kwargs)
+    def __init__(self, shape=None, origin=None, dtype=np.float32, fill_value=None, transform=None,
+                 path=None, name='data', **kwargs):
+        super().__init__(shape=shape, origin=origin, dtype=dtype, transform=transform, path=path, name=name, **kwargs)
 
         min_value = np.finfo(dtype).min if 'float' in dtype.__name__ else np.iinfo(dtype).min
         self.fill_value = fill_value if fill_value is not None else min_value
-        self.create_placeholder(name='data', dtype=self.dtype, fill_value=self.fill_value)
+        self.create_placeholder(name=name, dtype=self.dtype, fill_value=self.fill_value)
 
     def _update(self, crop, location):
         self.data[location] = np.maximum(crop, self.data[location])
@@ -406,10 +417,10 @@ class MaxAccumulator3D(Accumulator3D):
 
 class MeanAccumulator3D(Accumulator3D):
     """ Accumulator that takes mean value of overlapping crops. """
-    def __init__(self, shape=None, origin=None, dtype=np.float32, transform=None, path=None, **kwargs):
-        super().__init__(shape=shape, origin=origin, dtype=dtype, transform=transform, path=path, **kwargs)
+    def __init__(self, shape=None, origin=None, dtype=np.float32, transform=None, path=None, name='data', **kwargs):
+        super().__init__(shape=shape, origin=origin, dtype=dtype, transform=transform, path=path, name=name, **kwargs)
 
-        self.create_placeholder(name='data', dtype=self.dtype, fill_value=0)
+        self.create_placeholder(name=name, dtype=self.dtype, fill_value=0)
         self.create_placeholder(name='counts', dtype=np.int8, fill_value=0)
 
     def _update(self, crop, location):
@@ -441,10 +452,10 @@ class MeanAccumulator3D(Accumulator3D):
 
 class GMeanAccumulator3D(Accumulator3D):
     """ Accumulator that takes geometric mean value of overlapping crops. """
-    def __init__(self, shape=None, origin=None, dtype=np.float32, transform=None, path=None, **kwargs):
-        super().__init__(shape=shape, origin=origin, dtype=dtype, transform=transform, path=path, **kwargs)
+    def __init__(self, shape=None, origin=None, dtype=np.float32, transform=None, path=None, name='data', **kwargs):
+        super().__init__(shape=shape, origin=origin, dtype=dtype, transform=transform, path=path, name=name, **kwargs)
 
-        self.create_placeholder(name='data', dtype=self.dtype, fill_value=1)
+        self.create_placeholder(name=name, dtype=self.dtype, fill_value=1)
         self.create_placeholder(name='counts', dtype=np.int8, fill_value=0)
 
     def _update(self, crop, location):
