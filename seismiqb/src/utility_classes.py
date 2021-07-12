@@ -261,6 +261,8 @@ class Accumulator3D:
         If provided, then we use HDF5 datasets instead of regular Numpy arrays, storing the data directly on disk.
         After the initialization, we keep the file handle in `w-` mode during the update phase.
         After aggregation, we re-open the file to automatically repack it in `r` mode.
+    name : str
+        Name of the attribute (and dataset in hdf5) to store data.
     kwargs : dict
         Other parameters are passed to HDF5 dataset creation.
     """
@@ -303,6 +305,7 @@ class Accumulator3D:
 
     @property
     def data(self):
+        """ Data storage. """
         return getattr(self, self.name)
 
     @data.setter
