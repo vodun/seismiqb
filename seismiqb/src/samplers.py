@@ -422,8 +422,8 @@ class FaultSampler(BaseSampler):
             sampled[mask, 1:4] += shift
             sampled[mask, 4:] += shift
 
-            np.clip(sampled[mask, 1:4], 0, self.geometry.cube_shape - shape, out=sampled[mask, 1:4])
-            np.clip(sampled[mask, 4:7], shape, self.geometry.cube_shape, out=sampled[mask, 4:7])
+            sampled[mask, 1:4] = np.clip(sampled[mask, 1:4], 0, self.geometry.cube_shape - shape)
+            sampled[mask, 4:7] = np.clip(sampled[mask, 4:7], shape, self.geometry.cube_shape)
         return sampled
 
     def __repr__(self):
