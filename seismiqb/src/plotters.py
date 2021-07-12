@@ -224,7 +224,7 @@ class MatplotlibPlotter:
 
         if axes is None:
             FIGURE_KEYS = ['figsize', 'facecolor', 'dpi', 'ncols', 'nrows']
-            params = filter_parameters(all_params, FIGURE_KEYS)
+            params = filter_parameters(all_params, FIGURE_KEYS, prefix='figure_')
             params['figsize'] = params.get('figsize', MODE_TO_FIGSIZE[mode])
             if ('ncols' not in params) and ('nrows' not in params):
                 params['ncols'] = n_subplots

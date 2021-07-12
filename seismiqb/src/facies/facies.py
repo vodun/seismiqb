@@ -5,7 +5,6 @@ import numpy as np
 
 from scipy.signal import hilbert, ricker
 from scipy.ndimage import convolve
-from scipy.fft import fft
 from sklearn.decomposition import PCA
 
 
@@ -267,7 +266,7 @@ class Facies(Horizon):
         return reduced.reshape(*data.shape[:2], -1)
 
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
-    def fourier_decompose(self, window=50, n_components=3, add_alpha=False, **kwargs):
+    def fourier_decompose(self, window=50, n_components=None, **kwargs):
         """ Cached fourier transform calculation follower by dimensionaluty reduction via PCA.
 
         Parameters
@@ -277,30 +276,21 @@ class Facies(Horizon):
         n_components : int or None
             Number of components to keep after PCA.
             If None, do not perform dimensionality reduction.
-        add_alpha : bool
-            Whether add extra opacity layer to result or not. Needed for plotting.
         kwargs :
             For `sklearn.decomposition.PCA`.
         """
         transform_kwargs = retrieve_function_arguments(self.transform_where_present, kwargs)
 
         amplitudes = self.load_attribute('amplitudes', window=window)
-        result = np.abs(fft(amplitudes))[:, :, window // 2:]
+        result = np.abs(np.fft.rfft(amplitudes))
 
         if n_components is not None:
             result = self.reduce_dimensionality(result, n_components, **kwargs)
 
-        result = self.transform_where_present(result, **transform_kwargs)
-
-        if add_alpha:
-            alpha = np.ones((*result.shape[:2], 1))
-            alpha[np.isnan(result).any(axis=-1)] = np.nan
-            result = np.concatenate([result, alpha], axis=-1)
-
-        return result
+        return self.transform_where_present(result, **transform_kwargs)
 
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
-    def wavelet_decompose(self, widths=range(1, 14, 3), window=50, n_components=3, add_alpha=False, **kwargs):
+    def wavelet_decompose(self, widths=range(1, 14, 3), window=50, n_components=None, **kwargs):
         """ Cached wavelet transform calculation follower by dimensionaluty reduction via PCA.
 
         Parameters
@@ -312,8 +302,6 @@ class Facies(Horizon):
         n_components : int
             Number of components to keep after PCA.
             If None, do not perform dimensionality reduction.
-        add_alpha : bool
-            Whether add extra opacity layer to result or not. Needed for plotting.
         kwargs :
             For `sklearn.decomposition.PCA`.
         """
@@ -329,14 +317,7 @@ class Facies(Horizon):
         if n_components is not None:
             result = self.reduce_dimensionality(result, n_components, **kwargs)
 
-        result = self.transform_where_present(result, **transform_kwargs)
-
-        if add_alpha:
-            alpha = np.ones((*result.shape[:2], 1))
-            alpha[np.isnan(result).any(axis=-1)] = np.nan
-            result = np.concatenate([result, alpha], axis=-1)
-
-        return result
+        return self.transform_where_present(result, **transform_kwargs)
 
     def show(self, load='depths', mode='imshow', draw=None, return_figure=False, **kwargs):
         """ Display facies attributes with predefined defaults.
@@ -401,8 +382,7 @@ class Facies(Horizon):
             postprocess = load.pop('postprocess', lambda x: x)
             load_defaults = {'fill_value': np.nan}
             if load['src'].split('/')[-1] in ['fourier', 'wavelet']:
-                load_defaults['add_alpha'] = True
-                load_defaults['normalize'] = 'min-max'
+                load_defaults['n_components'] = 1
             load = {**load_defaults, **load}
             data = self.load_attribute(**load)
             return postprocess(data)
