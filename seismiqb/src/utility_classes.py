@@ -265,12 +265,10 @@ class Accumulator3D:
         Other parameters are passed to HDF5 dataset creation.
     """
     def __init__(self, shape=None, origin=None, dtype=np.float32, transform=None, path=None, **kwargs):
-        # Main attribute to store results
-        self.data = None
-
         # Dimensionality and location
         self.shape = shape
         self.origin = origin
+        self.location = [slice(start, start + shape) for start, shape in zip(self.origin, self.shape)]
 
         # Properties of storages
         self.dtype = dtype
@@ -472,6 +470,50 @@ class GMeanAccumulator3D(Accumulator3D):
 
         # Cleanup
         self.remove_placeholder('counts')
+
+
+
+class AccumulatorBlosc(Accumulator3D):
+    """ !!. """
+    def __init__(self, path, orientation=0, shape=None, origin=None, dtype=np.float32,
+                 transform=None, aggregation='max', **kwargs):
+        super().__init__(shape=shape, origin=origin, dtype=dtype, transform=transform, path=None)
+        self.type = 'blosc'
+        self.path = path
+        self.orientation = orientation
+        self.aggregation = aggregation
+
+        # Manage the `BLOSC` file
+        from .geometry import BloscFile #pylint: disable=import-outside-toplevel
+        self.file = BloscFile(path, mode='w')
+        if orientation == 0:
+            name = 'cube_i'
+        elif orientation == 1:
+            name = 'cube_x'
+            shape = np.array(shape)[[1, 0, 2]]
+
+        self.name = name
+        self.file.create_dataset(name, shape=shape, dtype=dtype)
+
+    @property
+    def data(self):
+        """ Named dataset inside `BLOSC` file. """
+        if self.type == 'numpy':
+            return getattr(self, self.name)
+        return self.file[self.name]
+
+    def _update(self, crop, location):
+        crop = crop.astype(self.dtype)
+        iterator = range(location[self.orientation].start, location[self.orientation].stop)
+
+        for i, o in enumerate(iterator):
+            slc = [slice(None), slice(None), slice(None)]
+            slc[self.orientation] = i
+            slide = crop[tuple(slc)]
+            self.data[o, :, :] = slide.T if self.orientation == 1 else slide
+
+    def _aggregate(self):
+        self.file = self.file.repack(aggregation=self.aggregation)
 
 
 
