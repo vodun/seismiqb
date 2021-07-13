@@ -474,9 +474,25 @@ class GMeanAccumulator3D(Accumulator3D):
 
 
 class AccumulatorBlosc(Accumulator3D):
-    """ !!. """
-    def __init__(self, path, orientation=0, shape=None, origin=None, dtype=np.float32,
-                 transform=None, aggregation='max', **kwargs):
+    """ Accumulate predictions into `BLOSC` file.
+    Each of the saved slides supposed to be finalized, e.g. coming from another accumulator.
+    During the aggregation, we repack the file to remove duplicates.
+
+    Parameters
+    ----------
+    path : str
+        Path to save `BLOSC` file to.
+    orientation : int
+        If 0, then predictions are stored as `cube_i` dataset inside the file.
+        If 1, then predictions are stored as `cube_x` dataset inside the file and transposed before storing.
+    aggregation : str
+        Type of aggregation for duplicate slides.
+        If `max`, then we take element-wise maximum.
+        If `mean`, then take mean value.
+        If None, then we take random slide.
+    """
+    def __init__(self, path, orientation=0, aggregation='max',
+                 shape=None, origin=None, dtype=np.float32, transform=None, **kwargs):
         super().__init__(shape=shape, origin=origin, dtype=dtype, transform=transform, path=None)
         self.type = 'blosc'
         self.path = path
