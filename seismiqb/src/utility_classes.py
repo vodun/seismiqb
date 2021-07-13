@@ -305,9 +305,9 @@ class Accumulator3D:
     @property
     def data(self):
         """ Data storage. """
-        if self.mode == 'numpy':
-            return getattr(self, self.name)
-        return self.file[self.name]
+        if self.type == 'hdf5':
+            return self.file[self.name]
+        return getattr(self, self.name)
 
     def remove_placeholder(self, name=None):
         """ Remove created placeholder. """
