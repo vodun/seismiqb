@@ -297,7 +297,7 @@ class FaultSampler(BaseSampler):
 
     Locations are produced as np.ndarray of (size, 9) shape with following columns:
         (geometry_id, label_id, orientation, i_start, x_start, h_start, i_stop, x_stop, h_stop).
-    Location is randomized in (0.1*shape, 0.9*shape) range.
+    Location is randomized in (-0.4*shape, 0.4*shape) range.
 
     For sampling, we randomly choose `size` rows from `locations`. If some of the sampled locations does not fit the
     `threshold` constraint or it is imposible to make crop of defined shape, resample until we get exactly
@@ -329,12 +329,12 @@ class FaultSampler(BaseSampler):
                  extend=True, transpose=False, **kwargs):
         geometry = fault.geometry
 
-        self.points = fault.points.copy()
-        self.nodes = fault.nodes.copy() if hasattr(fault, 'nodes') else None
+        self.points = fault.points
+        self.nodes = fault.nodes if hasattr(fault, 'nodes') else None
         self.direction = fault.direction
         self.transpose = transpose
 
-        self.locations = self._make_locations(geometry, self.points, self.nodes, crop_shape, ranges, threshold, extend)
+        self.locations = self._make_locations(geometry, crop_shape, ranges, threshold, extend)
 
         self.kwargs = kwargs
 
@@ -348,7 +348,21 @@ class FaultSampler(BaseSampler):
 
         self.weight = len(self.locations)
 
-    def _make_locations(self, geometry, points, nodes, crop_shape, ranges, threshold, extend):
+    @property
+    def interpolated_nodes(self):
+        """ Create locations in non-labeled slides between labeled slides. """
+        slides = np.unique(self.nodes[:, self.direction])
+        locations = []
+        for i, slide in enumerate(slides):
+            left = slides[max(i-1, 0)]
+            right = slides[min(i+1, len(slides)-1)]
+            chunk = self.nodes[self.nodes[:, self.direction] == slide]
+            for j in range(left, right):
+                chunk[:, self.direction] = j
+                locations += [chunk.copy()]
+        return np.concatenate(locations, axis=0)
+
+    def _make_locations(self, geometry, crop_shape, ranges, threshold, extend):
          # Parse parameters
         ranges = ranges or [None, None, None]
         ranges = [item if item is not None else [0, c]
@@ -359,9 +373,10 @@ class FaultSampler(BaseSampler):
         crop_shape_t = crop_shape[[1, 0, 2]]
         n_threshold = np.int32(np.prod(crop_shape) * threshold)
 
-        if nodes is not None and extend:
-            nodes = extend_nodes(nodes, self.direction)
-        nodes = nodes if nodes is not None else points
+        if self.nodes is not None:
+            nodes = self.interpolated_nodes if extend else self.nodes
+        else:
+            nodes = self.points
 
         # Transform points to (orientation, i_start, x_start, h_start, i_stop, x_stop, h_stop)
         directions = [0, 1] if self.transpose else [self.direction]
@@ -393,8 +408,8 @@ class FaultSampler(BaseSampler):
 
         while accumulated < size:
             sampled = self._sample(size*4)
-            condition = vertical_check_sampled(sampled, self.points, self.crop_shape,
-                                               self.crop_shape_t, self.n_threshold)
+            condition = volumetric_check_sampled(sampled, self.points, self.crop_shape,
+                                                 self.crop_shape_t, self.n_threshold)
 
             sampled_list.append(sampled[condition])
             accumulated += condition.sum()
@@ -418,7 +433,7 @@ class FaultSampler(BaseSampler):
             low[shape == 1] = 0
             high[shape == 1] = 1
 
-            shift = np.random.randint(low=low, high=high, size=(sum(mask), 3), dtype=np.int32)
+            shift = np.random.randint(low=low, high=high, size=(mask.sum(), 3), dtype=np.int32)
             sampled[mask, 1:4] += shift
             sampled[mask, 4:] += shift
 
@@ -479,18 +494,6 @@ def spatial_check_points(points, matrix, crop_shape, i_mask, x_mask, threshold):
                 counter += 1
     return buffer[:counter]
 
-def extend_nodes(nodes, direction):
-    """ Create locations in non-labeled slides between labeled slides. """
-    slides = np.unique(nodes[:, direction])
-    locations = []
-    for i, slide in enumerate(slides):
-        left = slides[max(i-1, 0)]
-        right = slides[min(i+1, len(slides)-1)]
-        chunk = nodes[nodes[:, direction] == slide]
-        for j in range(left, right):
-            chunk[:, direction] = j
-            locations += [chunk.copy()]
-    return np.concatenate(locations, axis=0)
 
 
 @njit
@@ -524,7 +527,7 @@ def spatial_check_sampled(locations, matrix, threshold):
     return condition
 
 @njit
-def vertical_check_sampled(locations, points, crop_shape, crop_shape_t, threshold):
+def volumetric_check_sampled(locations, points, crop_shape, crop_shape_t, threshold):
     """ Remove points, which correspond to crops with less than `threshold` labeled pixels.
     Used as a final filter for already sampled locations: they can generate crops with
     smaller than `threshold`.

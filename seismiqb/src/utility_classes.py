@@ -305,13 +305,13 @@ class Accumulator3D:
     @property
     def data(self):
         """ Data storage. """
-        if self.type == 'hdf5':
+        if self.type in ['hdf5', 'blosc']:
             return self.file[self.name]
         return getattr(self, self.name)
 
     def remove_placeholder(self, name=None):
         """ Remove created placeholder. """
-        if self.type == 'hdf5':
+        if self.type in ['hdf5', 'blosc']:
             del self.file[name]
         setattr(self, name, None)
 
@@ -364,12 +364,13 @@ class Accumulator3D:
         raise NotImplementedError
 
     def __del__(self):
-        if self.type == 'hdf5':
+        if self.type in ['hdf5', 'blosc']:
             self.file.close()
 
     def clear(self):
         """ Remove placeholders from memory and disk. """
-        if self.type == 'hdf5':
+        # TODO: check for leaks
+        if self.type in ['hdf5', 'blosc']:
             os.remove(self.path)
 
     @property
