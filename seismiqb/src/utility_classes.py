@@ -281,17 +281,16 @@ class Accumulator3D:
             self.path = path
 
             self.file = h5py.File(path, mode='w-')
-            self.options = {**kwargs}
         self.type = 'hdf5' if path is not None else 'numpy'
 
         self.aggregated = False
+        self.kwargs = kwargs
 
     # Placeholder management
     def create_placeholder(self, name=None, dtype=None, fill_value=None):
         """ Create named storage as a dataset of HDF5 or plain array. """
         if self.type == 'hdf5':
-            options = {'fillvalue': fill_value, **self.options}
-            placeholder = self.file.create_dataset(name, shape=self.shape, dtype=dtype, **options)
+            placeholder = self.file.create_dataset(name, shape=self.shape, dtype=dtype, fillvalue=fill_value)
         elif self.type == 'numpy':
             placeholder = np.full(shape=self.shape, fill_value=fill_value, dtype=dtype)
 
@@ -384,6 +383,13 @@ class Accumulator3D:
 
         return aggregation_to_class[aggregation](shape=shape, origin=origin, dtype=dtype, fill_value=fill_value,
                                                  transform=transform, path=path, **kwargs)
+
+    @classmethod
+    def from_grid(cls, grid, aggregation='max', dtype=np.float32, fill_value=None, transform=None, path=None, **kwargs):
+        """ Infer necessary parameters for accumulator creation from a passed grid. """
+        return cls.from_aggregation(aggregation=aggregation, dtype=dtype, fill_value=fill_value,
+                                    shape=grid.shape, origin=grid.origin, orientation=grid.orientation,
+                                    transform=transform, path=path, **kwargs)
 
 
 class MaxAccumulator3D(Accumulator3D):
@@ -529,6 +535,12 @@ class AccumulatorBlosc(Accumulator3D):
 
     def _aggregate(self):
         self.file = self.file.repack(aggregation=self.aggregation)
+
+    @classmethod
+    def from_grid(cls, grid, aggregation='max', dtype=np.float32, transform=None, path=None, **kwargs):
+        """ Infer necessary parameters for accumulator creation from a passed grid. """
+        return cls(path=path, aggregation=aggregation, dtype=dtype, transform=transform,
+                   shape=grid.shape, origin=grid.origin, orientation=grid.orientation, **kwargs)
 
 
 
