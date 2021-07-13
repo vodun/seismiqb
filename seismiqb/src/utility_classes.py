@@ -472,7 +472,6 @@ class GMeanAccumulator3D(Accumulator3D):
         self.remove_placeholder('counts')
 
 
-
 class AccumulatorBlosc(Accumulator3D):
     """ Accumulate predictions into `BLOSC` file.
     Each of the saved slides supposed to be finalized, e.g. coming from another accumulator.

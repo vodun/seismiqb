@@ -20,7 +20,7 @@ import numpy as np
 from numba import njit
 
 from .utils import filtering_function
-from .utility_classes import IndexedDict
+from .utility_classes import IndexedDict, Accumulator3D, AccumulatorBlosc
 from ..batchflow import Sampler, ConstantSampler
 
 
@@ -811,6 +811,16 @@ class RegularGrid(BaseGrid):
         """
         return RegularGridChunksIterator(grid=self, size=size, overlap=overlap)
 
+
+    def make_accumulator(self, aggregation='max', dtype=np.float32, transform=None, path=None, **kwargs):
+        """ !!. """
+        return Accumulator3D.from_aggregation(aggregation, shape=self.shape, origin=self.origin, dtype=dtype,
+                                              transform=transform, path=path, **kwargs)
+
+    def make_accumulator_blosc(self, aggregation='max', dtype=np.float32, transform=None, path=None, **kwargs):
+        """ !!. """
+        return AccumulatorBlosc(shape=self.shape, origin=self.origin, dtype=dtype, orientation=self.orientation,
+                                aggregation=aggregation, transform=transform, path=path, **kwargs)
 
     def __repr__(self):
         return f'<RegularGrid for {self.geometry.short_name}: '\
