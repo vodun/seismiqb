@@ -235,6 +235,10 @@ class SeismicCropBatch(Batch):
             Dataset attribute with geometries dict.
         """
         geometry = self.get(ix, src_geometry)
+        # target geometry is created by `create_labels` and wrapped into a list
+        if isinstance(geometry, (list, tuple)) and len(geometry) > 0:
+            geometry = geometry[0]
+
         location = self.get(ix, 'locations')
 
         if slicing == 'native':
