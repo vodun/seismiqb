@@ -261,10 +261,15 @@ class Accumulator3D:
         If provided, then we use HDF5 datasets instead of regular Numpy arrays, storing the data directly on disk.
         After the initialization, we keep the file handle in `w-` mode during the update phase.
         After aggregation, we re-open the file to automatically repack it in `r` mode.
+    name : str
+        Name of the attribute (and dataset in hdf5) to store data.
     kwargs : dict
         Other parameters are passed to HDF5 dataset creation.
     """
-    def __init__(self, shape=None, origin=None, dtype=np.float32, transform=None, path=None, **kwargs):
+    def __init__(self, shape=None, origin=None, dtype=np.float32, transform=None, path=None, name='data', **kwargs):
+        # Main attribute to store results
+        self.name = name
+
         # Dimensionality and location
         self.shape = shape
         self.origin = origin
@@ -296,9 +301,16 @@ class Accumulator3D:
 
         setattr(self, name, placeholder)
 
+    @property
+    def data(self):
+        """ Data storage. """
+        if self.type in ['hdf5', 'blosc']:
+            return self.file[self.name]
+        return getattr(self, self.name)
+
     def remove_placeholder(self, name=None):
         """ Remove created placeholder. """
-        if self.type == 'hdf5':
+        if self.type in ['hdf5', 'blosc']:
             del self.file[name]
         setattr(self, name, None)
 
@@ -342,7 +354,6 @@ class Accumulator3D:
         if self.type == 'hdf5':
             self.file.close()
             self.file = h5py.File(self.path, 'r')
-            self.data = self.file['data']
 
         self.aggregated = True
         return self.data
@@ -352,14 +363,13 @@ class Accumulator3D:
         raise NotImplementedError
 
     def __del__(self):
-        if self.type == 'hdf5':
+        if self.type in ['hdf5', 'blosc']:
             self.file.close()
 
     def clear(self):
         """ Remove placeholders from memory and disk. """
-        self.data = None
-
-        if self.type == 'hdf5':
+        # TODO: check for leaks
+        if self.type in ['hdf5', 'blosc']:
             os.remove(self.path)
 
     @property
@@ -394,12 +404,13 @@ class Accumulator3D:
 
 class MaxAccumulator3D(Accumulator3D):
     """ Accumulator that takes maximum value of overlapping crops. """
-    def __init__(self, shape=None, origin=None, dtype=np.float32, fill_value=None, transform=None, path=None, **kwargs):
-        super().__init__(shape=shape, origin=origin, dtype=dtype, transform=transform, path=path, **kwargs)
+    def __init__(self, shape=None, origin=None, dtype=np.float32, fill_value=None, transform=None,
+                 path=None, name='data', **kwargs):
+        super().__init__(shape=shape, origin=origin, dtype=dtype, transform=transform, path=path, name=name, **kwargs)
 
         min_value = np.finfo(dtype).min if 'float' in dtype.__name__ else np.iinfo(dtype).min
         self.fill_value = fill_value if fill_value is not None else min_value
-        self.create_placeholder(name='data', dtype=self.dtype, fill_value=self.fill_value)
+        self.create_placeholder(name=name, dtype=self.dtype, fill_value=self.fill_value)
 
     def _update(self, crop, location):
         self.data[location] = np.maximum(crop, self.data[location])
@@ -410,10 +421,10 @@ class MaxAccumulator3D(Accumulator3D):
 
 class MeanAccumulator3D(Accumulator3D):
     """ Accumulator that takes mean value of overlapping crops. """
-    def __init__(self, shape=None, origin=None, dtype=np.float32, transform=None, path=None, **kwargs):
-        super().__init__(shape=shape, origin=origin, dtype=dtype, transform=transform, path=path, **kwargs)
+    def __init__(self, shape=None, origin=None, dtype=np.float32, transform=None, path=None, name='data', **kwargs):
+        super().__init__(shape=shape, origin=origin, dtype=dtype, transform=transform, path=path, name=name, **kwargs)
 
-        self.create_placeholder(name='data', dtype=self.dtype, fill_value=0)
+        self.create_placeholder(name=name, dtype=self.dtype, fill_value=0)
         self.create_placeholder(name='counts', dtype=np.int8, fill_value=0)
 
     def _update(self, crop, location):
@@ -445,10 +456,10 @@ class MeanAccumulator3D(Accumulator3D):
 
 class GMeanAccumulator3D(Accumulator3D):
     """ Accumulator that takes geometric mean value of overlapping crops. """
-    def __init__(self, shape=None, origin=None, dtype=np.float32, transform=None, path=None, **kwargs):
-        super().__init__(shape=shape, origin=origin, dtype=dtype, transform=transform, path=path, **kwargs)
+    def __init__(self, shape=None, origin=None, dtype=np.float32, transform=None, path=None, name='data', **kwargs):
+        super().__init__(shape=shape, origin=origin, dtype=dtype, transform=transform, path=path, name=name, **kwargs)
 
-        self.create_placeholder(name='data', dtype=self.dtype, fill_value=1)
+        self.create_placeholder(name=name, dtype=self.dtype, fill_value=1)
         self.create_placeholder(name='counts', dtype=np.int8, fill_value=0)
 
     def _update(self, crop, location):
@@ -515,13 +526,6 @@ class AccumulatorBlosc(Accumulator3D):
 
         self.name = name
         self.file.create_dataset(name, shape=shape, dtype=dtype)
-
-    @property
-    def data(self):
-        """ Named dataset inside `BLOSC` file. """
-        if self.type == 'numpy':
-            return getattr(self, self.name)
-        return self.file[self.name]
 
     def _update(self, crop, location):
         crop = crop.astype(self.dtype)
