@@ -269,7 +269,6 @@ class Accumulator3D:
     def __init__(self, shape=None, origin=None, dtype=np.float32, transform=None, path=None, name='data', **kwargs):
         # Main attribute to store results
         self.name = name
-        self.data = None
 
         # Dimensionality and location
         self.shape = shape
@@ -306,11 +305,9 @@ class Accumulator3D:
     @property
     def data(self):
         """ Data storage. """
-        return getattr(self, self.name)
-
-    @data.setter
-    def data(self, value):
-        setattr(self, self.name, value)
+        if self.mode == 'numpy':
+            return getattr(self, self.name)
+        return self.file[self.name]
 
     def remove_placeholder(self, name=None):
         """ Remove created placeholder. """
@@ -358,7 +355,6 @@ class Accumulator3D:
         if self.type == 'hdf5':
             self.file.close()
             self.file = h5py.File(self.path, 'r')
-            self.data = self.file[self.name]
 
         self.aggregated = True
         return self.data
@@ -373,8 +369,6 @@ class Accumulator3D:
 
     def clear(self):
         """ Remove placeholders from memory and disk. """
-        self.data = None
-
         if self.type == 'hdf5':
             os.remove(self.path)
 
