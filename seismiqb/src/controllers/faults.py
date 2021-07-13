@@ -146,6 +146,8 @@ class FaultController(BaseController):
         'loss': C('loss')
     }
 
+    # Train functional
+
     def make_dataset(self, **kwargs):
         """ Create an instance of :class:`.SeismicCubeset` with cubes and horizons. Arguments are from 'train'
         subconfig and kwargs. """
@@ -162,6 +164,35 @@ class FaultController(BaseController):
 
         return dataset
 
+    def make_sampler(self, dataset, ratios=None, threshold=0, **kwargs):
+        """ Create sampler for generating locations to train on. """
+        crop_shape = self.config['train']['crop_shape']
+
+        if ratios is None:
+            ratios = {}
+
+            if len(dataset) > 0:
+                for i in range(len(dataset)):
+                    faults = dataset.labels[i]
+                    fault_area = sum([len(np.unique(faults[j].points)) for j in range(len(faults))])
+                    cube_area = np.prod(dataset.geometries[i].cube_shape)
+                    ratios[dataset.indices[i]] = fault_area / cube_area
+            else:
+                ratios[dataset.indices[0]] = 1
+
+        weights = np.array([ratios[i] for i in dataset.indices])
+        weights /= weights.sum()
+        weights = weights.clip(max=0.3)
+        weights = weights.clip(min=0.1)
+        weights /= weights.sum()
+
+        self.weights = weights.tolist()
+
+        sampler = SeismicSampler(labels=dataset.labels, crop_shape=crop_shape, mode='fault',
+                                 threshold=threshold, proportions=self.weights, **kwargs)
+
+        return sampler
+
     def load_pipeline(self, train=True, create_masks=True):
         """ Create loading pipeline common for train and inference stages.
 
@@ -177,7 +208,7 @@ class FaultController(BaseController):
         batchflow.Pipeline
         """
         if train and self.config['train/adjust']:
-            load_shape = F(self.adjust_shape)(
+            load_shape = F(adjust_shape)(
                 C('crop_shape'), C('angle'), C('scale')[0]
             )
         else:
@@ -240,6 +271,7 @@ class FaultController(BaseController):
         )
 
     def make_notifier(self):
+        """ Make notifier. """
         return Notifier(None, graphs=['loss_history',
             {'source': B('images'), 'name': 'images', 'plot_function': self.custom_plotter},
             {'source': B('masks'), 'name': 'masks', 'plot_function': self.custom_plotter},
@@ -266,7 +298,36 @@ class FaultController(BaseController):
             self.train_pipeline(**kwargs)
         )
 
+    def get_model_config(self, name):
+        """ Get model config depending model architecture. """
+        if name == 'UNet':
+            return {**self.BASE_MODEL_CONFIG, **self.UNET_CONFIG}
+        raise ValueError(f'Unknown model name: {name}')
+
+    def get_model_class(self, name):
+        """ Get model class depending model architecture. """
+        if name == 'UNet':
+            return EncoderDecoder
+        return TorchModel
+
+    def dump_model(self, model, path):
+        model.save(os.path.join(self.config['savedir'], path))
+
+    # Inference functional
+
+    def metrics_pipeline_template(self, n_bins=1000):
+        """ Metrics pipeline. """
+        return (Pipeline()
+            .init_variable('metric', [])
+            .init_variable('semblance_hist', np.zeros(n_bins))
+            .compute_attribute(src='images', dst='semblance', attribute='semblance', window=(1, 5, 20))
+            .update(V('metric', mode='e'), F(similarity_metric)(B('semblance'), B('predictions')))
+            .update(V('semblance_hist'), V('semblance_hist') + F(np.histogram)(B('semblance').flatten(),
+                    bins=n_bins, range=(0, 1))[0])
+        )
+
     def get_inference_template(self, train_pipeline=None, model_path=None, create_masks=False):
+        """ Define the whole inference procedure pipeline. """
         if train_pipeline is not None:
             test_pipeline = Pipeline().import_model('model', train_pipeline)
         else:
@@ -283,13 +344,12 @@ class FaultController(BaseController):
             .run_later(D('size'))
         )
 
-        smooth_borders = self.config['inference/smooth_borders']
-        if smooth_borders:
-            if isinstance(smooth_borders, bool):
+        if self.config['inference/smooth_borders']:
+            if isinstance(self.config['inference/smooth_borders'], bool):
                 step = 0.1
             else:
-                step = smooth_borders
-            test_pipeline += Pipeline().update(B('predictions') , F(self.smooth_borders)(B('predictions'), step))
+                step = self.config['inference/smooth_borders']
+            test_pipeline += Pipeline().update(B('predictions') , F(smooth_borders)(B('predictions'), step))
 
         if create_masks:
             test_pipeline += Pipeline().update(V('target', mode='e'), B('masks'))
@@ -301,17 +361,8 @@ class FaultController(BaseController):
 
         return test_pipeline
 
-    def metrics_pipeline_template(self, n_bins=1000):
-        return (Pipeline()
-            .init_variable('metric', [])
-            .init_variable('semblance_hist', np.zeros(n_bins))
-            .compute_attribute(src='images', dst='semblance', attribute='semblance', window=(1, 5, 20))
-            .update(V('metric', mode='e'), F(similarity_metric)(B('semblance'), B('predictions')))
-            .update(V('semblance_hist'), V('semblance_hist') + F(np.histogram)(B('semblance').flatten(),
-                    bins=n_bins, range=(0, 1))[0])
-        )
-
     def make_inference_dataset(self, labels=False, **kwargs):
+        """ Make inference dataset. """
         config = {**self.config['inference'], **self.config['dataset'], **kwargs}
         inference_cubes = config['cubes']
         width = config['width']
@@ -326,6 +377,7 @@ class FaultController(BaseController):
         return dataset
 
     def parse_locations(self, cubes):
+        """ Parse inference ranges. """
         cubes = cubes.copy()
         if isinstance(cubes, (list, tuple)):
             cubes = {cube: (0, None, None, None) for cube in cubes}
@@ -333,36 +385,8 @@ class FaultController(BaseController):
             cubes[cube] = [cubes[cube]] if isinstance(cubes[cube][0], int) else cubes[cube]
         return cubes
 
-    def make_sampler(self, dataset, ratios=None, threshold=0, **kwargs):
-        """ Create sampler for generating locations to train on. """
-        crop_shape = self.config['train']['crop_shape']
-
-        if ratios is None:
-            ratios = {}
-
-            if len(dataset) > 0:
-                for i in range(len(dataset)):
-                    faults = dataset.labels[i]
-                    fault_area = sum([len(np.unique(faults[j].points)) for j in range(len(faults))])
-                    cube_area = np.prod(dataset.geometries[i].cube_shape)
-                    ratios[dataset.indices[i]] = fault_area / cube_area
-            else:
-                ratios[dataset.indices[0]] = 1
-
-        weights = np.array([ratios[i] for i in dataset.indices])
-        weights /= weights.sum()
-        weights = weights.clip(max=0.3)
-        weights = weights.clip(min=0.1)
-        weights /= weights.sum()
-
-        self.weights = weights.tolist()
-
-        sampler = SeismicSampler(labels=dataset.labels, crop_shape=crop_shape, mode='fault',
-                                 threshold=threshold, proportions=self.weights, **kwargs)
-
-        return sampler
-
     def make_accumulator(self, geometry, slices, crop_shape, strides, orientation=0, path=None):
+        """ Make grid and accumulator for inference. """
         batch_size = self.config['inference']['inference_batch_size']
         if orientation == 1:
             crop_shape = np.array(crop_shape)[[1, 0, 2]]
@@ -386,6 +410,7 @@ class FaultController(BaseController):
         return grid, accumulator
 
     def inference_on_slides(self, train_pipeline=None, model_path=None, create_mask=False, pbar=False, **kwargs):
+        """ Make inference on slides. """
         config = {**self.config['inference'], **kwargs}
         strides = config['stride'] if isinstance(config['stride'], tuple) else [config['stride']] * 3
 
@@ -459,6 +484,7 @@ class FaultController(BaseController):
 
     def inference_on_cube(self, train_pipeline=None, model_path=None, fmt='sgy', save_to=None, prefix=None,
                           tmp='hdf5', bar=True, **kwargs):
+        """ Make inference on cube. """
         config = {**self.config['inference'], **kwargs}
         strides = config['stride'] if isinstance(config['stride'], tuple) else [config['stride']] * 3
 
@@ -526,20 +552,10 @@ class FaultController(BaseController):
                         remove_hdf5=True, zip_result=True, pbar=True
                     )
 
-    def get_model_config(self, name):
-        if name == 'UNet':
-            return {**self.BASE_MODEL_CONFIG, **self.UNET_CONFIG}
-        raise ValueError(f'Unknown model name: {name}')
-
-    def get_model_class(self, name):
-        if name == 'UNet':
-            return EncoderDecoder
-        return TorchModel
-
-    def dump_model(self, model, path):
-        model.save(os.path.join(self.config['savedir'], path))
+    # Path utils
 
     def amplitudes_path(self, cube):
+        """ Get full path for cube. """
         ext = self.config['dataset/ext']
         filename = self.config['dataset/path'] + 'CUBE_' + cube + f'/amplitudes_{cube}.{ext}'
         if os.path.exists(filename):
@@ -552,44 +568,13 @@ class FaultController(BaseController):
     def cube_name_from_path(self, path):
         return os.path.splitext(path.split('/')[-1])[0]
 
-    def create_filename(self, prefix, orientation, ext):
-        return (prefix + datetime.now().strftime("%Y-%m-%d-%H-%M-%S") + '_{}.{}').format(orientation, ext)
-
-    @classmethod
-    def adjust_shape(cls, crop_shape, angle, scale):
-        crop_shape = np.array(crop_shape)
-        load_shape = adjust_shape_3d(crop_shape[[1, 2, 0]], angle, scale=scale)
-        return (load_shape[2], load_shape[0], load_shape[1])
-
-    def smooth_borders(self, crops, step):
-        mask = self.border_smoothing_mask(crops.shape[-3:], step)
-        mask = np.expand_dims(mask, axis=0)
-        if len(crops.shape) == 5:
-            mask = np.expand_dims(mask, axis=0)
-        crops = crops * mask
-        return crops
-
-    def border_smoothing_mask(self, shape, step):
-        mask = np.ones(shape)
-        axes = [(1, 2), (0, 2), (0, 1)]
-        if isinstance(step, (int, float)):
-            step = [step] * 3
-        for i in range(len(step)):
-            if isinstance(step[i], float):
-                step[i] = int(shape[i] * step[i])
-            length = shape[i]
-            if length >= 2 * step[i]:
-                _mask = np.ones(length, dtype='float32')
-                _mask[:step[i]] = np.linspace(0, 1, step[i]+1)[1:]
-                _mask[:-step[i]-1:-1] = np.linspace(0, 1, step[i]+1)[1:]
-                _mask = np.expand_dims(_mask, axes[i])
-                mask = mask * _mask
-        return mask
-
     def make_filename(self, prefix, orientation, ext):
         return (prefix + datetime.now().strftime("%Y-%m-%d-%H-%M-%S") + '_{}.{}').format(orientation, ext)
 
+    # Inference utils
+
     def skeletonize_faults(self, prediction, axis=0, threshold=0.1, bar=True):
+        """ Make faults from binary mask. """
         prediction_cube = SeismicGeometry(prediction) if isinstance(prediction, str) else prediction
         processed_faults = np.zeros(prediction_cube.cube_shape)
         for i in tqdm.tqdm_notebook(range(prediction_cube.cube_shape[axis]), disable=(not bar)):
@@ -607,7 +592,42 @@ class FaultController(BaseController):
 
         return Fault.from_mask(processed_faults, prediction_cube, chunk_size=100, pbar=bar)
 
+# Train utils
+
+def adjust_shape(crop_shape, angle, scale):
+    crop_shape = np.array(crop_shape)
+    load_shape = adjust_shape_3d(crop_shape[[1, 2, 0]], angle, scale=scale)
+    return (load_shape[2], load_shape[0], load_shape[1])
+
+def smooth_borders(crops, step):
+    """ Smooth image borders. """
+    mask = border_smoothing_mask(crops.shape[-3:], step)
+    mask = np.expand_dims(mask, axis=0)
+    if len(crops.shape) == 5:
+        mask = np.expand_dims(mask, axis=0)
+    crops = crops * mask
+    return crops
+
+def border_smoothing_mask(shape, step):
+    """ Make mask to smooth borders. """
+    mask = np.ones(shape)
+    axes = [(1, 2), (0, 2), (0, 1)]
+    if isinstance(step, (int, float)):
+        step = [step] * 3
+    for i in range(len(step)):
+        if isinstance(step[i], float):
+            step[i] = int(shape[i] * step[i])
+        length = shape[i]
+        if length >= 2 * step[i]:
+            _mask = np.ones(length, dtype='float32')
+            _mask[:step[i]] = np.linspace(0, 1, step[i]+1)[1:]
+            _mask[:-step[i]-1:-1] = np.linspace(0, 1, step[i]+1)[1:]
+            _mask = np.expand_dims(_mask, axes[i])
+            mask = mask * _mask
+    return mask
+
 def sum_with_axes(array, axes=None):
+    """ Sum for several axes. """
     if axes is None:
         return array.sum()
     if isinstance(axes, int):
@@ -619,6 +639,7 @@ def sum_with_axes(array, axes=None):
     return res
 
 def mean(array, axes=None):
+    """ Mean for several axes. """
     if axes is None:
         return array.mean()
     if isinstance(axes, int):
@@ -630,6 +651,7 @@ def mean(array, axes=None):
     return res
 
 def similarity_metric(semblance, masks, threshold=None):
+    """ Compute similarity metric. """
     SHIFTS = [-20, -15, -5, 5, 15, 20]
     if threshold:
         masks = masks > threshold
@@ -658,6 +680,7 @@ def similarity_metric(semblance, masks, threshold=None):
     return res
 
 def shift(array, shift=20):
+    """ Make shifts for mask. """
     result = np.zeros_like(array)
     for i, _array in enumerate(array):
         if shift > 0:
