@@ -166,6 +166,7 @@ class BaseController:
         _ = kwargs
 
     def make_notifier(self):
+        """ Create notifier. """
         return {
             'bar': self.config.bar,
             'monitors': 'loss_history',

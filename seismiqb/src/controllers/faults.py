@@ -5,9 +5,9 @@
 """
 import os
 from datetime import datetime
-import tqdm
 from shutil import copyfile
 
+import tqdm
 import numpy as np
 import torch
 
@@ -23,7 +23,7 @@ from ..cubeset import SeismicCubeset, SeismicGeometry
 from ..samplers import SeismicSampler, RegularGrid
 from ..fault import Fault
 from ..layers import InputLayer
-from ..utils import adjust_shape_3d, fill_defaults, compute_attribute
+from ..utils import adjust_shape_3d, fill_defaults
 from ..utility_classes import Accumulator3D
 from ..plotters import plot_image
 
@@ -311,6 +311,7 @@ class FaultController(BaseController):
         return TorchModel
 
     def dump_model(self, model, path):
+        """ Dump model. """
         model.save(os.path.join(self.config['savedir'], path))
 
     # Inference functional
@@ -417,13 +418,14 @@ class FaultController(BaseController):
         crop_shape = config['crop_shape']
         strides = np.maximum(np.array(crop_shape) * np.array(strides), 1).astype(int)
 
-        self.log(f'Create test pipeline and dataset.')
+        self.log('Create test pipeline and dataset.')
         dataset = self.make_inference_dataset(create_mask)
         inference_pipeline = self.get_inference_template(train_pipeline, model_path, create_mask)
         inference_pipeline.set_config(config)
 
-        inference_cubes = {
-            self.cube_name_from_path(self.amplitudes_path(k)): v for k, v in self.parse_locations(config['cubes']).items()
+        cubes = config['cubes']
+        cubes = {
+            self.cube_name_from_path(self.amplitudes_path(k)): v for k, v in self.parse_locations(cubes).items()
         }
 
         outputs = {}
@@ -431,7 +433,7 @@ class FaultController(BaseController):
             outputs[cube_idx] = []
             geometry = dataset.geometries[cube_idx]
             shape = geometry.cube_shape
-            for item in inference_cubes[cube_idx]:
+            for item in cubes[cube_idx]:
                 self.log(f'Create prediction for {cube_idx}: {item[1:]}. axis={item[0]}.')
                 axis = item[0]
                 slices = item[1:]
@@ -491,13 +493,14 @@ class FaultController(BaseController):
         crop_shape = config['crop_shape']
         strides = np.maximum(np.array(crop_shape) * np.array(strides), 1).astype(int)
 
-        self.log(f'Create test pipeline and dataset.')
+        self.log('Create test pipeline and dataset.')
         dataset = self.make_inference_dataset(create_mask=False)
         inference_pipeline = self.get_inference_template(train_pipeline, model_path, create_masks=False)
         inference_pipeline.set_config(config)
 
-        inference_cubes = {
-            self.cube_name_from_path(self.amplitudes_path(k)): v for k, v in self.parse_locations(config['cubes']).items()
+        cubes = config['cubes']
+        cubes = {
+            self.cube_name_from_path(self.amplitudes_path(k)): v for k, v in self.parse_locations(cubes).items()
         }
 
         if save_to:
@@ -514,10 +517,12 @@ class FaultController(BaseController):
 
         prefix = prefix or ''
 
+        outputs = dict()
         for cube_idx in dataset.indices:
+            outputs[cube_idx] = []
             geometry = dataset.geometries[cube_idx]
             shape = geometry.cube_shape
-            for item in inference_cubes[cube_idx]:
+            for item in cubes[cube_idx]:
                 self.log(f'Create prediction for {cube_idx}: {item[1:]}. axis={item[0]}.')
                 axis = item[0]
                 ranges = item[1:]
@@ -542,8 +547,8 @@ class FaultController(BaseController):
                 prediction = accumulator.aggregate()
 
                 if fmt == 'npy':
-                    return prediction
-                elif fmt == 'sgy':
+                    outputs.append(prediction)
+                if fmt == 'sgy':
                     copyfile(dataset.geometries[0].path_meta, filenames['meta'])
                     dataset.geometries[0].make_sgy(
                         path_hdf5=filenames[tmp],
@@ -563,12 +568,15 @@ class FaultController(BaseController):
         raise ValueError(f"File doesn't exist: {filename}")
 
     def cube_name_from_alias(self, path):
+        """ Get cube name from alias. """
         return os.path.splitext(self.amplitudes_path(path).split('/')[-1])[0]
 
     def cube_name_from_path(self, path):
+        """ Get cube name from path. """
         return os.path.splitext(path.split('/')[-1])[0]
 
     def make_filename(self, prefix, orientation, ext):
+        """ Make filename for infered cube. """
         return (prefix + datetime.now().strftime("%Y-%m-%d-%H-%M-%S") + '_{}.{}').format(orientation, ext)
 
     # Inference utils
@@ -595,6 +603,7 @@ class FaultController(BaseController):
 # Train utils
 
 def adjust_shape(crop_shape, angle, scale):
+    """ Adjust shape before augmentations. """
     crop_shape = np.array(crop_shape)
     load_shape = adjust_shape_3d(crop_shape[[1, 2, 0]], angle, scale=scale)
     return (load_shape[2], load_shape[0], load_shape[1])
@@ -614,15 +623,14 @@ def border_smoothing_mask(shape, step):
     axes = [(1, 2), (0, 2), (0, 1)]
     if isinstance(step, (int, float)):
         step = [step] * 3
-    for i in range(len(step)):
-        if isinstance(step[i], float):
-            step[i] = int(shape[i] * step[i])
-        length = shape[i]
-        if length >= 2 * step[i]:
+    for length, s, axis in zip(shape, step, axes):
+        if isinstance(s, float):
+            s = int(length * s)
+        if length >= 2 * s:
             _mask = np.ones(length, dtype='float32')
-            _mask[:step[i]] = np.linspace(0, 1, step[i]+1)[1:]
-            _mask[:-step[i]-1:-1] = np.linspace(0, 1, step[i]+1)[1:]
-            _mask = np.expand_dims(_mask, axes[i])
+            _mask[:s] = np.linspace(0, 1, s+1)[1:]
+            _mask[:-s-1:-1] = np.linspace(0, 1, s+1)[1:]
+            _mask = np.expand_dims(_mask, axis)
             mask = mask * _mask
     return mask
 
@@ -670,7 +678,7 @@ def similarity_metric(semblance, masks, threshold=None):
     weights = np.ones((len(SHIFTS), 1))
     weights = weights / weights.sum()
     for i in SHIFTS:
-        random_mask = shift(masks, shift=i)
+        random_mask = make_shift(masks, shift=i)
         rm = sum_with_axes(random_mask * (1 - semblance), axes=[1,2,3])
         ratio = m/rm
         res += [np.log(ratio)]
@@ -679,7 +687,7 @@ def similarity_metric(semblance, masks, threshold=None):
     res = np.clip(res, -2, 2)
     return res
 
-def shift(array, shift=20):
+def make_shift(array, shift=20):
     """ Make shifts for mask. """
     result = np.zeros_like(array)
     for i, _array in enumerate(array):

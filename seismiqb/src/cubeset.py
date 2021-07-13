@@ -14,7 +14,6 @@ from .horizon import Horizon
 from .plotters import plot_image, show_3d
 from .crop_batch import SeismicCropBatch
 from .utility_classes import IndexedDict
-from .utils import fill_defaults
 
 
 class SeismicCubeset(Dataset):
