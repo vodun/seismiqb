@@ -489,7 +489,7 @@ class GMeanAccumulator3D(Accumulator3D):
 class IndexedDict(OrderedDict):
     """ `OrderedDict` that allows integer indexing and values flattening.
 
-    - Both keys and their indices might be used to subscript. Therefore `int` keys are not supported.
+    - Both keys and their ordinal numbers might be used to subscript. Therefore `int` keys are not supported.
     - Flatten values list of requested keys can be obtained via `flatten` method.
     - Flatten list of all values is also available via `flat` property.
     """
