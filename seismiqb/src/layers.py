@@ -171,7 +171,8 @@ class FrequenciesFilterLayer(nn.Module):
     def forward(self, inputs):
         """ Forward pass. """
         inputs = inputs.view(-1, inputs.shape[-1])
-        sfft = torch.stft(inputs, self.window, return_complex=True)
+        # TODO: remove disable after torch update
+        sfft = torch.stft(inputs, self.window, return_complex=True) #pylint: disable=unexpected-keyword-arg
         q_ = int(sfft.shape[-2] * self.q)
         sfft[:, :q_] = 0
         sfft[:, -q_:] = 0

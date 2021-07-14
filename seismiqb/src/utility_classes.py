@@ -266,7 +266,8 @@ class Accumulator3D:
     kwargs : dict
         Other parameters are passed to HDF5 dataset creation.
     """
-    def __init__(self, shape=None, origin=None, dtype=np.float32, transform=None, path=None, name='data', **kwargs):
+    def __init__(self, shape=None, origin=None, dtype=np.float32, transform=None,
+                 path=None, name='placeholder', **kwargs):
         # Main attribute to store results
         self.name = name
 
@@ -399,7 +400,7 @@ class Accumulator3D:
 class MaxAccumulator3D(Accumulator3D):
     """ Accumulator that takes maximum value of overlapping crops. """
     def __init__(self, shape=None, origin=None, dtype=np.float32, fill_value=None, transform=None,
-                 path=None, name='data', **kwargs):
+                 path=None, name='placeholder', **kwargs):
         super().__init__(shape=shape, origin=origin, dtype=dtype, transform=transform, path=path, name=name, **kwargs)
 
         min_value = np.finfo(dtype).min if 'float' in dtype.__name__ else np.iinfo(dtype).min
@@ -415,7 +416,8 @@ class MaxAccumulator3D(Accumulator3D):
 
 class MeanAccumulator3D(Accumulator3D):
     """ Accumulator that takes mean value of overlapping crops. """
-    def __init__(self, shape=None, origin=None, dtype=np.float32, transform=None, path=None, name='data', **kwargs):
+    def __init__(self, shape=None, origin=None, dtype=np.float32, transform=None,
+                 path=None, name='placeholder', **kwargs):
         super().__init__(shape=shape, origin=origin, dtype=dtype, transform=transform, path=path, name=name, **kwargs)
 
         self.create_placeholder(name=name, dtype=self.dtype, fill_value=0)
@@ -440,9 +442,9 @@ class MeanAccumulator3D(Accumulator3D):
         elif self.type == 'numpy':
             self.counts[self.counts == 0] = 1
             if 'float' in self.dtype.__name__:
-                self.data /= self.counts
+                self.data[:] /= self.counts
             else:
-                self.data //= self.counts
+                self.data[:] //= self.counts
 
         # Cleanup
         self.remove_placeholder('counts')
@@ -450,7 +452,8 @@ class MeanAccumulator3D(Accumulator3D):
 
 class GMeanAccumulator3D(Accumulator3D):
     """ Accumulator that takes geometric mean value of overlapping crops. """
-    def __init__(self, shape=None, origin=None, dtype=np.float32, transform=None, path=None, name='data', **kwargs):
+    def __init__(self, shape=None, origin=None, dtype=np.float32, transform=None,
+                 path=None, name='placeholder', **kwargs):
         super().__init__(shape=shape, origin=origin, dtype=dtype, transform=transform, path=path, name=name, **kwargs)
 
         self.create_placeholder(name=name, dtype=self.dtype, fill_value=1)

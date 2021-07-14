@@ -77,10 +77,6 @@ class ExportMixin:
             file_name = os.path.basename(path_segy)
             shutil.make_archive(os.path.splitext(path_segy)[0], 'zip', dir_name, file_name)
 
-    @classmethod
-    def proba_to_int(cls, array):
-        return (array * 255 - 128).astype(np.int8)
-
 def make_segy_from_array(array, path_segy, zip_segy=True, remove_segy=None, **kwargs):
     """ Make a segy-cube from an array. Zip it if needed. Segy-headers are filled by defaults/arguments from kwargs.
 

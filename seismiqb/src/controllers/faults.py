@@ -465,22 +465,30 @@ class FaultController(BaseController):
         """ Plot predictions for cubes and ranges specified in 'inference' section of config. """
         if iteration % each == 0:
             results = self.inference_on_slides(*args, **kwargs)
-            if self.config['savedir'] is not None:
-                savepath = os.path.join(self.config['savedir'], 'prediction')
-            else:
-                savepath = None
-            for cube in results:
-                for item in results[cube]:
+            for cube, cube_results in results.items():
+                for item in cube_results:
                     slices, image, prediction, faults_metric, noise_metric = item[:5]
-                    _savepath = f'{savepath}_{slices}_{iteration}_{faults_metric:.03f}_{noise_metric:.03f}.png'
-                    show = savepath is None
+
+                    if self.config['savedir'] is not None:
+                        savepath = os.path.join(self.config['savedir'], 'prediction')
+                        if not os.path.exists(savepath):
+                            os.makedirs(savepath)
+                        savepath = os.path.join(
+                            savepath,
+                            f'{cube}_{slices}_{iteration}_{faults_metric:.03f}_{noise_metric:.03f}.png'
+                        )
+                        show = False
+                    else:
+                        savepath = None
+                        show = True
+
                     prediction = prediction[0]
                     prediction[prediction < threshold] = 0
                     if overlap:
                         plot_image([image[0], prediction], separate=False, cmap='gray', figsize=(20, 20),
-                                   savepath=_savepath, show=show)
+                                   savepath=savepath, show=show)
                     else:
-                        plot_image(prediction, figsize=(20, 20), savepath=_savepath, show=show)
+                        plot_image(prediction, figsize=(20, 20), savepath=savepath, show=show)
             return faults_metric, noise_metric
         return None, None
 
