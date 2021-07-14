@@ -10,8 +10,7 @@ import matplotlib.pyplot as plt
 from matplotlib import patheffects
 from matplotlib.cm import get_cmap, register_cmap
 from matplotlib.patches import Patch
-from matplotlib.colors import ColorConverter, ListedColormap, LinearSegmentedColormap
-from matplotlib.colors import BASE_COLORS, TABLEAU_COLORS, CSS4_COLORS
+from matplotlib.colors import ColorConverter, ListedColormap, LinearSegmentedColormap, is_color_like
 from mpl_toolkits import axes_grid1
 
 import plotly.figure_factory as ff
@@ -224,7 +223,7 @@ class MatplotlibPlotter:
 
         if axes is None:
             FIGURE_KEYS = ['figsize', 'facecolor', 'dpi', 'ncols', 'nrows', 'constrained_layout']
-            params = filter_parameters(all_params, FIGURE_KEYS)
+            params = filter_parameters(all_params, FIGURE_KEYS, prefix='figure_')
             params['figsize'] = params.get('figsize', MODE_TO_FIGSIZE[mode])
             if ('ncols' not in params) and ('nrows' not in params):
                 params['ncols'] = n_subplots
@@ -389,6 +388,7 @@ class MatplotlibPlotter:
         # other
         'order_axes': (1, 0, 2),
         'bad_color': (.0,.0,.0,.0),
+        'transparize_masks': False,
     }
 
     @classmethod
@@ -456,6 +456,8 @@ class MatplotlibPlotter:
         'color': 'r',
         'marker': 'o',
         'linestyle': '',
+        # suptitle
+        'suptitle_color': 'k',
         # title
         'title_color': 'k',
         # axis labels
@@ -558,6 +560,9 @@ class MatplotlibPlotter:
         'color': ['firebrick', 'forestgreen', 'royalblue', 'sandybrown', 'darkorchid'],
         'alpha': 0.8,
         'facecolor': 'white',
+        # suptitle
+        'suptitle_color': 'k',
+        'suptitle_y': 1.01,
         # title
         'title_color' : 'k',
         # axis labels
@@ -742,8 +747,7 @@ class MatplotlibPlotter:
     def add_legend(ax, color, label, size, loc):
         """ Add patches to legend. All invalid colors are filtered. """
         handles = getattr(ax.get_legend(), 'legendHandles', [])
-        VALID_COLORS = {**BASE_COLORS, **TABLEAU_COLORS, **CSS4_COLORS}
-        colors = [color for color in to_list(color) if color in VALID_COLORS]
+        colors = [color for color in to_list(color) if is_color_like(color)]
         labels = to_list(label, dtype='object' if any(isinstance(item, list) for item in label) else None)
         new_patches = [Patch(color=color, label=label) for color, label in zip(colors, labels) if label]
         handles += new_patches
