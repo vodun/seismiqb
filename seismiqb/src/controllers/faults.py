@@ -392,7 +392,7 @@ class FaultController(BaseController):
         if orientation == 1:
             crop_shape = np.array(crop_shape)[[1, 0, 2]]
             strides = np.array(strides)[[1, 0, 2]]
-        name = 'cube_i' if orientation == 0 else 'cube_x'
+        name = 'cube_i'
 
         grid = RegularGrid(geometry=geometry,
                            threshold=0,
