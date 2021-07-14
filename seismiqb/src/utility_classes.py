@@ -309,6 +309,15 @@ class Accumulator3D:
             return self.file[self.name]
         return getattr(self, self.name)
 
+    @data.setter
+    def data(self, value):
+        """ Data storage. """
+        if self.type in ['hdf5', 'blosc']:
+            self.file[self.name] = value
+        else:
+            setattr(self, self.name, value)
+
+
     def remove_placeholder(self, name=None):
         """ Remove created placeholder. """
         if self.type in ['hdf5', 'blosc']:
