@@ -17,6 +17,8 @@ except ImportError:
 
 import h5py
 
+from .utils import to_list
+
 
 
 class Accumulator:
@@ -485,7 +487,12 @@ class GMeanAccumulator3D(Accumulator3D):
 
 
 class IndexedDict(OrderedDict):
-    """ Allows to use both indices and ordinal integer keys to subscript. """
+    """ `OrderedDict` that allows integer indexing and values flattening.
+
+    - Both keys and their indices might be used to subscript. Therefore `int` keys are not supported.
+    - Flatten values list of requested keys can be obtained via `flatten` method.
+    - Flatten list of all values is also available via `flat` property.
+    """
     def __getitem__(self, key):
         if isinstance(key, (int, np.integer)):
             key = list(self.keys())[key]
@@ -495,6 +502,21 @@ class IndexedDict(OrderedDict):
         if isinstance(key, (int, np.integer)):
             key = list(self.keys())[key]
         super().__setitem__(key, value)
+
+    def flatten(self, keys=None):
+        """ Get dict values for requested keys in a single list. """
+        all_keys = list(self.keys())
+        keys = to_list(keys, default=all_keys, dtype='object')
+        lists = [to_list(self[key]) for key in keys]
+        return sum(lists, [])
+
+    @property
+    def flat(self):
+        """ List of all dictionary values. """
+        return self.flatten()
+
+    def __iter__(self):
+        return (x for x in self.flat)
 
 
 class lru_cache:
