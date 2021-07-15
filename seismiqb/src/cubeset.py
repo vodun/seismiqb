@@ -36,6 +36,7 @@ class SeismicCubeset(Dataset):
     labels : IndexedDict
         Nested storage of labels, where keys are cube names and values are sequences of labels.
     """
+    #pylint: disable=keyword-arg-before-vararg
     def __init__(self, index, batch_class=SeismicCropBatch, preloaded=None, *args, **kwargs):
         # Wrap with `FilesIndex`, if needed
         if not isinstance(index, FilesIndex):
@@ -206,6 +207,21 @@ class SeismicCubeset(Dataset):
                 cached_attr = getattr(self, attr)[idx]
                 cached_attr = cached_attr if isinstance(cached_attr, list) else [cached_attr]
                 _ = [item.reset_cache() for item in cached_attr]
+
+
+    # Default pipeline and batch for fast testing / introspection
+    def data_pipeline(self, sampler, batch_size=4):
+        """ Pipeline with default actions of creating locations, loading seismic images and corresponding masks. """
+        return (self.p
+                .make_locations(generator=sampler, batch_size=batch_size)
+                .create_masks(dst='masks', width=4)
+                .load_cubes(dst='images')
+                .adaptive_reshape(src=['images', 'masks'])
+                .normalize(src='images'))
+
+    def data_batch(self, sampler, batch_size=4):
+        """ Get one batch of `:meth:.data_pipeline` with `images` and `masks`. """
+        return self.data_pipeline(sampler=sampler, batch_size=batch_size).next_batch()
 
 
     # Textual and visual representation of dataset contents
