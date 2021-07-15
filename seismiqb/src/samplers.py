@@ -1051,7 +1051,9 @@ class RegularGridChunksIterator:
             chunk_ranges = grid.ranges.copy()
             chunk_ranges[grid.orientation] = [start, stop]
 
-            mask = (start <= grid.locations[:, 3+grid.orientation]) & (grid.locations[:, 6+grid.orientation] <= stop)
+            # Filter points beyound chunk ranges along `orientation` axis
+            mask = ((grid.locations[:, 3 + grid.orientation] >= start) &
+                    (grid.locations[:, 6 + grid.orientation] <= stop))
             chunk_locations = grid.locations[mask]
 
             yield RegularGrid(locations=chunk_locations, ranges=chunk_ranges, strides=grid.strides,

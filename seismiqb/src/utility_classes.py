@@ -520,11 +520,12 @@ class AccumulatorBlosc(Accumulator3D):
         crop = crop.astype(self.dtype)
         iterator = range(location[self.orientation].start, location[self.orientation].stop)
 
-        for i, o in enumerate(iterator):
+        # `i` is `loc_idx` shifted by `origin`
+        for i, loc_idx in enumerate(iterator):
             slc = [slice(None), slice(None), slice(None)]
             slc[self.orientation] = i
             slide = crop[tuple(slc)]
-            self.data[o, :, :] = slide.T if self.orientation == 1 else slide
+            self.data[loc_idx, :, :] = slide.T if self.orientation == 1 else slide
 
     def _aggregate(self):
         self.file = self.file.repack(aggregation=self.aggregation)
