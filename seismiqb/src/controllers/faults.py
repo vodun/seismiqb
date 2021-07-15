@@ -280,8 +280,7 @@ class FaultController(BaseController):
                 {'source': B('masks'), 'name': 'masks', 'plot_function': self.custom_plotter},
                 {'source': B('prediction'), 'name': 'predictions', 'plot_function': self.custom_plotter},
             ])
-        else:
-            return super().make_notifier()
+        return super().make_notifier()
 
     def custom_plotter(self, ax=None, container=None, **kwargs):
         """ Plot examples during train stage. """
