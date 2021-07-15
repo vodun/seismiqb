@@ -36,6 +36,7 @@ class SeismicCubeset(Dataset):
     labels : IndexedDict
         Nested storage of labels, where keys are cube names and values are sequences of labels.
     """
+    #pylint: disable=keyword-arg-before-vararg
     def __init__(self, index, batch_class=SeismicCropBatch, preloaded=None, *args, **kwargs):
         # Wrap with `FilesIndex`, if needed
         if not isinstance(index, FilesIndex):

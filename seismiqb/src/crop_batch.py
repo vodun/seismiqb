@@ -1092,7 +1092,7 @@ class SeismicCropBatch(Batch):
         if (shape > crop_shape).any():
             raise ValueError(f"shape can't be large then crop shape ({crop_shape}) but {shape} was given.")
         corner = crop_shape // 2 - shape // 2
-        slices = tuple([slice(start, start+length) for start, length in zip(corner, shape)])
+        slices = tuple(slice(start, start+length) for start, length in zip(corner, shape))
         return crop[slices]
 
     @apply_parallel
