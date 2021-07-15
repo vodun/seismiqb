@@ -1092,10 +1092,11 @@ class GeometryMetrics(BaseMetrics):
         return metric, plot_dict
 
 class FaultsMetrics:
+    """ Faults metric class. """
     SHIFTS = [-20, -15, -5, 5, 15, 20]
 
     def similarity_metric(self, semblance, masks, threshold=None):
-        """ Compute similarity metric. """
+        """ Compute similarity metric for faults mask. """
         if threshold:
             masks = masks > threshold
         if semblance.ndim == 2:

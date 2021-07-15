@@ -11,7 +11,7 @@ import numpy as np
 import torch
 
 
-from ...batchflow import Config, Pipeline, Notifier
+from ...batchflow import Config, Pipeline
 from ...batchflow import B, C, D, P, R, V, F, I
 from ...batchflow.models.torch import TorchModel, ResBlock, EncoderDecoder
 from .base import BaseController
@@ -45,7 +45,6 @@ class FaultController(BaseController):
         'train': {
             # Training parameters
             'batch_size': 1024,
-            'microbatch': 8,
             'crop_shape': [1, 128, 512],
             'n_iters': 2000,
             'callback/each': 100,
@@ -90,7 +89,7 @@ class FaultController(BaseController):
     BASE_MODEL_CONFIG = {
         'optimizer': {'name': 'Adam', 'lr': 0.01},
         "decay": {'name': 'exp', 'gamma': 0.9, 'frequency': 100, 'last_iter': 2000},
-        'microbatch': C('microbatch'),
+        'microbatch': C('microbatch', default=True),
         'initial_block': {
             'enable': C('phase'),
             'filters': C('filters')[0] // 2,
@@ -262,7 +261,7 @@ class FaultController(BaseController):
                          images=B('images'),
                          masks=B('masks'),
                          save_to=V('loss_history', mode='a'))
-            .call(self.plot_inference, train_pipeline=B().pipeline,
+            .call(self.visualize_predictions, train_pipeline=B().pipeline,
                   savepath='prediction', each=self.config['train/callback/each'],
                   iteration=I())
         )
@@ -351,7 +350,7 @@ class FaultController(BaseController):
 
         return test_pipeline
 
-    def parse_locations(self, cubes):
+    def get_inference_ranges(self, cubes):
         """ Parse inference ranges. """
         cubes = cubes.copy()
         if isinstance(cubes, (list, tuple)):
@@ -399,7 +398,7 @@ class FaultController(BaseController):
 
 
         cubes = {
-            self.cube_name_from_path(self.amplitudes_path(k)): v for k, v in self.parse_locations(cubes).items()
+            self.cube_name_from_path(self.amplitudes_path(k)): v for k, v in self.get_inference_ranges(cubes).items()
         }
 
         outputs = {}
@@ -433,7 +432,7 @@ class FaultController(BaseController):
                 outputs[cube_idx] += [[slices, image, prediction, *metrics]]
         return outputs
 
-    def plot_inference(self, *args, overlap=True, threshold=0.05, each=100, iteration=0, **kwargs):
+    def visualize_predictions(self, *args, overlap=True, threshold=0.05, each=100, iteration=0, **kwargs):
         """ Plot predictions for cubes and ranges specified in 'inference' section of config. """
         if iteration % each == 0:
             results = self.inference_on_slides(*args, **kwargs)
@@ -480,7 +479,7 @@ class FaultController(BaseController):
 
         cubes = config['inference_cubes']
         cubes = {
-            self.cube_name_from_path(self.amplitudes_path(k)): v for k, v in self.parse_locations(cubes).items()
+            self.cube_name_from_path(self.amplitudes_path(k)): v for k, v in self.get_inference_ranges(cubes).items()
         }
 
         if save_to:

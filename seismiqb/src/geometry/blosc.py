@@ -1,6 +1,7 @@
 """ Blosc sliced geometry. """
 #pylint: disable=unpacking-non-sequence
-from zipfile import ZipFile
+import os
+from zipfile import ZipFile, BadZipFile
 
 import dill
 import blosc
@@ -57,11 +58,54 @@ class BloscFile:
         #pylint: disable=consider-using-with
         self.zipfile = ZipFile(self.path, mode=self.mode)
 
+    def repack(self, aggregation=None):
+        """ Aggregate files with duplicate names. """
+        namelist = set(self.namelist())
+        infolist = self.zipfile.infolist()
+
+        path_out = self.path + '_temporal'
+        with BloscFile(path_out, mode='w') as out:
+            for key, dataset in self.key_to_dataset.items():
+                out.create_dataset(key, shape=dataset.shape, dtype=dataset.dtype)
+
+            for name in namelist:
+                infos = [info for info in infolist if info.filename == name]
+
+                # Get all versions of duplicates
+                slides = []
+                for info in infos:
+                    try:
+                        with self.zipfile.open(info, mode='r') as f:
+                            slide = self.load(f)
+                            slides.append(slide)
+                    except BadZipFile:
+                        pass
+
+                # Aggregate
+                if aggregation is None:
+                    slide = slides[0]
+                elif aggregation in ['max', 'maximum']:
+                    slide = np.maximum.reduce(slides)
+                elif aggregation in ['mean', 'average']:
+                    slide = np.mean(slides, axis=0)
+
+                # Write to new file
+                with out.zipfile.open(name, mode='w') as file:
+                    out.dump(slide, file)
+
+        os.remove(self.path)
+        os.rename(out.path, self.path)
+        return BloscFile(self.path, mode='r')
+
     # Utilities
     def namelist(self):
         """ Contents of the file. """
         namelist = self.zipfile.namelist()
         return [name for name in namelist if '_meta' not in name]
+
+    def __len__(self):
+        return len(self.zipfile.infolist())
+
 
     def __contains__(self, key):
         """ Check if projections is available. """

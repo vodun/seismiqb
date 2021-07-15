@@ -22,7 +22,7 @@ def fill_defaults(value, default):
     elif isinstance(value, int):
         value = tuple([value] * 3)
     elif isinstance(value, tuple):
-        value = tuple([item if item else default[i] for i, item in enumerate(value)])
+        value = tuple(item if item else default[i] for i, item in enumerate(value))
     return value
 
 
