@@ -195,13 +195,8 @@ class BloscDataset:
             # In a multi-processing setting, the ZipFile can be (somehow) closed from other process
             # We can mitigate that by re-opening the handler, if needed.
             try:
-                name = f'{self.key}/{key}'
-                if name in self.namelist():
-                    with self.zipfile.open(name, mode='r') as file:
-                        slide = self.load(file)
-                else:
-                    slide = np.zeros(self.shape[1:], dtype=self.dtype)
-                break
+                with self.zipfile.open(f'{self.key}/{key}', mode='r') as file:
+                    slide = self.load(file)
             except ValueError:
                 self.parent.open_handler()
         return slide

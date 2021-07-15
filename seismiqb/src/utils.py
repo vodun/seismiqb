@@ -262,13 +262,13 @@ def compute_attribute(array, window=None, device='cuda:0', attribute='semblance'
     inputs = torch.Tensor(array).to(device)
 
     if attribute == 'semblance':
-        layer = SemblanceLayer(array, window=window, fill_value=fill_value or 1)
+        layer = SemblanceLayer(inputs, window=window, fill_value=fill_value or 1)
     elif attribute == 'moving_normalization':
-        layer = MovingNormalizationLayer(array, window=window, fill_value=fill_value or 1, **kwargs)
+        layer = MovingNormalizationLayer(inputs, window=window, fill_value=fill_value or 1, **kwargs)
     elif attribute == 'phase':
-        layer = InstantaneousPhaseLayer(array, **kwargs)
+        layer = InstantaneousPhaseLayer(inputs, **kwargs)
     elif attribute == 'frequencies_filter':
-        layer = FrequenciesFilterLayer(array, window=window, **kwargs)
+        layer = FrequenciesFilterLayer(inputs, window=window, **kwargs)
     result = layer(inputs)
     return result.cpu().numpy()
 

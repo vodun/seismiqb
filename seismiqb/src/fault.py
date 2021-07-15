@@ -11,9 +11,10 @@ from numba import prange, njit
 
 from tqdm.auto import tqdm
 
-from scipy.ndimage import measurements
 from sklearn.decomposition import PCA
 from sklearn.neighbors import NearestNeighbors
+from skimage.morphology import skeletonize
+from scipy.ndimage import measurements, binary_erosion, binary_dilation, generate_binary_structure, binary_fill_holes
 
 from .geometry import SeismicGeometry
 from .horizon import Horizon
@@ -407,6 +408,26 @@ class Fault(Horizon):
             labels = [Fault(item[1].astype('int32'), name=f'fault_{i}', geometry=geometry)
                       for i, item in tqdm(enumerate(labels), disable=(not pbar))]
         return labels
+
+    @classmethod
+    def skeletonize_faults(cls, prediction, axis=0, threshold=0.1, bar=True):
+        """ Make faults from binary mask. """
+        prediction_cube = SeismicGeometry(prediction) if isinstance(prediction, str) else prediction
+        processed_faults = np.zeros(prediction_cube.cube_shape)
+        for i in tqdm(range(prediction_cube.cube_shape[axis]), disable=(not bar)):
+            slices = [slice(None)] * 2
+            slices[axis] = i
+            slices = tuple(slices)
+            struct = generate_binary_structure(2, 10)
+
+            prediction = prediction_cube.load_slide(i, axis=axis)
+            dilation = binary_dilation(prediction > threshold, struct)
+            holes = binary_fill_holes(dilation, struct)
+            erosion = binary_erosion(holes, generate_binary_structure(2, 1))
+
+            processed_faults[slices] = binary_dilation(skeletonize(erosion, method='lee'))
+
+        return cls.from_mask(processed_faults, prediction_cube, chunk_size=100, pbar=bar)
 
 def faults_sizes(labels):
     """ Compute sizes of faults.

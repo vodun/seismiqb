@@ -10,14 +10,14 @@ from ..batchflow.models.torch import ResBlock
 
 
 class InstantaneousPhaseLayer(nn.Module):
-    """ Instantaneous phase computation.
+    """ Instantaneous phase computation along depth axis.
 
     Parameters
     ----------
     inputs : torch.Tensor, optional.
 
     continuous : bool, optional
-        Transform phase from (-pi, pi) to (-pi / 2, pi / 2) to make it continuous, by default False.
+        Transform phase from (-pi, pi) to (-pi / 2, pi / 2) to make it continuous or not, by default False.
         Transformation: f(phi) = abs(phi) - pi / 2.
     """
     def __init__(self, inputs=None, continuous=False, **kwargs):
@@ -73,13 +73,13 @@ class MovingNormalizationLayer(nn.Module):
     fill_value : int, optional
         Value to fill constant regions with std=0, by default 0.
     """
-    def __init__(self, inputs=None, window=(1, 1, 100), padding='same', fill_value=0):
+    def __init__(self, inputs, window=(1, 1, 100), padding='same', fill_value=0):
         super().__init__()
         self.window = window
         self.padding = padding
         self.fill_value = fill_value
         self.ndim = inputs.ndim
-        self.kernel = torch.ones((1, 1, *window), dtype=torch.float32, requires_grad=False).to(inputs.device)
+        self.kernel = torch.ones((1, 1, *window), dtype=inputs.dtype, requires_grad=False).to(inputs.device)
 
     @autocast(enabled=False)
     def forward(self, x):
@@ -111,42 +111,40 @@ class SemblanceLayer(nn.Module):
     fill_value : int, optional
         Value to fill constant regions, by default 1.
     """
-    def __init__(self, inputs=None, window=(1, 5, 20), fill_value=1):
+    def __init__(self, inputs, window=(1, 5, 20), fill_value=1):
         super().__init__()
         self.ndim = inputs.ndim
         self.window = window
         self.fill_value = fill_value
+        self.device = inputs.device
+
+        self.kernels = [
+            torch.ones((1, 1, window[0], window[1], 1), dtype=inputs.dtype, requires_grad=False).to(self.device),
+            torch.ones((1, 1, 1, 1, window[2]), dtype=inputs.dtype, requires_grad=False).to(self.device),
+            torch.ones((1, 1, *window), dtype=inputs.dtype, requires_grad=False).to(self.device),
+            torch.ones((1, 1, window[0], window[1]), dtype=inputs.dtype, requires_grad=False).to(self.device)
+        ]
 
     def forward(self, x):
         """ Forward pass. """
-        device = x.device
         window = self.window
         x = expand_dims(x)
 
         padding = [(w // 2, w - w // 2 - 1) for w in window]
         num = F.pad(x, (0, 0, *padding[1], *padding[0], 0, 0, 0, 0))
-
-        kernel = torch.ones((1, 1, window[0], window[1], 1), dtype=torch.float32, requires_grad=False).to(device)
-        num = F.conv3d(num, kernel) ** 2
+        num = F.conv3d(num, self.kernels[0]) ** 2
 
         num = F.pad(num, (*padding[2], 0, 0, 0, 0, 0, 0, 0, 0))
-
-        kernel = torch.ones((1, 1, 1, 1, window[2]), dtype=torch.float32, requires_grad=False).to(device)
-        num = F.conv3d(num, kernel)
+        num = F.conv3d(num, self.kernels[1])
 
         denum = F.pad(x, (*padding[2], *padding[1], *padding[0], 0, 0, 0, 0))
+        denum = F.conv3d(denum ** 2, self.kernels[2])
 
-        kernel = torch.ones((1, 1, *window), dtype=torch.float32, requires_grad=False).to(device)
-        denum = F.conv3d(denum ** 2, kernel)
-
-        normilizing = torch.ones(x.shape[:-1], dtype=torch.float32, requires_grad=False).to(device)
+        normilizing = torch.ones(x.shape[:-1], dtype=x.dtype, requires_grad=False).to(x.device)
         normilizing = F.pad(normilizing, (*padding[1], *padding[0], 0, 0, 0, 0))
-
-        kernel = torch.ones((1, 1, window[0], window[1]), dtype=torch.float32, requires_grad=False).to(device)
-        normilizing = F.conv2d(normilizing, kernel)
+        normilizing = F.conv2d(normilizing, self.kernels[3])
 
         denum *= normilizing.view(*normilizing.shape, 1)
-
         result = torch.nan_to_num(num / denum, nan=self.fill_value)
 
         return squueze(result, self.ndim)

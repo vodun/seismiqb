@@ -7,25 +7,22 @@ import os
 from datetime import datetime
 from shutil import copyfile
 
-import tqdm
 import numpy as np
 import torch
-
-from skimage.morphology import skeletonize
-from scipy.ndimage import binary_erosion, binary_dilation, generate_binary_structure, binary_fill_holes
 
 
 from ...batchflow import Config, Pipeline, Notifier
 from ...batchflow import B, C, D, P, R, V, F, I
 from ...batchflow.models.torch import TorchModel, ResBlock, EncoderDecoder
 from .base import BaseController
-from ..cubeset import SeismicCubeset, SeismicGeometry
+from ..cubeset import SeismicCubeset
 from ..samplers import SeismicSampler, RegularGrid
 from ..fault import Fault
 from ..layers import InputLayer
-from ..utils import adjust_shape_3d, fill_defaults
+from ..utils import adjust_shape_3d
 from ..utility_classes import Accumulator3D
 from ..plotters import plot_image
+from ..metrics import FaultsMetrics
 
 class FaultController(BaseController):
     """ Controller for faults detection tasks. """
@@ -36,9 +33,12 @@ class FaultController(BaseController):
             'path': '/cubes/',
             'train_cubes': [],
             'transposed_cubes': [],
+            'inference_cubes': dict(),
             'label_dir': '/INPUTS/FAULTS/NPY_WIDTH_{}/*',
             'width': 3,
-            'ext': 'qblosc'
+            'ext': 'qblosc',
+            'ratios': None,
+            'threshold': 0
         },
 
         # Model parameters
@@ -52,8 +52,8 @@ class FaultController(BaseController):
 
             # Augmentation parameters
             'angle': 25,
-            'scale': (0.7, 1.5),
-            'adjust': True,
+            'scale': (0.7, 1.5, 1),
+            'augment': True,
 
             # Normalization parameters
             'itemwise': False,
@@ -73,7 +73,6 @@ class FaultController(BaseController):
         },
 
         'inference': {
-            'cubes': dict(),
             'batch_size': 32,
             'crop_shape': [1, 128, 512],
             'inference_batch_size': 32,
@@ -146,95 +145,95 @@ class FaultController(BaseController):
         'loss': C('loss')
     }
 
-    # Train functional
+    def make_train_dataset(self, **kwargs):
+        """ Create train dataset as an instance of :class:`.SeismicCubeset` with cubes and faults.
+        Arguments are from 'dataset' subconfig and kwargs. """
+        return self._make_dataset(train=True, **kwargs)
 
-    def make_dataset(self, **kwargs):
-        """ Create an instance of :class:`.SeismicCubeset` with cubes and horizons. Arguments are from 'train'
+    def make_inference_dataset(self, labels=False, **kwargs):
+        """ Create inference dataset as an instance of :class:`.SeismicCubeset` with cubes and faults.
+        Arguments are from 'dataset' subconfig and kwargs. """
+        return self._make_dataset(train=False, labels=labels, **kwargs)
+
+    def _make_dataset(self, train=True, labels=True, bar=False, **kwargs):
+        """ Create an instance of :class:`.SeismicCubeset` with cubes and faults. Arguments are from 'dataset'
         subconfig and kwargs. """
         config = {**self.config['dataset'], **kwargs}
         width = config['width']
         label_dir = config['label_dir']
-        paths = [self.amplitudes_path(item) for item in config['train_cubes']]
-        transposed = config['transposed_cubes']
-        direction = {f'amplitudes_{cube}': 0 if cube not in transposed else 1 for cube in config['train_cubes']}
+        cubes = config['train_cubes'] if train else config['inference_cubes']
 
+        paths = [self.amplitudes_path(item) for item in cubes]
         dataset = SeismicCubeset(index=paths)
-        dataset.load(label_dir=label_dir.format(width), labels_class=Fault, transform=True,
-                     direction=direction, verify=True)
+
+        if labels:
+            transposed = config['transposed_cubes']
+            direction = {f'amplitudes_{cube}': 0 if cube not in transposed else 1 for cube in cubes}
+            dataset.load(label_dir=label_dir.format(width), labels_class=Fault, transform=True,
+                         direction=direction, verify=True, bar=bar)
+        else:
+            dataset.load_geometries()
 
         return dataset
 
-    def make_sampler(self, dataset, ratios=None, threshold=0, **kwargs):
+    def make_sampler(self, dataset, **kwargs):
         """ Create sampler for generating locations to train on. """
+        config = {**self.config['dataset'], **kwargs}
+        ratios = config['ratios']
+        threshold = config['threshold']
         crop_shape = self.config['train']['crop_shape']
 
-        if ratios is None:
-            ratios = {}
+        if self.config['train/augment'] and self.config['train/adjust']:
+            crop_shape = self.adjust_shape(crop_shape)
 
-            if len(dataset) > 0:
+        if len(dataset) > 0:
+            if ratios is None:
+                ratios = {}
                 for i in range(len(dataset)):
                     faults = dataset.labels[i]
                     fault_area = sum([len(np.unique(faults[j].points)) for j in range(len(faults))])
                     cube_area = np.prod(dataset.geometries[i].cube_shape)
                     ratios[dataset.indices[i]] = fault_area / cube_area
-            else:
-                ratios[dataset.indices[0]] = 1
 
-        weights = np.array([ratios[i] for i in dataset.indices])
-        weights /= weights.sum()
-        weights = weights.clip(max=0.3)
-        weights = weights.clip(min=0.1)
-        weights /= weights.sum()
+            weights = np.array([ratios[i] for i in dataset.indices])
+            weights /= weights.sum()
+            weights = np.clip(weights, 0.1, 0.3)
+            weights /= weights.sum()
 
-        self.weights = weights.tolist()
+            weights = weights.tolist()
+        else:
+            weights = [1]
+
+        self.log(f'Train dataset cubes weights: {weights}.')
 
         sampler = SeismicSampler(labels=dataset.labels, crop_shape=crop_shape, mode='fault',
-                                 threshold=threshold, proportions=self.weights, **kwargs)
+                                 threshold=threshold, proportions=weights, **kwargs)
 
         return sampler
 
-    def load_pipeline(self, train=True, create_masks=True):
-        """ Create loading pipeline common for train and inference stages.
+    def load_train(self):
+        """ Create loading pipeline for train stages. """
+        return (Pipeline()
+            .make_locations(batch_size=C('batch_size'), generator=C('sampler'))
+            .load_cubes(dst='images', slicing=C('slicing'))
+            .create_masks(dst='masks')
+            .adaptive_reshape(src=['images', 'masks'])
+            .normalize(mode='q', itemwise=C('itemwise'), src='images')
+        )
 
-        Parameters
-        ----------
-        train : bool
-            load pipeline for train (True) or for inference (False).
-        create_masks : bool, optional
-            create mask or not, by default True
-
-        Returns
-        -------
-        batchflow.Pipeline
-        """
-        if train and self.config['train/adjust']:
-            load_shape = F(adjust_shape)(
-                C('crop_shape'), C('angle'), C('scale')[0]
-            )
-        else:
-            load_shape = C('crop_shape')
-
-        load_shape = F(np.array)(load_shape)
-        shape = {self.cube_name_from_alias(k): load_shape for k in self.config['dataset/train_cubes']}
-        shape.update({
-            self.cube_name_from_alias(k): load_shape[[1, 0, 2]]
-            for k in self.config['dataset/transposed_cubes']
-        })
-
+    def load_test(self, create_masks=True):
+        """ Create loading pipeline for inference stages. """
         ppl = (Pipeline()
             .make_locations(batch_size=C('batch_size'), generator=C('sampler'))
             .load_cubes(dst='images', slicing=C('slicing'))
-        )
-        if create_masks:
-            ppl +=  Pipeline().create_masks(dst='masks')
-            components = ['images', 'masks']
-        else:
-            components = ['images']
-
-        ppl += (Pipeline()
-            .adaptive_reshape(src=components)
+            .adaptive_reshape(src='images')
             .normalize(mode='q', itemwise=C('itemwise'), src='images')
         )
+        if create_masks:
+            ppl += (Pipeline()
+                .create_masks(dst='masks')
+                .adaptive_reshape(src='masks')
+            )
         return ppl
 
     def augmentation_pipeline(self):
@@ -256,30 +255,20 @@ class FaultController(BaseController):
         model_config = F(self.get_model_config)(C('model'))
         return (Pipeline()
             .init_variable('loss_history', [])
-            .init_variable('loss', [])
-            .init_model('model', model_class, 'dynamic', model_config)
+            .init_model(name='model', model_class=model_class, mode='dynamic', config=model_config)
             .adaptive_expand(src=['images', 'masks'])
             .train_model('model',
-                         fetches=['loss', C('output')],
+                         fetches='loss',
                          images=B('images'),
                          masks=B('masks'),
-                         save_to=[V('loss', mode='w'), B('predictions')])
+                         save_to=V('loss_history', mode='a'))
             .call(self.plot_inference, train_pipeline=B().pipeline,
                   savepath='prediction', each=self.config['train/callback/each'],
                   iteration=I())
-            .update(V('loss_history', mode='a'), V('loss'))
         )
 
-    def make_notifier(self):
-        """ Make notifier. """
-        return Notifier(None, graphs=['loss_history',
-            {'source': B('images'), 'name': 'images', 'plot_function': self.custom_plotter},
-            {'source': B('masks'), 'name': 'masks', 'plot_function': self.custom_plotter},
-            {'source': B('predictions').astype('float32'), 'name': 'predictions', 'plot_function': self.custom_plotter},
-        ])
-
     def custom_plotter(self, ax=None, container=None, **kwargs):
-        """ Zero-out center area of the image, change plot parameters. """
+        """ Plot examples during train stage. """
         data = container['data']
         data = data[0][0]
         if data.ndim == 3:
@@ -293,8 +282,8 @@ class FaultController(BaseController):
     def get_train_template(self, **kwargs):
         """ Define the whole training procedure pipeline including data loading, augmentation and model training. """
         return (
-            self.load_pipeline(create_masks=True, **kwargs) +
-            (self.augmentation_pipeline(**kwargs) if self.config['train/adjust'] else Pipeline()) +
+            self.load_train(**kwargs) +
+            (self.augmentation_pipeline(**kwargs) if self.config['train/augment'] else Pipeline()) +
             self.train_pipeline(**kwargs)
         )
 
@@ -322,7 +311,7 @@ class FaultController(BaseController):
             .init_variable('metric', [])
             .init_variable('semblance_hist', np.zeros(n_bins))
             .compute_attribute(src='images', dst='semblance', attribute='semblance', window=(1, 5, 20))
-            .update(V('metric', mode='e'), F(similarity_metric)(B('semblance'), B('predictions')))
+            .update(V('metric', mode='e'), F(FaultsMetrics().similarity_metric)(B('semblance'), B('predictions')))
             .update(V('semblance_hist'), V('semblance_hist') + F(np.histogram)(B('semblance').flatten(),
                     bins=n_bins, range=(0, 1))[0])
         )
@@ -334,7 +323,7 @@ class FaultController(BaseController):
         else:
             test_pipeline = Pipeline().load_model('model', TorchModel, 'dynamic', path=model_path)
 
-        test_pipeline += self.load_pipeline(create_masks=create_masks, train=False)
+        test_pipeline += self.load_test(create_masks=create_masks)
         test_pipeline += (
             Pipeline()
             .adaptive_expand(src='images')
@@ -362,21 +351,6 @@ class FaultController(BaseController):
 
         return test_pipeline
 
-    def make_inference_dataset(self, labels=False, **kwargs):
-        """ Make inference dataset. """
-        config = {**self.config['inference'], **self.config['dataset'], **kwargs}
-        inference_cubes = config['cubes']
-        width = config['width']
-        label_dir = config['label_dir']
-
-        cubes_paths = [self.amplitudes_path(item) for item in inference_cubes]
-        dataset = SeismicCubeset(index=cubes_paths)
-        if labels:
-            dataset.load(label_dir=label_dir.format(width), labels_class=Fault, transform=True, verify=True, bar=False)
-        else:
-            dataset.load_geometries()
-        return dataset
-
     def parse_locations(self, cubes):
         """ Parse inference ranges. """
         cubes = cubes.copy()
@@ -389,9 +363,6 @@ class FaultController(BaseController):
     def make_accumulator(self, geometry, slices, crop_shape, strides, orientation=0, path=None):
         """ Make grid and accumulator for inference. """
         batch_size = self.config['inference']['inference_batch_size']
-        if orientation == 1:
-            crop_shape = np.array(crop_shape)[[1, 0, 2]]
-            strides = np.array(strides)[[1, 0, 2]]
         name = 'cube_i'
 
         grid = RegularGrid(geometry=geometry,
@@ -412,18 +383,21 @@ class FaultController(BaseController):
 
     def inference_on_slides(self, train_pipeline=None, model_path=None, create_mask=False, pbar=False, **kwargs):
         """ Make inference on slides. """
-        config = {**self.config['inference'], **kwargs}
-        strides = config['stride'] if isinstance(config['stride'], tuple) else [config['stride']] * 3
-
+        config = {**self.config['dataset'], **self.config['inference'], **kwargs}
         crop_shape = config['crop_shape']
+        cubes = config['inference_cubes']
+        strides = config['stride']
+
+        strides = strides if isinstance(strides, tuple) else [strides] * 3
+
         strides = np.maximum(np.array(crop_shape) * np.array(strides), 1).astype(int)
 
         self.log('Create test pipeline and dataset.')
         dataset = self.make_inference_dataset(create_mask)
         inference_pipeline = self.get_inference_template(train_pipeline, model_path, create_mask)
-        inference_pipeline.set_config(config)
+        inference_pipeline = inference_pipeline << config << dataset
 
-        cubes = config['cubes']
+
         cubes = {
             self.cube_name_from_path(self.amplitudes_path(k)): v for k, v in self.parse_locations(cubes).items()
         }
@@ -432,17 +406,15 @@ class FaultController(BaseController):
         for cube_idx in dataset.indices:
             outputs[cube_idx] = []
             geometry = dataset.geometries[cube_idx]
-            shape = geometry.cube_shape
             for item in cubes[cube_idx]:
-                self.log(f'Create prediction for {cube_idx}: {item[1:]}. axis={item[0]}.')
-                axis = item[0]
+                self.log(f'Create prediction for {cube_idx}: {item[1:]}. orientation={item[0]}.')
+                orientation = item[0]
                 slices = item[1:]
                 if len(slices) != 3:
                     slices = (None, None, None)
 
-                slices = fill_defaults(slices, [[0, i] for i in shape])
-                grid, accumulator = self.make_accumulator(geometry, slices, crop_shape, strides, axis)
-                ppl = inference_pipeline << dataset << {'sampler': grid, 'accumulator': accumulator}
+                grid, accumulator = self.make_accumulator(geometry, slices, crop_shape, strides, orientation)
+                ppl = inference_pipeline << {'sampler': grid, 'accumulator': accumulator}
 
                 ppl.run(n_iters=grid.n_iters, bar=pbar)
                 prediction = accumulator.aggregate()
@@ -453,7 +425,7 @@ class FaultController(BaseController):
                     slices[2][0]:slices[2][1]
                 ]
 
-                if axis == 1:
+                if orientation == 1:
                     image = image.transpose([1, 0, 2])
                     prediction = prediction.transpose([1, 0, 2])
 
@@ -483,7 +455,7 @@ class FaultController(BaseController):
                         show = True
 
                     prediction = prediction[0]
-                    prediction[prediction < threshold] = 0
+                    prediction[prediction < threshold] = np.nan
                     if overlap:
                         plot_image([image[0], prediction], separate=False, cmap='gray', figsize=(20, 20),
                                    savepath=savepath, show=show)
@@ -495,7 +467,7 @@ class FaultController(BaseController):
     def inference_on_cube(self, train_pipeline=None, model_path=None, fmt='sgy', save_to=None, prefix=None,
                           tmp='hdf5', bar=True, **kwargs):
         """ Make inference on cube. """
-        config = {**self.config['inference'], **kwargs}
+        config = {**self.config['dataset'], **self.config['inference'], **kwargs}
         strides = config['stride'] if isinstance(config['stride'], tuple) else [config['stride']] * 3
 
         crop_shape = config['crop_shape']
@@ -506,7 +478,7 @@ class FaultController(BaseController):
         inference_pipeline = self.get_inference_template(train_pipeline, model_path, create_masks=False)
         inference_pipeline.set_config(config)
 
-        cubes = config['cubes']
+        cubes = config['inference_cubes']
         cubes = {
             self.cube_name_from_path(self.amplitudes_path(k)): v for k, v in self.parse_locations(cubes).items()
         }
@@ -529,14 +501,12 @@ class FaultController(BaseController):
         for cube_idx in dataset.indices:
             outputs[cube_idx] = []
             geometry = dataset.geometries[cube_idx]
-            shape = geometry.cube_shape
             for item in cubes[cube_idx]:
                 self.log(f'Create prediction for {cube_idx}: {item[1:]}. axis={item[0]}.')
                 axis = item[0]
                 ranges = item[1:]
                 if len(ranges) != 3:
                     ranges = (None, None, None)
-                ranges = fill_defaults(ranges, [[0, i] for i in shape])
 
                 filenames = {ext: os.path.join(dirname, self.make_filename(prefix, 'x' if axis==1 else 'i', ext))
                              for ext in ['hdf5', 'sgy', 'blosc', 'qblosc', 'npy', 'meta']}
@@ -570,7 +540,7 @@ class FaultController(BaseController):
     def amplitudes_path(self, cube):
         """ Get full path for cube. """
         ext = self.config['dataset/ext']
-        filename = self.config['dataset/path'] + 'CUBE_' + cube + f'/amplitudes_{cube}.{ext}'
+        filename = self.config['dataset/path'] + f'CUBE_{cube}/amplitudes_{cube}.{ext}'
         if os.path.exists(filename):
             return filename
         raise ValueError(f"File doesn't exist: {filename}")
@@ -587,34 +557,16 @@ class FaultController(BaseController):
         """ Make filename for infered cube. """
         return (prefix + datetime.now().strftime("%Y-%m-%d-%H-%M-%S") + '_{}.{}').format(orientation, ext)
 
-    # Inference utils
+    # Train utils
 
-    def skeletonize_faults(self, prediction, axis=0, threshold=0.1, bar=True):
-        """ Make faults from binary mask. """
-        prediction_cube = SeismicGeometry(prediction) if isinstance(prediction, str) else prediction
-        processed_faults = np.zeros(prediction_cube.cube_shape)
-        for i in tqdm.tqdm_notebook(range(prediction_cube.cube_shape[axis]), disable=(not bar)):
-            slices = [slice(None)] * 2
-            slices[axis] = i
-            slices = tuple(slices)
-            struct = generate_binary_structure(2, 10)
-
-            prediction = prediction_cube.load_slide(i, axis=axis)
-            dilation = binary_dilation(prediction > threshold, struct)
-            holes = binary_fill_holes(dilation, struct)
-            erosion = binary_erosion(holes, generate_binary_structure(2, 1))
-
-            processed_faults[slices] = binary_dilation(skeletonize(erosion, method='lee'))
-
-        return Fault.from_mask(processed_faults, prediction_cube, chunk_size=100, pbar=bar)
+    def adjust_shape(self, crop_shape):
+        """ Adjust shape before augmentations. """
+        config = self.config['train']
+        crop_shape = np.array(crop_shape)
+        load_shape = adjust_shape_3d(crop_shape[[1, 2, 0]], config['angle'], scale=config['scale'])
+        return (load_shape[2], load_shape[0], load_shape[1])
 
 # Train utils
-
-def adjust_shape(crop_shape, angle, scale):
-    """ Adjust shape before augmentations. """
-    crop_shape = np.array(crop_shape)
-    load_shape = adjust_shape_3d(crop_shape[[1, 2, 0]], angle, scale=scale)
-    return (load_shape[2], load_shape[0], load_shape[1])
 
 def smooth_borders(crops, step):
     """ Smooth image borders. """
@@ -641,68 +593,3 @@ def border_smoothing_mask(shape, step):
             _mask = np.expand_dims(_mask, axis)
             mask = mask * _mask
     return mask
-
-def sum_with_axes(array, axes=None):
-    """ Sum for several axes. """
-    if axes is None:
-        return array.sum()
-    if isinstance(axes, int):
-        axes = [axes]
-    res = array
-    axes = sorted(axes)
-    for i, axis in enumerate(axes):
-        res = res.sum(axis=axis-i)
-    return res
-
-def mean(array, axes=None):
-    """ Mean for several axes. """
-    if axes is None:
-        return array.mean()
-    if isinstance(axes, int):
-        axes = [axes]
-    res = array
-    axes = sorted(axes)
-    for i, axis in enumerate(axes):
-        res = res.mean(axis=axis-i)
-    return res
-
-def similarity_metric(semblance, masks, threshold=None):
-    """ Compute similarity metric. """
-    SHIFTS = [-20, -15, -5, 5, 15, 20]
-    if threshold:
-        masks = masks > threshold
-    if semblance.ndim == 2:
-        semblance = np.expand_dims(semblance, axis=0)
-    if semblance.ndim == 3:
-        semblance = np.expand_dims(semblance, axis=0)
-
-    if masks.ndim == 2:
-        masks = np.expand_dims(masks, axis=0)
-    if masks.ndim == 3:
-        masks = np.expand_dims(masks, axis=0)
-
-    res = []
-    m = sum_with_axes(masks * (1 - semblance), axes=[1,2,3])
-    weights = np.ones((len(SHIFTS), 1))
-    weights = weights / weights.sum()
-    for i in SHIFTS:
-        random_mask = make_shift(masks, shift=i)
-        rm = sum_with_axes(random_mask * (1 - semblance), axes=[1,2,3])
-        ratio = m/rm
-        res += [np.log(ratio)]
-    res = np.stack(res, axis=0)
-    res = (res * weights).sum(axis=0)
-    res = np.clip(res, -2, 2)
-    return res
-
-def make_shift(array, shift=20):
-    """ Make shifts for mask. """
-    result = np.zeros_like(array)
-    for i, _array in enumerate(array):
-        if shift > 0:
-            result[i][:, shift:] = _array[:, :-shift]
-        elif shift < 0:
-            result[i][:, :shift] = _array[:, -shift:]
-        else:
-            result[i] = _array
-    return result
