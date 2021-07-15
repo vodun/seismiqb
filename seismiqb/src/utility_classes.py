@@ -261,16 +261,10 @@ class Accumulator3D:
         If provided, then we use HDF5 datasets instead of regular Numpy arrays, storing the data directly on disk.
         After the initialization, we keep the file handle in `w-` mode during the update phase.
         After aggregation, we re-open the file to automatically repack it in `r` mode.
-    name : str
-        Name of the attribute (and dataset in hdf5) to store data.
     kwargs : dict
         Other parameters are passed to HDF5 dataset creation.
     """
-    def __init__(self, shape=None, origin=None, dtype=np.float32, transform=None, path=None,
-                 name='placeholder', **kwargs):
-        # Main attribute to store results
-        self.name = name
-
+    def __init__(self, shape=None, origin=None, dtype=np.float32, transform=None, path=None, **kwargs):
         # Dimensionality and location
         self.shape = shape
         self.origin = origin
@@ -301,22 +295,6 @@ class Accumulator3D:
             placeholder = np.full(shape=self.shape, fill_value=fill_value, dtype=dtype)
 
         setattr(self, name, placeholder)
-
-    @property
-    def data(self):
-        """ Data storage. """
-        if self.type in ['hdf5', 'blosc']:
-            return self.file[self.name]
-        return getattr(self, self.name)
-
-    @data.setter
-    def data(self, value):
-        """ Data storage. """
-        if self.type in ['hdf5', 'blosc']:
-            self.file[self.name] = value
-        else:
-            setattr(self, self.name, value)
-
 
     def remove_placeholder(self, name=None):
         """ Remove created placeholder. """
@@ -361,9 +339,13 @@ class Accumulator3D:
         self._aggregate()
 
         # Re-open the HDF5 file to force flush changes and release disk space from deleted datasets
+        # Also add alias to `data` dataset, so the resulting cube can be opened by `SeismicGeometry`
         if self.type == 'hdf5':
+            self.file['cube_i'] = self.file['data']
             self.file.close()
             self.file = h5py.File(self.path, 'r')
+
+            self.data = self.file['data']
 
         self.aggregated = True
         return self.data
@@ -378,7 +360,6 @@ class Accumulator3D:
 
     def clear(self):
         """ Remove placeholders from memory and disk. """
-        # TODO: check for leaks
         if self.type in ['hdf5', 'blosc']:
             os.remove(self.path)
 
@@ -414,13 +395,12 @@ class Accumulator3D:
 
 class MaxAccumulator3D(Accumulator3D):
     """ Accumulator that takes maximum value of overlapping crops. """
-    def __init__(self, shape=None, origin=None, dtype=np.float32, fill_value=None, transform=None,
-                 path=None, name='placeholder', **kwargs):
-        super().__init__(shape=shape, origin=origin, dtype=dtype, transform=transform, path=path, name=name, **kwargs)
+    def __init__(self, shape=None, origin=None, dtype=np.float32, fill_value=None, transform=None, path=None, **kwargs):
+        super().__init__(shape=shape, origin=origin, dtype=dtype, transform=transform, path=path, **kwargs)
 
         min_value = np.finfo(dtype).min if 'float' in dtype.__name__ else np.iinfo(dtype).min
         self.fill_value = fill_value if fill_value is not None else min_value
-        self.create_placeholder(name=name, dtype=self.dtype, fill_value=self.fill_value)
+        self.create_placeholder(name='data', dtype=self.dtype, fill_value=self.fill_value)
 
     def _update(self, crop, location):
         self.data[location] = np.maximum(crop, self.data[location])
@@ -431,11 +411,10 @@ class MaxAccumulator3D(Accumulator3D):
 
 class MeanAccumulator3D(Accumulator3D):
     """ Accumulator that takes mean value of overlapping crops. """
-    def __init__(self, shape=None, origin=None, dtype=np.float32, transform=None, path=None,
-                 name='placeholder', **kwargs):
-        super().__init__(shape=shape, origin=origin, dtype=dtype, transform=transform, path=path, name=name, **kwargs)
+    def __init__(self, shape=None, origin=None, dtype=np.float32, transform=None, path=None, **kwargs):
+        super().__init__(shape=shape, origin=origin, dtype=dtype, transform=transform, path=path, **kwargs)
 
-        self.create_placeholder(name=name, dtype=self.dtype, fill_value=0)
+        self.create_placeholder(name='data', dtype=self.dtype, fill_value=0)
         self.create_placeholder(name='counts', dtype=np.int8, fill_value=0)
 
     def _update(self, crop, location):
@@ -467,11 +446,10 @@ class MeanAccumulator3D(Accumulator3D):
 
 class GMeanAccumulator3D(Accumulator3D):
     """ Accumulator that takes geometric mean value of overlapping crops. """
-    def __init__(self, shape=None, origin=None, dtype=np.float32, transform=None, path=None,
-                 name='placeholder', **kwargs):
-        super().__init__(shape=shape, origin=origin, dtype=dtype, transform=transform, path=path, name=name, **kwargs)
+    def __init__(self, shape=None, origin=None, dtype=np.float32, transform=None, path=None, **kwargs):
+        super().__init__(shape=shape, origin=origin, dtype=dtype, transform=transform, path=path, **kwargs)
 
-        self.create_placeholder(name=name, dtype=self.dtype, fill_value=1)
+        self.create_placeholder(name='data', dtype=self.dtype, fill_value=1)
         self.create_placeholder(name='counts', dtype=np.int8, fill_value=0)
 
     def _update(self, crop, location):
@@ -535,9 +513,8 @@ class AccumulatorBlosc(Accumulator3D):
         elif orientation == 1:
             name = 'cube_x'
             shape = np.array(shape)[[1, 0, 2]]
-
-        self.name = name
         self.file.create_dataset(name, shape=shape, dtype=dtype)
+
 
     def _update(self, crop, location):
         crop = crop.astype(self.dtype)
@@ -551,6 +528,7 @@ class AccumulatorBlosc(Accumulator3D):
 
     def _aggregate(self):
         self.file = self.file.repack(aggregation=self.aggregation)
+
 
     @classmethod
     def from_grid(cls, grid, aggregation='max', dtype=np.float32, transform=None, path=None, **kwargs):
