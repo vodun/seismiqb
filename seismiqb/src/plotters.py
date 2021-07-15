@@ -748,7 +748,7 @@ class MatplotlibPlotter:
         """ Add patches to legend. All invalid colors are filtered. """
         handles = getattr(ax.get_legend(), 'legendHandles', [])
         colors = [color for color in to_list(color) if is_color_like(color)]
-        labels = to_list(label, dtype='object' if any(isinstance(item, list) for item in label) else None)
+        labels = to_list(label)
         new_patches = [Patch(color=color, label=label) for color, label in zip(colors, labels) if label]
         handles += new_patches
         if handles:
