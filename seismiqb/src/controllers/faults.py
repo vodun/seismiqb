@@ -11,7 +11,7 @@ import numpy as np
 import torch
 
 
-from ...batchflow import Config, Pipeline
+from ...batchflow import Config, Pipeline, Notifier
 from ...batchflow import B, C, D, P, R, V, F, I
 from ...batchflow.models.torch import TorchModel, ResBlock, EncoderDecoder
 from .base import BaseController
@@ -48,6 +48,7 @@ class FaultController(BaseController):
             'crop_shape': [1, 128, 512],
             'n_iters': 2000,
             'callback/each': 100,
+            'visualize_crops': True,
 
             # Augmentation parameters
             'angle': 25,
@@ -252,7 +253,7 @@ class FaultController(BaseController):
         """ Create train pipeline. """
         model_class = F(self.get_model_class)(C('model'))
         model_config = F(self.get_model_config)(C('model'))
-        return (Pipeline()
+        ppl = (Pipeline()
             .init_variable('loss_history', [])
             .init_model(name='model', model_class=model_class, mode='dynamic', config=model_config)
             .adaptive_expand(src=['images', 'masks'])
@@ -265,6 +266,22 @@ class FaultController(BaseController):
                   savepath='prediction', each=self.config['train/callback/each'],
                   iteration=I())
         )
+        if self.config['train/visualize_crops']:
+            ppl += (Pipeline()
+                .predict_model('model', images=B('images')[:1], fetches=C('output'), save_to=B('prediction'))
+            )
+        return ppl
+
+    def make_notifier(self):
+        """ Make notifier. """
+        if self.config['train/visualize_crops']:
+            return Notifier(None, graphs=['loss_history',
+                {'source': B('images'), 'name': 'images', 'plot_function': self.custom_plotter},
+                {'source': B('masks'), 'name': 'masks', 'plot_function': self.custom_plotter},
+                {'source': B('prediction'), 'name': 'predictions', 'plot_function': self.custom_plotter},
+            ])
+        else:
+            return super().make_notifier()
 
     def custom_plotter(self, ax=None, container=None, **kwargs):
         """ Plot examples during train stage. """
