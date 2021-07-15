@@ -11,8 +11,9 @@ from tqdm.notebook import tqdm
 
 from .facies import Facies
 from .batch import FaciesBatch
+from ..samplers import RegularGrid
 from ..cubeset import SeismicCubeset
-from ..utility_classes import IndexedDict
+from ..utility_classes import IndexedDict, Accumulator3D
 from ..utils import to_list
 
 
@@ -21,6 +22,7 @@ class FaciesCubeset(SeismicCubeset):
     """ Storage extending `SeismicCubeset` functionality with methods for interaction with labels and their subsets.
 
     """
+    # pylint: disable=useless-super-delegation
     def __init__(self, *args, batch_class=FaciesBatch, **kwargs):
         super().__init__(*args, batch_class=batch_class, **kwargs)
 
@@ -72,7 +74,7 @@ class FaciesCubeset(SeismicCubeset):
         self.load_geometries()
 
         default_dst_labels = [labels_subdir.lower() for labels_subdir in labels_subdirs]
-        dst_labels = to_list(dst_labels, default=default_dst_labels)
+        dst_labels = to_list(dst_labels or default_dst_labels)
 
         if base_labels not in dst_labels:
             alt_base_labels = dst_labels[0]
@@ -152,7 +154,7 @@ class FaciesCubeset(SeismicCubeset):
     def add_merged_labels(self, src_labels, dst_labels, indices=None, add_subsets_to='labels'):
         """ Merge given labels and put result into cubeset. """
         results = IndexedDict({idx: [] for idx in self.indices})
-        indices = to_list(indices, default=self.indices)
+        indices = to_list(indices or self.indices)
         for idx in indices:
             to_merge = self[idx, src_labels]
             # since `merge_list` merges all horizons into first object from the list,
@@ -167,8 +169,8 @@ class FaciesCubeset(SeismicCubeset):
         if add_subsets_to:
             self.add_subsets(subset_labels=dst_labels, base_labels=add_subsets_to)
 
-    def make_predictions(self, pipeline, crop_shape, overlap_factor, order=(1, 2, 0), src_labels='labels',
-                         dst_labels='predictions', add_subsets=True, pipeline_variable='predictions', bar='n'):
+    def make_predictions(self, pipeline, crop_shape, overlap_factor, aggregation='mean', src_labels='labels',
+                         dst_labels='predictions', add_subsets=True, bar='n'):
         """
         Make predictions and put them into dataset attribute.
 
@@ -184,56 +186,45 @@ class FaciesCubeset(SeismicCubeset):
             Name of dataset component with items to make grid for.
         dst_labels : str
             Name of dataset component to put predictions into.
-        pipeline_var : str
-            Name of pipeline variable to get predictions for assemble from.
-        order : tuple of int
-            Passed directly to :meth:`.assemble_crops`.
         """
         # pylint: disable=blacklisted-name
         results = IndexedDict({ix: [] for ix in self.indices})
-        pbar = tqdm(getattr(self, src_labels).flat)
+        labels = getattr(self, src_labels)
+        pbar = tqdm(labels.flat)
         pbar.set_description("General progress")
+
         for label in pbar:
+            label_id = np.where([item.name == label.name for item in labels[label.geometry.short_name]])[0][0]
+            grid = RegularGrid(geometry=label.geometry, label_id=label_id, label_name=label.name,
+                               ranges=[None, None, (0, 1)], crop_shape=crop_shape, overlap_factor=overlap_factor)
+            accumulator = Accumulator3D.from_aggregation(aggregation=aggregation, origin=grid.origin,
+                                                         shape=grid.shape, fill_value=None)
+
+            pipeline = pipeline << self << {'grid': grid, 'accumulator': accumulator}
+            pipeline.run(n_iters=grid.n_iters, bar=bar)
+
+            predicted_matrix = expit(accumulator.data).squeeze()
+            predicted_matrix[label.geometry.zero_traces] = 0
+            filtering_matrix = np.invert(predicted_matrix > 0.5).astype(int)
+
             prediction = copy(label)
             prediction.name = label.name
-            cube_name = label.geometry.short_name
-            self.make_grid(cube_name=cube_name, crop_shape=crop_shape, overlap_factor=overlap_factor, label=label)
-            pipeline = pipeline << self
-            pipeline.update_config({'src_labels': src_labels, 'base_horizon': label})
-            pipeline.run(batch_size=self.size, n_iters=self.grid_iters, bar=bar)
-            predicted_matrix = expit(self.assemble_crops(pipeline.v(pipeline_variable), order=order).squeeze())
-            prediction.filter_matrix(~(predicted_matrix.round().astype(bool)))
+            prediction.filter_matrix(filtering_matrix)
+
             setattr(prediction, "probability_matrix", predicted_matrix)
-            results[cube_name].append(prediction)
+            results[label.geometry.short_name].append(prediction)
+
         setattr(self, dst_labels, results)
         if add_subsets:
             self.add_subsets(subset_labels=dst_labels, base_labels=src_labels)
 
-    def evaluate(self, true_src, pred_src, metrics_fn, output_format='df'):
+    def evaluate(self, src_true, src_pred, metrics_fn, indices=None, src_labels='labels'):
         """ TODO """
-        pd.options.display.float_format = '{:,.3f}'.format
-        if output_format == 'dict':
-            results = {}
-            for idx in self.indices:
-                results[idx] = []
-                for true, pred in zip(self[idx, true_src], self[idx, pred_src]):
-                    true_mask = true.load_attribute('masks', fill_value=0)
-                    pred_mask = pred.load_attribute('masks', fill_value=0)
-                    result = metrics_fn(true_mask, pred_mask)
-                    results[idx].append(result)
-        elif output_format == 'df':
-            columns = ['cube', 'horizon', 'metrics']
-            rows = []
-            for idx in self.indices:
-                for true, pred in zip(self[idx, true_src], self[idx, pred_src]):
-                    true_mask = true.load_attribute('masks', fill_value=0)
-                    pred_mask = pred.load_attribute('masks', fill_value=0)
-                    metrics_value = metrics_fn(true_mask, pred_mask)
-                    row = np.array([idx, true.short_name, metrics_value])
-                    rows.append(row)
-            data = np.stack(rows)
-            results = pd.DataFrame(data=data, columns=columns)
-            results['metrics'] = results['metrics'].values.astype(float)
+        metrics_values = self.apply_to_labels(function='evaluate', src_labels=src_labels, indices=indices,
+                                              src_true=src_true, src_pred=src_pred, metrics_fn=metrics_fn)
+
+        results = pd.concat(metrics_values[src_labels].values())
+
         return results
 
     def dump_labels(self, path, src_labels, postfix=None, indices=None):
@@ -242,19 +233,3 @@ class FaciesCubeset(SeismicCubeset):
         timestamp = datetime.now().strftime('%b-%d_%H-%M-%S')
         path = f"{path}/{timestamp}_{postfix}/"
         self.apply_to_labels(function='dump', indices=indices, src_labels=src_labels, path=path)
-
-    def make_grid(self, label, **kwargs):
-        """ Create regular grid of points in cube.
-        This method is usually used with :meth:`.assemble_predict`.
-
-        Parameters
-        ----------
-        label : Facies
-            label to make grid for
-        kwargs : for `Horizon.make_grid`
-        """
-        # pylint: disable=too-many-statements
-        height = int(label.h_mean) - kwargs['crop_shape'][2] // 2 # start for heights slices made by `crop` action
-        kwargs['heights'] = (height, height + 1)
-        super().make_grid(**kwargs)
-        label.grid_info = self.grid_info

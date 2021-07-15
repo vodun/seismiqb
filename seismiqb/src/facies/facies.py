@@ -2,6 +2,7 @@
 import os
 
 import numpy as np
+import pandas as pd
 
 from scipy.signal import hilbert, ricker
 from scipy.ndimage import convolve
@@ -9,9 +10,9 @@ from sklearn.decomposition import PCA
 
 
 from ..plotters import filter_parameters, plot_image
-from ..horizon import Horizon, _filtering_function
+from ..horizon import Horizon
 from ..utils import to_list, retrieve_function_arguments
-from ..utility_classes import lru_cache, AttachStr, HorizonSampler
+from ..utility_classes import lru_cache
 
 
 
@@ -81,7 +82,7 @@ class Facies(Horizon):
             raise KeyError(msg) from e
 
 
-    def _load_attribute(self, src, location=None, **kwargs):
+    def _load_attribute(self, src, location=None, use_cache=True, **kwargs):
         """ Make crops from `src` of horizon at `location`.
 
         Parameters
@@ -94,7 +95,7 @@ class Facies(Horizon):
             - 'instant_phases': instantaneous phase along the horizon;
             - 'instant_amplitudes': instantaneous amplitude along the horizon;
             - 'masks' or 'full_binary_matrix': mask of horizon;
-        location : sequence of 3 slices or None
+        location : sequence of 3 slices
             First two slices are used as `iline` and `xline` ranges to cut crop from.
             Last 'depth' slice is used to infer `window` parameter when `src` is 'cube_values'.
             If None, `src` is returned uncropped.
@@ -119,25 +120,21 @@ class Facies(Horizon):
 
         >>> Pipeline().load_attribute('cube_values', dst='amplitudes')
         """
-        x_slice, i_slice, h_slice = location if location is not None else (slice(None), slice(None), slice(None))
+        try:
+            method_name = self.ATTRIBUTE_TO_METHOD[src]
+        except KeyError as e:
+            raise ValueError(f"Unknown `src` {src}. Expected one of {list(self.ATTRIBUTE_TO_METHOD.keys())}.") from e
 
-        default_kwargs = {'use_cache': True}
-        # Update `default_kwargs` with extra arguments depending on `src`
-        if src in ['cube_values', 'amplitudes']:
-            if h_slice != slice(None):
-                # `window` arg for `get_cube_values` can be infered from `h_slice`
-                default_kwargs = {'window': h_slice.stop - h_slice.start, **default_kwargs}
-        kwargs = {**default_kwargs, **kwargs}
+        method = getattr(self, method_name)
+        data = method(use_cache=use_cache, **kwargs)
+        if location is not None:
+            i_slice, x_slice, _ = location
+            data = data[i_slice, x_slice]
 
-        func_name = self.ATTRIBUTE_TO_METHOD.get(src)
-        if func_name is None:
-            raise ValueError("Unknown `src` {}. Expected {}.".format(src,
-                                                                               self.ATTRIBUTE_TO_METHOD.keys()))
-        data = getattr(self, func_name)(**kwargs)
-        return data[x_slice, i_slice]
+        return data
 
 
-    def load_attribute(self, src, **kwargs):
+    def load_attribute(self, src, location=None, **kwargs):
         """ Get attribute for horizon or its subset.
 
         Parameters
@@ -152,16 +149,16 @@ class Facies(Horizon):
         >>> horizon.load_attribute(src="channels/depths")
         """
         *subsets, src = src.split('/')
+        if len(subsets) > 1:
+            raise NotImplementedError()
 
-        if src == 'amplitudes':
-            kwargs['window'] = kwargs.get('window', 1)
+        data = self._load_attribute(src=src, location=location, **kwargs)
 
-        data = self._load_attribute(src=src, **kwargs)
         if subsets:
             subset = self.get_subset(subsets[0])
-            location = kwargs.get('location', None)
             mask = subset.load_attribute(src='masks', location=location, fill_value=0).astype(bool)
             data[~mask] = kwargs.get('fill_value', self.FILL_VALUE)
+
         return data
 
 
@@ -381,6 +378,8 @@ class Facies(Horizon):
                 load = {'src': load}
             postprocess = load.pop('postprocess', lambda x: x)
             load_defaults = {'fill_value': np.nan}
+            if load['src'].split('/')[-1] in ['amplitudes', 'cube_values']:
+                load_defaults['width'] = 1
             if load['src'].split('/')[-1] in ['fourier', 'wavelet']:
                 load_defaults['n_components'] = 1
             load = {**load_defaults, **load}
@@ -456,7 +455,7 @@ class Facies(Horizon):
         figure = plot_image(data=data, mode=mode, **params)
 
         # Display additional info over axes via `Facies` methods starting with 'draw_' prefix
-        draw = to_list(draw, default=[])
+        draw = to_list(draw) if draw is not None else []
         for ax_draw, ax in zip(draw, figure.axes):
             if ax_draw is not None:
                 getattr(self, f"draw_{ax_draw}")(ax, **kwargs)
@@ -497,44 +496,6 @@ class Facies(Horizon):
             subset_label.reset_cache()
 
 
-    def create_sampler(self, bins=None, anomaly_grid=None, weights=None, threshold=0, **kwargs):
-        """ Create sampler based on horizon location.
-
-        Parameters
-        ----------
-        bins : sequence
-            Size of ticks alongs each respective axis.
-        anomaly_grid : ndarray or None
-            If not None, then must be a matrix with zeroes in locations to keep, ones in locations to remove.
-            Applied to `points` before sampler creation.
-        weights : ndarray or bool
-            Weights matrix with shape (ilines_len, xlines_len) for weights of sampling.
-            If True support correlation metric will be used.
-        """
-        _ = kwargs
-        default_bins = self.cube_shape[:2] // np.array([20, 20])
-        bins = bins if bins is not None else default_bins
-        anomaly_grid = self.anomaly_grid if anomaly_grid is True else anomaly_grid
-
-        points = self.points[:, :2]
-        if isinstance(anomaly_grid, np.ndarray):
-            points = _filtering_function(np.copy(points), 1 - anomaly_grid)
-
-
-        if weights:
-            if not isinstance(weights, np.ndarray):
-                corrs_matrix = self.evaluate_metric()
-                weights = corrs_matrix[points[:, 0], points[:, 1]]
-            points = points[~np.isnan(weights)]
-            weights = weights[~np.isnan(weights)]
-            points = points[weights > threshold]
-            weights = weights[weights > threshold]
-
-        sampler = HorizonSampler(np.histogramdd(points/self.cube_shape[:2], bins=bins, weights=weights), **kwargs)
-        sampler = sampler.apply(AttachStr(string=self.short_name, mode='append'))
-        self.sampler = sampler
-
-
     def draw_crop_grid(self, ax, **kwargs):
         """ Draw crops grid on given axis using grid info. """
         try:
@@ -566,3 +527,31 @@ class Facies(Horizon):
             crop_kwargs = filter_parameters(kwargs, filtered_keys, prefix='crop_corner_')
             draw_lines(lines[0] + crop_shape, lines_range[0], crop_shape, **crop_kwargs) # draw first crop
             draw_lines(lines[-1], lines_range[1] - crop_shape, lines_range[1], **crop_kwargs) # draw last crop
+
+    def evaluate(self, src_true, src_pred, metrics_fn, metrics_name='metrics', **kwargs):
+        """ Apply given function to 'masks' attribute of requested labels subsets.
+
+        Parameters
+        ----------
+        src_true : str
+            Name of `labels` subset to load true mask from.
+        src_pred : str
+            Name of `labels` subset to load prediction mask from.
+        metrics_fn : callable
+            Metrics function to calculate.
+        metrics_name : str
+            Name of the column with metrics values in resulted dataframe.
+        kwargs :
+            For `metrics_fn`.
+        """
+        pd.options.display.float_format = '{:,.3f}'.format
+
+        labeled_traces = self.get_full_binary_matrix(fill_value=0).astype(bool)
+        true = self.load_attribute(f"{src_true}/masks", fill_value=0)[labeled_traces]
+        pred = self.load_attribute(f"{src_pred}/masks", fill_value=0)[labeled_traces]
+        value = metrics_fn(true, pred, **kwargs)
+
+        index = pd.MultiIndex.from_arrays([[self.geometry.displayed_name], [self.short_name]],
+                                          names=['geometry_name', 'horizon_name'])
+        result = pd.DataFrame(index=index, data=[value], columns=[metrics_name])
+        return result

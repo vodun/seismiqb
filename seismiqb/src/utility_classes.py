@@ -241,10 +241,6 @@ class Accumulator3D:
         - `:meth:~.aggregate` is used to get the resulting volume
         - `:meth:~.clear` can be optionally used to remove array references and HDF5 file from disk
 
-    This class is an alternative to `:meth:.~SeismicCubeset.assemble_crops`, but allows to
-    greatly reduce memory footprint of crop aggregation by up to `overlap_factor` times.
-    Also, as this class updates rely on `location`s of crops, it can take crops in any order.
-
     Note that not all pixels of placeholders will be updated with data due to removal of dead traces,
     so we have to be careful with initialization!
 
@@ -278,14 +274,20 @@ class Accumulator3D:
         self.transform = transform if transform is not None else lambda array: array
 
         # Container definition
-        if path is not None:
-            if isinstance(path, str) and os.path.exists(path):
+        if path is None:
+            self.type = 'numpy'
+        else:
+            self.type = 'hdf5'
+
+            try:
                 os.remove(path)
+            except OSError:
+                pass
+
             self.path = path
 
             self.file = h5py.File(path, mode='w-')
             self.options = {**kwargs}
-        self.type = 'hdf5' if path is not None else 'numpy'
 
         self.aggregated = False
 
@@ -293,8 +295,8 @@ class Accumulator3D:
     def create_placeholder(self, name=None, dtype=None, fill_value=None):
         """ Create named storage as a dataset of HDF5 or plain array. """
         if self.type == 'hdf5':
-            options = {'fillvalue': fill_value, **self.options}
-            placeholder = self.file.create_dataset(name, shape=self.shape, dtype=dtype, **options)
+            placeholder = self.file.create_dataset(name, shape=self.shape, dtype=dtype,
+                                                   fillvalue=fill_value, **self.options)
         elif self.type == 'numpy':
             placeholder = np.full(shape=self.shape, fill_value=fill_value, dtype=dtype)
 
@@ -495,8 +497,7 @@ class IndexedDict(OrderedDict):
 
     def flatten(self, keys=None):
         """ Get dict values for requested keys in a single list. """
-        all_keys = list(self.keys())
-        keys = to_list(keys, default=all_keys)
+        keys = to_list(keys or list(self.keys()))
         keys = [key if isinstance(key, str) else all_keys[key] for key in keys]
         lists = [to_list(self[key]) for key in keys]
         return sum(lists, [])

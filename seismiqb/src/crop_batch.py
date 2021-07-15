@@ -15,6 +15,7 @@ from ..batchflow import FilesIndex, Batch, action, inbatch_parallel, SkipBatchEx
 from .horizon import Horizon
 from .plotters import plot_image
 from .utils import compute_attribute
+from .utility_classes import IndexedDict
 
 
 AFFIX = '___'
@@ -35,8 +36,6 @@ class SeismicCropBatch(Batch):
         'target': 'for',
         'post': '_assemble'
     }
-    # When an attribute containing one of keywords from list it accessed via `get`, firstly search it in `self.dataset`.
-    DATASET_ATTRIBUTES = ['label', 'geom', 'fan', 'channel', 'horizon']
 
 
     def _init_component(self, *args, **kwargs):
@@ -47,6 +46,10 @@ class SeismicCropBatch(Batch):
         dst = kwargs.get("dst")
         if dst is None:
             raise KeyError("dst argument must be specified")
+        if hasattr(self.dataset, dst):
+            msg = f"""Component with {dst} name cannot be added to batch,
+                      since attribute with this name is already present in dataset."""
+            raise KeyError(msg)
         if isinstance(dst, str):
             dst = (dst,)
         for comp in dst:
@@ -102,34 +105,27 @@ class SeismicCropBatch(Batch):
         return path
 
 
-    def __getattr__(self, name):
-        """ Retrieve data from either `self` or attached dataset. """
-        if hasattr(self.dataset, name):
-            return getattr(self.dataset, name)
-        return super().__getattr__(name)
-
     def get(self, item=None, component=None):
         """ Custom access for batch attributes.
-        If `component` has an entry from `DATASET_ATTRIBUTES` than retrieve it
-        from attached dataset and use unsalted version of `item` as key.
-        Otherwise, get position of `item` in the current batch and use it to index sequence-like `component`.
+        If `component` is present in dataset and is an instance of `IndexedDict`, that index it with item and return it.
+        Otherwise retrieve `component` from batch itself and optionally index it with `item` position in `self.indices`.
         """
-        if any(attribute in component for attribute in self.DATASET_ATTRIBUTES):
+        data = getattr(self.dataset, component, None)
+        # if component == 'labels':
+        #     print(data)
+        if isinstance(data, IndexedDict):
             if isinstance(item, str) and self.has_salt(item):
                 item = self.unsalt(item)
-            res = getattr(self, component)
-            if isinstance(res, dict) and item in res:
-                return res[item]
-            return res
+            return data[item]
 
+        data = getattr(self, component) if isinstance(component, str) else component
         if item is not None:
-            data = getattr(self, component) if isinstance(component, str) else component
             if isinstance(data, (np.ndarray, list)) and len(data) == len(self):
                 pos = np.where(self.indices == item)[0][0]
                 return data[pos]
-
             return super().get(item, component)
-        return getattr(self, component)
+
+        return data
 
 
     # Core actions

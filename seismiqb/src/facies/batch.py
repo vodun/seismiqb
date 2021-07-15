@@ -8,25 +8,15 @@ from ...batchflow import action, inbatch_parallel
 
 class FaciesBatch(SeismicCropBatch):
     """ Batch with facies-specific data loading. """
-    def get_label(self, ix, src_labels, label_name):
-        """ Get label by cube index, its attribute name and short name. """
-        all_labels = self.dataset[ix, src_labels]
-        labels = [label for label in all_labels if label.short_name == label_name]
-        if len(labels) == 0:
-            raise ValueError(f"Cannot find label with `{label_name}` name among {all_labels}.")
-        if len(labels) > 1:
-            raise ValueError(f"Cannot choose between several labels with identical names: {labels}.")
-        return labels[0]
-
 
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def load(self, ix, dst, attribute=None, src_labels='labels', locations='locations', res_ndim=3, **kwargs):
-        """ Load attribute for coordinates and label defined in given locations.
+    def load(self, ix, dst, src='amplitudes', src_labels='labels', res_ndim=3, **kwargs):
+        """ Load attribute for label at given location.
 
         Parameters
         ----------
-        attribute : str
+        src : str
             A keyword from :attr:`~Horizon.ATTRIBUTE_TO_METHOD` keys, defining label attribute to make crops from.
         src_labels : str
             Dataset attribute with labels dict.
@@ -44,9 +34,20 @@ class FaciesBatch(SeismicCropBatch):
         This method loads rectified data, e.g. amplitudes are croped relative
         to horizon and will form a straight plane in the resulting crop.
         """
-        location, label_name = self.get(ix, locations)
-        label = self.get_label(ix, src_labels, label_name)
-        res = label.load_attribute(attribute=attribute, location=location, **kwargs)
+        location = self.get(ix, 'locations')
+        label_index = self.get(ix, 'generated')[1]
+        label = self.get(ix, src_labels)[label_index]
+
+        label_name = self.get(ix, 'label_names')
+        if label.name != label_name:
+            msg = f"""Name of the label loaded by index {label_index} from {src_labels}
+                      does not match label name {label_name} from batch.
+
+                      This might have happened due to items order change in {src_labels}
+                      in between sampler creation and `make_locations` call."""
+            raise ValueError(msg)
+
+        res = label.load_attribute(src=src, location=location, **kwargs)
         if res_ndim == 3 and res.ndim == 2:
             res = res[..., np.newaxis]
         elif res_ndim != res.ndim:
