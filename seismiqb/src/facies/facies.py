@@ -47,7 +47,6 @@ class Facies(Horizon):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.sampler = None
         self.subsets = {}
 
 
@@ -94,7 +93,7 @@ class Facies(Horizon):
             - 'masks' or 'full_binary_matrix': mask of horizon;
         location : sequence of 3 slices
             First two slices are used as `iline` and `xline` ranges to cut crop from.
-            Last 'depth' slice is used to infer `window` parameter when `src` is 'cube_values'.
+            Last 'depth' slice is not used, since points are sampled exactly on horizon.
             If None, `src` is returned uncropped.
         kwargs :
             Passed directly to either:
@@ -103,7 +102,7 @@ class Facies(Horizon):
         Examples
         --------
 
-        >>> horizon.load_attribute('cube_values', (x_slice, i_slice, h_slice), window=10)
+        >>> horizon.load_attribute('cube_values', (x_slice, i_slice, 1), window=10)
 
         >>> horizon.load_attribute('depths')
 
@@ -312,7 +311,7 @@ class Facies(Horizon):
 
         return self.transform_where_present(result, **transform_kwargs)
 
-    def show(self, load='depths', mode='imshow', draw=None, return_figure=False, **kwargs):
+    def show(self, load='depths', mode='imshow', return_figure=False, **kwargs):
         """ Display facies attributes with predefined defaults.
 
         Loads requested data, constructs default parameters wrt to that data and delegates plot to `plot_image`.
@@ -329,10 +328,6 @@ class Facies(Horizon):
             Mode to display images in.
         return_figure : bool
             Whether return resulted figure or not.
-        draw : str, None or list of objects of those types
-            Aliases for actions applied to resulting figure axes.
-            E.g., if `draw='crop_grid'`, than `Facies.draw_crop_grid` is applied to first axis.
-            If `draw=[None, 'crop_grid']`, than `Facies.draw_crop_grid` is applied to second axis.
         kwargs : for `plot_image`
 
         Examples
@@ -450,12 +445,6 @@ class Facies(Horizon):
         # Plot image with given params and return resulting figure
         figure = plot_image(data=data, mode=mode, **params)
 
-        # Display additional info over axes via `Facies` methods starting with 'draw_' prefix
-        draw = to_list(draw) if draw is not None else []
-        for ax_draw, ax in zip(draw, figure.axes):
-            if ax_draw is not None:
-                getattr(self, f"draw_{ax_draw}")(ax, **kwargs)
-
         return figure if return_figure else None
 
 
@@ -491,38 +480,6 @@ class Facies(Horizon):
         for subset_label in self.subsets.values():
             subset_label.reset_cache()
 
-
-    def draw_crop_grid(self, ax, **kwargs):
-        """ Draw crops grid on given axis using grid info. """
-        try:
-            info = self.grid_info
-        except AttributeError as e:
-            raise AttributeError("To draw a grid, one must create it via `FaciesCubeset.make_grid`.") from e
-        xrange, yrange = info['range'][:2]
-
-        default_kwargs = {
-            'crop_grid_colors': 'darkslategray',
-            'crop_grid_linestyles': 'dashed',
-            'crop_corner_colors': 'crimson',
-            'crop_corner_linewidth': 3
-        }
-
-        kwargs = {**default_kwargs, **kwargs}
-
-        for ax_num, draw_lines in enumerate([ax.vlines, ax.hlines]):
-            stride = info['strides'][ax_num]
-            crop_shape = info['crop_shape'][ax_num]
-            lines_max = xrange[1] if ax_num == 0 else yrange[1]
-            lines_range = yrange if ax_num == 0 else xrange
-            lines = np.r_[np.arange(0, lines_max, stride), [lines_max - crop_shape]]
-
-            filtered_keys = ['colors', 'linestyles', 'linewidth']
-            grid_kwargs = filter_parameters(kwargs, filtered_keys, prefix='crop_grid_')
-            draw_lines(lines, *lines_range, **grid_kwargs)
-
-            crop_kwargs = filter_parameters(kwargs, filtered_keys, prefix='crop_corner_')
-            draw_lines(lines[0] + crop_shape, lines_range[0], crop_shape, **crop_kwargs) # draw first crop
-            draw_lines(lines[-1], lines_range[1] - crop_shape, lines_range[1], **crop_kwargs) # draw last crop
 
     def evaluate(self, src_true, src_pred, metrics_fn, metrics_name='metrics', **kwargs):
         """ Apply given function to 'masks' attribute of requested labels subsets.

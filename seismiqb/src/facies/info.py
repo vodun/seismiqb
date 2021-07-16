@@ -181,20 +181,7 @@ class FaciesInfo():
     def _process_base_labels(cls, base_labels, labels):
         """ If not provided explicitly, choose base labels folder name from the list of given labels subfolders. """
         if base_labels not in labels:
-            if len(labels) > 1:
-                horizon_labels = [label for label in labels if 'HORIZON' in label]
-                if not horizon_labels:
-                    msg += f"""
-                    Cannot automatically choose new base labels directory from {labels}.
-                    Please specify it explicitly.
-                    """
-                    raise ValueError(msg)
-                base_labels = horizon_labels[0]
-            else:
-                base_labels = labels[0]
-            msg = f"Base labels '{base_labels}' are not in {labels}. "\
-                  f"Base labels automatically inferred as `{base_labels}`."
-            warn(msg)
+            raise ValueError(f"Provided base labels '{base_labels}' are not in {labels}.")
         return base_labels
 
     def __getattr__(self, name):

@@ -6,7 +6,6 @@ from collections import defaultdict
 
 import numpy as np
 import pandas as pd
-from scipy.special import expit
 from tqdm.notebook import tqdm
 
 from .facies import Facies
@@ -58,7 +57,7 @@ class FaciesCubeset(SeismicCubeset):
 
         >>> label_dir = 'INPUTS/FACIES'
         >>> labels_subdirs = ['FANS_HORIZON', 'FANS']
-        >>> linkage = {'CUBE_01_AAA' : ['horizon_1.char'], 'CUBE_01_BBB' : ['horizon_2.char']}
+        >>> linkage = {'CUBE_01_AAA' : ['horizon_1.char'], 'CUBE_02_BBB' : ['horizon_2.char']}
         >>> dst_labels = ['horizons', 'fans']
         >>> base_labels = 'horizons'
 
@@ -122,7 +121,7 @@ class FaciesCubeset(SeismicCubeset):
 
         Examples
         --------
-        >>> cubeset.apply_to_labels('smooth_out', ['CUBE_01_XXX', 'CUBE_02_YYY'], ['horizons', 'fans'}, iters=3])
+        >>> cubeset.apply_to_labels('smooth_out', ['CUBE_01_XXX', 'CUBE_02_YYY'], ['horizons', 'fans'], iters=3)
         """
         src_labels = to_list(src_labels)
         results = {}
@@ -168,7 +167,7 @@ class FaciesCubeset(SeismicCubeset):
             self.add_subsets(subset_labels=dst_labels, base_labels=add_subsets_to)
 
     def make_predictions(self, pipeline, crop_shape, overlap_factor, aggregation='mean', src_labels='labels',
-                         dst_labels='predictions', add_subsets=True, bar='n'):
+                         dst_labels='predictions', add_subsets=True, notifier={'bar': 'n'}):
         """
         Make predictions and put them into dataset attribute.
 
@@ -193,15 +192,15 @@ class FaciesCubeset(SeismicCubeset):
 
         for label in pbar:
             label_id = np.where([item.name == label.name for item in labels[label.geometry.short_name]])[0][0]
-            grid = RegularGrid(geometry=label.geometry, label_id=label_id, label_name=label.name,
+            grid = RegularGrid(geometry=label.geometry, label_id=label_id, label_name=label.short_name,
                                ranges=[None, None, (0, 1)], crop_shape=crop_shape, overlap_factor=overlap_factor)
             accumulator = Accumulator3D.from_aggregation(aggregation=aggregation, origin=grid.origin,
-                                                         shape=grid.shape, fill_value=None)
+                                                         shape=grid.shape, fill_value=0)
 
             pipeline = pipeline << self << {'grid': grid, 'accumulator': accumulator}
-            pipeline.run(n_iters=grid.n_iters, bar=bar)
+            pipeline.run(n_iters=grid.n_iters, notifier=notifier)
 
-            predicted_matrix = expit(accumulator.data).squeeze()
+            predicted_matrix = accumulator.data.squeeze()
             predicted_matrix[label.geometry.zero_traces] = 0
             filtering_matrix = np.invert(predicted_matrix > 0.5).astype(int)
 
