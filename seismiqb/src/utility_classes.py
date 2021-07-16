@@ -242,6 +242,10 @@ class Accumulator3D:
         - `:meth:~.aggregate` is used to get the resulting volume
         - `:meth:~.clear` can be optionally used to remove array references and HDF5 file from disk
 
+    This class is an alternative to `:meth:.~SeismicCubeset.assemble_crops`, but allows to
+    greatly reduce memory footprint of crop aggregation by up to `overlap_factor` times.
+    Also, as this class updates rely on `location`s of crops, it can take crops in any order.
+
     Note that not all pixels of placeholders will be updated with data due to removal of dead traces,
     so we have to be careful with initialization!
 
@@ -273,16 +277,9 @@ class Accumulator3D:
         self.transform = transform if transform is not None else lambda array: array
 
         # Container definition
-        if path is None:
-            self.type = 'numpy'
-        else:
-            self.type = 'hdf5'
-
-            try:
+        if path is not None:
+            if isinstance(path, str) and os.path.exists(path):
                 os.remove(path)
-            except OSError:
-                pass
-
             self.path = path
 
             self.file = h5py.File(path, mode='w-')
