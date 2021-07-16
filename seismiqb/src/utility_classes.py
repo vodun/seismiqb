@@ -15,7 +15,6 @@ except ImportError:
     cp = np
     CUPY_AVAILABLE = False
 
-from .utils import to_list
 import h5py
 
 from .utils import to_list
