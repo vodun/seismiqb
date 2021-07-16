@@ -388,7 +388,7 @@ class MatplotlibPlotter:
         # other
         'order_axes': (1, 0, 2),
         'bad_color': (.0,.0,.0,.0),
-        'transparize_masks': False,
+        'transparize_masks': None,
     }
 
     @classmethod
@@ -425,7 +425,10 @@ class MatplotlibPlotter:
 
             # fill some values with nans to display them with `bad_color`
             bad_values = filter_parameters(kwargs, ['bad_values'], index=image_num).get('bad_values', [])
-            if kwargs.get('transparize_masks', image_num > 0):
+
+            transparize_masks = kwargs.get('transparize_masks')
+            transparize_masks = transparize_masks if transparize_masks is not None else image_num > 0
+            if transparize_masks:
                 unique_values = tuple(np.unique(image))
                 if unique_values == (0,) or unique_values == (0, 1): # pylint: disable=consider-using-in
                     kwargs['vmin'] = params.get('vmin', 0)
@@ -748,7 +751,7 @@ class MatplotlibPlotter:
         """ Add patches to legend. All invalid colors are filtered. """
         handles = getattr(ax.get_legend(), 'legendHandles', [])
         colors = [color for color in to_list(color) if is_color_like(color)]
-        labels = to_list(label, dtype='object' if any(isinstance(item, list) for item in label) else None)
+        labels = to_list(label)
         new_patches = [Patch(color=color, label=label) for color, label in zip(colors, labels) if label]
         handles += new_patches
         if handles:
