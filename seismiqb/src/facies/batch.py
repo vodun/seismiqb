@@ -39,12 +39,11 @@ class FaciesBatch(SeismicCropBatch):
         label = self.get(ix, src_labels)[label_index]
 
         label_name = self.get(ix, 'label_names')
-        if label.name != label_name:
-            msg = f"""Name of the label loaded by index {label_index} from {src_labels}
-                      does not match label name {label_name} from batch.
-
-                      This might have happened due to items order change in {src_labels}
-                      in between sampler creation and `make_locations` call."""
+        if label.short_name != label_name:
+            msg = f"Name `{label.short_name}` of the label loaded by index {label_index} "\
+                  f"from {src_labels} does not match label name {label_name} from batch."\
+                  f"This might have happened due to items order change in {src_labels} "\
+                  f"in between sampler creation and `make_locations` call."
             raise ValueError(msg)
 
         res = label.load_attribute(src=src, location=location, **kwargs)

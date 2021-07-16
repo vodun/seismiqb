@@ -171,10 +171,8 @@ class FaciesInfo():
             existing_subdirs = next(os.walk(labels_path))[1]
             for label in labels:
                 if label not in existing_subdirs:
-                    msg = f"""
-                        Label subdir {label} was not found in {labels_path}.
-                        Available subdirs are {existing_subdirs}.
-                    """
+                    msg = f"Label subdir {label} was not found in {labels_path}. "\
+                          f"Available subdirs are {existing_subdirs}."
                     warn(msg)
                     labels.pop(label)
         return labels
@@ -183,9 +181,6 @@ class FaciesInfo():
     def _process_base_labels(cls, base_labels, labels):
         """ If not provided explicitly, choose base labels folder name from the list of given labels subfolders. """
         if base_labels not in labels:
-            msg = f"""
-            Base labels '{base_labels}' are not in {labels}.
-            """
             if len(labels) > 1:
                 horizon_labels = [label for label in labels if 'HORIZON' in label]
                 if not horizon_labels:
@@ -197,9 +192,8 @@ class FaciesInfo():
                 base_labels = horizon_labels[0]
             else:
                 base_labels = labels[0]
-            msg += f"""
-            Base labels automatically inferred as `{base_labels}`.
-            """
+            msg = f"Base labels '{base_labels}' are not in {labels}. "\
+                  f"Base labels automatically inferred as `{base_labels}`."
             warn(msg)
         return base_labels
 
@@ -330,11 +324,9 @@ class FaciesInfo():
             }
 
         if not sum(linkage.values(), []):
-            msg = f"""
-            No labels were selected for subset `{subset}`.
-            Either choose non-empty subset or add some labels current one.
-            Labels can be added in either loaded json or via `FaciesInfo.interactive_split`.
-            """
+            msg = f"No labels were selected for subset `{subset}`. "\
+                  "Either choose non-empty subset or add some labels to requested one. "\
+                  "Labels can be added in either loaded json or via `FaciesInfo.interactive_split`."
             raise ValueError(msg)
 
         return linkage

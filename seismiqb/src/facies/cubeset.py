@@ -78,11 +78,9 @@ class FaciesCubeset(SeismicCubeset):
 
         if base_labels not in dst_labels:
             alt_base_labels = dst_labels[0]
-            msg = f"""
-            Provided `base_labels={base_labels}` are not in `dst_labels` and set automatically to `{alt_base_labels}`.
-            That means, that dataset `labels` attribute will point to `{alt_base_labels}`.
-            To override this behaviour provide `base_labels` from `dst_labels`.
-            """
+            msg = f"Provided base_labels `{base_labels}` are not in `dst_labels` and were set automatically "\
+                  f"to `{alt_base_labels}`. That means, that dataset `labels` will point to `{alt_base_labels}`. "\
+                  f"To override this behaviour provide `base_labels` from `dst_labels={dst_labels}`."
             warn(msg)
             base_labels = alt_base_labels
 

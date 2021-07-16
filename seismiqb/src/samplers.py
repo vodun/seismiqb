@@ -641,7 +641,8 @@ class SeismicSampler(Sampler):
             for label_id, label in enumerate(list_labels):
                 label_sampler = baseclass(label, crop_shape=crop_shape_, threshold=threshold_,
                                           ranges=ranges_, filtering_matrix=filtering_matrix_,
-                                          geometry_id=geometry_id, label_id=label_id, **kwargs)
+                                          geometry_id=geometry_id, label_id=label_id, shift_height=shift_height,
+                                          **kwargs)
                 cube_sampler = cube_sampler | label_sampler
 
                 samplers[idx].append(label_sampler)

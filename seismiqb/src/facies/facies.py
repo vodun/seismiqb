@@ -61,9 +61,6 @@ class Facies(Horizon):
         item : Facies
             Instance to store.
         """
-        # if not isinstance(item, Facies):
-        #     msg = f"Only instances of `Facies` can be added as subsets, but {type(item)} was given."
-        #     raise TypeError(msg)
         self.subsets[name] = item
 
 
@@ -202,7 +199,6 @@ class Facies(Horizon):
         depths = [window // 2] if depths is None else depths
         amplitudes = self.get_cube_values(window, use_cache=False, **kwargs) #pylint: disable=unexpected-keyword-arg
         result = np.abs(hilbert(amplitudes))[:, :, depths]
-        # result[self.full_matrix == self.FILL_VALUE] = np.nan
         return self.transform_where_present(result, **transform_kwargs)
 
 
