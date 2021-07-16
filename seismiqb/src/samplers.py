@@ -164,7 +164,7 @@ class GeometrySampler(BaseSampler):
         self.geometry = geometry
         self.matrix = matrix
         self.name = geometry.short_name
-        self.displayed_name = geometry.short_name
+        self.displayed_name = geometry.displayed_name
         super().__init__()
 
     def sample(self, size):
@@ -228,11 +228,13 @@ class HorizonSampler(BaseSampler):
         Map of points to remove from potentially generated locations.
     geometry_id, label_id : int
         Used as the first two columns of sampled values.
+    shift_height : bool
+        Whether apply random shift to height locations of sampled horizon points or not.
     """
     dim = 2 + 1 + 6 # dimensionality of sampled points: geometry_id and label_id, orientation, locations
 
     def __init__(self, horizon, crop_shape, threshold=0.05, ranges=None, filtering_matrix=None,
-                 geometry_id=0, label_id=0, **kwargs):
+                 geometry_id=0, label_id=0, shift_height=True, **kwargs):
         geometry = horizon.geometry
         matrix = horizon.full_matrix
 
@@ -249,6 +251,7 @@ class HorizonSampler(BaseSampler):
         self.matrix = matrix
         self.name = horizon.geometry.short_name
         self.displayed_name = horizon.short_name
+        self.shift_height = shift_height
         super().__init__()
 
     def sample(self, size):
@@ -279,9 +282,10 @@ class HorizonSampler(BaseSampler):
         idx = np.random.randint(self.n, size=size)
         sampled = self.locations[idx]
 
-        shift = np.random.randint(low=-int(self.crop_height*0.9), high=-int(self.crop_height*0.1),
-                                  size=(size, 1), dtype=np.int32)
-        sampled[:, [3, 6]] += shift
+        if self.shift_height:
+            shift = np.random.randint(low=-int(self.crop_height*0.9), high=-int(self.crop_height*0.1),
+                                    size=(size, 1), dtype=np.int32)
+            sampled[:, [3, 6]] += shift
 
         np.clip(sampled[:, 3], 0, self.geometry.cube_shape[2] - self.crop_height, out=sampled[:, 3])
         np.clip(sampled[:, 6], 0 + self.crop_height, self.geometry.cube_shape[2], out=sampled[:, 6])
@@ -600,6 +604,8 @@ class SeismicSampler(Sampler):
         Note that we actually use only the first two elements, corresponding to spatial ranges.
     filtering_matrix : np.ndarray, optional
         Map of points to remove from potentially generated locations.
+    shift_height : bool
+        Whether apply random shift to height locations of sampled horizon points or not.
     kwargs : dict
         Other parameters of initializing label samplers.
     """
@@ -613,7 +619,7 @@ class SeismicSampler(Sampler):
                      for mode in mode_list}
 
     def __init__(self, labels, crop_shape, proportions=None, mode='geometry',
-                 threshold=0.05, ranges=None, filtering_matrix=None, **kwargs):
+                 threshold=0.05, ranges=None, filtering_matrix=None, shift_height=True, **kwargs):
         baseclass = self.MODE_TO_CLASS[mode]
 
         names, geometry_names = {}, {}
@@ -667,6 +673,8 @@ class SeismicSampler(Sampler):
         """ Convert the first two columns of sampled locations into geometry and label string names. """
         return np.array([self.names[tuple(ids)] for ids in id_array])
 
+    def __len__(self):
+        return sum(len(sampler.locations) for sampler_list in self.samplers.values() for sampler in sampler_list)
 
     def __str__(self):
         msg = 'SeismicSampler:'
@@ -739,10 +747,10 @@ class BaseGrid:
     """ Determenistic generator of crop locations. """
     def __init__(self, crop_shape, batch_size=64, locations=None, geometry=None):
         self._iterator = None
+        self.crop_shape = np.array(crop_shape)
         self.batch_size = batch_size
 
         if locations is None:
-            self.crop_shape = np.array(crop_shape)
             self._make_locations()
         else:
             self.locations = locations
@@ -819,12 +827,17 @@ class BaseGrid:
 
     # Useful info
     @property
-    def origin(self):
+    def original_crop_shape(self):
+        """ Original crop shape. """
+        return self.crop_shape if self.orientation == 0 else self.crop_shape[[1, 0, 2]]
+
+    @property
+    def actual_origin(self):
         """ The upper leftmost point of all locations. """
         return self.locations[:, [3, 4, 5]].min(axis=0).astype(np.int32)
 
     @property
-    def endpoint(self):
+    def actual_endpoint(self):
         """ The lower rightmost point of all locations. """
         return self.locations[:, [6, 7, 8]].max(axis=0).astype(np.int32)
 
@@ -917,7 +930,12 @@ class RegularGrid(BaseGrid):
         Number of batches to generate on demand.
     """
     def __init__(self, geometry, ranges, crop_shape, geometry_id=-1, label_id=-1, orientation=0, label_name='unknown',
-                 threshold=0, strides=None, overlap=None, overlap_factor=None, batch_size=64):
+                 threshold=0, strides=None, overlap=None, overlap_factor=None, batch_size=64, locations=None):
+        # Make correct crop shape
+        orientation = geometry.parse_axis(orientation)
+        crop_shape = np.array(crop_shape)
+        crop_shape = crop_shape if orientation == 0 else crop_shape[[1, 0, 2]]
+
         # Make ranges
         ranges = [item if item is not None else [0, c] for item, c in zip(ranges, geometry.cube_shape)]
         ranges = np.array(ranges)
@@ -925,6 +943,10 @@ class RegularGrid(BaseGrid):
         if (ranges[:, 0] < 0).any() or (ranges[:, 1] > geometry.cube_shape).any():
             raise ValueError('Grid ranges must contain in the geometry!')
         self.ranges = ranges
+
+        # Infer from `ranges`
+        self.origin = ranges[:, 0]
+        self.endpoint = ranges[:, 1]
         self.shape = ranges[:, 1] - ranges[:, 0]
 
         # Make `strides`
@@ -953,7 +975,7 @@ class RegularGrid(BaseGrid):
         self.geometry_name = geometry.short_name
         self.label_name = label_name
         self.unfiltered_length = None
-        super().__init__(crop_shape=crop_shape, batch_size=batch_size)
+        super().__init__(crop_shape=crop_shape, batch_size=batch_size, locations=locations, geometry=geometry)
 
     @staticmethod
     def _arange(start, stop, stride, limit):
@@ -962,6 +984,7 @@ class RegularGrid(BaseGrid):
         return np.sort(grid)
 
     def _make_locations(self):
+        # Ranges for each axis
         i_args, x_args, h_args = tuple(zip(self.ranges[:, 0],
                                            self.ranges[:, 1],
                                            self.strides,
@@ -996,10 +1019,71 @@ class RegularGrid(BaseGrid):
         """ Convert the first two columns of sampled locations into geometry and label string names. """
         return np.array([(self.geometry_name, self.label_name) for ids in id_array])
 
+    def to_chunks(self, size, overlap=0.05):
+        """ Split the current grid into chunks along `orientation` axis.
+
+        Parameters
+        ----------
+        size : int
+            Length of one chunk along the splitting axis.
+        overlap : number
+            If integer, then number of slices for overlapping between consecutive chunks.
+            If float, then proportion of `size` to overlap between consecutive chunks.
+
+        Returns
+        -------
+        iterator with instances of `RegularGrid`.
+        """
+        return RegularGridChunksIterator(grid=self, size=size, overlap=overlap)
+
 
     def __repr__(self):
         return f'<RegularGrid for {self.geometry.short_name}: '\
-               f'origin={tuple(self.origin)}, endpoint={tuple(self.endpoint)}, crop_shape={tuple(self.crop_shape)}>'
+               f'origin={tuple(self.origin)}, endpoint={tuple(self.endpoint)}, crop_shape={tuple(self.crop_shape)}, '\
+               f'orientation={self.orientation}>'
+
+
+
+class RegularGridChunksIterator:
+    """ Split regular grid into chunks along `orientation` axis. Supposed to be iterated over.
+
+    Parameters
+    ----------
+    grid : RegularGrid
+        Regular grid to split into chunks.
+    size : int
+        Length of one chunk along the splitting axis.
+    overlap : number
+        If integer, then number of slices for overlapping between consecutive chunks.
+        If float, then proportion of `size` to overlap between consecutive chunks.
+    """
+    def __init__(self, grid, size, overlap):
+        self.grid = grid
+        self.size = size
+        self.overlap = overlap
+
+        self.step = int(size * (1 - overlap)) if isinstance(overlap, (float, np.float)) else size - overlap
+
+    def __iter__(self):
+        grid = self.grid
+
+        for start in range(*grid.ranges[grid.orientation], self.step):
+            stop = min(start + self.size, grid.geometry.cube_shape[grid.orientation])
+
+            chunk_ranges = grid.ranges.copy()
+            chunk_ranges[grid.orientation] = [start, stop]
+
+            # Filter points beyound chunk ranges along `orientation` axis
+            mask = ((grid.locations[:, 3 + grid.orientation] >= start) &
+                    (grid.locations[:, 6 + grid.orientation] <= stop))
+            chunk_locations = grid.locations[mask]
+
+            yield RegularGrid(locations=chunk_locations, ranges=chunk_ranges, strides=grid.strides,
+                              orientation=grid.orientation, threshold=grid.threshold, geometry=grid.geometry,
+                              crop_shape=grid.original_crop_shape, batch_size=grid.batch_size)
+
+    def __len__(self):
+        return len(range(*self.grid.ranges[self.grid.orientation], self.step))
 
 
 
