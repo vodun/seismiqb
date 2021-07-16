@@ -36,6 +36,7 @@ class SeismicCubeset(Dataset):
     labels : IndexedDict
         Nested storage of labels, where keys are cube names and values are sequences of labels.
     """
+    #pylint: disable=keyword-arg-before-vararg
     def __init__(self, index, batch_class=SeismicCropBatch, preloaded=None, *args, **kwargs):
         # Wrap with `FilesIndex`, if needed
         if not isinstance(index, FilesIndex):
@@ -176,8 +177,8 @@ class SeismicCubeset(Dataset):
         self._cached_attributes.add(dst)
 
 
-    def dump_labels(self, path, fmt='npy', separate=False):
-        """ Dump points to file. """
+    def dump_labels(self, path, name='points', separate=True):
+        """ Dump label points to file. """
         for idx, labels_list in self.labels.items():
             for label in labels_list:
                 dirname = os.path.dirname(self.index.get_fullpath(idx))
@@ -186,9 +187,9 @@ class SeismicCubeset(Dataset):
                 dirname = os.path.join(dirname, path)
                 if not os.path.exists(dirname):
                     os.makedirs(dirname)
-                name = label.name if separate else 'faults'
-                save_to = os.path.join(dirname, name + '.' + fmt)
-                label.dump_points(save_to, fmt)
+                name = label.name if separate else name
+                save_to = os.path.join(dirname, name + '.npz')
+                label.dump_points(save_to)
 
     def reset_caches(self, attributes=None):
         """ Reset lru cache for cached class attributes.
@@ -206,6 +207,21 @@ class SeismicCubeset(Dataset):
                 cached_attr = getattr(self, attr)[idx]
                 cached_attr = cached_attr if isinstance(cached_attr, list) else [cached_attr]
                 _ = [item.reset_cache() for item in cached_attr]
+
+
+    # Default pipeline and batch for fast testing / introspection
+    def data_pipeline(self, sampler, batch_size=4):
+        """ Pipeline with default actions of creating locations, loading seismic images and corresponding masks. """
+        return (self.p
+                .make_locations(generator=sampler, batch_size=batch_size)
+                .create_masks(dst='masks', width=4)
+                .load_cubes(dst='images')
+                .adaptive_reshape(src=['images', 'masks'])
+                .normalize(src='images'))
+
+    def data_batch(self, sampler, batch_size=4):
+        """ Get one batch of `:meth:.data_pipeline` with `images` and `masks`. """
+        return self.data_pipeline(sampler=sampler, batch_size=batch_size).next_batch()
 
 
     # Textual and visual representation of dataset contents
@@ -404,8 +420,8 @@ class SeismicCubeset(Dataset):
             imgs = [img[zoom_slice] for img in imgs]
             xmin = zoom_slice[0].start or xmin
             xmax = zoom_slice[0].stop or xmax
-            ymin = zoom_slice[1].stop or xmin
-            ymax = zoom_slice[1].start or xmax
+            ymin = zoom_slice[1].stop or ymin
+            ymax = zoom_slice[1].start or ymax
 
         # Plotting defaults
         header = geometry.axis_names[axis]
@@ -544,7 +560,7 @@ class SeismicCubeset(Dataset):
 
     # Convenient loader
     def load(self, label_dir=None, filter_zeros=True, dst_labels='labels',
-             labels_class=Horizon, **kwargs):
+             labels_class=Horizon, direction=None, **kwargs):
         """ Load geometries and labels, stored on disk in a predefined format:
 
         Parameters
@@ -557,6 +573,8 @@ class SeismicCubeset(Dataset):
             Class attribute to put loaded data into.
         labels_class : class
             Class to use for labels creation.
+        direction : int or None
+            Faults direction, 0 or 1. If None, will be infered automatically.
         """
         self.load_geometries(**kwargs)
 
@@ -573,4 +591,4 @@ class SeismicCubeset(Dataset):
             paths_txt[idx] = dir_
 
         self.create_labels(paths=paths_txt, filter_zeros=filter_zeros, dst=dst_labels,
-                           labels_class=labels_class, **kwargs)
+                           labels_class=labels_class, direction=direction, **kwargs)

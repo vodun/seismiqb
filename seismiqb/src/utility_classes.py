@@ -18,6 +18,8 @@ except ImportError:
 from .utils import to_list
 import h5py
 
+from .utils import to_list
+
 
 
 class Accumulator:
@@ -262,12 +264,10 @@ class Accumulator3D:
         Other parameters are passed to HDF5 dataset creation.
     """
     def __init__(self, shape=None, origin=None, dtype=np.float32, transform=None, path=None, **kwargs):
-        # Main attribute to store results
-        self.data = None
-
         # Dimensionality and location
         self.shape = shape
         self.origin = origin
+        self.location = [slice(start, start + shape) for start, shape in zip(self.origin, self.shape)]
 
         # Properties of storages
         self.dtype = dtype
@@ -287,16 +287,16 @@ class Accumulator3D:
             self.path = path
 
             self.file = h5py.File(path, mode='w-')
-            self.options = {**kwargs}
+        self.type = 'hdf5' if path is not None else 'numpy'
 
         self.aggregated = False
+        self.kwargs = kwargs
 
     # Placeholder management
     def create_placeholder(self, name=None, dtype=None, fill_value=None):
         """ Create named storage as a dataset of HDF5 or plain array. """
         if self.type == 'hdf5':
-            placeholder = self.file.create_dataset(name, shape=self.shape, dtype=dtype,
-                                                   fillvalue=fill_value, **self.options)
+            placeholder = self.file.create_dataset(name, shape=self.shape, dtype=dtype, fillvalue=fill_value)
         elif self.type == 'numpy':
             placeholder = np.full(shape=self.shape, fill_value=fill_value, dtype=dtype)
 
@@ -304,7 +304,7 @@ class Accumulator3D:
 
     def remove_placeholder(self, name=None):
         """ Remove created placeholder. """
-        if self.type == 'hdf5':
+        if self.type in ['hdf5', 'blosc']:
             del self.file[name]
         setattr(self, name, None)
 
@@ -345,9 +345,12 @@ class Accumulator3D:
         self._aggregate()
 
         # Re-open the HDF5 file to force flush changes and release disk space from deleted datasets
+        # Also add alias to `data` dataset, so the resulting cube can be opened by `SeismicGeometry`
         if self.type == 'hdf5':
+            self.file['cube_i'] = self.file['data']
             self.file.close()
             self.file = h5py.File(self.path, 'r')
+
             self.data = self.file['data']
 
         self.aggregated = True
@@ -358,14 +361,12 @@ class Accumulator3D:
         raise NotImplementedError
 
     def __del__(self):
-        if self.type == 'hdf5':
+        if self.type in ['hdf5', 'blosc']:
             self.file.close()
 
     def clear(self):
         """ Remove placeholders from memory and disk. """
-        self.data = None
-
-        if self.type == 'hdf5':
+        if self.type in ['hdf5', 'blosc']:
             os.remove(self.path)
 
     @property
@@ -389,6 +390,13 @@ class Accumulator3D:
 
         return aggregation_to_class[aggregation](shape=shape, origin=origin, dtype=dtype, fill_value=fill_value,
                                                  transform=transform, path=path, **kwargs)
+
+    @classmethod
+    def from_grid(cls, grid, aggregation='max', dtype=np.float32, fill_value=None, transform=None, path=None, **kwargs):
+        """ Infer necessary parameters for accumulator creation from a passed grid. """
+        return cls.from_aggregation(aggregation=aggregation, dtype=dtype, fill_value=fill_value,
+                                    shape=grid.shape, origin=grid.origin, orientation=grid.orientation,
+                                    transform=transform, path=path, **kwargs)
 
 
 class MaxAccumulator3D(Accumulator3D):
@@ -477,11 +485,70 @@ class GMeanAccumulator3D(Accumulator3D):
         self.remove_placeholder('counts')
 
 
+class AccumulatorBlosc(Accumulator3D):
+    """ Accumulate predictions into `BLOSC` file.
+    Each of the saved slides supposed to be finalized, e.g. coming from another accumulator.
+    During the aggregation, we repack the file to remove duplicates.
+
+    Parameters
+    ----------
+    path : str
+        Path to save `BLOSC` file to.
+    orientation : int
+        If 0, then predictions are stored as `cube_i` dataset inside the file.
+        If 1, then predictions are stored as `cube_x` dataset inside the file and transposed before storing.
+    aggregation : str
+        Type of aggregation for duplicate slides.
+        If `max`, then we take element-wise maximum.
+        If `mean`, then take mean value.
+        If None, then we take random slide.
+    """
+    def __init__(self, path, orientation=0, aggregation='max',
+                 shape=None, origin=None, dtype=np.float32, transform=None, **kwargs):
+        super().__init__(shape=shape, origin=origin, dtype=dtype, transform=transform, path=None)
+        self.type = 'blosc'
+        self.path = path
+        self.orientation = orientation
+        self.aggregation = aggregation
+
+        # Manage the `BLOSC` file
+        from .geometry import BloscFile #pylint: disable=import-outside-toplevel
+        self.file = BloscFile(path, mode='w')
+        if orientation == 0:
+            name = 'cube_i'
+        elif orientation == 1:
+            name = 'cube_x'
+            shape = np.array(shape)[[1, 0, 2]]
+        self.file.create_dataset(name, shape=shape, dtype=dtype)
+
+
+    def _update(self, crop, location):
+        crop = crop.astype(self.dtype)
+        iterator = range(location[self.orientation].start, location[self.orientation].stop)
+
+        # `i` is `loc_idx` shifted by `origin`
+        for i, loc_idx in enumerate(iterator):
+            slc = [slice(None), slice(None), slice(None)]
+            slc[self.orientation] = i
+            slide = crop[tuple(slc)]
+            self.data[loc_idx, :, :] = slide.T if self.orientation == 1 else slide
+
+    def _aggregate(self):
+        self.file = self.file.repack(aggregation=self.aggregation)
+
+
+    @classmethod
+    def from_grid(cls, grid, aggregation='max', dtype=np.float32, transform=None, path=None, **kwargs):
+        """ Infer necessary parameters for accumulator creation from a passed grid. """
+        return cls(path=path, aggregation=aggregation, dtype=dtype, transform=transform,
+                   shape=grid.shape, origin=grid.origin, orientation=grid.orientation, **kwargs)
+
+
 
 class IndexedDict(OrderedDict):
     """ `OrderedDict` that allows integer indexing and values flattening.
 
-    - Both keys and their indices might be used to subscript. Therefore `int` keys are not supported.
+    - Both keys and their ordinal numbers might be used to subscript. Therefore `int` keys are not supported.
     - Flatten values list of requested keys can be obtained via `flatten` method.
     - Flatten list of all values is also available via `flat` property.
     """
@@ -497,19 +564,17 @@ class IndexedDict(OrderedDict):
 
     def flatten(self, keys=None):
         """ Get dict values for requested keys in a single list. """
-        keys = to_list(keys or list(self.keys()))
-        keys = [key if isinstance(key, str) else all_keys[key] for key in keys]
+        keys = to_list(keys) if keys is not None else list(self.keys())
         lists = [to_list(self[key]) for key in keys]
         return sum(lists, [])
-
-    def __iter__(self):
-        return (x for x in self.flatten())
 
     @property
     def flat(self):
         """ List of all dictionary values. """
-        return list(self)
+        return self.flatten()
 
+    def __iter__(self):
+        return (x for x in self.flat)
 
 
 class lru_cache:

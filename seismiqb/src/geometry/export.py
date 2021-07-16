@@ -55,7 +55,7 @@ class ExportMixin:
         grid = np.stack([lower_bounds, upper_bounds], axis=-1)
 
         for position, chunk in src:
-            slices = tuple([slice(position[i], position[i]+chunk.shape[i]) for i in range(3)])
+            slices = tuple(slice(position[i], position[i]+chunk.shape[i]) for i in range(3))
             _chunk = dst[slices]
             if agg in ('max', 'min'):
                 chunk = np.maximum(chunk, _chunk) if agg == 'max' else np.minimum(chunk, _chunk)
