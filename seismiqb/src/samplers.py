@@ -164,7 +164,7 @@ class GeometrySampler(BaseSampler):
         self.geometry = geometry
         self.matrix = matrix
         self.name = geometry.short_name
-        self.displayed_name = geometry.short_name
+        self.displayed_name = geometry.displayed_name
         super().__init__()
 
     def sample(self, size):
@@ -923,8 +923,8 @@ class RegularGrid(BaseGrid):
     batch_size : int
         Number of batches to generate on demand.
     """
-    def __init__(self, geometry, ranges, crop_shape, orientation=0, threshold=0,
-                 strides=None, overlap=None, overlap_factor=None, batch_size=64, locations=None):
+    def __init__(self, geometry, ranges, crop_shape, geometry_id=-1, label_id=-1, orientation=0, label_name='unknown',
+                 threshold=0, strides=None, overlap=None, overlap_factor=None, batch_size=64, locations=None)::
         # Make correct crop shape
         orientation = geometry.parse_axis(orientation)
         crop_shape = np.array(crop_shape)
@@ -962,9 +962,12 @@ class RegularGrid(BaseGrid):
             threshold = int(threshold * crop_shape[0] * crop_shape[1])
         self.threshold = threshold
 
+        self.geometry_id = geometry_id
+        self.label_id = label_id
         self.orientation = orientation
         self.geometry = geometry
-        self.name = geometry.short_name
+        self.geometry_name = geometry.short_name
+        self.label_name = label_name
         self.unfiltered_length = None
         super().__init__(crop_shape=crop_shape, batch_size=batch_size, locations=locations, geometry=geometry)
 
@@ -998,7 +1001,8 @@ class RegularGrid(BaseGrid):
 
         # Buffer: (cube_id, i_start, x_start, h_start, i_stop, x_stop, h_stop)
         buffer = np.empty((len(points), 9), dtype=np.int32)
-        buffer[:, [0, 1]] = -1
+        buffer[:, 0] = self.geometry_id
+        buffer[:, 1] = self.label_id
         buffer[:, 2] = self.orientation
         buffer[:, [3, 4, 5]] = points
         buffer[:, [6, 7, 8]] = points
@@ -1007,7 +1011,7 @@ class RegularGrid(BaseGrid):
 
     def to_names(self, id_array):
         """ Convert the first two columns of sampled locations into geometry and label string names. """
-        return np.array([(self.name, 'unknown') for ids in id_array])
+        return np.array([(self.geometry_name, self.label_name) for ids in id_array])
 
     def to_chunks(self, size, overlap=0.05):
         """ Split the current grid into chunks along `orientation` axis.
