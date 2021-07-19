@@ -233,8 +233,8 @@ class HorizonSampler(BaseSampler):
     """
     dim = 2 + 1 + 6 # dimensionality of sampled points: geometry_id and label_id, orientation, locations
 
-    def __init__(self, horizon, crop_shape, threshold=0.05, ranges=None, filtering_matrix=None,
-                 geometry_id=0, label_id=0, shift_height=True, **kwargs):
+    def __init__(self, horizon, crop_shape, threshold=0.05, ranges=None, filtering_matrix=None, shift_height=True,
+                 geometry_id=0, label_id=0, **kwargs):
         geometry = horizon.geometry
         matrix = horizon.full_matrix
 
@@ -341,8 +341,8 @@ class FaultSampler(BaseSampler):
     """
     dim = 2 + 1 + 6 # dimensionality of sampled points: geometry_id and label_id, orientation, locations
 
-    def __init__(self, fault, crop_shape, threshold=0, ranges=None, geometry_id=0, label_id=0,
-                 extend=True, transpose=False, **kwargs):
+    def __init__(self, fault, crop_shape, threshold=0, ranges=None, extend=True, transpose=False,
+                 geometry_id=0, label_id=0, **kwargs):
         geometry = fault.geometry
 
         self.points = fault.points
@@ -605,7 +605,7 @@ class SeismicSampler(Sampler):
     filtering_matrix : np.ndarray, optional
         Map of points to remove from potentially generated locations.
     shift_height : bool
-        Whether apply random shift to height locations of sampled horizon points or not.
+        Whether to apply random shift to height locations of sampled horizon points or not.
     kwargs : dict
         Other parameters of initializing label samplers.
     """
@@ -761,6 +761,9 @@ class BaseGrid:
     def _make_locations(self):
         raise NotImplementedError('Must be implemented in sub-classes')
 
+    def to_names(self, id_array):
+        """ Convert the first two columns of sampled locations into geometry and label string names. """
+        return np.array([(self.geometry_name, self.label_name) for ids in id_array])
 
     # Iteration protocol
     @property
@@ -797,7 +800,6 @@ class BaseGrid:
         """ Total number of iterations. """
         return np.ceil(len(self) / self.batch_size).astype(np.int32)
 
-
     # Concatenate multiple grids into one
     def join(self, other):
         """ Update locations of a current grid with locations from other instance of BaseGrid. """
@@ -812,21 +814,17 @@ class BaseGrid:
         return BaseGrid(locations=locations, batch_size=batch_size, geometry=self.geometry)
 
     def __add__(self, other):
-        self.join(other)
+        return self.join(other)
 
     def __and__(self, other):
-        self.join(other)
+        return self.join(other)
 
-    def to_names(self, id_array):
-        """ Convert the first two columns of sampled locations into geometry and label string names. """
-        return np.array([(self.name, 'unknown') for ids in id_array])
 
+    # Useful info
     def __repr__(self):
         return f'<BaseGrid for {self.name}: '\
                f'origin={tuple(self.origin)}, endpoint={tuple(self.endpoint)}>'
 
-
-    # Useful info
     @property
     def original_crop_shape(self):
         """ Original crop shape. """
@@ -929,9 +927,15 @@ class RegularGrid(BaseGrid):
         Only one of `strides`, `overlap` or `overlap_factor` should be specified.
     batch_size : int
         Number of batches to generate on demand.
+    geometry_id, label_id : int
+        Used as the first two columns of sampled values.
+    label_name : str, optional
+        Name of the inferred label.
+    locations : np.array, optional
+        Pre-defined locations. If provided, then directly stored and used as the grid coordinates.
     """
-    def __init__(self, geometry, ranges, crop_shape, geometry_id=-1, label_id=-1, orientation=0, label_name='unknown',
-                 threshold=0, strides=None, overlap=None, overlap_factor=None, batch_size=64, locations=None):
+    def __init__(self, geometry, ranges, crop_shape, orientation=0, strides=None, overlap=None, overlap_factor=None,
+                 threshold=0, batch_size=64, geometry_id=-1, label_id=-1, label_name='unknown', locations=None):
         # Make correct crop shape
         orientation = geometry.parse_axis(orientation)
         crop_shape = np.array(crop_shape)
@@ -1016,9 +1020,6 @@ class RegularGrid(BaseGrid):
         buffer[:, [6, 7, 8]] += self.crop_shape
         self.locations = buffer
 
-    def to_names(self, id_array):
-        """ Convert the first two columns of sampled locations into geometry and label string names. """
-        return np.array([(self.geometry_name, self.label_name) for ids in id_array])
 
     def to_chunks(self, size, overlap=0.05):
         """ Split the current grid into chunks along `orientation` axis.
@@ -1123,7 +1124,7 @@ class ExtensionGrid(BaseGrid):
         self.horizon = horizon
         self.geometry = horizon.geometry
         self.geometry_name = horizon.geometry.short_name
-        self.horizon_name = horizon.short_name
+        self.label_name = horizon.short_name
         self.name = self.geometry_name
 
         self.uncovered_before = None
@@ -1221,9 +1222,6 @@ class ExtensionGrid(BaseGrid):
         locations[:, 2:9] = buffer
         self.locations = locations
 
-    def to_names(self, id_array):
-        """ Convert the first two columns of sampled locations into geometry and label string names. """
-        return np.array([(self.geometry_name, self.horizon_name) for ids in id_array])
 
     @property
     def uncovered_after(self):
@@ -1271,7 +1269,7 @@ class ExtensionGrid(BaseGrid):
                 'cmap': 'blue',
                 'alpha': 0.3,
                 'colorbar': False,
-                'title': f'Extension Grid on `{self.horizon_name}`',
+                'title': f'Extension Grid on `{self.label_name}`',
                 'ax': ax[0],
                 **kwargs,
             }

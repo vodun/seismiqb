@@ -430,14 +430,14 @@ class MeanAccumulator3D(Accumulator3D):
             for i in range(self.data.shape[0]):
                 counts = self.counts[i]
                 counts[counts == 0] = 1
-                if 'float' in self.dtype.__name__:
+                if np.issubdtype(self.dtype, np.floating):
                     self.data[i] /= counts
                 else:
                     self.data[i] //= counts
 
         elif self.type == 'numpy':
             self.counts[self.counts == 0] = 1
-            if 'float' in self.dtype.__name__:
+            if np.issubdtype(self.dtype, np.floating):
                 self.data /= self.counts
             else:
                 self.data //= self.counts
