@@ -804,7 +804,7 @@ class BaseGrid:
         """ Update locations of a current grid with locations from other instance of BaseGrid. """
         if not isinstance(other, BaseGrid):
             raise TypeError('Other should be an instance of `BaseGrid`')
-        if self.name != other.name:
+        if self.geometry_name != other.geometry_name:
             raise ValueError('Grids should be for the same geometry!')
 
         locations = np.concatenate([self.locations, other.locations], axis=0)
