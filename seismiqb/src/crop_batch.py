@@ -14,7 +14,8 @@ from ..batchflow import FilesIndex, Batch, action, inbatch_parallel, SkipBatchEx
 
 from .horizon import Horizon
 from .plotters import plot_image
-from .utils import compute_attribute
+from .utils import compute_attribute, to_list
+from .utility_classes import IndexedDict
 
 
 AFFIX = '___'
@@ -35,8 +36,6 @@ class SeismicCropBatch(Batch):
         'target': 'for',
         'post': '_assemble'
     }
-    # When an attribute containing one of keywords from list it accessed via `get`, firstly search it in `self.dataset`.
-    DATASET_ATTRIBUTES = ['label', 'geom', 'fan', 'channel', 'horizon']
 
 
     def _init_component(self, *args, **kwargs):
@@ -53,6 +52,29 @@ class SeismicCropBatch(Batch):
             if not hasattr(self, comp):
                 self.add_components(comp, np.array([np.nan] * len(self.index)))
         return self.indices
+
+    @action
+    def add_components(self, components, init=None):
+        """ Add new components, checking that attributes of the same name are not present in dataset.
+
+        Parameters
+        ----------
+        components : str or list
+            new component names
+        init : array-like
+            initial component data
+
+        Raises
+        ------
+        ValueError
+            If a component or an attribute with the given name already exists in batch or dataset.
+        """
+        for component in to_list(components):
+            if hasattr(self.dataset, component):
+                msg = f"Component with `{component}` name cannot be added to batch, "\
+                      "since attribute with this name is already present in dataset."
+                raise ValueError(msg)
+        super().add_components(components=components, init=init)
 
     # Inner workings
     @staticmethod
@@ -102,34 +124,25 @@ class SeismicCropBatch(Batch):
         return path
 
 
-    def __getattr__(self, name):
-        """ Retrieve data from either `self` or attached dataset. """
-        if hasattr(self.dataset, name):
-            return getattr(self.dataset, name)
-        return super().__getattr__(name)
-
     def get(self, item=None, component=None):
         """ Custom access for batch attributes.
-        If `component` has an entry from `DATASET_ATTRIBUTES` than retrieve it
-        from attached dataset and use unsalted version of `item` as key.
-        Otherwise, get position of `item` in the current batch and use it to index sequence-like `component`.
+        If `component` is present in dataset and is an instance of `IndexedDict`, that index it with item and return it.
+        Otherwise retrieve `component` from batch itself and optionally index it with `item` position in `self.indices`.
         """
-        if any(attribute in component for attribute in self.DATASET_ATTRIBUTES):
+        data = getattr(self.dataset, component, None)
+        if isinstance(data, IndexedDict):
             if isinstance(item, str) and self.has_salt(item):
                 item = self.unsalt(item)
-            res = getattr(self, component)
-            if isinstance(res, dict) and item in res:
-                return res[item]
-            return res
+            return data[item]
 
+        data = getattr(self, component) if isinstance(component, str) else component
         if item is not None:
-            data = getattr(self, component) if isinstance(component, str) else component
             if isinstance(data, (np.ndarray, list)) and len(data) == len(self):
                 pos = np.where(self.indices == item)[0][0]
                 return data[pos]
-
             return super().get(item, component)
-        return getattr(self, component)
+
+        return data
 
 
     # Core actions
@@ -403,12 +416,6 @@ class SeismicCropBatch(Batch):
                 break
         return mask
 
-    def get_nearest_horizon(self, ix, src_labels, heights_slice):
-        """ Get horizon with its `h_mean` closest to mean of `heights_slice`. """
-        location_h_mean = (heights_slice.start + heights_slice.stop) // 2
-        nearest_horizon_ind = np.argmin([abs(horizon.h_mean - location_h_mean) for horizon in self.get(ix, src_labels)])
-        return self.get(ix, src_labels)[nearest_horizon_ind]
-
 
     # More methods to work with labels
     @action
@@ -437,7 +444,7 @@ class SeismicCropBatch(Batch):
         _ = args, kwargs
         new_index = [self.indices[i] for i, area in enumerate(areas) if area > threshold]
         new_dict = {idx: self.index._paths[idx] for idx in new_index}
-        if len(new_index):
+        if len(new_index) > 0:
             self.index = FilesIndex.from_index(index=new_index, paths=new_dict, dirs=False)
         else:
             raise SkipBatchException
