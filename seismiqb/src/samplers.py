@@ -962,9 +962,6 @@ class RegularGrid(BaseGrid):
         # Make ranges
         ranges = [item if item is not None else [0, c] for item, c in zip(ranges, geometry.cube_shape)]
         ranges = np.array(ranges)
-
-        if (ranges[:, 0] < 0).any() or (ranges[:, 1] > geometry.cube_shape).any():
-            raise ValueError('Grid ranges must contain in the geometry!')
         self.ranges = ranges
 
         # Infer from `ranges`
