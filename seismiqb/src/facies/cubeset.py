@@ -4,15 +4,12 @@ from warnings import warn
 from datetime import datetime
 from collections import defaultdict
 
-import numpy as np
 import pandas as pd
-from tqdm.notebook import tqdm
 
 from .facies import Facies
 from .batch import FaciesBatch
-from ..samplers import RegularGrid
 from ..cubeset import SeismicCubeset
-from ..utility_classes import IndexedDict, Accumulator3D
+from ..utility_classes import IndexedDict
 from ..utils import to_list
 
 
@@ -132,9 +129,10 @@ class FaciesCubeset(SeismicCubeset):
                 results[src][label.short_name] = res
         return results
 
-    def show(self, load='depths', src_labels='labels', indices=None, **kwargs):
+    def show(self, attributes='depths', src_labels='labels', indices=None, **kwargs):
         """ Show attributes of multiple dataset labels. """
-        res = self.apply_to_labels(function='show', src_labels=src_labels, indices=indices, load=load, **kwargs)
+        res = self.apply_to_labels(function='show', src_labels=src_labels, indices=indices,
+                                   attributes=attributes, **kwargs)
         return res if kwargs.get('return_figure') else None
 
     def invert_subsets(self, subset, indices=None, src_labels='labels', dst_labels=None, add_subsets=True):
@@ -165,55 +163,6 @@ class FaciesCubeset(SeismicCubeset):
         setattr(self, dst_labels, results)
         if add_subsets_to:
             self.add_subsets(subset_labels=dst_labels, base_labels=add_subsets_to)
-
-    def make_predictions(self, pipeline, crop_shape, overlap_factor, aggregation='mean', src_labels='labels',
-                         dst_labels='predictions', add_subsets=True, notifier={'bar': 'n'}):
-        """
-        Make predictions and put them into dataset attribute.
-
-        Parameters
-        ----------
-        pipeline : Pipeline
-            Inference pipeline.
-        crop_shape : sequence
-            Passed directly to :meth:`.make_grid`.
-        overlap_factor : float or sequence
-            Passed directly to :meth:`.make_grid`.
-        src_labels : str
-            Name of dataset component with items to make grid for.
-        dst_labels : str
-            Name of dataset component to put predictions into.
-        """
-        # pylint: disable=blacklisted-name
-        results = IndexedDict({ix: [] for ix in self.indices})
-        labels = getattr(self, src_labels)
-        pbar = tqdm(labels.flat)
-        pbar.set_description("General progress")
-
-        for label in pbar:
-            label_id = np.where([item.name == label.name for item in labels[label.geometry.short_name]])[0][0]
-            grid = RegularGrid(geometry=label.geometry, label_id=label_id, label_name=label.short_name,
-                               ranges=[None, None, (0, 1)], crop_shape=crop_shape, overlap_factor=overlap_factor)
-            accumulator = Accumulator3D.from_aggregation(aggregation=aggregation, origin=grid.origin,
-                                                         shape=grid.shape, fill_value=0)
-
-            pipeline = pipeline << self << {'grid': grid, 'accumulator': accumulator}
-            pipeline.run(n_iters=grid.n_iters, notifier=notifier)
-
-            predicted_matrix = accumulator.data.squeeze()
-            predicted_matrix[label.geometry.zero_traces] = 0
-            filtering_matrix = np.invert(predicted_matrix > 0.5).astype(int)
-
-            prediction = copy(label)
-            prediction.name = label.name
-            prediction.filter_matrix(filtering_matrix)
-
-            setattr(prediction, "probability_matrix", predicted_matrix)
-            results[label.geometry.short_name].append(prediction)
-
-        setattr(self, dst_labels, results)
-        if add_subsets:
-            self.add_subsets(subset_labels=dst_labels, base_labels=src_labels)
 
     def evaluate(self, src_true, src_pred, metrics_fn, indices=None, src_labels='labels'):
         """ TODO """

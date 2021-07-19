@@ -9,7 +9,7 @@ from scipy.ndimage import convolve
 from sklearn.decomposition import PCA
 
 
-from ..plotters import filter_parameters, plot_image
+from ..plotters import  plot_image
 from ..horizon import Horizon
 from ..utils import to_list, retrieve_function_arguments
 from ..utility_classes import lru_cache
@@ -79,43 +79,7 @@ class Facies(Horizon):
 
 
     def _load_attribute(self, src, location=None, use_cache=True, **kwargs):
-        """ Make crops from `src` of horizon at `location`.
-
-        Parameters
-        ----------
-        src : str
-            A keyword defining horizon attribute to make crops from:
-            - 'cube_values' or 'amplitudes': cube values cut along the horizon;
-            - 'depths' or 'full_matrix': horizon depth map in cubic coordinates;
-            - 'metrics': random support metrics matrix.
-            - 'instant_phases': instantaneous phase along the horizon;
-            - 'instant_amplitudes': instantaneous amplitude along the horizon;
-            - 'masks' or 'full_binary_matrix': mask of horizon;
-        location : sequence of 3 slices
-            First two slices are used as `iline` and `xline` ranges to cut crop from.
-            Last 'depth' slice is not used, since points are sampled exactly on horizon.
-            If None, `src` is returned uncropped.
-        kwargs :
-            Passed directly to either:
-            - one of attribute-evaluating methods from :attr:`.ATTRIBUTE_TO_METHOD` depending on `src`;
-            - or attribute-transforming method :meth:`.transform_where_present`.
-        Examples
-        --------
-
-        >>> horizon.load_attribute('cube_values', (x_slice, i_slice, 1), window=10)
-
-        >>> horizon.load_attribute('depths')
-
-        >>> horizon.load_attribute('metrics', metrics='hilbert', normalize='min-max')
-
-        Notes
-        -----
-
-        Although the function can be used in a straightforward way as described above, its main purpose is to act
-        as an interface for accessing :class:`.Horizon` attributes from :class:`~SeismicCropBatch` to allow calls like:
-
-        >>> Pipeline().load_attribute('cube_values', dst='amplitudes')
-        """
+        """ Load horizon attribute at requested location. """
         try:
             method_name = self.ATTRIBUTE_TO_METHOD[src]
         except KeyError as e:
@@ -131,28 +95,57 @@ class Facies(Horizon):
 
 
     def load_attribute(self, src, location=None, **kwargs):
-        """ Get attribute for horizon or its subset.
+        """ Load horizon or its subset attribute values at requested location.
 
         Parameters
         ----------
         src : str
-            Key of the desired attribute. If attribute is from horizon subset, key must be like "subset/attribute".
-        kwargs : for `Horizon.load_attribute`
+            Key of the desired attribute.
+            If attribute is from horizon subset, key must be like "subset/attribute".
+
+            Valid attributes are:
+            - 'cube_values' or 'amplitudes': cube values;
+            - 'depths' or 'full_matrix': horizon depth map in cubic coordinates;
+            - 'metrics': random support metrics matrix.
+            - 'instant_phases': instantaneous phase;
+            - 'instant_amplitudes': instantaneous amplitude;
+            - 'fourier' or 'fourier_decomposition': fourier transform with optional PCA;
+            - 'wavelet' or 'wavelet decomposition': wavelet transform with optional PCA;
+            - 'masks' or 'full_binary_matrix': mask of horizon;
+        location : sequence of 3 slices
+            First two slices are used as `iline` and `xline` ranges to cut crop from.
+            Last 'depth' slice is not used, since points are sampled exactly on horizon.
+            If None, `src` is returned uncropped.
+        kwargs :
+            Passed directly to either:
+            - one of attribute-evaluating methods from :attr:`.ATTRIBUTE_TO_METHOD` depending on `src`;
+            - or attribute-transforming method :meth:`.transform_where_present`.
 
         Examples
         --------
-        To load "depths" attribute from "channels" subset of `horizon` one should do the following:
-        >>> horizon.load_attribute(src="channels/depths")
+        Load 'depths' attribute for whole horizon:
+        >>> horizon.load_attribute('depths')
+
+        Load 'cube_values' attribute for requested slice of fixed width:
+        >>> horizon.load_attribute('cube_values', (x_slice, i_slice, 1), window=10)
+
+        Load 'metrics' attribute with specific evaluation parameter and following normalization.
+        >>> horizon.load_attribute('metrics', metrics='hilbert', normalize='min-max')
+
+        Load "wavelet" attribute from "channels" subset of `horizon`:
+        >>> horizon.load_attribute(src="channels/wavelet")
         """
-        *subsets, src = src.split('/')
-        if len(subsets) > 1:
-            raise NotImplementedError()
+        if '/' in src:
+            subset_name, src = src.split('/')
+        else:
+            subset_name = None
 
         data = self._load_attribute(src=src, location=location, **kwargs)
 
-        if subsets:
-            subset = self.get_subset(subsets[0])
-            mask = subset.load_attribute(src='masks', location=location, fill_value=0).astype(bool)
+        if subset_name:
+            subset = self.get_subset(subset_name)
+            # pylint: disable=protected-access
+            mask = subset._load_attribute(src='masks', location=location, fill_value=0).astype(bool)
             data[~mask] = kwargs.get('fill_value', self.FILL_VALUE)
 
         return data
@@ -311,15 +304,15 @@ class Facies(Horizon):
 
         return self.transform_where_present(result, **transform_kwargs)
 
-    def show(self, load='depths', mode='imshow', return_figure=False, **kwargs):
+    def show(self, attributes='depths', mode='imshow', return_figure=False, **kwargs):
         """ Display facies attributes with predefined defaults.
 
         Loads requested data, constructs default parameters wrt to that data and delegates plot to `plot_image`.
 
         Parameters
         ----------
-        load : str or dict or np.ndarray, or a list of objects of those types
-            Defines data to display.
+        attributes : str or dict or np.ndarray, or a list of objects of those types
+            Defines attributes to display.
             If str, a name of attribute to load. Address `Facies.METHOD_TO_ATTRIBUTE` values for details.
             If dict, arguments for `Facies.load_attribute` and optional callable param under 'postprocess` key.
             If np.ndarray, must be 2d and match facies full matrix shape.
@@ -335,13 +328,13 @@ class Facies(Horizon):
         Display depth attribute:
         >>> facies.show()
         Display several attributes one over another:
-        >>> facies.show(load=['amplitudes', 'channels/masks'])
+        >>> facies.show(['amplitudes', 'channels/masks'])
         Display several attributes separately:
-        >>> facies.show(load=['amplitudes', 'instant_amplitudes'], separate=True)
+        >>> facies.show(['amplitudes', 'instant_amplitudes'], separate=True)
         Display several attributes in mixed manner:
-        >>> facies.show(load=['amplitudes', ['amplitudes', 'channels/masks']])
+        >>> facies.show(['amplitudes', ['amplitudes', 'channels/masks']])
         Display attribute with additional postprocessing:
-        >>> facies.show(load={'src': 'amplitudes', 'fill_value': 0, 'normalize': 'min-max'})
+        >>> facies.show({'src': 'amplitudes', 'fill_value': 0, 'normalize': 'min-max'})
 
         Notes
         -----
@@ -361,39 +354,41 @@ class Facies(Horizon):
             return res
 
         # Load attributes and put obtained data in a list with same nestedness as `load`
-        def load_data(load):
+        def load_data(attributes):
             """ Manage data loading depending on load params type. """
-            if isinstance(load, np.ndarray):
-                return load
-            if isinstance(load, str):
-                load = {'src': load}
+            if isinstance(attributes, np.ndarray):
+                return attributes
+            if isinstance(attributes, str):
+                load = {'src': attributes}
+            if isinstance(attributes, dict):
+                load = attributes
             postprocess = load.pop('postprocess', lambda x: x)
             load_defaults = {'fill_value': np.nan}
             if load['src'].split('/')[-1] in ['amplitudes', 'cube_values']:
-                load_defaults['width'] = 1
+                load_defaults['window'] = 1
             if load['src'].split('/')[-1] in ['fourier', 'wavelet']:
                 load_defaults['n_components'] = 1
             load = {**load_defaults, **load}
             data = self.load_attribute(**load)
             return postprocess(data)
 
-        data = apply_by_scenario(load_data, load)
+        data = apply_by_scenario(load_data, attributes)
 
         # Make titles
-        def extract_data_name(load):
-            if isinstance(load, np.ndarray):
+        def extract_data_name(attributes):
+            if isinstance(attributes, np.ndarray):
                 name = 'custom'
-            elif isinstance(load, dict):
-                name = load['src']
-            elif isinstance(load, str):
-                name = load
+            elif isinstance(attributes, dict):
+                name = attributes['src']
+            elif isinstance(attributes, str):
+                name = attributes
             return name
 
-        names = apply_by_scenario(extract_data_name, load)
+        names = apply_by_scenario(extract_data_name, attributes)
         n_subplots = len(data) if isinstance(data, list) else 1
 
         def make_titles(names):
-            if any(isinstance(item, list) for item in load):
+            if any(isinstance(item, list) for item in attributes):
                 return [', '.join(subplot_names) for subplot_names in names]
             return names
 
@@ -481,7 +476,7 @@ class Facies(Horizon):
             subset_label.reset_cache()
 
 
-    def evaluate(self, src_true, src_pred, metrics_fn, metrics_name='metrics', **kwargs):
+    def evaluate(self, src_true, src_pred, metrics_fn, metrics_names=None, output='df'):
         """ Apply given function to 'masks' attribute of requested labels subsets.
 
         Parameters
@@ -490,21 +485,27 @@ class Facies(Horizon):
             Name of `labels` subset to load true mask from.
         src_pred : str
             Name of `labels` subset to load prediction mask from.
-        metrics_fn : callable
-            Metrics function to calculate.
-        metrics_name : str
+        metrics_fn : callable or list of callable
+            Metrics function(s) to calculate.
+        metrics_name : str, optional
             Name of the column with metrics values in resulted dataframe.
-        kwargs :
-            For `metrics_fn`.
+        output : 'df' or 'arr'
+            Whether return an array of metrics values or dataframe.
         """
         pd.options.display.float_format = '{:,.3f}'.format
 
         labeled_traces = self.get_full_binary_matrix(fill_value=0).astype(bool)
         true = self.load_attribute(f"{src_true}/masks", fill_value=0)[labeled_traces]
         pred = self.load_attribute(f"{src_pred}/masks", fill_value=0)[labeled_traces]
-        value = metrics_fn(true, pred, **kwargs)
+
+        metrics_fn = to_list(metrics_fn)
+        values = [fn(true, pred) for fn in metrics_fn]
+
+        if output == 'arr':
+            return values
 
         index = pd.MultiIndex.from_arrays([[self.geometry.displayed_name], [self.short_name]],
                                           names=['geometry_name', 'horizon_name'])
-        result = pd.DataFrame(index=index, data=[value], columns=[metrics_name])
-        return result
+        names = metrics_names if metrics_names is not None else [fn.__name__ for fn in metrics_fn]
+        df = pd.DataFrame(index=index, data=values, columns=names)
+        return df

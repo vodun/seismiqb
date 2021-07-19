@@ -11,7 +11,7 @@ class FaciesBatch(SeismicCropBatch):
 
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def load(self, ix, dst, src='amplitudes', src_labels='labels', res_ndim=3, **kwargs):
+    def load_attribute(self, ix, dst, src='amplitudes', src_labels='labels', res_ndim=3, **kwargs):
         """ Load attribute for label at given location.
 
         Parameters
