@@ -29,7 +29,7 @@ class BaseSampler(Sampler):
     """ Common logic of making locations. Refer to the documentation of inherited classes for more details. """
     def _make_locations(self, geometry, points, matrix, crop_shape, ranges, threshold, filtering_matrix):
         # Parse parameters
-        ranges = ranges or [None, None, None]
+        ranges = ranges if ranges is not None else [None, None, None]
         ranges = [item if item is not None else [0, c]
                   for item, c in zip(ranges, geometry.cube_shape)]
         ranges = np.array(ranges)
@@ -376,7 +376,7 @@ class FaultSampler(BaseSampler):
 
     def _make_locations(self, geometry, crop_shape, ranges, threshold, extend):
          # Parse parameters
-        ranges = ranges or [None, None, None]
+        ranges = ranges if ranges is not None else [None, None, None]
         ranges = [item if item is not None else [0, c]
                   for item, c in zip(ranges, geometry.cube_shape)]
         ranges = np.array(ranges)
@@ -688,9 +688,8 @@ class SeismicSampler(Sampler):
                       for sampler in samplers_list]
 
             ncols_ = min(ncols, len(samplers_list))
-            nrows = len(samplers_list) // ncols_ or 1
-
-            kwargs = {
+            nrows = (len(samplers_list) // ncols_ + len(samplers_list) % 2) or 1
+            _kwargs = {
                 'cmap': [['Sampler', 'black']] * len(samplers_list),
                 'alpha': [[1.0, 0.4]] * len(samplers_list),
                 'ncols': ncols_, 'nrows': nrows,
@@ -699,13 +698,13 @@ class SeismicSampler(Sampler):
                 'suptitle_label': idx if len(samplers_list) > 1 else '',
                 'constrained_layout': True,
                 'colorbar': False,
-                'legend_label': ['ILINES and CROSSLINES', 'only ILINES', 'only CROSSLINES',
-                                 'restricted', 'dead traces'],
-                'legend_cmap': ['purple','blue','red', 'white', 'gray'],
+                'legend_label': ('ILINES and CROSSLINES', 'only ILINES', 'only CROSSLINES',
+                                 'restricted', 'dead traces'),
+                'legend_cmap': ('purple','blue','red', 'white', 'gray'),
                 'legend_loc': 10,
                 **kwargs
             }
-            geometry.show(images, **kwargs)
+            geometry.show(images, **_kwargs)
 
     def show_sampled(self, n=10000, binary=False, **kwargs):
         """ Visualize on geometry map by sampling `n` crop locations. """
@@ -1205,6 +1204,10 @@ class ExtensionGrid(BaseGrid):
         mask = potential > self.threshold
         buffer = buffer[mask]
 
+        # Correct the height
+        np.clip(buffer[:, 3], 0, self.geometry.cube_shape[2] - crop_shape[2], out=buffer[:, 3])
+        np.clip(buffer[:, 6], crop_shape[2], self.geometry.cube_shape[2], out=buffer[:, 6])
+
         locations = np.empty((len(buffer), 9), dtype=np.int32)
         locations[:, [0, 1]] = -1
         locations[:, 2:9] = buffer
@@ -1277,9 +1280,9 @@ def compute_potential(locations, coverage_matrix, shape):
 
     for i, (_, i_start, x_start, _, i_stop, x_stop, _) in enumerate(locations):
         sliced = coverage_matrix[i_start:i_stop, x_start:x_stop].ravel()
-        covered = sliced.sum()
 
         if len(sliced) == area:
+            covered = sliced.sum()
             buffer[i] = area - covered
             coverage_matrix[i_start:i_stop, x_start:x_stop] = True
         else:
