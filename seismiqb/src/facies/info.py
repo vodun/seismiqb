@@ -339,7 +339,8 @@ class FaciesInfo():
             indices = [cube for cube in cubes if cube in linkage.keys()]
             arguments = copy(arguments)
             arguments.pop('cubes')
-            dataset.apply_to_labels(function=function, indices=indices, src_labels=dst_labels, **arguments)
+            for dst in dst_labels:
+                dataset.map_labels(function=function, indices=indices, src_labels=dst, **arguments)
 
         return dataset
 

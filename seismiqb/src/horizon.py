@@ -782,7 +782,7 @@ class Horizon:
         return mask
 
 
-    def transform_where_present(self, array, normalize=None, fill_value=None, shift=None, rescale=None):
+    def transform_where_present(self, array, normalize=None, fill_value=None, shift=None, rescale=None, res_ndim=None):
         """ Normalize array where horizon is present, fill with constant where the horizon is absent.
 
         Parameters
@@ -797,19 +797,17 @@ class Horizon:
             If None, no filling applied. Defaults to None.
         shift, rescale : number, optional
             For 'shift-rescale` normalization mode.
+        res_ndim : int or None
+            Number of dimensions returned result should have.
         """
-
-        if not normalize and fill_value is None:
-            return array
-
-        values = array[self.presence_matrix]
-
         if normalize is None:
             pass
         elif normalize == 'min-max':
+            values = array[self.presence_matrix]
             min_, max_ = values.min(), values.max()
             array = (array - min_) / (max_ - min_)
         elif normalize == 'mean-std':
+            values = array[self.presence_matrix]
             mean, std = values.mean(), values.std()
             array = (array - mean) / std
         elif normalize == 'shift-rescale':
@@ -819,6 +817,14 @@ class Horizon:
 
         if fill_value is not None:
             array[~self.presence_matrix] = fill_value
+
+        if res_ndim == array.ndim + 1:
+            array = array[..., np.newaxis]
+        elif res_ndim is not None and res_ndim != array.ndim:
+            msg = f"Result ndim is {array.ndim}, while requested ndim is {res_ndim}. "\
+                  f"Adding more than one new axis is not currently implemented."
+            raise ValueError(msg)
+
         return array
 
 

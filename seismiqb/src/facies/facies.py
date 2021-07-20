@@ -17,10 +17,13 @@ from ..utility_classes import lru_cache
 
 
 class Facies(Horizon):
-    """ Extends basic `Horizon` functionality, allowing interaction with label subsets.
+    """ Extends base class functionality, allowing interaction with label subsets.
 
-    Class methods heavily rely on the concept of nested subset storage. The underlaying idea is that label stores all
-    its subsets. With this approach label subsets and their attributes can be accessed via the parent label.
+    - Class methods here rely heavily on the concept of nested subset storage. Facies are labeled along the horizon and
+    therefore can be viewed as a subsets of those horizons, if compared as sets of triplets of points they consist of.
+
+    - If facies are added as subsets to their base horizons, than their attributes can be accessed via the base label.
+    This is how `Facies` different from `Horizon`, where different labels types are stored in separate class attributes.
 
     - Main methods for interaction with label subsets are `add_subset` and `get_subset`. First allows adding given label
     instance under provided name into parent subsets storage. Second returns the subset label under requested name.
@@ -45,9 +48,9 @@ class Facies(Horizon):
     ATTRIBUTE_TO_METHOD = {attr: func for func, attrs in METHOD_TO_ATTRIBUTE.items() for attr in attrs}
 
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.subsets = {}
+    def __init__(self, storage, geometry, name=None, dtype=np.int32, subsets=None, **kwargs):
+        super().__init__(storage=storage, geometry=geometry, name=name, dtype=dtype, **kwargs)
+        self.subsets = subsets or {}
 
 
     def add_subset(self, name, item):
@@ -87,6 +90,8 @@ class Facies(Horizon):
 
         method = getattr(self, method_name)
         data = method(use_cache=use_cache, **kwargs)
+        # TODO: Someday, we would need to re-write attribute loading methods
+        # so they use locations not to crop the loaded result, but to load attribute only at location.
         if location is not None:
             i_slice, x_slice, _ = location
             data = data[i_slice, x_slice]
@@ -368,6 +373,8 @@ class Facies(Horizon):
                 load_defaults['window'] = 1
             if load['src'].split('/')[-1] in ['fourier', 'wavelet']:
                 load_defaults['n_components'] = 1
+            if load['src'].split('/')[-1] in ['masks', 'full_binary_matrix']:
+                load_defaults['fill_value'] = 0
             load = {**load_defaults, **load}
             data = self.load_attribute(**load)
             return postprocess(data)
@@ -461,12 +468,14 @@ class Facies(Horizon):
         return self - self.get_subset(subset)
 
 
-    def dump(self, path, name=None):
+    def dump(self, path, name=None, log=True):
         """ Save facies. """
         path = path.replace('*', self.geometry.short_name)
         os.makedirs(path, exist_ok=True)
         file_path = f"{path}/{name or self.name}"
         super().dump(file_path)
+        if log:
+            print(f"`{self.short_name}` saved to `{file_path}`")
 
 
     def reset_cache(self):

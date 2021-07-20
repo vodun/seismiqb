@@ -1,6 +1,4 @@
 """ Facies batch. """
-import numpy as np
-
 from ..crop_batch import SeismicCropBatch
 from ...batchflow import action, inbatch_parallel
 
@@ -22,8 +20,6 @@ class FaciesBatch(SeismicCropBatch):
             Dataset attribute with labels dict.
         locations : str
             Component of batch with locations of crops to load.
-        res_ndim : 2 or 3
-            Number of dimensions returned result should have.
         kwargs :
             Passed directly to either:
             - one of attribute-evaluating methods from :attr:`~Horizon.ATTRIBUTE_TO_METHOD` depending on `attribute`
@@ -46,9 +42,4 @@ class FaciesBatch(SeismicCropBatch):
                   f"in between sampler creation and `make_locations` call."
             raise ValueError(msg)
 
-        res = label.load_attribute(src=src, location=location, **kwargs)
-        if res_ndim == 3 and res.ndim == 2:
-            res = res[..., np.newaxis]
-        elif res_ndim != res.ndim:
-            raise ValueError(f"Expected returned crop to have {res_ndim} dimensions, but got {res.ndim}.")
-        return res
+        return label.load_attribute(src=src, location=location, **kwargs)

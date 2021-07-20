@@ -103,46 +103,50 @@ class FaciesCubeset(SeismicCubeset):
         for base_label, subset_label in zip(flat_base_labels, flat_subset_labels):
             base_label.add_subset(subset_labels, subset_label)
 
-    def apply_to_labels(self, function, indices=None, src_labels='labels', **kwargs):
-        """ Call specific function for labels attributes of specific cubes.
+    def map_labels(self, function, indices=None, src_labels='labels', **kwargs):
+        """ Call function for every item from labels list of requested cubes and return produced results.
 
+        Parameters
+        ----------
         function : str or callable
-            If str, name of the function or method to call from the attribute.
-            If callable, applied directly to each item of cubeset attribute from `attributes`.
+            If str, name of label method to call.
+            If callable, applied to labels of chosen cubes.
         indices : sequence of str
-            For the attributes of which cubes to call `function`.
-        src_labels : sequence of str
-            For what cube label to call `function`.
+            Which cubes' labels to map.
+        src_labels : str
+            Attribute with labels to map.
         kwargs :
             Passed directly to `function`.
 
+        Returns
+        -------
+        IndexedDict where keys are cubes names and values are lists of results obtained by applied map.
+        If all lists in result values are empty, None is returned instead.
+
         Examples
         --------
-        >>> cubeset.apply_to_labels('smooth_out', ['CUBE_01_XXX', 'CUBE_02_YYY'], ['horizons', 'fans'], iters=3)
+        >>> cubeset.map_labels('smooth_out', ['CUBE_01_AAA', 'CUBE_02_BBB'], 'horizons', iters=3)
         """
-        src_labels = to_list(src_labels)
-        results = {}
-        for src in src_labels:
-            results[src] = {}
-            for label in getattr(self, src).flatten(keys=indices):
-                res = function(label, **kwargs) if callable(function) else getattr(label, function)(**kwargs)
-                results[src][label.short_name] = res
-        return results
+        results = IndexedDict({idx: [] for idx in self.indices})
+        for label in getattr(self, src_labels).flatten(keys=indices):
+            if isinstance(function, str):
+                res = getattr(label, function)(**kwargs)
+            elif callable(function):
+                res = function(label, **kwargs)
+            if res is not None:
+                results[label.geometry.short_name].append(res)
+        return results if len(results.flat) > 0 else None
 
     def show(self, attributes='depths', src_labels='labels', indices=None, **kwargs):
         """ Show attributes of multiple dataset labels. """
-        res = self.apply_to_labels(function='show', src_labels=src_labels, indices=indices,
-                                   attributes=attributes, **kwargs)
-        return res if kwargs.get('return_figure') else None
+        return self.map_labels(function='show', src_labels=src_labels, indices=indices, attributes=attributes, **kwargs)
 
-    def invert_subsets(self, subset, indices=None, src_labels='labels', dst_labels=None, add_subsets=True):
+    def invert_subsets(self, subset, src_labels='labels', dst_labels=None, add_subsets=True):
         """ Apply `invert_subset` for every given label and put it into cubeset. """
         dst_labels = dst_labels or f"{subset}_inverted"
-        inverted = self.apply_to_labels(function='invert_subset', indices=indices, src_labels=src_labels, subset=subset)
-        results = IndexedDict({idx: [] for idx in self.indices})
-        for _, label in inverted[src_labels].items():
-            results[label.cube_name].append(label)
-        setattr(self, dst_labels, results)
+        inverted = self.map_labels(function='invert_subset', indices=None, src_labels=src_labels, subset=subset)
+
+        setattr(self, dst_labels, inverted)
         if add_subsets:
             self.add_subsets(subset_labels=dst_labels, base_labels=src_labels)
 
@@ -166,16 +170,13 @@ class FaciesCubeset(SeismicCubeset):
 
     def evaluate(self, src_true, src_pred, metrics_fn, indices=None, src_labels='labels'):
         """ TODO """
-        metrics_values = self.apply_to_labels(function='evaluate', src_labels=src_labels, indices=indices,
+        metrics_values = self.map_labels(function='evaluate', src_labels=src_labels, indices=indices,
                                               src_true=src_true, src_pred=src_pred, metrics_fn=metrics_fn)
-
-        results = pd.concat(metrics_values[src_labels].values())
-
-        return results
+        return pd.concat(metrics_values.flat)
 
     def dump_labels(self, path, src_labels, postfix=None, indices=None):
         """ TODO """
         postfix = src_labels if postfix is None else postfix
         timestamp = datetime.now().strftime('%b-%d_%H-%M-%S')
         path = f"{path}/{timestamp}_{postfix}/"
-        self.apply_to_labels(function='dump', indices=indices, src_labels=src_labels, path=path)
+        self.map_labels(function='dump', indices=indices, src_labels=src_labels, path=path)
