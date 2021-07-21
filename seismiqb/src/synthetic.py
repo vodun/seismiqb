@@ -182,10 +182,11 @@ class SyntheticGenerator():
         self._curves = None
         self._horizon_heights = None
 
-    def generate_velocities(self, num_reflections=200, vel_limits=(900, 5400), horizon_heights=(1/4, 1/2, 2/3),
-                            horizon_multipliers=(7, 5, 4)):
+    def make_velocities(self, num_reflections=200, vel_limits=(900, 5400), horizon_heights=(1/4, 1/2, 2/3),
+                        horizon_multipliers=(7, 5, 4)):
         """ Generate and store array of velocities. Roughly speaking, seismic slide is a stack of layers of constant
-        velocities. This method generates the array of velocity-values.
+        velocities. This method generates the array of velocity-values, that are to be used later for making of
+        velocity model.
 
         Parameters
         ----------
@@ -195,10 +196,12 @@ class SyntheticGenerator():
             Contains two floats. Velocities of layers in velocity model gradually change from the
             lower limit (first number) to the upper limit (second number) with some noise added.
         horizon_heights : sequence
-            Some reflections are sharper than the others - they represent seismic horizons. The tuple contains
-            heights (in [0, 1]-interval) of sharp reflections.
+            Each element is a float in [0, 1] interval and defines the depth at which a horizon should be located.
+            Note that each horizon is yielded by a large velocity gradient.
         horizon_multipliers : sequence
-            Mutipliers controling the magnitide of sharp jumps. Should have the same length as `horizon_heights`-arg.
+            Each element is float mutiplier >> 1 (or << -1) controling the magnitide of gradients in velocity.
+            The larger the gradients, the more prominient are the horizons. The argument should have the same length
+            as `horizon_heights`-arg.
         """
         low, high = vel_limits
         llim = (high - low) / num_reflections
@@ -211,8 +214,8 @@ class SyntheticGenerator():
         self._horizon_heights = horizon_heights
         return self
 
-    def generate_velocity_model(self, shape=(50, 400, 800), grid_shape=(10, 10), perturbation_share=.2):
-        """ Generate velocity model and store it in the class-instance.
+    def make_velocity_model(self, shape=(50, 400, 800), grid_shape=(10, 10), perturbation_share=.2):
+        """ Make 2d or 3d velocity model out of the array of velocities and store it in the class-instance.
 
         Parameters
         ----------
@@ -287,8 +290,8 @@ class SyntheticGenerator():
             self.velocity_model[:x, y_low:y_high] = crop_elastic
         return self
 
-    def generate_density_model(self, density_noise_lims=(0.97, 1.3)):
-        """ Generate density model and store it in the class-instance.
+    def make_density_model(self, density_noise_lims=(0.97, 1.3)):
+        """ Make density model out of velocity model and store it in the class-instance.
 
         Parameters
         ----------
@@ -436,8 +439,8 @@ def generate_synthetic(shape=(50, 400, 800), num_reflections=200, vel_limits=(90
         raise ValueError('The function only supports the generation of 2d and 3d synthetic seismic.')
 
     gen = (SyntheticGenerator(rng, seed)
-           .generate_velocities(num_reflections, vel_limits, horizon_heights, horizon_multipliers)
-           .generate_velocity_model(shape, grid_shape, perturbation_share))
+           .make_velocities(num_reflections, vel_limits, horizon_heights, horizon_multipliers)
+           .make_velocity_model(shape, grid_shape, perturbation_share))
 
     # add faults if needed and possible
     if faults is not None:
@@ -447,8 +450,8 @@ def generate_synthetic(shape=(50, 400, 800), num_reflections=200, vel_limits=(90
         else:
             raise ValueError("For now, faults are only supported for dim = 2.")
 
-    gen = (gen.generate_density_model(density_noise_lims)
-              .generate_synthetic(ricker_width, ricker_points)
+    gen = (gen.make_density_model(density_noise_lims)
+              .make_synthetic(ricker_width, ricker_points)
               .postprocess_synthetic(sigma, noise_mul))
     return gen.synthetic, gen.fetch_horizons(fetch_surfaces)
 
