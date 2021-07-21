@@ -251,7 +251,7 @@ class SyntheticGenerator():
         generated seismic images. Elastic transforms are performed through coordinates-transformation
         in depth-projection. Those are smooth maps [0, 1] -> [0, 1] described as f(x) = x + distortion.
         In current version, distortions are always hump-shaped. Almost all parameters of the function
-        are used to define properties of the "hump".
+        are used to define properties of the hump-shaped distortion.
 
         Parameters
         ----------
@@ -300,10 +300,10 @@ class SyntheticGenerator():
             If set to None, density-model is equal to velocity-model.
         """
         if density_noise_lims is not None:
-            self.density_noise_lims = self.velocity_model * self.rng.uniform(*density_noise_lims,
-                                                                             size=self.velocity_model.shape)
+            self.density_model = self.velocity_model * self.rng.uniform(*density_noise_lims,
+                                                                        size=self.velocity_model.shape)
         else:
-            self.density_noise_lims = self.velocity_model
+            self.density_model = self.velocity_model
         return self
 
     def make_synthetic(self, ricker_width=5, ricker_points=50):
@@ -358,8 +358,9 @@ class SyntheticGenerator():
             raise ValueError('Mode can be one of `horizons`, `all` or `top[k]`')
         raise ValueError('Mode must be str and can be one of `horizons`, `all` or `top[k]`')
 
-def generate_synthetic(shape=(50, 400, 800), num_reflections=200, vel_limits=(900, 5400), horizon_heights=(1/4, 1/2, 2/3), #pylint: disable=too-many-arguments
-                       horizon_multipliers=(7, 5, 4), grid_shape=(10, 10), perturbation_share=.2, density_noise_lims=(0.97, 1.3),
+def generate_synthetic(shape=(50, 400, 800), num_reflections=200, vel_limits=(900, 5400), #pylint: disable=too-many-arguments
+                       horizon_heights=(1/4, 1/2, 2/3), horizon_multipliers=(7, 5, 4), grid_shape=(10, 10),
+                       perturbation_share=.2, density_noise_lims=(0.97, 1.3),
                        ricker_width=5, ricker_points=50, sigma=1.1, noise_mul=0.5,
                        faults=(((100, 50), (100, 370)),
                                ((50, 320), (50, 470)),
