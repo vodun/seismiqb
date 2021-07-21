@@ -76,13 +76,13 @@ class FaultController(BaseController):
             'batch_size': 32,
             'crop_shape': [1, 128, 512],
             'inference_batch_size': 32,
-            'inference_chunk_shape': (100, None, None),
             'smooth_borders': False,
             'stride': 0.5,
             'orientation': 'ilines',
             'slicing': 'native',
             'output': 'sigmoid',
-            'itemwise': False
+            'itemwise': False,
+            'aggregation': 'mean'
         }
     })
 
@@ -378,6 +378,7 @@ class FaultController(BaseController):
     def make_accumulator(self, geometry, slices, crop_shape, strides, orientation=0, path=None):
         """ Make grid and accumulator for inference. """
         batch_size = self.config['inference']['inference_batch_size']
+        aggregation = self.config['inference']['aggregation']
         name = 'cube_i'
 
         grid = RegularGrid(geometry=geometry,
@@ -387,7 +388,7 @@ class FaultController(BaseController):
                            batch_size=batch_size,
                            crop_shape=crop_shape, strides=strides)
 
-        accumulator = Accumulator3D.from_aggregation(aggregation='mean',
+        accumulator = Accumulator3D.from_aggregation(aggregation=aggregation,
                                                      origin=grid.origin,
                                                      shape=grid.shape,
                                                      fill_value=0.0,
@@ -469,13 +470,11 @@ class FaultController(BaseController):
                         savepath = None
                         show = True
 
-                    prediction = prediction[0]
-                    prediction[prediction < threshold] = np.nan
                     if overlap:
-                        plot_image([image[0], prediction], separate=False, cmap='gray', figsize=(20, 20),
+                        plot_image([image[0], prediction[0] > threshold], separate=False, figsize=(20, 20),
                                    savepath=savepath, show=show)
                     else:
-                        plot_image(prediction, figsize=(20, 20), savepath=savepath, show=show)
+                        plot_image(prediction[0], figsize=(20, 20), savepath=savepath, show=show)
             return faults_metric, noise_metric
         return None, None
 
