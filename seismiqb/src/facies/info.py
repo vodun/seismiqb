@@ -1,20 +1,16 @@
 """ Seismic facies linkage manager. """
 import os
-import re
 import json
 
-from copy import copy
-from warnings import warn
 from collections import defaultdict
 from pandas import DataFrame
 
-from .cubeset import FaciesCubeset
 from ..utils import get_environ_flag, to_list
 
 
 
 class FaciesInfo():
-    """ Class to load and reorder geometry-labels linkage stored in json.
+    """ Class to manage geometry-labels linkage.
 
     Initialized from path to json file or/and keyword arguments.
     Key-value structure in json file must match parameters setup described below.
@@ -22,41 +18,24 @@ class FaciesInfo():
 
     Parameters
     ----------
-    json_path : str
-        Path to json file containing required parameters.
-    cubes_dir : str, optional
-        Path to cubes storage folder.
-    cubes : list of str
-        Names of cubes to include without 'CUBE_' prefix.
-    cubes_extension : str
-        Name of valid geometry extension.
-    labels_dir : str
-        Path to folder containing corresponding labels subfolders.
-        Must be relative to loaded geometry location.
-    labels : list of str
-        Path to folders containing corresponding labels.
-        Must be relative to `labels_dir` folder.
-    labels_extension : str
-        Name of valid label extension.
-    base_labels : str, optional
-        Name of `labels_dir` subfolder containing labels to put in dataset `labels` attribute.
-        Generally, one wants horizon labels to be base.
+    root : str, optional
+        Path to cubes files storage folder.
+    cubes : str or list of str
+        Names of cubes files to load.
+    labels_dirs : str
+        Path to folders containing corresponding labels files.
+        Must be relative to loaded cube file location.
     subsets : nested dict
         keys : str
             Subset names.
         values : dict
             keys : str
-                Cubes included in subset.
+                Cubes files names included in subset.
             values : list of str
-                Cube labes included in subset.
-    apply : nested dict
-        keys : str
-            Method name to call from `FaciesCubeset`
-        values : dict
-            keys : str
-                Method arguments names.
-            values : any
-                Method arguments values.
+                Labels files names from `labels_dirs` included in subset.
+    json_path : str
+        Path to json file containing keyword arguments in a format defined above.
+        Arguments from json file have higher priority, than those explicitly provided.
 
     Notes
     -----
@@ -65,158 +44,74 @@ class FaciesInfo():
     Example of json file
     --------------------
     {
-        "cubes_dir": "/data/cubes",
-        "cubes": ["01_AAA", "02_BBB"],
-        "cubes_extension": ".hdf5",
+        "root": "/data/cubes",
+        "cubes": ["01_AAA.blosc", "02_BBB.blosc"],
 
-        "labels_dir": "INPUTS/FACIES",
-        "labels": ["FANS_HORIZONS", "FANS"],
-        "base_labels": "FANS_HORIZONS",
-        "labels_extension": ".char",
+        "labels_dir": ["INPUTS/FACIES/FANS_HORIZONS", "INPUTS/FACES/FANS"],
 
         "subsets":
         {
             "train":
             {
-                "01_AAA": ["horizon_1"],
-                "02_BBB": ["horizon_2"],
+                "01_AAA.blosc": ["horizon_1.char"],
+                "02_BBB.blosc": ["horizon_2.char"],
             },
             "infer":
             {
-                "01_AAA": ["horizon_2"],
-                "02_BBB": ["horizon_1"],
-            }
-        },
-
-        "apply":
-        {
-            "smooth_out":
-            {
-                "cubes": ["02_BBB"],
-                "preserve_borders": false
+                "01_AAA.blosc": ["horizon_2.char"],
+                "02_BBB.blosc": ["horizon_1.char"],
             }
         }
     }
-
     """
+    def __init__(self, root='/data/seismic_data/seismic_interpretation', cubes=None,
+                 labels_dirs="INPUTS/HORIZONS/RAW", dst_labels=None, subsets=None, json_path=None):
+        self.anonymize = get_environ_flag('SEISMIQB_ANONYMIZE')
 
-    DEFAULT_INFO = {
-        'cubes_dir': '/data/seismic_data/seismic_interpretation',
-        'cubes': [],
-        'cubes_extension': '.blosc',
-
-        'labels_dir': "INPUTS/HORIZONS",
-        'labels': ["RAW"],
-        'labels_extension': '.char',
-        'base_labels': "RAW",
-
-        'subsets': {},
-        'apply': {}
-    }
-
-    def __init__(self, json_path=None, **kwargs):
-        """ Info from json file has lower priority than from kwargs, so one can easily redefine required arguments."""
-        self.info = self._process_arguments(json_path, **kwargs)
-        self.subsets = self._make_subsets_storage()
-
-    @classmethod
-    def _process_arguments(cls, json_path, **kwargs):
-        """ Merge arguments from json and kwargs, filter out unknown arguments and process known. """
-        info = {}
+        json_kwargs = {}
         if json_path is not None:
             with open(json_path, 'r') as f:
-                info = json.load(f)
-        info.update(kwargs)
+                json_kwargs = json.load(f)
 
-        # Pop any unexpected keys from `info`
-        provided_keys = list(info.keys())
-        unrecognized = {key: info.pop(key) for key in provided_keys if key not in cls.DEFAULT_INFO}
-        if unrecognized:
-            warn(f"Unknown arguments ignored:\n{unrecognized}")
+        self.root = json_kwargs.get('root', root)
 
-        info = {**cls.DEFAULT_INFO, **info}
-        info['cubes'] = cls._process_cubes_list(info['cubes'], info['cubes_dir'])
-        info['base_labels'] = cls._process_base_labels(info['base_labels'], info['labels'])
-        info['labels'] = cls._process_labels(info['labels'], info['cubes_dir'], info['cubes'], info['labels_dir'])
+        cubes = json_kwargs.get('cubes', cubes)
+        if cubes is None:
+            raise ValueError("Cubes list must be specified in either kwargs or provided json.")
+        self.cubes = to_list(cubes)
 
-        return info
+        labels_dirs = json_kwargs.get('labels_dirs', labels_dirs)
+        self.labels_dirs = to_list(labels_dirs)
 
-    @classmethod
-    def _process_cubes_list(cls, cubes, cubes_dir):
-        """ If given intergers sequence, find corresponding cubes folders name. """
-        cubes = to_list(cubes)
-        all_cubes = [dir.split('CUBE_')[1] for dir in os.listdir(cubes_dir) if dir.startswith('CUBE_')]
-        if not cubes:
-            chosen_cubes = all_cubes
-        elif isinstance(cubes[0], int):
-            chosen_cubes = []
-            for cube in all_cubes:
-                # extract cube numbers from their names
-                numbers = re.findall(r'\d+', cube)
-                if len(numbers) == 0:
-                    warn(f"No numbers occured in cube name {cube}. Skipping.")
-                elif len(numbers) != 1:
-                    warn(f"Multiple numbers occured in cube name {cube}. Skipping.")
-                elif int(numbers[0]) in cubes:
-                    chosen_cubes.append(cube)
-        else:
-            chosen_cubes = cubes
-        return chosen_cubes
+        self.dst_labels = json_kwargs.get('dst_labels', dst_labels)
 
-    @classmethod
-    def _process_labels(cls, labels, cubes_dir, cubes, labels_dir):
-        labels = to_list(labels)
-        for cube in cubes:
-            labels_path = f"{cubes_dir}/CUBE_{cube}/{labels_dir}"
-            existing_subdirs = next(os.walk(labels_path))[1]
-            for label in labels:
-                if label not in existing_subdirs:
-                    msg = f"Label subdir {label} was not found in {labels_path}. "\
-                          f"Available subdirs are {existing_subdirs}."
-                    warn(msg)
-                    labels.pop(label)
-        return labels
+        subsets = json_kwargs.get('subsets', subsets)
+        self.subsets = self.make_subsets_storage(subsets)
 
-    @classmethod
-    def _process_base_labels(cls, base_labels, labels):
-        """ If not provided explicitly, choose base labels folder name from the list of given labels subfolders. """
-        if base_labels not in labels:
-            raise ValueError(f"Provided base labels '{base_labels}' are not in {labels}.")
-        return base_labels
-
-    def __getattr__(self, name):
-        """ If attribute is not present in dataset, try retrieving it from dict-like storage. """
-        return self.info[name]
-
-    def _get_cube_labels(self, cube):
-        """ Make a list of existing labels for cube. """
-        base_labels_path = f"{self.cubes_dir}/CUBE_{cube}/{self.labels_dir}/{self.base_labels}"
-
-        base_labels = []
-        if os.path.exists(base_labels_path):
-            for file in os.listdir(base_labels_path):
-                if file.endswith(self.labels_extension):
-                    base_labels.append(file)
-        else:
-            warn(f"Path {base_labels_path} does not exist.")
-
-        if not base_labels:
-            msg = f"No labels with {self.labels_extension} extension found in {base_labels_path}."
-            warn(msg)
-
-        return base_labels
-
-    def _make_subsets_storage(self):
+    def make_subsets_storage(self, subsets):
         """ Wrap subsets linkage info with flexible nested structure.
         Besides cubes-labels linkage given in `self.info['subsets']`,
         create subset containing all possible labels for every cube name under 'all' key.
         """
         result = defaultdict(lambda: defaultdict(list))
 
+        # Detect labels common for corresponding labels directories and add them to `all` subset
         for cube in self.cubes:
-            result['all'][cube] = self._get_cube_labels(cube)
-        for subset, linkage in self.subsets.items():
-            result[subset] = defaultdict(list, linkage)
+            cube_dir = self.cube_dir_from_name(cube)
+            cube_labels = []
+            for labels_dir in self.labels_dirs:
+                labels_set = set()
+                for file in os.listdir(f"{self.root}/{cube_dir}/{labels_dir}"):
+                    if file.startswith('.') or file.endswith('.dvc'):
+                        continue
+                    labels_set.add(file)
+                cube_labels.append(labels_set)
+            result['all'][cube] = list(set.intersection(*cube_labels))
+
+        # Add subsets linkages provided in `subsets` to subsets storage
+        if subsets is not None:
+            for subset, linkage in subsets.items():
+                result[subset] = defaultdict(list, linkage)
 
         return result
 
@@ -245,25 +140,41 @@ class FaciesInfo():
             for box in boxes:
                 box.value = not first_box_value
 
+    @staticmethod
+    def cube_dir_from_name(name):
+        """ Make cube directory name from cube name. """
+        return f"CUBE_{name.split('.')[0]}"
+
+    def displayed_cube_name(self, name):
+        """ Remove extension from cube name and optionally remove field name. """
+        displayed_name = name.split('.')[0]
+        if self.anonymize:
+            displayed_name = displayed_name[:displayed_name.rfind('_')]
+        return displayed_name
+
+    @staticmethod
+    def displayed_label_name(name):
+        """ Remove extension from labels name. """
+        return name.split('.')[0]
+
     def show_subsets(self):
         """ Display predefined subsets as a dataframe. """
         data = {}
         for cube, labels in self.subsets['all'].items():
             for label in labels:
-                data[(cube, label)] = [label in values[cube] for values in self.subsets.values()]
+                idx = (self.displayed_cube_name(cube), self.displayed_label_name(label))
+                data[idx] = [label in values[cube] for values in self.subsets.values()]
         df = DataFrame(data=data, index=self.subsets.keys()).T
         df = df.replace([False, True], ['ㅤㅤ❌ㅤㅤ', 'ㅤㅤ✅ㅤㅤ'])
         style = [dict(selector="th", props=[('text-align', 'center')]),
                  dict(selector="caption", props=[('font-size', '15px'), ('font-weight', 'bold')])]
-        return df.style.set_caption("PREDEFINED SUBSETS").set_table_styles(style)
+        return df.style.set_caption("SUBSETS").set_table_styles(style)
 
     def interactive_split(self, subsets=('train', 'infer'), main_subset='all'):
         """ Render interactive menu to include/exclude labels for every name in `subsets`. """
         # pylint: disable=import-outside-toplevel, protected-access
         from ipywidgets import Checkbox, VBox, HBox, Button, Layout
         from IPython.display import display
-
-        anonymize = get_environ_flag('SEISMIQB_ANONYMIZE')
 
         subsets = to_list(subsets)
 
@@ -278,8 +189,7 @@ class FaciesInfo():
             subset_controls.append(subset_button)
             for cube in self.cubes:
 
-                displayed_cube_name = cube[:cube.rfind('_')] if anonymize else cube
-                cube_button = Button(description=displayed_cube_name)
+                cube_button = Button(description=self.displayed_cube_name(cube))
                 cube_button._labels = []
                 cube_button._controls = subset_controls
                 cube_button._subset = subset
@@ -288,9 +198,9 @@ class FaciesInfo():
                 subset_controls.append(cube_button)
 
                 for label in self.subsets[main_subset][cube]:
-                    displayed_label_name = label.rstrip(self.labels_extension)
                     default_label_value = label in self.subsets[subset].get(cube, [])
-                    label_box = Checkbox(description=displayed_label_name, value=default_label_value)
+                    label_box = Checkbox(description=self.displayed_label_name(label),
+                                         value=default_label_value)
                     label_box._subset = subset
                     label_box._cube = cube
                     label_box._label = label
@@ -302,8 +212,8 @@ class FaciesInfo():
         hbox = HBox(vboxes)
         display(hbox)
 
-    def _get_subset_linkage(self, subset):
-        """ Get cubes-labels linkage for given subset name. """
+    def make_linkage(self, subset='all', dst_labels=None):
+        """ Return cubes paths and cubes-labels linkage to load for requested subset. """
         linkage = {
             cube: sorted(labels)
             for cube, labels in sorted(self.subsets[subset].items())
@@ -316,35 +226,30 @@ class FaciesInfo():
                   "Labels can be added in either loaded json or via `FaciesInfo.interactive_split`."
             raise ValueError(msg)
 
-        return linkage
-
-    def make_cubeset(self, subset='all', dst_labels=None, cube_file_prefix='', **kwargs):
-        """ Create `FaciesCubeset` instance from cube-labels linkage defined by `subset`. """
-        linkage = self._get_subset_linkage(subset)
-
         cubes_paths = [
-            f"{self.cubes_dir}/CUBE_{cube}/{cube_file_prefix}{cube}{self.cubes_extension}"
+            f"{self.root}/{self.cube_dir_from_name(cube)}/{cube}"
             for cube in linkage.keys()
         ]
 
-        linkage = {f"{cube_file_prefix}{k}": v for k, v in linkage.items()}
-        dataset = FaciesCubeset(cubes_paths)
+        dst_labels = dst_labels or self.dst_labels
+        if dst_labels is None:
+            raise ValueError("`dst_labels` must be provided either in `__init__` or in `make_linkage`.")
+        dst_labels = to_list(dst_labels)
 
-        dst_labels = dst_labels or [label.lower() for label in self.labels]
-        dataset.load_labels(label_dir=self.labels_dir, labels_subdirs=self.labels,
-                            linkage=linkage, dst_labels=dst_labels, **kwargs)
+        labels_linkage = {}
+        for labels_dir, dst in zip(self.labels_dirs, dst_labels):
+            src_labels_linkage = {}
+            for cube, labels in linkage.items():
+                labels_path = f"{self.root}/{self.cube_dir_from_name(cube)}/{labels_dir}"
+                labels_files_paths = [f"{labels_path}/{label}" for label in labels]
+                geometry_index = cube.split('.')[0] # geometry indices are cubes filenames without extension
+                src_labels_linkage[geometry_index] = labels_files_paths
+            labels_linkage[dst] = src_labels_linkage
 
-        for function, arguments in self.apply.items():
-            cubes = self._process_cubes_list(arguments['cubes'], self.cubes_dir)
-            indices = [cube for cube in cubes if cube in linkage.keys()]
-            arguments = copy(arguments)
-            arguments.pop('cubes')
-            for dst in dst_labels:
-                dataset.map_labels(function=function, indices=indices, src_labels=dst, **arguments)
-
-        return dataset
+        return cubes_paths, labels_linkage
 
     def dump(self, path):
         """ Save info. """
+        info = {'root': self.root, 'cubes': self.cubes, 'labels_dirs': self.labels_dirs, 'subsets': self.subsets}
         with open(path, 'w') as f:
-            json.dump(self.info, f)
+            f.write(json.dumps(info, indent=4, sort_keys=False))

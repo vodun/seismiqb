@@ -789,7 +789,7 @@ class Horizon:
         ----------
         array : np.array
             Matrix of (cube_ilines, cube_xlines, ...) shape.
-        normalize : 'min-max', 'mean-std', 'shift-rescale' or None
+        normalize : 'min-max', 'mean-std', 'shift-rescale' or None/False
             Normalization mode for data where `presence_matrix` is True.
             If None, no normalization applied. Defaults to None.
         fill_value : number
@@ -800,7 +800,7 @@ class Horizon:
         res_ndim : int or None
             Number of dimensions returned result should have.
         """
-        if normalize is None:
+        if not normalize:
             pass
         elif normalize == 'min-max':
             values = array[self.presence_matrix]
@@ -813,7 +813,7 @@ class Horizon:
         elif normalize == 'shift-rescale':
             array = (array + shift) * rescale
         else:
-            raise ValueError('Unknown normalize mode {}'.format(normalize))
+            raise ValueError('Unknown normalize mode `{}`'.format(normalize))
 
         if fill_value is not None:
             array[~self.presence_matrix] = fill_value
