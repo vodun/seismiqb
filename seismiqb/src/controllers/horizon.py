@@ -11,19 +11,20 @@ import gc
 from time import perf_counter
 from textwrap import indent
 from pprint import pformat
-from copy import copy
 from glob import glob
 
 import numpy as np
 import torch
 
 from ...batchflow import Config, Pipeline, Monitor, Notifier
-from ...batchflow import B, D, C, V, P, R
+from ...batchflow import B, C, V, P, R
 from ...batchflow.models.torch import EncoderDecoder
 
 from ..cubeset import SeismicCubeset, Horizon
-from ..metrics import HorizonMetrics, GeometryMetrics
+from ..samplers import SeismicSampler, RegularGrid
+from ..metrics import HorizonMetrics
 from ..plotters import plot_image
+from ..utility_classes import Accumulator3D
 
 from .base import BaseController
 
@@ -55,6 +56,9 @@ class HorizonController(BaseController):
             'n_iters': 100,
             'early_stopping': True,
         },
+        'finetune': {
+            'n_iters': 10,
+        },
         'inference': {
             'orientation': 'ix',
             'batch_size': None,
@@ -65,12 +69,13 @@ class HorizonController(BaseController):
             'spatial_ranges': None,
             'heights_range': None,
             'overlap_factor': 2,
-            'filtering_matrix': None,
-            'filter_threshold': 0.,
+            'threshold': 0.,
 
             'prefetch': 0,
             'chunk_size': 100,
             'chunk_overlap': 0.1,
+
+            'finetune': True,
         },
 
         # Common parameters for train and inference
@@ -124,19 +129,10 @@ class HorizonController(BaseController):
             self.log(f'Created dataset\n{indent(str(dataset), " "*4)}')
         return dataset
 
-    def make_carcass(self, horizon, frequencies=(200, 200), regular=True, margin=50, **kwargs):
-        """ Cut carcass out of a horizon. """
-        horizon = copy(horizon)
-
-        if regular:
-            gm = GeometryMetrics(horizon.geometry)
-            grid = 1 - gm.make_grid(1 - horizon.geometry.zero_traces, frequencies=frequencies, margin=margin)
-        else:
-            grid = 1 - horizon.geometry.make_quality_grid(frequencies, margin=margin)
-
-        horizon.filter(filtering_matrix=grid)
-        horizon.smooth_out(preserve_borders=False)
-        return horizon
+    def make_carcass(self, dataset, frequencies=200, **kwargs):
+        """ Cut a grid from the passed horizon. """
+        carcass = dataset.labels[0][0].make_carcass(frequencies=frequencies, **kwargs)
+        return carcass, SeismicCubeset.from_horizon(carcass)
 
     def make_grid(self, dataset, frequencies, **kwargs):
         """ Create a grid, based on quality map, for each of the cubes in supplied `dataset`. Works inplace.
@@ -165,34 +161,13 @@ class HorizonController(BaseController):
                              (np.prod(geometry.cube_shape[:2]) - np.nansum(geometry.zero_traces)))
             self.log(f'Created {frequencies} grid on {idx}; coverage is: {grid_coverage:4.4f}')
 
-    def make_sampler(self, dataset, bins=None, use_grid=False, grid_src='quality_grid', side_view=False, **kwargs):
-        """ Create sampler. Works inplace. """
-        dataset.create_sampler(quality_grid=use_grid, bins=bins)
-        dataset.modify_sampler('train_sampler', finish=True, **kwargs)
-        self.log('Created sampler')
-
-        # Cleanup
-        dataset.sampler = None
-        dataset.samplers = None
-
+    def make_sampler(self, dataset, **kwargs):
+        """ Create sampler for generating locations to train on. """
         crop_shape = self.config['train']['crop_shape']
-        for i, idx in enumerate(dataset.indices):
-            postfix = f'_{idx}' if len(dataset.indices) > 1 else ''
-            dataset.show_slices(
-                src_sampler='train_sampler', idx=i, normalize=False,
-                shape=crop_shape, side_view=side_view,
-                adaptive_slices=use_grid, grid_src=grid_src,
-                show=self.plot, cmap='Reds', interpolation='bilinear', figsize=(15, 15),
-                savepath=self.make_savepath(f'sampled{postfix}.png')
-            )
-
-            dataset.show_slices(
-                src_sampler='train_sampler', idx=i, normalize=True,
-                shape=crop_shape, side_view=side_view,
-                adaptive_slices=use_grid, grid_src=grid_src,
-                show=self.plot, cmap='Reds', interpolation='bilinear', figsize=(15, 15),
-                savepath=self.make_savepath(f'sampled_normalized{postfix}.png')
-            )
+        rebatch_threshold = self.config['train']['rebatch_threshold']
+        sampler = SeismicSampler(labels=dataset.labels, crop_shape=crop_shape,
+                                 threshold=rebatch_threshold, mode='horizon', **kwargs)
+        return sampler
 
     # Train method is inherited from BaseController class
 
@@ -269,7 +244,7 @@ class HorizonController(BaseController):
 
         # Make spatial and height ranges
         if spatial_ranges is None:
-            spatial_ranges = [[0, item - 1] for item in geometry.cube_shape[:2]]
+            spatial_ranges = [None, None]
 
         if heights_range is None:
             bases = dataset.labels[0]
@@ -280,26 +255,18 @@ class HorizonController(BaseController):
             else:
                 heights_range = [0, geometry.depth]
 
-        # Update config according to the orientation
-        if orientation == 'i':
-            axis = 0
-            config.update({
-                'crop_shape_grid': config.crop_shape,
-                'side_view': 0.0,
-                'order': (0, 1, 2),
-            })
-        elif orientation == 'x':
-            axis = 1
-            config.update({
-                'crop_shape_grid': np.array(config.crop_shape)[[1, 0, 2]],
-                'side_view': 1.0,
-                'order': (1, 0, 2),
-            })
+        # Create grid
+        ranges = [*spatial_ranges, heights_range]
+        grid = RegularGrid(geometry=geometry,
+                           ranges=ranges,
+                           orientation=orientation,
+                           crop_shape=config.crop_shape,
+                           threshold=config.threshold,
+                           batch_size=config.batch_size,
+                           overlap_factor=config.overlap_factor)
 
         # Make iterator of chunks over given axis
-        chunk_iterator = range(spatial_ranges[axis][0],
-                               spatial_ranges[axis][1],
-                               int(chunk_size*(1 - chunk_overlap)))
+        chunk_iterator = grid.to_chunks(size=chunk_size, overlap=chunk_overlap)
 
         # Actual inference
         self.log(f'Starting {orientation}-inference with {len(chunk_iterator)} chunks')
@@ -310,20 +277,12 @@ class HorizonController(BaseController):
         chunk_iterator = notifier(chunk_iterator)
 
         horizons = []
-        total_length, total_unfiltered_length = 0, 0
-        for chunk in chunk_iterator:
-            chunk_spatial_ranges = copy(spatial_ranges)
-            chunk_spatial_ranges[axis] = [chunk, min(chunk + chunk_size, spatial_ranges[axis][-1])]
-
-            horizons_ = self._inference_on_chunk(dataset=dataset, model=model,
-                                                 ranges=(*chunk_spatial_ranges, heights_range),
-                                                 config=config)
+        for i, grid_chunk in enumerate(chunk_iterator):
+            horizons_ = self._inference_on_chunk(dataset=dataset, model=model, grid_chunk=grid_chunk,
+                                                 config=config, iteration=i)
             horizons.extend(horizons_)
 
-            total_length += dataset.grid_info['length']
-            total_unfiltered_length += dataset.grid_info['unfiltered_length']
-
-        self.log(f'Inferenced total of {total_length} out of {total_unfiltered_length} crops possible')
+        self.log(f'Inferenced total of {grid.length} out of {grid.unfiltered_length} crops possible')
 
         # Cleanup
         for item in dataset.geometries.values():
@@ -333,39 +292,44 @@ class HorizonController(BaseController):
 
         return Horizon.merge_list(horizons, mean_threshold=5.5, adjacency=3, minsize=500)
 
-    def _inference_on_chunk(self, dataset, model, ranges, config):
+    def _inference_on_chunk(self, dataset, model, grid_chunk, config, iteration):
         # Prepare parameters
-        overlap_factor, filtering_matrix, filter_threshold = config.get(['overlap_factor',
-                                                                         'filtering_matrix',
-                                                                         'filter_threshold'])
         prefetch = config.get('prefetch', 0)
 
+        if config.get('finetune', True):
+            sampler = self.make_sampler(dataset, ranges=grid_chunk.ranges,)
+            if len(sampler) > 0:
+                sampler.show_locations(show=self.plot,
+                                       savepath=self.make_savepath('chunk', str(iteration), 'sampler_locations.png'))
+                sampler.show_sampled(show=self.plot,
+                                     savepath=self.make_savepath('chunk', str(iteration), 'sampler_generated.png'))
+
+                self.finetune(dataset=dataset, sampler=sampler, model=model)
+                self.log(f'Finetuned! {model.iteration}')
+
+        # Create regular grid over desired ranges
+        geometry = dataset.geometries[0]
+        config['grid'] = grid_chunk
+
         # Create grid over chunk ranges
-        dataset.make_grid(dataset.indices[0],
-                          np.array(config.crop_shape)[list(config.order)],
-                          *ranges,
-                          batch_size=config.batch_size,
-                          overlap_factor=overlap_factor,
-                          filtering_matrix=filtering_matrix,
-                          filter_threshold=filter_threshold)
+        accumulator = Accumulator3D.from_grid(grid=grid_chunk, aggregation='max', fill_value=0.0)
+        config['accumulator'] = accumulator
 
         # Create pipeline TODO: make better `add_model`
         inference_pipeline = self.get_inference_template() << config << dataset
         inference_pipeline.models.add_model('model', model)
 
         # Make predictions over chunk
-        inference_pipeline.run(D.size, n_iters=dataset.grid_iters, prefetch=prefetch)
-        predictions = inference_pipeline.v('predictions')
-
-        # Assemble prediction together in accordance to the created grid
-        assembled_prediction = dataset.assemble_crops(predictions, order=config.order, fill_value=0.0)
+        inference_pipeline.run(n_iters=grid_chunk.n_iters, prefetch=prefetch)
+        assembled_prediction = accumulator.aggregate()
 
         # Extract Horizon instances
-        horizons = Horizon.from_mask(assembled_prediction, dataset.grid_info,
+        horizons = Horizon.from_mask(assembled_prediction,
+                                     geometry=geometry, shifts=grid_chunk.origin,
                                      threshold=0.5, minsize=50)
-
         # Cleanup
         gc.collect()
+        accumulator.clear()
         inference_pipeline.reset('variables')
         return horizons
 
@@ -405,9 +369,9 @@ class HorizonController(BaseController):
             # Basic demo: depth map and properties
             horizon.show(show=self.plot, savepath=self.make_savepath(*prefix, name + 'p_depth_map.png'))
 
-            horizon.show_slide(horizon.geometry.lens[0]//2, axis=0, width=5,
+            horizon.show_slide(horizon.geometry.lens[0]//2, axis=0, show=self.plot,
                                savepath=self.make_savepath(*prefix, name + 'p_slide_i.png'))
-            horizon.show_slide(horizon.geometry.lens[1]//2, axis=1, width=5,
+            horizon.show_slide(horizon.geometry.lens[1]//2, axis=1, show=self.plot,
                                savepath=self.make_savepath(*prefix, name + 'p_slide_x.png'))
 
             with open(self.make_savepath(*prefix, name + 'p_results_self.txt'), 'w') as result_txt:
@@ -465,32 +429,24 @@ class HorizonController(BaseController):
                    f'\ncoverage={horizon.coverage:4.3f}\ncorrs={info["corrs"]:4.3f}'
                    f'\nphase={info["phase"]:4.3f}\navg depth={horizon.h_mean:4.3f}')
             self.log(indent(msg, ' '*shift))
+            self.log(f'Done evaluation for {horizon.name}')
         return results
 
     # Pipelines
-    def load_pipeline(self, dynamic_factor=1, dynamic_low=None, dynamic_high=None, **kwargs):
+    def load_pipeline(self, **kwargs):
         """ Define data loading pipeline.
 
-        Following parameters are fetched from pipeline config: `adaptive_slices`, 'grid_src' and `rebatch_threshold`.
+        Following parameters are fetched from pipeline config: `sampler`, `batch_size` `width` and `rebatch_threshold`.
         """
         _ = kwargs
-        self.log(f'Generating data with dynamic factor of {dynamic_factor}')
         return (
             Pipeline()
-            .init_variable('shape', None)
-            .call(generate_shape, shape=C('crop_shape'),
-                  dynamic_factor=dynamic_factor, dynamic_low=dynamic_low, dynamic_high=dynamic_high,
-                  save_to=V('shape'))
-            .make_locations(points=D('train_sampler')(C('batch_size')),
-                            shape=V('shape'),
-                            side_view=C('side_view', default=False),
-                            adaptive_slices=C('adaptive_slices'),
-                            grid_src=C('grid_src', default='quality_grid'))
+            .make_locations(generator=C('sampler'), batch_size=C('batch_size'))
 
             .create_masks(dst='masks', width=C('width', default=3))
             .mask_rebatch(src='masks', threshold=C('rebatch_threshold', default=0.1))
             .load_cubes(dst='images')
-            .adaptive_reshape(src=['images', 'masks'], shape=V('shape'))
+            .adaptive_reshape(src=['images', 'masks'])
             .normalize(src='images')
         )
 
@@ -521,7 +477,7 @@ class HorizonController(BaseController):
             Pipeline()
             .init_variable('loss_history', [])
             .init_model(mode='dynamic', model_class=C('model_class', default=EncoderDecoder),
-                        name='model', config=C('model_config'))
+                        name='model', config=C('model_config'), source=C('source_model', default=None))
 
             .train_model('model',
                          fetches='loss',
@@ -547,31 +503,18 @@ class HorizonController(BaseController):
         """
         inference_template = (
             Pipeline()
-            .init_variable('predictions', [])
 
             # Load data
-            .make_locations(points=D('grid_gen')(), shape=C('crop_shape'),
-                            side_view=C('side_view'))
+            .make_locations(generator=C('grid'))
             .load_cubes(dst='images')
-            .adaptive_reshape(src='images', shape=C('crop_shape'))
+            .adaptive_reshape(src='images')
             .normalize(src='images')
 
             # Predict with model, then aggregate
             .predict_model('model',
                            B('images'),
                            fetches='sigmoid',
-                           save_to=V('predictions', mode='e'))
+                           save_to=B('predictions'))
+            .update_accumulator(src='predictions', accumulator=C('accumulator'))
         )
         return inference_template
-
-
-
-def generate_shape(_, shape, dynamic_factor=1, dynamic_low=None, dynamic_high=None):
-    """ Dynamically generate shape of a crop to get. """
-    dynamic_low = dynamic_low or dynamic_factor
-    dynamic_high = dynamic_high or dynamic_factor
-
-    i, x, h = shape
-    x = np.random.randint(x // dynamic_low, x * dynamic_high + 1)
-    h = np.random.randint(h // dynamic_low, h * dynamic_high + 1)
-    return (i, x, h)

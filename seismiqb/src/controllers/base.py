@@ -19,7 +19,7 @@ import psutil
 import numpy as np
 import torch
 
-from ...batchflow import Config, Monitor, D
+from ...batchflow import Config, Monitor
 from ...batchflow.models.torch import EncoderDecoder
 
 from ..plotters import plot_loss
@@ -103,6 +103,7 @@ class BaseController:
             self.gpu_list = []
 
         self.make_filelogger()
+        self.log(f'Initialized {self.__class__.__name__}')
 
     # Utility functions
     def make_savepath(self, *postfix):
@@ -132,6 +133,7 @@ class BaseController:
 
             logger = logging.getLogger(str(id(self)))
             logger.addHandler(handler)
+            logger.setLevel(logging.INFO)
             self.filelogger = logger.info
         else:
             self.filelogger = None
@@ -144,7 +146,9 @@ class BaseController:
 
         logger = self.config.logger
         if logger:
-            logger(msg)
+            logger = logger if isinstance(logger, (tuple, list)) else [logger]
+            for logger_ in logger:
+                logger_(msg)
         if self.filelogger:
             self.filelogger(msg)
 
@@ -161,7 +165,7 @@ class BaseController:
         _ = kwargs
 
     # Train
-    def train(self, dataset, config=None, **kwargs):
+    def train(self, dataset, sampler, config=None, **kwargs):
         """ Train model on a provided dataset.
         Uses the `get_train_template` method to create pipeline of model training.
 
@@ -187,13 +191,14 @@ class BaseController:
             monitor.__enter__()
 
         # Make pipeline
+        pipeline_config['sampler'] = sampler
         train_pipeline = self.get_train_template(**kwargs) << pipeline_config << dataset
 
         # Log: pipeline_config to a file
         self.log_to_file(pformat(pipeline_config.config, depth=2), '末 train_config.txt')
 
         # Test batch to initialize model and log stats
-        batch = train_pipeline.next_batch(D.size)
+        batch = train_pipeline.next_batch()
         model = train_pipeline.m('model')
 
         self.log(f'Target batch size: {pipeline_config["batch_size"]}')
@@ -201,14 +206,9 @@ class BaseController:
         self.log(f'Cache sizes: {[item.cache_size for item in dataset.geometries.values()]}')
         self.log(f'Cache lengths: {[item.cache_length for item in dataset.geometries.values()]}')
 
-        # Log: full model repr
+        # Log: full and short model repr
         self.log_to_file(repr(model.model), '末 model_repr.txt')
-
-        # Log: short model repr
-        model.model.apply(lambda module: setattr(module, 'short_repr', True))
-        msg = repr(model.model)
-        model.model.apply(lambda module: setattr(module, 'short_repr', False))
-        self.log_to_file(msg, '末 model_shortrepr.txt')
+        self.log_to_file(model._short_repr(), '末 model_shortrepr.txt')
 
         # Rescale batch size, if needed
         if rescale:
@@ -221,7 +221,7 @@ class BaseController:
         # Run training procedure
         start_time = perf_counter()
         self.log(f'Train run: n_iters={n_iters}, prefetch={prefetch}')
-        train_pipeline.run(D.size, n_iters=n_iters, prefetch=prefetch, notifier=notifier)
+        train_pipeline.run(n_iters=n_iters, prefetch=prefetch, notifier=notifier)
         elapsed = perf_counter() - start_time
 
         # Log: resource graphs
@@ -257,6 +257,24 @@ class BaseController:
             'final_loss': final_loss,
         }
         return model
+
+    def finetune(self, dataset, sampler, model, config=None, **kwargs):
+        """ Train given model for a couple more iterations on a specific sampler.
+        Used to fine-tune the model on specific range during inference stage.
+        """
+        # Prepare parameters
+        config = config or {}
+        pipeline_config = Config({**self.config['common'], **self.config['train'],
+                                  **self.config['finetune'], **config, **kwargs})
+        n_iters, prefetch = pipeline_config.pop(['n_iters', 'prefetch'])
+
+        pipeline_config['sampler'] = sampler
+        pipeline_config['source_model'] = model
+        train_pipeline = self.get_train_template(**kwargs) << pipeline_config << dataset
+        train_pipeline.run(n_iters=n_iters, prefetch=prefetch)
+
+        torch.cuda.empty_cache()
+
 
     # Inference
     def inference(self, dataset, model, **kwargs):

@@ -89,14 +89,14 @@ class SeismicGeometry(ExportMixin):
     Based on the extension of the path, a different subclass is used to implement key methods for data indexing.
     Currently supported extensions:
         - `segy`
-        - `hdf5` and its quantized version
-        - `blosc` and its quantized version
+        - `hdf5` and its quantized version `qhdf5`
+        - `blosc` and its quantized version `qblosc`
     The last two are created by converting the original SEG-Y cube.
-    During the conversion, an extra step of int8 quantization can be performed to reduce the space taken.
+    During the conversion, an extra step of `int8` quantization can be performed to reduce the disk usage.
 
-    Independent of exact format, `SeismicGeometry` provides the following:
+    Independent of the exact format, `SeismicGeometry` provides the following:
         - Attributes to describe shape and structure of the cube like `cube_shape` and `lens`,
-        as well as exact values of file-wide headers, for example, `time_delay` and `sample_rate`.
+        as well as exact values of file-wide headers, for example, `delay` and `sample_rate`.
 
         - Ability to infer information about the cube amplitudes:
           `trace_container` attribute contains examples of amplitudes inside the cube and allows to compute statistics.
@@ -140,8 +140,8 @@ class SeismicGeometry(ExportMixin):
     NPZ_ALIASES = ['npz']
     ARRAY_ALIASES = ['dummyarray']
 
-    # Attributes to store during SEG-Y -> HDF5 conversion
-    PRESERVED = [
+    # Attributes to store in a separate `.meta` file
+    PRESERVED = [ # loaded at instance initialization
         # Crucial geometry properties
         'depth', 'delay', 'sample_rate', 'cube_shape',
         'byte_no', 'offsets', 'ranges', 'lens', # `uniques` can't be saved due to different lenghts of arrays
@@ -163,7 +163,7 @@ class SeismicGeometry(ExportMixin):
         'qnt_q001', 'qnt_q01', 'qnt_q05', 'qnt_q95', 'qnt_q99', 'qnt_q999',
     ]
 
-    PRESERVED_LAZY = [
+    PRESERVED_LAZY = [ # loaded at the time of the first access
         'trace_container', 'hist_matrix',
         'min_matrix', 'max_matrix', 'mean_matrix', 'std_matrix',
     ]
@@ -179,7 +179,9 @@ class SeismicGeometry(ExportMixin):
     INDEX_CDP = ['CDP_Y', 'CDP_X']
 
     def __new__(cls, path, *args, **kwargs):
-        """ Select the type of geometry based on file extension. """
+        """ Select the type of geometry based on file extension.
+        Breaks the autoreload magic (but only for this class).
+        """
         #pylint: disable=import-outside-toplevel
         _ = args, kwargs
         fmt = os.path.splitext(path)[1][1:]
@@ -210,15 +212,9 @@ class SeismicGeometry(ExportMixin):
         self.path = path
         self.anonymize = get_environ_flag('SEISMIQB_ANONYMIZE')
 
-        name = os.path.basename(self.path)
-        # Find span of uppercase letter sequence between '_' and '.' symbols in filename
-        field_search = re.search(r'_([A-Z]+?)\.', name)
-        self.field = name[slice(*field_search.span(1))] if field_search is not None else ""
-        self.name = name.replace("_" * bool(self.field) + self.field, "") if self.anonymize else name
-        if not self.field and self.anonymize:
-            raise ValueError("Geometry name was not anonymized, since field name cannot be parsed from it.")
-
         # Names of different lengths and format: helpful for outside usage
+        self.name = os.path.basename(self.path)
+        self.field = self.parse_field()
         self.short_name = self.name.split('.')[0]
         self.long_name = ':'.join(self.path.split('/')[-2:])
         self.format = os.path.splitext(self.path)[1][1:]
@@ -233,6 +229,21 @@ class SeismicGeometry(ExportMixin):
         if process:
             self.process(**kwargs)
 
+
+    def parse_field(self):
+        """ Try to parse field from geometry name. """
+
+        # search for a sequence of uppercase letters between '_' and '.' symbols
+        field_search = re.search(r'_([A-Z]+?)\.', self.name)
+        if field_search is None:
+            if self.anonymize:
+                msg = f"""
+                Cannot anonymize name {self.name}, because field cannot be parsed from it.
+                Expected name in `<attribute>_<NUM>_<FIELD>.<extension>` format.
+                """
+                raise ValueError(msg)
+            return ""
+        return self.name[slice(*field_search.span(1))]
 
     # Utility functions
     def parse_axis(self, axis):
@@ -508,9 +519,14 @@ class SeismicGeometry(ExportMixin):
         return txt.strip()
 
     @property
+    def displayed_name(self):
+        """ Return name with masked field name, if anonymization needed. """
+        return self.short_name.replace(f"_{self.field}", "") if self.anonymize else self.short_name
+
+    @property
     def displayed_path(self):
         """ Return path with masked field name, if anonymization needed. """
-        return self.path.replace(self.field, "*" * bool(self.field)) if self.anonymize else self.path
+        return self.path.replace(self.field, "*") if self.anonymize else self.path
 
     @property
     def nonzero_traces(self):
@@ -562,17 +578,25 @@ class SeismicGeometry(ExportMixin):
 
     # Textual representation
     def __repr__(self):
-        return f'<Inferred geometry for {self.name}: {tuple(self.cube_shape)}>'
+        return f'<Inferred geometry for cube {self.displayed_name}: {tuple(self.cube_shape)}>'
 
     def __str__(self):
         msg = f"""
         Geometry for cube              {self.displayed_path}
         Current index:                 {self.index_headers}
-        Cube shape:                    {self.cube_shape}
+        Cube shape:                    {tuple(self.cube_shape)}
         Time delay:                    {self.delay}
         Sample rate:                   {self.sample_rate}
+        Area:                          {self.area:4.1f} km²
+        """
 
-        Cube size:                     {os.path.getsize(self.path) / (1024**3):4.3f} GB
+        if os.path.exists(self.segy_path):
+            segy_size = os.path.getsize(self.segy_path) / (1024 ** 3)
+            msg += f"""
+        SEG-Y original size:           {segy_size:4.3f} GB
+        """
+
+        msg += f"""Current cube size:             {self.file_size:4.3f} GB
         Size of the instance:          {self.ngbytes:4.3f} GB
 
         Number of traces:              {self.total_traces}
@@ -580,7 +604,8 @@ class SeismicGeometry(ExportMixin):
 
         if hasattr(self, 'zero_traces'):
             msg += f"""Number of non-zero traces:     {self.nonzero_traces}
-            """
+        Fullness:                      {self.nonzero_traces / self.total_traces:2.2f}
+        """
 
         if self.has_stats:
             msg += f"""
@@ -626,15 +651,17 @@ class SeismicGeometry(ExportMixin):
     # Visual representation
     def show(self, matrix='snr', **kwargs):
         """ Show geometry related top-view map. """
+        matrix_name = matrix if isinstance(matrix, str) else kwargs.get('matrix_name', 'custom matrix')
         kwargs = {
             'cmap': 'viridis_r',
-            'title': f'{matrix if isinstance(matrix, str) else ""} map of `{self.name}`',
+            'title': f'`{matrix_name}` map of cube `{self.displayed_name}`',
             'xlabel': self.index_headers[0],
             'ylabel': self.index_headers[1],
+            'colorbar': True,
             **kwargs
             }
         matrix = getattr(self, matrix) if isinstance(matrix, str) else matrix
-        plot_image(matrix, mode='single', **kwargs)
+        return plot_image(matrix, **kwargs)
 
     def show_histogram(self, normalize=None, bins=50, **kwargs):
         """ Show distribution of amplitudes in `trace_container`. Optionally applies chosen normalization. """
@@ -650,10 +677,9 @@ class SeismicGeometry(ExportMixin):
             'ylabel': 'density',
             **kwargs
         }
-        plot_image(data, backend='matplotlib', bins=bins, mode='histogram', **kwargs)
+        return plot_image(data, backend='matplotlib', bins=bins, mode='histogram', **kwargs)
 
-    def show_slide(self, loc=None, start=None, end=None, step=1, axis=0, zoom_slice=None,
-                   n_ticks=5, delta_ticks=100, stable=True, **kwargs):
+    def show_slide(self, loc=None, start=None, end=None, step=1, axis=0, zoom_slice=None, stable=True, **kwargs):
         """ Show seismic slide in desired place.
         Under the hood relies on :meth:`load_slide`, so works with geometries in any formats.
 
@@ -672,13 +698,14 @@ class SeismicGeometry(ExportMixin):
         """
         axis = self.parse_axis(axis)
         slide = self.load_slide(loc=loc, start=start, end=end, step=step, axis=axis, stable=stable)
-        xticks = list(range(slide.shape[0]))
-        yticks = list(range(slide.shape[1]))
+        xmin, xmax, ymin, ymax = 0, slide.shape[0], slide.shape[1], 0
 
         if zoom_slice:
             slide = slide[zoom_slice]
-            xticks = xticks[zoom_slice[0]]
-            yticks = yticks[zoom_slice[1]]
+            xmin = zoom_slice[0].start or xmin
+            xmax = zoom_slice[0].stop or xmax
+            ymin = zoom_slice[1].stop or ymin
+            ymax = zoom_slice[1].start or ymax
 
         # Plot params
         if len(self.index_headers) > 1:
@@ -695,37 +722,26 @@ class SeismicGeometry(ExportMixin):
             xlabel = self.index_headers[0]
             ylabel = 'DEPTH'
 
-        xticks = xticks[::max(1, round(len(xticks) // (n_ticks - 1) / delta_ticks)) * delta_ticks] + [xticks[-1]]
-        xticks = sorted(list(set(xticks)))
-        yticks = yticks[::max(1, round(len(xticks) // (n_ticks - 1) / delta_ticks)) * delta_ticks] + [yticks[-1]]
-        yticks = sorted(list(set(yticks)), reverse=True)
-
-        if len(xticks) > 2 and (xticks[-1] - xticks[-2]) < delta_ticks:
-            xticks.pop(-2)
-        if len(yticks) > 2 and (yticks[0] - yticks[1]) < delta_ticks:
-            yticks.pop(1)
-
         kwargs = {
             'title': title,
             'xlabel': xlabel,
             'ylabel': ylabel,
             'cmap': 'gray',
-            'xticks': xticks,
-            'yticks': yticks,
+            'extent': (xmin, xmax, ymin, ymax),
             'labeltop': False,
             'labelright': False,
             **kwargs
         }
-        plot_image(slide, **kwargs)
+        return plot_image(slide, **kwargs)
 
     def show_quality_map(self, **kwargs):
         """ Show quality map. """
-        self.show(matrix=self.quality_map, cmap='Reds', title=f'Quality map of `{self.name}`')
+        self.show(matrix=self.quality_map, cmap='Reds', title=f'Quality map of `{self.displayed_name}`')
 
     def show_quality_grid(self, **kwargs):
         """ Show quality grid. """
         self.show(matrix=self.quality_grid, cmap='Reds', interpolation='bilinear',
-                  title=f'Quality map of `{self.name}`')
+                  title=f'Quality map of `{self.displayed_name}`')
 
 
     # Coordinate conversion
