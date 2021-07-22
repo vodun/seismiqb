@@ -995,7 +995,8 @@ class RegularGrid(BaseGrid):
         self.geometry_name = geometry.short_name
         self.label_name = label_name
         self.unfiltered_length = None
-        super().__init__(crop_shape=crop_shape, batch_size=batch_size, locations=locations, geometry=geometry)
+        super().__init__(crop_shape=crop_shape, batch_size=batch_size, locations=locations, geometry=geometry,
+                         orientation=self.orientation, origin=self.origin, endpoint=self.endpoint)
 
     @staticmethod
     def _arange(start, stop, stride, limit):
