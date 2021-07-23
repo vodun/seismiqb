@@ -478,11 +478,12 @@ class Facies(Horizon):
     def dump(self, path, name=None, log=True):
         """ Save facies. """
         path = path.replace('*', self.geometry.short_name)
+        name = name.replace('*', self.name) if name is not None else self.name
         os.makedirs(path, exist_ok=True)
-        file_path = f"{path}/{name or self.name}"
-        super().dump(file_path)
+        dump_path = f"{path}/{name}"
+        super().dump(dump_path)
         if log:
-            print(f"`{self.short_name}` saved to `{file_path}`")
+            print(f"`{self.short_name}` saved to `{dump_path}`")
 
 
     def reset_cache(self):
@@ -493,7 +494,7 @@ class Facies(Horizon):
 
 
     def evaluate(self, src_true, src_pred, metrics_fn, metrics_names=None, output='df'):
-        """ Apply given function to 'masks' attribute of requested labels subsets.
+        """ Apply given function to 'masks' attribute of requested labels.
 
         Parameters
         ----------

@@ -1,10 +1,8 @@
 """ Container for storing seismic data and labels with facies-specific interaction model. """
 from copy import copy
-from datetime import datetime
 
 import pandas as pd
 
-from .batch import FaciesBatch
 from ..cubeset import SeismicCubeset
 from ..utility_classes import IndexedDict
 from ..utils import to_list
@@ -12,21 +10,15 @@ from ..utils import to_list
 
 
 class FaciesCubeset(SeismicCubeset):
-    """ Storage extending `SeismicCubeset` functionality with methods for interaction with labels and their subsets.
-
-    """
-    # pylint: disable=useless-super-delegation
-    def __init__(self, *args, batch_class=FaciesBatch, **kwargs):
-        super().__init__(*args, batch_class=batch_class, **kwargs)
-
-    def add_subsets(self, subset_labels, base_labels='labels'):
+    """ Storage extending `SeismicCubeset` functionality with methods for interaction with labels and their subsets. """
+    def add_subsets(self, src_subset, dst_base='labels'):
         """ Add nested labels. """
-        flat_base_labels = getattr(self, base_labels).flat
-        flat_subset_labels = getattr(self, subset_labels).flat
-        if len(flat_base_labels) != len(flat_subset_labels):
-            raise ValueError(f"Labels `{subset_labels}` and `{base_labels}` have different lengths.")
-        for base_label, subset_label in zip(flat_base_labels, flat_subset_labels):
-            base_label.add_subset(subset_labels, subset_label)
+        subset_labels = getattr(self, src_subset)
+        base_labels = getattr(self, dst_base)
+        if len(subset_labels.flat) != len(base_labels.flat):
+            raise ValueError(f"Labels `{src_subset}` and `{dst_base}` have different lengths.")
+        for subset, base in zip(subset_labels, base_labels):
+            base.add_subset(name=src_subset, item=subset)
 
     def map_labels(self, function, indices=None, src_labels='labels', **kwargs):
         """ Call function for every item from labels list of requested cubes and return produced results.
@@ -73,9 +65,9 @@ class FaciesCubeset(SeismicCubeset):
 
         setattr(self, dst_labels, inverted)
         if add_subsets:
-            self.add_subsets(subset_labels=dst_labels, base_labels=src_labels)
+            self.add_subsets(src_subsets=dst_labels, dst_base=src_labels)
 
-    def add_merged_labels(self, src_labels, dst_labels, indices=None, add_subsets_to='labels'):
+    def add_merged_labels(self, src_labels, dst_labels, indices=None, dst_base='labels'):
         """ Merge given labels and put result into cubeset. """
         results = IndexedDict({idx: [] for idx in self.indices})
         indices = to_list(indices or self.indices)
@@ -91,17 +83,22 @@ class FaciesCubeset(SeismicCubeset):
             results[idx].append(container)
         setattr(self, dst_labels, results)
         if add_subsets_to:
-            self.add_subsets(subset_labels=dst_labels, base_labels=add_subsets_to)
+            self.add_subsets(src_subset=dst_labels, dst_base=dst_base)
 
-    def evaluate(self, src_true, src_pred, metrics_fn, indices=None, src_labels='labels'):
-        """ TODO """
+    def evaluate(self, src_true, src_pred, metrics_fn, metrics_names=None, indices=None, src_labels='labels'):
+        """ Apply given function to 'masks' attribute of requested labels and return merged dataframe of results.
+
+        Parameters
+        ----------
+        src_true : str
+            Name of `labels` subset to load true mask from.
+        src_pred : str
+            Name of `labels` subset to load prediction mask from.
+        metrics_fn : callable or list of callable
+            Metrics function(s) to calculate.
+        metrics_name : str, optional
+            Name of the column with metrics values in resulted dataframe.
+        """
         metrics_values = self.map_labels(function='evaluate', src_labels=src_labels, indices=indices,
                                               src_true=src_true, src_pred=src_pred, metrics_fn=metrics_fn)
         return pd.concat(metrics_values.flat)
-
-    def dump_labels(self, path, src_labels, postfix=None, indices=None):
-        """ TODO """
-        postfix = src_labels if postfix is None else postfix
-        timestamp = datetime.now().strftime('%b-%d_%H-%M-%S')
-        path = f"{path}/{timestamp}_{postfix}/"
-        self.map_labels(function='dump', indices=indices, src_labels=src_labels, path=path)
