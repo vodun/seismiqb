@@ -3,6 +3,7 @@ import os
 
 import numpy as np
 import pandas as pd
+from matplotlib import pyplot as plt
 
 from scipy.signal import hilbert, ricker
 from scipy.ndimage import convolve
@@ -408,6 +409,9 @@ class Facies(Horizon):
         }
 
         # Infer defaults for `mode`: generate cmaps according to requested data, set axis labels as index headers
+        default_colors = ['firebrick', 'darkorchid', 'sandybrown']
+        gen_color = (color for color in default_colors)
+        name_to_color = {}
         def make_cmap(name):
             attr = name.split('/')[-1]
             if attr == 'depths':
@@ -415,7 +419,9 @@ class Facies(Horizon):
             if attr == 'metrics':
                 return 'Metric'
             if attr == 'masks':
-                return 'firebrick'
+                if name not in name_to_color:
+                    name_to_color[name] = next(gen_color)
+                return name_to_color[name]
             return 'ocean'
 
         def make_alpha(name):
@@ -446,6 +452,7 @@ class Facies(Horizon):
                 params[text] = apply_by_scenario(lambda s: s.replace('*', defaults['suptitle_label']), params[text])
         # Plot image with given params and return resulting figure
         figure = plot_image(data=data, mode=mode, **params)
+        plt.show()
 
         return figure if return_figure else None
 

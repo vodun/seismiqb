@@ -36,8 +36,8 @@ class FaciesCubeset(SeismicCubeset):
         function : str or callable
             If str, name of label method to call.
             If callable, applied to labels of chosen cubes.
-        indices : sequence of str
-            Which cubes' labels to map.
+        indices : str or sequence of str
+            Indices of cubes which labels to map.
         src_labels : str
             Attribute with labels to map.
         kwargs :

@@ -1,8 +1,8 @@
 """ Seismic facies linkage manager. """
 import os
 import json
-
 from collections import defaultdict
+
 from pandas import DataFrame
 
 from ..utils import get_environ_flag, to_list
@@ -25,6 +25,7 @@ class FaciesInfo():
     labels_dirs : str
         Path to folders containing corresponding labels files.
         Must be relative to loaded cube file location.
+        Corresponding labels files must have identical names.
     subsets : nested dict
         keys : str
             Subset names.
@@ -86,9 +87,9 @@ class FaciesInfo():
         self.dst_labels = json_kwargs.get('dst_labels', dst_labels)
 
         subsets = json_kwargs.get('subsets', subsets)
-        self.subsets = self.make_subsets_storage(subsets)
+        self.subsets = self._make_subsets(subsets)
 
-    def make_subsets_storage(self, subsets):
+    def _make_subsets(self, subsets):
         """ Wrap subsets linkage info with flexible nested structure.
         Besides cubes-labels linkage given in `self.info['subsets']`,
         create subset containing all possible labels for every cube name under 'all' key.
@@ -97,16 +98,15 @@ class FaciesInfo():
 
         # Detect labels common for corresponding labels directories and add them to `all` subset
         for cube in self.cubes:
-            cube_dir = self.cube_dir_from_name(cube)
             cube_labels = []
             for labels_dir in self.labels_dirs:
                 labels_set = set()
-                for file in os.listdir(f"{self.root}/{cube_dir}/{labels_dir}"):
+                for file in os.listdir(f"{self.root}/{cube.split('.')[0]}/{labels_dir}"):
                     if file.startswith('.') or file.endswith('.dvc'):
                         continue
                     labels_set.add(file)
                 cube_labels.append(labels_set)
-            result['all'][cube] = list(set.intersection(*cube_labels))
+            result['all'][cube] = sorted(set.intersection(*cube_labels))
 
         # Add subsets linkages provided in `subsets` to subsets storage
         if subsets is not None:
@@ -114,6 +114,70 @@ class FaciesInfo():
                 result[subset] = defaultdict(list, linkage)
 
         return result
+
+    def make_linkage(self, subset='all', dst_labels=None):
+        """ Return cubes paths and cubes-labels linkage to load for requested subset. """
+        linkage = {
+            cube: sorted(labels)
+            for cube, labels in sorted(self.subsets[subset].items())
+            if labels
+            }
+
+        if not sum(linkage.values(), []):
+            msg = f"No labels were selected for subset `{subset}`. "\
+                  "Either choose non-empty subset or add some labels to requested one. "\
+                  "Labels can be added in either loaded json or via `FaciesInfo.interactive_split`."
+            raise ValueError(msg)
+
+        cubes_paths = [
+            f"{self.root}/{cube.split('.')[0]}/{cube}"
+            for cube in linkage.keys()
+        ]
+
+        dst_labels = dst_labels or self.dst_labels
+        if dst_labels is None:
+            raise ValueError("`dst_labels` must be provided either in `__init__` or in `make_linkage`.")
+        dst_labels = to_list(dst_labels)
+
+        labels_linkage = {}
+        for labels_dir, dst in zip(self.labels_dirs, dst_labels):
+            src_labels_linkage = {}
+            for cube, labels in linkage.items():
+                labels_path = f"{self.root}/{cube.split('.')[0]}/{labels_dir}"
+                labels_files_paths = [f"{labels_path}/{label}" for label in labels]
+                geometry_index = cube.split('.')[0] # geometry indices are cubes filenames without extension
+                src_labels_linkage[geometry_index] = labels_files_paths
+            labels_linkage[dst] = src_labels_linkage
+
+        return cubes_paths, labels_linkage
+
+    def dump(self, path):
+        """ Save info. """
+        info = {'root': self.root, 'cubes': self.cubes, 'labels_dirs': self.labels_dirs, 'subsets': self.subsets}
+        with open(path, 'w') as f:
+            f.write(json.dumps(info, indent=4, sort_keys=False))
+
+    # Linkage visualizations
+
+    def displayed_cube_name(self, name):
+        """ Optionally remove field name from cube name. """
+        displayed_name = name.split('.')[0]
+        if self.anonymize:
+            displayed_name = displayed_name[:displayed_name.rfind('_')]
+        return displayed_name
+
+    def show_subsets(self):
+        """ Display predefined subsets as a dataframe. """
+        data = {}
+        for cube, labels in self.subsets['all'].items():
+            for label in labels:
+                idx = (self.displayed_cube_name(cube), label.split('.')[0])
+                data[idx] = [label in values[cube] for values in self.subsets.values()]
+        df = DataFrame(data=data, index=self.subsets.keys()).T
+        df = df.replace([False, True], ['ㅤㅤ❌ㅤㅤ', 'ㅤㅤ✅ㅤㅤ'])
+        style = [dict(selector="th", props=[('text-align', 'center')]),
+                 dict(selector="caption", props=[('font-size', '15px'), ('font-weight', 'bold')])]
+        return df.style.set_caption("SUBSETS").set_table_styles(style)
 
     def _update_on_event(self, event):
         """ Method to pass to ipywidgets `observe` call. """
@@ -139,36 +203,6 @@ class FaciesInfo():
             first_box_value = boxes[0].value
             for box in boxes:
                 box.value = not first_box_value
-
-    @staticmethod
-    def cube_dir_from_name(name):
-        """ Make cube directory name from cube name. """
-        return f"CUBE_{name.split('.')[0]}"
-
-    def displayed_cube_name(self, name):
-        """ Remove extension from cube name and optionally remove field name. """
-        displayed_name = name.split('.')[0]
-        if self.anonymize:
-            displayed_name = displayed_name[:displayed_name.rfind('_')]
-        return displayed_name
-
-    @staticmethod
-    def displayed_label_name(name):
-        """ Remove extension from labels name. """
-        return name.split('.')[0]
-
-    def show_subsets(self):
-        """ Display predefined subsets as a dataframe. """
-        data = {}
-        for cube, labels in self.subsets['all'].items():
-            for label in labels:
-                idx = (self.displayed_cube_name(cube), self.displayed_label_name(label))
-                data[idx] = [label in values[cube] for values in self.subsets.values()]
-        df = DataFrame(data=data, index=self.subsets.keys()).T
-        df = df.replace([False, True], ['ㅤㅤ❌ㅤㅤ', 'ㅤㅤ✅ㅤㅤ'])
-        style = [dict(selector="th", props=[('text-align', 'center')]),
-                 dict(selector="caption", props=[('font-size', '15px'), ('font-weight', 'bold')])]
-        return df.style.set_caption("SUBSETS").set_table_styles(style)
 
     def interactive_split(self, subsets=('train', 'infer'), main_subset='all'):
         """ Render interactive menu to include/exclude labels for every name in `subsets`. """
@@ -199,7 +233,7 @@ class FaciesInfo():
 
                 for label in self.subsets[main_subset][cube]:
                     default_label_value = label in self.subsets[subset].get(cube, [])
-                    label_box = Checkbox(description=self.displayed_label_name(label),
+                    label_box = Checkbox(description=label.split('.')[0],
                                          value=default_label_value)
                     label_box._subset = subset
                     label_box._cube = cube
@@ -211,45 +245,3 @@ class FaciesInfo():
 
         hbox = HBox(vboxes)
         display(hbox)
-
-    def make_linkage(self, subset='all', dst_labels=None):
-        """ Return cubes paths and cubes-labels linkage to load for requested subset. """
-        linkage = {
-            cube: sorted(labels)
-            for cube, labels in sorted(self.subsets[subset].items())
-            if labels
-            }
-
-        if not sum(linkage.values(), []):
-            msg = f"No labels were selected for subset `{subset}`. "\
-                  "Either choose non-empty subset or add some labels to requested one. "\
-                  "Labels can be added in either loaded json or via `FaciesInfo.interactive_split`."
-            raise ValueError(msg)
-
-        cubes_paths = [
-            f"{self.root}/{self.cube_dir_from_name(cube)}/{cube}"
-            for cube in linkage.keys()
-        ]
-
-        dst_labels = dst_labels or self.dst_labels
-        if dst_labels is None:
-            raise ValueError("`dst_labels` must be provided either in `__init__` or in `make_linkage`.")
-        dst_labels = to_list(dst_labels)
-
-        labels_linkage = {}
-        for labels_dir, dst in zip(self.labels_dirs, dst_labels):
-            src_labels_linkage = {}
-            for cube, labels in linkage.items():
-                labels_path = f"{self.root}/{self.cube_dir_from_name(cube)}/{labels_dir}"
-                labels_files_paths = [f"{labels_path}/{label}" for label in labels]
-                geometry_index = cube.split('.')[0] # geometry indices are cubes filenames without extension
-                src_labels_linkage[geometry_index] = labels_files_paths
-            labels_linkage[dst] = src_labels_linkage
-
-        return cubes_paths, labels_linkage
-
-    def dump(self, path):
-        """ Save info. """
-        info = {'root': self.root, 'cubes': self.cubes, 'labels_dirs': self.labels_dirs, 'subsets': self.subsets}
-        with open(path, 'w') as f:
-            f.write(json.dumps(info, indent=4, sort_keys=False))
