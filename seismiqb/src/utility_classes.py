@@ -1,5 +1,6 @@
 """ Helper classes. """
 import os
+from ast import literal_eval
 from time import perf_counter
 from collections import OrderedDict, defaultdict
 from threading import RLock
@@ -571,6 +572,42 @@ class IndexedDict(OrderedDict):
 
     def __iter__(self):
         return (x for x in self.flat)
+
+
+
+class MetaDict(dict):
+    """ Dictionary that can dump itself on disk in a human-readable and human-editable way.
+    Usually describes cube meta info such as name, coordinates (if known) and other useful data.
+    """
+    def __repr__(self):
+        lines = '\n'.join(f'    "{key}" : {repr(value)},'
+                          for key, value in self.items())
+        return f'{{\n{lines}\n}}'
+
+    @classmethod
+    def load(cls, path):
+        """ Load self from `path` by evaluating the containing dictionary. """
+        with open(path, 'r') as file:
+            content = '\n'.join(file.readlines())
+        return cls(literal_eval(content.replace('\n', '').replace('    ', '')))
+
+    def dump(self, path):
+        """ Save self to `path` with each key on a separate line. """
+        with open(path, 'w') as file:
+            print(repr(self), file=file)
+
+
+    @classmethod
+    def placeholder(cls):
+        """ Default MetaDict"""
+        return cls({
+            'name': 'UNKNOWN',
+            'ru_name': 'Неизвестно',
+            'latitude': None,
+            'longitude': None,
+            'info': 'дополнительная информация о кубе'
+        })
+
 
 
 class lru_cache:
