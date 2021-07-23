@@ -37,7 +37,7 @@ class FaultController(BaseController):
             'label_dir': '/INPUTS/FAULTS/NPY_WIDTH_{}/*',
             'width': 3,
             'ext': 'qblosc',
-            'ratios': None,
+            'weights': None,
             'threshold': 0
         },
 
@@ -179,30 +179,18 @@ class FaultController(BaseController):
     def make_sampler(self, dataset, **kwargs):
         """ Create sampler for generating locations to train on. """
         config = {**self.config['dataset'], **kwargs}
-        ratios = config['ratios']
+        weights = config.get('weights')
         threshold = config['threshold']
         crop_shape = self.config['train']['crop_shape']
 
         if self.config['train/augment'] and self.config['train/adjust']:
             crop_shape = self.adjust_shape(crop_shape)
 
-        if len(dataset) > 0:
-            if ratios is None:
-                ratios = {}
-                for i in range(len(dataset)):
-                    faults = dataset.labels[i]
-                    fault_area = sum([len(np.unique(faults[j].points)) for j in range(len(faults))])
-                    cube_area = np.prod(dataset.geometries[i].cube_shape)
-                    ratios[dataset.indices[i]] = fault_area / cube_area
-
-            weights = np.array([ratios[i] for i in dataset.indices])
-            weights /= weights.sum()
-            weights = np.clip(weights, 0.1, 0.3)
-            weights /= weights.sum()
-
-            weights = weights.tolist()
-        else:
-            weights = [1]
+        if weights is None:
+            if len(dataset) > 0:
+                weights = [1 / len(labels) for labels in dataset.labels.values()]
+            else:
+                weights = [1]
 
         self.log(f'Train dataset cubes weights: {weights}.')
 
