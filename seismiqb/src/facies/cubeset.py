@@ -65,7 +65,7 @@ class FaciesCubeset(SeismicCubeset):
 
         setattr(self, dst_labels, inverted)
         if add_subsets:
-            self.add_subsets(src_subsets=dst_labels, dst_base=src_labels)
+            self.add_subsets(src_subset=dst_labels, dst_base=src_labels)
 
     def add_merged_labels(self, src_labels, dst_labels, indices=None, dst_base='labels'):
         """ Merge given labels and put result into cubeset. """
@@ -82,7 +82,7 @@ class FaciesCubeset(SeismicCubeset):
             container.reset_cache()
             results[idx].append(container)
         setattr(self, dst_labels, results)
-        if add_subsets_to:
+        if dst_base:
             self.add_subsets(src_subset=dst_labels, dst_base=dst_base)
 
     def evaluate(self, src_true, src_pred, metrics_fn, metrics_names=None, indices=None, src_labels='labels'):

@@ -1,4 +1,5 @@
 """ Seismic facies container. """
+# pylint: disable=too-many-statements
 import os
 
 import numpy as np
@@ -10,7 +11,7 @@ from scipy.ndimage import convolve
 from sklearn.decomposition import PCA
 
 
-from ..plotters import  plot_image
+from ..plotters import plot_image
 from ..horizon import Horizon
 from ..utils import to_list, retrieve_function_arguments
 from ..utility_classes import lru_cache
