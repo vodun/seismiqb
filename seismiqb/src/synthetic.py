@@ -140,7 +140,8 @@ def make_colors_array_3d(colors, levels, shape):
 
 def make_coords_shift(rng=None, seed=None, n_points=10, zeros_share=0.6, kind='cubic', perturb_values=True,
                       perturb_peak=True, peak_value=0.05, random_invert=True):
-    """ Make randomized map [0, 1] -> [0, 1] to use it later as a coordinate-shift.
+    """ Generate a map [0, 1] -> [0, 1]. The map is given by f(x) = x + distortion, where
+    the distortion is hump-shaped. This map will later be used to perform elastic transform of an image.
     """
     rng = rng or np.random.default_rng(seed)
     xs = np.linspace(0, 1, n_points)
