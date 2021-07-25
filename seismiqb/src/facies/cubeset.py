@@ -10,9 +10,21 @@ from ..utils import to_list
 
 
 class FaciesCubeset(SeismicCubeset):
-    """ Storage extending `SeismicCubeset` functionality with methods for interaction with labels and their subsets. """
+    """ Storage extending `SeismicCubeset` functionality with methods for interaction with labels and their subsets.
+
+    Most methods basically call methods of the same name for every label stored in requested attribute.
+    """
+
     def add_subsets(self, src_subset, dst_base='labels'):
-        """ Add nested labels. """
+        """ Add nested labels.
+
+        Parameters
+        ----------
+        src_labels : str
+            Name of dataset attribute with labels to add as subsets.
+        dst_base: str
+            Name of dataset attribute with labels to add subsets to.
+        """
         subset_labels = getattr(self, src_subset)
         base_labels = getattr(self, dst_base)
         if len(subset_labels.flat) != len(base_labels.flat):
@@ -55,11 +67,11 @@ class FaciesCubeset(SeismicCubeset):
         return results if len(results.flat) > 0 else None
 
     def show(self, attributes='depths', src_labels='labels', indices=None, **kwargs):
-        """ Show attributes of multiple dataset labels. """
+        """ Show attributes of requested dataset labels. """
         return self.map_labels(function='show', src_labels=src_labels, indices=indices, attributes=attributes, **kwargs)
 
     def invert_subsets(self, subset, src_labels='labels', dst_labels=None, add_subsets=True):
-        """ Apply `invert_subset` for every given label and put it into cubeset. """
+        """ Invert matrices of requested dataset labels and store resulted labels in cubeset. """
         dst_labels = dst_labels or f"{subset}_inverted"
         inverted = self.map_labels(function='invert_subset', indices=None, src_labels=src_labels, subset=subset)
 
@@ -68,7 +80,7 @@ class FaciesCubeset(SeismicCubeset):
             self.add_subsets(src_subset=dst_labels, dst_base=src_labels)
 
     def add_merged_labels(self, src_labels, dst_labels, indices=None, dst_base='labels'):
-        """ Merge given labels and put result into cubeset. """
+        """ Merge requested labels and store resulted labels in cubeset. """
         results = IndexedDict({idx: [] for idx in self.indices})
         indices = to_list(indices or self.indices)
         for idx in indices:

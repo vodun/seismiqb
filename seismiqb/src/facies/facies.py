@@ -21,19 +21,41 @@ from ..utility_classes import lru_cache
 class Facies(Horizon):
     """ Extends base class functionality, allowing interaction with label subsets.
 
+    Parameters
+    ----------
+    subsets : dict, optional
+        Subsets of the initialized label. Keys are subset names and values are `Facies` instances.
+    args, kwargs : misc
+        For `Horizon` base class.
+
+    Methods
+    -------
     - Class methods here rely heavily on the concept of nested subset storage. Facies are labeled along the horizon and
-    therefore can be viewed as a subsets of those horizons, if compared as sets of triplets of points they consist of.
+    therefore can be viewed as subsets of those horizons, if compared as sets of triplets of points they consist of.
 
-    - If facies are added as subsets to their base horizons, than their attributes can be accessed via the base label.
-    This is how `Facies` different from `Horizon`, where different labels types are stored in separate class attributes.
+    Main methods for interaction with label subsets are `add_subset` and `get_subset`. First allows adding given label
+    instance under provided name into parent subsets storage. Second returns the subset label under the requested name.
 
-    - Main methods for interaction with label subsets are `add_subset` and `get_subset`. First allows adding given label
-    instance under provided name into parent subsets storage. Second returns the subset label under requested name.
 
-    - Method for getting desired attributes is `load_attribute`. It works with nested keys, i.e. one can get attributes
-    of horizon susbsets. Address method documentation for further details.
+    - If facies are added as subsets to their base horizons then their attributes can be accessed via the base label.
+    This is how `Facies` is different from `Horizon`, where different labels are stored in separate class attributes.
 
-    - Method `show` visualizes horizon and its attributes in both separate and overlap manners.
+    Method for getting desired attributes is `load_attribute`. It works with nested keys, i.e. one can get attributes
+    of horizon subsets. Address method documentation for further details.
+
+
+    - Method `show` visualizes horizon and its attributes in both separate and overlap manners. It allows visual overlap
+    of various attributes with one or more labels masks.
+
+
+    - Facies predictions might be stored as separate subsets of base labels (a horizon they are segmented along).
+    Method `evaluate` is used for comparison of ground truth labels and predicted ones, if both are stored as subsets.
+
+
+    - Since attributes calculation is cached, there may be a need to free up storage. Method `reset_caches` does that.
+
+
+    - To save facies call `dump`.
     """
 
     # Correspondence between attribute alias and the class function that calculates it
@@ -55,6 +77,7 @@ class Facies(Horizon):
         self.subsets = subsets or {}
 
 
+    # Subsets interaction
     def add_subset(self, name, item):
         """ Add item to subsets storage.
 
@@ -66,7 +89,6 @@ class Facies(Horizon):
             Instance to store.
         """
         self.subsets[name] = item
-
 
     def get_subset(self, name):
         """ Get item from subsets storage.
@@ -83,6 +105,7 @@ class Facies(Horizon):
             raise KeyError(msg) from e
 
 
+    # Generic attributes loading
     def _load_attribute(self, src, location=None, use_cache=True, **kwargs):
         """ Load horizon attribute at requested location. """
         try:
@@ -99,7 +122,6 @@ class Facies(Horizon):
             data = data[i_slice, x_slice]
 
         return data
-
 
     def load_attribute(self, src, location=None, **kwargs):
         """ Load horizon or its subset attribute values at requested location.
@@ -158,6 +180,7 @@ class Facies(Horizon):
         return data
 
 
+    # Specific attributes loading
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     def get_full_binary_matrix(self, **kwargs):
         """ Transform `binary_matrix` attribute to match cubic coordinates.
@@ -170,7 +193,6 @@ class Facies(Horizon):
         transform_kwargs = retrieve_function_arguments(self.transform_where_present, kwargs)
         full_binary_matrix = self.put_on_full(self.binary_matrix, **kwargs)
         return self.transform_where_present(full_binary_matrix, **transform_kwargs)
-
 
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     def get_instantaneous_amplitudes(self, window=23, depths=None, **kwargs):
@@ -200,7 +222,6 @@ class Facies(Horizon):
         result = np.abs(hilbert(amplitudes))[:, :, depths]
         return self.transform_where_present(result, **transform_kwargs)
 
-
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     def get_instantaneous_phases(self, window=23, depths=None, **kwargs):
         """ Calculate instantaneous phase along the horizon.
@@ -229,7 +250,6 @@ class Facies(Horizon):
         result = np.angle(hilbert(amplitudes))[:, :, depths]
         # result[self.full_matrix == self.FILL_VALUE] = np.nan
         return self.transform_where_present(result, **transform_kwargs)
-
 
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     def evaluate_metric(self, metric='support_corrs', supports=50, agg='nanmean', **kwargs):
@@ -311,6 +331,8 @@ class Facies(Horizon):
 
         return self.transform_where_present(result, **transform_kwargs)
 
+
+    # Attributes visualization
     def show(self, attributes='depths', mode='imshow', return_figure=False, **kwargs):
         """ Display facies attributes with predefined defaults.
 
@@ -458,42 +480,7 @@ class Facies(Horizon):
         return figure if return_figure else None
 
 
-    def __sub__(self, other):
-        if not isinstance(other, type(self)):
-            raise TypeError(f"Operands types do not match. Got {type(self)} and {type(other)}.")
-        presence = other.presence_matrix
-        discrepancies = self.full_matrix[presence] != other.full_matrix[presence]
-        if discrepancies.any():
-            raise ValueError("Horizons have different depths where present.")
-        result = self.full_matrix.copy()
-        result[presence] = self.FILL_VALUE
-        name = f"~{other.name}"
-        return type(self)(result, self.geometry, name)
-
-
-    def invert_subset(self, subset):
-        """ Subtract subset matrix from facies matrix. """
-        return self - self.get_subset(subset)
-
-
-    def dump(self, path, name=None, log=True):
-        """ Save facies. """
-        path = path.replace('*', self.geometry.short_name)
-        name = name.replace('*', self.name) if name is not None else self.name
-        os.makedirs(path, exist_ok=True)
-        dump_path = f"{path}/{name}"
-        super().dump(dump_path)
-        if log:
-            print(f"`{self.short_name}` saved to `{dump_path}`")
-
-
-    def reset_cache(self):
-        """ Clear cached data. """
-        super().reset_cache()
-        for subset_label in self.subsets.values():
-            subset_label.reset_cache()
-
-
+    # Metrics evaluations
     def evaluate(self, src_true, src_pred, metrics_fn, metrics_names=None, output='df'):
         """ Apply given function to 'masks' attribute of requested labels.
 
@@ -527,3 +514,40 @@ class Facies(Horizon):
         names = metrics_names if metrics_names is not None else [fn.__name__ for fn in metrics_fn]
         df = pd.DataFrame(index=index, data=values, columns=names)
         return df
+
+
+    # Matrix inversion
+    def __sub__(self, other):
+        if not isinstance(other, type(self)):
+            raise TypeError(f"Operands types do not match. Got {type(self)} and {type(other)}.")
+        presence = other.presence_matrix
+        discrepancies = self.full_matrix[presence] != other.full_matrix[presence]
+        if discrepancies.any():
+            raise ValueError("Horizons have different depths where present.")
+        result = self.full_matrix.copy()
+        result[presence] = self.FILL_VALUE
+        name = f"~{other.name}"
+        return type(self)(result, self.geometry, name)
+
+    def invert_subset(self, subset):
+        """ Subtract subset matrix from facies matrix. """
+        return self - self.get_subset(subset)
+
+
+    # Manage data
+
+    def dump(self, path, name=None, log=True):
+        """ Save facies. """
+        path = path.replace('*', self.geometry.short_name)
+        name = name.replace('*', self.name) if name is not None else self.name
+        os.makedirs(path, exist_ok=True)
+        dump_path = f"{path}/{name}"
+        super().dump(dump_path)
+        if log:
+            print(f"`{self.short_name}` saved to `{dump_path}`")
+
+    def reset_cache(self):
+        """ Clear cached data. """
+        super().reset_cache()
+        for subset_label in self.subsets.values():
+            subset_label.reset_cache()

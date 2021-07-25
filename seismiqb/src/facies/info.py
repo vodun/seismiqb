@@ -12,35 +12,41 @@ from ..utils import get_environ_flag, to_list
 class FaciesInfo():
     """ Class to manage geometry-labels linkage.
 
-    Initialized from path to json file or/and keyword arguments.
+    Initialized from the path to json file or/and keyword arguments.
     Key-value structure in json file must match parameters setup described below.
-    Some items are optional — their defaults are defined in class variable `DEFAULT_INFO`.
 
     Parameters
     ----------
-    root : str, optional
+    root : str
         Path to cubes files storage folder.
     cubes : str or list of str
         Names of cubes files to load.
     labels_dirs : str
         Path to folders containing corresponding labels files.
-        Must be relative to loaded cube file location.
+        Must be relative to a loaded cube file location.
         Corresponding labels files must have identical names.
-    subsets : nested dict
+    subsets : nested dict, optional
         keys : str
             Subset names.
         values : dict
             keys : str
-                Cubes files names included in subset.
+                Cubes files names included in the subset.
             values : list of str
                 Labels files names from `labels_dirs` included in subset.
-    json_path : str
+    json_path : str, optional
         Path to json file containing keyword arguments in a format defined above.
-        Arguments from json file have higher priority, than those explicitly provided.
+        Arguments from json file have higher priority than those explicitly provided.
 
-    Notes
-    -----
-    Cubes names in parameters above are implied to be in 'XX_YYY' format, i.e. without 'CUBE_' prefix.
+    Methods
+    -------
+    - The main purpose of this class is automation of path data creation needed for `SeismicCubeset` initialization.
+    Method `make_linkage` creates this initialization data for the requested subset.
+
+    - To display which subsets consist of which labels use `show_subsets`.
+
+    - To manage labels entries in linkages for different subsets interactively use `interactive_split`.
+
+    - To reuse subsets linkage info created interactively use `dump` method, which saves the info as a json file.
 
     Example of json file
     --------------------
@@ -57,7 +63,7 @@ class FaciesInfo():
                 "01_AAA.blosc": ["horizon_1.char"],
                 "02_BBB.blosc": ["horizon_2.char"],
             },
-            "infer":
+            "test":
             {
                 "01_AAA.blosc": ["horizon_2.char"],
                 "02_BBB.blosc": ["horizon_1.char"],
@@ -115,6 +121,7 @@ class FaciesInfo():
 
         return result
 
+
     def make_linkage(self, subset='all', dst_labels=None):
         """ Return cubes paths and cubes-labels linkage to load for requested subset. """
         linkage = {
@@ -151,15 +158,8 @@ class FaciesInfo():
 
         return cubes_paths, labels_linkage
 
-    def dump(self, path):
-        """ Save info. """
-        info = {'root': self.root, 'cubes': self.cubes, 'labels_dirs': self.labels_dirs, 'subsets': self.subsets}
-        with open(path, 'w') as f:
-            f.write(json.dumps(info, indent=4, sort_keys=False))
 
-    # Linkage visualizations
-
-    def displayed_cube_name(self, name):
+    def _displayed_cube_name(self, name):
         """ Optionally remove field name from cube name. """
         displayed_name = name.split('.')[0]
         if self.anonymize:
@@ -167,17 +167,18 @@ class FaciesInfo():
         return displayed_name
 
     def show_subsets(self):
-        """ Display predefined subsets as a dataframe. """
+        """ Display available subsets in a dataframe. """
         data = {}
         for cube, labels in self.subsets['all'].items():
             for label in labels:
-                idx = (self.displayed_cube_name(cube), label.split('.')[0])
+                idx = (self._displayed_cube_name(cube), label.split('.')[0])
                 data[idx] = [label in values[cube] for values in self.subsets.values()]
         df = DataFrame(data=data, index=self.subsets.keys()).T
         df = df.replace([False, True], ['ㅤㅤ❌ㅤㅤ', 'ㅤㅤ✅ㅤㅤ'])
         style = [dict(selector="th", props=[('text-align', 'center')]),
                  dict(selector="caption", props=[('font-size', '15px'), ('font-weight', 'bold')])]
         return df.style.set_caption("SUBSETS").set_table_styles(style)
+
 
     def _update_on_event(self, event):
         """ Method to pass to ipywidgets `observe` call. """
@@ -204,8 +205,8 @@ class FaciesInfo():
             for box in boxes:
                 box.value = not first_box_value
 
-    def interactive_split(self, subsets=('train', 'infer'), main_subset='all'):
-        """ Render interactive menu to include/exclude labels for every name in `subsets`. """
+    def interactive_split(self, subsets=('train', 'test')):
+        """ Render interactive menu to include/exclude labels for every requested subset. """
         # pylint: disable=import-outside-toplevel, protected-access
         from ipywidgets import Checkbox, VBox, HBox, Button, Layout
         from IPython.display import display
@@ -223,7 +224,7 @@ class FaciesInfo():
             subset_controls.append(subset_button)
             for cube in self.cubes:
 
-                cube_button = Button(description=self.displayed_cube_name(cube))
+                cube_button = Button(description=self._displayed_cube_name(cube))
                 cube_button._labels = []
                 cube_button._controls = subset_controls
                 cube_button._subset = subset
@@ -231,7 +232,7 @@ class FaciesInfo():
                 subset_button._cubes.append(cube_button)
                 subset_controls.append(cube_button)
 
-                for label in self.subsets[main_subset][cube]:
+                for label in self.subsets['all'][cube]:
                     default_label_value = label in self.subsets[subset].get(cube, [])
                     label_box = Checkbox(description=label.split('.')[0],
                                          value=default_label_value)
@@ -245,3 +246,10 @@ class FaciesInfo():
 
         hbox = HBox(vboxes)
         display(hbox)
+
+
+    def dump(self, path):
+        """ Save info. """
+        info = {'root': self.root, 'cubes': self.cubes, 'labels_dirs': self.labels_dirs, 'subsets': self.subsets}
+        with open(path, 'w') as f:
+            f.write(json.dumps(info, indent=4, sort_keys=False))
