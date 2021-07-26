@@ -358,8 +358,6 @@ class FaultSampler(BaseSampler):
         self.displayed_name = fault.short_name
         super().__init__(self)
 
-        # self.weight = 1 / len(self.locations)
-
     @property
     def interpolated_nodes(self):
         """ Create locations in non-labeled slides between labeled slides. """

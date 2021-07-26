@@ -16,7 +16,7 @@ from ...batchflow import B, C, D, P, R, V, F, I
 from ...batchflow.models.torch import TorchModel, ResBlock, EncoderDecoder
 from .base import BaseController
 from ..cubeset import SeismicCubeset
-from ..samplers import SeismicSampler, RegularGrid
+from ..samplers import SeismicSampler, RegularGrid, FaultSampler, ConstantSampler
 from ..fault import Fault
 from ..layers import InputLayer
 from ..utils import adjust_shape_3d
@@ -38,7 +38,9 @@ class FaultController(BaseController):
             'width': 3,
             'ext': 'qblosc',
             'weights': None,
-            'threshold': 0
+            'threshold': 0,
+            'uniform_cubes': True,
+            'uniform_faults': True
         },
 
         # Model parameters
@@ -172,7 +174,7 @@ class FaultController(BaseController):
             dataset.load(label_dir=label_dir.format(width), labels_class=Fault, transform=True,
                          direction=direction, verify=True, bar=bar)
         else:
-            dataset.load_geometries()
+            dataset.load_geometries(logs=False)
 
         return dataset
 
@@ -183,19 +185,42 @@ class FaultController(BaseController):
         threshold = config['threshold']
         crop_shape = self.config['train']['crop_shape']
 
+        uniform_cubes = config['uniform_cubes']
+        uniform_faults = config['uniform_faults']
+
         if self.config['train/augment'] and self.config['train/adjust']:
             crop_shape = self.adjust_shape(crop_shape)
 
         if weights is None:
             if len(dataset) > 0:
-                weights = [1 / len(labels) for labels in dataset.labels.values()]
+                if uniform_cubes:
+                    weights = [1 for _ in dataset.labels.values()]
+                else:
+                    weights = [len(labels) for labels in dataset.labels.values()]
             else:
                 weights = [1]
+        weights = np.array(weights)
+        weights = weights / weights.sum()
 
         self.log(f'Train dataset cubes weights: {weights}.')
 
         sampler = SeismicSampler(labels=dataset.labels, crop_shape=crop_shape, mode='fault',
-                                 threshold=threshold, proportions=weights, **kwargs)
+                                 threshold=threshold, **kwargs)
+
+        new_sampler = 0 & ConstantSampler(np.int32(0), dim=FaultSampler.dim)
+        for cube_weight, cube_sampler in zip(weights, sampler.samplers.values()):
+            new_cube_sampler = 0 & ConstantSampler(np.int32(0), dim=FaultSampler.dim)
+            if uniform_faults:
+                fault_weights = np.array([len(sampler.locations) for sampler in cube_sampler])
+                fault_weights = fault_weights / fault_weights.sum()
+            else:
+                fault_weights = np.array([1 / len(cube_sampler) for _ in cube_sampler])
+
+            for fault_weight, fault_sampler in zip(fault_weights, cube_sampler):
+                new_cube_sampler = new_cube_sampler | (cube_weight * fault_weight & fault_sampler)
+
+            new_sampler = new_sampler | new_cube_sampler
+            sampler.sampler = new_sampler
 
         return sampler
 
