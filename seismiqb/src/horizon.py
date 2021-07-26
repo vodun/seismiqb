@@ -365,7 +365,7 @@ class Horizon:
         else:
             raise ValueError('Horizon labels must be in CHARISMA or REDUCED_CHARISMA format.')
 
-        df = pd.read_csv(path, sep='\s+', names=names, usecols=Horizon.COLUMNS)
+        df = pd.read_csv(path, sep=r'\s+', names=names, usecols=Horizon.COLUMNS)
         df.sort_values(Horizon.COLUMNS, inplace=True)
         return df.values
 
