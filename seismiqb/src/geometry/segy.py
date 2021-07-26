@@ -107,7 +107,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
 
         # Computed from CDP_X/CDP_Y information
         self.rotation_matrix = self.compute_rotation_matrix()
-        # self.area = self.compute_area()
+        self.area = self.compute_area()
 
     def add_attributes(self):
         """ Infer info about curent index from `dataframe` attribute. """
