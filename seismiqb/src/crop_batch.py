@@ -1173,7 +1173,7 @@ class SeismicCropBatch(Batch):
         # Get location
         l = self.locations[idx]
         cube_name = self.unsalt(self.indices[idx])
-        displayed_cube_name = self.dataset.geometries[cube_name].displayed_name
+        displayed_name = self.dataset.geometries[cube_name].displayed_name
 
         if (l[0].stop - l[0].start) == 1:
             suptitle = f'INLINE {l[0].start}   CROSSLINES {l[1].start}:{l[1].stop}   DEPTH {l[2].start}:{l[2].stop}'
@@ -1181,7 +1181,7 @@ class SeismicCropBatch(Batch):
             suptitle = f'CROSSLINE {l[1].start}   INLINES {l[0].start}:{l[0].stop}   DEPTH {l[2].start}:{l[2].stop}'
         else:
             suptitle = f'DEPTH {l[2].start}  INLINES {l[0].start}:{l[0].stop}   CROSSLINES {l[1].start}:{l[1].stop}'
-        suptitle = f'batch item {idx}                  {displayed_cube_name}\n{suptitle}'
+        suptitle = f'batch item {idx}                  {displayed_name}\n{suptitle}'
 
         # Plot parameters
         kwargs = {
