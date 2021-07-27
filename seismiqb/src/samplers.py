@@ -709,6 +709,8 @@ class SeismicSampler(Sampler):
                                  'restricted', 'dead traces'),
                 'legend_cmap': ('purple','blue','red', 'white', 'gray'),
                 'legend_loc': 10,
+                'vmin': [[1, 0]] * len(samplers_list),
+                'vmax': [[3, 1]] * len(samplers_list),
                 **kwargs
             }
             geometry.show(images, **_kwargs)
