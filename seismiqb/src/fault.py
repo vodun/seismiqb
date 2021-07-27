@@ -429,6 +429,39 @@ class Fault(Horizon):
 
         return cls.from_mask(processed_faults, prediction_cube, chunk_size=100, pbar=bar)
 
+    @classmethod
+    def remove_predictions_on_bounds(self, image, prediction, window=30, dilation=30, padding=True, fill_value=0):
+        """ Remove predictions from cube bounds. """
+        dilation = [dilation] * image.ndim if isinstance(dilation, int) else dilation
+        if padding:
+            pad_width = [(0, 0)] * image.ndim
+            pad_width[-1] = (window // 2, window // 2)
+            image = np.pad(image, pad_width=pad_width)
+
+        shape = (*image.shape[:-1], image.shape[-1] - window + window % 2, window)
+        strides = (*image.strides, image.strides[-1])
+
+        strided = np.lib.stride_tricks.as_strided(image, shape, strides=strides)
+
+        if padding:
+            mask = strided.min(axis=-1) == strided.max(axis=-1)
+        else:
+            mask = np.ones_like(image, dtype=np.bool)
+            slices = [slice(None)] * image.ndim
+            slices[-1] = slice(window // 2, -window // 2 + 1)
+            mask[slices] = strided.min(axis=-1) == strided.max(axis=-1)
+
+        for i, width in enumerate(dilation):
+            slices = [[slice(None) for _ in range(image.ndim)] for _ in range(2)]
+            for _ in range(1, width):
+                slices[0][i] = slice(1, None)
+                slices[1][i] = slice(None, -1)
+                mask[slices[0]] = np.logical_or(mask[slices[0]], mask[slices[1]])
+                mask[slices[1]] = np.logical_or(mask[slices[0]], mask[slices[1]])
+        prediction[mask] = fill_value
+
+        return prediction
+
 def faults_sizes(labels):
     """ Compute sizes of faults.
 
