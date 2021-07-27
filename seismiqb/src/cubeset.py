@@ -219,9 +219,9 @@ class SeismicCubeset(Dataset):
                 .adaptive_reshape(src=['images', 'masks'])
                 .normalize(src='images'))
 
-    def data_batch(self, sampler, batch_size=4):
+    def data_batch(self, sampler, batch_size=4, width=4):
         """ Get one batch of `:meth:.data_pipeline` with `images` and `masks`. """
-        return self.data_pipeline(sampler=sampler, batch_size=batch_size).next_batch()
+        return self.data_pipeline(sampler=sampler, batch_size=batch_size, width=width).next_batch()
 
 
     # Textual and visual representation of dataset contents
