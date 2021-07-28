@@ -430,7 +430,7 @@ class Fault(Horizon):
         return cls.from_mask(processed_faults, prediction_cube, chunk_size=100, pbar=bar)
 
     @classmethod
-    def remove_predictions_on_bounds(self, image, prediction, window=30, dilation=30, padding=True, fill_value=0):
+    def remove_predictions_on_bounds(cls, image, prediction, window=30, dilation=30, padding=True, fill_value=0):
         """ Remove predictions from cube bounds. """
         dilation = [dilation] * image.ndim if isinstance(dilation, int) else dilation
         if padding:

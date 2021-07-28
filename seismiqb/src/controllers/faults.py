@@ -8,12 +8,11 @@ from datetime import datetime
 from shutil import copyfile
 
 import numpy as np
-import torch
 
 
 from ...batchflow import Config, Pipeline, Notifier
 from ...batchflow import B, C, D, P, R, V, F, I
-from ...batchflow.models.torch import TorchModel, ResBlock, EncoderDecoder
+from ...batchflow.models.torch import TorchModel, EncoderDecoder
 from .base import BaseController
 from .best_practices import MODEL_CONFIG
 from ..cubeset import SeismicCubeset
