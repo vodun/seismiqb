@@ -15,6 +15,7 @@ from ...batchflow import Config, Pipeline, Notifier
 from ...batchflow import B, C, D, P, R, V, F, I
 from ...batchflow.models.torch import TorchModel, ResBlock, EncoderDecoder
 from .base import BaseController
+from .best_practices import MODEL_CONFIG
 from ..cubeset import SeismicCubeset
 from ..samplers import SeismicSampler, RegularGrid, FaultSampler, ConstantSampler
 from ..fault import Fault
@@ -23,7 +24,6 @@ from ..utils import adjust_shape_3d
 from ..utility_classes import Accumulator3D
 from ..plotters import plot_image
 from ..metrics import FaultsMetrics
-
 class FaultController(BaseController):
     """ Controller for faults detection tasks. """
     DEFAULTS = Config({
@@ -58,6 +58,7 @@ class FaultController(BaseController):
             'augment': True,
 
             # Normalization parameters
+            'norm_mode': 'minmax',
             'itemwise': False,
             'normalization_layer': False,
             'normalization_window': (1, 1, 100),
@@ -83,6 +84,7 @@ class FaultController(BaseController):
             'orientation': 'ilines',
             'slicing': 'native',
             'output': 'sigmoid',
+            'norm_mode': 'minmax',
             'itemwise': False,
             'aggregation': 'mean'
         }
@@ -108,43 +110,13 @@ class FaultController(BaseController):
     }
 
     UNET_CONFIG = {
+        **MODEL_CONFIG,
         'initial_block/base_block': InputLayer,
-        'body/encoder': {
-            'num_stages': 4,
-            'order': 'sbd',
-            'blocks': {
-                'base': ResBlock,
-                'n_reps': 1,
-                'filters': C('filters')[:-1],
-                'attention': 'scse',
-            },
-        },
-        'body/embedding': {
-            'base': ResBlock,
-            'n_reps': 1,
-            'filters': C('filters')[-1],
-            'attention': 'scse',
-        },
-        'body/decoder': {
-            'num_stages': 4,
-            'upsample': {
-                'layout': 'tna',
-                'kernel_size': 5,
-            },
-            'blocks': {
-                'base': ResBlock,
-                'filters': C('filters')[-2::-1],
-                'attention': 'scse',
-            },
-        },
-        'head': {
-            'base_block': ResBlock,
-            'filters': [16, 8],
-            'attention': 'scse'
-        },
-        'output': torch.sigmoid,
+        'body/encoder/blocks/filters': C('filters')[:-1],
+        'body/embedding/filters': C('filters')[-1],
+        'body/decoder/upsample/kernel_size': 5,
+        'body/decoder/blocks/filters': C('filters')[-2::-1],
         'common/activation': 'relu6',
-        'loss': C('loss')
     }
 
     def make_train_dataset(self, **kwargs):
@@ -190,6 +162,7 @@ class FaultController(BaseController):
 
         if self.config['train/augment'] and self.config['train/adjust']:
             crop_shape = self.adjust_shape(crop_shape)
+            self.log(f'Adjusted crop shape: {crop_shape}.')
 
         if weights is None:
             if len(dataset) > 0:
@@ -231,7 +204,7 @@ class FaultController(BaseController):
             .load_cubes(dst='images', slicing=C('slicing'))
             .create_masks(dst='masks')
             .adaptive_reshape(src=['images', 'masks'])
-            .normalize(mode='q', itemwise=C('itemwise'), src='images')
+            .normalize(mode=C('norm_mode'), itemwise=C('itemwise'), src='images')
         )
 
     def load_test(self, create_masks=True):
@@ -240,7 +213,7 @@ class FaultController(BaseController):
             .make_locations(batch_size=C('batch_size'), generator=C('sampler'))
             .load_cubes(dst='images', slicing=C('slicing'))
             .adaptive_reshape(src='images')
-            .normalize(mode='q', itemwise=C('itemwise'), src='images')
+            .normalize(mode=C('norm_mode'), itemwise=C('itemwise'), src='images')
         )
         if create_masks:
             ppl += (Pipeline()
@@ -288,24 +261,25 @@ class FaultController(BaseController):
     def make_notifier(self):
         """ Make notifier. """
         if self.config['train/visualize_crops']:
-            return Notifier(None, graphs=['loss_history',
-                {'source': B('images'), 'name': 'images', 'plot_function': self.custom_plotter},
-                {'source': B('masks'), 'name': 'masks', 'plot_function': self.custom_plotter},
-                {'source': B('prediction'), 'name': 'predictions', 'plot_function': self.custom_plotter},
-            ])
+            cube_name = B().unsalt(B('indices')[0])
+            return Notifier(True, graphs=['loss_history',
+                {'source': [B('images'), B('masks'), cube_name, B('locations')],
+                 'name': 'masks', 'loc': B('location'), 'plot_function': self.custom_plotter},
+                {'source': [B('images'), B('prediction'), cube_name, B('locations')],
+                 'name': 'prediction', 'loc': B('location'), 'plot_function': self.custom_plotter},
+            ],
+            figsize=(40, 10))
         return super().make_notifier()
 
     def custom_plotter(self, ax=None, container=None, **kwargs):
         """ Plot examples during train stage. """
-        data = container['data']
-        data = data[0][0]
-        if data.ndim == 3:
-            data = data[0]
-        ax.imshow(data.T)
-        ax.set_title(container['name'], fontsize=18)
+        images, masks, cube_name, locations = container['data']
 
-        ax.set_xlabel('axis one', fontsize=18)
-        ax.set_ylabel('axis two', fontsize=18)
+        loc = [(slc.start, slc.stop) for slc in locations[0]]
+        loc = '  '.join([f'{item[0]}:{item[1]}' for item in loc])
+
+        title = f"{cube_name}  {loc}\n{container['name']}"
+        plot_image([images[0][0], masks[0][0] > 0.5], overlap=True, title=title, ax=ax)
 
     def get_train_template(self, **kwargs):
         """ Define the whole training procedure pipeline including data loading, augmentation and model training. """
@@ -392,7 +366,6 @@ class FaultController(BaseController):
         """ Make grid and accumulator for inference. """
         batch_size = self.config['inference']['inference_batch_size']
         aggregation = self.config['inference']['aggregation']
-        name = 'cube_i'
 
         grid = RegularGrid(geometry=geometry,
                            threshold=0,
@@ -405,7 +378,6 @@ class FaultController(BaseController):
                                                      origin=grid.origin,
                                                      shape=grid.shape,
                                                      fill_value=0.0,
-                                                     name=name,
                                                      path=path)
 
         return grid, accumulator

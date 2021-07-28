@@ -380,4 +380,4 @@ def to_list(obj):
 
 def get_class_methods(cls):
     """ Get a list of non-private class methods. """
-    return [func for func in dir(cls) if not func.startswith("__") and callable(getattr(cls, func))]
+    return [getattr(cls, func) for func in dir(cls) if not func.startswith("__") and callable(getattr(cls, func))]

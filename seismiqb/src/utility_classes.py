@@ -1,5 +1,6 @@
 """ Helper classes. """
 import os
+from ast import literal_eval
 from time import perf_counter
 from collections import OrderedDict, defaultdict
 from threading import RLock
@@ -430,17 +431,17 @@ class MeanAccumulator3D(Accumulator3D):
             for i in range(self.data.shape[0]):
                 counts = self.counts[i]
                 counts[counts == 0] = 1
-                if 'float' in self.dtype.__name__:
+                if np.issubdtype(self.dtype, np.floating):
                     self.data[i] /= counts
                 else:
                     self.data[i] //= counts
 
         elif self.type == 'numpy':
             self.counts[self.counts == 0] = 1
-            if 'float' in self.dtype.__name__:
-                self.data[:] /= self.counts
+            if np.issubdtype(self.dtype, np.floating):
+                self.data /= self.counts
             else:
-                self.data[:] //= self.counts
+                self.data //= self.counts
 
         # Cleanup
         self.remove_placeholder('counts')
@@ -502,6 +503,9 @@ class AccumulatorBlosc(Accumulator3D):
     def __init__(self, path, orientation=0, aggregation='max',
                  shape=None, origin=None, dtype=np.float32, transform=None, **kwargs):
         super().__init__(shape=shape, origin=origin, dtype=dtype, transform=transform, path=None)
+        if orientation == 2:
+            raise ValueError("Can't use BLOSC accumulator for a joined grid with mixed orientations!")
+
         self.type = 'blosc'
         self.path = path
         self.orientation = orientation
@@ -561,7 +565,7 @@ class IndexedDict(OrderedDict):
     def flatten(self, keys=None):
         """ Get dict values for requested keys in a single list. """
         keys = to_list(keys) if keys is not None else list(self.keys())
-        lists = [to_list(self[key]) for key in keys]
+        lists = [self[key] if isinstance(self[key], list) else [self[key]] for key in keys]
         return sum(lists, [])
 
     @property
@@ -571,6 +575,42 @@ class IndexedDict(OrderedDict):
 
     def __iter__(self):
         return (x for x in self.flat)
+
+
+
+class MetaDict(dict):
+    """ Dictionary that can dump itself on disk in a human-readable and human-editable way.
+    Usually describes cube meta info such as name, coordinates (if known) and other useful data.
+    """
+    def __repr__(self):
+        lines = '\n'.join(f'    "{key}" : {repr(value)},'
+                          for key, value in self.items())
+        return f'{{\n{lines}\n}}'
+
+    @classmethod
+    def load(cls, path):
+        """ Load self from `path` by evaluating the containing dictionary. """
+        with open(path, 'r') as file:
+            content = '\n'.join(file.readlines())
+        return cls(literal_eval(content.replace('\n', '').replace('    ', '')))
+
+    def dump(self, path):
+        """ Save self to `path` with each key on a separate line. """
+        with open(path, 'w') as file:
+            print(repr(self), file=file)
+
+
+    @classmethod
+    def placeholder(cls):
+        """ Default MetaDict"""
+        return cls({
+            'name': 'UNKNOWN',
+            'ru_name': 'Неизвестно',
+            'latitude': None,
+            'longitude': None,
+            'info': 'дополнительная информация о кубе'
+        })
+
 
 
 class lru_cache:

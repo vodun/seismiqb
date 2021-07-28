@@ -227,13 +227,14 @@ class BloscDataset:
 
 
     def __getitem__(self, key):
-        """ Load the file, named as the number of a slide. """
+        """ Load the file, named as the number of a slide or construct array from slice. """
         key = key if isinstance(key, (int, slice)) else key[0]
         if isinstance(key, slice):
-            array = []
-            for i in np.arange(self.shape[0])[key]:
-                array.append(self[int(i)])
-            return np.stack(array, axis=0)
+            shape = (len(np.arange(self.shape[0])[key]), *self.shape[1:])
+            array = np.empty(shape, dtype=self.dtype)
+            for i, idx in enumerate(np.arange(self.shape[0])[key]):
+                array[i] = self[int(idx)]
+            return array
 
         for _ in range(self.RETRIES):
             # In a multi-processing setting, the ZipFile can be (somehow) closed from other process
@@ -241,6 +242,7 @@ class BloscDataset:
             try:
                 with self.zipfile.open(f'{self.key}/{key}', mode='r') as file:
                     slide = self.load(file)
+                break
             except ValueError:
                 self.parent.open_handler()
         return slide

@@ -14,7 +14,8 @@ from ..batchflow import FilesIndex, Batch, action, inbatch_parallel, SkipBatchEx
 
 from .horizon import Horizon
 from .plotters import plot_image
-from .utils import compute_attribute
+from .utils import compute_attribute, to_list
+from .utility_classes import IndexedDict
 
 
 AFFIX = '___'
@@ -35,8 +36,6 @@ class SeismicCropBatch(Batch):
         'target': 'for',
         'post': '_assemble'
     }
-    # When an attribute containing one of keywords from list it accessed via `get`, firstly search it in `self.dataset`.
-    DATASET_ATTRIBUTES = ['label', 'geom', 'fan', 'channel', 'horizon']
 
 
     def _init_component(self, *args, **kwargs):
@@ -53,6 +52,29 @@ class SeismicCropBatch(Batch):
             if not hasattr(self, comp):
                 self.add_components(comp, np.array([np.nan] * len(self.index)))
         return self.indices
+
+    @action
+    def add_components(self, components, init=None):
+        """ Add new components, checking that attributes of the same name are not present in dataset.
+
+        Parameters
+        ----------
+        components : str or list
+            new component names
+        init : array-like
+            initial component data
+
+        Raises
+        ------
+        ValueError
+            If a component or an attribute with the given name already exists in batch or dataset.
+        """
+        for component in to_list(components):
+            if hasattr(self.dataset, component):
+                msg = f"Component with `{component}` name cannot be added to batch, "\
+                      "since attribute with this name is already present in dataset."
+                raise ValueError(msg)
+        super().add_components(components=components, init=init)
 
     # Inner workings
     @staticmethod
@@ -102,34 +124,25 @@ class SeismicCropBatch(Batch):
         return path
 
 
-    def __getattr__(self, name):
-        """ Retrieve data from either `self` or attached dataset. """
-        if hasattr(self.dataset, name):
-            return getattr(self.dataset, name)
-        return super().__getattr__(name)
-
     def get(self, item=None, component=None):
         """ Custom access for batch attributes.
-        If `component` has an entry from `DATASET_ATTRIBUTES` than retrieve it
-        from attached dataset and use unsalted version of `item` as key.
-        Otherwise, get position of `item` in the current batch and use it to index sequence-like `component`.
+        If `component` is present in dataset and is an instance of `IndexedDict`, that index it with item and return it.
+        Otherwise retrieve `component` from batch itself and optionally index it with `item` position in `self.indices`.
         """
-        if any(attribute in component for attribute in self.DATASET_ATTRIBUTES):
+        data = getattr(self.dataset, component, None)
+        if isinstance(data, IndexedDict):
             if isinstance(item, str) and self.has_salt(item):
                 item = self.unsalt(item)
-            res = getattr(self, component)
-            if isinstance(res, dict) and item in res:
-                return res[item]
-            return res
+            return data[item]
 
+        data = getattr(self, component) if isinstance(component, str) else component
         if item is not None:
-            data = getattr(self, component) if isinstance(component, str) else component
             if isinstance(data, (np.ndarray, list)) and len(data) == len(self):
                 pos = np.where(self.indices == item)[0][0]
                 return data[pos]
-
             return super().get(item, component)
-        return getattr(self, component)
+
+        return data
 
 
     # Core actions
@@ -324,39 +337,6 @@ class SeismicCropBatch(Batch):
         result = compute_attribute(image, window, device, attribute)
         return result
 
-    @action
-    @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def load_attribute(self, ix, dst, src_attribute=None, final_ndim=3, src_labels='labels', **kwargs):
-        """ Load attribute for depth-nearest label and crop in given locations.
-
-        Parameters
-        ----------
-        src_attribute : str
-            A keyword from :attr:`~Horizon.ATTRIBUTE_TO_METHOD` keys, defining label attribute to make crops from.
-        src_labels : str
-            Dataset attribute with labels dict.
-        final_ndim : 2 or 3
-            Number of dimensions returned crop should have.
-        kwargs :
-            Passed directly to either:
-            - one of attribute-evaluating methods from :attr:`~Horizon.ATTRIBUTE_TO_METHOD` depending on `src_attribute`
-            - or attribute-transforming method :meth:`~Horizon.transform_where_present`.
-
-        Notes
-        -----
-        This method loads rectified data, e.g. amplitudes are croped relative
-        to horizon and will form a straight plane in the resulting crop.
-        """
-        location = self.get(ix, 'locations')
-        nearest_horizon = self.get_nearest_horizon(ix, src_labels, location[2])
-        crop = nearest_horizon.load_attribute(src_attribute=src_attribute, location=location, **kwargs)
-        if final_ndim == 3 and crop.ndim == 2:
-            crop = crop[..., np.newaxis]
-        elif final_ndim != crop.ndim:
-            raise ValueError("Crop returned by `Horizon.get_attribute` has {} dimensions, but shape conversion "
-                             "to expected {} dimensions is not implemented.".format(crop.ndim, final_ndim))
-        return crop
-
 
     # Loading of labels
     @action
@@ -403,11 +383,42 @@ class SeismicCropBatch(Batch):
                 break
         return mask
 
-    def get_nearest_horizon(self, ix, src_labels, heights_slice):
-        """ Get horizon with its `h_mean` closest to mean of `heights_slice`. """
-        location_h_mean = (heights_slice.start + heights_slice.stop) // 2
-        nearest_horizon_ind = np.argmin([abs(horizon.h_mean - location_h_mean) for horizon in self.get(ix, src_labels)])
-        return self.get(ix, src_labels)[nearest_horizon_ind]
+    @action
+    @inbatch_parallel(init='indices', post='_assemble', target='for')
+    def load_attribute(self, ix, dst, src='amplitudes', src_labels='labels', res_ndim=3, **kwargs):
+        """ Load attribute for label at given location.
+
+        Parameters
+        ----------
+        src : str
+            A keyword from :attr:`~Facies.ATTRIBUTE_TO_METHOD` keys, defining label attribute to make crops from.
+        src_labels : str
+            Dataset attribute with labels dict.
+        locations : str
+            Component of batch with locations of crops to load.
+        kwargs :
+            Passed directly to either:
+            - one of attribute-evaluating methods from :attr:`~Horizon.ATTRIBUTE_TO_METHOD` depending on `attribute`
+            - or attribute-transforming method :meth:`~Horizon.transform_where_present`.
+
+        Notes
+        -----
+        This method loads rectified data, e.g. amplitudes are croped relative
+        to horizon and will form a straight plane in the resulting crop.
+        """
+        location = self.get(ix, 'locations')
+        label_index = self.get(ix, 'generated')[1]
+        label = self.get(ix, src_labels)[label_index]
+
+        label_name = self.get(ix, 'label_names')
+        if label.short_name != label_name:
+            msg = f"Name `{label.short_name}` of the label loaded by index {label_index} "\
+                  f"from {src_labels} does not match label name {label_name} from batch."\
+                  f"This might have happened due to items order change in {src_labels} "\
+                  f"in between sampler creation and `make_locations` call."
+            raise ValueError(msg)
+
+        return label.load_attribute(src=src, location=location, res_ndim=res_ndim, **kwargs)
 
 
     # More methods to work with labels
@@ -437,7 +448,7 @@ class SeismicCropBatch(Batch):
         _ = args, kwargs
         new_index = [self.indices[i] for i, area in enumerate(areas) if area > threshold]
         new_dict = {idx: self.index._paths[idx] for idx in new_index}
-        if len(new_index):
+        if len(new_index) > 0:
             self.index = FilesIndex.from_index(index=new_index, paths=new_dict, dirs=False)
         else:
             raise SkipBatchException
@@ -1162,13 +1173,15 @@ class SeismicCropBatch(Batch):
         # Get location
         l = self.locations[idx]
         cube_name = self.unsalt(self.indices[idx])
+        displayed_name = self.dataset.geometries[cube_name].displayed_name
+
         if (l[0].stop - l[0].start) == 1:
             suptitle = f'INLINE {l[0].start}   CROSSLINES {l[1].start}:{l[1].stop}   DEPTH {l[2].start}:{l[2].stop}'
         elif (l[1].stop - l[1].start) == 1:
             suptitle = f'CROSSLINE {l[1].start}   INLINES {l[0].start}:{l[0].stop}   DEPTH {l[2].start}:{l[2].stop}'
         else:
             suptitle = f'DEPTH {l[2].start}  INLINES {l[0].start}:{l[0].stop}   CROSSLINES {l[1].start}:{l[1].stop}'
-        suptitle = f'batch item {idx}                  {cube_name}\n{suptitle}'
+        suptitle = f'batch item {idx}                  {displayed_name}\n{suptitle}'
 
         # Plot parameters
         kwargs = {

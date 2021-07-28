@@ -209,18 +209,18 @@ class SeismicCubeset(Dataset):
 
 
     # Default pipeline and batch for fast testing / introspection
-    def data_pipeline(self, sampler, batch_size=4):
+    def data_pipeline(self, sampler, batch_size=4, width=4):
         """ Pipeline with default actions of creating locations, loading seismic images and corresponding masks. """
         return (self.p
                 .make_locations(generator=sampler, batch_size=batch_size)
-                .create_masks(dst='masks', width=4)
+                .create_masks(dst='masks', width=width)
                 .load_cubes(dst='images')
                 .adaptive_reshape(src=['images', 'masks'])
                 .normalize(src='images'))
 
-    def data_batch(self, sampler, batch_size=4):
+    def data_batch(self, sampler, batch_size=4, width=4):
         """ Get one batch of `:meth:.data_pipeline` with `images` and `masks`. """
-        return self.data_pipeline(sampler=sampler, batch_size=batch_size).next_batch()
+        return self.data_pipeline(sampler=sampler, batch_size=batch_size, width=width).next_batch()
 
 
     # Textual and visual representation of dataset contents
