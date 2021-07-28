@@ -423,23 +423,23 @@ class MatplotlibPlotter:
         for image_num, image in enumerate(data):
             image = np.transpose(image, axes=kwargs['order_axes'][:image.ndim]).astype(np.float32)
 
+            keys = ['cmap', 'vmin', 'vmax', 'interpolation', 'alpha', 'extent']
+            params = filter_parameters(kwargs, keys, prefix='imshow_', index=image_num)
+            params['cmap'] = cls.make_cmap(params.pop('cmap'), kwargs['bad_color'])
+            params['extent'] = params.get('extent') or [0, image.shape[1], image.shape[0], 0]
+
             # fill some values with nans to display them with `bad_color`
             bad_values = filter_parameters(kwargs, ['bad_values'], index=image_num).get('bad_values', [])
-
             transparize_masks = kwargs.get('transparize_masks')
             transparize_masks = transparize_masks if transparize_masks is not None else image_num > 0
             if transparize_masks:
                 unique_values = tuple(np.unique(image))
                 if unique_values == (0,) or unique_values == (0, 1): # pylint: disable=consider-using-in
-                    kwargs['vmin'] = params.get('vmin', 0)
+                    params['vmin'] = params.get('vmin', 0)
                     bad_values = [0]
             for bad_value in bad_values:
                 image[image == bad_value] = np.nan
 
-            keys = ['cmap', 'vmin', 'vmax', 'interpolation', 'alpha', 'extent']
-            params = filter_parameters(kwargs, keys, prefix='imshow_', index=image_num)
-            params['cmap'] = cls.make_cmap(params.pop('cmap'), kwargs['bad_color'])
-            params['extent'] = params.get('extent') or [0, image.shape[1], image.shape[0], 0]
             ax_image = ax.imshow(image, **params)
             if image_num == 0:
                 kwargs['ax_image'] = ax_image
@@ -666,6 +666,8 @@ class MatplotlibPlotter:
             if rolling_mean:
                 averaged = array.copy()
                 window = 10 if rolling_mean is True else rolling_mean
+                if window > len(averaged * 2):
+                    break
                 averaged[(window // 2):(-window // 2 + 1)] = np.convolve(array, np.ones(window) / window, mode='valid')
                 ax.plot(averaged, color=mean_color, linestyle='--')
 
