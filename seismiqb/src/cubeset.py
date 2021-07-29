@@ -14,7 +14,6 @@ from .horizon import Horizon
 from .plotters import plot_image, show_3d
 from .crop_batch import SeismicCropBatch
 from .utility_classes import IndexedDict
-from .utils import fill_defaults
 
 
 class SeismicCubeset(Dataset):
@@ -486,64 +485,6 @@ class SeismicCubeset(Dataset):
 
         return background
 
-    def make_prediction(self, dst, pipeline, crop_shape, crop_stride, locations=None,
-                        idx=0, src='predictions', chunk_shape=None, chunk_stride=None, batch_size=8,
-                        agg='max', projection='ixh', threshold=0.5, pbar=True, order=(0, 1, 2)):
-        """ #TODO: no longer needed, remove. """
-        cube_shape = self.geometries[idx].cube_shape
-
-        if locations is None:
-            locations = [(0, s) for s in cube_shape]
-        else:
-            locations = [(item.start or 0, item.stop or stop) for item, stop in zip(locations, cube_shape)]
-        locations = np.array(locations)
-        output_shape = locations[:, 1] - locations[:, 0]
-
-        chunk_shape = fill_defaults(chunk_shape, output_shape)
-        chunk_shape = np.minimum(np.array(chunk_shape), np.array(output_shape))
-        chunk_stride = fill_defaults(chunk_stride, chunk_shape)
-
-        predictions_generator = self._predictions_generator(idx, pipeline, locations, output_shape,
-                                                            chunk_shape, chunk_stride, crop_shape, crop_stride,
-                                                            batch_size, src, pbar, order)
-
-        return SeismicGeometry.create_file_from_iterable(predictions_generator, output_shape,
-                                                         chunk_shape, chunk_stride, dst, agg, projection, threshold)
-
-    def _predictions_generator(self, idx, pipeline, locations, output_shape, chunk_shape, chunk_stride,
-                               crop_shape, crop_stride, batch_size, src, pbar, order):
-        """ #TODO: no longer needed, remove. """
-        geometry = self.geometries[idx]
-        cube_shape = geometry.cube_shape
-
-        chunk_grid = self._make_regular_grid(idx, chunk_shape, ilines=locations[0], xlines=locations[1],
-                                             heights=locations[2], filtering_matrix=geometry.zero_traces,
-                                             strides=chunk_stride)[-1][:, 1:]
-
-        if pbar:
-            total = self._compute_total_batches_in_all_chunks(idx, chunk_grid, chunk_shape,
-                                                              crop_shape, crop_stride, batch_size)
-            progress_bar = tqdm(total=total)
-
-        for lower_bound in chunk_grid:
-            upper_bound = np.minimum(lower_bound + chunk_shape, cube_shape)
-            self.make_grid(
-                self.indices[idx], crop_shape,
-                *list(zip(lower_bound, upper_bound)),
-                strides=crop_stride, batch_size=batch_size
-            )
-            chunk_pipeline = pipeline << self
-            for _ in range(self.grid_iters):
-                _ = chunk_pipeline.next_batch(len(self))
-                if pbar:
-                    progress_bar.update(1)
-            prediction = self.assemble_crops(chunk_pipeline.v(src), order=order)
-            prediction = prediction[:output_shape[0], :output_shape[1], :output_shape[2]]
-            position = lower_bound - np.array([locations[i][0] for i in range(3)])
-            yield position, prediction
-        if pbar:
-            progress_bar.close()
-
     def _compute_total_batches_in_all_chunks(self, idx, chunk_grid, chunk_shape, crop_shape, crop_stride, batch_size):
         """ #TODO: no longer needed, remove. """
         total = 0
@@ -560,8 +501,8 @@ class SeismicCubeset(Dataset):
 
     # Convenient loader
     def load(self, label_dir=None, filter_zeros=True, dst_labels='labels',
-             labels_class=Horizon, direction=None, **kwargs):
-        """ Load geometries and labels, stored on disk in a predefined format:
+             labels_class=None, direction=None, **kwargs):
+        """ Load everything: geometries, point clouds, labels, samplers.
 
         Parameters
         ----------

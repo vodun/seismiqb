@@ -362,8 +362,6 @@ class FaultSampler(BaseSampler):
         self.displayed_name = fault.short_name
         super().__init__(self)
 
-        self.weight = len(self.locations)
-
     @property
     def interpolated_nodes(self):
         """ Create locations in non-labeled slides between labeled slides. """
@@ -625,6 +623,7 @@ class SeismicSampler(Sampler):
         names, geometry_names = {}, {}
         sampler = 0 & ConstantSampler(np.int32(0), dim=baseclass.dim)
         samplers = IndexedDict({idx: [] for idx in labels.keys()})
+
         proportions = proportions or [1 / len(labels) for _ in labels]
 
         for (geometry_id, ((idx, list_labels), p)) in enumerate(zip(labels.items(), proportions)):
