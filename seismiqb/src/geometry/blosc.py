@@ -230,7 +230,8 @@ class BloscDataset:
         """ Load the file, named as the number of a slide or construct array from slice. """
         key = key if isinstance(key, (int, slice)) else key[0]
         if isinstance(key, slice):
-            shape = (len(np.arange(self.shape[0])[key]), *self.shape[1:])
+            length = len(range(*key.indices(self.shape[0])))
+            shape = (length, *self.shape[1:])
             array = np.empty(shape, dtype=self.dtype)
             for i, idx in enumerate(np.arange(self.shape[0])[key]):
                 array[i] = self[int(idx)]
