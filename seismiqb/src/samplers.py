@@ -831,8 +831,8 @@ class BaseGrid:
         other_endpoint = other.endpoint if isinstance(other, RegularGrid) else other.actual_endpoint
         endpoint = np.maximum(self_endpoint, other_endpoint)
 
-        label_name = other.label_name if isinstance(other.ExtensionGrid) else self.label_name
-        
+        label_name = other.label_name if isinstance(other, ExtensionGrid) else self.label_name
+
         return BaseGrid(locations=locations, batch_size=batch_size, orientation=orientation,
                         origin=origin, endpoint=endpoint, geometry=self.geometry, label_name=label_name)
 
