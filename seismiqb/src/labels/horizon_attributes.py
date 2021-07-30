@@ -720,7 +720,7 @@ class AttributesMixin:
             x, y = self.matrix.shape
             defaults = {
                 **defaults,
-                'figsize': (x / min(x, y) * n_subplots * 10, y / min(x, y) * 10),
+                'figsize': (x / min(x, y) * n_subplots * 7, y / min(x, y) * 7),
                 'xlim': self.bbox[0],
                 'ylim': self.bbox[1][::-1],
                 'cmap': apply_by_scenario(make_cmap, names),
