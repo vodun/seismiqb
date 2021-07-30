@@ -761,7 +761,7 @@ class BaseGrid:
             self.endpoint = endpoint
             self.shape = endpoint - origin
             self.geometry = geometry
-            self.name = geometry.short_name
+            self.geometry_name = geometry.short_name
 
     def _make_locations(self):
         raise NotImplementedError('Must be implemented in sub-classes')
@@ -841,7 +841,7 @@ class BaseGrid:
 
     # Useful info
     def __repr__(self):
-        return f'<BaseGrid for {self.name}: '\
+        return f'<BaseGrid for {self.geometry_name}: '\
                f'origin={tuple(self.origin)}, endpoint={tuple(self.endpoint)}>'
 
     @property
@@ -1142,7 +1142,7 @@ class ExtensionGrid(BaseGrid):
         self.geometry = horizon.geometry
         self.geometry_name = horizon.geometry.short_name
         self.label_name = horizon.short_name
-        self.name = self.geometry_name
+        self.geometry_name = self.geometry_name
 
         self.uncovered_before = None
 
