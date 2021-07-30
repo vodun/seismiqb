@@ -10,8 +10,7 @@ import h5py
 
 from .export import ExportMixin
 
-from ..utils import file_print, get_environ_flag
-from ..utility_classes import lru_cache
+from ..utils import file_print, get_environ_flag, lru_cache
 from ..plotters import plot_image
 
 

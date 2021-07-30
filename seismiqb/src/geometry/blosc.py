@@ -219,7 +219,7 @@ class BloscDataset:
         """ Save slide to a sub-directory. Number of slide is used as the filename. """
         key = key if isinstance(key, (int, slice)) else key[0]
         if isinstance(key, slice):
-            for i, pos in enumerate(range(*key.indices(self.shape[0])):
+            for i, pos in enumerate(range(*key.indices(self.shape[0]))):
                 self[int(pos)] = slide[i]
         else: # int
             with self.zipfile.open(f'{self.key}/{key}', mode='w') as file:

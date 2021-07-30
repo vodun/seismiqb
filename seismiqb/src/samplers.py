@@ -19,9 +19,8 @@ from itertools import product
 import numpy as np
 from numba import njit
 
-from .fault import insert_fault_into_mask
-from .utils import filtering_function
-from .utility_classes import IndexedDict
+from .utils import filtering_function, IndexedDict
+from .labels.fault import insert_fault_into_mask
 from ..batchflow import Sampler, ConstantSampler
 
 
@@ -686,7 +685,6 @@ class SeismicSampler(Sampler):
 
     def show_locations(self, ncols=2, **kwargs):
         """ Visualize on geometry map by using underlying `locations` structure. """
-        #TODO: don't use `horizon` here
         for idx, samplers_list in self.samplers.items():
             geometry = samplers_list[0].geometry
 
@@ -694,7 +692,7 @@ class SeismicSampler(Sampler):
                       for sampler in samplers_list]
 
             ncols_ = min(ncols, len(samplers_list))
-            nrows = (len(samplers_list) // ncols_ + len(samplers_list) % 2) or 1
+            nrows = (len(samplers_list) // ncols_ + len(samplers_list) % 2 - 1) or 1
             _kwargs = {
                 'cmap': [['Sampler', 'black']] * len(samplers_list),
                 'alpha': [[1.0, 0.4]] * len(samplers_list),
@@ -702,7 +700,7 @@ class SeismicSampler(Sampler):
                 'figsize': (16, 5*nrows),
                 'title': [sampler.displayed_name for sampler in samplers_list],
                 'suptitle_label': idx if len(samplers_list) > 1 else '',
-                'constrained_layout': True,
+                'constrained_layout': len(samplers_list) > 1,
                 'colorbar': False,
                 'legend_label': ('ILINES and CROSSLINES', 'only ILINES', 'only CROSSLINES',
                                  'restricted', 'dead traces'),

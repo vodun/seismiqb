@@ -12,10 +12,9 @@ from scipy.signal import butter, lfilter, hilbert
 
 from ..batchflow import FilesIndex, Batch, action, inbatch_parallel, SkipBatchException, apply_parallel
 
-from .horizon import Horizon
+from .labels import Horizon
 from .plotters import plot_image
-from .utils import compute_attribute, to_list
-from .utility_classes import IndexedDict
+from .utils import compute_attribute, to_list, IndexedDict
 
 
 AFFIX = '___'
