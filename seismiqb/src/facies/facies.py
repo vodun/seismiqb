@@ -1,6 +1,7 @@
 """ Seismic facies container. """
 # pylint: disable=too-many-statements
 import os
+from copy import copy
 
 import numpy as np
 import pandas as pd
@@ -103,6 +104,30 @@ class Facies(Horizon):
         except KeyError as e:
             msg = f"Requested subset {name} is missing in subsets storage. Availiable subsets are {list(self.subsets)}."
             raise KeyError(msg) from e
+
+    def cut_subset(self, matrix, name=None):
+        """ Make new label with points matrix filtered by given presense matrix.
+
+        Parameters
+        ----------
+        matrix : np.array
+            Presense matrix of labels points. Must be in full cubes coordinates.
+            If consists of 0 and 1, keep points only where values are 1.
+            If consists of values from [0, 1] interval, keep points where values are greater than 0.5.
+        name : str or None
+            Name for new label. If None, original label name used.
+
+        Returns
+        -------
+        New `Facies` instance with filtered points matrix.
+        """
+        other = copy(self)
+        other.name = name or self.name
+
+        filtering_matrix = (matrix < 0.5).astype(int)
+        other.filter_matrix(filtering_matrix)
+
+        return other
 
 
     # Generic attributes loading
@@ -470,9 +495,16 @@ class Facies(Horizon):
         # Merge default and given params
         params = {**defaults, **kwargs}
         # Substitute asterisks with label name
-        for text in ['suptitle_label', 'suptitle', 'title_label', 'title', 't', 'savepath']:
+        for text in ['suptitle_label', 'suptitle', 'title_label', 'title', 't']:
             if text in params:
                 params[text] = apply_by_scenario(lambda s: s.replace('*', defaults['suptitle_label']), params[text])
+        if 'savepath' in params:
+            savepath = params['savepath']
+            if savepath.endswith('/*'):
+                savepath = savepath.replace('/*', f'/{self.geometry.short_name}/{self.short_name}.png')
+            dir_path = savepath[:savepath.rfind('/')]
+            os.makedirs(dir_path, exist_ok=True)
+            params['savepath'] = savepath
         # Plot image with given params and return resulting figure
         figure = plot_image(data=data, mode=mode, **params)
         plt.show()
@@ -481,7 +513,7 @@ class Facies(Horizon):
 
 
     # Metrics evaluations
-    def evaluate(self, src_true, src_pred, metrics_fn, metrics_names=None, output='df'):
+    def evaluate(self, src_true, src_pred, metrics_fn, metrics_names=None):
         """ Apply given function to 'masks' attribute of requested labels.
 
         Parameters
@@ -493,9 +525,7 @@ class Facies(Horizon):
         metrics_fn : callable or list of callable
             Metrics function(s) to calculate.
         metrics_name : str, optional
-            Name of the column with metrics values in resulted dataframe.
-        output : 'df' or 'arr'
-            Whether return an array of metrics values or dataframe.
+            Name of the columns with metrics values in resulted dataframe.
         """
         pd.options.display.float_format = '{:,.3f}'.format
 
@@ -505,14 +535,12 @@ class Facies(Horizon):
 
         metrics_fn = to_list(metrics_fn)
         values = [fn(true, pred) for fn in metrics_fn]
-
-        if output == 'arr':
-            return values
+        names = to_list(metrics_names) if metrics_names is not None else [fn.__name__ for fn in metrics_fn]
+        data = dict(zip(names, values))
 
         index = pd.MultiIndex.from_arrays([[self.geometry.displayed_name], [self.short_name]],
                                           names=['geometry_name', 'horizon_name'])
-        names = metrics_names if metrics_names is not None else [fn.__name__ for fn in metrics_fn]
-        df = pd.DataFrame(index=index, data=values, columns=names)
+        df = pd.DataFrame(index=index, data=data)
         return df
 
 
@@ -536,15 +564,15 @@ class Facies(Horizon):
 
     # Manage data
 
-    def dump(self, path, name=None, log=True):
+    def dump(self, path, log=True):
         """ Save facies. """
-        path = path.replace('*', self.geometry.short_name)
-        name = name.replace('*', self.name) if name is not None else self.name
-        os.makedirs(path, exist_ok=True)
-        dump_path = f"{path}/{name}"
-        super().dump(dump_path)
+        if path.endswith('/*'):
+            path = path.replace('/*', f'/{self.geometry.short_name}/{self.name}')
+        dir_path = path[:path.rfind('/')]
+        os.makedirs(dir_path, exist_ok=True)
+        super().dump(path)
         if log:
-            print(f"`{self.short_name}` saved to `{dump_path}`")
+            print(f"`{self.short_name}` saved to `{path}`")
 
     def reset_cache(self):
         """ Clear cached data. """
