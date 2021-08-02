@@ -206,6 +206,9 @@ class SeismicGeometry(ExportMixin):
         instance = super().__new__(new_cls)
         return instance
 
+    def __getnewargs__(self):
+        return (self.path, )
+
     def __init__(self, path, *args, process=True, path_meta=None, **kwargs):
         _ = args
         self.path = path
