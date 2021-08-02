@@ -12,9 +12,7 @@ from ..utils import filter_simplices
 
 
 class VisualizationMixin:
-    """ !!. """
-
-    # Methods of (visual) representation of a horizon
+    """ Methods for textual and visual representation of a horizon. """
     def __repr__(self):
         return f"""<horizon {self.name} for {self.geometry.displayed_name} at {hex(id(self))}>"""
 

@@ -16,8 +16,11 @@ from ..plotters import plot_image
 
 
 class AttributesMixin:
-    """ Geological attributes along horizon.
-    !!.
+    """ Geological attributes along horizon:
+    - geometrical statistics like number of holes, perimeter, coverage
+    - straight-forward maps along horizons, computed directly from its matrix such as `binary`, `borders`, `grad` etc
+    - methods to cut data from the cube along horizon
+    - maps, derived from amplitudes along horizon.
 
     Method for getting desired attributes is `load_attribute`. It works with nested keys, i.e. one can get attributes
     of horizon subsets. Address method documentation for further details.
@@ -39,13 +42,6 @@ class AttributesMixin:
     ATTRIBUTE_TO_METHOD = {attr: func for func, attrs in METHOD_TO_ATTRIBUTE.items() for attr in attrs}
 
     # Geometrical and geological properties
-    @property
-    def cube_values(self):
-        """ Values from the cube along the horizon. """
-        cube_values = self.get_cube_values(window=1)
-        cube_values[self.full_matrix == self.FILL_VALUE] = np.nan
-        return cube_values
-
     @property
     def amplitudes(self):
         """ Alias for cube values. Depending on what loaded to cube geometries
@@ -78,6 +74,13 @@ class AttributesMixin:
     def coverage(self):
         """ Ratio between number of present values and number of good traces in cube. """
         return len(self) / (np.prod(self.cube_shape[:2]) - np.sum(self.geometry.zero_traces))
+
+    @property
+    def cube_values(self):
+        """ Values from the cube along the horizon. """
+        cube_values = self.get_cube_values(window=1)
+        cube_values[self.full_matrix == self.FILL_VALUE] = np.nan
+        return cube_values
 
     @property
     def filled_matrix(self):
