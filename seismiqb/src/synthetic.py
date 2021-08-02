@@ -1,5 +1,6 @@
 """ Functions for generation of 2d and 3d synthetic seismic arrays.
 """
+from collections import defaultdict
 import numpy as np
 from scipy.interpolate import interp1d, interp2d
 from scipy.ndimage import gaussian_filter, map_coordinates
@@ -112,28 +113,28 @@ def convolve_3d(array, kernel):
 
 
 @njit
-def make_colors_array_2d(colors, levels, shape):
-    """ Color 2d-array in colors according to given levels.
+def _make_velocity_model_2d(velocities, surfaces, shape):
+    """ Make 2d-velocity model.
     """
     array = np.zeros(shape=shape)
     for i in range(array.shape[0]):
         vec = array[i, :]
-        for j, color in enumerate(colors):
-            low = np.minimum(levels[j][i], array.shape[-1])
+        for j, color in enumerate(velocities):
+            low = np.minimum(surfaces[j][i], array.shape[-1])
             vec[low : ] = color
     return array
 
 
 @njit
-def make_colors_array_3d(colors, levels, shape):
-    """ Color 3d-array in colors according to given levels.
+def _make_velocity_model_3d(velocities, surfaces, shape):
+    """ Make 3d-velocity model.
     """
     array = np.zeros(shape=shape)
     for i in range(array.shape[0]):
         for j in range(array.shape[1]):
             vec = array[i, j, :]
-            for k, color in enumerate(colors):
-                low = np.minimum(levels[k][i, j], array.shape[-1])
+            for k, color in enumerate(velocities):
+                low = np.minimum(surfaces[k][i, j], array.shape[-1])
                 vec[low : ] = color
     return array
 
@@ -182,6 +183,7 @@ class SyntheticGenerator():
         self.synthetic = None
         self._curves = None
         self._horizon_heights = None
+        self._faults_coords = None
 
     def make_velocities(self, num_reflections=200, vel_limits=(900, 5400), horizon_heights=(1/4, 1/2, 2/3),
                         horizon_multipliers=(7, 5, 4)):
@@ -236,8 +238,8 @@ class SyntheticGenerator():
         num_reflections = len(self.velocities) - 1
         curves = make_surfaces(num_reflections, grid_shape, perturbation_share=perturbation_share,
                                shape=shape, rng=self.rng)
-        make_colors_array = make_colors_array_2d if self.dim == 2 else make_colors_array_3d
-        self.velocity_model = make_colors_array(self.velocities, curves, shape)
+        _make_velocity_model = _make_velocity_model_2d if self.dim == 2 else _make_velocity_model_3d
+        self.velocity_model = _make_velocity_model(self.velocities, curves, shape)
 
         # store curves-list to later use them as horizons
         self._curves = curves
@@ -279,6 +281,7 @@ class SyntheticGenerator():
         if self.velocity_model is None:
             raise ValueError("You need to create velocity model first to add faults later.")
 
+        self._faults_coords = faults
         for fault in faults:
             x = fault[0][0]
             y_low, y_high = fault[0][1], fault[1][1]
@@ -358,6 +361,22 @@ class SyntheticGenerator():
                 return self._curves[ixs]
             raise ValueError('Mode can be one of `horizons`, `all` or `top[k]`')
         raise ValueError('Mode must be str and can be one of `horizons`, `all` or `top[k]`')
+
+
+    def fetch_faults(self):
+        """ Fetch faults in N X 3 - format (cloud of points).
+        """
+        # convert each fault to the point-cloud format
+        point_clouds = []
+        for l, h in self._faults_coords:
+            x = l[0]
+            y_low, y_high = l[1], h[1]
+            heights = np.arange(y_low, y_high)
+            ilines, xlines = np.zeros_like(heights), np.ones_like(heights) * x
+            point_cloud = np.stack([ilines, xlines, heights], axis=1)
+            point_clouds.append(point_cloud)
+
+        return np.array(point_clouds)
 
 def generate_synthetic(shape=(50, 400, 800), num_reflections=200, vel_limits=(900, 5400), #pylint: disable=too-many-arguments
                        horizon_heights=(1/4, 1/2, 2/3), horizon_multipliers=(7, 5, 4), grid_shape=(10, 10),
