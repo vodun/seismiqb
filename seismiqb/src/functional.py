@@ -114,6 +114,7 @@ def tv(array1, array2, std1, std2, **kwargs):
     return 1 - xp.abs(array2 - array1).sum(axis=-1) / 2
 
 
+# Helper functions
 def hilbert(array, axis=-1):
     """ Compute the analytic signal, using the Hilbert transform. """
     xp = cp.get_array_module(array) if CUPY_AVAILABLE else np

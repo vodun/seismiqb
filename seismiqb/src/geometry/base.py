@@ -89,14 +89,14 @@ class SeismicGeometry(ExportMixin):
     Based on the extension of the path, a different subclass is used to implement key methods for data indexing.
     Currently supported extensions:
         - `segy`
-        - `hdf5` and its quantized version
-        - `blosc` and its quantized version
+        - `hdf5` and its quantized version `qhdf5`
+        - `blosc` and its quantized version `qblosc`
     The last two are created by converting the original SEG-Y cube.
-    During the conversion, an extra step of int8 quantization can be performed to reduce the space taken.
+    During the conversion, an extra step of `int8` quantization can be performed to reduce the disk usage.
 
-    Independent of exact format, `SeismicGeometry` provides the following:
+    Independent of the exact format, `SeismicGeometry` provides the following:
         - Attributes to describe shape and structure of the cube like `cube_shape` and `lens`,
-        as well as exact values of file-wide headers, for example, `time_delay` and `sample_rate`.
+        as well as exact values of file-wide headers, for example, `delay` and `sample_rate`.
 
         - Ability to infer information about the cube amplitudes:
           `trace_container` attribute contains examples of amplitudes inside the cube and allows to compute statistics.
@@ -140,8 +140,8 @@ class SeismicGeometry(ExportMixin):
     NPZ_ALIASES = ['npz']
     ARRAY_ALIASES = ['dummyarray']
 
-    # Attributes to store during SEG-Y -> HDF5 conversion
-    PRESERVED = [
+    # Attributes to store in a separate `.meta` file
+    PRESERVED = [ # loaded at instance initialization
         # Crucial geometry properties
         'depth', 'delay', 'sample_rate', 'cube_shape',
         'byte_no', 'offsets', 'ranges', 'lens', # `uniques` can't be saved due to different lenghts of arrays
@@ -163,7 +163,7 @@ class SeismicGeometry(ExportMixin):
         'qnt_q001', 'qnt_q01', 'qnt_q05', 'qnt_q95', 'qnt_q99', 'qnt_q999',
     ]
 
-    PRESERVED_LAZY = [
+    PRESERVED_LAZY = [ # loaded at the time of the first access
         'trace_container', 'hist_matrix',
         'min_matrix', 'max_matrix', 'mean_matrix', 'std_matrix',
     ]
@@ -179,7 +179,9 @@ class SeismicGeometry(ExportMixin):
     INDEX_CDP = ['CDP_Y', 'CDP_X']
 
     def __new__(cls, path, *args, **kwargs):
-        """ Select the type of geometry based on file extension. """
+        """ Select the type of geometry based on file extension.
+        Breaks the autoreload magic (but only for this class).
+        """
         #pylint: disable=import-outside-toplevel
         _ = args, kwargs
         fmt = os.path.splitext(path)[1][1:]
@@ -675,7 +677,7 @@ class SeismicGeometry(ExportMixin):
             'ylabel': 'density',
             **kwargs
         }
-        return plot_image(data, backend='matplotlib', bins=bins, mode='histogram', **kwargs)
+        return plot_image(data, backend='matplotlib', bins=bins, mode='hist', **kwargs)
 
     def show_slide(self, loc=None, start=None, end=None, step=1, axis=0, zoom_slice=None, stable=True, **kwargs):
         """ Show seismic slide in desired place.
@@ -702,8 +704,8 @@ class SeismicGeometry(ExportMixin):
             slide = slide[zoom_slice]
             xmin = zoom_slice[0].start or xmin
             xmax = zoom_slice[0].stop or xmax
-            ymin = zoom_slice[1].stop or xmin
-            ymax = zoom_slice[1].start or xmax
+            ymin = zoom_slice[1].stop or ymin
+            ymax = zoom_slice[1].start or ymax
 
         # Plot params
         if len(self.index_headers) > 1:

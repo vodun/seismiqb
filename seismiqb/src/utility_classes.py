@@ -1,5 +1,6 @@
 """ Helper classes. """
 import os
+from ast import literal_eval
 from time import perf_counter
 from collections import OrderedDict, defaultdict
 from threading import RLock
@@ -16,6 +17,8 @@ except ImportError:
     CUPY_AVAILABLE = False
 
 import h5py
+
+from .utils import to_list
 
 
 
@@ -48,8 +51,8 @@ class Accumulator:
             - 'stack' just stores the matrices and concatenates them along (new) last axis
             - 'mode' stores supplied matrices and computes mode along the last axis during the `get` call
     amortize : bool
-        If True, then supplied matrices are stacked into ndarray, and then aggregation is applied.
-        If False, then accumulation logic is applied.
+        If False, then supplied matrices are stacked into ndarray, and then aggregation is applied.
+        If True, then accumulation logic is applied.
         Allows for trade-off between memory usage and speed: `amortize=False` is faster,
         but takes more memory resources.
     total : int or None
@@ -229,11 +232,11 @@ class Accumulator3D:
     Can accumulate data in memory (Numpy arrays) or on disk (HDF5 datasets).
 
     Type of aggregation is defined in subclasses, that must implement `__init__`, `_update` and `_aggregate` methods.
-    The main result in subclsses should be stored in `data` attribute, which is accessed by base class.
+    The main result in subclasses should be stored in `data` attribute, which is accessed by the base class.
 
-    Supposed to be used in combination with `:meth:.~SeismicCubeset.make_grid` and
+    Supposed to be used in combination with `:class:.~RegularGrid` and
     `:meth:.~SeismicCropBatch.update_accumulator` in a following manner:
-        - `make_grid` defines how to split desired cube range into small crops
+        - `RegularGrid` defines how to split desired cube range into small crops
         - `Accumulator3D` creates necessary placeholders for a desired type of aggregation
         - `update_accumulator` action of pipeline passes individual crops (and their locations) to
         update those placeholders (see `:meth:~.update`)
@@ -265,12 +268,10 @@ class Accumulator3D:
         Other parameters are passed to HDF5 dataset creation.
     """
     def __init__(self, shape=None, origin=None, dtype=np.float32, transform=None, path=None, **kwargs):
-        # Main attribute to store results
-        self.data = None
-
         # Dimensionality and location
         self.shape = shape
         self.origin = origin
+        self.location = [slice(start, start + shape) for start, shape in zip(self.origin, self.shape)]
 
         # Properties of storages
         self.dtype = dtype
@@ -283,17 +284,16 @@ class Accumulator3D:
             self.path = path
 
             self.file = h5py.File(path, mode='w-')
-            self.options = {**kwargs}
         self.type = 'hdf5' if path is not None else 'numpy'
 
         self.aggregated = False
+        self.kwargs = kwargs
 
-
+    # Placeholder management
     def create_placeholder(self, name=None, dtype=None, fill_value=None):
         """ Create named storage as a dataset of HDF5 or plain array. """
         if self.type == 'hdf5':
-            options = {'fillvalue': fill_value, **self.options}
-            placeholder = self.file.create_dataset(name, shape=self.shape, dtype=dtype, **options)
+            placeholder = self.file.create_dataset(name, shape=self.shape, dtype=dtype, fillvalue=fill_value)
         elif self.type == 'numpy':
             placeholder = np.full(shape=self.shape, fill_value=fill_value, dtype=dtype)
 
@@ -301,9 +301,10 @@ class Accumulator3D:
 
     def remove_placeholder(self, name=None):
         """ Remove created placeholder. """
-        if self.type == 'hdf5':
+        if self.type in ['hdf5', 'blosc']:
             del self.file[name]
         setattr(self, name, None)
+
 
     def update(self, crop, location):
         """ Update underlying storages in supplied `location` with data from `crop`. """
@@ -341,9 +342,12 @@ class Accumulator3D:
         self._aggregate()
 
         # Re-open the HDF5 file to force flush changes and release disk space from deleted datasets
+        # Also add alias to `data` dataset, so the resulting cube can be opened by `SeismicGeometry`
         if self.type == 'hdf5':
+            self.file['cube_i'] = self.file['data']
             self.file.close()
             self.file = h5py.File(self.path, 'r')
+
             self.data = self.file['data']
 
         self.aggregated = True
@@ -354,14 +358,12 @@ class Accumulator3D:
         raise NotImplementedError
 
     def __del__(self):
-        if self.type == 'hdf5':
+        if self.type in ['hdf5', 'blosc']:
             self.file.close()
 
     def clear(self):
         """ Remove placeholders from memory and disk. """
-        self.data = None
-
-        if self.type == 'hdf5':
+        if self.type in ['hdf5', 'blosc']:
             os.remove(self.path)
 
     @property
@@ -385,6 +387,13 @@ class Accumulator3D:
 
         return aggregation_to_class[aggregation](shape=shape, origin=origin, dtype=dtype, fill_value=fill_value,
                                                  transform=transform, path=path, **kwargs)
+
+    @classmethod
+    def from_grid(cls, grid, aggregation='max', dtype=np.float32, fill_value=None, transform=None, path=None, **kwargs):
+        """ Infer necessary parameters for accumulator creation from a passed grid. """
+        return cls.from_aggregation(aggregation=aggregation, dtype=dtype, fill_value=fill_value,
+                                    shape=grid.shape, origin=grid.origin, orientation=grid.orientation,
+                                    transform=transform, path=path, **kwargs)
 
 
 class MaxAccumulator3D(Accumulator3D):
@@ -422,14 +431,14 @@ class MeanAccumulator3D(Accumulator3D):
             for i in range(self.data.shape[0]):
                 counts = self.counts[i]
                 counts[counts == 0] = 1
-                if 'float' in self.dtype.__name__:
+                if np.issubdtype(self.dtype, np.floating):
                     self.data[i] /= counts
                 else:
                     self.data[i] //= counts
 
         elif self.type == 'numpy':
             self.counts[self.counts == 0] = 1
-            if 'float' in self.dtype.__name__:
+            if np.issubdtype(self.dtype, np.floating):
                 self.data /= self.counts
             else:
                 self.data //= self.counts
@@ -473,9 +482,76 @@ class GMeanAccumulator3D(Accumulator3D):
         self.remove_placeholder('counts')
 
 
+class AccumulatorBlosc(Accumulator3D):
+    """ Accumulate predictions into `BLOSC` file.
+    Each of the saved slides supposed to be finalized, e.g. coming from another accumulator.
+    During the aggregation, we repack the file to remove duplicates.
+
+    Parameters
+    ----------
+    path : str
+        Path to save `BLOSC` file to.
+    orientation : int
+        If 0, then predictions are stored as `cube_i` dataset inside the file.
+        If 1, then predictions are stored as `cube_x` dataset inside the file and transposed before storing.
+    aggregation : str
+        Type of aggregation for duplicate slides.
+        If `max`, then we take element-wise maximum.
+        If `mean`, then take mean value.
+        If None, then we take random slide.
+    """
+    def __init__(self, path, orientation=0, aggregation='max',
+                 shape=None, origin=None, dtype=np.float32, transform=None, **kwargs):
+        super().__init__(shape=shape, origin=origin, dtype=dtype, transform=transform, path=None)
+        if orientation == 2:
+            raise ValueError("Can't use BLOSC accumulator for a joined grid with mixed orientations!")
+
+        self.type = 'blosc'
+        self.path = path
+        self.orientation = orientation
+        self.aggregation = aggregation
+
+        # Manage the `BLOSC` file
+        from .geometry import BloscFile #pylint: disable=import-outside-toplevel
+        self.file = BloscFile(path, mode='w')
+        if orientation == 0:
+            name = 'cube_i'
+        elif orientation == 1:
+            name = 'cube_x'
+            shape = np.array(shape)[[1, 0, 2]]
+        self.file.create_dataset(name, shape=shape, dtype=dtype)
+
+
+    def _update(self, crop, location):
+        crop = crop.astype(self.dtype)
+        iterator = range(location[self.orientation].start, location[self.orientation].stop)
+
+        # `i` is `loc_idx` shifted by `origin`
+        for i, loc_idx in enumerate(iterator):
+            slc = [slice(None), slice(None), slice(None)]
+            slc[self.orientation] = i
+            slide = crop[tuple(slc)]
+            self.data[loc_idx, :, :] = slide.T if self.orientation == 1 else slide
+
+    def _aggregate(self):
+        self.file = self.file.repack(aggregation=self.aggregation)
+
+
+    @classmethod
+    def from_grid(cls, grid, aggregation='max', dtype=np.float32, transform=None, path=None, **kwargs):
+        """ Infer necessary parameters for accumulator creation from a passed grid. """
+        return cls(path=path, aggregation=aggregation, dtype=dtype, transform=transform,
+                   shape=grid.shape, origin=grid.origin, orientation=grid.orientation, **kwargs)
+
+
 
 class IndexedDict(OrderedDict):
-    """ Allows to use both indices and keys to subscript. """
+    """ `OrderedDict` that allows integer indexing and values flattening.
+
+    - Both keys and their ordinal numbers might be used to subscript. Therefore `int` keys are not supported.
+    - Flatten values list of requested keys can be obtained via `flatten` method.
+    - Flatten list of all values is also available via `flat` property.
+    """
     def __getitem__(self, key):
         if isinstance(key, (int, np.integer)):
             key = list(self.keys())[key]
@@ -485,6 +561,56 @@ class IndexedDict(OrderedDict):
         if isinstance(key, (int, np.integer)):
             key = list(self.keys())[key]
         super().__setitem__(key, value)
+
+    def flatten(self, keys=None):
+        """ Get dict values for requested keys in a single list. """
+        keys = to_list(keys) if keys is not None else list(self.keys())
+        lists = [self[key] if isinstance(self[key], list) else [self[key]] for key in keys]
+        return sum(lists, [])
+
+    @property
+    def flat(self):
+        """ List of all dictionary values. """
+        return self.flatten()
+
+    def __iter__(self):
+        return (x for x in self.flat)
+
+
+
+class MetaDict(dict):
+    """ Dictionary that can dump itself on disk in a human-readable and human-editable way.
+    Usually describes cube meta info such as name, coordinates (if known) and other useful data.
+    """
+    def __repr__(self):
+        lines = '\n'.join(f'    "{key}" : {repr(value)},'
+                          for key, value in self.items())
+        return f'{{\n{lines}\n}}'
+
+    @classmethod
+    def load(cls, path):
+        """ Load self from `path` by evaluating the containing dictionary. """
+        with open(path, 'r') as file:
+            content = '\n'.join(file.readlines())
+        return cls(literal_eval(content.replace('\n', '').replace('    ', '')))
+
+    def dump(self, path):
+        """ Save self to `path` with each key on a separate line. """
+        with open(path, 'w') as file:
+            print(repr(self), file=file)
+
+
+    @classmethod
+    def placeholder(cls):
+        """ Default MetaDict"""
+        return cls({
+            'name': 'UNKNOWN',
+            'ru_name': 'Неизвестно',
+            'latitude': None,
+            'longitude': None,
+            'info': 'дополнительная информация о кубе'
+        })
+
 
 
 class lru_cache:
@@ -500,6 +626,8 @@ class lru_cache:
         Attributes to get from object and use as additions to key.
     apply_by_default : bool
         Whether the cache logic is on by default.
+    copy_on_return : bool
+        Whether to copy the object on retrieving from cache.
 
     Examples
     --------
@@ -519,7 +647,7 @@ class lru_cache:
         self.apply_by_default = apply_by_default
         self.copy_on_return = copy_on_return
 
-        # Make `attributes` always a list
+        # Parse `attributes`
         if isinstance(attributes, str):
             self.attributes = [attributes]
         elif isinstance(attributes, (tuple, list)):

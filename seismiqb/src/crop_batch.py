@@ -14,7 +14,8 @@ from ..batchflow import FilesIndex, Batch, action, inbatch_parallel, SkipBatchEx
 
 from .horizon import Horizon
 from .plotters import plot_image
-from .utils import compute_attribute
+from .utils import compute_attribute, to_list
+from .utility_classes import IndexedDict
 
 
 AFFIX = '___'
@@ -24,14 +25,17 @@ CHARS = string.ascii_uppercase + string.digits
 
 
 class SeismicCropBatch(Batch):
-    """ Batch with ability to generate 3d-crops of various shapes. """
+    """ Batch with ability to generate 3d-crops of various shapes.
+
+    The first action in any pipeline with this class should be `make_locations` to transform batch index from
+    individual cubes into crop-based indices. The transformation uses randomly generated postfix (see `:meth:.salt`)
+    to obtain unique elements.
+    """
     components = None
     apply_defaults = {
         'target': 'for',
         'post': '_assemble'
     }
-    # When an attribute containing one of keywords from list it accessed via `get`, firstly search it in `self.dataset`.
-    DATASET_ATTRIBUTES = ['label', 'geom', 'fan', 'channel', 'horizon']
 
 
     def _init_component(self, *args, **kwargs):
@@ -49,8 +53,30 @@ class SeismicCropBatch(Batch):
                 self.add_components(comp, np.array([np.nan] * len(self.index)))
         return self.indices
 
+    @action
+    def add_components(self, components, init=None):
+        """ Add new components, checking that attributes of the same name are not present in dataset.
 
-    # Core
+        Parameters
+        ----------
+        components : str or list
+            new component names
+        init : array-like
+            initial component data
+
+        Raises
+        ------
+        ValueError
+            If a component or an attribute with the given name already exists in batch or dataset.
+        """
+        for component in to_list(components):
+            if hasattr(self.dataset, component):
+                msg = f"Component with `{component}` name cannot be added to batch, "\
+                      "since attribute with this name is already present in dataset."
+                raise ValueError(msg)
+        super().add_components(components=components, init=init)
+
+    # Inner workings
     @staticmethod
     def salt(path):
         """ Adds random postfix of predefined length to string.
@@ -67,7 +93,7 @@ class SeismicCropBatch(Batch):
 
         Notes
         -----
-        Action `crop` makes a new instance of SeismicCropBatch with different (enlarged) index.
+        Action `make_locations` makes a new instance of SeismicCropBatch with different (enlarged) index.
         Items in that index should point to cube location to cut crops from.
         Since we can't store multiple copies of the same string in one index (due to internal usage of dictionary),
         we need to augment those strings with random postfix, which can be removed later.
@@ -98,36 +124,28 @@ class SeismicCropBatch(Batch):
         return path
 
 
-    def __getattr__(self, name):
-        """ Retrieve data from either `self` or attached dataset. """
-        if hasattr(self.dataset, name):
-            return getattr(self.dataset, name)
-        return super().__getattr__(name)
-
     def get(self, item=None, component=None):
         """ Custom access for batch attributes.
-        If `component` has an entry from `DATASET_ATTRIBUTES` than retrieve it
-        from attached dataset and use unsalted version of `item` as key.
-        Otherwise, get position of `item` in the current batch and use it
-        to index sequence-like `component`.
+        If `component` is present in dataset and is an instance of `IndexedDict`, that index it with item and return it.
+        Otherwise retrieve `component` from batch itself and optionally index it with `item` position in `self.indices`.
         """
-        if any(attribute in component for attribute in self.DATASET_ATTRIBUTES):
+        data = getattr(self.dataset, component, None)
+        if isinstance(data, IndexedDict):
             if isinstance(item, str) and self.has_salt(item):
                 item = self.unsalt(item)
-            res = getattr(self, component)
-            if isinstance(res, dict) and item in res:
-                return res[item]
-            return res
+            return data[item]
 
+        data = getattr(self, component) if isinstance(component, str) else component
         if item is not None:
-            data = getattr(self, component) if isinstance(component, str) else component
             if isinstance(data, (np.ndarray, list)) and len(data) == len(self):
                 pos = np.where(self.indices == item)[0][0]
                 return data[pos]
-
             return super().get(item, component)
-        return getattr(self, component)
 
+        return data
+
+
+    # Core actions
     @action
     def make_locations(self, generator, batch_size=None, passdown=None):
         """ Use `generator` to create `batch_size` locations.
@@ -136,6 +154,7 @@ class SeismicCropBatch(Batch):
         Generator can be either Sampler or Grid to make locations in a random or deterministic fashion.
         `generator` must be a callable and return (batch_size, 9+) array, where the first nine columns should be:
         (geometry_id, label_id, orientation, i_start, x_start, h_start, i_stop, x_stop, h_stop).
+        `generator` must have `to_names` method to convert cube and label ids into actual strings.
 
         Geometry and label ids are transformed into names of actual cubes and labels (horizons, faults, facies, etc).
         Then we create a completely new instance of `SeismicCropBatch`, where the new index is set to
@@ -143,7 +162,7 @@ class SeismicCropBatch(Batch):
 
         After parsing contents of generated (batch_size, 9+) array we add following attributes:
             - `locations` with triplets of slices
-            - `orientations` with crop orientation
+            - `orientations` with crop orientation: 0 for iline direction, 1 for crossline direction
             - `shapes`
             - `label_names`
             - `generated` with originally generated data
@@ -215,19 +234,26 @@ class SeismicCropBatch(Batch):
     # Loading of cube data and its derivatives
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def load_cubes(self, ix, dst, src_geometry='geometries', slicing='custom', **kwargs):
-        """ Load data from cube in given positions.
+    def load_cubes(self, ix, dst, slicing='custom', src_geometry='geometries', **kwargs):
+        """ Load data from cube for stored `locations`.
 
         Parameters
         ----------
         dst : str
             Component of batch to put loaded crops in.
         slicing : str
-            if 'native', crop will be looaded as a slice of geometry. If 'custom', use `load_crop` method to make crops.
-            The 'native' option is prefered to 3D crops to speed up loading.
+            If 'custom', use `load_crop` method to make crops.
+            if 'native', crop will be looaded as a slice of geometry. Prefered for 3D crops to speed up loading.
+        src_geometry : str
+            Dataset attribute with geometries dict.
         """
         geometry = self.get(ix, src_geometry)
+        # target geometry is created by `create_labels` and wrapped into a list
+        if isinstance(geometry, (list, tuple)) and len(geometry) > 0:
+            geometry = geometry[0]
+
         location = self.get(ix, 'locations')
+
         if slicing == 'native':
             crop = geometry[tuple(location)]
         elif slicing == 'custom':
@@ -311,74 +337,31 @@ class SeismicCropBatch(Batch):
         result = compute_attribute(image, window, device, attribute)
         return result
 
-    @action
-    @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def load_attribute(self, ix, dst, src_attribute=None, src_labels='labels', final_ndim=3, **kwargs):
-        """ Load attribute for depth-nearest label and crop in given locations.
-
-        Parameters
-        ----------
-        src_attribute : str
-            A keyword from :attr:`~Horizon.ATTRIBUTE_TO_METHOD` keys, defining label attribute to make crops from.
-        src_labels : str
-            Dataset attribute with labels dict.
-        final_ndim : 2 or 3
-            Number of dimensions returned crop should have.
-        kwargs :
-            Passed directly to either:
-            - one of attribute-evaluating methods from :attr:`~Horizon.ATTRIBUTE_TO_METHOD` depending on `src_attribute`
-            - or attribute-transforming method :meth:`~Horizon.transform_where_present`.
-
-        Notes
-        -----
-        This method loads rectified data, e.g. amplitudes are croped relative
-        to horizon and will form a straight plane in the resulting crop.
-        """
-        location = self.get(ix, 'locations')
-        nearest_horizon = self.get_nearest_horizon(ix, src_labels, location[2])
-        crop = nearest_horizon.load_attribute(src_attribute=src_attribute, location=location, **kwargs)
-        if final_ndim == 3 and crop.ndim == 2:
-            crop = crop[..., np.newaxis]
-        elif final_ndim != crop.ndim:
-            raise ValueError("Crop returned by `Horizon.get_attribute` has {} dimensions, but shape conversion "
-                             "to expected {} dimensions is not implemented.".format(crop.ndim, final_ndim))
-        return crop
-
 
     # Loading of labels
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def create_masks(self, ix, dst, src_labels='labels', use_labels='all', width=3):
-        """ Create masks from labels-dictionary in given positions.
+    def create_masks(self, ix, dst, use_labels='all', width=3, src_labels='labels'):
+        """ Create masks from labels in stored `locations`.
 
         Parameters
         ----------
         dst : str
             Component of batch to put loaded masks in.
-        src_labels : str
-            Dataset attribute with labels dict.
         use_labels : str, int or sequence of ints
             Which labels to use in mask creation.
-            If 'all', use all labels.
-            If 'single', use one random label.
-            If 'nearest' or 'nearest_to_center', use one label closest to height from `src_locations`.
-            If int or array-like then element(s) are interpreted as indices of
-            desired labels and must be ints in range [0, len(horizons) - 1].
+            If 'all', then use all labels.
+            If 'single' or `random`, then use one random label.
+            If 'nearest' or 'nearest_to_center', then use one label closest to height from `src_locations`.
+            If int or array-like, then element(s) are interpreted as indices of desired labels.
         width : int
-            How much to thicken the horizon.
-
-        Returns
-        -------
-        SeismicCropBatch
-            Batch with loaded masks in desired components.
-
-        Notes
-        -----
-        Can be run only after labels-dict is loaded into labels-component.
+            Width of the resulting label.
+        src_labels : str
+            Dataset attribute with labels dict.
         """
         location = self.get(ix, 'locations')
         crop_shape = self.get(ix, 'shapes')
-        mask = np.zeros(crop_shape, dtype='float32')
+        mask = np.zeros(crop_shape, dtype=np.float32)
 
         labels = self.get(ix, src_labels) if isinstance(src_labels, str) else src_labels
         labels = [labels] if not isinstance(labels, (tuple, list)) else labels
@@ -389,8 +372,8 @@ class SeismicCropBatch(Batch):
 
         if isinstance(use_labels, (tuple, list, np.ndarray)):
             labels = [labels[idx] for idx in use_labels]
-        elif use_labels == 'single':
-            np.random.shuffle(labels)
+        elif use_labels in ['single', 'random']:
+            labels = np.random.shuffle(labels)[0]
         elif use_labels in ['nearest', 'nearest_to_center']:
             labels = [self.get_nearest_horizon(ix, src_labels, location[2])]
 
@@ -400,11 +383,42 @@ class SeismicCropBatch(Batch):
                 break
         return mask
 
-    def get_nearest_horizon(self, ix, src_labels, heights_slice):
-        """ Get horizon with its `h_mean` closest to mean of `heights_slice`. """
-        location_h_mean = (heights_slice.start + heights_slice.stop) // 2
-        nearest_horizon_ind = np.argmin([abs(horizon.h_mean - location_h_mean) for horizon in self.get(ix, src_labels)])
-        return self.get(ix, src_labels)[nearest_horizon_ind]
+    @action
+    @inbatch_parallel(init='indices', post='_assemble', target='for')
+    def load_attribute(self, ix, dst, src='amplitudes', src_labels='labels', res_ndim=3, **kwargs):
+        """ Load attribute for label at given location.
+
+        Parameters
+        ----------
+        src : str
+            A keyword from :attr:`~Facies.ATTRIBUTE_TO_METHOD` keys, defining label attribute to make crops from.
+        src_labels : str
+            Dataset attribute with labels dict.
+        locations : str
+            Component of batch with locations of crops to load.
+        kwargs :
+            Passed directly to either:
+            - one of attribute-evaluating methods from :attr:`~Horizon.ATTRIBUTE_TO_METHOD` depending on `attribute`
+            - or attribute-transforming method :meth:`~Horizon.transform_where_present`.
+
+        Notes
+        -----
+        This method loads rectified data, e.g. amplitudes are croped relative
+        to horizon and will form a straight plane in the resulting crop.
+        """
+        location = self.get(ix, 'locations')
+        label_index = self.get(ix, 'generated')[1]
+        label = self.get(ix, src_labels)[label_index]
+
+        label_name = self.get(ix, 'label_names')
+        if label.short_name != label_name:
+            msg = f"Name `{label.short_name}` of the label loaded by index {label_index} "\
+                  f"from {src_labels} does not match label name {label_name} from batch."\
+                  f"This might have happened due to items order change in {src_labels} "\
+                  f"in between sampler creation and `make_locations` call."
+            raise ValueError(msg)
+
+        return label.load_attribute(src=src, location=location, res_ndim=res_ndim, **kwargs)
 
 
     # More methods to work with labels
@@ -417,11 +431,11 @@ class SeismicCropBatch(Batch):
         Parameters
         ----------
         threshold : float
-            Minimum percentage of covered area (spatial-wise) for a mask to be kept in the batch.
+            Minimum percentage of covered area for a mask to be kept in the batch.
         passdown : sequence of str
-            Components to filter.
+            Components to filter in the batch.
         axis : int
-            Axis to project horizon to before computing mask area.
+            Axis to project masks to before computing mask area.
         """
         _ = threshold, passdown
         mask = self.get(ix, src)
@@ -434,7 +448,7 @@ class SeismicCropBatch(Batch):
         _ = args, kwargs
         new_index = [self.indices[i] for i, area in enumerate(areas) if area > threshold]
         new_dict = {idx: self.index._paths[idx] for idx in new_index}
-        if len(new_index):
+        if len(new_index) > 0:
             self.index = FilesIndex.from_index(index=new_index, paths=new_dict, dirs=False)
         else:
             raise SkipBatchException
@@ -453,6 +467,7 @@ class SeismicCropBatch(Batch):
     @inbatch_parallel(init='_init_component', post='_assemble', target='for')
     def filter_out(self, ix, src=None, dst=None, mode=None, expr=None, low=None, high=None, length=None, p=1.0):
         """ Zero out mask for horizon extension task.
+        TODO: rethink
 
         Parameters
         ----------
@@ -518,6 +533,7 @@ class SeismicCropBatch(Batch):
     @apply_parallel
     def shift_masks(self, crop, n_segments=3, max_shift=4, max_len=10):
         """ Randomly shift parts of the crop up or down.
+        TODO: rethink
 
         Parameters
         ----------
@@ -549,6 +565,8 @@ class SeismicCropBatch(Batch):
     def bend_masks(self, crop, angle=10):
         """ Rotate part of the mask on a given angle.
         Must be used for crops in (xlines, heights, inlines) format.
+
+        TODO: rethink
         """
         shape = crop.shape
 
@@ -583,6 +601,7 @@ class SeismicCropBatch(Batch):
     @apply_parallel
     def linearize_masks(self, crop, n=3, shift=0, kind='random', width=None):
         """ Sample `n` points from the original mask and create a new mask by interpolating them.
+        TODO: rethink
 
         Parameters
         ----------
@@ -646,8 +665,10 @@ class SeismicCropBatch(Batch):
     # Predictions
     @action
     @inbatch_parallel(init='indices', post=None, target='for')
-    def update_accumulator(self, ix, src, accumulator, order=(0, 1, 2)):
+    def update_accumulator(self, ix, src, accumulator):
         """ Update accumulator with data from crops.
+        Allows to gradually accumulate predicitons in a single instance, instead of
+        keeping all of them and assembling later.
 
         Parameters
         ----------
@@ -655,12 +676,12 @@ class SeismicCropBatch(Batch):
             Component with crops.
         accumulator : Accumulator3D
             Container for cube aggregation.
-        order : sequence
-            The order of axes of the crop which corresponds to natural iline-xline-depth order
         """
         crop = self.get(ix, src)
         location = self.get(ix, 'locations')
-        accumulator.update(crop.transpose(order), location)
+        if self.get(ix, 'orientations'):
+            crop = crop.transpose(1, 0, 2)
+        accumulator.update(crop, location)
         return self
 
     @action
@@ -773,12 +794,12 @@ class SeismicCropBatch(Batch):
 
     @apply_parallel
     def rotate_axes(self, crop):
-        """ The last shall be first and the first last.
+        """ The last shall be the first and the first last.
 
         Notes
         -----
-        Actions `crop`, `load_cubes`, `create_mask` make data in [iline, xline, height]
-        format. Since most of the models percieve ilines as channels, it might be convinient
+        Actions `make_locations`, `load_cubes`, `create_mask` make data in [iline, xline, height] format.
+        Since most of the TensorFlow models percieve ilines as channels, it might be convinient
         to change format to [xlines, height, ilines] via this action.
         """
         crop_ = np.swapaxes(crop, 0, 1)
@@ -1085,7 +1106,7 @@ class SeismicCropBatch(Batch):
         if (shape > crop_shape).any():
             raise ValueError(f"shape can't be large then crop shape ({crop_shape}) but {shape} was given.")
         corner = crop_shape // 2 - shape // 2
-        slices = tuple([slice(start, start+length) for start, length in zip(corner, shape)])
+        slices = tuple(slice(start, start+length) for start, length in zip(corner, shape))
         return crop[slices]
 
     @apply_parallel
@@ -1135,11 +1156,13 @@ class SeismicCropBatch(Batch):
 
         Parameters
         ----------
+        components : str or sequence of str
+            Components to get from batch and draw.
         idx : int or None
             If int, then index of desired image in list.
             If None, then no indexing is applied.
-        components : str or sequence of str
-            Components to get from batch and draw.
+        slide : slice
+            Indexing element for individual images.
         """
         # Get components data
         if idx is not None:
@@ -1152,12 +1175,16 @@ class SeismicCropBatch(Batch):
 
         # Get location
         l = self.locations[idx]
+        cube_name = self.unsalt(self.indices[idx])
+        displayed_name = self.dataset.geometries[cube_name].displayed_name
+
         if (l[0].stop - l[0].start) == 1:
             suptitle = f'INLINE {l[0].start}   CROSSLINES {l[1].start}:{l[1].stop}   DEPTH {l[2].start}:{l[2].stop}'
         elif (l[1].stop - l[1].start) == 1:
             suptitle = f'CROSSLINE {l[1].start}   INLINES {l[0].start}:{l[0].stop}   DEPTH {l[2].start}:{l[2].stop}'
         else:
             suptitle = f'DEPTH {l[2].start}  INLINES {l[0].start}:{l[0].stop}   CROSSLINES {l[1].start}:{l[1].stop}'
+        suptitle = f'batch item {idx}                  {displayed_name}\n{suptitle}'
 
         # Plot parameters
         kwargs = {
@@ -1170,5 +1197,16 @@ class SeismicCropBatch(Batch):
             'bad_values': (),
             **kwargs
         }
+        return plot_image(data, **kwargs)
 
-        plot_image(data, **kwargs)
+
+    def show(self, n=1, separate=True, components=None, **kwargs):
+        """ Plot `n` random batch items. """
+        available_components = components or ['images', 'masks', 'predictions']
+        available_components = [compo for compo in available_components
+                                if hasattr(self, compo)]
+
+        n = min(n, len(self))
+
+        for idx in self.random.choice(len(self), size=n, replace=False):
+            self.plot_components(*available_components, idx=idx, separate=separate, **kwargs)
