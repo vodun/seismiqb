@@ -10,8 +10,7 @@ import matplotlib.pyplot as plt
 from matplotlib import patheffects
 from matplotlib.cm import get_cmap, register_cmap
 from matplotlib.patches import Patch
-from matplotlib.colors import ColorConverter, ListedColormap, LinearSegmentedColormap
-from matplotlib.colors import BASE_COLORS, TABLEAU_COLORS, CSS4_COLORS
+from matplotlib.colors import ColorConverter, ListedColormap, LinearSegmentedColormap, is_color_like
 from mpl_toolkits import axes_grid1
 
 import plotly.figure_factory as ff
@@ -224,7 +223,7 @@ class MatplotlibPlotter:
 
         if axes is None:
             FIGURE_KEYS = ['figsize', 'facecolor', 'dpi', 'ncols', 'nrows', 'constrained_layout']
-            params = filter_parameters(all_params, FIGURE_KEYS)
+            params = filter_parameters(all_params, FIGURE_KEYS, prefix='figure_')
             params['figsize'] = params.get('figsize', MODE_TO_FIGSIZE[mode])
             if ('ncols' not in params) and ('nrows' not in params):
                 params['ncols'] = n_subplots
@@ -389,6 +388,7 @@ class MatplotlibPlotter:
         # other
         'order_axes': (1, 0, 2),
         'bad_color': (.0,.0,.0,.0),
+        'transparize_masks': None,
     }
 
     @classmethod
@@ -423,20 +423,23 @@ class MatplotlibPlotter:
         for image_num, image in enumerate(data):
             image = np.transpose(image, axes=kwargs['order_axes'][:image.ndim]).astype(np.float32)
 
-            # fill some values with nans to display them with `bad_color`
-            bad_values = filter_parameters(kwargs, ['bad_values'], index=image_num).get('bad_values', [])
-            if kwargs.get('transparize_masks', image_num > 0):
-                unique_values = tuple(np.unique(image))
-                if unique_values == (0,) or unique_values == (0, 1): # pylint: disable=consider-using-in
-                    kwargs['vmin'] = params.get('vmin', 0)
-                    bad_values = [0]
-            for bad_value in bad_values:
-                image[image == bad_value] = np.nan
-
             keys = ['cmap', 'vmin', 'vmax', 'interpolation', 'alpha', 'extent']
             params = filter_parameters(kwargs, keys, prefix='imshow_', index=image_num)
             params['cmap'] = cls.make_cmap(params.pop('cmap'), kwargs['bad_color'])
             params['extent'] = params.get('extent') or [0, image.shape[1], image.shape[0], 0]
+
+            # fill some values with nans to display them with `bad_color`
+            bad_values = filter_parameters(kwargs, ['bad_values'], index=image_num).get('bad_values', [])
+            transparize_masks = kwargs.get('transparize_masks')
+            transparize_masks = transparize_masks if transparize_masks is not None else image_num > 0
+            if transparize_masks:
+                unique_values = tuple(np.unique(image))
+                if unique_values == (0,) or unique_values == (0, 1): # pylint: disable=consider-using-in
+                    params['vmin'] = params.get('vmin', 0)
+                    bad_values = [0]
+            for bad_value in bad_values:
+                image[image == bad_value] = np.nan
+
             ax_image = ax.imshow(image, **params)
             if image_num == 0:
                 kwargs['ax_image'] = ax_image
@@ -456,6 +459,8 @@ class MatplotlibPlotter:
         'color': 'r',
         'marker': 'o',
         'linestyle': '',
+        # suptitle
+        'suptitle_color': 'k',
         # title
         'title_color': 'k',
         # axis labels
@@ -558,6 +563,9 @@ class MatplotlibPlotter:
         'color': ['firebrick', 'forestgreen', 'royalblue', 'sandybrown', 'darkorchid'],
         'alpha': 0.8,
         'facecolor': 'white',
+        # suptitle
+        'suptitle_color': 'k',
+        'suptitle_y': 1.01,
         # title
         'title_color' : 'k',
         # axis labels
@@ -657,7 +665,9 @@ class MatplotlibPlotter:
             rolling_mean = kwargs.get('rolling_mean')
             if rolling_mean:
                 averaged = array.copy()
-                window = 10 if rolling_mean is True else rolling_mean
+                window = min(10 if rolling_mean is True else rolling_mean, len(array))
+                if window > len(averaged * 2):
+                    break
                 averaged[(window // 2):(-window // 2 + 1)] = np.convolve(array, np.ones(window) / window, mode='valid')
                 ax.plot(averaged, color=mean_color, linestyle='--')
 
@@ -742,9 +752,8 @@ class MatplotlibPlotter:
     def add_legend(ax, color, label, size, loc):
         """ Add patches to legend. All invalid colors are filtered. """
         handles = getattr(ax.get_legend(), 'legendHandles', [])
-        VALID_COLORS = {**BASE_COLORS, **TABLEAU_COLORS, **CSS4_COLORS}
-        colors = [color for color in to_list(color) if color in VALID_COLORS]
-        labels = to_list(label, dtype='object' if any(isinstance(item, list) for item in label) else None)
+        colors = [color for color in to_list(color) if is_color_like(color)]
+        labels = to_list(label)
         new_patches = [Patch(color=color, label=label) for color, label in zip(colors, labels) if label]
         handles += new_patches
         if handles:

@@ -20,6 +20,8 @@ class Enhancer(HorizonController):
         """ Train model for horizon enhancement. """
         dataset = self.make_dataset(horizon=horizon)
         sampler = self.make_sampler(dataset)
+        sampler.show_locations(show=self.plot, savepath=self.make_savepath('sampler_locations.png'))
+        sampler.show_sampled(show=self.plot, savepath=self.make_savepath('sampler_generated.png'))
         return super().train(dataset, sampler=sampler, **kwargs)
 
 

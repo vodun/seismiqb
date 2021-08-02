@@ -19,6 +19,7 @@ from itertools import product
 import numpy as np
 from numba import njit
 
+from .fault import insert_fault_into_mask
 from .utils import filtering_function
 from .utility_classes import IndexedDict
 from ..batchflow import Sampler, ConstantSampler
@@ -28,7 +29,7 @@ class BaseSampler(Sampler):
     """ Common logic of making locations. Refer to the documentation of inherited classes for more details. """
     def _make_locations(self, geometry, points, matrix, crop_shape, ranges, threshold, filtering_matrix):
         # Parse parameters
-        ranges = ranges or [None, None, None]
+        ranges = ranges if ranges is not None else [None, None, None]
         ranges = [item if item is not None else [0, c]
                   for item, c in zip(ranges, geometry.cube_shape)]
         ranges = np.array(ranges)
@@ -53,7 +54,19 @@ class BaseSampler(Sampler):
             points = filtering_function(points, filtering_matrix)
 
         # Keep only points, that produce crops with horizon larger than threshold; append flag
-        points = check_points(points, matrix, crop_shape[:2], i_mask, x_mask, n_threshold)
+        # TODO: Implement threshold check via filtering points with matrix obtained by
+        # convolution of horizon binary matrix and a kernel with size of crop shape
+        if threshold != 0.0:
+            points = spatial_check_points(points, matrix, crop_shape[:2], i_mask, x_mask, n_threshold)
+        else:
+            _points = np.empty((i_mask.sum() + x_mask.sum(), 4), dtype=np.int32)
+            _points[:i_mask.sum(), 0:3] = points[i_mask, :]
+            _points[:i_mask.sum(), 3] = 0
+
+            _points[i_mask.sum():, 0:3] = points[x_mask, :]
+            _points[i_mask.sum():, 3] = 1
+
+            points = _points
 
         # Transform points to (orientation, i_start, x_start, h_start, i_stop, x_stop, h_stop)
         buffer = np.empty((len(points), 7), dtype=np.int32)
@@ -151,7 +164,7 @@ class GeometrySampler(BaseSampler):
         self.geometry = geometry
         self.matrix = matrix
         self.name = geometry.short_name
-        self.displayed_name = geometry.short_name
+        self.displayed_name = geometry.displayed_name
         super().__init__()
 
     def sample(self, size):
@@ -215,10 +228,12 @@ class HorizonSampler(BaseSampler):
         Map of points to remove from potentially generated locations.
     geometry_id, label_id : int
         Used as the first two columns of sampled values.
+    shift_height : bool
+        Whether apply random shift to height locations of sampled horizon points or not.
     """
     dim = 2 + 1 + 6 # dimensionality of sampled points: geometry_id and label_id, orientation, locations
 
-    def __init__(self, horizon, crop_shape, threshold=0.05, ranges=None, filtering_matrix=None,
+    def __init__(self, horizon, crop_shape, threshold=0.05, ranges=None, filtering_matrix=None, shift_height=True,
                  geometry_id=0, label_id=0, **kwargs):
         geometry = horizon.geometry
         matrix = horizon.full_matrix
@@ -236,10 +251,13 @@ class HorizonSampler(BaseSampler):
         self.matrix = matrix
         self.name = horizon.geometry.short_name
         self.displayed_name = horizon.short_name
+        self.shift_height = shift_height
         super().__init__()
 
     def sample(self, size):
         """ Get exactly `size` locations. """
+        if size == 0:
+            return np.zeros((0, 9), np.int32)
         if self.threshold == 0.0:
             sampled = self._sample(size)
         else:
@@ -248,12 +266,11 @@ class HorizonSampler(BaseSampler):
 
             while accumulated < size:
                 sampled = self._sample(size*2)
-                condition = check_sampled(sampled, self.matrix, self.n_threshold)
+                condition = spatial_check_sampled(sampled, self.matrix, self.n_threshold)
 
                 sampled_list.append(sampled[condition])
                 accumulated += condition.sum()
             sampled = np.concatenate(sampled_list)[:size]
-            self._counter = len(sampled_list)
 
         buffer = np.empty((size, 9), dtype=np.int32)
         buffer[:, 0] = self.geometry_id
@@ -265,12 +282,13 @@ class HorizonSampler(BaseSampler):
         idx = np.random.randint(self.n, size=size)
         sampled = self.locations[idx]
 
-        shift = np.random.randint(low=-int(self.crop_height*0.9), high=-int(self.crop_height*0.1),
-                                  size=(size, 1), dtype=np.int32)
-        sampled[:, [3, 6]] += shift
+        if self.shift_height:
+            shift = np.random.randint(low=-int(self.crop_height*0.9), high=-int(self.crop_height*0.1),
+                                    size=(size, 1), dtype=np.int32)
+            sampled[:, [3, 6]] += shift
 
         np.clip(sampled[:, 3], 0, self.geometry.cube_shape[2] - self.crop_height, out=sampled[:, 3])
-        np.clip(sampled[:, 6], 0, self.geometry.cube_shape[2], out=sampled[:, 6])
+        np.clip(sampled[:, 6], 0 + self.crop_height, self.geometry.cube_shape[2], out=sampled[:, 6])
         return sampled
 
 
@@ -286,8 +304,163 @@ class HorizonSampler(BaseSampler):
         return orientation_matrix
 
 
+
+class FaultSampler(BaseSampler):
+    """ Generator of crop locations, based on a single fault. Not intended to be used directly, see `SeismicSampler`.
+    Makes locations that:
+        - start from the labeled point on fault
+        - don't go beyond cube limits
+
+    Locations are produced as np.ndarray of (size, 9) shape with following columns:
+        (geometry_id, label_id, orientation, i_start, x_start, h_start, i_stop, x_stop, h_stop).
+    Location is randomized in (-0.4*shape, 0.4*shape) range.
+
+    For sampling, we randomly choose `size` rows from `locations`. If some of the sampled locations does not fit the
+    `threshold` constraint or it is imposible to make crop of defined shape, resample until we get exactly
+    `size` locations.
+
+    Parameters
+    ----------
+    fault : Fault
+        Fault to base sampler on.
+    crop_shape : tuple
+        Shape of crop locations to generate.
+    threshold : float
+        Minimum proportion of labeled points in each sampled location.
+    ranges : sequence, optional
+        Sequence of three tuples of two ints or `None`s.
+        If tuple of two ints, then defines ranges of sampling along this axis.
+        If None, then geometry limits are used (no constraints).
+        Note that we actually use only the first two elements, corresponding to spatial ranges.
+    geometry_id, label_id : int
+        Used as the first two columns of sampled values.
+    extend : bool
+        Create locations in non-labeled slides between labeled slides.
+    transpose : bool
+        Create transposed crop locations or not.
+    """
+    dim = 2 + 1 + 6 # dimensionality of sampled points: geometry_id and label_id, orientation, locations
+
+    def __init__(self, fault, crop_shape, threshold=0, ranges=None, extend=True, transpose=False,
+                 geometry_id=0, label_id=0, **kwargs):
+        geometry = fault.geometry
+
+        self.points = fault.points
+        self.nodes = fault.nodes if hasattr(fault, 'nodes') else None
+        self.direction = fault.direction
+        self.transpose = transpose
+
+        self.locations = self._make_locations(geometry, crop_shape, ranges, threshold, extend)
+
+        self.kwargs = kwargs
+
+        self.geometry_id = geometry_id
+        self.label_id = label_id
+
+        self.geometry = geometry
+        self.name = fault.geometry.short_name
+        self.displayed_name = fault.short_name
+        super().__init__(self)
+
+    @property
+    def interpolated_nodes(self):
+        """ Create locations in non-labeled slides between labeled slides. """
+        slides = np.unique(self.nodes[:, self.direction])
+        locations = []
+        for i, slide in enumerate(slides):
+            left = slides[max(i-1, 0)]
+            right = slides[min(i+1, len(slides)-1)]
+            chunk = self.nodes[self.nodes[:, self.direction] == slide]
+            for j in range(left, right):
+                chunk[:, self.direction] = j
+                locations += [chunk.copy()]
+        return np.concatenate(locations, axis=0)
+
+    def _make_locations(self, geometry, crop_shape, ranges, threshold, extend):
+         # Parse parameters
+        ranges = ranges if ranges is not None else [None, None, None]
+        ranges = [item if item is not None else [0, c]
+                  for item, c in zip(ranges, geometry.cube_shape)]
+        ranges = np.array(ranges)
+
+        crop_shape = np.array(crop_shape)
+        crop_shape_t = crop_shape[[1, 0, 2]]
+        n_threshold = np.int32(np.prod(crop_shape) * threshold)
+
+        if self.nodes is not None:
+            nodes = self.interpolated_nodes if extend else self.nodes
+        else:
+            nodes = self.points
+
+        # Transform points to (orientation, i_start, x_start, h_start, i_stop, x_stop, h_stop)
+        directions = [0, 1] if self.transpose else [self.direction]
+
+        buffer = np.empty((len(nodes) * len(directions), 7), dtype=np.int32)
+
+        for i, direction, in enumerate(directions):
+            start, end = i * len(nodes), (i+1) * len(nodes)
+            shape = crop_shape if direction == 0 else crop_shape_t
+            buffer[start:end, 1:4] = nodes - shape // 2
+            buffer[start:end, 4:7] = buffer[start:end, 1:4] + shape
+            buffer[start:end, 0] = direction
+
+        self.n = len(buffer)
+        self.crop_shape = crop_shape
+        self.crop_shape_t = crop_shape_t
+        self.crop_height = crop_shape[2]
+        self.ranges = ranges
+        self.threshold = threshold
+        self.n_threshold = n_threshold
+        return buffer
+
+    def sample(self, size):
+        """ Get exactly `size` locations. """
+        if size == 0:
+            return np.zeros((0, 9), np.int32)
+        accumulated = 0
+        sampled_list = []
+
+        while accumulated < size:
+            sampled = self._sample(size*4)
+            condition = volumetric_check_sampled(sampled, self.points, self.crop_shape,
+                                                 self.crop_shape_t, self.n_threshold)
+
+            sampled_list.append(sampled[condition])
+            accumulated += condition.sum()
+        sampled = np.concatenate(sampled_list)[:size]
+
+        buffer = np.empty((size, 9), dtype=np.int32)
+        buffer[:, 0] = self.geometry_id
+        buffer[:, 1] = self.label_id
+        buffer[:, 2:] = sampled
+        return buffer
+
+    def _sample(self, size):
+        idx = np.random.randint(self.n, size=size)
+        sampled = self.locations[idx]
+        i_mask = sampled[:, 0] == 0
+        x_mask = sampled[:, 0] == 1
+
+        for mask, shape in zip([i_mask, x_mask], [self.crop_shape, self.crop_shape_t]):
+            high = np.floor(shape * 0.4)
+            low = -high
+            low[shape == 1] = 0
+            high[shape == 1] = 1
+
+            shift = np.random.randint(low=low, high=high, size=(mask.sum(), 3), dtype=np.int32)
+            sampled[mask, 1:4] += shift
+            sampled[mask, 4:] += shift
+
+            sampled[mask, 1:4] = np.clip(sampled[mask, 1:4], 0, self.geometry.cube_shape - shape)
+            sampled[mask, 4:7] = np.clip(sampled[mask, 4:7], shape, self.geometry.cube_shape)
+        return sampled
+
+    def __repr__(self):
+        return f'<FaultSampler for {self.displayed_name}: '\
+               f'crop_shape={tuple(self.crop_shape)}, threshold={self.threshold}>'
+
 @njit
-def check_points(points, matrix, crop_shape, i_mask, x_mask, threshold):
+def spatial_check_points(points, matrix, crop_shape, i_mask, x_mask, threshold):
     """ Compute points, which would generate crops with more than `threshold` labeled pixels.
     For each point, we test two possible shapes (i-oriented and x-oriented) and check `matrix` to compute the
     number of present points. Therefore, each of the initial points can result in up to two points in the output.
@@ -335,8 +508,10 @@ def check_points(points, matrix, crop_shape, i_mask, x_mask, threshold):
                 counter += 1
     return buffer[:counter]
 
+
+
 @njit
-def check_sampled(locations, matrix, threshold):
+def spatial_check_sampled(locations, matrix, threshold):
     """ Remove points, which correspond to crops with less than `threshold` labeled pixels.
     Used as a final filter for already sampled locations: they can generate crops with
     smaller than `threshold` mask only due to the depth randomization.
@@ -349,6 +524,11 @@ def check_sampled(locations, matrix, threshold):
         Depth map in cube coordinates.
     threshold : int
         Minimum amount of labeled pixels in a crop.
+
+    Returns
+    -------
+    condition : np.ndarray
+        Boolean mask for locations.
     """
     condition = np.ones(len(locations), dtype=np.bool_)
 
@@ -360,7 +540,43 @@ def check_sampled(locations, matrix, threshold):
             condition[i] = False
     return condition
 
+@njit
+def volumetric_check_sampled(locations, points, crop_shape, crop_shape_t, threshold):
+    """ Remove points, which correspond to crops with less than `threshold` labeled pixels.
+    Used as a final filter for already sampled locations: they can generate crops with
+    smaller than `threshold`.
 
+    Parameters
+    ----------
+    locations : np.ndarray
+        Locations in (orientation, i_start, x_start, h_start, i_stop, x_stop, h_stop) format.
+    points : points
+        Fault points.
+    crop_shape : np.ndarray
+        Crop shape
+    crop_shape_t : np.ndarray
+        Tranposed crop shape
+    threshold : int
+        Minimum amount of labeled pixels in a crop.
+
+    Returns
+    -------
+    condition : np.ndarray
+        Boolean mask for locations.
+    """
+    condition = np.ones(len(locations), dtype=np.bool_)
+
+    if threshold > 0:
+        for i, (orientation, i_start, x_start, h_start, i_stop,  x_stop, h_stop) in enumerate(locations):
+            shape = crop_shape if orientation == 0 else crop_shape_t
+            mask_bbox = np.array([[i_start, i_stop], [x_start, x_stop], [h_start, h_stop]], dtype=np.int32)
+            mask = np.zeros((shape[0], shape[1], shape[2]), dtype=np.int32)
+
+            insert_fault_into_mask(mask, points, mask_bbox)
+            if mask.sum() < threshold:
+                condition[i] = False
+
+    return condition
 
 class SeismicSampler(Sampler):
     """ Mixture of samplers for multiple cubes with multiple labels.
@@ -386,24 +602,28 @@ class SeismicSampler(Sampler):
         Note that we actually use only the first two elements, corresponding to spatial ranges.
     filtering_matrix : np.ndarray, optional
         Map of points to remove from potentially generated locations.
+    shift_height : bool
+        Whether to apply random shift to height locations of sampled horizon points or not.
     kwargs : dict
         Other parameters of initializing label samplers.
     """
     CLASS_TO_MODE = {
         GeometrySampler: ['geometry', 'cube'],
         HorizonSampler: ['horizon', 'surface'],
+        FaultSampler: ['fault']
     }
     MODE_TO_CLASS = {mode : class_
                      for class_, mode_list in CLASS_TO_MODE.items()
                      for mode in mode_list}
 
     def __init__(self, labels, crop_shape, proportions=None, mode='geometry',
-                 threshold=0.05, ranges=None, filtering_matrix=None, **kwargs):
-        baseclass = self.MODE_TO_CLASS[mode]
+                 threshold=0.05, ranges=None, filtering_matrix=None, shift_height=True, **kwargs):
+        baseclass = self.MODE_TO_CLASS[mode] if isinstance(mode, str) else mode
 
         names, geometry_names = {}, {}
         sampler = 0 & ConstantSampler(np.int32(0), dim=baseclass.dim)
         samplers = IndexedDict({idx: [] for idx in labels.keys()})
+
         proportions = proportions or [1 / len(labels) for _ in labels]
 
         for (geometry_id, ((idx, list_labels), p)) in enumerate(zip(labels.items(), proportions)):
@@ -420,7 +640,8 @@ class SeismicSampler(Sampler):
             for label_id, label in enumerate(list_labels):
                 label_sampler = baseclass(label, crop_shape=crop_shape_, threshold=threshold_,
                                           ranges=ranges_, filtering_matrix=filtering_matrix_,
-                                          geometry_id=geometry_id, label_id=label_id, **kwargs)
+                                          geometry_id=geometry_id, label_id=label_id, shift_height=shift_height,
+                                          **kwargs)
                 cube_sampler = cube_sampler | label_sampler
 
                 samplers[idx].append(label_sampler)
@@ -452,6 +673,8 @@ class SeismicSampler(Sampler):
         """ Convert the first two columns of sampled locations into geometry and label string names. """
         return np.array([self.names[tuple(ids)] for ids in id_array])
 
+    def __len__(self):
+        return sum(len(sampler.locations) for sampler_list in self.samplers.values() for sampler in sampler_list)
 
     def __str__(self):
         msg = 'SeismicSampler:'
@@ -471,9 +694,8 @@ class SeismicSampler(Sampler):
                       for sampler in samplers_list]
 
             ncols_ = min(ncols, len(samplers_list))
-            nrows = len(samplers_list) // ncols_ or 1
-
-            kwargs = {
+            nrows = (len(samplers_list) // ncols_ + len(samplers_list) % 2) or 1
+            _kwargs = {
                 'cmap': [['Sampler', 'black']] * len(samplers_list),
                 'alpha': [[1.0, 0.4]] * len(samplers_list),
                 'ncols': ncols_, 'nrows': nrows,
@@ -482,13 +704,15 @@ class SeismicSampler(Sampler):
                 'suptitle_label': idx if len(samplers_list) > 1 else '',
                 'constrained_layout': True,
                 'colorbar': False,
-                'legend_label': ['ILINES and CROSSLINES', 'only ILINES', 'only CROSSLINES',
-                                 'restricted', 'dead traces'],
-                'legend_cmap': ['purple','blue','red', 'white', 'gray'],
+                'legend_label': ('ILINES and CROSSLINES', 'only ILINES', 'only CROSSLINES',
+                                 'restricted', 'dead traces'),
+                'legend_cmap': ('purple','blue','red', 'white', 'gray'),
                 'legend_loc': 10,
+                'vmin': [[1, 0]] * len(samplers_list),
+                'vmax': [[3, 1]] * len(samplers_list),
                 **kwargs
             }
-            geometry.show(images, **kwargs)
+            geometry.show(images, **_kwargs)
 
     def show_sampled(self, n=10000, binary=False, **kwargs):
         """ Visualize on geometry map by sampling `n` crop locations. """
@@ -507,7 +731,7 @@ class SeismicSampler(Sampler):
                 matrix[matrix > 0] = 1
                 kwargs['bad_values'] = ()
 
-            kwargs = {
+            _kwargs = {
                 'matrix_name': 'Sampled slices',
                 'cmap': ['Reds', 'black'],
                 'alpha': [1.0, 0.4],
@@ -516,27 +740,36 @@ class SeismicSampler(Sampler):
                 'interpolation': 'bilinear',
                 **kwargs
             }
-            geometry.show((matrix, geometry.zero_traces), **kwargs)
+            geometry.show((matrix, geometry.zero_traces), **_kwargs)
 
 
 
 class BaseGrid:
     """ Determenistic generator of crop locations. """
-    def __init__(self, crop_shape, batch_size=64, locations=None, geometry=None):
+    def __init__(self, crop_shape=None, batch_size=64,
+                 locations=None, orientation=None, origin=None, endpoint=None, geometry=None, label_name='unknown'):
         self._iterator = None
+        self.crop_shape = np.array(crop_shape)
         self.batch_size = batch_size
 
         if locations is None:
-            self.crop_shape = np.array(crop_shape)
             self._make_locations()
         else:
             self.locations = locations
+            self.orientation = orientation
+            self.origin = origin
+            self.endpoint = endpoint
+            self.shape = endpoint - origin
             self.geometry = geometry
-            self.name = geometry.short_name
+            self.geometry_name = geometry.short_name
+            self.label_name = label_name
 
     def _make_locations(self):
         raise NotImplementedError('Must be implemented in sub-classes')
 
+    def to_names(self, id_array):
+        """ Convert the first two columns of sampled locations into geometry and label string names. """
+        return np.array([(self.geometry_name, self.label_name) for ids in id_array])
 
     # Iteration protocol
     @property
@@ -573,43 +806,60 @@ class BaseGrid:
         """ Total number of iterations. """
         return np.ceil(len(self) / self.batch_size).astype(np.int32)
 
-
     # Concatenate multiple grids into one
     def join(self, other):
         """ Update locations of a current grid with locations from other instance of BaseGrid. """
         if not isinstance(other, BaseGrid):
             raise TypeError('Other should be an instance of `BaseGrid`')
-        if self.name != other.name:
+        if self.geometry_name != other.geometry_name:
             raise ValueError('Grids should be for the same geometry!')
 
         locations = np.concatenate([self.locations, other.locations], axis=0)
         locations = np.unique(locations, axis=0)
         batch_size = min(self.batch_size, other.batch_size)
-        return BaseGrid(locations=locations, batch_size=batch_size, geometry=self.geometry)
+
+        if self.orientation == other.orientation:
+            orientation = self.orientation
+        else:
+            orientation = 2
+
+        self_origin = self.origin if isinstance(self, RegularGrid) else self.actual_origin
+        other_origin = other.origin if isinstance(other, RegularGrid) else other.actual_origin
+        origin = np.minimum(self_origin, other_origin)
+
+        self_endpoint = self.endpoint if isinstance(self, RegularGrid) else self.actual_endpoint
+        other_endpoint = other.endpoint if isinstance(other, RegularGrid) else other.actual_endpoint
+        endpoint = np.maximum(self_endpoint, other_endpoint)
+
+        label_name = other.label_name if isinstance(other, ExtensionGrid) else self.label_name
+
+        return BaseGrid(locations=locations, batch_size=batch_size, orientation=orientation,
+                        origin=origin, endpoint=endpoint, geometry=self.geometry, label_name=label_name)
 
     def __add__(self, other):
-        self.join(other)
+        return self.join(other)
 
     def __and__(self, other):
-        self.join(other)
-
-    def to_names(self, id_array):
-        """ Convert the first two columns of sampled locations into geometry and label string names. """
-        return np.array([(self.name, 'unknown') for ids in id_array])
-
-    def __repr__(self):
-        return f'<BaseGrid for {self.name}: '\
-               f'origin={tuple(self.origin)}, endpoint={tuple(self.endpoint)}>'
+        return self.join(other)
 
 
     # Useful info
+    def __repr__(self):
+        return f'<BaseGrid for {self.geometry_name}: '\
+               f'origin={tuple(self.origin)}, endpoint={tuple(self.endpoint)}>'
+
     @property
-    def origin(self):
+    def original_crop_shape(self):
+        """ Original crop shape. """
+        return self.crop_shape if self.orientation == 0 else self.crop_shape[[1, 0, 2]]
+
+    @property
+    def actual_origin(self):
         """ The upper leftmost point of all locations. """
         return self.locations[:, [3, 4, 5]].min(axis=0).astype(np.int32)
 
     @property
-    def endpoint(self):
+    def actual_endpoint(self):
         """ The lower rightmost point of all locations. """
         return self.locations[:, [6, 7, 8]].max(axis=0).astype(np.int32)
 
@@ -700,16 +950,28 @@ class RegularGrid(BaseGrid):
         Only one of `strides`, `overlap` or `overlap_factor` should be specified.
     batch_size : int
         Number of batches to generate on demand.
+    geometry_id, label_id : int
+        Used as the first two columns of sampled values.
+    label_name : str, optional
+        Name of the inferred label.
+    locations : np.array, optional
+        Pre-defined locations. If provided, then directly stored and used as the grid coordinates.
     """
-    def __init__(self, geometry, ranges, crop_shape, orientation=0, threshold=0,
-                 strides=None, overlap=None, overlap_factor=None, batch_size=64):
+    def __init__(self, geometry, ranges, crop_shape, orientation=0, strides=None, overlap=None, overlap_factor=None,
+                 threshold=0, batch_size=64, geometry_id=-1, label_id=-1, label_name='unknown', locations=None):
+        # Make correct crop shape
+        orientation = geometry.parse_axis(orientation)
+        crop_shape = np.array(crop_shape)
+        crop_shape = crop_shape if orientation == 0 else crop_shape[[1, 0, 2]]
+
         # Make ranges
         ranges = [item if item is not None else [0, c] for item, c in zip(ranges, geometry.cube_shape)]
         ranges = np.array(ranges)
-
-        if (ranges[:, 0] < 0).any() or (ranges[:, 1] > geometry.cube_shape).any():
-            raise ValueError('Grid ranges must contain in the geometry!')
         self.ranges = ranges
+
+        # Infer from `ranges`
+        self.origin = ranges[:, 0]
+        self.endpoint = ranges[:, 1]
         self.shape = ranges[:, 1] - ranges[:, 0]
 
         # Make `strides`
@@ -731,11 +993,15 @@ class RegularGrid(BaseGrid):
             threshold = int(threshold * crop_shape[0] * crop_shape[1])
         self.threshold = threshold
 
+        self.geometry_id = geometry_id
+        self.label_id = label_id
         self.orientation = orientation
         self.geometry = geometry
-        self.name = geometry.short_name
+        self.geometry_name = geometry.short_name
+        self.label_name = label_name
         self.unfiltered_length = None
-        super().__init__(crop_shape=crop_shape, batch_size=batch_size)
+        super().__init__(crop_shape=crop_shape, batch_size=batch_size, locations=locations, geometry=geometry,
+                         orientation=self.orientation, origin=self.origin, endpoint=self.endpoint)
 
     @staticmethod
     def _arange(start, stop, stride, limit):
@@ -744,6 +1010,7 @@ class RegularGrid(BaseGrid):
         return np.sort(grid)
 
     def _make_locations(self):
+        # Ranges for each axis
         i_args, x_args, h_args = tuple(zip(self.ranges[:, 0],
                                            self.ranges[:, 1],
                                            self.strides,
@@ -766,21 +1033,80 @@ class RegularGrid(BaseGrid):
 
         # Buffer: (cube_id, i_start, x_start, h_start, i_stop, x_stop, h_stop)
         buffer = np.empty((len(points), 9), dtype=np.int32)
-        buffer[:, [0, 1]] = -1
+        buffer[:, 0] = self.geometry_id
+        buffer[:, 1] = self.label_id
         buffer[:, 2] = self.orientation
         buffer[:, [3, 4, 5]] = points
         buffer[:, [6, 7, 8]] = points
         buffer[:, [6, 7, 8]] += self.crop_shape
         self.locations = buffer
 
-    def to_names(self, id_array):
-        """ Convert the first two columns of sampled locations into geometry and label string names. """
-        return np.array([(self.name, 'unknown') for ids in id_array])
+
+    def to_chunks(self, size, overlap=0.05):
+        """ Split the current grid into chunks along `orientation` axis.
+
+        Parameters
+        ----------
+        size : int
+            Length of one chunk along the splitting axis.
+        overlap : number
+            If integer, then number of slices for overlapping between consecutive chunks.
+            If float, then proportion of `size` to overlap between consecutive chunks.
+
+        Returns
+        -------
+        iterator with instances of `RegularGrid`.
+        """
+        return RegularGridChunksIterator(grid=self, size=size, overlap=overlap)
 
 
     def __repr__(self):
         return f'<RegularGrid for {self.geometry.short_name}: '\
-               f'origin={tuple(self.origin)}, endpoint={tuple(self.endpoint)}, crop_shape={tuple(self.crop_shape)}>'
+               f'origin={tuple(self.origin)}, endpoint={tuple(self.endpoint)}, crop_shape={tuple(self.crop_shape)}, '\
+               f'orientation={self.orientation}>'
+
+
+
+class RegularGridChunksIterator:
+    """ Split regular grid into chunks along `orientation` axis. Supposed to be iterated over.
+
+    Parameters
+    ----------
+    grid : RegularGrid
+        Regular grid to split into chunks.
+    size : int
+        Length of one chunk along the splitting axis.
+    overlap : number
+        If integer, then number of slices for overlapping between consecutive chunks.
+        If float, then proportion of `size` to overlap between consecutive chunks.
+    """
+    def __init__(self, grid, size, overlap):
+        self.grid = grid
+        self.size = size
+        self.overlap = overlap
+
+        self.step = int(size * (1 - overlap)) if isinstance(overlap, (float, np.float)) else size - overlap
+
+    def __iter__(self):
+        grid = self.grid
+
+        for start in range(*grid.ranges[grid.orientation], self.step):
+            stop = min(start + self.size, grid.geometry.cube_shape[grid.orientation])
+
+            chunk_ranges = grid.ranges.copy()
+            chunk_ranges[grid.orientation] = [start, stop]
+
+            # Filter points beyound chunk ranges along `orientation` axis
+            mask = ((grid.locations[:, 3 + grid.orientation] >= start) &
+                    (grid.locations[:, 6 + grid.orientation] <= stop))
+            chunk_locations = grid.locations[mask]
+
+            yield RegularGrid(locations=chunk_locations, ranges=chunk_ranges, strides=grid.strides,
+                              orientation=grid.orientation, threshold=grid.threshold, geometry=grid.geometry,
+                              crop_shape=grid.original_crop_shape, batch_size=grid.batch_size)
+
+    def __len__(self):
+        return len(range(*self.grid.ranges[self.grid.orientation], self.step))
 
 
 
@@ -819,8 +1145,8 @@ class ExtensionGrid(BaseGrid):
         self.horizon = horizon
         self.geometry = horizon.geometry
         self.geometry_name = horizon.geometry.short_name
-        self.horizon_name = horizon.short_name
-        self.name = self.geometry_name
+        self.label_name = horizon.short_name
+        self.geometry_name = self.geometry_name
 
         self.uncovered_before = None
 
@@ -912,14 +1238,15 @@ class ExtensionGrid(BaseGrid):
         mask = potential > self.threshold
         buffer = buffer[mask]
 
+        # Correct the height
+        np.clip(buffer[:, 3], 0, self.geometry.cube_shape[2] - crop_shape[2], out=buffer[:, 3])
+        np.clip(buffer[:, 6], crop_shape[2], self.geometry.cube_shape[2], out=buffer[:, 6])
+
         locations = np.empty((len(buffer), 9), dtype=np.int32)
         locations[:, [0, 1]] = -1
         locations[:, 2:9] = buffer
         self.locations = locations
 
-    def to_names(self, id_array):
-        """ Convert the first two columns of sampled locations into geometry and label string names. """
-        return np.array([(self.geometry_name, self.horizon_name) for ids in id_array])
 
     @property
     def uncovered_after(self):
@@ -967,7 +1294,7 @@ class ExtensionGrid(BaseGrid):
                 'cmap': 'blue',
                 'alpha': 0.3,
                 'colorbar': False,
-                'title': f'Extension Grid on `{self.horizon_name}`',
+                'title': f'Extension Grid on `{self.label_name}`',
                 'ax': ax[0],
                 **kwargs,
             }
@@ -984,9 +1311,9 @@ def compute_potential(locations, coverage_matrix, shape):
 
     for i, (_, i_start, x_start, _, i_stop, x_stop, _) in enumerate(locations):
         sliced = coverage_matrix[i_start:i_stop, x_start:x_stop].ravel()
-        covered = sliced.sum()
 
         if len(sliced) == area:
+            covered = sliced.sum()
             buffer[i] = area - covered
             coverage_matrix[i_start:i_stop, x_start:x_stop] = True
         else:

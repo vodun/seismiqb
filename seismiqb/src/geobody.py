@@ -169,7 +169,7 @@ class GeoBody:
         else:
             raise ValueError('GeoBody labels must be in FACIES_SPEC format.')
 
-        df = pd.read_csv(path, sep='\s+', names=names, usecols=GeoBody.COLUMNS)
+        df = pd.read_csv(path, sep=r'\s+', names=names, usecols=GeoBody.COLUMNS)
         df.sort_values(GeoBody.COLUMNS, inplace=True)
         return df.values
 
