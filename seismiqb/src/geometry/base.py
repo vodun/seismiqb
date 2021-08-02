@@ -578,7 +578,10 @@ class SeismicGeometry(ExportMixin):
 
     # Textual representation
     def __repr__(self):
-        return f'<Inferred geometry for cube {self.displayed_name}: {tuple(self.cube_shape)}>'
+        geometry = f'geometry for cube {self.displayed_name}'
+        if not hasattr(self, 'cube_shape'):
+            return f'<Unprocessed {geometry}>'
+        return f'<Processed {geometry}: {tuple(self.cube_shape)}>'
 
     def __str__(self):
         msg = f"""
