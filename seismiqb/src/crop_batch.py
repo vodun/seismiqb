@@ -16,6 +16,8 @@ from .horizon import Horizon
 from .plotters import plot_image
 from .utils import compute_attribute, to_list
 from .utility_classes import IndexedDict
+from .synthetic import generate_synthetic
+from .geometry.array import DummyFile, SeismicGeometryArray
 
 
 AFFIX = '___'
@@ -261,6 +263,42 @@ class SeismicCropBatch(Batch):
         else:
             raise ValueError(f"slicing must be 'native' or 'custom' but {slicing} were given.")
         return crop
+
+    @action
+    def generate_synthetic(self, dst_cubes='cubes', dst_masks='masks', dst_faults=None, **kwargs):
+        """ Fill crops with synthetic seismic data along with corresponding horizon and faults masks.
+        """
+        shape = kwargs['shape']
+
+        if shape[0] == 1 or shape[1] == 1:
+            kwargs['shape'] = np.squeeze(kwargs['shape'])
+            axis_num = 0 if shape[0] == 1 else 1
+        else:
+            axis_num = None
+
+        crops = []
+        masks = []
+        for ix in self.indices:
+            crop, horizons = generate_synthetic(**kwargs)
+            if axis_num is not None:
+                crop = np.expand_dims(crop, axis=axis_num)
+                horizons = np.expand_dims(horizons, axis=axis_num + 1)
+
+            crops.append(crop)
+            mask = np.zeros_like(crop)
+            locations = (slice(0, mask.shape[0]),
+                         slice(0, mask.shape[1]), slice(0, mask.shape[2]))
+
+            for horizon_data in horizons:
+                dummyfile = DummyFile(crop)
+                geom = SeismicGeometryArray(dummyfile.path, dummyfile=dummyfile)
+                horizon = Horizon(horizon_data, geom)
+                horizon.add_to_mask(mask, locations)
+            masks.append(mask)
+
+        setattr(self, dst_cubes, np.stack(crops, axis=0))
+        setattr(self, dst_masks, np.stack(masks, axis=0))
+        return self
 
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
