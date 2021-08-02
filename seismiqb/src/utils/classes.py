@@ -15,10 +15,19 @@ try:
 except ImportError:
     cp = np
     CUPY_AVAILABLE = False
+import bottleneck as bn
 
 import h5py
 
 from .functions import to_list
+
+
+
+class AugmentedNumpy:
+    """ NumPy with better routines for nan-handling. """
+    def __getattr__(self, key):
+        return getattr(bn, key, getattr(np, key))
+augmented_np = AugmentedNumpy()
 
 
 
@@ -74,7 +83,7 @@ class Accumulator:
     def init(self, matrix):
         """ Initialize all the containers on first `update`. """
         # No amortization: collect all the matrices and apply reduce afterwards
-        self.module = cp.get_array_module(matrix) if CUPY_AVAILABLE else np
+        self.module = cp.get_array_module(matrix) if CUPY_AVAILABLE else augmented_np
         self.n = 1
 
         if self.amortize is False or self.agg in ['stack', 'mode']:

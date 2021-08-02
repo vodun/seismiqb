@@ -6,8 +6,10 @@ from tqdm.auto import tqdm
 import numpy as np
 try:
     import cupy as cp
+    CUPY_AVAILABLE = True
 except ImportError:
     cp = np
+    CUPY_AVAILABLE = False
 
 import cv2
 
@@ -148,7 +150,7 @@ class BaseMetrics:
         # Transfer to GPU, if needed
         data = to_device(data, device)
         bad_traces = to_device(bad_traces, device)
-        xp = cp.get_array_module(data) if (cp is not np) else np
+        xp = cp.get_array_module(data) if CUPY_AVAILABLE else np
 
         # Compute data statistics
         data_stds = data.std(axis=-1)
@@ -239,7 +241,7 @@ class BaseMetrics:
         # Transfer to GPU, if needed
         data = to_device(data, device)
         bad_traces = to_device(bad_traces, device)
-        xp = cp.get_array_module(data) if (cp is not np) else np
+        xp = cp.get_array_module(data) if CUPY_AVAILABLE else np
 
         # Compute data statistics
         data_stds = data.std(axis=-1)
@@ -783,7 +785,7 @@ class HorizonMetrics(BaseMetrics):
         #pylint: disable=unexpected-keyword-arg
         # Transfer to GPU, if needed
         data = to_device(self.data, device)
-        xp = cp.get_array_module(data) if (cp is not np) else np
+        xp = cp.get_array_module(data) if CUPY_AVAILABLE else np
 
         # Compute hilbert transform and scale to 2pi range
         analytic = hilbert(data, axis=2)
