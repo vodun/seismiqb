@@ -9,20 +9,22 @@ from shutil import copyfile
 
 import numpy as np
 
+from .base import BaseController
+from .best_practices import MODEL_CONFIG
+
+from ..labels import Fault
+from ..cubeset import SeismicCubeset
+from ..samplers import SeismicSampler, RegularGrid, FaultSampler, ConstantSampler
+from ..metrics import FaultsMetrics
+from ..utils import adjust_shape_3d, Accumulator3D, InputLayer
+from ..plotters import plot_image
 
 from ...batchflow import Config, Pipeline, Notifier
 from ...batchflow import B, C, D, P, R, V, F, I
 from ...batchflow.models.torch import TorchModel, EncoderDecoder
-from .base import BaseController
-from .best_practices import MODEL_CONFIG
-from ..cubeset import SeismicCubeset
-from ..samplers import SeismicSampler, RegularGrid, FaultSampler, ConstantSampler
-from ..fault import Fault
-from ..layers import InputLayer
-from ..utils import adjust_shape_3d
-from ..utility_classes import Accumulator3D
-from ..plotters import plot_image
-from ..metrics import FaultsMetrics
+
+
+
 class FaultController(BaseController):
     """ Controller for faults detection tasks. """
     DEFAULTS = Config({

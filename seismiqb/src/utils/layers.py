@@ -5,7 +5,7 @@ from torch import nn
 import torch.nn.functional as F
 from torch.cuda.amp import autocast
 
-from ..batchflow.models.torch import ResBlock
+from ...batchflow.models.torch import ResBlock
 
 
 

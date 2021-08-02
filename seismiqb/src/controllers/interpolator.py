@@ -1,7 +1,9 @@
 """ Interpolate horizon from a carcass. """
 #pylint: disable=attribute-defined-outside-init
 from textwrap import indent
+
 from .horizon import HorizonController
+
 
 
 class Interpolator(HorizonController):
