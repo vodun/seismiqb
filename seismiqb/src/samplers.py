@@ -747,7 +747,7 @@ class SeismicSampler(Sampler):
 class BaseGrid:
     """ Determenistic generator of crop locations. """
     def __init__(self, crop_shape=None, batch_size=64,
-                 locations=None, orientation=None, origin=None, endpoint=None, geometry=None):
+                 locations=None, orientation=None, origin=None, endpoint=None, geometry=None, label_name='unknown'):
         self._iterator = None
         self.crop_shape = np.array(crop_shape)
         self.batch_size = batch_size
@@ -761,7 +761,8 @@ class BaseGrid:
             self.endpoint = endpoint
             self.shape = endpoint - origin
             self.geometry = geometry
-            self.name = geometry.short_name
+            self.geometry_name = geometry.short_name
+            self.label_name = label_name
 
     def _make_locations(self):
         raise NotImplementedError('Must be implemented in sub-classes')
@@ -829,8 +830,11 @@ class BaseGrid:
         self_endpoint = self.endpoint if isinstance(self, RegularGrid) else self.actual_endpoint
         other_endpoint = other.endpoint if isinstance(other, RegularGrid) else other.actual_endpoint
         endpoint = np.maximum(self_endpoint, other_endpoint)
+
+        label_name = other.label_name if isinstance(other, ExtensionGrid) else self.label_name
+
         return BaseGrid(locations=locations, batch_size=batch_size, orientation=orientation,
-                        origin=origin, endpoint=endpoint, geometry=self.geometry)
+                        origin=origin, endpoint=endpoint, geometry=self.geometry, label_name=label_name)
 
     def __add__(self, other):
         return self.join(other)
@@ -841,7 +845,7 @@ class BaseGrid:
 
     # Useful info
     def __repr__(self):
-        return f'<BaseGrid for {self.name}: '\
+        return f'<BaseGrid for {self.geometry_name}: '\
                f'origin={tuple(self.origin)}, endpoint={tuple(self.endpoint)}>'
 
     @property
@@ -1142,7 +1146,7 @@ class ExtensionGrid(BaseGrid):
         self.geometry = horizon.geometry
         self.geometry_name = horizon.geometry.short_name
         self.label_name = horizon.short_name
-        self.name = self.geometry_name
+        self.geometry_name = self.geometry_name
 
         self.uncovered_before = None
 
