@@ -825,6 +825,13 @@ class Horizon(AttributesMixin, VisualizationMixin):
 
 
     # Evaluate horizon on its own / against other(s)
+    @property
+    def horizon_metrics(self):
+        """ Calculate :class:`~HorizonMetrics` on demand. """
+        # pylint: disable=import-outside-toplevel
+        from ..metrics import HorizonMetrics
+        return HorizonMetrics(self)
+
     def evaluate(self, compute_metric=True, supports=50, plot=True, savepath=None, printer=print, **kwargs):
         """ Compute crucial metrics of a horizon.
 
@@ -1244,7 +1251,7 @@ class Horizon(AttributesMixin, VisualizationMixin):
         add_height : bool
             Whether to concatenate average horizon height to a file name.
         """
-        matrix = self.make_float_matrix(kernel_size=kernel_size, sigma=sigma, margin=margin)
+        matrix = self.matrix_smooth_out(matrix=self.full_matrix, kernel_size=kernel_size, sigma=sigma, margin=margin)
         points = self.matrix_to_points(matrix)
         points = self.cubic_to_lines(points)
         self.dump_charisma(points, path, transform, add_height)
