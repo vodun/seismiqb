@@ -474,6 +474,8 @@ def generate_synthetic(shape=(50, 400, 800), num_reflections=200, vel_limits=(90
     gen = (gen.make_density_model(density_noise_lims)
               .make_synthetic(ricker_width, ricker_points)
               .postprocess_synthetic(sigma, noise_mul))
+    if faults is not None:
+        return gen.synthetic, gen.fetch_horizons(fetch_surfaces), gen.fetch_faults()
     return gen.synthetic, gen.fetch_horizons(fetch_surfaces)
 
 

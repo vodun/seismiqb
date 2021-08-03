@@ -18,7 +18,7 @@ from .utils import compute_attribute, to_list
 from .utility_classes import IndexedDict
 from .synthetic import generate_synthetic
 from .geometry.array import DummyFile, SeismicGeometryArray
-
+from .fault import Fault
 
 AFFIX = '___'
 SIZE_POSTFIX = 12
@@ -268,36 +268,48 @@ class SeismicCropBatch(Batch):
     def generate_synthetic(self, dst_cubes='cubes', dst_masks='masks', dst_faults=None, **kwargs):
         """ Fill crops with synthetic seismic data along with corresponding horizon and faults masks.
         """
-        shape = kwargs['shape']
+        shape = np.array(kwargs['shape'])
 
         if shape[0] == 1 or shape[1] == 1:
-            kwargs['shape'] = np.squeeze(kwargs['shape'])
+            kwargs['shape'] = tuple(shape[shape != 1])
             axis_num = 0 if shape[0] == 1 else 1
         else:
             axis_num = None
 
         crops = []
         masks = []
+        fault_masks = []
         for ix in self.indices:
-            crop, horizons = generate_synthetic(**kwargs)
+            if len(kwargs.get('faults', ())) != 0 and dst_faults is not None:
+                crop, horizons, faults = generate_synthetic(**kwargs)
+            else:
+                crop, horizons = generate_synthetic(**kwargs)
+                faults = ()
             if axis_num is not None:
                 crop = np.expand_dims(crop, axis=axis_num)
                 horizons = np.expand_dims(horizons, axis=axis_num + 1)
 
             crops.append(crop)
             mask = np.zeros_like(crop)
+            fault_mask = np.zeros_like(crop)
             locations = (slice(0, mask.shape[0]),
                          slice(0, mask.shape[1]), slice(0, mask.shape[2]))
 
+            dummyfile = DummyFile(crop)
+            geom = SeismicGeometryArray(dummyfile.path, dummyfile=dummyfile)
             for horizon_data in horizons:
-                dummyfile = DummyFile(crop)
-                geom = SeismicGeometryArray(dummyfile.path, dummyfile=dummyfile)
                 horizon = Horizon(horizon_data, geom)
                 horizon.add_to_mask(mask, locations)
+            for fault_data in faults:
+                fault = Fault(fault_data, geom)
+                fault.add_to_mask(fault_mask, locations)
             masks.append(mask)
+            fault_masks.append(fault_mask)
 
         setattr(self, dst_cubes, np.stack(crops, axis=0))
         setattr(self, dst_masks, np.stack(masks, axis=0))
+        if len(faults) != 0 and dst_faults != 0:
+            setattr(self, dst_faults, np.stack(fault_masks, axis=0))
         return self
 
     @action
