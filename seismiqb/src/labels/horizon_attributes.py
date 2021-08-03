@@ -1,5 +1,7 @@
 """ Mixin with computed along horizon geological attributes. """
 # pylint: disable=too-many-statements
+from functools import wraps
+
 import numpy as np
 from matplotlib import pyplot as plt
 
@@ -10,9 +12,31 @@ from skimage.measure import label
 from sklearn.decomposition import PCA
 
 from ..functional import smooth_out
-from ..utils import to_list, retrieve_function_arguments, lru_cache
+from ..utils import to_list, lru_cache
 from ..plotters import plot_image
 
+
+
+def transformable(method):
+    """ !!. """
+    @wraps(method)
+    def wrapper(instance, *args, on_full=False, fill_value=None, dtype=None, normalize=False, ndim=None, **kwargs):
+        print('in wrapper', method, on_full, fill_value, dtype, normalize, ndim)
+        result = method(instance, *args, **kwargs)
+
+        if dtype:
+            result = instance.matrix_set_dtype(result, dtype=dtype)
+        if on_full:
+            result = instance.matrix_put_on_full(result)
+        if normalize:
+            result = instance.matrix_normalize(result, normalize)
+        if fill_value:
+            result = instance.matrix_fill_to_num(result, fill_value=fill_value)
+        if ndim:
+            result = instance.matrix_set_ndim(result, ndim=ndim)
+
+        return result
+    return wrapper
 
 
 class AttributesMixin:
@@ -40,91 +64,107 @@ class AttributesMixin:
         'wavelet_decompose': ['wavelet', 'wavelet_decompose']
     }
     ATTRIBUTE_TO_METHOD = {attr: func for func, attrs in METHOD_TO_ATTRIBUTE.items() for attr in attrs}
+    # Modify computed matrices
+    def _dtype_to_fill_value(self, dtype):
+        if dtype == np.int32:
+            fill_value = self.FILL_VALUE
+        elif dtype == np.float32:
+            fill_value = np.nan
+        elif np.issubdtype(dtype, np.bool):
+            fill_value = False
+        else:
+            raise TypeError(f'Incorrect dtype: `{dtype}`')
+        return fill_value
 
-    # Geometrical and geological properties
-    @property
-    def amplitudes(self):
-        """ Alias for cube values. Depending on what loaded to cube geometries
-        might actually not be amplitudes, so use it with caution.
-        """
-        return self.cube_values
+    def matrix_set_dtype(self, matrix, dtype):
+        """ !!. """
+        matrix = matrix.astype(dtype)
 
+        mask = (matrix == self.FILL_VALUE) | np.isnan(matrix)
+        matrix[mask] = self._dtype_to_fill_value(dtype)
+        return matrix
+
+    def matrix_put_on_full(self, matrix):
+        """ !!. """
+        if (matrix.shape[:2] != self.cube_shape[:2]).any():
+            background = np.full(self.cube_shape[:2], self._dtype_to_fill_value(matrix.dtype), dtype=matrix.dtype)
+            background[self.i_min:self.i_max + 1, self.x_min:self.x_max + 1] = matrix
+        else:
+            background = matrix
+        return background
+
+    def matrix_fill_to_num(self, matrix, value):
+        """ !!. """
+        if matrix.dtype == np.int32:
+            mask = (matrix == self.FILL_VALUE)
+        elif matrix.dtype == np.float32:
+            mask = np.isnan(matrix)
+        elif matrix.dtype in {np.bool, np.bool_}:
+            mask = ~matrix
+
+        matrix[mask] = value
+        return matrix
+
+    def matrix_num_to_fill(self, matrix, value):
+        """ !!. """
+        if value is np.nan:
+            mask = np.isnan(matrix)
+        else:
+            mask = (matrix == value)
+
+        matrix[mask] = self._dtype_to_fill_value(matrix.dtype)
+        return matrix
+
+    def matrix_normalize(self, array, mode):
+        """ !!. """
+        if mode in ['min-max', True]:
+            values = array[self.presence_matrix]
+            min_, max_ = np.nanmin(values), np.nanmax(values)
+            array = (array - min_) / (max_ - min_)
+        elif mode == 'mean-std':
+            values = array[self.presence_matrix]
+            mean, std = np.nanmean(values), np.nanstd(values)
+            array = (array - mean) / std
+        else:
+            raise ValueError(f'Unknown normalization mode `{mode}`.')
+        return array
+
+    def matrix_set_ndim(self, matrix, ndim):
+        """ !!. """
+        if ndim == matrix.ndim:
+            pass
+        elif ndim == matrix.ndim + 1:
+            matrix = matrix[..., np.newaxis]
+        else:
+            msg = f'Result ndim is unequal to requested ndim: `{matrix.ndim} != {ndim}`.'
+            raise ValueError(msg)
+        return matrix
+
+    #
+    def __getattr__(self, key):
+        if key.startswith('full_'):
+            print('in getattrr')
+            return self.matrix_put_on_full(getattr(self, key[5:]))
+        raise AttributeError(key)
+
+
+    # Technical matrices
     @property
     def binary_matrix(self):
-        """ Matrix with ones at places where horizon is present and zeros everywhere else. """
-        return (self.matrix > 0).astype(bool)
+        """ Boolean matrix with `true` values at places where horizon is present and `false` everywhere else. """
+        return (self.matrix > 0).astype(np.bool)
 
     @property
-    def borders_matrix(self):
-        """ Borders of horizons (borders of holes inside are not included). """
-        filled_matrix = self.filled_matrix
-        structure = np.ones((3, 3))
-        eroded = binary_erosion(filled_matrix, structure, border_value=0)
-        return filled_matrix ^ eroded # binary difference operation
+    def presence_matrix(self):
+        """ A convenient alias for binary matrix in cubic coordinate system. """
+        return self.full_binary_matrix
 
-    @property
-    def boundaries_matrix(self):
-        """ Borders of horizons (borders of holes inside included). """
-        binary_matrix = self.binary_matrix
-        structure = np.ones((3, 3))
-        eroded = binary_erosion(binary_matrix, structure, border_value=0)
-        return binary_matrix ^ eroded # binary difference operation
 
+    # Scalars computed from depth map only
     @property
     def coverage(self):
         """ Ratio between number of present values and number of good traces in cube. """
         return len(self) / (np.prod(self.cube_shape[:2]) - np.sum(self.geometry.zero_traces))
-
-    @property
-    def cube_values(self):
-        """ Values from the cube along the horizon. """
-        cube_values = self.get_cube_values(window=1)
-        cube_values[self.full_matrix == self.FILL_VALUE] = np.nan
-        return cube_values
-
-    @property
-    def filled_matrix(self):
-        """ Binary matrix with filled holes. """
-        structure = np.ones((3, 3))
-        filled_matrix = binary_fill_holes(self.binary_matrix, structure)
-        return filled_matrix
-
-    @property
-    def full_matrix(self):
-        """ Matrix in cubic coordinate system. """
-        return self.get_full_matrix()
-
-    @property
-    def presence_matrix(self):
-        """ Binary matrix in cubic coordinate system. """
-        return self.put_on_full(self.binary_matrix, fill_value=False, dtype=bool)
-
-    @property
-    def grad_i(self):
-        """ Change of heights along iline direction. """
-        return self.grad_along_axis(0)
-
-    @property
-    def grad_x(self):
-        """ Change of heights along xline direction. """
-        return self.grad_along_axis(1)
-
-    @property
-    def hash(self):
-        """ Hash on current data of the horizon. """
-        return hash(self.matrix.data.tobytes())
-
-    @property
-    def horizon_metrics(self):
-        """ Calculate :class:`~HorizonMetrics` on demand. """
-        # pylint: disable=import-outside-toplevel
-        from ..metrics import HorizonMetrics
-        return HorizonMetrics(self)
-
-    @property
-    def instantaneous_phase(self):
-        """ Phase along the horizon. """
-        return self.horizon_metrics.evaluate('instantaneous_phase')
 
     @property
     def number_of_holes(self):
@@ -142,6 +182,49 @@ class AttributesMixin:
     def solidity(self):
         """ Ratio of area covered by horizon to total area inside borders. """
         return len(self) / np.sum(self.filled_matrix)
+
+
+    # Matrices computed from depth-map only
+    @property
+    def borders_matrix(self):
+        """ Borders of horizons (borders of holes inside are not included). """
+        filled_matrix = self.filled_matrix
+        structure = np.ones((3, 3))
+        eroded = binary_erosion(filled_matrix, structure, border_value=0)
+        return filled_matrix ^ eroded # binary difference operation
+
+    @property
+    def boundaries_matrix(self):
+        """ Borders of horizons (borders of holes inside included). """
+        binary_matrix = self.binary_matrix
+        structure = np.ones((3, 3))
+        eroded = binary_erosion(binary_matrix, structure, border_value=0)
+        return binary_matrix ^ eroded # binary difference operation
+
+    @property
+    def filled_matrix(self):
+        """ Binary matrix with filled holes. """
+        structure = np.ones((3, 3))
+        filled_matrix = binary_fill_holes(self.binary_matrix, structure)
+        return filled_matrix
+
+
+    def grad_along_axis(self, axis=0):
+        """ Change of heights along specified direction. """
+        grad = np.diff(self.matrix, axis=axis, prepend=0)
+        grad[np.abs(grad) > 10000] = self.FILL_VALUE
+        grad[self.matrix == self.FILL_VALUE] = self.FILL_VALUE
+        return grad
+
+    @property
+    def grad_i(self):
+        """ Change of heights along iline direction. """
+        return self.grad_along_axis(0)
+
+    @property
+    def grad_x(self):
+        """ Change of heights along xline direction. """
+        return self.grad_along_axis(1)
 
 
     # Carcass properties: should be used only if the horizon is a carcass
@@ -162,61 +245,11 @@ class AttributesMixin:
         uniques, counts = np.unique(self.points[:, 1], return_counts=True)
         return uniques[counts > 256]
 
-    @property
-    def carcass_grid(self):
-        """ Full matrix with present lines. """
-        return self.put_on_full(self.binary_matrix, fill_value=0.0)
-
 
     # Retrieve data from seismic along horizon
-    def transform_where_present(self, array, normalize=None, fill_value=None, shift=None, rescale=None, res_ndim=None):
-        """ Normalize array where horizon is present, fill with constant where the horizon is absent.
-
-        Parameters
-        ----------
-        array : np.array
-            Matrix of (cube_ilines, cube_xlines, ...) shape.
-        normalize : 'min-max', 'mean-std', 'shift-rescale' or None/False
-            Normalization mode for data where `presence_matrix` is True.
-            If None, no normalization applied. Defaults to None.
-        fill_value : number
-            Value to fill `array` in where :attr:`.presence_matrix` is False. Must be compatible with `array.dtype`.
-            If None, no filling applied. Defaults to None.
-        shift, rescale : number, optional
-            For 'shift-rescale` normalization mode.
-        res_ndim : int or None
-            Number of dimensions returned result should have.
-        """
-        if not normalize:
-            pass
-        elif normalize == 'min-max':
-            values = array[self.presence_matrix]
-            min_, max_ = values.min(), values.max()
-            array = (array - min_) / (max_ - min_)
-        elif normalize == 'mean-std':
-            values = array[self.presence_matrix]
-            mean, std = values.mean(), values.std()
-            array = (array - mean) / std
-        elif normalize == 'shift-rescale':
-            array = (array + shift) * rescale
-        else:
-            raise ValueError('Unknown normalize mode `{}`'.format(normalize))
-
-        if fill_value is not None:
-            array[~self.presence_matrix] = fill_value
-
-        if res_ndim == array.ndim + 1:
-            array = array[..., np.newaxis]
-        elif res_ndim is not None and res_ndim != array.ndim:
-            msg = f"Result ndim is {array.ndim}, while requested ndim is {res_ndim}. "\
-                  f"Adding more than one new axis is not currently implemented."
-            raise ValueError(msg)
-
-        return array
-
-
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
-    def get_cube_values(self, window=23, offset=0, chunk_size=256, **kwargs):
+    @transformable
+    def get_cube_values(self, window=23, offset=0, chunk_size=256):
         """ Get values from the cube along the horizon.
 
         Parameters
@@ -227,10 +260,7 @@ class AttributesMixin:
             Offset of data slice with respect to horizon heights matrix.
         chunk_size : int
             Size of data along height axis processed at a time.
-        kwargs :
-            Passed directly to :meth:`.transform_where_present`.
         """
-        transform_kwargs = retrieve_function_arguments(self.transform_where_present, kwargs)
         low = window // 2
         high = max(window - low, 0)
         chunk_size = min(chunk_size, self.h_max - self.h_min + window)
@@ -266,21 +296,7 @@ class AttributesMixin:
                 heights = heights[mask]
 
         background[self.geometry.zero_traces == 1] = np.nan
-        return self.transform_where_present(background, **transform_kwargs)
-
-
-    @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
-    def get_full_matrix(self, **kwargs):
-        """ Transform `matrix` attribute to match cubic coordinates.
-
-        Parameters
-        ----------
-        kwargs :
-            Passed directly to :meth:`.put_on_full` and :meth:`.transform_where_present`.
-        """
-        transform_kwargs = retrieve_function_arguments(self.transform_where_present, kwargs)
-        matrix = self.put_on_full(self.matrix, **kwargs)
-        return self.transform_where_present(matrix, **transform_kwargs)
+        return background
 
 
     def get_array_values(self, array, shifts=None, grid_info=None, width=5, axes=(2, 1, 0)):
@@ -343,29 +359,41 @@ class AttributesMixin:
         return result
 
 
-    # Modify things
-    def grad_along_axis(self, axis=0):
-        """ Change of heights along specified direction. """
-        grad = np.diff(self.matrix, axis=axis, prepend=0)
-        grad[np.abs(grad) > 10000] = self.FILL_VALUE
-        grad[self.matrix == self.FILL_VALUE] = self.FILL_VALUE
-        return grad
+    # Matrices computed from data along the horizon
+    @property
+    def amplitudes(self):
+        """ Alias for cube values. Depending on what loaded to cube geometries
+        might actually not be amplitudes, so use it with caution.
+        """
+        return self.cube_values
 
+    @property
+    def cube_values(self):
+        """ Values from the cube along the horizon. """
+        cube_values = self.get_cube_values(window=1)
+        cube_values[~self.presence_matrix] = np.nan
+        return cube_values
+
+    @property
+    def horizon_metrics(self):
+        """ Calculate :class:`~HorizonMetrics` on demand. """
+        # pylint: disable=import-outside-toplevel
+        from ..metrics import HorizonMetrics
+        return HorizonMetrics(self)
+
+    @property
+    def instantaneous_phase(self):
+        """ Phase along the horizon. """
+        return self.get_instantaneous_phases()[:, :, 0]
+
+
+    # Modify things
     def make_float_matrix(self, kernel=None, kernel_size=7, sigma=2., margin=5, iters=1):
         """ Smooth the depth matrix to produce floating point numbers. """
         float_matrix = smooth_out(self.full_matrix, kernel=kernel,
                                   kernel_size=kernel_size, sigma=sigma, margin=margin,
                                   fill_value=self.FILL_VALUE, preserve=True, iters=iters)
         return float_matrix
-
-    def put_on_full(self, matrix=None, fill_value=None, dtype=np.float32):
-        """ Create a matrix in cubic coordinate system. """
-        matrix = matrix if matrix is not None else self.matrix
-        fill_value = fill_value if fill_value is not None else self.FILL_VALUE
-
-        background = np.full(self.cube_shape[:-1], fill_value, dtype=dtype)
-        background[self.i_min:self.i_max+1, self.x_min:self.x_max+1] = matrix
-        return background
 
 
     # Generic attributes loading
@@ -420,7 +448,7 @@ class AttributesMixin:
         if subset_name:
             subset = self.get_subset(subset_name)
             # pylint: disable=protected-access
-            mask = subset._load_attribute(src='masks', location=location, fill_value=0).astype(bool)
+            mask = subset._load_attribute(src='masks', location=location, fill_value=0).astype(np.bool)
             data[~mask] = kwargs.get('fill_value', self.FILL_VALUE)
 
         return data
@@ -445,19 +473,19 @@ class AttributesMixin:
 
     # Specific attributes loading
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
+    @transformable
     def get_full_binary_matrix(self, **kwargs):
-        """ Transform `binary_matrix` attribute to match cubic coordinates.
-
-        Parameters
-        ----------
-        kwargs :
-            Passed directly to :meth:`.put_on_full` and :meth:`.transform_where_present`.
-        """
-        transform_kwargs = retrieve_function_arguments(self.transform_where_present, kwargs)
-        full_binary_matrix = self.put_on_full(self.binary_matrix, **kwargs)
-        return self.transform_where_present(full_binary_matrix, **transform_kwargs)
+        """ !!. """
+        return self.full_binary_matrix
 
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
+    @transformable
+    def get_full_matrix(self):
+        """ !!. """
+        return self.full_matrix
+
+    @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
+    @transformable
     def get_instantaneous_amplitudes(self, window=23, depths=None, **kwargs):
         """ Calculate instantaneous amplitude along the horizon.
 
@@ -470,7 +498,7 @@ class AttributesMixin:
             If slice or sequence of int, used for slicing calculated attribute along last axis.
             If None, infer middle channel index from 'window' and slice at it calculated attribute along last axis.
         kwargs :
-            Passed directly to :meth:`.get_cube_values` and :meth:`.transform_where_present``.
+            Passed directly to :meth:`.get_cube_values`.
 
         Notes
         -----
@@ -479,13 +507,13 @@ class AttributesMixin:
         `label.get_instantaneous_amplitudes(depths=range(10, 21), window=41)` the attribute will be first calculated
         by array of `(xlines, ilines, 41)` shape and then the slice `[..., ..., 10:21]` of them will be returned.
         """
-        transform_kwargs = retrieve_function_arguments(self.transform_where_present, kwargs)
         depths = [window // 2] if depths is None else depths
         amplitudes = self.get_cube_values(window, use_cache=False, **kwargs) #pylint: disable=unexpected-keyword-arg
         result = np.abs(hilbert(amplitudes))[:, :, depths]
-        return self.transform_where_present(result, **transform_kwargs)
+        return result
 
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
+    @transformable
     def get_instantaneous_phases(self, window=23, depths=None, **kwargs):
         """ Calculate instantaneous phase along the horizon.
 
@@ -498,7 +526,7 @@ class AttributesMixin:
             If slice or sequence of int, used for slicing calculated attribute along last axis.
             If None, infer middle channel index from 'window' and slice at it calculated attribute along last axis.
         kwargs :
-            Passed directly to :meth:`.get_cube_values` and :meth:`.transform_where_present`.
+            Passed directly to :meth:`.get_cube_values`.
 
         Notes
         -----
@@ -507,14 +535,14 @@ class AttributesMixin:
         `label.get_instantaneous_phases(depths=range(10, 21), window=41)` the attribute will be first calculated
         by array of `(xlines, ilines, 41)` shape and then the slice `[..., ..., 10:21]` of them will be returned.
         """
-        transform_kwargs = retrieve_function_arguments(self.transform_where_present, kwargs)
         depths = [window // 2] if depths is None else depths
         amplitudes = self.get_cube_values(window, use_cache=False, **kwargs) #pylint: disable=unexpected-keyword-arg
         result = np.angle(hilbert(amplitudes))[:, :, depths]
         # result[self.full_matrix == self.FILL_VALUE] = np.nan
-        return self.transform_where_present(result, **transform_kwargs)
+        return result
 
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
+    @transformable
     def evaluate_metric(self, metric='support_corrs', supports=50, agg='nanmean', **kwargs):
         """ Cached metrics calcucaltion with disabled plotting option.
 
@@ -525,11 +553,10 @@ class AttributesMixin:
         kwargs :
             Passed directly to :meth:`.HorizonMetrics.evaluate` and :meth:`.transform_where_present`.
         """
-        transform_kwargs = retrieve_function_arguments(self.transform_where_present, kwargs)
         metrics = self.horizon_metrics.evaluate(metric=metric, supports=supports, agg=agg,
                                                 plot=False, savepath=None, **kwargs)
         metrics = np.nan_to_num(metrics)
-        return self.transform_where_present(metrics, **transform_kwargs)
+        return metrics
 
     @staticmethod
     def reduce_dimensionality(data, n_components=3, **kwargs):
@@ -541,6 +568,7 @@ class AttributesMixin:
         return reduced.reshape(*data.shape[:2], -1)
 
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
+    @transformable
     def fourier_decompose(self, window=50, n_components=None, **kwargs):
         """ Cached fourier transform calculation follower by dimensionaluty reduction via PCA.
 
@@ -554,17 +582,15 @@ class AttributesMixin:
         kwargs :
             For `sklearn.decomposition.PCA`.
         """
-        transform_kwargs = retrieve_function_arguments(self.transform_where_present, kwargs)
-
         amplitudes = self.load_attribute('amplitudes', window=window)
         result = np.abs(np.fft.rfft(amplitudes))
 
         if n_components is not None:
             result = self.reduce_dimensionality(result, n_components, **kwargs)
-
-        return self.transform_where_present(result, **transform_kwargs)
+        return result
 
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
+    @transformable
     def wavelet_decompose(self, widths=range(1, 14, 3), window=50, n_components=None, **kwargs):
         """ Cached wavelet transform calculation follower by dimensionaluty reduction via PCA.
 
@@ -580,8 +606,6 @@ class AttributesMixin:
         kwargs :
             For `sklearn.decomposition.PCA`.
         """
-        transform_kwargs = retrieve_function_arguments(self.transform_where_present, kwargs)
-
         amplitudes = self.load_attribute('amplitudes', window=window)
         result_shape = *amplitudes.shape[:2], len(widths)
         result = np.empty(result_shape, dtype=np.float32)
@@ -591,8 +615,7 @@ class AttributesMixin:
 
         if n_components is not None:
             result = self.reduce_dimensionality(result, n_components, **kwargs)
-
-        return self.transform_where_present(result, **transform_kwargs)
+        return result
 
 
     # Attributes visualization
