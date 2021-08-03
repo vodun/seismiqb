@@ -466,7 +466,6 @@ class SeismicCropBatch(Batch):
     @inbatch_parallel(init='_init_component', post='_assemble', target='for')
     def filter_out(self, ix, src=None, dst=None, mode=None, expr=None, low=None, high=None, length=None, p=1.0):
         """ Zero out mask for horizon extension task.
-        TODO: rethink
 
         Parameters
         ----------
@@ -494,21 +493,10 @@ class SeismicCropBatch(Batch):
 
         if np.random.binomial(1, 1 - p) or len(coords[0]) == 0:
             return mask
-        if mode is not None:
-            new_mask = np.zeros_like(mask)
-            point = np.random.randint(len(coords))
-            if mode == 'point':
-                new_mask[coords[0][point], coords[1][point], :] = mask[coords[0][point], coords[1][point], :]
-            elif mode == 'iline' or (mode == 'line' and np.random.binomial(1, 0.5)) == 1:
-                new_mask[coords[0][point], :, :] = mask[coords[0][point], :, :]
-            elif mode in ['xline', 'line']:
-                new_mask[:, coords[1][point], :] = mask[:, coords[1][point], :]
-            else:
-                raise ValueError('Mode should be either `point`, `iline`, `xline` or `line')
         if expr is not None:
-            coords = np.where(mask > 0)
+            if mode is not None:
+                warn('If `mode` and `expr` are setted than only `expr` filter will be applied.')
             new_mask = np.zeros_like(mask)
-
             coords = np.array(coords).astype(np.float).T
             cond = np.ones(shape=coords.shape[0]).astype(bool)
             coords /= np.reshape(mask.shape, newshape=(1, 3))
@@ -524,29 +512,41 @@ class SeismicCropBatch(Batch):
             new_mask[coords[:, 0], coords[:, 1], coords[:, 2]] = mask[coords[:, 0],
                                                                       coords[:, 1],
                                                                       coords[:, 2]]
+        elif mode is not None:
+            new_mask = np.zeros_like(mask)
+            point = np.random.randint(len(coords))
+            if mode == 'point':
+                new_mask[coords[0][point], coords[1][point], :] = mask[coords[0][point], coords[1][point], :]
+            elif mode == 'iline' or (mode == 'line' and np.random.binomial(1, 0.5)) == 1:
+                new_mask[coords[0][point], :, :] = mask[coords[0][point], :, :]
+            elif mode in ['xline', 'line']:
+                new_mask[:, coords[1][point], :] = mask[:, coords[1][point], :]
+            else:
+                raise ValueError('Mode should be either `point`, `iline`, `xline` or `line')
         else:
             new_mask = mask
         return new_mask
 
     @apply_parallel
-    def shift_masks(self, crop, n_segments=3, max_shift=4, max_len=10):
+    def shift_masks(self, crop, n_segments=3, max_shift=4, min_len=5, max_len=10):
         """ Randomly shift parts of the crop up or down.
-        TODO: rethink
 
         Parameters
         ----------
         n_segments : int
             Number of segments to shift.
         max_shift : int
-            Size of shift along vertical axis.
+            Max size of shift along vertical axis.
+        min_len : int
+            Min size of shift along horizontal axis.
         max_len : int
-            Size of shift along horizontal axis.
+            Max size of shift along horizontal axis.
         """
         crop = np.copy(crop)
         for _ in range(n_segments):
             # Point of starting the distortion, its length and size
             begin = np.random.randint(0, crop.shape[1])
-            length = np.random.randint(5, max_len)
+            length = np.random.randint(min_len, max_len)
             shift = np.random.randint(-max_shift, max_shift)
 
             # Apply shift
@@ -556,7 +556,8 @@ class SeismicCropBatch(Batch):
                 shifted_segment[:, :, shift:] = segment[:, :, :-shift]
             elif shift < 0:
                 shifted_segment[:, :, :shift] = segment[:, :, -shift:]
-            crop[:, begin:min(begin + length, crop.shape[1]), :] = shifted_segment
+            if shift != 0:
+                crop[:, begin:min(begin + length, crop.shape[1]), :] = shifted_segment
         return crop
 
     @apply_parallel
@@ -564,34 +565,26 @@ class SeismicCropBatch(Batch):
         """ Rotate part of the mask on a given angle.
         Must be used for crops in (xlines, heights, inlines) format.
 
-        TODO: rethink
+        Parameters
+        ----------
+        angle : float
+            Rotation angle in degrees.
         """
         shape = crop.shape
+        point_x = np.random.randint(0, shape[0])
+        point_h = np.argmax(crop[point_x, :, :])
 
-        if np.random.random() >= 0.5:
-            point_x = np.random.randint(shape[0]//2, shape[0])
-            point_h = np.argmax(crop[point_x, :, :])
+        if np.sum(crop[point_x, point_h, :]) == 0.0:
+            return np.copy(crop)
 
-            if np.sum(crop[point_x, point_h, :]) == 0.0:
-                return np.copy(crop)
+        matrix = cv2.getRotationMatrix2D((point_h, point_x), angle, 1)
+        rotated = cv2.warpAffine(crop, matrix, (shape[1], shape[0])).reshape(shape)
 
-            matrix = cv2.getRotationMatrix2D((point_h, point_x), angle, 1)
-            rotated = cv2.warpAffine(crop, matrix, (shape[1], shape[0])).reshape(shape)
-
-            combined = np.zeros_like(crop)
+        combined = np.zeros_like(crop)
+        if point_x >= shape[0]//2:
             combined[:point_x, :, :] = crop[:point_x, :, :]
             combined[point_x:, :, :] = rotated[point_x:, :, :]
         else:
-            point_x = np.random.randint(0, shape[0]//2)
-            point_h = np.argmax(crop[point_x, :, :])
-
-            if np.sum(crop[point_x, point_h, :]) == 0.0:
-                return np.copy(crop)
-
-            matrix = cv2.getRotationMatrix2D((point_h, point_x), angle, 1)
-            rotated = cv2.warpAffine(crop, matrix, (shape[1], shape[0])).reshape(shape)
-
-            combined = np.zeros_like(crop)
             combined[point_x:, :, :] = crop[point_x:, :, :]
             combined[:point_x, :, :] = rotated[:point_x, :, :]
         return combined
@@ -599,7 +592,6 @@ class SeismicCropBatch(Batch):
     @apply_parallel
     def linearize_masks(self, crop, n=3, shift=0, kind='random', width=None):
         """ Sample `n` points from the original mask and create a new mask by interpolating them.
-        TODO: rethink
 
         Parameters
         ----------
@@ -614,8 +606,10 @@ class SeismicCropBatch(Batch):
         """
         # Parse arguments
         if kind == 'random':
-            kind = np.random.choice(['linear', 'slinear', 'quadratic', 'cubic'])
-        width = width or np.sum(crop, axis=2).mean()
+            kind = np.random.choice(['linear', 'slinear', 'quadratic', 'cubic', 'previous', 'next'])
+        if width is None:
+            width = np.sum(crop, axis=2)
+            width = int(np.round(np.mean(width[width!=0])))
 
         # Choose the anchor points
         axis = 1 - np.argmin(crop.shape)
@@ -652,12 +646,16 @@ class SeismicCropBatch(Batch):
 
         slc = (indices if axis == 0 else indices * 0,
                indices if axis == 1 else indices * 0,
-               np.clip(heights, 0, 255))
+               np.clip(heights, 0, crop.shape[2]-1))
+        mask_ = np.zeros_like(crop)
         mask_[slc] = 1
 
         # Make horizon wider
-        structure = np.ones((1, 3), dtype=np.uint8)
-        return cv2.dilate(mask_, structure, iterations=width)
+        structure = np.ones((1, width), dtype=np.uint8)
+        shape = mask_.shape
+        mask_ = mask_.reshape((mask_.shape[axis], mask_.shape[2]))
+        mask_ = cv2.dilate(mask_, kernel=structure, iterations=1).reshape(shape)
+        return mask_
 
 
     # Predictions
@@ -1204,5 +1202,5 @@ class SeismicCropBatch(Batch):
 
         n = min(n, len(self))
 
-        for idx in self.random.choice(len(self), size=n, replace=False):
+        for idx in np.random.choice(len(self), size=n, replace=False):
             self.plot_components(*available_components, idx=idx, separate=separate, **kwargs)
