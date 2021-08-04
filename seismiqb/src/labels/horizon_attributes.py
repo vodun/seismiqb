@@ -16,7 +16,32 @@ from ..utils import lru_cache
 
 
 def transformable(method):
-    """ !!. """
+    """ Transform the output matrix of a function to optionally:
+        - put the matrix on a background with spatial shape of a cube
+        - change values at absent values to a desired value
+        - set dtype of a matrix
+        - normalize values
+        - reduce dimensionality via PCA transform
+        - view data as atleast 3d array.
+
+    Parameters
+    ----------
+    on_full : bool
+        Whether to put the matrix on full cube spatial shaped background.
+    fill_value : number, optional
+        If provided, then used at points where the horizon is absent.
+    dtype : numpy dtype, optional
+        If provided, then dtype of a matrix is changed, and fill_value at absent points is changed accordingly.
+    normalize : bool, str, optional
+        If `min-max` or True, then use min-max scaling.
+        If `mean-std`, then use mean-std scaling.
+        If False, don't scale matrix.
+    n_components : number, optional
+        If integer, then number of components to keep for PCA transformation.
+        If float in (0, 1) range, then amount of variance to be explained after PCA transformation.
+    atleast_3d : bool
+        Whether to return the view of a resulting array as at least 3-dimensional entity.
+    """
     @wraps(method)
     def wrapper(instance, *args, on_full=False, fill_value=None, dtype=None,
                 normalize=False, n_components=None, atleast_3d=False, **kwargs):
@@ -44,17 +69,17 @@ def transformable(method):
 
 class AttributesMixin:
     """ Geological attributes along horizon:
-    - geometrical statistics like number of holes, perimeter, coverage
-    - straight-forward maps along horizons, computed directly from its matrix such as `binary`, `borders`, `grad` etc
+    - scalars computed from its depth map only: number of holes, perimeter, coverage
+    - matrices computed from its depth map only: presence matrix, gradients along directions, etc
+    - properties of a carcass
     - methods to cut data from the cube along horizon
-    - maps, derived from amplitudes along horizon.
+    - matrices derived from amplitudes along horizon: instant amplitudes/phases, decompositions, etc.
+
+    Also changes the `__getattr__` of a horizon by allowing the `full_` prefix to apply `:meth:~.put_on_full`.
+    For example, `full_binary_matrix` would return the result of `binary_matrix`, wrapped with `:meth:~.put_on_full`.
 
     Method for getting desired attributes is `load_attribute`. It works with nested keys, i.e. one can get attributes
     of horizon subsets. Address method documentation for further details.
-
-
-    - Method `show` visualizes horizon and its attributes in both separate and overlap manners. It allows visual overlap
-    of various attributes with one or more labels masks.
     """
     #pylint: disable=unexpected-keyword-arg
 
@@ -71,7 +96,7 @@ class AttributesMixin:
         return fill_value
 
     def matrix_set_dtype(self, matrix, dtype):
-        """ !!. """
+        """ Change the dtype and fill_value to match it. """
         mask = (matrix == self.FILL_VALUE) | np.isnan(matrix)
         matrix = matrix.astype(dtype)
 
@@ -79,7 +104,7 @@ class AttributesMixin:
         return matrix
 
     def matrix_put_on_full(self, matrix):
-        """ !!. """
+        """ Convert matrix from being horizon-shaped to cube-shaped. """
         if (matrix.shape[:2] != self.cube_shape[:2]).any():
             background = np.full(self.cube_shape[:2], self._dtype_to_fill_value(matrix.dtype), dtype=matrix.dtype)
             background[self.i_min:self.i_max + 1, self.x_min:self.x_max + 1] = matrix
@@ -88,7 +113,7 @@ class AttributesMixin:
         return background
 
     def matrix_fill_to_num(self, matrix, value):
-        """ !!. """
+        """ Change the matrix values at points where horizon is absent to a supplied one. """
         if matrix.dtype == np.int32:
             mask = (matrix == self.FILL_VALUE)
         elif matrix.dtype == np.float32:
@@ -100,7 +125,7 @@ class AttributesMixin:
         return matrix
 
     def matrix_num_to_fill(self, matrix, value):
-        """ !!. """
+        """ Mark points equal to value as absent ones. """
         if value is np.nan:
             mask = np.isnan(matrix)
         else:
@@ -110,7 +135,15 @@ class AttributesMixin:
         return matrix
 
     def matrix_normalize(self, array, mode):
-        """ !!. """
+        """ Normalize matrix values.
+
+        Parameters
+        ----------
+        mode : bool, str, optional
+            If `min-max` or True, then use min-max scaling.
+            If `mean-std`, then use mean-std scaling.
+            If False, don't scale matrix.
+        """
         if mode in ['min-max', True]:
             values = array[self.presence_matrix]
             min_, max_ = np.nanmin(values), np.nanmax(values)
@@ -370,12 +403,12 @@ class AttributesMixin:
     METHOD_TO_ATTRIBUTE = {
         'get_cube_values': ['cube_values', 'amplitudes'],
         'get_full_matrix': ['full_matrix', 'heights', 'depths'],
-        'evaluate_metric': ['metrics'],
+        'get_metric': ['metrics'],
         'get_instantaneous_phases': ['instant_phases'],
         'get_instantaneous_amplitudes': ['instant_amplitudes'],
         'get_full_binary_matrix': ['full_binary_matrix', 'masks'],
-        'fourier_decompose': ['fourier', 'fourier_decompose'],
-        'wavelet_decompose': ['wavelet', 'wavelet_decompose']
+        'get_fourier_decomposition': ['fourier', 'fourier_decompose'],
+        'get_wavelet_decomposition': ['wavelet', 'wavelet_decompose']
     }
     ATTRIBUTE_TO_METHOD = {attr: func for func, attrs in METHOD_TO_ATTRIBUTE.items() for attr in attrs}
 
@@ -445,7 +478,6 @@ class AttributesMixin:
             if data is None:
                 raise ValueError(f'Unknown `src` {src}. Expected one of {list(self.ATTRIBUTE_TO_METHOD.keys())}.')
 
-
         # TODO: Someday, we would need to re-write attribute loading methods
         # so they use locations not to crop the loaded result, but to load attribute only at location.
         if location is not None:
@@ -458,13 +490,13 @@ class AttributesMixin:
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     @transformable
     def get_full_binary_matrix(self, **kwargs):
-        """ !!. """
+        """ Dummy functional for applying optional transformations and caching. """
         return self.full_binary_matrix
 
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     @transformable
     def get_full_matrix(self):
-        """ !!. """
+        """ Dummy functional for applying optional transformations and caching. """
         return self.full_matrix
 
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
