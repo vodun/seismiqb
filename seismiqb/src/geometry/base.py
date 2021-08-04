@@ -10,8 +10,7 @@ import h5py
 
 from .export import ExportMixin
 
-from ..utils import file_print, get_environ_flag
-from ..utility_classes import lru_cache
+from ..utils import file_print, get_environ_flag, lru_cache
 from ..plotters import plot_image
 
 
@@ -206,6 +205,9 @@ class SeismicGeometry(ExportMixin):
 
         instance = super().__new__(new_cls)
         return instance
+
+    def __getnewargs__(self):
+        return (self.path, )
 
     def __init__(self, path, *args, process=True, path_meta=None, **kwargs):
         _ = args
@@ -677,7 +679,7 @@ class SeismicGeometry(ExportMixin):
             'ylabel': 'density',
             **kwargs
         }
-        return plot_image(data, backend='matplotlib', bins=bins, mode='histogram', **kwargs)
+        return plot_image(data, backend='matplotlib', bins=bins, mode='hist', **kwargs)
 
     def show_slide(self, loc=None, start=None, end=None, step=1, axis=0, zoom_slice=None, stable=True, **kwargs):
         """ Show seismic slide in desired place.

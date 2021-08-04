@@ -7,8 +7,8 @@ from itertools import product
 import numpy as np
 import pandas as pd
 
-from .utils import round_to_array
-from .plotters import plot_image
+from ..plotters import plot_image
+from ..utils import round_to_array
 
 
 
@@ -126,7 +126,7 @@ class UnstructuredHorizon:
         self.path = path
         self.name = os.path.basename(path) if self.name is None else self.name
 
-        defaults = {'sep': '\s+'}
+        defaults = {'sep': r'\s+'}
         reader_params = reader_params or {}
         reader_params = {**defaults, **reader_params}
         df = pd.read_csv(path, names=names, usecols=columns, **reader_params)

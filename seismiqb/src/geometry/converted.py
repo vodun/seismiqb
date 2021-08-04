@@ -2,8 +2,8 @@
 import os
 import numpy as np
 
-from ..utility_classes import lru_cache
 from .base import SeismicGeometry
+from ..utils import lru_cache
 
 
 class SeismicGeometryConverted(SeismicGeometry):

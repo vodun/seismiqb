@@ -11,7 +11,7 @@ except ImportError:
     CUPY_AVAILABLE = False
 from numba import njit, prange
 
-from .utility_classes import Accumulator
+from .utils import Accumulator
 
 
 

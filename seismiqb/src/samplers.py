@@ -19,9 +19,8 @@ from itertools import product
 import numpy as np
 from numba import njit
 
-from .fault import insert_fault_into_mask
-from .utils import filtering_function
-from .utility_classes import IndexedDict
+from .utils import filtering_function, IndexedDict
+from .labels.fault import insert_fault_into_mask
 from ..batchflow import Sampler, ConstantSampler
 
 
@@ -362,8 +361,6 @@ class FaultSampler(BaseSampler):
         self.displayed_name = fault.short_name
         super().__init__(self)
 
-        self.weight = len(self.locations)
-
     @property
     def interpolated_nodes(self):
         """ Create locations in non-labeled slides between labeled slides. """
@@ -620,11 +617,12 @@ class SeismicSampler(Sampler):
 
     def __init__(self, labels, crop_shape, proportions=None, mode='geometry',
                  threshold=0.05, ranges=None, filtering_matrix=None, shift_height=True, **kwargs):
-        baseclass = self.MODE_TO_CLASS[mode]
+        baseclass = self.MODE_TO_CLASS[mode] if isinstance(mode, str) else mode
 
         names, geometry_names = {}, {}
         sampler = 0 & ConstantSampler(np.int32(0), dim=baseclass.dim)
         samplers = IndexedDict({idx: [] for idx in labels.keys()})
+
         proportions = proportions or [1 / len(labels) for _ in labels]
 
         for (geometry_id, ((idx, list_labels), p)) in enumerate(zip(labels.items(), proportions)):
@@ -687,7 +685,6 @@ class SeismicSampler(Sampler):
 
     def show_locations(self, ncols=2, **kwargs):
         """ Visualize on geometry map by using underlying `locations` structure. """
-        #TODO: don't use `horizon` here
         for idx, samplers_list in self.samplers.items():
             geometry = samplers_list[0].geometry
 
@@ -695,7 +692,7 @@ class SeismicSampler(Sampler):
                       for sampler in samplers_list]
 
             ncols_ = min(ncols, len(samplers_list))
-            nrows = (len(samplers_list) // ncols_ + len(samplers_list) % 2) or 1
+            nrows = (len(samplers_list) // ncols_ + len(samplers_list) % 2 - 1) or 1
             _kwargs = {
                 'cmap': [['Sampler', 'black']] * len(samplers_list),
                 'alpha': [[1.0, 0.4]] * len(samplers_list),
@@ -703,12 +700,14 @@ class SeismicSampler(Sampler):
                 'figsize': (16, 5*nrows),
                 'title': [sampler.displayed_name for sampler in samplers_list],
                 'suptitle_label': idx if len(samplers_list) > 1 else '',
-                'constrained_layout': True,
+                'constrained_layout': len(samplers_list) > 1,
                 'colorbar': False,
                 'legend_label': ('ILINES and CROSSLINES', 'only ILINES', 'only CROSSLINES',
                                  'restricted', 'dead traces'),
                 'legend_cmap': ('purple','blue','red', 'white', 'gray'),
                 'legend_loc': 10,
+                'vmin': [[1, 0]] * len(samplers_list),
+                'vmax': [[3, 1]] * len(samplers_list),
                 **kwargs
             }
             geometry.show(images, **_kwargs)
@@ -745,7 +744,8 @@ class SeismicSampler(Sampler):
 
 class BaseGrid:
     """ Determenistic generator of crop locations. """
-    def __init__(self, crop_shape, batch_size=64, locations=None, geometry=None):
+    def __init__(self, crop_shape=None, batch_size=64,
+                 locations=None, orientation=None, origin=None, endpoint=None, geometry=None, label_name='unknown'):
         self._iterator = None
         self.crop_shape = np.array(crop_shape)
         self.batch_size = batch_size
@@ -754,8 +754,13 @@ class BaseGrid:
             self._make_locations()
         else:
             self.locations = locations
+            self.orientation = orientation
+            self.origin = origin
+            self.endpoint = endpoint
+            self.shape = endpoint - origin
             self.geometry = geometry
-            self.name = geometry.short_name
+            self.geometry_name = geometry.short_name
+            self.label_name = label_name
 
     def _make_locations(self):
         raise NotImplementedError('Must be implemented in sub-classes')
@@ -810,7 +815,24 @@ class BaseGrid:
         locations = np.concatenate([self.locations, other.locations], axis=0)
         locations = np.unique(locations, axis=0)
         batch_size = min(self.batch_size, other.batch_size)
-        return BaseGrid(locations=locations, batch_size=batch_size, geometry=self.geometry)
+
+        if self.orientation == other.orientation:
+            orientation = self.orientation
+        else:
+            orientation = 2
+
+        self_origin = self.origin if isinstance(self, RegularGrid) else self.actual_origin
+        other_origin = other.origin if isinstance(other, RegularGrid) else other.actual_origin
+        origin = np.minimum(self_origin, other_origin)
+
+        self_endpoint = self.endpoint if isinstance(self, RegularGrid) else self.actual_endpoint
+        other_endpoint = other.endpoint if isinstance(other, RegularGrid) else other.actual_endpoint
+        endpoint = np.maximum(self_endpoint, other_endpoint)
+
+        label_name = other.label_name if isinstance(other, ExtensionGrid) else self.label_name
+
+        return BaseGrid(locations=locations, batch_size=batch_size, orientation=orientation,
+                        origin=origin, endpoint=endpoint, geometry=self.geometry, label_name=label_name)
 
     def __add__(self, other):
         return self.join(other)
@@ -821,7 +843,7 @@ class BaseGrid:
 
     # Useful info
     def __repr__(self):
-        return f'<BaseGrid for {self.name}: '\
+        return f'<BaseGrid for {self.geometry_name}: '\
                f'origin={tuple(self.origin)}, endpoint={tuple(self.endpoint)}>'
 
     @property
@@ -943,9 +965,6 @@ class RegularGrid(BaseGrid):
         # Make ranges
         ranges = [item if item is not None else [0, c] for item, c in zip(ranges, geometry.cube_shape)]
         ranges = np.array(ranges)
-
-        if (ranges[:, 0] < 0).any() or (ranges[:, 1] > geometry.cube_shape).any():
-            raise ValueError('Grid ranges must contain in the geometry!')
         self.ranges = ranges
 
         # Infer from `ranges`
@@ -979,7 +998,8 @@ class RegularGrid(BaseGrid):
         self.geometry_name = geometry.short_name
         self.label_name = label_name
         self.unfiltered_length = None
-        super().__init__(crop_shape=crop_shape, batch_size=batch_size, locations=locations, geometry=geometry)
+        super().__init__(crop_shape=crop_shape, batch_size=batch_size, locations=locations, geometry=geometry,
+                         orientation=self.orientation, origin=self.origin, endpoint=self.endpoint)
 
     @staticmethod
     def _arange(start, stop, stride, limit):
@@ -1124,7 +1144,7 @@ class ExtensionGrid(BaseGrid):
         self.geometry = horizon.geometry
         self.geometry_name = horizon.geometry.short_name
         self.label_name = horizon.short_name
-        self.name = self.geometry_name
+        self.geometry_name = self.geometry_name
 
         self.uncovered_before = None
 
