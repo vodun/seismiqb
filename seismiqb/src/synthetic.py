@@ -1,6 +1,5 @@
 """ Functions for generation of 2d and 3d synthetic seismic arrays.
 """
-from collections import defaultdict
 import numpy as np
 from scipy.interpolate import interp1d, interp2d
 from scipy.ndimage import gaussian_filter, map_coordinates
