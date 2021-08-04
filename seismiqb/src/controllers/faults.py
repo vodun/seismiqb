@@ -280,7 +280,12 @@ class FaultController(BaseController):
         loc = '  '.join([f'{item[0]}:{item[1]}' for item in loc])
 
         title = f"{cube_name}  {loc}\n{container['name']}"
-        plot_image([images[0][0], masks[0][0] > 0.5], overlap=True, title=title, ax=ax)
+        if images.ndim == 4:
+            images, masks = images[0][0], masks[0][0]
+        elif images.ndim == 5:
+            pos = images.shape[2] // 2
+            images, masks = images[0][0][pos], masks[0][0][pos]
+        plot_image([images, masks > 0.5], overlap=True, title=title, ax=ax)
 
     def get_train_template(self, **kwargs):
         """ Define the whole training procedure pipeline including data loading, augmentation and model training. """
@@ -437,7 +442,7 @@ class FaultController(BaseController):
 
     def visualize_predictions(self, *args, overlap=True, threshold=0.05, each=100, iteration=0, **kwargs):
         """ Plot predictions for cubes and ranges specified in 'inference' section of config. """
-        if iteration % each == 0:
+        if each is not None and iteration % each == 0:
             results = self.inference_on_slides(*args, **kwargs)
             for cube, cube_results in results.items():
                 for item in cube_results:

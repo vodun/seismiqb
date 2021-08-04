@@ -410,24 +410,25 @@ class Fault(Horizon):
         return labels
 
     @classmethod
-    def skeletonize_faults(cls, prediction, axis=0, threshold=0.1, bar=True):
+    def skeletonize_faults(cls, prediction, axis=0, threshold=0.1, width=3, mode='faults', bar=True):
         """ Make faults from binary mask. """
         prediction_cube = SeismicGeometry(prediction) if isinstance(prediction, str) else prediction
-        processed_faults = np.zeros(prediction_cube.cube_shape)
-        for i in tqdm(range(prediction_cube.cube_shape[axis]), disable=(not bar)):
+        shape = prediction_cube.cube_shape if isinstance(prediction_cube, SeismicGeometry) else prediction_cube.shape
+        processed_faults = np.zeros(shape)
+        for i in tqdm(range(shape[axis]), disable=(not bar)):
             slices = [slice(None)] * 2
             slices[axis] = i
             slices = tuple(slices)
             struct = generate_binary_structure(2, 10)
-
-            prediction = prediction_cube.load_slide(i, axis=axis)
+            prediction = prediction_cube[slices]
             dilation = binary_dilation(prediction > threshold, struct)
             holes = binary_fill_holes(dilation, struct)
             erosion = binary_erosion(holes, generate_binary_structure(2, 1))
-
-            processed_faults[slices] = binary_dilation(skeletonize(erosion, method='lee'))
-
-        return cls.from_mask(processed_faults, prediction_cube, chunk_size=100, pbar=bar)
+            structure = np.ones((width, 1))
+            processed_faults[slices] = binary_dilation(skeletonize(erosion, method='lee'), structure=structure)
+        if mode == 'faults':
+            return cls.from_mask(processed_faults, prediction_cube, chunk_size=100, pbar=bar)
+        return processed_faults
 
     @classmethod
     def remove_predictions_on_bounds(cls, image, prediction, window=30, dilation=30, padding=True, fill_value=0):
