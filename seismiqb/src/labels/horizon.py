@@ -799,6 +799,18 @@ class Horizon(AttributesMixin, VisualizationMixin):
         return mask
 
 
+    def load_slide(self, loc, axis=0, width=3):
+        """ Create a mask at desired location along supplied axis. """
+        axis = self.geometry.parse_axis(axis)
+        locations = self.geometry.make_slide_locations(loc, axis=axis)
+        shape = np.array([(slc.stop - slc.start) for slc in locations])
+        width = width or max(5, shape[-1] // 100)
+
+        mask = np.zeros(shape, dtype=np.float32)
+        mask = self.add_to_mask(mask, locations=locations, width=width)
+        return np.squeeze(mask)
+
+
     # Helpers for computing matrices
     def enlarge_carcass_image(self, image, width=10):
         """ Increase visibility of a sparse carcass metric. """

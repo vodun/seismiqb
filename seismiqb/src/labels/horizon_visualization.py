@@ -235,7 +235,6 @@ class VisualizationMixin:
         return figure if return_figure else None
 
 
-
     def show_slide(self, loc, width=None, axis='i', zoom_slice=None, **kwargs):
         """ Show slide with horizon on it.
 
@@ -252,17 +251,12 @@ class VisualizationMixin:
         """
         # Make `locations` for slide loading
         axis = self.geometry.parse_axis(axis)
-        locations = self.geometry.make_slide_locations(loc, axis=axis)
-        shape = np.array([(slc.stop - slc.start) for slc in locations])
 
         # Load seismic and mask
         seismic_slide = self.geometry.load_slide(loc=loc, axis=axis)
-        xmin, xmax, ymin, ymax = 0, seismic_slide.shape[0], seismic_slide.shape[1], 0
-
-        mask = np.zeros(shape)
-        width = width or seismic_slide.shape[1] // 100
-        mask = self.add_to_mask(mask, locations=locations, width=width)
+        mask = self.load_slide(loc=loc, axis=axis, width=width)
         seismic_slide, mask = np.squeeze(seismic_slide), np.squeeze(mask)
+        xmin, xmax, ymin, ymax = 0, seismic_slide.shape[0], seismic_slide.shape[1], 0
 
         if zoom_slice:
             seismic_slide = seismic_slide[zoom_slice]
