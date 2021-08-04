@@ -40,47 +40,7 @@ class VisualizationMixin:
         return dedent(msg)
 
 
-    def show_amplitudes_rgb(self, width=3, channel_weights=(1, 0.5, 0.25), channels=None, **kwargs):
-        """ Show trace values on the horizon and surfaces directly under it.
-
-        Parameters
-        ----------
-        width : int
-            Space between surfaces to cut.
-        channel_weights : tuple
-            Weights applied to rgb-channels.
-        to_uint8 : bool
-            Determines whether the image should be cast to uint8.
-        channels : tuple
-            Tuple of 3 ints. Determines channels to take from amplitudes to form rgb-image.
-        backend : str
-            Can be either 'matplotlib' ('plt') or 'plotly' ('go')
-        """
-        # TODO: remove?
-        channels = (0, width, -1) if channels is None else channels
-
-        # get values along the horizon and cast them to [0, 1]
-        amplitudes = self.get_cube_values(window=1 + width*2, offset=width)
-        amplitudes = amplitudes[:, :, channels]
-        amplitudes -= np.nanmin(amplitudes, axis=(0, 1)).reshape(1, 1, -1)
-        amplitudes *= 1 / np.nanmax(amplitudes, axis=(0, 1)).reshape(1, 1, -1)
-        amplitudes[self.full_matrix == self.FILL_VALUE, :] = np.nan
-        amplitudes = amplitudes[:, :, ::-1]
-        amplitudes *= np.asarray(channel_weights).reshape(1, 1, -1)
-        amplitudes /= np.nanmax(amplitudes, axis=(0,1))
-
-        # defaults for plotting if not supplied in kwargs
-        kwargs = {
-            'title_label': f'RGB amplitudes of horizon {self.name} on cube {self.geometry.displayed_name}',
-            'xlabel': self.geometry.index_headers[0],
-            'ylabel': self.geometry.index_headers[1],
-            'order_axes': (1, 0, 2),
-            **kwargs
-            }
-
-        return plot_image(amplitudes, mode='imshow', **kwargs)
-
-
+    # 2D
     def show(self, attributes='depths', mode='imshow', return_figure=False, enlarge=True, width=9, **kwargs):
         """ Display facies attributes with predefined defaults.
 
@@ -192,11 +152,13 @@ class VisualizationMixin:
         name_to_color = {}
         def make_cmap(name):
             attr = name.split('/')[-1]
-            if attr == 'depths':
+            attr = self.ALIAS_TO_ATTRIBUTE.get(attr, attr)
+
+            if attr in ['matrix', 'full_matrix']:
                 return 'Depths'
-            if attr == 'metrics':
+            if attr == 'metric':
                 return 'Metric'
-            if attr == 'masks':
+            if attr == 'full_binary_matrix':
                 if name not in name_to_color:
                     name_to_color[name] = next(gen_color)
                 return name_to_color[name]
@@ -233,7 +195,6 @@ class VisualizationMixin:
         plt.show()
 
         return figure if return_figure else None
-
 
     def show_slide(self, loc, width=None, axis='i', zoom_slice=None, **kwargs):
         """ Show slide with horizon on it.
@@ -297,8 +258,7 @@ class VisualizationMixin:
         }
         return plot_image(data=[seismic_slide, mask], **kwargs)
 
-
-
+    # 3D
     def show_3d(self, n_points=100, threshold=100., z_ratio=1., zoom_slice=None, show_axes=True,
                 width=1200, height=1200, margin=(0, 0, 100), savepath=None, **kwargs):
         """ Interactive 3D plot. Roughly, does the following:

@@ -251,8 +251,8 @@ class AttributesMixin:
 
     def grad_along_axis(self, axis=0):
         """ Change of heights along specified direction. """
-        grad = np.diff(self.matrix, axis=axis, prepend=0)
-        grad[np.abs(grad) > 10000] = self.FILL_VALUE
+        grad = np.diff(self.matrix, axis=axis, prepend=np.int32(0))
+        grad[np.abs(grad) > self.h_min] = self.FILL_VALUE
         grad[self.matrix == self.FILL_VALUE] = self.FILL_VALUE
         return grad
 
@@ -289,7 +289,7 @@ class AttributesMixin:
     # Retrieve data from seismic along horizon
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     @transformable
-    def get_cube_values(self, window=23, offset=0, chunk_size=256):
+    def get_cube_values(self, window=1, offset=0, chunk_size=256):
         """ Get values from the cube along the horizon.
 
         Parameters
@@ -400,17 +400,29 @@ class AttributesMixin:
 
 
     # Generic attributes loading
-    METHOD_TO_ATTRIBUTE = {
-        'get_cube_values': ['cube_values', 'amplitudes'],
-        'get_full_matrix': ['full_matrix', 'heights', 'depths'],
-        'get_metric': ['metrics'],
-        'get_instantaneous_phases': ['instant_phases'],
-        'get_instantaneous_amplitudes': ['instant_amplitudes'],
-        'get_full_binary_matrix': ['full_binary_matrix', 'masks'],
-        'get_fourier_decomposition': ['fourier', 'fourier_decompose'],
-        'get_wavelet_decomposition': ['wavelet', 'wavelet_decompose']
+    ATTRIBUTE_TO_ALIAS = {
+        # Properties
+        'full_matrix': ['full_matrix', 'heights', 'depths'],
+        'full_binary_matrix': ['full_binary_matrix', 'masks'],
+
+        # Created by `get_*` methods
+        'amplitudes': ['amplitudes', 'cube_values'],
+        'metric': ['metric', 'metrics'],
+        'instant_phases': ['instant_phases', 'iphases'],
+        'instant_amplitudes': ['instant_amplitudes', 'iamplitudes'],
+        'fourier_decomposition': ['fourier', 'fourier_decomposition'],
+        'wavelet_decomposition': ['wavelet', 'wavelet_decomposition']
     }
-    ATTRIBUTE_TO_METHOD = {attr: func for func, attrs in METHOD_TO_ATTRIBUTE.items() for attr in attrs}
+    ALIAS_TO_ATTRIBUTE = {alias: name for name, aliases in ATTRIBUTE_TO_ALIAS.items() for alias in aliases}
+
+    ATTRIBUTE_TO_METHOD = {
+        'amplitudes' : 'get_cube_values',
+        'metric' : 'get_metric',
+        'instant_phases' : 'get_instantaneous_phases',
+        'instant_amplitudes' : 'get_instantaneous_amplitudes',
+        'fourier_decomposition' : 'get_fourier_decomposition',
+        'wavelet_decomposition' : 'get_wavelet_decomposition',
+    }
 
     def load_attribute(self, src, location=None, **kwargs):
         """ Load horizon or its subset attribute values at requested location.
@@ -435,9 +447,7 @@ class AttributesMixin:
             Last 'depth' slice is not used, since points are sampled exactly on horizon.
             If None, `src` is returned uncropped.
         kwargs :
-            Passed directly to either:
-            - one of attribute-evaluating methods from :attr:`.ATTRIBUTE_TO_METHOD` depending on `src`;
-            - or attribute-transforming method :meth:`.transform_where_present`.
+            Passed directly to attribute-evaluating methods from :attr:`.ATTRIBUTE_TO_METHOD` depending on `src`.
 
         Examples
         --------
@@ -470,13 +480,15 @@ class AttributesMixin:
 
     def _load_attribute(self, src, location=None, use_cache=True, **kwargs):
         """ Load horizon attribute at requested location. """
+        src = self.ALIAS_TO_ATTRIBUTE.get(src, src)
+
         if src in self.ATTRIBUTE_TO_METHOD:
+            print('loaded by get_*')
             method = self.ATTRIBUTE_TO_METHOD[src]
             data = getattr(self, method)(use_cache=use_cache, **kwargs)
         else:
-            data = getattr(self, src, None)
-            if data is None:
-                raise ValueError(f'Unknown `src` {src}. Expected one of {list(self.ATTRIBUTE_TO_METHOD.keys())}.')
+            print('loaded by get_property')
+            data = self.get_property(src, **kwargs)
 
         # TODO: Someday, we would need to re-write attribute loading methods
         # so they use locations not to crop the loaded result, but to load attribute only at location.
@@ -489,15 +501,13 @@ class AttributesMixin:
     # Specific attributes loading
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     @transformable
-    def get_full_binary_matrix(self, **kwargs):
-        """ Dummy functional for applying optional transformations and caching. """
-        return self.full_binary_matrix
-
-    @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
-    @transformable
-    def get_full_matrix(self):
-        """ Dummy functional for applying optional transformations and caching. """
-        return self.full_matrix
+    def get_property(self, src):
+        """ !!. """
+        data = getattr(self, src, None)
+        if data is None:
+            aliases = list(self.ALIAS_TO_ATTRIBUTE.keys())
+            raise ValueError(f'Unknown `src` {src}. Expected a matrix-property or one of {aliases}.')
+        return data
 
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     @transformable
@@ -566,11 +576,10 @@ class AttributesMixin:
         metric, supports, agg :
             Passed directly to :meth:`.HorizonMetrics.evaluate`.
         kwargs :
-            Passed directly to :meth:`.HorizonMetrics.evaluate` and :meth:`.transform_where_present`.
+            Passed directly to :meth:`.HorizonMetrics.evaluate`.
         """
         metrics = self.horizon_metrics.evaluate(metric=metric, supports=supports, agg=agg,
                                                 plot=False, savepath=None, **kwargs)
-        # metrics = np.nan_to_num(metrics)
         return metrics
 
 
@@ -608,34 +617,3 @@ class AttributesMixin:
             result[:, :, idx] = convolve(amplitudes, wavelet, mode='constant')[:, :, window // 2]
 
         return result
-
-
-    # Attribute matrices along the horizon
-    @property
-    def amplitudes(self):
-        """ Alias for cube values. Depending on what loaded to cube geometries
-        might actually not be amplitudes, so use it with caution.
-        """
-        cube_values = self.get_cube_values(window=1)
-        cube_values[~self.presence_matrix] = np.nan
-        return cube_values
-
-    @property
-    def instant_amplitudes(self):
-        """ Instantaneous amplitudes along the horizon. """
-        return self.get_instantaneous_amplitudes()[:, :, 0]
-
-    @property
-    def instant_phases(self):
-        """ Instantaneous phases along the horizon. """
-        return self.get_instantaneous_phases()[:, :, 0]
-
-    @property
-    def fourier_decomposition(self):
-        """ Fourier decomposition of data along the horizon, transformed into one component. """
-        return self.get_fourier_decomposition(n_components=1)[:, :, 0]
-
-    @property
-    def wavelet_decomposition(self):
-        """ Wavelet decomposition of data along the horizon, transformed into one component. """
-        return self.get_wavelet_decomposition(n_components=1)[:, :, 0]
