@@ -22,7 +22,7 @@ class Enhancer(HorizonController):
         sampler = self.make_sampler(dataset)
         sampler.show_locations(show=self.plot, savepath=self.make_savepath('sampler_locations.png'))
         sampler.show_sampled(show=self.plot, savepath=self.make_savepath('sampler_generated.png'))
-        return super().train(dataset, sampler=sampler, **kwargs)
+        return super().train(dataset=dataset, sampler=sampler, **kwargs)
 
 
     def inference(self, horizon, model, config=None, **kwargs):
@@ -110,9 +110,9 @@ class Enhancer(HorizonController):
             .init_variable('predictions', [])
 
             # Load data
-            .make_locations(generator=C('sampler'), batch_size=C('batch_size'))
+            .make_locations(generator=C('grid'))
             .load_cubes(dst='images')
-            .create_masks(dst='prior_masks', width=3)
+            .create_masks(dst='prior_masks', width=C('width', default=3))
             .adaptive_reshape(src=['images', 'prior_masks'])
             .normalize(src='images')
             .concat_components(src=['images', 'prior_masks'], dst='images', axis=1)
@@ -121,7 +121,8 @@ class Enhancer(HorizonController):
             .predict_model('model',
                            B('images'),
                            fetches='predictions',
-                           save_to=V('predictions', mode='e'))
+                           save_to=B('predictions'))
+            .update_accumulator(src='predictions', accumulator=C('accumulator'))
         )
         return inference_template
 
