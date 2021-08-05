@@ -464,7 +464,7 @@ class SeismicCropBatch(Batch):
 
     @action
     @inbatch_parallel(init='_init_component', post='_assemble', target='for')
-    def filter_out(self, ix, src=None, dst=None, mode=None, expr=None, low=None, high=None, length=None, p=1.0):
+    def filter_out(self, ix, src=None, dst=None, expr=None, low=None, high=None, length=None, p=1.0):
         """ Zero out mask for horizon extension task.
 
         Parameters
@@ -473,12 +473,6 @@ class SeismicCropBatch(Batch):
             Component of batch with mask
         dst : str
             Component of batch to put cut mask in.
-        mode : str
-            Either point, line, iline or xline.
-            If point, then only one point per horizon will be labeled.
-            If iline or xline then single iline or xline with labeled.
-            If line then randomly either single iline or xline will be
-            labeled.
         expr : callable, optional.
             Some vectorized function. Accepts points in cube, returns either float.
             If not None, low or high/length should also be supplied.
@@ -491,11 +485,9 @@ class SeismicCropBatch(Batch):
         mask = self.get(ix, src)
         coords = np.where(mask > 0)
 
-        if np.random.binomial(1, 1 - p) or len(coords[0]) == 0:
+        if np.random.binomial(1, 1 - p) or len(coords[0]) == 0 or expr is None:
             return mask
-        if expr is not None:
-            if mode is not None:
-                warn('If `mode` and `expr` are setted than only `expr` filter will be applied.')
+        else:
             new_mask = np.zeros_like(mask)
             coords = np.array(coords).astype(np.float).T
             cond = np.ones(shape=coords.shape[0]).astype(bool)
@@ -512,19 +504,6 @@ class SeismicCropBatch(Batch):
             new_mask[coords[:, 0], coords[:, 1], coords[:, 2]] = mask[coords[:, 0],
                                                                       coords[:, 1],
                                                                       coords[:, 2]]
-        elif mode is not None:
-            new_mask = np.zeros_like(mask)
-            point = np.random.randint(len(coords))
-            if mode == 'point':
-                new_mask[coords[0][point], coords[1][point], :] = mask[coords[0][point], coords[1][point], :]
-            elif mode == 'iline' or (mode == 'line' and np.random.binomial(1, 0.5)) == 1:
-                new_mask[coords[0][point], :, :] = mask[coords[0][point], :, :]
-            elif mode in ['xline', 'line']:
-                new_mask[:, coords[1][point], :] = mask[:, coords[1][point], :]
-            else:
-                raise ValueError('Mode should be either `point`, `iline`, `xline` or `line')
-        else:
-            new_mask = mask
         return new_mask
 
     @apply_parallel
