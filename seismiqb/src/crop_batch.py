@@ -15,7 +15,9 @@ from ..batchflow import FilesIndex, Batch, action, inbatch_parallel, SkipBatchEx
 from .labels import Horizon
 from .plotters import plot_image
 from .utils import compute_attribute, to_list, IndexedDict
-
+from .synthetic import generate_synthetic
+from .geometry.array import DummyFile, SeismicGeometryArray
+from .labels.fault import Fault
 
 AFFIX = '___'
 SIZE_POSTFIX = 12
@@ -260,6 +262,54 @@ class SeismicCropBatch(Batch):
         else:
             raise ValueError(f"slicing must be 'native' or 'custom' but {slicing} were given.")
         return crop
+
+    @action
+    def generate_synthetic(self, dst_cubes='cubes', dst_masks='masks', dst_faults=None, **kwargs):
+        """ Fill crops with synthetic seismic data along with corresponding horizon and faults masks.
+        """
+        shape = np.array(kwargs['shape'])
+
+        if shape[0] == 1 or shape[1] == 1:
+            kwargs['shape'] = tuple(shape[shape != 1])
+            axis_num = 0 if shape[0] == 1 else 1
+        else:
+            axis_num = None
+
+        crops = []
+        masks = []
+        fault_masks = []
+        for ix in self.indices:
+            if len(kwargs.get('faults', ())) != 0 and dst_faults is not None:
+                crop, horizons, faults = generate_synthetic(**kwargs)
+            else:
+                crop, horizons = generate_synthetic(**kwargs)
+                faults = ()
+            if axis_num is not None:
+                crop = np.expand_dims(crop, axis=axis_num)
+                horizons = np.expand_dims(horizons, axis=axis_num + 1)
+
+            crops.append(crop)
+            mask = np.zeros_like(crop)
+            fault_mask = np.zeros_like(crop)
+            locations = (slice(0, mask.shape[0]),
+                         slice(0, mask.shape[1]), slice(0, mask.shape[2]))
+
+            dummyfile = DummyFile(crop)
+            geom = SeismicGeometryArray(dummyfile.path, dummyfile=dummyfile)
+            for horizon_data in horizons:
+                horizon = Horizon(horizon_data, geom)
+                horizon.add_to_mask(mask, locations)
+            for fault_data in faults:
+                fault = Fault(fault_data, geom)
+                fault.add_to_mask(fault_mask, locations)
+            masks.append(mask)
+            fault_masks.append(fault_mask)
+
+        setattr(self, dst_cubes, np.stack(crops, axis=0))
+        setattr(self, dst_masks, np.stack(masks, axis=0))
+        if len(faults) != 0 and dst_faults != 0:
+            setattr(self, dst_faults, np.stack(fault_masks, axis=0))
+        return self
 
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
@@ -1147,7 +1197,7 @@ class SeismicCropBatch(Batch):
             setattr(self, _dst, crop)
         return self
 
-    def plot_components(self, *components, idx=0, slide=None, **kwargs):
+    def plot_components(self, *components, idx=0, slide=None, displayed_name=None, **kwargs):
         """ Plot components of batch.
 
         Parameters
@@ -1171,8 +1221,10 @@ class SeismicCropBatch(Batch):
 
         # Get location
         l = self.locations[idx]
-        cube_name = self.unsalt(self.indices[idx])
-        displayed_name = self.dataset.geometries[cube_name].displayed_name
+
+        if displayed_name is None:
+            cube_name = self.unsalt(self.indices[idx])
+            displayed_name = self.dataset.geometries[cube_name].displayed_name
 
         if (l[0].stop - l[0].start) == 1:
             suptitle = f'INLINE {l[0].start}   CROSSLINES {l[1].start}:{l[1].stop}   DEPTH {l[2].start}:{l[2].stop}'
