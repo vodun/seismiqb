@@ -486,7 +486,7 @@ class SeismicCropBatch(Batch):
         coords = np.where(mask > 0)
 
         if np.random.binomial(1, 1 - p) or len(coords[0]) == 0 or expr is None:
-            return mask
+            new_mask = mask
         else:
             new_mask = np.zeros_like(mask)
             coords = np.array(coords).astype(np.float).T
