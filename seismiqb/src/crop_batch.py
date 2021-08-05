@@ -575,7 +575,7 @@ class SeismicCropBatch(Batch):
         point_h = np.argmax(crop[point_x, :, :])
 
         if np.sum(crop[point_x, point_h, :]) == 0.0:
-            return np.copy(crop)
+            return crop
 
         matrix = cv2.getRotationMatrix2D((point_h, point_x), angle, 1)
         rotated = cv2.warpAffine(crop, matrix, (shape[1], shape[0])).reshape(shape)
@@ -1202,5 +1202,5 @@ class SeismicCropBatch(Batch):
 
         n = min(n, len(self))
 
-        for idx in np.random.choice(len(self), size=n, replace=False):
+        for idx in self.random.choice(len(self), size=n, replace=False):
             self.plot_components(*available_components, idx=idx, separate=separate, **kwargs)
