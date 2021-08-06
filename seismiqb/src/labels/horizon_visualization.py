@@ -319,7 +319,7 @@ class VisualizationMixin:
             represent triangle. Elements of row are indices of points that are vertices of triangle.
         """
         _ = kwargs
-        weights_matrix = self.full_matrix
+        weights_matrix = self.full_matrix.astype(np.float32)
 
         grad_i = np.diff(weights_matrix, axis=0, prepend=0)
         grad_x = np.diff(weights_matrix, axis=1, prepend=0)

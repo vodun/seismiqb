@@ -566,7 +566,6 @@ class AttributesMixin:
         depths = [window // 2] if depths is None else depths
         amplitudes = self.get_cube_values(window, use_cache=False, **kwargs)
         result = np.angle(hilbert(amplitudes))[:, :, depths]
-        # result[self.full_matrix == self.FILL_VALUE] = np.nan
         return result
 
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)

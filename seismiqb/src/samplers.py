@@ -93,7 +93,7 @@ class BaseSampler(Sampler):
             - 2 where only xline-oriented crops can be sampled.
             - 3 where both types of crop orientations can be sampled.
         """
-        matrix = np.zeros_like(self.matrix)
+        matrix = np.zeros_like(self.matrix, dtype=np.float32)
         orientations = self.locations[:, 0].astype(np.bool_)
 
         i_locations = self.locations[~orientations]
@@ -1272,7 +1272,7 @@ class ExtensionGrid(BaseGrid):
         kwargs : dict
             Other parameters to pass to the plotting function.
         """
-        hm = self.horizon.full_matrix
+        hm = self.horizon.full_matrix.astype(np.float32)
         hm[hm < 0] = np.nan
         fig = self.geometry.show(hm, cmap='Depths', colorbar=False, return_figure=True, **kwargs)
         ax = fig.axes
