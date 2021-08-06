@@ -17,6 +17,7 @@ class MyEncoderModule(nn.ModuleDict):
         self._make_modules(inputs, **kwargs)
 
     def forward(self, inputs):
+        """ Docstring. """
         x, y = inputs
         outputs = []
         for letter, (layer_name, layer) in zip(self.layout, self.items()):
