@@ -55,7 +55,7 @@ def transformable(method):
             result = instance.matrix_put_on_full(result)
         if normalize:
             result = instance.matrix_normalize(result, normalize)
-        if fill_value:
+        if fill_value is not None:
             result = instance.matrix_fill_to_num(result, value=fill_value)
         if atleast_3d:
             result = np.atleast_3d(result)
@@ -357,7 +357,7 @@ class AttributesMixin:
                 idx_x = idx_x[mask]
                 heights = heights[mask]
 
-        background[self.geometry.zero_traces == 1] = np.nan
+        background[~self.presence_matrix] = np.nan
         return background
 
 
@@ -537,7 +537,7 @@ class AttributesMixin:
         """
         depths = [window // 2] if depths is None else depths
         amplitudes = self.get_cube_values(window, use_cache=False, **kwargs)
-        result = np.abs(hilbert(amplitudes))[:, :, depths]
+        result = np.abs(hilbert(amplitudes)).astype(np.float32)[:, :, depths]
         return result
 
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
@@ -565,7 +565,7 @@ class AttributesMixin:
         """
         depths = [window // 2] if depths is None else depths
         amplitudes = self.get_cube_values(window, use_cache=False, **kwargs)
-        result = np.angle(hilbert(amplitudes))[:, :, depths]
+        result = np.angle(hilbert(amplitudes)).astype(np.float32)[:, :, depths]
         return result
 
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)

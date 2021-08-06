@@ -168,7 +168,7 @@ class Facies(Horizon):
         """
         pd.options.display.float_format = '{:,.3f}'.format
 
-        labeled_traces = self.get_full_binary_matrix(fill_value=0).astype(bool)
+        labeled_traces = self.load_attribute('masks', fill_value=0).astype(bool)
         true = self.load_attribute(f"{src_true}/masks", fill_value=0)[labeled_traces]
         pred = self.load_attribute(f"{src_pred}/masks", fill_value=0)[labeled_traces]
 
