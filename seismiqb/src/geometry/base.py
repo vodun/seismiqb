@@ -526,7 +526,7 @@ class SeismicGeometry(ExportMixin):
     @property
     def displayed_path(self):
         """ Return path with masked field name, if anonymization needed. """
-        return self.path.replace(self.field, "*") if self.anonymize else self.path
+        return self.path.replace(self.field, '*') if self.anonymize else self.path
 
     @property
     def nonzero_traces(self):
@@ -578,14 +578,17 @@ class SeismicGeometry(ExportMixin):
 
     # Textual representation
     def __repr__(self):
-        geometry = f'geometry for cube {self.displayed_name}'
+        msg = f'geometry for cube {self.displayed_name}'
         if not hasattr(self, 'cube_shape'):
-            return f'<Unprocessed {geometry}>'
-        return f'<Processed {geometry}: {tuple(self.cube_shape)}>'
+            return f'<Unprocessed {msg}>'
+        return f'<Processed {msg}: {tuple(self.cube_shape)}>'
 
     def __str__(self):
+        if not hasattr(self, 'cube_shape'):
+            return f'<Unprocessed geometry for cube {self.displayed_path}>'
+
         msg = f"""
-        Geometry for cube              {self.displayed_path}
+        Processed geometry for cube    {self.displayed_path}
         Current index:                 {self.index_headers}
         Cube shape:                    {tuple(self.cube_shape)}
         Time delay:                    {self.delay}
