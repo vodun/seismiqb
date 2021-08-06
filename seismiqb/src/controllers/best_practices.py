@@ -8,6 +8,13 @@ from ...batchflow.models.torch.losses.binary import Dice
 
 
 class DepthSoftmax(nn.Module):
+    """ Softmax activation for depth dimension.
+
+    Parameters
+    ----------
+    width : int
+        The predicted horizon width. Default is 3.
+    """
     def __init__(self, width=3):
         super().__init__()
         self.width_weights = torch.ones((1, 1, 1, width))

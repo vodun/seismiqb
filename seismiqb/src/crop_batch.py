@@ -758,8 +758,6 @@ class SeismicCropBatch(Batch):
         axis : int
             The axis along which the arrays will be joined.
         """
-        if not isinstance(src, (list, tuple, np.ndarray)):
-            raise ValueError()
         if len(src) == 1:
             warn("Since `src` contains only one component, concatenation not needed.")
 
