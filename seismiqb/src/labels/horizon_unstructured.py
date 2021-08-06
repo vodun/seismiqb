@@ -7,8 +7,8 @@ from itertools import product
 import numpy as np
 import pandas as pd
 
-from .utils import round_to_array
-from .plotters import plot_image
+from ..plotters import plot_image
+from ..utils import round_to_array
 
 
 

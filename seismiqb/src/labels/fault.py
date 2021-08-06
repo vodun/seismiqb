@@ -16,10 +16,10 @@ from sklearn.neighbors import NearestNeighbors
 from skimage.morphology import skeletonize
 from scipy.ndimage import measurements, binary_erosion, binary_dilation, generate_binary_structure, binary_fill_holes
 
-from .geometry import SeismicGeometry
 from .horizon import Horizon
-from .triangulation import make_triangulation, triangle_rasterization
-from .plotters import show_3d
+from .fault_triangulation import make_triangulation, triangle_rasterization
+from ..plotters import show_3d
+from ..geometry import SeismicGeometry
 
 
 

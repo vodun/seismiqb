@@ -10,13 +10,13 @@ from time import perf_counter
 import numpy as np
 import torch
 
-from ...batchflow import Pipeline, Config, Notifier, Monitor
-from ...batchflow import B, F, C, V, P, R
+from .enhancer import Enhancer
 
-from ..horizon import Horizon
+from ..labels import Horizon
 from ..samplers import ExtensionGrid
 
-from .enhancer import Enhancer
+from ...batchflow import Pipeline, Config, Notifier, Monitor
+from ...batchflow import B, F, C, V, P, R
 
 
 

@@ -13,8 +13,8 @@ import cv2
 
 from ..batchflow.notifier import Notifier
 
-from .horizon import Horizon
-from .utility_classes import Accumulator
+from .labels import Horizon
+from .utils import Accumulator
 from .functional import to_device, from_device
 from .functional import correlation, crosscorrelation, btch, kl, js, hellinger, tv, hilbert
 from .functional import smooth_out, digitize, gridify, perturb, histo_reduce
@@ -926,8 +926,6 @@ class HorizonMetrics(BaseMetrics):
         return metric, plot_dict
 
 
-
-
 class GeometryMetrics(BaseMetrics):
     """ Metrics to asses cube quality. """
     AVAILABLE_METRICS = [
@@ -1090,6 +1088,7 @@ class GeometryMetrics(BaseMetrics):
             **kwargs
         }
         return metric, plot_dict
+
 
 class FaultsMetrics:
     """ Faults metric class. """

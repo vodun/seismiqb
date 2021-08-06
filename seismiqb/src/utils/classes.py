@@ -18,7 +18,7 @@ except ImportError:
 
 import h5py
 
-from .utils import to_list
+from .functions import to_list
 
 
 

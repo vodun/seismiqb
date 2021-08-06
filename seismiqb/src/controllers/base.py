@@ -19,10 +19,10 @@ import psutil
 import numpy as np
 import torch
 
+from ..plotters import plot_loss
+
 from ...batchflow import Config, Monitor
 from ...batchflow.models.torch import EncoderDecoder
-
-from ..plotters import plot_loss
 
 
 
