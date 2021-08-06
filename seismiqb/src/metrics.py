@@ -64,7 +64,7 @@ class BaseMetrics:
         metric : str
             Name of metric to evaluate.
         enlarge : bool
-            Whether to apply `:meth:.Horizon.enlarge_carcass_image` to the result.
+            Whether to apply `:meth:.Horizon.matrix_enlarge_carcass` to the result.
         width : int
             Widening for the metric. Works only if `enlarge` set to True.
         plot : bool
@@ -90,7 +90,7 @@ class BaseMetrics:
             cp._default_memory_pool.free_all_blocks()
 
         if hasattr(self, 'horizon') and self.horizon.is_carcass and enlarge:
-            metric_val = self.horizon.enlarge_carcass_image(metric_val, width)
+            metric_val = self.horizon.matrix_enlarge_carcass(metric_val, width)
 
         if plot:
             plot_dict = {**self.PLOT_DEFAULTS, **plot_dict}

@@ -112,7 +112,6 @@ class Horizon(AttributesMixin, VisualizationMixin):
         # Heights information
         self._h_min, self._h_max = None, None
         self._h_mean, self._h_std = None, None
-        self._horizon_metrics = None
 
         # Attributes from geometry
         self.geometry = geometry
@@ -811,34 +810,9 @@ class Horizon(AttributesMixin, VisualizationMixin):
         return np.squeeze(mask)
 
 
-    # Helpers for computing matrices
-    def enlarge_carcass_image(self, image, width=10):
-        """ Increase visibility of a sparse carcass metric. """
-        # Convert all the nans to a number, so that `dilate` can work with it
-        image = image.copy()
-        image[np.isnan(image)] = self.FILL_VALUE
-
-        # Apply dilations along both axis
-        structure = np.ones((1, 3), dtype=np.uint8)
-        dilated1 = dilate(image, structure, iterations=width)
-        dilated2 = dilate(image, structure.T, iterations=width)
-
-        # Mix matrices
-        image = np.full_like(image, np.nan)
-        image[dilated1 != self.FILL_VALUE] = dilated1[dilated1 != self.FILL_VALUE]
-        image[dilated2 != self.FILL_VALUE] = dilated2[dilated2 != self.FILL_VALUE]
-
-        mask = (dilated1 != self.FILL_VALUE) & (dilated2 != self.FILL_VALUE)
-        image[mask] = (dilated1[mask] + dilated2[mask]) / 2
-
-        # Fix zero traces
-        image[np.isnan(self.geometry.std_matrix)] = np.nan
-        return image
-
-
     # Evaluate horizon on its own / against other(s)
     @property
-    def horizon_metrics(self):
+    def metrics(self):
         """ Calculate :class:`~HorizonMetrics` on demand. """
         # pylint: disable=import-outside-toplevel
         from ..metrics import HorizonMetrics
@@ -866,8 +840,8 @@ class Horizon(AttributesMixin, VisualizationMixin):
         """
         printer(dedent(msg))
         if compute_metric:
-            return self.horizon_metrics.evaluate('support_corrs', supports=supports, agg='nanmean',
-                                                 plot=plot, savepath=savepath, **kwargs)
+            return self.metrics.evaluate('support_corrs', supports=supports, agg='nanmean',
+                                         plot=plot, savepath=savepath, **kwargs)
         return None
 
     def compare(self, other, offset=0, absolute=True, printer=print, hist=True, plot=True):

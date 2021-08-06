@@ -4,6 +4,7 @@ from functools import wraps
 
 import numpy as np
 
+from cv2 import dilate
 from scipy.signal import hilbert, ricker
 from scipy.ndimage import convolve
 from scipy.ndimage.morphology import binary_fill_holes, binary_erosion
@@ -18,16 +19,17 @@ from ..utils import lru_cache
 def transformable(method):
     """ Transform the output matrix of a function to optionally:
         - put the matrix on a background with spatial shape of a cube
-        - change values at absent values to a desired value
+        - change values at absent points to a desired value
         - set dtype of a matrix
         - normalize values
         - reduce dimensionality via PCA transform
         - view data as atleast 3d array.
+    By default, does nothing.
 
     Parameters
     ----------
     on_full : bool
-        Whether to put the matrix on full cube spatial shaped background.
+        Whether to put the matrix on full cube spatial-shaped background.
     fill_value : number, optional
         If provided, then used at points where the horizon is absent.
     dtype : numpy dtype, optional
@@ -37,7 +39,7 @@ def transformable(method):
         If `mean-std`, then use mean-std scaling.
         If False, don't scale matrix.
     n_components : number, optional
-        If integer, then number of components to keep for PCA transformation.
+        If integer, then number of components to keep after PCA transformation.
         If float in (0, 1) range, then amount of variance to be explained after PCA transformation.
     atleast_3d : bool
         Whether to return the view of a resulting array as at least 3-dimensional entity.
@@ -45,7 +47,6 @@ def transformable(method):
     @wraps(method)
     def wrapper(instance, *args, on_full=False, fill_value=None, dtype=None,
                 normalize=False, n_components=None, atleast_3d=False, **kwargs):
-        print('in wrapper', method, on_full, fill_value, dtype, normalize, atleast_3d, n_components,)
         result = method(instance, *args, **kwargs)
 
         if dtype:
@@ -82,6 +83,12 @@ class AttributesMixin:
     of horizon subsets. Address method documentation for further details.
     """
     #pylint: disable=unexpected-keyword-arg
+    def __getattr__(self, key):
+        if key.startswith('full_'):
+            key = key.replace('full_', '')
+            matrix = getattr(self, key)
+            return self.matrix_put_on_full(matrix)
+        raise AttributeError(key)
 
     # Modify computed matrices
     def _dtype_to_fill_value(self, dtype):
@@ -118,7 +125,7 @@ class AttributesMixin:
             mask = (matrix == self.FILL_VALUE)
         elif matrix.dtype == np.float32:
             mask = np.isnan(matrix)
-        elif matrix.dtype in {np.bool, np.bool_}:
+        elif np.issubdtype(matrix.dtype, np.bool):
             mask = ~matrix
 
         matrix[mask] = value
@@ -163,6 +170,29 @@ class AttributesMixin:
                               margin=margin, fill_value=self.FILL_VALUE, preserve=True, iters=iters)
         return smoothed
 
+    def matrix_enlarge_carcass(self, matrix, width=10):
+        """ Increase visibility of a sparse carcass metric. """
+        # Convert all the nans to a number, so that `dilate` can work with it
+        matrix = matrix.copy()
+        matrix[np.isnan(matrix)] = self.FILL_VALUE
+
+        # Apply dilations along both axis
+        structure = np.ones((1, 3), dtype=np.uint8)
+        dilated1 = dilate(matrix, structure, iterations=width)
+        dilated2 = dilate(matrix, structure.T, iterations=width)
+
+        # Mix matrices
+        matrix = np.full_like(matrix, np.nan)
+        matrix[dilated1 != self.FILL_VALUE] = dilated1[dilated1 != self.FILL_VALUE]
+        matrix[dilated2 != self.FILL_VALUE] = dilated2[dilated2 != self.FILL_VALUE]
+
+        mask = (dilated1 != self.FILL_VALUE) & (dilated2 != self.FILL_VALUE)
+        matrix[mask] = (dilated1[mask] + dilated2[mask]) / 2
+
+        # Fix zero traces
+        matrix[np.isnan(self.geometry.std_matrix)] = np.nan
+        return matrix
+
     @staticmethod
     def pca_transform(data, n_components=3, **kwargs):
         """ Reduce number of channels along the depth axis. """
@@ -171,20 +201,12 @@ class AttributesMixin:
 
         pca = PCA(n_components, **kwargs)
         transformed = pca.fit_transform(flattened[~mask])
+        n_components = transformed.shape[-1]
 
         result = np.full((*data.shape[:2], n_components), np.nan).reshape(-1, n_components)
         result[~mask] = transformed
         result = result.reshape(*data.shape[:2], n_components)
         return result
-
-
-    #
-    def __getattr__(self, key):
-        if key.startswith('full_'):
-            key = key.replace('full_', '')
-            matrix = getattr(self, key)
-            return self.matrix_put_on_full(matrix)
-        raise AttributeError(key)
 
 
     # Technical matrices
@@ -403,7 +425,7 @@ class AttributesMixin:
     ATTRIBUTE_TO_ALIAS = {
         # Properties
         'full_matrix': ['full_matrix', 'heights', 'depths'],
-        'full_binary_matrix': ['full_binary_matrix', 'masks'],
+        'full_binary_matrix': ['full_binary_matrix', 'presence_matrix', 'masks'],
 
         # Created by `get_*` methods
         'amplitudes': ['amplitudes', 'cube_values'],
@@ -424,16 +446,19 @@ class AttributesMixin:
         'wavelet_decomposition' : 'get_wavelet_decomposition',
     }
 
-    def load_attribute(self, src, location=None, **kwargs):
-        """ Load horizon or its subset attribute values at requested location.
+    def load_attribute(self, src, location=None, use_cache=True, **kwargs):
+        """ Load horizon attribute values at requested location.
+        This is the intended interface of loading matrices along the horizon, and should be preffered in all scenarios.
+
+        To retrieve the attribute, we either use `:meth:~.get_property` or `:meth:~.get_*` methods: as all of them are
+        wrapped with `:func:~.transformable` decorator, you can use its arguments to modify the behaviour.
 
         Parameters
         ----------
         src : str
-            Key of the desired attribute.
-            If attribute is from horizon subset, key must be like "subset/attribute".
+            Key of the desired attribute. Valid attributes are either properties or aliases, defined
+            by `ALIAS_TO_ATTRIBUTE` mapping, for example:
 
-            Valid attributes are:
             - 'cube_values' or 'amplitudes': cube values;
             - 'depths' or 'full_matrix': horizon depth map in cubic coordinates;
             - 'metrics': random support metrics matrix.
@@ -458,36 +483,14 @@ class AttributesMixin:
         >>> horizon.load_attribute('cube_values', (x_slice, i_slice, 1), window=10)
 
         Load 'metrics' attribute with specific evaluation parameter and following normalization.
-        >>> horizon.load_attribute('metrics', metrics='hilbert', normalize='min-max')
-
-        Load "wavelet" attribute from "channels" subset of `horizon`:
-        >>> horizon.load_attribute(src="channels/wavelet")
+        >>> horizon.load_attribute('metrics', metric='local_corrs', normalize='min-max')
         """
-        if '/' in src:
-            subset_name, src = src.split('/')
-        else:
-            subset_name = None
-
-        data = self._load_attribute(src=src, location=location, **kwargs)
-
-        if subset_name:
-            subset = self.get_subset(subset_name)
-            # pylint: disable=protected-access
-            mask = subset._load_attribute(src='masks', location=location, fill_value=0).astype(np.bool)
-            data[~mask] = kwargs.get('fill_value', self.FILL_VALUE)
-
-        return data
-
-    def _load_attribute(self, src, location=None, use_cache=True, **kwargs):
-        """ Load horizon attribute at requested location. """
         src = self.ALIAS_TO_ATTRIBUTE.get(src, src)
 
         if src in self.ATTRIBUTE_TO_METHOD:
-            print('loaded by get_*')
             method = self.ATTRIBUTE_TO_METHOD[src]
             data = getattr(self, method)(use_cache=use_cache, **kwargs)
         else:
-            print('loaded by get_property')
             data = self.get_property(src, **kwargs)
 
         # TODO: Someday, we would need to re-write attribute loading methods
@@ -578,8 +581,8 @@ class AttributesMixin:
         kwargs :
             Passed directly to :meth:`.HorizonMetrics.evaluate`.
         """
-        metrics = self.horizon_metrics.evaluate(metric=metric, supports=supports, agg=agg,
-                                                plot=False, savepath=None, **kwargs)
+        metrics = self.metrics.evaluate(metric=metric, supports=supports, agg=agg,
+                                        plot=False, savepath=None, **kwargs)
         return metrics
 
 

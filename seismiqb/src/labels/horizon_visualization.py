@@ -114,7 +114,7 @@ class VisualizationMixin:
 
         def enlarge_data(data):
             if self.is_carcass and enlarge:
-                data = self.enlarge_carcass_image(data, width)
+                data = self.matrix_enlarge_carcass(data, width)
             return data
 
         data = apply_by_scenario(load_data, attributes)
