@@ -93,6 +93,62 @@ class Facies(Horizon):
         return self - self.get_subset(subset)
 
 
+    # Load attributes from subsets
+    def load_attribute(self, src, location=None, **kwargs):
+        """ Load horizon or its subset attribute values at requested location.
+
+        Parameters
+        ----------
+        src : str
+            Key of the desired attribute.
+            If attribute is from horizon subset, key must be like "subset/attribute".
+
+            Valid attributes are:
+            - 'cube_values' or 'amplitudes': cube values;
+            - 'depths' or 'full_matrix': horizon depth map in cubic coordinates;
+            - 'metrics': random support metrics matrix.
+            - 'instant_phases': instantaneous phase;
+            - 'instant_amplitudes': instantaneous amplitude;
+            - 'fourier' or 'fourier_decomposition': fourier transform with optional PCA;
+            - 'wavelet' or 'wavelet decomposition': wavelet transform with optional PCA;
+            - 'masks' or 'full_binary_matrix': mask of horizon;
+        location : sequence of 3 slices
+            First two slices are used as `iline` and `xline` ranges to cut crop from.
+            Last 'depth' slice is not used, since points are sampled exactly on horizon.
+            If None, `src` is returned uncropped.
+        kwargs :
+            Passed directly to attribute-evaluating methods from :attr:`.ATTRIBUTE_TO_METHOD` depending on `src`.
+
+        Examples
+        --------
+        Load 'depths' attribute for whole horizon:
+        >>> horizon.load_attribute('depths')
+
+        Load 'cube_values' attribute for requested slice of fixed width:
+        >>> horizon.load_attribute('cube_values', (x_slice, i_slice, 1), window=10)
+
+        Load 'metrics' attribute with specific evaluation parameter and following normalization.
+        >>> horizon.load_attribute('metrics', metrics='hilbert', normalize='min-max')
+
+        Load "wavelet" attribute from "channels" subset of `horizon`:
+        >>> horizon.load_attribute(src="channels/wavelet")
+        """
+        if '/' in src:
+            subset_name, src = src.split('/')
+        else:
+            subset_name = None
+
+        data = super().load_attribute(src=src, location=location, **kwargs)
+
+        if subset_name:
+            subset = self.get_subset(subset_name)
+            # pylint: disable=protected-access
+            mask = subset.load_attribute(src='masks', location=location, fill_value=0).astype(np.bool)
+            data[~mask] = kwargs.get('fill_value', self.FILL_VALUE)
+
+        return data
+
+
     # Metrics evaluations
     def evaluate(self, src_true, src_pred, metrics_fn, metrics_names=None, output='df'):
         """ Apply given function to 'masks' attribute of requested labels.
@@ -112,7 +168,7 @@ class Facies(Horizon):
         """
         pd.options.display.float_format = '{:,.3f}'.format
 
-        labeled_traces = self.get_full_binary_matrix(fill_value=0).astype(bool)
+        labeled_traces = self.load_attribute('masks', fill_value=0).astype(bool)
         true = self.load_attribute(f"{src_true}/masks", fill_value=0)[labeled_traces]
         pred = self.load_attribute(f"{src_pred}/masks", fill_value=0)[labeled_traces]
 
