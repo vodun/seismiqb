@@ -384,7 +384,8 @@ class SeismicCropBatch(Batch):
 
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def load_attribute(self, ix, dst, src='amplitudes', src_labels='labels', atleast_3d=True, dtype=np.float32, **kwargs):
+    def load_attribute(self, ix, dst, src='amplitudes', src_labels='labels',
+                       atleast_3d=True, dtype=np.float32, **kwargs):
         """ Load attribute for label at given location.
 
         Parameters
