@@ -1,7 +1,7 @@
 """ Collection of good architectures for the tasks of horizon detection. """
 import torch
 from torch import nn
-from torch import functional as F
+from torch.nn import functional as F
 
 from ...batchflow.batchflow.models.torch import ResBlock
 from ...batchflow.models.torch.losses.binary import Dice
@@ -93,7 +93,6 @@ MODEL_CONFIG_EXTENSION = {
         'layout': 'ca',
         'classes': 1,
         'filters': 1,
-        'target_shape': None,
         'activation': DepthSoftmax
     },
     'loss': Dice(apply_sigmoid=False)
