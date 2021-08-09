@@ -16,17 +16,19 @@ from glob import glob
 import numpy as np
 import torch
 
+from .base import BaseController
+
+from ..labels import Horizon
+from ..cubeset import SeismicCubeset
+from ..samplers import SeismicSampler, RegularGrid
+from ..metrics import HorizonMetrics
+from ..utils import Accumulator3D
+from ..plotters import plot_image
+
 from ...batchflow import Config, Pipeline, Monitor, Notifier
 from ...batchflow import B, C, V, P, R
 from ...batchflow.models.torch import EncoderDecoder
 
-from ..cubeset import SeismicCubeset, Horizon
-from ..samplers import SeismicSampler, RegularGrid
-from ..metrics import HorizonMetrics
-from ..plotters import plot_image
-from ..utility_classes import Accumulator3D
-
-from .base import BaseController
 
 
 class HorizonController(BaseController):

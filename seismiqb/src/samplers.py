@@ -19,9 +19,8 @@ from itertools import product
 import numpy as np
 from numba import njit
 
-from .fault import insert_fault_into_mask
-from .utils import filtering_function
-from .utility_classes import IndexedDict
+from .utils import filtering_function, IndexedDict
+from .labels.fault import insert_fault_into_mask
 from ..batchflow import Sampler, ConstantSampler
 
 
@@ -94,7 +93,7 @@ class BaseSampler(Sampler):
             - 2 where only xline-oriented crops can be sampled.
             - 3 where both types of crop orientations can be sampled.
         """
-        matrix = np.zeros_like(self.matrix)
+        matrix = np.zeros_like(self.matrix, dtype=np.float32)
         orientations = self.locations[:, 0].astype(np.bool_)
 
         i_locations = self.locations[~orientations]
@@ -300,7 +299,7 @@ class HorizonSampler(BaseSampler):
     def orientation_matrix(self):
         orientation_matrix = super().orientation_matrix
         if self.horizon.is_carcass:
-            orientation_matrix = self.horizon.enlarge_carcass_image(orientation_matrix, 9)
+            orientation_matrix = self.horizon.matrix_enlarge_carcass(orientation_matrix, 9)
         return orientation_matrix
 
 
@@ -361,8 +360,6 @@ class FaultSampler(BaseSampler):
         self.name = fault.geometry.short_name
         self.displayed_name = fault.short_name
         super().__init__(self)
-
-        self.weight = len(self.locations)
 
     @property
     def interpolated_nodes(self):
@@ -625,6 +622,7 @@ class SeismicSampler(Sampler):
         names, geometry_names = {}, {}
         sampler = 0 & ConstantSampler(np.int32(0), dim=baseclass.dim)
         samplers = IndexedDict({idx: [] for idx in labels.keys()})
+
         proportions = proportions or [1 / len(labels) for _ in labels]
 
         for (geometry_id, ((idx, list_labels), p)) in enumerate(zip(labels.items(), proportions)):
@@ -687,7 +685,6 @@ class SeismicSampler(Sampler):
 
     def show_locations(self, ncols=2, **kwargs):
         """ Visualize on geometry map by using underlying `locations` structure. """
-        #TODO: don't use `horizon` here
         for idx, samplers_list in self.samplers.items():
             geometry = samplers_list[0].geometry
 
@@ -695,7 +692,7 @@ class SeismicSampler(Sampler):
                       for sampler in samplers_list]
 
             ncols_ = min(ncols, len(samplers_list))
-            nrows = (len(samplers_list) // ncols_ + len(samplers_list) % 2) or 1
+            nrows = (len(samplers_list) // ncols_ + len(samplers_list) % 2 - 1) or 1
             _kwargs = {
                 'cmap': [['Sampler', 'black']] * len(samplers_list),
                 'alpha': [[1.0, 0.4]] * len(samplers_list),
@@ -703,12 +700,14 @@ class SeismicSampler(Sampler):
                 'figsize': (16, 5*nrows),
                 'title': [sampler.displayed_name for sampler in samplers_list],
                 'suptitle_label': idx if len(samplers_list) > 1 else '',
-                'constrained_layout': True,
+                'constrained_layout': len(samplers_list) > 1,
                 'colorbar': False,
                 'legend_label': ('ILINES and CROSSLINES', 'only ILINES', 'only CROSSLINES',
                                  'restricted', 'dead traces'),
                 'legend_cmap': ('purple','blue','red', 'white', 'gray'),
                 'legend_loc': 10,
+                'vmin': [[1, 0]] * len(samplers_list),
+                'vmax': [[3, 1]] * len(samplers_list),
                 **kwargs
             }
             geometry.show(images, **_kwargs)
@@ -746,7 +745,7 @@ class SeismicSampler(Sampler):
 class BaseGrid:
     """ Determenistic generator of crop locations. """
     def __init__(self, crop_shape=None, batch_size=64,
-                 locations=None, orientation=None, origin=None, endpoint=None, geometry=None):
+                 locations=None, orientation=None, origin=None, endpoint=None, geometry=None, label_name='unknown'):
         self._iterator = None
         self.crop_shape = np.array(crop_shape)
         self.batch_size = batch_size
@@ -760,7 +759,8 @@ class BaseGrid:
             self.endpoint = endpoint
             self.shape = endpoint - origin
             self.geometry = geometry
-            self.name = geometry.short_name
+            self.geometry_name = geometry.short_name
+            self.label_name = label_name
 
     def _make_locations(self):
         raise NotImplementedError('Must be implemented in sub-classes')
@@ -828,8 +828,11 @@ class BaseGrid:
         self_endpoint = self.endpoint if isinstance(self, RegularGrid) else self.actual_endpoint
         other_endpoint = other.endpoint if isinstance(other, RegularGrid) else other.actual_endpoint
         endpoint = np.maximum(self_endpoint, other_endpoint)
+
+        label_name = other.label_name if isinstance(other, ExtensionGrid) else self.label_name
+
         return BaseGrid(locations=locations, batch_size=batch_size, orientation=orientation,
-                        origin=origin, endpoint=endpoint, geometry=self.geometry)
+                        origin=origin, endpoint=endpoint, geometry=self.geometry, label_name=label_name)
 
     def __add__(self, other):
         return self.join(other)
@@ -840,7 +843,7 @@ class BaseGrid:
 
     # Useful info
     def __repr__(self):
-        return f'<BaseGrid for {self.name}: '\
+        return f'<BaseGrid for {self.geometry_name}: '\
                f'origin={tuple(self.origin)}, endpoint={tuple(self.endpoint)}>'
 
     @property
@@ -1141,7 +1144,7 @@ class ExtensionGrid(BaseGrid):
         self.geometry = horizon.geometry
         self.geometry_name = horizon.geometry.short_name
         self.label_name = horizon.short_name
-        self.name = self.geometry_name
+        self.geometry_name = self.geometry_name
 
         self.uncovered_before = None
 
@@ -1269,7 +1272,7 @@ class ExtensionGrid(BaseGrid):
         kwargs : dict
             Other parameters to pass to the plotting function.
         """
-        hm = self.horizon.full_matrix
+        hm = self.horizon.full_matrix.astype(np.float32)
         hm[hm < 0] = np.nan
         fig = self.geometry.show(hm, cmap='Depths', colorbar=False, return_figure=True, **kwargs)
         ax = fig.axes

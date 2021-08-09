@@ -7,20 +7,19 @@ import numpy as np
 import pandas as pd
 
 from cv2 import dilate
-from scipy.ndimage.morphology import binary_fill_holes, binary_erosion, binary_dilation
+from scipy.ndimage.morphology import binary_fill_holes, binary_dilation
 from scipy.ndimage import find_objects
-from scipy.spatial import Delaunay
 from skimage.measure import label
 
-from .utility_classes import lru_cache
-from .utils import groupby_mean, groupby_min, groupby_max, filter_simplices, filtering_function
-from .utils import retrieve_function_arguments, get_class_methods, make_bezier_figure
-from .functional import smooth_out
-from .plotters import plot_image, show_3d
+from .horizon_attributes import AttributesMixin
+from .horizon_visualization import VisualizationMixin
+from ..utils import groupby_mean, groupby_min, groupby_max, filtering_function
+from ..utils import get_class_methods, make_bezier_figure
+from ..functional import smooth_out
 
 
 
-class Horizon:
+class Horizon(AttributesMixin, VisualizationMixin):
     """ Contains spatially-structured horizon: each point describes a height on a particular (iline, xline).
 
     Initialized from `storage` and `geometry`, where storage can be one of:
@@ -113,7 +112,6 @@ class Horizon:
         # Heights information
         self._h_min, self._h_max = None, None
         self._h_mean, self._h_std = None, None
-        self._horizon_metrics = None
 
         # Attributes from geometry
         self.geometry = geometry
@@ -475,6 +473,23 @@ class Horizon:
         return horizons
 
 
+    # Basic properties
+    @property
+    def shape(self):
+        """ Tuple of horizon dimensions."""
+        return (self.i_length, self.x_length)
+
+    @property
+    def size(self):
+        """ Number of elements in the full horizon matrix."""
+        return self.i_length * self.x_length
+
+    @property
+    def short_name(self):
+        """ Name without extension. """
+        return self.name.split('.')[0]
+
+
     # Functions to use to change the horizon
     def apply_to_matrix(self, function, **kwargs):
         """ Apply passed function to matrix storage.
@@ -541,6 +556,7 @@ class Horizon:
     filter = filter_points
 
 
+    # Pre-defined transforms of a horizon
     def thin_out(self, factor=1, threshold=256):
         """ Thin out the horizon by keeping only each `factor`-th line.
 
@@ -617,7 +633,7 @@ class Horizon:
         carcass.name = carcass.name.replace('copy', 'carcass')
 
         if regular:
-            from .metrics import GeometryMetrics
+            from ..metrics import GeometryMetrics
             gm = GeometryMetrics(self.geometry)
             grid = gm.make_grid(1 - self.geometry.zero_traces, frequencies=frequencies, margin=margin, **kwargs)
         else:
@@ -732,7 +748,7 @@ class Horizon:
         return filtering_matrix
 
 
-    # Horizon usage: mask generation and cutting seismic data or its derivatives along self
+    # Horizon usage: mask generation
     def add_to_mask(self, mask, locations=None, width=3, alpha=1, **kwargs):
         """ Add horizon to a background.
         Note that background is changed in-place.
@@ -782,439 +798,26 @@ class Horizon:
         return mask
 
 
-    def transform_where_present(self, array, normalize=None, fill_value=None, shift=None, rescale=None, res_ndim=None):
-        """ Normalize array where horizon is present, fill with constant where the horizon is absent.
-
-        Parameters
-        ----------
-        array : np.array
-            Matrix of (cube_ilines, cube_xlines, ...) shape.
-        normalize : 'min-max', 'mean-std', 'shift-rescale' or None/False
-            Normalization mode for data where `presence_matrix` is True.
-            If None, no normalization applied. Defaults to None.
-        fill_value : number
-            Value to fill `array` in where :attr:`.presence_matrix` is False. Must be compatible with `array.dtype`.
-            If None, no filling applied. Defaults to None.
-        shift, rescale : number, optional
-            For 'shift-rescale` normalization mode.
-        res_ndim : int or None
-            Number of dimensions returned result should have.
-        """
-        if not normalize:
-            pass
-        elif normalize == 'min-max':
-            values = array[self.presence_matrix]
-            min_, max_ = values.min(), values.max()
-            array = (array - min_) / (max_ - min_)
-        elif normalize == 'mean-std':
-            values = array[self.presence_matrix]
-            mean, std = values.mean(), values.std()
-            array = (array - mean) / std
-        elif normalize == 'shift-rescale':
-            array = (array + shift) * rescale
-        else:
-            raise ValueError('Unknown normalize mode `{}`'.format(normalize))
-
-        if fill_value is not None:
-            array[~self.presence_matrix] = fill_value
-
-        if res_ndim == array.ndim + 1:
-            array = array[..., np.newaxis]
-        elif res_ndim is not None and res_ndim != array.ndim:
-            msg = f"Result ndim is {array.ndim}, while requested ndim is {res_ndim}. "\
-                  f"Adding more than one new axis is not currently implemented."
-            raise ValueError(msg)
-
-        return array
-
-
-    @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
-    def get_cube_values(self, window=23, offset=0, chunk_size=256, **kwargs):
-        """ Get values from the cube along the horizon.
-
-        Parameters
-        ----------
-        window : int
-            Width of data slice along the horizon.
-        offset : int
-            Offset of data slice with respect to horizon heights matrix.
-        chunk_size : int
-            Size of data along height axis processed at a time.
-        kwargs :
-            Passed directly to :meth:`.transform_where_present`.
-        """
-        transform_kwargs = retrieve_function_arguments(self.transform_where_present, kwargs)
-        low = window // 2
-        high = max(window - low, 0)
-        chunk_size = min(chunk_size, self.h_max - self.h_min + window)
-
-        background = np.zeros((self.geometry.ilines_len, self.geometry.xlines_len, window), dtype=np.float32)
-
-        for h_start in range(max(low, self.h_min), self.h_max + 1, chunk_size):
-            h_end = min(h_start + chunk_size, self.h_max + 1)
-
-            # Get chunk from the cube (depth-wise)
-            location = (slice(None), slice(None),
-                        slice(h_start - low, min(h_end + high, self.geometry.depth)))
-            data_chunk = self.geometry.load_crop(location, use_cache=False)
-
-            # Check which points of the horizon are in the current chunk (and present)
-            idx_i, idx_x = np.asarray((self.matrix != self.FILL_VALUE) &
-                                      (self.matrix >= h_start) &
-                                      (self.matrix < h_end)).nonzero()
-            heights = self.matrix[idx_i, idx_x]
-
-            # Convert spatial coordinates to cubic, convert height to current chunk local system
-            idx_i += self.i_min
-            idx_x += self.x_min
-            heights -= (h_start - offset)
-
-            # Subsequently add values from the cube to background, then shift horizon 1 unit lower
-            for j in range(window):
-                background[idx_i, idx_x, np.full_like(heights, j)] = data_chunk[idx_i, idx_x, heights]
-                heights += 1
-                mask = heights < data_chunk.shape[2]
-                idx_i = idx_i[mask]
-                idx_x = idx_x[mask]
-                heights = heights[mask]
-
-        background[self.geometry.zero_traces == 1] = np.nan
-        return self.transform_where_present(background, **transform_kwargs)
-
-
-    @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
-    def get_full_matrix(self, **kwargs):
-        """ Transform `matrix` attribute to match cubic coordinates.
-
-        Parameters
-        ----------
-        kwargs :
-            Passed directly to :meth:`.put_on_full` and :meth:`.transform_where_present`.
-        """
-        transform_kwargs = retrieve_function_arguments(self.transform_where_present, kwargs)
-        matrix = self.put_on_full(self.matrix, **kwargs)
-        return self.transform_where_present(matrix, **transform_kwargs)
-
-
-    def get_array_values(self, array, shifts=None, grid_info=None, width=5, axes=(2, 1, 0)):
-        """ Get values from an external array along the horizon.
-
-        Parameters
-        ----------
-        array : np.ndarray
-            A data-array to make a cut from.
-        shifts : tuple or None
-            an offset defining the location of given array with respect to the horizon.
-            If None, `grid_info` with key `range` must be supplied.
-        grid_info : dict
-            Whenever passed, must contain key `range`.
-            Used for infering shifts of the array with respect to horizon.
-        width : int
-            required width of the resulting cut.
-        axes : tuple
-            if not None, axes-transposition with the required axes-order is used.
-        """
-        if shifts is None and grid_info is None:
-            raise ValueError('Either shifts or dataset with filled grid_info must be supplied!')
-
-        if shifts is None:
-            shifts = [grid_info['range'][i][0] for i in range(3)]
-
-        shifts = np.array(shifts)
-        horizon_shift = np.array((self.bbox[0, 0], self.bbox[1, 0]))
-
-        if axes is not None:
-            array = np.transpose(array, axes=axes)
-
-        # compute start and end-points of the ilines-xlines overlap between
-        # array and matrix in horizon and array-coordinates
-        horizon_shift, shifts = np.array(horizon_shift), np.array(shifts)
-        horizon_max = horizon_shift[:2] + np.array(self.matrix.shape)
-        array_max = np.array(array.shape[:2]) + shifts[:2]
-        overlap_shape = np.minimum(horizon_max[:2], array_max[:2]) - np.maximum(horizon_shift[:2], shifts[:2])
-        overlap_start = np.maximum(0, horizon_shift[:2] - shifts[:2])
-        heights_start = np.maximum(shifts[:2] - horizon_shift[:2], 0)
-
-        # recompute horizon-matrix in array-coordinates
-        slc_array = [slice(l, h) for l, h in zip(overlap_start, overlap_start + overlap_shape)]
-        slc_horizon = [slice(l, h) for l, h in zip(heights_start, heights_start + overlap_shape)]
-        overlap_matrix = np.full(array.shape[:2], fill_value=self.FILL_VALUE, dtype=np.float32)
-        overlap_matrix[slc_array] = self.matrix[slc_horizon]
-        overlap_matrix -= shifts[-1]
-
-        # make the cut-array and fill it with array-data located on needed heights
-        result = np.full(array.shape[:2] + (width, ), np.nan, dtype=np.float32)
-        iterator = [overlap_matrix + shift for shift in range(-width // 2 + 1, width // 2 + 1)]
-
-        for i, surface_level in enumerate(np.array(iterator)):
-            mask = (surface_level >= 0) & (surface_level < array.shape[-1]) & (surface_level !=
-                                                                               self.FILL_VALUE - shifts[-1])
-            mask_where = np.where(mask)
-            result[mask_where[0], mask_where[1], i] = array[mask_where[0], mask_where[1],
-                                                            surface_level[mask_where].astype(np.int)]
-
-        return result
-
-
-    def get_cube_values_line(self, orientation='ilines', line=1, window=23, offset=0, normalize=False):
-        """ Get values from the cube along the horizon on a particular line.
-
-        Parameters
-        ----------
-        orientation : str
-            Whether to cut along ilines ('i') or xlines ('x').
-        line : int
-            Number of line to cut along.
-        window : int
-            Width of data to cut.
-        offset : int
-            Value to add to each entry in matrix.
-        normalize : bool, callable
-            If True, then values are scaled to [0, 1] range.
-            If callable, then it is applied to iline-oriented slices of data from the cube.
-        chunk_size : int
-            Size of data along height axis processed at a time.
-        """
-        low = window // 2
-
-        # Make callable scaler
-        if callable(normalize):
-            pass
-        elif normalize is True:
-            normalize = self.geometry.scaler
-        elif normalize is False:
-            normalize = lambda array: array
-
-        # Parameters for different orientation
-        if orientation.startswith('i'):
-            cube_hdf5 = self.geometry.file_hdf5['cube']
-            slide_transform = lambda array: array
-
-            hor_line = np.squeeze(self.matrix[line, :])
-            background = np.zeros((self.geometry.xlines_len, window))
-            idx_offset = self.x_min
-            bad_traces = np.squeeze(self.geometry.zero_traces[line, :])
-
-        elif orientation.startswith('x'):
-            cube_hdf5 = self.geometry.file_hdf5['cube_x']
-            slide_transform = lambda array: array.T
-
-            hor_line = np.squeeze(self.matrix[:, line])
-            background = np.zeros((self.geometry.ilines_len, window))
-            idx_offset = self.i_min
-            bad_traces = np.squeeze(self.geometry.zero_traces[:, line])
-
-        # Check where horizon is
-        idx = np.asarray((hor_line != self.FILL_VALUE)).nonzero()[0]
-        heights = hor_line[idx]
-
-        # Convert coordinates to cubic system
-        idx += idx_offset
-        heights -= (low - offset)
-
-        slide = cube_hdf5[line, :, :]
-        slide = slide_transform(slide)
-        slide = normalize(slide)
-
-        # Subsequently add values from the cube to background and shift horizon 1 unit lower
-        for j in range(window):
-            test = slide[idx, heights]
-            background[idx, np.full_like(idx, j)] = test
-            heights += 1
-
-        idx = np.asarray((hor_line == self.FILL_VALUE)).nonzero()[0]
-        idx += idx_offset
-        bad_traces[idx] = 1
-
-        bad_traces = bad_traces.reshape((1, -1) if orientation.startswith('i') else (-1, 1))
-        background = background.reshape((1, -1, window) if orientation.startswith('i') else (-1, 1, window))
-        return background, bad_traces
-
-
-
-    # Basic properties
-    @property
-    def shape(self):
-        """ Tuple of horizon dimensions."""
-        return (self.i_length, self.x_length)
-
-    @property
-    def size(self):
-        """ Number of elements in the full horizon matrix."""
-        return self.i_length * self.x_length
-
-    @property
-    def short_name(self):
-        """ Name without extension. """
-        return self.name.split('.')[0]
-
-
-    # Geometrical and geological properties
-    @property
-    def cube_values(self):
-        """ Values from the cube along the horizon. """
-        cube_values = self.get_cube_values(window=1)
-        cube_values[self.full_matrix == self.FILL_VALUE] = np.nan
-        return cube_values
-
-    @property
-    def amplitudes(self):
-        """ Alias for cube values. Depending on what loaded to cube geometries
-        might actually not be amplitudes, so use it with caution.
-        """
-        return self.cube_values
-
-    @property
-    def binary_matrix(self):
-        """ Matrix with ones at places where horizon is present and zeros everywhere else. """
-        return (self.matrix > 0).astype(bool)
-
-    @property
-    def borders_matrix(self):
-        """ Borders of horizons (borders of holes inside are not included). """
-        filled_matrix = self.filled_matrix
-        structure = np.ones((3, 3))
-        eroded = binary_erosion(filled_matrix, structure, border_value=0)
-        return filled_matrix ^ eroded # binary difference operation
-
-    @property
-    def boundaries_matrix(self):
-        """ Borders of horizons (borders of holes inside included). """
-        binary_matrix = self.binary_matrix
-        structure = np.ones((3, 3))
-        eroded = binary_erosion(binary_matrix, structure, border_value=0)
-        return binary_matrix ^ eroded # binary difference operation
-
-    @property
-    def coverage(self):
-        """ Ratio between number of present values and number of good traces in cube. """
-        return len(self) / (np.prod(self.cube_shape[:2]) - np.sum(self.geometry.zero_traces))
-
-    @property
-    def filled_matrix(self):
-        """ Binary matrix with filled holes. """
-        structure = np.ones((3, 3))
-        filled_matrix = binary_fill_holes(self.binary_matrix, structure)
-        return filled_matrix
-
-    @property
-    def full_matrix(self):
-        """ Matrix in cubic coordinate system. """
-        return self.get_full_matrix()
-
-    @property
-    def presence_matrix(self):
-        """ Binary matrix in cubic coordinate system. """
-        return self.put_on_full(self.binary_matrix, fill_value=False, dtype=bool)
-
-    @property
-    def grad_i(self):
-        """ Change of heights along iline direction. """
-        return self.grad_along_axis(0)
-
-    @property
-    def grad_x(self):
-        """ Change of heights along xline direction. """
-        return self.grad_along_axis(1)
-
-    @property
-    def hash(self):
-        """ Hash on current data of the horizon. """
-        return hash(self.matrix.data.tobytes())
-
-    @property
-    def horizon_metrics(self):
-        """ Calculate :class:`~HorizonMetrics` on demand. """
-        from .metrics import HorizonMetrics
-        return HorizonMetrics(self)
-
-    @property
-    def instantaneous_phase(self):
-        """ Phase along the horizon. """
-        return self.horizon_metrics.evaluate('instantaneous_phase')
-
-    @property
-    def number_of_holes(self):
-        """ Number of holes inside horizon borders. """
-        holes_array = self.filled_matrix != self.binary_matrix
-        _, num = label(holes_array, connectivity=2, return_num=True, background=0)
-        return num
-
-    @property
-    def perimeter(self):
-        """ Number of points in the borders. """
-        return np.sum((self.borders_matrix == 1).astype(np.int32))
-
-    @property
-    def solidity(self):
-        """ Ratio of area covered by horizon to total area inside borders. """
-        return len(self) / np.sum(self.filled_matrix)
-
-
-    # Carcass properties: should be used only if the horizon is a carcass
-    @property
-    def is_carcass(self):
-        """ Check if the horizon is a sparse carcass. """
-        return len(self) / self.filled_matrix.sum() < 0.5
-
-    @property
-    def carcass_ilines(self):
-        """ Labeled inlines in a carcass. """
-        uniques, counts = np.unique(self.points[:, 0], return_counts=True)
-        return uniques[counts > 256]
-
-    @property
-    def carcass_xlines(self):
-        """ Labeled xlines in a carcass. """
-        uniques, counts = np.unique(self.points[:, 1], return_counts=True)
-        return uniques[counts > 256]
-
-    @property
-    def carcass_grid(self):
-        """ Full matrix with present lines. """
-        return self.put_on_full(self.binary_matrix, fill_value=0.0)
-
-
-    # Helpers for computing matrices
-    def grad_along_axis(self, axis=0):
-        """ Change of heights along specified direction. """
-        grad = np.diff(self.matrix, axis=axis, prepend=0)
-        grad[np.abs(grad) > 10000] = self.FILL_VALUE
-        grad[self.matrix == self.FILL_VALUE] = self.FILL_VALUE
-        return grad
-
-    def make_float_matrix(self, kernel=None, kernel_size=7, sigma=2., margin=5, iters=1):
-        """ Smooth the depth matrix to produce floating point numbers. """
-        float_matrix = smooth_out(self.full_matrix, kernel=kernel,
-                                  kernel_size=kernel_size, sigma=sigma, margin=margin,
-                                  fill_value=self.FILL_VALUE, preserve=True, iters=iters)
-        return float_matrix
-
-    def enlarge_carcass_image(self, image, width=10):
-        """ Increase visibility of a sparse carcass metric. """
-        # Convert all the nans to a number, so that `dilate` can work with it
-        image = image.copy()
-        image[np.isnan(image)] = self.FILL_VALUE
-
-        # Apply dilations along both axis
-        structure = np.ones((1, 3), dtype=np.uint8)
-        dilated1 = dilate(image, structure, iterations=width)
-        dilated2 = dilate(image, structure.T, iterations=width)
-
-        # Mix matrices
-        image = np.full_like(image, np.nan)
-        image[dilated1 != self.FILL_VALUE] = dilated1[dilated1 != self.FILL_VALUE]
-        image[dilated2 != self.FILL_VALUE] = dilated2[dilated2 != self.FILL_VALUE]
-
-        mask = (dilated1 != self.FILL_VALUE) & (dilated2 != self.FILL_VALUE)
-        image[mask] = (dilated1[mask] + dilated2[mask]) / 2
-
-        # Fix zero traces
-        image[np.isnan(self.geometry.std_matrix)] = np.nan
-        return image
+    def load_slide(self, loc, axis=0, width=3):
+        """ Create a mask at desired location along supplied axis. """
+        axis = self.geometry.parse_axis(axis)
+        locations = self.geometry.make_slide_locations(loc, axis=axis)
+        shape = np.array([(slc.stop - slc.start) for slc in locations])
+        width = width or max(5, shape[-1] // 100)
+
+        mask = np.zeros(shape, dtype=np.float32)
+        mask = self.add_to_mask(mask, locations=locations, width=width)
+        return np.squeeze(mask)
 
 
     # Evaluate horizon on its own / against other(s)
+    @property
+    def metrics(self):
+        """ Calculate :class:`~HorizonMetrics` on demand. """
+        # pylint: disable=import-outside-toplevel
+        from ..metrics import HorizonMetrics
+        return HorizonMetrics(self)
+
     def evaluate(self, compute_metric=True, supports=50, plot=True, savepath=None, printer=print, **kwargs):
         """ Compute crucial metrics of a horizon.
 
@@ -1237,31 +840,13 @@ class Horizon:
         """
         printer(dedent(msg))
         if compute_metric:
-            return self.horizon_metrics.evaluate('support_corrs', supports=supports, agg='nanmean',
-                                                 plot=plot, savepath=savepath, **kwargs)
+            return self.metrics.evaluate('support_corrs', supports=supports, agg='nanmean',
+                                         plot=plot, savepath=savepath, **kwargs)
         return None
-
-
-    @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
-    def evaluate_metric(self, metric='support_corrs', supports=50, agg='nanmean', **kwargs):
-        """ Cached metrics calcucaltion with disabled plotting option.
-
-        Parameters
-        ----------
-        metric, supports, agg :
-            Passed directly to :meth:`.HorizonMetrics.evaluate`.
-        kwargs :
-            Passed directly to :meth:`.HorizonMetrics.evaluate` and :meth:`.transform_where_present`.
-        """
-        transform_kwargs = retrieve_function_arguments(self.transform_where_present, kwargs)
-        metrics = self.horizon_metrics.evaluate(metric=metric, supports=supports, agg=agg,
-                                                plot=False, savepath=None, **kwargs)
-        metrics = np.nan_to_num(metrics)
-        return self.transform_where_present(metrics, **transform_kwargs)
 
     def compare(self, other, offset=0, absolute=True, printer=print, hist=True, plot=True):
         """ Compare quality of self against another horizon or sequence of horizons. """
-        from .metrics import HorizonMetrics
+        from ..metrics import HorizonMetrics
         HorizonMetrics([self, other]).evaluate('compare', absolute=absolute, offset=offset,
                                                printer=printer, hist=hist, plot=plot)
 
@@ -1652,282 +1237,7 @@ class Horizon:
         add_height : bool
             Whether to concatenate average horizon height to a file name.
         """
-        matrix = self.make_float_matrix(kernel_size=kernel_size, sigma=sigma, margin=margin)
+        matrix = self.matrix_smooth_out(matrix=self.full_matrix, kernel_size=kernel_size, sigma=sigma, margin=margin)
         points = self.matrix_to_points(matrix)
         points = self.cubic_to_lines(points)
         self.dump_charisma(points, path, transform, add_height)
-
-    # Methods of (visual) representation of a horizon
-    def __repr__(self):
-        return f"""<horizon {self.name} for {self.geometry.displayed_name} at {hex(id(self))}>"""
-
-    def __str__(self):
-        msg = f"""
-        Horizon {self.name} for {self.geometry.displayed_name} loaded from {self.format}
-        Ilines range:      {self.i_min} to {self.i_max}
-        Xlines range:      {self.x_min} to {self.x_max}
-        Depth range:       {self.h_min} to {self.h_max}
-        Depth mean:        {self.h_mean:.6}
-        Depth std:         {self.h_std:.6}
-
-        Length:            {len(self)}
-        Perimeter:         {self.perimeter}
-        Coverage:          {self.coverage:3.5}
-        Solidity:          {self.solidity:3.5}
-        Num of holes:      {self.number_of_holes}
-        """
-
-        if self.is_carcass:
-            msg += f"""
-        Unique ilines:     {self.carcass_ilines}
-        Unique xlines:     {self.carcass_xlines}
-        """
-        return dedent(msg)
-
-
-    def put_on_full(self, matrix=None, fill_value=None, dtype=np.float32):
-        """ Create a matrix in cubic coordinate system. """
-        matrix = matrix if matrix is not None else self.matrix
-        fill_value = fill_value if fill_value is not None else self.FILL_VALUE
-
-        background = np.full(self.cube_shape[:-1], fill_value, dtype=dtype)
-        background[self.i_min:self.i_max+1, self.x_min:self.x_max+1] = matrix
-        return background
-
-
-    def show(self, src='matrix', fill_value=None, on_full=True, enlarge=True, width=9, **kwargs):
-        """ Nice visualization of a horizon-related matrix. """
-        matrix = getattr(self, src) if isinstance(src, str) else src
-        fill_value = fill_value if fill_value is not None else self.FILL_VALUE
-
-        if on_full:
-            matrix = self.put_on_full(matrix=matrix, fill_value=fill_value)
-        else:
-            matrix = copy(matrix).astype(np.float32)
-
-        if self.is_carcass and enlarge:
-            matrix = self.enlarge_carcass_image(matrix, width)
-
-        # defaults for plotting if not supplied in kwargs
-        title = f"{src} {'on full'*on_full} of horizon `{self.name}` on cube `{self.geometry.displayed_name}`"
-        kwargs = {
-            'title_label': title,
-            'xlabel': self.geometry.index_headers[0],
-            'ylabel': self.geometry.index_headers[1],
-            'cmap': 'Depths',
-            'colorbar': True,
-            **kwargs
-            }
-        matrix[matrix == fill_value] = np.nan
-        return plot_image(matrix, **kwargs)
-
-
-    def show_amplitudes_rgb(self, width=3, channel_weights=(1, 0.5, 0.25), channels=None, **kwargs):
-        """ Show trace values on the horizon and surfaces directly under it.
-
-        Parameters
-        ----------
-        width : int
-            Space between surfaces to cut.
-        channel_weights : tuple
-            Weights applied to rgb-channels.
-        to_uint8 : bool
-            Determines whether the image should be cast to uint8.
-        channels : tuple
-            Tuple of 3 ints. Determines channels to take from amplitudes to form rgb-image.
-        backend : str
-            Can be either 'matplotlib' ('plt') or 'plotly' ('go')
-        """
-        channels = (0, width, -1) if channels is None else channels
-
-        # get values along the horizon and cast them to [0, 1]
-        amplitudes = self.get_cube_values(window=1 + width*2, offset=width)
-        amplitudes = amplitudes[:, :, channels]
-        amplitudes -= np.nanmin(amplitudes, axis=(0, 1)).reshape(1, 1, -1)
-        amplitudes *= 1 / np.nanmax(amplitudes, axis=(0, 1)).reshape(1, 1, -1)
-        amplitudes[self.full_matrix == self.FILL_VALUE, :] = np.nan
-        amplitudes = amplitudes[:, :, ::-1]
-        amplitudes *= np.asarray(channel_weights).reshape(1, 1, -1)
-        amplitudes /= np.nanmax(amplitudes, axis=(0,1))
-
-        # defaults for plotting if not supplied in kwargs
-        kwargs = {
-            'title_label': f'RGB amplitudes of horizon {self.name} on cube {self.geometry.displayed_name}',
-            'xlabel': self.geometry.index_headers[0],
-            'ylabel': self.geometry.index_headers[1],
-            'order_axes': (1, 0, 2),
-            **kwargs
-            }
-
-        return plot_image(amplitudes, mode='imshow', **kwargs)
-
-
-    def show_3d(self, n_points=100, threshold=100., z_ratio=1., zoom_slice=None, show_axes=True,
-                width=1200, height=1200, margin=(0, 0, 100), savepath=None, **kwargs):
-        """ Interactive 3D plot. Roughly, does the following:
-            - select `n` points to represent the horizon surface
-            - triangulate those points
-            - remove some of the triangles on conditions
-            - use Plotly to draw the tri-surface
-
-        Parameters
-        ----------
-        n_points : int
-            Number of points for horizon surface creation.
-            The more, the better the image is and the slower it is displayed.
-        threshold : int
-            Threshold to remove triangles with bigger height differences in vertices.
-        z_ratio : int
-            Aspect ratio between height axis and spatial ones.
-        zoom_slice : tuple of slices
-            Crop from cube to show.
-        show_axes : bool
-            Whether to show axes and their labels.
-        width, height : int
-            Size of the image.
-        margin : int
-            Added margin from below and above along height axis.
-        savepath : str
-            Path to save interactive html to.
-        kwargs : dict
-            Other arguments of plot creation.
-        """
-        title = f'Horizon `{self.short_name}` on `{self.geometry.displayed_name}`'
-        aspect_ratio = (self.i_length / self.x_length, 1, z_ratio)
-        axis_labels = (self.geometry.index_headers[0], self.geometry.index_headers[1], 'DEPTH')
-        if zoom_slice is None:
-            zoom_slice = [slice(0, i) for i in self.geometry.cube_shape]
-        zoom_slice[-1] = slice(self.h_min, self.h_max)
-
-        x, y, z, simplices = self.make_triangulation(n_points, threshold, zoom_slice)
-
-        show_3d(x, y, z, simplices, title, zoom_slice, None, show_axes, aspect_ratio,
-                axis_labels, width, height, margin, savepath, **kwargs)
-
-
-    def make_triangulation(self, n_points, threshold, slices, **kwargs):
-        """ Create triangultaion of horizon.
-
-        Parameters
-        ----------
-        n_points: int
-            Number of points for horizon surface creation.
-            The more, the better the image is and the slower it is displayed.
-        slices : tuple
-            Region to process.
-
-        Returns
-        -------
-        x, y, z, simplices
-            `x`, `y` and `z` are np.ndarrays of triangle vertices, `simplices` is (N, 3) array where each row
-            represent triangle. Elements of row are indices of points that are vertices of triangle.
-        """
-        _ = kwargs
-        weights_matrix = self.full_matrix
-
-        grad_i = np.diff(weights_matrix, axis=0, prepend=0)
-        grad_x = np.diff(weights_matrix, axis=1, prepend=0)
-        weights_matrix = (grad_i + grad_x) / 2
-        weights_matrix[np.abs(weights_matrix) > 100] = np.nan
-
-        idx = np.stack(np.nonzero(self.full_matrix > 0), axis=0)
-        mask_1 = (idx <= np.array([slices[0].stop, slices[1].stop]).reshape(2, 1)).all(axis=0)
-        mask_2 = (idx >= np.array([slices[0].start, slices[1].start]).reshape(2, 1)).all(axis=0)
-        mask = np.logical_and(mask_1, mask_2)
-        idx = idx[:, mask]
-
-        probs = np.abs(weights_matrix[idx[0], idx[1]].flatten())
-        probs[np.isnan(probs)] = np.nanmax(probs)
-        indices = np.random.choice(len(probs), size=n_points, p=probs / probs.sum())
-
-        # Convert to meshgrid
-        ilines = self.points[mask, 0][indices]
-        xlines = self.points[mask, 1][indices]
-        ilines, xlines = np.meshgrid(ilines, xlines)
-        ilines = ilines.flatten()
-        xlines = xlines.flatten()
-
-        # Remove from grid points with no horizon in it
-        heights = self.full_matrix[ilines, xlines]
-        mask = (heights != self.FILL_VALUE)
-        x = ilines[mask]
-        y = xlines[mask]
-        z = heights[mask]
-
-        # Triangulate points and remove some of the triangles
-        tri = Delaunay(np.vstack([x, y]).T)
-        simplices = filter_simplices(simplices=tri.simplices, points=tri.points,
-                                     matrix=self.full_matrix, threshold=threshold)
-        return x, y, z, simplices
-
-    def show_slide(self, loc, width=None, axis='i', zoom_slice=None, **kwargs):
-        """ Show slide with horizon on it.
-
-        Parameters
-        ----------
-        loc : int
-            Number of slide to load.
-        width : int
-            Horizon thickness. If None given, set to 1% of seismic slide height.
-        axis : int
-            Number of axis to load slide along.
-        zoom_slice : tuple
-            Tuple of slices to apply directly to 2d images.
-        """
-        # Make `locations` for slide loading
-        axis = self.geometry.parse_axis(axis)
-        locations = self.geometry.make_slide_locations(loc, axis=axis)
-        shape = np.array([(slc.stop - slc.start) for slc in locations])
-
-        # Load seismic and mask
-        seismic_slide = self.geometry.load_slide(loc=loc, axis=axis)
-        xmin, xmax, ymin, ymax = 0, seismic_slide.shape[0], seismic_slide.shape[1], 0
-
-        mask = np.zeros(shape)
-        width = width or seismic_slide.shape[1] // 100
-        mask = self.add_to_mask(mask, locations=locations, width=width)
-        seismic_slide, mask = np.squeeze(seismic_slide), np.squeeze(mask)
-
-        if zoom_slice:
-            seismic_slide = seismic_slide[zoom_slice]
-            mask = mask[zoom_slice]
-            xmin = zoom_slice[0].start or xmin
-            xmax = zoom_slice[0].stop or xmax
-            ymin = zoom_slice[1].stop or ymin
-            ymax = zoom_slice[1].start or ymax
-
-        # defaults for plotting if not supplied in kwargs
-        header = self.geometry.axis_names[axis]
-        total = self.geometry.cube_shape[axis]
-
-        if axis in [0, 1]:
-            xlabel = self.geometry.index_headers[1 - axis]
-            ylabel = 'DEPTH'
-        if axis == 2:
-            xlabel = self.geometry.index_headers[0]
-            ylabel = self.geometry.index_headers[1]
-            total = self.geometry.depth
-
-        title = f'Horizon `{self.name}` on cube `{self.geometry.displayed_name}`\n {header} {loc} out of {total}'
-
-        kwargs = {
-            'figsize': (16, 8),
-            'title_label': title,
-            'title_y': 1.02,
-            'xlabel': xlabel,
-            'ylabel': ylabel,
-            'extent': (xmin, xmax, ymin, ymax),
-            'legend': False,
-            'labeltop': False,
-            'labelright': False,
-            'curve_width': width,
-            'grid': [False, True],
-            'colorbar': [True, False],
-            **kwargs
-        }
-        return plot_image(data=[seismic_slide, mask], **kwargs)
-
-
-
-class StructuredHorizon(Horizon):
-    """ Convenient alias for :class:`.Horizon` class. """

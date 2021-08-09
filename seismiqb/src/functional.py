@@ -9,9 +9,11 @@ try:
 except ImportError:
     cp = np
     CUPY_AVAILABLE = False
+import bottleneck
+import numexpr
 from numba import njit, prange
 
-from .utility_classes import Accumulator
+from .utils import Accumulator
 
 
 
@@ -52,9 +54,14 @@ def from_device(array):
 def correlation(array1, array2, std1, std2, **kwargs):
     """ Compute correlation. """
     _ = kwargs
-    window = array1.shape[-1]
-    covariation = (array1 * array2).sum(axis=-1) / window
-    return covariation / (std1 * std2)
+    xp = cp.get_array_module(array1) if CUPY_AVAILABLE else np
+    if xp is np:
+        covariation = bottleneck.nanmean(numexpr.evaluate('array1 * array2'), axis=-1)
+        result = numexpr.evaluate('covariation / (std1 * std2)')
+    else:
+        covariation = (array1 * array2).mean(axis=-1)
+        result = covariation / (std1 * std2)
+    return result
 
 
 def crosscorrelation(array1, array2, std1, std2, **kwargs):

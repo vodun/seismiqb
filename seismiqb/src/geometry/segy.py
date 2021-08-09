@@ -10,10 +10,8 @@ import h5pickle as h5py
 import segyio
 import cv2
 
-from ..utils import find_min_max
-from ..utility_classes import lru_cache, SafeIO
-
 from .base import SeismicGeometry
+from ..utils import find_min_max, lru_cache, SafeIO
 
 
 

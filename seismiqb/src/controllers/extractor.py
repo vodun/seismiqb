@@ -1,18 +1,18 @@
 """ Extract multiple 2D surfaces from a cube by controllably removing non-crucial amplitude information. """
 #pylint: disable=import-error, no-name-in-module, wrong-import-position
 from copy import copy
-from scipy.ndimage import sobel
-import numpy as np
 
+import numpy as np
+from scipy.ndimage import sobel
+
+from .base import BaseController
+
+from ..labels import Horizon
+from ..metrics import HorizonMetrics
 
 from ...batchflow import HistoSampler, NumpySampler
 from ...batchflow import Pipeline, B, V, C, D, P, R
 from ...batchflow.models.torch import EncoderDecoder
-
-from ..cubeset import Horizon
-from ..metrics import HorizonMetrics
-
-from .base import BaseController
 
 
 

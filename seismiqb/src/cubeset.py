@@ -1,20 +1,21 @@
 """ Container for storing seismic data and labels. """
 #pylint: disable=too-many-lines, too-many-arguments
 import os
+from copy import copy
 from glob import glob
 from warnings import warn
 
 import numpy as np
+import pandas as pd
 from tqdm.auto import tqdm
 
 from ..batchflow import FilesIndex, Dataset, Pipeline
 
 from .geometry import SeismicGeometry
-from .horizon import Horizon
+from .labels import Horizon
 from .plotters import plot_image, show_3d
 from .crop_batch import SeismicCropBatch
-from .utility_classes import IndexedDict
-from .utils import fill_defaults
+from .utils import to_list, IndexedDict
 
 
 class SeismicCubeset(Dataset):
@@ -486,64 +487,6 @@ class SeismicCubeset(Dataset):
 
         return background
 
-    def make_prediction(self, dst, pipeline, crop_shape, crop_stride, locations=None,
-                        idx=0, src='predictions', chunk_shape=None, chunk_stride=None, batch_size=8,
-                        agg='max', projection='ixh', threshold=0.5, pbar=True, order=(0, 1, 2)):
-        """ #TODO: no longer needed, remove. """
-        cube_shape = self.geometries[idx].cube_shape
-
-        if locations is None:
-            locations = [(0, s) for s in cube_shape]
-        else:
-            locations = [(item.start or 0, item.stop or stop) for item, stop in zip(locations, cube_shape)]
-        locations = np.array(locations)
-        output_shape = locations[:, 1] - locations[:, 0]
-
-        chunk_shape = fill_defaults(chunk_shape, output_shape)
-        chunk_shape = np.minimum(np.array(chunk_shape), np.array(output_shape))
-        chunk_stride = fill_defaults(chunk_stride, chunk_shape)
-
-        predictions_generator = self._predictions_generator(idx, pipeline, locations, output_shape,
-                                                            chunk_shape, chunk_stride, crop_shape, crop_stride,
-                                                            batch_size, src, pbar, order)
-
-        return SeismicGeometry.create_file_from_iterable(predictions_generator, output_shape,
-                                                         chunk_shape, chunk_stride, dst, agg, projection, threshold)
-
-    def _predictions_generator(self, idx, pipeline, locations, output_shape, chunk_shape, chunk_stride,
-                               crop_shape, crop_stride, batch_size, src, pbar, order):
-        """ #TODO: no longer needed, remove. """
-        geometry = self.geometries[idx]
-        cube_shape = geometry.cube_shape
-
-        chunk_grid = self._make_regular_grid(idx, chunk_shape, ilines=locations[0], xlines=locations[1],
-                                             heights=locations[2], filtering_matrix=geometry.zero_traces,
-                                             strides=chunk_stride)[-1][:, 1:]
-
-        if pbar:
-            total = self._compute_total_batches_in_all_chunks(idx, chunk_grid, chunk_shape,
-                                                              crop_shape, crop_stride, batch_size)
-            progress_bar = tqdm(total=total)
-
-        for lower_bound in chunk_grid:
-            upper_bound = np.minimum(lower_bound + chunk_shape, cube_shape)
-            self.make_grid(
-                self.indices[idx], crop_shape,
-                *list(zip(lower_bound, upper_bound)),
-                strides=crop_stride, batch_size=batch_size
-            )
-            chunk_pipeline = pipeline << self
-            for _ in range(self.grid_iters):
-                _ = chunk_pipeline.next_batch(len(self))
-                if pbar:
-                    progress_bar.update(1)
-            prediction = self.assemble_crops(chunk_pipeline.v(src), order=order)
-            prediction = prediction[:output_shape[0], :output_shape[1], :output_shape[2]]
-            position = lower_bound - np.array([locations[i][0] for i in range(3)])
-            yield position, prediction
-        if pbar:
-            progress_bar.close()
-
     def _compute_total_batches_in_all_chunks(self, idx, chunk_grid, chunk_shape, crop_shape, crop_stride, batch_size):
         """ #TODO: no longer needed, remove. """
         total = 0
@@ -560,8 +503,8 @@ class SeismicCubeset(Dataset):
 
     # Convenient loader
     def load(self, label_dir=None, filter_zeros=True, dst_labels='labels',
-             labels_class=Horizon, direction=None, **kwargs):
-        """ Load geometries and labels, stored on disk in a predefined format:
+             labels_class=None, direction=None, **kwargs):
+        """ Load everything: geometries, point clouds, labels, samplers.
 
         Parameters
         ----------
@@ -592,3 +535,112 @@ class SeismicCubeset(Dataset):
 
         self.create_labels(paths=paths_txt, filter_zeros=filter_zeros, dst=dst_labels,
                            labels_class=labels_class, direction=direction, **kwargs)
+
+
+
+class FaciesCubeset(SeismicCubeset):
+    """ Storage extending `SeismicCubeset` functionality with methods for interaction with labels and their subsets.
+
+    Most methods basically call methods of the same name for every label stored in requested attribute.
+    """
+
+    def add_subsets(self, src_subset, dst_base='labels'):
+        """ Add nested labels.
+
+        Parameters
+        ----------
+        src_labels : str
+            Name of dataset attribute with labels to add as subsets.
+        dst_base: str
+            Name of dataset attribute with labels to add subsets to.
+        """
+        subset_labels = getattr(self, src_subset)
+        base_labels = getattr(self, dst_base)
+        if len(subset_labels.flat) != len(base_labels.flat):
+            raise ValueError(f"Labels `{src_subset}` and `{dst_base}` have different lengths.")
+        for subset, base in zip(subset_labels, base_labels):
+            base.add_subset(name=src_subset, item=subset)
+
+    def map_labels(self, function, indices=None, src_labels='labels', **kwargs):
+        """ Call function for every item from labels list of requested cubes and return produced results.
+
+        Parameters
+        ----------
+        function : str or callable
+            If str, name of label method to call.
+            If callable, applied to labels of chosen cubes.
+        indices : str or sequence of str
+            Indices of cubes which labels to map.
+        src_labels : str
+            Attribute with labels to map.
+        kwargs :
+            Passed directly to `function`.
+
+        Returns
+        -------
+        IndexedDict where keys are cubes names and values are lists of results obtained by applied map.
+        If all lists in result values are empty, None is returned instead.
+
+        Examples
+        --------
+        >>> cubeset.map_labels('smooth_out', ['CUBE_01_AAA', 'CUBE_02_BBB'], 'horizons', iters=3)
+        """
+        results = IndexedDict({idx: [] for idx in self.indices})
+        for label in getattr(self, src_labels).flatten(keys=indices):
+            if isinstance(function, str):
+                res = getattr(label, function)(**kwargs)
+            elif callable(function):
+                res = function(label, **kwargs)
+            if res is not None:
+                results[label.geometry.short_name].append(res)
+        return results if len(results.flat) > 0 else None
+
+    def show(self, attributes='depths', src_labels='labels', indices=None, **kwargs):
+        """ Show attributes of requested dataset labels. """
+        return self.map_labels(function='show', src_labels=src_labels, indices=indices, attributes=attributes, **kwargs)
+
+    def invert_subsets(self, subset, src_labels='labels', dst_labels=None, add_subsets=True):
+        """ Invert matrices of requested dataset labels and store resulted labels in cubeset. """
+        dst_labels = dst_labels or f"{subset}_inverted"
+        inverted = self.map_labels(function='invert_subset', indices=None, src_labels=src_labels, subset=subset)
+
+        setattr(self, dst_labels, inverted)
+        if add_subsets:
+            self.add_subsets(src_subset=dst_labels, dst_base=src_labels)
+
+    def add_merged_labels(self, src_labels, dst_labels, indices=None, dst_base='labels'):
+        """ Merge requested labels and store resulted labels in cubeset. """
+        results = IndexedDict({idx: [] for idx in self.indices})
+        indices = to_list(indices or self.indices)
+        for idx in indices:
+            to_merge = self[idx, src_labels]
+            # since `merge_list` merges all horizons into first object from the list,
+            # make a copy of first horizon in list to save merge into its instance
+            container = copy(to_merge[0])
+            container.name = f"Merged {'/'.join([horizon.short_name for horizon in to_merge])}"
+            _ = [container.adjacent_merge(horizon, inplace=True, mean_threshold=999, adjacency=999)
+                 for horizon in to_merge]
+            container.reset_cache()
+            results[idx].append(container)
+        setattr(self, dst_labels, results)
+        if dst_base:
+            self.add_subsets(src_subset=dst_labels, dst_base=dst_base)
+
+    def evaluate(self, src_true, src_pred, metrics_fn, metrics_names=None, indices=None, src_labels='labels'):
+        """ Apply given function to 'masks' attribute of requested labels and return merged dataframe of results.
+
+        Parameters
+        ----------
+        src_true : str
+            Name of `labels` subset to load true mask from.
+        src_pred : str
+            Name of `labels` subset to load prediction mask from.
+        metrics_fn : callable or list of callable
+            Metrics function(s) to calculate.
+        metrics_name : str, optional
+            Name of the column with metrics values in resulted dataframe.
+        """
+        metrics_values = self.map_labels(function='evaluate', src_labels=src_labels, indices=indices,
+                                         src_true=src_true, src_pred=src_pred,
+                                         metrics_fn=metrics_fn, metrics_names=metrics_names)
+        return pd.concat(metrics_values.flat)

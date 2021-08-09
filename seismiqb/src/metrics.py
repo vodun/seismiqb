@@ -6,15 +6,17 @@ from tqdm.auto import tqdm
 import numpy as np
 try:
     import cupy as cp
+    CUPY_AVAILABLE = True
 except ImportError:
     cp = np
+    CUPY_AVAILABLE = False
 
 import cv2
 
 from ..batchflow.notifier import Notifier
 
-from .horizon import Horizon
-from .utility_classes import Accumulator
+from .labels import Horizon
+from .utils import Accumulator
 from .functional import to_device, from_device
 from .functional import correlation, crosscorrelation, btch, kl, js, hellinger, tv, hilbert
 from .functional import smooth_out, digitize, gridify, perturb, histo_reduce
@@ -64,7 +66,7 @@ class BaseMetrics:
         metric : str
             Name of metric to evaluate.
         enlarge : bool
-            Whether to apply `:meth:.Horizon.enlarge_carcass_image` to the result.
+            Whether to apply `:meth:.Horizon.matrix_enlarge_carcass` to the result.
         width : int
             Widening for the metric. Works only if `enlarge` set to True.
         plot : bool
@@ -90,7 +92,7 @@ class BaseMetrics:
             cp._default_memory_pool.free_all_blocks()
 
         if hasattr(self, 'horizon') and self.horizon.is_carcass and enlarge:
-            metric_val = self.horizon.enlarge_carcass_image(metric_val, width)
+            metric_val = self.horizon.matrix_enlarge_carcass(metric_val, width)
 
         if plot:
             plot_dict = {**self.PLOT_DEFAULTS, **plot_dict}
@@ -148,7 +150,7 @@ class BaseMetrics:
         # Transfer to GPU, if needed
         data = to_device(data, device)
         bad_traces = to_device(bad_traces, device)
-        xp = cp.get_array_module(data) if (cp is not np) else np
+        xp = cp.get_array_module(data) if CUPY_AVAILABLE else np
 
         # Compute data statistics
         data_stds = data.std(axis=-1)
@@ -239,7 +241,7 @@ class BaseMetrics:
         # Transfer to GPU, if needed
         data = to_device(data, device)
         bad_traces = to_device(bad_traces, device)
-        xp = cp.get_array_module(data) if (cp is not np) else np
+        xp = cp.get_array_module(data) if CUPY_AVAILABLE else np
 
         # Compute data statistics
         data_stds = data.std(axis=-1)
@@ -783,7 +785,7 @@ class HorizonMetrics(BaseMetrics):
         #pylint: disable=unexpected-keyword-arg
         # Transfer to GPU, if needed
         data = to_device(self.data, device)
-        xp = cp.get_array_module(data) if (cp is not np) else np
+        xp = cp.get_array_module(data) if CUPY_AVAILABLE else np
 
         # Compute hilbert transform and scale to 2pi range
         analytic = hilbert(data, axis=2)
@@ -924,8 +926,6 @@ class HorizonMetrics(BaseMetrics):
             **kwargs
         }
         return metric, plot_dict
-
-
 
 
 class GeometryMetrics(BaseMetrics):
@@ -1090,3 +1090,60 @@ class GeometryMetrics(BaseMetrics):
             **kwargs
         }
         return metric, plot_dict
+
+
+class FaultsMetrics:
+    """ Faults metric class. """
+    SHIFTS = [-20, -15, -5, 5, 15, 20]
+
+    def similarity_metric(self, semblance, masks, threshold=None):
+        """ Compute similarity metric for faults mask. """
+        if threshold:
+            masks = masks > threshold
+        if semblance.ndim == 2:
+            semblance = np.expand_dims(semblance, axis=0)
+        if semblance.ndim == 3:
+            semblance = np.expand_dims(semblance, axis=0)
+
+        if masks.ndim == 2:
+            masks = np.expand_dims(masks, axis=0)
+        if masks.ndim == 3:
+            masks = np.expand_dims(masks, axis=0)
+
+        res = []
+        m = self.sum_with_axes(masks * (1 - semblance), axes=[1,2,3])
+        weights = np.ones((len(self.SHIFTS), 1))
+        weights = weights / weights.sum()
+        for i in self.SHIFTS:
+            random_mask = self.make_shift(masks, shift=i)
+            rm = self.sum_with_axes(random_mask * (1 - semblance), axes=[1,2,3])
+            ratio = m/rm
+            res += [np.log(ratio)]
+        res = np.stack(res, axis=0)
+        res = (res * weights).sum(axis=0)
+        res = np.clip(res, -2, 2)
+        return res
+
+    def sum_with_axes(self, array, axes=None):
+        """ Sum for several axes. """
+        if axes is None:
+            return array.sum()
+        if isinstance(axes, int):
+            axes = [axes]
+        res = array
+        axes = sorted(axes)
+        for i, axis in enumerate(axes):
+            res = res.sum(axis=axis-i)
+        return res
+
+    def make_shift(self, array, shift=20):
+        """ Make shifts for mask. """
+        result = np.zeros_like(array)
+        for i, _array in enumerate(array):
+            if shift > 0:
+                result[i][:, shift:] = _array[:, :-shift]
+            elif shift < 0:
+                result[i][:, :shift] = _array[:, -shift:]
+            else:
+                result[i] = _array
+        return result
