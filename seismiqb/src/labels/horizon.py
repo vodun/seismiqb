@@ -1,6 +1,7 @@
 """ Horizon class for POST-STACK data. """
 import os
 from copy import copy
+from functools import partialmethod
 from textwrap import dedent
 
 import numpy as np
@@ -610,6 +611,8 @@ class Horizon(AttributesMixin, VisualizationMixin):
             return smoothed
 
         self.apply_to_matrix(smoothing_function, **kwargs)
+
+    interpolate = partialmethod(smooth_out, preserve_borders=False)
 
 
     def make_carcass(self, frequencies=100, regular=True, margin=50, apply_smoothing=False, **kwargs):
