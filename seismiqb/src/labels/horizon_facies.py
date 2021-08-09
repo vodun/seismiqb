@@ -1,6 +1,5 @@
 """ Seismic facies container. """
 # pylint: disable=too-many-statements
-import os
 from copy import copy
 
 import numpy as np
