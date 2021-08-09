@@ -263,10 +263,11 @@ class SeismicCropBatch(Batch):
             raise ValueError(f"slicing must be 'native' or 'custom' but {slicing} were given.")
         return crop
 
-    @action
-    def generate_synthetic(self, dst_cubes='cubes', dst_masks='masks', dst_faults=None, **kwargs):
+    @staticmethod
+    def generate_synthetic(ix, **kwargs):
         """ Fill crops with synthetic seismic data along with corresponding horizon and faults masks.
         """
+        _ = ix
         shape = np.array(kwargs['shape'])
 
         if shape[0] == 1 or shape[1] == 1:
@@ -275,41 +276,25 @@ class SeismicCropBatch(Batch):
         else:
             axis_num = None
 
-        crops = []
-        masks = []
-        fault_masks = []
-        for ix in self.indices:
-            if len(kwargs.get('faults', ())) != 0 and dst_faults is not None:
-                crop, horizons, faults = generate_synthetic(**kwargs)
-            else:
-                crop, horizons = generate_synthetic(**kwargs)
-                faults = ()
-            if axis_num is not None:
-                crop = np.expand_dims(crop, axis=axis_num)
-                horizons = np.expand_dims(horizons, axis=axis_num + 1)
+        crop, horizons, faults = generate_synthetic(**kwargs)
+        if axis_num is not None:
+            crop = np.expand_dims(crop, axis=axis_num)
+            horizons = np.expand_dims(horizons, axis=axis_num + 1)
 
-            crops.append(crop)
-            mask = np.zeros_like(crop)
-            fault_mask = np.zeros_like(crop)
-            locations = (slice(0, mask.shape[0]),
-                         slice(0, mask.shape[1]), slice(0, mask.shape[2]))
+        mask = np.zeros_like(crop)
+        fault_mask = np.zeros_like(crop)
+        locations = (slice(0, mask.shape[0]), slice(0, mask.shape[1]), slice(0, mask.shape[2]))
 
-            dummyfile = DummyFile(crop)
-            geom = SeismicGeometryArray(dummyfile.path, dummyfile=dummyfile)
-            for horizon_data in horizons:
-                horizon = Horizon(horizon_data, geom)
-                horizon.add_to_mask(mask, locations)
-            for fault_data in faults:
-                fault = Fault(fault_data, geom)
-                fault.add_to_mask(fault_mask, locations)
-            masks.append(mask)
-            fault_masks.append(fault_mask)
+        dummyfile = DummyFile(crop)
+        geom = SeismicGeometryArray(dummyfile.path, dummyfile=dummyfile)
+        for horizon_data in horizons:
+            horizon = Horizon(horizon_data, geom)
+            horizon.add_to_mask(mask, locations)
+        for fault_data in faults:
+            fault = Fault(fault_data, geom)
+            fault.add_to_mask(fault_mask, locations)
 
-        setattr(self, dst_cubes, np.stack(crops, axis=0))
-        setattr(self, dst_masks, np.stack(masks, axis=0))
-        if len(faults) != 0 and dst_faults != 0:
-            setattr(self, dst_faults, np.stack(fault_masks, axis=0))
-        return self
+        return crop, mask, fault_mask
 
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
