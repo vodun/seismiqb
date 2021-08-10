@@ -7,7 +7,7 @@ from warnings import warn
 import numpy as np
 import cv2
 from scipy.interpolate import interp1d
-from scipy.ndimage import gaussian_filter1d
+from scipy.ndimage import gaussian_filter1d, binary_dilation
 from scipy.signal import butter, lfilter, hilbert
 
 from ..batchflow import FilesIndex, Batch, action, inbatch_parallel, SkipBatchException, apply_parallel
@@ -263,11 +263,11 @@ class SeismicCropBatch(Batch):
             raise ValueError(f"slicing must be 'native' or 'custom' but {slicing} were given.")
         return crop
 
-    @staticmethod
-    def generate_synthetic(ix, **kwargs):
-        """ Fill crops with synthetic seismic data along with corresponding horizon and faults masks.
-        """
-        _ = ix
+    @action
+    @inbatch_parallel(init='indices', src='indices', target='for', post='_assemble',
+                      dst=('cubes', 'masks', 'faults'))
+    def generate_synthetic(self, ix, dst=None, fault_width=3, **kwargs):
+        _, _ = self, ix
         shape = np.array(kwargs['shape'])
 
         if shape[0] == 1 or shape[1] == 1:
@@ -294,6 +294,14 @@ class SeismicCropBatch(Batch):
             fault = Fault(fault_data, geom)
             fault.add_to_mask(fault_mask, locations)
 
+        if fault_width is not None:
+            if fault_width > 1:
+                if fault_mask.shape[0] == 1 or fault_mask.shape[1] == 1:
+                    axis_num = 0 if fault_mask.shape[0] == 1 else 1
+                    elem = np.zeros((fault_width, fault_width))
+                    elem[:, fault_width // 2] = 1
+                    fault_mask = binary_dilation(np.squeeze(fault_mask), elem)
+                    fault_mask = np.expand_dims(fault_mask.astype(np.float32), axis=axis_num)
         return crop, mask, fault_mask
 
     @action
