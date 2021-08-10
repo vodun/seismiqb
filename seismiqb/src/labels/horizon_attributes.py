@@ -112,8 +112,8 @@ class AttributesMixin:
 
     def matrix_put_on_full(self, matrix):
         """ Convert matrix from being horizon-shaped to cube-shaped. """
-        if (matrix.shape[:2] != self.cube_shape[:2]).any():
-            background = np.full(self.cube_shape[:2], self._dtype_to_fill_value(matrix.dtype), dtype=matrix.dtype)
+        if matrix.shape[:2] != self.field.spatial_shape:
+            background = np.full(self.field.spatial_shape, self._dtype_to_fill_value(matrix.dtype), dtype=matrix.dtype)
             background[self.i_min:self.i_max + 1, self.x_min:self.x_max + 1] = matrix
         else:
             background = matrix
@@ -190,7 +190,7 @@ class AttributesMixin:
         matrix[mask] = (dilated1[mask] + dilated2[mask]) / 2
 
         # Fix zero traces
-        matrix[np.isnan(self.geometry.std_matrix)] = np.nan
+        matrix[np.isnan(self.field.std_matrix)] = np.nan
         return matrix
 
     @staticmethod
@@ -226,7 +226,7 @@ class AttributesMixin:
     @property
     def coverage(self):
         """ Ratio between number of present values and number of good traces in cube. """
-        return len(self) / (np.prod(self.cube_shape[:2]) - np.sum(self.geometry.zero_traces))
+        return len(self) / (np.prod(self.field.spatial_shape) - np.sum(self.field.zero_traces))
 
     @property
     def number_of_holes(self):
@@ -327,15 +327,15 @@ class AttributesMixin:
         high = max(window - low, 0)
         chunk_size = min(chunk_size, self.h_max - self.h_min + window)
 
-        background = np.zeros((self.geometry.ilines_len, self.geometry.xlines_len, window), dtype=np.float32)
+        background = np.zeros((self.field.ilines_len, self.field.xlines_len, window), dtype=np.float32)
 
         for h_start in range(max(low, self.h_min), self.h_max + 1, chunk_size):
             h_end = min(h_start + chunk_size, self.h_max + 1)
 
             # Get chunk from the cube (depth-wise)
             location = (slice(None), slice(None),
-                        slice(h_start - low, min(h_end + high, self.geometry.depth)))
-            data_chunk = self.geometry.load_crop(location, use_cache=False)
+                        slice(h_start - low, min(h_end + high, self.field.depth)))
+            data_chunk = self.field.geometry.load_crop(location, use_cache=False)
 
             # Check which points of the horizon are in the current chunk (and present)
             idx_i, idx_x = np.asarray((self.matrix != self.FILL_VALUE) &

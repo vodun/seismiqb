@@ -913,10 +913,10 @@ class HorizonMetrics(BaseMetrics):
             }
             plot_image(metric, mode='hist', **hist_dict)
 
-        title = 'Height differences between {} and {}'.format(self.horizon.name, other.name)
+        title = f'Height differences between {self.horizon.name} and {other.name}'
         plot_dict = {
             'spatial': True,
-            'title_label': '{} on cube {}'.format(title, self.horizon.cube_name),
+            'title_label': f'{title} on cube {self.horizon.field.displayed_name}',
             'cmap': 'Reds',
             'zmin': 0, 'zmax': np.nanmax(metric),
             'ignore_value': np.nan,

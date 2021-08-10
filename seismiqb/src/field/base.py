@@ -102,7 +102,7 @@ class Field(VisualizationMixin):
         horizons = []
         for path in paths:
             if isinstance(path, str):
-                horizon = Horizon(path, geometry=self.geometry, **kwargs)
+                horizon = Horizon(path, field=self, **kwargs)
                 if filter:
                     horizon.filter()
                 if interpolate:

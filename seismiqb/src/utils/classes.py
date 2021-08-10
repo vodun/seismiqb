@@ -4,10 +4,9 @@ from ast import literal_eval
 from time import perf_counter
 from collections import OrderedDict, defaultdict
 from threading import RLock
-from functools import wraps, partial
+from functools import wraps
 from hashlib import blake2b
 from copy import copy
-from inspect import ismethod
 
 import numpy as np
 try:
@@ -563,8 +562,8 @@ class DelegatingList(list):
 
         attribute = getattr(self[0], key)
 
-        if not ismethod(attribute) and not isinstance(attribute, partial):
-            # Property
+        if not callable(attribute):
+            # Attribute or property
             return DelegatingList([getattr(item, key) for item in self])
 
         @wraps(attribute)

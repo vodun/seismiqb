@@ -14,11 +14,11 @@ from ..utils import to_list, filter_simplices
 class VisualizationMixin:
     """ Methods for textual and visual representation of a horizon. """
     def __repr__(self):
-        return f"""<Horizon `{self.name}` for `{self.geometry.displayed_name}` at {hex(id(self))}>"""
+        return f"""<Horizon `{self.name}` for `{self.field.displayed_name}` at {hex(id(self))}>"""
 
     def __str__(self):
         msg = f"""
-        Horizon {self.name} for {self.geometry.displayed_name} loaded from {self.format}
+        Horizon {self.name} for {self.field.displayed_name} loaded from {self.format}
         Ilines range:      {self.i_min} to {self.i_max}
         Xlines range:      {self.x_min} to {self.x_max}
         Depth range:       {self.h_min} to {self.h_max}
@@ -140,7 +140,7 @@ class VisualizationMixin:
 
         defaults = {
             'title_label': make_titles(names),
-            'suptitle_label': f"`{self.short_name}` of cube `{self.geometry.displayed_name}`",
+            'suptitle_label': f"`{self.short_name}` of cube `{self.field.displayed_name}`",
             'colorbar': mode == 'imshow',
             'tight_layout': True,
             'return_figure': True,
@@ -176,8 +176,8 @@ class VisualizationMixin:
                 'ylim': self.bbox[1][::-1],
                 'cmap': apply_by_scenario(make_cmap, names),
                 'alpha': apply_by_scenario(make_alpha, names),
-                'xlabel': self.geometry.index_headers[0],
-                'ylabel': self.geometry.index_headers[1],
+                'xlabel': self.field.index_headers[0],
+                'ylabel': self.field.index_headers[1],
             }
         elif mode == 'hist':
             defaults = {**defaults, 'figsize': (n_subplots * 10, 5)}
@@ -211,10 +211,10 @@ class VisualizationMixin:
             Tuple of slices to apply directly to 2d images.
         """
         # Make `locations` for slide loading
-        axis = self.geometry.parse_axis(axis)
+        axis = self.field.geometry.parse_axis(axis)
 
         # Load seismic and mask
-        seismic_slide = self.geometry.load_slide(loc=loc, axis=axis)
+        seismic_slide = self.field.geometry.load_slide(loc=loc, axis=axis)
         mask = self.load_slide(loc=loc, axis=axis, width=width)
         seismic_slide, mask = np.squeeze(seismic_slide), np.squeeze(mask)
         xmin, xmax, ymin, ymax = 0, seismic_slide.shape[0], seismic_slide.shape[1], 0
@@ -228,18 +228,18 @@ class VisualizationMixin:
             ymax = zoom_slice[1].start or ymax
 
         # defaults for plotting if not supplied in kwargs
-        header = self.geometry.axis_names[axis]
-        total = self.geometry.cube_shape[axis]
+        header = self.field.axis_names[axis]
+        total = self.field.cube_shape[axis]
 
         if axis in [0, 1]:
-            xlabel = self.geometry.index_headers[1 - axis]
+            xlabel = self.field.index_headers[1 - axis]
             ylabel = 'DEPTH'
         if axis == 2:
-            xlabel = self.geometry.index_headers[0]
-            ylabel = self.geometry.index_headers[1]
-            total = self.geometry.depth
+            xlabel = self.field.index_headers[0]
+            ylabel = self.field.index_headers[1]
+            total = self.field.depth
 
-        title = f'Horizon `{self.name}` on cube `{self.geometry.displayed_name}`\n {header} {loc} out of {total}'
+        title = f'Horizon `{self.name}` on cube `{self.field.displayed_name}`\n {header} {loc} out of {total}'
 
         kwargs = {
             'figsize': (16, 8),
@@ -289,11 +289,11 @@ class VisualizationMixin:
         kwargs : dict
             Other arguments of plot creation.
         """
-        title = f'Horizon `{self.short_name}` on `{self.geometry.displayed_name}`'
+        title = f'Horizon `{self.short_name}` on `{self.field.displayed_name}`'
         aspect_ratio = (self.i_length / self.x_length, 1, z_ratio)
-        axis_labels = (self.geometry.index_headers[0], self.geometry.index_headers[1], 'DEPTH')
+        axis_labels = (self.field.index_headers[0], self.field.index_headers[1], 'DEPTH')
         if zoom_slice is None:
-            zoom_slice = [slice(0, i) for i in self.geometry.cube_shape]
+            zoom_slice = [slice(0, i) for i in self.field.shape]
         zoom_slice[-1] = slice(self.h_min, self.h_max)
 
         x, y, z, simplices = self.make_triangulation(n_points, threshold, zoom_slice)
