@@ -1,16 +1,18 @@
 """ !!. """
+import os
 from glob import glob
 from difflib import get_close_matches
 
 import numpy as np
 
+from .visualization import VisualizationMixin
 from ..geometry import SeismicGeometry
 from ..labels import Horizon, Fault, Facies
 from ..utils import DelegatingList
 
 
 
-class Field:
+class Field(VisualizationMixin):
     """ !!. """
     def __init__(self, geometry, labels=None, labels_class=None, geometry_kwargs=None, labels_kwargs=None, **kwargs):
         # Attributes
@@ -54,9 +56,7 @@ class Field:
         if not isinstance(labels, dict):
             raise TypeError('TYPE SHOULD BE: str / sequence / dict')
 
-        self._labels = {**labels} #TODO: debug, remove?
-
-        # Labels class: make a dictionary-like object
+        # Labels class: make a dictionary
         if labels_class is None:
             labels_class_dict = {label_dst : None for label_dst in labels.keys()}
         if isinstance(labels_class, type):
@@ -99,7 +99,6 @@ class Field:
 
     def _load_horizons(self, paths, filter=True, interpolate=False, sort=True, **kwargs):
         #pylint: disable=redefined-builtin
-        print('IN _LOAD_HORIZONS')
         horizons = []
         for path in paths:
             if isinstance(path, str):
@@ -113,6 +112,9 @@ class Field:
                 horizon = path
             horizons.append(horizon)
 
+        if sort:
+            sort = sort if isinstance(sort, str) else 'h_mean'
+            horizons.sort(key=lambda label: getattr(label, sort))
         return horizons
 
     def _load_faults(self, paths, **kwargs):
@@ -184,16 +186,21 @@ class Field:
                 break
         return mask
 
+
+    # Utility functions
+    def make_savepath(self, path, name=None, makedirs=True):
+        """ !!. """
+        basedir = os.path.dirname(self.path)
+        name = name or self.short_name
+
+        path = (path.replace('**', basedir)
+                    .replace('%', basedir)
+                    .replace('*', name)
+                    .replace('//', '/'))
+
+        if makedirs:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+        return path
+
+
     # TODO: cache resets/introspection
-    # TODO: visualization
-
-    def __repr__(self):
-        return f"""<Field `{self.displayed_name}` at {hex(id(self))}>"""
-
-    def __str__(self):
-        processed_prefix = 'un' if self.geometry.has_stats is False else ''
-        labels_prefix = ':' if self.labels else ''
-        msg = f'Field `{self.displayed_name}` with {processed_prefix}processed geometry{labels_prefix}\n'
-        for label in self.labels:
-            msg += f'    {label.name}\n'
-        return msg
