@@ -1,5 +1,4 @@
 """ Mixin for horizon visualization. """
-import os
 from textwrap import dedent
 
 import numpy as np
