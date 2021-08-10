@@ -384,7 +384,8 @@ class SeismicCropBatch(Batch):
 
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def load_attribute(self, ix, dst, src='amplitudes', src_labels='labels', res_ndim=3, **kwargs):
+    def load_attribute(self, ix, dst, src='amplitudes', src_labels='labels',
+                       atleast_3d=True, dtype=np.float32, **kwargs):
         """ Load attribute for label at given location.
 
         Parameters
@@ -417,7 +418,7 @@ class SeismicCropBatch(Batch):
                   f"in between sampler creation and `make_locations` call."
             raise ValueError(msg)
 
-        return label.load_attribute(src=src, location=location, res_ndim=res_ndim, **kwargs)
+        return label.load_attribute(src=src, location=location, atleast_3d=atleast_3d, dtype=dtype, **kwargs)
 
 
     # More methods to work with labels

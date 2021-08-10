@@ -641,5 +641,6 @@ class FaciesCubeset(SeismicCubeset):
             Name of the column with metrics values in resulted dataframe.
         """
         metrics_values = self.map_labels(function='evaluate', src_labels=src_labels, indices=indices,
-                                              src_true=src_true, src_pred=src_pred, metrics_fn=metrics_fn)
+                                         src_true=src_true, src_pred=src_pred,
+                                         metrics_fn=metrics_fn, metrics_names=metrics_names)
         return pd.concat(metrics_values.flat)

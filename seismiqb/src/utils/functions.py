@@ -1,6 +1,5 @@
 """ Utility functions. """
 import os
-import inspect
 from math import atan
 
 import numpy as np
@@ -355,14 +354,6 @@ def make_bezier_figure(n=7, radius=0.2, sharpness=0.05, scale=1.0, shape=(1, 1),
     figure_coordinates = np.unique(np.ceil(curve_segments).astype(int), axis=0)
     return figure_coordinates
 
-def retrieve_function_arguments(function, dictionary):
-    """ Retrieve both positional and keyword arguments for a passed `function` from a `dictionary`.
-    Note that retrieved values are removed from the passed `dictionary` in-place. """
-    # pylint: disable=protected-access
-    parameters = inspect.signature(function).parameters
-    arguments_with_defaults = {k: v.default for k, v in parameters.items() if v.default != inspect._empty}
-    return {k: dictionary.pop(k, v) for k, v in arguments_with_defaults.items()}
-
 def get_environ_flag(flag_name, defaults=('0', '1'), convert=int):
     """ Retrive environmental variable, check if it matches expected defaults and optionally convert it. """
     flag = os.environ.get(flag_name, '0')
@@ -381,3 +372,14 @@ def to_list(obj):
 def get_class_methods(cls):
     """ Get a list of non-private class methods. """
     return [getattr(cls, func) for func in dir(cls) if not func.startswith("__") and callable(getattr(cls, func))]
+
+def make_savepath(path, name, extension=''):
+    """ If given replace asterisk in path with label name and create save dir if it does not already exist. """
+    if path.endswith('*'):
+        path = path.replace('*', f'{name}{extension}')
+
+    dir_path = os.path.dirname(path)
+    if dir_path:
+        os.makedirs(dir_path, exist_ok=True)
+
+    return path

@@ -7,7 +7,7 @@ from matplotlib import pyplot as plt
 from scipy.spatial import Delaunay
 
 from ..plotters import plot_image, show_3d
-from ..utils import to_list, filter_simplices
+from ..utils import filter_simplices, make_savepath
 
 
 
@@ -87,7 +87,10 @@ class VisualizationMixin:
             else:
                 res = []
                 for subplot_params in params:
-                    subplot_res = [action(layer_params) for layer_params in to_list(subplot_params)]
+                    if isinstance(subplot_params, list):
+                        subplot_res = [action(layer_params) for layer_params in subplot_params]
+                    else:
+                        subplot_res = [action(subplot_params)]
                     res.append(subplot_res)
             return res
 
@@ -102,18 +105,16 @@ class VisualizationMixin:
                 load = attributes
             postprocess = load.pop('postprocess', lambda x: x)
             load_defaults = {'dtype': np.float32, 'fill_value': np.nan}
-            if load['src'].split('/')[-1] in ['amplitudes', 'cube_values']:
-                load_defaults['window'] = 1
             if load['src'].split('/')[-1] in ['fourier', 'wavelet']:
                 load_defaults['n_components'] = 1
             if load['src'].split('/')[-1] in ['masks', 'full_binary_matrix']:
                 load_defaults['fill_value'] = 0
             load = {**load_defaults, **load}
-            data = self.load_attribute(**load)
+            data = self.load_attribute(**load).squeeze()
             return postprocess(data)
 
         def enlarge_data(data):
-            if self.is_carcass and enlarge:
+            if enlarge and self.is_carcass:
                 data = self.matrix_enlarge_carcass(data, width)
             return data
 
@@ -186,10 +187,16 @@ class VisualizationMixin:
 
         # Merge default and given params
         params = {**defaults, **kwargs}
-        # Substitute asterisks with label name
-        for text in ['suptitle_label', 'suptitle', 'title_label', 'title', 't', 'savepath']:
+
+        # Substitute asterisks in title-like parameters with default suptitle
+        for text in ['suptitle_label', 'suptitle', 'title_label', 'title', 't']:
             if text in params:
                 params[text] = apply_by_scenario(lambda s: s.replace('*', defaults['suptitle_label']), params[text])
+
+        # Substitute asterisk in `savepath` parameter with label name
+        if 'savepath' in params:
+            params['savepath'] = make_savepath(params['savepath'], self.short_name, '.png')
+
         # Plot image with given params and return resulting figure
         figure = plot_image(data=data, mode=mode, **params)
         plt.show()
