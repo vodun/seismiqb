@@ -138,8 +138,8 @@ def _make_velocity_model_3d(velocities, surfaces, shape):
     return array
 
 
-def make_coords_shift(rng=None, seed=None, n_points=10, zeros_share=0.6, kind='cubic', perturb_values=True,
-                      perturb_peak=True, peak_value=0.05, random_invert=True):
+def make_coords_shift(rng=None, seed=None, n_points=10, zeros_share=0.6, kind='cubic',
+                      perturb_values=True, perturb_peak=True, random_invert=True):
     """ Generate a map [0, 1] -> [0, 1]. The map is given by f(x) = x + distortion, where
     the distortion is hump-shaped. This map will later be used to perform elastic transform of an image.
     """
@@ -157,10 +157,10 @@ def make_coords_shift(rng=None, seed=None, n_points=10, zeros_share=0.6, kind='c
 
     # form the values-hump and perturb it if needed
     n_values = n_points - n_zeros
-    half = np.linspace(0, peak_value, n_values // 2 + 1 + n_values % 2)[1:]
+    half = np.linspace(0, 1, n_values // 2 + 1 + n_values % 2)[1:]
     values = half.tolist() + half.tolist()[::-1][n_values % 2:]
     if perturb_values:
-        step = 2 * peak_value / (n_values)
+        step = 2 / n_values
         values = (rng.uniform(-step / 2, step / 2, (n_values, )) + np.array(values)).tolist()
     spl = interp1d(xs, zeros_prefix + values + zeros_postfix, kind=kind)
 
@@ -181,8 +181,8 @@ class SyntheticGenerator():
         self.density_model = None
         self.synthetic = None
         self._curves = None
-        self._horizon_heights = None
-        self._faults_coords = None
+        self._horizon_heights = ()
+        self._faults_coords = ()
 
     def make_velocities(self, num_reflections=200, vel_limits=(900, 5400), horizon_heights=(1/4, 1/2, 2/3),
                         horizon_multipliers=(7, 5, 4)):
@@ -244,11 +244,47 @@ class SyntheticGenerator():
         self._curves = curves
         return self
 
+    def _add_fault(self, fault, num_points, zeros_share, kind, perturb_values,
+                   perturb_peak, random_invert, mul):
+        """ Add fault to a velocity model.
+        """
+        x0, x1 = fault[0][0], fault[1][0]
+        y0, y1 = fault[0][1], fault[1][1]
+        x_low, x_high, y_low, y_high = (0, self.velocity_model.shape[0], min(y0, y1), max(y0, y1))
+
+        # y-axis coordinate shift
+        y0, y1 = y0 - y_low, y1 - y_low
+
+        # coeffs of the line equation x = ky + b
+        k = (x1 - x0) / (y1 - y0)
+        b = (x0 * y1 - x1 * y0) / (y1 - y0)
+        kx, ky = (k, 1)
+
+        # apply map coordinates
+        xs, ys = np.meshgrid(np.arange(x_low, x_high), np.arange(0, y_high - y_low))
+        crop = self.velocity_model[x_low:x_high, y_low:y_high]
+        sign = lambda x, y: (np.sign(x - k * y - b) + 1) / 2
+
+        func = make_coords_shift(self.rng, n_points=num_points, perturb_peak=perturb_peak,
+                                 perturb_values=perturb_values, kind=kind, zeros_share=zeros_share,
+                                 random_invert=random_invert)
+        def distance(y):
+            y_01 = y / (y_high - y_low)
+            return func(y_01)
+
+        delta_xs, delta_ys = (mul * kx * sign(xs, ys) * distance(ys),
+                              mul * ky * sign(xs, ys) * distance(ys))
+        crop_elastic = map_coordinates(crop.astype(np.float32),
+                                       (xs + delta_xs, ys + delta_ys),
+                                       mode='nearest').T
+
+        self.velocity_model[x_low:x_high, y_low:y_high] = crop_elastic
+
     def add_faults(self, faults=(((100, 50), (100, 370)),
                                  ((50, 320), (50, 470)),
                                  ((150, 320), (150, 470))),
                    num_points=10, zeros_share=0.6, kind='cubic', perturb_values=True,
-                   perturb_peak=False, peak_value=0.05, random_invert=False):
+                   perturb_peak=False, random_invert=False, mul=10):
         """ Add faults to the velocity model. Faults are basically elastic transforms of patches of
         generated seismic images. Elastic transforms are performed through coordinates-transformation
         in depth-projection. Those are smooth maps [0, 1] -> [0, 1] described as f(x) = x + distortion.
@@ -271,9 +307,6 @@ class SyntheticGenerator():
             whether to add random perturbations to a coordinate-shift hump.
         perturb_peak : bool
             if set True, the position of hump's peak is randomly moved.
-        peak_value : float
-            value of a coordinate-shift transform in the peak of a hump
-            (before random perturbation).
         random_invert : bool
             if True, the coordinate-shift is defined as x - "hump" rather than x + "hump".
         """
@@ -282,15 +315,8 @@ class SyntheticGenerator():
 
         self._faults_coords = faults
         for fault in faults:
-            x = fault[0][0]
-            y_low, y_high = fault[0][1], fault[1][1]
-            crop = self.velocity_model[:x, y_low:y_high]
-            func = make_coords_shift(self.rng, n_points=num_points, peak_value=peak_value, perturb_peak=perturb_peak,
-                                     perturb_values=perturb_values, kind=kind, zeros_share=zeros_share,
-                                     random_invert=random_invert)
-            new_coords = func(np.arange(crop.shape[-1]) / (crop.shape[-1] - 1)) * (crop.shape[-1] - 1)
-            crop_elastic = np.array([map_coordinates(trace, [new_coords]) for trace in crop])
-            self.velocity_model[:x, y_low:y_high] = crop_elastic
+            self._add_fault(fault, num_points, zeros_share, kind, perturb_values,
+                            perturb_peak, random_invert, mul)
         return self
 
     def make_density_model(self, density_noise_lims=(0.97, 1.3)):
@@ -367,11 +393,17 @@ class SyntheticGenerator():
         """
         # convert each fault to the point-cloud format
         point_clouds = []
-        for l, h in self._faults_coords:
-            x = l[0]
-            y_low, y_high = l[1], h[1]
+        for fault in self._faults_coords:
+            x0, x1 = fault[0][0], fault[1][0]
+            y0, y1 = fault[0][1], fault[1][1]
+            y_low, y_high = min(y0, y1), max(y0, y1)
+
+            # coeffs of the line equation x = ky + b
+            k = (x1 - x0) / (y1 - y0)
+            b = (x0 * y1 - x1 * y0) / (y1 - y0)
+
             heights = np.arange(y_low, y_high)
-            ilines, xlines = np.zeros_like(heights), np.ones_like(heights) * x
+            ilines, xlines = np.zeros_like(heights), (np.rint(k * heights + b)).astype(np.int)
             point_cloud = np.stack([ilines, xlines, heights], axis=1)
             point_clouds.append(point_cloud)
 
@@ -385,8 +417,8 @@ def generate_synthetic(shape=(50, 400, 800), num_reflections=200, vel_limits=(90
                                ((50, 320), (50, 470)),
                                ((150, 320), (150, 470))),
                        num_points_faults=10, zeros_share_faults=0.6, fault_shift_interpolation='cubic',
-                       perturb_values=True, perturb_peak=False, peak_value=0.05, random_invert=False,
-                       fetch_surfaces='horizons', rng=None, seed=None):
+                       perturb_values=True, perturb_peak=False, random_invert=False,
+                       fetch_surfaces='horizons', rng=None, seed=None, mul=10):
     """ Generate and synthetic 3d-cube along with most prominient reflective surfaces ("horizons").
 
     Parameters
@@ -433,9 +465,6 @@ def generate_synthetic(shape=(50, 400, 800), num_reflections=200, vel_limits=(90
         add random perturbations to a coordinate-shift hump.
     perturb_peak : bool
         if set True, the position of hump's peak is randomly moved.
-    peak_value : float
-        value of a coordinate-shift transform in the peak of a hump
-        (before random perturbation).
     random_invert : bool
         if True, the coordinate-shift is defined as x - "hump" rather than x + "hump".
     fetch_surfaces : str
@@ -466,7 +495,7 @@ def generate_synthetic(shape=(50, 400, 800), num_reflections=200, vel_limits=(90
     if faults is not None:
         if dim == 2:
             gen.add_faults(faults, num_points_faults, zeros_share_faults, fault_shift_interpolation,
-                           perturb_values, perturb_peak, peak_value, random_invert)
+                           perturb_values, perturb_peak, random_invert, mul)
         else:
             raise ValueError("For now, faults are only supported for dim = 2.")
 
