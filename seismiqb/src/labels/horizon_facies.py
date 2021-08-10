@@ -162,6 +162,7 @@ class Facies(Horizon):
             subset_name = None
 
         data = super().load_attribute(src=src, location=location, **kwargs)
+
         if subset_name:
             subset = self.get_subset(subset_name)
             # pylint: disable=protected-access
