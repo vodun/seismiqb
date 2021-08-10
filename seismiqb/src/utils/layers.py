@@ -213,12 +213,16 @@ class InputLayer(nn.Module):
 
     def forward(self, x):
         """ Forward pass. """
+        if self.phases:
+            phases = self.phase_layer(x)
+
         if self.normalization:
             x = self.normalization_layer(x)
             x = torch.clip(x,  -10, 10) # TODO: remove clipping
+
         if self.phases:
-            phases = self.phase_layer(x)
             x = self._concat(x, phases)
+
         x = self.base_block(x)
         return x
 

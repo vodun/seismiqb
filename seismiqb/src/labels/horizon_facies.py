@@ -1,13 +1,13 @@
 """ Seismic facies container. """
 # pylint: disable=too-many-statements
-import os
+from copy import copy
 
 import numpy as np
 import pandas as pd
 
 
 from .horizon import Horizon
-from ..utils import to_list
+from ..utils import to_list, make_savepath
 
 
 
@@ -74,6 +74,29 @@ class Facies(Horizon):
             msg = f"Requested subset {name} is missing in subsets storage. Availiable subsets are {list(self.subsets)}."
             raise KeyError(msg) from e
 
+    def cut_subset(self, matrix, name=None):
+        """ Make new label with points matrix filtered by given presense matrix.
+
+        Parameters
+        ----------
+        matrix : np.array
+            Presense matrix of labels points. Must be in full cubes coordinates.
+            If consists of 0 and 1, keep points only where values are 1.
+            If consists of values from [0, 1] interval, keep points where values are greater than 0.5.
+        name : str or None
+            Name for new label. If None, original label name used.
+
+        Returns
+        -------
+        New `Facies` instance with filtered points matrix.
+        """
+        other = copy(self)
+        other.name = name or self.name
+
+        filtering_matrix = (matrix < 0.5).astype(int)
+        other.filter_matrix(filtering_matrix)
+
+        return other
 
     # Matrix inversion
     def __sub__(self, other):
@@ -93,8 +116,64 @@ class Facies(Horizon):
         return self - self.get_subset(subset)
 
 
+    # Load attributes from subsets
+    def load_attribute(self, src, location=None, **kwargs):
+        """ Load horizon or its subset attribute values at requested location.
+
+        Parameters
+        ----------
+        src : str
+            Key of the desired attribute.
+            If attribute is from horizon subset, key must be like "subset/attribute".
+
+            Valid attributes are:
+            - 'cube_values' or 'amplitudes': cube values;
+            - 'depths' or 'full_matrix': horizon depth map in cubic coordinates;
+            - 'metrics': random support metrics matrix.
+            - 'instant_phases': instantaneous phase;
+            - 'instant_amplitudes': instantaneous amplitude;
+            - 'fourier' or 'fourier_decomposition': fourier transform with optional PCA;
+            - 'wavelet' or 'wavelet decomposition': wavelet transform with optional PCA;
+            - 'masks' or 'full_binary_matrix': mask of horizon;
+        location : sequence of 3 slices
+            First two slices are used as `iline` and `xline` ranges to cut crop from.
+            Last 'depth' slice is not used, since points are sampled exactly on horizon.
+            If None, `src` is returned uncropped.
+        kwargs :
+            Passed directly to attribute-evaluating methods from :attr:`.ATTRIBUTE_TO_METHOD` depending on `src`.
+
+        Examples
+        --------
+        Load 'depths' attribute for whole horizon:
+        >>> horizon.load_attribute('depths')
+
+        Load 'cube_values' attribute for requested slice of fixed width:
+        >>> horizon.load_attribute('cube_values', (x_slice, i_slice, 1), window=10)
+
+        Load 'metrics' attribute with specific evaluation parameter and following normalization.
+        >>> horizon.load_attribute('metrics', metrics='hilbert', normalize='min-max')
+
+        Load "wavelet" attribute from "channels" subset of `horizon`:
+        >>> horizon.load_attribute(src="channels/wavelet")
+        """
+        if '/' in src:
+            subset_name, src = src.split('/')
+        else:
+            subset_name = None
+
+        data = super().load_attribute(src=src, location=location, **kwargs)
+
+        if subset_name:
+            subset = self.get_subset(subset_name)
+            # pylint: disable=protected-access
+            mask = subset.load_attribute(src='masks', location=location, fill_value=0).astype(np.bool)
+            data[~mask] = kwargs.get('fill_value', self.FILL_VALUE)
+
+        return data
+
+
     # Metrics evaluations
-    def evaluate(self, src_true, src_pred, metrics_fn, metrics_names=None, output='df'):
+    def evaluate(self, src_true, src_pred, metrics_fn, metrics_names=None):
         """ Apply given function to 'masks' attribute of requested labels.
 
         Parameters
@@ -106,39 +185,32 @@ class Facies(Horizon):
         metrics_fn : callable or list of callable
             Metrics function(s) to calculate.
         metrics_name : str, optional
-            Name of the column with metrics values in resulted dataframe.
-        output : 'df' or 'arr'
-            Whether return an array of metrics values or dataframe.
+            Name of the columns with metrics values in resulted dataframe.
         """
         pd.options.display.float_format = '{:,.3f}'.format
 
-        labeled_traces = self.get_full_binary_matrix(fill_value=0).astype(bool)
+        labeled_traces = self.load_attribute('masks', fill_value=0).astype(bool)
         true = self.load_attribute(f"{src_true}/masks", fill_value=0)[labeled_traces]
         pred = self.load_attribute(f"{src_pred}/masks", fill_value=0)[labeled_traces]
 
         metrics_fn = to_list(metrics_fn)
         values = [fn(true, pred) for fn in metrics_fn]
-
-        if output == 'arr':
-            return values
+        names = to_list(metrics_names) if metrics_names is not None else [fn.__name__ for fn in metrics_fn]
+        data = dict(zip(names, values))
 
         index = pd.MultiIndex.from_arrays([[self.geometry.displayed_name], [self.short_name]],
                                           names=['geometry_name', 'horizon_name'])
-        names = metrics_names if metrics_names is not None else [fn.__name__ for fn in metrics_fn]
-        df = pd.DataFrame(index=index, data=values, columns=names)
+        df = pd.DataFrame(index=index, data=data)
         return df
 
 
     # Manage data
-    def dump(self, path, name=None, log=True):
+    def dump(self, path, extension='.char', log=True):
         """ Save facies. """
-        path = path.replace('*', self.geometry.short_name)
-        name = name.replace('*', self.name) if name is not None else self.name
-        os.makedirs(path, exist_ok=True)
-        dump_path = f"{path}/{name}"
-        super().dump(dump_path)
+        path = make_savepath(path, self.short_name, extension)
+        super().dump(path)
         if log:
-            print(f"`{self.short_name}` saved to `{dump_path}`")
+            print(f"`{self.short_name}` saved to `{path}`")
 
     def reset_cache(self):
         """ Clear cached data. """

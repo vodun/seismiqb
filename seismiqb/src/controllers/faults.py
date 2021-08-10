@@ -22,7 +22,7 @@ from ..utils import adjust_shape_3d, Accumulator3D, InputLayer
 from ..plotters import plot_image
 
 from ...batchflow import Config, Pipeline, Notifier, Dataset
-from ...batchflow import B, C, D, P, R, V, F, I
+from ...batchflow import B, C, D, P, R, V, F, I, M, PP
 from ...batchflow import NumpySampler as NS
 from ...batchflow.models.torch import TorchModel, EncoderDecoder
 
@@ -44,7 +44,8 @@ class FaultController(BaseController):
             'weights': None,
             'threshold': 0,
             'uniform_cubes': True,
-            'uniform_faults': True
+            'uniform_faults': True,
+            'extend_annotation': True,
         },
 
         # Model parameters
@@ -160,6 +161,7 @@ class FaultController(BaseController):
         weights = config.get('weights')
         threshold = config['threshold']
         crop_shape = self.config['train']['crop_shape']
+        extend = self.config['dataset']['extend_annotation']
 
         uniform_cubes = config['uniform_cubes']
         uniform_faults = config['uniform_faults']
@@ -182,7 +184,7 @@ class FaultController(BaseController):
         self.log(f'Train dataset cubes weights: {weights}.')
 
         sampler = SeismicSampler(labels=dataset.labels, crop_shape=crop_shape, mode='fault',
-                                 threshold=threshold, **kwargs)
+                                 threshold=threshold, extend=extend, **kwargs)
 
         new_sampler = 0 & ConstantSampler(np.int32(0), dim=FaultSampler.dim)
         for cube_weight, cube_sampler in zip(weights, sampler.samplers.values()):
@@ -240,12 +242,14 @@ class FaultController(BaseController):
         il, xl, h = self.config['train/crop_shape']
 
         def faults():
-            x = np.random.randint(14, xl-10)
-            y0 =  np.random.randint(5, 30)
-            y1 = np.random.randint(90, h-10)
+            x0 = np.random.randint(14, xl-10)
+            x1 = np.random.randint(14, xl-10) # same prmtzn for x1 as for x0; you can change it ofc
+            y0 =  np.random.randint(0, 200)
+            y1 = np.random.randint(300, h)
             return (
-                ((x, y0), (x, y1)),
+                ((x0, y0), (x1, y1)),
             )
+
         nhors = NS('c', a=[0, 1, 2]).apply(lambda x: x[0, 0])
         locations = [slice(0, i) for i in self.config['train/crop_shape']]
         return (Pipeline()
@@ -255,17 +259,16 @@ class FaultController(BaseController):
                                     horizon_heights=F(heights.sample)(size=1),
                                     horizon_multipliers=F(muls.sample)(size=F(nhors.sample)(size=1)),
                                     faults=F(faults),
-                                    dst_cubes='images',
-                                    dst_masks='horizons',
-                                    dst_faults='masks',
-                                    peak_value=0.13,
-                                    zeros_share_faults=0.3,
+                                    dst=('images', 'horizons', 'masks'),
+                                    zeros_share_faults=0.1,
+                                    mul=10, # controls max fault-shift
+                                    fault_width=5 # default value is 3
                                     )
                 .rebatch(C('batch_size'), components=['images', 'masks'])
                 .update(B('locations'), [locations] * C('batch_size'))
                 .normalize(mode=C('norm_mode'), itemwise=C('itemwise'), src='images')
                 .run_later(batch_size=1, shuffle=False, n_iters=None, n_epochs=None, drop_last=False)
-                )
+        )
 
     def augmentation_pipeline(self):
         """ Augmentations for training. """
@@ -301,6 +304,16 @@ class FaultController(BaseController):
             ppl += (Pipeline()
                 .predict_model('model', images=B('images')[:1], fetches=C('output'), save_to=B('prediction'))
             )
+            if self.config['train/phase']:
+                ppl += Pipeline().update(B('phases'), M('model').get_intermediate_activations(
+                    images=B('images'),
+                    layers=M('model').model[0][0].phase_layer)
+                )
+            if self.config['train/normalization_layer']:
+                ppl += Pipeline().update(B('norm_images'), M('model').get_intermediate_activations(
+                    images=B('images'),
+                    layers=M('model').model[0][0].normalization_layer)
+                )
         return ppl
 
     def train(self, dataset, sampler=None, synthetic=False, config=None, **kwargs):
@@ -320,12 +333,23 @@ class FaultController(BaseController):
         """ Make notifier. """
         if self.config['train/visualize_crops']:
             cube_name = ""#B().unsalt(B('indices')[0])
-            return Notifier(True, graphs=['loss_history',
+            src = [
                 {'source': [B('images'), B('masks'), cube_name, B('locations')],
                  'name': 'masks', 'loc': B('location'), 'plot_function': self.custom_plotter},
                 {'source': [B('images'), B('prediction'), cube_name, B('locations')],
-                 'name': 'prediction', 'loc': B('location'), 'plot_function': self.custom_plotter},
-            ],
+                 'name': 'prediction', 'loc': B('location'), 'plot_function': self.custom_plotter}
+            ]
+            if self.config['train/normalization_layer']:
+                src += [
+                    {'source': [B('norm_images'), None, cube_name, B('locations')],
+                    'name': 'norm_images', 'loc': B('location'), 'plot_function': self.custom_plotter},
+                ]
+            if self.config['train/phase']:
+                src += [
+                    {'source': [B('phases'), None, cube_name, B('locations')],
+                    'name': 'phases', 'loc': B('location'), 'plot_function': self.custom_plotter},
+                ]
+            return Notifier(True, graphs=['loss_history', *src],
             total=self.config['train/n_iters'],
             figsize=(40, 10))
         return super().make_notifier()
@@ -337,13 +361,22 @@ class FaultController(BaseController):
         loc = [(slc.start, slc.stop) for slc in locations[0]]
         loc = '  '.join([f'{item[0]}:{item[1]}' for item in loc])
 
-        title = f"{cube_name}  {loc}\n{container['name']}"
-        if images.ndim == 4:
-            images, masks = images[0][0], masks[0][0]
-        elif images.ndim == 5:
-            pos = images.shape[2] // 2
-            images, masks = images[0][0][pos], masks[0][0][pos]
-        plot_image([images, masks > 0.5], overlap=True, title=title, ax=ax, displayed_name="")
+        if masks is not None:
+            title = f"{cube_name}  {loc}\n{container['name']}"
+            if images.ndim == 4:
+                images, masks = images[0][0], masks[0][0]
+            elif images.ndim == 5:
+                pos = images.shape[2] // 2
+                images, masks = images[0][0][pos], masks[0][0][pos]
+            plot_image([images, masks > 0.5], overlap=True, title=title, ax=ax, displayed_name="")
+        else:
+            title = f"{cube_name}  {loc}\n{container['name']}"
+            if images.ndim == 4:
+                images = images[0][0]
+            elif images.ndim == 5:
+                pos = images.shape[2] // 2
+                images = images[0][0][pos]
+            plot_image(images, overlap=True, title=title, ax=ax, displayed_name="")
 
     def get_train_template(self, synthetic=False, **kwargs):
         """ Define the whole training procedure pipeline including data loading, augmentation and model training. """
@@ -359,7 +392,7 @@ class FaultController(BaseController):
     def get_model_config(self, name):
         """ Get model config depending model architecture. """
         if name == 'UNet':
-            return {**self.BASE_MODEL_CONFIG, **self.UNET_CONFIG}
+            return (Config(self.BASE_MODEL_CONFIG) + Config(self.UNET_CONFIG)).flatten()
         raise ValueError(f'Unknown model name: {name}')
 
     def get_model_class(self, name):

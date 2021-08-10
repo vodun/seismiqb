@@ -22,6 +22,8 @@ setup(
         'numpy>=1.16.0',
         'scipy>=1.3.3',
         'pandas>=1.0.0',
+        'numexpr>=2.7',
+        'bottleneck>=1.3',
         'matplotlib>=3.0.2',
         'tqdm>=4.50.0',
         'segyio>=1.8.3',
