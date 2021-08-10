@@ -11,7 +11,6 @@ import gc
 from time import perf_counter
 from textwrap import indent
 from pprint import pformat
-from glob import glob
 
 import numpy as np
 import torch
@@ -19,7 +18,7 @@ import torch
 from .base import BaseController
 
 from ..labels import Horizon
-from ..cubeset import SeismicCubeset
+from ..dataset import SeismicDataset
 from ..samplers import SeismicSampler, RegularGrid
 from ..metrics import HorizonMetrics
 from ..utils import Accumulator3D
@@ -100,7 +99,7 @@ class HorizonController(BaseController):
 
     # Dataset creation: geometries, labels, grids, samplers
     def make_dataset(self, cube_paths=None, horizon_paths=None, horizon=None):
-        """ Create an instance of :class:`.SeismicCubeset` with cubes and horizons.
+        """ Create an instance of :class:`.SeismicDataset` with cubes and horizons.
 
         Parameters
         ----------
@@ -116,32 +115,30 @@ class HorizonController(BaseController):
         Instance of dataset.
         """
         if horizon is not None:
-            dataset = SeismicCubeset.from_horizon(horizon)
+            dataset = SeismicDataset.from_horizon(horizon)
 
             self.log(f'Created dataset from {horizon.name}')
         else:
-            dataset = SeismicCubeset(cube_paths)
-            dataset.load_geometries()
+            if horizon_paths is None or isinstance(horizon_paths, (str, tuple, list)):
+                index = {cube_paths: horizon_paths}
+            else:
+                index = horizon_paths
 
-            if horizon_paths:
-                if isinstance(horizon_paths, str):
-                    horizon_paths = {dataset.indices[0]: glob(horizon_paths)}
-                dataset.create_labels(horizon_paths, labels_class=Horizon)
-
+            dataset = SeismicDataset(index, labels_class=Horizon)
             self.log(f'Created dataset\n{indent(str(dataset), " "*4)}')
         return dataset
 
     def make_carcass(self, dataset, frequencies=200, **kwargs):
         """ Cut a grid from the passed horizon. """
         carcass = dataset.labels[0][0].make_carcass(frequencies=frequencies, **kwargs)
-        return carcass, SeismicCubeset.from_horizon(carcass)
+        return carcass, SeismicDataset.from_horizon(carcass)
 
     def make_grid(self, dataset, frequencies, **kwargs):
         """ Create a grid, based on quality map, for each of the cubes in supplied `dataset`. Works inplace.
 
         Parameters
         ----------
-        dataset : :class:`.SeismicCubeset`
+        dataset : :class:`.SeismicDataset`
             Dataset with cubes.
         frequencies : sequence of ints
             List of frequencies, corresponding to `easy` and `hard` places in the cube.

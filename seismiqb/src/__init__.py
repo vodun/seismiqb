@@ -1,7 +1,7 @@
 """ Init file. """
 # pylint: disable=wildcard-import
 # Core primitives
-from .cubeset import SeismicCubeset, FaciesCubeset
+from .dataset import SeismicDataset, FaciesCubeset
 from .crop_batch import SeismicCropBatch
 
 # Data entities

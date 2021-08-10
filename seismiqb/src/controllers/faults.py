@@ -13,7 +13,7 @@ from .base import BaseController
 from .best_practices import MODEL_CONFIG
 
 from ..labels import Fault
-from ..cubeset import SeismicCubeset
+from ..dataset import SeismicDataset
 from ..samplers import SeismicSampler, RegularGrid, FaultSampler, ConstantSampler
 from ..metrics import FaultsMetrics
 from ..utils import adjust_shape_3d, Accumulator3D, InputLayer
@@ -121,17 +121,17 @@ class FaultController(BaseController):
     }
 
     def make_train_dataset(self, **kwargs):
-        """ Create train dataset as an instance of :class:`.SeismicCubeset` with cubes and faults.
+        """ Create train dataset as an instance of :class:`.SeismicDataset` with cubes and faults.
         Arguments are from 'dataset' subconfig and kwargs. """
         return self._make_dataset(train=True, **kwargs)
 
     def make_inference_dataset(self, labels=False, **kwargs):
-        """ Create inference dataset as an instance of :class:`.SeismicCubeset` with cubes and faults.
+        """ Create inference dataset as an instance of :class:`.SeismicDataset` with cubes and faults.
         Arguments are from 'dataset' subconfig and kwargs. """
         return self._make_dataset(train=False, labels=labels, **kwargs)
 
     def _make_dataset(self, train=True, labels=True, bar=False, **kwargs):
-        """ Create an instance of :class:`.SeismicCubeset` with cubes and faults. Arguments are from 'dataset'
+        """ Create an instance of :class:`.SeismicDataset` with cubes and faults. Arguments are from 'dataset'
         subconfig and kwargs. """
         config = {**self.config['dataset'], **kwargs}
         width = config['width']
@@ -139,7 +139,7 @@ class FaultController(BaseController):
         cubes = config['train_cubes'] if train else config['inference_cubes']
 
         paths = [self.amplitudes_path(item) for item in cubes]
-        dataset = SeismicCubeset(index=paths)
+        dataset = SeismicDataset(index=paths)
 
         if labels:
             transposed = config['transposed_cubes']

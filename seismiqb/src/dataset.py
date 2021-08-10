@@ -2,24 +2,23 @@
 #pylint: disable=too-many-lines, too-many-arguments
 import os
 from copy import copy
-from glob import glob
-from warnings import warn
+from textwrap import indent
 
 import numpy as np
 import pandas as pd
-from tqdm.auto import tqdm
 
-from ..batchflow import FilesIndex, Dataset, Pipeline
+from ..batchflow import DatasetIndex, Dataset, Pipeline
 
+from .field import Field
 from .geometry import SeismicGeometry
-from .labels import Horizon
 from .plotters import plot_image, show_3d
 from .crop_batch import SeismicCropBatch
 from .utils import to_list, IndexedDict
 
 
-class SeismicCubeset(Dataset):
-    """ A common container for data entities: usually, seismic cubes and some type of labels.
+class SeismicDataset(Dataset):
+    """ !!.
+    A common container for data entities: usually, seismic cubes and some type of labels.
     Entities are stored in dict-like objects, which can be indexed with either cube names or ordinal integer.
 
     Can be initialized with either:
@@ -38,59 +37,44 @@ class SeismicCubeset(Dataset):
         Nested storage of labels, where keys are cube names and values are sequences of labels.
     """
     #pylint: disable=keyword-arg-before-vararg
-    def __init__(self, index, batch_class=SeismicCropBatch, preloaded=None, *args, **kwargs):
-        # Wrap with `FilesIndex`, if needed
-        if not isinstance(index, FilesIndex):
-            index = [index] if isinstance(index, str) else index
-            index = FilesIndex(path=index, no_ext=True)
-        super().__init__(index, batch_class=batch_class, preloaded=preloaded, *args, **kwargs)
+    def __init__(self, index, batch_class=SeismicCropBatch, *args, **kwargs):
+        if args:
+            raise TypeError('Positional args are not allowed for `SeismicDataset` initialization!')
 
-        # Initialize basic containers
-        self.geometries = IndexedDict({ix: SeismicGeometry(self.index.get_fullpath(ix), process=False)
-                                       for ix in self.indices})
-        self.labels = IndexedDict({ix: [] for ix in self.indices})
+        # Convert `index` to a dictionary
+        if isinstance(index, (str, SeismicGeometry, Field)):
+            index = [index]
+        if isinstance(index, (tuple, list, DatasetIndex)):
+            index = {item : None for item in index}
 
-        self._cached_attributes = {'geometries'}
+        if isinstance(index, dict):
+            self.fields = IndexedDict()
+            for geometry, labels in index.items():
+                print('DS INIT', geometry, labels)
+                field = Field(geometry=geometry, labels=labels, **kwargs)
+                self.fields[field.short_name] = field
+        else:
+            raise TypeError('!!.')
+
+        dataset_index = DatasetIndex(list(self.fields.keys()))
+        super().__init__(dataset_index, batch_class=batch_class)
 
 
     @classmethod
     def from_horizon(cls, horizon):
         """ Create dataset from an instance of Horizon. """
-        cube_path = horizon.geometry.path
-        dataset = SeismicCubeset(cube_path)
-        dataset.geometries[0] = horizon.geometry
-        dataset.labels[0] = [horizon]
-        return dataset
+        return cls({horizon.geometry : {'horizons': [horizon]}})
 
 
     # Inner workings
     def __getitem__(self, key):
-        """ Select attribute or its item for specific cube.
+        """ !!. """
+        if isinstance(key, (int, str)):
+            # if key not in self.indices:
+            #     return getattr(self, key)
+            return self.fields[key]
+        raise KeyError(f'Unsupported key for subscripting, {key}')
 
-        Examples
-        --------
-        Get `labels` attribute for cube with 0 index:
-        >>> cubeset[0, 'labels']
-        Get 2nd `channels` attribute item for cube with name 'CUBE_01_XXX':
-        >>> cubeset['CUBE_01_XXX', 'channels', 2]
-        """
-        idx, attr, *item_num = key
-        item_num = item_num[0] if len(item_num) == 1 else slice(None)
-        return getattr(self, attr)[idx][item_num]
-
-    def __setitem__(self, key, value):
-        """ Set attribute or its item for specific cube.
-
-        Examples
-        --------
-        Set `labels` attribute for cube with 0 index to `[label_0, label_1]`:
-        >>> cubeset[0, 'labels'] = [label_0, label_1]
-        Set 2nd item of `channels` attribute for cube with name 'CUBE_01_XXX' to `channel_0`:
-        >>> cubeset['CUBE_01_XXX', 'channels', 2] = channel_0
-        """
-        idx, attr, *item_num = key
-        item_num = item_num[0] if len(item_num) == 1 else slice(None)
-        getattr(self, attr)[idx][item_num] = value
 
     def gen_batch(self, batch_size=None, shuffle=False, n_iters=None, n_epochs=None, drop_last=False, **kwargs):
         """ Remove `n_epochs`, `shuffle` and `drop_last` from passed arguments.
@@ -105,109 +89,16 @@ class SeismicCubeset(Dataset):
         return super().gen_batch(batch_size, n_iters=n_iters, **kwargs)
 
 
-    # Create and manage data attributes
-    def load_geometries(self, logs=True, collect_stats=True, spatial=True, **kwargs):
-        """ Load geometries into dataset attribute.
+    # BC / conveniency
+    @property
+    def geometries(self):
+        """ !!. """
+        return IndexedDict({idx : field.geometry for idx, field in self.fields.items()})
 
-        Parameters
-        ----------
-        logs : bool
-            Whether to create logs. If True, .log file is created next to .sgy-cube location.
-        collect_stats : bool
-            Whether to collect stats for cubes in SEG-Y format.
-        spatial : bool
-            Whether to collect additional stats for POST-STACK cubes.
-
-        Returns
-        -------
-        SeismicCubeset
-            Same instance with loaded geometries.
-        """
-        for ix in self.indices:
-            self.geometries[ix].process(collect_stats=collect_stats, spatial=spatial, **kwargs)
-            if logs:
-                self.geometries[ix].log()
-
-    def create_labels(self, paths=None, filter_zeros=True, dst='labels', labels_class=Horizon,
-                      sort=True, bar=False, **kwargs):
-        """ Create labels (horizons, facies, etc) from given paths.
-        Optionally, sorts and filters loaded labels.
-
-        Parameters
-        ----------
-        paths : dict
-            Mapping from indices to txt paths with labels.
-        filter_zeros : bool
-            Whether to remove labels on zero-traces.
-        dst : str
-            Name of attribute to put labels in.
-        labels_class : class
-            Class to use for labels creation.
-        sort : bool or str
-            Whether to sort loaded labels. If True, then sort based on average depth.
-            If string, then name of the attribute to use as sorting key.
-        bar : bool
-            Progress bar for labels loading. Defaults to False.
-
-        Returns
-        -------
-        SeismicCubeset
-            Same instance with loaded labels.
-        """
-        labels = IndexedDict({ix: [] for ix in self.indices})
-
-        for idx in self.indices:
-            pbar = tqdm(paths[idx], disable=(not bar))
-
-            label_list = []
-            for path in pbar:
-                if path.endswith('.dvc'):
-                    continue
-                pbar.set_description(os.path.basename(path))
-                label_list.append(labels_class(path, geometry=self.geometries[idx], **kwargs))
-
-            if sort:
-                sort = sort if isinstance(sort, str) else 'h_mean'
-                label_list.sort(key=lambda label: getattr(label, sort))
-            if filter_zeros:
-                _ = [label.filter() for label in label_list]
-
-            labels[idx] = [label for label in label_list if len(label) > 0]
-
-        setattr(self, dst, labels)
-        self._cached_attributes.add(dst)
-
-
-    def dump_labels(self, path, name='points', separate=True):
-        """ Dump label points to file. """
-        for idx, labels_list in self.labels.items():
-            for label in labels_list:
-                dirname = os.path.dirname(self.index.get_fullpath(idx))
-                if path[0] == '/':
-                    path = path[1:]
-                dirname = os.path.join(dirname, path)
-                if not os.path.exists(dirname):
-                    os.makedirs(dirname)
-                name = label.name if separate else name
-                save_to = os.path.join(dirname, name + '.npz')
-                label.dump_points(save_to)
-
-    def reset_caches(self, attributes=None):
-        """ Reset lru cache for cached class attributes.
-
-        Parameters
-        ----------
-        attributes : sequence of str
-            Class attributes to reset cache in.
-            If not supplied, reset in `geometries` and attributes added by `create_labels`.
-        """
-        cached_attributes = attributes or self._cached_attributes
-
-        for attr in cached_attributes:
-            for idx in self.indices:
-                cached_attr = getattr(self, attr)[idx]
-                cached_attr = cached_attr if isinstance(cached_attr, list) else [cached_attr]
-                _ = [item.reset_cache() for item in cached_attr]
+    @property
+    def labels(self):
+        """ !!. """
+        return IndexedDict({idx : field.labels for idx, field in self.fields.items()})
 
 
     # Default pipeline and batch for fast testing / introspection
@@ -225,20 +116,49 @@ class SeismicCubeset(Dataset):
         return self.data_pipeline(sampler=sampler, batch_size=batch_size, width=width).next_batch()
 
 
+
+    def dump_labels(self, path, name='points', separate=True):
+        #TODO: remove?
+        """ Dump label points to file. """
+        for idx, labels_list in self.labels.items():
+            for label in labels_list:
+                dirname = os.path.dirname(self.index.get_fullpath(idx))
+                if path[0] == '/':
+                    path = path[1:]
+                dirname = os.path.join(dirname, path)
+                if not os.path.exists(dirname):
+                    os.makedirs(dirname)
+                name = label.name if separate else name
+                save_to = os.path.join(dirname, name + '.npz')
+                label.dump_points(save_to)
+
+    def reset_caches(self, attributes=None):
+        # TODO: rewrite for fields
+        """ Reset lru cache for cached class attributes.
+
+        Parameters
+        ----------
+        attributes : sequence of str
+            Class attributes to reset cache in.
+            If not supplied, reset in `geometries` and attributes added by `create_labels`.
+        """
+        cached_attributes = attributes or self._cached_attributes
+
+        for attr in cached_attributes:
+            for idx in self.indices:
+                cached_attr = getattr(self, attr)[idx]
+                cached_attr = cached_attr if isinstance(cached_attr, list) else [cached_attr]
+                _ = [item.reset_cache() for item in cached_attr]
+
+
     # Textual and visual representation of dataset contents
     def __str__(self):
-        msg = f'Seismic Cubeset with {len(self)} cube{"s" if len(self) > 1 else ""}:\n'
-        for idx in self.indices:
-            geometry = self.geometries[idx]
-            labels = self.labels.get(idx, [])
-
-            add = f'{repr(geometry)}' if hasattr(geometry, 'cube_shape') else f'{idx}'
-            msg += f'    {add}{":" if labels else ""}\n'
-
-            for horizon in labels:
-                msg += f'        {horizon.name}\n'
+        msg = f'Seismic Dataset with {len(self)} field{"s" if len(self) > 1 else ""}:\n'
+        for field in self.fields.values():
+            msg += indent(f'{str(field)}\n', prefix='    ')
         return msg[:-1]
 
+    # TODO: move to Field
     def show_3d(self, idx=0, src='labels', aspect_ratio=None, zoom_slice=None,
                  n_points=100, threshold=100, n_sticks=100, n_nodes=10,
                  slides=None, margin=(0, 0, 20), colors=None, **kwargs):
@@ -447,98 +367,8 @@ class SeismicCubeset(Dataset):
         return plot_image(imgs, **kwargs)
 
 
-    # Predictions
-    # TODO: no longer needed, remove
-    def assemble_crops(self, crops, grid_info='grid_info', order=(0, 1, 2), fill_value=None):
-        """ #TODO: no longer needed, remove. """
-        if isinstance(grid_info, str):
-            if not hasattr(self, grid_info):
-                raise ValueError('Pass grid_info dictionary or call `make_grid` method to create grid_info.')
-            grid_info = getattr(self, grid_info)
-
-        # Do nothing if number of crops differ from number of points in the grid.
-        if len(crops) != len(grid_info['grid_array']):
-            raise ValueError('Length of crops must be equal to number of crops in a grid')
-
-        if fill_value is None and len(crops) != 0:
-            fill_value = np.min(crops)
-
-        grid_array = grid_info['grid_array']
-        crop_shape = grid_info['crop_shape']
-        background = np.full(grid_info['predict_shape'], fill_value, dtype=crops[0].dtype)
-
-        for j, (i, x, h) in enumerate(grid_array):
-            crop_slice, background_slice = [], []
-
-            for k, start in enumerate((i, x, h)):
-                if start >= 0:
-                    end = min(background.shape[k], start + crop_shape[k])
-                    crop_slice.append(slice(0, end - start))
-                    background_slice.append(slice(start, end))
-                else:
-                    crop_slice.append(slice(-start, None))
-                    background_slice.append(slice(None))
-
-            crop = crops[j]
-            crop = np.transpose(crop, order)
-            crop = crop[tuple(crop_slice)]
-            previous = background[tuple(background_slice)]
-            background[tuple(background_slice)] = np.maximum(crop, previous)
-
-        return background
-
-    def _compute_total_batches_in_all_chunks(self, idx, chunk_grid, chunk_shape, crop_shape, crop_stride, batch_size):
-        """ #TODO: no longer needed, remove. """
-        total = 0
-        for lower_bound in chunk_grid:
-            upper_bound = np.minimum(lower_bound + chunk_shape, self.geometries[idx].cube_shape)
-            self.make_grid(
-                self.indices[idx], crop_shape,
-                *list(zip(lower_bound, upper_bound)),
-                strides=crop_stride, batch_size=batch_size
-            )
-            total += self.grid_iters
-        return total
-
-
-    # Convenient loader
-    def load(self, label_dir=None, filter_zeros=True, dst_labels='labels',
-             labels_class=None, direction=None, **kwargs):
-        """ Load everything: geometries, point clouds, labels, samplers.
-
-        Parameters
-        ----------
-        label_dir : str
-            Relative path from each cube to directory with labels.
-        filter_zeros : bool
-            Whether to remove labels on zero-traces.
-        dst_labels : str
-            Class attribute to put loaded data into.
-        labels_class : class
-            Class to use for labels creation.
-        direction : int or None
-            Faults direction, 0 or 1. If None, will be infered automatically.
-        """
-        self.load_geometries(**kwargs)
-
-        # Create suitable data structure for `create_labels`
-        label_dir = label_dir or '/INPUTS/HORIZONS/RAW/*'
-
-        paths_txt = {}
-        for idx in self.indices:
-            dir_path = '/'.join(self.index.get_fullpath(idx).split('/')[:-1])
-            label_dir_ = label_dir if isinstance(label_dir, str) else label_dir[idx]
-            dir_ = glob(dir_path + label_dir_)
-            if len(dir_) == 0:
-                warn("No labels in {}".format(dir_path))
-            paths_txt[idx] = dir_
-
-        self.create_labels(paths=paths_txt, filter_zeros=filter_zeros, dst=dst_labels,
-                           labels_class=labels_class, direction=direction, **kwargs)
-
-
-
-class FaciesCubeset(SeismicCubeset):
+ 
+class FaciesCubeset(SeismicDataset):
     """ Storage extending `SeismicCubeset` functionality with methods for interaction with labels and their subsets.
 
     Most methods basically call methods of the same name for every label stored in requested attribute.

@@ -10,7 +10,7 @@ from scipy.interpolate import interp1d
 from scipy.ndimage import gaussian_filter1d
 from scipy.signal import butter, lfilter, hilbert
 
-from ..batchflow import FilesIndex, Batch, action, inbatch_parallel, SkipBatchException, apply_parallel
+from ..batchflow import DatasetIndex, Batch, action, inbatch_parallel, SkipBatchException, apply_parallel
 
 from .labels import Horizon
 from .plotters import plot_image
@@ -197,8 +197,7 @@ class SeismicCropBatch(Batch):
 
         # Create a new SeismicCropBatch instance
         new_index = [self.salt(ix) for ix in geometry_names]
-        new_paths = {ix: self.index.get_fullpath(self.unsalt(ix)) for ix in new_index}
-        new_batch = type(self)(FilesIndex.from_index(index=new_index, paths=new_paths, dirs=False))
+        new_batch = type(self)(DatasetIndex.from_index(index=new_index))
 
         # Keep chosen components in the new batch
         if passdown:
@@ -233,7 +232,7 @@ class SeismicCropBatch(Batch):
     # Loading of cube data and its derivatives
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def load_cubes(self, ix, dst, slicing='custom', src_geometry='geometries', **kwargs):
+    def load_cubes(self, ix, dst, slicing='custom', src_geometry='geometry', **kwargs):
         """ Load data from cube for stored `locations`.
 
         Parameters
@@ -244,22 +243,11 @@ class SeismicCropBatch(Batch):
             If 'custom', use `load_crop` method to make crops.
             if 'native', crop will be looaded as a slice of geometry. Prefered for 3D crops to speed up loading.
         src_geometry : str
-            Dataset attribute with geometries dict.
+            Field attribute with desired geometry.
         """
-        geometry = self.get(ix, src_geometry)
-        # target geometry is created by `create_labels` and wrapped into a list
-        if isinstance(geometry, (list, tuple)) and len(geometry) > 0:
-            geometry = geometry[0]
-
+        field = self.get(ix, 'fields')
         location = self.get(ix, 'locations')
-
-        if slicing == 'native':
-            crop = geometry[tuple(location)]
-        elif slicing == 'custom':
-            crop = geometry.load_crop(location, **kwargs)
-        else:
-            raise ValueError(f"slicing must be 'native' or 'custom' but {slicing} were given.")
-        return crop
+        return field.load_seismic(location=location, slicing=slicing, src=src_geometry, **kwargs)
 
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
@@ -340,47 +328,28 @@ class SeismicCropBatch(Batch):
     # Loading of labels
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def create_masks(self, ix, dst, use_labels='all', width=3, src_labels='labels'):
+    def create_masks(self, ix, dst, indices='all', width=3, src_labels='labels'):
         """ Create masks from labels in stored `locations`.
 
         Parameters
         ----------
         dst : str
             Component of batch to put loaded masks in.
-        use_labels : str, int or sequence of ints
+        indices : str, int or sequence of ints
             Which labels to use in mask creation.
             If 'all', then use all labels.
             If 'single' or `random`, then use one random label.
-            If 'nearest' or 'nearest_to_center', then use one label closest to height from `src_locations`.
             If int or array-like, then element(s) are interpreted as indices of desired labels.
         width : int
             Width of the resulting label.
         src_labels : str
             Dataset attribute with labels dict.
         """
+        field = self.get(ix, 'fields')
         location = self.get(ix, 'locations')
         crop_shape = self.get(ix, 'shapes')
-        mask = np.zeros(crop_shape, dtype=np.float32)
+        return field.make_mask(location=location, shape=crop_shape, width=width, indices=indices, src=src_labels)
 
-        labels = self.get(ix, src_labels) if isinstance(src_labels, str) else src_labels
-        labels = [labels] if not isinstance(labels, (tuple, list)) else labels
-        if len(labels) == 0:
-            return mask
-
-        use_labels = [use_labels] if isinstance(use_labels, int) else use_labels
-
-        if isinstance(use_labels, (tuple, list, np.ndarray)):
-            labels = [labels[idx] for idx in use_labels]
-        elif use_labels in ['single', 'random']:
-            labels = np.random.shuffle(labels)[0]
-        elif use_labels in ['nearest', 'nearest_to_center']:
-            labels = [self.get_nearest_horizon(ix, src_labels, location[2])]
-
-        for label in labels:
-            mask = label.add_to_mask(mask, locations=location, width=width)
-            if use_labels == 'single' and np.sum(mask) > 0.0:
-                break
-        return mask
 
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
@@ -405,9 +374,10 @@ class SeismicCropBatch(Batch):
         This method loads rectified data, e.g. amplitudes are croped relative
         to horizon and will form a straight plane in the resulting crop.
         """
+        field = self.get(ix, 'fields')
         location = self.get(ix, 'locations')
         label_index = self.get(ix, 'generated')[1]
-        label = self.get(ix, src_labels)[label_index]
+        label = getattr(field, src_labels)[label_index]
 
         label_name = self.get(ix, 'label_names')
         if label.short_name != label_name:
@@ -446,9 +416,8 @@ class SeismicCropBatch(Batch):
         #pylint: disable=protected-access, access-member-before-definition, attribute-defined-outside-init
         _ = args, kwargs
         new_index = [self.indices[i] for i, area in enumerate(areas) if area > threshold]
-        new_dict = {idx: self.index._paths[idx] for idx in new_index}
         if len(new_index) > 0:
-            self.index = FilesIndex.from_index(index=new_index, paths=new_dict, dirs=False)
+            self.index = DatasetIndex.from_index(index=new_index)
         else:
             raise SkipBatchException
 
@@ -705,9 +674,9 @@ class SeismicCropBatch(Batch):
         if self.get(ix, 'orientations'):
             mask = np.transpose(mask, (1, 0, 2))
 
-        geometry = self.get(ix, 'geometries')
+        field = self.get(ix, 'fields')
         shifts = [self.get(ix, 'locations')[k].start for k in range(3)]
-        horizons = Horizon.from_mask(mask, geometry=geometry, shifts=shifts, threshold=threshold,
+        horizons = Horizon.from_mask(mask, geometry=field.geometry, shifts=shifts, threshold=threshold,
                                      mode=mode, minsize=minsize, prefix=prefix)
         return horizons
 

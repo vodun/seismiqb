@@ -217,7 +217,7 @@ class SeismicGeometry(ExportMixin):
         # Names of different lengths and format: helpful for outside usage
         self.name = os.path.basename(self.path)
         self.field = self.parse_field()
-        self.short_name = self.name.split('.')[0]
+        self.short_name = os.path.splitext(self.name)[0]
         self.long_name = ':'.join(self.path.split('/')[-2:])
         self.format = os.path.splitext(self.path)[1][1:]
 
@@ -549,6 +549,16 @@ class SeismicGeometry(ExportMixin):
         if hasattr(self, 'zero_traces'):
             return self.nonzero_traces
         return self.total_traces
+
+    @property
+    def shape(self):
+        """ Cube 3D shape. Same API, as NumPy. """
+        return tuple(self.cube_shape)
+
+    @property
+    def spatial_shape(self):
+        """ Shape of indexing axis. """
+        return self.shape[:2]
 
     @property
     def file_size(self):

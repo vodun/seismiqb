@@ -252,7 +252,7 @@ class Accumulator3D:
         - `:meth:~.aggregate` is used to get the resulting volume
         - `:meth:~.clear` can be optionally used to remove array references and HDF5 file from disk
 
-    This class is an alternative to `:meth:.~SeismicCubeset.assemble_crops`, but allows to
+    This class is an alternative to `:meth:.~SeismicDataset.assemble_crops`, but allows to
     greatly reduce memory footprint of crop aggregation by up to `overlap_factor` times.
     Also, as this class updates rely on `location`s of crops, it can take crops in any order.
 

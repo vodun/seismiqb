@@ -9,7 +9,7 @@ from .base import SeismicGeometry
 
 
 class DummyFile:
-    """ Object that allows creating a SeismicCubeset from an aray in memory.
+    """ Object that allows creating a SeismicDataset from an aray in memory.
         creates a temporary dummy file to be used in index and links it to the array in memory
 
         Parameters
