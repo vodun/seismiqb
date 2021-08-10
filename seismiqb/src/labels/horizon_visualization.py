@@ -14,7 +14,7 @@ from ..utils import to_list, filter_simplices
 class VisualizationMixin:
     """ Methods for textual and visual representation of a horizon. """
     def __repr__(self):
-        return f"""<horizon {self.name} for {self.geometry.displayed_name} at {hex(id(self))}>"""
+        return f"""<Horizon `{self.name}` for `{self.geometry.displayed_name}` at {hex(id(self))}>"""
 
     def __str__(self):
         msg = f"""

@@ -4,9 +4,10 @@ from ast import literal_eval
 from time import perf_counter
 from collections import OrderedDict, defaultdict
 from threading import RLock
-from functools import wraps
+from functools import wraps, partial
 from hashlib import blake2b
 from copy import copy
+from inspect import ismethod
 
 import numpy as np
 try:
@@ -554,6 +555,44 @@ class AccumulatorBlosc(Accumulator3D):
 
 
 
+class DelegatingList(list):
+    """ !!. """
+    def __getattr__(self, key):
+        if len(self) == 0:
+            return lambda *args, **kwargs: DelegatingList()
+
+        attribute = getattr(self[0], key)
+
+        if not ismethod(attribute) and not isinstance(attribute, partial):
+            # Property
+            return DelegatingList([getattr(item, key) for item in self])
+
+        @wraps(attribute)
+        def method_wrapper(*args, **kwargs):
+            results = []
+            for item in self:
+                result = getattr(item, key)(*args, **kwargs)
+                if result is not None:
+                    results.append(result)
+            return DelegatingList(results) if results else None
+
+        return method_wrapper
+
+    def __getitem__(self, key):
+        if isinstance(key, int):
+            return super().__getitem__(key)
+        if isinstance(key, slice):
+            return DelegatingList(super().__getitem__(key))
+
+        result = [super().__getitem__(idx) for idx in key]
+        return DelegatingList(result)
+
+    def __dir__(self):
+        if self:
+            return dir(self[0])
+        return dir(self)
+
+
 class IndexedDict(OrderedDict):
     """ `OrderedDict` that allows integer indexing and values flattening.
 
@@ -575,7 +614,8 @@ class IndexedDict(OrderedDict):
         """ Get dict values for requested keys in a single list. """
         keys = to_list(keys) if keys is not None else list(self.keys())
         lists = [self[key] if isinstance(self[key], list) else [self[key]] for key in keys]
-        return sum(lists, [])
+        flattened = sum(lists, [])
+        return DelegatingList(flattened)
 
     @property
     def flat(self):

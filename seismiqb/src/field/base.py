@@ -6,6 +6,7 @@ import numpy as np
 
 from ..geometry import SeismicGeometry
 from ..labels import Horizon, Fault, Facies
+from ..utils import DelegatingList
 
 
 
@@ -89,11 +90,11 @@ class Field:
             # Load desired labels, based on class
             method_name = self.CLASS_TO_METHOD[label_class]
             method = getattr(self, method_name)
-            lst = method(label_src, **labels_kwargs)
-            setattr(self, label_dst, lst)
+            result = method(label_src, **labels_kwargs)
+            setattr(self, label_dst, result)
 
             if 'labels' not in labels and not self.labels:
-                setattr(self, 'labels', lst)
+                setattr(self, 'labels', result)
 
 
     def _load_horizons(self, paths, filter=True, interpolate=False, sort=True, **kwargs):
@@ -143,6 +144,10 @@ class Field:
             return getattr(self.geometry, key)
         raise AttributeError(f'Attribute `{key}` does not exist in either Field or associated Geometry!')
 
+    def __getattribute__(self, key):
+        result = super().__getattribute__(key)
+        result = DelegatingList(result) if isinstance(result, list) else result
+        return result
 
     # Public methods. Usually, used by Batch class
     def load_seismic(self, location, slicing='custom', src='geometry', **kwargs):
@@ -181,6 +186,9 @@ class Field:
 
     # TODO: cache resets/introspection
     # TODO: visualization
+
+    def __repr__(self):
+        return f"""<Field `{self.displayed_name}` at {hex(id(self))}>"""
 
     def __str__(self):
         processed_prefix = 'un' if self.geometry.has_stats is False else ''

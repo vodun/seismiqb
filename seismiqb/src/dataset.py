@@ -67,15 +67,6 @@ class SeismicDataset(Dataset):
 
 
     # Inner workings
-    def __getitem__(self, key):
-        """ !!. """
-        if isinstance(key, (int, str)):
-            # if key not in self.indices:
-            #     return getattr(self, key)
-            return self.fields[key]
-        raise KeyError(f'Unsupported key for subscripting, {key}')
-
-
     def gen_batch(self, batch_size=None, shuffle=False, n_iters=None, n_epochs=None, drop_last=False, **kwargs):
         """ Remove `n_epochs`, `shuffle` and `drop_last` from passed arguments.
         Set default value `batch_size` to the size of current dataset, removing the need to
@@ -89,16 +80,31 @@ class SeismicDataset(Dataset):
         return super().gen_batch(batch_size, n_iters=n_iters, **kwargs)
 
 
-    # BC / conveniency
+    def get_nested_iterable(self, attribute):
+        """ !!. """
+        return IndexedDict({idx : getattr(field, attribute) for idx, field in self.fields.items()})
+
+    def get_flat_iterable(self, attribute):
+        """ !!. """
+        return self.get_nested_iterable(attribute=attribute).flat
+
+    def __getitem__(self, key):
+        """ !!. """
+        if isinstance(key, (int, str)):
+            return self.fields[key]
+        raise KeyError(f'Unsupported key for subscripting, {key}')
+
+    def __getattr__(self, key):
+        """ !!. """
+        if isinstance(key, str) and key not in self.indices:
+            return self.get_nested_iterable(key)
+        raise AttributeError(f'Unknown attribute {key}')
+
     @property
     def geometries(self):
         """ !!. """
-        return IndexedDict({idx : field.geometry for idx, field in self.fields.items()})
+        return self.get_nested_iterable('geometry')
 
-    @property
-    def labels(self):
-        """ !!. """
-        return IndexedDict({idx : field.labels for idx, field in self.fields.items()})
 
 
     # Default pipeline and batch for fast testing / introspection
@@ -367,7 +373,7 @@ class SeismicDataset(Dataset):
         return plot_image(imgs, **kwargs)
 
 
- 
+
 class FaciesCubeset(SeismicDataset):
     """ Storage extending `SeismicCubeset` functionality with methods for interaction with labels and their subsets.
 
