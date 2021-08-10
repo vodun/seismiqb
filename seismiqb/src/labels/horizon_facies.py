@@ -7,7 +7,7 @@ import pandas as pd
 
 
 from .horizon import Horizon
-from ..utils import to_list
+from ..utils import to_list, make_savepath
 
 
 
@@ -205,9 +205,9 @@ class Facies(Horizon):
 
 
     # Manage data
-    def dump(self, path, ext='.char', log=True):
+    def dump(self, path, extension='.char', log=True):
         """ Save facies. """
-        path = self.make_savepath(path, ext)
+        path = make_savepath(path, self.short_name, extension)
         super().dump(path)
         if log:
             print(f"`{self.short_name}` saved to `{path}`")
