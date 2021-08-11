@@ -8,7 +8,7 @@ import numpy as np
 from .visualization import VisualizationMixin
 from ..geometry import SeismicGeometry
 from ..labels import Horizon, Fault, Facies
-from ..utils import DelegatingList
+from ..utils import DelegatingList, transformable
 
 
 
@@ -185,6 +185,67 @@ class Field(VisualizationMixin):
             if indices in ['single', 'random'] and mask.sum() > 0.0:
                 break
         return mask
+
+
+    # Attribute retrieval
+    def matrix_fill_to_num(self, matrix, value):
+        """ Change the matrix values at points where field is absent to a supplied one. """
+        matrix[np.isnan(matrix)] = value
+        return matrix
+
+    def matrix_normalize(self, matrix, mode):
+        """ Normalize matrix values.
+
+        Parameters
+        ----------
+        mode : bool, str, optional
+            If `min-max` or True, then use min-max scaling.
+            If `mean-std`, then use mean-std scaling.
+            If False, don't scale matrix.
+        """
+        values = matrix[~np.isnan(matrix)]
+
+        if mode in ['min-max', True]:
+            min_, max_ = np.nanmin(values), np.nanmax(values)
+            matrix = (matrix - min_) / (max_ - min_)
+        elif mode == 'mean-std':
+            mean, std = np.nanmean(values), np.nanstd(values)
+            matrix = (matrix - mean) / std
+        else:
+            raise ValueError(f'Unknown normalization mode `{mode}`.')
+        return matrix
+
+    def load_attribute(self, src, **kwargs):
+        """ !!. """
+        # 'zero_traces'
+        # 'horizons:0/amplitudes'
+        # 'horizons:0/channels/masks'
+        src = src.strip('/')
+
+        if '/' not in src:
+            data = self.get_property(src=src, **kwargs)
+
+        else:
+            label_id, *src = src.split('/')
+            label_attr, label_idx = label_id.split(':')
+
+            if label_attr not in self.loaded_labels:
+                matched = get_close_matches(label_attr, self.loaded_labels, n=1)
+                if matched:
+                    label_attr = matched[0]
+                else:
+                    raise ValueError(f"Can't determine the label attribute for `{label_attr}`!")
+            label_idx = int(label_idx)
+            label = getattr(self, label_attr)[label_idx]
+
+            src = '/'.join(src)
+            data = label.load_attribute(src, **kwargs)
+        return data
+
+    @transformable
+    def get_property(self, src):
+        """ !!. """
+        return getattr(self, src)
 
 
     # Utility functions

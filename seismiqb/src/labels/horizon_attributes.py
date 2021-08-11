@@ -87,7 +87,7 @@ class AttributesMixin:
         matrix[mask] = self._dtype_to_fill_value(matrix.dtype)
         return matrix
 
-    def matrix_normalize(self, array, mode):
+    def matrix_normalize(self, matrix, mode):
         """ Normalize matrix values.
 
         Parameters
@@ -97,17 +97,17 @@ class AttributesMixin:
             If `mean-std`, then use mean-std scaling.
             If False, don't scale matrix.
         """
+        values = matrix[self.presence_matrix]
+
         if mode in ['min-max', True]:
-            values = array[self.presence_matrix]
             min_, max_ = np.nanmin(values), np.nanmax(values)
-            array = (array - min_) / (max_ - min_)
+            matrix = (matrix - min_) / (max_ - min_)
         elif mode == 'mean-std':
-            values = array[self.presence_matrix]
             mean, std = np.nanmean(values), np.nanstd(values)
-            array = (array - mean) / std
+            matrix = (matrix - mean) / std
         else:
             raise ValueError(f'Unknown normalization mode `{mode}`.')
-        return array
+        return matrix
 
 
     def matrix_smooth_out(self, matrix, kernel=None, kernel_size=7, sigma=2., margin=5, iters=1):

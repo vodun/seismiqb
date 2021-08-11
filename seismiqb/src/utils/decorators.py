@@ -3,6 +3,7 @@ from functools import wraps
 import numpy as np
 
 
+
 def transformable(method):
     """ Transform the output matrix of a function to optionally:
         - put the matrix on a background with spatial shape of a cube
