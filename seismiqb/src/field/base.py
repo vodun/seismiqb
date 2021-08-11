@@ -94,11 +94,12 @@ class Field(VisualizationMixin):
             method_name = self.CLASS_TO_METHOD[label_class]
             method = getattr(self, method_name)
             result = method(label_src, **labels_kwargs)
+
             setattr(self, label_dst, result)
+            self.loaded_labels.append(label_dst)
 
             if 'labels' not in labels and not self.labels:
                 setattr(self, 'labels', result)
-            self.loaded_labels.append(label_dst)
 
 
     def _load_horizons(self, paths, filter=True, interpolate=False, sort=True, **kwargs):
@@ -152,8 +153,11 @@ class Field(VisualizationMixin):
 
     def __getattribute__(self, key):
         result = super().__getattribute__(key)
-        result = DelegatingList(result) if isinstance(result, list) else result
+        if isinstance(result, list) and not isinstance(result, DelegatingList):
+            result = DelegatingList(result)
+            setattr(self, key, result)
         return result
+
 
     # Public methods. Usually, used by Batch class
     def load_seismic(self, location, slicing='custom', src='geometry', **kwargs):
@@ -209,9 +213,18 @@ class Field(VisualizationMixin):
 
     # TODO: cache resets/introspection
     def reset_cache(self):
-        """ !!. """
-        for attribute in ['geometry'] + self.loaded_labels:
+        """ Clear cached data from underlying entities. """
+        for attribute in set(['geometry'] + self.loaded_labels):
             getattr(self, attribute).reset_cache()
+
+    @property
+    def cache_size(self):
+        """ Total size of cached data. """
+        size = self.geometry.cache_size
+        for attribute in set(self.loaded_labels):
+            size += sum(getattr(self, attribute).cache_size)
+        return size
+
 
     # TODO: subsets
     def add_subsets(self, src_subset, dst_base='labels'):

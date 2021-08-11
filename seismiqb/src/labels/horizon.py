@@ -15,7 +15,7 @@ from skimage.measure import label
 from .horizon_attributes import AttributesMixin
 from .horizon_visualization import VisualizationMixin
 from ..utils import groupby_mean, groupby_min, groupby_max, filtering_function
-from ..utils import get_class_methods, make_bezier_figure
+from ..utils import make_bezier_figure
 from ..functional import smooth_out
 
 
@@ -228,9 +228,28 @@ class Horizon(AttributesMixin, VisualizationMixin):
 
     def reset_cache(self):
         """ Clear cached data. """
-        for method in get_class_methods(self):
-            if hasattr(method, 'cache'):
-                method.reset_instance(self)
+        for name in dir(self):
+            if name.startswith("__") or 'cache' in name:
+                continue
+
+            method = getattr(self, name)
+            if callable(method):
+                if hasattr(method, 'cache'):
+                    method.reset_instance(self)
+
+    @property
+    def cache_size(self):
+        """ Total size of cached data. """
+        size = 0
+        for name in dir(self):
+            if name.startswith("__") or 'cache' in name:
+                continue
+
+            method = getattr(self, name)
+            if callable(method):
+                if hasattr(method, 'cache'):
+                    size += sum(item.nbytes / (1024 ** 3) for item in method.cache()[self].values())
+        return size
 
     def __copy__(self):
         """ Create a new horizon with the same data.
