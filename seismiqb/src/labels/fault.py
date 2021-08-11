@@ -37,6 +37,10 @@ class Fault(Horizon):
     FAULT_STICKS = ['INLINE', 'iline', 'xline', 'cdp_x', 'cdp_y', 'height', 'name', 'number']
     COLUMNS = ['iline', 'xline', 'height', 'name', 'number']
 
+    def __init__(self, *args, **kwargs):
+        self.nodes = None
+        super().__init__(*args, **kwargs)
+
     def from_file(self, path, transform=True, direction=None, **kwargs):
         """ Init from path to either CHARISMA, REDUCED_CHARISMA or FAULT_STICKS csv-like file
         from .npy or .hdf5 file with points.
@@ -339,7 +343,7 @@ class Fault(Horizon):
         """
         # TODO: make chunks along xlines
         if isinstance(array, SeismicGeometry):
-            array = array.file_hdf5
+            array = array.file['cube_i']
         chunk_size = chunk_size or len(array)
         if chunk_size == len(array):
             overlap = 0

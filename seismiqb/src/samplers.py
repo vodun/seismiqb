@@ -962,6 +962,10 @@ class RegularGrid(BaseGrid):
         crop_shape = np.array(crop_shape)
         crop_shape = crop_shape if orientation == 0 else crop_shape[[1, 0, 2]]
 
+        if strides is not None:
+            strides = np.array(strides)
+            strides = strides if orientation == 0 else strides[[1, 0, 2]]
+
         # Make ranges
         ranges = [item if item is not None else [0, c] for item, c in zip(ranges, geometry.cube_shape)]
         ranges = np.array(ranges)

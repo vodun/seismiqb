@@ -514,8 +514,8 @@ class FaultController(BaseController):
                 slices = item[1:]
                 if len(slices) != 3:
                     slices = (None, None, None)
-                _strides = strides if orientation == 0 else strides[[1, 0, 2]]
-                grid, accumulator = self.make_accumulator(geometry, slices, crop_shape, _strides, orientation)
+
+                grid, accumulator = self.make_accumulator(geometry, slices, crop_shape, strides, orientation)
                 ppl = inference_pipeline << {'sampler': grid, 'accumulator': accumulator}
 
                 ppl.run(n_iters=grid.n_iters, bar=pbar)
@@ -570,7 +570,7 @@ class FaultController(BaseController):
         return None, None
 
     def inference_on_cube(self, train_pipeline=None, model_path=None, fmt='sgy', save_to=None, filename=None,
-                          tmp='hdf5', bar=True, threshold=0.05, width=3, skeletonize=False, clear=False, **kwargs):
+                          tmp='hdf5', bar=True, **kwargs):
         """ Make inference on cube. """
         config = {**self.config['dataset'], **self.config['inference'], **kwargs}
         strides = config['stride'] if isinstance(config['stride'], tuple) else [config['stride']] * 3
@@ -626,19 +626,8 @@ class FaultController(BaseController):
                 ppl = inference_pipeline << dataset << {'sampler': grid, 'accumulator': accumulator}
 
                 ppl.run(n_iters=grid.n_iters, bar=bar)
+                import pdb; pdb.set_trace()
                 prediction = accumulator.aggregate()
-
-                if skeletonize or clear:
-                    self.log(f'Process prediction for {cube_idx}: {item[1:]}. axis={item[0]}.')
-                    for i in tqdm.tqdm(range(geometry.cube_shape[axis]), disable=(not bar)):
-                        slice_ = [slice(None), slice(None)]
-                        slice_[axis] = [i]
-                        image, slide = geometry[slice_], prediction[slice_]
-                        if skeletonize:
-                            slide = Fault.skeletonize_faults(slide, threshold=threshold, mode='array', width=width)
-                        if clear:
-                            slide = Fault.remove_predictions_on_bounds(image, slide)
-                        prediction[slice_] = slide
 
                 if fmt == 'npy':
                     outputs.append(prediction)
@@ -650,6 +639,8 @@ class FaultController(BaseController):
                         path_segy=filenames['sgy'],
                         remove_hdf5=True, zip_result=True, pbar=True
                     )
+                if fmt in ['hdf5', 'blosc', 'qblosc']:
+                    accumulator.file.close()
 
     # Path utils
 
