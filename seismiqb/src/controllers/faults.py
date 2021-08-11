@@ -8,6 +8,7 @@ from datetime import datetime
 from shutil import copyfile
 
 import numpy as np
+import tqdm
 
 from .base import BaseController
 from .best_practices import MODEL_CONFIG
@@ -568,8 +569,8 @@ class FaultController(BaseController):
             return faults_metric, noise_metric
         return None, None
 
-    def inference_on_cube(self, train_pipeline=None, model_path=None, fmt='sgy', save_to=None, prefix=None,
-                          tmp='hdf5', bar=True, **kwargs):
+    def inference_on_cube(self, train_pipeline=None, model_path=None, fmt='sgy', save_to=None, filename=None,
+                          tmp='hdf5', bar=True, threshold=0.05, width=3, skeletonize=False, clear=False, **kwargs):
         """ Make inference on cube. """
         config = {**self.config['dataset'], **self.config['inference'], **kwargs}
         strides = config['stride'] if isinstance(config['stride'], tuple) else [config['stride']] * 3
@@ -599,20 +600,17 @@ class FaultController(BaseController):
             if not os.path.exists(dirname):
                 os.makedirs(dirname)
 
-        prefix = prefix or ''
-
         outputs = dict()
         for cube_idx in dataset.indices:
             outputs[cube_idx] = []
             geometry = dataset.geometries[cube_idx]
             for item in cubes[cube_idx]:
-                self.log(f'Create prediction for {cube_idx}: {item[1:]}. axis={item[0]}.')
                 axis = item[0]
                 ranges = item[1:]
                 if len(ranges) != 3:
                     ranges = (None, None, None)
 
-                filenames = {ext: os.path.join(dirname, self.make_filename(prefix, 'x' if axis==1 else 'i', ext))
+                filenames = {ext: os.path.join(dirname, filename)
                              for ext in ['hdf5', 'sgy', 'blosc', 'qblosc', 'npy', 'meta']}
 
                 if fmt in ['hdf5', 'blosc', 'qblosc']:
@@ -622,11 +620,25 @@ class FaultController(BaseController):
                 elif fmt == 'npy':
                     path = None
 
+                self.log(f'Create prediction {path} for {cube_idx}: {item[1:]}. axis={item[0]}.')
+
                 grid, accumulator = self.make_accumulator(geometry, ranges, crop_shape, strides, axis, path)
                 ppl = inference_pipeline << dataset << {'sampler': grid, 'accumulator': accumulator}
 
                 ppl.run(n_iters=grid.n_iters, bar=bar)
                 prediction = accumulator.aggregate()
+
+                if skeletonize or clear:
+                    self.log(f'Process prediction for {cube_idx}: {item[1:]}. axis={item[0]}.')
+                    for i in tqdm.tqdm(range(geometry.cube_shape[axis]), disable=(not bar)):
+                        slice_ = [slice(None), slice(None)]
+                        slice_[axis] = [i]
+                        image, slide = geometry[slice_], prediction[slice_]
+                        if skeletonize:
+                            slide = Fault.skeletonize_faults(slide, threshold=threshold, mode='array', width=width)
+                        if clear:
+                            slide = Fault.remove_predictions_on_bounds(image, slide)
+                        prediction[slice_] = slide
 
                 if fmt == 'npy':
                     outputs.append(prediction)
@@ -659,7 +671,7 @@ class FaultController(BaseController):
 
     def make_filename(self, prefix, orientation, ext):
         """ Make filename for infered cube. """
-        return (prefix + datetime.now().strftime("%Y-%m-%d-%H-%M-%S") + '_{}.{}').format(orientation, ext)
+        return (prefix + '_{}.{}').format(orientation, ext)
 
     # Train utils
 
