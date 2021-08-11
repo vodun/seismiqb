@@ -147,7 +147,7 @@ class FaultController(BaseController):
 
         if labels:
             transposed = config['transposed_cubes']
-            direction = {f'amplitudes_{cube}': 0 if cube not in transposed else 1 for cube in cubes}
+            direction = {f'{cube}': 0 if cube not in transposed else 1 for cube in cubes}
             dataset.load(label_dir=label_dir.format(width), labels_class=Fault, transform=True,
                          direction=direction, verify=True, bar=bar)
         else:
@@ -513,8 +513,8 @@ class FaultController(BaseController):
                 slices = item[1:]
                 if len(slices) != 3:
                     slices = (None, None, None)
-
-                grid, accumulator = self.make_accumulator(geometry, slices, crop_shape, strides, orientation)
+                _strides = strides if orientation == 0 else strides[[1, 0, 2]]
+                grid, accumulator = self.make_accumulator(geometry, slices, crop_shape, _strides, orientation)
                 ppl = inference_pipeline << {'sampler': grid, 'accumulator': accumulator}
 
                 ppl.run(n_iters=grid.n_iters, bar=pbar)
@@ -534,7 +534,7 @@ class FaultController(BaseController):
                 outputs[cube_idx] += [[slices, image, prediction, *metrics]]
         return outputs
 
-    def visualize_predictions(self, *args, overlap=True, threshold=0.05, each=100, iteration=0, **kwargs):
+    def visualize_predictions(self, *args, overlap=True, threshold=0.05, each=100, iteration=0, skeletonize=False, clear=False, width=3, figsize=(20, 20), **kwargs):
         """ Plot predictions for cubes and ranges specified in 'inference' section of config. """
         if each is not None and iteration % each == 0:
             results = self.inference_on_slides(*args, **kwargs)
@@ -555,11 +555,16 @@ class FaultController(BaseController):
                         savepath = None
                         show = True
 
+                    if skeletonize:
+                        prediction = Fault.skeletonize_faults(prediction, threshold=threshold, mode='array', width=width)
+                    if clear:
+                        prediction = Fault.remove_predictions_on_bounds(image, prediction)
+
                     if overlap:
-                        plot_image([image[0], prediction[0] > threshold], separate=False, figsize=(20, 20),
+                        plot_image([image[0], prediction[0] > threshold], separate=False, figsize=figsize,
                                    savepath=savepath, show=show)
                     else:
-                        plot_image(prediction[0], figsize=(20, 20), savepath=savepath, show=show)
+                        plot_image(prediction[0], figsize=figsize, savepath=savepath, show=show)
             return faults_metric, noise_metric
         return None, None
 
@@ -639,7 +644,7 @@ class FaultController(BaseController):
     def amplitudes_path(self, cube):
         """ Get full path for cube. """
         ext = self.config['dataset/ext']
-        filename = self.config['dataset/path'] + f'CUBE_{cube}/amplitudes_{cube}.{ext}'
+        filename = self.config['dataset/path'] + f'{cube}/{cube}.{ext}'
         if os.path.exists(filename):
             return filename
         raise ValueError(f"File doesn't exist: {filename}")
