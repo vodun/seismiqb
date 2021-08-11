@@ -18,6 +18,7 @@ class Field(VisualizationMixin):
         # Attributes
         self.labels = []
         self.horizons, self.facies, self.fans, self.channels, self.faults = [], [], [], [], []
+        self.loaded_labels = []
 
         # Geometry: description and convenient API to a seismic cube
         if isinstance(geometry, str):
@@ -59,6 +60,8 @@ class Field(VisualizationMixin):
         # Labels class: make a dictionary
         if labels_class is None:
             labels_class_dict = {label_dst : None for label_dst in labels.keys()}
+        if isinstance(labels_class, str):
+            labels_class = self.NAME_TO_CLASS[labels_class]
         if isinstance(labels_class, type):
             labels_class_dict = {label_dst : labels_class for label_dst in labels.keys()}
         if isinstance(labels_class, dict):
@@ -95,6 +98,7 @@ class Field(VisualizationMixin):
 
             if 'labels' not in labels and not self.labels:
                 setattr(self, 'labels', result)
+            self.loaded_labels.append(label_dst)
 
 
     def _load_horizons(self, paths, filter=True, interpolate=False, sort=True, **kwargs):

@@ -50,7 +50,6 @@ class SeismicDataset(Dataset):
         if isinstance(index, dict):
             self.fields = IndexedDict()
             for geometry, labels in index.items():
-                print('DS INIT', geometry, labels)
                 field = Field(geometry=geometry, labels=labels, **kwargs)
                 self.fields[field.short_name] = field
         else:
@@ -63,7 +62,7 @@ class SeismicDataset(Dataset):
     @classmethod
     def from_horizon(cls, horizon):
         """ Create dataset from an instance of Horizon. """
-        return cls({horizon.geometry : {'horizons': [horizon]}})
+        return cls({horizon.field.geometry : {'horizons': [horizon]}})
 
 
     # Inner workings

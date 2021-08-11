@@ -551,85 +551,6 @@ class BaseMetrics:
         return metric, plot_dict
 
 
-    def quality_map(self, quantiles, metric_names=None, computed_metrics=None,
-                    agg='mean', amortize=False, axis=0, apply_smoothing=False,
-                    smoothing_params=None, local_params=None, support_params=None, **kwargs):
-        """ Create a quality map based on number of metrics.
-
-        Parameters
-        ----------
-        quantiles : sequence of floats
-            Quantiles for computing hardness thresholds. Must be in (0, 1) ranges.
-        metric_names : sequence of str
-            Which metrics to use to assess hardness of data.
-        reduce_func : str
-            Function to reduce multiple metrics into one spatial map.
-        smoothing_params, local_params, support_params : dicts
-            Additional parameters for smoothening, local metrics, support metrics.
-        """
-        _ = kwargs
-        computed_metrics = computed_metrics or []
-        smoothing_params = smoothing_params or self.SMOOTHING_DEFAULTS
-        local_params = local_params or self.LOCAL_DEFAULTS
-        support_params = support_params or self.SUPPORT_DEFAULTS
-
-        smoothing_params = {**self.SMOOTHING_DEFAULTS, **smoothing_params, **kwargs}
-        local_params = {**self.LOCAL_DEFAULTS, **local_params, **kwargs}
-        support_params = {**self.SUPPORT_DEFAULTS, **support_params, **kwargs}
-
-        if metric_names:
-            for metric_name in metric_names:
-                if 'local' in metric_name:
-                    kwds = copy(local_params)
-                elif 'support' in metric_name:
-                    kwds = copy(support_params)
-
-                metric = self.evaluate(metric_name, plot=False, **kwds)
-                computed_metrics.append(metric)
-
-        accumulator = Accumulator(agg=agg, amortize=amortize, axis=axis)
-        for metric_matrix in computed_metrics:
-            if apply_smoothing:
-                metric_matrix = smooth_out(metric_matrix, **smoothing_params)
-            digitized = digitize(metric_matrix, quantiles)
-            accumulator.update(digitized)
-        quality_map = accumulator.get(final=True)
-
-        if apply_smoothing:
-            quality_map = smooth_out(quality_map, **smoothing_params)
-
-        title, plot_defaults = self.get_plot_defaults()
-        plot_dict = {
-            **plot_defaults,
-            'title_label': f'Quality map for {title}',
-            'cmap': 'Reds',
-            'zmin': 0.0, 'zmax': np.nanmax(quality_map),
-            **kwargs
-        }
-        return quality_map, plot_dict
-
-    def make_grid(self, quality_map, frequencies, iline=True, xline=True, full_lines=True, margin=0, **kwargs):
-        """ Create grid with various frequencies based on quality map. """
-        _ = kwargs
-        if margin:
-            bad_traces = np.copy(self.geometry.zero_traces)
-            bad_traces[:, 0] = 1
-            bad_traces[:, -1] = 1
-            bad_traces[0, :] = 1
-            bad_traces[-1, :] = 1
-
-            kernel = np.ones((2 + 2*margin, 2 + 2*margin), dtype=np.uint8)
-            bad_traces = cv2.dilate(bad_traces.astype(np.uint8), kernel, iterations=1).astype(bad_traces.dtype)
-            quality_map[(bad_traces - self.geometry.zero_traces) == 1] = 0.0
-
-        pre_grid = np.rint(quality_map)
-        grid = gridify(pre_grid, frequencies, iline, xline, full_lines)
-
-        if margin:
-            grid[(bad_traces - self.geometry.zero_traces) == 1] = 0
-        return grid
-
-
 
 class HorizonMetrics(BaseMetrics):
     """ Evaluate metric(s) on horizon(s).
@@ -680,10 +601,10 @@ class HorizonMetrics(BaseMetrics):
 
     def get_plot_defaults(self):
         """ Axis labels and horizon/cube names in the title. """
-        title = f'horizon `{self.name}` on cube `{self.horizon.geometry.displayed_name}`'
+        title = f'horizon `{self.name}` on cube `{self.horizon.field.displayed_name}`'
         return title, {
-            'xlabel': self.horizon.geometry.axis_names[0],
-            'ylabel': self.horizon.geometry.axis_names[1],
+            'xlabel': self.horizon.field.axis_names[0],
+            'ylabel': self.horizon.field.axis_names[1],
         }
 
     @property
@@ -699,7 +620,7 @@ class HorizonMetrics(BaseMetrics):
     def probs(self):
         """ Probabilistic interpretation of `data`. """
         if self._probs is None:
-            hist_matrix = histo_reduce(self.data, self.horizon.geometry.bins)
+            hist_matrix = histo_reduce(self.data, self.horizon.field.bins)
             self._probs = hist_matrix / np.sum(hist_matrix, axis=-1, keepdims=True) + self.EPS
         return self._probs
 
@@ -707,7 +628,7 @@ class HorizonMetrics(BaseMetrics):
     def bad_traces(self):
         """ Traces to fill with `nan` values. """
         if self._bad_traces is None:
-            self._bad_traces = self.horizon.geometry.zero_traces.copy()
+            self._bad_traces = self.horizon.field.zero_traces.copy()
             self._bad_traces[self.horizon.full_matrix == Horizon.FILL_VALUE] = 1
         return self._bad_traces
 
@@ -832,10 +753,10 @@ class HorizonMetrics(BaseMetrics):
             self.horizons[1] = [self.horizons[1]]
 
         lst = []
-        for hor in self.horizons[1]:
-            if hor.geometry.name == self.horizon.geometry.name:
-                overlap_info = Horizon.check_proximity(self.horizon, hor, offset=offset)
-                lst.append((hor, overlap_info))
+        for horizon in self.horizons[1]:
+            if horizon.field.name == self.horizon.field.name:
+                overlap_info = Horizon.check_proximity(self.horizon, horizon, offset=offset)
+                lst.append((horizon, overlap_info))
         lst.sort(key=lambda x: abs(x[1].get('mean', 999999)))
         other, overlap_info = lst[0]
         return (other, overlap_info), {} # actual return + fake plot dict
@@ -985,10 +906,89 @@ class GeometryMetrics(BaseMetrics):
         return self._probs
 
 
+    def quality_map(self, quantiles, metric_names=None, computed_metrics=None,
+                    agg='mean', amortize=False, axis=0, apply_smoothing=False,
+                    smoothing_params=None, local_params=None, support_params=None, **kwargs):
+        """ Create a quality map based on number of metrics.
+
+        Parameters
+        ----------
+        quantiles : sequence of floats
+            Quantiles for computing hardness thresholds. Must be in (0, 1) ranges.
+        metric_names : sequence of str
+            Which metrics to use to assess hardness of data.
+        reduce_func : str
+            Function to reduce multiple metrics into one spatial map.
+        smoothing_params, local_params, support_params : dicts
+            Additional parameters for smoothening, local metrics, support metrics.
+        """
+        _ = kwargs
+        computed_metrics = computed_metrics or []
+        smoothing_params = smoothing_params or self.SMOOTHING_DEFAULTS
+        local_params = local_params or self.LOCAL_DEFAULTS
+        support_params = support_params or self.SUPPORT_DEFAULTS
+
+        smoothing_params = {**self.SMOOTHING_DEFAULTS, **smoothing_params, **kwargs}
+        local_params = {**self.LOCAL_DEFAULTS, **local_params, **kwargs}
+        support_params = {**self.SUPPORT_DEFAULTS, **support_params, **kwargs}
+
+        if metric_names:
+            for metric_name in metric_names:
+                if 'local' in metric_name:
+                    kwds = copy(local_params)
+                elif 'support' in metric_name:
+                    kwds = copy(support_params)
+
+                metric = self.evaluate(metric_name, plot=False, **kwds)
+                computed_metrics.append(metric)
+
+        accumulator = Accumulator(agg=agg, amortize=amortize, axis=axis)
+        for metric_matrix in computed_metrics:
+            if apply_smoothing:
+                metric_matrix = smooth_out(metric_matrix, **smoothing_params)
+            digitized = digitize(metric_matrix, quantiles)
+            accumulator.update(digitized)
+        quality_map = accumulator.get(final=True)
+
+        if apply_smoothing:
+            quality_map = smooth_out(quality_map, **smoothing_params)
+
+        title, plot_defaults = self.get_plot_defaults()
+        plot_dict = {
+            **plot_defaults,
+            'title_label': f'Quality map for {title}',
+            'cmap': 'Reds',
+            'zmin': 0.0, 'zmax': np.nanmax(quality_map),
+            **kwargs
+        }
+        return quality_map, plot_dict
+
+    def make_grid(self, quality_map, frequencies, iline=True, xline=True, full_lines=True, margin=0, **kwargs):
+        """ Create grid with various frequencies based on quality map. """
+        _ = kwargs
+        if margin:
+            bad_traces = np.copy(self.geometry.zero_traces)
+            bad_traces[:, 0] = 1
+            bad_traces[:, -1] = 1
+            bad_traces[0, :] = 1
+            bad_traces[-1, :] = 1
+
+            kernel = np.ones((2 + 2*margin, 2 + 2*margin), dtype=np.uint8)
+            bad_traces = cv2.dilate(bad_traces.astype(np.uint8), kernel, iterations=1).astype(bad_traces.dtype)
+            quality_map[(bad_traces - self.geometry.zero_traces) == 1] = 0.0
+
+        pre_grid = np.rint(quality_map)
+        grid = gridify(pre_grid, frequencies, iline, xline, full_lines)
+
+        if margin:
+            grid[(bad_traces - self.geometry.zero_traces) == 1] = 0
+        return grid
+
+
     def tracewise(self, func, l=3, pbar=True, **kwargs):
         """ Apply `func` to compare two cubes tracewise. """
         pbar = tqdm if pbar else lambda iterator, *args, **kwargs: iterator
-        metric = np.full((*self.geometry.lens, l), np.nan)
+        metric = np.full((*self.geometry.spatial_shape, l), np.nan)
 
         indices = [geometry.dataframe['trace_index'] for geometry in self.geometries]
 
@@ -1021,7 +1021,7 @@ class GeometryMetrics(BaseMetrics):
         structure of cubes is assumed to be identical.
         """
         pbar = tqdm if pbar else lambda iterator, *args, **kwargs: iterator
-        metric = np.full((*self.geometry.lens, l), np.nan)
+        metric = np.full((*self.geometry.spatial_shape, l), np.nan)
 
         for idx in pbar(range(len(self.geometries[0].dataframe))):
             header = self.geometries[0].segyfile.header[idx]

@@ -42,8 +42,8 @@ class Facies(Horizon):
 
     # Correspondence between attribute alias and the class function that calculates it
 
-    def __init__(self, storage, geometry, name=None, dtype=np.int32, subsets=None, **kwargs):
-        super().__init__(storage=storage, geometry=geometry, name=name, dtype=dtype, **kwargs)
+    def __init__(self, storage, field, name=None, dtype=np.int32, subsets=None, **kwargs):
+        super().__init__(storage=storage, field=field, name=name, dtype=dtype, **kwargs)
         self.subsets = subsets or {}
 
 
@@ -86,7 +86,7 @@ class Facies(Horizon):
         result = self.full_matrix.copy()
         result[presence] = self.FILL_VALUE
         name = f"~{other.name}"
-        return type(self)(result, self.geometry, name)
+        return type(self)(storage=result, field=self.field, name=name)
 
     def invert_subset(self, subset):
         """ Subtract subset matrix from facies matrix. """
@@ -178,8 +178,8 @@ class Facies(Horizon):
         if output == 'arr':
             return values
 
-        index = pd.MultiIndex.from_arrays([[self.geometry.displayed_name], [self.short_name]],
-                                          names=['geometry_name', 'horizon_name'])
+        index = pd.MultiIndex.from_arrays([[self.field.displayed_name], [self.short_name]],
+                                          names=['field_name', 'horizon_name'])
         names = metrics_names if metrics_names is not None else [fn.__name__ for fn in metrics_fn]
         df = pd.DataFrame(index=index, data=values, columns=names)
         return df
@@ -188,7 +188,7 @@ class Facies(Horizon):
     # Manage data
     def dump(self, path, name=None, log=True):
         """ Save facies. """
-        path = path.replace('*', self.geometry.short_name)
+        path = path.replace('*', self.field.short_name)
         name = name.replace('*', self.name) if name is not None else self.name
         os.makedirs(path, exist_ok=True)
         dump_path = f"{path}/{name}"

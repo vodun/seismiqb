@@ -363,14 +363,14 @@ class HorizonController(BaseController):
         results = []
         for i, horizon in enumerate(predictions):
             info = {}
-            prefix = [horizon.geometry.short_name, f'{i}_horizon'] if add_prefix else []
+            prefix = [horizon.field.short_name, f'{i}_horizon'] if add_prefix else []
 
             # Basic demo: depth map and properties
             horizon.show(show=self.plot, savepath=self.make_savepath(*prefix, name + 'p_depth_map.png'))
 
-            horizon.show_slide(horizon.geometry.lens[0]//2, axis=0, show=self.plot,
+            horizon.show_slide(horizon.field.shape[0]//2, axis=0, show=self.plot,
                                savepath=self.make_savepath(*prefix, name + 'p_slide_i.png'))
-            horizon.show_slide(horizon.geometry.lens[1]//2, axis=1, show=self.plot,
+            horizon.show_slide(horizon.field.shape[1]//2, axis=1, show=self.plot,
                                savepath=self.make_savepath(*prefix, name + 'p_slide_x.png'))
 
             with open(self.make_savepath(*prefix, name + 'p_results_self.txt'), 'w') as result_txt:

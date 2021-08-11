@@ -152,10 +152,10 @@ class SeismicCropBatch(Batch):
 
         Generator can be either Sampler or Grid to make locations in a random or deterministic fashion.
         `generator` must be a callable and return (batch_size, 9+) array, where the first nine columns should be:
-        (geometry_id, label_id, orientation, i_start, x_start, h_start, i_stop, x_stop, h_stop).
+        (field_id, label_id, orientation, i_start, x_start, h_start, i_stop, x_stop, h_stop).
         `generator` must have `to_names` method to convert cube and label ids into actual strings.
 
-        Geometry and label ids are transformed into names of actual cubes and labels (horizons, faults, facies, etc).
+        Field and label ids are transformed into names of actual fields and labels (horizons, faults, facies, etc).
         Then we create a completely new instance of `SeismicCropBatch`, where the new index is set to
         cube names with additional postfixes (see `:meth:.salt`), which is returned as the result of this action.
 
@@ -185,7 +185,7 @@ class SeismicCropBatch(Batch):
         generated = generator(batch_size)
 
         # Convert IDs to names, that are used in dataset
-        geometry_names, label_names = generator.to_names(generated[:, [0, 1]]).T
+        field_names, label_names = generator.to_names(generated[:, [0, 1]]).T
 
         # Locations: 3D slices in the cube coordinates
         locations = [[slice(i_start, i_stop), slice(x_start, x_stop), slice(h_start, h_stop)]
@@ -196,7 +196,7 @@ class SeismicCropBatch(Batch):
         shapes = generated[:, [6, 7, 8]] - generated[:, [3, 4, 5]]
 
         # Create a new SeismicCropBatch instance
-        new_index = [self.salt(ix) for ix in geometry_names]
+        new_index = [self.salt(ix) for ix in field_names]
         new_batch = type(self)(DatasetIndex.from_index(index=new_index))
 
         # Keep chosen components in the new batch
@@ -290,8 +290,8 @@ class SeismicCropBatch(Batch):
                 else:
                     raise ValueError(f'Unknown mode: {mode}')
         else:
-            geometry = self.get(ix, 'geometries')
-            normalized = geometry.normalize(data, mode=mode)
+            field = self.get(ix, 'fields')
+            normalized = field.geometry.normalize(data, mode=mode)
         return normalized
 
 
