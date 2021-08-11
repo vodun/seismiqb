@@ -167,7 +167,8 @@ class Facies(Horizon):
             subset = self.get_subset(subset_name)
             # pylint: disable=protected-access
             mask = subset.load_attribute(src='masks', location=location, fill_value=0).astype(np.bool)
-            data[~mask] = kwargs.get('fill_value', self.FILL_VALUE)
+            default_fill_value = self._dtype_to_fill_value(data.dtype)
+            data[~mask] = kwargs.get('fill_value', default_fill_value)
 
         return data
 
