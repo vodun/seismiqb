@@ -216,9 +216,13 @@ class AttributesMixin:
         return (self.matrix > 0).astype(np.bool)
 
     @property
-    @lru_cache(maxsize=1)
     def presence_matrix(self):
         """ A convenient alias for binary matrix in cubic coordinate system. """
+        return self._presence_matrix()
+
+    @lru_cache(maxsize=1)
+    def _presence_matrix(self):
+        """ A method for getting binary matrix in cubic coordinates. Allows for introspectable cache. """
         return self.full_binary_matrix
 
 

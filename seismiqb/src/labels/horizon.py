@@ -520,6 +520,7 @@ class Horizon(AttributesMixin, VisualizationMixin):
         self.matrix, self.i_min, self.x_min = matrix, i_min, x_min
 
         self.reset_storage('points') # applied to matrix, so we need to re-create points
+        self.reset_cache()
 
     def apply_to_points(self, function, **kwargs):
         """ Apply passed function to points storage.
@@ -534,6 +535,7 @@ class Horizon(AttributesMixin, VisualizationMixin):
         """
         self.points = function(self.points, **kwargs)
         self.reset_storage('matrix') # applied to points, so we need to re-create matrix
+        self.reset_cache()
 
 
     def filter_points(self, filtering_matrix=None, **kwargs):
