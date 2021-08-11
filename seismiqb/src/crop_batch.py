@@ -676,8 +676,8 @@ class SeismicCropBatch(Batch):
             mask = np.transpose(mask, (1, 0, 2))
 
         field = self.get(ix, 'fields')
-        shifts = [self.get(ix, 'locations')[k].start for k in range(3)]
-        horizons = Horizon.from_mask(mask, geometry=field.geometry, shifts=shifts, threshold=threshold,
+        origin = [self.get(ix, 'locations')[k].start for k in range(3)]
+        horizons = Horizon.from_mask(mask, field=field, origin=origin, threshold=threshold,
                                      mode=mode, minsize=minsize, prefix=prefix)
         return horizons
 

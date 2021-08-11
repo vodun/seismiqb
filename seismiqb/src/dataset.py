@@ -1,6 +1,5 @@
 """ Container for storing seismic data and labels. """
 #pylint: disable=too-many-lines, too-many-arguments
-import os
 from copy import copy
 from textwrap import indent
 
@@ -78,7 +77,6 @@ class SeismicDataset(Dataset):
         batch_size = batch_size or len(self)
         return super().gen_batch(batch_size, n_iters=n_iters, **kwargs)
 
-
     def get_nested_iterable(self, attribute):
         """ !!. """
         return IndexedDict({idx : getattr(field, attribute) for idx, field in self.fields.items()})
@@ -105,7 +103,6 @@ class SeismicDataset(Dataset):
         return self.get_nested_iterable('geometry')
 
 
-
     # Default pipeline and batch for fast testing / introspection
     def data_pipeline(self, sampler, batch_size=4, width=4):
         """ Pipeline with default actions of creating locations, loading seismic images and corresponding masks. """
@@ -119,41 +116,6 @@ class SeismicDataset(Dataset):
     def data_batch(self, sampler, batch_size=4, width=4):
         """ Get one batch of `:meth:.data_pipeline` with `images` and `masks`. """
         return self.data_pipeline(sampler=sampler, batch_size=batch_size, width=width).next_batch()
-
-
-
-    def dump_labels(self, path, name='points', separate=True):
-        #TODO: remove?
-        """ Dump label points to file. """
-        for idx, labels_list in self.labels.items():
-            for label in labels_list:
-                dirname = os.path.dirname(self.index.get_fullpath(idx))
-                if path[0] == '/':
-                    path = path[1:]
-                dirname = os.path.join(dirname, path)
-                if not os.path.exists(dirname):
-                    os.makedirs(dirname)
-                name = label.name if separate else name
-                save_to = os.path.join(dirname, name + '.npz')
-                label.dump_points(save_to)
-
-    def reset_caches(self, attributes=None):
-        # TODO: rewrite for fields
-        """ Reset lru cache for cached class attributes.
-
-        Parameters
-        ----------
-        attributes : sequence of str
-            Class attributes to reset cache in.
-            If not supplied, reset in `geometries` and attributes added by `create_labels`.
-        """
-        cached_attributes = attributes or self._cached_attributes
-
-        for attr in cached_attributes:
-            for idx in self.indices:
-                cached_attr = getattr(self, attr)[idx]
-                cached_attr = cached_attr if isinstance(cached_attr, list) else [cached_attr]
-                _ = [item.reset_cache() for item in cached_attr]
 
 
     # Textual and visual representation of dataset contents

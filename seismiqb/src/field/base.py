@@ -146,7 +146,7 @@ class Field(VisualizationMixin):
 
     # Inner workings
     def __getattr__(self, key):
-        if not key in vars(self) and hasattr(self.geometry, key):
+        if hasattr(self.geometry, key):
             return getattr(self.geometry, key)
         raise AttributeError(f'Attribute `{key}` does not exist in either Field or associated Geometry!')
 
@@ -208,3 +208,35 @@ class Field(VisualizationMixin):
 
 
     # TODO: cache resets/introspection
+    def reset_cache(self):
+        """ !!. """
+        for attribute in ['geometry'] + self.loaded_labels:
+            getattr(self, attribute).reset_cache()
+
+    # TODO: subsets
+    def add_subsets(self, src_subset, dst_base='labels'):
+        """ Add nested labels.
+
+        Parameters
+        ----------
+        src_labels : str
+            Name of field attribute with labels to add as subsets.
+        dst_base: str
+            Name of field attribute with labels to add subsets to.
+        """
+        subset_labels = getattr(self, src_subset)
+        base_labels = getattr(self, dst_base)
+        if len(subset_labels.flat) != len(base_labels.flat):
+            raise ValueError(f"Labels `{src_subset}` and `{dst_base}` have different lengths.")
+
+        for subset, base in zip(subset_labels, base_labels):
+            base.add_subset(name=src_subset, item=subset)
+
+    def invert_subsets(self, subset, src='labels', dst=None, add_subsets=True):
+        """ !!. """
+        dst = dst or f"{subset}_inverted"
+        inverted = getattr(self, src).invert_subset(subset=subset)
+
+        setattr(self, dst, inverted)
+        if add_subsets:
+            self.add_subsets(src_subset=dst, dst_base=src)

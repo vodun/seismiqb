@@ -142,7 +142,7 @@ class Horizon(AttributesMixin, VisualizationMixin):
         getattr(self, 'from_{}'.format(self.format))(storage, **kwargs)
 
 
-    # Logic of lazy computation of `points` or `matrix` from the other available storage
+    # Logic of lazy computation of `points` or `matrix` from the other available storage; cache management
     @property
     def points(self):
         """ Storage of horizon data as (N, 3) array of (iline, xline, height) in cubic coordinates.
@@ -384,7 +384,6 @@ class Horizon(AttributesMixin, VisualizationMixin):
 
         self.reset_storage('points')
         self._len = length
-
 
     def from_full_matrix(self, matrix, **kwargs):
         """ Init from matrix that covers the whole cube. """
@@ -790,7 +789,6 @@ class Horizon(AttributesMixin, VisualizationMixin):
 
         return mask
 
-
     def load_slide(self, loc, axis=0, width=3):
         """ Create a mask at desired location along supplied axis. """
         axis = self.field.geometry.parse_axis(axis)
@@ -1155,8 +1153,7 @@ class Horizon(AttributesMixin, VisualizationMixin):
 
 
     # Save horizon to disk
-    @staticmethod
-    def dump_charisma(points, path, transform=None, add_height=False):
+    def dump_charisma(self, points, path, transform=None):
         """ Save (N, 3) array of points to disk in CHARISMA-compatible format.
 
         Parameters
@@ -1167,18 +1164,16 @@ class Horizon(AttributesMixin, VisualizationMixin):
             Path to a file to save horizon to.
         transform : None or callable
             If callable, then applied to points after converting to ilines/xlines coordinate system.
-        add_height : bool
-            Whether to concatenate average horizon height to a file name.
         """
         points = points if transform is None else transform(points)
-        path = path if not add_height else f'{path}_#{round(np.mean(points[:, 2]), 1)}'
+        path = self.field.make_savepath(path, name=self.name)
 
         df = pd.DataFrame(points, columns=Horizon.COLUMNS)
         df.sort_values(['iline', 'xline'], inplace=True)
         df = df.astype({'iline': np.int32, 'xline': np.int32, 'height': np.float32})
         df.to_csv(path, sep=' ', columns=Horizon.COLUMNS, index=False, header=False)
 
-    def dump_matrix(self, matrix, path, transform=None, add_height=False):
+    def dump_matrix(self, matrix, path, transform=None):
         """ Save (N_ILINES, N_CROSSLINES) matrix in CHARISMA-compatible format.
 
         Parameters
@@ -1189,14 +1184,12 @@ class Horizon(AttributesMixin, VisualizationMixin):
             Path to a file to save horizon to.
         transform : None or callable
             If callable, then applied to points after converting to ilines/xlines coordinate system.
-        add_height : bool
-            Whether to concatenate average horizon height to a file name.
         """
         points = Horizon.matrix_to_points(matrix)
         points = self.cubic_to_lines(points)
-        Horizon.dump_charisma(points, path, transform, add_height)
+        Horizon.dump_charisma(points, path, transform)
 
-    def dump(self, path, transform=None, add_height=False):
+    def dump(self, path, transform=None):
         """ Save horizon points on disk.
 
         Parameters
@@ -1205,13 +1198,11 @@ class Horizon(AttributesMixin, VisualizationMixin):
             Path to a file to save horizon to.
         transform : None or callable
             If callable, then applied to points after converting to ilines/xlines coordinate system.
-        add_height : bool
-            Whether to concatenate average horizon height to a file name.
         """
         points = self.cubic_to_lines(copy(self.points))
-        self.dump_charisma(points, path, transform, add_height)
+        self.dump_charisma(points, path, transform)
 
-    def dump_float(self, path, transform=None, kernel_size=7, sigma=2., margin=5, add_height=False):
+    def dump_float(self, path, transform=None, kernel_size=7, sigma=2., margin=5):
         """ Smooth out the horizon values, producing floating-point numbers, and dump to the disk.
 
         Parameters
@@ -1227,10 +1218,8 @@ class Horizon(AttributesMixin, VisualizationMixin):
         margin : number
             During the filtering, not include in the computation all the points that are
             further away from the current, than the margin.
-        add_height : bool
-            Whether to concatenate average horizon height to a file name.
         """
         matrix = self.matrix_smooth_out(matrix=self.full_matrix, kernel_size=kernel_size, sigma=sigma, margin=margin)
         points = self.matrix_to_points(matrix)
         points = self.cubic_to_lines(points)
-        self.dump_charisma(points, path, transform, add_height)
+        self.dump_charisma(points, path, transform)
