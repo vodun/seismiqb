@@ -33,20 +33,13 @@ class Field(VisualizationMixin):
 
 
     # Label initialization inner workings
-    CLASS_TO_METHOD = {
-        Horizon: '_load_horizons',
-        Fault: '_load_faults',
-        Facies: '_load_facies',
-        SeismicGeometry: '_load_geometries'
+    METHOD_TO_NAMES = {
+        '_load_horizons': ['horizon', Horizon],
+        '_load_faults': ['fault', Fault],
+        '_load_facies': ['facies', 'fans', 'channels', Facies],
+        '_load_geometries': ['geometries', SeismicGeometry],
     }
-
-    CLASS_TO_NAMES = {
-        Horizon: ['horizon'],
-        Fault: ['fault'],
-        Facies: ['facies', 'fans', 'channels'],
-        SeismicGeometry: ['geometries'],
-    }
-    NAME_TO_CLASS = {name: class_ for class_, names in CLASS_TO_NAMES.items() for name in names}
+    NAME_TO_METHOD = {name: method for method, names in METHOD_TO_NAMES.items() for name in names}
 
     def load_labels(self, labels=None, labels_class=None, **labels_kwargs):
         """ !!. """
@@ -60,9 +53,7 @@ class Field(VisualizationMixin):
         # Labels class: make a dictionary
         if labels_class is None:
             labels_class_dict = {label_dst : None for label_dst in labels.keys()}
-        if isinstance(labels_class, str):
-            labels_class = self.NAME_TO_CLASS[labels_class]
-        if isinstance(labels_class, type):
+        if isinstance(labels_class, (type, str)):
             labels_class_dict = {label_dst : labels_class for label_dst in labels.keys()}
         if isinstance(labels_class, dict):
             labels_class_dict = labels_class
@@ -72,10 +63,12 @@ class Field(VisualizationMixin):
             label_class = labels_class_dict.get(label_dst)
 
             if label_class is None:
-                # label_class = self.NAME_TO_CLASS.get(label_dst)
-                name = get_close_matches(label_dst, list(self.NAME_TO_CLASS.keys()), n=1)
-                if name:
-                    label_class = self.NAME_TO_CLASS[name[0]]
+                # Roughly equivalent to ``label_class = self.NAME_TO_METHOD.get(label_dst)``
+                str_names = [name for name in (self.NAME_TO_METHOD.keys())
+                             if isinstance(name, str)]
+                matched = get_close_matches(label_dst, str_names, n=1)
+                if matched:
+                    label_class = matched[0]
 
             if label_class is None:
                 raise TypeError(f"Can't determine the label class for `{label_dst}`!")
@@ -91,7 +84,7 @@ class Field(VisualizationMixin):
                             or not isinstance(item, str)]
 
             # Load desired labels, based on class
-            method_name = self.CLASS_TO_METHOD[label_class]
+            method_name = self.NAME_TO_METHOD[label_class]
             method = getattr(self, method_name)
             result = method(label_src, **labels_kwargs)
 
@@ -130,9 +123,8 @@ class Field(VisualizationMixin):
         print('IN _LOAD_FACIES', paths)
         return []
 
-    def _load_geometries(self, paths, **kwargs):
-        print('IN _LOAD_GEOMETRIES', paths)
-        return []
+    def _load_geometries(self, path, **kwargs):
+        return SeismicGeometry(path, **kwargs)
 
     # Other methods of initialization
     @classmethod
