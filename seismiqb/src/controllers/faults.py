@@ -363,12 +363,12 @@ class FaultController(BaseController):
             cubes[cube] = [cubes[cube]] if isinstance(cubes[cube][0], int) else cubes[cube]
         return cubes
 
-    def make_accumulator(self, geometry, slices, crop_shape, strides, orientation=0, path=None):
+    def make_accumulator(self, field, slices, crop_shape, strides, orientation=0, path=None):
         """ Make grid and accumulator for inference. """
         batch_size = self.config['inference']['inference_batch_size']
         aggregation = self.config['inference']['aggregation']
 
-        grid = RegularGrid(geometry=geometry,
+        grid = RegularGrid(field=field,
                            threshold=0,
                            orientation=orientation,
                            ranges=slices,
@@ -407,7 +407,7 @@ class FaultController(BaseController):
         outputs = {}
         for cube_idx in dataset.indices:
             outputs[cube_idx] = []
-            geometry = dataset.geometries[cube_idx]
+            field = dataset[cube_idx]
             for item in cubes[cube_idx]:
                 self.log(f'Create prediction for {cube_idx}: {item[1:]}. orientation={item[0]}.')
                 orientation = item[0]
@@ -415,13 +415,13 @@ class FaultController(BaseController):
                 if len(slices) != 3:
                     slices = (None, None, None)
 
-                grid, accumulator = self.make_accumulator(geometry, slices, crop_shape, strides, orientation)
+                grid, accumulator = self.make_accumulator(field, slices, crop_shape, strides, orientation)
                 ppl = inference_pipeline << {'sampler': grid, 'accumulator': accumulator}
 
                 ppl.run(n_iters=grid.n_iters, bar=pbar)
                 prediction = accumulator.aggregate()
 
-                image = geometry[
+                image = field.geometry[
                     slices[0][0]:slices[0][1],
                     slices[1][0]:slices[1][1],
                     slices[2][0]:slices[2][1]
@@ -500,7 +500,7 @@ class FaultController(BaseController):
         outputs = dict()
         for cube_idx in dataset.indices:
             outputs[cube_idx] = []
-            geometry = dataset.geometries[cube_idx]
+            field = dataset[cube_idx]
             for item in cubes[cube_idx]:
                 self.log(f'Create prediction for {cube_idx}: {item[1:]}. axis={item[0]}.')
                 axis = item[0]
@@ -518,7 +518,7 @@ class FaultController(BaseController):
                 elif fmt == 'npy':
                     path = None
 
-                grid, accumulator = self.make_accumulator(geometry, ranges, crop_shape, strides, axis, path)
+                grid, accumulator = self.make_accumulator(field, ranges, crop_shape, strides, axis, path)
                 ppl = inference_pipeline << dataset << {'sampler': grid, 'accumulator': accumulator}
 
                 ppl.run(n_iters=grid.n_iters, bar=bar)
@@ -527,7 +527,7 @@ class FaultController(BaseController):
                 if fmt == 'npy':
                     outputs.append(prediction)
                 if fmt == 'sgy':
-                    copyfile(dataset.geometries[0].path_meta, filenames['meta'])
+                    copyfile(dataset.field[0].path_meta, filenames['meta'])
                     dataset.geometries[0].make_sgy(
                         path_hdf5=filenames[tmp],
                         path_spec=dataset.geometries[0].segy_path.decode('utf-8'),

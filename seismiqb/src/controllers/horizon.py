@@ -97,7 +97,7 @@ class HorizonController(BaseController):
         }
     })
 
-    # Dataset creation: geometries, labels, grids, samplers
+    # Dataset creation: fields, grids, samplers
     def make_dataset(self, cube_paths=None, horizon_paths=None, horizon=None):
         """ Create an instance of :class:`.SeismicDataset` with cubes and horizons.
 
@@ -146,18 +146,18 @@ class HorizonController(BaseController):
             Other arguments, passed directly in quality grid creation function.
         """
         for idx in dataset.indices:
-            geometry = dataset.geometries[idx]
-            geometry.make_quality_grid(frequencies, **kwargs)
+            field = dataset[idx]
+            field.geometry.make_quality_grid(frequencies, **kwargs)
 
             postfix = f'_{idx}' if len(dataset.indices) > 1 else ''
             plot_image(
-                geometry.quality_grid, title=f'Quality grid for {idx}',
+                field.quality_grid, title=f'Quality grid for {idx}',
                 show=self.plot, cmap='Reds', interpolation='bilinear',
                 savepath=self.make_savepath(f'quality_grid{postfix}.png')
             )
 
-            grid_coverage = (np.nansum(geometry.quality_grid) /
-                             (np.prod(geometry.cube_shape[:2]) - np.nansum(geometry.zero_traces)))
+            grid_coverage = (np.nansum(field.quality_grid) /
+                             (np.prod(field.spatial_shape) - np.nansum(field.zero_traces)))
             self.log(f'Created {frequencies} grid on {idx}; coverage is: {grid_coverage:4.4f}')
 
     def make_sampler(self, dataset, **kwargs):
@@ -237,7 +237,7 @@ class HorizonController(BaseController):
 
     def _inference(self, dataset, model, orientation, config):
         # Prepare parameters
-        geometry = dataset.geometries[0]
+        field = dataset[0]
         spatial_ranges, heights_range = config.get(['spatial_ranges', 'heights_range'])
         chunk_size, chunk_overlap = config.get(['chunk_size', 'chunk_overlap'])
 
@@ -246,17 +246,17 @@ class HorizonController(BaseController):
             spatial_ranges = [None, None]
 
         if heights_range is None:
-            bases = dataset.labels[0]
+            bases = field.labels[0]
             if bases:
                 min_height = min(horizon.h_min for horizon in bases) - config.crop_shape[2]//2
                 max_height = max(horizon.h_max for horizon in bases) + config.crop_shape[2]//2
-                heights_range = [max(0, min_height), min(geometry.depth, max_height)]
+                heights_range = [max(0, min_height), min(field.depth, max_height)]
             else:
-                heights_range = [0, geometry.depth]
+                heights_range = [0, field.depth]
 
         # Create grid
         ranges = [*spatial_ranges, heights_range]
-        grid = RegularGrid(geometry=geometry,
+        grid = RegularGrid(field=field,
                            ranges=ranges,
                            orientation=orientation,
                            crop_shape=config.crop_shape,
@@ -284,8 +284,7 @@ class HorizonController(BaseController):
         self.log(f'Inferenced total of {grid.length} out of {grid.unfiltered_length} crops possible')
 
         # Cleanup
-        for item in dataset.geometries.values():
-            item.reset_cache()
+        dataset.geometries.flat.reset_cache()
         gc.collect()
         torch.cuda.empty_cache()
 
@@ -307,7 +306,7 @@ class HorizonController(BaseController):
                 self.log(f'Finetuned! {model.iteration}')
 
         # Create regular grid over desired ranges
-        geometry = dataset.geometries[0]
+        field = dataset[0]
         config['grid'] = grid_chunk
 
         # Create grid over chunk ranges
@@ -324,7 +323,7 @@ class HorizonController(BaseController):
 
         # Extract Horizon instances
         horizons = Horizon.from_mask(assembled_prediction,
-                                     geometry=geometry, shifts=grid_chunk.origin,
+                                     field=field, origin=grid_chunk.origin,
                                      threshold=0.5, minsize=50)
         # Cleanup
         gc.collect()
