@@ -246,10 +246,9 @@ class HorizonController(BaseController):
             spatial_ranges = [None, None]
 
         if heights_range is None:
-            bases = field.labels[0]
-            if bases:
-                min_height = min(horizon.h_min for horizon in bases) - config.crop_shape[2]//2
-                max_height = max(horizon.h_max for horizon in bases) + config.crop_shape[2]//2
+            if field.labels:
+                min_height = min(field.labels.h_min) - config.crop_shape[2]//2
+                max_height = max(field.labels.h_max) + config.crop_shape[2]//2
                 heights_range = [max(0, min_height), min(field.depth, max_height)]
             else:
                 heights_range = [0, field.depth]
