@@ -568,13 +568,7 @@ class DelegatingList(list):
 
         @wraps(attribute)
         def method_wrapper(*args, **kwargs):
-            results = []
-            for item in self:
-                result = getattr(item, key)(*args, **kwargs)
-                if result is not None:
-                    results.append(result)
-            return DelegatingList(results) if results else None
-
+            return DelegatingList([getattr(item, key)(*args, **kwargs) for item in self])
         return method_wrapper
 
     def __getitem__(self, key):
@@ -583,8 +577,7 @@ class DelegatingList(list):
         if isinstance(key, slice):
             return DelegatingList(super().__getitem__(key))
 
-        result = [super().__getitem__(idx) for idx in key]
-        return DelegatingList(result)
+        return DelegatingList([super().__getitem__(idx) for idx in key])
 
     def __dir__(self):
         if self:
