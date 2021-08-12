@@ -125,7 +125,8 @@ class SeismicCropBatch(Batch):
 
     def get(self, item=None, component=None):
         """ Custom access for batch attributes.
-        If `component` is present in dataset and is an instance of `AugmentedDict`, that index it with item and return it.
+        If `component` is present in dataset and is an instance of `AugmentedDict`,
+        then index it with item and return it.
         Otherwise retrieve `component` from batch itself and optionally index it with `item` position in `self.indices`.
         """
         data = getattr(self.dataset, component, None)
@@ -232,7 +233,7 @@ class SeismicCropBatch(Batch):
     # Loading of cube data and its derivatives
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def load_cubes(self, ix, dst, slicing='custom', src_geometry='geometry', **kwargs):
+    def load_cubes(self, ix, dst, native_slicing=False, src_geometry='geometry', **kwargs):
         """ Load data from cube for stored `locations`.
 
         Parameters
@@ -247,7 +248,7 @@ class SeismicCropBatch(Batch):
         """
         field = self.get(ix, 'fields')
         location = self.get(ix, 'locations')
-        return field.load_seismic(location=location, slicing=slicing, src=src_geometry, **kwargs)
+        return field.load_seismic(location=location, native_slicing=native_slicing, src=src_geometry, **kwargs)
 
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')

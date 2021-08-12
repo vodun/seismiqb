@@ -80,9 +80,8 @@ class Field(VisualizationMixin):
             if not isinstance(label_src, (tuple, list)):
                 label_src = [label_src]
             label_src = [item for item in label_src
-                         if (isinstance(item, str) and ('.dvc' not in item) \
-                             and ('.gitignore' not in item) and ('.meta' not in item)) \
-                            or not isinstance(item, str)]
+                         if not isinstance(item, str) or \
+                         not any(ext in item for ext in ['.dvc', '.gitignore', '.meta'])]
 
             # Load desired labels, based on class
             method_name = self.NAME_TO_METHOD[label_class]
@@ -156,16 +155,14 @@ class Field(VisualizationMixin):
 
 
     # Public methods. Usually, used by Batch class
-    def load_seismic(self, location, slicing='custom', src='geometry', **kwargs):
+    def load_seismic(self, location, native_slicing=False, src='geometry', **kwargs):
         """ !!. """
         geometry = getattr(self, src)
 
-        if slicing == 'native':
+        if native_slicing:
             seismic_crop = geometry[tuple(location)]
-        elif slicing == 'custom':
-            seismic_crop = geometry.load_crop(location, **kwargs)
         else:
-            raise ValueError(f"Slicing must be either 'native' or 'custom', not {slicing}!.")
+            seismic_crop = geometry.load_crop(location, **kwargs)
         return seismic_crop
 
     def make_mask(self, location, shape, indices='all', width=3, src='labels', **kwargs):
@@ -192,12 +189,14 @@ class Field(VisualizationMixin):
 
 
     # Attribute retrieval
-    def matrix_fill_to_num(self, matrix, value):
+    @staticmethod
+    def matrix_fill_to_num(matrix, value):
         """ Change the matrix values at points where field is absent to a supplied one. """
         matrix[np.isnan(matrix)] = value
         return matrix
 
-    def matrix_normalize(self, matrix, mode):
+    @staticmethod
+    def matrix_normalize(matrix, mode):
         """ Normalize matrix values.
 
         Parameters

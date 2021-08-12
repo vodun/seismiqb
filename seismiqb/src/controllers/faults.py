@@ -202,7 +202,7 @@ class FaultController(BaseController):
         """ Create loading pipeline for train stages. """
         return (Pipeline()
             .make_locations(batch_size=C('batch_size'), generator=C('sampler'))
-            .load_cubes(dst='images', slicing=C('slicing'))
+            .load_cubes(dst='images', native_slicing=C('native_slicing'))
             .create_masks(dst='masks')
             .adaptive_reshape(src=['images', 'masks'])
             .normalize(mode=C('norm_mode'), itemwise=C('itemwise'), src='images')
@@ -212,7 +212,7 @@ class FaultController(BaseController):
         """ Create loading pipeline for inference stages. """
         ppl = (Pipeline()
             .make_locations(batch_size=C('batch_size'), generator=C('sampler'))
-            .load_cubes(dst='images', slicing=C('slicing'))
+            .load_cubes(dst='images', native_slicing=C('native_slicing'))
             .adaptive_reshape(src='images')
             .normalize(mode=C('norm_mode'), itemwise=C('itemwise'), src='images')
         )
