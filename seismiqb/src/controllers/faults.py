@@ -626,7 +626,6 @@ class FaultController(BaseController):
                 ppl = inference_pipeline << dataset << {'sampler': grid, 'accumulator': accumulator}
 
                 ppl.run(n_iters=grid.n_iters, bar=bar)
-                import pdb; pdb.set_trace()
                 prediction = accumulator.aggregate()
 
                 if fmt == 'npy':
