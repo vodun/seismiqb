@@ -7,6 +7,11 @@ from matplotlib import pyplot as plt
 from ..plotters import plot_image
 
 
+COLOR_GENERATOR = iter(['firebrick', 'darkorchid', 'sandybrown'])
+NAME_TO_COLOR = {}
+
+
+
 class VisualizationMixin:
     """ !!. """
     # Textual representation
@@ -21,8 +26,77 @@ class VisualizationMixin:
             msg += f'    {label.name}\n'
         return msg
 
-    # Graphical representation
-    # 2D
+    # Graphical representation: 2D along axis
+    def show_slide(self, loc, width=None, axis='i', zoom_slice=None,
+                   src_geometry='geometry', src_labels='labels', **kwargs):
+        """ Show slide with horizon on it.
+
+        Parameters
+        ----------
+        loc : int
+            Number of slide to load.
+        width : int
+            Horizon thickness. If None given, set to 1% of seismic slide height.
+        axis : int
+            Number of axis to load slide along.
+        zoom_slice : tuple
+            Tuple of slices to apply directly to 2d images.
+        """
+        axis = self.geometry.parse_axis(axis)
+
+        # Load seismic and mask
+        seismic_slide = getattr(self, src_geometry).load_slide(loc=loc, axis=axis)
+
+        src_labels = src_labels if isinstance(src_labels, (tuple, list)) else [src_labels]
+        masks = []
+        for src in src_labels:
+            masks.extend(getattr(self, src).load_slide(loc=loc, axis=axis, width=width))
+        mask = sum(masks)
+
+        seismic_slide, mask = np.squeeze(seismic_slide), np.squeeze(mask)
+        xmin, xmax, ymin, ymax = 0, seismic_slide.shape[0], seismic_slide.shape[1], 0
+
+        if zoom_slice:
+            seismic_slide = seismic_slide[zoom_slice]
+            mask = mask[zoom_slice]
+            xmin = zoom_slice[0].start or xmin
+            xmax = zoom_slice[0].stop or xmax
+            ymin = zoom_slice[1].stop or ymin
+            ymax = zoom_slice[1].start or ymax
+
+        # defaults for plotting if not supplied in kwargs
+        header = self.geometry.axis_names[axis]
+        total = self.geometry.cube_shape[axis]
+
+        if axis in [0, 1]:
+            xlabel = self.geometry.index_headers[1 - axis]
+            ylabel = 'DEPTH'
+        if axis == 2:
+            xlabel = self.geometry.index_headers[0]
+            ylabel = self.geometry.index_headers[1]
+            total = self.geometry.depth
+
+        title = f'Field `{self.displayed_name}`\n {header} {loc} out of {total}'
+
+        kwargs = {
+            'figsize': (16, 8),
+            'title_label': title,
+            'title_y': 1.02,
+            'xlabel': xlabel,
+            'ylabel': ylabel,
+            'extent': (xmin, xmax, ymin, ymax),
+            'legend': False,
+            'labeltop': False,
+            'labelright': False,
+            'curve_width': width,
+            'grid': [False, True],
+            'colorbar': [True, False],
+            **kwargs
+        }
+        return plot_image(data=[seismic_slide, mask], **kwargs)
+
+
+    # 2D top-view maps
     @staticmethod
     def apply_nested(function, items):
         """ Apply `function` to each of `items`, keeping the same nestedness. Works with lists only. """
@@ -106,19 +180,19 @@ class VisualizationMixin:
             attribute_dict['alpha'] = 1.0
 
         # Cmaps
-        global color_generator, name_to_color
         if short_name in ['matrix', 'full_matrix']:
             attribute_dict['cmap'] = 'Depths'
         elif short_name == 'metric':
             attribute_dict['cmap'] = 'Metric'
         elif short_name == 'full_binary_matrix':
-            if name not in name_to_color:
-                name_to_color[name] = next(color_generator)
-            attribute_dict['cmap'] = name_to_color[name]
+            if name not in NAME_TO_COLOR:
+                NAME_TO_COLOR[name] = next(COLOR_GENERATOR)
+            attribute_dict['cmap'] = NAME_TO_COLOR[name]
         else:
             attribute_dict['cmap'] = 'ocean'
 
         return attribute_dict
+
 
     def show(self, attributes='snr', mode='imshow', return_figure=False, width=9, savepath=None, **kwargs):
         """ !!. """
@@ -133,17 +207,14 @@ class VisualizationMixin:
         load_method = partial(self._show_load_data, method=self.load_attribute)
         attribute_dicts = self.apply_nested(load_method, attribute_dicts)
 
-        # A cardinal sin
-        global color_generator, name_to_color
-        color_generator = iter(['firebrick', 'darkorchid', 'sandybrown'])
-        name_to_color = {}
+        # Plot params for attributes
         attribute_dicts = self.apply_nested(self._show_add_plot_defaults, attribute_dicts)
-
-        # Extract individual plot params
         data = self.apply_nested(lambda dct: dct['output'], attribute_dicts)
         titles = self.apply_nested(lambda dct: dct['name'], attribute_dicts)
         alphas = self.apply_nested(lambda dct: dct['alpha'], attribute_dicts)
         cmaps = self.apply_nested(lambda dct: dct['cmap'], attribute_dicts)
+
+        titles = [item[0] if isinstance(item, list) else item for item in titles]
 
         # Prepare plot defaults
         plot_defaults = {
@@ -179,72 +250,3 @@ class VisualizationMixin:
         figure = plot_image(data=data, mode=mode, savepath=savepath, **params)
         plt.show()
         return figure if return_figure else None
-
-
-    def show_slide(self, loc, width=None, axis='i', zoom_slice=None,
-                   src_geometry='geometry', src_labels='labels', **kwargs):
-        """ Show slide with horizon on it.
-
-        Parameters
-        ----------
-        loc : int
-            Number of slide to load.
-        width : int
-            Horizon thickness. If None given, set to 1% of seismic slide height.
-        axis : int
-            Number of axis to load slide along.
-        zoom_slice : tuple
-            Tuple of slices to apply directly to 2d images.
-        """
-        axis = self.geometry.parse_axis(axis)
-
-        # Load seismic and mask
-        seismic_slide = getattr(self, src_geometry).load_slide(loc=loc, axis=axis)
-
-        src_labels = src_labels if isinstance(src_labels, (tuple, list)) else [src_labels]
-        masks = []
-        for src in src_labels:
-            masks.extend(getattr(self, src).load_slide(loc=loc, axis=axis, width=width))
-        mask = sum(masks)
-
-        seismic_slide, mask = np.squeeze(seismic_slide), np.squeeze(mask)
-        xmin, xmax, ymin, ymax = 0, seismic_slide.shape[0], seismic_slide.shape[1], 0
-
-        if zoom_slice:
-            seismic_slide = seismic_slide[zoom_slice]
-            mask = mask[zoom_slice]
-            xmin = zoom_slice[0].start or xmin
-            xmax = zoom_slice[0].stop or xmax
-            ymin = zoom_slice[1].stop or ymin
-            ymax = zoom_slice[1].start or ymax
-
-        # defaults for plotting if not supplied in kwargs
-        header = self.geometry.axis_names[axis]
-        total = self.geometry.cube_shape[axis]
-
-        if axis in [0, 1]:
-            xlabel = self.geometry.index_headers[1 - axis]
-            ylabel = 'DEPTH'
-        if axis == 2:
-            xlabel = self.geometry.index_headers[0]
-            ylabel = self.geometry.index_headers[1]
-            total = self.geometry.depth
-
-        title = f'Field `{self.displayed_name}`\n {header} {loc} out of {total}'
-
-        kwargs = {
-            'figsize': (16, 8),
-            'title_label': title,
-            'title_y': 1.02,
-            'xlabel': xlabel,
-            'ylabel': ylabel,
-            'extent': (xmin, xmax, ymin, ymax),
-            'legend': False,
-            'labeltop': False,
-            'labelright': False,
-            'curve_width': width,
-            'grid': [False, True],
-            'colorbar': [True, False],
-            **kwargs
-        }
-        return plot_image(data=[seismic_slide, mask], **kwargs)
