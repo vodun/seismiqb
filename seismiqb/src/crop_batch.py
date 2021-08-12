@@ -361,20 +361,18 @@ class SeismicCropBatch(Batch):
         Parameters
         ----------
         src : str
-            A keyword from :attr:`~Facies.ATTRIBUTE_TO_METHOD` keys, defining label attribute to make crops from.
+            A keyword from :attr:`~Horizon.ATTRIBUTE_TO_METHOD` keys, defining label attribute to make crops from.
         src_labels : str
             Dataset attribute with labels dict.
         locations : str
             Component of batch with locations of crops to load.
         kwargs :
             Passed directly to either:
-            - one of attribute-evaluating methods from :attr:`~Horizon.ATTRIBUTE_TO_METHOD` depending on `attribute`
-            - or attribute-transforming method :meth:`~Horizon.transform_where_present`.
+            - one of attribute-evaluating methods from :attr:`~Horizon.ATTRIBUTE_TO_METHOD` depending on `attribute`.
 
         Notes
         -----
-        This method loads rectified data, e.g. amplitudes are croped relative
-        to horizon and will form a straight plane in the resulting crop.
+        Load requested attribute calculated along labels stored in sampled locations.
         """
         field = self.get(ix, 'fields')
         location = self.get(ix, 'locations')

@@ -1,4 +1,6 @@
 """ A mixin with field visualizations. """
+#pylint: disable=global-variable-undefined
+from functools import partial
 import numpy as np
 from matplotlib import pyplot as plt
 
@@ -21,134 +23,161 @@ class VisualizationMixin:
 
     # Graphical representation
     # 2D
-    def show(self, attributes='snr', mode='imshow', return_figure=False, enlarge=False, width=9, **kwargs):
+    @staticmethod
+    def apply_nested(function, items):
+        """ Apply `function` to each of `items`, keeping the same nestedness. Works with lists only. """
+        # Not a list
+        if not isinstance(items, list):
+            return function(items)
+
+        # Simple list
+        if all(not isinstance(item, list) for item in items):
+            return [function(item) for item in items]
+
+        # Nested list
+        result = []
+        for item in items:
+            item = item if isinstance(item, list) else [item]
+            result.append(VisualizationMixin.apply_nested(function, item))
+        return result
+
+
+    @staticmethod
+    def _show_to_dict(attribute):
+        # Convert everything to a dictionary
+        if isinstance(attribute, (str, np.ndarray)):
+            return {'src': attribute}
+        if isinstance(attribute, dict):
+            return attribute
+        raise TypeError(f'Each attribute should be either str, dict or array! Got {type(attribute)} instead.')
+
+    @staticmethod
+    def _show_extract_names(attribute_dict):
+        name = attribute_dict.get('name')
+        if name is None:
+            src = attribute_dict['src']
+            if isinstance(src, np.ndarray):
+                name = 'custom'
+            if isinstance(src, str):
+                name = src
+
+        attribute_dict['name'] = name
+        attribute_dict['short_name'] = name.split('/')[-1]
+        return attribute_dict
+
+    @staticmethod
+    def _show_add_load_defaults(attribute_dict):
+        short_name = attribute_dict['short_name']
+
+        if short_name in ['fourier', 'wavelet']:
+            attribute_dict['n_components'] = 1
+        if short_name in ['masks', 'full_binary_matrix']:
+            attribute_dict['fill_value'] = 0
+            attribute_dict['alpha'] = 0.7
+        return attribute_dict
+
+    @staticmethod
+    def _show_load_data(attribute_dict, method, **kwargs):
+        """ Manage data loading depending on load params type. """
+        src = attribute_dict['src']
+
+        # Already an array: no further actions needed
+        if isinstance(src, np.ndarray):
+            output = src
+        else:
+            # Load data with `method`
+            load = {**kwargs, **attribute_dict}
+            postprocess = load.pop('postprocess', lambda x: x)
+            output = method(**load).squeeze()
+            output = postprocess(output)
+
+        attribute_dict['output'] = output
+        return attribute_dict
+
+    @staticmethod
+    def _show_add_plot_defaults(attribute_dict):
+        name = attribute_dict['name']
+        short_name = attribute_dict['short_name']
+
+        # Alphas
+        if short_name in ['masks', 'full_binary_matrix']:
+            attribute_dict['alpha'] = 0.7
+        else:
+            attribute_dict['alpha'] = 1.0
+
+        # Cmaps
+        global color_generator, name_to_color
+        if short_name in ['matrix', 'full_matrix']:
+            attribute_dict['cmap'] = 'Depths'
+        elif short_name == 'metric':
+            attribute_dict['cmap'] = 'Metric'
+        elif short_name == 'full_binary_matrix':
+            if name not in name_to_color:
+                name_to_color[name] = next(color_generator)
+            attribute_dict['cmap'] = name_to_color[name]
+        else:
+            attribute_dict['cmap'] = 'ocean'
+
+        return attribute_dict
+
+    def show(self, attributes='snr', mode='imshow', return_figure=False, width=9, savepath=None, **kwargs):
         """ !!. """
         # pylint: disable=too-many-statements
-        def apply_by_scenario(action, params):
-            """ Generic method that applies given action to params depending on their type. """
-            if not isinstance(params, list):
-                res = action(params)
-            elif all(not isinstance(item, list) for item in params):
-                res = [action(subplot_params) for subplot_params in params]
-            else:
-                res = []
-                for subplot_params in params:
-                    if isinstance(subplot_params, list):
-                        subplot_res = [action(layer_params) for layer_params in subplot_params]
-                    else:
-                        subplot_res = [action(subplot_params)]
-                    res.append(subplot_res)
-            return res
 
-        # Load attributes and put obtained data in a list with same nestedness as `load`
-        def load_data(attributes):
-            """ Manage data loading depending on load params type. """
-            if isinstance(attributes, np.ndarray):
-                return attributes
-            if isinstance(attributes, str):
-                load = {'src': attributes}
-            if isinstance(attributes, dict):
-                load = attributes
-            postprocess = load.pop('postprocess', lambda x: x)
+        # To dictionaries -> add names - > add defaults
+        attribute_dicts = self.apply_nested(self._show_to_dict, attributes)
+        attribute_dicts = self.apply_nested(self._show_extract_names, attribute_dicts)
+        attribute_dicts = self.apply_nested(self._show_add_load_defaults, attribute_dicts)
 
-            load_defaults = {}
-            if load['src'].split('/')[-1] in ['fourier', 'wavelet']:
-                load_defaults['n_components'] = 1
-            if load['src'].split('/')[-1] in ['masks', 'full_binary_matrix']:
-                load_defaults['fill_value'] = 0
+        # Actually load data
+        load_method = partial(self._show_load_data, method=self.load_attribute)
+        attribute_dicts = self.apply_nested(load_method, attribute_dicts)
 
-            load = {**load_defaults, **load}
-            data = self.load_attribute(**load).squeeze()
-            return postprocess(data)
+        # A cardinal sin
+        global color_generator, name_to_color
+        color_generator = iter(['firebrick', 'darkorchid', 'sandybrown'])
+        name_to_color = {}
+        attribute_dicts = self.apply_nested(self._show_add_plot_defaults, attribute_dicts)
 
-        def enlarge_data(data):
-            if enlarge and self.is_carcass:
-                data = self.matrix_enlarge_carcass(data, width)
-            return data
+        # Extract individual plot params
+        data = self.apply_nested(lambda dct: dct['output'], attribute_dicts)
+        titles = self.apply_nested(lambda dct: dct['name'], attribute_dicts)
+        alphas = self.apply_nested(lambda dct: dct['alpha'], attribute_dicts)
+        cmaps = self.apply_nested(lambda dct: dct['cmap'], attribute_dicts)
 
-        data = apply_by_scenario(load_data, attributes)
-        data = apply_by_scenario(enlarge_data, data)
-
-        # Make titles
-        def extract_data_name(attributes):
-            if isinstance(attributes, np.ndarray):
-                name = 'custom'
-            elif isinstance(attributes, dict):
-                name = attributes['src']
-            elif isinstance(attributes, str):
-                name = attributes
-            return name
-
-        names = apply_by_scenario(extract_data_name, attributes)
-        n_subplots = len(data) if isinstance(data, list) else 1
-
-        def make_titles(names):
-            if any(isinstance(item, list) for item in attributes):
-                return [', '.join(subplot_names) for subplot_names in names]
-            return names
-
-        defaults = {
-            'title_label': make_titles(names),
+        # Prepare plot defaults
+        plot_defaults = {
             'suptitle_label': f"Field `{self.displayed_name}`",
-            'colorbar': mode == 'imshow',
+            'title_label': titles,
             'tight_layout': True,
             'return_figure': True,
         }
 
-        # Infer defaults for `mode`: generate cmaps according to requested data, set axis labels as index headers
-        default_colors = ['firebrick', 'darkorchid', 'sandybrown']
-        gen_color = (color for color in default_colors)
-        name_to_color = {}
-        def make_cmap(name):
-            attr = name.split('/')[-1]
-            # attr = self.ALIAS_TO_ATTRIBUTE.get(attr, attr)
-
-            if attr in ['matrix', 'full_matrix']:
-                return 'Depths'
-            if attr == 'metric':
-                return 'Metric'
-            if attr == 'full_binary_matrix':
-                if name not in name_to_color:
-                    name_to_color[name] = next(gen_color)
-                return name_to_color[name]
-            return 'ocean'
-
-        def make_alpha(name):
-            return 0.7 if name.split('/')[-1] == 'masks' else 1.0
-
+        # Defaults for chosen mode
         if mode == 'imshow':
             x, y = self.spatial_shape
-            defaults = {
-                **defaults,
+            n_subplots = len(data) if isinstance(data, list) else 1
+
+            plot_defaults = {
+                **plot_defaults,
                 'figsize': (x / min(x, y) * n_subplots * 7, y / min(x, y) * 7),
-                # 'xlim': self.bbox[0],
-                # 'ylim': self.bbox[1][::-1],
-                'cmap': apply_by_scenario(make_cmap, names),
-                'alpha': apply_by_scenario(make_alpha, names),
+                'cmap': cmaps,
+                'alpha': alphas,
+                'colorbar': True,
                 'xlabel': self.index_headers[0],
                 'ylabel': self.index_headers[1],
             }
         elif mode == 'hist':
-            defaults = {**defaults, 'figsize': (n_subplots * 10, 5)}
+            plot_defaults = {**plot_defaults, 'figsize': (n_subplots * 10, 5)}
         else:
             raise ValueError(f"Valid modes are 'imshow' or 'hist', but '{mode}' was given.")
 
-        # Merge default and given params
-        params = {**defaults, **kwargs}
-
-        # Substitute asterisks in title-like parameters with default suptitle
-        for text in ['suptitle_label', 'suptitle', 'title_label', 'title', 't']:
-            if text in params:
-                params[text] = apply_by_scenario(lambda s: s.replace('*', defaults['suptitle_label']), params[text])
-
-        # Substitute asterisk in `savepath` parameter with label name
-        if 'savepath' in params:
-            params['savepath'] = self.make_savepath(params['savepath'], name=self.short_name)
-
         # Plot image with given params and return resulting figure
-        figure = plot_image(data=data, mode=mode, **params)
-        plt.show()
+        params = {**plot_defaults, **kwargs}
+        savepath = self.make_savepath(params['savepath'], name=self.short_name) if savepath is not None else None
 
+        figure = plot_image(data=data, mode=mode, savepath=savepath, **params)
+        plt.show()
         return figure if return_figure else None
 
 

@@ -261,7 +261,7 @@ class AttributesMixin:
     # Retrieve data from seismic along horizon
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     @transformable
-    def get_cube_values(self, window=1, offset=0, chunk_size=256):
+    def get_cube_values(self, window=1, offset=0, chunk_size=256, **_):
         """ Get values from the cube along the horizon.
 
         Parameters
@@ -454,7 +454,7 @@ class AttributesMixin:
     # Specific attributes loading
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     @transformable
-    def get_property(self, src):
+    def get_property(self, src, **_):
         """ Load a desired instance attribute. Decorated to allow additional postprocessing steps. """
         data = getattr(self, src, None)
         if data is None:
@@ -537,7 +537,7 @@ class AttributesMixin:
 
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     @transformable
-    def get_fourier_decomposition(self, window=50):
+    def get_fourier_decomposition(self, window=50, **_):
         """ Cached fourier transform calculation follower by dimensionaluty reduction via PCA.
 
         Parameters
@@ -551,7 +551,7 @@ class AttributesMixin:
 
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     @transformable
-    def get_wavelet_decomposition(self, widths=range(1, 14, 3), window=50):
+    def get_wavelet_decomposition(self, widths=range(1, 14, 3), window=50, **_):
         """ Cached wavelet transform calculation followed by dimensionaluty reduction via PCA.
 
         Parameters

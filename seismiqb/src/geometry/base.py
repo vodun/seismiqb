@@ -625,7 +625,7 @@ class SeismicGeometry(ExportMixin):
         return self.get_property(src=src, **kwargs)
 
     @transformable
-    def get_property(self, src):
+    def get_property(self, src, **_):
         """ Load a desired instance attribute. Decorated to allow additional postprocessing steps. """
         return getattr(self, src)
 
