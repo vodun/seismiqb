@@ -84,9 +84,8 @@ class FaultController(BaseController):
         },
 
         'inference': {
-            'batch_size': 32,
             'crop_shape': [1, 128, 512],
-            'inference_batch_size': 32,
+            'batch_size': 32,
             'smooth_borders': False,
             'stride': 0.5,
             'orientation': 'ilines',
@@ -467,7 +466,7 @@ class FaultController(BaseController):
 
     def make_accumulator(self, geometry, slices, crop_shape, strides, orientation=0, path=None):
         """ Make grid and accumulator for inference. """
-        batch_size = self.config['inference']['inference_batch_size']
+        batch_size = self.config['inference']['batch_size']
         aggregation = self.config['inference']['aggregation']
 
         grid = RegularGrid(geometry=geometry,
