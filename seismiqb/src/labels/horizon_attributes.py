@@ -455,7 +455,7 @@ class AttributesMixin:
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     @transformable
     def get_property(self, src):
-        """ !!. """
+        """ Load a desired instance attribute. Decorated to allow additional postprocessing steps. """
         data = getattr(self, src, None)
         if data is None:
             aliases = list(self.ALIAS_TO_ATTRIBUTE.keys())

@@ -1,4 +1,4 @@
-""" !!. """
+""" A container for all information about the field: geometry and labels, as well as convenient API. """
 import os
 import re
 from glob import glob
@@ -43,13 +43,13 @@ class Field(VisualizationMixin):
     NAME_TO_METHOD = {name: method for method, names in METHOD_TO_NAMES.items() for name in names}
 
     def load_labels(self, labels=None, labels_class=None, **labels_kwargs):
-        """ !!. """
+        """ Load labels and store them in the instance. Refer to the class documentation for details. """
         if isinstance(labels, str):
             labels = glob(labels)
         if isinstance(labels, (tuple, list)):
             labels = {'labels': labels}
         if not isinstance(labels, dict):
-            raise TypeError('TYPE SHOULD BE: str / sequence / dict')
+            raise TypeError(f'Labels type should be `str`, `sequence` or `dict`, got {type(labels)} instead!')
 
         # Labels class: make a dictionary
         if labels_class is None:
@@ -113,6 +113,7 @@ class Field(VisualizationMixin):
                     horizons.extend(horizons_)
                     continue
 
+                # Otherwise, make a new instance
                 horizon = Horizon(path, field=self, **kwargs)
                 if filter:
                     horizon.filter()
@@ -137,29 +138,35 @@ class Field(VisualizationMixin):
         return []
 
     def _load_geometries(self, paths, **kwargs):
-        if len(paths) > 1:
-            raise ValueError('!!.')
-        path = paths[0]
+        if isinstance(paths, str):
+            path = paths
+        if isinstance(paths, (tuple, list)):
+            if len(paths) > 1:
+                raise ValueError(f'Path for Geometry loading is non-unique!, {paths}')
+            path = paths[0]
         return SeismicGeometry(path, **kwargs)
 
     # Other methods of initialization
     @classmethod
     def from_horizon(cls, horizon):
-        """ !!. """
+        """ Create a field from a single horizon. """
         return cls(geometry=horizon.geometry, labels={'horizons': horizon})
 
     @classmethod
     def from_dvc(cls, tag, dvc_path=''):
-        """ !!. """
+        """ Create a field from a dvc tag. """
 
 
     # Inner workings
     def __getattr__(self, key):
+        """ Redirect calls for missing attributes, properties and methods to `geometry`. """
         if hasattr(self.geometry, key):
             return getattr(self.geometry, key)
         raise AttributeError(f'Attribute `{key}` does not exist in either Field or associated Geometry!')
 
     def __getattribute__(self, key):
+        """ Wrap every accessed list with `AugmentedList`.
+        The wrapped attribute is re-stored in the instance, so that we return the same object as in the instance. """
         result = super().__getattribute__(key)
         if isinstance(result, list) and not isinstance(result, AugmentedList):
             result = AugmentedList(result)
@@ -169,7 +176,18 @@ class Field(VisualizationMixin):
 
     # Public methods. Usually, used by Batch class
     def load_seismic(self, location, native_slicing=False, src='geometry', **kwargs):
-        """ !!. """
+        """ Load data from cube.
+
+        Parameters
+        ----------
+        location : sequence
+            A triplet of slices to define exact location in the cube.
+        native_slicing : bool
+            if True, crop will be looaded as a slice of geometry. Prefered for 3D crops to speed up loading.
+            If False, use `load_crop` method to load crops.
+        src : str
+            Attribute with desired geometry.
+        """
         geometry = getattr(self, src)
 
         if native_slicing:
@@ -179,7 +197,22 @@ class Field(VisualizationMixin):
         return seismic_crop
 
     def make_mask(self, location, shape, indices='all', width=3, src='labels', **kwargs):
-        """ !!. """
+        """ Create masks from labels.
+
+        Parameters
+        ----------
+        location : sequence
+            A triplet of slices to define exact location in the cube.
+        indices : str, int or sequence of ints
+            Which labels to use in mask creation.
+            If 'all', then use all labels.
+            If 'single' or `random`, then use one random label.
+            If int or array-like, then element(s) are interpreted as indices of desired labels.
+        width : int
+            Width of the resulting label.
+        src : str
+            Attribute with desired labels.
+        """
         mask = np.zeros(shape, dtype=np.float32)
 
         labels = getattr(self, src)
@@ -193,7 +226,6 @@ class Field(VisualizationMixin):
         elif indices in ['single', 'random']:
             labels = np.random.shuffle(labels)[0]
 
-
         for label in labels:
             mask = label.add_to_mask(mask, locations=location, width=width)
             if indices in ['single', 'random'] and mask.sum() > 0.0:
@@ -203,7 +235,19 @@ class Field(VisualizationMixin):
 
     # Attribute retrieval
     def load_attribute(self, src, **kwargs):
-        """ !!. """
+        """ Load desired geological attribute from geometry or labels.
+
+        Parameters
+        ----------
+        src : str
+            Identificator of `what` to load and `from where`.
+            The part before the slash identifies the instance, for example: `geometry`, `horizons:0`, `faults:123`.
+            In general it is `attribute_name:idx`, where `attribute_name` is the attribute to retrieve, and
+            optional `idx` can be used to slice it.
+            The part after the slash is paseed directly to instance's `load_attribute` method.
+        kwargs : dict
+            Additional parameters for attribute computation.
+        """
         # Prepare `src`
         src = src.strip('/')
         if '/' not in src:
@@ -227,10 +271,21 @@ class Field(VisualizationMixin):
         return data
 
 
-
     # Utility functions
     def make_savepath(self, path, name=None, makedirs=True):
-        """ !!. """
+        """ Make path by mapping some of the symbols into pre-defined strings:
+            - `**` or `%` is replaced with basedir of a cube
+            - `*` is replaced with `name`
+
+        Parameters
+        ----------
+        pat : str
+            Path to process.
+        name : str
+            Replacement for `*` symbol.
+        makedirs : bool
+            Whether to make dirs preceding the path.
+        """
         basedir = os.path.dirname(self.path)
         name = name or self.short_name
 
@@ -244,7 +299,7 @@ class Field(VisualizationMixin):
         return path
 
 
-    # TODO: cache resets/introspection
+    # Cache: introspection and reset
     def reset_cache(self):
         """ Clear cached data from underlying entities. """
         for attribute in set(['geometry'] + self.loaded_labels):
@@ -261,15 +316,7 @@ class Field(VisualizationMixin):
 
     # TODO: subsets
     def add_subsets(self, src_subset, dst_base='labels'):
-        """ Add nested labels.
-
-        Parameters
-        ----------
-        src_labels : str
-            Name of field attribute with labels to add as subsets.
-        dst_base: str
-            Name of field attribute with labels to add subsets to.
-        """
+        """ !!. """
         subset_labels = getattr(self, src_subset)
         base_labels = getattr(self, dst_base)
         if len(subset_labels.flat) != len(base_labels.flat):

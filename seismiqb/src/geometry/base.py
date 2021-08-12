@@ -619,12 +619,14 @@ class SeismicGeometry(ExportMixin):
         return matrix
 
     def load_attribute(self, src, **kwargs):
-        """ !!. """
+        """ Load instance attribute from a string, e.g. `snr` or `std_matrix`.
+        Used from a field to re-direct calls.
+        """
         return self.get_property(src=src, **kwargs)
 
     @transformable
     def get_property(self, src):
-        """ !!. """
+        """ Load a desired instance attribute. Decorated to allow additional postprocessing steps. """
         return getattr(self, src)
 
 

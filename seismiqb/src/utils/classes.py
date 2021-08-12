@@ -555,7 +555,14 @@ class AccumulatorBlosc(Accumulator3D):
 
 
 class AugmentedList(list):
-    """ !!. """
+    """ List with additional features:
+        - can be indexed with other iterables.
+        - delegates calls to contained objects.
+        For example, `a_list.method()` is equivalent to `[item.method() for item in a_list]`.
+        Can be used to retrieve attributes, properties and call methods.
+        Returns the list of results, which is itself an instance of `AugmentedList`.
+        - auto-completes names to that of contained objects.
+    """
     # Advanced indexing
     def __getitem__(self, key):
         if isinstance(key, int):
@@ -589,7 +596,15 @@ class AugmentedList(list):
 
 
 class AugmentedDict(OrderedDict):
-    """ !!. """
+    """ Ordered dictionary with additional features:
+        - can be indexed with ordinals.
+        - delegates calls to contained objects.
+        For example, `a_dict.method()` is equivalent to `{key : value.method() for key, value in a_dict.items()}`.
+        Can be used to retrieve attributes, properties and call methods.
+        Returns the dictionary with results, which is itself an instance of `AugmentedDict`.
+        - auto-completes names to that of contained objects.
+        - can be flattened.
+    """
     # Ordinal indexation
     def __getitem__(self, key):
         if isinstance(key, (int, np.integer)):
@@ -638,9 +653,6 @@ class AugmentedDict(OrderedDict):
     def flat(self):
         """ List of all dictionary values. """
         return self.flatten()
-
-    # def __iter__(self):
-    #     return (x for x in self.flat)
 
 
 

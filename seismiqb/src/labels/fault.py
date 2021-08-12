@@ -317,8 +317,8 @@ class Fault(Horizon):
         ----------
         array : numpy.ndarray or SeismicGeometry
             binary mask of faults or array of coordinates.
-        field : SeismicGeometry or None
-            !!.
+        field : Field or None
+            Where the fault is.
         chunk_size : int
             size of chunks to apply `measurements.label`.
         threshold : float or None

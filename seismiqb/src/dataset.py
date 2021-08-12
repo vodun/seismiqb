@@ -37,7 +37,8 @@ class SeismicDataset(Dataset):
                 field = Field(geometry=geometry, labels=labels, **kwargs)
                 self.fields[field.short_name] = field
         else:
-            raise TypeError('!!.')
+            raise TypeError('Dataset should be initialized with a string, a ready-to-use Geometry or Field,'
+                            f' sequence or a dict, got {type(index)} instead.')
 
         dataset_index = DatasetIndex(list(self.fields.keys()))
         super().__init__(dataset_index, batch_class=batch_class)
@@ -50,6 +51,37 @@ class SeismicDataset(Dataset):
 
 
     # Inner workings
+    def __getitem__(self, key):
+        """ Index a field with either its name or ordinal. """
+        if isinstance(key, (int, str)):
+            return self.fields[key]
+        raise KeyError(f'Unsupported key for subscripting, {key}')
+
+    def get_nested_iterable(self, attribute):
+        """ Create an `AugmentedDict` with field ids as keys and their `attribute` as values.
+        For example, `dataset.get_nested_iterable('labels')` would
+        return an `AugmentedDict` with labels for every field.
+        """
+        return AugmentedDict({idx : getattr(field, attribute) for idx, field in self.fields.items()})
+
+    def get_flat_iterable(self, attribute):
+        """ Flattened version of `:meth:.get_nested_iterable`. """
+        return self.get_nested_iterable(attribute=attribute).flat
+
+    def __getattr__(self, key):
+        """ Create nested iterables for a key.
+        For example, `dataset.labels` would return an `AugmentedDict` with labels for every field.
+        """
+        if isinstance(key, str) and key not in self.indices:
+            return self.get_nested_iterable(key)
+        raise AttributeError(f'Unknown attribute {key}')
+
+    @property
+    def geometries(self):
+        """ Back-compatibility and conveniency. """
+        return self.get_nested_iterable('geometry')
+
+
     def gen_batch(self, batch_size=None, shuffle=False, n_iters=None, n_epochs=None, drop_last=False, **kwargs):
         """ Remove `n_epochs`, `shuffle` and `drop_last` from passed arguments.
         Set default value `batch_size` to the size of current dataset, removing the need to
@@ -61,31 +93,6 @@ class SeismicDataset(Dataset):
 
         batch_size = batch_size or len(self)
         return super().gen_batch(batch_size, n_iters=n_iters, **kwargs)
-
-    def get_nested_iterable(self, attribute):
-        """ !!. """
-        return AugmentedDict({idx : getattr(field, attribute) for idx, field in self.fields.items()})
-
-    def get_flat_iterable(self, attribute):
-        """ !!. """
-        return self.get_nested_iterable(attribute=attribute).flat
-
-    def __getitem__(self, key):
-        """ !!. """
-        if isinstance(key, (int, str)):
-            return self.fields[key]
-        raise KeyError(f'Unsupported key for subscripting, {key}')
-
-    def __getattr__(self, key):
-        """ !!. """
-        if isinstance(key, str) and key not in self.indices:
-            return self.get_nested_iterable(key)
-        raise AttributeError(f'Unknown attribute {key}')
-
-    @property
-    def geometries(self):
-        """ !!. """
-        return self.get_nested_iterable('geometry')
 
 
     # Default pipeline and batch for fast testing / introspection

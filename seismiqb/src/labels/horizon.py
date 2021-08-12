@@ -437,9 +437,10 @@ class Horizon(AttributesMixin, VisualizationMixin):
 
         Parameters
         ----------
-        field
-        origin
-        !!.
+        field : Field
+            Field to attach the horizon.
+        origin : sequence
+        The upper left coordinate of a `mask` in the cube coordinates.
         threshold : float
             Parameter of mask-thresholding.
         mode : str
