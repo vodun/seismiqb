@@ -1,5 +1,6 @@
 """ !!. """
 import os
+import re
 from glob import glob
 from difflib import get_close_matches
 
@@ -8,7 +9,7 @@ import numpy as np
 from .visualization import VisualizationMixin
 from ..geometry import SeismicGeometry
 from ..labels import Horizon, Fault, Facies
-from ..utils import DelegatingList, transformable
+from ..utils import AugmentedList, transformable
 
 
 
@@ -37,7 +38,7 @@ class Field(VisualizationMixin):
         '_load_horizons': ['horizon', Horizon],
         '_load_faults': ['fault', Fault],
         '_load_facies': ['facies', 'fans', 'channels', Facies],
-        '_load_geometries': ['geometries', SeismicGeometry],
+        '_load_geometries': ['geometries', 'geometry',  SeismicGeometry],
     }
     NAME_TO_METHOD = {name: method for method, names in METHOD_TO_NAMES.items() for name in names}
 
@@ -123,7 +124,10 @@ class Field(VisualizationMixin):
         print('IN _LOAD_FACIES', paths)
         return []
 
-    def _load_geometries(self, path, **kwargs):
+    def _load_geometries(self, paths, **kwargs):
+        if len(paths) > 1:
+            raise ValueError('!!.')
+        path = paths[0]
         return SeismicGeometry(path, **kwargs)
 
     # Other methods of initialization
@@ -145,8 +149,8 @@ class Field(VisualizationMixin):
 
     def __getattribute__(self, key):
         result = super().__getattribute__(key)
-        if isinstance(result, list) and not isinstance(result, DelegatingList):
-            result = DelegatingList(result)
+        if isinstance(result, list) and not isinstance(result, AugmentedList):
+            result = AugmentedList(result)
             setattr(self, key, result)
         return result
 
@@ -227,7 +231,7 @@ class Field(VisualizationMixin):
 
         else:
             label_id, *src = src.split('/')
-            label_attr, label_idx = label_id.split(':')
+            label_attr, label_idx = re.split(':|_|-', label_id)
 
             if label_attr not in self.loaded_labels:
                 matched = get_close_matches(label_attr, self.loaded_labels, n=1)

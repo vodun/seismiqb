@@ -14,7 +14,7 @@ from ..batchflow import DatasetIndex, Batch, action, inbatch_parallel, SkipBatch
 
 from .labels import Horizon
 from .plotters import plot_image
-from .utils import compute_attribute, to_list, IndexedDict
+from .utils import compute_attribute, to_list, AugmentedDict
 
 
 AFFIX = '___'
@@ -125,11 +125,11 @@ class SeismicCropBatch(Batch):
 
     def get(self, item=None, component=None):
         """ Custom access for batch attributes.
-        If `component` is present in dataset and is an instance of `IndexedDict`, that index it with item and return it.
+        If `component` is present in dataset and is an instance of `AugmentedDict`, that index it with item and return it.
         Otherwise retrieve `component` from batch itself and optionally index it with `item` position in `self.indices`.
         """
         data = getattr(self.dataset, component, None)
-        if isinstance(data, IndexedDict):
+        if isinstance(data, AugmentedDict):
             if isinstance(item, str) and self.has_salt(item):
                 item = self.unsalt(item)
             return data[item]

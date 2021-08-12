@@ -554,44 +554,43 @@ class AccumulatorBlosc(Accumulator3D):
 
 
 
-class DelegatingList(list):
+class AugmentedList(list):
     """ !!. """
+    # Advanced indexing
+    def __getitem__(self, key):
+        if isinstance(key, int):
+            return super().__getitem__(key)
+        if isinstance(key, slice):
+            return AugmentedList(super().__getitem__(key))
+
+        return AugmentedList([super().__getitem__(idx) for idx in key])
+
+    # Delegating to contained objects
     def __getattr__(self, key):
         if len(self) == 0:
-            return lambda *args, **kwargs: DelegatingList()
+            return lambda *args, **kwargs: self
 
         attribute = getattr(self[0], key)
 
         if not callable(attribute):
             # Attribute or property
-            return DelegatingList([getattr(item, key) for item in self])
+            return AugmentedList([getattr(item, key) for item in self])
 
         @wraps(attribute)
         def method_wrapper(*args, **kwargs):
-            return DelegatingList([getattr(item, key)(*args, **kwargs) for item in self])
+            return AugmentedList([getattr(item, key)(*args, **kwargs) for item in self])
         return method_wrapper
 
-    def __getitem__(self, key):
-        if isinstance(key, int):
-            return super().__getitem__(key)
-        if isinstance(key, slice):
-            return DelegatingList(super().__getitem__(key))
-
-        return DelegatingList([super().__getitem__(idx) for idx in key])
-
     def __dir__(self):
-        if self:
+        """ Correct autocompletion for delegated methods. """
+        if len(self) == 0:
             return dir(self[0])
         return dir(self)
 
 
-class IndexedDict(OrderedDict):
-    """ `OrderedDict` that allows integer indexing and values flattening.
-
-    - Both keys and their ordinal numbers might be used to subscript. Therefore `int` keys are not supported.
-    - Flatten values list of requested keys can be obtained via `flatten` method.
-    - Flatten list of all values is also available via `flat` property.
-    """
+class AugmentedDict(OrderedDict):
+    """ !!. """
+    # Ordinal indexation
     def __getitem__(self, key):
         if isinstance(key, (int, np.integer)):
             key = list(self.keys())[key]
@@ -600,22 +599,48 @@ class IndexedDict(OrderedDict):
     def __setitem__(self, key, value):
         if isinstance(key, (int, np.integer)):
             key = list(self.keys())[key]
+
+        if isinstance(value, list):
+            value = AugmentedList(value)
         super().__setitem__(key, value)
 
+    # Delegating to contained objects
+    def __getattr__(self, key):
+        if len(self) == 0:
+            return lambda *args, **kwargs: self
+
+        attribute = getattr(self[0], key)
+
+        if not callable(attribute):
+            # Attribute or property
+            return AugmentedDict({key_ : getattr(value, key) for key_, value in self.items()})
+
+        @wraps(attribute)
+        def method_wrapper(*args, **kwargs):
+            return AugmentedDict({key_ : getattr(value, key)(*args, **kwargs) for key_, value in self.items()})
+        return method_wrapper
+
+    def __dir__(self):
+        """ Correct autocompletion for delegated methods. """
+        if len(self) == 0:
+            return dir(self[0])
+        return dir(self)
+
+    # Convenient iterables
     def flatten(self, keys=None):
         """ Get dict values for requested keys in a single list. """
         keys = to_list(keys) if keys is not None else list(self.keys())
         lists = [self[key] if isinstance(self[key], list) else [self[key]] for key in keys]
         flattened = sum(lists, [])
-        return DelegatingList(flattened)
+        return AugmentedList(flattened)
 
     @property
     def flat(self):
         """ List of all dictionary values. """
         return self.flatten()
 
-    def __iter__(self):
-        return (x for x in self.flat)
+    # def __iter__(self):
+    #     return (x for x in self.flat)
 
 
 

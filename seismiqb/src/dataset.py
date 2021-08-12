@@ -12,28 +12,13 @@ from .field import Field
 from .geometry import SeismicGeometry
 from .plotters import plot_image, show_3d
 from .crop_batch import SeismicCropBatch
-from .utils import to_list, IndexedDict
+from .utils import to_list, AugmentedDict
 
 
 class SeismicDataset(Dataset):
     """ !!.
     A common container for data entities: usually, seismic cubes and some type of labels.
     Entities are stored in dict-like objects, which can be indexed with either cube names or ordinal integer.
-
-    Can be initialized with either:
-        - `FilesIndex` instance
-        - path(s) to cubes
-        - from an instance of Horizon
-
-    For batch generation and pipeline usage, we use `:meth:~SeismicCropBatch.make_locations` to convert batch indices
-    from individual cubes to crops.
-
-    Attributes
-    ----------
-    geometries : IndexedDict
-        Storage of geometries, where keys are cube names and values are `SeismicGeometry` instances.
-    labels : IndexedDict
-        Nested storage of labels, where keys are cube names and values are sequences of labels.
     """
     #pylint: disable=keyword-arg-before-vararg
     def __init__(self, index, batch_class=SeismicCropBatch, *args, **kwargs):
@@ -47,7 +32,7 @@ class SeismicDataset(Dataset):
             index = {item : None for item in index}
 
         if isinstance(index, dict):
-            self.fields = IndexedDict()
+            self.fields = AugmentedDict()
             for geometry, labels in index.items():
                 field = Field(geometry=geometry, labels=labels, **kwargs)
                 self.fields[field.short_name] = field
@@ -79,7 +64,7 @@ class SeismicDataset(Dataset):
 
     def get_nested_iterable(self, attribute):
         """ !!. """
-        return IndexedDict({idx : getattr(field, attribute) for idx, field in self.fields.items()})
+        return AugmentedDict({idx : getattr(field, attribute) for idx, field in self.fields.items()})
 
     def get_flat_iterable(self, attribute):
         """ !!. """
@@ -375,14 +360,14 @@ class FaciesCubeset(SeismicDataset):
 
         Returns
         -------
-        IndexedDict where keys are cubes names and values are lists of results obtained by applied map.
+        AugmentedDict where keys are cubes names and values are lists of results obtained by applied map.
         If all lists in result values are empty, None is returned instead.
 
         Examples
         --------
         >>> cubeset.map_labels('smooth_out', ['CUBE_01_AAA', 'CUBE_02_BBB'], 'horizons', iters=3)
         """
-        results = IndexedDict({idx: [] for idx in self.indices})
+        results = AugmentedDict({idx: [] for idx in self.indices})
         for label in getattr(self, src_labels).flatten(keys=indices):
             if isinstance(function, str):
                 res = getattr(label, function)(**kwargs)
@@ -407,7 +392,7 @@ class FaciesCubeset(SeismicDataset):
 
     def add_merged_labels(self, src_labels, dst_labels, indices=None, dst_base='labels'):
         """ Merge requested labels and store resulted labels in cubeset. """
-        results = IndexedDict({idx: [] for idx in self.indices})
+        results = AugmentedDict({idx: [] for idx in self.indices})
         indices = to_list(indices or self.indices)
         for idx in indices:
             to_merge = self[idx, src_labels]

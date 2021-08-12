@@ -19,7 +19,7 @@ from itertools import product
 import numpy as np
 from numba import njit
 
-from .utils import filtering_function, IndexedDict
+from .utils import filtering_function, AugmentedDict
 from .labels.fault import insert_fault_into_mask
 from ..batchflow import Sampler, ConstantSampler
 
@@ -621,7 +621,7 @@ class SeismicSampler(Sampler):
 
         names, field_names = {}, {}
         sampler = 0 & ConstantSampler(np.int32(0), dim=baseclass.dim)
-        samplers = IndexedDict({idx: [] for idx in labels.keys()})
+        samplers = AugmentedDict({idx: [] for idx in labels.keys()})
 
         proportions = proportions or [1 / len(labels) for _ in labels]
 
