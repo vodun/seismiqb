@@ -57,16 +57,13 @@ class SeismicDataset(Dataset):
             return self.fields[key]
         raise KeyError(f'Unsupported key for subscripting, {key}')
 
+
     def get_nested_iterable(self, attribute):
         """ Create an `AugmentedDict` with field ids as keys and their `attribute` as values.
         For example, `dataset.get_nested_iterable('labels')` would
         return an `AugmentedDict` with labels for every field.
         """
         return AugmentedDict({idx : getattr(field, attribute) for idx, field in self.fields.items()})
-
-    def get_flat_iterable(self, attribute):
-        """ Flattened version of `:meth:.get_nested_iterable`. """
-        return self.get_nested_iterable(attribute=attribute).flat
 
     def __getattr__(self, key):
         """ Create nested iterables for a key.

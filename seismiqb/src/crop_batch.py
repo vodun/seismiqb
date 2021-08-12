@@ -242,7 +242,7 @@ class SeismicCropBatch(Batch):
             Component of batch to put loaded crops in.
         slicing : str
             If 'custom', use `load_crop` method to make crops.
-            if 'native', crop will be looaded as a slice of geometry. Prefered for 3D crops to speed up loading.
+            if 'native', crop will be loaded as a slice of geometry. Prefered for 3D crops to speed up loading.
         src_geometry : str
             Field attribute with desired geometry.
         """

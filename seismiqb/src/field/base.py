@@ -183,7 +183,7 @@ class Field(VisualizationMixin):
         location : sequence
             A triplet of slices to define exact location in the cube.
         native_slicing : bool
-            if True, crop will be looaded as a slice of geometry. Prefered for 3D crops to speed up loading.
+            if True, crop will be loaded as a slice of geometry. Prefered for 3D crops to speed up loading.
             If False, use `load_crop` method to load crops.
         src : str
             Attribute with desired geometry.
@@ -244,7 +244,7 @@ class Field(VisualizationMixin):
             The part before the slash identifies the instance, for example: `geometry`, `horizons:0`, `faults:123`.
             In general it is `attribute_name:idx`, where `attribute_name` is the attribute to retrieve, and
             optional `idx` can be used to slice it.
-            The part after the slash is paseed directly to instance's `load_attribute` method.
+            The part after the slash is passed directly to instance's `load_attribute` method.
         kwargs : dict
             Additional parameters for attribute computation.
         """
