@@ -350,6 +350,8 @@ class Horizon(AttributesMixin, VisualizationMixin):
         self.name = os.path.basename(path) if self.name is None else self.name
         points = self.file_to_points(path)
         self.from_points(points, transform, **kwargs)
+        if self.points.size == 0:
+            raise ValueError(f'Loaded horizon `{path}` is beyond geometry `{self.geometry.displayed_name}` limits.')
 
     def file_to_points(self, path):
         """ Get point cloud array from file values. """
