@@ -10,7 +10,7 @@ import h5py
 
 from .export import ExportMixin
 
-from ..utils import file_print, get_environ_flag, lru_cache
+from ..utils import file_print, get_environ_flag, lru_cache, transformable
 from ..plotters import plot_image
 
 
@@ -586,6 +586,46 @@ class SeismicGeometry(ExportMixin):
     def ngbytes(self):
         """ Size of instance in gigabytes. """
         return self.nbytes / (1024**3)
+
+
+    # Attribute retrieval
+    @staticmethod
+    def matrix_fill_to_num(matrix, value):
+        """ Change the matrix values at points where field is absent to a supplied one. """
+        matrix[np.isnan(matrix)] = value
+        return matrix
+
+    @staticmethod
+    def matrix_normalize(matrix, mode):
+        """ Normalize matrix values.
+
+        Parameters
+        ----------
+        mode : bool, str, optional
+            If `min-max` or True, then use min-max scaling.
+            If `mean-std`, then use mean-std scaling.
+            If False, don't scale matrix.
+        """
+        values = matrix[~np.isnan(matrix)]
+
+        if mode in ['min-max', True]:
+            min_, max_ = np.nanmin(values), np.nanmax(values)
+            matrix = (matrix - min_) / (max_ - min_)
+        elif mode == 'mean-std':
+            mean, std = np.nanmean(values), np.nanstd(values)
+            matrix = (matrix - mean) / std
+        else:
+            raise ValueError(f'Unknown normalization mode `{mode}`.')
+        return matrix
+
+    def load_attribute(self, src, **kwargs):
+        """ !!. """
+        return self.get_property(src=src, **kwargs)
+
+    @transformable
+    def get_property(self, src):
+        """ !!. """
+        return getattr(self, src)
 
 
     # Textual representation

@@ -9,7 +9,7 @@ import numpy as np
 from .visualization import VisualizationMixin
 from ..geometry import SeismicGeometry
 from ..labels import Horizon, Fault, Facies
-from ..utils import AugmentedList, transformable
+from ..utils import AugmentedList
 
 
 
@@ -60,7 +60,7 @@ class Field(VisualizationMixin):
             labels_class_dict = labels_class
 
         for label_dst, label_src in labels.items():
-            # Try getting provided `labels_class`, else fallback on NAME_TO_CLASS closest match
+            # Try getting provided `labels_class`, else fallback on NAME_TO_METHOD closest match
             label_class = labels_class_dict.get(label_dst)
 
             if label_class is None:
@@ -79,9 +79,7 @@ class Field(VisualizationMixin):
                 label_src = glob(label_src)
             if not isinstance(label_src, (tuple, list)):
                 label_src = [label_src]
-            label_src = [item for item in label_src
-                         if not isinstance(item, str) or \
-                         not any(ext in item for ext in ['.dvc', '.gitignore', '.meta'])]
+            label_src = self._filter_paths(label_src)
 
             # Load desired labels, based on class
             method_name = self.NAME_TO_METHOD[label_class]
@@ -94,12 +92,27 @@ class Field(VisualizationMixin):
             if 'labels' not in labels and not self.labels:
                 setattr(self, 'labels', result)
 
+    @staticmethod
+    def _filter_paths(paths):
+        """ Remove paths fors service files. """
+        return [path for path in paths
+                if not isinstance(path, str) or \
+                not any(ext in path for ext in ['.dvc', '.gitignore', '.meta'])]
+
 
     def _load_horizons(self, paths, filter=True, interpolate=False, sort=True, **kwargs):
         #pylint: disable=redefined-builtin
         horizons = []
         for path in paths:
             if isinstance(path, str):
+                # If path is a mask, call recursively
+                paths_ = self._filter_paths(glob(path))
+                if len(paths_) > 1 or paths_[0] != path:
+                    horizons_ = self._load_horizons(paths_, filter=filter, interpolate=interpolate,
+                                                    sort=False, **kwargs)
+                    horizons.extend(horizons_)
+                    continue
+
                 horizon = Horizon(path, field=self, **kwargs)
                 if filter:
                     horizon.filter()
@@ -189,66 +202,30 @@ class Field(VisualizationMixin):
 
 
     # Attribute retrieval
-    @staticmethod
-    def matrix_fill_to_num(matrix, value):
-        """ Change the matrix values at points where field is absent to a supplied one. """
-        matrix[np.isnan(matrix)] = value
-        return matrix
-
-    @staticmethod
-    def matrix_normalize(matrix, mode):
-        """ Normalize matrix values.
-
-        Parameters
-        ----------
-        mode : bool, str, optional
-            If `min-max` or True, then use min-max scaling.
-            If `mean-std`, then use mean-std scaling.
-            If False, don't scale matrix.
-        """
-        values = matrix[~np.isnan(matrix)]
-
-        if mode in ['min-max', True]:
-            min_, max_ = np.nanmin(values), np.nanmax(values)
-            matrix = (matrix - min_) / (max_ - min_)
-        elif mode == 'mean-std':
-            mean, std = np.nanmean(values), np.nanstd(values)
-            matrix = (matrix - mean) / std
-        else:
-            raise ValueError(f'Unknown normalization mode `{mode}`.')
-        return matrix
-
     def load_attribute(self, src, **kwargs):
         """ !!. """
-        # 'zero_traces'
-        # 'horizons:0/amplitudes'
-        # 'horizons:0/channels/masks'
+        # Prepare `src`
         src = src.strip('/')
-
         if '/' not in src:
-            data = self.get_property(src=src, **kwargs)
+            src = 'geometry/' + src
 
-        else:
-            label_id, *src = src.split('/')
+        label_id, *src = src.split('/')
+        src = '/'.join(src)
+
+        # Select instance
+        if any(sep in label_id for sep in ':_-'):
             label_attr, label_idx = re.split(':|_|-', label_id)
 
             if label_attr not in self.loaded_labels:
-                matched = get_close_matches(label_attr, self.loaded_labels, n=1)
-                if matched:
-                    label_attr = matched[0]
-                else:
-                    raise ValueError(f"Can't determine the label attribute for `{label_attr}`!")
+                raise ValueError(f"Can't determine the label attribute for `{label_attr}`!")
             label_idx = int(label_idx)
             label = getattr(self, label_attr)[label_idx]
+        else:
+            label = getattr(self, label_id)
 
-            src = '/'.join(src)
-            data = label.load_attribute(src, **kwargs)
+        data = label.load_attribute(src, **kwargs)
         return data
 
-    @transformable
-    def get_property(self, src):
-        """ !!. """
-        return getattr(self, src)
 
 
     # Utility functions
