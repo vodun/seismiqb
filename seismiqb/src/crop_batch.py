@@ -267,7 +267,23 @@ class SeismicCropBatch(Batch):
     @inbatch_parallel(init='indices', src='indices', target='for', post='_assemble',
                       dst=('cubes', 'masks', 'faults'))
     def generate_synthetic(self, ix, dst=None, fault_width=3, **kwargs):
+        """ Generate synthetic seismic, corresponding horizons' and faults'
+        masks and put it into batch-components.
+
+        Parameters
+        ----------
+        dst : sequence
+            sequence of length=3 to put created components in.
+        fault_width : int
+            width of a fault on a faults-mask.
+        **kwargs : dict
+            all arguments of `generate_synthetic`-method. See the docstring for more
+            info.
+        """
         _, _ = self, ix
+
+        # if the requested shape is in fact 2d (for instance [1, 64, 128] or [64, 1, 128])
+        # performs `generate_synthetic` in 2d and then adds the missing axis
         shape = np.array(kwargs['shape'])
 
         if shape[0] == 1 or shape[1] == 1:
@@ -276,11 +292,13 @@ class SeismicCropBatch(Batch):
         else:
             axis_num = None
 
+        # generate synthetic crop and horizons, faults points clouds
         crop, horizons, faults = generate_synthetic(**kwargs)
         if axis_num is not None:
             crop = np.expand_dims(crop, axis=axis_num)
             horizons = np.expand_dims(horizons, axis=axis_num + 1)
 
+        # generate horizons' and faults' masks
         mask = np.zeros_like(crop)
         fault_mask = np.zeros_like(crop)
         locations = (slice(0, mask.shape[0]), slice(0, mask.shape[1]), slice(0, mask.shape[2]))
@@ -294,6 +312,7 @@ class SeismicCropBatch(Batch):
             fault = Fault(fault_data, geom)
             fault.add_to_mask(fault_mask, locations)
 
+        # add requested width to faults' mask
         if fault_width is not None:
             if fault_width > 1:
                 if fault_mask.shape[0] == 1 or fault_mask.shape[1] == 1:
