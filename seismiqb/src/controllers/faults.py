@@ -6,9 +6,11 @@
 import os
 from datetime import datetime
 from shutil import copyfile
+import h5py
+import tqdm
 
 import numpy as np
-import tqdm
+from pprint import pformat
 
 from .base import BaseController
 from .best_practices import MODEL_CONFIG
@@ -22,8 +24,8 @@ from ..metrics import FaultsMetrics
 from ..utils import adjust_shape_3d, Accumulator3D, InputLayer
 from ..plotters import plot_image
 
-from ...batchflow import Config, Pipeline, Notifier, Dataset
-from ...batchflow import B, C, D, P, R, V, F, I, M, PP
+from ...batchflow import Config, Pipeline, Notifier, Dataset, Monitor
+from ...batchflow import B, C, D, P, R, V, F, I, M
 from ...batchflow import NumpySampler as NS
 from ...batchflow.models.torch import TorchModel, EncoderDecoder
 
@@ -518,7 +520,11 @@ class FaultController(BaseController):
                 grid, accumulator = self.make_accumulator(geometry, slices, crop_shape, strides, orientation)
                 ppl = inference_pipeline << {'sampler': grid, 'accumulator': accumulator}
 
-                ppl.run(n_iters=grid.n_iters, bar=pbar)
+                notifier = {
+                    'file': self.make_savepath('末 inference_bar.log'),
+                }
+
+                ppl.run(n_iters=grid.n_iters, notifier=notifier)
                 prediction = accumulator.aggregate()
 
                 image = geometry[
@@ -579,9 +585,13 @@ class FaultController(BaseController):
         strides = np.maximum(np.array(crop_shape) * np.array(strides), 1).astype(int)
 
         self.log('Create test pipeline and dataset.')
+
         dataset = self.make_inference_dataset(create_mask=False)
         inference_pipeline = self.get_inference_template(train_pipeline, model_path, create_masks=False)
         inference_pipeline.set_config(config)
+
+        # Log: pipeline_config to a file
+        self.log_to_file(pformat(config, depth=2), '末 inference_config.txt')
 
         cubes = config['inference_cubes']
         cubes = {
@@ -605,6 +615,10 @@ class FaultController(BaseController):
             outputs[cube_idx] = []
             geometry = dataset.geometries[cube_idx]
             for item in cubes[cube_idx]:
+                if self.monitor:
+                    monitor = Monitor(['uss', 'gpu', 'gpu_memory'], frequency=0.5, gpu_list=self.gpu_list)
+                    monitor.__enter__()
+
                 axis = item[0]
                 ranges = item[1:]
                 if len(ranges) != 3:
@@ -625,8 +639,20 @@ class FaultController(BaseController):
                 grid, accumulator = self.make_accumulator(geometry, ranges, crop_shape, strides, axis, path)
                 ppl = inference_pipeline << dataset << {'sampler': grid, 'accumulator': accumulator}
 
-                ppl.run(n_iters=grid.n_iters, bar=bar)
+                notifier = {
+                    'file': self.make_savepath('末 inference_bar.log'),
+                }
+
+                self.log(f'n_iters: {grid.n_iters}')
+
+                ppl.run(n_iters=grid.n_iters, notifier=notifier)
                 prediction = accumulator.aggregate()
+
+                self.log(f'Finish prediction {path}')
+
+                if self.monitor:
+                    monitor.__exit__(None, None, None)
+                    monitor.visualize(savepath=self.make_savepath('末 inference_resource.png'), show=self.plot)
 
                 if fmt == 'npy':
                     outputs.append(prediction)
@@ -640,6 +666,39 @@ class FaultController(BaseController):
                     )
                 if fmt in ['hdf5', 'blosc', 'qblosc']:
                     accumulator.file.close()
+
+    def process(self, cube_path, prediction_path, orientation=0, skeletonize=True, clear=True, threshold=0.05, width=3, bar=True):
+        orientation = int(orientation)
+        geometry = SeismicGeometry(cube_path)
+        prediction = h5py.File(prediction_path, mode='a')
+
+        self.log(f'Start processing {prediction_path}')
+
+        for i in range(geometry.cube_shape[orientation]):
+            self.log(f'Process slide {i}/{geometry.cube_shape[orientation]}')
+            if orientation == 0:
+                image, slide = geometry.file['cube_i'][i:i+1], prediction['cube_i'][i:i+1]
+            else:
+                image, slide = geometry.file['cube_x'][i:i+1].transpose(0, 2, 1), prediction['cube_i'][:, i:i+1].transpose(1, 0, 2)
+            if prediction:
+                slide = Fault.skeletonize_faults(slide, threshold=threshold, mode='array', width=width, bar=False)
+            if clear:
+                slide = Fault.remove_predictions_on_bounds(image, slide)
+
+            if orientation == 0:
+                prediction['cube_i'][i:i+1] = slide
+            else:
+                prediction['cube_i'][:, i:i+1] = slide.transpose(1, 0, 2)
+
+        self.log(f'Start faults splitting for {prediction_path}')
+
+        faults = Fault.from_mask(SeismicGeometry(prediction_path), geometry, chunk_size=100, threshold=0.05)
+        ds = SeismicCubeset(index=cube_path)
+        ds.load(label_dir='dummy', labels_class=Fault)
+        ds.labels[0] = faults
+        ds.dump_labels(f'/PREDICTIONS/FAULTS/SKELETON_{orientation}', separate=True)
+
+        self.log(f'Finish faults splitting for {prediction_path}')
 
     # Path utils
 
