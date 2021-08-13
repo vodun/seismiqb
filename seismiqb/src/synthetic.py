@@ -176,6 +176,17 @@ class SyntheticGenerator():
     """ Class for generation of syhthetic velocity and density models and synthetic seismic - 2D/3D.
     """
     def __init__(self, rng=None, seed=None):
+        """ Class for generation of syhthetic velocity and density models and synthetic seismic - 2D/3D.
+        Can generate synthetic seismic with faults. Horizons and faults acn be stored in instances of the
+        class.
+
+        Parameters
+        ----------
+        rng : np.random.Generator or None
+            generator of random numbers.
+        seed : int or None
+            sees used for creation of random generator (check out `np.random.default_rng`).
+        """
         self.dim = None
         self.rng = rng or np.random.default_rng(seed)
         self.velocities = None
@@ -208,12 +219,12 @@ class SyntheticGenerator():
             as `horizon_heights`-arg.
         """
         low, high = vel_limits
-        llim = (high - low) / num_reflections
+        velocity_delta = (high - low) / num_reflections
         self.velocities = (np.linspace(low, high, num_reflections + 1) +
-                           self.rng.uniform(low=-llim, high=llim, size=(num_reflections + 1, )))
+                           self.rng.uniform(low=-velocity_delta, high=velocity_delta, size=(num_reflections + 1, )))
 
         for height_share, jump_mul in zip(horizon_heights, horizon_multipliers):
-            self.velocities[int(self.velocities.shape[0] * height_share)] += llim * jump_mul
+            self.velocities[int(self.velocities.shape[0] * height_share)] += velocity_delta * jump_mul
 
         self._horizon_heights = horizon_heights
         return self
@@ -375,6 +386,20 @@ class SyntheticGenerator():
 
     def fetch_horizons(self, mode='horizons'):
         """ Fetch some (or all) reflective surfaces.
+
+        Parameters
+        ----------
+        horizons : str
+            Can be either 'horizons', 'all' or None. When 'horizons', only horizon-surfaces
+            (option `horizon_heights`) are returned. Choosing 'all' allows to return all of
+            the reflections, while 'topK' option leads to fetching K surfaces correpsonding
+            to K largest jumps in velocities-array.
+
+        Returns
+        -------
+        np.ndarray
+            array of shape n_horizons X n_ilines X n_xlines containing horizon-heights
+            of selected horizons.
         """
         if mode is None:
             return None
@@ -423,7 +448,7 @@ def generate_synthetic(shape=(50, 400, 800), num_reflections=200, vel_limits=(90
                        num_points_faults=10, max_shift=10, zeros_share_faults=0.6, fault_shift_interpolation='cubic',
                        perturb_values=True, perturb_peak=False, random_invert=False,
                        fetch_surfaces='horizons', rng=None, seed=None):
-    """ Generate and synthetic 3d-cube along with most prominient reflective surfaces ("horizons").
+    """ Generate synthetic 3d-cube and most prominent reflective surfaces ("horizons").
 
     Parameters
     ----------
@@ -508,9 +533,8 @@ def generate_synthetic(shape=(50, 400, 800), num_reflections=200, vel_limits=(90
     gen = (gen.make_density_model(density_noise_lims)
               .make_synthetic(ricker_width, ricker_points)
               .postprocess_synthetic(sigma, noise_mul))
-    if faults is not None:
-        return gen.synthetic, gen.fetch_horizons(fetch_surfaces), gen.fetch_faults()
-    return gen.synthetic, gen.fetch_horizons(fetch_surfaces)
+
+    return gen.synthetic, gen.fetch_horizons(fetch_surfaces), gen.fetch_faults()
 
 
 def surface_to_points(surface):
