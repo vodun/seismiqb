@@ -169,8 +169,8 @@ def make_elastic_distortion(rng=None, seed=None, n_points=10, zeros_share=0.2, k
     # possibly invert the elastic transform
     if random_invert:
         if rng.choice([True, False]):
-            return lambda x: x - spl(x)
-    return lambda x: x + spl(x)
+            return lambda x: -spl(x)
+    return spl
 
 class SyntheticGenerator():
     """ Class for generation of syhthetic velocity and density models and synthetic seismic - 2D/3D.
