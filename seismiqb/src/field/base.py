@@ -327,7 +327,7 @@ class Field(VisualizationMixin):
                     .replace('*', name)
                     .replace('//', '/'))
 
-        if makedirs:
+        if makedirs and os.path.dirname(path):
             os.makedirs(os.path.dirname(path), exist_ok=True)
         return path
 

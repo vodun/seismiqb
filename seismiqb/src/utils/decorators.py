@@ -37,19 +37,19 @@ def transformable(method):
                 normalize=False, enlarge=False, enlarge_width=10, n_components=None, atleast_3d=False, **kwargs):
         result = method(instance, *args, **kwargs)
 
-        if dtype:
+        if dtype and hasattr(instance, 'matrix_set_dtype'):
             result = instance.matrix_set_dtype(result, dtype=dtype)
-        if on_full:
+        if on_full and hasattr(instance, 'matrix_put_on_full'):
             result = instance.matrix_put_on_full(result)
-        if normalize:
+        if normalize and hasattr(instance, 'matrix_normalize'):
             result = instance.matrix_normalize(result, normalize)
-        if enlarge:
+        if enlarge and hasattr(instance, 'matrix_enlarge'):
             result = instance.matrix_enlarge(result, width=enlarge_width)
-        if fill_value is not None:
+        if fill_value is not None and hasattr(instance, 'matrix_fill_to_num'):
             result = instance.matrix_fill_to_num(result, value=fill_value)
         if atleast_3d:
             result = np.atleast_3d(result)
-        if n_components:
+        if n_components and hasattr(instance, 'pca_transform'):
             if result.ndim != 3:
                 raise ValueError(f'PCA transformation can be applied only to 3D arrays, got `{result.ndim}`')
             result = instance.pca_transform(result, n_components=n_components)

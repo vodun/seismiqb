@@ -148,10 +148,8 @@ class VisualizationMixin:
 
     @staticmethod
     def _show_add_load_defaults(attribute_dict):
-        name = attribute_dict['name']
-        if 'horizons' in name or 'labels' in name:
-            attribute_dict['fill_value'] = np.nan
-            attribute_dict['dtype'] = np.float32
+        attribute_dict['fill_value'] = np.nan
+        attribute_dict['dtype'] = np.float32
 
         short_name = attribute_dict['short_name']
 
