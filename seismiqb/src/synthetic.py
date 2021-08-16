@@ -27,9 +27,9 @@ def make_surfaces(num_surfaces, grid_shape, shape, kind='cubic', perturbation_sh
     shares : np.ndarray
         Array representing height-distances between subsequent surfaces as shares of unit-interval.
     rng : np.random.Generator or None
-        generator of random numbers.
+        Generator of random numbers.
     seed : int or None
-        seed used for creation of random generator (check out `np.random.default_rng`).
+        Seed used for creation of random generator (check out `np.random.default_rng`).
 
     Returns
     -------
@@ -183,9 +183,9 @@ class SyntheticGenerator():
         Parameters
         ----------
         rng : np.random.Generator or None
-            generator of random numbers.
+            Generator of random numbers.
         seed : int or None
-            sees used for creation of random generator (check out `np.random.default_rng`).
+            Seed used for creation of random generator (check out `np.random.default_rng`).
         """
         self.dim = None
         self.rng = rng or np.random.default_rng(seed)
@@ -211,8 +211,8 @@ class SyntheticGenerator():
             Contains two floats. Velocities of layers in velocity model gradually change from the
             lower limit (first number) to the upper limit (second number) with some noise added.
         horizon_heights : sequence
-            Each element is a float in [0, 1] interval and defines the depth at which a horizon should be located.
-            Note that each horizon is yielded by a large velocity gradient.
+            Each element is a float in [0, 1] interval that defines the depth (at unit coordinates) at which a
+            horizon should be located.
         horizon_multipliers : sequence
             Each element is float mutiplier >> 1 (or << -1) controling the magnitide of gradients in velocity.
             The larger the gradients, the more prominient are the horizons. The argument should have the same length
@@ -307,23 +307,23 @@ class SyntheticGenerator():
         Parameters
         ----------
         faults : sequence
-            iterable containing faults-coordinates in form ((x0, y0), (x1, y1)).
+            Iterable containing faults-coordinates in form ((x0, y0), (x1, y1)).
         num_points : int
-            number of points used for making coordinate-shifts for faults.
+            Number of points used for making coordinate-shifts for faults.
         max_shift : int
             Maximum vertical shift resulting from the fault.
         zeros_share : float
-            left and right tails of humps are set to zeros. This is needed to make
+            Left and right tails of humps are set to zeros. This is needed to make
             transformations that are identical on the tails. The parameter controls the share
             of zero-values for tails.
         kind : str
-            kind of interpolation used for building coordinate-shifts.
+            Kind of interpolation used for building coordinate-shifts.
         perturb_values : bool
-            whether to add random perturbations to a coordinate-shift hump.
+            Whether to add random perturbations to a coordinate-shift hump.
         perturb_peak : bool
-            if set True, the position of hump's peak is randomly moved.
+            If set True, the position of hump's peak is randomly moved.
         random_invert : bool
-            if True, the coordinate-shift is defined as x - "hump" rather than x + "hump".
+            If True, the coordinate-shift is defined as x - "hump" rather than x + "hump".
         """
         if self.velocity_model is None:
             raise ValueError("You need to create velocity model first to add faults later.")
@@ -374,7 +374,7 @@ class SyntheticGenerator():
         Parameters
         ----------
         sigma : float or None
-            sigma used for gaussian blur of the synthetic seismic.
+            Sigma used for gaussian blur of the synthetic seismic.
         noise_mul : float or None
             If not None, gaussian noise scale by this number is applied to the synthetic.
         """
@@ -398,7 +398,7 @@ class SyntheticGenerator():
         Returns
         -------
         np.ndarray
-            array of shape n_horizons X n_ilines X n_xlines containing horizon-heights
+            Array of shape n_horizons X n_ilines X n_xlines containing horizon-heights
             of selected horizons.
         """
         if mode is None:
@@ -419,6 +419,11 @@ class SyntheticGenerator():
 
     def fetch_faults(self):
         """ Fetch faults in N X 3 - format (cloud of points).
+
+        Returns
+        -------
+        list
+            List containing arrays of shape N_points_in_fault X 3.
         """
         # convert each fault to the point-cloud format
         point_clouds = []
@@ -436,7 +441,7 @@ class SyntheticGenerator():
             point_cloud = np.stack([ilines, xlines, heights], axis=1)
             point_clouds.append(point_cloud)
 
-        return np.array(point_clouds)
+        return point_clouds
 
 def generate_synthetic(shape=(50, 400, 800), num_reflections=200, vel_limits=(900, 5400), #pylint: disable=too-many-arguments
                        horizon_heights=(1/4, 1/2, 2/3), horizon_multipliers=(7, 5, 4), grid_shape=(10, 10),
@@ -477,41 +482,41 @@ def generate_synthetic(shape=(50, 400, 800), num_reflections=200, vel_limits=(90
     ricker_points : int
         Number of points in the ricker-wave - `points`-parameter of `scipy.signal.ricker`.
     sigma : float or None
-        sigma used for gaussian blur of the synthetic seismic.
+        Sigma used for gaussian blur of the synthetic seismic.
     noise_mul : float or None
         If not None, gaussian noise scale by this number is applied to the synthetic.
     faults : tuple or list
-        iterable containing faults-coordinates in form ((x0, y0), (x1, y1)).
+        Iterable containing faults-coordinates in form ((x0, y0), (x1, y1)).
     num_points_faults : int
-        number of points used for making coordinate-shifts for faults.
+        Number of points used for making coordinate-shifts for faults.
     max_shift : int
         Maximum vertical shift resulting from the fault.
     zeros_share_faults : float
-        left and right tails of humps are set to zeros. This is needed to make
+        Left and right tails of humps are set to zeros. This is needed to make
         transformations that are identical on the tails. The parameter controls the share
         of zero-values for tails.
     fault_shift_interpolation : str
-        kind of interpolation used for building coordinate-shifts.
+        Kind of interpolation used for building coordinate-shifts.
     perturb_values : bool
-        add random perturbations to a coordinate-shift hump.
+        Add random perturbations to a coordinate-shift hump.
     perturb_peak : bool
-        if set True, the position of hump's peak is randomly moved.
+        If set True, the position of hump's peak is randomly moved.
     random_invert : bool
-        if True, the coordinate-shift is defined as x - "hump" rather than x + "hump".
+        If True, the coordinate-shift is defined as x - "hump" rather than x + "hump".
     fetch_surfaces : str
         Can be either 'horizons', 'all' or None. When 'horizons', only horizon-surfaces
         (option `horizon_heights`) are returned. Choosing 'all' allows to return all of
         the reflections, while 'topK' option leads to fetching K surfaces correpsonding
         to K largest jumps in velocities-array.
     rng : np.random.Generator or None
-        generator of random numbers.
+        Generator of random numbers.
     seed : int or None
-        sees used for creation of random generator (check out `np.random.default_rng`).
+        Seed used for creation of random generator (check out `np.random.default_rng`).
 
     Returns
     -------
     tuple
-        tuple (cube, horizons, faults); horizons can be None if `fetch_surfaces` is set to None.
+        Tuple (cube, horizons, faults); horizons can be None if `fetch_surfaces` is set to None.
     """
     if len(shape) in (2, 3):
         dim = len(shape)
@@ -544,7 +549,7 @@ def surface_to_points(surface):
     Parameters
     ----------
     surface : np.ndarray
-        array of heights representing the reflective surface in a generated cube.
+        Array of heights representing the reflective surface in a generated cube.
     """
     n_ilines, n_xlines = surface.shape
     mesh = np.meshgrid(range(n_ilines), range(n_xlines), indexing='ij')
