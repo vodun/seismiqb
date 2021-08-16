@@ -207,7 +207,8 @@ class VisualizationMixin:
         return attribute_dict
 
 
-    def show(self, attributes='snr', mode='imshow', return_figure=False, width=9, savepath=None, **kwargs):
+    def show(self, attributes='snr', mode='imshow', return_figure=False, width=9, short_title=False,
+             savepath=None, **kwargs):
         """ !!. """
         # pylint: disable=too-many-statements
 
@@ -217,13 +218,13 @@ class VisualizationMixin:
         attribute_dicts = self.apply_nested(self._show_add_load_defaults, attribute_dicts)
 
         # Actually load data
-        load_method = partial(self._show_load_data, method=self.load_attribute)
+        load_method = partial(self._show_load_data, method=self.load_attribute, **kwargs)
         attribute_dicts = self.apply_nested(load_method, attribute_dicts)
 
         # Plot params for attributes
         attribute_dicts = self.apply_nested(self._show_add_plot_defaults, attribute_dicts)
         data = self.apply_nested(lambda dct: dct['output'], attribute_dicts)
-        titles = self.apply_nested(lambda dct: dct['name'], attribute_dicts)
+        titles = self.apply_nested(lambda dct: dct['short_name' if short_title else 'name'], attribute_dicts)
         alphas = self.apply_nested(lambda dct: dct['alpha'], attribute_dicts)
         cmaps = self.apply_nested(lambda dct: dct['cmap'], attribute_dicts)
 
@@ -232,7 +233,7 @@ class VisualizationMixin:
 
         # Prepare plot defaults
         plot_defaults = {
-            'suptitle_label': f"Field `{self.displayed_name}`",
+            'suptitle_label': f'Field `{self.displayed_name}`',
             'title_label': titles,
             'tight_layout': True,
             'return_figure': True,

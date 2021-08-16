@@ -117,9 +117,9 @@ class AttributesMixin:
         return smoothed
 
     def matrix_enlarge(self, matrix, width=10):
-        """ Increase visibility of a sparse carcass metric. """
+        """ Increase visibility of a sparse carcass metric. Should be used only for visualization purposes. """
         # Convert all the nans to a number, so that `dilate` can work with it
-        matrix = matrix.copy()
+        matrix = matrix.copy().astype(np.float32).squeeze()
         matrix[np.isnan(matrix)] = self.FILL_VALUE
 
         # Apply dilations along both axis
@@ -421,6 +421,9 @@ class AttributesMixin:
             First two slices are used as `iline` and `xline` ranges to cut crop from.
             Last 'depth' slice is not used, since points are sampled exactly on horizon.
             If None, `src` is returned uncropped.
+        enlarge : bool, optional
+            Whether to enlarge carcass maps. Defaults to True, if the horizon is a carcass, False otherwise.
+            Should be used only for visualization purposes.
         kwargs :
             Passed directly to attribute-evaluating methods from :attr:`.ATTRIBUTE_TO_METHOD` depending on `src`.
 
@@ -436,7 +439,7 @@ class AttributesMixin:
         >>> horizon.load_attribute('metrics', metric='local_corrs', normalize='min-max')
         """
         src = self.ALIAS_TO_ATTRIBUTE.get(src, src)
-        enlarge = enlarge or self.is_carcass
+        enlarge = enlarge if enlarge is not None else self.is_carcass
 
         if src in self.ATTRIBUTE_TO_METHOD:
             method = self.ATTRIBUTE_TO_METHOD[src]

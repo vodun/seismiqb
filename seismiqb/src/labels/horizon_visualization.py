@@ -42,7 +42,7 @@ class VisualizationMixin:
     # 2D
     def find_self(self):
         """ !!. """
-        for src in self.field.loaded_labels:
+        for src in self.field.loaded_labels + ['attached_instances']:
             labels = getattr(self.field, src)
 
             if isinstance(labels, list):
@@ -57,14 +57,15 @@ class VisualizationMixin:
         return attribute.replace('//', '/')
 
 
-    def show(self, attributes='depths', mode='imshow', return_figure=False, enlarge=True, width=9, **kwargs):
+    def show(self, attributes='depths', mode='imshow', short_title=True, return_figure=False, width=9, **kwargs):
         """ !!. """
-
         src, idx = self.find_self()
         add_prefix = partial(self._show_add_prefix, prefix=f'{src}:{idx}')
         attributes = self.field.apply_nested(add_prefix, attributes)
 
-        self.field.show(attributes=attributes, mode=mode, return_figure=return_figure, width=width, **kwargs)
+        suptitle_label = f'`{self.name}` on field `{self.field.displayed_name}`'
+        self.field.show(attributes=attributes, mode=mode, width=width, short_title=short_title,
+                        suptitle_label=suptitle_label, return_figure=return_figure, **kwargs)
 
 
 

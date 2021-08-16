@@ -269,10 +269,10 @@ class Field(VisualizationMixin):
         src = '/'.join(src)
 
         # Select instance
-        if any(sep in label_id for sep in ':_-'):
-            label_attr, label_idx = re.split(':|_|-', label_id)
+        if any(sep in label_id for sep in ':-'):
+            label_attr, label_idx = re.split(':|-', label_id)
 
-            if label_attr not in self.loaded_labels:
+            if label_attr not in self.loaded_labels and label_attr != 'attached_instances':
                 raise ValueError(f"Can't determine the label attribute for `{label_attr}`!")
             label_idx = int(label_idx)
             label = getattr(self, label_attr)[label_idx]
