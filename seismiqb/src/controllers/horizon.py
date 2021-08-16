@@ -414,7 +414,7 @@ class HorizonController(BaseController):
                 dump_name = name + '_' if name else ''
                 dump_name += f'{i}_' if n > 1 else ''
                 dump_name += horizon.name or 'predicted'
-                horizon.dump_float(path=self.make_savepath(*prefix, dump_name), add_height=False)
+                horizon.dump_float(path=self.make_savepath(*prefix, dump_name))
 
             info['corrs'] = np.nanmean(corrs)
             info['phase'] = np.nanmean(np.abs(phase))

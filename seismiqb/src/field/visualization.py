@@ -4,6 +4,7 @@ from functools import partial
 import numpy as np
 from matplotlib import pyplot as plt
 
+from .viewer import FieldViewer
 from ..plotters import plot_image
 
 
@@ -26,7 +27,7 @@ class VisualizationMixin:
             msg += f'    {label.name}\n'
         return msg
 
-    # Graphical representation: 2D along axis
+    # 2D along axis
     def show_slide(self, loc, width=None, axis='i', zoom_slice=None,
                    src_geometry='geometry', src_labels='labels', **kwargs):
         """ Show slide with horizon on it.
@@ -265,3 +266,9 @@ class VisualizationMixin:
         figure = plot_image(data=data, mode=mode, savepath=savepath, **params)
         plt.show()
         return figure if return_figure else None
+
+
+    # 2D interactive
+    def viewer(self, figsize=(8, 8), **kwargs):
+        """ !!. """
+        return FieldViewer(field=self, figsize=figsize, **kwargs)
