@@ -273,11 +273,11 @@ class SeismicCropBatch(Batch):
         Parameters
         ----------
         dst : sequence
-            sequence of length=3 to put created components in.
+            Sequence of length=3 to put created components in.
         fault_width : int
-            width of a fault on a faults-mask.
+            Width of a fault on a faults-mask.
         **kwargs : dict
-            all arguments of `generate_synthetic`-method. See the docstring for more
+            All arguments of `generate_synthetic`-method. See the docstring for more
             info.
         """
         _, _ = self, ix
