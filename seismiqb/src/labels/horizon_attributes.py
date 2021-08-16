@@ -116,7 +116,7 @@ class AttributesMixin:
                               margin=margin, fill_value=self.FILL_VALUE, preserve=True, iters=iters)
         return smoothed
 
-    def matrix_enlarge_carcass(self, matrix, width=10):
+    def matrix_enlarge(self, matrix, width=10):
         """ Increase visibility of a sparse carcass metric. """
         # Convert all the nans to a number, so that `dilate` can work with it
         matrix = matrix.copy()
@@ -396,7 +396,7 @@ class AttributesMixin:
         'wavelet_decomposition' : 'get_wavelet_decomposition',
     }
 
-    def load_attribute(self, src, location=None, use_cache=True, **kwargs):
+    def load_attribute(self, src, location=None, use_cache=True, enlarge=None, **kwargs):
         """ Load horizon attribute values at requested location.
         This is the intended interface of loading matrices along the horizon, and should be preffered in all scenarios.
 
@@ -436,12 +436,13 @@ class AttributesMixin:
         >>> horizon.load_attribute('metrics', metric='local_corrs', normalize='min-max')
         """
         src = self.ALIAS_TO_ATTRIBUTE.get(src, src)
+        enlarge = enlarge or self.is_carcass
 
         if src in self.ATTRIBUTE_TO_METHOD:
             method = self.ATTRIBUTE_TO_METHOD[src]
-            data = getattr(self, method)(use_cache=use_cache, **kwargs)
+            data = getattr(self, method)(use_cache=use_cache, enlarge=enlarge, **kwargs)
         else:
-            data = self.get_property(src, **kwargs)
+            data = self.get_property(src, enlarge=enlarge, **kwargs)
 
         # TODO: Someday, we would need to re-write attribute loading methods
         # so they use locations not to crop the loaded result, but to load attribute only at location.

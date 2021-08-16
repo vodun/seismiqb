@@ -34,7 +34,7 @@ def transformable(method):
     """
     @wraps(method)
     def wrapper(instance, *args, on_full=False, fill_value=None, dtype=None,
-                normalize=False, n_components=None, atleast_3d=False, **kwargs):
+                normalize=False, enlarge=False, enlrage_width=10, n_components=None, atleast_3d=False, **kwargs):
         result = method(instance, *args, **kwargs)
 
         if dtype:
@@ -43,6 +43,8 @@ def transformable(method):
             result = instance.matrix_put_on_full(result)
         if normalize:
             result = instance.matrix_normalize(result, normalize)
+        if enlarge:
+            result = instance.matrix_enlarge(result, width=enlrage_width)
         if fill_value is not None:
             result = instance.matrix_fill_to_num(result, value=fill_value)
         if atleast_3d:

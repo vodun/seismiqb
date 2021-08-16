@@ -299,7 +299,7 @@ class HorizonSampler(BaseSampler):
     def orientation_matrix(self):
         orientation_matrix = super().orientation_matrix
         if self.horizon.is_carcass:
-            orientation_matrix = self.horizon.matrix_enlarge_carcass(orientation_matrix, 9)
+            orientation_matrix = self.horizon.matrix_enlarge(orientation_matrix, 9)
         return orientation_matrix
 
 
