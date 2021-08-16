@@ -216,7 +216,7 @@ class SeismicGeometry(ExportMixin):
 
         # Names of different lengths and format: helpful for outside usage
         self.name = os.path.basename(self.path)
-        self.field = self.parse_field()
+        self.field_name = self.parse_field()
         self.short_name = os.path.splitext(self.name)[0]
         self.long_name = ':'.join(self.path.split('/')[-2:])
         self.format = os.path.splitext(self.path)[1][1:]
@@ -523,12 +523,12 @@ class SeismicGeometry(ExportMixin):
     @property
     def displayed_name(self):
         """ Return name with masked field name, if anonymization needed. """
-        return self.short_name.replace(f"_{self.field}", "") if self.anonymize else self.short_name
+        return self.short_name.replace(f"_{self.field_name}", "") if self.anonymize else self.short_name
 
     @property
     def displayed_path(self):
         """ Return path with masked field name, if anonymization needed. """
-        return self.path.replace(self.field, '*') if self.anonymize else self.path
+        return self.path.replace(self.field_name, '*') if self.anonymize else self.path
 
     @property
     def nonzero_traces(self):
