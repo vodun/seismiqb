@@ -20,6 +20,7 @@ class Field(VisualizationMixin):
         self.labels = []
         self.horizons, self.facies, self.fans, self.channels, self.faults = [], [], [], [], []
         self.loaded_labels = []
+        self.attached_instances = []
 
         # Geometry: description and convenient API to a seismic cube
         if isinstance(geometry, str):
@@ -334,15 +335,14 @@ class Field(VisualizationMixin):
     # Cache: introspection and reset
     def reset_cache(self):
         """ Clear cached data from underlying entities. """
-        for attribute in set(['geometry'] + self.loaded_labels):
-            getattr(self, attribute).reset_cache()
+        self.geometry.reset_cache()
+        self.attached_instances.reset_cache()
 
     @property
     def cache_size(self):
         """ Total size of cached data. """
         size = self.geometry.cache_size
-        for attribute in set(self.loaded_labels):
-            size += sum(getattr(self, attribute).cache_size)
+        size += sum(self.attached_instances.cache_size)
         return size
 
 
