@@ -747,6 +747,7 @@ class MatplotlibPlotter:
         else:
             colorbar = ax_image.axes.figure.colorbar(ax_image, cax=cax)
             colorbar.ax.yaxis.set_tick_params(color=color)
+            ax_image.axes.created_colorbar = colorbar
 
     @staticmethod
     def add_legend(ax, color, label, size, loc):

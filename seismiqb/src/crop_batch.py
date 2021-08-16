@@ -348,8 +348,7 @@ class SeismicCropBatch(Batch):
         """
         field = self.get(ix, 'fields')
         location = self.get(ix, 'locations')
-        crop_shape = self.get(ix, 'shapes')
-        return field.make_mask(location=location, shape=crop_shape, width=width, indices=indices, src=src_labels)
+        return field.make_mask(location=location, width=width, indices=indices, src=src_labels)
 
 
     @action

@@ -170,7 +170,8 @@ class Field(VisualizationMixin):
         result = super().__getattribute__(key)
         if isinstance(result, list) and not isinstance(result, AugmentedList):
             result = AugmentedList(result)
-            setattr(self, key, result)
+            if not (key in vars(self.__class__) and isinstance(getattr(self.__class__, key), property)):
+                setattr(self, key, result)
         return result
 
 
@@ -196,13 +197,16 @@ class Field(VisualizationMixin):
             seismic_crop = geometry.load_crop(location, **kwargs)
         return seismic_crop
 
-    def make_mask(self, location, shape, indices='all', width=3, src='labels', **kwargs):
+    def make_mask(self, location, axis=None, indices='all', width=3, src='labels', **kwargs):
         """ Create masks from labels.
 
         Parameters
         ----------
-        location : sequence
-            A triplet of slices to define exact location in the cube.
+        location : int or sequence
+            If integer, then location along specified `axis`.
+            Otherwise, a triplet of slices to define exact location in the cube.
+        axis : int or str
+            Axis identifier. must be provided if `location` is integer.
         indices : str, int or sequence of ints
             Which labels to use in mask creation.
             If 'all', then use all labels.
@@ -213,6 +217,13 @@ class Field(VisualizationMixin):
         src : str
             Attribute with desired labels.
         """
+        # Parse parameters
+        if isinstance(location, int):
+            location = self.geometry.make_slide_locations(loc=location, axis=axis)
+        shape = tuple(slc.stop - slc.start for slc in location)
+        width = width or max(5, shape[-1] // 100)
+
+        # Placeholder
         mask = np.zeros(shape, dtype=np.float32)
 
         labels = getattr(self, src)
@@ -269,6 +280,27 @@ class Field(VisualizationMixin):
 
         data = label.load_attribute(src, **kwargs)
         return data
+
+    @property
+    def available_attributes(self):
+        """ A list of all load-able attributes from a current field. """
+        available_names = []
+
+        for name in ['geometry'] + self.loaded_labels:
+            labels = getattr(self, name)
+
+            if isinstance(labels, list):
+                for idx, label in enumerate(labels):
+                    if isinstance(label, Horizon):
+                        available_attributes = ['depths', 'amplitudes', 'metrics',
+                                                'instant_amplitudes', 'instant_phases',
+                                                'fourier_decomposition', 'wavelet_decomposition']
+                    available_names.extend([f'{name}:{idx}/{attr}' for attr in available_attributes])
+            else:
+                if isinstance(labels, SeismicGeometry):
+                    available_attributes = ['mean_matrix', 'std_matrix', 'snr', 'quality_map']
+                available_names.extend([f'{name}/{attr}' for attr in available_attributes])
+        return available_names
 
 
     # Utility functions

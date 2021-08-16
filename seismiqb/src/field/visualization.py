@@ -50,8 +50,14 @@ class VisualizationMixin:
         src_labels = src_labels if isinstance(src_labels, (tuple, list)) else [src_labels]
         masks = []
         for src in src_labels:
-            masks.extend(getattr(self, src).load_slide(loc=loc, axis=axis, width=width))
+            masks.append(self.make_mask(location=loc, axis=axis, src=src, width=width))
         mask = sum(masks)
+
+        # src_labels = src_labels if isinstance(src_labels, (tuple, list)) else [src_labels]
+        # masks = []
+        # for src in src_labels:
+        #     masks.extend(getattr(self, src).load_slide(loc=loc, axis=axis, width=width))
+        # mask = sum(masks)
 
         seismic_slide, mask = np.squeeze(seismic_slide), np.squeeze(mask)
         xmin, xmax, ymin, ymax = 0, seismic_slide.shape[0], seismic_slide.shape[1], 0
@@ -141,9 +147,14 @@ class VisualizationMixin:
 
     @staticmethod
     def _show_add_load_defaults(attribute_dict):
+        name = attribute_dict['name']
+        if 'horizons' in name or 'labels' in name:
+            attribute_dict['fill_value'] = np.nan
+            attribute_dict['dtype'] = np.float32
+
         short_name = attribute_dict['short_name']
 
-        if short_name in ['fourier', 'wavelet']:
+        if short_name in ['fourier', 'wavelet', 'fourier_decomposition', 'wavelet_decomposition']:
             attribute_dict['n_components'] = 1
         if short_name in ['masks', 'full_binary_matrix']:
             attribute_dict['fill_value'] = 0
@@ -180,10 +191,12 @@ class VisualizationMixin:
             attribute_dict['alpha'] = 1.0
 
         # Cmaps
-        if short_name in ['matrix', 'full_matrix']:
+        if short_name in ['depths', 'matrix', 'full_matrix']:
             attribute_dict['cmap'] = 'Depths'
-        elif short_name == 'metric':
+        elif short_name in  ['metric', 'metrics']:
             attribute_dict['cmap'] = 'Metric'
+        elif short_name == 'quality_map':
+            attribute_dict['cmap'] = 'Reds'
         elif short_name == 'full_binary_matrix':
             if name not in NAME_TO_COLOR:
                 NAME_TO_COLOR[name] = next(COLOR_GENERATOR)
@@ -214,7 +227,8 @@ class VisualizationMixin:
         alphas = self.apply_nested(lambda dct: dct['alpha'], attribute_dicts)
         cmaps = self.apply_nested(lambda dct: dct['cmap'], attribute_dicts)
 
-        titles = [item[0] if isinstance(item, list) else item for item in titles]
+        if isinstance(titles, list):
+            titles = [item[0] if isinstance(item, list) else item for item in titles]
 
         # Prepare plot defaults
         plot_defaults = {
