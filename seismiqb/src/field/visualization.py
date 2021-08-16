@@ -260,7 +260,7 @@ class VisualizationMixin:
 
         # Plot image with given params and return resulting figure
         params = {**plot_defaults, **kwargs}
-        savepath = self.make_savepath(params['savepath'], name=self.short_name) if savepath is not None else None
+        savepath = self.make_savepath(savepath, name=self.short_name) if savepath is not None else None
 
         figure = plot_image(data=data, mode=mode, savepath=savepath, **params)
         plt.show()
