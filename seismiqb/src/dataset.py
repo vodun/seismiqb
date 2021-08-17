@@ -34,6 +34,9 @@ class SeismicDataset(Dataset):
         if isinstance(index, dict):
             self.fields = AugmentedDict()
             for geometry, labels in index.items():
+                if isinstance(geometry, Field):
+                    field = geometry
+                else:
                 field = Field(geometry=geometry, labels=labels, **kwargs)
                 self.fields[field.short_name] = field
         else:

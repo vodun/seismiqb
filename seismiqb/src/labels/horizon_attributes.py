@@ -118,6 +118,9 @@ class AttributesMixin:
 
     def matrix_enlarge(self, matrix, width=10):
         """ Increase visibility of a sparse carcass metric. Should be used only for visualization purposes. """
+        if matrix.ndim == 3 and matrix.shape[-1] != 1:
+            return matrix
+
         # Convert all the nans to a number, so that `dilate` can work with it
         matrix = matrix.copy().astype(np.float32).squeeze()
         matrix[np.isnan(matrix)] = self.FILL_VALUE
@@ -535,7 +538,7 @@ class AttributesMixin:
             Passed directly to :meth:`.HorizonMetrics.evaluate`.
         """
         metrics = self.metrics.evaluate(metric=metric, supports=supports, agg=agg,
-                                        plot=False, savepath=None, **kwargs)
+                                        enlarge=False, plot=False, savepath=None, **kwargs)
         return metrics
 
 

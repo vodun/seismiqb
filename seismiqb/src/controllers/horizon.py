@@ -283,7 +283,7 @@ class HorizonController(BaseController):
         self.log(f'Inferenced total of {grid.length} out of {grid.unfiltered_length} crops possible')
 
         # Cleanup
-        dataset.geometries.flat.reset_cache()
+        dataset.geometries.reset_cache()
         gc.collect()
         torch.cuda.empty_cache()
 
