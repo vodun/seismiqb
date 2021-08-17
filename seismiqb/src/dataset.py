@@ -9,6 +9,7 @@ import pandas as pd
 from ..batchflow import DatasetIndex, Dataset, Pipeline
 
 from .field import Field
+from .synthetic import SyntheticField
 from .geometry import SeismicGeometry
 from .plotters import plot_image
 from .crop_batch import SeismicCropBatch
@@ -26,7 +27,7 @@ class SeismicDataset(Dataset):
             raise TypeError('Positional args are not allowed for `SeismicDataset` initialization!')
 
         # Convert `index` to a dictionary
-        if isinstance(index, (str, SeismicGeometry, Field)):
+        if isinstance(index, (str, SeismicGeometry, Field, SyntheticField)):
             index = [index]
         if isinstance(index, (tuple, list, DatasetIndex)):
             index = {item : None for item in index}
@@ -34,7 +35,7 @@ class SeismicDataset(Dataset):
         if isinstance(index, dict):
             self.fields = AugmentedDict()
             for geometry, labels in index.items():
-                if isinstance(geometry, Field):
+                if isinstance(geometry, (Field, SyntheticField)):
                     field = geometry
                 else:
                     field = Field(geometry=geometry, labels=labels, **kwargs)
@@ -117,7 +118,7 @@ class SeismicDataset(Dataset):
             msg += indent(f'{str(field)}\n', prefix='    ')
         return msg[:-1]
 
-    # TODO: move to Field
+
     def show_slide(self, loc, idx=0, axis='iline', zoom_slice=None, src_labels='labels', **kwargs):
         """ Show slide of the given cube on the given line.
 
