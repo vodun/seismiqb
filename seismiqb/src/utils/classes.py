@@ -697,11 +697,8 @@ class lru_cache:
         """ Add the cache to the function. """
         @wraps(func)
         def wrapper(instance, *args, **kwargs):
-            # Parse the `use_cache`
-            if 'use_cache' in kwargs:
-                use_cache = kwargs.pop('use_cache')
-            else:
-                use_cache = self.apply_by_default
+            use_cache = kwargs.pop('use_cache', self.apply_by_default)
+            copy_on_return = kwargs.pop('copy_on_return', self.copy_on_return)
 
             # Skip the caching logic and evaluate function directly
             if not use_cache:
@@ -717,7 +714,7 @@ class lru_cache:
                     del self.cache[instance][key]
                     self.cache[instance][key] = result
                     self.stats[instance]['hit'] += 1
-                    return copy(result) if self.copy_on_return else result
+                    return copy(result) if copy_on_return else result
 
             # The result was not found in cache: evaluate function
             result = func(instance, *args, **kwargs)
@@ -733,7 +730,7 @@ class lru_cache:
                 else:
                     self.cache[instance][key] = result
                     self.is_full[instance] = (len(self.cache[instance]) >= self.maxsize)
-            return copy(result) if self.copy_on_return else result
+            return copy(result) if copy_on_return else result
 
         wrapper.__name__ = func.__name__
         wrapper.cache = lambda: self.cache
