@@ -5,7 +5,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 
 from .viewer import FieldViewer
-from ..plotters import plot_image
+from ..plotters import plot_image, show_3d
 
 
 COLOR_GENERATOR = iter(['firebrick', 'darkorchid', 'sandybrown'])
@@ -101,6 +101,30 @@ class VisualizationMixin:
             **kwargs
         }
         return plot_image(data=[seismic_slide, mask], **kwargs)
+
+
+    # 2D depth slice
+    def show_points(self, src='labels', **kwargs):
+        """ Plot 2D map of points. """
+        map_ = np.zeros(self.spatial_shape)
+        denum = np.zeros(self.spatial_shape)
+
+        for label in getattr(self, src):
+            map_[label.points[:, 0], label.points[:, 1]] += label.points[:, 2]
+            denum[label.points[:, 0], label.points[:, 1]] += 1
+        denum[denum == 0] = 1
+        map_ = map_ / denum
+        map_[map_ == 0] = np.nan
+
+        labels_class = type(getattr(self, src)[0]).__name__
+        kwargs = {
+            'title_label': f'{labels_class} on {self.displayed_name}',
+            'xlabel': self.index_headers[0],
+            'ylabel': self.index_headers[1],
+            'cmap': 'Reds',
+            **kwargs
+        }
+        return plot_image(map_, **kwargs)
 
 
     # 2D top-view maps
@@ -270,3 +294,112 @@ class VisualizationMixin:
     def viewer(self, figsize=(8, 8), **kwargs):
         """ !!. """
         return FieldViewer(field=self, figsize=figsize, **kwargs)
+
+
+    # 3D interactive
+    def show_3d(self, src='labels', aspect_ratio=None, zoom_slice=None,
+                 n_points=100, threshold=100, n_sticks=100, n_nodes=10,
+                 slides=None, margin=(0, 0, 20), colors=None, **kwargs):
+        """ Interactive 3D plot for some elements of a field.
+        Roughly, does the following:
+            - take some faults and/or horizons
+            - select `n` points to represent the horizon surface and `n_sticks` and `n_nodes` for each fault
+            - triangulate those points
+            - remove some of the triangles on conditions
+            - use Plotly to draw the tri-surface
+            - draw few slides of the cube if needed
+
+        Parameters
+        ----------
+        src : str, Horizon-instance or list
+            Items to draw, by default, 'labels'. If item of list (or `src` itself) is str, then all items of
+            that dataset attribute will be drawn.
+        aspect_ratio : None, tuple of floats or Nones
+            Aspect ratio for each axis. Each None in the resulting tuple will be replaced by item from
+            `(geometry.cube_shape[0] / geometry.cube_shape[1], 1, 1)`.
+        zoom_slice : tuple of slices or None
+            Crop from cube to show. By default, the whole cube volume will be shown.
+        n_points : int
+            Number of points for horizon surface creation.
+            The more, the better the image is and the slower it is displayed.
+        threshold : number
+            Threshold to remove triangles with bigger height differences in vertices.
+        n_sticks : int
+            Number of sticks for each fault.
+        n_nodes : int
+            Number of nodes for each stick.
+        slides : list of tuples
+            Each tuple is pair of location and axis to load slide from seismic cube.
+        margin : tuple of ints
+            Added margin for each axis, by default, (0, 0, 20).
+        colors : dict or list
+            Mapping of label class name to color defined as str, by default, all labels will be shown in green.
+        show_axes : bool
+            Whether to show axes and their labels.
+        width, height : number
+            Size of the image.
+        savepath : str
+            Path to save interactive html to.
+        kwargs : dict
+            Other arguments of plot creation.
+        """
+        src = src if isinstance(src, (tuple, list)) else [src]
+        coords = []
+        simplices = []
+
+        if zoom_slice is None:
+            zoom_slice = [slice(0, s) for s in self.shape]
+        else:
+            zoom_slice = [
+                slice(item.start or 0, item.stop or stop) for item, stop in zip(zoom_slice, self.shape)
+            ]
+        zoom_slice = tuple(zoom_slice)
+        triangulation_kwargs = {
+            'n_points': n_points,
+            'threshold': threshold,
+            'n_sticks': n_sticks,
+            'n_nodes': n_nodes,
+            'slices': zoom_slice
+        }
+
+        labels = [getattr(self, src_) if isinstance(src_, str) else [src_] for src_ in src]
+        labels = sum(labels, [])
+
+        if colors is None:
+            colors = ['green' for label in labels]
+        if isinstance(colors, dict):
+            colors = [colors.get(type(label).__name__, colors.get('all', 'green')) for label in labels]
+
+        simplices_colors = []
+        for label, color in zip(labels, colors):
+            x, y, z, simplices_ = label.make_triangulation(**triangulation_kwargs)
+            if x is not None:
+                simplices += [simplices_ + sum([len(item) for item in coords])]
+                simplices_colors += [[color] * len(simplices_)]
+                coords += [np.stack([x, y, z], axis=1)]
+
+        simplices = np.concatenate(simplices, axis=0)
+        coords = np.concatenate(coords, axis=0)
+        simplices_colors = np.concatenate(simplices_colors)
+        title = self.displayed_name
+
+        default_aspect_ratio = (self.shape[0] / self.shape[1], 1, 1)
+        aspect_ratio = [None] * 3 if aspect_ratio is None else aspect_ratio
+        aspect_ratio = [item or default for item, default in zip(aspect_ratio, default_aspect_ratio)]
+
+        axis_labels = (self.index_headers[0], self.index_headers[1], 'DEPTH')
+
+        images = []
+        if slides is not None:
+            for loc, axis in slides:
+                image = self.geometry.load_slide(loc, axis=axis)
+                if axis == 0:
+                    image = image[zoom_slice[1:]]
+                elif axis == 1:
+                    image = image[zoom_slice[0], zoom_slice[-1]]
+                else:
+                    image = image[zoom_slice[:-1]]
+                images += [(image, loc, axis)]
+
+        show_3d(coords[:, 0], coords[:, 1], coords[:, 2], simplices, title, zoom_slice, simplices_colors, margin=margin,
+                aspect_ratio=aspect_ratio, axis_labels=axis_labels, images=images, **kwargs)
