@@ -631,7 +631,7 @@ class AttributesMixin:
         window : positive int
             Width of data slice above/below the horizon made along its surface.
         """
-        amplitudes = self.get_cube_values(window=window, offset=window // 2 * side)
+        amplitudes = self.get_cube_values(window=window, offset=window // 2 * side, fill_value=0)
         # reverse array along depth axis for invariance
         amplitudes = amplitudes[:, :, ::side]
 
@@ -670,5 +670,5 @@ class AttributesMixin:
         # apply additional float shifts to shift matrix
         shift[mask] += float_shift
 
-        result = label.full_matrix + shift * side
+        result = self.full_matrix + shift * side
         return result
