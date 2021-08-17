@@ -398,7 +398,7 @@ class AttributesMixin:
         'instant_amplitudes' : 'get_instantaneous_amplitudes',
         'fourier_decomposition' : 'get_fourier_decomposition',
         'wavelet_decomposition' : 'get_wavelet_decomposition',
-        'spikes': 'get_spikes',
+        'spikes': 'get_spikes_map',
     }
 
     def load_attribute(self, src, location=None, use_cache=True, enlarge=None, **kwargs):
@@ -582,7 +582,7 @@ class AttributesMixin:
 
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     @transformable
-    def get_spikes_map(self, mode='m', kernel_size=11, kernel=None, margin=0, iters=2, threshold=2):
+    def get_spikes_map(self, mode='m', kernel_size=11, kernel=None, margin=0, iters=2, threshold=2, **_):
         """ !!. """
         convolved = special_convolve(self.full_matrix, mode=mode, kernel=kernel, kernel_size=kernel_size,
                                      margin=margin, iters=iters, fill_value=self.FILL_VALUE)
@@ -590,4 +590,5 @@ class AttributesMixin:
 
         if threshold is not None:
             spikes = (spikes > threshold).astype(np.float32)
+        spikes[spikes == 0.0] = np.nan
         return spikes
