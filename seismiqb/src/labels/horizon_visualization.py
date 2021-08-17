@@ -53,8 +53,9 @@ class VisualizationMixin:
 
     @staticmethod
     def _show_add_prefix(attribute, prefix=None):
-        attribute = '/'.join([prefix, attribute])
-        return attribute.replace('//', '/')
+        if isinstance(attribute, str):
+            attribute = ('/'.join([prefix, attribute])).replace('//', '/')
+        return attribute
 
 
     def show(self, attributes='depths', mode='imshow', short_title=True, return_figure=False, width=9, **kwargs):

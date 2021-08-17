@@ -218,6 +218,7 @@ class VisualizationMixin:
             attribute_dict['cmap'] = 'Depths'
         elif short_name in  ['metric', 'metrics']:
             attribute_dict['cmap'] = 'Metric'
+            attribute_dict['fill_color'] = 'black'
         elif short_name == 'quality_map':
             attribute_dict['cmap'] = 'Reds'
         elif short_name == 'full_binary_matrix':
