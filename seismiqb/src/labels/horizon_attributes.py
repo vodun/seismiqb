@@ -9,7 +9,7 @@ from scipy.ndimage.morphology import binary_fill_holes, binary_erosion
 from skimage.measure import label
 from sklearn.decomposition import PCA
 
-from ..functional import smooth_out
+from ..functional import smooth_out, special_convolve
 from ..utils import transformable, lru_cache
 
 
@@ -386,7 +386,8 @@ class AttributesMixin:
         'instant_phases': ['instant_phases', 'iphases'],
         'instant_amplitudes': ['instant_amplitudes', 'iamplitudes'],
         'fourier_decomposition': ['fourier', 'fourier_decomposition'],
-        'wavelet_decomposition': ['wavelet', 'wavelet_decomposition']
+        'wavelet_decomposition': ['wavelet', 'wavelet_decomposition'],
+        'spikes': ['spikes'],
     }
     ALIAS_TO_ATTRIBUTE = {alias: name for name, aliases in ATTRIBUTE_TO_ALIAS.items() for alias in aliases}
 
@@ -397,6 +398,7 @@ class AttributesMixin:
         'instant_amplitudes' : 'get_instantaneous_amplitudes',
         'fourier_decomposition' : 'get_fourier_decomposition',
         'wavelet_decomposition' : 'get_wavelet_decomposition',
+        'spikes': 'get_spikes',
     }
 
     def load_attribute(self, src, location=None, use_cache=True, enlarge=None, **kwargs):
@@ -576,3 +578,16 @@ class AttributesMixin:
             result[:, :, idx] = convolve(amplitudes, wavelet, mode='constant')[:, :, window // 2]
 
         return result
+
+
+    @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
+    @transformable
+    def get_spikes_map(self, mode='m', kernel_size=11, kernel=None, margin=0, iters=2, threshold=2):
+        """ !!. """
+        convolved = special_convolve(self.full_matrix, mode=mode, kernel=kernel, kernel_size=kernel_size,
+                                     margin=margin, iters=iters, fill_value=self.FILL_VALUE)
+        spikes = np.abs(self.full_matrix - convolved)
+
+        if threshold is not None:
+            spikes = (spikes > threshold).astype(np.float32)
+        return spikes
