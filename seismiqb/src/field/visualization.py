@@ -236,8 +236,9 @@ class VisualizationMixin:
              savepath=None, **kwargs):
         """ !!. """
         # If `*` is present, run `show` multiple times with `*` replaced to label id
-        replacer = lambda attr: attr.replace(':*', '') if isinstance(attr, str) else attr
-        wildcard = self.apply_nested(replacer, attributes) != attributes
+        checker = lambda attr: attr.replace(':*', '') != attr if isinstance(attr, str) else False
+        wildcard = self.apply_nested(checker, attributes)
+        wildcard = any(flatten([wildcard]))
 
         if wildcard:
             # Get len of each attribute
