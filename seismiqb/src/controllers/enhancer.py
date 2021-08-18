@@ -7,7 +7,7 @@ import numpy as np
 from ...batchflow import Pipeline, B, V, C, P, R
 
 from .horizon import HorizonController
-from .torch_models import EncoderDecoder
+from ...batchflow.models.torch import EncoderDecoder
 
 
 class Enhancer(HorizonController):
