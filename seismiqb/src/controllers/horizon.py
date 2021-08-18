@@ -416,10 +416,14 @@ class HorizonController(BaseController):
                 dump_name += horizon.name or 'predicted'
                 horizon.dump_float(path=self.make_savepath(*prefix, dump_name))
 
-            info['corrs'] = np.nanmean(corrs)
-            info['phase'] = np.nanmean(np.abs(phase))
-            info['perturbed_mean'] = np.nanmean(perturbed_mean)
-            info['perturbed_max'] = np.nanmean(perturbed_max)
+            info = {
+                'coverage': horizon.coverage,
+                'corrs': np.nanmean(corrs),
+                'phase': np.nanmean(np.abs(phase)),
+                'perturbed_mean': np.nanmean(perturbed_mean),
+                'perturbed_max': np.nanmean(perturbed_max),
+                **info
+            }
             results.append((info))
 
             msg = (f'\nPredicted horizon {i}:\n{horizon.name}\nlen={len(horizon)}'
