@@ -365,8 +365,10 @@ class HorizonController(BaseController):
 
             # Basic demo: depth map and properties
             horizon.show(show=self.plot, savepath=self.make_savepath(*prefix, name + 'p_depth_map.png'))
-            horizon.show(['amplitudes', 'iamplitudes', 'iphases', 'spikes'], separate=True, nrows=4, ncols=1,
+            horizon.show(['amplitudes', 'iamplitudes', 'iphases'], separate=True, nrows=3, ncols=1,
                          show=self.plot, savepath=self.make_savepath(*prefix, name + 'p_attributes.png'))
+            horizon.show('spikes', enlarge=True, enlarge_width=3,
+                         show=self.plot, savepath=self.make_savepath(*prefix, name + 'p_spikes.png'))
 
             horizon.show_slide(horizon.field.shape[0]//2, axis=0, show=self.plot,
                                savepath=self.make_savepath(*prefix, name + 'p_slide_i.png'))
