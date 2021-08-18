@@ -175,5 +175,5 @@ class Extender(Enhancer):
 
         prediction = self.inference(horizon, model, **kwargs)
         prediction = self.postprocess(prediction)
-        self.evaluate(prediction, dataset=dataset)
-        return prediction
+        info = self.evaluate(prediction, dataset=dataset)
+        return prediction, info
