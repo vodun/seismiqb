@@ -3,6 +3,7 @@
 from functools import partial
 import numpy as np
 from matplotlib import pyplot as plt
+from matplotlib.cbook import flatten
 
 from .viewer import FieldViewer
 from ..plotters import plot_image, show_3d
@@ -234,7 +235,33 @@ class VisualizationMixin:
     def show(self, attributes='snr', mode='imshow', return_figure=False, width=9, short_title=False,
              savepath=None, **kwargs):
         """ !!. """
-        # pylint: disable=too-many-statements
+        # If `*` is present, run `show` multiple times with `*` replaced to label id
+        replacer = lambda attr: attr.replace(':*', '') if isinstance(attr, str) else attr
+        wildcard = self.apply_nested(replacer, attributes) != attributes
+
+        if wildcard:
+            # Get len of each attribute
+            get_labels_len = lambda attr: [len(getattr(self, item)) for item in self.loaded_labels
+                                           if '*' in attr and item in attr]
+            lens = self.apply_nested(get_labels_len, attributes)
+
+            if len(set(flatten(lens))) != 1:
+                raise ValueError('When using `show` with starred-expressions, length of attributes must be the same!')
+            n_items = next(flatten(lens))
+
+            figures = []
+            for i in range(n_items):
+                #pylint: disable=cell-var-from-loop
+                label_id = str(i)
+                substitutor = lambda attr: attr.replace('*', label_id) if isinstance(attr, str) else attr
+                attributes_ = self.apply_nested(substitutor, attributes)
+                savepath_ = self.make_savepath(savepath, name=label_id) if savepath is not None else None
+
+                fig = self.show(attributes=attributes_, mode=mode, return_figure=True, width=width,
+                                short_title=short_title, savepath=savepath_, **kwargs)
+                figures.append(fig)
+            return figures if return_figure else None
+
 
         # To dictionaries -> add names - > add defaults
         attribute_dicts = self.apply_nested(self._show_to_dict, attributes)

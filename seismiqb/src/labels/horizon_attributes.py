@@ -116,7 +116,7 @@ class AttributesMixin:
                               margin=margin, fill_value=self.FILL_VALUE, preserve=True, iters=iters)
         return smoothed
 
-    def matrix_enlarge(self, matrix, width=10):
+    def matrix_enlarge(self, matrix, width=3):
         """ Increase visibility of a sparse carcass metric. Should be used only for visualization purposes. """
         if matrix.ndim == 3 and matrix.shape[-1] != 1:
             return matrix
