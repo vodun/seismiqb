@@ -568,6 +568,27 @@ class Horizon(AttributesMixin, VisualizationMixin):
 
     filter = filter_points
 
+    def filter_spikes(self, mode='gradient', threshold=1., dilation=5, kernel_size=11, kernel=None, margin=0, iters=2):
+        """ !!. """
+        spikes = self.load_attribute('spikes', spikes_mode=mode, threshold=threshold, dilation=dilation,
+                                     kernel_size=kernel_size, kernel=kernel, margin=margin, iters=iters)
+        self.filter(spikes)
+
+    despike = filter_spikes
+
+    def filter_disconnected_regions(self):
+        """ !!. """
+        labeled = label(self.presence_matrix)
+        values, counts = np.unique(labeled, return_counts=True)
+        counts = counts[values != 0]
+        values = values[values != 0]
+
+        object_id = values[np.argmax(counts)]
+
+        filtering_matrix = self.presence_matrix.copy()
+        filtering_matrix[labeled == object_id] = 0
+        self.filter(filtering_matrix)
+
 
     # Pre-defined transforms of a horizon
     def thin_out(self, factor=1, threshold=256):
