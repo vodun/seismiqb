@@ -15,7 +15,7 @@ NAME_TO_COLOR = {}
 
 
 class VisualizationMixin:
-    """ !!. """
+    """ Methods for field visualization: textual, 2d along various axis, 2d interactive, 3d. """
     # Textual representation
     def __repr__(self):
         return f"""<Field `{self.displayed_name}` at {hex(id(self))}>"""
@@ -179,7 +179,7 @@ class VisualizationMixin:
         short_name = attribute_dict['short_name']
 
         if short_name in ['fourier', 'wavelet', 'fourier_decomposition', 'wavelet_decomposition']:
-            attribute_dict['n_components'] = 1
+            attribute_dict['n_components'] = attribute_dict.get('n_components', 1)
         if short_name in ['masks', 'full_binary_matrix']:
             attribute_dict['fill_value'] = 0
             attribute_dict['alpha'] = 0.7
@@ -232,9 +232,58 @@ class VisualizationMixin:
         return attribute_dict
 
 
-    def show(self, attributes='snr', mode='imshow', return_figure=False, width=9, short_title=False,
-             savepath=None, **kwargs):
-        """ !!. """
+    def show(self, attributes='snr', mode='imshow', return_figure=False, short_title=False, savepath=None, **kwargs):
+        """ Show one or more field attributes on one figure.
+
+        Parameters
+        ----------
+        attributes : str, np.ndarray, dict or sequence of them
+            Attributes to display.
+            If str, then use `:meth:.load_attribute` to load the data. For example, `geometry/snr`, `labels:0/depths`.
+            If instead of label index contains `:*`, for example, `labels:*/amplitudes`, then run this method
+            for each of the objects in `labels` attribute.
+            If np.ndarray, then directly used as data to display.
+            If dict, then should define either string or np.ndarray (and used the same as previous types),
+            as well as other parameters for `:meth:.load_attribute`.
+            If sequence of them, then either should be a list to display loaded entities one over the other,
+            or nested list to define separate axis and overlaying for each of them.
+            For more details, refer to `:func:plot_image`.
+        mode : {'imshow', 'hist'}
+            Mode to display images.
+        return_figure : bool
+            Whether to return the figure.
+        short_title : bool
+            Whether to use only attribute names as titles for axis.
+        savepath : str, optional
+            Path to save the figure. `**` is changed to a field base directory, `*` is changed to field base name.
+        kwargs : dict
+            Additional parameters for attribute loading and plot creation.
+
+        Examples
+        --------
+        Simplest possible plot of a geometry-related attribute:
+        >>> field.show('mean_matrix')
+
+        Display attribute of a fan over the geometry map:
+        >>> field.show(['mean_matrix', 'fans:0/masks'])
+
+        Display attributes on separate axis:
+        >>> field.show(['mean_matrix', 'horizons:0/fourier', custom_data_array], separate=True)
+
+        Use various parameters for each of the plots:
+        >>> field.show([{'src':'labels:0/fourier', 'window': 20, 'normalize': True},
+                        {'src':'labels:0/fourier', 'window': 40, 'n_components': 3}],
+                       separate=True)
+
+        Display amplitudes and gradients for each of the horizons in a field:
+        >>> field.show(['horizons:*/amplitudes', 'horizons:*/gradient'], separate=True)
+
+        Display several attributes on multiple axes with overlays and save it near the cube:
+        >>> field.show(['geometry/std_matrix', 'horizons:3/amplitudes',
+                        ['horizons:3/instant_phases', 'fans:3/masks'],
+                        ['horizons:3/instant_phases', predicted_mask]],
+                       savepath='**/IMAGES/complex.png')
+        """
         # If `*` is present, run `show` multiple times with `*` replaced to label id
         checker = lambda attr: attr.replace(':*', '') != attr if isinstance(attr, str) else False
         wildcard = self.apply_nested(checker, attributes)
@@ -258,7 +307,7 @@ class VisualizationMixin:
                 attributes_ = self.apply_nested(substitutor, attributes)
                 savepath_ = self.make_savepath(savepath, name=label_id) if savepath is not None else None
 
-                fig = self.show(attributes=attributes_, mode=mode, return_figure=True, width=width,
+                fig = self.show(attributes=attributes_, mode=mode, return_figure=True,
                                 short_title=short_title, savepath=savepath_, **kwargs)
                 figures.append(fig)
             return figures if return_figure else None
@@ -321,7 +370,7 @@ class VisualizationMixin:
 
     # 2D interactive
     def viewer(self, figsize=(8, 8), **kwargs):
-        """ !!. """
+        """ Interactive field viewer. """
         return FieldViewer(field=self, figsize=figsize, **kwargs)
 
 

@@ -14,7 +14,39 @@ from ..utils import AugmentedList
 
 
 class Field(VisualizationMixin):
-    """ !!. """
+    """ A common container for all information about the field: cube geometry and various labels.
+
+    To initialize, one must provide:
+        - geometry-like entity, which can be a path to a seismic cube or instance of `:class:SeismicGeometry`;
+        additional parameters of geometry instantiation can be passed via `geometry_kwargs` parameters.
+        - optionally, labels in one of the following formats:
+            - dictionary with keys defining attribute to store loaded labels in and values as
+            sequences of label-like entities (path to a label or instance of label class)
+            - sequence with label-like entities. This way, labels will be stored in `labels` attribute
+            - string to define path(s) to labels (same as those paths wrapped in a list)
+            - None as a signal that no labels are provided for a field.
+        `labels_class` defines the class to use for loading. If it is not provided, we try to infer the class from
+        name of the attribute to store the labels in. For example,
+        >>> {'horizons': 'path/to/horizons/*'}
+        would be loaded as instances of `:class:.Horizon`.
+        `labels_kwargs` are passed for instantiation of every label.
+
+    Examples
+    --------
+    Initialize field with only geometry:
+    >>> Field(geometry='path/to/cube.qblosc')
+    >>> Field(geometry=SeismicGeometry(...))
+
+    The most complete labels definition:
+    >>> Field(geometry=..., labels={'horizons': ['path/to/horizon', Horizon(...)],
+                                    'fans': 'paths/to/fans/*',
+                                    'faults': ['path/to/fault1', 'path/to/fault2', ],
+                                    'lift_geometry': 'path/to/geometry_target.hdf5'})
+
+    Use a `labels_class` instead; this way, all of the labels are stored as `labels` attribute, no matter the class:
+    >>> Field(geometry=..., labels='paths/*', labels_class='horizon')
+    >>> Field(geometry=..., labels=['paths/1', 'paths/2', 'paths/3'], labels_class='fault')
+    """
     def __init__(self, geometry, labels=None, labels_class=None, geometry_kwargs=None, labels_kwargs=None, **kwargs):
         # Attributes
         self.labels = []
@@ -344,24 +376,3 @@ class Field(VisualizationMixin):
         size = self.geometry.cache_size
         size += sum(self.attached_instances.cache_size)
         return size
-
-
-    # TODO: subsets
-    def add_subsets(self, src_subset, dst_base='labels'):
-        """ !!. """
-        subset_labels = getattr(self, src_subset)
-        base_labels = getattr(self, dst_base)
-        if len(subset_labels.flat) != len(base_labels.flat):
-            raise ValueError(f"Labels `{src_subset}` and `{dst_base}` have different lengths.")
-
-        for subset, base in zip(subset_labels, base_labels):
-            base.add_subset(name=src_subset, item=subset)
-
-    def invert_subsets(self, subset, src='labels', dst=None, add_subsets=True):
-        """ !!. """
-        dst = dst or f"{subset}_inverted"
-        inverted = getattr(self, src).invert_subset(subset=subset)
-
-        setattr(self, dst, inverted)
-        if add_subsets:
-            self.add_subsets(src_subset=dst, dst_base=src)
