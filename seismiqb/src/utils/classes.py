@@ -594,6 +594,19 @@ class AugmentedList(list):
             return dir(self[0])
         return dir(self)
 
+    # Correct type of operations
+    def __add__(self, other):
+        return type(self)(list.__add__(self, other))
+
+    def __radd__(self, other):
+        return self.__add__(other)
+
+    def __mul__(self, other):
+        return type(self)(list.__mul__(self, other))
+
+    def __rmul__(self, other):
+        return self.__mul__(other)
+
 
 class AugmentedDict(OrderedDict):
     """ Ordered dictionary with additional features:
