@@ -343,6 +343,10 @@ class HorizonController(BaseController):
 
         iterator = predictions if isinstance(predictions, (tuple, list)) else [predictions]
         for horizon in iterator:
+            #
+            horizon.show(['depths', 'gradient'], separate=True,
+                         show=self.plot, savepath=self.make_savepath('postprocess', 'depth_gradient__before.png'))
+
             initial_len = len(horizon)
             if despike:
                 horizon.despike(**despike)
@@ -357,7 +361,10 @@ class HorizonController(BaseController):
             after_interpolate = len(horizon)
 
             horizon.filter()
-            self.log(f'Horizon {horizon.name}: {initial_len} -despike-> {after_despike}'
+
+            horizon.show(['depths', 'gradient'], separate=True,
+                         show=self.plot, savepath=self.make_savepath('postprocess', 'depth_gradient_after.png'))
+            self.log(f'Postprocess {horizon.name}: {initial_len} -despike-> {after_despike}'
                      f' -remove- > {after_remove} -interpolate- > {after_interpolate}')
         return predictions
 
