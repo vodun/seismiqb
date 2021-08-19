@@ -378,7 +378,7 @@ class SeismicCropBatch(Batch):
         src = src.replace('*', str(label_index))
 
         src_labels = src[:src.find(':')]
-        label = getattr(field, src_labels)[ix]
+        label = getattr(field, src_labels)[label_index]
         label_name = self.get(ix, 'label_names')
         if label.short_name != label_name:
             msg = f"Name `{label.short_name}` of the label loaded by index {label_index} "\

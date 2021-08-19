@@ -565,7 +565,7 @@ class AugmentedList(list):
     """
     # Advanced indexing
     def __getitem__(self, key):
-        if isinstance(key, int):
+        if isinstance(key, (int, np.integer)):
             return super().__getitem__(key)
         if isinstance(key, slice):
             return AugmentedList(super().__getitem__(key))
