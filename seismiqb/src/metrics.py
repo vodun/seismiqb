@@ -1,6 +1,8 @@
 """ Metrics for seismic objects: cubes and horizons. """
 from copy import copy
 from textwrap import dedent
+from itertools import zip_longest
+
 from tqdm.auto import tqdm
 
 import numpy as np
@@ -12,11 +14,12 @@ except ImportError:
     CUPY_AVAILABLE = False
 
 import cv2
+import pandas as pd
 
 from ..batchflow.notifier import Notifier
 
 from .labels import Horizon
-from .utils import Accumulator
+from .utils import Accumulator, to_list
 from .functional import to_device, from_device
 from .functional import correlation, crosscorrelation, btch, kl, js, hellinger, tv, hilbert
 from .functional import smooth_out, digitize, gridify, perturb, histo_reduce
@@ -1147,3 +1150,99 @@ class FaultsMetrics:
             else:
                 result[i] = _array
         return result
+
+
+class FaciesMetrics():
+    """ Evaluate facies metrics.
+    To get the value of a particular metric, use :meth:`.evaluate`::
+        FaciesMetrics(horizon, true_label, pred_label).evaluate('dice')
+
+    Parameters
+    horizons : :class:`.Horizon` or sequence of :class:`.Horizon`
+        Horizon(s) to use as base labels that contain facies.
+    true_labels : :class:`.Horizon` or sequence of :class:`.Horizon`
+        Facies to use as ground-truth labels.
+    pred_labels : :class:`.Horizon` or sequence of :class:`.Horizon`
+        Horizon(s) to use as predictions labels.
+    """
+    def __init__(self, horizons, true_labels=None, pred_labels=None):
+        self.horizons = to_list(horizons)
+        self.true_labels = to_list(true_labels or [])
+        self.pred_labels = to_list(pred_labels or [])
+
+
+    @staticmethod
+    def true_positive(true, pred):
+        """ Calculate correctly classified facies pixels. """
+        return np.sum(true * pred)
+
+    @staticmethod
+    def true_negative(true, pred):
+        """ Calculate correctly classified non-facies pixels. """
+        return np.sum((1 - true) * (1 - pred))
+
+    @staticmethod
+    def false_positive(true, pred):
+        """ Calculate misclassified facies pixels. """
+        return np.sum((1 - true) * pred)
+
+    @staticmethod
+    def false_negative(true, pred):
+        """ Calculate misclassified non-facies pixels. """
+        return np.sum(true * (1 - pred))
+
+    def sensitivity(self, true, pred):
+        """ Calculate ratio of correctly classified facies points to ground-truth facies points. """
+        tp = self.true_positive(true, pred)
+        fn = self.false_negative(true, pred)
+        return tp / (tp + fn)
+
+    def specificity(self, true, pred):
+        """ Calculate ratio of correctly classified non-facies points to ground-truth non-facies points. """
+        tn = self.true_negative(true, pred)
+        fp = self.false_positive(true, pred)
+        return tn / (tn + fp)
+
+    def dice(self, true, pred):
+        """ Calculate the similarity of ground-truth facies mask and preditcted facies mask. """
+        tp = self.true_positive(true, pred)
+        fp = self.false_positive(true, pred)
+        fn = self.false_negative(true, pred)
+        return 2 * tp / (2 * tp + fp + fn)
+
+
+    def evaluate(self, metrics):
+        """ Calculate desired metric and return a dataframe of results.
+
+        Parameters
+        ----------
+        metrics : str or list of str
+            Name of metric(s) to evaluate.
+        """
+        metrics = [getattr(self, fn) for fn in to_list(metrics)]
+        names = [fn.__name__ for fn in metrics]
+        rows = []
+
+        for horizon, true_label, pred_label in zip_longest(self.horizons, self.true_labels, self.pred_labels):
+            kwargs = {}
+
+            if true_label is not None:
+                true = true_label.load_attribute('masks', fill_value=0)
+                true = true[horizon.presence_matrix]
+                kwargs['true'] = true
+
+            if pred_label is not None:
+                pred = pred_label.load_attribute('masks', fill_value=0)
+                pred = pred[horizon.presence_matrix]
+                kwargs['pred'] = pred
+
+            values = [fn(**kwargs) for fn in metrics]
+
+            index = pd.MultiIndex.from_arrays([[horizon.field.displayed_name], [horizon.short_name]],
+                                              names=['field_name', 'horizon_name'])
+            data = dict(zip(names, values))
+            row = pd.DataFrame(index=index, data=data)
+            rows.append(row)
+
+        df = pd.concat(rows)
+        return df

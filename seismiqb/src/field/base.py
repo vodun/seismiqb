@@ -8,7 +8,8 @@ import numpy as np
 
 from .visualization import VisualizationMixin
 from ..geometry import SeismicGeometry
-from ..labels import Horizon, Fault, Facies
+from ..labels import Horizon, Fault
+from ..metrics import FaciesMetrics
 from ..utils import AugmentedList
 
 
@@ -36,9 +37,8 @@ class Field(VisualizationMixin):
 
     # Label initialization inner workings
     METHOD_TO_NAMES = {
-        '_load_horizons': ['horizon', Horizon],
+        '_load_horizons': ['horizon', 'facies', 'fans', 'channels', Horizon],
         '_load_faults': ['fault', Fault],
-        '_load_facies': ['facies', 'fans', 'channels', Facies],
         '_load_geometries': ['geometries', 'geometry',  SeismicGeometry],
     }
     NAME_TO_METHOD = {name: method for method, names in METHOD_TO_NAMES.items() for name in names}
@@ -132,10 +132,6 @@ class Field(VisualizationMixin):
 
     def _load_faults(self, paths, **kwargs):
         print('IN _LOAD_FAULTS', paths)
-        return []
-
-    def _load_facies(self, paths, **kwargs):
-        print('IN _LOAD_FACIES', paths)
         return []
 
     def _load_geometries(self, paths, **kwargs):
@@ -346,22 +342,26 @@ class Field(VisualizationMixin):
         return size
 
 
-    # TODO: subsets
-    def add_subsets(self, src_subset, dst_base='labels'):
-        """ !!. """
-        subset_labels = getattr(self, src_subset)
-        base_labels = getattr(self, dst_base)
-        if len(subset_labels.flat) != len(base_labels.flat):
-            raise ValueError(f"Labels `{src_subset}` and `{dst_base}` have different lengths.")
+    # Facies
+    def evaluate_facies(self, src_horizons, src_true=None, src_pred=None, metrics='dice'):
+        """ Calculate facies metrics for requested labels of the field and return dataframe of results.
 
-        for subset, base in zip(subset_labels, base_labels):
-            base.add_subset(name=src_subset, item=subset)
+        Parameters
+        ----------
+        scr_horizons : str
+            Name of field attribute that contains base horizons.
+        src_true : str
+            Name of field attribute that contains ground-truth labels.
+        src_pred : str
+            Name of field attribute that contains predicted labels.
+        metrics: str or list of str
+            Metrics function(s) to calculate.
+        """
+        horizons = getattr(self, src_horizons)
+        true_labels = getattr(self, src_true) if src_true is not None else None
+        pred_labels = getattr(self, src_pred) if src_pred is not None else None
 
-    def invert_subsets(self, subset, src='labels', dst=None, add_subsets=True):
-        """ !!. """
-        dst = dst or f"{subset}_inverted"
-        inverted = getattr(self, src).invert_subset(subset=subset)
+        fm = FaciesMetrics(horizons=horizons, true_labels=true_labels, pred_labels=pred_labels)
+        result = fm.evaluate(metrics)
 
-        setattr(self, dst, inverted)
-        if add_subsets:
-            self.add_subsets(src_subset=dst, dst_base=src)
+        return result

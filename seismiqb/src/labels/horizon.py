@@ -262,6 +262,22 @@ class Horizon(AttributesMixin, VisualizationMixin):
         return type(self)(storage=np.copy(self.matrix), field=self.field, i_min=self.i_min, x_min=self.x_min,
                           name=f"copy_of_{self.name}")
 
+    def __sub__(self, other):
+        if not isinstance(other, type(self)):
+            raise TypeError(f"Operands types do not match. Got {type(self)} and {type(other)}.")
+
+        presence = other.presence_matrix
+        discrepancies = self.full_matrix[presence] != other.full_matrix[presence]
+        if discrepancies.any():
+            raise ValueError("Horizons have different depths where present.")
+
+        res_matrix = self.full_matrix.copy()
+        res_matrix[presence] = self.FILL_VALUE
+        name = f"~{other.name}"
+        result = type(self)(storage=res_matrix, field=self.field, name=name)
+
+        return result
+
 
     # Properties, computed from lazy evaluated attributes
     @property
@@ -483,6 +499,29 @@ class Horizon(AttributesMixin, VisualizationMixin):
         horizons = [horizon for horizon in horizons if len(horizon) != 0]
         return horizons
 
+    def from_subset(self, matrix, name=None):
+        """ Make new label with points matrix filtered by given presense matrix.
+
+        Parameters
+        ----------
+        matrix : np.array
+            Presense matrix of labels points. Must be in full cubes coordinates.
+            If consists of 0 and 1, keep points only where values are 1.
+            If consists of values from [0, 1] interval, keep points where values are greater than 0.5.
+        name : str or None
+            Name for new label. If None, original label name used.
+
+        Returns
+        -------
+        New `Horizon` instance with filtered points matrix.
+        """
+        result = copy(self)
+        result.name = name or self.name
+
+        filtering_matrix = (matrix < 0.5).astype(int)
+        result.filter_matrix(filtering_matrix)
+
+        return result
 
     # Basic properties
     @property

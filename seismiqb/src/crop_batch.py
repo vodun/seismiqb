@@ -353,31 +353,32 @@ class SeismicCropBatch(Batch):
 
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def load_attribute(self, ix, dst, src='amplitudes', src_labels='labels',
-                       atleast_3d=True, dtype=np.float32, **kwargs):
-        """ Load attribute for label at given location.
+    def compute_label_attribute(self, ix, dst, src='amplitudes', atleast_3d=True, dtype=np.float32, **kwargs):
+        """ Compute requested attribute along label surface. Target labels are defined by sampled locations.
 
         Parameters
         ----------
         src : str
-            A keyword from :attr:`~Horizon.ATTRIBUTE_TO_METHOD` keys, defining label attribute to make crops from.
-        src_labels : str
-            Dataset attribute with labels dict.
-        locations : str
-            Component of batch with locations of crops to load.
-        kwargs :
-            Passed directly to either:
-            - one of attribute-evaluating methods from :attr:`~Horizon.ATTRIBUTE_TO_METHOD` depending on `attribute`.
+            Keyword that defines label attribute to compute.
+        atleast_3d : bool
+            Whether add one more dimension to 2d result or not.
+        dtype : valid dtype compatible with requested attribute
+            A dtype that result must have.
+        kwargs : misc
+            Passed directly to one of attribute-evaluating methods.
 
         Notes
         -----
-        Load requested attribute calculated along labels stored in sampled locations.
+        Correspondence between the attribute and the method that computes it
+        is defined by :attr:`~Horizon.ATTRIBUTE_TO_METHOD`.
         """
         field = self.get(ix, 'fields')
         location = self.get(ix, 'locations')
         label_index = self.get(ix, 'generated')[1]
-        label = getattr(field, src_labels)[label_index]
+        src = src.replace('*', str(label_index))
 
+        src_labels = src[:src.find(':')]
+        label = getattr(field, src_labels)[ix]
         label_name = self.get(ix, 'label_names')
         if label.short_name != label_name:
             msg = f"Name `{label.short_name}` of the label loaded by index {label_index} "\
@@ -386,7 +387,9 @@ class SeismicCropBatch(Batch):
                   f"in between sampler creation and `make_locations` call."
             raise ValueError(msg)
 
-        return label.load_attribute(src=src, location=location, atleast_3d=atleast_3d, dtype=dtype, **kwargs)
+        result = field.load_attribute(src=src, location=location, atleast_3d=atleast_3d, dtype=dtype, **kwargs)
+
+        return result
 
 
     # More methods to work with labels
