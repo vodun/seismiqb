@@ -284,6 +284,7 @@ class VisualizationMixin:
             titles = [item[0] if isinstance(item, list) else item for item in titles]
 
         # Prepare plot defaults
+        n_subplots = len(data) if isinstance(data, list) else 1
         plot_defaults = {
             'suptitle_label': f'Field `{self.displayed_name}`',
             'title_label': titles,
@@ -294,7 +295,6 @@ class VisualizationMixin:
         # Defaults for chosen mode
         if mode == 'imshow':
             x, y = self.spatial_shape
-            n_subplots = len(data) if isinstance(data, list) else 1
 
             plot_defaults = {
                 **plot_defaults,
