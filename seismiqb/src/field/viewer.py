@@ -7,7 +7,12 @@ import matplotlib.pyplot as plt
 
 
 class FieldViewer:
-    """ !!. """
+    """ Interactive viewer of a field.
+
+    Creates a figure with two axis -- base map and slice map, as well as some additional controls.
+    On the base map we show a top-view image of a field with requested attribute from a geometry / one of the labels.
+    On the slice map we show one slice from a cube along desired axis.
+    """
     out = widgets.Output()
 
     def __init__(self, field, figsize=(8, 8)):
@@ -66,7 +71,6 @@ class FieldViewer:
         display(self.vbox)
 
 
-
     # Draw methods
     def draw_base(self, force=False):
         """ Draw base top-view map on the left axis. """
@@ -84,7 +88,6 @@ class FieldViewer:
 
         # Update previous state
         self._state_base = {**self.state_base}
-
 
     def draw_slice(self, force=False):
         """ Draw slice from a field on the right axis. """
@@ -116,7 +119,6 @@ class FieldViewer:
         # Update previous state
         self._state_slice = {**self.state_slice}
 
-
     def zoom_line(self, point):
         """ Highlight selected (on the right axis) region on the top-view map (left axis). """
         lines = [children for children in self.base_ax.get_children()
@@ -147,7 +149,6 @@ class FieldViewer:
 
         self.location_text.value = self.state_slice['location']
         self.location_slider.value = self.state_slice['location']
-
 
     @out.capture()
     def change_axis(self):

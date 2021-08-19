@@ -41,7 +41,7 @@ class VisualizationMixin:
 
     # 2D
     def find_self(self):
-        """ !!. """
+        """ Get name of the attribute of a field, where instance is stored, as well as the index. """
         for src in self.field.loaded_labels + ['attached_instances']:
             labels = getattr(self.field, src)
 
@@ -49,7 +49,8 @@ class VisualizationMixin:
                 for idx, label in enumerate(labels):
                     if label is self:
                         return src, idx
-        return None
+        # Should never be raised, unless something went terribly wrong
+        raise TypeError('Instance is not attached to its field!')
 
     @staticmethod
     def _show_add_prefix(attribute, prefix=None):
@@ -59,7 +60,7 @@ class VisualizationMixin:
 
 
     def show(self, attributes='depths', mode='imshow', short_title=True, return_figure=False, width=9, **kwargs):
-        """ !!. """
+        """ Field visualization with custom naming scheme. """
         src, idx = self.find_self()
         add_prefix = partial(self._show_add_prefix, prefix=f'{src}:{idx}')
         attributes = self.field.apply_nested(add_prefix, attributes)

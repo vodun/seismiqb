@@ -16,9 +16,22 @@ from .utils import AugmentedDict
 
 
 class SeismicDataset(Dataset):
-    """ !!.
-    A common container for data entities: usually, seismic cubes and some type of labels.
-    Entities are stored in dict-like objects, which can be indexed with either cube names or ordinal integer.
+    """ Container of fields.
+
+    Getitem is re-defined to index stored fields.
+    Getattr is re-defined to return the same attributes from all stored fields, wrapped into `AugmentedDict`.
+
+    Can be initialized with:
+        - a nested dictionary, where keys are field-like entities (path to seismic cube, instance of Geometry or Field),
+        and values are either:
+            - dictionary with keys defining attribute to store loaded labels in and values as
+            sequences of label-like entities (path to a label or instance of label class)
+            - sequence with label-like entities. This way, labels will be stored in `labels` attribute
+            - string to define path(s) to labels (same as those paths wrapped in a list)
+            - None as a signal that no labels are provided for a field.
+        - a sequence with field-like entities (same as dictionary where every value is None)
+        - one field-like entity (same as sequence with only one element)
+    Named arguments are passed for each field initialization.
     """
     #pylint: disable=keyword-arg-before-vararg
     def __init__(self, index, batch_class=SeismicCropBatch, *args, **kwargs):
