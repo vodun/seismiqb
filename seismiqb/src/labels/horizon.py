@@ -569,7 +569,20 @@ class Horizon(AttributesMixin, VisualizationMixin):
     filter = filter_points
 
     def filter_spikes(self, mode='gradient', threshold=1., dilation=5, kernel_size=11, kernel=None, margin=0, iters=2):
-        """ !!. """
+        """ Remove spikes from horizon. Works inplace.
+
+        Parameters
+        ----------
+        mode : str
+            If 'gradient', then use gradient map to locate spikes.
+            If 'median', then use median diffs to locate spikes.
+        threshold : number
+            Threshold to consider a difference to be a spike,
+        dilation : int
+            Number of iterations for binary dilation algorithm to increase the spikes.
+        kernel_size, kernel, margin, iters
+            Parameters for median differences computation.
+        """
         spikes = self.load_attribute('spikes', spikes_mode=mode, threshold=threshold, dilation=dilation,
                                      kernel_size=kernel_size, kernel=kernel, margin=margin, iters=iters)
         self.filter(spikes)
@@ -577,7 +590,7 @@ class Horizon(AttributesMixin, VisualizationMixin):
     despike = filter_spikes
 
     def filter_disconnected_regions(self):
-        """ !!. """
+        """ Remove regions, not connected to the largest component of a horizon. """
         labeled = label(self.presence_matrix)
         values, counts = np.unique(labeled, return_counts=True)
         counts = counts[values != 0]

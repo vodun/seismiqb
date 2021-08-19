@@ -588,7 +588,7 @@ class AttributesMixin:
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     @transformable
     def get_median_diff_map(self, convolve_mode='m', kernel_size=11, kernel=None, margin=0, iters=2, threshold=2, **_):
-        """ !!. """
+        """ Compute difference between depth map and its median filtered counterpart. """
         convolved = special_convolve(self.full_matrix, mode=convolve_mode, kernel=kernel, kernel_size=kernel_size,
                                      margin=margin, iters=iters, fill_value=self.FILL_VALUE)
         spikes = self.full_matrix - convolved
@@ -601,7 +601,13 @@ class AttributesMixin:
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     @transformable
     def get_gradient_map(self, threshold=0, **_):
-        """ !!. """
+        """ Compute combined gradient map along both directions.
+
+        Parameters
+        ----------
+        threshold : number
+            Threshold to consider a difference to be a spike.
+        """
         grad_i = self.load_attribute('grad_i', on_full=True, dtype=np.float32, use_cache=False)
         grad_x = self.load_attribute('grad_x', on_full=True, dtype=np.float32, use_cache=False)
 
@@ -617,7 +623,20 @@ class AttributesMixin:
     @transformable
     def get_spikes_map(self, spikes_mode='median', threshold=1., dilation=5,
                        kernel_size=11, kernel=None, margin=0, iters=2, **_):
-        """ !!. """
+        """ Locate spikes on a horizon.
+
+        Parameters
+        ----------
+        mode : str
+            If 'gradient', then use gradient map to locate spikes.
+            If 'median', then use median diffs to locate spikes.
+        threshold : number
+            Threshold to consider a difference to be a spike.
+        dilation : int
+            Number of iterations for binary dilation algorithm to increase the spikes.
+        kernel_size, kernel, margin, iters
+            Parameters for median differences computation.
+        """
         if spikes_mode.startswith('m'):
             spikes = self.load_attribute('median_diff', mode='m', kernel=kernel, kernel_size=kernel_size,
                                          margin=margin, iters=iters, threshold=threshold)
