@@ -621,12 +621,13 @@ class AttributesMixin:
         if spikes_mode.startswith('m'):
             spikes = self.load_attribute('median_diff', mode='m', kernel=kernel, kernel_size=kernel_size,
                                          margin=margin, iters=iters, threshold=threshold)
-
         elif spikes_mode.startswith('g'):
             spikes = self.load_attribute('gradient', threshold=threshold)
+        else:
+            raise ValueError(f'Wrong mode passed, {spikes_mode}')
 
         if dilation:
             spikes = np.nan_to_num(spikes)
             spikes = binary_dilation(spikes, iterations=dilation).astype(np.float32)
-            spikes[spikes == 0.0] = np.nan
+            spikes[self.field.zero_traces == 1] = np.nan
         return spikes

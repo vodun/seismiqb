@@ -574,9 +574,7 @@ class Horizon(AttributesMixin, VisualizationMixin):
                                      kernel_size=kernel_size, kernel=kernel, margin=margin, iters=iters)
         self.filter(spikes)
 
-
     despike = filter_spikes
-
 
     def filter_disconnected_regions(self):
         """ !!. """

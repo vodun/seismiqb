@@ -83,7 +83,11 @@ class HorizonController(BaseController):
         'common': {},
 
         # Make predictions smoother
-        'postprocess': {},
+        'postprocess': {
+            'despike': {'mode': 'gradient', 'threshold': 1, 'dilation': 5},
+            'interpolate': {'kernel_size': 5, 'sigma': 0.4, 'margin': 2},
+            'filter_disconnected_regions' : True,
+        },
 
         # Compute metrics
         'evaluate': {
@@ -331,15 +335,30 @@ class HorizonController(BaseController):
         return horizons
 
     # Postprocess
-    def postprocess(self, predictions, **kwargs):
+    def postprocess(self, predictions, despike=True, interpolate=True, **kwargs):
         """ Modify predictions. """
         config = Config({**self.config['postprocess'], **kwargs})
-        _ = config
+        despike, interpolate = config.get(['despike', 'interpolate'])
+        filter_disconnected_regions = config.get('filter_disconnected_regions')
 
         iterator = predictions if isinstance(predictions, (tuple, list)) else [predictions]
         for horizon in iterator:
-            horizon.smooth_out(preserve_borders=False)
+            initial_len = len(horizon)
+            if despike:
+                horizon.despike(**despike)
+            after_despike = len(horizon)
+
+            if filter_disconnected_regions:
+                horizon.filter_disconnected_regions()
+            after_remove = len(horizon)
+
+            if interpolate:
+                horizon.interpolate(**interpolate)
+            after_interpolate = len(horizon)
+
             horizon.filter()
+            self.log(f'Horizon {horizon.name}: {initial_len} -despike-> {after_despike}'
+                     f' -remove- > {after_remove} -interpolate- > {after_interpolate}')
         return predictions
 
     # Evaluate
@@ -367,7 +386,7 @@ class HorizonController(BaseController):
             horizon.show(show=self.plot, savepath=self.make_savepath(*prefix, name + 'p_depth_map.png'))
             horizon.show(['amplitudes', 'iamplitudes', 'iphases'], separate=True, nrows=3, ncols=1,
                          show=self.plot, savepath=self.make_savepath(*prefix, name + 'p_attributes.png'))
-            horizon.show('spikes', enlarge=True, enlarge_width=3,
+            horizon.show('spikes', spikes_mode='median', kernel_size=7, threshold=2., dilation=7,
                          show=self.plot, savepath=self.make_savepath(*prefix, name + 'p_spikes.png'))
 
             horizon.show_slide(horizon.field.shape[0]//2, axis=0, show=self.plot,
