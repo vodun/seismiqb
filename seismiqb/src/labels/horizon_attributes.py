@@ -621,7 +621,7 @@ class AttributesMixin:
         return result
 
 
-    def get_zeros_cross(self, side, window=15):
+    def get_zerocrossings(self, side, window=15):
         """ Get matrix of depths shifted to nearest point of sign change in cube values.
 
         Parameters
@@ -631,11 +631,11 @@ class AttributesMixin:
         window : positive int
             Width of data slice above/below the horizon made along its surface.
         """
-        amplitudes = self.get_cube_values(window=window, offset=window // 2 * side, fill_value=0)
+        values = self.get_cube_values(window=window, offset=window // 2 * side, fill_value=0)
         # reverse array along depth axis for invariance
-        amplitudes = amplitudes[:, :, ::side]
+        values = values[:, :, ::side]
 
-        sign = np.sign(amplitudes)
+        sign = np.sign(values)
         # value 2 in the array below mark cube values sign change along depth axis
         cross = np.abs(np.diff(sign, axis=-1))
 
@@ -644,31 +644,28 @@ class AttributesMixin:
         cross[zeros] = 2
 
         # obtain indices of first sign change occurences for every trace
-        # if trace doesn't change sign, corresponding shift is 0
-        indices = np.argmax(cross == 2, axis=-1)
+        # if trace doesn't change sign, corresponding index of sign change is 0
+        cross_indices = np.argmax(cross == 2, axis=-1)
 
-        # treat obtained indices as shifts for label depths matrix
-        shift = indices.astype(np.float32)
-
-        # remember traces where sign changes
-        mask = cross.any(axis=-1)
-
-        start_points = self.matrix_to_points(indices)
-        start_points = start_points[mask.flatten()].T
         # get cube values before sign change
-        start = amplitudes[tuple(start_points)]
+        start_points = self.matrix_to_points(cross_indices).T
+        start_values = values[tuple(start_points)]
 
-        stop_points = start_points.copy()
-        stop_points[2] += 1
         # get cube values after sign change
-        stop = amplitudes[tuple(stop_points)]
+        stop_points = start_points + np.array([[0], [0], [1]])
+        stop_values = values[tuple(stop_points)]
 
         # calculate additional float shifts towards true zero-crossing point
-        float_shift = start - stop
-        # do not perform division at points, where both 'before' and 'after' values are 0
-        np.divide(start, float_shift, out=float_shift, where=float_shift != 0)
-        # apply additional float shifts to shift matrix
-        shift[mask] += float_shift
+        float_shift = start_values - stop_values
+        # do not perform division at points, where both 'start' and 'stop' values are 0
+        np.divide(start_values, float_shift, out=float_shift, where=float_shift != 0)
 
-        result = self.full_matrix + shift * side
+        # treat obtained indices as shifts for label depths matrix
+        shift = cross_indices.astype(np.float32)
+        # apply additional float shifts to shift matrix
+        shift += float_shift.reshape(shift.shape)
+        # account for shift matrix sign change
+        shift *= side
+
+        result = self.full_matrix + shift
         return result
