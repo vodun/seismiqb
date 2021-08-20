@@ -300,12 +300,13 @@ class VisualizationMixin:
             n_items = next(flatten(lens))
 
             figures = []
-            for i in range(n_items):
+            for label_num in range(n_items):
                 #pylint: disable=cell-var-from-loop
-                label_id = str(i)
-                substitutor = lambda attr: attr.replace('*', label_id) if isinstance(attr, str) else attr
+                substitutor = lambda attr: attr.replace('*', str(label_num)) if isinstance(attr, str) else attr
                 attributes_ = self.apply_nested(substitutor, attributes)
-                savepath_ = self.make_savepath(savepath, name=label_id) if savepath is not None else None
+
+                label_name = self.labels[label_num].short_name
+                savepath_ = self.make_savepath(savepath, name=label_name) if savepath is not None else None
 
                 fig = self.show(attributes=attributes_, mode=mode, return_figure=True,
                                 short_title=short_title, savepath=savepath_, **kwargs)
@@ -365,6 +366,7 @@ class VisualizationMixin:
 
         figure = plot_image(data=data, mode=mode, savepath=savepath, **params)
         plt.show()
+
         return figure if return_figure else None
 
 
