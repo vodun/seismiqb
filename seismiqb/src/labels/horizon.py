@@ -375,7 +375,10 @@ class Horizon(AttributesMixin, VisualizationMixin):
         """ Init from matrix and location of minimum i, x points. """
         _ = kwargs
 
+        if np.issubdtype(self.dtype, np.integer):
+            matrix = np.rint(matrix)
         self.matrix = matrix.astype(self.dtype)
+
         self.i_min, self.x_min = i_min, x_min
         self.i_max, self.x_max = i_min + matrix.shape[0] - 1, x_min + matrix.shape[1] - 1
 
