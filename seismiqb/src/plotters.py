@@ -347,7 +347,7 @@ class MatplotlibPlotter:
         if pyqt:
             return None
         save_kwargs = dict(bbox_inches='tight', pad_inches=0, dpi=100)
-        save_kwargs.update(kwargs.get('save') or dict())
+        save_kwargs.update(kwargs.get('save') or {})
 
         # save if necessary and render
         if savepath is not None:
@@ -837,7 +837,7 @@ class PlotlyPlotter:
     def save_and_show(fig, show=True, savepath=None, **kwargs):
         """ Save and show plot if needed.
         """
-        save_kwargs = kwargs.get('save', dict())
+        save_kwargs = kwargs.get('save', {})
 
         # save if necessary and render
         if savepath is not None:

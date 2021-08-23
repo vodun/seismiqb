@@ -157,7 +157,7 @@ class BaseController:
         """ Log message to a separate file. """
         log_path = self.make_savepath(path)
         if log_path:
-            with open(log_path, 'w') as file:
+            with open(log_path, 'w', encoding='utf-8') as file:
                 print(msg, file=file)
 
     # Dataset creation

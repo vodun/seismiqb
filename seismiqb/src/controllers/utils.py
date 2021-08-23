@@ -17,7 +17,7 @@ def log_to_dict(log_path):
     #pylint: disable=too-many-branches
     dct = OrderedDict()
 
-    with open(log_path) as file:
+    with open(log_path, encoding='utf-8') as file:
         for i, line in enumerate(file):
             if i == 0:
                 dct['Начало вычислений'] = line_to_time(line)

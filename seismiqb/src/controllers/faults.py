@@ -34,7 +34,7 @@ class FaultController(BaseController):
             'path': '/cubes/',
             'train_cubes': [],
             'transposed_cubes': [],
-            'inference_cubes': dict(),
+            'inference_cubes': {},
             'label_dir': '/INPUTS/FAULTS/NPY_WIDTH_{}/*',
             'width': 3,
             'ext': 'qblosc',
@@ -497,7 +497,7 @@ class FaultController(BaseController):
 
         prefix = prefix or ''
 
-        outputs = dict()
+        outputs = {}
         for cube_idx in dataset.indices:
             outputs[cube_idx] = []
             field = dataset[cube_idx]

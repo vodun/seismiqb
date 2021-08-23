@@ -681,13 +681,13 @@ class MetaDict(dict):
     @classmethod
     def load(cls, path):
         """ Load self from `path` by evaluating the containing dictionary. """
-        with open(path, 'r') as file:
+        with open(path, 'r', encoding='utf-8') as file:
             content = '\n'.join(file.readlines())
         return cls(literal_eval(content.replace('\n', '').replace('    ', '')))
 
     def dump(self, path):
         """ Save self to `path` with each key on a separate line. """
-        with open(path, 'w') as file:
+        with open(path, 'w', encoding='utf-8') as file:
             print(repr(self), file=file)
 
 
@@ -881,7 +881,7 @@ class SafeIO:
             self._info(self.log_file, f'Opened {self.path}')
 
     def _info(self, log_file, msg):
-        with open(log_file, 'a') as f:
+        with open(log_file, 'a', encoding='utf-8') as f:
             f.write('\n' + msg)
 
     def __getattr__(self, key):

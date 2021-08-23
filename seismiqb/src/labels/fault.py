@@ -94,7 +94,7 @@ class Fault(Horizon):
     @classmethod
     def read_file(cls, path):
         """ Read data frame with sticks. """
-        with open(path) as file:
+        with open(path, encoding='utf-8') as file:
             line_len = len([item for item in file.readline().split(' ') if len(item) > 0])
         if line_len == 3:
             names = Horizon.REDUCED_CHARISMA_SPEC

@@ -209,7 +209,7 @@ class HorizonController(BaseController):
 
         # Compare two largest horizons from each orientation
         if len(orientation) == 2:
-            with open(self.make_savepath('inference_ix', 'results.txt'), 'w') as result_txt:
+            with open(self.make_savepath('inference_ix', 'results.txt'), 'w', encoding='utf-8') as result_txt:
                 hm = HorizonMetrics(largest)
                 hm.evaluate('compare', hist=False,
                             plot=True, show=self.plot,
@@ -401,7 +401,7 @@ class HorizonController(BaseController):
             horizon.show_slide(horizon.field.shape[1]//2, axis=1, show=self.plot,
                                savepath=self.make_savepath(*prefix, name + 'p_slide_x.png'))
 
-            with open(self.make_savepath(*prefix, name + 'p_results_self.txt'), 'w') as result_txt:
+            with open(self.make_savepath(*prefix, name + 'p_results_self.txt'), 'w', encoding='utf-8') as result_txt:
                 horizon.evaluate(compute_metric=False, printer=lambda msg: print(msg, file=result_txt))
 
             # Metric maps
@@ -424,7 +424,7 @@ class HorizonController(BaseController):
                 other, _info = hm.evaluate('find_best_match', agg=None)
                 info = {**info, **_info}
 
-                with open(self.make_savepath(*prefix, name + 'p_results.txt'), 'w') as result_txt:
+                with open(self.make_savepath(*prefix, name + 'p_results.txt'), 'w', encoding='utf-8') as result_txt:
                     hm.evaluate('compare', hist=False,
                                 plot=True, show=self.plot,
                                 printer=lambda msg: print(msg, file=result_txt),
