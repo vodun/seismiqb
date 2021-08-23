@@ -83,7 +83,11 @@ class HorizonController(BaseController):
         'common': {},
 
         # Make predictions smoother
-        'postprocess': {},
+        'postprocess': {
+            'despike': {'mode': 'gradient', 'threshold': 1, 'dilation': 5},
+            'interpolate': {'kernel_size': 5, 'sigma': 0.4, 'margin': 2},
+            'filter_disconnected_regions' : True,
+        },
 
         # Compute metrics
         'evaluate': {
@@ -331,15 +335,37 @@ class HorizonController(BaseController):
         return horizons
 
     # Postprocess
-    def postprocess(self, predictions, **kwargs):
+    def postprocess(self, predictions, despike=True, interpolate=True, **kwargs):
         """ Modify predictions. """
         config = Config({**self.config['postprocess'], **kwargs})
-        _ = config
+        despike, interpolate = config.get(['despike', 'interpolate'])
+        filter_disconnected_regions = config.get('filter_disconnected_regions')
 
         iterator = predictions if isinstance(predictions, (tuple, list)) else [predictions]
         for horizon in iterator:
-            horizon.smooth_out(preserve_borders=False)
+            #
+            horizon.show(['depths', 'gradient'], separate=True,
+                         show=self.plot, savepath=self.make_savepath('postprocess', 'depth_gradient__before.png'))
+
+            initial_len = len(horizon)
+            if despike:
+                horizon.despike(**despike)
+            after_despike = len(horizon)
+
+            if filter_disconnected_regions:
+                horizon.filter_disconnected_regions()
+            after_remove = len(horizon)
+
+            if interpolate:
+                horizon.interpolate(**interpolate)
+            after_interpolate = len(horizon)
+
             horizon.filter()
+
+            horizon.show(['depths', 'gradient'], separate=True,
+                         show=self.plot, savepath=self.make_savepath('postprocess', 'depth_gradient_after.png'))
+            self.log(f'Postprocess {horizon.name}: {initial_len} -despike-> {after_despike}'
+                     f' -remove- > {after_remove} -interpolate- > {after_interpolate}')
         return predictions
 
     # Evaluate
@@ -365,6 +391,10 @@ class HorizonController(BaseController):
 
             # Basic demo: depth map and properties
             horizon.show(show=self.plot, savepath=self.make_savepath(*prefix, name + 'p_depth_map.png'))
+            horizon.show(['amplitudes', 'iamplitudes', 'iphases'], separate=True, nrows=3, ncols=1,
+                         show=self.plot, savepath=self.make_savepath(*prefix, name + 'p_attributes.png'))
+            horizon.show('spikes', spikes_mode='median', kernel_size=7, threshold=2., dilation=7,
+                         show=self.plot, savepath=self.make_savepath(*prefix, name + 'p_spikes.png'))
 
             horizon.show_slide(horizon.field.shape[0]//2, axis=0, show=self.plot,
                                savepath=self.make_savepath(*prefix, name + 'p_slide_i.png'))
@@ -416,10 +446,14 @@ class HorizonController(BaseController):
                 dump_name += horizon.name or 'predicted'
                 horizon.dump_float(path=self.make_savepath(*prefix, dump_name))
 
-            info['corrs'] = np.nanmean(corrs)
-            info['phase'] = np.nanmean(np.abs(phase))
-            info['perturbed_mean'] = np.nanmean(perturbed_mean)
-            info['perturbed_max'] = np.nanmean(perturbed_max)
+            info = {
+                'coverage': horizon.coverage,
+                'corrs': np.nanmean(corrs),
+                'phase': np.nanmean(np.abs(phase)),
+                'perturbed_mean': np.nanmean(perturbed_mean),
+                'perturbed_max': np.nanmean(perturbed_max),
+                **info
+            }
             results.append((info))
 
             msg = (f'\nPredicted horizon {i}:\n{horizon.name}\nlen={len(horizon)}'

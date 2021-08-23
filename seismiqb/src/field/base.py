@@ -333,7 +333,7 @@ class Field(VisualizationMixin):
 
 
     # Utility functions
-    def make_savepath(self, path, name=None, makedirs=True):
+    def make_path(self, path, name=None, makedirs=True):
         """ Make path by mapping some of the symbols into pre-defined strings:
             - `**` or `%` is replaced with basedir of a cube
             - `*` is replaced with `name`

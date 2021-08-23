@@ -151,11 +151,11 @@ class Extender(Enhancer):
             .create_masks(dst='prior_masks', width=C('width', default=3))
             .adaptive_reshape(src=['images', 'prior_masks'])
             .normalize(src='images')
+            .concat_components(src=['images', 'prior_masks'], dst='images', axis=1)
 
             # Use model for prediction
             .predict_model('model',
                            B('images'),
-                           B('prior_masks'),
                            fetches='predictions',
                            save_to=B('predicted_masks', mode='w'))
             .masks_to_horizons(src_masks='predicted_masks', threshold=0.5, minsize=16,
@@ -175,5 +175,5 @@ class Extender(Enhancer):
 
         prediction = self.inference(horizon, model, **kwargs)
         prediction = self.postprocess(prediction)
-        self.evaluate(prediction, dataset=dataset)
-        return prediction
+        info = self.evaluate(prediction, dataset=dataset)
+        return prediction, info

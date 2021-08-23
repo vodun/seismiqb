@@ -5,11 +5,11 @@ import numpy as np
 from cv2 import dilate
 from scipy.signal import hilbert, ricker
 from scipy.ndimage import convolve
-from scipy.ndimage.morphology import binary_fill_holes, binary_erosion
+from scipy.ndimage.morphology import binary_fill_holes, binary_erosion, binary_dilation
 from skimage.measure import label
 from sklearn.decomposition import PCA
 
-from ..functional import smooth_out
+from ..functional import smooth_out, special_convolve
 from ..utils import transformable, lru_cache
 
 
@@ -386,7 +386,10 @@ class AttributesMixin:
         'instant_phases': ['instant_phases', 'iphases'],
         'instant_amplitudes': ['instant_amplitudes', 'iamplitudes'],
         'fourier_decomposition': ['fourier', 'fourier_decomposition'],
-        'wavelet_decomposition': ['wavelet', 'wavelet_decomposition']
+        'wavelet_decomposition': ['wavelet', 'wavelet_decomposition'],
+        'median_diff': ['median_diff', 'mdiff'],
+        'grad': ['grad', 'gradient'],
+        'spikes': ['spikes'],
     }
     ALIAS_TO_ATTRIBUTE = {alias: name for name, aliases in ATTRIBUTE_TO_ALIAS.items() for alias in aliases}
 
@@ -397,6 +400,9 @@ class AttributesMixin:
         'instant_amplitudes' : 'get_instantaneous_amplitudes',
         'fourier_decomposition' : 'get_fourier_decomposition',
         'wavelet_decomposition' : 'get_wavelet_decomposition',
+        'median_diff': 'get_median_diff_map',
+        'grad': 'get_gradient_map',
+        'spikes': 'get_spikes_map',
     }
 
     def load_attribute(self, src, location=None, use_cache=True, enlarge=False, **kwargs):
@@ -576,3 +582,71 @@ class AttributesMixin:
             result[:, :, idx] = convolve(amplitudes, wavelet, mode='constant')[:, :, window // 2]
 
         return result
+
+
+    # Despiking maps
+    @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
+    @transformable
+    def get_median_diff_map(self, convolve_mode='m', kernel_size=11, kernel=None, margin=0, iters=2, threshold=2, **_):
+        """ Compute difference between depth map and its median filtered counterpart. """
+        convolved = special_convolve(self.full_matrix, mode=convolve_mode, kernel=kernel, kernel_size=kernel_size,
+                                     margin=margin, iters=iters, fill_value=self.FILL_VALUE)
+        spikes = self.full_matrix - convolved
+
+        if threshold is not None:
+            spikes[np.abs(spikes) < threshold] = 0
+        spikes[self.field.zero_traces == 1] = np.nan
+        return spikes
+
+    @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
+    @transformable
+    def get_gradient_map(self, threshold=0, **_):
+        """ Compute combined gradient map along both directions.
+
+        Parameters
+        ----------
+        threshold : number
+            Threshold to consider a difference to be a spike.
+        """
+        grad_i = self.load_attribute('grad_i', on_full=True, dtype=np.float32, use_cache=False)
+        grad_x = self.load_attribute('grad_x', on_full=True, dtype=np.float32, use_cache=False)
+
+        grad_i[np.abs(grad_i) <= threshold] = 0
+        grad_x[np.abs(grad_x) <= threshold] = 0
+
+        grad = grad_i + grad_x
+        grad[self.field.zero_traces == 1] = np.nan
+        return grad
+
+
+    @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
+    @transformable
+    def get_spikes_map(self, spikes_mode='median', threshold=1., dilation=5,
+                       kernel_size=11, kernel=None, margin=0, iters=2, **_):
+        """ Locate spikes on a horizon.
+
+        Parameters
+        ----------
+        mode : str
+            If 'gradient', then use gradient map to locate spikes.
+            If 'median', then use median diffs to locate spikes.
+        threshold : number
+            Threshold to consider a difference to be a spike.
+        dilation : int
+            Number of iterations for binary dilation algorithm to increase the spikes.
+        kernel_size, kernel, margin, iters
+            Parameters for median differences computation.
+        """
+        if spikes_mode.startswith('m'):
+            spikes = self.load_attribute('median_diff', mode='m', kernel=kernel, kernel_size=kernel_size,
+                                         margin=margin, iters=iters, threshold=threshold)
+        elif spikes_mode.startswith('g'):
+            spikes = self.load_attribute('gradient', threshold=threshold)
+        else:
+            raise ValueError(f'Wrong mode passed, {spikes_mode}')
+
+        if dilation:
+            spikes = np.nan_to_num(spikes)
+            spikes = binary_dilation(spikes, iterations=dilation).astype(np.float32)
+            spikes[self.field.zero_traces == 1] = np.nan
+        return spikes

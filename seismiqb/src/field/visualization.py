@@ -24,8 +24,15 @@ class VisualizationMixin:
         processed_prefix = 'un' if self.geometry.has_stats is False else ''
         labels_prefix = ':' if self.labels else ''
         msg = f'Field `{self.displayed_name}` with {processed_prefix}processed geometry{labels_prefix}\n'
-        for label in self.labels:
-            msg += f'    {label.name}\n'
+
+        for label_src in self.loaded_labels:
+            labels = getattr(self, label_src)
+            if len(labels) > 25:
+                type_ = type(labels[0])
+                msg += f'    {len(labels)} {type_.__name__}s'
+            else:
+                for label in labels:
+                    msg += f'    {label.name}\n'
         return msg
 
     # 2D along axis
@@ -119,13 +126,15 @@ class VisualizationMixin:
 
         labels_class = type(getattr(self, src)[0]).__name__
         kwargs = {
-            'title_label': f'{labels_class} on {self.displayed_name}',
+            'title_label': f'{labels_class}s on {self.displayed_name}',
             'xlabel': self.index_headers[0],
             'ylabel': self.index_headers[1],
-            'cmap': 'Reds',
+            'cmap': ['Reds', 'black'],
+            'alpha': [1.0, 0.4],
+            'colorbar': True,
             **kwargs
         }
-        return plot_image(map_, **kwargs)
+        return plot_image([map_, self.zero_traces], **kwargs)
 
 
     # 2D top-view maps
@@ -217,6 +226,8 @@ class VisualizationMixin:
         # Cmaps
         if short_name in ['depths', 'matrix', 'full_matrix']:
             attribute_dict['cmap'] = 'Depths'
+        elif short_name in ['spikes']:
+            attribute_dict['cmap'] = 'Reds'
         elif short_name in  ['metric', 'metrics']:
             attribute_dict['cmap'] = 'Metric'
             attribute_dict['fill_color'] = 'black'
@@ -309,7 +320,7 @@ class VisualizationMixin:
                 attributes_ = self.apply_nested(substitutor, attributes)
 
                 label_name = self.labels[label_num].short_name
-                savepath_ = self.make_savepath(savepath, name=label_name) if savepath is not None else None
+                savepath_ = self.make_path(savepath, name=label_name) if savepath is not None else None
 
                 fig = self.show(attributes=attributes_, mode=mode, return_figure=True,
                                 short_title=short_title, savepath=savepath_, **kwargs)
@@ -366,7 +377,7 @@ class VisualizationMixin:
 
         # Plot image with given params and return resulting figure
         params = {**plot_defaults, **kwargs}
-        savepath = self.make_savepath(savepath, name=self.short_name) if savepath is not None else None
+        savepath = self.make_path(savepath, name=self.short_name) if savepath is not None else None
 
         figure = plot_image(data=data, mode=mode, savepath=savepath, **params)
         plt.show()
