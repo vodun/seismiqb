@@ -232,7 +232,8 @@ class VisualizationMixin:
         return attribute_dict
 
 
-    def show(self, attributes='snr', mode='imshow', return_figure=False, short_title=False, savepath=None, **kwargs):
+    def show(self, attributes='snr', mode='imshow', return_figure=False, short_title=False, savepath=None,
+             load_kwargs=None, **kwargs):
         """ Show one or more field attributes on one figure.
 
         Parameters
@@ -256,8 +257,10 @@ class VisualizationMixin:
             Whether to use only attribute names as titles for axis.
         savepath : str, optional
             Path to save the figure. `**` is changed to a field base directory, `*` is changed to field base name.
+        load_kwargs : dict
+            Loading parameters common for every requested attribute.
         kwargs : dict
-            Additional parameters for attribute loading and plot creation.
+            Additional parameters for plot creation.
 
         Examples
         --------
@@ -271,8 +274,8 @@ class VisualizationMixin:
         >>> field.show(['mean_matrix', 'horizons:0/fourier', custom_data_array], separate=True)
 
         Use various parameters for each of the plots:
-        >>> field.show([{'src':'labels:0/fourier', 'window': 20, 'normalize': True},
-                        {'src':'labels:0/fourier', 'window': 40, 'n_components': 3}],
+        >>> field.show([{'src': 'labels:0/fourier', 'window': 20, 'normalize': True},
+                        {'src': 'labels:0/fourier', 'window': 40, 'n_components': 3}],
                        separate=True)
 
         Display amplitudes and gradients for each of the horizons in a field:
@@ -320,7 +323,8 @@ class VisualizationMixin:
         attribute_dicts = self.apply_nested(self._show_add_load_defaults, attribute_dicts)
 
         # Actually load data
-        load_method = partial(self._show_load_data, method=self.load_attribute, **kwargs)
+        load_kwargs = load_kwargs or {}
+        load_method = partial(self._show_load_data, method=self.load_attribute, **load_kwargs)
         attribute_dicts = self.apply_nested(load_method, attribute_dicts)
 
         # Plot params for attributes
