@@ -230,7 +230,8 @@ class Horizon(AttributesMixin, VisualizationMixin):
     def reset_cache(self):
         """ Clear cached data. """
         for name in dir(self):
-            if name.startswith("__") or 'cache' in name:
+            is_property = isinstance(getattr(self.__class__, name, None), property)
+            if name.startswith("__") or 'cache' in name or is_property:
                 continue
 
             method = getattr(self, name)
@@ -243,7 +244,8 @@ class Horizon(AttributesMixin, VisualizationMixin):
         """ Total size of cached data. """
         size = 0
         for name in dir(self):
-            if name.startswith("__") or 'cache' in name:
+            is_property = isinstance(getattr(self.__class__, name, None), property)
+            if name.startswith("__") or 'cache' in name or is_property:
                 continue
 
             method = getattr(self, name)
@@ -1224,7 +1226,7 @@ class Horizon(AttributesMixin, VisualizationMixin):
             If callable, then applied to points after converting to ilines/xlines coordinate system.
         """
         points = points if transform is None else transform(points)
-        path = self.field.make_path(path, name=self.name)
+        path = self.field.make_path(path, name=self.short_name)
 
         df = pd.DataFrame(points, columns=Horizon.COLUMNS)
         df.sort_values(['iline', 'xline'], inplace=True)

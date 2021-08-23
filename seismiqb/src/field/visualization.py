@@ -24,8 +24,15 @@ class VisualizationMixin:
         processed_prefix = 'un' if self.geometry.has_stats is False else ''
         labels_prefix = ':' if self.labels else ''
         msg = f'Field `{self.displayed_name}` with {processed_prefix}processed geometry{labels_prefix}\n'
-        for label in self.labels:
-            msg += f'    {label.name}\n'
+
+        for label_src in self.loaded_labels:
+            labels = getattr(self, label_src)
+            if len(labels) > 25:
+                type_ = type(labels[0])
+                msg += f'    {len(labels)} {type_.__name__}s'
+            else:
+                for label in labels:
+                    msg += f'    {label.name}\n'
         return msg
 
     # 2D along axis
@@ -119,7 +126,7 @@ class VisualizationMixin:
 
         labels_class = type(getattr(self, src)[0]).__name__
         kwargs = {
-            'title_label': f'{labels_class} on {self.displayed_name}',
+            'title_label': f'{labels_class}s on {self.displayed_name}',
             'xlabel': self.index_headers[0],
             'ylabel': self.index_headers[1],
             'cmap': ['Reds', 'black'],

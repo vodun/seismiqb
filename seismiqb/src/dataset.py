@@ -172,10 +172,10 @@ class SeismicDataset(Dataset):
                     .normalize(src='images'))
 
         if 'masks' in components:
-            use_labels = kwargs.pop('use_labels', 'all')
+            indices = kwargs.pop('indices', 'all')
             width = kwargs.pop('width', crop_shape[-1] // 100)
             labels_pipeline = (Pipeline()
-                               .create_masks(src_labels=src_labels, dst='masks', width=width, use_labels=use_labels))
+                               .create_masks(src_labels=src_labels, dst='masks', width=width, indices=indices))
 
             pipeline = pipeline + labels_pipeline
 

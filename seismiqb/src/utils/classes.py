@@ -590,9 +590,9 @@ class AugmentedList(list):
 
     def __dir__(self):
         """ Correct autocompletion for delegated methods. """
-        if len(self) == 0:
+        if len(self) != 0:
             return dir(self[0])
-        return dir(self)
+        return dir(list)
 
     # Correct type of operations
     def __add__(self, other):
@@ -650,9 +650,9 @@ class AugmentedDict(OrderedDict):
 
     def __dir__(self):
         """ Correct autocompletion for delegated methods. """
-        if len(self) == 0:
+        if len(self) != 0:
             return dir(self[0])
-        return dir(self)
+        return dir(dict)
 
     # Convenient iterables
     def flatten(self, keys=None):
