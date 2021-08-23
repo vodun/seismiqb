@@ -9,7 +9,8 @@ import numpy as np
 
 from .visualization import VisualizationMixin
 from ..geometry import SeismicGeometry
-from ..labels import Horizon, Fault, Facies
+from ..labels import Horizon, Fault
+from ..metrics import FaciesMetrics
 from ..utils import AugmentedList
 
 
@@ -69,9 +70,8 @@ class Field(VisualizationMixin):
 
     # Label initialization inner workings
     METHOD_TO_NAMES = {
-        '_load_horizons': ['horizon', Horizon],
+        '_load_horizons': ['horizon', 'facies', 'fans', 'channels', Horizon],
         '_load_faults': ['fault', Fault],
-        '_load_facies': ['facies', 'fans', 'channels', Facies],
         '_load_geometries': ['geometries', 'geometry',  SeismicGeometry],
     }
     NAME_TO_METHOD = {name: method for method, names in METHOD_TO_NAMES.items() for name in names}
@@ -177,10 +177,6 @@ class Field(VisualizationMixin):
             if len(fault) > 0:
                 faults.append(fault)
         return faults
-
-    def _load_facies(self, paths, **kwargs):
-        print('IN _LOAD_FACIES', paths)
-        return []
 
     def _load_geometries(self, paths, **kwargs):
         if isinstance(paths, str):
@@ -390,3 +386,27 @@ class Field(VisualizationMixin):
         size = self.geometry.cache_size
         size += sum(self.attached_instances.cache_size)
         return size
+
+    # Facies
+    def evaluate_facies(self, src_horizons, src_true=None, src_pred=None, metrics='dice'):
+        """ Calculate facies metrics for requested labels of the field and return dataframe of results.
+
+        Parameters
+        ----------
+        scr_horizons : str
+            Name of field attribute that contains base horizons.
+        src_true : str
+            Name of field attribute that contains ground-truth labels.
+        src_pred : str
+            Name of field attribute that contains predicted labels.
+        metrics: str or list of str
+            Metrics function(s) to calculate.
+        """
+        horizons = getattr(self, src_horizons)
+        true_labels = getattr(self, src_true) if src_true is not None else None
+        pred_labels = getattr(self, src_pred) if src_pred is not None else None
+
+        fm = FaciesMetrics(horizons=horizons, true_labels=true_labels, pred_labels=pred_labels)
+        result = fm.evaluate(metrics)
+
+        return result

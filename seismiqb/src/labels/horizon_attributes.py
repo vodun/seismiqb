@@ -405,7 +405,7 @@ class AttributesMixin:
         'spikes': 'get_spikes_map',
     }
 
-    def load_attribute(self, src, location=None, use_cache=True, enlarge=None, **kwargs):
+    def load_attribute(self, src, location=None, use_cache=True, enlarge=False, **kwargs):
         """ Load horizon attribute values at requested location.
         This is the intended interface of loading matrices along the horizon, and should be preffered in all scenarios.
 
@@ -448,7 +448,7 @@ class AttributesMixin:
         >>> horizon.load_attribute('metrics', metric='local_corrs', normalize='min-max')
         """
         src = self.ALIAS_TO_ATTRIBUTE.get(src, src)
-        enlarge = enlarge if enlarge is not None else self.is_carcass
+        enlarge = enlarge and self.is_carcass
 
         if src in self.ATTRIBUTE_TO_METHOD:
             method = self.ATTRIBUTE_TO_METHOD[src]
