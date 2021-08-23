@@ -391,6 +391,13 @@ class FaultSampler(BaseSampler):
         else:
             nodes = self.points
 
+        # Keep only points, that can be a starting point for a crop of given shape
+        i_mask = ((ranges[:2, 0] < nodes[:, :2]).all(axis=1) &
+                  ((nodes[:, :2] + crop_shape[:2]) < ranges[:2, 1]).all(axis=1))
+        x_mask = ((ranges[:2, 0] < nodes[:, :2]).all(axis=1) &
+                  ((nodes[:, :2] + crop_shape_t[:2]) < ranges[:2, 1]).all(axis=1))
+        nodes = nodes[i_mask | x_mask]
+
         # Transform points to (orientation, i_start, x_start, h_start, i_stop, x_stop, h_stop)
         directions = [0, 1] if self.transpose else [self.direction]
 
@@ -641,10 +648,12 @@ class SeismicSampler(Sampler):
                                           ranges=ranges_, filtering_matrix=filtering_matrix_,
                                           field_id=field_id, label_id=label_id, shift_height=shift_height,
                                           **kwargs)
-                cube_sampler = cube_sampler | label_sampler
 
-                samplers[idx].append(label_sampler)
-                names[(field_id, label_id)] = (idx, label.short_name)
+                if label_sampler.n != 0:
+                    cube_sampler = cube_sampler | label_sampler
+
+                    samplers[idx].append(label_sampler)
+                    names[(field_id, label_id)] = (idx, label.short_name)
 
             # Resulting mixture
             sampler = sampler | (p & cube_sampler)

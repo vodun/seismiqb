@@ -41,6 +41,9 @@ class Fault(Horizon):
         """ Init from path to either CHARISMA, REDUCED_CHARISMA or FAULT_STICKS csv-like file
         from .npy or .hdf5 file with points.
         """
+        path = self.field.make_path(path, makedirs=False)
+        self.path = path
+
         self.name = os.path.basename(path)
         ext = os.path.splitext(path)[1][1:]
         if ext == 'npz':
@@ -48,19 +51,25 @@ class Fault(Horizon):
             points = npzfile['points']
             transform = False
             nodes = None if len(npzfile['nodes']) == 0 else npzfile['nodes']
+            self.format = 'file-npz'
         elif ext == 'hdf5':
             cube = SeismicGeometry(path, **kwargs).file_hdf5['cube']
             points = np.stack(np.where(np.array(cube) == 1)).T #TODO: get points in chunks
             transform = False
             nodes = None
+            self.format = 'file-hdf5'
         else:
             points, nodes = self.csv_to_points(path, **kwargs)
+            self.format = 'file-csv'
         self.from_points(points, transform, **kwargs)
         if nodes is not None:
             self.from_points(nodes, transform, dst='nodes', reset=None, **kwargs)
 
         if direction is None:
-            self.direction = 0 if self.points[:, 0].ptp() > self.points[:, 1].ptp() else 1
+            if len(self.points) > 0:
+                self.direction = 0 if self.points[:, 0].ptp() > self.points[:, 1].ptp() else 1
+            else:
+                self.direction = 0
         elif isinstance(direction, int):
             self.direction = direction
         elif isinstance(direction[self.field.short_name], int):
@@ -217,10 +226,15 @@ class Fault(Horizon):
 
     def dump_points(self, path):
         """ Dump points. """
+        path = self.field.make_path(path, name=self.short_name, makedirs=False)
+
         if os.path.exists(path):
             npzfile = np.load(path, allow_pickle=False)
             points = np.concatenate([npzfile['points'], self.points], axis=0)
-            nodes = np.concatenate([nodes, self.nodes], axis=0) if self.nodes is not None else npzfile['nodes']
+            if self.nodes is not None:
+                nodes = np.concatenate([npzfile['nodes'], self.nodes], axis=0)
+            else:
+                nodes = npzfile['nodes']
         else:
             points = self.points
             nodes = self.nodes if self.nodes is not None else np.zeros((0, 3), dtype=np.int32)

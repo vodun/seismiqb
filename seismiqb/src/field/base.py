@@ -3,6 +3,7 @@ import os
 import re
 from glob import glob
 from difflib import get_close_matches
+from tqdm.auto import tqdm
 
 import numpy as np
 
@@ -78,6 +79,7 @@ class Field(VisualizationMixin):
     def load_labels(self, labels=None, labels_class=None, **labels_kwargs):
         """ Load labels and store them in the instance. Refer to the class documentation for details. """
         if isinstance(labels, str):
+            labels = self.make_path(labels, makedirs=False)
             labels = glob(labels)
         if isinstance(labels, (tuple, list)):
             labels = {'labels': labels}
@@ -109,6 +111,7 @@ class Field(VisualizationMixin):
 
             # Process paths: get rid of service files
             if isinstance(label_src, str):
+                label_src = self.make_path(label_src, makedirs=False)
                 label_src = glob(label_src)
             if not isinstance(label_src, (tuple, list)):
                 label_src = [label_src]
@@ -162,9 +165,18 @@ class Field(VisualizationMixin):
             horizons.sort(key=lambda label: getattr(label, sort))
         return horizons
 
-    def _load_faults(self, paths, **kwargs):
-        print('IN _LOAD_FAULTS', paths)
-        return []
+    def _load_faults(self, paths, pbar=True, filter=True, fix=True, **kwargs):
+        #pylint: disable=redefined-builtin
+        faults = []
+        for path in tqdm(paths, desc=f'Loading faults for {self.name}', ncols=800, disable=not pbar):
+            fault = Fault(path, field=self, fix=fix, **kwargs)
+
+            if filter and fault.format != 'file-npz':
+                fault.filter()
+
+            if len(fault) > 0:
+                faults.append(fault)
+        return faults
 
     def _load_facies(self, paths, **kwargs):
         print('IN _LOAD_FACIES', paths)
@@ -317,6 +329,7 @@ class Field(VisualizationMixin):
     @property
     def available_attributes(self):
         """ A list of all load-able attributes from a current field. """
+        #pylint: disable=unidiomatic-typecheck
         available_names = []
 
         for name in ['geometry'] + self.loaded_labels:
@@ -324,10 +337,12 @@ class Field(VisualizationMixin):
 
             if isinstance(labels, list):
                 for idx, label in enumerate(labels):
-                    if isinstance(label, Horizon):
+                    if type(label) is Horizon:
                         available_attributes = ['depths', 'amplitudes', 'metrics',
                                                 'instant_amplitudes', 'instant_phases',
                                                 'fourier_decomposition', 'wavelet_decomposition']
+                    else:
+                        available_attributes = []
                     available_names.extend([f'{name}:{idx}/{attr}' for attr in available_attributes])
             else:
                 if isinstance(labels, SeismicGeometry):
@@ -354,9 +369,8 @@ class Field(VisualizationMixin):
         basedir = os.path.dirname(self.path)
         name = name or self.short_name
 
-        path = (path.replace('**', basedir)
-                    .replace('%', basedir)
-                    .replace('*', name)
+        path = (path.replace('~', basedir)
+                    .replace('$', name)
                     .replace('//', '/'))
 
         if makedirs and os.path.dirname(path):
