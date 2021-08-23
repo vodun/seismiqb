@@ -122,10 +122,12 @@ class VisualizationMixin:
             'title_label': f'{labels_class} on {self.displayed_name}',
             'xlabel': self.index_headers[0],
             'ylabel': self.index_headers[1],
-            'cmap': 'Reds',
+            'cmap': ['Reds', 'black'],
+            'alpha': [1.0, 0.4],
+            'colorbar': True,
             **kwargs
         }
-        return plot_image(map_, **kwargs)
+        return plot_image([map_, self.zero_traces], **kwargs)
 
 
     # 2D top-view maps
@@ -307,7 +309,7 @@ class VisualizationMixin:
                 label_id = str(i)
                 substitutor = lambda attr: attr.replace('*', label_id) if isinstance(attr, str) else attr
                 attributes_ = self.apply_nested(substitutor, attributes)
-                savepath_ = self.make_savepath(savepath, name=label_id) if savepath is not None else None
+                savepath_ = self.make_path(savepath, name=label_id) if savepath is not None else None
 
                 fig = self.show(attributes=attributes_, mode=mode, return_figure=True,
                                 short_title=short_title, savepath=savepath_, **kwargs)
@@ -363,7 +365,7 @@ class VisualizationMixin:
 
         # Plot image with given params and return resulting figure
         params = {**plot_defaults, **kwargs}
-        savepath = self.make_savepath(savepath, name=self.short_name) if savepath is not None else None
+        savepath = self.make_path(savepath, name=self.short_name) if savepath is not None else None
 
         figure = plot_image(data=data, mode=mode, savepath=savepath, **params)
         plt.show()

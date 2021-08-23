@@ -364,6 +364,7 @@ class Horizon(AttributesMixin, VisualizationMixin):
     def from_file(self, path, transform=True, **kwargs):
         """ Init from path to either CHARISMA or REDUCED_CHARISMA csv-like file. """
         _ = kwargs
+        path = self.field.make_path(path, makedirs=False)
 
         self.path = path
         self.name = os.path.basename(path) if self.name is None else self.name
@@ -1223,7 +1224,7 @@ class Horizon(AttributesMixin, VisualizationMixin):
             If callable, then applied to points after converting to ilines/xlines coordinate system.
         """
         points = points if transform is None else transform(points)
-        path = self.field.make_savepath(path, name=self.name)
+        path = self.field.make_path(path, name=self.name)
 
         df = pd.DataFrame(points, columns=Horizon.COLUMNS)
         df.sort_values(['iline', 'xline'], inplace=True)
