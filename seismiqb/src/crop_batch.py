@@ -266,7 +266,7 @@ class SeismicCropBatch(Batch):
     @action
     @inbatch_parallel(init='indices', src='indices', target='for', post='_assemble',
                       dst=('cubes', 'masks', 'faults'))
-    def generate_synthetic(self, ix, dst=None, fault_width=3, **kwargs):
+    def generate_synthetic(self, ix, dst=None, **kwargs):
         """ Generate synthetic seismic, corresponding horizons' and faults'
         masks and put it into batch-components.
 
@@ -274,8 +274,6 @@ class SeismicCropBatch(Batch):
         ----------
         dst : sequence
             Sequence of length=3 to put created components in.
-        fault_width : int
-            Width of a fault on a faults-mask.
         **kwargs : dict
             All arguments of `generate_synthetic`-method. See the docstring for more
             info.
@@ -292,36 +290,14 @@ class SeismicCropBatch(Batch):
         else:
             axis_num = None
 
-        # generate synthetic crop and horizons, faults points clouds
+        # generate synthetic crop, horizons and faults
         crop, horizons, faults = generate_synthetic(**kwargs)
         if axis_num is not None:
-            crop = np.expand_dims(crop, axis=axis_num)
-            horizons = np.expand_dims(horizons, axis=axis_num + 1)
+            crop, horizons, faults = [np.expand_dims(array, axis=axis_num) for array in (crop, horizons, faults)]
 
-        # generate horizons' and faults' masks
-        mask = np.zeros_like(crop)
-        fault_mask = np.zeros_like(crop)
-        locations = (slice(0, mask.shape[0]), slice(0, mask.shape[1]), slice(0, mask.shape[2]))
-
-        dummyfile = DummyFile(crop)
-        geom = SeismicGeometryArray(dummyfile.path, dummyfile=dummyfile)
-        for horizon_data in horizons:
-            horizon = Horizon(horizon_data, geom)
-            horizon.add_to_mask(mask, locations)
-        for fault_data in faults:
-            fault = Fault(fault_data, geom)
-            fault.add_to_mask(fault_mask, locations)
-
-        # add requested width to faults' mask
-        if fault_width is not None:
-            if fault_width > 1:
-                if fault_mask.shape[0] == 1 or fault_mask.shape[1] == 1:
-                    axis_num = 0 if fault_mask.shape[0] == 1 else 1
-                    elem = np.zeros((fault_width, fault_width))
-                    elem[:, fault_width // 2] = 1
-                    fault_mask = binary_dilation(np.squeeze(fault_mask), elem)
-                    fault_mask = np.expand_dims(fault_mask.astype(np.float32), axis=axis_num)
-        return crop, mask, fault_mask
+        # set locations if needed
+        # locations = (slice(0, crop.shape[0]), slice(0, crop.shape[1]), slice(0, crop.shape[2]))
+        return crop, horizons, faults
 
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')

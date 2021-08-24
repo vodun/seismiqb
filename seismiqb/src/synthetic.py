@@ -2,7 +2,7 @@
 """
 import numpy as np
 from scipy.interpolate import interp1d, interp2d
-from scipy.ndimage import gaussian_filter, map_coordinates
+from scipy.ndimage import gaussian_filter, map_coordinates, binary_dilation
 from scipy.signal import ricker
 from numba import njit
 
@@ -384,41 +384,70 @@ class SyntheticGenerator():
             self.synthetic += noise_mul * self.rng.random(self.synthetic.shape) * self.synthetic.std()
         return self
 
-    def fetch_horizons(self, mode='horizons'):
+    def fetch_horizons(self, mode='horizons', format='heights', width=5):
         """ Fetch some (or all) reflective surfaces.
 
         Parameters
         ----------
-        horizons : str
+        mode : str
             Can be either 'horizons', 'all' or None. When 'horizons', only horizon-surfaces
             (option `horizon_heights`) are returned. Choosing 'all' allows to return all of
             the reflections, while 'topK' option leads to fetching K surfaces correpsonding
             to K largest jumps in velocities-array.
+        format : str
+            Can be either 'heights' or 'mask'.
+        width : int
+            ...
 
         Returns
         -------
         np.ndarray
-            Array of shape n_horizons X n_ilines X n_xlines containing horizon-heights
-            of selected horizons.
+            If format set to 'heights', array of shape n_horizons X n_ilines X n_xlines
+            containing horizon-heights of selected horizons. If format set to 'mask',
+            returns horizons-mask.
         """
         if mode is None:
             return None
-        if isinstance(mode, str):
-            if mode == 'all':
-                return self._curves
-            if mode == 'horizons':
-                return self._curves[[int(self._curves.shape[0] * height_share)
+        if mode == 'all':
+            curves = self._curves
+        elif mode == 'horizons':
+            curves = self._curves[[int(self._curves.shape[0] * height_share)
                                     for height_share in self._horizon_heights]]
-            if 'top' in mode:
-                top_k = int(mode.replace('top', ''))
-                ixs = np.argsort(np.abs(np.diff(self.velocities)))[::-1][:top_k]
-                return self._curves[ixs]
+        elif 'top' in mode:
+            top_k = int(mode.replace('top', ''))
+            ixs = np.argsort(np.abs(np.diff(self.velocities)))[::-1][:top_k]
+            curves = self._curves[ixs]
+        else:
             raise ValueError('Mode can be one of `horizons`, `all` or `top[k]`')
-        raise ValueError('Mode must be str and can be one of `horizons`, `all` or `top[k]`')
 
+        if format == 'heights':
+            return curves
+        elif format == 'mask':
+            mask = np.zeros_like(self.velocity_model)
+            for curve in curves:
+                mesh = np.meshgrid(*[np.arange(axis_shape) for axis_shape in curve.shape])
+                mask[(*mesh, curve)] = 1
 
-    def fetch_faults(self):
+            # add width to horizon-mask if needed
+            if width is not None:
+                if width > 1:
+                    dim = len(mask.shape)
+                    slc = (width // 2, ) * (dim - 1) + (slice(None, None), )
+                    kernel = np.zeros((width, ) * dim)
+                    kernel[slc] = 1
+                    mask = binary_dilation(mask, kernel)
+            return mask
+        raise ValueError('Format can be either `heights` or `mask`')
+
+    def fetch_faults(self, format='mask', width=5):
         """ Fetch faults in N X 3 - format (cloud of points).
+
+        Parameters
+        ----------
+        format : str
+            Can be either `point_cloud` or `mask`.
+        width : int
+            ...
 
         Returns
         -------
@@ -441,7 +470,27 @@ class SyntheticGenerator():
             point_cloud = np.stack([ilines, xlines, heights], axis=1)
             point_clouds.append(point_cloud)
 
-        return point_clouds
+        # form masks out of point clouds if needed
+        if format == 'mask':
+            mask = np.zeros_like(self.velocity_model)
+            for point_cloud in point_clouds:
+                xlines, heights = point_cloud[:, 1], point_cloud[:, 2]
+                mask[xlines, heights] = 1
+
+            # add width to faults-mask if needed
+            if width is not None:
+                if width > 1:
+                    dim = len(mask.shape)
+                    slc = (slice(None, None), ) * (dim - 1) + (width // 2, )
+                    kernel = np.zeros((width, ) * dim)
+                    kernel[slc] = 1
+                    mask = binary_dilation(mask, kernel)
+            return mask
+        elif format == 'point_cloud':
+            return point_clouds
+        else:
+            raise ValueError('Format can be either `point_cloud` or `mask`')
+
 
 def generate_synthetic(shape=(50, 400, 800), num_reflections=200, vel_limits=(900, 5400), #pylint: disable=too-many-arguments
                        horizon_heights=(1/4, 1/2, 2/3), horizon_multipliers=(7, 5, 4), grid_shape=(10, 10),
@@ -452,7 +501,8 @@ def generate_synthetic(shape=(50, 400, 800), num_reflections=200, vel_limits=(90
                                ((150, 320), (150, 470))),
                        num_points_faults=10, max_shift=10, zeros_share_faults=0.6, fault_shift_interpolation='cubic',
                        perturb_values=True, perturb_peak=False, random_invert=False,
-                       fetch_surfaces='horizons', rng=None, seed=None):
+                       fetch_surfaces='horizons', geobodies_format=('mask', 'mask'),
+                       geobodies_width=(5, 5), rng=None, seed=None):
     """ Generate synthetic 3d-cube and most prominent reflective surfaces ("horizons").
 
     Parameters
@@ -512,6 +562,12 @@ def generate_synthetic(shape=(50, 400, 800), num_reflections=200, vel_limits=(90
         Generator of random numbers.
     seed : int or None
         Seed used for creation of random generator (check out `np.random.default_rng`).
+    geobodies_format : tuple or list
+        Sequence containing return-format of horizons and faults. See docstrings
+        of `SyntheticGenerator.fetch_horizons` and `SyntheticGenerator.fetch_faults`.
+    geobodies_width : tuple or list
+        Sequence containing width of horizons and faults on returned-masks. See docstrings
+        of `SyntheticGenerator.fetch_horizons` and `SyntheticGenerator.fetch_faults`.
 
     Returns
     -------
@@ -529,17 +585,19 @@ def generate_synthetic(shape=(50, 400, 800), num_reflections=200, vel_limits=(90
 
     # add faults if needed and possible
     if faults is not None:
-        if dim == 2:
-            gen.add_faults(faults, num_points_faults, max_shift, zeros_share_faults, fault_shift_interpolation,
-                           perturb_values, perturb_peak, random_invert)
-        else:
-            raise ValueError("For now, faults are only supported for dim = 2.")
+        if len(faults) > 0:
+            if dim == 2:
+                gen.add_faults(faults, num_points_faults, max_shift, zeros_share_faults, fault_shift_interpolation,
+                               perturb_values, perturb_peak, random_invert)
+            else:
+                raise ValueError("For now, faults are only supported for dim = 2.")
 
     gen = (gen.make_density_model(density_noise_lims)
               .make_synthetic(ricker_width, ricker_points)
               .postprocess_synthetic(sigma, noise_mul))
 
-    return gen.synthetic, gen.fetch_horizons(fetch_surfaces), gen.fetch_faults()
+    return (gen.synthetic, gen.fetch_horizons(fetch_surfaces, format=geobodies_format[0], width=geobodies_width[0]),
+            gen.fetch_faults(format=geobodies_format[1], width=geobodies_width[1]))
 
 
 def surface_to_points(surface):
