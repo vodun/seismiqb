@@ -22,17 +22,35 @@ class VisualizationMixin:
 
     def __str__(self):
         processed_prefix = 'un' if self.geometry.has_stats is False else ''
-        labels_prefix = ':' if self.labels else ''
+        labels_prefix = ' and labels:' if self.labels else ''
         msg = f'Field `{self.displayed_name}` with {processed_prefix}processed geometry{labels_prefix}\n'
 
         for label_src in self.loaded_labels:
             labels = getattr(self, label_src)
-            if len(labels) > 25:
-                type_ = type(labels[0])
-                msg += f'    {len(labels)} {type_.__name__}s'
-            else:
-                for label in labels:
-                    msg += f'    {label.name}\n'
+            names = [label.short_name for label in labels]
+
+            labels_msg = ''
+            line = f'    - {label_src}: ['
+            while names:
+                line += names.pop(0)
+
+                if names:
+                    line += ', '
+                else:
+                    labels_msg += line
+                    break
+
+                if len(line) > 100:
+                    labels_msg += line
+                    line = '\n         ' + ' ' * len(label_src)
+
+                if len(labels_msg) > 200:
+                    break
+
+            if names:
+                labels_msg += f'… and {len(names)} more item(s)'
+            labels_msg += ']\n'
+            msg += labels_msg
         return msg
 
     # 2D along axis
