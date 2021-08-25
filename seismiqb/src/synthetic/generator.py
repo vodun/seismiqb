@@ -488,8 +488,7 @@ class SyntheticGenerator():
             return mask
         if faults_format == 'point_cloud':
             return point_clouds
-        else:
-            raise ValueError('Format can be either `point_cloud` or `mask`')
+        raise ValueError('Format can be either `point_cloud` or `mask`')
 
 
 def generate_synthetic(shape=(50, 400, 800), num_reflections=200, vel_limits=(900, 5400), #pylint: disable=too-many-arguments
