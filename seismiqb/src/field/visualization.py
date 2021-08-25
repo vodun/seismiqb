@@ -13,6 +13,15 @@ COLOR_GENERATOR = iter(['firebrick', 'darkorchid', 'sandybrown'])
 NAME_TO_COLOR = {}
 
 
+class UniterableProxy:
+    """ Proxy to disable `object` iteration protocol. """
+    def __init__(self, obj):
+        self.object = obj
+
+    def __getattr__(self, key):
+        return getattr(self.object, key)
+
+
 
 class VisualizationMixin:
     """ Methods for field visualization: textual, 2d along various axis, 2d interactive, 3d. """
@@ -220,18 +229,22 @@ class VisualizationMixin:
         # Already an array: no further actions needed
         if isinstance(src, np.ndarray):
             output = src
+            label = None
         else:
             # Load data with `method`
-            load = {**kwargs, **attribute_dict}
+            load = {**kwargs, **attribute_dict, '_return_label': True}
             postprocess = load.pop('postprocess', lambda x: x)
-            output = method(**load).squeeze()
+            output, label = method(**load)
+            output = output.squeeze()
             output = postprocess(output)
 
         attribute_dict['output'] = output
+        attribute_dict['label_instance'] = UniterableProxy(label)
         return attribute_dict
 
     @staticmethod
     def _show_add_plot_defaults(attribute_dict):
+        # Filter based on name of the loaded attribute
         name = attribute_dict['name']
         short_name = attribute_dict['short_name']
 
@@ -258,6 +271,11 @@ class VisualizationMixin:
         else:
             attribute_dict['cmap'] = 'ocean'
 
+        # Filter based on name of the class of instance
+        label_instance = attribute_dict['label_instance']
+
+        attribute_dict['label_name'] = label_instance.short_name
+        attribute_dict['bbox'] = label_instance.bbox if hasattr(label_instance, 'bbox') else None
         return attribute_dict
 
 
@@ -337,11 +355,8 @@ class VisualizationMixin:
                 substitutor = lambda attr: attr.replace('*', str(label_num)) if isinstance(attr, str) else attr
                 attributes_ = self.apply_nested(substitutor, attributes)
 
-                label_name = self.labels[label_num].short_name
-                savepath_ = self.make_path(savepath, name=label_name) if savepath is not None else None
-
                 fig = self.show(attributes=attributes_, mode=mode, return_figure=True,
-                                short_title=short_title, savepath=savepath_, **kwargs)
+                                short_title=short_title, savepath=savepath, **kwargs)
                 figures.append(fig)
             return figures if return_figure else None
 
@@ -359,12 +374,18 @@ class VisualizationMixin:
         # Plot params for attributes
         attribute_dicts = self.apply_nested(self._show_add_plot_defaults, attribute_dicts)
         data = self.apply_nested(lambda dct: dct['output'], attribute_dicts)
-        titles = self.apply_nested(lambda dct: dct['short_name' if short_title else 'name'], attribute_dicts)
         alphas = self.apply_nested(lambda dct: dct['alpha'], attribute_dicts)
         cmaps = self.apply_nested(lambda dct: dct['cmap'], attribute_dicts)
 
+        titles = self.apply_nested(lambda dct: dct['short_name' if short_title else 'name'], attribute_dicts)
         if isinstance(titles, list):
             titles = [item[0] if isinstance(item, list) else item for item in titles]
+
+        # Instance-dependant parameters: name and plotting bbox
+        label_instances = self.apply_nested(lambda dct: dct['label_instance'], attribute_dicts)
+        label_instance = [label for label in flatten([label_instances]) if label is not None][0]
+        label_name = label_instance.short_name
+        bbox = label_instance.bbox if hasattr(label_instance, 'bbox') else [[None] * 2] * 2
 
         # Prepare plot defaults
         n_subplots = len(data) if isinstance(data, list) else 1
@@ -387,6 +408,8 @@ class VisualizationMixin:
                 'colorbar': True,
                 'xlabel': self.index_headers[0],
                 'ylabel': self.index_headers[1],
+                'xlim': bbox[0],
+                'ylim': bbox[1][::-1],
             }
         elif mode == 'hist':
             plot_defaults = {**plot_defaults, 'figsize': (n_subplots * 10, 5)}
@@ -395,7 +418,7 @@ class VisualizationMixin:
 
         # Plot image with given params and return resulting figure
         params = {**plot_defaults, **kwargs}
-        savepath = self.make_path(savepath, name=self.short_name) if savepath is not None else None
+        savepath = self.make_path(savepath, name=label_name) if savepath is not None else None
 
         figure = plot_image(data=data, mode=mode, savepath=savepath, **params)
         plt.show()
