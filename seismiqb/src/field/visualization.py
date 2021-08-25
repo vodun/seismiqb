@@ -264,10 +264,11 @@ class VisualizationMixin:
             attribute_dict['fill_color'] = 'black'
         elif short_name == 'quality_map':
             attribute_dict['cmap'] = 'Reds'
-        elif short_name == 'full_binary_matrix':
-            if name not in NAME_TO_COLOR:
-                NAME_TO_COLOR[name] = next(COLOR_GENERATOR)
-            attribute_dict['cmap'] = NAME_TO_COLOR[name]
+        elif short_name in ['masks', 'full_binary_matrix']:
+            global_name = ''.join(filter(lambda x: x.isalpha(), name))
+            if global_name not in NAME_TO_COLOR:
+                NAME_TO_COLOR[global_name] = next(COLOR_GENERATOR)
+            attribute_dict['cmap'] = NAME_TO_COLOR[global_name]
         else:
             attribute_dict['cmap'] = 'ocean'
 
