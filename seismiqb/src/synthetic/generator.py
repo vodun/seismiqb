@@ -384,7 +384,7 @@ class SyntheticGenerator():
             self.synthetic += noise_mul * self.rng.random(self.synthetic.shape) * self.synthetic.std()
         return self
 
-    def fetch_horizons(self, mode='horizons', format='heights', width=5):
+    def fetch_horizons(self, mode='horizons', horizon_format='heights', width=5):
         """ Fetch some (or all) reflective surfaces.
 
         Parameters
@@ -394,7 +394,7 @@ class SyntheticGenerator():
             (option `horizon_heights`) are returned. Choosing 'all' allows to return all of
             the reflections, while 'topK' option leads to fetching K surfaces correpsonding
             to K largest jumps in velocities-array.
-        format : str
+        horizon_format : str
             Can be either 'heights' or 'mask'.
         width : int
             ...
@@ -420,9 +420,9 @@ class SyntheticGenerator():
         else:
             raise ValueError('Mode can be one of `horizons`, `all` or `top[k]`')
 
-        if format == 'heights':
+        if horizon_format == 'heights':
             return curves
-        elif format == 'mask':
+        if horizon_format == 'mask':
             mask = np.zeros_like(self.velocity_model)
             for curve in curves:
                 mesh = np.meshgrid(*[np.arange(axis_shape) for axis_shape in curve.shape])
@@ -439,12 +439,12 @@ class SyntheticGenerator():
             return mask
         raise ValueError('Format can be either `heights` or `mask`')
 
-    def fetch_faults(self, format='mask', width=5):
+    def fetch_faults(self, faults_format='mask', width=5):
         """ Fetch faults in N X 3 - format (cloud of points).
 
         Parameters
         ----------
-        format : str
+        faults_format : str
             Can be either `point_cloud` or `mask`.
         width : int
             ...
@@ -471,7 +471,7 @@ class SyntheticGenerator():
             point_clouds.append(point_cloud)
 
         # form masks out of point clouds if needed
-        if format == 'mask':
+        if faults_format == 'mask':
             mask = np.zeros_like(self.velocity_model)
             for point_cloud in point_clouds:
                 xlines, heights = point_cloud[:, 1], point_cloud[:, 2]
@@ -486,7 +486,7 @@ class SyntheticGenerator():
                     kernel[slc] = 1
                     mask = binary_dilation(mask, kernel)
             return mask
-        elif format == 'point_cloud':
+        if faults_format == 'point_cloud':
             return point_clouds
         else:
             raise ValueError('Format can be either `point_cloud` or `mask`')
@@ -596,8 +596,9 @@ def generate_synthetic(shape=(50, 400, 800), num_reflections=200, vel_limits=(90
               .make_synthetic(ricker_width, ricker_points)
               .postprocess_synthetic(sigma, noise_mul))
 
-    return (gen.synthetic, gen.fetch_horizons(fetch_surfaces, format=geobodies_format[0], width=geobodies_width[0]),
-            gen.fetch_faults(format=geobodies_format[1], width=geobodies_width[1]))
+    return (gen.synthetic,
+            gen.fetch_horizons(fetch_surfaces, horizon_format=geobodies_format[0], width=geobodies_width[0]),
+            gen.fetch_faults(faults_format=geobodies_format[1], width=geobodies_width[1]))
 
 
 def surface_to_points(surface):

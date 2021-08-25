@@ -1,15 +1,16 @@
 """ Init file. """
 # pylint: disable=wildcard-import
 # Core primitives
-from .cubeset import SeismicCubeset, FaciesCubeset
+from .dataset import SeismicDataset
 from .crop_batch import SeismicCropBatch
 
 # Data entities
+from .field import Field
+from .synthetic import SyntheticField
 from .geometry import SeismicGeometry, BloscFile
-from .labels import Horizon, UnstructuredHorizon, Facies, Fault, GeoBody
-from .metrics import HorizonMetrics, GeometryMetrics
+from .labels import Horizon, UnstructuredHorizon, Fault, GeoBody
+from .metrics import HorizonMetrics, GeometryMetrics, FaciesMetrics
 from .samplers import GeometrySampler, HorizonSampler, SeismicSampler, BaseGrid, RegularGrid, ExtensionGrid
-
 
 # Utilities and helpers
 from .plotters import plot_image, plot_loss

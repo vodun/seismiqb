@@ -162,9 +162,9 @@ def make_gaussian_kernel(kernel_size=3, sigma=1.):
     return gaussian_kernel
 
 
-def smooth_out(matrix, kernel=None, kernel_size=3, sigma=2.0, iters=1,
-               fill_value=None, preserve=True, margin=np.inf, **kwargs):
-    """ Convolve the matrix with a given kernel (or Gaussian with desired parameters).
+def special_convolve(matrix, mode='convolve', kernel_size=3, kernel=None, iters=1,
+                     fill_value=None, preserve=True, margin=np.inf, **_):
+    """ Convolve the matrix with a given kernel.
     A special treatment is given to the missing points (marked with either `fill_value` or `np.nan`),
     and to areas with high variance.
 
@@ -172,12 +172,13 @@ def smooth_out(matrix, kernel=None, kernel_size=3, sigma=2.0, iters=1,
     ----------
     matrix : ndarray
         Array to smooth values in.
+    mode : str
+        If 'convolve', then use convolutions with a kernel to compute result.
+        Otherwise, use median values in a kernel to compute result.
+    kernel_size : int
+        If the kernel is not provided, shape of the square kernel with ones.
     kernel : ndarray or None
         Kernel to convolve with.
-    kernel_size : int
-        If the kernel is not provided, shape of the square Gaussian kernel.
-    sigma : number
-        If the kernel is not provided, std of the Gaussian kernel.
     iters : int
         Number of smoothening iterations to perform.
     fill_value : number
@@ -189,37 +190,41 @@ def smooth_out(matrix, kernel=None, kernel_size=3, sigma=2.0, iters=1,
         If the distance between anchor point and the point inside filter is bigger than the margin,
         then the point is ignored in convolutions.
         Can be used for separate smoothening on sides of discontinuity.
-    kwargs : other params
-        Not used.
     """
-    _ = kwargs
+    # Choose the filtering function
+    if mode.startswith('c'):
+        function = _convolve
+    else:
+        function = _medfilt
 
     # Convert all the fill values to nans
     matrix = matrix.astype(np.float32).copy()
     if fill_value is not None:
         matrix[matrix == fill_value] = np.nan
 
-    # Pad and make kernel, if needed
-    smoothed = np.pad(matrix, kernel_size, constant_values=np.nan)
-    kernel = kernel if kernel is not None else make_gaussian_kernel(kernel_size, sigma)
+    # Make the kernel, if needed. Pad the input
+    if kernel is None:
+        kernel = np.ones((kernel_size, kernel_size), dtype=np.float32)
+    kernel_size = kernel.shape[0]
+    result = np.pad(matrix, kernel_size, constant_values=np.nan)
 
     # Apply smoothing multiple times. Note that there is no dtype conversion in between
     for _ in range(iters):
-        smoothed = _smooth_out(smoothed, kernel, preserve=preserve, margin=margin)
-    smoothed = smoothed[kernel_size:-kernel_size, kernel_size:-kernel_size]
+        result = function(result, kernel, preserve=preserve, margin=margin)
+    result = result[kernel_size:-kernel_size, kernel_size:-kernel_size]
 
     # Remove all the unwanted values
     if preserve:
-        smoothed[np.isnan(matrix)] = np.nan
+        result[np.isnan(matrix)] = np.nan
 
     # Convert nans back to fill value
     if fill_value is not None:
-        smoothed[np.isnan(smoothed)] = fill_value
-    return smoothed
+        result[np.isnan(result)] = fill_value
+    return result
 
 @njit(parallel=True)
-def _smooth_out(src, kernel, preserve, margin):
-    """ Jit-accelerated function to apply smoothing. """
+def _convolve(src, kernel, preserve, margin):
+    """ Jit-accelerated function to apply 2d convolution with special care for nan values. """
     #pylint: disable=too-many-nested-blocks, consider-using-enumerate, not-an-iterable
     k = int(np.floor(kernel.shape[0] / 2))
     raveled_kernel = kernel.ravel() / np.sum(kernel)
@@ -230,6 +235,7 @@ def _smooth_out(src, kernel, preserve, margin):
     for iline in prange(k, i_range - k):
         for xline in range(k, x_range - k):
             central = src[iline, xline]
+
             if (preserve is True) and isnan(central):
                 continue
 
@@ -245,6 +251,52 @@ def _smooth_out(src, kernel, preserve, margin):
             if sum_weights != 0.0:
                 dst[iline, xline] = s / sum_weights
     return dst
+
+@njit(parallel=True)
+def _medfilt(src, kernel, preserve, margin):
+    """ Jit-accelerated function to apply 2d median filter with special care for nan values. """
+    # margin = 0: median across all non-equal-to-self elements in kernel
+    # margin = -1: median across all elements in kernel
+    #pylint: disable=too-many-nested-blocks, consider-using-enumerate, not-an-iterable
+    k = int(np.floor(kernel.shape[0] / 2))
+
+    i_range, x_range = src.shape
+    dst = src.copy()
+
+    for iline in prange(k, i_range - k):
+        for xline in range(k, x_range - k):
+            central = src[iline, xline]
+            if (preserve is True) and isnan(central):
+                continue
+
+            element = src[iline-k:iline+k+1, xline-k:xline+k+1].ravel()
+
+            # 0 for close, 1 for distant, 2 for nan
+            indicator = np.zeros_like(element)
+
+            for i in range(len(element)):
+                item = element[i]
+                if not isnan(item):
+                    if (abs(item - central) > margin) or isnan(central):
+                        indicator[i] = np.float32(1)
+                else:
+                    indicator[i] = np.float32(2)
+
+            n_close = (indicator == np.float32(0)).sum()
+            mask_distant = indicator == np.float32(1)
+            n_distant = mask_distant.sum()
+            if n_distant > n_close:
+                dst[iline, xline] = np.median(element[mask_distant])
+    return dst
+
+
+def smooth_out(matrix, mode='convolve', kernel_size=3, sigma=2.0, kernel=None, iters=1,
+               fill_value=None, preserve=True, margin=np.inf, **_):
+    """ `special_convolve` with a Gaussian kernel. """
+    if kernel is None:
+        kernel = make_gaussian_kernel(kernel_size=kernel_size, sigma=sigma)
+    return special_convolve(matrix, mode=mode, kernel=kernel, iters=iters,
+                            fill_value=fill_value, preserve=preserve, margin=margin)
 
 
 def digitize(matrix, quantiles):

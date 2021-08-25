@@ -1,71 +1,17 @@
 """ Mixin with computed along horizon geological attributes. """
 # pylint: disable=too-many-statements
-from functools import wraps
-
 import numpy as np
 
 from cv2 import dilate
 from scipy.signal import hilbert, ricker
 from scipy.ndimage import convolve
-from scipy.ndimage.morphology import binary_fill_holes, binary_erosion
+from scipy.ndimage.morphology import binary_fill_holes, binary_erosion, binary_dilation
 from skimage.measure import label
 from sklearn.decomposition import PCA
 
-from ..functional import smooth_out
-from ..utils import lru_cache
+from ..functional import smooth_out, special_convolve
+from ..utils import transformable, lru_cache
 
-
-
-def transformable(method):
-    """ Transform the output matrix of a function to optionally:
-        - put the matrix on a background with spatial shape of a cube
-        - change values at absent points to a desired value
-        - set dtype of a matrix
-        - normalize values
-        - reduce dimensionality via PCA transform
-        - view data as atleast 3d array.
-    By default, does nothing.
-
-    Parameters
-    ----------
-    on_full : bool
-        Whether to put the matrix on full cube spatial-shaped background.
-    fill_value : number, optional
-        If provided, then used at points where the horizon is absent.
-    dtype : numpy dtype, optional
-        If provided, then dtype of a matrix is changed, and fill_value at absent points is changed accordingly.
-    normalize : bool, str, optional
-        If `min-max` or True, then use min-max scaling.
-        If `mean-std`, then use mean-std scaling.
-        If False, don't scale matrix.
-    n_components : number, optional
-        If integer, then number of components to keep after PCA transformation.
-        If float in (0, 1) range, then amount of variance to be explained after PCA transformation.
-    atleast_3d : bool
-        Whether to return the view of a resulting array as at least 3-dimensional entity.
-    """
-    @wraps(method)
-    def wrapper(instance, *args, on_full=False, fill_value=None, dtype=None,
-                normalize=False, n_components=None, atleast_3d=False, **kwargs):
-        result = method(instance, *args, **kwargs)
-
-        if dtype:
-            result = instance.matrix_set_dtype(result, dtype=dtype)
-        if on_full:
-            result = instance.matrix_put_on_full(result)
-        if normalize:
-            result = instance.matrix_normalize(result, normalize)
-        if fill_value is not None:
-            result = instance.matrix_fill_to_num(result, value=fill_value)
-        if atleast_3d:
-            result = np.atleast_3d(result)
-        if n_components:
-            if result.ndim != 3:
-                raise ValueError(f'PCA transformation can be applied only to 3D arrays, got `{result.ndim}`')
-            result = instance.pca_transform(result, n_components=n_components)
-
-        return result
-    return wrapper
 
 
 class AttributesMixin:
@@ -112,8 +58,8 @@ class AttributesMixin:
 
     def matrix_put_on_full(self, matrix):
         """ Convert matrix from being horizon-shaped to cube-shaped. """
-        if (matrix.shape[:2] != self.cube_shape[:2]).any():
-            background = np.full(self.cube_shape[:2], self._dtype_to_fill_value(matrix.dtype), dtype=matrix.dtype)
+        if matrix.shape[:2] != self.field.spatial_shape:
+            background = np.full(self.field.spatial_shape, self._dtype_to_fill_value(matrix.dtype), dtype=matrix.dtype)
             background[self.i_min:self.i_max + 1, self.x_min:self.x_max + 1] = matrix
         else:
             background = matrix
@@ -141,7 +87,7 @@ class AttributesMixin:
         matrix[mask] = self._dtype_to_fill_value(matrix.dtype)
         return matrix
 
-    def matrix_normalize(self, array, mode):
+    def matrix_normalize(self, matrix, mode):
         """ Normalize matrix values.
 
         Parameters
@@ -151,17 +97,17 @@ class AttributesMixin:
             If `mean-std`, then use mean-std scaling.
             If False, don't scale matrix.
         """
+        values = matrix[self.presence_matrix]
+
         if mode in ['min-max', True]:
-            values = array[self.presence_matrix]
             min_, max_ = np.nanmin(values), np.nanmax(values)
-            array = (array - min_) / (max_ - min_)
+            matrix = (matrix - min_) / (max_ - min_)
         elif mode == 'mean-std':
-            values = array[self.presence_matrix]
             mean, std = np.nanmean(values), np.nanstd(values)
-            array = (array - mean) / std
+            matrix = (matrix - mean) / std
         else:
             raise ValueError(f'Unknown normalization mode `{mode}`.')
-        return array
+        return matrix
 
 
     def matrix_smooth_out(self, matrix, kernel=None, kernel_size=7, sigma=2., margin=5, iters=1):
@@ -170,10 +116,13 @@ class AttributesMixin:
                               margin=margin, fill_value=self.FILL_VALUE, preserve=True, iters=iters)
         return smoothed
 
-    def matrix_enlarge_carcass(self, matrix, width=10):
-        """ Increase visibility of a sparse carcass metric. """
+    def matrix_enlarge(self, matrix, width=3):
+        """ Increase visibility of a sparse carcass metric. Should be used only for visualization purposes. """
+        if matrix.ndim == 3 and matrix.shape[-1] != 1:
+            return matrix
+
         # Convert all the nans to a number, so that `dilate` can work with it
-        matrix = matrix.copy()
+        matrix = matrix.copy().astype(np.float32).squeeze()
         matrix[np.isnan(matrix)] = self.FILL_VALUE
 
         # Apply dilations along both axis
@@ -190,7 +139,7 @@ class AttributesMixin:
         matrix[mask] = (dilated1[mask] + dilated2[mask]) / 2
 
         # Fix zero traces
-        matrix[np.isnan(self.geometry.std_matrix)] = np.nan
+        matrix[np.isnan(self.field.std_matrix)] = np.nan
         return matrix
 
     @staticmethod
@@ -216,9 +165,13 @@ class AttributesMixin:
         return (self.matrix > 0).astype(np.bool)
 
     @property
-    @lru_cache(maxsize=1)
     def presence_matrix(self):
         """ A convenient alias for binary matrix in cubic coordinate system. """
+        return self._presence_matrix()
+
+    @lru_cache(maxsize=1)
+    def _presence_matrix(self):
+        """ A method for getting binary matrix in cubic coordinates. Allows for introspectable cache. """
         return self.full_binary_matrix
 
 
@@ -226,7 +179,7 @@ class AttributesMixin:
     @property
     def coverage(self):
         """ Ratio between number of present values and number of good traces in cube. """
-        return len(self) / (np.prod(self.cube_shape[:2]) - np.sum(self.geometry.zero_traces))
+        return len(self) / (np.prod(self.field.spatial_shape) - np.sum(self.field.zero_traces))
 
     @property
     def number_of_holes(self):
@@ -311,7 +264,7 @@ class AttributesMixin:
     # Retrieve data from seismic along horizon
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     @transformable
-    def get_cube_values(self, window=1, offset=0, chunk_size=256):
+    def get_cube_values(self, window=1, offset=0, chunk_size=256, **_):
         """ Get values from the cube along the horizon.
 
         Parameters
@@ -327,15 +280,15 @@ class AttributesMixin:
         high = max(window - low, 0)
         chunk_size = min(chunk_size, self.h_max - self.h_min + window)
 
-        background = np.zeros((self.geometry.ilines_len, self.geometry.xlines_len, window), dtype=np.float32)
+        background = np.zeros((self.field.ilines_len, self.field.xlines_len, window), dtype=np.float32)
 
         for h_start in range(max(low, self.h_min), self.h_max + 1, chunk_size):
             h_end = min(h_start + chunk_size, self.h_max + 1)
 
             # Get chunk from the cube (depth-wise)
             location = (slice(None), slice(None),
-                        slice(h_start - low, min(h_end + high, self.geometry.depth)))
-            data_chunk = self.geometry.load_crop(location, use_cache=False)
+                        slice(h_start - low, min(h_end + high, self.field.depth)))
+            data_chunk = self.field.geometry.load_crop(location, use_cache=False)
 
             # Check which points of the horizon are in the current chunk (and present)
             idx_i, idx_x = np.asarray((self.matrix != self.FILL_VALUE) &
@@ -433,7 +386,10 @@ class AttributesMixin:
         'instant_phases': ['instant_phases', 'iphases'],
         'instant_amplitudes': ['instant_amplitudes', 'iamplitudes'],
         'fourier_decomposition': ['fourier', 'fourier_decomposition'],
-        'wavelet_decomposition': ['wavelet', 'wavelet_decomposition']
+        'wavelet_decomposition': ['wavelet', 'wavelet_decomposition'],
+        'median_diff': ['median_diff', 'mdiff'],
+        'grad': ['grad', 'gradient'],
+        'spikes': ['spikes'],
     }
     ALIAS_TO_ATTRIBUTE = {alias: name for name, aliases in ATTRIBUTE_TO_ALIAS.items() for alias in aliases}
 
@@ -444,9 +400,12 @@ class AttributesMixin:
         'instant_amplitudes' : 'get_instantaneous_amplitudes',
         'fourier_decomposition' : 'get_fourier_decomposition',
         'wavelet_decomposition' : 'get_wavelet_decomposition',
+        'median_diff': 'get_median_diff_map',
+        'grad': 'get_gradient_map',
+        'spikes': 'get_spikes_map',
     }
 
-    def load_attribute(self, src, location=None, use_cache=True, **kwargs):
+    def load_attribute(self, src, location=None, use_cache=True, enlarge=False, **kwargs):
         """ Load horizon attribute values at requested location.
         This is the intended interface of loading matrices along the horizon, and should be preffered in all scenarios.
 
@@ -471,6 +430,9 @@ class AttributesMixin:
             First two slices are used as `iline` and `xline` ranges to cut crop from.
             Last 'depth' slice is not used, since points are sampled exactly on horizon.
             If None, `src` is returned uncropped.
+        enlarge : bool, optional
+            Whether to enlarge carcass maps. Defaults to True, if the horizon is a carcass, False otherwise.
+            Should be used only for visualization purposes.
         kwargs :
             Passed directly to attribute-evaluating methods from :attr:`.ATTRIBUTE_TO_METHOD` depending on `src`.
 
@@ -486,12 +448,13 @@ class AttributesMixin:
         >>> horizon.load_attribute('metrics', metric='local_corrs', normalize='min-max')
         """
         src = self.ALIAS_TO_ATTRIBUTE.get(src, src)
+        enlarge = enlarge and self.is_carcass
 
         if src in self.ATTRIBUTE_TO_METHOD:
             method = self.ATTRIBUTE_TO_METHOD[src]
-            data = getattr(self, method)(use_cache=use_cache, **kwargs)
+            data = getattr(self, method)(use_cache=use_cache, enlarge=enlarge, **kwargs)
         else:
-            data = self.get_property(src, **kwargs)
+            data = self.get_property(src, enlarge=enlarge, **kwargs)
 
         # TODO: Someday, we would need to re-write attribute loading methods
         # so they use locations not to crop the loaded result, but to load attribute only at location.
@@ -504,8 +467,8 @@ class AttributesMixin:
     # Specific attributes loading
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     @transformable
-    def get_property(self, src):
-        """ !!. """
+    def get_property(self, src, **_):
+        """ Load a desired instance attribute. Decorated to allow additional postprocessing steps. """
         data = getattr(self, src, None)
         if data is None:
             aliases = list(self.ALIAS_TO_ATTRIBUTE.keys())
@@ -581,13 +544,13 @@ class AttributesMixin:
             Passed directly to :meth:`.HorizonMetrics.evaluate`.
         """
         metrics = self.metrics.evaluate(metric=metric, supports=supports, agg=agg,
-                                        plot=False, savepath=None, **kwargs)
+                                        enlarge=False, plot=False, savepath=None, **kwargs)
         return metrics
 
 
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     @transformable
-    def get_fourier_decomposition(self, window=50):
+    def get_fourier_decomposition(self, window=50, **_):
         """ Cached fourier transform calculation follower by dimensionaluty reduction via PCA.
 
         Parameters
@@ -601,7 +564,7 @@ class AttributesMixin:
 
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     @transformable
-    def get_wavelet_decomposition(self, widths=range(1, 14, 3), window=50):
+    def get_wavelet_decomposition(self, widths=range(1, 14, 3), window=50, **_):
         """ Cached wavelet transform calculation followed by dimensionaluty reduction via PCA.
 
         Parameters
@@ -619,3 +582,121 @@ class AttributesMixin:
             result[:, :, idx] = convolve(amplitudes, wavelet, mode='constant')[:, :, window // 2]
 
         return result
+
+
+    def get_zerocrossings(self, side, window=15):
+        """ Get matrix of depths shifted to nearest point of sign change in cube values.
+
+        Parameters
+        ----------
+        side : -1 or 1
+            Whether to look for sign change above the horizon (-1) or below (1).
+        window : positive int
+            Width of data slice above/below the horizon made along its surface.
+        """
+        values = self.get_cube_values(window=window, offset=window // 2 * side, fill_value=0)
+        # reverse array along depth axis for invariance
+        values = values[:, :, ::side]
+
+        sign = np.sign(values)
+        # value 2 in the array below mark cube values sign change along depth axis
+        cross = np.abs(np.diff(sign, axis=-1))
+
+        # put 2 at points, where cube values are precisely equal to zero
+        zeros = sign[:, :, :-1] == 0
+        cross[zeros] = 2
+
+        # obtain indices of first sign change occurences for every trace
+        # if trace doesn't change sign, corresponding index of sign change is 0
+        cross_indices = np.argmax(cross == 2, axis=-1)
+
+        # get cube values before sign change
+        start_points = self.matrix_to_points(cross_indices).T
+        start_values = values[tuple(start_points)]
+
+        # get cube values after sign change
+        stop_points = start_points + np.array([[0], [0], [1]])
+        stop_values = values[tuple(stop_points)]
+
+        # calculate additional float shifts towards true zero-crossing point
+        float_shift = start_values - stop_values
+        # do not perform division at points, where both 'start' and 'stop' values are 0
+        np.divide(start_values, float_shift, out=float_shift, where=float_shift != 0)
+
+        # treat obtained indices as shifts for label depths matrix
+        shift = cross_indices.astype(np.float32)
+        # apply additional float shifts to shift matrix
+        shift += float_shift.reshape(shift.shape)
+        # account for shift matrix sign change
+        shift *= side
+
+        result = self.full_matrix + shift
+        return result
+
+
+    # Despiking maps
+    @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
+    @transformable
+    def get_median_diff_map(self, convolve_mode='m', kernel_size=11, kernel=None, margin=0, iters=2, threshold=2, **_):
+        """ Compute difference between depth map and its median filtered counterpart. """
+        convolved = special_convolve(self.full_matrix, mode=convolve_mode, kernel=kernel, kernel_size=kernel_size,
+                                     margin=margin, iters=iters, fill_value=self.FILL_VALUE)
+        spikes = self.full_matrix - convolved
+
+        if threshold is not None:
+            spikes[np.abs(spikes) < threshold] = 0
+        spikes[self.field.zero_traces == 1] = np.nan
+        return spikes
+
+    @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
+    @transformable
+    def get_gradient_map(self, threshold=0, **_):
+        """ Compute combined gradient map along both directions.
+
+        Parameters
+        ----------
+        threshold : number
+            Threshold to consider a difference to be a spike.
+        """
+        grad_i = self.load_attribute('grad_i', on_full=True, dtype=np.float32, use_cache=False)
+        grad_x = self.load_attribute('grad_x', on_full=True, dtype=np.float32, use_cache=False)
+
+        grad_i[np.abs(grad_i) <= threshold] = 0
+        grad_x[np.abs(grad_x) <= threshold] = 0
+
+        grad = grad_i + grad_x
+        grad[self.field.zero_traces == 1] = np.nan
+        return grad
+
+
+    @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
+    @transformable
+    def get_spikes_map(self, spikes_mode='median', threshold=1., dilation=5,
+                       kernel_size=11, kernel=None, margin=0, iters=2, **_):
+        """ Locate spikes on a horizon.
+
+        Parameters
+        ----------
+        mode : str
+            If 'gradient', then use gradient map to locate spikes.
+            If 'median', then use median diffs to locate spikes.
+        threshold : number
+            Threshold to consider a difference to be a spike.
+        dilation : int
+            Number of iterations for binary dilation algorithm to increase the spikes.
+        kernel_size, kernel, margin, iters
+            Parameters for median differences computation.
+        """
+        if spikes_mode.startswith('m'):
+            spikes = self.load_attribute('median_diff', mode='m', kernel=kernel, kernel_size=kernel_size,
+                                         margin=margin, iters=iters, threshold=threshold)
+        elif spikes_mode.startswith('g'):
+            spikes = self.load_attribute('gradient', threshold=threshold)
+        else:
+            raise ValueError(f'Wrong mode passed, {spikes_mode}')
+
+        if dilation:
+            spikes = np.nan_to_num(spikes)
+            spikes = binary_dilation(spikes, iterations=dilation).astype(np.float32)
+            spikes[self.field.zero_traces == 1] = np.nan
+        return spikes

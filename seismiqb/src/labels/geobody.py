@@ -162,7 +162,7 @@ class GeoBody:
     def file_to_points(self, path):
         """ Get point cloud array from file values. """
         #pylint: disable=anomalous-backslash-in-string
-        with open(path) as file:
+        with open(path, encoding='utf-8') as file:
             line_len = len(file.readline().split(' '))
         if line_len == 4:
             names = GeoBody.FACIES_SPEC

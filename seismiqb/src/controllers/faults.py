@@ -13,7 +13,7 @@ from .base import BaseController
 from .best_practices import MODEL_CONFIG
 
 from ..labels import Fault
-from ..cubeset import SeismicCubeset
+from ..dataset import SeismicDataset
 from ..samplers import SeismicSampler, RegularGrid, FaultSampler, ConstantSampler
 from ..metrics import FaultsMetrics
 from ..utils import adjust_shape_3d, Accumulator3D, InputLayer
@@ -34,7 +34,7 @@ class FaultController(BaseController):
             'path': '/cubes/',
             'train_cubes': [],
             'transposed_cubes': [],
-            'inference_cubes': dict(),
+            'inference_cubes': {},
             'label_dir': '/INPUTS/FAULTS/NPY_WIDTH_{}/*',
             'width': 3,
             'ext': 'qblosc',
@@ -121,17 +121,17 @@ class FaultController(BaseController):
     }
 
     def make_train_dataset(self, **kwargs):
-        """ Create train dataset as an instance of :class:`.SeismicCubeset` with cubes and faults.
+        """ Create train dataset as an instance of :class:`.SeismicDataset` with cubes and faults.
         Arguments are from 'dataset' subconfig and kwargs. """
         return self._make_dataset(train=True, **kwargs)
 
     def make_inference_dataset(self, labels=False, **kwargs):
-        """ Create inference dataset as an instance of :class:`.SeismicCubeset` with cubes and faults.
+        """ Create inference dataset as an instance of :class:`.SeismicDataset` with cubes and faults.
         Arguments are from 'dataset' subconfig and kwargs. """
         return self._make_dataset(train=False, labels=labels, **kwargs)
 
     def _make_dataset(self, train=True, labels=True, bar=False, **kwargs):
-        """ Create an instance of :class:`.SeismicCubeset` with cubes and faults. Arguments are from 'dataset'
+        """ Create an instance of :class:`.SeismicDataset` with cubes and faults. Arguments are from 'dataset'
         subconfig and kwargs. """
         config = {**self.config['dataset'], **kwargs}
         width = config['width']
@@ -139,7 +139,7 @@ class FaultController(BaseController):
         cubes = config['train_cubes'] if train else config['inference_cubes']
 
         paths = [self.amplitudes_path(item) for item in cubes]
-        dataset = SeismicCubeset(index=paths)
+        dataset = SeismicDataset(index=paths)
 
         if labels:
             transposed = config['transposed_cubes']
@@ -202,7 +202,7 @@ class FaultController(BaseController):
         """ Create loading pipeline for train stages. """
         return (Pipeline()
             .make_locations(batch_size=C('batch_size'), generator=C('sampler'))
-            .load_cubes(dst='images', slicing=C('slicing'))
+            .load_cubes(dst='images', native_slicing=C('native_slicing'))
             .create_masks(dst='masks')
             .adaptive_reshape(src=['images', 'masks'])
             .normalize(mode=C('norm_mode'), itemwise=C('itemwise'), src='images')
@@ -212,7 +212,7 @@ class FaultController(BaseController):
         """ Create loading pipeline for inference stages. """
         ppl = (Pipeline()
             .make_locations(batch_size=C('batch_size'), generator=C('sampler'))
-            .load_cubes(dst='images', slicing=C('slicing'))
+            .load_cubes(dst='images', native_slicing=C('native_slicing'))
             .adaptive_reshape(src='images')
             .normalize(mode=C('norm_mode'), itemwise=C('itemwise'), src='images')
         )
@@ -363,12 +363,12 @@ class FaultController(BaseController):
             cubes[cube] = [cubes[cube]] if isinstance(cubes[cube][0], int) else cubes[cube]
         return cubes
 
-    def make_accumulator(self, geometry, slices, crop_shape, strides, orientation=0, path=None):
+    def make_accumulator(self, field, slices, crop_shape, strides, orientation=0, path=None):
         """ Make grid and accumulator for inference. """
         batch_size = self.config['inference']['inference_batch_size']
         aggregation = self.config['inference']['aggregation']
 
-        grid = RegularGrid(geometry=geometry,
+        grid = RegularGrid(field=field,
                            threshold=0,
                            orientation=orientation,
                            ranges=slices,
@@ -407,7 +407,7 @@ class FaultController(BaseController):
         outputs = {}
         for cube_idx in dataset.indices:
             outputs[cube_idx] = []
-            geometry = dataset.geometries[cube_idx]
+            field = dataset[cube_idx]
             for item in cubes[cube_idx]:
                 self.log(f'Create prediction for {cube_idx}: {item[1:]}. orientation={item[0]}.')
                 orientation = item[0]
@@ -415,13 +415,13 @@ class FaultController(BaseController):
                 if len(slices) != 3:
                     slices = (None, None, None)
 
-                grid, accumulator = self.make_accumulator(geometry, slices, crop_shape, strides, orientation)
+                grid, accumulator = self.make_accumulator(field, slices, crop_shape, strides, orientation)
                 ppl = inference_pipeline << {'sampler': grid, 'accumulator': accumulator}
 
                 ppl.run(n_iters=grid.n_iters, bar=pbar)
                 prediction = accumulator.aggregate()
 
-                image = geometry[
+                image = field.geometry[
                     slices[0][0]:slices[0][1],
                     slices[1][0]:slices[1][1],
                     slices[2][0]:slices[2][1]
@@ -497,10 +497,10 @@ class FaultController(BaseController):
 
         prefix = prefix or ''
 
-        outputs = dict()
+        outputs = {}
         for cube_idx in dataset.indices:
             outputs[cube_idx] = []
-            geometry = dataset.geometries[cube_idx]
+            field = dataset[cube_idx]
             for item in cubes[cube_idx]:
                 self.log(f'Create prediction for {cube_idx}: {item[1:]}. axis={item[0]}.')
                 axis = item[0]
@@ -518,7 +518,7 @@ class FaultController(BaseController):
                 elif fmt == 'npy':
                     path = None
 
-                grid, accumulator = self.make_accumulator(geometry, ranges, crop_shape, strides, axis, path)
+                grid, accumulator = self.make_accumulator(field, ranges, crop_shape, strides, axis, path)
                 ppl = inference_pipeline << dataset << {'sampler': grid, 'accumulator': accumulator}
 
                 ppl.run(n_iters=grid.n_iters, bar=bar)
@@ -527,7 +527,7 @@ class FaultController(BaseController):
                 if fmt == 'npy':
                     outputs.append(prediction)
                 if fmt == 'sgy':
-                    copyfile(dataset.geometries[0].path_meta, filenames['meta'])
+                    copyfile(dataset.field[0].path_meta, filenames['meta'])
                     dataset.geometries[0].make_sgy(
                         path_hdf5=filenames[tmp],
                         path_spec=dataset.geometries[0].segy_path.decode('utf-8'),

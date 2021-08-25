@@ -46,5 +46,5 @@ class Interpolator(HorizonController):
 
         prediction = self.inference(dataset, model)
         prediction = self.postprocess(prediction)
-        self.evaluate(prediction, dataset=dataset)
-        return prediction
+        info = self.evaluate(prediction, dataset=dataset)
+        return prediction, info
