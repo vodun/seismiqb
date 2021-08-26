@@ -276,6 +276,7 @@ class SeismicCropBatch(Batch):
         data = self.get(ix, src)
         if callable(mode):
             normalized = mode(data)
+            return normalized
 
         if itemwise:
             # Adjust data based on the current item only
