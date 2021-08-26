@@ -388,8 +388,13 @@ class VisualizationMixin:
         label_name = label_instance.short_name
         bbox = label_instance.bbox if hasattr(label_instance, 'bbox') else [[None] * 2] * 2
 
+        # Infer number of figure subplots from data nestedness level
+        n_subplots = 1
+        if isinstance(data, list):
+            if kwargs.get('separate') or any(isinstance(item, list) for item in data):
+                n_subplots = len(data)
+
         # Prepare plot defaults
-        n_subplots = len(data) if isinstance(data, list) else 1
         plot_defaults = {
             'suptitle_label': f'Field `{self.displayed_name}`',
             'title_label': titles,
