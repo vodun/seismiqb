@@ -393,7 +393,8 @@ class HorizonController(BaseController):
             horizon.show(show=self.plot, savepath=self.make_savepath(*prefix, name + 'p_depth_map.png'))
             horizon.show(['amplitudes', 'iamplitudes', 'iphases'], separate=True, nrows=3, ncols=1,
                          show=self.plot, savepath=self.make_savepath(*prefix, name + 'p_attributes.png'))
-            horizon.show('spikes', spikes_mode='median', kernel_size=7, threshold=2., dilation=7,
+            horizon.show('spikes', load_kwargs={'spikes_mode': 'median', 'kernel_size': 7,
+                                                'margin': 0, 'threshold': 2., 'dilation': 7},
                          show=self.plot, savepath=self.make_savepath(*prefix, name + 'p_spikes.png'))
 
             horizon.show_slide(horizon.field.shape[0]//2, axis=0, show=self.plot,
