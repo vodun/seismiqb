@@ -196,6 +196,7 @@ class SyntheticGenerator():
         self._curves = None
         self._horizon_heights = ()
         self._faults_coords = ()
+        self._mask = None
 
     def make_velocities(self, num_reflections=200, vel_limits=(900, 5400), horizon_heights=(1/4, 1/2, 2/3),
                         horizon_multipliers=(7, 5, 4)):
@@ -258,7 +259,7 @@ class SyntheticGenerator():
         return self
 
     def _add_fault(self, fault, num_points, max_shift, zeros_share, kind,
-                   perturb_values, perturb_peak, random_invert, update_curves='horizons'):
+                   perturb_values, perturb_peak, random_invert, update_mask):
         """ Add fault to a velocity model.
         """
         x0, x1 = fault[0][0], fault[1][0]
@@ -290,40 +291,26 @@ class SyntheticGenerator():
         crop_elastic = map_coordinates(crop.astype(np.float32),
                                        (xs + delta_xs, ys + delta_ys),
                                        mode='nearest').T
-
         self.velocity_model[x_low:x_high, y_low:y_high] = crop_elastic
 
-        # adjust horizon-curves if needed
-        if update_curves is not None:
-            if update_curves == 'all':
-                ixs = np.arange(len(self._curves))
-            if update_curves == 'horizons':
-                ixs = [int(self._curves.shape[0] * height_share)
-                       for height_share in self._horizon_heights]
-            elif 'top' in update_curves:
-                top_k = int(update_curves.replace('top', ''))
-                ixs = np.argsort(np.abs(np.diff(self.velocities)))[::-1][:top_k]
-            else:
-                raise ValueError('`update_curves` can be one of `horizons`, `all` or `top[k]`')
-
+        # adjust mask if needed
+        if update_mask is not None:
             # make enumerated mask and apply the same coordinate-map to it
-            enumerated_mask = self._make_enumerated_mask(self._curves[ixs])
-            crop = enumerated_mask[x_low:x_high, y_low:y_high]
+            mask = self.fetch_horizons(update_mask, horizon_format='mask')
+            crop = mask[x_low:x_high, y_low:y_high]
             crop_elastic = map_coordinates(crop.astype(np.int32),
                                            (xs + delta_xs, ys + delta_ys),
                                            mode='nearest').T
 
-            # update curves with adjusted ones
-            enumerated_mask[x_low:x_high, y_low:y_high] = crop_elastic
-            updated_curves = self._enumerated_to_heights(enumerated_mask)
-            for i,  ix in enumerate(ixs):
-                self._curves[ix] = updated_curves[i]
+            # update the mask
+            mask[x_low:x_high, y_low:y_high] = crop_elastic
+            self._mask = mask
 
     def add_faults(self, faults=(((100, 50), (100, 370)),
                                  ((50, 320), (50, 470)),
                                  ((150, 320), (150, 470))),
                    num_points=10, max_shift=10, zeros_share=0.6, kind='cubic', perturb_values=True,
-                   perturb_peak=False, random_invert=False):
+                   perturb_peak=False, random_invert=False, update_mask='horizons'):
         """ Add faults to the velocity model. Faults are basically elastic transforms of patches of
         generated seismic images. Elastic transforms are performed through coordinates-transformation
         in depth-projection. Those are smooth maps [0, 1] -> [0, 1] described as f(x) = x + distortion.
@@ -350,6 +337,9 @@ class SyntheticGenerator():
             If set True, the position of hump's peak is randomly moved.
         random_invert : bool
             If True, the coordinate-shift is defined as x - "hump" rather than x + "hump".
+        update_mask : str
+            If not None, horizons-mask is also updated. If does not exist yet, will be created.
+            Can be either
         """
         if self.velocity_model is None:
             raise ValueError("You need to create velocity model first to add faults later.")
@@ -357,7 +347,7 @@ class SyntheticGenerator():
         self._faults_coords = faults
         for fault in faults:
             self._add_fault(fault, num_points, max_shift, zeros_share, kind, perturb_values,
-                            perturb_peak, random_invert)
+                            perturb_peak, random_invert, update_mask)
         return self
 
     def make_density_model(self, density_noise_lims=(0.97, 1.3)):
@@ -469,6 +459,8 @@ class SyntheticGenerator():
         if horizon_format == 'heights':
             return curves
         if horizon_format == 'mask':
+            if self._mask is not None:
+                return self._mask
             mask = np.zeros_like(self.velocity_model)
             for curve in curves:
                 mesh = np.meshgrid(*[np.arange(axis_shape) for axis_shape in curve.shape])
