@@ -258,7 +258,7 @@ class SyntheticGenerator():
         return self
 
     def _add_fault(self, fault, num_points, max_shift, zeros_share, kind,
-                   perturb_values, perturb_peak, random_invert):
+                   perturb_values, perturb_peak, random_invert, update_curves='horizons'):
         """ Add fault to a velocity model.
         """
         x0, x1 = fault[0][0], fault[1][0]
@@ -292,6 +292,32 @@ class SyntheticGenerator():
                                        mode='nearest').T
 
         self.velocity_model[x_low:x_high, y_low:y_high] = crop_elastic
+
+        # adjust horizon-curves if needed
+        if update_curves is not None:
+            if update_curves == 'all':
+                ixs = np.arange(len(self._curves))
+            if update_curves == 'horizons':
+                ixs = [int(self._curves.shape[0] * height_share)
+                       for height_share in self._horizon_heights]
+            elif 'top' in update_curves:
+                top_k = int(update_curves.replace('top', ''))
+                ixs = np.argsort(np.abs(np.diff(self.velocities)))[::-1][:top_k]
+            else:
+                raise ValueError('`update_curves` can be one of `horizons`, `all` or `top[k]`')
+
+            # make enumerated mask and apply the same coordinate-map to it
+            enumerated_mask = self._make_enumerated_mask(self._curves[ixs])
+            crop = enumerated_mask[x_low:x_high, y_low:y_high]
+            crop_elastic = map_coordinates(crop.astype(np.int32),
+                                           (xs + delta_xs, ys + delta_ys),
+                                           mode='nearest').T
+
+            # update curves with adjusted ones
+            enumerated_mask[x_low:x_high, y_low:y_high] = crop_elastic
+            updated_curves = self._enumerated_to_heights(enumerated_mask)
+            for i,  ix in enumerate(ixs):
+                self._curves[ix] = updated_curves[i]
 
     def add_faults(self, faults=(((100, 50), (100, 370)),
                                  ((50, 320), (50, 470)),
@@ -384,6 +410,26 @@ class SyntheticGenerator():
             self.synthetic += noise_mul * self.rng.random(self.synthetic.shape) * self.synthetic.std()
         return self
 
+    def _make_enumerated_mask(self, curves):
+        """ Make enumerated mask from a sequence of curves. Each curve is marked by its ordinal
+        number from `range(1, len(curves) + 1)` on a resulting mask.
+        """
+        mask = np.zeros_like(self.velocity_model)
+        for i, horizon in enumerate(curves):
+            mesh = np.meshgrid(*[np.arange(axis_shape) for axis_shape in horizon.shape])
+            mask[(*mesh, horizon)] = i + 1
+        return mask
+
+    def _enumerated_to_heights(self, mask):
+        """ Convert enumerated mask to heights.
+        """
+        curves = []
+        n_levels = len(np.unique(mask)) - 1
+        for i in range(1, n_levels + 1):
+            heights = np.where(mask == i)[-1].reshape(self._curves[0].shape)
+            curves.append(heights)
+        return curves
+
     def fetch_horizons(self, mode='horizons', horizon_format='heights', width=5):
         """ Fetch some (or all) reflective surfaces.
 
@@ -447,7 +493,7 @@ class SyntheticGenerator():
         faults_format : str
             Can be either `point_cloud` or `mask`.
         width : int
-            ...
+            Width of faults on resulting mask - used when faults_format `mask`  is chosen.
 
         Returns
         -------
