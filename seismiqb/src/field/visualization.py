@@ -29,6 +29,9 @@ class VisualizationMixin:
     def __repr__(self):
         return f"""<Field `{self.displayed_name}` at {hex(id(self))}>"""
 
+    REPR_MAX_LEN = 100
+    REPR_MAX_ROWS = 5
+
     def __str__(self):
         processed_prefix = 'un' if self.geometry.has_stats is False else ''
         labels_prefix = ' and labels:' if self.labels else ''
@@ -49,15 +52,15 @@ class VisualizationMixin:
                     labels_msg += line
                     break
 
-                if len(line) > 100:
+                if len(line) > self.REPR_MAX_LEN:
                     labels_msg += line
                     line = '\n         ' + ' ' * len(label_src)
 
-                if len(labels_msg) > 200:
+                if len(labels_msg) > self.REPR_MAX_LEN * self.REPR_MAX_ROWS:
                     break
 
             if names:
-                labels_msg += f'… and {len(names)} more item(s)'
+                labels_msg += f'\n         {" "*len(label_src)}and {len(names)} more item(s)'
             labels_msg += ']\n'
             msg += labels_msg
         return msg
