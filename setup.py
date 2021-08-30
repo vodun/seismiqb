@@ -39,6 +39,7 @@ setup(
         'h5py>=2.10.0',
         'h5pickle>=0.2.0',
         'nvidia_smi>=0.1.3',
+        'nvidia-ml-py3>=7.3',
         'ipython>=7.10.0',
         'Pillow>=8.0.1',
         'psutil>=5.6.7',
