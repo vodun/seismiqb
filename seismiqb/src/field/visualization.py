@@ -67,7 +67,7 @@ class VisualizationMixin:
 
     # 2D along axis
     def show_slide(self, loc, width=None, axis='i', zoom_slice=None,
-                   src_geometry='geometry', src_labels='labels', **kwargs):
+                   src_geometry='geometry', src_labels='labels', indices='all', **kwargs):
         """ Show slide with horizon on it.
 
         Parameters
@@ -89,8 +89,9 @@ class VisualizationMixin:
         src_labels = src_labels if isinstance(src_labels, (tuple, list)) else [src_labels]
         masks = []
         for src in src_labels:
-            masks.append(self.make_mask(location=loc, axis=axis, src=src, width=width))
+            masks.append(self.make_mask(location=loc, axis=axis, src=src, width=width, indices=indices))
         mask = sum(masks)
+        mask[mask == 0] = np.nan
 
         # src_labels = src_labels if isinstance(src_labels, (tuple, list)) else [src_labels]
         # masks = []
@@ -184,6 +185,16 @@ class VisualizationMixin:
         for item in items:
             item = item if isinstance(item, list) else [item]
             result.append(VisualizationMixin.apply_nested(function, item))
+        return result
+
+    @staticmethod
+    def _show_wildcard_check(attribute):
+        if isinstance(attribute, str):
+            result = attribute.replace(':*', '') != attribute
+        elif isinstance(attribute, dict):
+            result = attribute['src'].replace(':*', '') != attribute['src']
+        else:
+            result = False
         return result
 
 
@@ -280,6 +291,12 @@ class VisualizationMixin:
 
         attribute_dict['label_name'] = label_instance.short_name
         attribute_dict['bbox'] = label_instance.bbox if hasattr(label_instance, 'bbox') else None
+
+        if 'title' not in attribute_dict:
+            if '/' in attribute_dict['name']:
+                attribute_dict['title'] = f'`{label_instance.short_name}`\n{attribute_dict["name"].split("/")[1]}'
+            else:
+                attribute_dict['title'] = attribute_dict['name']
         return attribute_dict
 
 
@@ -339,8 +356,7 @@ class VisualizationMixin:
                        savepath='**/IMAGES/complex.png')
         """
         # If `*` is present, run `show` multiple times with `*` replaced to label id
-        checker = lambda attr: attr.replace(':*', '') != attr if isinstance(attr, str) else False
-        wildcard = self.apply_nested(checker, attributes)
+        wildcard = self.apply_nested(self._show_wildcard_check, attributes)
         wildcard = any(flatten([wildcard]))
 
         if wildcard:
@@ -360,7 +376,7 @@ class VisualizationMixin:
                 attributes_ = self.apply_nested(substitutor, attributes)
 
                 fig = self.show(attributes=attributes_, mode=mode, return_figure=True,
-                                short_title=short_title, savepath=savepath, **kwargs)
+                                short_title=short_title, savepath=savepath, load_kwargs=load_kwargs, **kwargs)
                 figures.append(fig)
             return figures if return_figure else None
 
@@ -381,7 +397,7 @@ class VisualizationMixin:
         alphas = self.apply_nested(lambda dct: dct['alpha'], attribute_dicts)
         cmaps = self.apply_nested(lambda dct: dct['cmap'], attribute_dicts)
 
-        titles = self.apply_nested(lambda dct: dct['short_name' if short_title else 'name'], attribute_dicts)
+        titles = self.apply_nested(lambda dct: dct['short_name' if short_title else 'title'], attribute_dicts)
         if isinstance(titles, list):
             titles = [item[0] if isinstance(item, list) else item for item in titles]
 
