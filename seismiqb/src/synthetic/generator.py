@@ -337,9 +337,9 @@ class SyntheticGenerator():
             If set True, the position of hump's peak is randomly moved.
         random_invert : bool
             If True, the coordinate-shift is defined as x - "hump" rather than x + "hump".
-        fetch_and_update_mask : dict
-            If not None or False, horizons-mask is also updated. If does not exist yet, will be created.
-            Can be either 
+        fetch_and_update_mask : dict or None
+            If not None or False, horizons-mask is also updated when faulting. If does not exist yet,
+            will be created. Represents kwargs-dict for creating/fetching the mask.
         """
         if self.velocity_model is None:
             raise ValueError("You need to create velocity model first to add faults later.")
