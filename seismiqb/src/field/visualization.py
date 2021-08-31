@@ -190,9 +190,9 @@ class VisualizationMixin:
     @staticmethod
     def _show_wildcard_check(attribute):
         if isinstance(attribute, str):
-            result = attribute.replace(':*', '') != attribute
+            result = ':*/' in attribute
         elif isinstance(attribute, dict):
-            result = attribute['src'].replace(':*', '') != attribute['src']
+            result = ':*/' in attribute['src']
         else:
             result = False
         return result
@@ -353,9 +353,9 @@ class VisualizationMixin:
         >>> field.show(['geometry/std_matrix', 'horizons:3/amplitudes',
                         ['horizons:3/instant_phases', 'fans:3/masks'],
                         ['horizons:3/instant_phases', predicted_mask]],
-                       savepath='**/IMAGES/complex.png')
+                       savepath='~/IMAGES/complex.png')
         """
-        # If `*` is present, run `show` multiple times with `*` replaced to label id
+        # If `*` is present, run `show` multiple times with `*` replaced to a label id
         wildcard = self.apply_nested(self._show_wildcard_check, attributes)
         wildcard = any(flatten([wildcard]))
 

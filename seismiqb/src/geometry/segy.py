@@ -44,7 +44,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
         self.dataframe = None
         self.segyfile = None
 
-        self.headers = headers or self.HEADERS_POST
+        self.headers = headers or self.HEADERS_POST_FULL
         self.index_headers = index_headers or self.INDEX_POST
 
         super().__init__(path, **kwargs)
@@ -60,7 +60,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
 
 
     # Methods of inferring dataframe and amplitude stats
-    def process(self, collect_stats=False, recollect=False, **kwargs):
+    def process(self, collect_stats=True, recollect=False, **kwargs):
         """ Create dataframe based on `segy` file headers. """
         # Note that all the `segyio` structure inference is disabled
         self.segyfile = SafeIO(self.path, opener=segyio.open, mode='r', strict=False, ignore_geometry=True)
@@ -163,6 +163,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
         _ = kwargs
 
         num_traces = len(self.segyfile.header)
+        num_keep = min(num_keep, num_traces // 10) or 1
         frequency = num_traces // num_keep
 
         # Get min/max values, store some of the traces
