@@ -259,7 +259,7 @@ class SyntheticGenerator():
         return self
 
     def _add_fault(self, fault, num_points, max_shift, zeros_share, kind,
-                   perturb_values, perturb_peak, random_invert, update_mask):
+                   perturb_values, perturb_peak, random_invert, fetch_and_update_mask):
         """ Add fault to a velocity model.
         """
         x0, x1 = fault[0][0], fault[1][0]
@@ -294,9 +294,9 @@ class SyntheticGenerator():
         self.velocity_model[x_low:x_high, y_low:y_high] = crop_elastic
 
         # adjust mask if needed
-        if update_mask is not None:
+        if fetch_and_update_mask is not None:
             # make enumerated mask and apply the same coordinate-map to it
-            mask = self.fetch_horizons(update_mask, horizon_format='mask')
+            mask = self.fetch_horizons(horizon_format='mask', **fetch_and_update_mask)
             crop = mask[x_low:x_high, y_low:y_high]
             crop_elastic = map_coordinates(crop.astype(np.int32),
                                            (xs + delta_xs, ys + delta_ys),
@@ -310,7 +310,7 @@ class SyntheticGenerator():
                                  ((50, 320), (50, 470)),
                                  ((150, 320), (150, 470))),
                    num_points=10, max_shift=10, zeros_share=0.6, kind='cubic', perturb_values=True,
-                   perturb_peak=False, random_invert=False, update_mask='horizons'):
+                   perturb_peak=False, random_invert=False, fetch_and_update_mask='horizons'):
         """ Add faults to the velocity model. Faults are basically elastic transforms of patches of
         generated seismic images. Elastic transforms are performed through coordinates-transformation
         in depth-projection. Those are smooth maps [0, 1] -> [0, 1] described as f(x) = x + distortion.
@@ -337,9 +337,9 @@ class SyntheticGenerator():
             If set True, the position of hump's peak is randomly moved.
         random_invert : bool
             If True, the coordinate-shift is defined as x - "hump" rather than x + "hump".
-        update_mask : str
-            If not None, horizons-mask is also updated. If does not exist yet, will be created.
-            Can be either
+        fetch_and_update_mask : dict
+            If not None or False, horizons-mask is also updated. If does not exist yet, will be created.
+            Can be either 
         """
         if self.velocity_model is None:
             raise ValueError("You need to create velocity model first to add faults later.")
@@ -347,7 +347,7 @@ class SyntheticGenerator():
         self._faults_coords = faults
         for fault in faults:
             self._add_fault(fault, num_points, max_shift, zeros_share, kind, perturb_values,
-                            perturb_peak, random_invert, update_mask)
+                            perturb_peak, random_invert, fetch_and_update_mask)
         return self
 
     def make_density_model(self, density_noise_lims=(0.97, 1.3)):
@@ -433,7 +433,7 @@ class SyntheticGenerator():
         horizon_format : str
             Can be either 'heights' or 'mask'.
         width : int
-            ...
+            Width of horizons on resulting masks.
 
         Returns
         -------
@@ -624,8 +624,10 @@ def generate_synthetic(shape=(50, 400, 800), num_reflections=200, vel_limits=(90
     if faults is not None:
         if len(faults) > 0:
             if dim == 2:
+                fetch_and_update = {'mode': fetch_surfaces, 'horizon_format': geobodies_format[0],
+                                    'width': geobodies_width[0]}
                 gen.add_faults(faults, num_points_faults, max_shift, zeros_share_faults, fault_shift_interpolation,
-                               perturb_values, perturb_peak, random_invert)
+                               perturb_values, perturb_peak, random_invert, fetch_and_update)
             else:
                 raise ValueError("For now, faults are only supported for dim = 2.")
 
