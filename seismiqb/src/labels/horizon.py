@@ -350,21 +350,24 @@ class Horizon(AttributesMixin, VisualizationMixin):
         self.name = os.path.basename(path) if self.name is None else self.name
         points = self.file_to_points(path)
         self.from_points(points, transform, **kwargs)
+        if self.points.size == 0:
+            raise ValueError(f'Loaded horizon `{path}` is beyond geometry `{self.geometry.displayed_name}` limits.')
 
-    def file_to_points(self, path):
+    @classmethod
+    def file_to_points(cls, path):
         """ Get point cloud array from file values. """
         #pylint: disable=anomalous-backslash-in-string
         with open(path) as file:
             line_len = len(file.readline().split(' '))
         if line_len == 3:
-            names = Horizon.REDUCED_CHARISMA_SPEC
+            names = cls.REDUCED_CHARISMA_SPEC
         elif line_len >= 9:
-            names = Horizon.CHARISMA_SPEC
+            names = cls.CHARISMA_SPEC
         else:
             raise ValueError('Horizon labels must be in CHARISMA or REDUCED_CHARISMA format.')
 
-        df = pd.read_csv(path, sep=r'\s+', names=names, usecols=Horizon.COLUMNS)
-        df.sort_values(Horizon.COLUMNS, inplace=True)
+        df = pd.read_csv(path, sep=r'\s+', names=names, usecols=cls.COLUMNS)
+        df.sort_values(cls.COLUMNS, inplace=True)
         return df.values
 
 
@@ -372,7 +375,10 @@ class Horizon(AttributesMixin, VisualizationMixin):
         """ Init from matrix and location of minimum i, x points. """
         _ = kwargs
 
+        if np.issubdtype(self.dtype, np.integer):
+            matrix = np.rint(matrix)
         self.matrix = matrix.astype(self.dtype)
+
         self.i_min, self.x_min = i_min, x_min
         self.i_max, self.x_max = i_min + matrix.shape[0] - 1, x_min + matrix.shape[1] - 1
 

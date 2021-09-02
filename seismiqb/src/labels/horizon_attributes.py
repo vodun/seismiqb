@@ -619,3 +619,53 @@ class AttributesMixin:
             result[:, :, idx] = convolve(amplitudes, wavelet, mode='constant')[:, :, window // 2]
 
         return result
+
+
+    def get_zerocrossings(self, side, window=15):
+        """ Get matrix of depths shifted to nearest point of sign change in cube values.
+
+        Parameters
+        ----------
+        side : -1 or 1
+            Whether to look for sign change above the horizon (-1) or below (1).
+        window : positive int
+            Width of data slice above/below the horizon made along its surface.
+        """
+        values = self.get_cube_values(window=window, offset=window // 2 * side, fill_value=0)
+        # reverse array along depth axis for invariance
+        values = values[:, :, ::side]
+
+        sign = np.sign(values)
+        # value 2 in the array below mark cube values sign change along depth axis
+        cross = np.abs(np.diff(sign, axis=-1))
+
+        # put 2 at points, where cube values are precisely equal to zero
+        zeros = sign[:, :, :-1] == 0
+        cross[zeros] = 2
+
+        # obtain indices of first sign change occurences for every trace
+        # if trace doesn't change sign, corresponding index of sign change is 0
+        cross_indices = np.argmax(cross == 2, axis=-1)
+
+        # get cube values before sign change
+        start_points = self.matrix_to_points(cross_indices).T
+        start_values = values[tuple(start_points)]
+
+        # get cube values after sign change
+        stop_points = start_points + np.array([[0], [0], [1]])
+        stop_values = values[tuple(stop_points)]
+
+        # calculate additional float shifts towards true zero-crossing point
+        float_shift = start_values - stop_values
+        # do not perform division at points, where both 'start' and 'stop' values are 0
+        np.divide(start_values, float_shift, out=float_shift, where=float_shift != 0)
+
+        # treat obtained indices as shifts for label depths matrix
+        shift = cross_indices.astype(np.float32)
+        # apply additional float shifts to shift matrix
+        shift += float_shift.reshape(shift.shape)
+        # account for shift matrix sign change
+        shift *= side
+
+        result = self.full_matrix + shift
+        return result
