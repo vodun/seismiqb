@@ -59,15 +59,18 @@ class VisualizationMixin:
         return attribute
 
 
-    def show(self, attributes='depths', mode='imshow', short_title=True, return_figure=False, width=9, **kwargs):
+    def show(self, attributes='depths', mode='imshow', short_title=True, return_figure=False, **kwargs):
         """ Field visualization with custom naming scheme. """
         src, idx = self.find_self()
         add_prefix = partial(self._show_add_prefix, prefix=f'{src}:{idx}')
         attributes = self.field.apply_nested(add_prefix, attributes)
 
-        suptitle_label = f'`{self.name}` on field `{self.field.displayed_name}`'
-        self.field.show(attributes=attributes, mode=mode, width=width, short_title=short_title,
-                        suptitle_label=suptitle_label, return_figure=return_figure, **kwargs)
+        kwargs = {
+            'suptitle_label': f'`{self.name}` on field `{self.field.displayed_name}`',
+            **kwargs
+        }
+        self.field.show(attributes=attributes, mode=mode, short_title=short_title,
+                        return_figure=return_figure, **kwargs)
 
 
 

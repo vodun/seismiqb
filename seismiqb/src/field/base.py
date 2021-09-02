@@ -286,7 +286,7 @@ class Field(VisualizationMixin):
 
 
     # Attribute retrieval
-    def load_attribute(self, src, **kwargs):
+    def load_attribute(self, src, _return_label=False, **kwargs):
         """ Load desired geological attribute from geometry or labels.
 
         Parameters
@@ -320,6 +320,9 @@ class Field(VisualizationMixin):
             label = getattr(self, label_id)
 
         data = label.load_attribute(src, **kwargs)
+
+        if _return_label:
+            return data, label
         return data
 
     @property

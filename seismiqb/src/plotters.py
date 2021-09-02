@@ -617,6 +617,8 @@ class MatplotlibPlotter:
         # curve
         'color': ['skyblue', 'sandybrown', 'lightcoral'],
         'facecolor': 'white',
+        # suptitle
+        'suptitle_color': 'k',
         # title
         'title_color': 'k',
         # axis labels
