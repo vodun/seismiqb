@@ -11,7 +11,7 @@ from .layers import SemblanceLayer, MovingNormalizationLayer, InstantaneousPhase
 
 def file_print(msg, path, mode='w'):
     """ Print to file. """
-    with open(path, mode) as file:
+    with open(path, mode, encoding='utf-8') as file:
         print(msg, file=file)
 
 def fill_defaults(value, default):

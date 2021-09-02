@@ -96,7 +96,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
                 slc = np.stack([self[:, :, i * size] for i in range(1, 10)], axis=0)
                 self.zero_traces = np.zeros(self.lens, dtype=np.int32)
                 self.zero_traces[np.std(slc, axis=0) == 0] = 1
-            except ValueError: # can't reshape
+            except (ValueError, AttributeError): # can't reshape
                 pass
 
         # Store additional segy info
@@ -104,8 +104,13 @@ class SeismicGeometrySEGY(SeismicGeometry):
         self.segy_text = [self.segyfile.text[i] for i in range(1 + self.segyfile.ext_headers)]
 
         # Computed from CDP_X/CDP_Y information
-        self.rotation_matrix = self.compute_rotation_matrix()
-        self.area = self.compute_area()
+        try:
+            self.rotation_matrix = self.compute_rotation_matrix()
+            self.area = self.compute_area()
+        except (ValueError, KeyError): # single line SEG-Y
+            self.rotation_matrix = None
+            self.area = -1.
+
 
     def add_attributes(self):
         """ Infer info about curent index from `dataframe` attribute. """

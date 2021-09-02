@@ -1,24 +1,23 @@
 """ Mixin for horizon visualization. """
+from functools import partial
 from textwrap import dedent
 
 import numpy as np
-from matplotlib import pyplot as plt
-
 from scipy.spatial import Delaunay
 
 from ..plotters import plot_image, show_3d
-from ..utils import filter_simplices, make_savepath
+from ..utils import filter_simplices
 
 
 
 class VisualizationMixin:
     """ Methods for textual and visual representation of a horizon. """
     def __repr__(self):
-        return f"""<horizon {self.name} for {self.geometry.displayed_name} at {hex(id(self))}>"""
+        return f"""<Horizon `{self.name}` for `{self.field.displayed_name}` at {hex(id(self))}>"""
 
     def __str__(self):
         msg = f"""
-        Horizon {self.name} for {self.geometry.displayed_name} loaded from {self.format}
+        Horizon {self.name} for {self.field.displayed_name} loaded from {self.format}
         Ilines range:      {self.i_min} to {self.i_max}
         Xlines range:      {self.x_min} to {self.x_max}
         Depth range:       {self.h_min} to {self.h_max}
@@ -41,167 +40,36 @@ class VisualizationMixin:
 
 
     # 2D
-    def show(self, attributes='depths', mode='imshow', return_figure=False, enlarge=True, width=9, **kwargs):
-        """ Display facies attributes with predefined defaults.
+    def find_self(self):
+        """ Get name of the attribute of a field, where instance is stored, as well as the index. """
+        for src in self.field.loaded_labels + ['attached_instances']:
+            labels = getattr(self.field, src)
 
-        Loads requested data, constructs default parameters wrt to that data and delegates plot to `plot_image`.
+            if isinstance(labels, list):
+                for idx, label in enumerate(labels):
+                    if label is self:
+                        return src, idx
+        # Should never be raised, unless something went terribly wrong
+        raise TypeError('Instance is not attached to its field!')
 
-        Parameters
-        ----------
-        attributes : str or dict or np.ndarray, or a list of objects of those types
-            Defines attributes to display.
-            If str, a name of attribute to load. Address `Facies.METHOD_TO_ATTRIBUTE` values for details.
-            If dict, arguments for `Facies.load_attribute` and optional callable param under 'postprocess` key.
-            If np.ndarray, must be 2d and match facies full matrix shape.
-            If list, defines several data object to display. For details about nestedness address `plot_image` docs.
-        mode : 'imshow' or 'hist'
-            Mode to display images in.
-        return_figure : bool
-            Whether return resulted figure or not.
-        kwargs : for `plot_image`
+    @staticmethod
+    def _show_add_prefix(attribute, prefix=None):
+        if isinstance(attribute, str):
+            attribute = ('/'.join([prefix, attribute])).replace('//', '/')
+        return attribute
 
-        Examples
-        --------
-        Display depth attribute:
-        >>> facies.show()
-        Display several attributes one over another:
-        >>> facies.show(['amplitudes', 'channels/masks'])
-        Display several attributes separately:
-        >>> facies.show(['amplitudes', 'instant_amplitudes'], separate=True)
-        Display several attributes in mixed manner:
-        >>> facies.show(['amplitudes', ['amplitudes', 'channels/masks']])
-        Display attribute with additional postprocessing:
-        >>> facies.show({'src': 'amplitudes', 'fill_value': 0, 'normalize': 'min-max'})
 
-        Notes
-        -----
-        Asterisks in title-like and 'savepath' parameters are replaced by label displayed name.
-        """
-        # pylint: disable=too-many-statements
-        def apply_by_scenario(action, params):
-            """ Generic method that applies given action to params depending on their type. """
-            if not isinstance(params, list):
-                res = action(params)
-            elif all(not isinstance(item, list) for item in params):
-                res = [action(subplot_params) for subplot_params in params]
-            else:
-                res = []
-                for subplot_params in params:
-                    if isinstance(subplot_params, list):
-                        subplot_res = [action(layer_params) for layer_params in subplot_params]
-                    else:
-                        subplot_res = [action(subplot_params)]
-                    res.append(subplot_res)
-            return res
+    def show(self, attributes='depths', mode='imshow', short_title=True, return_figure=False, width=9, **kwargs):
+        """ Field visualization with custom naming scheme. """
+        src, idx = self.find_self()
+        add_prefix = partial(self._show_add_prefix, prefix=f'{src}:{idx}')
+        attributes = self.field.apply_nested(add_prefix, attributes)
 
-        # Load attributes and put obtained data in a list with same nestedness as `load`
-        def load_data(attributes):
-            """ Manage data loading depending on load params type. """
-            if isinstance(attributes, np.ndarray):
-                return attributes
-            if isinstance(attributes, str):
-                load = {'src': attributes}
-            if isinstance(attributes, dict):
-                load = attributes
-            postprocess = load.pop('postprocess', lambda x: x)
-            load_defaults = {'dtype': np.float32, 'fill_value': np.nan}
-            if load['src'].split('/')[-1] in ['fourier', 'wavelet']:
-                load_defaults['n_components'] = 1
-            if load['src'].split('/')[-1] in ['masks', 'full_binary_matrix']:
-                load_defaults['fill_value'] = 0
-            load = {**load_defaults, **load}
-            data = self.load_attribute(**load).squeeze()
-            return postprocess(data)
+        suptitle_label = f'`{self.name}` on field `{self.field.displayed_name}`'
+        self.field.show(attributes=attributes, mode=mode, width=width, short_title=short_title,
+                        suptitle_label=suptitle_label, return_figure=return_figure, **kwargs)
 
-        def enlarge_data(data):
-            if enlarge and self.is_carcass:
-                data = self.matrix_enlarge_carcass(data, width)
-            return data
 
-        data = apply_by_scenario(load_data, attributes)
-        data = apply_by_scenario(enlarge_data, data)
-
-        # Make titles
-        def extract_data_name(attributes):
-            if isinstance(attributes, np.ndarray):
-                name = 'custom'
-            elif isinstance(attributes, dict):
-                name = attributes['src']
-            elif isinstance(attributes, str):
-                name = attributes
-            return name
-
-        names = apply_by_scenario(extract_data_name, attributes)
-        n_subplots = len(data) if isinstance(data, list) else 1
-
-        def make_titles(names):
-            if any(isinstance(item, list) for item in attributes):
-                return [', '.join(subplot_names) for subplot_names in names]
-            return names
-
-        defaults = {
-            'title_label': make_titles(names),
-            'suptitle_label': f"`{self.short_name}` of cube `{self.geometry.displayed_name}`",
-            'colorbar': mode == 'imshow',
-            'tight_layout': True,
-            'return_figure': True,
-        }
-
-        # Infer defaults for `mode`: generate cmaps according to requested data, set axis labels as index headers
-        default_colors = ['firebrick', 'darkorchid', 'sandybrown']
-        gen_color = (color for color in default_colors)
-        name_to_color = {}
-        def make_cmap(name):
-            attr = name.split('/')[-1]
-            attr = self.ALIAS_TO_ATTRIBUTE.get(attr, attr)
-
-            if attr in ['matrix', 'full_matrix']:
-                return 'Depths'
-            if attr == 'metric':
-                return 'Metric'
-            if attr == 'full_binary_matrix':
-                if name not in name_to_color:
-                    name_to_color[name] = next(gen_color)
-                return name_to_color[name]
-            return 'ocean'
-
-        def make_alpha(name):
-            return 0.7 if name.split('/')[-1] == 'masks' else 1.0
-
-        if mode == 'imshow':
-            x, y = self.matrix.shape
-            defaults = {
-                **defaults,
-                'figsize': (x / min(x, y) * n_subplots * 7, y / min(x, y) * 7),
-                'xlim': self.bbox[0],
-                'ylim': self.bbox[1][::-1],
-                'cmap': apply_by_scenario(make_cmap, names),
-                'alpha': apply_by_scenario(make_alpha, names),
-                'xlabel': self.geometry.index_headers[0],
-                'ylabel': self.geometry.index_headers[1],
-            }
-        elif mode == 'hist':
-            defaults = {**defaults, 'figsize': (n_subplots * 10, 5)}
-        else:
-            raise ValueError(f"Valid modes are 'imshow' or 'hist', but '{mode}' was given.")
-
-        # Merge default and given params
-        params = {**defaults, **kwargs}
-
-        # Substitute asterisks in title-like parameters with default suptitle
-        for text in ['suptitle_label', 'suptitle', 'title_label', 'title', 't']:
-            if text in params:
-                params[text] = apply_by_scenario(lambda s: s.replace('*', defaults['suptitle_label']), params[text])
-
-        # Substitute asterisk in `savepath` parameter with label name
-        if 'savepath' in params:
-            params['savepath'] = make_savepath(params['savepath'], self.short_name, '.png')
-
-        # Plot image with given params and return resulting figure
-        figure = plot_image(data=data, mode=mode, **params)
-        plt.show()
-
-        return figure if return_figure else None
 
     def show_slide(self, loc, width=None, axis='i', zoom_slice=None, **kwargs):
         """ Show slide with horizon on it.
@@ -218,10 +86,10 @@ class VisualizationMixin:
             Tuple of slices to apply directly to 2d images.
         """
         # Make `locations` for slide loading
-        axis = self.geometry.parse_axis(axis)
+        axis = self.field.geometry.parse_axis(axis)
 
         # Load seismic and mask
-        seismic_slide = self.geometry.load_slide(loc=loc, axis=axis)
+        seismic_slide = self.field.geometry.load_slide(loc=loc, axis=axis)
         mask = self.load_slide(loc=loc, axis=axis, width=width)
         seismic_slide, mask = np.squeeze(seismic_slide), np.squeeze(mask)
         xmin, xmax, ymin, ymax = 0, seismic_slide.shape[0], seismic_slide.shape[1], 0
@@ -235,18 +103,18 @@ class VisualizationMixin:
             ymax = zoom_slice[1].start or ymax
 
         # defaults for plotting if not supplied in kwargs
-        header = self.geometry.axis_names[axis]
-        total = self.geometry.cube_shape[axis]
+        header = self.field.axis_names[axis]
+        total = self.field.cube_shape[axis]
 
         if axis in [0, 1]:
-            xlabel = self.geometry.index_headers[1 - axis]
+            xlabel = self.field.index_headers[1 - axis]
             ylabel = 'DEPTH'
         if axis == 2:
-            xlabel = self.geometry.index_headers[0]
-            ylabel = self.geometry.index_headers[1]
-            total = self.geometry.depth
+            xlabel = self.field.index_headers[0]
+            ylabel = self.field.index_headers[1]
+            total = self.field.depth
 
-        title = f'Horizon `{self.name}` on cube `{self.geometry.displayed_name}`\n {header} {loc} out of {total}'
+        title = f'Horizon `{self.name}` on cube `{self.field.displayed_name}`\n {header} {loc} out of {total}'
 
         kwargs = {
             'figsize': (16, 8),
@@ -296,11 +164,11 @@ class VisualizationMixin:
         kwargs : dict
             Other arguments of plot creation.
         """
-        title = f'Horizon `{self.short_name}` on `{self.geometry.displayed_name}`'
+        title = f'Horizon `{self.short_name}` on `{self.field.displayed_name}`'
         aspect_ratio = (self.i_length / self.x_length, 1, z_ratio)
-        axis_labels = (self.geometry.index_headers[0], self.geometry.index_headers[1], 'DEPTH')
+        axis_labels = (self.field.index_headers[0], self.field.index_headers[1], 'DEPTH')
         if zoom_slice is None:
-            zoom_slice = [slice(0, i) for i in self.geometry.cube_shape]
+            zoom_slice = [slice(0, i) for i in self.field.shape]
         zoom_slice[-1] = slice(self.h_min, self.h_max)
 
         x, y, z, simplices = self.make_triangulation(n_points, threshold, zoom_slice)

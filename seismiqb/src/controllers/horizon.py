@@ -11,7 +11,6 @@ import gc
 from time import perf_counter
 from textwrap import indent
 from pprint import pformat
-from glob import glob
 
 import numpy as np
 import torch
@@ -19,7 +18,7 @@ import torch
 from .base import BaseController
 
 from ..labels import Horizon
-from ..cubeset import SeismicCubeset
+from ..dataset import SeismicDataset
 from ..samplers import SeismicSampler, RegularGrid
 from ..metrics import HorizonMetrics
 from ..utils import Accumulator3D
@@ -84,7 +83,11 @@ class HorizonController(BaseController):
         'common': {},
 
         # Make predictions smoother
-        'postprocess': {},
+        'postprocess': {
+            'despike': {'mode': 'gradient', 'threshold': 1, 'dilation': 5},
+            'interpolate': {'kernel_size': 5, 'sigma': 0.4, 'margin': 2},
+            'filter_disconnected_regions' : True,
+        },
 
         # Compute metrics
         'evaluate': {
@@ -98,9 +101,9 @@ class HorizonController(BaseController):
         }
     })
 
-    # Dataset creation: geometries, labels, grids, samplers
+    # Dataset creation: fields, grids, samplers
     def make_dataset(self, cube_paths=None, horizon_paths=None, horizon=None):
-        """ Create an instance of :class:`.SeismicCubeset` with cubes and horizons.
+        """ Create an instance of :class:`.SeismicDataset` with cubes and horizons.
 
         Parameters
         ----------
@@ -116,32 +119,30 @@ class HorizonController(BaseController):
         Instance of dataset.
         """
         if horizon is not None:
-            dataset = SeismicCubeset.from_horizon(horizon)
+            dataset = SeismicDataset.from_horizon(horizon)
 
             self.log(f'Created dataset from {horizon.name}')
         else:
-            dataset = SeismicCubeset(cube_paths)
-            dataset.load_geometries()
+            if horizon_paths is None or isinstance(horizon_paths, (str, tuple, list)):
+                index = {cube_paths: horizon_paths}
+            else:
+                index = horizon_paths
 
-            if horizon_paths:
-                if isinstance(horizon_paths, str):
-                    horizon_paths = {dataset.indices[0]: glob(horizon_paths)}
-                dataset.create_labels(horizon_paths, labels_class=Horizon)
-
+            dataset = SeismicDataset(index, labels_class=Horizon)
             self.log(f'Created dataset\n{indent(str(dataset), " "*4)}')
         return dataset
 
     def make_carcass(self, dataset, frequencies=200, **kwargs):
         """ Cut a grid from the passed horizon. """
         carcass = dataset.labels[0][0].make_carcass(frequencies=frequencies, **kwargs)
-        return carcass, SeismicCubeset.from_horizon(carcass)
+        return carcass, SeismicDataset.from_horizon(carcass)
 
     def make_grid(self, dataset, frequencies, **kwargs):
         """ Create a grid, based on quality map, for each of the cubes in supplied `dataset`. Works inplace.
 
         Parameters
         ----------
-        dataset : :class:`.SeismicCubeset`
+        dataset : :class:`.SeismicDataset`
             Dataset with cubes.
         frequencies : sequence of ints
             List of frequencies, corresponding to `easy` and `hard` places in the cube.
@@ -149,18 +150,18 @@ class HorizonController(BaseController):
             Other arguments, passed directly in quality grid creation function.
         """
         for idx in dataset.indices:
-            geometry = dataset.geometries[idx]
-            geometry.make_quality_grid(frequencies, **kwargs)
+            field = dataset[idx]
+            field.geometry.make_quality_grid(frequencies, **kwargs)
 
             postfix = f'_{idx}' if len(dataset.indices) > 1 else ''
             plot_image(
-                geometry.quality_grid, title=f'Quality grid for {idx}',
+                field.quality_grid, title=f'Quality grid for {idx}',
                 show=self.plot, cmap='Reds', interpolation='bilinear',
                 savepath=self.make_savepath(f'quality_grid{postfix}.png')
             )
 
-            grid_coverage = (np.nansum(geometry.quality_grid) /
-                             (np.prod(geometry.cube_shape[:2]) - np.nansum(geometry.zero_traces)))
+            grid_coverage = (np.nansum(field.quality_grid) /
+                             (np.prod(field.spatial_shape) - np.nansum(field.zero_traces)))
             self.log(f'Created {frequencies} grid on {idx}; coverage is: {grid_coverage:4.4f}')
 
     def make_sampler(self, dataset, **kwargs):
@@ -208,7 +209,7 @@ class HorizonController(BaseController):
 
         # Compare two largest horizons from each orientation
         if len(orientation) == 2:
-            with open(self.make_savepath('inference_ix', 'results.txt'), 'w') as result_txt:
+            with open(self.make_savepath('inference_ix', 'results.txt'), 'w', encoding='utf-8') as result_txt:
                 hm = HorizonMetrics(largest)
                 hm.evaluate('compare', hist=False,
                             plot=True, show=self.plot,
@@ -240,7 +241,7 @@ class HorizonController(BaseController):
 
     def _inference(self, dataset, model, orientation, config):
         # Prepare parameters
-        geometry = dataset.geometries[0]
+        field = dataset[0]
         spatial_ranges, heights_range = config.get(['spatial_ranges', 'heights_range'])
         chunk_size, chunk_overlap = config.get(['chunk_size', 'chunk_overlap'])
 
@@ -249,17 +250,16 @@ class HorizonController(BaseController):
             spatial_ranges = [None, None]
 
         if heights_range is None:
-            bases = dataset.labels[0]
-            if bases:
-                min_height = min(horizon.h_min for horizon in bases) - config.crop_shape[2]//2
-                max_height = max(horizon.h_max for horizon in bases) + config.crop_shape[2]//2
-                heights_range = [max(0, min_height), min(geometry.depth, max_height)]
+            if field.labels:
+                min_height = min(field.labels.h_min) - config.crop_shape[2]//2
+                max_height = max(field.labels.h_max) + config.crop_shape[2]//2
+                heights_range = [max(0, min_height), min(field.depth, max_height)]
             else:
-                heights_range = [0, geometry.depth]
+                heights_range = [0, field.depth]
 
         # Create grid
         ranges = [*spatial_ranges, heights_range]
-        grid = RegularGrid(geometry=geometry,
+        grid = RegularGrid(field=field,
                            ranges=ranges,
                            orientation=orientation,
                            crop_shape=config.crop_shape,
@@ -287,8 +287,7 @@ class HorizonController(BaseController):
         self.log(f'Inferenced total of {grid.length} out of {grid.unfiltered_length} crops possible')
 
         # Cleanup
-        for item in dataset.geometries.values():
-            item.reset_cache()
+        dataset.geometries.reset_cache()
         gc.collect()
         torch.cuda.empty_cache()
 
@@ -310,7 +309,7 @@ class HorizonController(BaseController):
                 self.log(f'Finetuned! {model.iteration}')
 
         # Create regular grid over desired ranges
-        geometry = dataset.geometries[0]
+        field = dataset[0]
         config['grid'] = grid_chunk
 
         # Create grid over chunk ranges
@@ -327,7 +326,7 @@ class HorizonController(BaseController):
 
         # Extract Horizon instances
         horizons = Horizon.from_mask(assembled_prediction,
-                                     geometry=geometry, shifts=grid_chunk.origin,
+                                     field=field, origin=grid_chunk.origin,
                                      threshold=0.5, minsize=50)
         # Cleanup
         gc.collect()
@@ -336,15 +335,37 @@ class HorizonController(BaseController):
         return horizons
 
     # Postprocess
-    def postprocess(self, predictions, **kwargs):
+    def postprocess(self, predictions, despike=True, interpolate=True, **kwargs):
         """ Modify predictions. """
         config = Config({**self.config['postprocess'], **kwargs})
-        _ = config
+        despike, interpolate = config.get(['despike', 'interpolate'])
+        filter_disconnected_regions = config.get('filter_disconnected_regions')
 
         iterator = predictions if isinstance(predictions, (tuple, list)) else [predictions]
         for horizon in iterator:
-            horizon.smooth_out(preserve_borders=False)
+            #
+            horizon.show(['depths', 'gradient'], separate=True,
+                         show=self.plot, savepath=self.make_savepath('postprocess', 'depth_gradient__before.png'))
+
+            initial_len = len(horizon)
+            if despike:
+                horizon.despike(**despike)
+            after_despike = len(horizon)
+
+            if filter_disconnected_regions:
+                horizon.filter_disconnected_regions()
+            after_remove = len(horizon)
+
+            if interpolate:
+                horizon.interpolate(**interpolate)
+            after_interpolate = len(horizon)
+
             horizon.filter()
+
+            horizon.show(['depths', 'gradient'], separate=True,
+                         show=self.plot, savepath=self.make_savepath('postprocess', 'depth_gradient_after.png'))
+            self.log(f'Postprocess {horizon.name}: {initial_len} -despike-> {after_despike}'
+                     f' -remove- > {after_remove} -interpolate- > {after_interpolate}')
         return predictions
 
     # Evaluate
@@ -366,17 +387,21 @@ class HorizonController(BaseController):
         results = []
         for i, horizon in enumerate(predictions):
             info = {}
-            prefix = [horizon.geometry.short_name, f'{i}_horizon'] if add_prefix else []
+            prefix = [horizon.field.short_name, f'{i}_horizon'] if add_prefix else []
 
             # Basic demo: depth map and properties
             horizon.show(show=self.plot, savepath=self.make_savepath(*prefix, name + 'p_depth_map.png'))
+            horizon.show(['amplitudes', 'iamplitudes', 'iphases'], separate=True, nrows=3, ncols=1,
+                         show=self.plot, savepath=self.make_savepath(*prefix, name + 'p_attributes.png'))
+            horizon.show('spikes', spikes_mode='median', kernel_size=7, threshold=2., dilation=7,
+                         show=self.plot, savepath=self.make_savepath(*prefix, name + 'p_spikes.png'))
 
-            horizon.show_slide(horizon.geometry.lens[0]//2, axis=0, show=self.plot,
+            horizon.show_slide(horizon.field.shape[0]//2, axis=0, show=self.plot,
                                savepath=self.make_savepath(*prefix, name + 'p_slide_i.png'))
-            horizon.show_slide(horizon.geometry.lens[1]//2, axis=1, show=self.plot,
+            horizon.show_slide(horizon.field.shape[1]//2, axis=1, show=self.plot,
                                savepath=self.make_savepath(*prefix, name + 'p_slide_x.png'))
 
-            with open(self.make_savepath(*prefix, name + 'p_results_self.txt'), 'w') as result_txt:
+            with open(self.make_savepath(*prefix, name + 'p_results_self.txt'), 'w', encoding='utf-8') as result_txt:
                 horizon.evaluate(compute_metric=False, printer=lambda msg: print(msg, file=result_txt))
 
             # Metric maps
@@ -399,7 +424,7 @@ class HorizonController(BaseController):
                 other, _info = hm.evaluate('find_best_match', agg=None)
                 info = {**info, **_info}
 
-                with open(self.make_savepath(*prefix, name + 'p_results.txt'), 'w') as result_txt:
+                with open(self.make_savepath(*prefix, name + 'p_results.txt'), 'w', encoding='utf-8') as result_txt:
                     hm.evaluate('compare', hist=False,
                                 plot=True, show=self.plot,
                                 printer=lambda msg: print(msg, file=result_txt),
@@ -419,12 +444,16 @@ class HorizonController(BaseController):
                 dump_name = name + '_' if name else ''
                 dump_name += f'{i}_' if n > 1 else ''
                 dump_name += horizon.name or 'predicted'
-                horizon.dump_float(path=self.make_savepath(*prefix, dump_name), add_height=False)
+                horizon.dump_float(path=self.make_savepath(*prefix, dump_name))
 
-            info['corrs'] = np.nanmean(corrs)
-            info['phase'] = np.nanmean(np.abs(phase))
-            info['perturbed_mean'] = np.nanmean(perturbed_mean)
-            info['perturbed_max'] = np.nanmean(perturbed_max)
+            info = {
+                'coverage': horizon.coverage,
+                'corrs': np.nanmean(corrs),
+                'phase': np.nanmean(np.abs(phase)),
+                'perturbed_mean': np.nanmean(perturbed_mean),
+                'perturbed_max': np.nanmean(perturbed_max),
+                **info
+            }
             results.append((info))
 
             msg = (f'\nPredicted horizon {i}:\n{horizon.name}\nlen={len(horizon)}'

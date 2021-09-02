@@ -48,6 +48,7 @@ setup(
         'blosc>=1.8.1',
         'pytest>=5.3.1',
         'torch>=1.3.0',
+        'ipywidgets>=7.0',
     ],
     extras_require={
         'cupy': ['cupy>=8.1.0'],

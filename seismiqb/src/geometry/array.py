@@ -9,7 +9,7 @@ from .base import SeismicGeometry
 
 
 class DummyFile:
-    """ Object that allows creating a SeismicCubeset from an aray in memory.
+    """ Object that allows creating a SeismicDataset from an aray in memory.
         creates a temporary dummy file to be used in index and links it to the array in memory
 
         Parameters
@@ -37,9 +37,9 @@ class DummyFile:
 class SeismicGeometryArray(SeismicGeometryHDF5):
     """ Numpy array stored in memory as a  SeismicGeometry"""
     #pylint: disable=attribute-defined-outside-init, access-member-before-definition
-    def process(self, dummyfile, num_keep=10000, **kwargs):
+    def process(self, array, num_keep=10000, **kwargs):
         """ Store references to data array. """
-        self.array = dummyfile.data
+        self.array = array
 
         self.available_axis = [0]
         self.available_names = ['cube_i']
@@ -58,5 +58,21 @@ class SeismicGeometryArray(SeismicGeometryHDF5):
             traces = self.array[nonzero_indices[0][::step_traces], nonzero_indices[1][::step_traces]]
 
             self.v_q01, self.v_q99 = np.quantile(traces, [0.01, 0.99])
+            self.v_mean, self.v_std = np.nan, np.nan
+            self.v_min, self.v_max = np.nan, np.nan
+            self.v_uniques = np.nan
 
             self.has_stats = True
+
+        # Placeholders for some stats
+        self.area = -1.
+        self.segy_path = '_dummypath'
+        self.quantized = False
+
+    @property
+    def file_size(self):
+        return round(self.array.nbytes / (1024**3), 3)
+
+    @property
+    def nbytes(self):
+        return - (1024 ** 3)

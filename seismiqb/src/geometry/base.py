@@ -10,7 +10,7 @@ import h5py
 
 from .export import ExportMixin
 
-from ..utils import file_print, get_environ_flag, lru_cache
+from ..utils import file_print, get_environ_flag, lru_cache, transformable
 from ..plotters import plot_image
 
 
@@ -216,8 +216,8 @@ class SeismicGeometry(ExportMixin):
 
         # Names of different lengths and format: helpful for outside usage
         self.name = os.path.basename(self.path)
-        self.field = self.parse_field()
-        self.short_name = self.name.split('.')[0]
+        self.field_name = self.parse_field()
+        self.short_name = os.path.splitext(self.name)[0]
         self.long_name = ':'.join(self.path.split('/')[-2:])
         self.format = os.path.splitext(self.path)[1][1:]
 
@@ -523,12 +523,12 @@ class SeismicGeometry(ExportMixin):
     @property
     def displayed_name(self):
         """ Return name with masked field name, if anonymization needed. """
-        return self.short_name.replace(f"_{self.field}", "") if self.anonymize else self.short_name
+        return self.short_name.replace(f"_{self.field_name}", "") if self.anonymize else self.short_name
 
     @property
     def displayed_path(self):
         """ Return path with masked field name, if anonymization needed. """
-        return self.path.replace(self.field, '*') if self.anonymize else self.path
+        return self.path.replace(self.field_name, '*') if self.anonymize else self.path
 
     @property
     def nonzero_traces(self):
@@ -549,6 +549,16 @@ class SeismicGeometry(ExportMixin):
         if hasattr(self, 'zero_traces'):
             return self.nonzero_traces
         return self.total_traces
+
+    @property
+    def shape(self):
+        """ Cube 3D shape. Same API, as NumPy. """
+        return tuple(self.cube_shape)
+
+    @property
+    def spatial_shape(self):
+        """ Shape of indexing axis. """
+        return self.shape[:2]
 
     @property
     def file_size(self):
@@ -578,12 +588,54 @@ class SeismicGeometry(ExportMixin):
         return self.nbytes / (1024**3)
 
 
+    # Attribute retrieval
+    @staticmethod
+    def matrix_fill_to_num(matrix, value):
+        """ Change the matrix values at points where field is absent to a supplied one. """
+        matrix[np.isnan(matrix)] = value
+        return matrix
+
+    @staticmethod
+    def matrix_normalize(matrix, mode):
+        """ Normalize matrix values.
+
+        Parameters
+        ----------
+        mode : bool, str, optional
+            If `min-max` or True, then use min-max scaling.
+            If `mean-std`, then use mean-std scaling.
+            If False, don't scale matrix.
+        """
+        values = matrix[~np.isnan(matrix)]
+
+        if mode in ['min-max', True]:
+            min_, max_ = np.nanmin(values), np.nanmax(values)
+            matrix = (matrix - min_) / (max_ - min_)
+        elif mode == 'mean-std':
+            mean, std = np.nanmean(values), np.nanstd(values)
+            matrix = (matrix - mean) / std
+        else:
+            raise ValueError(f'Unknown normalization mode `{mode}`.')
+        return matrix
+
+    def load_attribute(self, src, **kwargs):
+        """ Load instance attribute from a string, e.g. `snr` or `std_matrix`.
+        Used from a field to re-direct calls.
+        """
+        return self.get_property(src=src, **kwargs)
+
+    @transformable
+    def get_property(self, src, **_):
+        """ Load a desired instance attribute. Decorated to allow additional postprocessing steps. """
+        return getattr(self, src)
+
+
     # Textual representation
     def __repr__(self):
-        msg = f'geometry for cube {self.displayed_name}'
+        msg = f'geometry for cube `{self.displayed_name}`'
         if not hasattr(self, 'cube_shape'):
             return f'<Unprocessed {msg}>'
-        return f'<Processed {msg}: {tuple(self.cube_shape)}>'
+        return f'<Processed {msg}: {tuple(self.cube_shape)} at {hex(id(self))}>'
 
     def __str__(self):
         if not hasattr(self, 'cube_shape'):

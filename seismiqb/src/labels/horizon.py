@@ -1,6 +1,7 @@
 """ Horizon class for POST-STACK data. """
 import os
 from copy import copy
+from functools import partialmethod
 from textwrap import dedent
 
 import numpy as np
@@ -14,7 +15,7 @@ from skimage.measure import label
 from .horizon_attributes import AttributesMixin
 from .horizon_visualization import VisualizationMixin
 from ..utils import groupby_mean, groupby_min, groupby_max, filtering_function
-from ..utils import get_class_methods, make_bezier_figure
+from ..utils import make_bezier_figure
 from ..functional import smooth_out
 
 
@@ -90,7 +91,7 @@ class Horizon(AttributesMixin, VisualizationMixin):
     FILL_VALUE = -999999
 
 
-    def __init__(self, storage, geometry, name=None, dtype=np.int32, **kwargs):
+    def __init__(self, storage, field, name=None, dtype=np.int32, **kwargs):
         # Meta information
         self.path = None
         self.name = name
@@ -113,10 +114,9 @@ class Horizon(AttributesMixin, VisualizationMixin):
         self._h_min, self._h_max = None, None
         self._h_mean, self._h_std = None, None
 
-        # Attributes from geometry
-        self.geometry = geometry
-        self.cube_name = geometry.displayed_name
-        self.cube_shape = geometry.cube_shape
+        # Field reference
+        self.field = field
+        self.field.attached_instances.append(self)
 
         # Check format of storage, then use it to populate attributes
         if isinstance(storage, str):
@@ -132,7 +132,7 @@ class Horizon(AttributesMixin, VisualizationMixin):
                 # array with row in (iline, xline, height) format
                 self.format = 'points'
 
-            elif storage.ndim == 2 and (storage.shape == self.cube_shape[:-1]).all():
+            elif storage.ndim == 2 and (storage.shape == self.field.spatial_shape):
                 # matrix of (iline, xline) shape with every value being height
                 self.format = 'full_matrix'
 
@@ -143,7 +143,7 @@ class Horizon(AttributesMixin, VisualizationMixin):
         getattr(self, 'from_{}'.format(self.format))(storage, **kwargs)
 
 
-    # Logic of lazy computation of `points` or `matrix` from the other available storage
+    # Logic of lazy computation of `points` or `matrix` from the other available storage; cache management
     @property
     def points(self):
         """ Storage of horizon data as (N, 3) array of (iline, xline, height) in cubic coordinates.
@@ -229,19 +229,56 @@ class Horizon(AttributesMixin, VisualizationMixin):
 
     def reset_cache(self):
         """ Clear cached data. """
-        for method in get_class_methods(self):
-            if hasattr(method, 'cache'):
-                method.reset_instance(self)
+        for name in dir(self):
+            is_property = isinstance(getattr(self.__class__, name, None), property)
+            if name.startswith("__") or 'cache' in name or is_property:
+                continue
+
+            method = getattr(self, name)
+            if callable(method):
+                if hasattr(method, 'cache'):
+                    method.reset_instance(self)
+
+    @property
+    def cache_size(self):
+        """ Total size of cached data. """
+        size = 0
+        for name in dir(self):
+            is_property = isinstance(getattr(self.__class__, name, None), property)
+            if name.startswith("__") or 'cache' in name or is_property:
+                continue
+
+            method = getattr(self, name)
+            if callable(method):
+                if hasattr(method, 'cache'):
+                    size += sum(item.nbytes / (1024 ** 3) for item in method.cache()[self].values())
+        return size
 
     def __copy__(self):
         """ Create a new horizon with the same data.
 
         Returns
         -------
-        A horizon object with new matrix object and a reference to the old geometry attribute.
+        A horizon object with new matrix object and a reference to the same field.
         """
-        return type(self)(np.copy(self.matrix), self.geometry, i_min=self.i_min, x_min=self.x_min,
+        return type(self)(storage=np.copy(self.matrix), field=self.field, i_min=self.i_min, x_min=self.x_min,
                           name=f"copy_of_{self.name}")
+
+    def __sub__(self, other):
+        if not isinstance(other, type(self)):
+            raise TypeError(f"Operands types do not match. Got {type(self)} and {type(other)}.")
+
+        presence = other.presence_matrix
+        discrepancies = self.full_matrix[presence] != other.full_matrix[presence]
+        if discrepancies.any():
+            raise ValueError("Horizons have different depths where present.")
+
+        res_matrix = self.full_matrix.copy()
+        res_matrix[presence] = self.FILL_VALUE
+        name = f"~{other.name}"
+        result = type(self)(storage=res_matrix, field=self.field, name=name)
+
+        return result
 
 
     # Properties, computed from lazy evaluated attributes
@@ -286,19 +323,19 @@ class Horizon(AttributesMixin, VisualizationMixin):
     # Coordinate transforms
     def lines_to_cubic(self, array):
         """ Convert ilines-xlines to cubic coordinates system. """
-        array[:, 0] -= self.geometry.ilines_offset
-        array[:, 1] -= self.geometry.xlines_offset
-        array[:, 2] -= self.geometry.delay
-        array[:, 2] /= self.geometry.sample_rate
+        array[:, 0] -= self.field.ilines_offset
+        array[:, 1] -= self.field.xlines_offset
+        array[:, 2] -= self.field.delay
+        array[:, 2] /= self.field.sample_rate
         return array
 
     def cubic_to_lines(self, array):
         """ Convert cubic coordinates to ilines-xlines system. """
-        array = array.astype(float)
-        array[:, 0] += self.geometry.ilines_offset
-        array[:, 1] += self.geometry.xlines_offset
-        array[:, 2] *= self.geometry.sample_rate
-        array[:, 2] += self.geometry.delay
+        array = array.astype(np.float32)
+        array[:, 0] += self.field.ilines_offset
+        array[:, 1] += self.field.xlines_offset
+        array[:, 2] *= self.field.sample_rate
+        array[:, 2] += self.field.delay
         return array
 
 
@@ -328,9 +365,9 @@ class Horizon(AttributesMixin, VisualizationMixin):
             idx = np.where((points[:, 0] >= 0) &
                            (points[:, 1] >= 0) &
                            (points[:, 2] >= 0) &
-                           (points[:, 0] < self.cube_shape[0]) &
-                           (points[:, 1] < self.cube_shape[1]) &
-                           (points[:, 2] < self.cube_shape[2]))[0]
+                           (points[:, 0] < self.field.shape[0]) &
+                           (points[:, 1] < self.field.shape[1]) &
+                           (points[:, 2] < self.field.shape[2]))[0]
             points = points[idx]
 
         if self.dtype == np.int32:
@@ -345,19 +382,18 @@ class Horizon(AttributesMixin, VisualizationMixin):
     def from_file(self, path, transform=True, **kwargs):
         """ Init from path to either CHARISMA or REDUCED_CHARISMA csv-like file. """
         _ = kwargs
+        path = self.field.make_path(path, makedirs=False)
 
         self.path = path
         self.name = os.path.basename(path) if self.name is None else self.name
         points = self.file_to_points(path)
         self.from_points(points, transform, **kwargs)
-        if self.points.size == 0:
-            raise ValueError(f'Loaded horizon `{path}` is beyond geometry `{self.geometry.displayed_name}` limits.')
 
     @classmethod
     def file_to_points(cls, path):
         """ Get point cloud array from file values. """
         #pylint: disable=anomalous-backslash-in-string
-        with open(path) as file:
+        with open(path, encoding='utf-8') as file:
             line_len = len(file.readline().split(' '))
         if line_len == 3:
             names = cls.REDUCED_CHARISMA_SPEC
@@ -392,7 +428,6 @@ class Horizon(AttributesMixin, VisualizationMixin):
         self.reset_storage('points')
         self._len = length
 
-
     def from_full_matrix(self, matrix, **kwargs):
         """ Init from matrix that covers the whole cube. """
         kwargs = {
@@ -419,17 +454,17 @@ class Horizon(AttributesMixin, VisualizationMixin):
 
 
     @staticmethod
-    def from_mask(mask, grid_info=None, geometry=None, shifts=None,
+    def from_mask(mask, field=None, origin=None,
                   mode='mean', threshold=0.5, minsize=0, prefix='predict', **kwargs):
         """ Convert mask to a list of horizons.
         Returned list is sorted on length of horizons.
 
         Parameters
         ----------
-        grid_info : dict
-            Information about mask creation parameters. Required keys are `geom` and `range`
-            to infer geometry and leftmost upper point, or they can be passed directly.
-            If not provided, same entities must be passed as arguments `geometry` and `shifts`.
+        field : Field
+            Horizon parent field.
+        origin : sequence
+            The upper left coordinate of a `mask` in the cube coordinates.
         threshold : float
             Parameter of mask-thresholding.
         mode : str
@@ -440,13 +475,6 @@ class Horizon(AttributesMixin, VisualizationMixin):
             Name of horizon to use.
         """
         _ = kwargs
-        if grid_info is not None:
-            geometry = grid_info['geometry']
-            shifts = np.array([item[0] for item in grid_info['range']])
-
-        if geometry is None or shifts is None:
-            raise TypeError('Pass `grid_info` or `geometry` and `shifts` to `from_mask` method of Horizon creation.')
-
         if mode in ['mean', 'avg']:
             group_function = groupby_mean
         elif mode in ['min']:
@@ -471,13 +499,36 @@ class Horizon(AttributesMixin, VisualizationMixin):
                 if len(indices[0]) >= minsize:
                     coords = np.vstack([indices[i] + sl[i].start for i in range(3)]).T
 
-                    points = group_function(coords) + shifts
-                    horizons.append(Horizon(points, geometry, name=f'{prefix}_{i}'))
+                    points = group_function(coords) + origin
+                    horizons.append(Horizon(storage=points, field=field, name=f'{prefix}_{i}'))
 
         horizons.sort(key=len)
         horizons = [horizon for horizon in horizons if len(horizon) != 0]
         return horizons
 
+    def from_subset(self, matrix, name=None):
+        """ Make new label with points matrix filtered by given presense matrix.
+
+        Parameters
+        ----------
+        matrix : np.array
+            Presense matrix of labels points. Must be in full cubes coordinates.
+            If consists of 0 and 1, keep points only where values are 1.
+            If consists of values from [0, 1] interval, keep points where values are greater than 0.5.
+        name : str or None
+            Name for new label. If None, original label name used.
+
+        Returns
+        -------
+        New `Horizon` instance with filtered points matrix.
+        """
+        result = copy(self)
+        result.name = name or self.name
+
+        filtering_matrix = (matrix < 0.5).astype(int)
+        result.filter_matrix(filtering_matrix)
+
+        return result
 
     # Basic properties
     @property
@@ -517,6 +568,7 @@ class Horizon(AttributesMixin, VisualizationMixin):
         self.matrix, self.i_min, self.x_min = matrix, i_min, x_min
 
         self.reset_storage('points') # applied to matrix, so we need to re-create points
+        self.reset_cache()
 
     def apply_to_points(self, function, **kwargs):
         """ Apply passed function to points storage.
@@ -531,12 +583,13 @@ class Horizon(AttributesMixin, VisualizationMixin):
         """
         self.points = function(self.points, **kwargs)
         self.reset_storage('matrix') # applied to points, so we need to re-create matrix
+        self.reset_cache()
 
 
     def filter_points(self, filtering_matrix=None, **kwargs):
         """ Remove points that correspond to 1's in `filtering_matrix` from points storage. """
         if filtering_matrix is None:
-            filtering_matrix = self.geometry.zero_traces
+            filtering_matrix = self.field.zero_traces
 
         def _filtering_function(points, **kwds):
             _ = kwds
@@ -547,7 +600,7 @@ class Horizon(AttributesMixin, VisualizationMixin):
     def filter_matrix(self, filtering_matrix=None, **kwargs):
         """ Remove points that correspond to 1's in `filtering_matrix` from matrix storage. """
         if filtering_matrix is None:
-            filtering_matrix = self.geometry.zero_traces
+            filtering_matrix = self.field.zero_traces
 
         idx_i, idx_x = np.asarray(filtering_matrix[self.i_min:self.i_max + 1,
                                                    self.x_min:self.x_max + 1] == 1).nonzero()
@@ -560,6 +613,40 @@ class Horizon(AttributesMixin, VisualizationMixin):
         self.apply_to_matrix(_filtering_function, **kwargs)
 
     filter = filter_points
+
+    def filter_spikes(self, mode='gradient', threshold=1., dilation=5, kernel_size=11, kernel=None, margin=0, iters=2):
+        """ Remove spikes from horizon. Works inplace.
+
+        Parameters
+        ----------
+        mode : str
+            If 'gradient', then use gradient map to locate spikes.
+            If 'median', then use median diffs to locate spikes.
+        threshold : number
+            Threshold to consider a difference to be a spike,
+        dilation : int
+            Number of iterations for binary dilation algorithm to increase the spikes.
+        kernel_size, kernel, margin, iters
+            Parameters for median differences computation.
+        """
+        spikes = self.load_attribute('spikes', spikes_mode=mode, threshold=threshold, dilation=dilation,
+                                     kernel_size=kernel_size, kernel=kernel, margin=margin, iters=iters)
+        self.filter(spikes)
+
+    despike = filter_spikes
+
+    def filter_disconnected_regions(self):
+        """ Remove regions, not connected to the largest component of a horizon. """
+        labeled = label(self.presence_matrix)
+        values, counts = np.unique(labeled, return_counts=True)
+        counts = counts[values != 0]
+        values = values[values != 0]
+
+        object_id = values[np.argmax(counts)]
+
+        filtering_matrix = self.presence_matrix.copy()
+        filtering_matrix[labeled == object_id] = 0
+        self.filter(filtering_matrix)
 
 
     # Pre-defined transforms of a horizon
@@ -611,11 +698,13 @@ class Horizon(AttributesMixin, VisualizationMixin):
                                   kernel_size=kernel_size, sigma=sigma, margin=margin,
                                   fill_value=self.FILL_VALUE, preserve=preserve_borders, iters=iters)
             smoothed = np.rint(smoothed).astype(np.int32)
-            smoothed[self.geometry.zero_traces[self.i_min:self.i_max + 1,
-                                               self.x_min:self.x_max + 1] == 1] = self.FILL_VALUE
+            smoothed[self.field.zero_traces[self.i_min:self.i_max + 1,
+                                            self.x_min:self.x_max + 1] == 1] = self.FILL_VALUE
             return smoothed
 
         self.apply_to_matrix(smoothing_function, **kwargs)
+
+    interpolate = partialmethod(smooth_out, preserve_borders=False)
 
 
     def make_carcass(self, frequencies=100, regular=True, margin=50, apply_smoothing=False, **kwargs):
@@ -640,10 +729,10 @@ class Horizon(AttributesMixin, VisualizationMixin):
 
         if regular:
             from ..metrics import GeometryMetrics
-            gm = GeometryMetrics(self.geometry)
-            grid = gm.make_grid(1 - self.geometry.zero_traces, frequencies=frequencies, margin=margin, **kwargs)
+            gm = GeometryMetrics(self.field.geometry)
+            grid = gm.make_grid(1 - self.field.zero_traces, frequencies=frequencies, margin=margin, **kwargs)
         else:
-            grid = self.geometry.make_quality_grid(frequencies, margin=margin, **kwargs)
+            grid = self.field.geometry.make_quality_grid(frequencies, margin=margin, **kwargs)
 
         carcass.filter(filtering_matrix=1-grid)
         if apply_smoothing:
@@ -803,11 +892,10 @@ class Horizon(AttributesMixin, VisualizationMixin):
 
         return mask
 
-
     def load_slide(self, loc, axis=0, width=3):
         """ Create a mask at desired location along supplied axis. """
-        axis = self.geometry.parse_axis(axis)
-        locations = self.geometry.make_slide_locations(loc, axis=axis)
+        axis = self.field.geometry.parse_axis(axis)
+        locations = self.field.geometry.make_slide_locations(loc, axis=axis)
         shape = np.array([(slc.stop - slc.start) for slc in locations])
         width = width or max(5, shape[-1] // 100)
 
@@ -887,7 +975,7 @@ class Horizon(AttributesMixin, VisualizationMixin):
             'abs_max': np.max(np.abs(diffs)),
             'std': np.std(diffs),
             'abs_std': np.std(np.abs(diffs)),
-            'window_rate': np.mean(np.abs(diffs) < (5 / self.geometry.sample_rate)),
+            'window_rate': np.mean(np.abs(diffs) < (5 / self.field.sample_rate)),
             'offset_diffs': diffs,
         }
         return overlap_info
@@ -1011,7 +1099,7 @@ class Horizon(AttributesMixin, VisualizationMixin):
             merged = True
         else:
             # Return a new instance of horizon
-            merged = Horizon(background, self.geometry, self.name,
+            merged = Horizon(storage=background, field=self.field, name=self.name,
                              i_min=shared_i_min, x_min=shared_x_min, length=length)
         return merged
 
@@ -1089,7 +1177,7 @@ class Horizon(AttributesMixin, VisualizationMixin):
                 merged = True
             else:
                 # Return a new instance of horizon
-                merged = Horizon(background, self.geometry, self.name,
+                merged = Horizon(storage=background, field=self.field, name=self.name,
                                  i_min=shared_i_min, x_min=shared_x_min, length=length)
             return merged
         return False
@@ -1141,10 +1229,10 @@ class Horizon(AttributesMixin, VisualizationMixin):
     @staticmethod
     def average_horizons(horizons):
         """ Average list of horizons into one surface. """
-        geometry = horizons[0].geometry
-        horizon_matrix = np.zeros(geometry.lens, dtype=np.float32)
-        std_matrix = np.zeros(geometry.lens, dtype=np.float32)
-        counts_matrix = np.zeros(geometry.lens, dtype=np.int32)
+        field = horizons[0].field
+        horizon_matrix = np.zeros(field.spatial_shape, dtype=np.float32)
+        std_matrix = np.zeros(field.spatial_shape, dtype=np.float32)
+        counts_matrix = np.zeros(field.spatial_shape, dtype=np.int32)
 
         for horizon in horizons:
             fm = horizon.full_matrix
@@ -1160,7 +1248,7 @@ class Horizon(AttributesMixin, VisualizationMixin):
         std_matrix = np.sqrt(std_matrix)
         std_matrix[counts_matrix == 0] = np.nan
 
-        averaged_horizon = Horizon(horizon_matrix.astype(np.int32), geometry=geometry)
+        averaged_horizon = Horizon(horizon_matrix.astype(np.int32), field=field)
         return averaged_horizon, {
             'matrix': horizon_matrix,
             'std_matrix': std_matrix,
@@ -1168,8 +1256,7 @@ class Horizon(AttributesMixin, VisualizationMixin):
 
 
     # Save horizon to disk
-    @staticmethod
-    def dump_charisma(points, path, transform=None, add_height=False):
+    def dump_charisma(self, points, path, transform=None):
         """ Save (N, 3) array of points to disk in CHARISMA-compatible format.
 
         Parameters
@@ -1180,18 +1267,16 @@ class Horizon(AttributesMixin, VisualizationMixin):
             Path to a file to save horizon to.
         transform : None or callable
             If callable, then applied to points after converting to ilines/xlines coordinate system.
-        add_height : bool
-            Whether to concatenate average horizon height to a file name.
         """
         points = points if transform is None else transform(points)
-        path = path if not add_height else f'{path}_#{round(np.mean(points[:, 2]), 1)}'
+        path = self.field.make_path(path, name=self.short_name)
 
         df = pd.DataFrame(points, columns=Horizon.COLUMNS)
         df.sort_values(['iline', 'xline'], inplace=True)
         df = df.astype({'iline': np.int32, 'xline': np.int32, 'height': np.float32})
         df.to_csv(path, sep=' ', columns=Horizon.COLUMNS, index=False, header=False)
 
-    def dump_matrix(self, matrix, path, transform=None, add_height=False):
+    def dump_matrix(self, matrix, path, transform=None):
         """ Save (N_ILINES, N_CROSSLINES) matrix in CHARISMA-compatible format.
 
         Parameters
@@ -1202,14 +1287,12 @@ class Horizon(AttributesMixin, VisualizationMixin):
             Path to a file to save horizon to.
         transform : None or callable
             If callable, then applied to points after converting to ilines/xlines coordinate system.
-        add_height : bool
-            Whether to concatenate average horizon height to a file name.
         """
         points = Horizon.matrix_to_points(matrix)
         points = self.cubic_to_lines(points)
-        Horizon.dump_charisma(points, path, transform, add_height)
+        Horizon.dump_charisma(points, path, transform)
 
-    def dump(self, path, transform=None, add_height=False):
+    def dump(self, path, transform=None):
         """ Save horizon points on disk.
 
         Parameters
@@ -1218,13 +1301,11 @@ class Horizon(AttributesMixin, VisualizationMixin):
             Path to a file to save horizon to.
         transform : None or callable
             If callable, then applied to points after converting to ilines/xlines coordinate system.
-        add_height : bool
-            Whether to concatenate average horizon height to a file name.
         """
         points = self.cubic_to_lines(copy(self.points))
-        self.dump_charisma(points, path, transform, add_height)
+        self.dump_charisma(points, path, transform)
 
-    def dump_float(self, path, transform=None, kernel_size=7, sigma=2., margin=5, add_height=False):
+    def dump_float(self, path, transform=None, kernel_size=7, sigma=2., margin=5):
         """ Smooth out the horizon values, producing floating-point numbers, and dump to the disk.
 
         Parameters
@@ -1240,10 +1321,8 @@ class Horizon(AttributesMixin, VisualizationMixin):
         margin : number
             During the filtering, not include in the computation all the points that are
             further away from the current, than the margin.
-        add_height : bool
-            Whether to concatenate average horizon height to a file name.
         """
         matrix = self.matrix_smooth_out(matrix=self.full_matrix, kernel_size=kernel_size, sigma=sigma, margin=margin)
         points = self.matrix_to_points(matrix)
         points = self.cubic_to_lines(points)
-        self.dump_charisma(points, path, transform, add_height)
+        self.dump_charisma(points, path, transform)

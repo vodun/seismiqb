@@ -1,5 +1,7 @@
 """ Collection of good architectures for the tasks of horizon detection. """
 from ...batchflow.batchflow.models.torch import ResBlock
+from ...batchflow.models.torch.losses.binary import Dice
+from ..utils.layers import DepthSoftmax
 
 
 MODEL_CONFIG = {
@@ -61,5 +63,20 @@ MODEL_CONFIG_EXTENSION = {
     **MODEL_CONFIG,
     'initial_block': {},
     'optimizer': {'name': 'Adam', 'lr': 0.005,},
+    'microbatch': 64,
+    'order': ['initial_block', 'body', 'head', ('head_2', 'head_2', 'head')],
+    'head/attention': None,
+    'head/classes': 8,
+    'head_2': {
+        'layout': 'ca',
+        'classes': 1,
+        'filters': 1,
+        'activation': DepthSoftmax
+    },
+    'loss': Dice(apply_sigmoid=False)
 }
-MODEL_CONFIG_ENHANCE = {**MODEL_CONFIG_EXTENSION}
+MODEL_CONFIG_ENHANCE = {
+    **MODEL_CONFIG,
+    'initial_block': {},
+    'optimizer': {'name': 'Adam', 'lr': 0.005,}
+}

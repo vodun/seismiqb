@@ -252,7 +252,7 @@ class Accumulator3D:
         - `:meth:~.aggregate` is used to get the resulting volume
         - `:meth:~.clear` can be optionally used to remove array references and HDF5 file from disk
 
-    This class is an alternative to `:meth:.~SeismicCubeset.assemble_crops`, but allows to
+    This class is an alternative to `:meth:.~SeismicDataset.assemble_crops`, but allows to
     greatly reduce memory footprint of crop aggregation by up to `overlap_factor` times.
     Also, as this class updates rely on `location`s of crops, it can take crops in any order.
 
@@ -554,13 +554,71 @@ class AccumulatorBlosc(Accumulator3D):
 
 
 
-class IndexedDict(OrderedDict):
-    """ `OrderedDict` that allows integer indexing and values flattening.
-
-    - Both keys and their ordinal numbers might be used to subscript. Therefore `int` keys are not supported.
-    - Flatten values list of requested keys can be obtained via `flatten` method.
-    - Flatten list of all values is also available via `flat` property.
+class AugmentedList(list):
+    """ List with additional features:
+        - can be indexed with other iterables.
+        - delegates calls to contained objects.
+        For example, `a_list.method()` is equivalent to `[item.method() for item in a_list]`.
+        Can be used to retrieve attributes, properties and call methods.
+        Returns the list of results, which is itself an instance of `AugmentedList`.
+        - auto-completes names to that of contained objects.
     """
+    # Advanced indexing
+    def __getitem__(self, key):
+        if isinstance(key, (int, np.integer)):
+            return super().__getitem__(key)
+        if isinstance(key, slice):
+            return AugmentedList(super().__getitem__(key))
+
+        return AugmentedList([super().__getitem__(idx) for idx in key])
+
+    # Delegating to contained objects
+    def __getattr__(self, key):
+        if len(self) == 0:
+            return lambda *args, **kwargs: self
+
+        attribute = getattr(self[0], key)
+
+        if not callable(attribute):
+            # Attribute or property
+            return AugmentedList([getattr(item, key) for item in self])
+
+        @wraps(attribute)
+        def method_wrapper(*args, **kwargs):
+            return AugmentedList([getattr(item, key)(*args, **kwargs) for item in self])
+        return method_wrapper
+
+    def __dir__(self):
+        """ Correct autocompletion for delegated methods. """
+        if len(self) != 0:
+            return dir(self[0])
+        return dir(list)
+
+    # Correct type of operations
+    def __add__(self, other):
+        return type(self)(list.__add__(self, other))
+
+    def __radd__(self, other):
+        return self.__add__(other)
+
+    def __mul__(self, other):
+        return type(self)(list.__mul__(self, other))
+
+    def __rmul__(self, other):
+        return self.__mul__(other)
+
+
+class AugmentedDict(OrderedDict):
+    """ Ordered dictionary with additional features:
+        - can be indexed with ordinals.
+        - delegates calls to contained objects.
+        For example, `a_dict.method()` is equivalent to `{key : value.method() for key, value in a_dict.items()}`.
+        Can be used to retrieve attributes, properties and call methods.
+        Returns the dictionary with results, which is itself an instance of `AugmentedDict`.
+        - auto-completes names to that of contained objects.
+        - can be flattened.
+    """
+    # Ordinal indexation
     def __getitem__(self, key):
         if isinstance(key, (int, np.integer)):
             key = list(self.keys())[key]
@@ -569,21 +627,45 @@ class IndexedDict(OrderedDict):
     def __setitem__(self, key, value):
         if isinstance(key, (int, np.integer)):
             key = list(self.keys())[key]
+
+        if isinstance(value, list):
+            value = AugmentedList(value)
         super().__setitem__(key, value)
 
+    # Delegating to contained objects
+    def __getattr__(self, key):
+        if len(self) == 0:
+            return lambda *args, **kwargs: self
+
+        attribute = getattr(self[0], key)
+
+        if not callable(attribute):
+            # Attribute or property
+            return AugmentedDict({key_ : getattr(value, key) for key_, value in self.items()})
+
+        @wraps(attribute)
+        def method_wrapper(*args, **kwargs):
+            return AugmentedDict({key_ : getattr(value, key)(*args, **kwargs) for key_, value in self.items()})
+        return method_wrapper
+
+    def __dir__(self):
+        """ Correct autocompletion for delegated methods. """
+        if len(self) != 0:
+            return dir(self[0])
+        return dir(dict)
+
+    # Convenient iterables
     def flatten(self, keys=None):
         """ Get dict values for requested keys in a single list. """
         keys = to_list(keys) if keys is not None else list(self.keys())
         lists = [self[key] if isinstance(self[key], list) else [self[key]] for key in keys]
-        return sum(lists, [])
+        flattened = sum(lists, [])
+        return AugmentedList(flattened)
 
     @property
     def flat(self):
         """ List of all dictionary values. """
         return self.flatten()
-
-    def __iter__(self):
-        return (x for x in self.flat)
 
 
 
@@ -599,13 +681,13 @@ class MetaDict(dict):
     @classmethod
     def load(cls, path):
         """ Load self from `path` by evaluating the containing dictionary. """
-        with open(path, 'r') as file:
+        with open(path, 'r', encoding='utf-8') as file:
             content = '\n'.join(file.readlines())
         return cls(literal_eval(content.replace('\n', '').replace('    ', '')))
 
     def dump(self, path):
         """ Save self to `path` with each key on a separate line. """
-        with open(path, 'w') as file:
+        with open(path, 'w', encoding='utf-8') as file:
             print(repr(self), file=file)
 
 
@@ -697,11 +779,8 @@ class lru_cache:
         """ Add the cache to the function. """
         @wraps(func)
         def wrapper(instance, *args, **kwargs):
-            # Parse the `use_cache`
-            if 'use_cache' in kwargs:
-                use_cache = kwargs.pop('use_cache')
-            else:
-                use_cache = self.apply_by_default
+            use_cache = kwargs.pop('use_cache', self.apply_by_default)
+            copy_on_return = kwargs.pop('copy_on_return', self.copy_on_return)
 
             # Skip the caching logic and evaluate function directly
             if not use_cache:
@@ -717,7 +796,7 @@ class lru_cache:
                     del self.cache[instance][key]
                     self.cache[instance][key] = result
                     self.stats[instance]['hit'] += 1
-                    return copy(result) if self.copy_on_return else result
+                    return copy(result) if copy_on_return else result
 
             # The result was not found in cache: evaluate function
             result = func(instance, *args, **kwargs)
@@ -733,7 +812,7 @@ class lru_cache:
                 else:
                     self.cache[instance][key] = result
                     self.is_full[instance] = (len(self.cache[instance]) >= self.maxsize)
-            return copy(result) if self.copy_on_return else result
+            return copy(result) if copy_on_return else result
 
         wrapper.__name__ = func.__name__
         wrapper.cache = lambda: self.cache
@@ -799,7 +878,7 @@ class SafeIO:
             self._info(self.log_file, f'Opened {self.path}')
 
     def _info(self, log_file, msg):
-        with open(log_file, 'a') as f:
+        with open(log_file, 'a', encoding='utf-8') as f:
             f.write('\n' + msg)
 
     def __getattr__(self, key):

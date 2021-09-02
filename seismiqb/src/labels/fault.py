@@ -45,6 +45,9 @@ class Fault(Horizon):
         """ Init from path to either CHARISMA, REDUCED_CHARISMA or FAULT_STICKS csv-like file
         from .npy or .hdf5 file with points.
         """
+        path = self.field.make_path(path, makedirs=False)
+        self.path = path
+
         self.name = os.path.basename(path)
         ext = os.path.splitext(path)[1][1:]
         if ext == 'npz':
@@ -52,25 +55,31 @@ class Fault(Horizon):
             points = npzfile['points']
             transform = False
             nodes = None if len(npzfile['nodes']) == 0 else npzfile['nodes']
+            self.format = 'file-npz'
         elif ext == 'hdf5':
             cube = SeismicGeometry(path, **kwargs).file_hdf5['cube']
             points = np.stack(np.where(np.array(cube) == 1)).T #TODO: get points in chunks
             transform = False
             nodes = None
+            self.format = 'file-hdf5'
         else:
             points, nodes = self.csv_to_points(path, **kwargs)
+            self.format = 'file-csv'
         self.from_points(points, transform, **kwargs)
         if nodes is not None:
             self.from_points(nodes, transform, dst='nodes', reset=None, **kwargs)
 
         if direction is None:
-            self.direction = 0 if self.points[:, 0].ptp() > self.points[:, 1].ptp() else 1
+            if len(self.points) > 0:
+                self.direction = 0 if self.points[:, 0].ptp() > self.points[:, 1].ptp() else 1
+            else:
+                self.direction = 0
         elif isinstance(direction, int):
             self.direction = direction
-        elif isinstance(direction[self.geometry.short_name], int):
-            self.direction = direction[self.geometry.short_name]
+        elif isinstance(direction[self.field.short_name], int):
+            self.direction = direction[self.field.short_name]
         else:
-            self.direction = direction[self.geometry.short_name][self.name]
+            self.direction = direction[self.field.short_name][self.name]
 
 
     def csv_to_points(self, path, fix=False, **kwargs):
@@ -89,7 +98,7 @@ class Fault(Horizon):
     @classmethod
     def read_file(cls, path):
         """ Read data frame with sticks. """
-        with open(path) as file:
+        with open(path, encoding='utf-8') as file:
             line_len = len([item for item in file.readline().split(' ') if len(item) > 0])
         if line_len == 3:
             names = Horizon.REDUCED_CHARISMA_SPEC
@@ -107,15 +116,15 @@ class Fault(Horizon):
     def recover_lines_from_cdp(self, df):
         """ Fix broken iline and crossline coordinates. If coordinates are out of the cube, 'iline' and 'xline'
         will be infered from 'cdp_x' and 'cdp_y'. """
-        i_bounds = [self.geometry.ilines_offset, self.geometry.ilines_offset + self.geometry.cube_shape[0]]
-        x_bounds = [self.geometry.xlines_offset, self.geometry.xlines_offset + self.geometry.cube_shape[1]]
+        i_bounds = [self.field.ilines_offset, self.field.ilines_offset + self.field.cube_shape[0]]
+        x_bounds = [self.field.xlines_offset, self.field.xlines_offset + self.field.cube_shape[1]]
 
         i_mask = np.logical_or(df.iline < i_bounds[0], df.iline >= i_bounds[1])
         x_mask = np.logical_or(df.xline < x_bounds[0], df.xline >= x_bounds[1])
 
         _df = df[np.logical_and(i_mask, x_mask)]
 
-        coords = np.rint(self.geometry.cdp_to_lines(_df[['cdp_x', 'cdp_y']].values)).astype('int32')
+        coords = np.rint(self.field.geometry.cdp_to_lines(_df[['cdp_x', 'cdp_y']].values)).astype(np.int32)
         df.loc[np.logical_and(i_mask, x_mask), ['iline', 'xline']] = coords
 
         return df
@@ -221,10 +230,15 @@ class Fault(Horizon):
 
     def dump_points(self, path):
         """ Dump points. """
+        path = self.field.make_path(path, name=self.short_name, makedirs=False)
+
         if os.path.exists(path):
             npzfile = np.load(path, allow_pickle=False)
             points = np.concatenate([npzfile['points'], self.points], axis=0)
-            nodes = np.concatenate([nodes, self.nodes], axis=0) if self.nodes is not None else npzfile['nodes']
+            if self.nodes is not None:
+                nodes = np.concatenate([npzfile['nodes'], self.nodes], axis=0)
+            else:
+                nodes = npzfile['nodes']
         else:
             points = self.points
             nodes = self.nodes if self.nodes is not None else np.zeros((0, 3), dtype=np.int32)
@@ -238,9 +252,9 @@ class Fault(Horizon):
         **kwargs
             Arguments for `split_faults` function.
         """
-        array = np.zeros(self.cube_shape)
+        array = np.zeros(self.field.shape)
         array[self.points[:, 0], self.points[:, 1], self.points[:, 2]] = 1
-        return self.from_mask(array, cube_shape=tuple(self.cube_shape), geometry=self.geometry, **kwargs)
+        return self.from_mask(array, cube_shape=self.field.shape, field=self.field, **kwargs)
 
     def show_3d(self, n_sticks=100, n_nodes=10, z_ratio=1., zoom_slice=None, show_axes=True,
                 width=1200, height=1200, margin=20, savepath=None, **kwargs):
@@ -271,11 +285,11 @@ class Fault(Horizon):
         kwargs : dict
             Other arguments of plot creation.
         """
-        title = f'Fault `{self.name}` on `{self.cube_name}`'
+        title = f'Fault `{self.name}` on `{self.field.displayed_name}`'
         aspect_ratio = (self.i_length / self.x_length, 1, z_ratio)
-        axis_labels = (self.geometry.index_headers[0], self.geometry.index_headers[1], 'DEPTH')
+        axis_labels = (self.field.index_headers[0], self.field.index_headers[1], 'DEPTH')
         if zoom_slice is None:
-            zoom_slice = [slice(0, i) for i in self.geometry.cube_shape]
+            zoom_slice = [slice(0, i) for i in self.field.shape]
         zoom_slice[-1] = slice(self.h_min, self.h_max)
         margin = [margin] * 3 if isinstance(margin, int) else margin
         x, y, z, simplices = self.make_triangulation(n_sticks, n_nodes, zoom_slice)
@@ -313,7 +327,7 @@ class Fault(Horizon):
         return coords[:, 0], coords[:, 1], coords[:, 2], simplices
 
     @classmethod
-    def from_mask(cls, array, geometry=None, chunk_size=None, threshold=None, overlap=1, pbar=False,
+    def from_mask(cls, array, field=None, chunk_size=None, threshold=None, overlap=1, pbar=False,
                   cube_shape=None, fmt='mask'):
         """ Label faults in an array.
 
@@ -321,8 +335,8 @@ class Fault(Horizon):
         ----------
         array : numpy.ndarray or SeismicGeometry
             binary mask of faults or array of coordinates.
-        geometry : SeismicGeometry or None
-            geometry instance to create Fault-instance.
+        field : Field or None
+            Where the fault is.
         chunk_size : int
             size of chunks to apply `measurements.label`.
         threshold : float or None
@@ -408,8 +422,8 @@ class Fault(Horizon):
         labels = sorted(zip(sizes, labels), key=lambda x: x[0], reverse=True)
         if threshold:
             labels = [item for item in labels if item[0] >= threshold]
-        if geometry is not None:
-            labels = [Fault(item[1].astype('int32'), name=f'fault_{i}', geometry=geometry)
+        if field is not None:
+            labels = [Fault(item[1].astype('int32'), name=f'fault_{i}', field=field)
                       for i, item in tqdm(enumerate(labels), disable=(not pbar))]
         return labels
 
