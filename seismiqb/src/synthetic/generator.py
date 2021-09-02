@@ -295,8 +295,12 @@ class SyntheticGenerator():
 
         # adjust mask if needed
         if fetch_and_update_mask is not None:
+            if isinstance(fetch_and_update_mask, str):
+                fetch_and_update_mask = {'mode': fetch_and_update_mask}
+            fetch_and_update_mask['horizon_format'] = 'mask'
+
             # make enumerated mask and apply the same coordinate-map to it
-            mask = self.fetch_horizons(horizon_format='mask', **fetch_and_update_mask)
+            mask = self.fetch_horizons(**fetch_and_update_mask)
             crop = mask[x_low:x_high, y_low:y_high]
             crop_elastic = map_coordinates(crop.astype(np.int32),
                                            (xs + delta_xs, ys + delta_ys),
