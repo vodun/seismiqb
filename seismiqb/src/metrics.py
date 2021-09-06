@@ -170,7 +170,7 @@ class BaseMetrics:
 
         # Compute metric by shifting arrays
         total = kernel_size * kernel_size - 1
-        pbar = Notifier(pbar, total=total) if pbar else None
+        pbar = Notifier(pbar, total=total)
 
         accumulator = Accumulator(agg=agg, amortize=amortize, axis=axis, total=total)
         for i in range(k):
@@ -196,11 +196,8 @@ class BaseMetrics:
                 symmetric_computed[symmetric_bad_traces == 1] = xp.nan
                 accumulator.update(computed)
                 accumulator.update(symmetric_computed)
-                if pbar:
-                    pbar.update(2)
-
-        if pbar:
-            pbar.close()
+                pbar.update(2)
+        pbar.close()
 
         result = accumulator.get(final=True)
         return from_device(result)
@@ -278,16 +275,14 @@ class BaseMetrics:
         support_stds = data_stds[support_coords[:, 0], support_coords[:, 1]]
 
         # Compute metric
-        pbar = Notifier(pbar, total=len(support_traces)) if pbar else None
+        pbar = Notifier(pbar, total=len(support_traces))
         accumulator = Accumulator(agg=agg, amortize=amortize, axis=axis, total=len(support_traces))
         for i, _ in enumerate(support_traces):
             computed = function(data_n, support_traces[i], data_stds, support_stds[i])
             computed[bad_traces == 1] = xp.nan
             accumulator.update(computed)
-            if pbar:
-                pbar.update()
-        if pbar:
-            pbar.close()
+            pbar.update()
+        pbar.close()
 
         result = accumulator.get(final=True)
         return from_device(result)

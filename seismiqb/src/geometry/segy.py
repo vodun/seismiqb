@@ -1,8 +1,6 @@
 """ SEG-Y geometry. """
 import os
-
 from itertools import product
-from tqdm.auto import tqdm
 
 import numpy as np
 import pandas as pd
@@ -12,6 +10,7 @@ import cv2
 
 from .base import SeismicGeometry
 from ..utils import find_min_max, lru_cache, SafeIO
+from ...batchflow import Notifier
 
 
 
@@ -171,7 +170,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
         value_min, value_max = np.inf, -np.inf
         min_matrix, max_matrix = np.full(self.lens, np.nan), np.full(self.lens, np.nan)
 
-        for i in tqdm(range(num_traces), desc='Finding min/max', ncols=800, disable=(not pbar)):
+        for i in Notifier(pbar, desc='Finding min/max')(range(num_traces)):
             trace = self.segyfile.trace[i]
             store_key = self._get_store_key(i)
 
@@ -201,8 +200,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
             hist_matrix = np.full((*self.lens, len(bins)-1), np.nan)
 
             # Iterate over traces
-            description = f'Collecting stats for {self.displayed_name}'
-            for i in tqdm(range(num_traces), desc=description, ncols=800, disable=(not pbar)):
+            for i in Notifier(pbar, desc=f'Collecting stats for {self.displayed_name}')(range(num_traces)):
                 trace = self.segyfile.trace[i]
                 store_key = self._get_store_key(i)
 
@@ -610,7 +608,7 @@ class SeismicGeometrySEGY(SeismicGeometry):
             total = (('i' in projections) * self.cube_shape[0] +
                      ('x' in projections) * self.cube_shape[1] +
                      ('h' in projections) * self.cube_shape[2])
-            progress_bar = tqdm(total=total, ncols=800, disable=(not pbar))
+            progress_bar = Notifier(pbar, total=total)
             name = os.path.basename(path)
 
             for p in projections:

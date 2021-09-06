@@ -3,9 +3,10 @@ import os
 import re
 from glob import glob
 from difflib import get_close_matches
-from tqdm.auto import tqdm
 
 import numpy as np
+
+from ...batchflow.notifier import Notifier
 
 from .visualization import VisualizationMixin
 from ..geometry import SeismicGeometry
@@ -168,7 +169,7 @@ class Field(VisualizationMixin):
     def _load_faults(self, paths, pbar=True, filter=True, fix=True, **kwargs):
         #pylint: disable=redefined-builtin
         faults = []
-        for path in tqdm(paths, desc=f'Loading faults for {self.name}', ncols=800, disable=not pbar):
+        for path in Notifier(pbar, desc=f'Loading faults for {self.name}')(paths):
             fault = Fault(path, field=self, fix=fix, **kwargs)
 
             if filter and fault.format != 'file-npz':

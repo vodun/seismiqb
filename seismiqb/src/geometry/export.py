@@ -7,6 +7,8 @@ import numpy as np
 import h5pickle as h5py
 import segyio
 
+from ...batchflow.notifier import Notifier
+
 class ExportMixin:
     """ Container for methods to save data as seismic cubes in different formats. """
     def make_sgy(self, path_hdf5=None, path_spec=None, postfix='',
@@ -62,7 +64,7 @@ class ExportMixin:
                     dst_file.text[i] = segy.text[i]
                 dst_file.bin = segy.bin
 
-                for c, (i, x) in enumerate(tqdm(idx, disable=(not pbar))):
+                for c, (i, x) in Notifier(pbar)(enumerate(idx)):
                     locs = tuple([i_enc[i], x_enc[x], slice(None)])
                     dst_file.header[c] = segy.header[c]
                     dst_file.trace[c] = cube_hdf5[locs]
