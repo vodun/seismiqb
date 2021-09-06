@@ -231,9 +231,7 @@ class FaultController(BaseController):
         return ppl
 
     def make_synthetic_dataset(self):
-        ds = Dataset(1, SeismicCropBatch)
-        # ds = Dataset(range(self.config['train/batch_size']), SeismicCropBatch)
-        ds.geometries = {i: SeismicGeometry('/cubes/031_CHIST/031_CHIST.qblosc') for i in ds.indices}
+        ds = SeismicDataset(index='/cubes/031_CHIST/031_CHIST.qblosc')
         return ds
 
     def load_synthetic(self, **kwargs):
@@ -261,7 +259,7 @@ class FaultController(BaseController):
                                     horizon_heights=F(heights.sample)(size=1),
                                     horizon_multipliers=F(muls.sample)(size=F(nhors.sample)(size=1)),
                                     faults=F(faults),
-                                    dst=('images', 'horizons', 'masks'),
+                                    dst=('images', 'horizons_', 'masks'),
                                     zeros_share_faults=0.1,
                                     max_shift=10, # controls max fault-shift
                                     geobodies_width=(5, 5) # default value is 3
