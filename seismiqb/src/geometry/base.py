@@ -5,8 +5,8 @@ import sys
 
 from textwrap import dedent
 
-import numpy as np
 from time import perf_counter
+import numpy as np
 import h5py
 
 from .export import ExportMixin
