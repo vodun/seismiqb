@@ -116,7 +116,6 @@ class Horizon(AttributesMixin, VisualizationMixin):
 
         # Field reference
         self.field = field
-        self.field.attached_instances.append(self)
 
         # Check format of storage, then use it to populate attributes
         if isinstance(storage, str):

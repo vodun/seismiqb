@@ -274,7 +274,7 @@ class HorizonController(BaseController):
         self.log(f'Starting {orientation}-inference with {len(chunk_iterator)} chunks')
         self.log(f'Inference over {spatial_ranges}, {heights_range}')
         notifier = Notifier(self.config.bar,
-                            desc=f'{orientation}-inference', update_total=False,
+                            desc=f'{orientation}-inference',
                             file=self.make_savepath(f'末 inference_chunks_{orientation}.log'))
         chunk_iterator = notifier(chunk_iterator)
 

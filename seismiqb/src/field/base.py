@@ -57,7 +57,6 @@ class Field(VisualizationMixin):
         self.labels = []
         self.horizons, self.facies, self.fans, self.channels, self.faults = [], [], [], [], []
         self.loaded_labels = []
-        self.attached_instances = []
 
         # Geometry: description and convenient API to a seismic cube
         if isinstance(geometry, str):
@@ -148,10 +147,11 @@ class Field(VisualizationMixin):
                 paths_to_load.extend(paths_)
 
             elif isinstance(item, Horizon):
+                item.field = self
                 horizons.append(item)
 
         # Load from paths in multiple threads
-        with ThreadPoolExecutor(max_workers=min(max_workers, len(paths_to_load))) as executor:
+        with ThreadPoolExecutor(max_workers=min(max_workers, len(paths_to_load) or 1)) as executor:
             function = lambda path: self._load_horizon(path, filter=filter, interpolate=interpolate, **kwargs)
             loaded = list(executor.map(function, paths_to_load))
         horizons.extend(loaded)
@@ -173,7 +173,7 @@ class Field(VisualizationMixin):
 
     def _load_faults(self, paths, max_workers=4, pbar=True, filter=True, fix=True, **kwargs):
         """ Load faults from paths. """
-        with ThreadPoolExecutor(max_workers=min(max_workers, len(paths))) as executor:
+        with ThreadPoolExecutor(max_workers=min(max_workers, len(paths) or 1)) as executor:
             function = lambda path: self._load_fault(path, filter=filter, fix=fix, **kwargs)
             loaded = list(Notifier(pbar, total=len(paths))(executor.map(function, paths)))
 
@@ -322,7 +322,7 @@ class Field(VisualizationMixin):
         if any(sep in label_id for sep in ':-'):
             label_attr, label_idx = re.split(':|-', label_id)
 
-            if label_attr not in self.loaded_labels and label_attr != 'attached_instances':
+            if label_attr not in self.loaded_labels:
                 raise ValueError(f"Can't determine the label attribute for `{label_attr}`!")
             label_idx = int(label_idx)
             label = getattr(self, label_attr)[label_idx]
@@ -388,6 +388,18 @@ class Field(VisualizationMixin):
 
 
     # Cache: introspection and reset
+    @property
+    def attached_instances(self):
+        """ All correctly loaded/added instances. """
+        instances = []
+        for src in self.loaded_labels:
+            item = getattr(self, src)
+            if isinstance(item, list):
+                instances.extend(item)
+            else:
+                instances.append(item)
+        return instances
+
     def reset_cache(self):
         """ Clear cached data from underlying entities. """
         self.geometry.reset_cache()
