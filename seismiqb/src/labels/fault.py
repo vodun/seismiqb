@@ -233,15 +233,15 @@ class Fault(Horizon):
         path = self.field.make_path(path, name=self.short_name, makedirs=False)
 
         if os.path.exists(path):
-            npzfile = np.load(path, allow_pickle=False)
-            points = np.concatenate([npzfile['points'], self.points], axis=0)
-            if self.nodes is not None:
-                nodes = np.concatenate([npzfile['nodes'], self.nodes], axis=0)
-            else:
-                nodes = npzfile['nodes']
-        else:
-            points = self.points
-            nodes = self.nodes if self.nodes is not None else np.zeros((0, 3), dtype=np.int32)
+            raise ValueError(f'{path} already exists.')
+
+        points = self.points
+        nodes = self.nodes if self.nodes is not None else np.zeros((0, 3), dtype=np.int32)
+
+        folder_name = os.path.dirname(path)
+        if not os.path.exists(folder_name):
+            os.makedirs(folder_name)
+
         np.savez(path, points=points, nodes=nodes, allow_pickle=False)
 
     def split_faults(self, **kwargs):

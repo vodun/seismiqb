@@ -4,10 +4,8 @@
     - making an inference on selected data
 """
 import os
-from datetime import datetime
 from shutil import copyfile
 import h5py
-import tqdm
 
 import numpy as np
 from pprint import pformat
@@ -15,7 +13,6 @@ from pprint import pformat
 from .base import BaseController
 from .best_practices import MODEL_CONFIG
 
-from ..crop_batch import SeismicCropBatch
 from ..geometry import SeismicGeometry
 from ..labels import Fault
 from ..dataset import SeismicDataset
@@ -24,11 +21,11 @@ from ..metrics import FaultsMetrics
 from ..utils import adjust_shape_3d, Accumulator3D, InputLayer
 from ..plotters import plot_image
 
-from ...batchflow import Config, Pipeline, Notifier, Dataset, Monitor
+from ...batchflow import Config, Pipeline, Notifier, Monitor
 from ...batchflow import B, C, D, P, R, V, F, I, M
 from ...batchflow import NumpySampler as NS
-from ...batchflow.models.torch import TorchModel, EncoderDecoder
-
+from ...batchflow.models.torch import TorchModel, EncoderDecoder, ResBlock
+from ...batchflow.models.torch.losses import BCE
 
 
 class FaultController(BaseController):
@@ -41,7 +38,7 @@ class FaultController(BaseController):
             'train_cubes': [],
             'transposed_cubes': [],
             'inference_cubes': {},
-            'label_dir': '/INPUTS/FAULTS/NPY_WIDTH_{}/*',
+            'label_dir': '~/INPUTS/FAULTS/NPY_WIDTH_{}/*',
             'width': 3,
             'ext': 'qblosc',
             'weights': None,
@@ -68,19 +65,38 @@ class FaultController(BaseController):
             # Normalization parameters
             'norm_mode': 'minmax',
             'itemwise': False,
-            'normalization_layer': False,
-            'normalization_window': (1, 1, 100),
+            # 'normalization_layer': False,
+            # 'normalization_window': (1, 1, 100),
 
             # Model parameters
-            'phase': True,
-            'continuous_phase': False,
-            'filters': [64, 96, 128, 192, 256],
-            'model': 'UNet',
-            'loss': 'bce',
-            'output': 'sigmoid',
-            'slicing': 'native',
+            'model_class': EncoderDecoder,
+            # 'phase': True,
+            # 'continuous_phase': False,
+            # 'filters': [64, 96, 128, 192, 256],
+            # 'loss': 'bce',
+            # 'output': 'sigmoid',
+            'native_slicing': True,
             'prefetch': 0,
             'rescale_batch_size': False,
+            'model_config': {
+                **MODEL_CONFIG,
+                # 'body/encoder/blocks/filters': C('filters')[:-1],
+                # 'body/embedding/filters': C('filters')[-1],
+                # 'body/decoder/upsample/kernel_size': 5,
+                # 'body/decoder/blocks/filters': C('filters')[-2::-1],
+                'common/activation': 'relu6',
+                'optimizer': {'name': 'Adam', 'lr': 0.01},
+                "decay": {'name': 'exp', 'gamma': 0.9, 'frequency': 100, 'last_iter': 2000},
+                'microbatch': True,
+                'initial_block': {
+                    'base_block': InputLayer,
+                    'phases': True,
+                    'continuous': False,
+                    'window': (1, 1, 30),
+                    'normalization': True,
+                },
+                'loss': 'bce'
+            }
         },
 
         'inference': {
@@ -89,42 +105,13 @@ class FaultController(BaseController):
             'smooth_borders': False,
             'stride': 0.5,
             'orientation': 'ilines',
-            'slicing': 'native',
+            'native_slicing': True,
             'output': 'sigmoid',
             'norm_mode': 'minmax',
             'itemwise': False,
             'aggregation': 'mean'
         }
     })
-
-    # Model (not controller) config
-    BASE_MODEL_CONFIG = {
-        'optimizer': {'name': 'Adam', 'lr': 0.01},
-        "decay": {'name': 'exp', 'gamma': 0.9, 'frequency': 100, 'last_iter': 2000},
-        'microbatch': C('microbatch', default=True),
-        'initial_block': {
-            'enable': C('phase'),
-            'filters': C('filters')[0] // 2,
-            'kernel_size': 5,
-            'downsample': False,
-            'attention': 'scse',
-            'phases': C('phase'),
-            'continuous': C('continuous_phase'),
-            'window': C('normalization_window'),
-            'normalization': C('normalization_layer')
-        },
-        'loss': C('loss')
-    }
-
-    UNET_CONFIG = {
-        **MODEL_CONFIG,
-        'initial_block/base_block': InputLayer,
-        'body/encoder/blocks/filters': C('filters')[:-1],
-        'body/embedding/filters': C('filters')[-1],
-        'body/decoder/upsample/kernel_size': 5,
-        'body/decoder/blocks/filters': C('filters')[-2::-1],
-        'common/activation': 'relu6',
-    }
 
     def make_train_dataset(self, **kwargs):
         """ Create train dataset as an instance of :class:`.SeismicDataset` with cubes and faults.
@@ -145,15 +132,14 @@ class FaultController(BaseController):
         cubes = config['train_cubes'] if train else config['inference_cubes']
 
         paths = [self.amplitudes_path(item) for item in cubes]
-        dataset = SeismicDataset(index=paths)
 
         if labels:
             transposed = config['transposed_cubes']
             direction = {f'{cube}': 0 if cube not in transposed else 1 for cube in cubes}
-            dataset.load(label_dir=label_dir.format(width), labels_class=Fault, transform=True,
-                         direction=direction, verify=True, bar=bar)
+            index = {path: label_dir.format(width) for path in paths}
+            dataset = SeismicDataset(index=index, labels_class=Fault, direction=direction)
         else:
-            dataset.load_geometries(logs=False)
+            dataset = SeismicDataset(index=paths, logs=False)
 
         return dataset
 
@@ -285,8 +271,8 @@ class FaultController(BaseController):
 
     def train_pipeline(self):
         """ Create train pipeline. """
-        model_class = F(self.get_model_class)(C('model'))
-        model_config = F(self.get_model_config)(C('model'))
+        model_class = self.config['train/model_class']
+        model_config = self.config['train/model_config']
         ppl = (Pipeline()
             .init_variable('loss_history', [])
             .init_model(name='model', model_class=model_class, mode='dynamic', config=model_config)
@@ -301,17 +287,18 @@ class FaultController(BaseController):
                   iteration=I())
         )
         if self.config['train/visualize_crops']:
+            output = self.config['inference/output']
             ppl += (Pipeline()
-                .predict_model('model', images=B('images')[:1], fetches=C('output'), save_to=B('prediction'))
+                .predict_model('model', images=B('images')[:1], fetches=output, save_to=B('prediction'))
             )
-            if self.config['train/phase']:
+            if self.config['train/model_config/initial_block/phases']:
                 ppl += Pipeline().update(B('phases'), M('model').get_intermediate_activations(
-                    images=B('images'),
+                    images=B('images')[:2],
                     layers=M('model').model[0][0].phase_layer)
                 )
-            if self.config['train/normalization_layer']:
+            if self.config['train/model_config/initial_block/normalization']:
                 ppl += Pipeline().update(B('norm_images'), M('model').get_intermediate_activations(
-                    images=B('images'),
+                    images=B('images')[:2],
                     layers=M('model').model[0][0].normalization_layer)
                 )
         return ppl
@@ -339,12 +326,12 @@ class FaultController(BaseController):
                 {'source': [B('images'), B('prediction'), cube_name, B('locations')],
                  'name': 'prediction', 'loc': B('location'), 'plot_function': self.custom_plotter}
             ]
-            if self.config['train/normalization_layer']:
+            if self.config['train/model_config/initial_block/normalization']:
                 src += [
                     {'source': [B('norm_images'), None, cube_name, B('locations')],
                     'name': 'norm_images', 'loc': B('location'), 'plot_function': self.custom_plotter},
                 ]
-            if self.config['train/phase']:
+            if self.config['train/model_config/initial_block/phases']:
                 src += [
                     {'source': [B('phases'), None, cube_name, B('locations')],
                     'name': 'phases', 'loc': B('location'), 'plot_function': self.custom_plotter},
@@ -426,12 +413,13 @@ class FaultController(BaseController):
             test_pipeline = Pipeline().load_model('model', TorchModel, 'dynamic', path=model_path)
 
         test_pipeline += self.load_test(create_masks=create_masks)
+        output = self.config['inference/output']
         test_pipeline += (
             Pipeline()
             .adaptive_expand(src='images')
             .init_variable('predictions', [])
             .init_variable('target', [])
-            .predict_model('model', B('images'), fetches=C('output'), save_to=B('predictions'))
+            .predict_model('model', B('images'), fetches=output, save_to=B('predictions'))
             .adaptive_squeeze(src='predictions')
             .run_later(D('size'))
         )
@@ -538,7 +526,8 @@ class FaultController(BaseController):
                 outputs[cube_idx] += [[slices, image, prediction, *metrics]]
         return outputs
 
-    def visualize_predictions(self, *args, overlap=True, threshold=0.05, each=100, iteration=0, skeletonize=False, clear=False, width=3, figsize=(20, 20), **kwargs):
+    def visualize_predictions(self, *args, overlap=True, threshold=0.5, each=100, iteration=0, skeletonize=False,
+                              clear=False, width=3, figsize=(20, 20), **kwargs):
         """ Plot predictions for cubes and ranges specified in 'inference' section of config. """
         if each is not None and iteration % each == 0:
             results = self.inference_on_slides(*args, **kwargs)
