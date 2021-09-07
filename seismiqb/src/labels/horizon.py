@@ -839,7 +839,6 @@ class Horizon(AttributesMixin, VisualizationMixin):
         filtering_matrix[coordinates[:, 0], coordinates[:, 1]] = 1
         filtering_matrix = binary_fill_holes(filtering_matrix)
         filtering_matrix = binary_dilation(filtering_matrix, iterations=4)
-        filtering_matrix = self.put_on_full(filtering_matrix, False)
         return filtering_matrix
 
 

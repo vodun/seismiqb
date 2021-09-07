@@ -6,6 +6,7 @@ import sys
 from textwrap import dedent
 
 import numpy as np
+from time import perf_counter
 import h5py
 
 from .export import ExportMixin
@@ -814,3 +815,25 @@ class SeismicGeometry(ExportMixin):
         inverse_matrix = np.linalg.inv(self.rotation_matrix[:, :2])
         lines = (inverse_matrix @ points.T - inverse_matrix @ self.rotation_matrix[:, 2].reshape(2, -1)).T
         return np.rint(lines)
+
+    def benchmark(self, n_repeats_slide=300, n_repeats_crop=300, seed=42):
+        """Calculate average data loading timings in ms"""
+        rng = np.random.default_rng(seed)
+
+        start = perf_counter()
+        for _ in range(n_repeats_slide):
+            axis = rng.integers(low=0, high=3)
+            loc = rng.integers(low=0, high=self.cube_shape[axis])
+            _ = self.load_slide(loc, axis)
+        slide_timings = 1000 * (perf_counter() - start) / n_repeats_slide
+
+        start = perf_counter()
+        for _ in range(n_repeats_crop):
+            point = rng.integers(low=(0, 0, 0), high=self.cube_shape) // 2
+            shape = rng.integers(low=(5, 5, 5), high=(200, 200, 200))
+            locations = [slice(start_, np.clip(start_+shape_, 0, max_shape))
+                        for start_, shape_, max_shape in zip(point, shape, self.cube_shape)]
+            _ = self.load_crop(locations)
+
+        crop_timings = 1000 * (perf_counter() - start) / n_repeats_crop
+        return {'slide': slide_timings, 'crop': crop_timings}
