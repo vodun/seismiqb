@@ -5,7 +5,7 @@ import sys
 
 from textwrap import dedent
 
-from time import perf_counter
+from resource import getrusage, RUSAGE_SELF
 import numpy as np
 import h5py
 
@@ -816,24 +816,39 @@ class SeismicGeometry(ExportMixin):
         lines = (inverse_matrix @ points.T - inverse_matrix @ self.rotation_matrix[:, 2].reshape(2, -1)).T
         return np.rint(lines)
 
-    def benchmark(self, n_repeats_slide=300, n_repeats_crop=300, seed=42):
-        """Calculate average data loading timings in ms"""
-        rng = np.random.default_rng(seed)
+    def benchmark(self, n_repeats_slide=300, n_repeats_crop=300, use_cache=False, seed=42):
+        """Calculate average data loading timings for slides and crops in ms.
 
-        start = perf_counter()
+        Parameters
+        ----------
+        n_repeats_slide : int, optional
+            Amount of slides to load in an experiment.
+        n_repeats_crop : int, optional
+            Amount of crops to load in an experiment.
+        use_cache : bool, optional
+            Whether to use lru_cache.
+        seed : int, optional
+            Seed the random numbers generator.
+        """
+        self.reset_cache()
+        rng = np.random.default_rng(seed)
+        crop_kwargs = {'mode': 'slide'} if use_cache else {}
+
+        start = getrusage(RUSAGE_SELF)[0] # user time in seconds
         for _ in range(n_repeats_slide):
             axis = rng.integers(low=0, high=3)
             loc = rng.integers(low=0, high=self.cube_shape[axis])
-            _ = self.load_slide(loc, axis)
-        slide_timings = 1000 * (perf_counter() - start) / n_repeats_slide
+            _ = self.load_slide(loc=loc, axis=axis, use_cache=use_cache)
+        slide_timings = 1000 * (getrusage(RUSAGE_SELF)[0] - start) / n_repeats_slide
 
-        start = perf_counter()
+        start = getrusage(RUSAGE_SELF)[0]
         for _ in range(n_repeats_crop):
             point = rng.integers(low=(0, 0, 0), high=self.cube_shape) // 2
             shape = rng.integers(low=(5, 5, 5), high=(200, 200, 200))
             locations = [slice(start_, np.clip(start_+shape_, 0, max_shape))
                         for start_, shape_, max_shape in zip(point, shape, self.cube_shape)]
-            _ = self.load_crop(locations)
+            _ = self.load_crop(locations, **crop_kwargs)
 
-        crop_timings = 1000 * (perf_counter() - start) / n_repeats_crop
+        crop_timings = 1000 * (getrusage(RUSAGE_SELF)[0] - start) / n_repeats_crop
+        self.reset_cache()
         return {'slide': slide_timings, 'crop': crop_timings}
