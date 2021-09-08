@@ -1,16 +1,16 @@
 """ Horizon class for POST-STACK data. """
 import os
 from copy import copy
-from functools import partialmethod
 from textwrap import dedent
+from functools import partialmethod
 
 import numpy as np
 import pandas as pd
 
 from cv2 import dilate
-from scipy.ndimage.morphology import binary_fill_holes, binary_dilation
-from scipy.ndimage import find_objects
 from skimage.measure import label
+from scipy.ndimage import find_objects
+from scipy.ndimage.morphology import binary_fill_holes, binary_dilation
 
 from .horizon_attributes import AttributesMixin
 from .horizon_visualization import VisualizationMixin
@@ -1325,3 +1325,30 @@ class Horizon(AttributesMixin, VisualizationMixin):
         points = self.matrix_to_points(matrix)
         points = self.cubic_to_lines(points)
         self.dump_charisma(points, path, transform)
+
+
+    # Utility
+    @staticmethod
+    def is_charisma_like(path, bad_extensions=None, size_threshold=100):
+        """ Check if the path looks like the horizon file. """
+        bad_extensions = bad_extensions or []
+        bad_extensions.extend(['.py', '.ipynb', '.ckpt',
+                            '.png', '.jpg',
+                            '.log', '.txt', '.torch'])
+
+        try:
+            if os.path.isdir(path):
+                return False
+
+            if max([path.endswith(ext) for ext in bad_extensions]):
+                return False
+
+            if (os.path.getsize(path) / 1024) < size_threshold:
+                return False
+            with open(path, encoding='utf-8') as file:
+                line = file.readline()
+                n = len(line.split(' '))
+            return (n == 3) or (n >= 9 and 'INLINE' in line)
+
+        except UnicodeDecodeError:
+            return False

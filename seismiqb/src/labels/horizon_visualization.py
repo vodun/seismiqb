@@ -54,6 +54,7 @@ class VisualizationMixin:
                     if label is self:
                         return f'{src}:{idx}'
 
+        # Instance is not attached to a field: add it temporarily (clean-up later)
         self.field._unknown_label = self
         self.field.loaded_labels.append('_unknown_label')
         return '_unknown_label'
@@ -62,6 +63,8 @@ class VisualizationMixin:
     def _show_add_prefix(attribute, prefix=None):
         if isinstance(attribute, str):
             attribute = ('/'.join([prefix, attribute])).replace('//', '/')
+        elif isinstance(attribute, dict):
+            attribute['src'] = ('/'.join([prefix, attribute['src']])).replace('//', '/')
         return attribute
 
 
