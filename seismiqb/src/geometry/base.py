@@ -816,7 +816,7 @@ class SeismicGeometry(ExportMixin):
         lines = (inverse_matrix @ points.T - inverse_matrix @ self.rotation_matrix[:, 2].reshape(2, -1)).T
         return np.rint(lines)
 
-    def benchmark(self, n_slide=300, projections=[0, 1, 2],
+    def benchmark(self, n_slide=300, projections=(0, 1, 2),
                   n_crop=300, crop_shapes_min=5, crop_shapes_max=200,
                   use_cache=False, seed=42):
         """Calculate average data loading timings (in ms) in user, system and wall mode for slides and crops.
@@ -847,14 +847,14 @@ class SeismicGeometry(ExportMixin):
 
         # Calculate the average loading slide time by loading random slides `n_slide` times
         self.reset_cache()
-        start = getrusage(RUSAGE_SELF)[:2] # Resource usage information
+        start = getrusage(RUSAGE_SELF)[:2]  # 0 - user time in seconds,  1 - system time in seconds
         for _ in range(n_slide):
             axis = rng.choice(a=projections)
             loc = rng.integers(low=0, high=self.cube_shape[axis])
             _ = self.load_slide(loc=loc, axis=axis, use_cache=use_cache)
         end = getrusage(RUSAGE_SELF)[:2]
-        user_slide_timings = 1000 * (end[0] - start[0]) / n_slide # A zero key provides time in user mode in float seconds
-        system_slide_timings = 1000 * (end[1] - start[1]) / n_slide # A first key provides time in system mode in float seconds
+        user_slide_timings = 1000 * (end[0] - start[0]) / n_slide
+        system_slide_timings = 1000 * (end[1] - start[1]) / n_slide
         timings['slide'] = {
             'user': user_slide_timings,
             'system': system_slide_timings,
@@ -873,7 +873,7 @@ class SeismicGeometry(ExportMixin):
         crop_kwargs = {'mode': 'slide'} if use_cache else {}
 
         # Calculate the average loading crop time by loading random crops `n_crop` times
-        start = getrusage(RUSAGE_SELF)[:2]
+        start = getrusage(RUSAGE_SELF)[:2] # 0 key - user time in seconds,  1 key - system time in seconds
         for _ in range(n_crop):
             point = rng.integers(low=(0, 0, 0), high=self.cube_shape) // 2
             shape = rng.integers(low=crop_shapes_min, high=crop_shapes_max)
@@ -881,8 +881,8 @@ class SeismicGeometry(ExportMixin):
                         for start_, shape_, max_shape in zip(point, shape, self.cube_shape)]
             _ = self.load_crop(locations, **crop_kwargs)
         end = getrusage(RUSAGE_SELF)[:2]
-        user_crop_timings = 1000 * (end[0] - start[0]) / n_crop # A zero key provides time in user mode in float seconds
-        system_crop_timings = 1000 * (end[1] - start[1]) / n_crop # A first key provides time in system mode in float seconds
+        user_crop_timings = 1000 * (end[0] - start[0]) / n_crop
+        system_crop_timings = 1000 * (end[1] - start[1]) / n_crop
         timings['crop'] = {
             'user': user_crop_timings,
             'system': system_crop_timings,
