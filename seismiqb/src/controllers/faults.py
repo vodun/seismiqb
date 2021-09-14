@@ -24,7 +24,7 @@ from ..plotters import plot_image
 from ...batchflow import Config, Pipeline, Notifier, Monitor
 from ...batchflow import B, C, D, P, R, V, F, I, M
 from ...batchflow import NumpySampler as NS
-from ...batchflow.models.torch import TorchModel, EncoderDecoder, ResBlock
+from ...batchflow.models.torch import TorchModel, EncoderDecoder
 from ...batchflow.models.torch.losses import BCE
 
 
@@ -54,7 +54,12 @@ class FaultController(BaseController):
             'batch_size': 1024,
             'crop_shape': [1, 128, 512],
             'n_iters': 2000,
-            'callback/each': 100,
+            'callback': [
+                (
+                    'visualize_predictions',
+                    100,
+                    {'train_pipeline': B().pipeline, 'savepath': 'prediction', 'iteration': I()})
+            ],
             'visualize_crops': True,
 
             # Augmentation parameters
@@ -78,25 +83,22 @@ class FaultController(BaseController):
             'native_slicing': True,
             'prefetch': 0,
             'rescale_batch_size': False,
-            'model_config': {
-                **MODEL_CONFIG,
-                # 'body/encoder/blocks/filters': C('filters')[:-1],
-                # 'body/embedding/filters': C('filters')[-1],
-                # 'body/decoder/upsample/kernel_size': 5,
-                # 'body/decoder/blocks/filters': C('filters')[-2::-1],
-                'common/activation': 'relu6',
-                'optimizer': {'name': 'Adam', 'lr': 0.01},
-                "decay": {'name': 'exp', 'gamma': 0.9, 'frequency': 100, 'last_iter': 2000},
-                'microbatch': True,
-                'initial_block': {
-                    'base_block': InputLayer,
-                    'phases': True,
-                    'continuous': False,
-                    'window': (1, 1, 30),
-                    'normalization': True,
-                },
-                'loss': 'bce'
-            }
+            'model_config': None,
+            # 'model_config': {
+            #     **MODEL_CONFIG,
+            #     'common/activation': 'relu6',
+            #     'optimizer': {'name': 'Adam', 'lr': 0.01},
+            #     "decay": {'name': 'exp', 'gamma': 0.9, 'frequency': 100, 'last_iter': 2000},
+            #     'microbatch': True,
+            #     'initial_block': {
+            #         'base_block': InputLayer,
+            #         'phases': True,
+            #         'continuous': False,
+            #         'window': (1, 1, 30),
+            #         'normalization': True,
+            #     },
+            #     'loss': BCE(pos_weight=20),
+            # }
         },
 
         'inference': {
@@ -123,7 +125,7 @@ class FaultController(BaseController):
         Arguments are from 'dataset' subconfig and kwargs. """
         return self._make_dataset(train=False, labels=labels, **kwargs)
 
-    def _make_dataset(self, train=True, labels=True, bar=False, **kwargs):
+    def _make_dataset(self, train=True, labels=True, **kwargs):
         """ Create an instance of :class:`.SeismicDataset` with cubes and faults. Arguments are from 'dataset'
         subconfig and kwargs. """
         config = {**self.config['dataset'], **kwargs}
@@ -225,7 +227,7 @@ class FaultController(BaseController):
         heights = (NS('u', dim=2) * [0.2, 0.2] + [0.25, 0.55]).apply(lambda x: np.squeeze(x))
         muls = NS('c', a=np.arange(-8, -4)).apply(lambda x: x[:, 0])
 
-        il, xl, h = self.config['train/crop_shape']
+        _, xl, h = self.config['train/crop_shape']
 
         def faults():
             x0 = np.random.randint(14, xl-10)
@@ -238,6 +240,7 @@ class FaultController(BaseController):
 
         nhors = NS('c', a=[0, 1, 2]).apply(lambda x: x[0, 0])
         locations = [slice(0, i) for i in self.config['train/crop_shape']]
+
         return (Pipeline()
                 .generate_synthetic(shape=self.config['train/crop_shape'],
                                     grid_shape=(10,),
@@ -273,19 +276,25 @@ class FaultController(BaseController):
         """ Create train pipeline. """
         model_class = self.config['train/model_class']
         model_config = self.config['train/model_config']
+
         ppl = (Pipeline()
             .init_variable('loss_history', [])
             .init_model(name='model', model_class=model_class, mode='dynamic', config=model_config)
             .adaptive_expand(src=['images', 'masks'])
+            # .mask_rebatch(axis=-2, threshold=0.8)
             .train_model('model',
                          fetches='loss',
                          images=B('images'),
                          masks=B('masks'),
                          save_to=V('loss_history', mode='a'))
-            .call(self.visualize_predictions, train_pipeline=B().pipeline,
-                  savepath='prediction', each=self.config['train/callback/each'],
-                  iteration=I())
         )
+        callbacks = [
+            (getattr(self, name), each, kwargs) for name, each, kwargs in self.config['train/callback']
+        ]
+
+        for callback, each, kwargs in callbacks:
+            ppl += Pipeline().call(callback, each=each, **kwargs)
+
         if self.config['train/visualize_crops']:
             output = self.config['inference/output']
             ppl += (Pipeline()
@@ -293,12 +302,12 @@ class FaultController(BaseController):
             )
             if self.config['train/model_config/initial_block/phases']:
                 ppl += Pipeline().update(B('phases'), M('model').get_intermediate_activations(
-                    images=B('images')[:2],
+                    images=B('images')[:1],
                     layers=M('model').model[0][0].phase_layer)
                 )
             if self.config['train/model_config/initial_block/normalization']:
                 ppl += Pipeline().update(B('norm_images'), M('model').get_intermediate_activations(
-                    images=B('images')[:2],
+                    images=B('images')[:1],
                     layers=M('model').model[0][0].normalization_layer)
                 )
         return ppl
@@ -323,7 +332,7 @@ class FaultController(BaseController):
             src = [
                 {'source': [B('images'), B('masks'), cube_name, B('locations')],
                  'name': 'masks', 'loc': B('location'), 'plot_function': self.custom_plotter},
-                {'source': [B('images'), B('prediction'), cube_name, B('locations')],
+                {'source': [B('prediction'), None, cube_name, B('locations')],
                  'name': 'prediction', 'loc': B('location'), 'plot_function': self.custom_plotter}
             ]
             if self.config['train/model_config/initial_block/normalization']:
