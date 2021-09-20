@@ -48,26 +48,26 @@ def make_surfaces(num_surfaces, grid_shape, shape, kind='cubic', perturbation_sh
     elif len(shape) == 3:
         interp = interp2d
     else:
-        raise ValueError('The function only supports the generation of 1d curves and 2d-surfaces.')
+        raise ValueError('The function only supports the generation of 1d and 2d-surfaces.')
 
     # make the grid
     grid = [np.linspace(0, 1, num_points) for num_points in grid_shape]
 
-    # make the first curve
-    curves = [np.zeros(grid_shape)]
+    # make the first surface
+    surfaces = [np.zeros(grid_shape)]
     shares = shares if shares is not None else np.ones((num_surfaces, ))
     shares = np.array(shares) / np.sum(shares)
     for delta_h in shares:
         epsilon = perturbation_share * delta_h
 
-        # make each curve in unit-terms
-        curves.append(curves[-1] + delta_h * np.ones_like(curves[0])
-                      + rng.uniform(low=-epsilon, high=epsilon, size=curves[0].shape))
+        # make each surface in unit-terms
+        surfaces.append(surfaces[-1] + delta_h * np.ones_like(surfaces[0])
+                      + rng.uniform(low=-epsilon, high=epsilon, size=surfaces[0].shape))
 
-    # interpolate and scale each curve to cube-shape
+    # interpolate and scale each surface to cube-shape
     results = []
-    for curve in curves:
-        func = interp(*grid, curve, kind=kind)
+    for surface in surfaces:
+        func = interp(*grid, surface, kind=kind)
         results.append((func(*[np.arange(num_points) / num_points for num_points in shape[:-1]])
                         * shape[-1]).astype(np.int).T)
     return np.array(results)
@@ -138,46 +138,48 @@ def _make_velocity_model_3d(velocities, surfaces, shape):
     return array
 
 
-def make_elastic_distortion(rng=None, seed=None, n_points=10, zeros_share=0.2, kind='cubic',
+def make_elastic_distortion(xs, rng=None, seed=None, n_points=10, zeros_share=0.2, kind='cubic',
                             perturb_values=True, perturb_peak=True, random_invert=True):
-    """ Generate a hump-shaped distortion [0, 1] -> [0, 1]. Transform f(x) = x + distortion * mul
-    will later be used to perform elastic transform of an image. The left and the right tails of the
+    """ Generate a hump-shaped distortion [0, 1] -> [0, 1] and apply it to a set of points.
+    The transformation has form f(x) = x + distortion * mul. It represents an
+    elastic transform of an image represented by `xs`. The left and the right tails of the
     distortion can be filled with zeros. Also, the peak of the hump can be randomly shifted to
     left or right. In addition, when needed, the distortion itself can be randomly inverted.
     """
     rng = rng or np.random.default_rng(seed)
-    xs = np.linspace(0, 1, n_points)
+    points = np.linspace(0, 1, n_points)
 
-    # make zeros-containing postfix and prefix
+    # compute length of prefix of zeros
     n_zeros = int(n_points * zeros_share)
     if perturb_peak:
-        delta_position = np.random.randint(-n_zeros // 4, n_zeros // 4 + 1)
+        delta_position = rng.integers(-n_zeros // 4, n_zeros // 4 + 1)
     else:
         delta_position = 0
-    zeros_prefix = [0] * (n_zeros // 2 + delta_position)
-    zeros_postfix = [0] * (n_zeros - len(zeros_prefix))
+    prefix_length = n_zeros // 2 + delta_position
 
     # form the values-hump and perturb it if needed
+    values = np.zeros((n_points, ))
     n_values = n_points - n_zeros
-    half = np.linspace(0, 1, n_values // 2 + 1 + n_values % 2)[1:]
-    values = half.tolist() + half.tolist()[::-1][n_values % 2:]
+    half_hump = np.linspace(0, 1, n_values // 2 + 1 + n_values % 2)[1:]
+    hump = np.concatenate([half_hump, half_hump[::-1][n_values % 2:]])
     if perturb_values:
         step = 2 / n_values
-        values = (rng.uniform(-step / 2, step / 2, (n_values, )) + np.array(values)).tolist()
-    spl = interp1d(xs, zeros_prefix + values + zeros_postfix, kind=kind)
+        hump += rng.uniform(-step / 2, step / 2, (n_values, ))
+    values[prefix_length: prefix_length + len(hump)] = hump
+    spline = interp1d(points, values, kind=kind)
 
     # possibly invert the elastic transform
     if random_invert:
         if rng.choice([True, False]):
-            return lambda x: -spl(x)
-    return spl
+            return -spline(xs)
+    return spline(xs)
 
 class SyntheticGenerator():
     """ Class for generation of syhthetic velocity and density models and synthetic seismic - 2D/3D.
     """
     def __init__(self, rng=None, seed=None):
         """ Class for generation of syhthetic velocity and density models and synthetic seismic - 2D/3D.
-        Can generate synthetic seismic with faults. Horizons and faults acn be stored in instances of the
+        Can generate synthetic seismic with faults. Horizons and faults can be stored in instances of the
         class.
 
         Parameters
@@ -193,7 +195,7 @@ class SyntheticGenerator():
         self.velocity_model = None
         self.density_model = None
         self.synthetic = None
-        self._curves = None
+        self._reflection_surfaces = None
         self._horizon_heights = ()
         self._faults_coords = ()
         self._mask = None
@@ -249,21 +251,21 @@ class SyntheticGenerator():
             raise ValueError('The function only supports the generation of 2d and 3d synthetic seismic.')
 
         num_reflections = len(self.velocities) - 1
-        curves = make_surfaces(num_reflections, grid_shape, perturbation_share=perturbation_share,
-                               shape=shape, rng=self.rng)
+        surfaces = make_surfaces(num_reflections, grid_shape, perturbation_share=perturbation_share,
+                                 shape=shape, rng=self.rng)
         _make_velocity_model = _make_velocity_model_2d if self.dim == 2 else _make_velocity_model_3d
-        self.velocity_model = _make_velocity_model(self.velocities, curves, shape)
+        self.velocity_model = _make_velocity_model(self.velocities, surfaces, shape)
 
-        # store curves-list to later use them as horizons
-        self._curves = curves
+        # store surfaces-list to later use them as horizons
+        self._reflection_surfaces = surfaces
         return self
 
-    def _add_fault(self, fault, num_points, max_shift, zeros_share, kind,
+    def _add_fault(self, fault_coordinates, num_points, max_shift, zeros_share, kind,
                    perturb_values, perturb_peak, random_invert, fetch_and_update_mask):
         """ Add fault to a velocity model.
         """
-        x0, x1 = fault[0][0], fault[1][0]
-        y0, y1 = fault[0][1], fault[1][1]
+        x0, x1 = fault_coordinates[0][0], fault_coordinates[1][0]
+        y0, y1 = fault_coordinates[0][1], fault_coordinates[1][1]
         x_low, x_high, y_low, y_high = (0, self.velocity_model.shape[0], min(y0, y1), max(y0, y1))
 
         # y-axis coordinate shift
@@ -274,20 +276,21 @@ class SyntheticGenerator():
         b = (x0 * y1 - x1 * y0) / (y1 - y0)
         kx, ky = (k, 1)
 
-        # apply map coordinates
+        # make preparations for coordinate-map (i.e. elastic transform)
         xs, ys = np.meshgrid(np.arange(x_low, x_high), np.arange(0, y_high - y_low))
+
+        # 0 to the left of the fault, 1 to the right
+        indicator = (np.sign(xs - k * ys - b) + 1) / 2
+
+        # compute measure of closeness of a point to the fault-center
+        closeness = make_elastic_distortion(ys / (y_high - y_low), self.rng, n_points=num_points,
+                                            perturb_peak=perturb_peak, perturb_values=perturb_values,
+                                            kind=kind, zeros_share=zeros_share, random_invert=random_invert)
+
+        # compute vector field for a coordinate-map and apply the map to the seismic
+        delta_xs, delta_ys = (max_shift * kx * indicator * closeness,
+                              max_shift * ky * indicator * closeness)
         crop = self.velocity_model[x_low:x_high, y_low:y_high]
-        sign = lambda x, y: (np.sign(x - k * y - b) + 1) / 2
-
-        func = make_elastic_distortion(self.rng, n_points=num_points, perturb_peak=perturb_peak,
-                                       perturb_values=perturb_values, kind=kind, zeros_share=zeros_share,
-                                       random_invert=random_invert)
-        def distance(y):
-            y_01 = y / (y_high - y_low)
-            return func(y_01)
-
-        delta_xs, delta_ys = (max_shift * kx * sign(xs, ys) * distance(ys),
-                              max_shift * ky * sign(xs, ys) * distance(ys))
         crop_elastic = map_coordinates(crop.astype(np.float32),
                                        (xs + delta_xs, ys + delta_ys),
                                        mode='nearest').T
@@ -299,7 +302,7 @@ class SyntheticGenerator():
                 fetch_and_update_mask = {'mode': fetch_and_update_mask}
             fetch_and_update_mask['horizon_format'] = 'mask'
 
-            # make enumerated mask and apply the same coordinate-map to it
+            # make mask and apply the same coordinate-map to it
             mask = self.fetch_horizons(**fetch_and_update_mask)
             crop = mask[x_low:x_high, y_low:y_high]
             crop_elastic = map_coordinates(crop.astype(np.int32),
@@ -404,12 +407,12 @@ class SyntheticGenerator():
             self.synthetic += noise_mul * self.rng.random(self.synthetic.shape) * self.synthetic.std()
         return self
 
-    def _make_enumerated_mask(self, curves):
-        """ Make enumerated mask from a sequence of curves. Each curve is marked by its ordinal
-        number from `range(1, len(curves) + 1)` on a resulting mask.
+    def _make_enumerated_mask(self, surfaces):
+        """ Make enumerated mask from a sequence of surfaces. Each surfaces is marked by its ordinal
+        number from `range(1, len(surfaces) + 1)` on a resulting mask.
         """
         mask = np.zeros_like(self.velocity_model)
-        for i, horizon in enumerate(curves):
+        for i, horizon in enumerate(surfaces):
             mesh = np.meshgrid(*[np.arange(axis_shape) for axis_shape in horizon.shape])
             mask[(*mesh, horizon)] = i + 1
         return mask
@@ -417,12 +420,19 @@ class SyntheticGenerator():
     def _enumerated_to_heights(self, mask):
         """ Convert enumerated mask to heights.
         """
-        curves = []
+        surfaces = []
         n_levels = len(np.unique(mask)) - 1
         for i in range(1, n_levels + 1):
-            heights = np.where(mask == i)[-1].reshape(self._curves[0].shape)
-            curves.append(heights)
-        return curves
+            heights = np.where(mask == i)[-1].reshape(self._reflection_surfaces[0].shape)
+            surfaces.append(heights)
+        return surfaces
+
+    @staticmethod
+    def _add_surface_to_mask(surface, mask):
+        """ Add horizon-surface to mask.
+        """
+        mesh = np.meshgrid(*[np.arange(axis_shape) for axis_shape in surface.shape])
+        mask[(*mesh, surface)] = 1
 
     def fetch_horizons(self, mode='horizons', horizon_format='heights', width=5):
         """ Fetch some (or all) reflective surfaces.
@@ -430,9 +440,9 @@ class SyntheticGenerator():
         Parameters
         ----------
         mode : str
-            Can be either 'horizons', 'all' or None. When 'horizons', only horizon-surfaces
+            Can be either 'horizons', 'all' ot 'top{K}'. When 'horizons', only horizon-surfaces
             (option `horizon_heights`) are returned. Choosing 'all' allows to return all of
-            the reflections, while 'topK' option leads to fetching K surfaces correpsonding
+            the reflections, while 'top{K}' option leads to fetching K surfaces correpsonding
             to K largest jumps in velocities-array.
         horizon_format : str
             Can be either 'heights' or 'mask'.
@@ -446,29 +456,26 @@ class SyntheticGenerator():
             containing horizon-heights of selected horizons. If format set to 'mask',
             returns horizons-mask.
         """
-        if mode is None:
-            return None
         if mode == 'all':
-            curves = self._curves
+            indices = slice(0, None)
         elif mode == 'horizons':
-            curves = self._curves[[int(self._curves.shape[0] * height_share)
-                                    for height_share in self._horizon_heights]]
+            indices = [int(self._reflection_surfaces.shape[0] * height_share)
+                       for height_share in self._horizon_heights]
         elif 'top' in mode:
             top_k = int(mode.replace('top', ''))
-            ixs = np.argsort(np.abs(np.diff(self.velocities)))[::-1][:top_k]
-            curves = self._curves[ixs]
+            indices = np.argsort(np.abs(np.diff(self.velocities)))[::-1][:top_k]
         else:
             raise ValueError('Mode can be one of `horizons`, `all` or `top[k]`')
+        surfaces = self._reflection_surfaces[indices]
 
         if horizon_format == 'heights':
-            return curves
+            return surfaces
         if horizon_format == 'mask':
             if self._mask is not None:
                 return self._mask
             mask = np.zeros_like(self.velocity_model)
-            for curve in curves:
-                mesh = np.meshgrid(*[np.arange(axis_shape) for axis_shape in curve.shape])
-                mask[(*mesh, curve)] = 1
+            for surface in surfaces:
+                self._add_surface_to_mask(surface, mask)
 
             # add width to horizon-mask if needed
             if width is not None:
