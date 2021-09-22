@@ -5,7 +5,6 @@
 """
 import os
 from shutil import copyfile
-import h5py
 
 import numpy as np
 from pprint import pformat
@@ -18,7 +17,7 @@ from ..labels import Fault
 from ..dataset import SeismicDataset
 from ..samplers import SeismicSampler, RegularGrid, FaultSampler, ConstantSampler
 from ..metrics import FaultsMetrics
-from ..utils import adjust_shape_3d, Accumulator3D, InputLayer
+from ..utils import adjust_shape_3d, Accumulator3D, skeletonize
 from ..plotters import plot_image
 
 from ...batchflow import Config, Pipeline, Notifier, Monitor
@@ -65,53 +64,33 @@ class FaultController(BaseController):
             # Augmentation parameters
             'angle': 25,
             'scale': (0.7, 1.5, 1),
-            'augment': True,
+            'augment': False,
+            'adjust': False,
 
             # Normalization parameters
             'norm_mode': 'minmax',
-            'itemwise': False,
-            # 'normalization_layer': False,
-            # 'normalization_window': (1, 1, 100),
+            'itemwise': True,
 
             # Model parameters
             'model_class': EncoderDecoder,
-            # 'phase': True,
-            # 'continuous_phase': False,
-            # 'filters': [64, 96, 128, 192, 256],
-            # 'loss': 'bce',
-            # 'output': 'sigmoid',
             'native_slicing': True,
             'prefetch': 0,
             'rescale_batch_size': False,
-            'model_config': None,
-            # 'model_config': {
-            #     **MODEL_CONFIG,
-            #     'common/activation': 'relu6',
-            #     'optimizer': {'name': 'Adam', 'lr': 0.01},
-            #     "decay": {'name': 'exp', 'gamma': 0.9, 'frequency': 100, 'last_iter': 2000},
-            #     'microbatch': True,
-            #     'initial_block': {
-            #         'base_block': InputLayer,
-            #         'phases': True,
-            #         'continuous': False,
-            #         'window': (1, 1, 30),
-            #         'normalization': True,
-            #     },
-            #     'loss': BCE(pos_weight=20),
-            # }
+            'model_config': None
         },
 
         'inference': {
             'crop_shape': [1, 128, 512],
             'batch_size': 32,
-            'smooth_borders': False,
+            'smooth_borders': True,
             'stride': 0.5,
             'orientation': 'ilines',
             'native_slicing': True,
             'output': 'sigmoid',
             'norm_mode': 'minmax',
-            'itemwise': False,
-            'aggregation': 'mean'
+            'itemwise': True,
+            'aggregation': 'max',
+            'prefetch': 4
         }
     })
 
@@ -232,7 +211,7 @@ class FaultController(BaseController):
         def faults():
             x0 = np.random.randint(14, xl-10)
             x1 = np.random.randint(14, xl-10) # same prmtzn for x1 as for x0; you can change it ofc
-            y0 =  np.random.randint(0, 200)
+            y0 = np.random.randint(0, 200)
             y1 = np.random.randint(300, h)
             return (
                 ((x0, y0), (x1, y1)),
@@ -414,12 +393,13 @@ class FaultController(BaseController):
                     bins=n_bins, range=(0, 1))[0])
         )
 
-    def get_inference_template(self, train_pipeline=None, model_path=None, create_masks=False):
+    def get_inference_template(self, model, create_masks):
         """ Define the whole inference procedure pipeline. """
-        if train_pipeline is not None:
-            test_pipeline = Pipeline().import_model('model', train_pipeline)
-        else:
-            test_pipeline = Pipeline().load_model('model', TorchModel, 'dynamic', path=model_path)
+        # if train_pipeline is not None:
+        #     test_pipeline = Pipeline().import_model('model', train_pipeline)
+        # else:
+        #     test_pipeline = Pipeline().load_model('model', TorchModel, 'dynamic', path=model_path)
+        test_pipeline = Pipeline().init_model(name='model', source=model)
 
         test_pipeline += self.load_test(create_masks=create_masks)
         output = self.config['inference/output']
@@ -459,7 +439,7 @@ class FaultController(BaseController):
             cubes[cube] = [cubes[cube]] if isinstance(cubes[cube][0], int) else cubes[cube]
         return cubes
 
-    def make_accumulator(self, field, slices, crop_shape, strides, orientation=0, path=None):
+    def make_accumulator(self, field, ranges, crop_shape, strides, orientation=0, full=False, path=None):
         """ Make grid and accumulator for inference. """
         batch_size = self.config['inference']['batch_size']
         aggregation = self.config['inference']['aggregation']
@@ -467,73 +447,21 @@ class FaultController(BaseController):
         grid = RegularGrid(field=field,
                            threshold=0,
                            orientation=orientation,
-                           ranges=slices,
+                           ranges=ranges,
                            batch_size=batch_size,
-                           crop_shape=crop_shape, strides=strides)
+                           crop_shape=crop_shape,
+                           strides=strides)
+
+        origin = (0, 0, 0) if full else grid.origin
+        shape = field.shape if full else grid.shape
 
         accumulator = Accumulator3D.from_aggregation(aggregation=aggregation,
-                                                     origin=grid.origin,
-                                                     shape=grid.shape,
+                                                     origin=origin,
+                                                     shape=shape,
                                                      fill_value=0.0,
                                                      path=path)
 
         return grid, accumulator
-
-    def inference_on_slides(self, train_pipeline=None, model_path=None, create_mask=False, pbar=False, **kwargs):
-        """ Make inference on slides. """
-        config = {**self.config['dataset'], **self.config['inference'], **kwargs}
-        crop_shape = config['crop_shape']
-        cubes = config['inference_cubes']
-        strides = config['stride']
-
-        strides = strides if isinstance(strides, tuple) else [strides] * 3
-
-        strides = np.maximum(np.array(crop_shape) * np.array(strides), 1).astype(int)
-
-        self.log('Create test pipeline and dataset.')
-        dataset = self.make_inference_dataset(create_mask)
-        inference_pipeline = self.get_inference_template(train_pipeline, model_path, create_mask)
-        inference_pipeline = inference_pipeline << config << dataset
-
-
-        cubes = {
-            self.cube_name_from_path(self.amplitudes_path(k)): v for k, v in self.get_inference_ranges(cubes).items()
-        }
-
-        outputs = {}
-        for cube_idx in dataset.indices:
-            outputs[cube_idx] = []
-            field = dataset[cube_idx]
-            for item in cubes[cube_idx]:
-                self.log(f'Create prediction for {cube_idx}: {item[1:]}. orientation={item[0]}.')
-                orientation = item[0]
-                slices = item[1:]
-                if len(slices) != 3:
-                    slices = (None, None, None)
-
-                grid, accumulator = self.make_accumulator(field, slices, crop_shape, strides, orientation)
-                ppl = inference_pipeline << {'sampler': grid, 'accumulator': accumulator}
-
-                notifier = {
-                    'file': self.make_savepath('末 inference_bar.log'),
-                }
-
-                ppl.run(n_iters=grid.n_iters, notifier=notifier)
-                prediction = accumulator.aggregate()
-
-                image = field.geometry[
-                    slices[0][0]:slices[0][1],
-                    slices[1][0]:slices[1][1],
-                    slices[2][0]:slices[2][1]
-                ]
-
-                if orientation == 1:
-                    image = image.transpose([1, 0, 2])
-                    prediction = prediction.transpose([1, 0, 2])
-
-                metrics = np.nanmean(ppl.v('metric')), np.argmax(ppl.v('semblance_hist')) / 1000
-                outputs[cube_idx] += [[slices, image, prediction, *metrics]]
-        return outputs
 
     def visualize_predictions(self, *args, overlap=True, threshold=0.5, each=100, iteration=0, skeletonize=False,
                               clear=False, width=3, figsize=(20, 20), **kwargs):
@@ -569,6 +497,115 @@ class FaultController(BaseController):
                         plot_image(prediction[0], figsize=figsize, savepath=savepath, show=show)
             return faults_metric, noise_metric
         return None, None
+
+    def inference(self, dataset, model, ranges=None, orientation=0, dst=None,
+                  create_mask=False, full=False, **kwargs):
+        config = {**self.config['inference'], **kwargs}
+        crop_shape = config['crop_shape']
+        strides = config['stride']
+        prefetch = config['prefetch']
+
+        strides = strides if isinstance(strides, tuple) else [strides] * 3
+        strides = np.maximum(np.array(crop_shape) * np.array(strides), 1).astype(int)
+
+        ranges = (None, None, None) if ranges is None else ranges
+
+        self.log(f'Start inference for {dataset.indices[0]} at range {ranges} with orientation {orientation}.')
+        self.log('Create test pipeline and dataset.')
+
+        if isinstance(model, str):
+            model_ = TorchModel()
+            model_.load(model)
+            model = model_
+
+        if dst is not None:
+            dst = dataset.fields[0].make_path(dst)
+            self.log(f'Result will be save to {dst}.')
+        else:
+            self.log(f'Result will be save to numpy array.')
+
+        inference_pipeline = self.get_inference_template(model, create_mask)
+        inference_pipeline = inference_pipeline << config << dataset
+
+        grid, accumulator = self.make_accumulator(dataset.fields[0], ranges, crop_shape,
+                                                  strides, orientation, full, dst)
+        ppl = inference_pipeline << dataset << {'sampler': grid, 'accumulator': accumulator}
+
+        notifier = {'file': self.make_savepath('末 inference_bar.log')} #TODO: make notifier
+        self.log(f'n_iters: {grid.n_iters}')
+
+
+        if self.monitor:
+            monitor = Monitor(['uss', 'gpu', 'gpu_memory'], frequency=0.5, gpu_list=self.gpu_list)
+            monitor.__enter__()
+
+        ppl.run(n_iters=grid.n_iters, notifier=notifier, prefetch=prefetch)
+        prediction = accumulator.aggregate()
+
+        self.log(f'Finish prediction.')
+
+        if self.monitor:
+            monitor.__exit__(None, None, None)
+            monitor.visualize(savepath=self.make_savepath('末 inference_resource.png'), show=self.plot)
+
+        # if fmt in ['hdf5', 'blosc', 'hdf5', 'qblosc'] and accumulator.file is not None: #TODO: whats wrong with hdf5?
+        #     accumulator.file.close()
+
+        return prediction
+
+
+    def inference_on_slides(self, train_pipeline=None, model_path=None, create_mask=False, pbar=False, **kwargs):
+        """ Make inference on slides. """
+        config = {**self.config['dataset'], **self.config['inference'], **kwargs}
+        crop_shape = config['crop_shape']
+        cubes = config['inference_cubes']
+        strides = config['stride']
+
+        strides = strides if isinstance(strides, tuple) else [strides] * 3
+
+        strides = np.maximum(np.array(crop_shape) * np.array(strides), 1).astype(int)
+
+        self.log('Create test pipeline and dataset.')
+        dataset = self.make_inference_dataset(create_mask)
+        inference_pipeline = self.get_inference_template(train_pipeline, model_path, create_mask)
+        inference_pipeline = inference_pipeline << config << dataset
+
+        cubes = self.get_inference_ranges(cubes)
+
+        outputs = {}
+        for cube_idx in dataset.indices:
+            outputs[cube_idx] = []
+            field = dataset[cube_idx]
+            for item in cubes[cube_idx]:
+                self.log(f'Create prediction for {cube_idx}: {item[1:]}. orientation={item[0]}.')
+                orientation = item[0]
+                slices = item[1:]
+                if len(slices) != 3:
+                    slices = (None, None, None)
+
+                grid, accumulator = self.make_accumulator(field, slices, crop_shape, strides, orientation)
+                ppl = inference_pipeline << {'sampler': grid, 'accumulator': accumulator}
+
+                notifier = {
+                    'file': self.make_savepath('末 inference_bar.log'),
+                }
+
+                ppl.run(n_iters=grid.n_iters, notifier=notifier)
+                prediction = accumulator.aggregate()
+
+                image = field.geometry[
+                    slices[0][0]:slices[0][1],
+                    slices[1][0]:slices[1][1],
+                    slices[2][0]:slices[2][1]
+                ]
+
+                if orientation == 1:
+                    image = image.transpose([1, 0, 2])
+                    prediction = prediction.transpose([1, 0, 2])
+
+                metrics = np.nanmean(ppl.v('metric')), np.argmax(ppl.v('semblance_hist')) / 1000
+                outputs[cube_idx] += [[slices, image, prediction, *metrics]]
+        return outputs
 
     def inference_on_cube(self, train_pipeline=None, model_path=None, fmt='sgy', save_to=None, filename=None,
                           tmp='hdf5', bar=True, **kwargs):
@@ -662,38 +699,29 @@ class FaultController(BaseController):
                 if fmt in ['hdf5', 'blosc', 'qblosc']:
                     accumulator.file.close()
 
-    def process(self, cube_path, prediction_path, orientation=0, skeletonize=True, clear=True, threshold=0.05, width=3, bar=True):
-        orientation = int(orientation)
-        geometry = SeismicGeometry(cube_path)
-        prediction = h5py.File(prediction_path, mode='a')
-
-        self.log(f'Start processing {prediction_path}')
-
-        for i in range(geometry.cube_shape[orientation]):
+    def process(self, geometry, prediction, orientation=0, origin=0):
+        self.log(f'Start processing.')
+        if isinstance(geometry, str):
+            geometry = SeismicGeometry(geometry)
+        for i in range(prediction.shape[orientation]):
             self.log(f'Process slide {i}/{geometry.cube_shape[orientation]}')
             if orientation == 0:
-                image, slide = geometry.file['cube_i'][i:i+1], prediction['cube_i'][i:i+1]
+                image, slide = geometry.file['cube_i'][origin+i], prediction[i]
             else:
-                image, slide = geometry.file['cube_x'][i:i+1].transpose(0, 2, 1), prediction['cube_i'][:, i:i+1].transpose(1, 0, 2)
-            if prediction:
-                slide = Fault.skeletonize_faults(slide, threshold=threshold, mode='array', width=width, bar=False)
-            if clear:
-                slide = Fault.remove_predictions_on_bounds(image, slide)
+                image, slide = (
+                    geometry.file['cube_x'][origin+i].T,
+                    prediction[:, i]
+                )
+            slide = skeletonize(slide)
+            slide = Fault.remove_predictions_on_bounds(image, slide)
 
             if orientation == 0:
-                prediction['cube_i'][i:i+1] = slide
+                prediction[i] = slide
             else:
-                prediction['cube_i'][:, i:i+1] = slide.transpose(1, 0, 2)
-
-        self.log(f'Start faults splitting for {prediction_path}')
-
-        faults = Fault.from_mask(SeismicGeometry(prediction_path), geometry, chunk_size=100, threshold=0.05)
-        ds = SeismicCubeset(index=cube_path)
-        ds.load(label_dir='dummy', labels_class=Fault)
-        ds.labels[0] = faults
-        ds.dump_labels(f'/PREDICTIONS/FAULTS/SKELETON_{orientation}', separate=True)
-
-        self.log(f'Finish faults splitting for {prediction_path}')
+                prediction[:, i] = slide
+        if not isinstance(prediction, np.ndarray):
+            prediction.file.close()
+        self.log(f'Finish processing.')
 
     # Path utils
 

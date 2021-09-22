@@ -293,7 +293,7 @@ class Accumulator3D:
             self.path = path
 
             self.file = h5py.File(path, mode='w-')
-        self.type = 'hdf5' if path is not None else 'numpy'
+        self.type = os.path.splitext(path)[1][1:] if path is not None else 'numpy'
 
         self.aggregated = False
         self.kwargs = kwargs
@@ -301,7 +301,7 @@ class Accumulator3D:
     # Placeholder management
     def create_placeholder(self, name=None, dtype=None, fill_value=None):
         """ Create named storage as a dataset of HDF5 or plain array. """
-        if self.type == 'hdf5':
+        if self.type in ('hdf5', 'blosc'):
             placeholder = self.file.create_dataset(name, shape=self.shape, dtype=dtype, fillvalue=fill_value)
         elif self.type == 'numpy':
             placeholder = np.full(shape=self.shape, fill_value=fill_value, dtype=dtype)
@@ -354,9 +354,8 @@ class Accumulator3D:
         # Also add alias to `data` dataset, so the resulting cube can be opened by `SeismicGeometry`
         if self.type == 'hdf5':
             self.file['cube_i'] = self.file['data']
-            self.file.close()
-            self.file = h5py.File(self.path, 'r')
-
+            # self.file.close()
+            # self.file = h5py.File(self.path, 'r')
             self.data = self.file['data']
 
         self.aggregated = True
@@ -367,7 +366,7 @@ class Accumulator3D:
         raise NotImplementedError
 
     def __del__(self):
-        if self.type in ['hdf5', 'blosc']:
+        if self.type in ['hdf5', 'blosc'] and self.file is not None:
             self.file.close()
 
     def clear(self):
