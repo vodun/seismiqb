@@ -7,72 +7,6 @@ from scipy.signal import ricker
 from numba import njit
 
 
-def make_surfaces(num_surfaces, grid_shape, shape, kind='cubic', perturbation_share=0.25, shares=None,
-                  rng=None, seed=None):
-    """ Make arrays representing heights of surfaces in a 3d/2d-array.
-
-    Parameters
-    ----------
-    num_surfaces : int
-        The number of resulting surfaces.
-    grid_shape : tuple
-        Shape of a grid of points used for interpolating surfaces.
-    shape : tuple
-        Shape of a 3d/2d array inside which the surfaces are created.
-    kind : str
-        Surfaces are interpolated from values on the grid of points. This is the type of interpolation
-        to use (see `scipy.interpolate.intepr1d` for all possible options).
-    perturbation_share : float
-        Maximum allowed surface-perturbation w.r.t. the distance between subsequent surfaces.
-    shares : np.ndarray
-        Array representing height-distances between subsequent surfaces as shares of unit-interval.
-    rng : np.random.Generator or None
-        Generator of random numbers.
-    seed : int or None
-        Seed used for creation of random generator (check out `np.random.default_rng`).
-
-    Returns
-    -------
-    np.ndarray
-        Array of size num_surfaces X shape[:2] representing resulting surfaces-heights.
-    """
-    rng = rng or np.random.default_rng(seed)
-
-    # check shapes and select interpolation-method
-    grid_shape = (grid_shape, ) if isinstance(grid_shape, int) else grid_shape
-    if len(shape) != len(grid_shape) + 1:
-        raise ValueError("`(len(shape) - 1)` should be equal to `len(grid_shape)`.")
-
-    if len(shape) == 2:
-        interp = interp1d
-    elif len(shape) == 3:
-        interp = interp2d
-    else:
-        raise ValueError('The function only supports the generation of 1d and 2d-surfaces.')
-
-    # make the grid
-    grid = [np.linspace(0, 1, num_points) for num_points in grid_shape]
-
-    # make the first surface
-    surfaces = [np.zeros(grid_shape)]
-    shares = shares if shares is not None else np.ones((num_surfaces, ))
-    shares = np.array(shares) / np.sum(shares)
-    for delta_h in shares:
-        epsilon = perturbation_share * delta_h
-
-        # make each surface in unit-terms
-        surfaces.append(surfaces[-1] + delta_h * np.ones_like(surfaces[0])
-                      + rng.uniform(low=-epsilon, high=epsilon, size=surfaces[0].shape))
-
-    # interpolate and scale each surface to cube-shape
-    results = []
-    for surface in surfaces:
-        func = interp(*grid, surface, kind=kind)
-        results.append((func(*[np.arange(num_points) / num_points for num_points in shape[:-1]])
-                        * shape[-1]).astype(np.int).T)
-    return np.array(results)
-
-
 def reflectivity(v, rho):
     """ Compute reflectivity coefficients given velocity and density models.
     Velocities and reflectivity coefficients can be either 2d or 3d.
@@ -138,42 +72,6 @@ def _make_velocity_model_3d(velocities, surfaces, shape):
     return array
 
 
-def make_elastic_distortion(xs, rng=None, seed=None, n_points=10, zeros_share=0.2, kind='cubic',
-                            perturb_values=True, perturb_peak=True, random_invert=True):
-    """ Generate a hump-shaped distortion [0, 1] -> [0, 1] and apply it to a set of points.
-    The transformation has form f(x) = x + distortion * mul. It represents an
-    elastic transform of an image represented by `xs`. The left and the right tails of the
-    distortion can be filled with zeros. Also, the peak of the hump can be randomly shifted to
-    left or right. In addition, when needed, the distortion itself can be randomly inverted.
-    """
-    rng = rng or np.random.default_rng(seed)
-    points = np.linspace(0, 1, n_points)
-
-    # compute length of prefix of zeros
-    n_zeros = int(n_points * zeros_share)
-    if perturb_peak:
-        delta_position = rng.integers(-n_zeros // 4, n_zeros // 4 + 1)
-    else:
-        delta_position = 0
-    prefix_length = n_zeros // 2 + delta_position
-
-    # form the values-hump and perturb it if needed
-    values = np.zeros((n_points, ))
-    n_values = n_points - n_zeros
-    half_hump = np.linspace(0, 1, n_values // 2 + 1 + n_values % 2)[1:]
-    hump = np.concatenate([half_hump, half_hump[::-1][n_values % 2:]])
-    if perturb_values:
-        step = 2 / n_values
-        hump += rng.uniform(-step / 2, step / 2, (n_values, ))
-    values[prefix_length: prefix_length + len(hump)] = hump
-    spline = interp1d(points, values, kind=kind)
-
-    # possibly invert the elastic transform
-    if random_invert:
-        if rng.choice([True, False]):
-            return -spline(xs)
-    return spline(xs)
-
 class SyntheticGenerator():
     """ Class for generation of syhthetic velocity and density models and synthetic seismic - 2D/3D.
     """
@@ -232,6 +130,64 @@ class SyntheticGenerator():
         self._horizon_heights = horizon_heights
         return self
 
+    def _make_surfaces(self, num_surfaces, grid_shape, shape, kind='cubic', perturbation_share=0.25, shares=None):
+        """ Make arrays representing heights of surfaces in a 3d/2d-array.
+
+        Parameters
+        ----------
+        num_surfaces : int
+            The number of resulting surfaces.
+        grid_shape : tuple
+            Shape of a grid of points used for interpolating surfaces.
+        shape : tuple
+            Shape of a 3d/2d array inside which the surfaces are created.
+        kind : str
+            Surfaces are interpolated from values on the grid of points. This is the type of interpolation
+            to use (see `scipy.interpolate.intepr1d` for all possible options).
+        perturbation_share : float
+            Maximum allowed surface-perturbation w.r.t. the distance between subsequent surfaces.
+        shares : np.ndarray
+            Array representing height-distances between subsequent surfaces as shares of unit-interval.
+
+        Returns
+        -------
+        np.ndarray
+            Array of size num_surfaces X shape[:2] representing resulting surfaces-heights.
+        """
+        # check shapes and select interpolation-method
+        grid_shape = (grid_shape, ) if isinstance(grid_shape, int) else grid_shape
+        if len(shape) != len(grid_shape) + 1:
+            raise ValueError("`(len(shape) - 1)` should be equal to `len(grid_shape)`.")
+
+        if len(shape) == 2:
+            interp = interp1d
+        elif len(shape) == 3:
+            interp = interp2d
+        else:
+            raise ValueError('The function only supports the generation of 1d and 2d-surfaces.')
+
+        # make the grid
+        grid = [np.linspace(0, 1, num_points) for num_points in grid_shape]
+
+        # make the first surface
+        surfaces = [np.zeros(grid_shape)]
+        shares = shares if shares is not None else np.ones((num_surfaces, ))
+        shares = np.array(shares) / np.sum(shares)
+        for delta_h in shares:
+            epsilon = perturbation_share * delta_h
+
+            # make each surface in unit-terms
+            surfaces.append(surfaces[-1] + delta_h * np.ones_like(surfaces[0])
+                            + self.rng.uniform(low=-epsilon, high=epsilon, size=surfaces[0].shape))
+
+        # interpolate and scale each surface to cube-shape
+        results = []
+        for surface in surfaces:
+            func = interp(*grid, surface, kind=kind)
+            results.append((func(*[np.arange(num_points) / num_points for num_points in shape[:-1]])
+                            * shape[-1]).astype(np.int).T)
+        return np.array(results)
+
     def make_velocity_model(self, shape=(50, 400, 800), grid_shape=(10, 10), perturbation_share=.2):
         """ Make 2d or 3d velocity model out of the array of velocities and store it in the class-instance.
 
@@ -251,14 +207,48 @@ class SyntheticGenerator():
             raise ValueError('The function only supports the generation of 2d and 3d synthetic seismic.')
 
         num_reflections = len(self.velocities) - 1
-        surfaces = make_surfaces(num_reflections, grid_shape, perturbation_share=perturbation_share,
-                                 shape=shape, rng=self.rng)
+        surfaces = self._make_surfaces(num_reflections, grid_shape, perturbation_share=perturbation_share, shape=shape)
         _make_velocity_model = _make_velocity_model_2d if self.dim == 2 else _make_velocity_model_3d
         self.velocity_model = _make_velocity_model(self.velocities, surfaces, shape)
 
         # store surfaces-list to later use them as horizons
         self._reflection_surfaces = surfaces
         return self
+
+    def _make_elastic_distortion(self, xs, n_points=10, zeros_share=0.2, kind='cubic',
+                                 perturb_values=True, perturb_peak=True, random_invert=True):
+        """ Generate a hump-shaped distortion [0, 1] -> [0, 1] and apply it to a set of points.
+        The transformation has form f(x) = x + distortion * mul. It represents an
+        elastic transform of an image represented by `xs`. The left and the right tails of the
+        distortion can be filled with zeros. Also, the peak of the hump can be randomly shifted to
+        left or right. In addition, when needed, the distortion itself can be randomly inverted.
+        """
+        points = np.linspace(0, 1, n_points)
+
+        # compute length of prefix of zeros
+        n_zeros = int(n_points * zeros_share)
+        if perturb_peak:
+            delta_position = self.rng.integers(-n_zeros // 4, n_zeros // 4 + 1)
+        else:
+            delta_position = 0
+        prefix_length = n_zeros // 2 + delta_position
+
+        # form the values-hump and perturb it if needed
+        values = np.zeros((n_points, ))
+        n_values = n_points - n_zeros
+        half_hump = np.linspace(0, 1, n_values // 2 + 1 + n_values % 2)[1:]
+        hump = np.concatenate([half_hump, half_hump[::-1][n_values % 2:]])
+        if perturb_values:
+            step = 2 / n_values
+            hump += self.rng.uniform(-step / 2, step / 2, (n_values, ))
+        values[prefix_length: prefix_length + len(hump)] = hump
+        spline = interp1d(points, values, kind=kind)
+
+        # possibly invert the elastic transform
+        if random_invert:
+            if self.rng.choice([True, False]):
+                return -spline(xs)
+        return spline(xs)
 
     def _add_fault(self, fault_coordinates, num_points, max_shift, zeros_share, kind,
                    perturb_values, perturb_peak, random_invert, fetch_and_update_mask):
@@ -283,9 +273,9 @@ class SyntheticGenerator():
         indicator = (np.sign(xs - k * ys - b) + 1) / 2
 
         # compute measure of closeness of a point to the fault-center
-        closeness = make_elastic_distortion(ys / (y_high - y_low), self.rng, n_points=num_points,
-                                            perturb_peak=perturb_peak, perturb_values=perturb_values,
-                                            kind=kind, zeros_share=zeros_share, random_invert=random_invert)
+        closeness = self._make_elastic_distortion(ys / (y_high - y_low), n_points=num_points,
+                                                  perturb_peak=perturb_peak, perturb_values=perturb_values,
+                                                  kind=kind, zeros_share=zeros_share, random_invert=random_invert)
 
         # compute vector field for a coordinate-map and apply the map to the seismic
         delta_xs, delta_ys = (max_shift * kx * indicator * closeness,
