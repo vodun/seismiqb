@@ -397,16 +397,6 @@ class SyntheticGenerator():
             self.synthetic += noise_mul * self.rng.random(self.synthetic.shape) * self.synthetic.std()
         return self
 
-    def _make_enumerated_mask(self, surfaces):
-        """ Make enumerated mask from a sequence of surfaces. Each surfaces is marked by its ordinal
-        number from `range(1, len(surfaces) + 1)` on a resulting mask.
-        """
-        mask = np.zeros_like(self.velocity_model)
-        for i, horizon in enumerate(surfaces):
-            mesh = np.meshgrid(*[np.arange(axis_shape) for axis_shape in horizon.shape])
-            mask[(*mesh, horizon)] = i + 1
-        return mask
-
     def _enumerated_to_heights(self, mask):
         """ Convert enumerated mask to heights.
         """
@@ -418,11 +408,20 @@ class SyntheticGenerator():
         return surfaces
 
     @staticmethod
-    def _add_surface_to_mask(surface, mask):
+    def _add_surface_to_mask(surface, mask, alpha=1):
         """ Add horizon-surface to mask.
         """
-        mesh = np.meshgrid(*[np.arange(axis_shape) for axis_shape in surface.shape])
-        mask[(*mesh, surface)] = 1
+        indices = np.array((surface >= 0) & (surface < mask.shape[-1])).nonzero()
+        mask[(*indices, surface[indices])] = alpha
+
+    def _make_enumerated_mask(self, surfaces):
+        """ Make enumerated mask from a sequence of surfaces. Each surfaces is marked by its ordinal
+        number from `range(1, len(surfaces) + 1)` on a resulting mask.
+        """
+        mask = np.zeros_like(self.velocity_model)
+        for i, horizon in enumerate(surfaces):
+            self._add_surface_to_mask(horizon, mask, alpha=i + 1)
+        return mask
 
     def fetch_horizons(self, mode='horizons', horizon_format='heights', width=5):
         """ Fetch some (or all) reflective surfaces.
