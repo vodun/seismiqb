@@ -3,6 +3,7 @@ import os
 import re
 from glob import glob
 from difflib import get_close_matches
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 
@@ -22,17 +23,25 @@ class Field(VisualizationMixin):
     To initialize, one must provide:
         - geometry-like entity, which can be a path to a seismic cube or instance of `:class:SeismicGeometry`;
         additional parameters of geometry instantiation can be passed via `geometry_kwargs` parameters.
-        - optionally, labels in one of the following formats:
+
+        - optionally, `labels` in one of the following formats:
             - dictionary with keys defining attribute to store loaded labels in and values as
             sequences of label-like entities (path to a label or instance of label class)
             - sequence with label-like entities. This way, labels will be stored in `labels` attribute
             - string to define path(s) to labels (same as those paths wrapped in a list)
             - None as a signal that no labels are provided for a field.
-        `labels_class` defines the class to use for loading. If it is not provided, we try to infer the class from
-        name of the attribute to store the labels in. For example,
-        >>> {'horizons': 'path/to/horizons/*'}
-        would be loaded as instances of `:class:.Horizon`.
-        `labels_kwargs` are passed for instantiation of every label.
+
+        - `labels_class` defines the class to use for loading and can be supplied in one of the following formats:
+            - dictionary with same keys as in `labels`. Values are either string (e.g. `horizon`) or
+            the type to initialize label itself (e.g. `:class:.Horizon`)
+            - a single string or type to use for all of the labels
+            - if not provided, we try to infer the class from name of the attribute to store the labels in.
+            The guess is based on a similarity between passed name and a list of pre-defined label types.
+            For example, `horizons` will be threated as `horizon` and loaded as such.
+            >>> {'horizons': 'path/to/horizons/*'}
+            would be loaded as instances of `:class:.Horizon`.
+
+        - `labels_kwargs` are passed for instantiation of every label.
 
     Examples
     --------
@@ -50,12 +59,12 @@ class Field(VisualizationMixin):
     >>> Field(geometry=..., labels='paths/*', labels_class='horizon')
     >>> Field(geometry=..., labels=['paths/1', 'paths/2', 'paths/3'], labels_class='fault')
     """
+    #pylint: disable=redefined-builtin
     def __init__(self, geometry, labels=None, labels_class=None, geometry_kwargs=None, labels_kwargs=None, **kwargs):
         # Attributes
         self.labels = []
         self.horizons, self.facies, self.fans, self.channels, self.faults = [], [], [], [], []
         self.loaded_labels = []
-        self.attached_instances = []
 
         # Geometry: description and convenient API to a seismic cube
         if isinstance(geometry, str):
@@ -136,48 +145,56 @@ class Field(VisualizationMixin):
                 if not isinstance(path, str) or \
                 not any(ext in path for ext in ['.dvc', '.gitignore', '.meta'])]
 
+    def _load_horizons(self, paths, max_workers=4, filter=True, interpolate=False, sort=True, **kwargs):
+        """ Load horizons from paths or re-use already created ones. """
+        # Separate paths from ready-to-use instances
+        horizons, paths_to_load = [], []
+        for item in paths:
+            if isinstance(item, str):
+                paths_ = self._filter_paths(glob(item))
+                paths_to_load.extend(paths_)
 
-    def _load_horizons(self, paths, filter=True, interpolate=False, sort=True, **kwargs):
-        #pylint: disable=redefined-builtin
-        horizons = []
-        for path in paths:
-            if isinstance(path, str):
-                # If path is a mask, call recursively
-                paths_ = self._filter_paths(glob(path))
-                if len(paths_) > 1 or paths_[0] != path:
-                    horizons_ = self._load_horizons(paths_, filter=filter, interpolate=interpolate,
-                                                    sort=False, **kwargs)
-                    horizons.extend(horizons_)
-                    continue
+            elif isinstance(item, Horizon):
+                item.field = self
+                horizons.append(item)
 
-                # Otherwise, make a new instance
-                horizon = Horizon(path, field=self, **kwargs)
-                if filter:
-                    horizon.filter()
-                if interpolate:
-                    horizon.interpolate()
-
-            elif isinstance(path, Horizon):
-                horizon = path
-            horizons.append(horizon)
+        # Load from paths in multiple threads
+        with ThreadPoolExecutor(max_workers=min(max_workers, len(paths_to_load) or 1)) as executor:
+            function = lambda path: self._load_horizon(path, filter=filter, interpolate=interpolate, **kwargs)
+            loaded = list(executor.map(function, paths_to_load))
+        horizons.extend(loaded)
 
         if sort:
             sort = sort if isinstance(sort, str) else 'h_mean'
             horizons.sort(key=lambda label: getattr(label, sort))
         return horizons
 
-    def _load_faults(self, paths, pbar=True, filter=True, fix=True, **kwargs):
-        #pylint: disable=redefined-builtin
-        faults = []
-        for path in Notifier(pbar, desc=f'Loading faults for {self.name}')(paths):
-            fault = Fault(path, field=self, fix=fix, **kwargs)
+    def _load_horizon(self, path, filter=True, interpolate=False, **kwargs):
+        """ Load a single horizon from path. """
+        horizon = Horizon(path, field=self, **kwargs)
+        if filter:
+            horizon.filter()
+        if interpolate:
+            horizon.interpolate()
+        return horizon
 
-            if filter and fault.format != 'file-npz':
-                fault.filter()
 
-            if len(fault) > 0:
-                faults.append(fault)
+    def _load_faults(self, paths, max_workers=4, pbar=True, filter=True, fix=True, **kwargs):
+        """ Load faults from paths. """
+        with ThreadPoolExecutor(max_workers=min(max_workers, len(paths) or 1)) as executor:
+            function = lambda path: self._load_fault(path, filter=filter, fix=fix, **kwargs)
+            loaded = list(Notifier(pbar, total=len(paths))(executor.map(function, paths)))
+
+        faults = [fault for fault in loaded if len(fault) > 0]
         return faults
+
+    def _load_fault(self, path, filter=True, fix=True, **kwargs):
+        """ Load a single fault from path. """
+        fault = Fault(path, field=self, fix=fix, **kwargs)
+
+        if filter and fault.format != 'file-npz':
+            fault.filter()
+        return fault
 
     def _load_geometries(self, paths, **kwargs):
         if isinstance(paths, str):
@@ -313,7 +330,7 @@ class Field(VisualizationMixin):
         if any(sep in label_id for sep in ':-'):
             label_attr, label_idx = re.split(':|-', label_id)
 
-            if label_attr not in self.loaded_labels and label_attr != 'attached_instances':
+            if label_attr not in self.loaded_labels:
                 raise ValueError(f"Can't determine the label attribute for `{label_attr}`!")
             label_idx = int(label_idx)
             label = getattr(self, label_attr)[label_idx]
@@ -379,6 +396,18 @@ class Field(VisualizationMixin):
 
 
     # Cache: introspection and reset
+    @property
+    def attached_instances(self):
+        """ All correctly loaded/added instances. """
+        instances = []
+        for src in self.loaded_labels:
+            item = getattr(self, src)
+            if isinstance(item, list):
+                instances.extend(item)
+            else:
+                instances.append(item)
+        return instances
+
     def reset_cache(self):
         """ Clear cached data from underlying entities. """
         self.geometry.reset_cache()

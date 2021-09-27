@@ -65,7 +65,7 @@ class Extender(Enhancer):
         prev_len = initial_len = len(horizon)
         self.log(f'Inference started for {n_steps} steps with stride {stride}')
         notifier = Notifier(self.config.bar,
-                            desc='Extender inference', update_total=False,
+                            desc='Extender inference',
                             file=self.make_savepath('末 inference.log'))
 
         start_time = perf_counter()
