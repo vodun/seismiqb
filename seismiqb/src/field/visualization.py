@@ -13,6 +13,15 @@ COLOR_GENERATOR = iter(['firebrick', 'darkorchid', 'sandybrown'])
 NAME_TO_COLOR = {}
 
 
+class UniterableProxy:
+    """ Proxy to disable `object` iteration protocol. """
+    def __init__(self, obj):
+        self.object = obj
+
+    def __getattr__(self, key):
+        return getattr(self.object, key)
+
+
 
 class VisualizationMixin:
     """ Methods for field visualization: textual, 2d along various axis, 2d interactive, 3d. """
@@ -20,24 +29,45 @@ class VisualizationMixin:
     def __repr__(self):
         return f"""<Field `{self.displayed_name}` at {hex(id(self))}>"""
 
+    REPR_MAX_LEN = 100
+    REPR_MAX_ROWS = 5
+
     def __str__(self):
         processed_prefix = 'un' if self.geometry.has_stats is False else ''
-        labels_prefix = ':' if self.labels else ''
+        labels_prefix = ' and labels:' if self.labels else ''
         msg = f'Field `{self.displayed_name}` with {processed_prefix}processed geometry{labels_prefix}\n'
 
         for label_src in self.loaded_labels:
             labels = getattr(self, label_src)
-            if len(labels) > 25:
-                type_ = type(labels[0])
-                msg += f'    {len(labels)} {type_.__name__}s'
-            else:
-                for label in labels:
-                    msg += f'    {label.name}\n'
+            names = [label.short_name for label in labels]
+
+            labels_msg = ''
+            line = f'    - {label_src}: ['
+            while names:
+                line += names.pop(0)
+
+                if names:
+                    line += ', '
+                else:
+                    labels_msg += line
+                    break
+
+                if len(line) > self.REPR_MAX_LEN:
+                    labels_msg += line
+                    line = '\n         ' + ' ' * len(label_src)
+
+                if len(labels_msg) > self.REPR_MAX_LEN * self.REPR_MAX_ROWS:
+                    break
+
+            if names:
+                labels_msg += f'\n         {" "*len(label_src)}and {len(names)} more item(s)'
+            labels_msg += ']\n'
+            msg += labels_msg
         return msg
 
     # 2D along axis
     def show_slide(self, loc, width=None, axis='i', zoom_slice=None,
-                   src_geometry='geometry', src_labels='labels', **kwargs):
+                   src_geometry='geometry', src_labels='labels', indices='all', **kwargs):
         """ Show slide with horizon on it.
 
         Parameters
@@ -59,8 +89,9 @@ class VisualizationMixin:
         src_labels = src_labels if isinstance(src_labels, (tuple, list)) else [src_labels]
         masks = []
         for src in src_labels:
-            masks.append(self.make_mask(location=loc, axis=axis, src=src, width=width))
+            masks.append(self.make_mask(location=loc, axis=axis, src=src, width=width, indices=indices))
         mask = sum(masks)
+        mask[mask == 0] = np.nan
 
         # src_labels = src_labels if isinstance(src_labels, (tuple, list)) else [src_labels]
         # masks = []
@@ -156,6 +187,16 @@ class VisualizationMixin:
             result.append(VisualizationMixin.apply_nested(function, item))
         return result
 
+    @staticmethod
+    def _show_wildcard_check(attribute):
+        if isinstance(attribute, str):
+            result = ':*/' in attribute
+        elif isinstance(attribute, dict):
+            result = ':*/' in attribute['src']
+        else:
+            result = False
+        return result
+
 
     @staticmethod
     def _show_to_dict(attribute):
@@ -202,18 +243,22 @@ class VisualizationMixin:
         # Already an array: no further actions needed
         if isinstance(src, np.ndarray):
             output = src
+            label = None
         else:
             # Load data with `method`
-            load = {**kwargs, **attribute_dict}
+            load = {**kwargs, **attribute_dict, '_return_label': True}
             postprocess = load.pop('postprocess', lambda x: x)
-            output = method(**load).squeeze()
+            output, label = method(**load)
+            output = output.squeeze()
             output = postprocess(output)
 
         attribute_dict['output'] = output
+        attribute_dict['label_instance'] = UniterableProxy(label)
         return attribute_dict
 
     @staticmethod
     def _show_add_plot_defaults(attribute_dict):
+        # Filter based on name of the loaded attribute
         name = attribute_dict['name']
         short_name = attribute_dict['short_name']
 
@@ -233,13 +278,25 @@ class VisualizationMixin:
             attribute_dict['fill_color'] = 'black'
         elif short_name == 'quality_map':
             attribute_dict['cmap'] = 'Reds'
-        elif short_name == 'full_binary_matrix':
-            if name not in NAME_TO_COLOR:
-                NAME_TO_COLOR[name] = next(COLOR_GENERATOR)
-            attribute_dict['cmap'] = NAME_TO_COLOR[name]
+        elif short_name in ['masks', 'full_binary_matrix']:
+            global_name = ''.join(filter(lambda x: x.isalpha(), name))
+            if global_name not in NAME_TO_COLOR:
+                NAME_TO_COLOR[global_name] = next(COLOR_GENERATOR)
+            attribute_dict['cmap'] = NAME_TO_COLOR[global_name]
         else:
             attribute_dict['cmap'] = 'ocean'
 
+        # Filter based on name of the class of instance
+        label_instance = attribute_dict['label_instance']
+
+        attribute_dict['label_name'] = label_instance.short_name
+        attribute_dict['bbox'] = label_instance.bbox if hasattr(label_instance, 'bbox') else None
+
+        if 'title' not in attribute_dict:
+            if '/' in attribute_dict['name']:
+                attribute_dict['title'] = f'`{label_instance.short_name}`\n{attribute_dict["name"].split("/")[1]}'
+            else:
+                attribute_dict['title'] = attribute_dict['name']
         return attribute_dict
 
 
@@ -296,11 +353,10 @@ class VisualizationMixin:
         >>> field.show(['geometry/std_matrix', 'horizons:3/amplitudes',
                         ['horizons:3/instant_phases', 'fans:3/masks'],
                         ['horizons:3/instant_phases', predicted_mask]],
-                       savepath='**/IMAGES/complex.png')
+                       savepath='~/IMAGES/complex.png')
         """
-        # If `*` is present, run `show` multiple times with `*` replaced to label id
-        checker = lambda attr: attr.replace(':*', '') != attr if isinstance(attr, str) else False
-        wildcard = self.apply_nested(checker, attributes)
+        # If `*` is present, run `show` multiple times with `*` replaced to a label id
+        wildcard = self.apply_nested(self._show_wildcard_check, attributes)
         wildcard = any(flatten([wildcard]))
 
         if wildcard:
@@ -319,11 +375,8 @@ class VisualizationMixin:
                 substitutor = lambda attr: attr.replace('*', str(label_num)) if isinstance(attr, str) else attr
                 attributes_ = self.apply_nested(substitutor, attributes)
 
-                label_name = self.labels[label_num].short_name
-                savepath_ = self.make_path(savepath, name=label_name) if savepath is not None else None
-
                 fig = self.show(attributes=attributes_, mode=mode, return_figure=True,
-                                short_title=short_title, savepath=savepath_, **kwargs)
+                                short_title=short_title, savepath=savepath, load_kwargs=load_kwargs, **kwargs)
                 figures.append(fig)
             return figures if return_figure else None
 
@@ -341,15 +394,26 @@ class VisualizationMixin:
         # Plot params for attributes
         attribute_dicts = self.apply_nested(self._show_add_plot_defaults, attribute_dicts)
         data = self.apply_nested(lambda dct: dct['output'], attribute_dicts)
-        titles = self.apply_nested(lambda dct: dct['short_name' if short_title else 'name'], attribute_dicts)
         alphas = self.apply_nested(lambda dct: dct['alpha'], attribute_dicts)
         cmaps = self.apply_nested(lambda dct: dct['cmap'], attribute_dicts)
 
+        titles = self.apply_nested(lambda dct: dct['short_name' if short_title else 'title'], attribute_dicts)
         if isinstance(titles, list):
             titles = [item[0] if isinstance(item, list) else item for item in titles]
 
+        # Instance-dependant parameters: name and plotting bbox
+        label_instances = self.apply_nested(lambda dct: dct['label_instance'], attribute_dicts)
+        label_instance = [label for label in flatten([label_instances]) if label is not None][0]
+        label_name = label_instance.short_name
+        bbox = label_instance.bbox if hasattr(label_instance, 'bbox') else [[None] * 2] * 2
+
+        # Infer number of figure subplots from data nestedness level
+        n_subplots = 1
+        if isinstance(data, list):
+            if kwargs.get('separate') or any(isinstance(item, list) for item in data):
+                n_subplots = len(data)
+
         # Prepare plot defaults
-        n_subplots = len(data) if isinstance(data, list) else 1
         plot_defaults = {
             'suptitle_label': f'Field `{self.displayed_name}`',
             'title_label': titles,
@@ -369,6 +433,8 @@ class VisualizationMixin:
                 'colorbar': True,
                 'xlabel': self.index_headers[0],
                 'ylabel': self.index_headers[1],
+                'xlim': bbox[0],
+                'ylim': bbox[1][::-1],
             }
         elif mode == 'hist':
             plot_defaults = {**plot_defaults, 'figsize': (n_subplots * 10, 5)}
@@ -377,7 +443,7 @@ class VisualizationMixin:
 
         # Plot image with given params and return resulting figure
         params = {**plot_defaults, **kwargs}
-        savepath = self.make_path(savepath, name=self.short_name) if savepath is not None else None
+        savepath = self.make_path(savepath, name=label_name) if savepath is not None else None
 
         figure = plot_image(data=data, mode=mode, savepath=savepath, **params)
         plt.show()

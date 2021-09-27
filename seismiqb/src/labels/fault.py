@@ -9,12 +9,12 @@ import pandas as pd
 
 from numba import prange, njit
 
-from tqdm.auto import tqdm
-
 from sklearn.decomposition import PCA
 from sklearn.neighbors import NearestNeighbors
 from skimage.morphology import skeletonize
 from scipy.ndimage import measurements, binary_erosion, binary_dilation, generate_binary_structure, binary_fill_holes
+
+from ...batchflow.notifier import Notifier
 
 from .horizon import Horizon
 from .fault_triangulation import make_triangulation, triangle_rasterization
@@ -381,7 +381,7 @@ class Fault(Horizon):
         labels = np.zeros((0, 4), dtype='int32')
         n_objects = 0
 
-        for start, item in tqdm(chunks, total=total, disable=(not pbar)):
+        for start, item in Notifier(pbar, total=total)(chunks):
             chunk_labels, new_objects = measurements.label(item, structure=np.ones((3, 3, 3))) # labels for new chunk
             chunk_labels[chunk_labels > 0] += n_objects # shift all values to avoid intersecting with previous labels
             new_overlap = chunk_labels[:overlap]
@@ -420,15 +420,15 @@ class Fault(Horizon):
             labels = [item for item in labels if item[0] >= threshold]
         if field is not None:
             labels = [Fault(item[1].astype('int32'), name=f'fault_{i}', field=field)
-                      for i, item in tqdm(enumerate(labels), disable=(not pbar))]
+                      for i, item in Notifier(pbar)(enumerate(labels))]
         return labels
 
     @classmethod
-    def skeletonize_faults(cls, prediction, axis=0, threshold=0.1, bar=True):
+    def skeletonize_faults(cls, prediction, axis=0, threshold=0.1, pbar=True):
         """ Make faults from binary mask. """
         prediction_cube = SeismicGeometry(prediction) if isinstance(prediction, str) else prediction
         processed_faults = np.zeros(prediction_cube.cube_shape)
-        for i in tqdm(range(prediction_cube.cube_shape[axis]), disable=(not bar)):
+        for i in Notifier(pbar)(range(prediction_cube.cube_shape[axis])):
             slices = [slice(None)] * 2
             slices[axis] = i
             slices = tuple(slices)
@@ -441,7 +441,7 @@ class Fault(Horizon):
 
             processed_faults[slices] = binary_dilation(skeletonize(erosion, method='lee'))
 
-        return cls.from_mask(processed_faults, prediction_cube, chunk_size=100, pbar=bar)
+        return cls.from_mask(processed_faults, prediction_cube, chunk_size=100, pbar=pbar)
 
     @classmethod
     def remove_predictions_on_bounds(cls, image, prediction, window=30, dilation=30, padding=True, fill_value=0):

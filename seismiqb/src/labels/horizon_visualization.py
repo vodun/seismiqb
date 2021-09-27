@@ -12,6 +12,7 @@ from ..utils import filter_simplices
 
 class VisualizationMixin:
     """ Methods for textual and visual representation of a horizon. """
+    #pylint: disable=protected-access
     def __repr__(self):
         return f"""<Horizon `{self.name}` for `{self.field.displayed_name}` at {hex(id(self))}>"""
 
@@ -41,33 +42,49 @@ class VisualizationMixin:
 
     # 2D
     def find_self(self):
-        """ Get name of the attribute of a field, where instance is stored, as well as the index. """
-        for src in self.field.loaded_labels + ['attached_instances']:
+        """ Get reference to the instance in a field.
+        If it was loaded/added correctly, then it should be one of `loaded_labels`.
+        Otherwise, we add it in a fake attribute and remove later.
+        """
+        for src in self.field.loaded_labels:
             labels = getattr(self.field, src)
 
             if isinstance(labels, list):
                 for idx, label in enumerate(labels):
                     if label is self:
-                        return src, idx
-        # Should never be raised, unless something went terribly wrong
-        raise TypeError('Instance is not attached to its field!')
+                        return f'{src}:{idx}'
+
+        # Instance is not attached to a field: add it temporarily (clean-up later)
+        self.field._unknown_label = self
+        self.field.loaded_labels.append('_unknown_label')
+        return '_unknown_label'
 
     @staticmethod
     def _show_add_prefix(attribute, prefix=None):
         if isinstance(attribute, str):
             attribute = ('/'.join([prefix, attribute])).replace('//', '/')
+        elif isinstance(attribute, dict):
+            attribute['src'] = ('/'.join([prefix, attribute['src']])).replace('//', '/')
         return attribute
 
 
-    def show(self, attributes='depths', mode='imshow', short_title=True, return_figure=False, width=9, **kwargs):
+    def show(self, attributes='depths', mode='imshow', short_title=True, return_figure=False, **kwargs):
         """ Field visualization with custom naming scheme. """
-        src, idx = self.find_self()
-        add_prefix = partial(self._show_add_prefix, prefix=f'{src}:{idx}')
+        prefix = self.find_self()
+        add_prefix = partial(self._show_add_prefix, prefix=prefix)
         attributes = self.field.apply_nested(add_prefix, attributes)
 
-        suptitle_label = f'`{self.name}` on field `{self.field.displayed_name}`'
-        self.field.show(attributes=attributes, mode=mode, width=width, short_title=short_title,
-                        suptitle_label=suptitle_label, return_figure=return_figure, **kwargs)
+        kwargs = {
+            'suptitle_label': f'`{self.name}` on field `{self.field.displayed_name}`',
+            **kwargs
+        }
+        self.field.show(attributes=attributes, mode=mode, short_title=short_title,
+                        return_figure=return_figure, **kwargs)
+
+        # Clean-up
+        if self.field.loaded_labels[-1] == '_unknown_label':
+            self.field._unknown_label = None
+            self.field.loaded_labels.pop(-1)
 
 
 

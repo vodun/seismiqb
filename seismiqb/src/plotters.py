@@ -30,7 +30,7 @@ def plot_image(data=None, mode='imshow', backend='matplotlib', **kwargs):
         return MatplotlibPlotter.plot(data=data, mode=mode, **kwargs)
     if backend in ('plotly', 'go'):
         return getattr(PlotlyPlotter, mode)(data, **kwargs)
-    raise ValueError('{} backend is not supported!'.format(backend))
+    raise ValueError(f'{backend} backend is not supported!')
 
 
 def plot_loss(data, title=None, **kwargs):
@@ -617,6 +617,8 @@ class MatplotlibPlotter:
         # curve
         'color': ['skyblue', 'sandybrown', 'lightcoral'],
         'facecolor': 'white',
+        # suptitle
+        'suptitle_color': 'k',
         # title
         'title_color': 'k',
         # axis labels

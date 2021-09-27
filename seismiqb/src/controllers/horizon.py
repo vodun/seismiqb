@@ -274,7 +274,7 @@ class HorizonController(BaseController):
         self.log(f'Starting {orientation}-inference with {len(chunk_iterator)} chunks')
         self.log(f'Inference over {spatial_ranges}, {heights_range}')
         notifier = Notifier(self.config.bar,
-                            desc=f'{orientation}-inference', update_total=False,
+                            desc=f'{orientation}-inference',
                             file=self.make_savepath(f'末 inference_chunks_{orientation}.log'))
         chunk_iterator = notifier(chunk_iterator)
 
@@ -393,7 +393,8 @@ class HorizonController(BaseController):
             horizon.show(show=self.plot, savepath=self.make_savepath(*prefix, name + 'p_depth_map.png'))
             horizon.show(['amplitudes', 'iamplitudes', 'iphases'], separate=True, nrows=3, ncols=1,
                          show=self.plot, savepath=self.make_savepath(*prefix, name + 'p_attributes.png'))
-            horizon.show('spikes', spikes_mode='median', kernel_size=7, threshold=2., dilation=7,
+            horizon.show('spikes', load_kwargs={'spikes_mode': 'median', 'kernel_size': 7,
+                                                'margin': 0, 'threshold': 2., 'dilation': 7},
                          show=self.plot, savepath=self.make_savepath(*prefix, name + 'p_spikes.png'))
 
             horizon.show_slide(horizon.field.shape[0]//2, axis=0, show=self.plot,
