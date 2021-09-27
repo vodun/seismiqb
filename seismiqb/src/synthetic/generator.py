@@ -7,15 +7,6 @@ from scipy.signal import ricker
 from numba import njit
 
 
-def reflectivity(v, rho):
-    """ Compute reflectivity coefficients given velocity and density models.
-    Velocities and reflectivity coefficients can be either 2d or 3d.
-    """
-    rc = np.zeros_like(v)
-    v_rho = v * rho
-    rc[..., 1:] = (v_rho[..., 1:] - v_rho[..., :-1]) / (v_rho[..., 1:] + v_rho[..., :-1])
-    return rc
-
 @njit
 def convolve_2d(array, kernel):
     """ Shape-preserving vector-wise convolution of a 2d-array with a kernel-vector.
@@ -363,6 +354,15 @@ class SyntheticGenerator():
             self.density_model = self.velocity_model
         return self
 
+    def _compute_reflectivity(self):
+        """ Compute reflectivity coefficients given velocity and density models.
+        Velocities and reflectivity coefficients can be either 2d or 3d.
+        """
+        rc = np.zeros_like(self.velocity_model)
+        v_rho = self.velocity_model * self.density_model
+        rc[..., 1:] = (v_rho[..., 1:] - v_rho[..., :-1]) / (v_rho[..., 1:] + v_rho[..., :-1])
+        return rc
+
     def make_synthetic(self, ricker_width=5, ricker_points=50):
         """ Generate and store 2d or 3d synthetic seismic. Synthetic seismic generation relies
         on generated velocity and density models. Hence, can be run only after `generate_velocities`,
@@ -375,7 +375,7 @@ class SyntheticGenerator():
         ricker_points : int
             Number of points in the ricker-wave - `points`-parameter of `scipy.signal.ricker`.
         """
-        ref_coeffs = reflectivity(self.velocity_model, self.density_model)
+        ref_coeffs = self._compute_reflectivity()
         wavelet = ricker(ricker_points, ricker_width)
         convolve = convolve_2d if self.dim == 2 else convolve_3d
         self.synthetic = convolve(ref_coeffs, wavelet)
