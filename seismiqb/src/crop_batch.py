@@ -10,11 +10,11 @@ from scipy.interpolate import interp1d
 from scipy.ndimage import gaussian_filter1d
 from scipy.signal import butter, lfilter, hilbert
 
-from ..batchflow import FilesIndex, Batch, action, inbatch_parallel, SkipBatchException, apply_parallel
+from ..batchflow import DatasetIndex, Batch, action, inbatch_parallel, SkipBatchException, apply_parallel
 
 from .labels import Horizon
 from .plotters import plot_image
-from .utils import compute_attribute, to_list, IndexedDict
+from .utils import compute_attribute, to_list, AugmentedDict
 
 
 AFFIX = '___'
@@ -125,11 +125,12 @@ class SeismicCropBatch(Batch):
 
     def get(self, item=None, component=None):
         """ Custom access for batch attributes.
-        If `component` is present in dataset and is an instance of `IndexedDict`, that index it with item and return it.
+        If `component` is present in dataset and is an instance of `AugmentedDict`,
+        then index it with item and return it.
         Otherwise retrieve `component` from batch itself and optionally index it with `item` position in `self.indices`.
         """
         data = getattr(self.dataset, component, None)
-        if isinstance(data, IndexedDict):
+        if isinstance(data, AugmentedDict):
             if isinstance(item, str) and self.has_salt(item):
                 item = self.unsalt(item)
             return data[item]
@@ -152,10 +153,10 @@ class SeismicCropBatch(Batch):
 
         Generator can be either Sampler or Grid to make locations in a random or deterministic fashion.
         `generator` must be a callable and return (batch_size, 9+) array, where the first nine columns should be:
-        (geometry_id, label_id, orientation, i_start, x_start, h_start, i_stop, x_stop, h_stop).
+        (field_id, label_id, orientation, i_start, x_start, h_start, i_stop, x_stop, h_stop).
         `generator` must have `to_names` method to convert cube and label ids into actual strings.
 
-        Geometry and label ids are transformed into names of actual cubes and labels (horizons, faults, facies, etc).
+        Field and label ids are transformed into names of actual fields and labels (horizons, faults, facies, etc).
         Then we create a completely new instance of `SeismicCropBatch`, where the new index is set to
         cube names with additional postfixes (see `:meth:.salt`), which is returned as the result of this action.
 
@@ -185,7 +186,7 @@ class SeismicCropBatch(Batch):
         generated = generator(batch_size)
 
         # Convert IDs to names, that are used in dataset
-        geometry_names, label_names = generator.to_names(generated[:, [0, 1]]).T
+        field_names, label_names = generator.to_names(generated[:, [0, 1]]).T
 
         # Locations: 3D slices in the cube coordinates
         locations = [[slice(i_start, i_stop), slice(x_start, x_stop), slice(h_start, h_stop)]
@@ -196,9 +197,8 @@ class SeismicCropBatch(Batch):
         shapes = generated[:, [6, 7, 8]] - generated[:, [3, 4, 5]]
 
         # Create a new SeismicCropBatch instance
-        new_index = [self.salt(ix) for ix in geometry_names]
-        new_paths = {ix: self.index.get_fullpath(self.unsalt(ix)) for ix in new_index}
-        new_batch = type(self)(FilesIndex.from_index(index=new_index, paths=new_paths, dirs=False))
+        new_index = [self.salt(ix) for ix in field_names]
+        new_batch = type(self)(DatasetIndex.from_index(index=new_index))
 
         # Keep chosen components in the new batch
         if passdown:
@@ -233,7 +233,7 @@ class SeismicCropBatch(Batch):
     # Loading of cube data and its derivatives
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def load_cubes(self, ix, dst, slicing='custom', src_geometry='geometries', **kwargs):
+    def load_cubes(self, ix, dst, native_slicing=False, src_geometry='geometry', **kwargs):
         """ Load data from cube for stored `locations`.
 
         Parameters
@@ -242,24 +242,13 @@ class SeismicCropBatch(Batch):
             Component of batch to put loaded crops in.
         slicing : str
             If 'custom', use `load_crop` method to make crops.
-            if 'native', crop will be looaded as a slice of geometry. Prefered for 3D crops to speed up loading.
+            if 'native', crop will be loaded as a slice of geometry. Preferred for 3D crops to speed up loading.
         src_geometry : str
-            Dataset attribute with geometries dict.
+            Field attribute with desired geometry.
         """
-        geometry = self.get(ix, src_geometry)
-        # target geometry is created by `create_labels` and wrapped into a list
-        if isinstance(geometry, (list, tuple)) and len(geometry) > 0:
-            geometry = geometry[0]
-
+        field = self.get(ix, 'fields')
         location = self.get(ix, 'locations')
-
-        if slicing == 'native':
-            crop = geometry[tuple(location)]
-        elif slicing == 'custom':
-            crop = geometry.load_crop(location, **kwargs)
-        else:
-            raise ValueError(f"slicing must be 'native' or 'custom' but {slicing} were given.")
-        return crop
+        return field.load_seismic(location=location, native_slicing=native_slicing, src=src_geometry, **kwargs)
 
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
@@ -287,6 +276,7 @@ class SeismicCropBatch(Batch):
         data = self.get(ix, src)
         if callable(mode):
             normalized = mode(data)
+            return normalized
 
         if itemwise:
             # Adjust data based on the current item only
@@ -302,8 +292,8 @@ class SeismicCropBatch(Batch):
                 else:
                     raise ValueError(f'Unknown mode: {mode}')
         else:
-            geometry = self.get(ix, 'geometries')
-            normalized = geometry.normalize(data, mode=mode)
+            field = self.get(ix, 'fields')
+            normalized = field.geometry.normalize(data, mode=mode)
         return normalized
 
 
@@ -340,76 +330,56 @@ class SeismicCropBatch(Batch):
     # Loading of labels
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def create_masks(self, ix, dst, use_labels='all', width=3, src_labels='labels'):
+    def create_masks(self, ix, dst, indices='all', width=3, src_labels='labels'):
         """ Create masks from labels in stored `locations`.
 
         Parameters
         ----------
         dst : str
             Component of batch to put loaded masks in.
-        use_labels : str, int or sequence of ints
+        indices : str, int or sequence of ints
             Which labels to use in mask creation.
             If 'all', then use all labels.
             If 'single' or `random`, then use one random label.
-            If 'nearest' or 'nearest_to_center', then use one label closest to height from `src_locations`.
             If int or array-like, then element(s) are interpreted as indices of desired labels.
         width : int
             Width of the resulting label.
         src_labels : str
             Dataset attribute with labels dict.
         """
+        field = self.get(ix, 'fields')
         location = self.get(ix, 'locations')
-        crop_shape = self.get(ix, 'shapes')
-        mask = np.zeros(crop_shape, dtype=np.float32)
+        return field.make_mask(location=location, width=width, indices=indices, src=src_labels)
 
-        labels = self.get(ix, src_labels) if isinstance(src_labels, str) else src_labels
-        labels = [labels] if not isinstance(labels, (tuple, list)) else labels
-        if len(labels) == 0:
-            return mask
-
-        use_labels = [use_labels] if isinstance(use_labels, int) else use_labels
-
-        if isinstance(use_labels, (tuple, list, np.ndarray)):
-            labels = [labels[idx] for idx in use_labels]
-        elif use_labels in ['single', 'random']:
-            labels = np.random.shuffle(labels)[0]
-        elif use_labels in ['nearest', 'nearest_to_center']:
-            labels = [self.get_nearest_horizon(ix, src_labels, location[2])]
-
-        for label in labels:
-            mask = label.add_to_mask(mask, locations=location, width=width)
-            if use_labels == 'single' and np.sum(mask) > 0.0:
-                break
-        return mask
 
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def load_attribute(self, ix, dst, src='amplitudes', src_labels='labels',
-                       atleast_3d=True, dtype=np.float32, **kwargs):
-        """ Load attribute for label at given location.
+    def compute_label_attribute(self, ix, dst, src='amplitudes', atleast_3d=True, dtype=np.float32, **kwargs):
+        """ Compute requested attribute along label surface. Target labels are defined by sampled locations.
 
         Parameters
         ----------
         src : str
-            A keyword from :attr:`~Facies.ATTRIBUTE_TO_METHOD` keys, defining label attribute to make crops from.
-        src_labels : str
-            Dataset attribute with labels dict.
-        locations : str
-            Component of batch with locations of crops to load.
-        kwargs :
-            Passed directly to either:
-            - one of attribute-evaluating methods from :attr:`~Horizon.ATTRIBUTE_TO_METHOD` depending on `attribute`
-            - or attribute-transforming method :meth:`~Horizon.transform_where_present`.
+            Keyword that defines label attribute to compute.
+        atleast_3d : bool
+            Whether add one more dimension to 2d result or not.
+        dtype : valid dtype compatible with requested attribute
+            A dtype that result must have.
+        kwargs : misc
+            Passed directly to one of attribute-evaluating methods.
 
         Notes
         -----
-        This method loads rectified data, e.g. amplitudes are croped relative
-        to horizon and will form a straight plane in the resulting crop.
+        Correspondence between the attribute and the method that computes it
+        is defined by :attr:`~Horizon.ATTRIBUTE_TO_METHOD`.
         """
+        field = self.get(ix, 'fields')
         location = self.get(ix, 'locations')
         label_index = self.get(ix, 'generated')[1]
-        label = self.get(ix, src_labels)[label_index]
+        src = src.replace('*', str(label_index))
 
+        src_labels = src[:src.find(':')]
+        label = getattr(field, src_labels)[label_index]
         label_name = self.get(ix, 'label_names')
         if label.short_name != label_name:
             msg = f"Name `{label.short_name}` of the label loaded by index {label_index} "\
@@ -418,7 +388,9 @@ class SeismicCropBatch(Batch):
                   f"in between sampler creation and `make_locations` call."
             raise ValueError(msg)
 
-        return label.load_attribute(src=src, location=location, atleast_3d=atleast_3d, dtype=dtype, **kwargs)
+        result = field.load_attribute(src=src, location=location, atleast_3d=atleast_3d, dtype=dtype, **kwargs)
+
+        return result
 
 
     # More methods to work with labels
@@ -447,9 +419,8 @@ class SeismicCropBatch(Batch):
         #pylint: disable=protected-access, access-member-before-definition, attribute-defined-outside-init
         _ = args, kwargs
         new_index = [self.indices[i] for i, area in enumerate(areas) if area > threshold]
-        new_dict = {idx: self.index._paths[idx] for idx in new_index}
         if len(new_index) > 0:
-            self.index = FilesIndex.from_index(index=new_index, paths=new_dict, dirs=False)
+            self.index = DatasetIndex.from_index(index=new_index)
         else:
             raise SkipBatchException
 
@@ -465,9 +436,8 @@ class SeismicCropBatch(Batch):
 
     @action
     @inbatch_parallel(init='_init_component', post='_assemble', target='for')
-    def filter_out(self, ix, src=None, dst=None, mode=None, expr=None, low=None, high=None, length=None, p=1.0):
+    def filter_out(self, ix, src=None, dst=None, expr=None, low=None, high=None, length=None, p=1.0):
         """ Zero out mask for horizon extension task.
-        TODO: rethink
 
         Parameters
         ----------
@@ -475,12 +445,6 @@ class SeismicCropBatch(Batch):
             Component of batch with mask
         dst : str
             Component of batch to put cut mask in.
-        mode : str
-            Either point, line, iline or xline.
-            If point, then only one point per horizon will be labeled.
-            If iline or xline then single iline or xline with labeled.
-            If line then randomly either single iline or xline will be
-            labeled.
         expr : callable, optional.
             Some vectorized function. Accepts points in cube, returns either float.
             If not None, low or high/length should also be supplied.
@@ -493,23 +457,10 @@ class SeismicCropBatch(Batch):
         mask = self.get(ix, src)
         coords = np.where(mask > 0)
 
-        if np.random.binomial(1, 1 - p) or len(coords[0]) == 0:
-            return mask
-        if mode is not None:
+        if np.random.binomial(1, 1 - p) or len(coords[0]) == 0 or expr is None:
+            new_mask = mask
+        else:
             new_mask = np.zeros_like(mask)
-            point = np.random.randint(len(coords))
-            if mode == 'point':
-                new_mask[coords[0][point], coords[1][point], :] = mask[coords[0][point], coords[1][point], :]
-            elif mode == 'iline' or (mode == 'line' and np.random.binomial(1, 0.5)) == 1:
-                new_mask[coords[0][point], :, :] = mask[coords[0][point], :, :]
-            elif mode in ['xline', 'line']:
-                new_mask[:, coords[1][point], :] = mask[:, coords[1][point], :]
-            else:
-                raise ValueError('Mode should be either `point`, `iline`, `xline` or `line')
-        if expr is not None:
-            coords = np.where(mask > 0)
-            new_mask = np.zeros_like(mask)
-
             coords = np.array(coords).astype(np.float).T
             cond = np.ones(shape=coords.shape[0]).astype(bool)
             coords /= np.reshape(mask.shape, newshape=(1, 3))
@@ -525,29 +476,29 @@ class SeismicCropBatch(Batch):
             new_mask[coords[:, 0], coords[:, 1], coords[:, 2]] = mask[coords[:, 0],
                                                                       coords[:, 1],
                                                                       coords[:, 2]]
-        else:
-            new_mask = mask
         return new_mask
 
+
     @apply_parallel
-    def shift_masks(self, crop, n_segments=3, max_shift=4, max_len=10):
+    def shift_masks(self, crop, n_segments=3, max_shift=4, min_len=5, max_len=10):
         """ Randomly shift parts of the crop up or down.
-        TODO: rethink
 
         Parameters
         ----------
         n_segments : int
             Number of segments to shift.
         max_shift : int
-            Size of shift along vertical axis.
+            Max size of shift along vertical axis.
+        min_len : int
+            Min size of shift along horizontal axis.
         max_len : int
-            Size of shift along horizontal axis.
+            Max size of shift along horizontal axis.
         """
         crop = np.copy(crop)
         for _ in range(n_segments):
             # Point of starting the distortion, its length and size
             begin = np.random.randint(0, crop.shape[1])
-            length = np.random.randint(5, max_len)
+            length = np.random.randint(min_len, max_len)
             shift = np.random.randint(-max_shift, max_shift)
 
             # Apply shift
@@ -557,7 +508,8 @@ class SeismicCropBatch(Batch):
                 shifted_segment[:, :, shift:] = segment[:, :, :-shift]
             elif shift < 0:
                 shifted_segment[:, :, :shift] = segment[:, :, -shift:]
-            crop[:, begin:min(begin + length, crop.shape[1]), :] = shifted_segment
+            if shift != 0:
+                crop[:, begin:min(begin + length, crop.shape[1]), :] = shifted_segment
         return crop
 
     @apply_parallel
@@ -565,34 +517,26 @@ class SeismicCropBatch(Batch):
         """ Rotate part of the mask on a given angle.
         Must be used for crops in (xlines, heights, inlines) format.
 
-        TODO: rethink
+        Parameters
+        ----------
+        angle : float
+            Rotation angle in degrees.
         """
         shape = crop.shape
+        point_x = np.random.randint(0, shape[0])
+        point_h = np.argmax(crop[point_x, :, :])
 
-        if np.random.random() >= 0.5:
-            point_x = np.random.randint(shape[0]//2, shape[0])
-            point_h = np.argmax(crop[point_x, :, :])
+        if np.sum(crop[point_x, point_h, :]) == 0.0:
+            return crop
 
-            if np.sum(crop[point_x, point_h, :]) == 0.0:
-                return np.copy(crop)
+        matrix = cv2.getRotationMatrix2D((point_h, point_x), angle, 1)
+        rotated = cv2.warpAffine(crop, matrix, (shape[1], shape[0])).reshape(shape)
 
-            matrix = cv2.getRotationMatrix2D((point_h, point_x), angle, 1)
-            rotated = cv2.warpAffine(crop, matrix, (shape[1], shape[0])).reshape(shape)
-
-            combined = np.zeros_like(crop)
+        combined = np.zeros_like(crop)
+        if point_x >= shape[0]//2:
             combined[:point_x, :, :] = crop[:point_x, :, :]
             combined[point_x:, :, :] = rotated[point_x:, :, :]
         else:
-            point_x = np.random.randint(0, shape[0]//2)
-            point_h = np.argmax(crop[point_x, :, :])
-
-            if np.sum(crop[point_x, point_h, :]) == 0.0:
-                return np.copy(crop)
-
-            matrix = cv2.getRotationMatrix2D((point_h, point_x), angle, 1)
-            rotated = cv2.warpAffine(crop, matrix, (shape[1], shape[0])).reshape(shape)
-
-            combined = np.zeros_like(crop)
             combined[point_x:, :, :] = crop[point_x:, :, :]
             combined[:point_x, :, :] = rotated[:point_x, :, :]
         return combined
@@ -600,7 +544,6 @@ class SeismicCropBatch(Batch):
     @apply_parallel
     def linearize_masks(self, crop, n=3, shift=0, kind='random', width=None):
         """ Sample `n` points from the original mask and create a new mask by interpolating them.
-        TODO: rethink
 
         Parameters
         ----------
@@ -615,8 +558,10 @@ class SeismicCropBatch(Batch):
         """
         # Parse arguments
         if kind == 'random':
-            kind = np.random.choice(['linear', 'slinear', 'quadratic', 'cubic'])
-        width = width or np.sum(crop, axis=2).mean()
+            kind = np.random.choice(['linear', 'slinear', 'quadratic', 'cubic', 'previous', 'next'])
+        if width is None:
+            width = np.sum(crop, axis=2)
+            width = int(np.round(np.mean(width[width!=0])))
 
         # Choose the anchor points
         axis = 1 - np.argmin(crop.shape)
@@ -653,12 +598,16 @@ class SeismicCropBatch(Batch):
 
         slc = (indices if axis == 0 else indices * 0,
                indices if axis == 1 else indices * 0,
-               np.clip(heights, 0, 255))
+               np.clip(heights, 0, crop.shape[2]-1))
+        mask_ = np.zeros_like(crop)
         mask_[slc] = 1
 
         # Make horizon wider
-        structure = np.ones((1, 3), dtype=np.uint8)
-        return cv2.dilate(mask_, structure, iterations=width)
+        structure = np.ones((1, width), dtype=np.uint8)
+        shape = mask_.shape
+        mask_ = mask_.reshape((mask_.shape[axis], mask_.shape[2]))
+        mask_ = cv2.dilate(mask_, kernel=structure, iterations=1).reshape(shape)
+        return mask_
 
 
     # Predictions
@@ -706,9 +655,9 @@ class SeismicCropBatch(Batch):
         if self.get(ix, 'orientations'):
             mask = np.transpose(mask, (1, 0, 2))
 
-        geometry = self.get(ix, 'geometries')
-        shifts = [self.get(ix, 'locations')[k].start for k in range(3)]
-        horizons = Horizon.from_mask(mask, geometry=geometry, shifts=shifts, threshold=threshold,
+        field = self.get(ix, 'fields')
+        origin = [self.get(ix, 'locations')[k].start for k in range(3)]
+        horizons = Horizon.from_mask(mask, field=field, origin=origin, threshold=threshold,
                                      mode=mode, minsize=minsize, prefix=prefix)
         return horizons
 
@@ -758,25 +707,25 @@ class SeismicCropBatch(Batch):
         axis : int
             The axis along which the arrays will be joined.
         """
-        if axis != -1:
-            raise NotImplementedError("For now function works for `axis=-1` only.")
-
-        if not isinstance(src, (list, tuple, np.ndarray)):
-            raise ValueError()
         if len(src) == 1:
             warn("Since `src` contains only one component, concatenation not needed.")
 
         items = [self.get(None, attr) for attr in src]
 
-        depth = sum(item.shape[-1] for item in items)
-        final_shape = (*items[0].shape[:3], depth)
+        concat_axis_length = sum(item.shape[axis] for item in items)
+        final_shape = [*items[0].shape]
+        final_shape[axis] = concat_axis_length
+        if axis < 0:
+            axis = len(final_shape) + axis
         prealloc = np.empty(final_shape, dtype=np.float32)
 
-        start_depth = 0
+        length_counter = 0
+        slicing = [slice(None) for _ in range(axis + 1)]
         for item in items:
-            depth_shift = item.shape[-1]
-            prealloc[..., start_depth:start_depth + depth_shift] = item
-            start_depth += depth_shift
+            length_shift = item.shape[axis]
+            slicing[-1] = slice(length_counter, length_counter + length_shift)
+            prealloc[slicing] = item
+            length_counter += length_shift
         setattr(self, dst, prealloc)
         return self
 
@@ -1172,8 +1121,8 @@ class SeismicCropBatch(Batch):
 
         # Get location
         l = self.locations[idx]
-        cube_name = self.unsalt(self.indices[idx])
-        displayed_name = self.dataset.geometries[cube_name].displayed_name
+        field_name = self.unsalt(self.indices[idx])
+        displayed_name = self.dataset[field_name].displayed_name
 
         if (l[0].stop - l[0].start) == 1:
             suptitle = f'INLINE {l[0].start}   CROSSLINES {l[1].start}:{l[1].stop}   DEPTH {l[2].start}:{l[2].stop}'

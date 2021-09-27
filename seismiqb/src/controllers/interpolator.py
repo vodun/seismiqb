@@ -14,7 +14,7 @@ class Interpolator(HorizonController):
             dataset = self.make_dataset(cube_paths=cube_paths, horizon_paths=horizon_paths, horizon=horizon)
 
         horizon = dataset.labels[0][0]
-        horizon.show(show=self.plot, savepath=self.make_savepath('input_image.png'))
+        horizon.show(load_kwargs={'enlarge': True}, show=self.plot, savepath=self.make_savepath('input_image.png'))
         self.log(f'Coverage of carcass is {horizon.coverage:2.5f}')
 
         sampler = self.make_sampler(dataset)
@@ -46,5 +46,5 @@ class Interpolator(HorizonController):
 
         prediction = self.inference(dataset, model)
         prediction = self.postprocess(prediction)
-        self.evaluate(prediction, dataset=dataset)
-        return prediction
+        info = self.evaluate(prediction, dataset=dataset)
+        return prediction, info

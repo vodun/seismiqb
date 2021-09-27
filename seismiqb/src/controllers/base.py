@@ -157,7 +157,7 @@ class BaseController:
         """ Log message to a separate file. """
         log_path = self.make_savepath(path)
         if log_path:
-            with open(log_path, 'w') as file:
+            with open(log_path, 'w', encoding='utf-8') as file:
                 print(msg, file=file)
 
     # Dataset creation
@@ -208,8 +208,8 @@ class BaseController:
 
         self.log(f'Target batch size: {pipeline_config["batch_size"]}')
         self.log(f'Actual batch size: {len(batch)}')
-        self.log(f'Cache sizes: {[item.cache_size for item in dataset.geometries.values()]}')
-        self.log(f'Cache lengths: {[item.cache_length for item in dataset.geometries.values()]}')
+        self.log(f'Cache sizes: {dataset.geometries.cache_size}')
+        self.log(f'Cache lengths: {dataset.geometries.cache_length}')
 
         # Log: full and short model repr
         self.log_to_file(repr(model.model), '末 model_repr.txt')
@@ -245,15 +245,14 @@ class BaseController:
         # Log: stats
         self.log(f'Trained for {model.iteration} iterations in {elapsed:4.1f}s')
         self.log(f'Average of 25 last loss values: {final_loss:4.3f}')
-        self.log(f'Cache sizes: {[item.cache_size for item in dataset.geometries.values()]}')
-        self.log(f'Cache lengths: {[item.cache_length for item in dataset.geometries.values()]}')
+        self.log(f'Cache sizes: {dataset.geometries.cache_size}')
+        self.log(f'Cache lengths: {dataset.geometries.cache_length}')
 
         # Cleanup
         torch.cuda.empty_cache()
         gc.collect()
         train_pipeline.reset('variables')
-        for item in dataset.geometries.values():
-            item.reset_cache()
+        dataset.geometries.reset_cache()
         self.log('')
 
         self.train_log = {

@@ -30,7 +30,7 @@ def plot_image(data=None, mode='imshow', backend='matplotlib', **kwargs):
         return MatplotlibPlotter.plot(data=data, mode=mode, **kwargs)
     if backend in ('plotly', 'go'):
         return getattr(PlotlyPlotter, mode)(data, **kwargs)
-    raise ValueError('{} backend is not supported!'.format(backend))
+    raise ValueError(f'{backend} backend is not supported!')
 
 
 def plot_loss(data, title=None, **kwargs):
@@ -347,7 +347,7 @@ class MatplotlibPlotter:
         if pyqt:
             return None
         save_kwargs = dict(bbox_inches='tight', pad_inches=0, dpi=100)
-        save_kwargs.update(kwargs.get('save') or dict())
+        save_kwargs.update(kwargs.get('save') or {})
 
         # save if necessary and render
         if savepath is not None:
@@ -617,6 +617,8 @@ class MatplotlibPlotter:
         # curve
         'color': ['skyblue', 'sandybrown', 'lightcoral'],
         'facecolor': 'white',
+        # suptitle
+        'suptitle_color': 'k',
         # title
         'title_color': 'k',
         # axis labels
@@ -747,6 +749,7 @@ class MatplotlibPlotter:
         else:
             colorbar = ax_image.axes.figure.colorbar(ax_image, cax=cax)
             colorbar.ax.yaxis.set_tick_params(color=color)
+            ax_image.axes.created_colorbar = colorbar
 
     @staticmethod
     def add_legend(ax, color, label, size, loc):
@@ -836,7 +839,7 @@ class PlotlyPlotter:
     def save_and_show(fig, show=True, savepath=None, **kwargs):
         """ Save and show plot if needed.
         """
-        save_kwargs = kwargs.get('save', dict())
+        save_kwargs = kwargs.get('save', {})
 
         # save if necessary and render
         if savepath is not None:

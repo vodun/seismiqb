@@ -66,7 +66,7 @@ class UnstructuredHorizon:
             # array with row in (iline, xline, height) format
             self.format = 'points'
 
-        getattr(self, 'from_{}'.format(self.format))(storage, **kwargs)
+        getattr(self, f'from_{self.format}')(storage, **kwargs)
 
 
     def from_points(self, points, **kwargs):
@@ -115,7 +115,7 @@ class UnstructuredHorizon:
         #pylint: disable=anomalous-backslash-in-string
         _ = kwargs
         if names is None:
-            with open(path) as file:
+            with open(path, encoding='utf-8') as file:
                 line_len = len(file.readline().split(' '))
             if line_len == 3:
                 names = UnstructuredHorizon.REDUCED_CHARISMA_SPEC
