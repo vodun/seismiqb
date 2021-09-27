@@ -2,6 +2,7 @@
 import os
 import re
 import sys
+import time
 
 from textwrap import dedent
 
@@ -816,17 +817,18 @@ class SeismicGeometry(ExportMixin):
         lines = (inverse_matrix @ points.T - inverse_matrix @ self.rotation_matrix[:, 2].reshape(2, -1)).T
         return np.rint(lines)
 
-    def benchmark(self, n_slide=300, projections=(0, 1, 2),
-                  n_crop=300, crop_shapes_min=5, crop_shapes_max=200,
+    def benchmark(self, n_slide=300, projections='ixh', n_crop=300, crop_shapes_min=5, crop_shapes_max=200,
                   use_cache=False, seed=42):
-        """Calculate average data loading timings (in ms) in user, system and wall mode for slides and crops.
+        """ Calculate average data loading timings (in ms) in user, system and wall mode for slides and crops.
+
+        Time measurement idea (sys, user and wall) is from python magic function `time` realization.
 
         Parameters
         ----------
         n_slide : int, optional
             Amount of slides to load in an experiment.
-        projections : sequence of int, optional
-            A sequence of preferable axes to load slide along.
+        projections : str or sequence of int or str, optional
+            Preferable axes to load slide along: `i` or 0 for iline one, `x` or 1 for the crossline, `h` or 2 for depth.
         n_crop : int, optional
             Amount of crops to load in an experiment.
         crop_shapes_min : int or tuple of int, optional
@@ -845,20 +847,30 @@ class SeismicGeometry(ExportMixin):
         rng = np.random.default_rng(seed)
         timings = {}
 
+        # parse projections:
+        projections_seq = []
+        for projection in projections:
+            projections_seq.append(self.parse_axis(projection))
+
         # Calculate the average loading slide time by loading random slides `n_slide` times
         self.reset_cache()
+
+        wall_st = time.time()
         start = getrusage(RUSAGE_SELF)[:2]  # 0 - user time in seconds,  1 - system time in seconds
+
         for _ in range(n_slide):
-            axis = rng.choice(a=projections)
+            axis = rng.choice(a=projections_seq)
+            axis = self.parse_axis(axis)
             loc = rng.integers(low=0, high=self.cube_shape[axis])
             _ = self.load_slide(loc=loc, axis=axis, use_cache=use_cache)
+
         end = getrusage(RUSAGE_SELF)[:2]
-        user_slide_timings = 1000 * (end[0] - start[0]) / n_slide
-        system_slide_timings = 1000 * (end[1] - start[1]) / n_slide
+        wall_end = time.time()
+
         timings['slide'] = {
-            'user': user_slide_timings,
-            'system': system_slide_timings,
-            'wall': user_slide_timings + system_slide_timings
+            'user': 1000 * (end[0] - start[0]) / n_slide,
+            'system': 1000 * (end[1] - start[1]) / n_slide,
+            'wall': 1000 * (wall_end - wall_st) / n_slide
         }
 
         # Preparation for timing loading crop calculation
@@ -873,20 +885,23 @@ class SeismicGeometry(ExportMixin):
         crop_kwargs = {'mode': 'slide'} if use_cache else {}
 
         # Calculate the average loading crop time by loading random crops `n_crop` times
+        wall_st = time.time()
         start = getrusage(RUSAGE_SELF)[:2] # 0 key - user time in seconds,  1 key - system time in seconds
+
         for _ in range(n_crop):
             point = rng.integers(low=(0, 0, 0), high=self.cube_shape) // 2
             shape = rng.integers(low=crop_shapes_min, high=crop_shapes_max)
             locations = [slice(start_, np.clip(start_+shape_, 0, max_shape))
                         for start_, shape_, max_shape in zip(point, shape, self.cube_shape)]
             _ = self.load_crop(locations, **crop_kwargs)
+
         end = getrusage(RUSAGE_SELF)[:2]
-        user_crop_timings = 1000 * (end[0] - start[0]) / n_crop
-        system_crop_timings = 1000 * (end[1] - start[1]) / n_crop
+        wall_end = time.time()
+
         timings['crop'] = {
-            'user': user_crop_timings,
-            'system': system_crop_timings,
-            'wall': user_crop_timings + system_crop_timings
+            'user': 1000 * (end[0] - start[0]) / n_slide,
+            'system': 1000 * (end[1] - start[1]) / n_slide,
+            'wall': 1000 * (wall_end - wall_st) / n_slide
         }
 
         self.reset_cache()
