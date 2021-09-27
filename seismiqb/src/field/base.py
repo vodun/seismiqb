@@ -23,17 +23,25 @@ class Field(VisualizationMixin):
     To initialize, one must provide:
         - geometry-like entity, which can be a path to a seismic cube or instance of `:class:SeismicGeometry`;
         additional parameters of geometry instantiation can be passed via `geometry_kwargs` parameters.
-        - optionally, labels in one of the following formats:
+
+        - optionally, `labels` in one of the following formats:
             - dictionary with keys defining attribute to store loaded labels in and values as
             sequences of label-like entities (path to a label or instance of label class)
             - sequence with label-like entities. This way, labels will be stored in `labels` attribute
             - string to define path(s) to labels (same as those paths wrapped in a list)
             - None as a signal that no labels are provided for a field.
-        `labels_class` defines the class to use for loading. If it is not provided, we try to infer the class from
-        name of the attribute to store the labels in. For example,
-        >>> {'horizons': 'path/to/horizons/*'}
-        would be loaded as instances of `:class:.Horizon`.
-        `labels_kwargs` are passed for instantiation of every label.
+
+        - `labels_class` defines the class to use for loading and can be supplied in one of the following formats:
+            - dictionary with same keys as in `labels`. Values are either string (e.g. `horizon`) or
+            the type to initialize label itself (e.g. `:class:.Horizon`)
+            - a single string or type to use for all of the labels
+            - if not provided, we try to infer the class from name of the attribute to store the labels in.
+            The guess is based on a similarity between passed name and a list of pre-defined label types.
+            For example, `horizons` will be threated as `horizon` and loaded as such.
+            >>> {'horizons': 'path/to/horizons/*'}
+            would be loaded as instances of `:class:.Horizon`.
+
+        - `labels_kwargs` are passed for instantiation of every label.
 
     Examples
     --------
