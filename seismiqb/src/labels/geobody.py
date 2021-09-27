@@ -76,7 +76,7 @@ class GeoBody:
             else:
                 raise NotImplementedError
 
-        getattr(self, 'from_{}'.format(self.format))(storage, **kwargs)
+        getattr(self, f'from_{self.format}')(storage, **kwargs)
 
 
     def __len__(self):
@@ -407,8 +407,8 @@ class GeoBody:
         # defaults for plotting if not supplied in kwargs
         kwargs = {
             'cmap': 'viridis_r',
-            'title': '{} {} of `{}` on `{}`'.format(src if isinstance(src, str) else '',
-                                                    'on full'*on_full, self.name, self.cube_name),
+            'title': f'{src if isinstance(src, str) else ""} {"on full"*on_full} '
+                     f'of `{self.name}` on `{self.cube_name}`',
             'xlabel': self.geometry.index_headers[0],
             'ylabel': self.geometry.index_headers[1],
             **kwargs

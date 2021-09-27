@@ -555,7 +555,7 @@ class FaultController(BaseController):
 
     def make_filename(self, prefix, orientation, ext):
         """ Make filename for infered cube. """
-        return (prefix + datetime.now().strftime("%Y-%m-%d-%H-%M-%S") + '_{}.{}').format(orientation, ext)
+        return prefix + datetime.now().strftime("%Y-%m-%d-%H-%M-%S") + f'_{orientation}.{ext}'
 
     # Train utils
 

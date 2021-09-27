@@ -139,7 +139,7 @@ class Horizon(AttributesMixin, VisualizationMixin):
                 # matrix of (iline, xline) shape with every value being height
                 self.format = 'matrix'
 
-        getattr(self, 'from_{}'.format(self.format))(storage, **kwargs)
+        getattr(self, f'from_{self.format}')(storage, **kwargs)
 
 
     # Logic of lazy computation of `points` or `matrix` from the other available storage; cache management
@@ -1330,7 +1330,17 @@ class Horizon(AttributesMixin, VisualizationMixin):
     # Utility
     @staticmethod
     def is_charisma_like(path, bad_extensions=None, size_threshold=100):
-        """ Check if the path looks like the horizon file. """
+        """ Check if the path looks like the horizon file.
+
+        Parameters
+        ----------
+        path : str
+            Path of file to check.
+        bad_extensions : list, optional
+            If provided, then list of extensions to consider file not charisma-like.
+        size_threshold : number
+            If file size in kilobytes is less, than the threshold, then file is considered not charisma-like.
+        """
         bad_extensions = bad_extensions or []
         bad_extensions.extend(['.py', '.ipynb', '.ckpt',
                             '.png', '.jpg',
