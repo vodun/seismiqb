@@ -10,7 +10,7 @@ import segyio
 class ExportMixin:
     """ Container for methods to save data as seismic cubes in different formats. """
     def make_sgy(self, path_hdf5=None, path_spec=None, postfix='',
-                 remove_hdf5=False, zip_result=True, path_segy=None, pbar=False):
+                 remove_hdf5=False, zip_result=True, path_segy=None, dataset='cube_i', pbar=False):
         """ Convert POST-STACK HDF5 cube to SEG-Y format with supplied spec.
 
         Parameters
@@ -36,7 +36,7 @@ class ExportMixin:
             path_hdf5 = os.path.join(os.path.dirname(self.path), 'temp.hdf5')
 
         with h5py.File(path_hdf5, 'r') as src:
-            cube_hdf5 = src['cube_i']
+            cube_hdf5 = src[dataset]
 
             from .base import SeismicGeometry #pylint: disable=import-outside-toplevel
             geometry = SeismicGeometry(path_spec)
@@ -121,7 +121,7 @@ def make_segy_from_array(array, path_segy, zip_segy=True, remove_segy=None, path
         cdpx = np.zeros((array.shape[0], array.shape[1]), dtype=np.int32)
         cdpy = np.zeros((array.shape[0], array.shape[1]), dtype=np.int32)
 
-        for c, (i, x) in enumerate(idx):
+        for c, (i, x) in tqdm(enumerate(idx)):
             if ilines_offset <= i < ilines_offset + array.shape[0]:
                 if xlines_offset <= x < xlines_offset + array.shape[1]:
                     header = segy.header[c]
