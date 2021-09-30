@@ -3,37 +3,8 @@
 import numpy as np
 from scipy.interpolate import interp1d, interp2d
 from scipy.ndimage import gaussian_filter, map_coordinates, binary_dilation
-from scipy.signal import ricker
+from scipy.signal import ricker, convolve
 from numba import njit
-
-
-@njit
-def convolve_2d(array, kernel):
-    """ Shape-preserving vector-wise convolution of a 2d-array with a kernel-vector.
-    """
-    # calculate offsets to trim arrays resulting from the convolution
-    result = np.zeros_like(array)
-    left_offset = (len(kernel) - 1) // 2
-    right_offset = len(kernel) - 1 - left_offset
-
-    for i in range(array.shape[0]):
-        result[i, :] = np.convolve(array[i], kernel)[left_offset:-right_offset]
-    return result
-
-
-@njit
-def convolve_3d(array, kernel):
-    """ Shape-preserving vector-wise convolution of a 3d-array with a kernel-vector.
-    """
-    # calculate offsets to trim arrays resulting from the convolution
-    result = np.zeros_like(array)
-    left_offset = (len(kernel) - 1) // 2
-    right_offset = len(kernel) - 1 - left_offset
-
-    for i in range(array.shape[0]):
-        for j in range(array.shape[1]):
-            result[i, j, :] = np.convolve(array[i, j], kernel)[left_offset:-right_offset]
-    return result
 
 
 @njit
@@ -375,10 +346,13 @@ class SyntheticGenerator():
         ricker_points : int
             Number of points in the ricker-wave - `points`-parameter of `scipy.signal.ricker`.
         """
-        ref_coeffs = self._compute_reflectivity()
+        reflection_coefficients = self._compute_reflectivity()
         wavelet = ricker(ricker_points, ricker_width)
-        convolve = convolve_2d if self.dim == 2 else convolve_3d
-        self.synthetic = convolve(ref_coeffs, wavelet)
+
+        # colvolve reflection coefficients with wavelet to obtain synthetic
+        # note: convolution is performed along depth-axis
+        kernel = wavelet.reshape((1, ) * (self.velocity_model.ndim - 1) + (-1, ))
+        self.synthetic = convolve(reflection_coefficients, kernel, mode='same')
         return self
 
     def postprocess_synthetic(self, sigma=1.1, noise_mul=0.5):
