@@ -19,7 +19,7 @@ from ..labels import Fault
 from ..dataset import SeismicDataset
 from ..samplers import SeismicSampler, RegularGrid, FaultSampler, ConstantSampler
 from ..metrics import FaultsMetrics
-from ..utils import adjust_shape_3d, Accumulator3D, skeletonize, to_list, GaussianLayer
+from ..utils import adjust_shape_3d, Accumulator3D, skeletonize, GaussianLayer, expand_dims, squueze
 from ..plotters import plot_image
 
 from ...batchflow import Config, Pipeline, Notifier, Monitor
@@ -548,40 +548,51 @@ class FaultController(BaseController):
     def smooth_predictions(self, prediction, chunk_size=None, kernel=(11, 21, 11)):
         if chunk_size is None:
             chunk_size = prediction.shape[0]
+        if chunk_size < kernel[0]:
+            raise ValueError(f"Thefirst dim of kernel can't be greater then chunk_size but {kernel[0]} > {chunk_size}")
+        chunk_size = min(chunk_size, prediction.shape[0])
 
         start = 0
-        next_chunk = None
 
         while True:
             stop = min(start + chunk_size, prediction.shape[0])
-            chunk = prediction[start:stop].copy()
-            if next_chunk is not None:
-                chunk[:kernel[0] // 2] = next_chunk
+            chunk = prediction[start:stop]
+
             padding = [[item // 2, item - item // 2 - 1] for item in kernel]
             if start > 0:
                 padding[0][0] = 0
             if stop < prediction.shape[0]:
                 padding[0][1] = 0
+
             inputs = torch.tensor(chunk)
             layer = GaussianLayer(inputs, kernel_size=kernel, padding=padding)
-            chunk = layer(inputs).numpy()
+            output = layer(inputs).numpy()
 
             output_start = 0 if start == 0 else start + kernel[0] // 2
-            output_stop = output_start + chunk.shape[0]
+            output_stop = output_start + output.shape[0]
 
-            start = output_stop - kernel[0] // 2
+            if start != 0:
+                prediction[start:start+kernel[0] // 2] = overlap
 
-            next_chunk = prediction[start:start+kernel[0] // 2].copy()
-            prediction[output_start:output_stop] = chunk
             if stop == prediction.shape[0]:
+                prediction[output_start:output_stop] = output
                 break
+
+            prediction[output_start:output_stop - kernel[0] // 2] = output[:-kernel[0] // 2 + 1]
+            overlap = output[-kernel[0] // 2+1:]
+            start = output_stop - kernel[0] // 2
 
         return prediction
 
+    def skeletonize(self, slide, peaks_width=5, skeleton_width=3):
+        slide = skeletonize(slide, width=peaks_width)
+        pooling = torch.nn.MaxPool3d((1, skeleton_width, 1), stride=1, padding=(0, skeleton_width // 2, 0))
+        slide = torch.tensor(slide)
+        return squueze(pooling(expand_dims(slide)), 3).numpy()
+
     def process(self, prediction, geometry=None, orientation=0, origin=(0, 0, 0), dst=None,
-                smoothing_kernel=(11, 21, 11),
-                peaks_width=5,
-                skeleton_width=3,
+                smoothing_kernel=(7, 11, 7), chunk_size=100,
+                peaks_width=5, skeleton_width=3,
                 removing_window=30, dilation=30, padding=True, fill_value=0):
         self.log(f'Start processing.')
         if dst is None:
@@ -589,13 +600,13 @@ class FaultController(BaseController):
         if isinstance(geometry, str):
             geometry = SeismicGeometry(geometry)
         self.log(f'Smooth predictions')
-
+        prediction = self.smooth_predictions(prediction, chunk_size, kernel=smoothing_kernel)
 
         for i in range(prediction.shape[orientation]):
             self.log(f'Process slide {i}/{prediction.shape[orientation]}')
 
             slide = prediction[i] if orientation == 0 else prediction[:, i]
-            slide = skeletonize(slide, width=peaks_width)
+            slide = self.skeletonize(slide, peaks_width=peaks_width, skeleton_width=skeleton_width)
 
             if geometry is not None:
                 if orientation == 0:
