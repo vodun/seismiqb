@@ -9,6 +9,8 @@ from shutil import copyfile
 import numpy as np
 from pprint import pformat
 
+import torch
+
 from .base import BaseController
 from .best_practices import MODEL_CONFIG
 
@@ -17,14 +19,13 @@ from ..labels import Fault
 from ..dataset import SeismicDataset
 from ..samplers import SeismicSampler, RegularGrid, FaultSampler, ConstantSampler
 from ..metrics import FaultsMetrics
-from ..utils import adjust_shape_3d, Accumulator3D, skeletonize
+from ..utils import adjust_shape_3d, Accumulator3D, skeletonize, to_list, GaussianLayer
 from ..plotters import plot_image
 
 from ...batchflow import Config, Pipeline, Notifier, Monitor
 from ...batchflow import B, C, D, P, R, V, F, I, M
 from ...batchflow import NumpySampler as NS
 from ...batchflow.models.torch import TorchModel, EncoderDecoder
-from ...batchflow.models.torch.losses import BCE
 
 
 class FaultController(BaseController):
@@ -57,7 +58,7 @@ class FaultController(BaseController):
                 (
                     'visualize_predictions',
                     100,
-                    {'train_pipeline': B().pipeline, 'savepath': 'prediction', 'iteration': I()})
+                    {'model': B().pipeline, 'iteration': I()})
             ],
             'visualize_crops': True,
 
@@ -111,6 +112,8 @@ class FaultController(BaseController):
         width = config['width']
         label_dir = config['label_dir']
         cubes = config['train_cubes'] if train else config['inference_cubes']
+        if isinstance(cubes, str):
+            cubes = [cubes]
 
         paths = [self.amplitudes_path(item) for item in cubes]
 
@@ -364,18 +367,6 @@ class FaultController(BaseController):
 
         return self.load_synthetic(**kwargs) + self.train_pipeline(**kwargs)
 
-    def get_model_config(self, name):
-        """ Get model config depending model architecture. """
-        if name == 'UNet':
-            return (Config(self.BASE_MODEL_CONFIG) + Config(self.UNET_CONFIG)).flatten()
-        raise ValueError(f'Unknown model name: {name}')
-
-    def get_model_class(self, name):
-        """ Get model class depending model architecture. """
-        if name == 'UNet':
-            return EncoderDecoder
-        return TorchModel
-
     def dump_model(self, model, path):
         """ Dump model. """
         model.save(os.path.join(self.config['savedir'], path))
@@ -395,20 +386,15 @@ class FaultController(BaseController):
 
     def get_inference_template(self, model, create_masks):
         """ Define the whole inference procedure pipeline. """
-        # if train_pipeline is not None:
-        #     test_pipeline = Pipeline().import_model('model', train_pipeline)
-        # else:
-        #     test_pipeline = Pipeline().load_model('model', TorchModel, 'dynamic', path=model_path)
         test_pipeline = Pipeline().init_model(name='model', source=model)
 
         test_pipeline += self.load_test(create_masks=create_masks)
-        output = self.config['inference/output']
         test_pipeline += (
             Pipeline()
             .adaptive_expand(src='images')
             .init_variable('predictions', [])
             .init_variable('target', [])
-            .predict_model('model', B('images'), fetches=output, save_to=B('predictions'))
+            .predict_model('model', B('images'), fetches=self.config['inference/output'], save_to=B('predictions'))
             .adaptive_squeeze(src='predictions')
             .run_later(D('size'))
         )
@@ -463,42 +449,48 @@ class FaultController(BaseController):
 
         return grid, accumulator
 
-    def visualize_predictions(self, *args, overlap=True, threshold=0.5, each=100, iteration=0, skeletonize=False,
-                              clear=False, width=3, figsize=(20, 20), **kwargs):
+    def visualize_predictions(self, model, overlap=True, each=100, iteration=0,
+                              process=True, threshold=0.5, figsize=(20, 20)):
         """ Plot predictions for cubes and ranges specified in 'inference' section of config. """
-        if each is not None and iteration % each == 0:
-            results = self.inference_on_slides(*args, **kwargs)
-            for cube, cube_results in results.items():
-                for item in cube_results:
-                    slices, image, prediction, faults_metric, noise_metric = item[:5]
+        if each is not None and (iteration + 1) % each == 0:
+            dataset = self.make_inference_dataset()
+            cubes = self.config['dataset/inference_cubes']
+            for cube in cubes:
+                if isinstance(cubes, list):
+                    ranges = None, None, None
+                    orientation = 0
+                else:
+                    ranges = cubes[cube][1:]
+                    orientation = cubes[cube][0]
+                    if len(ranges) == 0:
+                        ranges = None, None, None
+                prediction = self.inference(dataset, model, idx=cube, ranges=ranges, orientation=orientation)
 
-                    if self.config['savedir'] is not None:
-                        savepath = os.path.join(self.config['savedir'], 'prediction')
-                        if not os.path.exists(savepath):
-                            os.makedirs(savepath)
-                        savepath = os.path.join(
-                            savepath,
-                            f'{cube}_{slices}_{iteration}_{faults_metric:.03f}_{noise_metric:.03f}.png'
-                        )
-                        show = False
-                    else:
-                        savepath = None
-                        show = True
+                if process:
+                    prediction = self.process(prediction, orientation=orientation)
 
-                    if skeletonize:
-                        prediction = Fault.skeletonize_faults(prediction, threshold=threshold, mode='array', width=width)
-                    if clear:
-                        prediction = Fault.remove_predictions_on_bounds(image, prediction)
+                slide = prediction[0] if orientation == 0 else prediction[:, 0]
+                loc = ranges[orientation][0]
+                zoom_slice = [slice(*ranges[i]) for i in range(3) if i != orientation]
+                image = dataset[cube].load_slide(loc, orientation=orientation)[zoom_slice]
 
-                    if overlap:
-                        plot_image([image[0], prediction[0] > threshold], separate=False, figsize=figsize,
-                                   savepath=savepath, show=show)
-                    else:
-                        plot_image(prediction[0], figsize=figsize, savepath=savepath, show=show)
-            return faults_metric, noise_metric
-        return None, None
+                if self.config['savedir'] is not None:
+                    savepath = os.path.join(self.config['savedir'], 'predictions')
+                    if not os.path.exists(savepath):
+                        os.makedirs(savepath)
+                    savepath = os.path.join(savepath, f'{cube}_{orientation}_{ranges}_{iteration}_')
+                    show = False
+                else:
+                    savepath = None
+                    show = True
 
-    def inference(self, dataset, model, ranges=None, orientation=0, dst=None,
+                filename = savepath + 'prediction.png' if savepath else None
+                plot_image([image, slide > threshold], figsize=figsize, separate=False, savepath=filename, show=show)
+
+                filename = savepath + 'mask.png' if savepath else None
+                plot_image(slide, figsize=figsize, savepath=filename, show=show)
+
+    def inference(self, dataset, model, idx=0, ranges=None, orientation=0, dst=None,
                   create_mask=False, full=False, **kwargs):
         config = {**self.config['inference'], **kwargs}
         crop_shape = config['crop_shape']
@@ -519,7 +511,7 @@ class FaultController(BaseController):
             model = model_
 
         if dst is not None:
-            dst = dataset.fields[0].make_path(dst)
+            dst = dataset.fields[idx].make_path(dst)
             self.log(f'Result will be save to {dst}.')
         else:
             self.log(f'Result will be save to numpy array.')
@@ -527,7 +519,7 @@ class FaultController(BaseController):
         inference_pipeline = self.get_inference_template(model, create_mask)
         inference_pipeline = inference_pipeline << config << dataset
 
-        grid, accumulator = self.make_accumulator(dataset.fields[0], ranges, crop_shape,
+        grid, accumulator = self.make_accumulator(dataset.fields[idx], ranges, crop_shape,
                                                   strides, orientation, full, dst)
         ppl = inference_pipeline << dataset << {'sampler': grid, 'accumulator': accumulator}
 
@@ -553,176 +545,84 @@ class FaultController(BaseController):
 
         return prediction
 
+    def smooth_predictions(self, prediction, chunk_size=None, kernel=(11, 21, 11)):
+        if chunk_size is None:
+            chunk_size = prediction.shape[0]
 
-    def inference_on_slides(self, train_pipeline=None, model_path=None, create_mask=False, pbar=False, **kwargs):
-        """ Make inference on slides. """
-        config = {**self.config['dataset'], **self.config['inference'], **kwargs}
-        crop_shape = config['crop_shape']
-        cubes = config['inference_cubes']
-        strides = config['stride']
+        start = 0
+        next_chunk = None
 
-        strides = strides if isinstance(strides, tuple) else [strides] * 3
+        while True:
+            stop = min(start + chunk_size, prediction.shape[0])
+            chunk = prediction[start:stop].copy()
+            if next_chunk is not None:
+                chunk[:kernel[0] // 2] = next_chunk
+            padding = [[item // 2, item - item // 2 - 1] for item in kernel]
+            if start > 0:
+                padding[0][0] = 0
+            if stop < prediction.shape[0]:
+                padding[0][1] = 0
+            inputs = torch.tensor(chunk)
+            layer = GaussianLayer(inputs, kernel_size=kernel, padding=padding)
+            chunk = layer(inputs).numpy()
 
-        strides = np.maximum(np.array(crop_shape) * np.array(strides), 1).astype(int)
+            output_start = 0 if start == 0 else start + kernel[0] // 2
+            output_stop = output_start + chunk.shape[0]
 
-        self.log('Create test pipeline and dataset.')
-        dataset = self.make_inference_dataset(create_mask)
-        inference_pipeline = self.get_inference_template(train_pipeline, model_path, create_mask)
-        inference_pipeline = inference_pipeline << config << dataset
+            start = output_stop - kernel[0] // 2
 
-        cubes = self.get_inference_ranges(cubes)
+            next_chunk = prediction[start:start+kernel[0] // 2].copy()
+            prediction[output_start:output_stop] = chunk
+            if stop == prediction.shape[0]:
+                break
 
-        outputs = {}
-        for cube_idx in dataset.indices:
-            outputs[cube_idx] = []
-            field = dataset[cube_idx]
-            for item in cubes[cube_idx]:
-                self.log(f'Create prediction for {cube_idx}: {item[1:]}. orientation={item[0]}.')
-                orientation = item[0]
-                slices = item[1:]
-                if len(slices) != 3:
-                    slices = (None, None, None)
+        return prediction
 
-                grid, accumulator = self.make_accumulator(field, slices, crop_shape, strides, orientation)
-                ppl = inference_pipeline << {'sampler': grid, 'accumulator': accumulator}
-
-                notifier = {
-                    'file': self.make_savepath('末 inference_bar.log'),
-                }
-
-                ppl.run(n_iters=grid.n_iters, notifier=notifier)
-                prediction = accumulator.aggregate()
-
-                image = field.geometry[
-                    slices[0][0]:slices[0][1],
-                    slices[1][0]:slices[1][1],
-                    slices[2][0]:slices[2][1]
-                ]
-
-                if orientation == 1:
-                    image = image.transpose([1, 0, 2])
-                    prediction = prediction.transpose([1, 0, 2])
-
-                metrics = np.nanmean(ppl.v('metric')), np.argmax(ppl.v('semblance_hist')) / 1000
-                outputs[cube_idx] += [[slices, image, prediction, *metrics]]
-        return outputs
-
-    def inference_on_cube(self, train_pipeline=None, model_path=None, fmt='sgy', save_to=None, filename=None,
-                          tmp='hdf5', bar=True, **kwargs):
-        """ Make inference on cube. """
-        config = {**self.config['dataset'], **self.config['inference'], **kwargs}
-        strides = config['stride'] if isinstance(config['stride'], tuple) else [config['stride']] * 3
-
-        crop_shape = config['crop_shape']
-        strides = np.maximum(np.array(crop_shape) * np.array(strides), 1).astype(int)
-
-        self.log('Create test pipeline and dataset.')
-
-        dataset = self.make_inference_dataset(create_mask=False)
-        inference_pipeline = self.get_inference_template(train_pipeline, model_path, create_masks=False)
-        inference_pipeline.set_config(config)
-
-        # Log: pipeline_config to a file
-        self.log_to_file(pformat(config, depth=2), '末 inference_config.txt')
-
-        cubes = config['inference_cubes']
-        cubes = {
-            self.cube_name_from_path(self.amplitudes_path(k)): v for k, v in self.get_inference_ranges(cubes).items()
-        }
-
-        if save_to:
-            dirname = save_to
-        else:
-            dirname = os.path.join(
-                    os.path.dirname(dataset.geometries[0].path),
-                    'PREDICTIONS/FAULTS',
-            )
-            if not os.path.exists(os.path.dirname(dirname)):
-                os.makedirs(os.path.dirname(dirname))
-            if not os.path.exists(dirname):
-                os.makedirs(dirname)
-
-        outputs = dict()
-        for cube_idx in dataset.indices:
-            outputs[cube_idx] = []
-            field = dataset[cube_idx]
-            for item in cubes[cube_idx]:
-                if self.monitor:
-                    monitor = Monitor(['uss', 'gpu', 'gpu_memory'], frequency=0.5, gpu_list=self.gpu_list)
-                    monitor.__enter__()
-
-                axis = item[0]
-                ranges = item[1:]
-                if len(ranges) != 3:
-                    ranges = (None, None, None)
-
-                filenames = {ext: os.path.join(dirname, filename)
-                             for ext in ['hdf5', 'sgy', 'blosc', 'qblosc', 'npy', 'meta']}
-
-                if fmt in ['hdf5', 'blosc', 'qblosc']:
-                    path = filenames[fmt]
-                elif fmt in ['sgy', 'segy']:
-                    path = filenames[tmp]
-                elif fmt == 'npy':
-                    path = None
-
-                self.log(f'Create prediction {path} for {cube_idx}: {item[1:]}. axis={item[0]}.')
-
-                grid, accumulator = self.make_accumulator(field, ranges, crop_shape, strides, axis, path)
-                ppl = inference_pipeline << dataset << {'sampler': grid, 'accumulator': accumulator}
-
-                notifier = {
-                    'file': self.make_savepath('末 inference_bar.log'),
-                }
-
-                self.log(f'n_iters: {grid.n_iters}')
-
-                ppl.run(n_iters=grid.n_iters, notifier=notifier)
-                prediction = accumulator.aggregate()
-
-                self.log(f'Finish prediction {path}')
-
-                if self.monitor:
-                    monitor.__exit__(None, None, None)
-                    monitor.visualize(savepath=self.make_savepath('末 inference_resource.png'), show=self.plot)
-
-                if fmt == 'npy':
-                    outputs.append(prediction)
-                if fmt == 'sgy':
-                    copyfile(dataset.field[0].path_meta, filenames['meta'])
-                    dataset.geometries[0].make_sgy(
-                        path_hdf5=filenames[tmp],
-                        path_spec=dataset.geometries[0].segy_path.decode('utf-8'),
-                        path_segy=filenames['sgy'],
-                        remove_hdf5=True, zip_result=True, pbar=True
-                    )
-                if fmt in ['hdf5', 'blosc', 'qblosc']:
-                    accumulator.file.close()
-
-    def process(self, geometry, prediction, orientation=0, origin=0):
+    def process(self, prediction, geometry=None, orientation=0, origin=(0, 0, 0), dst=None,
+                smoothing_kernel=(11, 21, 11),
+                peaks_width=5,
+                skeleton_width=3,
+                removing_window=30, dilation=30, padding=True, fill_value=0):
         self.log(f'Start processing.')
+        if dst is None:
+            dst = prediction
         if isinstance(geometry, str):
             geometry = SeismicGeometry(geometry)
+        self.log(f'Smooth predictions')
+
+
         for i in range(prediction.shape[orientation]):
-            self.log(f'Process slide {i}/{geometry.cube_shape[orientation]}')
-            if orientation == 0:
-                image, slide = geometry.file['cube_i'][origin+i], prediction[i]
-            else:
-                image, slide = (
-                    geometry.file['cube_x'][origin+i].T,
-                    prediction[:, i]
+            self.log(f'Process slide {i}/{prediction.shape[orientation]}')
+
+            slide = prediction[i] if orientation == 0 else prediction[:, i]
+            slide = skeletonize(slide, width=peaks_width)
+
+            if geometry is not None:
+                if orientation == 0:
+                    zoom_slice = (
+                        slice(origin[1], origin[1]+prediction.shape[1]),
+                        slice(origin[2], origin[2]+prediction.shape[2])
+                    )
+                    image = geometry.file['cube_i'][origin[0]+i][zoom_slice]
+                else:
+                    zoom_slice = (
+                        slice(origin[2], origin[2]+prediction.shape[2]),
+                        slice(origin[0], origin[0]+prediction.shape[0])
+                    )
+                    image = geometry.file['cube_x'][origin[1]+i][zoom_slice].T
+                slide = Fault.remove_predictions_on_bounds(
+                    image, slide, window=removing_window, dilation=dilation, padding=padding, fill_value=fill_value
                 )
-            slide = skeletonize(slide)
-            slide = Fault.remove_predictions_on_bounds(image, slide)
 
             if orientation == 0:
-                prediction[i] = slide
+                dst[i] = slide
             else:
-                prediction[:, i] = slide
+                dst[:, i] = slide
         if not isinstance(prediction, np.ndarray):
             prediction.file.close()
         self.log(f'Finish processing.')
 
+        return dst
     # Path utils
 
     def amplitudes_path(self, cube):

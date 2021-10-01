@@ -4,6 +4,7 @@ import numpy as np
 from torch import nn
 import torch.nn.functional as F
 from torch.cuda.amp import autocast
+import scipy
 
 from ...batchflow.models.torch import ResBlock
 
@@ -265,3 +266,34 @@ class DepthSoftmax(nn.Module):
         width_weights = self.width_weights.to(device=x.device, dtype=x.dtype)
         x = F.conv2d(x, width_weights, padding=(0, 1))
         return x.float()
+
+class GaussianLayer(nn.Module):
+    def __init__(self, inputs, kernel_size=5, padding='same'):
+        super().__init__()
+        self.ndim = inputs.ndim
+        if isinstance(kernel_size, int):
+            kernel_size = [kernel_size] * self.ndim
+
+        kernel = self.gaussian_kernel(kernel_size)
+        kernel = np.expand_dims(kernel, axis=[0, 1])
+
+        self.kernel_size = kernel_size
+        if padding == 'same':
+            self.padding = [(w // 2, w - w // 2 - 1) for w in self.kernel_size]
+        elif padding == 'valid':
+            self.padding = None
+        else:
+            self.padding = padding
+        self.kernel = torch.tensor(kernel, dtype=inputs.dtype, requires_grad=False).to(inputs.device)
+
+    def forward(self, x):
+        x = expand_dims(x)
+        if self.padding is not None:
+            x = F.pad(x, (*self.padding[2], *self.padding[1], *self.padding[0], 0, 0, 0, 0))
+        return squueze(F.conv3d(x, self.kernel), self.ndim)
+
+    def gaussian_kernel(self, kernel_size):
+        kernel_size = np.array(kernel_size)
+        n = np.zeros(kernel_size)
+        n[tuple(np.array(n.shape) // 2)] = 1
+        return scipy.ndimage.gaussian_filter(n, sigma=kernel_size // 3)

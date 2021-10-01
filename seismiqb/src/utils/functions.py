@@ -502,10 +502,16 @@ def find_peaks(x, width=5, rel_height=0.5, threshold=0.05):
     return peaks[widths[0] >= width], None
 
 @njit(parallel=True)
-def skeletonize(slide, width=5):
+def skeletonize(slide, width=5, window=0):
     filtered_prediction = np.zeros_like(slide)
     for i in prange(slide.shape[1]):
-        x = slide[:, i]
+        x = slide[:, i].copy()
+        for step in range(1, window+1):
+            if i - step >= 0:
+                x += slide[:, i-step]
+            if i + step < slide.shape[0]:
+                x += slide[:, i+step]
+        x /= (2 * window + 1)
         peaks = find_peaks(x, width=width)[0]
         filtered_prediction[peaks, i] = 1
     return filtered_prediction
