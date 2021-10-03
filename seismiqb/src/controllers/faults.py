@@ -14,6 +14,7 @@ import torch
 from .base import BaseController
 from .best_practices import MODEL_CONFIG
 
+from ..field import Field
 from ..geometry import SeismicGeometry
 from ..labels import Fault
 from ..dataset import SeismicDataset
@@ -588,12 +589,13 @@ class FaultController(BaseController):
         slide = skeletonize(slide, width=peaks_width)
         pooling = torch.nn.MaxPool3d((1, skeleton_width, 1), stride=1, padding=(0, skeleton_width // 2, 0))
         slide = torch.tensor(slide)
-        return squueze(pooling(expand_dims(slide)), 3).numpy()
+        return squueze(pooling(expand_dims(slide)), 2).numpy()
 
     def process(self, prediction, geometry=None, orientation=0, origin=(0, 0, 0), dst=None,
                 smoothing_kernel=(7, 11, 7), chunk_size=100,
                 peaks_width=5, skeleton_width=3,
-                removing_window=30, dilation=30, padding=True, fill_value=0):
+                removing_window=30, dilation=30, padding=True, fill_value=0,
+                faults_dst='~/PREDICTIONS/FAULTS/'):
         self.log(f'Start processing.')
         if dst is None:
             dst = prediction
@@ -603,7 +605,7 @@ class FaultController(BaseController):
         prediction = self.smooth_predictions(prediction, chunk_size, kernel=smoothing_kernel)
 
         for i in range(prediction.shape[orientation]):
-            self.log(f'Process slide {i}/{prediction.shape[orientation]}')
+            self.log(f'Skeletonize slide {i}/{prediction.shape[orientation]}')
 
             slide = prediction[i] if orientation == 0 else prediction[:, i]
             slide = self.skeletonize(slide, peaks_width=peaks_width, skeleton_width=skeleton_width)
@@ -629,6 +631,11 @@ class FaultController(BaseController):
                 dst[i] = slide
             else:
                 dst[:, i] = slide
+        self.log(f'Split faults.')
+
+        for fault in Fault.from_mask(dst, field=Field(geometry), chunk_size=100):
+            fault.dump_points(os.path.join(faults_dst, f'{fault.short_name}.npz'))
+
         if not isinstance(prediction, np.ndarray):
             prediction.file.close()
         self.log(f'Finish processing.')

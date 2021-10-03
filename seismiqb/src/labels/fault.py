@@ -86,7 +86,8 @@ class Fault(Horizon):
         """ Get point cloud array from file values. """
         df = self.read_file(path)
         if df is not None:
-            df = self.recover_lines_from_cdp(df)
+            if 'cdp_x' in df.columns:
+                df = self.recover_lines_from_cdp(df)
             sticks = self.read_sticks(df, self.name, fix)
             if len(sticks) > 0:
                 sticks = self.sort_sticks(sticks)
@@ -426,27 +427,6 @@ class Fault(Horizon):
             labels = [Fault(item[1].astype('int32'), name=f'fault_{i}', field=field)
                       for i, item in tqdm(enumerate(labels), disable=(not pbar))]
         return labels
-
-    # @classmethod
-    # def skeletonize_faults(cls, prediction, axis=0, threshold=0.1, width=3, mode='faults', bar=True):
-    #     """ Make faults from binary mask. """
-    #     prediction_cube = SeismicGeometry(prediction) if isinstance(prediction, str) else prediction
-    #     shape = prediction_cube.cube_shape if isinstance(prediction_cube, SeismicGeometry) else prediction_cube.shape
-    #     processed_faults = np.zeros(shape)
-    #     for i in tqdm(range(shape[axis]), disable=(not bar)):
-    #         slices = [slice(None)] * 2
-    #         slices[axis] = i
-    #         slices = tuple(slices)
-    #         struct = generate_binary_structure(2, 10)
-    #         prediction = prediction_cube[slices]
-    #         dilation = binary_dilation(prediction > threshold, struct)
-    #         holes = binary_fill_holes(dilation, struct)
-    #         erosion = binary_erosion(holes, generate_binary_structure(2, 1))
-    #         structure = np.ones((width, 1))
-    #         processed_faults[slices] = binary_dilation(skeletonize(erosion, method='lee'), structure=structure)
-    #     if mode == 'faults':
-    #         return cls.from_mask(processed_faults, prediction_cube, chunk_size=100, pbar=bar)
-    #     return processed_faults
 
     @classmethod
     def skeletonize(cls, prediction, width=5):
