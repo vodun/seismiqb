@@ -6,8 +6,8 @@ import time
 
 from textwrap import dedent
 
-from resource import getrusage, RUSAGE_SELF
 import numpy as np
+import psutil
 import h5py
 
 from .export import ExportMixin
@@ -855,8 +855,8 @@ class SeismicGeometry(ExportMixin):
         # Calculate the average loading slide time by loading random slides `n_slide` times
         self.reset_cache()
 
-        wall_st = time.time()
-        start = getrusage(RUSAGE_SELF)[:2]  # 0 - user time in seconds,  1 - system time in seconds
+        wall_st = time.perf_counter()
+        start = psutil.cpu_times() # 0 key - user time in seconds,  2 key - system time in seconds
 
         for _ in range(n_slide):
             axis = rng.choice(a=projections_seq)
@@ -864,12 +864,12 @@ class SeismicGeometry(ExportMixin):
             loc = rng.integers(low=0, high=self.cube_shape[axis])
             _ = self.load_slide(loc=loc, axis=axis, use_cache=use_cache)
 
-        end = getrusage(RUSAGE_SELF)[:2]
-        wall_end = time.time()
+        end = psutil.cpu_times()
+        wall_end = time.perf_counter()
 
         timings['slide'] = {
             'user': 1000 * (end[0] - start[0]) / n_slide,
-            'system': 1000 * (end[1] - start[1]) / n_slide,
+            'system': 1000 * (end[2] - start[2]) / n_slide,
             'wall': 1000 * (wall_end - wall_st) / n_slide
         }
 
@@ -885,8 +885,8 @@ class SeismicGeometry(ExportMixin):
         crop_kwargs = {'mode': 'slide'} if use_cache else {}
 
         # Calculate the average loading crop time by loading random crops `n_crop` times
-        wall_st = time.time()
-        start = getrusage(RUSAGE_SELF)[:2] # 0 key - user time in seconds,  1 key - system time in seconds
+        wall_st = time.perf_counter()
+        start = psutil.cpu_times() # 0 key - user time in seconds,  2 key - system time in seconds
 
         for _ in range(n_crop):
             point = rng.integers(low=(0, 0, 0), high=self.cube_shape) // 2
@@ -895,12 +895,12 @@ class SeismicGeometry(ExportMixin):
                         for start_, shape_, max_shape in zip(point, shape, self.cube_shape)]
             _ = self.load_crop(locations, **crop_kwargs)
 
-        end = getrusage(RUSAGE_SELF)[:2]
-        wall_end = time.time()
+        end = psutil.cpu_times()
+        wall_end = time.perf_counter()
 
         timings['crop'] = {
             'user': 1000 * (end[0] - start[0]) / n_slide,
-            'system': 1000 * (end[1] - start[1]) / n_slide,
+            'system': 1000 * (end[2] - start[2]) / n_slide,
             'wall': 1000 * (wall_end - wall_st) / n_slide
         }
 
