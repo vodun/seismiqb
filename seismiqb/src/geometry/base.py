@@ -847,10 +847,8 @@ class SeismicGeometry(ExportMixin):
         rng = np.random.default_rng(seed)
         timings = {}
 
-        # parse projections:
-        projections_seq = []
-        for projection in projections:
-            projections_seq.append(self.parse_axis(projection))
+        # Parse projections:
+        projections = [self.parse_axis(proj) for proj in projections]
 
         # Calculate the average loading slide time by loading random slides `n_slide` times
         self.reset_cache()
@@ -859,8 +857,7 @@ class SeismicGeometry(ExportMixin):
         start = psutil.cpu_times() # 0 key - user time in seconds,  2 key - system time in seconds
 
         for _ in range(n_slide):
-            axis = rng.choice(a=projections_seq)
-            axis = self.parse_axis(axis)
+            axis = rng.choice(a=projections)
             loc = rng.integers(low=0, high=self.cube_shape[axis])
             _ = self.load_slide(loc=loc, axis=axis, use_cache=use_cache)
 
