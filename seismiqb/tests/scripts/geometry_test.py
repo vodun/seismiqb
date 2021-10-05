@@ -53,10 +53,12 @@ print(msg)
 # It contains: checking data; attributes, slides, crops loading test, data loading timings and visualization tests.
 with open(TEST_FOLDER + f'tmp/test_array_{DATESTAMP}.npy', 'rb') as infile:
     data_array = np.load(infile)
+print("Data array was loaded.\n")
 
 timings_file = glob.glob(TEST_FOLDER + 'timings*.json')[0]
 with open(timings_file, "r", encoding="utf-8") as infile:
     standard_timings = json.load(infile)
+print("Standard timings were loaded.\n")
 
 timings = {}
 all_OK = True
@@ -70,6 +72,8 @@ for f in tqdm(FORMATS):
 
         geometry = SeismicGeometry(CUBE_PATH)
         expected_timings = standard_timings[geometry.format]
+        
+        print("Tests execution for f{f.upper} cube.\n")
 
         run_tests(geometry=geometry, data_array=data_array,
                   test_folder=TEST_FOLDER, expected_timings=expected_timings,
@@ -82,8 +86,10 @@ for f in tqdm(FORMATS):
     except Exception as exc_inst:
         all_OK = False
         current_message += f'An ERROR occured in {f.upper()} tests.\n'
-
+    msg + = 'current_message'
     print(current_message)
+    
+print(msg)
 
 # Dump timings and remove extra files
 if all_OK:
