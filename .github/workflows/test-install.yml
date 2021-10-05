@@ -33,4 +33,4 @@ jobs:
     - name: Run basic tests
       run: |
         pip install -U pytest
-        pytest -m "not slow" --disable-pytest-warnings -v --pyargs seismiqb.tests.scripts
+        pytest -m "not slow" --disable-pytest-warnings -v --pyargs seismiqb.tests
