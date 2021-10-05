@@ -814,3 +814,7 @@ class SeismicGeometry(ExportMixin):
         inverse_matrix = np.linalg.inv(self.rotation_matrix[:, :2])
         lines = (inverse_matrix @ points.T - inverse_matrix @ self.rotation_matrix[:, 2].reshape(2, -1)).T
         return np.rint(lines)
+
+    def depth_to_time(self, depthes):
+        """ Convert depth to time. """
+        return depthes * self.sample_rate + self.delay
