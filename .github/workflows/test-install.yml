@@ -29,3 +29,8 @@ jobs:
 
     - name: Run 'import' in installed environment
       run: python -c 'import seismiqb'
+
+    - name: Run basic tests
+      run: |
+        pip install -U pytest
+        pytest -m "not slow" --disable-pytest-warnings -v --pyargs seismiqb.tests.scripts

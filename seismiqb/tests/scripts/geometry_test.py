@@ -6,16 +6,13 @@ from datetime import date
 
 import glob
 import json
-import nbformat
 import numpy as np
-from matplotlib import pyplot as plt
 from tqdm import tqdm
 
 sys.path.append('../../..')
 from seismiqb import SeismicGeometry
-
-from geometry_test_data_format import run_tests
-from geometry_test_preparation import run_preparation
+from seismiqb.tests.scripts.geometry_test_data_format import run_tests
+from seismiqb.tests.scripts.geometry_test_preparation import run_preparation
 
 DATESTAMP = date.today().strftime("%Y-%m-%d")
 
@@ -32,7 +29,7 @@ SEED = 42
 # The `tmp` dir contains cube files: cube in different formats and meta
 # The `notebooks` dir contains notebooks results (notebooks copies with outputs)
 if os.path.exists(TEST_FOLDER + 'tmp/'):
-     shutil.rmtree(TEST_FOLDER + 'tmp/')
+    shutil.rmtree(TEST_FOLDER + 'tmp/')
 os.makedirs(TEST_FOLDER + 'tmp/')
 
 # if previous run failed than we need to delete corresponding timings
@@ -40,7 +37,7 @@ failed_timings_file = glob.glob(TEST_FOLDER + 'timings*fail*.json')
 
 if failed_timings_file:
     os.remove(failed_timings_file[0])
-    
+
 DROP_EXTRA_FILES = True # drop files reffering to successful tests
 
 msg = '\n' + DATESTAMP + '\n\n'
@@ -56,9 +53,9 @@ print(msg)
 # It contains: checking data; attributes, slides, crops loading test, data loading timings and visualization tests.
 with open(TEST_FOLDER + f'tmp/test_array_{DATESTAMP}.npy', 'rb') as infile:
     data_array = np.load(infile)
-        
+
 timings_file = glob.glob(TEST_FOLDER + 'timings*.json')[0]
-with open(timings_file, "r") as infile:
+with open(timings_file, "r", encoding="utf-8") as infile:
     standard_timings = json.load(infile)
 
 timings = {}
@@ -79,16 +76,15 @@ for f in tqdm(FORMATS):
                   figsize=FIGSIZE, n_slide=N_SLIDE, n_crop=N_CROP, seed=SEED, datestamp=DATESTAMP)
 
         # Saving logs
-        with open(TEST_FOLDER + f'tmp/timings_{f}_{DATESTAMP}.json', "r") as infile:
+        with open(TEST_FOLDER + f'tmp/timings_{f}_{DATESTAMP}.json', "r", encoding="utf-8") as infile:
             timings.update(json.load(infile))
             current_message += f'Tests for {f.upper()} cube were executed correctly.\n'
-    except:
+    except Exception as exc_inst:
         all_OK = False
         current_message += f'An ERROR occured in {f.upper()} tests.\n'
 
     print(current_message)
-    msg += current_message
-    
+
 # Dump timings and remove extra files
 if all_OK:
     timings['state'] = 'OK'
@@ -96,10 +92,10 @@ if all_OK:
     if DROP_EXTRA_FILES:
         timings_file = glob.glob(TEST_FOLDER + 'timings*.json')[0]
         os.remove(timings_file)
-        
+
         shutil.rmtree(TEST_FOLDER + 'tmp/')
-        
-    with open(TEST_FOLDER + f'timings_{DATESTAMP}.json', "w") as outfile:
+
+    with open(TEST_FOLDER + f'timings_{DATESTAMP}.json', "w", encoding="utf-8") as outfile:
         json.dump(timings, outfile)
 else:
     timings['state'] = 'FAIL'
@@ -108,6 +104,6 @@ else:
         timings_files = glob.glob(TEST_FOLDER + 'tmp/timings*')
         for file_name in timings_files:
             os.remove(file_name)
-            
-    with open(TEST_FOLDER + f'timings_fail_{DATESTAMP}.json', "w") as outfile:
+
+    with open(TEST_FOLDER + f'timings_fail_{DATESTAMP}.json', "w", encoding="utf-8") as outfile:
         json.dump(timings, outfile)
