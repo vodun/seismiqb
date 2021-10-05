@@ -55,6 +55,7 @@ class SyntheticGenerator():
         self.velocity_model = None
         self.density_model = None
         self.synthetic = None
+        self.num_reflections = None
         self.reflection_surfaces = None
         self.horizon_heights = ()
         self.faults_coordinates = ()
@@ -89,12 +90,15 @@ class SyntheticGenerator():
         velocity_delta = velocities[1] - velocities[0]
         velocities += self.rng.uniform(low=-velocity_delta, high=velocity_delta, size=(num_reflections + 1, ))
 
-        # add velocity gradients of large magnitide corresponding to horizons
+        # add velocity gradients of large magnitide
+        # to model horizons
         indices = (np.array(horizon_heights) * (num_reflections + 1)).astype(np.int32)
-        velocities[indices] += velocity_delta * np.array(horizon_multipliers)
+        for ix, multiplier in zip(indices, horizon_multipliers):
+            velocities[ix:] += velocity_delta * multiplier
 
         self.horizon_heights = horizon_heights
         self.velocities = velocities
+        self.num_reflections = num_reflections
         return self
 
     def _make_surfaces(self, num_surfaces, grid_shape, shape, kind='cubic', perturbation_share=0.25, shares=None):
@@ -173,8 +177,7 @@ class SyntheticGenerator():
         else:
             raise ValueError('The function only supports the generation of 2d and 3d synthetic seismic.')
 
-        num_reflections = len(self.velocities) - 1
-        surfaces = self._make_surfaces(num_reflections, grid_shape, perturbation_share=perturbation_share, shape=shape)
+        surfaces = self._make_surfaces(self.num_reflections, grid_shape, perturbation_share=perturbation_share, shape=shape)
         _make_velocity_model = _make_velocity_model_2d if self.dim == 2 else _make_velocity_model_3d
         self.velocity_model = _make_velocity_model(self.velocities, surfaces, shape)
 
