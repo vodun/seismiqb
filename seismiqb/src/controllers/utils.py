@@ -34,7 +34,7 @@ def log_to_dict(log_path):
                         dct['Детекция: начало обучения модели'] = line_to_time(line)
                     if 'Trained for ' in line:
                         dct['Детекция: конец обучения модели'] = line_to_time(line)
-                    if 'Starting ix inference' in line:
+                    if 'Starting' in line and 'inference' in line:
                         dct['Детекция: начало процедуры предсказания'] = line_to_time(line)
                     if 'Inference done in' in line:
                         dct['Детекция: конец процедуры предсказания'] = line_to_time(line)

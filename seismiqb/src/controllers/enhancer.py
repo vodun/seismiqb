@@ -2,6 +2,7 @@
     - training a model on a horizon with synthetic distortions.
     - making inference on a selected data.
 """
+from textwrap import indent
 import numpy as np
 
 from ...batchflow import Pipeline, B, V, C, P, R
@@ -22,6 +23,8 @@ class Enhancer(HorizonController):
         sampler = self.make_sampler(dataset)
         sampler.show_locations(show=self.plot, savepath=self.make_savepath('sampler_locations.png'))
         sampler.show_sampled(show=self.plot, savepath=self.make_savepath('sampler_generated.png'))
+        self.log(f'Created sampler\n{indent(str(sampler), " "*4)}')
+
         return super().train(dataset=dataset, sampler=sampler, **kwargs)
 
 
