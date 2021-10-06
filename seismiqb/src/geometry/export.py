@@ -138,6 +138,10 @@ def make_segy_from_array(array, path_segy, zip_segy=True, remove_segy=None, **kw
                 header[segyio.TraceField.INLINE_3D] = i
                 header[segyio.TraceField.CROSSLINE_3D] = x
 
+                # change cdpx and cdpy in trace-header
+                header[segyio.TraceField.CDP_X] = i
+                header[segyio.TraceField.CDP_Y] = x
+
                 # change depth-related fields in trace-header
                 header[segyio.TraceField.TRACE_SAMPLE_COUNT] = array.shape[2]
                 header[segyio.TraceField.TRACE_SAMPLE_INTERVAL] = sample_rate

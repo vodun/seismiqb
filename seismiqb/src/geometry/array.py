@@ -71,8 +71,10 @@ class SeismicGeometryArray(SeismicGeometryHDF5):
 
     @property
     def file_size(self):
+        """ Get size of a stored array in gygabytes. """
         return round(self.array.nbytes / (1024**3), 3)
 
     @property
     def nbytes(self):
+        """ Get size of stored array in bytes. """
         return - (1024 ** 3)
