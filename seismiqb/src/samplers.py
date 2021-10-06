@@ -297,7 +297,7 @@ class HorizonSampler(BaseSampler):
 
     def __repr__(self):
         return f'<HorizonSampler for {self.displayed_name}: '\
-               f'crop_shape={tuple(self.crop_shape)}, threshold={self.threshold}>'
+               f'crop_shape={tuple(self.crop_shape)}, threshold={self.threshold}, shift_height={self.shift_height}>'
 
     @property
     def orientation_matrix(self):
