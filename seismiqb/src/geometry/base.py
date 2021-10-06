@@ -2,10 +2,12 @@
 import os
 import re
 import sys
+import time
 
 from textwrap import dedent
 
 import numpy as np
+import psutil
 import h5py
 
 from .export import ExportMixin
@@ -105,7 +107,7 @@ class SeismicGeometry(ExportMixin):
           `hist_matrix` contains a histogram of values for each trace in the cube, and can be used as
           a proxy for amplitudes in each trace for evaluating aggregated statistics.
 
-        - `load_slide` (2D entity) or `load_crop` (3D entity) methods to load data from the cube.
+        - :meth:`load_slide` (2D entity) or :meth:`load_crop` (3D entity) methods to load data from the cube.
           Load slides takes a number of slide and axis to cut along; makes use of `lru_cache` to work
           faster for subsequent loads. Cache is bound for each instance.
           Load crops works off of complete location specification (3D slice).
@@ -814,3 +816,90 @@ class SeismicGeometry(ExportMixin):
         inverse_matrix = np.linalg.inv(self.rotation_matrix[:, :2])
         lines = (inverse_matrix @ points.T - inverse_matrix @ self.rotation_matrix[:, 2].reshape(2, -1)).T
         return np.rint(lines)
+
+    def benchmark(self, n_slide=300, projections='ixh', n_crop=300, crop_shapes_min=5, crop_shapes_max=200,
+                  use_cache=False, seed=42):
+        """ Calculate average data loading timings (in ms) in user, system and wall mode for slides and crops.
+
+        Time measurement idea (sys, user and wall) is from python magic function `time` realization.
+
+        Parameters
+        ----------
+        n_slide : int, optional
+            Amount of slides to load in an experiment.
+        projections : str or sequence of int or str, optional
+            Preferable axes to load slide along: `i` or 0 for iline one, `x` or 1 for the crossline, `h` or 2 for depth.
+        n_crop : int, optional
+            Amount of crops to load in an experiment.
+        crop_shapes_min : int or tuple of int, optional
+            A minimum size of crop.
+            If int, then it applied for the first index, the second, and depth.
+            If tuple, then each number correspond to each crop index.
+        crop_shapes_max : int or tuple of int, optional
+            A maximum size of crop.
+            If int, then it applied for the first index, the second, and depth.
+            If tuple, then each number correspond to each crop index.
+        use_cache : bool, optional
+            Whether to use lru_cache for :meth:`load_slide` and :meth:`load_crop`.
+        seed : int, optional
+            Seed the random numbers generator.
+        """
+        rng = np.random.default_rng(seed)
+        timings = {}
+
+        # Parse projections:
+        projections = [self.parse_axis(proj) for proj in projections]
+
+        # Calculate the average loading slide time by loading random slides `n_slide` times
+        self.reset_cache()
+
+        wall_st = time.perf_counter()
+        start = psutil.cpu_times() # 0 key - user time in seconds,  2 key - system time in seconds
+
+        for _ in range(n_slide):
+            axis = rng.choice(a=projections)
+            loc = rng.integers(low=0, high=self.cube_shape[axis])
+            _ = self.load_slide(loc=loc, axis=axis, use_cache=use_cache)
+
+        end = psutil.cpu_times()
+        wall_end = time.perf_counter()
+
+        timings['slide'] = {
+            'user': 1000 * (end[0] - start[0]) / n_slide,
+            'system': 1000 * (end[2] - start[2]) / n_slide,
+            'wall': 1000 * (wall_end - wall_st) / n_slide
+        }
+
+        # Preparation for timing loading crop calculation
+        self.reset_cache()
+
+        if isinstance(crop_shapes_min, int):
+            crop_shapes_min = (crop_shapes_min, crop_shapes_min, crop_shapes_min)
+        if isinstance(crop_shapes_max, int):
+            crop_shapes_max = (crop_shapes_max, crop_shapes_max, crop_shapes_max)
+
+        # The `load_crop` method by default doesn't use cache. It uses cache in the `slide` mode.
+        crop_kwargs = {'mode': 'slide'} if use_cache else {}
+
+        # Calculate the average loading crop time by loading random crops `n_crop` times
+        wall_st = time.perf_counter()
+        start = psutil.cpu_times() # 0 key - user time in seconds,  2 key - system time in seconds
+
+        for _ in range(n_crop):
+            point = rng.integers(low=(0, 0, 0), high=self.cube_shape) // 2
+            shape = rng.integers(low=crop_shapes_min, high=crop_shapes_max)
+            locations = [slice(start_, np.clip(start_+shape_, 0, max_shape))
+                        for start_, shape_, max_shape in zip(point, shape, self.cube_shape)]
+            _ = self.load_crop(locations, **crop_kwargs)
+
+        end = psutil.cpu_times()
+        wall_end = time.perf_counter()
+
+        timings['crop'] = {
+            'user': 1000 * (end[0] - start[0]) / n_slide,
+            'system': 1000 * (end[2] - start[2]) / n_slide,
+            'wall': 1000 * (wall_end - wall_st) / n_slide
+        }
+
+        self.reset_cache()
+        return timings
