@@ -177,7 +177,8 @@ class SyntheticGenerator():
         else:
             raise ValueError('The function only supports the generation of 2d and 3d synthetic seismic.')
 
-        surfaces = self._make_surfaces(self.num_reflections, grid_shape, perturbation_share=perturbation_share, shape=shape)
+        surfaces = self._make_surfaces(self.num_reflections, grid_shape, perturbation_share=perturbation_share,
+                                       shape=shape)
         _make_velocity_model = _make_velocity_model_2d if self.dim == 2 else _make_velocity_model_3d
         self.velocity_model = _make_velocity_model(self.velocities, surfaces, shape)
 
@@ -605,8 +606,9 @@ def generate_synthetic(shape=(50, 400, 800), num_reflections=200, vel_limits=(90
             if dim == 2:
                 fetch_and_update = {'mode': fetch_surfaces, 'horizon_format': geobodies_format[0],
                                     'width': geobodies_width[0]}
-                gen.add_faults(faults_coordinates, num_points_faults, max_shift, zeros_share_faults, fault_shift_interpolation,
-                               perturb_values, perturb_peak, random_invert, fetch_and_update)
+                gen.add_faults(faults_coordinates, num_points_faults, max_shift, zeros_share_faults,
+                               fault_shift_interpolation, perturb_values, perturb_peak, random_invert,
+                               fetch_and_update)
             else:
                 raise ValueError("For now, faults are only supported for dim = 2.")
 

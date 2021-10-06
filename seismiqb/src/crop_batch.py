@@ -271,8 +271,7 @@ class SeismicCropBatch(Batch):
         # if the requested shape is in fact 2d (for instance [1, 64, 128] or [64, 1, 128])
         # performs `generate_synthetic` in 2d and then adds the missing axis
         shape = np.array(kwargs['shape'])
-
-        if shape[0] == 1 or shape[1] == 1:
+        if 1 in shape[:2]:
             kwargs['shape'] = tuple(shape[shape != 1])
             axis_num = 0 if shape[0] == 1 else 1
         else:
