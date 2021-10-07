@@ -38,7 +38,7 @@ jobs:
     - name: Run basic tests
       env:
         TESTS_SCRIPTS_DIR: ${{ github.workspace }}/seismiqb/tests/
-        PATH_TO_SEISMIQB: '../..'
+        PATH_TO_SEISMIQB: ${{ github.workspace }}
       run: |
         pip install -U pytest
         pytest -m "not slow" --disable-pytest-warnings -v --pyargs seismiqb.tests
