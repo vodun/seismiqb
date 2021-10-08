@@ -382,39 +382,38 @@ class Fault(Horizon):
             chunks = _chunks()
             total = len(range(0, cube_shape[0], chunk_size-overlap))
 
-        prev_overlap = np.zeros((0, *cube_shape[1:]))
+        prev_overlapped_labels = None
         labels = np.zeros((0, 4), dtype='int32')
         n_objects = 0
 
         for start, item in tqdm(chunks, total=total, disable=(not pbar)):
             chunk_labels, new_objects = measurements.label(item, structure=np.ones((3, 3, 3))) # labels for new chunk
-            chunk_labels[chunk_labels > 0] += n_objects # shift all values to avoid intersecting with previous labels
-            new_overlap = chunk_labels[:overlap]
+            new_labels = np.where(chunk_labels)
+            new_labels = np.stack([*new_labels, chunk_labels[new_labels] + n_objects], axis = -1)
 
-            if len(prev_overlap) > 0:
-                coords = np.where(prev_overlap > 0)
-                if len(coords[0]) > 0:
-                    # while there are the same objects with different labels repeat procedure
-                    while (new_overlap != prev_overlap).any():
-                        # find overlapping objects and change labels in chunk
-                        chunk_transform = {k: v for k, v in zip(new_overlap[coords], prev_overlap[coords]) if k != v}
-                        for k, v in chunk_transform.items():
-                            chunk_labels[chunk_labels == k] = v
-                        new_overlap = chunk_labels[:overlap]
+            overlapped_labels = new_labels[new_labels[:, 0] < overlap, 3]
+            if prev_overlapped_labels is not None:
+                # while there are the same objects with different labels repeat procedure
+                while (overlapped_labels != prev_overlapped_labels).any():
+                    # find overlapping objects and change labels in new chunk
+                    transform = {k: v for k, v in zip(overlapped_labels, prev_overlapped_labels) if k != v}
 
-                        # find overlapping objects and change labels in processed part of cube
-                        labels_transform = {k: v for k, v in zip(prev_overlap[coords], new_overlap[coords]) if k != v}
-                        for k, v in labels_transform.items():
-                            labels[labels[:, 3] == k, 3] = v
-                            prev_overlap[prev_overlap == k] = v
+                    for k, v in transform.items():
+                        new_labels[new_labels[:, 3] == k, 3] = v
+                    overlapped_labels = new_labels[new_labels[:, 0] < overlap, 3]
+                    transform = {k: v for k, v in zip(prev_overlapped_labels, overlapped_labels) if k != v}
 
-            prev_overlap = chunk_labels[-overlap:]
-            chunk_labels = chunk_labels[overlap:]
+                    # find overlapping objects and change labels in processed part of cube
+                    for k, v in transform.items():
+                        labels[labels[:, 3] == k, 3] = v
+                    prev_overlapped_labels = labels[labels[:, 0] >= start - overlap + 1, 3]
 
-            nonzero_coord = np.where(chunk_labels)
-            chunk_labels = np.stack([*nonzero_coord, chunk_labels[nonzero_coord]], axis = -1)
-            chunk_labels[:, 0] += start
-            labels = np.concatenate([labels, chunk_labels])
+            if start != 0:
+                new_labels = new_labels[new_labels[:, 0] >= overlap]
+
+            new_labels[:, 0] += start
+            labels = np.concatenate([labels, new_labels])
+            prev_overlapped_labels = labels[labels[:, 0] >= start + item.shape[0] - overlap, 3]
             n_objects += new_objects
 
         labels = labels[np.argsort(labels[:, 3])]

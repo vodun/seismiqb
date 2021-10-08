@@ -631,10 +631,10 @@ class FaultController(BaseController):
                 dst[i] = slide
             else:
                 dst[:, i] = slide
-        self.log(f'Split faults.')
+        # self.log(f'Split faults.')
 
-        for fault in Fault.from_mask(dst, field=Field(geometry), chunk_size=100):
-            fault.dump_points(os.path.join(faults_dst, f'{fault.short_name}.npz'))
+        # for fault in Fault.from_mask(dst, field=Field(geometry), chunk_size=100):
+        #     fault.dump_points(os.path.join(faults_dst, f'{fault.short_name}.npz'))
 
         if not isinstance(prediction, np.ndarray):
             prediction.file.close()
