@@ -586,7 +586,7 @@ class FaultController(BaseController):
         return prediction
 
     def skeletonize(self, slide, peaks_width=5, skeleton_width=3):
-        slide = skeletonize(slide, width=peaks_width)
+        slide = slide * skeletonize(slide, width=peaks_width)
         pooling = torch.nn.MaxPool3d((1, skeleton_width, 1), stride=1, padding=(0, skeleton_width // 2, 0))
         slide = torch.tensor(slide)
         return squueze(pooling(expand_dims(slide)), 2).numpy()
