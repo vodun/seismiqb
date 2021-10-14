@@ -250,6 +250,9 @@ class HorizonSampler(BaseSampler):
         self.matrix = matrix
         self.name = field.short_name
         self.displayed_name = horizon.short_name
+
+        if shift_height:
+            shift_height = shift_height if isinstance(shift_height, tuple) else (0.9, 0.1)
         self.shift_height = shift_height
         super().__init__()
 
@@ -282,8 +285,9 @@ class HorizonSampler(BaseSampler):
         sampled = self.locations[idx]
 
         if self.shift_height:
-            shift = np.random.randint(low=-int(self.crop_height*0.9), high=-int(self.crop_height*0.1),
-                                    size=(size, 1), dtype=np.int32)
+            shift = np.random.randint(low=-int(self.crop_height*self.shift_height[0]),
+                                      high=-int(self.crop_height*self.shift_height[1]),
+                                      size=(size, 1), dtype=np.int32)
             sampled[:, [3, 6]] += shift
 
         np.clip(sampled[:, 3], 0, self.field.depth - self.crop_height, out=sampled[:, 3])
@@ -293,7 +297,7 @@ class HorizonSampler(BaseSampler):
 
     def __repr__(self):
         return f'<HorizonSampler for {self.displayed_name}: '\
-               f'crop_shape={tuple(self.crop_shape)}, threshold={self.threshold}>'
+               f'crop_shape={tuple(self.crop_shape)}, threshold={self.threshold}, shift_height={self.shift_height}>'
 
     @property
     def orientation_matrix(self):

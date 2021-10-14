@@ -66,7 +66,7 @@ class UnstructuredHorizon:
             # array with row in (iline, xline, height) format
             self.format = 'points'
 
-        getattr(self, 'from_{}'.format(self.format))(storage, **kwargs)
+        getattr(self, f'from_{self.format}')(storage, **kwargs)
 
 
     def from_points(self, points, **kwargs):

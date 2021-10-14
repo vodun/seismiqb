@@ -65,7 +65,7 @@ class Extender(Enhancer):
         prev_len = initial_len = len(horizon)
         self.log(f'Inference started for {n_steps} steps with stride {stride}')
         notifier = Notifier(self.config.bar,
-                            desc='Extender inference', update_total=False,
+                            desc='Extender inference',
                             file=self.make_savepath('末 inference.log'))
 
         start_time = perf_counter()
@@ -84,7 +84,7 @@ class Extender(Enhancer):
             # Merge surfaces on crops to the horizon itself
             for patch_horizon in inference_pipeline.v('predicted_horizons'):
                 merge_code, _ = Horizon.verify_merge(horizon, patch_horizon,
-                                                     mean_threshold=5.5, adjacency=5)
+                                                     mean_threshold=0.5, adjacency=1)
                 if merge_code == 3:
                     _ = horizon.overlap_merge(patch_horizon, inplace=True)
 

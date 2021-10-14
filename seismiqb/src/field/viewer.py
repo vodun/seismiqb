@@ -12,6 +12,8 @@ class FieldViewer:
     Creates a figure with two axis -- base map and slice map, as well as some additional controls.
     On the base map we show a top-view image of a field with requested attribute from a geometry / one of the labels.
     On the slice map we show one slice from a cube along desired axis.
+
+    Requires the `ipympl` library and the `%matplotlib widget` magic to work.
     """
     out = widgets.Output()
 
@@ -51,7 +53,6 @@ class FieldViewer:
             self.base_ax, self.slice_ax = self.ax
             self.vbox = widgets.VBox([self.hbox,
                                       self.fig.canvas])
-            print('asd')
 
         # Setup widgets
         self.attribute_dropdown.observe(self.attribute_dropdown_update, names='value')
@@ -67,7 +68,6 @@ class FieldViewer:
             self.draw_base(force=True)
             self.draw_slice(force=True)
 
-        # print(self.ax)
         display(self.vbox)
 
 

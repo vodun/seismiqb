@@ -9,12 +9,12 @@ import pandas as pd
 
 from numba import prange, njit
 
-from tqdm.auto import tqdm
-
 from sklearn.decomposition import PCA
 from sklearn.neighbors import NearestNeighbors
 # from skimage.morphology import skeletonize
 from scipy.ndimage import measurements#, binary_erosion, binary_dilation, generate_binary_structure, binary_fill_holes
+
+from ...batchflow.notifier import Notifier
 
 from .horizon import Horizon
 from .fault_triangulation import make_triangulation, triangle_rasterization
@@ -386,7 +386,7 @@ class Fault(Horizon):
         labels = np.zeros((0, 4), dtype='int32')
         n_objects = 0
 
-        for start, item in tqdm(chunks, total=total, disable=(not pbar)):
+        for start, item in Notifier(pbar, total=total)(chunks):
             chunk_labels, new_objects = measurements.label(item, structure=np.ones((3, 3, 3))) # labels for new chunk
             new_labels = np.where(chunk_labels)
             new_labels = np.stack([*new_labels, chunk_labels[new_labels] + n_objects], axis = -1)
@@ -424,7 +424,7 @@ class Fault(Horizon):
             labels = [item for item in labels if item[0] >= threshold]
         if field is not None:
             labels = [Fault(item[1].astype('int32'), name=f'fault_{i}', field=field)
-                      for i, item in tqdm(enumerate(labels), disable=(not pbar))]
+                      for i, item in Notifier(pbar)(enumerate(labels))]
         return labels
 
     @classmethod

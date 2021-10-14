@@ -1,16 +1,16 @@
 """ Horizon class for POST-STACK data. """
 import os
 from copy import copy
-from functools import partialmethod
 from textwrap import dedent
+from functools import partialmethod
 
 import numpy as np
 import pandas as pd
 
 from cv2 import dilate
-from scipy.ndimage.morphology import binary_fill_holes, binary_dilation
-from scipy.ndimage import find_objects
 from skimage.measure import label
+from scipy.ndimage import find_objects
+from scipy.ndimage.morphology import binary_fill_holes, binary_dilation
 
 from .horizon_attributes import AttributesMixin
 from .horizon_visualization import VisualizationMixin
@@ -116,7 +116,6 @@ class Horizon(AttributesMixin, VisualizationMixin):
 
         # Field reference
         self.field = field
-        self.field.attached_instances.append(self)
 
         # Check format of storage, then use it to populate attributes
         if isinstance(storage, str):
@@ -140,7 +139,7 @@ class Horizon(AttributesMixin, VisualizationMixin):
                 # matrix of (iline, xline) shape with every value being height
                 self.format = 'matrix'
 
-        getattr(self, 'from_{}'.format(self.format))(storage, **kwargs)
+        getattr(self, f'from_{self.format}')(storage, **kwargs)
 
 
     # Logic of lazy computation of `points` or `matrix` from the other available storage; cache management
@@ -839,7 +838,6 @@ class Horizon(AttributesMixin, VisualizationMixin):
         filtering_matrix[coordinates[:, 0], coordinates[:, 1]] = 1
         filtering_matrix = binary_fill_holes(filtering_matrix)
         filtering_matrix = binary_dilation(filtering_matrix, iterations=4)
-        filtering_matrix = self.put_on_full(filtering_matrix, False)
         return filtering_matrix
 
 
@@ -1326,3 +1324,40 @@ class Horizon(AttributesMixin, VisualizationMixin):
         points = self.matrix_to_points(matrix)
         points = self.cubic_to_lines(points)
         self.dump_charisma(points, path, transform)
+
+
+    # Utility
+    @staticmethod
+    def is_charisma_like(path, bad_extensions=None, size_threshold=100):
+        """ Check if the path looks like the horizon file.
+
+        Parameters
+        ----------
+        path : str
+            Path of file to check.
+        bad_extensions : list, optional
+            If provided, then list of extensions to consider file not charisma-like.
+        size_threshold : number
+            If file size in kilobytes is less, than the threshold, then file is considered not charisma-like.
+        """
+        bad_extensions = bad_extensions or []
+        bad_extensions.extend(['.py', '.ipynb', '.ckpt',
+                            '.png', '.jpg',
+                            '.log', '.txt', '.torch'])
+
+        try:
+            if os.path.isdir(path):
+                return False
+
+            if max([path.endswith(ext) for ext in bad_extensions]):
+                return False
+
+            if (os.path.getsize(path) / 1024) < size_threshold:
+                return False
+            with open(path, encoding='utf-8') as file:
+                line = file.readline()
+                n = len(line.split(' '))
+            return (n == 3) or (n >= 9 and 'INLINE' in line)
+
+        except UnicodeDecodeError:
+            return False
