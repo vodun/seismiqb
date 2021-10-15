@@ -2,6 +2,7 @@
 import glob
 import json
 import os
+import pprint
 from datetime import date
 from ..batchflow.utils_notebook import run_notebook
 
@@ -12,6 +13,7 @@ DROP_EXTRA_FILES = True
 SHOW_TEST_ERROR_INFO = True
 TESTS_SCRIPTS_DIR = os.getenv("TESTS_SCRIPTS_DIR", os.path.dirname(os.path.realpath(__file__))+'/')
 TEST_FOLDER = os.path.join(TESTS_SCRIPTS_DIR, 'notebooks/geometry_test_files/')
+SHOW_MESSAGE = True
 
 def test_geometry(capsys):
     """ Run SeismicGeometry test notebook."""
@@ -38,15 +40,27 @@ def test_geometry(capsys):
     )
 
     with capsys.disabled():
+        # Extract and drop message
+        if SHOW_MESSAGE:
+            message_path = glob.glob(os.path.join(TEST_FOLDER, 'message*.txt'))[-1]
+            with open(message_path, "r") as infile:
+                for line in infile.readlines():
+                    print(line)
+
+        if DROP_EXTRA_FILES:
+            os.remove(message_path)
+
         # Extract timings data
-        timings_path = glob.glob(os.path.join(TEST_FOLDER, 'timings_*.json'))[-1]
+        timings_path = glob.glob(os.path.join(TEST_FOLDER, 'timings_*.json'))
+        timings_path = sorted(timings_path)[-1]
         with open(timings_path, "r") as infile:
             timings = json.load(infile)
-            print(timings)
+            pp = pprint.PrettyPrinter()
+            pp.pprint(timings)
 
         # Output message and extra file deleting
-        if exec_info is True:
-            print('Tests were executed correctly.\n')
+        if timings['state']=='OK':
+            print('Tests were executed successfully.\n')
 
             if DROP_EXTRA_FILES:
                 os.remove(out_path_ipynb)
