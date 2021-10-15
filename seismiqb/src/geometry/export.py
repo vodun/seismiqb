@@ -1,3 +1,4 @@
+#pylint:disable=too-many-statements
 """ Methods to save data as seismic cubes in different formats. """
 import os
 import shutil
@@ -94,6 +95,10 @@ def make_segy_from_array(array, path_segy, zip_segy=True, remove_segy=None, path
         whether to remove the cube or not. If supplied (not None), the supplied value is used.
         Otherwise, True if option `zip` is True (so that not to create both the archive and the segy-cube)
         False, whenever `zip` is set to False.
+    path_spec : str or None, optional
+        path to segy-cube to get spec of traces.
+    origin : tuple, optional
+        position of the array in segy-cube specified in 'path_spec'.
     kwargs : dict
         sorting : int
             2 stands for ilines-sorting while 1 stands for xlines-sorting.

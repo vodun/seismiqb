@@ -387,6 +387,47 @@ def make_savepath(path, name, extension=''):
 
 # Utils for skeletonize
 
+@njit(parallel=True)
+def skeletonize(slide, width=5, rel_height=0.5, threshold=0.05):
+    """ Perform skeletonize of faults on 2D slide
+
+    Parameters
+    ----------
+    slide : numpy.ndarray
+
+    width : int, optional
+        width of the resulting skeleton, by default 5
+    rel_height, threshold : float, optional
+        parameters of :meth:~.find_peaks`
+
+    Returns
+    -------
+    numpy.ndarray
+        skeletonized slide
+    """
+    skeletonized_slide = np.zeros_like(slide)
+    for i in prange(slide.shape[1]): #pylint: disable=not-an-iterable
+        x = slide[:, i].copy()
+        peaks = find_peaks(x, width=width, rel_height=rel_height, threshold=threshold)[0]
+        skeletonized_slide[peaks, i] = 1
+    return skeletonized_slide
+
+@njit
+def find_peaks(x, width=5, rel_height=0.5, threshold=0.05):
+    """ See :meth:`scipy.signal.find_peaks`. """
+    lmax = (x[1:] - x[:-1] >= 0)
+    rmax = (x[:-1] - x[1:] >= 0)
+    mask = np.empty(len(x))
+    mask[0] = rmax[0]
+    mask[-1] = lmax[-1]
+    mask[1:-1] = np.logical_and(lmax[:-1], rmax[1:])
+    mask = np.logical_and(mask, x >= threshold)
+    peaks = np.where(mask)[0]
+
+    prominences, left_bases, right_bases = _peak_prominences(x, peaks, -1)
+    widths = _peak_widths(x, peaks, rel_height, prominences, left_bases, right_bases)
+    return peaks[widths[0] >= width], None
+
 @njit
 def _peak_prominences(x, peaks, wlen):
     prominences = np.empty(peaks.shape[0], dtype=np.float64)
@@ -398,7 +439,7 @@ def _peak_prominences(x, peaks, wlen):
         i_min = 0
         i_max = x.shape[0] - 1
 
-        if 2 <= wlen:
+        if wlen >= 2:
             i_min = max(peak - wlen // 2, i_min)
             i_max = min(peak + wlen // 2, i_max)
 
@@ -456,8 +497,6 @@ def _peak_widths(x, peaks, rel_height, prominences, left_bases, right_bases):
             right_ip -= (height - x[i]) / (x[i - 1] - x[i])
 
         widths[p] = right_ip - left_ip
-        if widths[p] == 0:
-            show_warning = True
         left_ips[p] = left_ip
         right_ips[p] = right_ip
 
@@ -476,7 +515,7 @@ def _select_by_peak_distance(peaks, priority, distance):
             continue
 
         k = j - 1
-        while 0 <= k and peaks[j] - peaks[k] < distance_:
+        while k >= 0 and peaks[j] - peaks[k] < distance_:
             keep[k] = 0
             k -= 1
 
@@ -485,33 +524,3 @@ def _select_by_peak_distance(peaks, priority, distance):
             keep[k] = 0
             k += 1
     return keep  # Return as boolean array
-
-@njit
-def find_peaks(x, width=5, rel_height=0.5, threshold=0.05):
-    lmax = (x[1:] - x[:-1] >= 0)
-    rmax = (x[:-1] - x[1:] >= 0)
-    mask = np.empty(len(x))
-    mask[0] = rmax[0]
-    mask[-1] = lmax[-1]
-    mask[1:-1] = np.logical_and(lmax[:-1], rmax[1:])
-    mask = np.logical_and(mask, x >= threshold)
-    peaks = np.where(mask)[0]
-
-    prominences, left_bases, right_bases = _peak_prominences(x, peaks, -1)
-    widths = _peak_widths(x, peaks, rel_height, prominences, left_bases, right_bases)
-    return peaks[widths[0] >= width], None
-
-@njit(parallel=True)
-def skeletonize(slide, width=5, window=0):
-    filtered_prediction = np.zeros_like(slide)
-    for i in prange(slide.shape[1]):
-        x = slide[:, i].copy()
-        for step in range(1, window+1):
-            if i - step >= 0:
-                x += slide[:, i-step]
-            if i + step < slide.shape[0]:
-                x += slide[:, i+step]
-        x /= (2 * window + 1)
-        peaks = find_peaks(x, width=width)[0]
-        filtered_prediction[peaks, i] = 1
-    return filtered_prediction

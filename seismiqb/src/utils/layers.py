@@ -268,6 +268,17 @@ class DepthSoftmax(nn.Module):
         return x.float()
 
 class GaussianLayer(nn.Module):
+    """ Layer for gaussian smoothing.
+
+    Parameters
+    ----------
+    inputs : torch.Tensor
+
+    kernel_size : int, optional
+        kernel size, by default 5.
+    padding : str, optional
+        'valid' or 'same, by default 'same'.
+    """
     def __init__(self, inputs, kernel_size=5, padding='same'):
         super().__init__()
         self.ndim = inputs.ndim
@@ -287,12 +298,14 @@ class GaussianLayer(nn.Module):
         self.kernel = torch.tensor(kernel, dtype=inputs.dtype, requires_grad=False).to(inputs.device)
 
     def forward(self, x):
+        """ Forward pass. """
         x = expand_dims(x)
         if self.padding is not None:
             x = F.pad(x, (*self.padding[2], *self.padding[1], *self.padding[0], 0, 0, 0, 0))
         return squueze(F.conv3d(x, self.kernel), self.ndim)
 
     def gaussian_kernel(self, kernel_size):
+        """ Create gaussian kernel of the specified size. """
         kernel_size = np.array(kernel_size)
         n = np.zeros(kernel_size)
         n[tuple(np.array(n.shape) // 2)] = 1

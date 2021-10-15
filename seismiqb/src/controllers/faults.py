@@ -4,18 +4,11 @@
     - making an inference on selected data
 """
 import os
-from shutil import copyfile
 
 import numpy as np
-from pprint import pformat
-
 import torch
 
 from .base import BaseController
-from .best_practices import MODEL_CONFIG
-
-from ..field import Field
-from ..geometry import SeismicGeometry
 from ..labels import Fault
 from ..dataset import SeismicDataset
 from ..samplers import SeismicSampler, RegularGrid, FaultSampler, ConstantSampler
@@ -202,12 +195,14 @@ class FaultController(BaseController):
         return ppl
 
     def make_synthetic_dataset(self):
-        ds = SeismicDataset(index='/cubes/031_CHIST/031_CHIST.qblosc')
+        """ Make Dataset class for use with seismic data. """
+        ds = SeismicDataset(index='/cubes/031_CHIST/031_CHIST.qblosc') #TODO: remove hardcode
         return ds
 
     def load_synthetic(self, **kwargs):
+        """ Create pipeline to generate synthetic data. """
         refs = NS('c', a=np.arange(50, 70)).apply(lambda x: x[0, 0])
-        heights = (NS('u', dim=2) * [0.2, 0.2] + [0.25, 0.55]).apply(lambda x: np.squeeze(x))
+        heights = (NS('u', dim=2) * [0.2, 0.2] + [0.25, 0.55]).apply(np.squeeze)
         muls = NS('c', a=np.arange(-8, -4)).apply(lambda x: x[:, 0])
 
         _, xl, h = self.config['train/crop_shape']
@@ -296,6 +291,7 @@ class FaultController(BaseController):
         return ppl
 
     def train(self, dataset, sampler=None, synthetic=False, config=None, **kwargs):
+        """ Train the model. """
         if synthetic:
             config = config or {}
             pipeline_config = Config({**self.config['common'], **self.config['train'], **config, **kwargs})
@@ -491,10 +487,38 @@ class FaultController(BaseController):
                 filename = savepath + 'mask.png' if savepath else None
                 plot_image(slide, figsize=figsize, savepath=filename, show=show)
 
-    def inference(self, dataset, model, idx=0, ranges=None, orientation=0, dst=None,
-                  create_mask=False, full=False, **kwargs):
+    def inference(self, dataset, model, idx=0, ranges=None, orientation=0, dst=None, full=False, **kwargs):
+        """ Start inference.
+
+        Parameters
+        ----------
+        dataset : SeismicDataset
+
+        model : str ot TorchModel
+            path to the model or the model itself.
+        idx : int, optional
+            index of the cube in the dataset to infer, by default 0.
+        ranges : tuple of tuples or None, optional
+            each tuple is range for correspong axis to infer, by default None. If None, the whole cube will be infered.
+        orientation : int, optional
+            axis to infer along, by default 0
+        dst : str or None, optional
+            path to HDF5 to store result, by default None. If None,  the result will be returned in numpy.ndarray.
+        full : bool, optional
+            Is applied when 'ranges' is not None. If True then the result will have the same shape as initial cube with
+            prediction in 'ranges', if False then the result will be of the same shape as 'ranges' defines.
+
+        Returns
+        -------
+        numpy.ndarray or HDF5 dataset (depends on 'dst')
+        """
         config = {**self.config['inference'], **kwargs}
         crop_shape = config['crop_shape']
+        if orientation == 0:
+            crop_shape = np.minimum(crop_shape, dataset[idx].shape)
+        else:
+            crop_shape = np.minimum(crop_shape, np.array(dataset[idx].shape)[1, 0, 2])
+
         strides = config['stride']
         prefetch = config['prefetch']
 
@@ -513,11 +537,11 @@ class FaultController(BaseController):
 
         if dst is not None:
             dst = dataset.fields[idx].make_path(dst)
-            self.log(f'Result will be save to {dst}.')
+            self.log(f'Result will be saved to {dst}.')
         else:
-            self.log(f'Result will be save to numpy array.')
+            self.log('Result will be saved to numpy array.')
 
-        inference_pipeline = self.get_inference_template(model, create_mask)
+        inference_pipeline = self.get_inference_template(model, create_masks=False)
         inference_pipeline = inference_pipeline << config << dataset
 
         grid, accumulator = self.make_accumulator(dataset.fields[idx], ranges, crop_shape,
@@ -535,7 +559,7 @@ class FaultController(BaseController):
         ppl.run(n_iters=grid.n_iters, notifier=notifier, prefetch=prefetch)
         prediction = accumulator.aggregate()
 
-        self.log(f'Finish prediction.')
+        self.log('Finish inference.')
 
         if self.monitor:
             monitor.__exit__(None, None, None)
@@ -546,19 +570,52 @@ class FaultController(BaseController):
 
         return prediction
 
-    def smooth_predictions(self, prediction, chunk_size=None, kernel=(11, 21, 11)):
+    def smooth_predictions(self, prediction, chunk_size=100, kernel=(11, 21, 11), inplace=False, dst=None):
+        """ Smooth proba prediction by gaussian kernel by chunks along the first axis.
+
+        Parameters
+        ----------
+        prediction : numpy.ndarray or HDF5/BLOSC dataset.
+
+        chunk_size : int, optional
+            The size of the chunk along the first axis, by default 100. If None, smoothing will be performed without
+            chunk splitting.
+        kernel : tuple, optional
+            gaussian kernel size, by default (11, 21, 11)
+        inplace : bool, optional
+            make smoothing inplace or not, by default False. If True and dst is None, numpy.ndarray of the same shape
+            will be created.
+        dst : numpy.ndarray, HDF5/BLOSC dataset or None, optional
+            dst for processed prediction if inplace is False.
+
+        Returns
+        -------
+        numpy.ndarray or HDF5/BLOSC dataset
+            smoothed prediction
+        """
+        self.log('Start smoothing predictions.')
         if chunk_size is None:
             chunk_size = prediction.shape[0]
         if chunk_size < kernel[0]:
-            raise ValueError(f"Thefirst dim of kernel can't be greater then chunk_size but {kernel[0]} > {chunk_size}")
+            raise ValueError(f"The first dim of kernel can't be greater then chunk_size but {kernel[0]} > {chunk_size}")
         chunk_size = min(chunk_size, prediction.shape[0])
 
+        if inplace:
+            dst = prediction
+        elif dst is None:
+            dst = np.empty_like(prediction)
+        elif dst.shape != prediction.shape:
+            raise ValueError(f"dst must be of the same shape as prediction but {dst.shape} != {prediction.shape}")
+
         start = 0
+        overlap = None
 
         while True:
             stop = min(start + chunk_size, prediction.shape[0])
             chunk = prediction[start:stop]
 
+            # Only the first and the last chunks need zero padding, other chunks must have valid padding
+            # to make smoothing seamless.
             padding = [[item // 2, item - item // 2 - 1] for item in kernel]
             if start > 0:
                 padding[0][0] = 0
@@ -569,78 +626,167 @@ class FaultController(BaseController):
             layer = GaussianLayer(inputs, kernel_size=kernel, padding=padding)
             output = layer(inputs).numpy()
 
+            # Compute positions of the processed `inputs` (depends on the padding)
             output_start = 0 if start == 0 else start + kernel[0] // 2
             output_stop = output_start + output.shape[0]
 
+            # `overlap` is needed in the case when `dst == predictions` to correctly smooth data.
             if start != 0:
-                prediction[start:start+kernel[0] // 2] = overlap
+                dst[start:start+kernel[0] // 2] = overlap
 
             if stop == prediction.shape[0]:
-                prediction[output_start:output_stop] = output
+                dst[output_start:output_stop] = output
                 break
 
-            prediction[output_start:output_stop - kernel[0] // 2] = output[:-kernel[0] // 2 + 1]
+            dst[output_start:output_stop - kernel[0] // 2] = output[:-kernel[0] // 2 + 1]
             overlap = output[-kernel[0] // 2+1:]
             start = output_stop - kernel[0] // 2
+        self.log('Finish smoothing predictions.')
+        return dst
 
-        return prediction
+    def skeletonize(self, prediction, orientation=0, skeleton_width=3, inplace=False, dst=None, **kwargs):
+        """ Skeletonize predictions along one axis.
 
-    def skeletonize(self, slide, peaks_width=5, skeleton_width=3):
-        slide = slide * skeletonize(slide, width=peaks_width)
-        pooling = torch.nn.MaxPool3d((1, skeleton_width, 1), stride=1, padding=(0, skeleton_width // 2, 0))
-        slide = torch.tensor(slide)
-        return squueze(pooling(expand_dims(slide)), 2).numpy()
+        Parameters
+        ----------
+        prediction : numpy.ndarray or dataset of HDF5.
 
-    def process(self, prediction, geometry=None, orientation=0, origin=(0, 0, 0), dst=None,
-                smoothing_kernel=(7, 11, 7), chunk_size=100,
-                peaks_width=5, skeleton_width=3,
-                removing_window=30, dilation=30, padding=True, fill_value=0,
-                faults_dst='~/PREDICTIONS/FAULTS/'):
-        self.log(f'Start processing.')
-        if dst is None:
+        orientation : int, optional
+            axis to perform skeletonize, by default 0
+        skeleton_width : int, optional
+            width of the skeletonized faults, by default 3
+        inplace : bool, optional
+            make smoothing inplace or not, by default False. If True and dst is None, numpy.ndarray of the same shape
+            will be created.
+        dst : numpy.ndarray, HDF5/BLOSC dataset or None, optional
+            dst for processed prediction if inplace is False.
+
+        Returns
+        -------
+        numpy.ndarray or HDF5/BLOSC dataset
+            skeletonized prediction
+        """
+        self.log('Start skeletonize.')
+        if inplace:
             dst = prediction
-        if isinstance(geometry, str):
-            geometry = SeismicGeometry(geometry)
-        self.log(f'Smooth predictions')
-        prediction = self.smooth_predictions(prediction, chunk_size, kernel=smoothing_kernel)
+        elif dst is None:
+            dst = np.empty_like(prediction)
+        elif dst.shape != prediction.shape:
+            raise ValueError(f"dst must be of the same shape as prediction but {dst.shape} != {prediction.shape}")
 
         for i in range(prediction.shape[orientation]):
-            self.log(f'Skeletonize slide {i}/{prediction.shape[orientation]}')
-
             slide = prediction[i] if orientation == 0 else prediction[:, i]
-            slide = self.skeletonize(slide, peaks_width=peaks_width, skeleton_width=skeleton_width)
-
-            if geometry is not None:
-                if orientation == 0:
-                    zoom_slice = (
-                        slice(origin[1], origin[1]+prediction.shape[1]),
-                        slice(origin[2], origin[2]+prediction.shape[2])
-                    )
-                    image = geometry.file['cube_i'][origin[0]+i][zoom_slice]
-                else:
-                    zoom_slice = (
-                        slice(origin[2], origin[2]+prediction.shape[2]),
-                        slice(origin[0], origin[0]+prediction.shape[0])
-                    )
-                    image = geometry.file['cube_x'][origin[1]+i][zoom_slice].T
-                slide = Fault.remove_predictions_on_bounds(
-                    image, slide, window=removing_window, dilation=dilation, padding=padding, fill_value=fill_value
-                )
-
+            slide = slide * skeletonize(slide, width=skeleton_width, **kwargs)
+            pooling = torch.nn.MaxPool3d((1, skeleton_width, 1), stride=1, padding=(0, skeleton_width // 2, 0))
+            slide = torch.tensor(slide)
+            slide = squueze(pooling(expand_dims(slide)), 2).numpy()
             if orientation == 0:
                 dst[i] = slide
             else:
                 dst[:, i] = slide
-        # self.log(f'Split faults.')
-
-        # for fault in Fault.from_mask(dst, field=Field(geometry), chunk_size=100):
-        #     fault.dump_points(os.path.join(faults_dst, f'{fault.short_name}.npz'))
-
-        if not isinstance(prediction, np.ndarray):
-            prediction.file.close()
-        self.log(f'Finish processing.')
-
+        self.log('Finish skeletonize.')
         return dst
+
+    def process_bounds(self, prediction, geometry, origin=(0, 0, 0), window=30,
+                       fill_value=0, inplace=False, dst=None, **kwargs):
+        """ Remove prediction on bounds (between zero regions and filled).
+
+        Parameters
+        ----------
+        prediction : numpy.ndarray or dataset of HDF5.
+            prediction of the part of the cube which position is defined by origin.
+        geometry : SeismicGeometry
+            geometry to find bounds
+        origin : tuple, optional
+            position of the prediction respectively to geometry, by default (0, 0, 0)
+        window : int, optional
+            size of vertical window to find constant regions, by default 30
+        fill_value : int, optional
+            Value for bounds in prediction, by default 0
+        inplace : bool, optional
+            make smoothing inplace or not, by default False. If True and dst is None, numpy.ndarray of the same shape
+            will be created.
+        dst : numpy.ndarray, HDF5/BLOSC dataset or None, optional
+            dst for processed prediction if inplace is False.
+        kwargs : dict
+            kwargs for :meth:`~.FaultController.bounds_mask`.
+
+        Returns
+        -------
+        numpy.ndarray or HDF5/BLOSC dataset
+            skeletonized prediction
+        """
+        self.log('Start bounds processing.')
+        if inplace:
+            dst = prediction
+        elif dst is None:
+            dst = np.empty_like(prediction)
+        elif dst.shape != prediction.shape:
+            raise ValueError(f"dst must be of the same shape as prediction but {dst.shape} != {prediction.shape}")
+
+        for i in range(prediction.shape[0]):
+            image = geometry.load_slide(origin[0]+i)[
+                origin[1]:origin[1]+prediction.shape[1],
+                origin[2]:origin[2]+prediction.shape[2]
+            ]
+
+            mask = self.bounds_mask(image, window=window, **kwargs)
+            dst[i] = prediction[i]
+            dst[i][mask] = fill_value
+        self.log('Finish bounds processing.')
+        return dst
+
+    def bounds_mask(self, image, window=30, dilation=30, padding=True, threshold=0):
+        """ Remove predictions from cube bounds.
+
+        Parameters
+        ----------
+        image : numpy.ndarray
+            seismic image to find bounds
+        window : int, optional
+            size of vertical window to find constant regions, by default 30
+        dilation : int, optional
+            dilation of detected bounds, by default 30
+        padding : bool, optional
+            make padding or not, by default True
+        threshold : int, optional
+            threshold for ptp in the window, by default 0
+
+        Returns
+        -------
+        numpy.ndarray
+            mask of bounds
+        """
+        dilation = [dilation] * image.ndim if isinstance(dilation, int) else dilation
+        if padding:
+            pad_width = [(0, 0)] * image.ndim
+            pad_width[-1] = (window // 2, window // 2)
+            image = np.pad(image, pad_width=pad_width)
+
+        # Create array of windows to find constant regions
+        shape = (*image.shape[:-1], image.shape[-1] - window + window % 2, window)
+        strides = (*image.strides, image.strides[-1])
+        strided = np.lib.stride_tricks.as_strided(image, shape, strides=strides)
+
+        # Find centers of almost constant vertical windows
+        if padding:
+            mask = strided.ptp(axis=-1) <= threshold
+        else:
+            mask = np.ones_like(image, dtype=np.bool)
+            slices = [slice(None)] * image.ndim
+            slices[-1] = slice(window // 2, -window // 2 + 1)
+            mask[slices] = strided.ptp(axis=-1) <= threshold
+
+        for i, width in enumerate(dilation):
+            slices = [[slice(None) for _ in range(image.ndim)] for _ in range(2)]
+            for _ in range(1, width):
+                slices[0][i] = slice(1, None)
+                slices[1][i] = slice(None, -1)
+                mask[slices[0]] = np.logical_or(mask[slices[0]], mask[slices[1]])
+                mask[slices[1]] = np.logical_or(mask[slices[0]], mask[slices[1]])
+
+        return mask
+
     # Path utils
 
     def amplitudes_path(self, cube):
