@@ -213,7 +213,7 @@ class VisualizationMixin:
         if name is None:
             src = attribute_dict['src']
             if isinstance(src, np.ndarray):
-                name = 'custom'
+                name = 'data array'
             if isinstance(src, str):
                 name = src
 
@@ -284,12 +284,12 @@ class VisualizationMixin:
                 NAME_TO_COLOR[global_name] = next(COLOR_GENERATOR)
             attribute_dict['cmap'] = NAME_TO_COLOR[global_name]
         else:
-            attribute_dict['cmap'] = 'ocean'
+            attribute_dict['cmap'] = 'Basic'
 
         # Filter based on name of the class of instance
         label_instance = attribute_dict['label_instance']
 
-        attribute_dict['label_name'] = label_instance.short_name
+        attribute_dict['label_name'] = label_instance.short_name if hasattr(label_instance, 'short_name') else None
         attribute_dict['bbox'] = label_instance.bbox if hasattr(label_instance, 'bbox') else None
 
         if 'title' not in attribute_dict:

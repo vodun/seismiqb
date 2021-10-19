@@ -180,7 +180,7 @@ class MatplotlibPlotter:
         all_params = {**mode_defaults, **kwargs}
 
         data = cls.make_nested_data(data=data, separate=separate)
-        axes = cls.make_or_parse_axes(mode=mode, n_subplots=len(data), all_params=all_params)
+        axes = cls.make_or_parse_axes(data=data, mode=mode, separate=separate, all_params=all_params)
         for ax_num, (ax_data, ax) in enumerate(zip(data, axes)):
             index_condition = None if separate else lambda x: isinstance(x, list)
             ax_params = filter_parameters(all_params, index=ax_num, index_condition=index_condition)
@@ -208,25 +208,62 @@ class MatplotlibPlotter:
             raise ValueError("Arrays list must be flat, when `separate` option is True.")
         return [[item] if isinstance(item, np.ndarray) else item for item in data]
 
-
     @classmethod
-    def make_or_parse_axes(cls, mode, n_subplots, all_params):
-        """ Create figure and axes if needed, else use provided. """
-        MODE_TO_FIGSIZE = {'imshow' : (12, 12),
-                           'hist' : (8, 5),
-                           'wiggle' : (12, 7),
+    def infer_figsize(cls, data, mode, order_axes, params):
+        """" Infer figure size from aspect ratios of provided data. """
+        MODE_TO_FIGSIZE = {'wiggle' : (12, 7),
                            'curve': (15, 5)}
 
+        DEFAULT_COLUMN_WIDTH = 8
+        DEFAULT_ROW_HEIGHT = 5
+        ncols, nrows = params.get('ncols', 1), params.get('nrows', 1)
+
+        if mode == 'imshow':
+            shapes = [item[0].shape if isinstance(item, list) else item.shape for item in data]
+            shapes += [(0, 0)] * (ncols * nrows - len(shapes))
+
+            # pylint: disable=too-many-function-args
+            heights, widths = np.array(shapes).reshape(nrows, ncols, 2).transpose(2, 0, 1)
+            max_height, max_width = heights.sum(axis=0).max(), widths.sum(axis=1).max()
+            ratio = max_height / max_width
+            if order_axes[:2] == (1, 0):
+                ratio = 1 / ratio
+
+            fig_width = min(30, DEFAULT_COLUMN_WIDTH * ncols)
+            fig_height = max(DEFAULT_ROW_HEIGHT * nrows, int(fig_width * ratio))
+            figsize = (fig_width, fig_height)
+        elif mode == 'hist':
+            fig_width = DEFAULT_COLUMN_WIDTH * ncols
+            fig_height = DEFAULT_ROW_HEIGHT * nrows
+            figsize = (fig_width, fig_height)
+        else:
+            figsize = MODE_TO_FIGSIZE[mode]
+
+        return figsize
+
+    @classmethod
+    def make_or_parse_axes(cls, data, mode, separate, all_params):
+        """ Create figure and axes if needed, else use provided. """
         axes = all_params.pop('axis', None)
         axes = all_params.pop('axes', axes)
         axes = all_params.pop('ax', axes)
 
+        n_subplots = 1
+        if isinstance(data, list):
+            if separate or any(isinstance(item, list) for item in data):
+                n_subplots = len(data)
+
         if axes is None:
             FIGURE_KEYS = ['figsize', 'facecolor', 'dpi', 'ncols', 'nrows', 'constrained_layout']
             params = filter_parameters(all_params, FIGURE_KEYS, prefix='figure_')
-            params['figsize'] = params.get('figsize', MODE_TO_FIGSIZE[mode])
+
             if ('ncols' not in params) and ('nrows' not in params):
                 params['ncols'] = n_subplots
+
+            order_axes = all_params.get('order_axes', (0, 1, 2))
+            default_figsize = cls.infer_figsize(data, mode, order_axes, params)
+            params['figsize'] = params.get('figsize', default_figsize)
+
             _, axes = plt.subplots(**params)
 
         axes = to_list(axes)
@@ -710,6 +747,9 @@ class MatplotlibPlotter:
     METRIC_CMAP = LinearSegmentedColormap('Metric', METRIC_CDICT)
     METRIC_CMAP.set_bad(color='black')
     register_cmap(name='Metric', cmap=METRIC_CMAP)
+
+    BASIC_CMAP = ListedColormap(get_cmap('ocean')(np.linspace(0.0, 0.9, 100)))
+    register_cmap(name='Basic', cmap=BASIC_CMAP)
 
     DEPTHS_CMAP = ListedColormap(get_cmap('viridis_r')(np.linspace(0.0, 0.5, 100)))
     register_cmap(name='Depths', cmap=DEPTHS_CMAP)
