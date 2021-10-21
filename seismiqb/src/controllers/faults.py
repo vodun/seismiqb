@@ -51,7 +51,7 @@ class FaultController(BaseController):
             'callback': [
                 (
                     'visualize_predictions',
-                    100,
+                    5,
                     {'model': B().pipeline, 'iteration': I()})
             ],
             'visualize_crops': True,
@@ -446,8 +446,7 @@ class FaultController(BaseController):
 
         return grid, accumulator
 
-    def visualize_predictions(self, model, overlap=True, each=100, iteration=0,
-                              process=True, threshold=0.5, figsize=(20, 20)):
+    def visualize_predictions(self, model, overlap=True, each=100, iteration=0, threshold=0.01, figsize=(20, 20)):
         """ Plot predictions for cubes and ranges specified in 'inference' section of config. """
         if each is not None and (iteration + 1) % each == 0:
             dataset = self.make_inference_dataset()
@@ -461,31 +460,39 @@ class FaultController(BaseController):
                     orientation = cubes[cube][0]
                     if len(ranges) == 0:
                         ranges = None, None, None
-                prediction = self.inference(dataset, model, idx=cube, ranges=ranges, orientation=orientation)
-
-                if process:
-                    prediction = self.process(prediction, orientation=orientation)
-
-                slide = prediction[0] if orientation == 0 else prediction[:, 0]
-                loc = ranges[orientation][0]
-                zoom_slice = [slice(*ranges[i]) for i in range(3) if i != orientation]
-                image = dataset[cube].load_slide(loc, orientation=orientation)[zoom_slice]
 
                 if self.config['savedir'] is not None:
-                    savepath = os.path.join(self.config['savedir'], 'predictions')
+                    savepath = os.path.join(self.config['savedir'], 'predictions', cube)
                     if not os.path.exists(savepath):
                         os.makedirs(savepath)
-                    savepath = os.path.join(savepath, f'{cube}_{orientation}_{ranges}_{iteration}_')
+                    savepath = os.path.join(savepath, f'{orientation}_{ranges}_{iteration}_')
                     show = False
                 else:
                     savepath = None
                     show = True
 
-                filename = savepath + 'prediction.png' if savepath else None
-                plot_image([image, slide > threshold], figsize=figsize, separate=False, savepath=filename, show=show)
+                origin = [item[0] if item is not None else None for item in ranges]
+                loc = ranges[orientation][0]
+                zoom_slice = [slice(*ranges[i]) for i in range(3) if i != orientation]
 
-                filename = savepath + 'mask.png' if savepath else None
-                plot_image(slide, figsize=figsize, savepath=filename, show=show)
+                model_prediction = self.inference(dataset, model, idx=cube, ranges=ranges, orientation=orientation)
+
+                processed_prediction = self.process_bounds(prediction=model_prediction, geometry=dataset[cube].geometry,
+                                                           inplace=False, origin=origin)
+                self.smooth_predictions(prediction=processed_prediction, inplace=True)
+                self.skeletonize(prediction=processed_prediction, inplace=True, orientation=orientation)
+
+                image = dataset[cube].load_slide(loc, orientation=orientation)[zoom_slice]
+
+                for prediction, name in zip([model_prediction, processed_prediction], ['model', 'processed']):
+                    slide = prediction[0] if orientation == 0 else prediction[:, 0]
+
+                    filename = savepath + f'{name}_' + 'prediction.png' if savepath else None
+                    slide[slide <= threshold] = np.nan
+                    plot_image([image, slide], figsize=figsize, separate=False, savepath=filename, show=show)
+
+                    filename = savepath + f'{name}_' + 'mask.png' if savepath else None
+                    plot_image(slide, figsize=figsize, savepath=filename, show=show)
 
     def inference(self, dataset, model, idx=0, ranges=None, orientation=0, dst=None, full=False, **kwargs):
         """ Start inference.
@@ -517,7 +524,7 @@ class FaultController(BaseController):
         if orientation == 0:
             crop_shape = np.minimum(crop_shape, dataset[idx].shape)
         else:
-            crop_shape = np.minimum(crop_shape, np.array(dataset[idx].shape)[1, 0, 2])
+            crop_shape = np.minimum(crop_shape, np.array(dataset[idx].shape)[[1, 0, 2]])
 
         strides = config['stride']
         prefetch = config['prefetch']
