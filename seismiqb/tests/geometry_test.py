@@ -2,6 +2,7 @@
 import glob
 import json
 import os
+import pytest
 import pprint
 from datetime import date
 from ..batchflow.utils_notebook import run_notebook
@@ -15,7 +16,8 @@ TESTS_SCRIPTS_DIR = os.getenv("TESTS_SCRIPTS_DIR", os.path.dirname(os.path.realp
 TEST_FOLDER = os.path.join(TESTS_SCRIPTS_DIR, 'notebooks/geometry_test_files/')
 SHOW_MESSAGE = True
 
-def test_geometry(capsys):
+@pytest.fixture(scope="session")
+def tests_notebook(tmpdir_factory):
     """ Run SeismicGeometry test notebook."""
     # Delete old test notebook results
     previous_output_files = glob.glob(os.path.join(TESTS_SCRIPTS_DIR, 'notebooks/geometry_test_out_*.ipynb'))
@@ -23,7 +25,7 @@ def test_geometry(capsys):
     for file in previous_output_files:
         os.remove(file)
 
-    out_path_ipynb = os.path.join(TESTS_SCRIPTS_DIR, f'notebooks/geometry_test_out_{DATESTAMP}.ipynb')
+    out_path_ipynb = tmpdir_factory.mktemp("notebooks") / "geometry_test_out_{DATESTAMP}.ipynb"
 
     # Tests execution
     _, tests_notebook = run_notebook(
@@ -40,8 +42,10 @@ def test_geometry(capsys):
         display_links=False,
         return_nb=True
     )
+    return (tests_notebook, out_path_ipynb)
 
-    # Get message and timing from the notebook cells (github didn't save temporary files)
+def test_geometry(capsys, tests_notebook):
+    # Get message and timing from the notebook cells (github don't save temporary files)
     msg = tests_notebook['cells'][7]['outputs'][0]['text']
     timings = json.loads(tests_notebook['cells'][9]['outputs'][0]['text'].replace('\'', '\"'))
 
@@ -56,8 +60,6 @@ def test_geometry(capsys):
         if timings['state']=='OK':
             print('Tests for SeismicGeometry were executed successfully.\n')
 
-            if DROP_EXTRA_FILES:
-                os.remove(out_path_ipynb)
         else:
-            print(f'SeismicGeometry tests failed:\n{out_path_ipynb}\n')
+            print(f'SeismicGeometry tests failed.\n')
             assert False
