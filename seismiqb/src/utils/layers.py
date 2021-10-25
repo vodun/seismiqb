@@ -77,27 +77,40 @@ class MovingNormalizationLayer(nn.Module):
     def __init__(self, inputs, window=(1, 1, 100), padding='same', fill_value=0):
         super().__init__()
         self.window = window
-        self.padding = padding
         self.fill_value = fill_value
         self.ndim = inputs.ndim
         self.kernel = torch.ones((1, 1, *window), dtype=inputs.dtype, requires_grad=False).to(inputs.device)
+
+        if padding == 'same':
+            pad = [(w // 2, w - w // 2 - 1) for w in self.window]
+            self.padding = (*pad[2], *pad[1], *pad[0], 0, 0, 0, 0)
+
+            normilizing = torch.ones(expand_dims(inputs[:1]).shape, dtype=inputs.dtype, requires_grad=False).to(inputs.device)
+            normilizing = F.pad(normilizing, self.padding)
+            self.normalization_map = F.conv3d(normilizing, self.kernel)[0]
+        else:
+            padding = None
+            self.normalization_map = np.prod(self.window)
 
     @autocast(enabled=False)
     def forward(self, x):
         """ Forward pass. """
         x = expand_dims(x)
-        pad = [(w // 2, w - w // 2 - 1) for w in self.window]
-        if self.padding == 'same':
-            num = F.pad(x, (*pad[2], *pad[1], *pad[0], 0, 0, 0, 0))
-        else:
+
+        if self.padding is None:
             num = x
-        n = np.prod(self.window)
-        mean = F.conv3d(num, self.kernel / n)
-        mean_2 = F.conv3d(num ** 2, self.kernel / n)
-        std = torch.clip(mean_2 - mean ** 2, min=0) ** 0.5
+        else:
+            num = F.pad(x, self.padding)
+
+        mean = F.conv3d(num, self.kernel) / self.normalization_map
+        mean_2 = F.conv3d(num ** 2, self.kernel) / self.normalization_map
+        std = torch.clip(mean_2 - mean ** 2, min=1e-10) ** 0.5
+
+        pad = self.padding
         if self.padding == 'valid':
-            x = x[:, :, pad[0][0]:x.shape[2]-pad[0][1], pad[1][0]:x.shape[3]-pad[1][1], pad[2][0]:x.shape[4]-pad[2][1]]
-        result = torch.nan_to_num((x - mean) / std, nan=self.fill_value)
+            x = x[:, :, pad[4]:x.shape[2]-pad[5], pad[2]:x.shape[3]-pad[3], pad[0]:x.shape[4]-pad[1]]
+        result = (x - mean) / std
+        result = torch.nan_to_num(result, nan=self.fill_value)
         return squueze(result, self.ndim)
 
 class SemblanceLayer(nn.Module):
@@ -278,14 +291,23 @@ class GaussianLayer(nn.Module):
         kernel size, by default 5.
     padding : str, optional
         'valid' or 'same, by default 'same'.
+    sigma : float or None,  optional
+
     """
-    def __init__(self, inputs, kernel_size=5, padding='same'):
+    def __init__(self, inputs, kernel_size=5, sigma=None, padding='same'):
         super().__init__()
         self.ndim = inputs.ndim
         if isinstance(kernel_size, int):
-            kernel_size = [kernel_size] * self.ndim
+            kernel_size = [kernel_size] * 3
+        kernel_size = np.array(kernel_size)
 
-        kernel = self.gaussian_kernel(kernel_size)
+        if isinstance(sigma, int):
+            sigma = [sigma] * 3
+        elif sigma is None:
+            sigma = kernel_size // 3
+        sigma = np.array(sigma)
+
+        kernel = self.gaussian_kernel(kernel_size, sigma)
         kernel = np.expand_dims(kernel, axis=[0, 1])
 
         self.kernel_size = kernel_size
@@ -304,9 +326,8 @@ class GaussianLayer(nn.Module):
             x = F.pad(x, (*self.padding[2], *self.padding[1], *self.padding[0], 0, 0, 0, 0))
         return squueze(F.conv3d(x, self.kernel), self.ndim)
 
-    def gaussian_kernel(self, kernel_size):
+    def gaussian_kernel(self, kernel_size, sigma=None):
         """ Create gaussian kernel of the specified size. """
-        kernel_size = np.array(kernel_size)
         n = np.zeros(kernel_size)
         n[tuple(np.array(n.shape) // 2)] = 1
-        return scipy.ndimage.gaussian_filter(n, sigma=kernel_size // 3)
+        return scipy.ndimage.gaussian_filter(n, sigma=sigma)

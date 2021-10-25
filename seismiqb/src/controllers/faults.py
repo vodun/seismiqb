@@ -51,7 +51,7 @@ class FaultController(BaseController):
             'callback': [
                 (
                     'visualize_predictions',
-                    5,
+                    100,
                     {'model': B().pipeline, 'iteration': I()})
             ],
             'visualize_crops': True,
