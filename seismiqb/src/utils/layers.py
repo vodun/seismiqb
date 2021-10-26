@@ -84,17 +84,20 @@ class MovingNormalizationLayer(nn.Module):
         if padding == 'same':
             pad = [(w // 2, w - w // 2 - 1) for w in self.window]
             self.padding = (*pad[2], *pad[1], *pad[0], 0, 0, 0, 0)
-
-            normilizing = torch.ones(expand_dims(inputs[:1]).shape, dtype=inputs.dtype, requires_grad=False).to(inputs.device)
-            normilizing = F.pad(normilizing, self.padding)
-            self.normalization_map = F.conv3d(normilizing, self.kernel)[0]
         else:
             padding = None
-            self.normalization_map = np.prod(self.window)
+
+    def init_normalizer_map(self, inputs):
+        """ Create normalization map. """
+        normalizer = torch.ones(expand_dims(inputs[:1]).shape, dtype=inputs.dtype, requires_grad=False)
+        normalizer = F.pad(normalizer.to(inputs.device), self.padding)
+        return F.conv3d(normalizer, self.kernel)[0]
 
     @autocast(enabled=False)
     def forward(self, x):
         """ Forward pass. """
+        normalization_map = self.init_normalizer_map(x)
+
         x = expand_dims(x)
 
         if self.padding is None:
@@ -102,8 +105,8 @@ class MovingNormalizationLayer(nn.Module):
         else:
             num = F.pad(x, self.padding)
 
-        mean = F.conv3d(num, self.kernel) / self.normalization_map
-        mean_2 = F.conv3d(num ** 2, self.kernel) / self.normalization_map
+        mean = F.conv3d(num, self.kernel) / normalization_map
+        mean_2 = F.conv3d(num ** 2, self.kernel) / normalization_map
         std = torch.clip(mean_2 - mean ** 2, min=1e-10) ** 0.5
 
         pad = self.padding
