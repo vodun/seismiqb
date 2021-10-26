@@ -125,9 +125,7 @@ class VisualizationMixin:
         title = f'Field `{self.displayed_name}`\n {header} {loc} out of {total}'
 
         kwargs = {
-            'figsize': (16, 8),
             'title_label': title,
-            'title_y': 1.02,
             'xlabel': xlabel,
             'ylabel': ylabel,
             'extent': (xmin, xmax, ymin, ymax),
@@ -427,7 +425,6 @@ class VisualizationMixin:
 
             plot_defaults = {
                 **plot_defaults,
-                'figsize': (x / min(x, y) * n_subplots * 7, y / min(x, y) * 7),
                 'cmap': cmaps,
                 'alpha': alphas,
                 'colorbar': True,
@@ -436,8 +433,6 @@ class VisualizationMixin:
                 'xlim': bbox[0],
                 'ylim': bbox[1][::-1],
             }
-        elif mode == 'hist':
-            plot_defaults = {**plot_defaults, 'figsize': (n_subplots * 10, 5)}
         else:
             raise ValueError(f"Valid modes are 'imshow' or 'hist', but '{mode}' was given.")
 

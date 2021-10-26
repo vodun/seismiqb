@@ -209,28 +209,31 @@ class MatplotlibPlotter:
         return [[item] if isinstance(item, np.ndarray) else item for item in data]
 
     @classmethod
-    def infer_figsize(cls, data, mode, order_axes, params):
+    def infer_figsize(cls, data, mode, params):
         """" Infer figure size from aspect ratios of provided data. """
         MODE_TO_FIGSIZE = {'wiggle' : (12, 7),
                            'curve': (15, 5)}
 
-        DEFAULT_COLUMN_WIDTH = 8
-        DEFAULT_ROW_HEIGHT = 5
+        scale = params.pop('scale', 1)
+        DEFAULT_COLUMN_WIDTH = int(8 * scale)
+        DEFAULT_ROW_HEIGHT = int(3 * scale)
         ncols, nrows = params.get('ncols', 1), params.get('nrows', 1)
 
         if mode == 'imshow':
-            shapes = [item[0].shape if isinstance(item, list) else item.shape for item in data]
+            order_axes = params.pop('order_axes', cls.IMSHOW_DEFAULTS['order_axes'])
+            shapes = []
+            for item in data:
+                shape = item[0].shape if isinstance(item, list) else item.shape
+                shape = tuple(shape[pos] for pos in order_axes[:2])
+                shapes.append(shape)
             shapes += [(0, 0)] * (ncols * nrows - len(shapes))
 
-            # pylint: disable=too-many-function-args
-            heights, widths = np.array(shapes).reshape(nrows, ncols, 2).transpose(2, 0, 1)
+            heights, widths = np.array(shapes).reshape((nrows, ncols, 2)).transpose(2, 0, 1)
             max_height, max_width = heights.sum(axis=0).max(), widths.sum(axis=1).max()
             ratio = max_height / max_width
-            if order_axes[:2] == (1, 0):
-                ratio = 1 / ratio
 
             fig_width = min(30, DEFAULT_COLUMN_WIDTH * ncols)
-            fig_height = max(DEFAULT_ROW_HEIGHT * nrows, int(fig_width * ratio))
+            fig_height = max(DEFAULT_ROW_HEIGHT * nrows, fig_width * ratio)
             figsize = (fig_width, fig_height)
         elif mode == 'hist':
             fig_width = DEFAULT_COLUMN_WIDTH * ncols
@@ -254,15 +257,16 @@ class MatplotlibPlotter:
                 n_subplots = len(data)
 
         if axes is None:
-            FIGURE_KEYS = ['figsize', 'facecolor', 'dpi', 'ncols', 'nrows', 'constrained_layout']
+            FIGURE_KEYS = ['figsize', 'facecolor', 'dpi', 'ncols', 'nrows', 'tight_layout', 'scale', 'order_axes']
             params = filter_parameters(all_params, FIGURE_KEYS, prefix='figure_')
 
             if ('ncols' not in params) and ('nrows' not in params):
                 params['ncols'] = n_subplots
 
-            order_axes = all_params.get('order_axes', (0, 1, 2))
-            default_figsize = cls.infer_figsize(data, mode, order_axes, params)
+            default_figsize = cls.infer_figsize(data, mode, params)
             params['figsize'] = params.get('figsize', default_figsize)
+
+            params['tight_layout'] = params.get('tight_layout', True)
 
             _, axes = plt.subplots(**params)
 
@@ -347,7 +351,7 @@ class MatplotlibPlotter:
 
         # colorbar
         if all_params.get('colorbar', False) and mode == 'imshow':
-            keys = ['colorbar', 'fraction', 'aspect', 'fake', 'ax_image']
+            keys = ['colorbar', 'size', 'pad', 'fake', 'ax_image']
             params = filter_parameters(ax_params, keys, prefix='colorbar_', index=ax_num)
             # if colorbar is disabled for subplot, add param to plot fake axis instead to keep proportions
             params['fake'] = not params.pop('colorbar', True)
@@ -410,8 +414,8 @@ class MatplotlibPlotter:
         # axis labels
         'xlabel': '', 'ylabel': '',
         # colorbar
-        'colorbar_fraction': 3.0,
-        'colorbar_aspect': 30,
+        'colorbar_size': 5,
+        'colorbar_pad': None,
         # ticks
         'labeltop': True,
         'labelright': True,
@@ -784,12 +788,11 @@ class MatplotlibPlotter:
         return colorsys.hls_to_rgb(h, min(1, l * scale), s = s)
 
     @staticmethod
-    def add_colorbar(ax_image, aspect=30, fraction=0.5, color='black', fake=False):
+    def add_colorbar(ax_image, size=5, pad=None, color='black', fake=False):
         """ Append colorbar to the image on the right. """
         divider = axes_grid1.make_axes_locatable(ax_image.axes)
-        width = axes_grid1.axes_size.AxesY(ax_image.axes, aspect=1./aspect)
-        pad = axes_grid1.axes_size.Fraction(fraction, width)
-        cax = divider.append_axes("right", size=width, pad=pad)
+        pad = size * 1.5 if pad is None else pad
+        cax = divider.append_axes("right", size=f"{size}%", pad=f"{pad}%")
         if fake:
             cax.set_axis_off()
         else:

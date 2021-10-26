@@ -134,9 +134,7 @@ class VisualizationMixin:
         title = f'Horizon `{self.name}` on cube `{self.field.displayed_name}`\n {header} {loc} out of {total}'
 
         kwargs = {
-            'figsize': (16, 8),
             'title_label': title,
-            'title_y': 1.02,
             'xlabel': xlabel,
             'ylabel': ylabel,
             'extent': (xmin, xmax, ymin, ymax),
