@@ -42,7 +42,7 @@ def tests_notebook(tmpdir_factory):
         display_links=False,
         return_nb=True
     )
-    return (tests_notebook, out_path_ipynb)
+    return tests_notebook
 
 def test_geometry(capsys, tests_notebook):
     # Get message and timing from the notebook cells (github don't save temporary files)
@@ -51,15 +51,14 @@ def test_geometry(capsys, tests_notebook):
 
     with capsys.disabled():
         if SHOW_MESSAGE:
-            print(msg)
+            print(msg, '\n')
 
         pp = pprint.PrettyPrinter()
         pp.pprint(timings)
 
-        # Output message and extra file deleting
+        # End of the running message
         if timings['state']=='OK':
             print('Tests for SeismicGeometry were executed successfully.\n')
-
         else:
             print(f'SeismicGeometry tests failed.\n')
             assert False
