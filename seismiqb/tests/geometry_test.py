@@ -46,6 +46,7 @@ def tests_notebook(tmpdir_factory):
 
 def test_geometry(capsys, tests_notebook):
     # Get message and timing from the notebook cells (github don't save temporary files)
+    print(tests_notebook)
     msg = tests_notebook['cells'][7]['outputs'][0]['text']
     timings = json.loads(tests_notebook['cells'][9]['outputs'][0]['text'].replace('\'', '\"'))
 
