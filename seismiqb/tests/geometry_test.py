@@ -2,7 +2,6 @@
 import glob
 import json
 import os
-import pytest
 import pprint
 from datetime import date
 
@@ -37,7 +36,7 @@ def test_geometry(capsys, tmpdir):
         out_path_ipynb = os.path.join(TESTS_SCRIPTS_DIR, f'notebooks/geometry_test_out_{DATESTAMP}.ipynb')
 
     # Tests execution
-    exec_info, tests_notebook = run_notebook(
+    exec_info = run_notebook(
         path=os.path.join(TESTS_SCRIPTS_DIR, 'notebooks/geometry_test.ipynb'),
         nb_kwargs={
             'NOTEBOOKS_DIR': os.path.join(TESTS_SCRIPTS_DIR, 'notebooks/'),
@@ -50,21 +49,20 @@ def test_geometry(capsys, tmpdir):
         },
         insert_pos=1,
         out_path_ipynb=out_path_ipynb,
-        display_links=False,
-        return_nb=True
+        display_links=False
     )
 
     if exec_info is True:
         # Open message
         message_path = glob.glob(os.path.join(SAVING_DIR, 'message_*.txt'))[-1]
 
-        with open(message_path, "r") as infile:
+        with open(message_path, "r", encoding="utf-8") as infile:
             msg = infile.readlines()
 
         # Open timings
         timings_path = glob.glob(os.path.join(SAVING_DIR, 'timings_*.json'))[-1]
 
-        with open(timings_path, "r") as infile:
+        with open(timings_path, "r", encoding="utf-8") as infile:
             timings = json.load(infile)
 
     else:
