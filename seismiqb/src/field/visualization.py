@@ -405,12 +405,6 @@ class VisualizationMixin:
         label_name = label_instance.short_name
         bbox = label_instance.bbox if hasattr(label_instance, 'bbox') else [[None] * 2] * 2
 
-        # Infer number of figure subplots from data nestedness level
-        n_subplots = 1
-        if isinstance(data, list):
-            if kwargs.get('separate') or any(isinstance(item, list) for item in data):
-                n_subplots = len(data)
-
         # Prepare plot defaults
         plot_defaults = {
             'suptitle_label': f'Field `{self.displayed_name}`',
@@ -421,8 +415,6 @@ class VisualizationMixin:
 
         # Defaults for chosen mode
         if mode == 'imshow':
-            x, y = self.spatial_shape
-
             plot_defaults = {
                 **plot_defaults,
                 'cmap': cmaps,
@@ -430,10 +422,10 @@ class VisualizationMixin:
                 'colorbar': True,
                 'xlabel': self.index_headers[0],
                 'ylabel': self.index_headers[1],
-                'xlim': bbox[0],
-                'ylim': bbox[1][::-1],
+                'xlim': tuple(bbox[0]),
+                'ylim': tuple(bbox[1][::-1]),
             }
-        else:
+        elif mode != 'hist':
             raise ValueError(f"Valid modes are 'imshow' or 'hist', but '{mode}' was given.")
 
         # Plot image with given params and return resulting figure

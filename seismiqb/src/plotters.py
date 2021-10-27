@@ -209,23 +209,26 @@ class MatplotlibPlotter:
         return [[item] if isinstance(item, np.ndarray) else item for item in data]
 
     @classmethod
-    def infer_figsize(cls, data, mode, params):
+    def infer_figsize(cls, data, mode, order_axes, ncols, nrows, scale, xlim, ylim):
         """" Infer figure size from aspect ratios of provided data. """
         MODE_TO_FIGSIZE = {'wiggle' : (12, 7),
                            'curve': (15, 5)}
 
-        scale = params.pop('scale', 1)
         DEFAULT_COLUMN_WIDTH = int(8 * scale)
         DEFAULT_ROW_HEIGHT = int(3 * scale)
-        ncols, nrows = params.get('ncols', 1), params.get('nrows', 1)
 
         if mode == 'imshow':
-            order_axes = params.pop('order_axes', cls.IMSHOW_DEFAULTS['order_axes'])
+            if not isinstance(xlim, list):
+                xlim = [xlim] * len(data)
+            if not isinstance(ylim, list):
+                ylim = [ylim] * len(data)
+
             shapes = []
-            for item in data:
+            for num, item in enumerate(data):
                 shape = item[0].shape if isinstance(item, list) else item.shape
-                shape = tuple(shape[pos] for pos in order_axes[:2])
-                shapes.append(shape)
+                subplot_height = abs(xlim[num][0] - xlim[num][1]) + 1 if xlim[num] is not None else shape[order_axes[1]]
+                subplot_width = abs(ylim[num][0] - ylim[num][1]) + 1 if ylim[num] is not None else shape[order_axes[0]]
+                shapes.append((subplot_width, subplot_height))
             shapes += [(0, 0)] * (ncols * nrows - len(shapes))
 
             heights, widths = np.array(shapes).reshape((nrows, ncols, 2)).transpose(2, 0, 1)
@@ -244,6 +247,23 @@ class MatplotlibPlotter:
 
         return figsize
 
+    @staticmethod
+    def infer_cols_rows(n_subplots, params, default_ncols=4):
+        """ Infer number of columns or/and rows for ploting provided number of subplots. """
+        ncols = params.pop('ncols', None)
+        nrows = params.pop('nrows', None)
+
+        ceil_div = lambda a, b: -(-a // b)
+        if ncols is None and nrows is None:
+            ncols = min(default_ncols, n_subplots)
+            nrows = ceil_div(n_subplots, ncols)
+        elif ncols is None:
+            ncols = ceil_div(n_subplots, ncols)
+        elif nrows is None:
+            nrows = ceil_div(n_subplots, ncols)
+
+        return ncols, nrows
+
     @classmethod
     def make_or_parse_axes(cls, data, mode, separate, all_params):
         """ Create figure and axes if needed, else use provided. """
@@ -257,13 +277,17 @@ class MatplotlibPlotter:
                 n_subplots = len(data)
 
         if axes is None:
-            FIGURE_KEYS = ['figsize', 'facecolor', 'dpi', 'ncols', 'nrows', 'tight_layout', 'scale', 'order_axes']
+            FIGURE_KEYS = ['figsize', 'facecolor', 'dpi', 'ncols', 'nrows', 'tight_layout']
             params = filter_parameters(all_params, FIGURE_KEYS, prefix='figure_')
 
-            if ('ncols' not in params) and ('nrows' not in params):
-                params['ncols'] = n_subplots
+            ncols, nrows = cls.infer_cols_rows(n_subplots, params)
+            params['ncols'], params['nrows'] = ncols, nrows
 
-            default_figsize = cls.infer_figsize(data, mode, params)
+            order_axes = all_params.get('order_axes', cls.IMSHOW_DEFAULTS['order_axes'])
+            scale = all_params.get('scale', 1)
+            xlim = all_params.get('xlim', None)
+            ylim = all_params.get('ylim', None)
+            default_figsize = cls.infer_figsize(data, mode, order_axes, ncols, nrows, scale, xlim, ylim)
             params['figsize'] = params.get('figsize', default_figsize)
 
             params['tight_layout'] = params.get('tight_layout', True)
@@ -801,7 +825,7 @@ class MatplotlibPlotter:
             ax_image.axes.created_colorbar = colorbar
 
     @staticmethod
-    def add_legend(ax, color, label, size, loc):
+    def add_legend(ax, color, label, size, loc, facecolor='white'):
         """ Add patches to legend. All invalid colors are filtered. """
         handles = getattr(ax.get_legend(), 'legendHandles', [])
         colors = [color for color in to_list(color) if is_color_like(color)]
@@ -809,7 +833,7 @@ class MatplotlibPlotter:
         new_patches = [Patch(color=color, label=label) for color, label in zip(colors, labels) if label]
         handles += new_patches
         if handles:
-            ax.legend(handles=handles, loc=loc, prop={'size': size})
+            ax.legend(handles=handles, loc=loc, prop={'size': size}, facecolor=facecolor)
 
 
 

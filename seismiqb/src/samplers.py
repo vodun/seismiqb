@@ -22,7 +22,7 @@ from numba import njit
 from .utils import filtering_function, AugmentedDict
 from .labels.fault import insert_fault_into_mask
 from ..batchflow import Sampler, ConstantSampler
-
+from .plotters import MatplotlibPlotter, plot_image
 
 class BaseSampler(Sampler):
     """ Common logic of making locations. Refer to the documentation of inherited classes for more details. """
@@ -696,41 +696,55 @@ class SeismicSampler(Sampler):
                 msg += f'\n        {sampler}'
         return msg
 
-    def show_locations(self, ncols=2, **kwargs):
+    def show_locations(self, **kwargs):
         """ Visualize on field map by using underlying `locations` structure. """
-        for idx, samplers_list in self.samplers.items():
+        data = []
+        titles = []
+
+        for samplers_list in self.samplers.values():
             field = samplers_list[0].field
 
-            images = [[sampler.orientation_matrix, field.zero_traces]
-                      for sampler in samplers_list]
+            field_data = [[sampler.orientation_matrix, field.zero_traces] for sampler in samplers_list]
+            data.extend(field_data)
 
-            ncols_ = min(ncols, len(samplers_list))
-            nrows = (len(samplers_list) // ncols_ + len(samplers_list) % 2 - 1) or 1
-            _kwargs = {
-                'cmap': [['Sampler', 'black']] * len(samplers_list),
-                'alpha': [[1.0, 0.4]] * len(samplers_list),
-                'ncols': ncols_, 'nrows': nrows,
-                'figsize': (16, 5*nrows),
-                'title': [sampler.displayed_name for sampler in samplers_list],
-                'suptitle_label': idx if len(samplers_list) > 1 else '',
-                'constrained_layout': len(samplers_list) > 1,
-                'colorbar': False,
-                'legend_label': ('ILINES and CROSSLINES', 'only ILINES', 'only CROSSLINES',
-                                 'restricted', 'dead traces'),
-                'legend_cmap': ('purple','blue','red', 'white', 'gray'),
-                'legend_loc': 10,
-                'vmin': [[1, 0]] * len(samplers_list),
-                'vmax': [[3, 1]] * len(samplers_list),
-                **kwargs
-            }
-            field.geometry.show(images, **_kwargs)
+            field_titles = [f'{field.displayed_name}: {sampler.displayed_name}' for sampler in samplers_list]
+            titles.extend(field_titles)
+
+        ncols, nrows = MatplotlibPlotter.infer_cols_rows(n_subplots=len(data), params=kwargs)
+        # add extra axis for legend plot no space left on a grid of inferred cols and rows
+        if ncols * nrows == len(data):
+            nrows += 1
+
+        kwargs = {
+            'cmap': [['Sampler', 'black']] * len(data),
+            'alpha': [[1.0, 0.4]] * len(data),
+            'ncols': ncols,
+            'nrows': nrows,
+            'title': titles,
+            'vmin': [[1, 0]] * len(data),
+            'vmax': [[3, 1]] * len(data),
+            **kwargs
+        }
+
+        fig = plot_image(data, return_figure=True, **kwargs)
+
+        legend_params = {
+            'ax': fig.axes[len(data)],
+            'color': ('purple','blue','red', 'white', 'gray'),
+            'label': ('ILINES and CROSSLINES', 'only ILINES', 'only CROSSLINES', 'restricted', 'dead traces'),
+            'size': 20,
+            'loc': 10,
+            'facecolor': 'silver',
+        }
+        MatplotlibPlotter.add_legend(**legend_params)
 
     def show_sampled(self, n=10000, binary=False, **kwargs):
         """ Visualize on field map by sampling `n` crop locations. """
         sampled = self.sample(n)
 
-        ids = np.unique(sampled[:, 0])
-        for field_id in ids:
+        data = []
+        titles = []
+        for field_id in np.unique(sampled[:, 0]):
             field = self.samplers[field_id][0].field
             matrix = np.zeros_like(field.zero_traces, dtype=np.int32)
 
@@ -742,16 +756,41 @@ class SeismicSampler(Sampler):
                 matrix[matrix > 0] = 1
                 kwargs['bad_values'] = ()
 
-            _kwargs = {
-                'matrix_name': 'Sampled slices',
-                'cmap': ['Reds', 'black'],
-                'alpha': [1.0, 0.4],
-                'figsize': (16, 8),
-                'title': f'{self.field_names[field_id]}: {len(sampled_)} points',
-                'interpolation': 'bilinear',
-                **kwargs
-            }
-            field.geometry.show((matrix, field.zero_traces), **_kwargs)
+            field_data = [matrix, field.zero_traces]
+            data.append(field_data)
+
+            title = f'{self.field_names[field_id]}: {len(sampled_)} points'
+            titles.append(title)
+
+        ncols, nrows = MatplotlibPlotter.infer_cols_rows(n_subplots=len(data), params=kwargs)
+        # add extra axis for legend plot no space left on a grid of inferred cols and rows
+        if ncols * nrows == len(data):
+            nrows += 1
+
+        kwargs = {
+            'matrix_name': 'Sampled slices',
+            'cmap': [['Reds', 'black']] * len(data),
+            'alpha': [[1.0, 0.4]] * len(data),
+            'title': titles,
+            'interpolation': 'bilinear',
+            'xlabel': field.index_headers[0],
+            'ylabel': field.index_headers[1],
+            'ncols': ncols,
+            'nrows': nrows,
+            **kwargs
+        }
+
+        fig = plot_image(data, return_figure=True, **kwargs)
+
+        legend_params = {
+            'ax': fig.axes[len(data)],
+            'color': ('beige', 'salmon', 'grey'),
+            'label': ('alive traces', 'sampled locations', 'dead traces'),
+            'size': 20,
+            'loc': 10,
+            'facecolor': 'silver',
+        }
+        MatplotlibPlotter.add_legend(**legend_params)
 
 
 

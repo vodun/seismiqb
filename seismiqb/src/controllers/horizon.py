@@ -154,7 +154,7 @@ class HorizonController(BaseController):
         """
         for idx in dataset.indices:
             field = dataset[idx]
-            field.geometry.make_quality_grid(frequencies, **kwargs)
+            field.make_quality_grid(frequencies, **kwargs)
 
             postfix = f'_{idx}' if len(dataset.indices) > 1 else ''
             plot_image(
@@ -349,7 +349,6 @@ class HorizonController(BaseController):
 
         iterator = predictions if isinstance(predictions, (tuple, list)) else [predictions]
         for horizon in iterator:
-            #
             horizon.show(['depths', 'gradient'], separate=True,
                          show=self.plot, savepath=self.make_savepath('postprocess', 'depth_gradient__before.png'))
 
