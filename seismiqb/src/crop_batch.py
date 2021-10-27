@@ -1133,6 +1133,28 @@ class SeismicCropBatch(Batch):
             setattr(self, _dst, crop)
         return self
 
+    @action
+    def zero_bounds(self, src, dst=None, ratio=0.05):
+        if (np.array(ratio) == 0).all():
+            return self
+
+        dst = dst or src
+        src = [src] if isinstance(src, str) else src
+        dst = [dst] if isinstance(dst, str) else dst
+
+        if isinstance(ratio, (int, float)):
+            ratio = (ratio, ratio)
+
+        for _src, _dst in zip(src, dst):
+            crop = getattr(self, _src).copy()
+            pad = [np.floor(crop.shape[i]) * r if isinstance(r, float) else r for i, r in enumerate(ratio)]
+            crop[:, :, :pad[0] // 2] = 0
+            crop[:, :, -pad[0] // 2:] = 0
+            crop[:, :, :, :pad[1] // 2] = 0
+            crop[:, :, :, -pad[1] // 2:] = 0
+            setattr(self, _dst, crop)
+        return self
+
     def plot_components(self, *components, idx=0, slide=None, displayed_name=None, **kwargs):
         """ Plot components of batch.
 

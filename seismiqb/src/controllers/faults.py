@@ -11,6 +11,7 @@ import torch
 from .base import BaseController
 from ..labels import Fault
 from ..dataset import SeismicDataset
+from ..geometry import SeismicGeometry
 from ..samplers import SeismicSampler, RegularGrid, FaultSampler, ConstantSampler
 from ..metrics import FaultsMetrics
 from ..utils import adjust_shape_3d, Accumulator3D, skeletonize, GaussianLayer, expand_dims, squueze
@@ -85,7 +86,8 @@ class FaultController(BaseController):
             'norm_mode': 'minmax',
             'itemwise': True,
             'aggregation': 'max',
-            'prefetch': 4
+            'prefetch': 4,
+            'ratio': (0, 0)
         }
     })
 
@@ -393,6 +395,7 @@ class FaultController(BaseController):
             .init_variable('target', [])
             .predict_model('model', B('images'), fetches=self.config['inference/output'], save_to=B('predictions'))
             .adaptive_squeeze(src='predictions')
+            .zero_bounds(src='predictions', ratio=C('ratio'))
             .run_later(D('size'))
         )
 
@@ -730,6 +733,9 @@ class FaultController(BaseController):
             dst = np.empty_like(prediction)
         elif dst.shape != prediction.shape:
             raise ValueError(f"dst must be of the same shape as prediction but {dst.shape} != {prediction.shape}")
+
+        if isinstance(geometry, str):
+            geometry = SeismicGeometry(geometry)
 
         for i in range(prediction.shape[0]):
             image = geometry.load_slide(origin[0]+i)[
