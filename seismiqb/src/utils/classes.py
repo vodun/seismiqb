@@ -493,6 +493,7 @@ class GMeanAccumulator3D(Accumulator3D):
 
 
 class MedianAccumulator3D(Accumulator3D):
+    """ Accumulator that takes median value of overlapping crops. """
     def __init__(self, shape=None, origin=None, dtype=np.float32,
                  n_classes=2, transform=None, path=None, **kwargs):
         # Create placeholder with counters for each class
