@@ -95,7 +95,6 @@ class AttributesMixin:
         mode : bool, str, optional
             If `min-max` or True, then use min-max scaling.
             If `mean-std`, then use mean-std scaling.
-            If False, don't scale matrix.
         """
         values = matrix[self.presence_matrix]
 

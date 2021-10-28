@@ -90,6 +90,11 @@ class BaseMetrics:
         metric_fn = getattr(self, metric)
         metric_val, plot_dict = metric_fn(**kwargs)
 
+        if isinstance(metric_val, tuple):
+            metric_val, properties_dict = metric_val
+        else:
+            properties_dict = None
+
         if cp is not np and cp.cuda.is_available():
             # pylint: disable=protected-access
             cp._default_memory_pool.free_all_blocks()
@@ -109,7 +114,7 @@ class BaseMetrics:
             # Store for debug / introspection purposes
             self._last_evaluation['plot_dict'] = plot_dict
             self._last_evaluation['figure'] = figure
-        return metric_val
+        return metric_val, properties_dict
 
 
     def compute_local(self, function, data, bad_traces, kernel_size=3,
@@ -760,7 +765,7 @@ class HorizonMetrics(BaseMetrics):
         return (other, overlap_info), {} # actual return + fake plot dict
 
 
-    def compare(self, offset=0, absolute=True, hist=True, printer=print, **kwargs):
+    def compare(self, offset=0, absolute=True, hist=True, printer=print, return_dict=False, **kwargs):
         """ Compare horizons on against the best match from the list of horizons.
 
         Parameters
@@ -773,6 +778,8 @@ class HorizonMetrics(BaseMetrics):
             Whether to plot histogram of differences.
         printer : callable
             Function to print results, for example `print` or any other callable that can log data.
+        return_dict : bool
+            Whether to return dict with comparison results.
         """
         if len(self.horizons) != 2:
             raise ValueError('Can compare two horizons exactly or one to the best match from list of horizons. ')
@@ -844,6 +851,33 @@ class HorizonMetrics(BaseMetrics):
             'colorbar': True,
             **kwargs
         }
+
+        if return_dict:
+            properties_dict = {
+                'Horizon_1': self.horizon.name,
+                'Horizon_2' : other.name,
+                'Rate in 5ms': oinfo['window_rate'],
+                'Mean of errors': oinfo['mean'],
+                'Std of errors': oinfo['std'],
+                'Mean of abs errors': oinfo['abs_mean'],
+                'Std of abs errors': oinfo['abs_std'],
+                'Max error': oinfo['max'],
+                'Abs error': oinfo['abs_max'],
+                'Length of Horizon_1': len(self.horizon),
+                'Length of Horizon_2': len(other),
+                'Average heights of Horizon_1': (offset + self.horizon.h_mean),
+                'Average heights of Horizon_2': other.h_mean,
+                'Coverage Horizon_1': self.horizon.coverage,
+                'Coverage Horizon_2': other.coverage,
+                'Solidity of Horizon_1': self.horizon.solidity,
+                'Solidity of Horizon_2': other.solidity,
+                'Number of holes in Horizon_1': self.horizon.number_of_holes,
+                'Number of holes in Horizon_2': other.number_of_holes,
+                'Additional traces labeled (present in Horizon_1, absent in Horizon_2)': at_1,
+                'Additional traces labeled (present in Horizon_2, absent in Horizon_1)': at_2
+            }
+            return (metric, properties_dict), plot_dict
+
         return metric, plot_dict
 
 
