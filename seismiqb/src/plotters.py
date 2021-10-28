@@ -215,7 +215,7 @@ class MatplotlibPlotter:
                            'curve': (15, 5)}
 
         DEFAULT_COLUMN_WIDTH = int(8 * scale)
-        DEFAULT_ROW_HEIGHT = int(3 * scale)
+        DEFAULT_ROW_HEIGHT = int(5 * scale)
 
         if mode == 'imshow':
             if not isinstance(xlim, list):
@@ -226,8 +226,15 @@ class MatplotlibPlotter:
             shapes = []
             for num, item in enumerate(data):
                 shape = item[0].shape if isinstance(item, list) else item.shape
-                subplot_height = abs(xlim[num][0] - xlim[num][1]) + 1 if xlim[num] is not None else shape[order_axes[1]]
-                subplot_width = abs(ylim[num][0] - ylim[num][1]) + 1 if ylim[num] is not None else shape[order_axes[0]]
+
+                min_height = xlim[num][0] or 0
+                max_height = xlim[num][1] or shape[order_axes[1]]
+                subplot_height = abs(max_height - min_height)
+
+                min_width = ylim[num][0] or shape[order_axes[0]]
+                max_width = ylim[num][1] or 0
+                subplot_width = abs(max_width - min_width)
+
                 shapes.append((subplot_width, subplot_height))
             shapes += [(0, 0)] * (ncols * nrows - len(shapes))
 
@@ -285,8 +292,8 @@ class MatplotlibPlotter:
 
             order_axes = all_params.get('order_axes', cls.IMSHOW_DEFAULTS['order_axes'])
             scale = all_params.get('scale', 1)
-            xlim = all_params.get('xlim', None)
-            ylim = all_params.get('ylim', None)
+            xlim = all_params.get('xlim', (None, None))
+            ylim = all_params.get('ylim', (None, None))
             default_figsize = cls.infer_figsize(data, mode, order_axes, ncols, nrows, scale, xlim, ylim)
             params['figsize'] = params.get('figsize', default_figsize)
 
