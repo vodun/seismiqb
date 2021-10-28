@@ -1,6 +1,7 @@
 """ A mixin with field visualizations. """
 #pylint: disable=global-variable-undefined
 import re
+from copy import copy
 from collections import defaultdict
 
 import numpy as np
@@ -202,7 +203,7 @@ class VisualizationMixin:
         >>> field.show('mean_matrix')
 
         Display attribute of a fan over the geometry map:
-        >>> field.show(['mean_matrix', 'fans:0/masks'])
+        >>> field.show(['mean_matrix', 'fans:0/mask'])
 
         Display attributes on separate axis:
         >>> field.show(['mean_matrix', 'horizons:0/fourier', custom_data_array], separate=True)
@@ -217,12 +218,13 @@ class VisualizationMixin:
 
         Display several attributes on multiple axes with overlays and save it near the cube:
         >>> field.show(['geometry/std_matrix', 'horizons:3/amplitudes',
-                        ['horizons:3/instant_phases', 'fans:3/masks'],
+                        ['horizons:3/instant_phases', 'fans:3/mask'],
                         ['horizons:3/instant_phases', predicted_mask]],
                        savepath='~/IMAGES/complex.png')
         """
         # Wrap given attributes load parameters in a structure that allows applying functions to its nested items
         load_params = DelegatingList(attributes)
+        load_params = load_params.apply(lambda item: copy(item) if isinstance(item, dict) else item)
 
         # Prepare data loading params
         load_params = load_params.apply(self._make_load_params, common_params=load_kwargs)
@@ -303,11 +305,14 @@ class VisualizationMixin:
         # Make data loading defaults
         default_params = {'dtype': np.float32}
 
+        if params['attribute_name'] in ['instantaneous_amplitudes', 'instantaneous_phases']:
+            default_params['channels'] = 'mid'
+
         if params['attribute_name'] in ['fourier_decomposition', 'wavelet_decomposition']:
             default_params['n_components'] = 1
 
-        if params['attribute_name'] in ['masks', 'full_binary_matrix']:
-            default_params['fill_value'] = 0
+        if attribute_name in ['mask', 'full_binary_matrix']:
+            params['fill_value'] = 0
 
         # Merge defaults with provided parameters
         params = {**default_params, **(common_params or {}), **params}
@@ -373,6 +378,8 @@ class VisualizationMixin:
         linkage = defaultdict(list)
 
         for params in to_list(data_params):
+            if isinstance(params, list):
+                params = params[0]
             src_label = params['src_labels']
             if params['label_num']:
                 src_label += ':' + params['label_num']

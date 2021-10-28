@@ -171,8 +171,8 @@ class MatplotlibPlotter:
               Parameters and data nestedness levels must match.
               Every param with 'imshow_', 'wiggle_', 'hist_' or 'curve_' prefix is redirected to corresponding method.
             - For `annotate_axis`.
-              Every param with 'title_', 'suptitle_', 'xlabel_', 'ylabel_', 'xticks_', 'yticks_', 'ticks_', 'xlim_',
-              'ylim_', colorbar_', 'legend_' or 'grid_' prefix is redirected to corresponding matplotlib method.
+              Every param with 'title_', 'suptitle_', 'xlabel_', 'ylabel_', 'xticks_', 'yticks_', 'xlim_', 'ylim_',
+              colorbar_', 'legend_' or 'grid_' prefix is redirected to corresponding matplotlib method.
               Also 'facecolor', 'set_axisbelow', 'disable_axes' arguments are accepted.
         """
         if mode == 'wiggle' and separate:
