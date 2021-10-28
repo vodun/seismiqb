@@ -390,7 +390,7 @@ class Accumulator3D:
             MaxAccumulator3D: ['max', 'maximum'],
             MeanAccumulator3D: ['mean', 'avg', 'average'],
             GMeanAccumulator3D: ['gmean', 'geometric'],
-            ModeAccumulator3D: ['mode', 'argmax']
+            ModeAccumulator3D: ['mode']
         }
         aggregation_to_class = {alias: class_ for class_, lst in class_to_aggregation.items()
                                 for alias in lst}
@@ -500,11 +500,8 @@ class ModeAccumulator3D(Accumulator3D):
         self.fill_value = 0
         self.n_classes = n_classes
 
-        shape = list(shape)
-        shape.append(n_classes)
-
-        origin = list(origin)
-        origin.append(0)
+        shape = (*shape, n_classes)
+        origin = (*origin, 0)
 
         super().__init__(shape=shape, origin=origin, dtype=dtype, transform=transform, path=path, **kwargs)
 

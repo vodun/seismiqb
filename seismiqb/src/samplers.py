@@ -757,6 +757,7 @@ class SeismicSampler(Sampler):
             if isinstance(field, Field):
                 geometry = field.geometry
             elif isinstance(field, SeismicGeometry):
+                # It is possible in case when dataset and sampler are created in geometry mode
                 geometry = field
 
             geometry.show((matrix, field.zero_traces), **_kwargs)
