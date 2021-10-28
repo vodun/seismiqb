@@ -5,6 +5,7 @@ from math import atan
 import numpy as np
 import torch
 from numba import njit, prange
+from scipy.ndimage import measurements
 
 from .layers import SemblanceLayer, MovingNormalizationLayer, InstantaneousPhaseLayer, FrequenciesFilterLayer
 
@@ -381,5 +382,15 @@ def make_savepath(path, name, extension=''):
     dir_path = os.path.dirname(path)
     if dir_path:
         os.makedirs(dir_path, exist_ok=True)
-
     return path
+
+def faults_sizes(slide, normalize):
+    """ Compue sizes (depth length) for each connected object. """
+    sizes = slide.copy()
+    labels, n_objects = measurements.label(slide > 0, structure=np.ones((3, 3)))
+    for i in range(n_objects):
+        size = np.where(labels == i)[-1].ptp()
+        if normalize:
+            size /= slide.shape[-1]
+        sizes[labels == i] = size
+    return sizes

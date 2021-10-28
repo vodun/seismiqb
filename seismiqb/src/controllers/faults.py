@@ -14,7 +14,7 @@ from ..dataset import SeismicDataset
 from ..geometry import SeismicGeometry
 from ..samplers import SeismicSampler, RegularGrid, FaultSampler, ConstantSampler
 from ..metrics import FaultsMetrics
-from ..utils import adjust_shape_3d, Accumulator3D, skeletonize, GaussianLayer, expand_dims, squueze
+from ..utils import adjust_shape_3d, Accumulator3D, skeletonize, GaussianLayer, expand_dims, squueze, faults_sizes
 from ..plotters import plot_image
 
 from ...batchflow import Config, Pipeline, Notifier, Monitor
@@ -580,7 +580,7 @@ class FaultController(BaseController):
 
         return prediction
 
-    def smooth_predictions(self, prediction, chunk_size=100, kernel=(11, 21, 11), inplace=False, dst=None):
+    def smooth_predictions(self, prediction, chunk_size=100, kernel=(11, 11, 11), inplace=False, dst=None):
         """ Smooth proba prediction by gaussian kernel by chunks along the first axis.
 
         Parameters
@@ -604,6 +604,7 @@ class FaultController(BaseController):
             smoothed prediction
         """
         self.log('Start smoothing predictions.')
+        kernel = np.minimum(kernel, prediction.shape)
         if chunk_size is None:
             chunk_size = prediction.shape[0]
         if chunk_size < kernel[0]:
@@ -654,7 +655,7 @@ class FaultController(BaseController):
         self.log('Finish smoothing predictions.')
         return dst
 
-    def skeletonize(self, prediction, orientation=0, skeleton_width=3, inplace=False, dst=None, **kwargs):
+    def skeletonize(self, prediction, orientation=0, skeleton_width=3, proba=True, inplace=False, dst=None, **kwargs):
         """ Skeletonize predictions along one axis.
 
         Parameters
@@ -665,6 +666,8 @@ class FaultController(BaseController):
             axis to perform skeletonize, by default 0
         skeleton_width : int, optional
             width of the skeletonized faults, by default 3
+        proba : bool, optional
+            return soft proba max (probabilities from initial prediction) or hard binary mask.
         inplace : bool, optional
             make smoothing inplace or not, by default False. If True and dst is None, numpy.ndarray of the same shape
             will be created.
@@ -686,7 +689,12 @@ class FaultController(BaseController):
 
         for i in range(prediction.shape[orientation]):
             slide = prediction[i] if orientation == 0 else prediction[:, i]
-            slide = slide * skeletonize(slide, width=skeleton_width, **kwargs)
+
+            if proba:
+                slide = slide * skeletonize(slide, width=skeleton_width, **kwargs)
+            else:
+                slide = skeletonize(slide, width=skeleton_width, **kwargs)
+
             pooling = torch.nn.MaxPool3d((1, skeleton_width, 1), stride=1, padding=(0, skeleton_width // 2, 0))
             slide = torch.tensor(slide)
             slide = squueze(pooling(expand_dims(slide)), 2).numpy()
@@ -744,8 +752,9 @@ class FaultController(BaseController):
             ]
 
             mask = self.bounds_mask(image, window=window, **kwargs)
-            dst[i] = prediction[i]
-            dst[i][mask] = fill_value
+            slide = prediction[i].copy()
+            slide[mask] = fill_value
+            dst[i] = slide
         self.log('Finish bounds processing.')
         return dst
 
@@ -799,6 +808,100 @@ class FaultController(BaseController):
                 mask[slices[1]] = np.logical_or(mask[slices[0]], mask[slices[1]])
 
         return mask
+
+    def compute_sizes(self, prediction, orientation=0, normalize=True, multiply=True, inplace=False, dst=None):
+        """ Compute sizes (depth length) of connected objects on 2D slides.
+
+        Parameters
+        ----------
+        prediction : numpy.ndarray or dataset of HDF5.
+
+        orientation : int, optional
+            axis of slides to compute, by default 0
+        normalize : bool, optional
+            normalize size by depth of the slide or not.
+        multiply : bool, optional
+            multiply prediction on sizes or not. Can be needed if prediction is probabilities.
+        inplace : bool, optional
+            make smoothing inplace or not, by default False. If True and dst is None, numpy.ndarray of the same shape
+            will be created.
+        dst : numpy.ndarray, HDF5/BLOSC dataset or None, optional
+            dst for processed prediction if inplace is False.
+
+        Returns
+        -------
+        numpy.ndarray or HDF5/BLOSC dataset
+            prediction where values are multiplied by size of computed objects.
+        """
+        self.log('Start sizes computation.')
+        if inplace:
+            dst = prediction
+        elif dst is None:
+            dst = np.empty_like(prediction)
+        elif dst.shape != prediction.shape:
+            raise ValueError(f"dst must be of the same shape as prediction but {dst.shape} != {prediction.shape}")
+
+        for i in range(prediction.shape[orientation]):
+            slide = prediction[i] if orientation == 0 else prediction[:, i]
+
+            if multiply:
+                slide = slide * faults_sizes(slide, normalize)
+            else:
+                slide = faults_sizes(slide, normalize)
+
+            if orientation == 0:
+                dst[i] = slide
+            else:
+                dst[:, i] = slide
+        self.log('Finish sizes computation.')
+        return dst
+
+    def filter_prediction(self, prediction, orientation=0, threshold=0.1, inplace=False, dst=None):
+        """ Filter prediction by sizes of connected objects on 2D slides.
+
+        Parameters
+        ----------
+        prediction : numpy.ndarray or dataset of HDF5.
+
+        orientation : int, optional
+            axis of slides to compute, by default 0
+        threshold : float, optional
+            threshold for size of objects. If threshold < 1 then it defines relative length of the appropriate faults
+            with respect to the depth size of the cube,
+        inplace : bool, optional
+            make smoothing inplace or not, by default False. If True and dst is None, numpy.ndarray of the same shape
+            will be created.
+        dst : numpy.ndarray, HDF5/BLOSC dataset or None, optional
+            dst for processed prediction if inplace is False.
+
+        Returns
+        -------
+        numpy.ndarray or HDF5/BLOSC dataset
+            filtered prediction
+        """
+        self.log('Start filtering.')
+        if inplace:
+            dst = prediction
+        elif dst is None:
+            dst = np.empty_like(prediction)
+        elif dst.shape != prediction.shape:
+            raise ValueError(f"dst must be of the same shape as prediction but {dst.shape} != {prediction.shape}")
+
+        normalize = (threshold < 1)
+
+        for i in range(prediction.shape[orientation]):
+            slide = prediction[i] if orientation == 0 else prediction[:, i]
+
+            sizes = faults_sizes(slide, normalize)
+
+            if orientation == 0:
+                dst[i] = slide
+                dst[i][sizes < threshold] = 0
+            else:
+                dst[:, i] = slide
+                dst[:, i][sizes < threshold] = 0
+        self.log('Finish filtering.')
+        return dst
 
     # Path utils
 
