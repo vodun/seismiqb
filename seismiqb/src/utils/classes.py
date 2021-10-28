@@ -390,6 +390,7 @@ class Accumulator3D:
             MaxAccumulator3D: ['max', 'maximum'],
             MeanAccumulator3D: ['mean', 'avg', 'average'],
             GMeanAccumulator3D: ['gmean', 'geometric'],
+            MedianAccumulator3D: ['median']
         }
         aggregation_to_class = {alias: class_ for class_, lst in class_to_aggregation.items()
                                 for alias in lst}
@@ -489,6 +490,38 @@ class GMeanAccumulator3D(Accumulator3D):
 
         # Cleanup
         self.remove_placeholder('counts')
+
+
+class MedianAccumulator3D(Accumulator3D):
+    def __init__(self, shape=None, origin=None, dtype=np.float32,
+                 n_classes=2, transform=None, path=None, **kwargs):
+        # Create placeholder with counters for each class
+        self.fill_value = 0
+        self.n_classes = n_classes
+
+        shape = list(shape)
+        shape.append(n_classes)
+
+        origin = list(origin)
+        origin.append(0)
+
+        super().__init__(shape=shape, origin=origin, dtype=dtype, transform=transform, path=path, **kwargs)
+
+        self.create_placeholder(name='data', dtype=self.dtype, fill_value=self.fill_value)
+
+    def _update(self, crop, location):
+        # Update class counters in location
+        crop = np.eye(self.n_classes)[crop]
+        self.data[location] += crop
+
+    def _aggregate(self):
+        # Choose the most frequently seen class value
+        if self.type == 'hdf5':
+            for i in range(self.data.shape[0]):
+                self.data[i] = np.argmax(self.data[i], axis=-1)
+
+        elif self.type == 'numpy':
+            self.data = np.argmax(self.data, axis=-1)
 
 
 class AccumulatorBlosc(Accumulator3D):
