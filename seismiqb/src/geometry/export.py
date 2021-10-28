@@ -115,6 +115,9 @@ def make_segy_from_array(array, path_segy, zip_segy=True, remove_segy=None, path
     if remove_segy is None:
         remove_segy = zip_segy
 
+    cdpx = np.tile(np.arange(array.shape[0])[:, np.newaxis], array.shape[1])
+    cdpy = np.tile(np.arange(array.shape[1])[np.newaxis, :], (array.shape[0], 1))
+
     if path_spec:
         from .base import SeismicGeometry #pylint: disable=import-outside-toplevel
         geometry = SeismicGeometry(path_spec)
@@ -125,8 +128,6 @@ def make_segy_from_array(array, path_segy, zip_segy=True, remove_segy=None, path
         delay = origin[2] * sample_rate + int(geometry.delay)
 
         idx = np.stack(geometry.dataframe.index)
-        cdpx = np.zeros((array.shape[0], array.shape[1]), dtype=np.int32)
-        cdpy = np.zeros((array.shape[0], array.shape[1]), dtype=np.int32)
 
         for c, (i, x) in tqdm(enumerate(idx)):
             if ilines_offset <= i < ilines_offset + array.shape[0]:
@@ -172,14 +173,8 @@ def make_segy_from_array(array, path_segy, zip_segy=True, remove_segy=None, path
                 # change inline and xline in trace-header
                 header[segyio.TraceField.INLINE_3D] = i + ilines_offset
                 header[segyio.TraceField.CROSSLINE_3D] = x + xlines_offset
-
-                if path_spec:
-                    header[segyio.TraceField.CDP_X] = cdpx[i, x]
-                    header[segyio.TraceField.CDP_Y] = cdpy[i, x]
-                else:
-                    # change cdpx and cdpy in trace-header
-                    header[segyio.TraceField.CDP_X] = i
-                    header[segyio.TraceField.CDP_Y] = x
+                header[segyio.TraceField.CDP_X] = cdpx[i, x]
+                header[segyio.TraceField.CDP_Y] = cdpy[i, x]
 
                 # change depth-related fields in trace-header
                 header[segyio.TraceField.TRACE_SAMPLE_COUNT] = array.shape[2]

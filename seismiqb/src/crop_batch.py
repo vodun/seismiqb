@@ -1135,6 +1135,7 @@ class SeismicCropBatch(Batch):
 
     @action
     def zero_bounds(self, src, dst=None, ratio=0.05):
+        """ Fill bounds of crops with zeros. """
         if (np.array(ratio) == 0).all():
             return self
 
