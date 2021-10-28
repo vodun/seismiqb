@@ -390,7 +390,7 @@ class Accumulator3D:
             MaxAccumulator3D: ['max', 'maximum'],
             MeanAccumulator3D: ['mean', 'avg', 'average'],
             GMeanAccumulator3D: ['gmean', 'geometric'],
-            MedianAccumulator3D: ['median']
+            ModeAccumulator3D: ['mode', 'argmax']
         }
         aggregation_to_class = {alias: class_ for class_, lst in class_to_aggregation.items()
                                 for alias in lst}
@@ -492,8 +492,8 @@ class GMeanAccumulator3D(Accumulator3D):
         self.remove_placeholder('counts')
 
 
-class MedianAccumulator3D(Accumulator3D):
-    """ Accumulator that takes median value of overlapping crops. """
+class ModeAccumulator3D(Accumulator3D):
+    """ Accumulator that takes mode value in overlapping crops. """
     def __init__(self, shape=None, origin=None, dtype=np.float32,
                  n_classes=2, transform=None, path=None, **kwargs):
         # Create placeholder with counters for each class
