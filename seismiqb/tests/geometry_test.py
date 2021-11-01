@@ -18,7 +18,14 @@ SHOW_MESSAGE = True
 GITHUB_MODE = True
 
 def test_geometry(capsys, tmpdir):
-    """ Run SeismicGeometry test notebook."""
+    """ Run SeismicGeometry test notebook.
+
+    This test runs ./notebooks/geometry_test.ipynb test file and show execution message and
+    the most important timings for SeismicGeometry tests.
+
+    Under the hood, this notebook create a fake seismic cube, saves it in different data formats
+    and for each format run SeismicGeometry tests.
+    """
     # Delete old test notebook results
     if GITHUB_MODE:
         SAVING_DIR = tmpdir.mkdir("notebooks").mkdir("geometry_test_files")
@@ -71,13 +78,13 @@ def test_geometry(capsys, tmpdir):
 
     with capsys.disabled():
         # Tests output
-
         if SHOW_MESSAGE:
             for line in msg:
                 print(line)
 
         pp = pprint.PrettyPrinter()
         pp.pprint(timings)
+        print('\n')
 
         # End of the running message
         if timings['state']=='OK':
