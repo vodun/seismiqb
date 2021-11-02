@@ -18,7 +18,7 @@ class Interpolator(HorizonController):
         self.log(f'Coverage of carcass is {horizon.coverage:2.5f}')
 
         sampler = self.make_sampler(dataset)
-        sampler.show_locations(show=self.plot, savepath=self.make_savepath('sampler_locations.png'))
+        # sampler.show_locations(show=self.plot, savepath=self.make_savepath('sampler_locations.png'))
         sampler.show_sampled(show=self.plot, savepath=self.make_savepath('sampler_generated.png'))
         self.log(f'Created sampler\n{indent(str(sampler), " "*4)}')
 
