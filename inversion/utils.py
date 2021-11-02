@@ -11,23 +11,42 @@ from seismiqb import SyntheticGenerator, plot_image, plot_loss
 
 
 
-def make_data(size, synthetic_shape,
-              num_reflections, horizon_height, horizon_multipliers,
-              grid_size, ricker_width, ricker_points, noise_mul):
+def parameter_generator_example():
+    params = {
+        # Horizons
+        'num_reflections' : 33,
+        'horizon_height' : 0.66,
+        'horizon_multipliers': 13,
+
+        # Faults
+
+        # Impedance creation
+        'grid_size' : 7,
+
+        # Conversion to seismic
+        'ricker_width' : 4.2,
+        'ricker_points' : 88,
+        'noise_mul' : 0.17,
+    }
+    return params
+
+
+def make_data(size, synthetic_shape, parameter_generator):
     synthetic_seismic = []
     impedance_models = []
 
     for _ in range(size):
         generator = SyntheticGenerator()
+        params = parameter_generator()
 
-        (generator.make_velocities(num_reflections=num_reflections.sample(1),
-                                   horizon_heights=horizon_height.sample(1),
-                                   horizon_multipliers=horizon_multipliers.sample(1))
-                  .make_velocity_model(synthetic_shape, grid_shape=grid_size.sample(1))
+        (generator.make_velocities(num_reflections=params['num_reflections'],
+                                   horizon_heights=params['horizon_height'],
+                                   horizon_multipliers=params['horizon_multipliers'])
+                  .make_velocity_model(synthetic_shape, grid_shape=params['grid_size'])
                   .make_density_model()
-                  .make_synthetic(ricker_width=ricker_width.sample(1),
-                                  ricker_points=ricker_points.sample(1))
-                  .postprocess_synthetic(noise_mul=noise_mul.sample(1)))
+                  .make_synthetic(ricker_width=params['ricker_width'],
+                                  ricker_points=params['ricker_points'])
+                  .postprocess_synthetic(noise_mul=params['noise_mul']))
 
         synthetic_seismic.append(generator.synthetic)
         impedance_models.append(generator.velocity_model)
