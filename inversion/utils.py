@@ -41,7 +41,8 @@ def make_data(size, synthetic_shape, parameter_generator):
 
         (generator.make_velocities(num_reflections=params['num_reflections'],
                                    horizon_heights=params['horizon_height'],
-                                   horizon_multipliers=params['horizon_multipliers'])
+                                   horizon_multipliers=params['horizon_multipliers'],
+                                   vel_limits=(5000, 11000))
                   .make_velocity_model(synthetic_shape, grid_shape=params['grid_size'])
                   .make_density_model()
                   .make_synthetic(ricker_width=params['ricker_width'],
