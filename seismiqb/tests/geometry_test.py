@@ -199,7 +199,7 @@ def test_geometry(capsys, tmpdir):
         out_path_ipynb = os.path.join(TESTS_SCRIPTS_DIR, f'notebooks/geometry_test_out_{DATESTAMP}.ipynb')
 
     # Tests execution
-    exec_info = run_notebook(
+    exec_info, nb = run_notebook(
         path=os.path.join(TESTS_SCRIPTS_DIR, 'notebooks/geometry_test.ipynb'),
         nb_kwargs={
             'NOTEBOOKS_DIR': os.path.join(TESTS_SCRIPTS_DIR, 'notebooks/'),
@@ -212,7 +212,8 @@ def test_geometry(capsys, tmpdir):
         },
         insert_pos=1,
         out_path_ipynb=out_path_ipynb,
-        display_links=False
+        display_links=False,
+        return_nb=True
     )
 
     if exec_info is True:
@@ -233,6 +234,7 @@ def test_geometry(capsys, tmpdir):
         timings= {'state': 'FAIL'}
 
     with capsys.disabled():
+        print(nb)
         # Tests output
         if SHOW_MESSAGE:
             for line in msg:
