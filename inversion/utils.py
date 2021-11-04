@@ -8,45 +8,73 @@ from skimage.metrics import structural_similarity
 
 sys.path.append('../../seismiqb')
 from seismiqb import SyntheticGenerator, plot_image, plot_loss
+from seismiqb.batchflow import NumpySampler as NS
 
 
 
-def parameter_generator_example():
-    params = {
+def make_params():
+    """ Parameter-generator example. Generates crops of fixed shape with random quantity of horizons.
+    """
+    SYNTHETIC_SHAPE = (128, 256)
+    # Sampling procedures for params of synhetic generation
+    num_horizons_sampler = NS('c', a=np.arange(0, 5)).apply(lambda x: x[0][0])
+
+    samplers = {
         # Horizons
-        'num_reflections' : 33,
-        'horizon_height' : 0.66,
-        'horizon_multipliers': 13,
+        'num_reflections': NS('c', a=np.arange(25, 50)).apply(lambda x: x[0][0]),
+        'horizon_heights': NS('u', low=.05, high=.95).apply(lambda x: tuple(x.reshape(-1))),
+        'horizon_multipliers': NS('c', a=list(range(-13, -7)) + list(range(12, 20))).apply(lambda x: tuple(x.reshape(-1))),
 
         # Faults
 
         # Impedance creation
-        'grid_size' : 7,
+        'grid_shape': NS('c', a=np.arange(5, 10)).apply(lambda x: (x[0][0], )),
+        'density_noise_lims': (NS('u', low=0.8, high=1) & NS('u', low=1, high=1.2)).apply(lambda x: tuple(x.reshape(-1))),
 
         # Conversion to seismic
-        'ricker_width' : 4.2,
-        'ricker_points' : 88,
-        'noise_mul' : 0.17,
+        'ricker_width': NS('u', low=3.3, high=5.5).apply(lambda x: x[0][0]),
+        'ricker_points': NS('c', a=np.arange(50, 130)).apply(lambda x: x[0][0]),
+        'noise_mul': NS('u', low=0.1, high=0.3).apply(lambda x: x[0][0]),
     }
+
+    constants = {
+        'shape': SYNTHETIC_SHAPE,
+        'vel_limits': (5000, 11000)
+    }
+
+    # Making parameters-dict
+    params = {}
+
+    # Sampling
+    num_horizons = num_horizons_sampler.sample(1)
+    for name, sampler in samplers.items():
+        if name in ('horizon_heights', 'horizon_multipliers'):
+            params[name] = sampler.sample(num_horizons)
+        else:
+            params[name] = sampler.sample(1)
+
+    # Taking Constants
+    for name, value in constants.items():
+        params[name] = value
+
     return params
 
 
-def make_data(size, synthetic_shape, parameter_generator):
+def make_data(size, parameters_generator):
     synthetic_seismic = []
     impedance_models = []
 
     for _ in range(size):
         generator = SyntheticGenerator()
-        params = parameter_generator()
+        params = parameters_generator()
 
         (generator.make_velocities(num_reflections=params['num_reflections'],
-                                   horizon_heights=params['horizon_height'],
+                                   horizon_heights=params['horizon_heights'],
                                    horizon_multipliers=params['horizon_multipliers'],
-                                   vel_limits=(5000, 11000))
-                  .make_velocity_model(synthetic_shape, grid_shape=params['grid_size'])
-                  .make_density_model()
-                  .make_synthetic(ricker_width=params['ricker_width'],
-                                  ricker_points=params['ricker_points'])
+                                   vel_limits=params['vel_limits'])
+                  .make_velocity_model(params['shape'], grid_shape=params['grid_shape'])
+                  .make_density_model(params['density_noise_lims'])
+                  .make_synthetic(ricker_width=params['ricker_width'], ricker_points=params['ricker_points'])
                   .postprocess_synthetic(noise_mul=params['noise_mul']))
 
         synthetic_seismic.append(generator.synthetic)
