@@ -176,8 +176,6 @@ class HorizonController(BaseController):
         rebatch_threshold = config.pop('threshold') if 'threshold' in config else self.config['train']['rebatch_threshold']
         sampler = SeismicSampler(labels=dataset.labels, crop_shape=crop_shape,
                                  threshold=rebatch_threshold, mode='horizon', **config)
-
-        self.log(f'{sampler(100).shape}')
         return sampler
 
     # Train method is inherited from BaseController class
