@@ -322,7 +322,7 @@ class Field(VisualizationMixin):
         if isinstance(indices, (tuple, list, np.ndarray)):
             labels = [labels[idx] for idx in indices]
         elif indices in ['single', 'random']:
-            labels = np.random.shuffle(labels)[0]
+            np.random.shuffle(labels)
 
         for label in labels:
             mask = label.add_to_mask(mask, locations=location, width=width)

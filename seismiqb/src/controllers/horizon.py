@@ -42,6 +42,8 @@ class HorizonController(BaseController):
         'bar': False,
         'plot': False,
 
+        'train_sampler': {},
+
         'train': {
             'model_class': EncoderDecoder,
             'model_config': None,
@@ -60,6 +62,7 @@ class HorizonController(BaseController):
         'finetune': {
             'n_iters': 10,
         },
+
         'inference': {
             'orientation': 'ix',
             'batch_size': None,
@@ -73,26 +76,26 @@ class HorizonController(BaseController):
             'threshold': 0.,
 
             'prefetch': 0,
-            'chunk_size': 100,
-            'chunk_overlap': 0.1,
+            'chunk_size': 200,
+            'chunk_overlap': 0.05,
 
-            'finetune': True,
+            'finetune': False,
+        },
+
+        # Make predictions smoother
+        'postprocess': {
+            'despike': {'mode': 'median', 'threshold': 3, 'dilation': 3},
+            'interpolate': {'kernel_size': 3, 'sigma': 0.4, 'margin': 2},
+            'filter_disconnected_regions' : True,
         },
 
         # Common parameters for train and inference
         'common': {},
 
-        # Make predictions smoother
-        'postprocess': {
-            'despike': {'mode': 'gradient', 'threshold': 1, 'dilation': 5},
-            'interpolate': {'kernel_size': 5, 'sigma': 0.4, 'margin': 2},
-            'filter_disconnected_regions' : True,
-        },
-
         # Compute metrics
         'evaluate': {
             'supports': 100,
-            'device': 'gpu',
+            'device': 'cpu',
 
             'add_prefix': False,
             'dump': False,
@@ -164,12 +167,15 @@ class HorizonController(BaseController):
                              (np.prod(field.spatial_shape) - np.nansum(field.zero_traces)))
             self.log(f'Created {frequencies} grid on {idx}; coverage is: {grid_coverage:4.4f}')
 
-    def make_sampler(self, dataset, **kwargs):
+    def make_sampler(self, dataset, config=None, **kwargs):
         """ Create sampler for generating locations to train on. """
+        config = config or {}
+        config = Config({**self.config['common'], **self.config['train_sampler'], **config, **kwargs})
+
         crop_shape = self.config['train']['crop_shape']
         rebatch_threshold = self.config['train']['rebatch_threshold']
         sampler = SeismicSampler(labels=dataset.labels, crop_shape=crop_shape,
-                                 threshold=rebatch_threshold, mode='horizon', **kwargs)
+                                 threshold=rebatch_threshold, mode='horizon', **config)
         return sampler
 
     # Train method is inherited from BaseController class
@@ -217,7 +223,7 @@ class HorizonController(BaseController):
                             savepath=self.make_savepath('inference_ix', 'l1.png'))
 
         # Merge all the predictions
-        horizons = Horizon.merge_list(horizons, minsize=1000)
+        horizons = Horizon.merge_list(horizons, minsize=1000, mean_threshold=0.5, adjacency=1)
         self.log(f'Inference done in {elapsed:4.1f}')
 
         # Log: resource graphs
@@ -291,7 +297,7 @@ class HorizonController(BaseController):
         gc.collect()
         torch.cuda.empty_cache()
 
-        return Horizon.merge_list(horizons, mean_threshold=5.5, adjacency=3, minsize=500)
+        return Horizon.merge_list(horizons, mean_threshold=0.5, adjacency=3, minsize=500)
 
     def _inference_on_chunk(self, dataset, model, grid_chunk, config, iteration):
         # Prepare parameters

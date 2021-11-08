@@ -49,7 +49,8 @@ class SeismicDataset(Dataset):
             for geometry, labels in index.items():
                 if isinstance(geometry, (Field, SyntheticField)):
                     field = geometry
-                    field.load_labels(labels=labels, **kwargs)
+                    if labels is not None:
+                        field.load_labels(labels=labels, **kwargs)
                 else:
                     field = Field(geometry=geometry, labels=labels, **kwargs)
                 self.fields[field.short_name] = field
