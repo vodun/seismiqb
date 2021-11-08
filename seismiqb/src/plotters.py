@@ -366,7 +366,9 @@ class MatplotlibPlotter:
 
     IMSHOW_DEFAULTS = {
         # image
-        'cmap': ['Greys_r', 'firebrick', 'forestgreen', 'royalblue', 'sandybrown', 'darkorchid'],
+        'cmap': ['Greys_r', 'firebrick', 'mediumseagreen', 'thistle', 'darkorange', 'navy', 'gold',
+                 'red', 'turquoise', 'darkorchid', 'darkkhaki', 'royalblue', 'yellow',
+                 'chocolate', 'forestgreen', 'lightpink', 'darkslategray', 'deepskyblue', 'wheat'],
         'facecolor': 'white',
         # axis labels
         'xlabel': '', 'ylabel': '',
@@ -560,7 +562,9 @@ class MatplotlibPlotter:
     HIST_DEFAULTS = {
         # hist
         'bins': 50,
-        'color': ['firebrick', 'forestgreen', 'royalblue', 'sandybrown', 'darkorchid'],
+        'color': ['firebrick', 'mediumseagreen', 'thistle', 'darkorange', 'navy', 'gold',
+                  'red', 'turquoise', 'darkorchid', 'darkkhaki', 'royalblue', 'yellow',
+                  'chocolate', 'forestgreen', 'lightpink', 'darkslategray', 'deepskyblue', 'wheat'],
         'alpha': 0.8,
         'facecolor': 'white',
         # suptitle
@@ -615,7 +619,9 @@ class MatplotlibPlotter:
         'rolling_mean': None,
         'rolling_final': None,
         # curve
-        'color': ['skyblue', 'sandybrown', 'lightcoral'],
+        'color': ['skyblue', 'sandybrown', 'lightpink', 'mediumseagreen', 'thistle', 'firebrick',
+                  'forestgreen', 'navy', 'gold', 'red', 'turquoise', 'darkorchid',
+                  'darkkhaki', 'royalblue', 'yellow', 'chocolate', 'darkslategray', 'wheat'],
         'facecolor': 'white',
         # suptitle
         'suptitle_color': 'k',
