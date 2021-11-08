@@ -533,15 +533,15 @@ class Field(VisualizationMixin):
         if return_points:
             return points
 
-        else:
-            shape = np.max(points, axis=0)[:2].astype(int) + 1
-            matrix = np.full(shape=shape, fill_value=fill_value, dtype=dtype)
+        # Make a matrix from points and return
+        shape = np.max(points, axis=0)[:2].astype(int) + 1
+        matrix = np.full(shape=shape, fill_value=fill_value, dtype=dtype)
 
-            if dtype is int:
-                points[:, 2] = np.round(points[:, 2]).astype(int)
+        if dtype is int:
+            points[:, 2] = np.round(points[:, 2]).astype(int)
 
-            matrix[points[:, 0].astype(int), points[:, 1].astype(int)] = points[:, 2]
-            return matrix
+        matrix[points[:, 0].astype(int), points[:, 1].astype(int)] = points[:, 2]
+        return matrix
 
     @classmethod
     def file_to_points(cls, path):

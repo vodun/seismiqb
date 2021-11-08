@@ -1,11 +1,9 @@
 """ Horizon class for POST-STACK data. """
-import os
 from copy import copy
 from textwrap import dedent
 from functools import partialmethod
 
 import numpy as np
-import pandas as pd
 
 from cv2 import dilate
 from skimage.measure import label
@@ -77,6 +75,12 @@ class Horizon(AttributesMixin, VisualizationMixin):
         - A wealth of visualization methods: view from above, slices along iline/xline axis, etc.
     """
     #pylint: disable=too-many-public-methods, import-outside-toplevel
+
+    # CHARISMA: default seismic format of storing surfaces inside the 3D volume
+    CHARISMA_SPEC = ['INLINE', '_', 'iline', 'XLINE', '__', 'xline', 'cdp_x', 'cdp_y', 'height']
+
+    # REDUCED_CHARISMA: CHARISMA without redundant columns
+    REDUCED_CHARISMA_SPEC = ['iline', 'xline', 'height']
 
     # Columns that are used from the file
     COLUMNS = ['iline', 'xline', 'height']

@@ -1,8 +1,6 @@
 """ Script for running notebook with Field tests."""
 import glob
-import json
 import os
-import pprint
 from datetime import date
 import nbformat
 
@@ -46,7 +44,7 @@ def test_field(capsys, tmpdir):
     # Tests execution
     exec_info = run_notebook(
         path=os.path.join(TESTS_SCRIPTS_DIR, 'notebooks/field_test_draft.ipynb'),
-        nb_kwargs={           
+        nb_kwargs={
             'SEED': SEED,
             'SAVING_DIR': SAVING_DIR,
             'DATESTAMP': DATESTAMP,
@@ -79,7 +77,7 @@ def test_field(capsys, tmpdir):
                         msg += line
                     msg += '\n'
                     break
-            
+
 
     with capsys.disabled():
         # Output message
