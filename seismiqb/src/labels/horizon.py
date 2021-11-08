@@ -78,12 +78,6 @@ class Horizon(AttributesMixin, VisualizationMixin):
     """
     #pylint: disable=too-many-public-methods, import-outside-toplevel
 
-    # CHARISMA: default seismic format of storing surfaces inside the 3D volume
-    CHARISMA_SPEC = ['INLINE', '_', 'iline', 'XLINE', '__', 'xline', 'cdp_x', 'cdp_y', 'height']
-
-    # REDUCED_CHARISMA: CHARISMA without redundant columns
-    REDUCED_CHARISMA_SPEC = ['iline', 'xline', 'height']
-
     # Columns that are used from the file
     COLUMNS = ['iline', 'xline', 'height']
 
@@ -339,20 +333,10 @@ class Horizon(AttributesMixin, VisualizationMixin):
         _ = kwargs
 
         # Transform to cubic coordinates, if needed
-        if transform:
-            points = self.field.lines_to_cubic(points)
-        if verify:
-            idx = np.where((points[:, 0] >= 0) &
-                           (points[:, 1] >= 0) &
-                           (points[:, 2] >= 0) &
-                           (points[:, 0] < self.field.shape[0]) &
-                           (points[:, 1] < self.field.shape[1]) &
-                           (points[:, 2] < self.field.shape[2]))[0]
-            points = points[idx]
+        points = self.field.from_points(points=points, transform=transform, verify=verify, dst=dst, **kwargs)
 
         if self.dtype == np.int32:
             points = np.rint(points)
-        setattr(self, dst, points.astype(self.dtype))
 
         # Collect stats on separate axes. Note that depth stats are properties
         if reset:
@@ -361,31 +345,7 @@ class Horizon(AttributesMixin, VisualizationMixin):
 
     def from_file(self, path, transform=True, **kwargs):
         """ Init from path to either CHARISMA or REDUCED_CHARISMA csv-like file. """
-        _ = kwargs
-        path = self.field.make_path(path, makedirs=False)
-
-        self.path = path
-        self.name = os.path.basename(path) if self.name is None else self.name
-        points = self.file_to_points(path)
-        self.from_points(points, transform, **kwargs)
-
-    @classmethod
-    def file_to_points(cls, path):
-        """ Get point cloud array from file values. """
-        #pylint: disable=anomalous-backslash-in-string
-        with open(path, encoding='utf-8') as file:
-            line_len = len(file.readline().split(' '))
-        if line_len == 3:
-            names = cls.REDUCED_CHARISMA_SPEC
-        elif line_len >= 9:
-            names = cls.CHARISMA_SPEC
-        else:
-            raise ValueError('Horizon labels must be in CHARISMA or REDUCED_CHARISMA format.')
-
-        df = pd.read_csv(path, sep=r'\s+', names=names, usecols=cls.COLUMNS)
-        df.sort_values(cls.COLUMNS, inplace=True)
-        return df.values
-
+        self.field.from_file(path=path, name=self.name, transform=transform, **kwargs)
 
     def from_matrix(self, matrix, i_min, x_min, length=None, **kwargs):
         """ Init from matrix and location of minimum i, x points. """
@@ -1269,40 +1229,3 @@ class Horizon(AttributesMixin, VisualizationMixin):
         points = self.matrix_to_points(matrix)
         points = self.field.cubic_to_lines(points)
         self.field.dump_charisma(points, path, transform)
-
-
-    # Utility
-    @staticmethod
-    def is_charisma_like(path, bad_extensions=None, size_threshold=100):
-        """ Check if the path looks like the horizon file.
-
-        Parameters
-        ----------
-        path : str
-            Path of file to check.
-        bad_extensions : list, optional
-            If provided, then list of extensions to consider file not charisma-like.
-        size_threshold : number
-            If file size in kilobytes is less, than the threshold, then file is considered not charisma-like.
-        """
-        bad_extensions = bad_extensions or []
-        bad_extensions.extend(['.py', '.ipynb', '.ckpt',
-                            '.png', '.jpg',
-                            '.log', '.txt', '.torch'])
-
-        try:
-            if os.path.isdir(path):
-                return False
-
-            if max([path.endswith(ext) for ext in bad_extensions]):
-                return False
-
-            if (os.path.getsize(path) / 1024) < size_threshold:
-                return False
-            with open(path, encoding='utf-8') as file:
-                line = file.readline()
-                n = len(line.split(' '))
-            return (n == 3) or (n >= 9 and 'INLINE' in line)
-
-        except UnicodeDecodeError:
-            return False

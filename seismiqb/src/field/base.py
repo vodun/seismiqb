@@ -60,6 +60,14 @@ class Field(VisualizationMixin):
     >>> Field(geometry=..., labels='paths/*', labels_class='horizon')
     >>> Field(geometry=..., labels=['paths/1', 'paths/2', 'paths/3'], labels_class='fault')
     """
+
+    # CHARISMA: default seismic format of storing surfaces inside the 3D volume
+    CHARISMA_SPEC = ['INLINE', '_', 'iline', 'XLINE', '__', 'xline', 'cdp_x', 'cdp_y', 'height']
+
+    # REDUCED_CHARISMA: CHARISMA without redundant columns
+    REDUCED_CHARISMA_SPEC = ['iline', 'xline', 'height']
+
+
     #pylint: disable=redefined-builtin
     def __init__(self, geometry, labels=None, labels_class=None, geometry_kwargs=None, labels_kwargs=None, **kwargs):
         # Attributes
@@ -138,6 +146,7 @@ class Field(VisualizationMixin):
 
             if 'labels' not in labels and not self.labels:
                 setattr(self, 'labels', result)
+
 
     # Coordinate transforms
     def lines_to_cubic(self, array):
@@ -463,6 +472,94 @@ class Field(VisualizationMixin):
 
         return result
 
+    # Matrix operations
+    # Load matrix data from disk
+    def from_points(self, points, transform=False, verify=True, dst='points', **kwargs):
+        """ Base initialization: from point cloud array of (N, 3) shape.
+
+        Parameters
+        ----------
+        points : ndarray
+            Array of points. Each row describes one point inside the cube: two spatial coordinates and depth.
+        transform : bool
+            Whether transform from line coordinates (ilines, xlines) to cubic system.
+        verify : bool
+            Whether to remove points outside of the cube range.
+        dst : str
+            Attribute to save result.
+        """
+        _ = kwargs
+
+        # Transform to cubic coordinates, if needed
+        if transform:
+            points = self.lines_to_cubic(points)
+        if verify:
+            idx = np.where((points[:, 0] >= 0) &
+                           (points[:, 1] >= 0) &
+                           (points[:, 2] >= 0) &
+                           (points[:, 0] < self.shape[0]) &
+                           (points[:, 1] < self.shape[1]) &
+                           (points[:, 2] < self.shape[2]))[0]
+            points = points[idx]
+
+        return points
+
+
+    def from_file(self, path, dtype=int, return_points=True, fill_value=-999999, name=None, transform=True, **kwargs):
+        """ Init from path to either CHARISMA or REDUCED_CHARISMA csv-like file.
+
+        Parameters
+        ----------
+        path : str
+            Path to a file to import matrix from.
+        dtype : data-type
+            Output matrix dtype.
+        return_points : bool
+            Whether to return data in points format.
+        fill_value : int or float
+            Value to place into blank spaces.
+        name : str
+            Matrix name.
+        transform : bool
+            Whether transform from line coordinates (ilines, xlines) to cubic system.
+        """
+        _ = kwargs
+        path = self.make_path(path, makedirs=False)
+
+        self.name = os.path.basename(path) if name is None else name
+        points = self.file_to_points(path=path)
+        points = self.from_points(points=points, transform=transform, **kwargs)
+
+        if return_points:
+            return points
+
+        else:
+            shape = np.max(points, axis=0)[:2].astype(int) + 1
+            matrix = np.full(shape=shape, fill_value=fill_value, dtype=dtype)
+
+            if dtype is int:
+                points[:, 2] = np.round(points[:, 2]).astype(int)
+
+            matrix[points[:, 0].astype(int), points[:, 1].astype(int)] = points[:, 2]
+            return matrix
+
+    @classmethod
+    def file_to_points(cls, path):
+        """ Get point cloud array from file values. """
+        #pylint: disable=anomalous-backslash-in-string
+        with open(path, encoding='utf-8') as file:
+            line_len = len(file.readline().split(' '))
+        if line_len == 3:
+            names = cls.REDUCED_CHARISMA_SPEC
+        elif line_len >= 9:
+            names = cls.CHARISMA_SPEC
+        else:
+            raise ValueError('Data must be in CHARISMA or REDUCED_CHARISMA format.')
+
+        df = pd.read_csv(path, sep=r'\s+', names=names, usecols=cls.REDUCED_CHARISMA_SPEC)
+        df.sort_values(cls.REDUCED_CHARISMA_SPEC, inplace=True)
+        return df.values
+
     # Save matrix data to disk
     def dump_charisma(self, points, path, transform=None):
         """ Save (N, 3) array of points to disk in CHARISMA-compatible format.
@@ -499,3 +596,39 @@ class Field(VisualizationMixin):
         points = Horizon.matrix_to_points(matrix)
         points = self.cubic_to_lines(points)
         self.dump_charisma(points, path, transform)
+
+    # Utility
+    @staticmethod
+    def is_charisma_like(path, bad_extensions=None, size_threshold=100):
+        """ Check if the path looks like the horizon file.
+
+        Parameters
+        ----------
+        path : str
+            Path of file to check.
+        bad_extensions : list, optional
+            If provided, then list of extensions to consider file not charisma-like.
+        size_threshold : number
+            If file size in kilobytes is less, than the threshold, then file is considered not charisma-like.
+        """
+        bad_extensions = bad_extensions or []
+        bad_extensions.extend(['.py', '.ipynb', '.ckpt',
+                            '.png', '.jpg',
+                            '.log', '.txt', '.torch'])
+
+        try:
+            if os.path.isdir(path):
+                return False
+
+            if max([path.endswith(ext) for ext in bad_extensions]):
+                return False
+
+            if (os.path.getsize(path) / 1024) < size_threshold:
+                return False
+            with open(path, encoding='utf-8') as file:
+                line = file.readline()
+                n = len(line.split(' '))
+            return (n == 3) or (n >= 9 and 'INLINE' in line)
+
+        except UnicodeDecodeError:
+            return False
