@@ -20,7 +20,7 @@ GITHUB_MODE = True
 
 
 def test_field(capsys, tmpdir):
-    """ Run Field test notebook.
+    """ Run Field test notebook draft.
 
     This test runs ./notebooks/field_test_draft.ipynb test file and show execution message.
 

@@ -17,6 +17,7 @@ from scipy.ndimage import measurements, binary_erosion, binary_dilation, generat
 from ...batchflow.notifier import Notifier
 
 from .horizon import Horizon
+from ..field import Field
 from .fault_triangulation import make_triangulation, triangle_rasterization
 from ..plotters import show_3d
 from ..geometry import SeismicGeometry
@@ -97,11 +98,11 @@ class Fault(Horizon):
         with open(path, encoding='utf-8') as file:
             line_len = len([item for item in file.readline().split(' ') if len(item) > 0])
         if line_len == 3:
-            names = Horizon.REDUCED_CHARISMA_SPEC
+            names = Field.REDUCED_CHARISMA_SPEC
         elif line_len == 8:
             names = cls.FAULT_STICKS
         elif line_len >= 9:
-            names = Horizon.CHARISMA_SPEC
+            names = Field.CHARISMA_SPEC
         elif line_len == 0:
             return None
         else:
