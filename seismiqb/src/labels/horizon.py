@@ -319,25 +319,6 @@ class Horizon(AttributesMixin, VisualizationMixin):
         return self._len
 
 
-    # Coordinate transforms
-    def lines_to_cubic(self, array):
-        """ Convert ilines-xlines to cubic coordinates system. """
-        array[:, 0] -= self.field.ilines_offset
-        array[:, 1] -= self.field.xlines_offset
-        array[:, 2] -= self.field.delay
-        array[:, 2] /= self.field.sample_rate
-        return array
-
-    def cubic_to_lines(self, array):
-        """ Convert cubic coordinates to ilines-xlines system. """
-        array = array.astype(np.float32)
-        array[:, 0] += self.field.ilines_offset
-        array[:, 1] += self.field.xlines_offset
-        array[:, 2] *= self.field.sample_rate
-        array[:, 2] += self.field.delay
-        return array
-
-
     # Initialization from different containers
     def from_points(self, points, transform=False, verify=True, dst='points', reset='matrix', **kwargs):
         """ Base initialization: from point cloud array of (N, 3) shape.
@@ -359,7 +340,7 @@ class Horizon(AttributesMixin, VisualizationMixin):
 
         # Transform to cubic coordinates, if needed
         if transform:
-            points = self.lines_to_cubic(points)
+            points = self.field.lines_to_cubic(points)
         if verify:
             idx = np.where((points[:, 0] >= 0) &
                            (points[:, 1] >= 0) &
@@ -1254,42 +1235,6 @@ class Horizon(AttributesMixin, VisualizationMixin):
 
 
     # Save horizon to disk
-    def dump_charisma(self, points, path, transform=None):
-        """ Save (N, 3) array of points to disk in CHARISMA-compatible format.
-
-        Parameters
-        ----------
-        points : ndarray
-            Array of (N, 3) shape.
-        path : str
-            Path to a file to save horizon to.
-        transform : None or callable
-            If callable, then applied to points after converting to ilines/xlines coordinate system.
-        """
-        points = points if transform is None else transform(points)
-        path = self.field.make_path(path, name=self.short_name)
-
-        df = pd.DataFrame(points, columns=Horizon.COLUMNS)
-        df.sort_values(['iline', 'xline'], inplace=True)
-        df = df.astype({'iline': np.int32, 'xline': np.int32, 'height': np.float32})
-        df.to_csv(path, sep=' ', columns=Horizon.COLUMNS, index=False, header=False)
-
-    def dump_matrix(self, matrix, path, transform=None):
-        """ Save (N_ILINES, N_CROSSLINES) matrix in CHARISMA-compatible format.
-
-        Parameters
-        ----------
-        matrix : ndarray
-            Array of (N_ILINES, N_CROSSLINES) shape with depth values.
-        path : str
-            Path to a file to save horizon to.
-        transform : None or callable
-            If callable, then applied to points after converting to ilines/xlines coordinate system.
-        """
-        points = Horizon.matrix_to_points(matrix)
-        points = self.cubic_to_lines(points)
-        Horizon.dump_charisma(points, path, transform)
-
     def dump(self, path, transform=None):
         """ Save horizon points on disk.
 
@@ -1300,8 +1245,8 @@ class Horizon(AttributesMixin, VisualizationMixin):
         transform : None or callable
             If callable, then applied to points after converting to ilines/xlines coordinate system.
         """
-        points = self.cubic_to_lines(copy(self.points))
-        self.dump_charisma(points, path, transform)
+        points = self.field.cubic_to_lines(copy(self.points))
+        self.field.dump_charisma(points, path, transform)
 
     def dump_float(self, path, transform=None, kernel_size=7, sigma=2., margin=5):
         """ Smooth out the horizon values, producing floating-point numbers, and dump to the disk.
@@ -1322,8 +1267,8 @@ class Horizon(AttributesMixin, VisualizationMixin):
         """
         matrix = self.matrix_smooth_out(matrix=self.full_matrix, kernel_size=kernel_size, sigma=sigma, margin=margin)
         points = self.matrix_to_points(matrix)
-        points = self.cubic_to_lines(points)
-        self.dump_charisma(points, path, transform)
+        points = self.field.cubic_to_lines(points)
+        self.field.dump_charisma(points, path, transform)
 
 
     # Utility

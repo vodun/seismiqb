@@ -5,6 +5,7 @@ from glob import glob
 from difflib import get_close_matches
 from concurrent.futures import ThreadPoolExecutor
 
+import pandas as pd
 import numpy as np
 
 from ...batchflow.notifier import Notifier
@@ -137,6 +138,24 @@ class Field(VisualizationMixin):
 
             if 'labels' not in labels and not self.labels:
                 setattr(self, 'labels', result)
+
+    # Coordinate transforms
+    def lines_to_cubic(self, array):
+        """ Convert ilines-xlines to cubic coordinates system. """
+        array[:, 0] -= self.ilines_offset
+        array[:, 1] -= self.xlines_offset
+        array[:, 2] -= self.delay
+        array[:, 2] /= self.sample_rate
+        return array
+
+    def cubic_to_lines(self, array):
+        """ Convert cubic coordinates to ilines-xlines system. """
+        array = array.astype(np.float32)
+        array[:, 0] += self.ilines_offset
+        array[:, 1] += self.xlines_offset
+        array[:, 2] *= self.sample_rate
+        array[:, 2] += self.delay
+        return array
 
     @staticmethod
     def _filter_paths(paths):
@@ -443,3 +462,40 @@ class Field(VisualizationMixin):
         result = fm.evaluate(metrics)
 
         return result
+
+    # Save matrix data to disk
+    def dump_charisma(self, points, path, transform=None):
+        """ Save (N, 3) array of points to disk in CHARISMA-compatible format.
+
+        Parameters
+        ----------
+        points : ndarray
+            Array of (N, 3) shape.
+        path : str
+            Path to a file to save array to.
+        transform : None or callable
+            If callable, then applied to points after converting to ilines/xlines coordinate system.
+        """
+        points = points if transform is None else transform(points)
+        path = self.make_path(path, name=self.short_name)
+
+        df = pd.DataFrame(points, columns=Horizon.COLUMNS)
+        df.sort_values(['iline', 'xline'], inplace=True)
+        df = df.astype({'iline': np.int32, 'xline': np.int32, 'height': np.float32})
+        df.to_csv(path, sep=' ', columns=Horizon.COLUMNS, index=False, header=False)
+
+    def dump_matrix(self, matrix, path, transform=None):
+        """ Save (N_ILINES, N_CROSSLINES) matrix in CHARISMA-compatible format.
+
+        Parameters
+        ----------
+        matrix : ndarray
+            Array of (N_ILINES, N_CROSSLINES) shape with values.
+        path : str
+            Path to a file to save matrix to.
+        transform : None or callable
+            If callable, then applied to points after converting to ilines/xlines coordinate system.
+        """
+        points = Horizon.matrix_to_points(matrix)
+        points = self.cubic_to_lines(points)
+        self.dump_charisma(points, path, transform)
