@@ -22,6 +22,8 @@ from numba import njit
 from .utils import filtering_function, AugmentedDict
 from .labels.fault import insert_fault_into_mask
 from ..batchflow import Sampler, ConstantSampler
+from .field import Field
+from .geometry import SeismicGeometry
 
 
 class BaseSampler(Sampler):
@@ -751,7 +753,14 @@ class SeismicSampler(Sampler):
                 'interpolation': 'bilinear',
                 **kwargs
             }
-            field.geometry.show((matrix, field.zero_traces), **_kwargs)
+
+            if isinstance(field, Field):
+                geometry = field.geometry
+            elif isinstance(field, SeismicGeometry):
+                # It is possible in case when dataset and sampler are created in geometry mode
+                geometry = field
+
+            geometry.show((matrix, field.zero_traces), **_kwargs)
 
 
 
