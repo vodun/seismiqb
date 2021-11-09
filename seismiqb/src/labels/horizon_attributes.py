@@ -225,7 +225,7 @@ class AttributesMixin:
 
     def grad_along_axis(self, axis=0):
         """ Change of heights along specified direction. """
-        grad = np.diff(self.matrix, axis=axis, prepend=np.int32(0))
+        grad = np.diff(self.matrix, axis=axis, prepend=self.FILL_VALUE)
         grad[np.abs(grad) > self.h_min] = self.FILL_VALUE
         grad[self.matrix == self.FILL_VALUE] = self.FILL_VALUE
         return grad

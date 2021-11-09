@@ -936,14 +936,13 @@ class Horizon(AttributesMixin, VisualizationMixin):
                                          plot=plot, savepath=savepath, **kwargs)
         return None
 
-    def compare(self, other, offset=0, absolute=True, printer=print, hist=True, plot=True, return_dict=False):
+    def compare(self, other, offset=0, absolute=True, printer=print, hist=True, plot=True):
         """ Compare quality of self against another horizon or sequence of horizons. """
         from ..metrics import HorizonMetrics
-        _, properties_dict = HorizonMetrics([self, other]).evaluate(
+        _ = HorizonMetrics([self, other]).evaluate(
             'compare', absolute=absolute, offset=offset, printer=printer,
-            hist=hist, plot=plot, return_dict=return_dict
+            hist=hist, plot=plot
         )
-        return  properties_dict
 
     def check_proximity(self, other, offset=0):
         """ Compute a number of stats on location of `self` relative to the `other` Horizons.
