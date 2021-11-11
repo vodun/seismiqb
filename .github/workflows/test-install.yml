@@ -6,16 +6,42 @@ on:
     - master
 
 jobs:
+  matrix_on_pull:
+    if: github.event.pull_request.merged == false
+    runs-on: [ubuntu-latest, windows-latest]
+    strategy:
+      matrix:
+        os: ubuntu-latest
+        python-version: [3.6, 3.7, 3.8]
+    steps:
+      - name: setmatrix
+        id: set-matrix
+        run: echo ${{ matrix.os }}
 
-  test_install:
-
-    runs-on: ${{ matrix.os }}
+  matrix_on_merge:
+    if: github.event.pull_request.merged == true
+    runs-on: [ubuntu-latest, windows-latest]
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest]
         python-version: [3.6, 3.7, 3.8]
+    steps:
+      - name: setmatrix
+        id: set-matrix
+        run: echo ${{ matrix.os }}
+
+  test_install:
+
+    runs-on: ${{ matrix.os }}
+    # strategy:
+    #   matrix:
+    #     os: [ubuntu-latest, windows-latest]
+    #     python-version: [3.6, 3.7, 3.8]
+
 
     steps:
+    - name: Check matrix
+      run: echo ${{ matrix.os }}
     - name: Set up Python ${{ matrix.python-version }} on ${{ matrix.os }}
       uses: actions/setup-python@v2
       with:
