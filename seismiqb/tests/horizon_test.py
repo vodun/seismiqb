@@ -1,19 +1,18 @@
 """ Script for running notebook with SeismicGeometry tests."""
 import glob
-import json
 import os
-import pprint
 import shutil
 from datetime import date
 
+from .utils import extract_traceback
 from ..batchflow.utils_notebook import run_notebook
 
 # Constants
 DATESTAMP = date.today().strftime("%Y-%m-%d")
 DROP_EXTRA_FILES = True
 TESTS_SCRIPTS_DIR = os.getenv("TESTS_SCRIPTS_DIR", os.path.dirname(os.path.realpath(__file__))+'/')
-TEST_DIR = os.path.join(TESTS_SCRIPTS_DIR, 'notebooks/horizon_test_files/')
 SHOW_MESSAGE = True
+SHOW_TEST_ERROR_INFO = True
 GITHUB_MODE = True
 
 def test_horizon(capsys, tmpdir):
@@ -37,7 +36,7 @@ def test_horizon(capsys, tmpdir):
             os.remove(file)
 
         # Path to a new test noteboook result
-        SAVING_DIR = TEST_DIR
+        SAVING_DIR = os.path.join(TESTS_SCRIPTS_DIR, 'notebooks/horizon_test_files/')
         out_path_ipynb = os.path.join(TESTS_SCRIPTS_DIR, f'notebooks/horizon_test_out_{DATESTAMP}.ipynb')
 
     # Tests execution
@@ -48,7 +47,6 @@ def test_horizon(capsys, tmpdir):
             'DATESTAMP': DATESTAMP,
             'NOTEBOOKS_DIR': os.path.join(TESTS_SCRIPTS_DIR, 'notebooks/'),
             'SAVING_DIR': SAVING_DIR,
-            'TEST_DIR': TEST_DIR,
 
             # Synthetic creation
             'SYNTHETIC_MODE': True,
@@ -65,7 +63,7 @@ def test_horizon(capsys, tmpdir):
 
             # Execution
             'DROP_EXTRA_FILES': DROP_EXTRA_FILES,
-            'SHOW_TEST_ERROR_INFO': True,
+            'SHOW_TEST_ERROR_INFO': SHOW_TEST_ERROR_INFO,
             'GITHUB_MODE': GITHUB_MODE
         },
         insert_pos=1,
@@ -75,12 +73,15 @@ def test_horizon(capsys, tmpdir):
 
     if exec_info is True:
         # Open message
-        message_path = glob.glob(os.path.join(TEST_DIR, 'message_*.txt'))[-1]
+        message_path = glob.glob(os.path.join(SAVING_DIR, 'message_*.txt'))[-1]
 
         with open(message_path, "r", encoding="utf-8") as infile:
             msg = infile.readlines()
     else:
         msg = ['Horizon tests execution failed.\n']
+        if SHOW_TEST_ERROR_INFO:
+            # Add error traceback into the message
+            msg.append(extract_traceback(path_ipynb=out_path_ipynb))
 
     with capsys.disabled():
         # Tests output
@@ -95,13 +96,13 @@ def test_horizon(capsys, tmpdir):
         # End of the running message
         if exec_info is True and line.find('success'):
             print()
-            
+
             # Clear directory with extra files
             if not GITHUB_MODE and DROP_EXTRA_FILES:
                 try:
-                    shutil.rmtree(TEST_DIR)
+                    shutil.rmtree(SAVING_DIR)
                 except OSError as e:
-                    print(f"Can't delete the directory {TEST_DIR} : {e.strerror}")
+                    print(f"Can't delete the directory {SAVING_DIR} : {e.strerror}")
 
-        else:
+        else:            
             assert False, 'Horizon tests failed.\n'

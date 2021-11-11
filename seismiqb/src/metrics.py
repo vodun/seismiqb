@@ -844,7 +844,6 @@ class HorizonMetrics(BaseMetrics):
             'colorbar': True,
             **kwargs
         }
-
         return metric, plot_dict
 
 
