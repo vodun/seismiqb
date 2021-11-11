@@ -6,65 +6,71 @@ on:
     - master
 
 jobs:
-  matrix_on_pull:
-    if: github.event.pull_request.merged == false
-    runs-on: [ubuntu-latest, windows-latest]
-    strategy:
-      matrix:
-        os: ubuntu-latest
-        python-version: [3.6, 3.7, 3.8]
-    steps:
-      - name: setmatrix
-        id: set-matrix
-        run: echo ${{ matrix.os }}
 
-  matrix_on_merge:
-    if: github.event.pull_request.merged == true
-    runs-on: [ubuntu-latest, windows-latest]
-    strategy:
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-        python-version: [3.6, 3.7, 3.8]
-    steps:
-      - name: setmatrix
-        id: set-matrix
-        run: echo ${{ matrix.os }}
+  set_matrix:
 
-  test_install:
+    runs-on: ubuntu-latest
+
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+
+    steps:
+    - id: set-matrix
+      shell: bash
+      run: |
+        if ${{github.event.pull_request.merged == true}}; then
+          echo "::set-output name=matrix::{\"os\":[\"ubuntu-latest\"], \"python-version\":[3.6, 3.7, 3.8]}"
+        else
+          echo "::set-output name=matrix::{\"os\":[\"ubuntu-latest\", \"windows-latest\"], \"python-version\":[3.6, 3.7, 3.8]}"
+        fi
+        
+
+  set_strategy:
 
     runs-on: ${{ matrix.os }}
-    # strategy:
-    #   matrix:
-    #     os: [ubuntu-latest, windows-latest]
-    #     python-version: [3.6, 3.7, 3.8]
+    needs: set_matrix
 
+    strategy:
+      matrix: ${{fromJSON(needs.set_matrix.outputs.matrix)}}
 
     steps:
-    - name: Check matrix
-      run: echo ${{ matrix.os }}
-    - name: Set up Python ${{ matrix.python-version }} on ${{ matrix.os }}
-      uses: actions/setup-python@v2
-      with:
-        python-version: ${{ matrix.python-version }}
+    - name: matrix
+      run: echo ${{needs.set_matrix.outputs.matrix}}
 
-    - name: Install via pip from github
-      run: |
-        pip install --user -U pip
-        pip install wheel
-        pip install git+https://github.com/gazprom-neft/seismiqb.git@${{ github.sha }}
+  # test_install:
 
-    - name: Run 'import' in installed environment
-      run: python -c 'import seismiqb'
+  #   if: ${{ always() }}
+  #   needs: [set_strategy_on_pull, set_strategy_on_merge]
 
-    - name: Checkout SeismiQB
-      uses: actions/checkout@v2
-      with:
-        submodules: true
+  #   runs-on: ${{ matrix.os }}
 
-    - name: Run basic tests
-      env:
-        TESTS_SCRIPTS_DIR: ${{ github.workspace }}/seismiqb/tests/
-      working-directory: ${{ github.workspace }}/seismiqb/
-      run: |
-        pip install -U pytest
-        pytest -m "not slow" --disable-pytest-warnings -v --pyargs seismiqb.tests
+  #   steps:
+  #   - name: Check matrix
+  #     run: echo ${{ matrix.os }}
+
+  #   - name: Set up Python ${{ matrix.python-version }} on ${{ matrix.os }}
+  #     uses: actions/setup-python@v2
+  #     with:
+  #       python-version: ${{ matrix.python-version }}
+
+  #   - name: Install via pip from github
+  #     run: |
+  #       pip install --user -U pip
+  #       pip install wheel
+  #       pip install git+https://github.com/gazprom-neft/seismiqb.git@${{ github.sha }}
+
+  #   - name: Run 'import' in installed environment
+  #     run: python -c 'import seismiqb'
+
+  #   - name: Checkout SeismiQB
+  #     uses: actions/checkout@v2
+  #     with:
+  #       submodules: true
+
+  #   - name: Run basic tests
+  #     env:
+  #       TESTS_SCRIPTS_DIR: ${{ github.workspace }}/seismiqb/tests/
+  #     working-directory: ${{ github.workspace }}/seismiqb/
+  #     run: |
+  #       pip install -U pytest
+  #       pytest -m "not slow" --disable-pytest-warnings -v --pyargs seismiqb.tests
