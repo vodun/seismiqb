@@ -104,5 +104,5 @@ def test_horizon(capsys, tmpdir):
                 except OSError as e:
                     print(f"Can't delete the directory {SAVING_DIR} : {e.strerror}")
 
-        else:            
+        else:
             assert False, 'Horizon tests failed.\n'

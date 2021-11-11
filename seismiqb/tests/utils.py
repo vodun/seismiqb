@@ -1,3 +1,4 @@
+""" Tests helper functions."""
 import nbformat
 
 def find_traceback_in_outputs(cell_info):
@@ -17,7 +18,7 @@ def find_traceback_in_outputs(cell_info):
 
 def extract_traceback(path_ipynb, cell_num=None):
     """ Extracts error traceback from tests notebooks.
-    
+
     Parameters
     ----------
     path_ipynb: str
@@ -30,7 +31,7 @@ def extract_traceback(path_ipynb, cell_num=None):
     """
     traceback_msg = "TRACEBACK: \n"
     out_notebook = nbformat.read(path_ipynb, as_version=4)
-    
+
     if cell_num is not None:
         # Get a traceback from cell directly
         cell_info = out_notebook['cells'][cell_num]
@@ -39,6 +40,6 @@ def extract_traceback(path_ipynb, cell_num=None):
     else:
         # Find a cell with a traceback
         for cell_info in out_notebook['cells']:
-             traceback_msg += find_traceback_in_outputs(cell_info=cell_info)
-                
+            traceback_msg += find_traceback_in_outputs(cell_info=cell_info)
+
     return traceback_msg
