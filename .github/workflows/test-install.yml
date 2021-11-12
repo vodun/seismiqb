@@ -23,9 +23,8 @@ jobs:
         else
           echo "::set-output name=matrix::{\"os\":[\"ubuntu-latest\", \"windows-latest\"], \"python-version\":[3.6, 3.7, 3.8]}"
         fi
-        
 
-  set_strategy:
+  test_install:
 
     runs-on: ${{ matrix.os }}
     needs: set_matrix
@@ -34,43 +33,32 @@ jobs:
       matrix: ${{fromJSON(needs.set_matrix.outputs.matrix)}}
 
     steps:
-    - name: matrix
-      run: echo ${{needs.set_matrix.outputs.matrix}}
+    - name: Check matrix
+      run: echo ${{ matrix.os }}
 
-  # test_install:
+    - name: Set up Python ${{ matrix.python-version }} on ${{ matrix.os }}
+      uses: actions/setup-python@v2
+      with:
+        python-version: ${{ matrix.python-version }}
 
-  #   if: ${{ always() }}
-  #   needs: [set_strategy_on_pull, set_strategy_on_merge]
+    - name: Install via pip from github
+      run: |
+        pip install --user -U pip
+        pip install wheel
+        pip install git+https://github.com/gazprom-neft/seismiqb.git@${{ github.sha }}
 
-  #   runs-on: ${{ matrix.os }}
+    - name: Run 'import' in installed environment
+      run: python -c 'import seismiqb'
 
-  #   steps:
-  #   - name: Check matrix
-  #     run: echo ${{ matrix.os }}
+    - name: Checkout SeismiQB
+      uses: actions/checkout@v2
+      with:
+        submodules: true
 
-  #   - name: Set up Python ${{ matrix.python-version }} on ${{ matrix.os }}
-  #     uses: actions/setup-python@v2
-  #     with:
-  #       python-version: ${{ matrix.python-version }}
-
-  #   - name: Install via pip from github
-  #     run: |
-  #       pip install --user -U pip
-  #       pip install wheel
-  #       pip install git+https://github.com/gazprom-neft/seismiqb.git@${{ github.sha }}
-
-  #   - name: Run 'import' in installed environment
-  #     run: python -c 'import seismiqb'
-
-  #   - name: Checkout SeismiQB
-  #     uses: actions/checkout@v2
-  #     with:
-  #       submodules: true
-
-  #   - name: Run basic tests
-  #     env:
-  #       TESTS_SCRIPTS_DIR: ${{ github.workspace }}/seismiqb/tests/
-  #     working-directory: ${{ github.workspace }}/seismiqb/
-  #     run: |
-  #       pip install -U pytest
-  #       pytest -m "not slow" --disable-pytest-warnings -v --pyargs seismiqb.tests
+    - name: Run basic tests
+      env:
+        TESTS_SCRIPTS_DIR: ${{ github.workspace }}/seismiqb/tests/
+      working-directory: ${{ github.workspace }}/seismiqb/
+      run: |
+        pip install -U pytest
+        pytest -m "not slow" --disable-pytest-warnings -v --pyargs seismiqb.tests
