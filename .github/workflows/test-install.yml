@@ -18,7 +18,7 @@ jobs:
     - id: set-matrix
       shell: bash
       run: |
-        if ${{github.event.pull_request.merged == true}}; then
+        if ${{github.event.pull_request.merged == false}}; then
           echo "::set-output name=matrix::{\"os\":[\"ubuntu-latest\"], \"python-version\":[3.6, 3.7, 3.8]}"
         else
           echo "::set-output name=matrix::{\"os\":[\"ubuntu-latest\", \"windows-latest\"], \"python-version\":[3.6, 3.7, 3.8]}"
@@ -33,9 +33,6 @@ jobs:
       matrix: ${{fromJSON(needs.set_matrix.outputs.matrix)}}
 
     steps:
-    - name: Check matrix
-      run: echo ${{ matrix.os }}
-
     - name: Set up Python ${{ matrix.python-version }} on ${{ matrix.os }}
       uses: actions/setup-python@v2
       with:
