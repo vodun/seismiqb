@@ -8,9 +8,12 @@ from .utils import extract_traceback
 from ..batchflow.utils_notebook import run_notebook
 
 # Constants
+# Workspace
 DATESTAMP = date.today().strftime("%Y-%m-%d")
-DROP_EXTRA_FILES = True
 TESTS_SCRIPTS_DIR = os.getenv("TESTS_SCRIPTS_DIR", os.path.dirname(os.path.realpath(__file__))+'/')
+
+# Execution
+DROP_EXTRA_FILES = True
 SHOW_MESSAGE = True
 SHOW_TEST_ERROR_INFO = True
 GITHUB_MODE = True
