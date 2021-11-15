@@ -97,7 +97,7 @@ def test_horizon(capsys, tmpdir):
 
 
         # End of the running message
-        if exec_info is True and line.find('success'):
+        if exec_info is True and line.find('success')!=-1:
             print()
 
             # Clear directory with extra files
