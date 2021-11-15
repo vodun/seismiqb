@@ -835,7 +835,7 @@ class SeismicCropBatch(Batch):
         ----------
         patch_shape : array-like
             Shape or patches along each axis.
-        n : number
+        n_patches : number
             Number of patches to cut.
         fill_value : number
             Value to fill patches with.
