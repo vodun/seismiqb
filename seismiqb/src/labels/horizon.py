@@ -1190,9 +1190,9 @@ class Horizon(AttributesMixin, VisualizationMixin):
         horizons = [horizon for horizon in horizons if len(horizon) >= minsize]
 
         # Iterate over the list of horizons to merge everything that can be merged
-        i = 0
         flag = True
         while flag:
+            i = 0
             # Continue while at least one pair of horizons was merged at previous iteration
             flag = False
             while True:
