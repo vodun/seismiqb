@@ -7,13 +7,15 @@ import nbformat
 from ..batchflow.utils_notebook import run_notebook
 
 # Constants
+# Workspace
 DATESTAMP = date.today().strftime("%Y-%m-%d")
-DROP_EXTRA_FILES = False
-SHOW_TEST_ERROR_INFO = True
 TESTS_SCRIPTS_DIR = os.getenv("TESTS_SCRIPTS_DIR", os.path.dirname(os.path.realpath(__file__))+'/')
 TEST_DIR = os.path.join(TESTS_SCRIPTS_DIR, 'notebooks')
-SEED = 10
-CUBE_SHAPE = (100, 100, 100)
+
+# Execution
+DROP_EXTRA_FILES = True
+SHOW_TEST_ERROR_INFO = True
+SHOW_MESSAGE = True
 GITHUB_MODE = True
 
 
@@ -45,10 +47,10 @@ def test_field(capsys, tmpdir):
     exec_info = run_notebook(
         path=os.path.join(TESTS_SCRIPTS_DIR, 'notebooks/field_test_draft.ipynb'),
         nb_kwargs={
-            'SEED': SEED,
+            'SEED': 10,
             'SAVING_DIR': SAVING_DIR,
             'DATESTAMP': DATESTAMP,
-            'CUBE_SHAPE': CUBE_SHAPE,
+            'CUBE_SHAPE': (100, 100, 100),
             'DROP_EXTRA_FILES': DROP_EXTRA_FILES,
             'GITHUB_MODE': GITHUB_MODE
         },
@@ -58,30 +60,26 @@ def test_field(capsys, tmpdir):
     )
 
     if exec_info is True:
-        msg = 'Draft tests for Field were executed successfully.\n'
+        msg = ['Draft tests for Field were executed successfully.\n']
     else:
-        msg = 'Field draft tests execution failed.\n'
+        msg = ['Field draft tests execution failed.\n']
 
         if SHOW_TEST_ERROR_INFO:
             # Add error traceback into the message
-            out_notebook = nbformat.read(out_path_ipynb, as_version=4)
-            cell_info = out_notebook['cells'][exec_info + 1] # plus one because we inserted an additional cell
-
-            for output in cell_info['outputs']:
-                output_type = output.get('output_type', False)
-
-                if output_type == 'error':
-                    msg += f"TRACEBACK: \n {traceback}\n"
-                    traceback = output.get('traceback', None)
-                    for line in traceback:
-                        msg += line
-                    msg += '\n'
-                    break
+            msg.append(extract_traceback(path_ipynb=out_path_ipynb))
 
 
     with capsys.disabled():
         # Output message
-        if exec_info is True:
-            print(msg)
+        if SHOW_MESSAGE:
+            for line in msg:
+                print(line)
         else:
-            assert False, msg
+            for line in msg:
+                pass
+
+        # Test exit
+        if exec_info is True and line.find('success'):
+            print()
+        else:
+            assert False, 'Field tests draft failed.\n'

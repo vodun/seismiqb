@@ -341,6 +341,7 @@ class Horizon(AttributesMixin, VisualizationMixin):
 
         if self.dtype == np.int32:
             points = np.rint(points)
+        setattr(self, dst, points.astype(self.dtype))
 
         # Collect stats on separate axes. Note that depth stats are properties
         if reset:
@@ -349,7 +350,10 @@ class Horizon(AttributesMixin, VisualizationMixin):
 
     def from_file(self, path, transform=True, **kwargs):
         """ Init from path to either CHARISMA or REDUCED_CHARISMA csv-like file. """
-        self.field.from_file(path=path, name=self.name, transform=transform, **kwargs)
+        self.field.from_file(
+            path=path, name=self.name, transform=transform,
+            fill_value=self.FILL_VALUE, **kwargs
+        )
 
     def from_matrix(self, matrix, i_min, x_min, length=None, **kwargs):
         """ Init from matrix and location of minimum i, x points. """
@@ -1209,8 +1213,7 @@ class Horizon(AttributesMixin, VisualizationMixin):
         transform : None or callable
             If callable, then applied to points after converting to ilines/xlines coordinate system.
         """
-        points = self.field.cubic_to_lines(copy(self.points))
-        self.field.dump_charisma(points, path, transform)
+        self.field.dump_charisma(copy(self.points), path, transform)
 
     def dump_float(self, path, transform=None, kernel_size=7, sigma=2., margin=5):
         """ Smooth out the horizon values, producing floating-point numbers, and dump to the disk.
@@ -1231,5 +1234,4 @@ class Horizon(AttributesMixin, VisualizationMixin):
         """
         matrix = self.matrix_smooth_out(matrix=self.full_matrix, kernel_size=kernel_size, sigma=sigma, margin=margin)
         points = self.matrix_to_points(matrix)
-        points = self.field.cubic_to_lines(points)
         self.field.dump_charisma(points, path, transform)
