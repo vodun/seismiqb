@@ -5,6 +5,7 @@ import os
 import pprint
 from datetime import date
 
+from .utils import extract_traceback
 from ..batchflow.utils_notebook import run_notebook
 
 # Constants
@@ -72,8 +73,12 @@ def test_geometry(capsys, tmpdir):
             timings = json.load(infile)
 
     else:
-        msg = ['SeismicGeometry tests execution failed.\n']
+        msg = ['SeismicGeometry tests execution failed.']
         timings= {'state': 'FAIL'}
+
+        if SHOW_TEST_ERROR_INFO:
+            # Add error traceback into the message
+            msg.append(extract_traceback(path_ipynb=out_path_ipynb))
 
     with capsys.disabled():
         # Tests output

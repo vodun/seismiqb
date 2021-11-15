@@ -888,8 +888,10 @@ class Horizon(AttributesMixin, VisualizationMixin):
     def compare(self, other, offset=0, absolute=True, printer=print, hist=True, plot=True):
         """ Compare quality of self against another horizon or sequence of horizons. """
         from ..metrics import HorizonMetrics
-        HorizonMetrics([self, other]).evaluate('compare', absolute=absolute, offset=offset,
-                                               printer=printer, hist=hist, plot=plot)
+        _ = HorizonMetrics([self, other]).evaluate(
+            'compare', absolute=absolute, offset=offset, printer=printer,
+            hist=hist, plot=plot
+        )
 
     def check_proximity(self, other, offset=0):
         """ Compute a number of stats on location of `self` relative to the `other` Horizons.
@@ -1137,9 +1139,9 @@ class Horizon(AttributesMixin, VisualizationMixin):
         horizons = [horizon for horizon in horizons if len(horizon) >= minsize]
 
         # Iterate over the list of horizons to merge everything that can be merged
-        i = 0
         flag = True
         while flag:
+            i = 0
             # Continue while at least one pair of horizons was merged at previous iteration
             flag = False
             while True:
