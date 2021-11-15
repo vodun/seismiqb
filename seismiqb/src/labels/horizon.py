@@ -3,6 +3,7 @@ from copy import copy
 from textwrap import dedent
 from functools import partialmethod
 
+import os
 import numpy as np
 
 from cv2 import dilate
@@ -350,10 +351,14 @@ class Horizon(AttributesMixin, VisualizationMixin):
 
     def from_file(self, path, transform=True, **kwargs):
         """ Init from path to either CHARISMA or REDUCED_CHARISMA csv-like file. """
-        self.field.from_file(
-            path=path, name=self.name, transform=transform,
-            fill_value=self.FILL_VALUE, **kwargs
-        )
+        path = self.field.make_path(path, makedirs=False)
+        self.path = path
+
+        self.name = os.path.basename(path) if self.name is None else self.name
+
+        points = self.field.file_to_points(path=path)
+        self.from_points(points, transform, **kwargs)
+
 
     def from_matrix(self, matrix, i_min, x_min, length=None, **kwargs):
         """ Init from matrix and location of minimum i, x points. """
@@ -1215,7 +1220,7 @@ class Horizon(AttributesMixin, VisualizationMixin):
         transform : None or callable
             If callable, then applied to points after converting to ilines/xlines coordinate system.
         """
-        self.field.dump_charisma(copy(self.points), path, transform)
+        self.field.dump_charisma(points=copy(self.points), path=path, name=self.short_name, transform=transform)
 
     def dump_float(self, path, transform=None, kernel_size=7, sigma=2., margin=5):
         """ Smooth out the horizon values, producing floating-point numbers, and dump to the disk.
@@ -1236,4 +1241,4 @@ class Horizon(AttributesMixin, VisualizationMixin):
         """
         matrix = self.matrix_smooth_out(matrix=self.full_matrix, kernel_size=kernel_size, sigma=sigma, margin=margin)
         points = self.matrix_to_points(matrix)
-        self.field.dump_charisma(points, path, transform)
+        self.field.dump_charisma(points=points, path=path, name=self.short_name, transform=transform)

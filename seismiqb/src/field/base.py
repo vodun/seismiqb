@@ -511,7 +511,6 @@ class Field(VisualizationMixin):
         _ = kwargs
         path = self.make_path(path, makedirs=False)
 
-        self.name = os.path.basename(path) if name is None else name
         points = self.file_to_points(path=path)
         points = self.from_points(points=points, transform=transform, **kwargs)
 
@@ -545,7 +544,7 @@ class Field(VisualizationMixin):
         return df.values
 
     # Save matrix data to disk
-    def dump_charisma(self, points, path, transform=None):
+    def dump_charisma(self, points, path, name=None, transform=None):
         """ Save matrix as (N, 3) array of points to a disk in CHARISMA-compatible format.
 
         Parameters
@@ -556,8 +555,11 @@ class Field(VisualizationMixin):
             Path to a file to save array to.
         transform : None or callable
             If callable, then applied to points after converting to ilines/xlines coordinate system.
+        name : str
+            Dumped object name.
         """
-        path = self.make_path(path, name=self.short_name)
+        print(name)
+        path = self.make_path(path, name=name)
 
          # Cubic to lines
         points = points.astype(np.float32)

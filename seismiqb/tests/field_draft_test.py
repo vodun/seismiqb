@@ -2,8 +2,8 @@
 import glob
 import os
 from datetime import date
-import nbformat
 
+from .utils import extract_traceback
 from ..batchflow.utils_notebook import run_notebook
 
 # Constants
@@ -79,7 +79,7 @@ def test_field(capsys, tmpdir):
                 pass
 
         # Test exit
-        if exec_info is True and line.find('success'):
+        if exec_info is True and line.find('success')!=-1:
             print()
         else:
             assert False, 'Field tests draft failed.\n'
