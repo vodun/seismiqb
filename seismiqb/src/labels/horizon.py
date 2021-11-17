@@ -338,7 +338,7 @@ class Horizon(AttributesMixin, VisualizationMixin):
         _ = kwargs
 
         # Transform to cubic coordinates, if needed
-        points = self.field.from_points(points=points, transform=transform, verify=verify, dst=dst, **kwargs)
+        points = self.field.prepare_points(points=points, transform=transform, verify=verify, **kwargs)
 
         if self.dtype == np.int32:
             points = np.rint(points)
@@ -356,7 +356,7 @@ class Horizon(AttributesMixin, VisualizationMixin):
 
         self.name = os.path.basename(path) if self.name is None else self.name
 
-        points = self.field.file_to_points(path=path)
+        points = self.field.load_points_from_file(path=path)
         self.from_points(points, transform, **kwargs)
 
 

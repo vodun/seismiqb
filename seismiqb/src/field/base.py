@@ -454,8 +454,26 @@ class Field(VisualizationMixin):
         return result
 
     # Matrix operations
-    # Load matrix data from disk
-    def from_points(self, points, transform=False, verify=True, dst='points', **kwargs):
+    # Coordinate transforms
+    def lines_to_cubic(self, array):
+        """ Convert ilines-xlines to cubic coordinates system. """
+        array[:, 0] -= self.ilines_offset
+        array[:, 1] -= self.xlines_offset
+        array[:, 2] -= self.delay
+        array[:, 2] /= self.sample_rate
+        return array
+
+    def cubic_to_lines(self, array):
+        """ Convert cubic coordinates to ilines-xlines system. """
+        array = array.astype(np.float32)
+        array[:, 0] += self.ilines_offset
+        array[:, 1] += self.xlines_offset
+        array[:, 2] *= self.sample_rate
+        array[:, 2] += self.delay
+        return array
+
+    # Load matrix from disk
+    def prepare_points(self, points, transform=False, verify=True, **kwargs):
         """ Prepare matrix in points cloud format (array of (N, 3) shape).
 
         Parameters
@@ -466,17 +484,11 @@ class Field(VisualizationMixin):
             Whether transform from line coordinates (ilines, xlines) to cubic system.
         verify : bool
             Whether to remove points outside of the cube range.
-        dst : str
-            Attribute to save result.
         """
         _ = kwargs
 
-        # Transform to cubic coordinates, if needed
         if transform:
-            points[:, 0] -= self.ilines_offset
-            points[:, 1] -= self.xlines_offset
-            points[:, 2] -= self.delay
-            points[:, 2] /= self.sample_rate
+            points = self.lines_to_cubic(points)
 
         if verify:
             idx = np.where((points[:, 0] >= 0) &
@@ -490,7 +502,7 @@ class Field(VisualizationMixin):
         return points
 
 
-    def from_file(self, path, dtype=int, return_points=True, fill_value=np.nan, name=None, transform=True, **kwargs):
+    def load_matrix_from_file(self, path, dtype=np.int32, return_points=True, fill_value=np.nan, name=None, transform=True, **kwargs):
         """ Load matrix from path to either CHARISMA or REDUCED_CHARISMA csv-like file.
 
         Parameters
@@ -511,8 +523,8 @@ class Field(VisualizationMixin):
         _ = kwargs
         path = self.make_path(path, makedirs=False)
 
-        points = self.file_to_points(path=path)
-        points = self.from_points(points=points, transform=transform, **kwargs)
+        points = self.load_points_from_file(path=path)
+        points = self.prepare_points(points=points, transform=transform, **kwargs)
 
         if return_points:
             return points
@@ -520,14 +532,16 @@ class Field(VisualizationMixin):
         # Make a matrix from points and return
         matrix = np.full(shape=self.shape[:2], fill_value=fill_value, dtype=np.float32)
 
-        if dtype is int:
-            points[:, 2] = np.round(points[:, 2]).astype(int)
+        if np.issubdtype(dtype, np.integer):
+            points[:, 2] = np.round(points[:, 2])
+
+        points = points.astype(dtype)
 
         matrix[points[:, 0].astype(int), points[:, 1].astype(int)] = points[:, 2]
         return matrix
 
     @classmethod
-    def file_to_points(cls, path):
+    def load_points_from_file(cls, path):
         """ Get matrix as point cloud array from a file. """
         #pylint: disable=anomalous-backslash-in-string
         with open(path, encoding='utf-8') as file:
@@ -558,15 +572,8 @@ class Field(VisualizationMixin):
         name : str
             Dumped object name.
         """
-        print(name)
         path = self.make_path(path, name=name)
-
-         # Cubic to lines
-        points = points.astype(np.float32)
-        points[:, 0] += self.ilines_offset
-        points[:, 1] += self.xlines_offset
-        points[:, 2] *= self.sample_rate
-        points[:, 2] += self.delay
+        points = self.cubic_to_lines(points)
 
         # Additional transform
         points = points if transform is None else transform(points)
