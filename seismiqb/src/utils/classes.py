@@ -584,6 +584,35 @@ class AccumulatorBlosc(Accumulator3D):
                    shape=grid.shape, origin=grid.origin, orientation=grid.orientation, **kwargs)
 
 
+class LoopedList(list):
+    """ List that loops from given position (default is 0).
+
+        Examples
+        --------
+        >>> l = LoopedList(['a', 'b', 'c'])
+        >>> [l[i] for i in range(9)]
+        ['a', 'b', 'c', 'a', 'b', 'c', 'a', 'b', 'c']
+
+        >>> l = LoopedList(['a', 'b', 'c', 'd'], loop_from=2)
+        >>> [l[i] for i in range(9)]
+        ['a', 'b', 'c', 'd', 'c', 'd', 'c', 'd', 'c']
+
+        >>> l = LoopedList(['a', 'b', 'c', 'd', 'e'], loop_from=-1)
+        >>> [l[i] for i in range(9)]
+        ['a', 'b', 'c', 'd', 'e', 'e', 'e', 'e', 'e']
+    """
+    def __init__(self, *args, loop_from=0, **kwargs):
+        self.loop_from = loop_from
+        super().__init__(*args, **kwargs)
+
+    def __getitem__(self, idx):
+        if idx >= len(self):
+            pos = self.loop_from + len(self) * (self.loop_from < 0)
+            if pos < 0:
+                raise IndexError(f"List of length {len(self)} is looped from {self.loop_from} index")
+            idx = pos + (idx - pos) % (len(self) - pos)
+        return super().__getitem__(idx)
+
 
 class AugmentedList(list):
     """ List with additional features:
