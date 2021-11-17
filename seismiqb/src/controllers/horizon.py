@@ -310,8 +310,8 @@ class HorizonController(BaseController):
         if config.get('finetune', True):
             sampler = self.make_sampler(dataset, ranges=grid_chunk.ranges,)
             if len(sampler) > 0:
-                # sampler.show_locations(show=self.plot,
-                #                        savepath=self.make_savepath('chunk', str(iteration), 'sampler_locations.png'))
+                sampler.show_locations(show=self.plot,
+                                       savepath=self.make_savepath('chunk', str(iteration), 'sampler_locations.png'))
                 sampler.show_sampled(show=self.plot,
                                      savepath=self.make_savepath('chunk', str(iteration), 'sampler_generated.png'))
 
