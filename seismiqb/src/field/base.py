@@ -502,7 +502,8 @@ class Field(VisualizationMixin):
         return points
 
 
-    def load_matrix_from_file(self, path, dtype=np.int32, return_points=True, fill_value=np.nan, name=None, transform=True, **kwargs):
+    def load_matrix_from_file(self, path, dtype=np.int32exit, return_points=True,
+                              fill_value=np.nan, name=None, transform=True, **kwargs):
         """ Load matrix from path to either CHARISMA or REDUCED_CHARISMA csv-like file.
 
         Parameters
