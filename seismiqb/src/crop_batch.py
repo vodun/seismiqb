@@ -366,7 +366,7 @@ class SeismicCropBatch(Batch):
     # Loading of labels
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def create_masks(self, ix, dst, indices='all', width=3, src_labels='labels'):
+    def create_masks(self, ix, dst, indices='all', width=3, src_labels='labels', sparse=False):
         """ Create masks from labels in stored `locations`.
 
         Parameters
@@ -385,7 +385,7 @@ class SeismicCropBatch(Batch):
         """
         field = self.get(ix, 'fields')
         location = self.get(ix, 'locations')
-        return field.make_mask(location=location, width=width, indices=indices, src=src_labels)
+        return field.make_mask(location=location, width=width, indices=indices, src=src_labels, sparse=sparse)
 
 
     @action

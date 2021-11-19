@@ -63,6 +63,9 @@ class FaultController(BaseController):
             'augment': False,
             'adjust': False,
 
+            # Mask creation params
+            'sparse': False,
+
             # Normalization parameters
             'norm_mode': 'minmax',
             'itemwise': True,
@@ -72,7 +75,7 @@ class FaultController(BaseController):
             'native_slicing': True,
             'prefetch': 0,
             'rescale_batch_size': False,
-            'model_config': None
+            'model_config': None,
         },
 
         'inference': {
@@ -176,7 +179,7 @@ class FaultController(BaseController):
         return (Pipeline()
             .make_locations(batch_size=C('batch_size'), generator=C('sampler'))
             .load_cubes(dst='images', native_slicing=C('native_slicing'))
-            .create_masks(dst='masks')
+            .create_masks(dst='masks', sparse=C('sparse'))
             .adaptive_reshape(src=['images', 'masks'])
             .normalize(mode=C('norm_mode'), itemwise=C('itemwise'), src='images')
         )
@@ -409,7 +412,6 @@ class FaultController(BaseController):
         if create_masks:
             test_pipeline += Pipeline().update(V('target', mode='e'), B('masks'))
 
-        test_pipeline += self.metrics_pipeline_template()
         test_pipeline += (Pipeline()
             .update_accumulator(src='predictions', accumulator=C('accumulator'))
         )

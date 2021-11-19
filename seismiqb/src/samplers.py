@@ -380,7 +380,7 @@ class FaultSampler(BaseSampler):
         return np.concatenate(locations, axis=0)
 
     def _make_locations(self, field, crop_shape, ranges, threshold, extend):
-         # Parse parameters
+        # Parse parameters
         ranges = ranges if ranges is not None else [None, None, None]
         ranges = [item if item is not None else [0, c]
                   for item, c in zip(ranges, field.shape)]

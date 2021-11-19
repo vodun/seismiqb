@@ -36,9 +36,11 @@ class Fault(Horizon):
     FAULT_STICKS = ['INLINE', 'iline', 'xline', 'cdp_x', 'cdp_y', 'height', 'name', 'number']
     COLUMNS = ['iline', 'xline', 'height', 'name', 'number']
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, nodes=None, **kwargs):
         self.nodes = None
         super().__init__(*args, **kwargs)
+        if nodes is not None:
+            self.from_points(nodes, dst='nodes', reset=None, **kwargs)
 
     def from_file(self, path, transform=True, direction=None, **kwargs):
         """ Init from path to either CHARISMA, REDUCED_CHARISMA or FAULT_STICKS csv-like file
@@ -49,12 +51,18 @@ class Fault(Horizon):
 
         self.name = os.path.basename(path)
         ext = os.path.splitext(path)[1][1:]
+
         if ext == 'npz':
             npzfile = np.load(path, allow_pickle=False)
             points = npzfile['points']
             transform = False
             nodes = None if len(npzfile['nodes']) == 0 else npzfile['nodes']
             self.format = 'file-npz'
+        elif ext == 'npy':
+            points = np.load(path, allow_pickle=False)
+            transform = False
+            nodes = None
+            self.format = 'file-npy'
         elif ext == 'hdf5':
             cube = SeismicGeometry(path, **kwargs).file_hdf5['cube']
             points = np.stack(np.where(np.array(cube) == 1)).T #TODO: get points in chunks
@@ -70,7 +78,9 @@ class Fault(Horizon):
 
         if direction is None:
             if len(self.points) > 0:
-                self.direction = 0 if self.points[:, 0].ptp() > self.points[:, 1].ptp() else 1
+                mean_depth = int(self.points[:, 2].mean())
+                depth_slice = self.points[self.points[:, 2] == mean_depth]
+                self.direction = 0 if depth_slice[:, 0].ptp() > depth_slice[:, 1].ptp() else 1
             else:
                 self.direction = 0
         elif isinstance(direction, int):
@@ -175,7 +185,7 @@ class Fault(Horizon):
             points += [res]
         return np.concatenate(points, axis=0)
 
-    def add_to_mask(self, mask, locations=None, **kwargs):
+    def add_to_mask(self, mask, locations=None, sparse=False, **kwargs):
         """ Add fault to background. """
         mask_bbox = np.array([[locations[0].start, locations[0].stop],
                             [locations[1].start, locations[1].stop],
@@ -183,10 +193,22 @@ class Fault(Horizon):
                             dtype=np.int32)
         points = self.points
 
+        if sparse and self.nodes is not None:
+            slides_indices = np.unique(self.nodes[:, self.direction])
+            indices = np.isin(points[:, self.direction], slides_indices)
+            points = points[indices]
+
         if (self.bbox[:, 1] < mask_bbox[:, 0]).any() or (self.bbox[:, 0] >= mask_bbox[:, 1]).any():
             return mask
 
         insert_fault_into_mask(mask, points, mask_bbox)
+        if sparse:
+            indices = np.arange(mask.shape[self.direction])
+            pos = ~np.isin(indices, slides_indices - locations[self.direction].start)
+            if self.direction == 0:
+                mask[np.logical_and(pos, ~np.any(mask > 0, axis=(1, 2)))] = -1
+            else:
+                mask[:, np.logical_and(pos, ~np.any(mask > 0, axis=(0, 2)))] = -1
         return mask
 
     @classmethod
@@ -222,6 +244,15 @@ class Fault(Horizon):
             os.makedirs(dst)
         df = pd.read_csv(path, sep=r'\s+', names=cls.FAULT_STICKS)
         df.groupby('name').apply(cls.fault_to_csv, dst=dst)
+
+    def merge(self, other, **kwargs):
+        """ Merge two Fault instances"""
+        points = np.concatenate([self.points, other.points], axis=0)
+        if self.nodes is not None:
+            nodes = np.concatenate([self.nodes, other.nodes], axis=0)
+        else:
+            nodes = None
+        return Fault(points, nodes=nodes, field=self.field, **kwargs)
 
     @classmethod
     def fault_to_csv(cls, df, dst):

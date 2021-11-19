@@ -256,7 +256,7 @@ class Field(VisualizationMixin):
             seismic_crop = geometry.load_crop(location, **kwargs)
         return seismic_crop
 
-    def make_mask(self, location, axis=None, indices='all', width=3, src='labels', **kwargs):
+    def make_mask(self, location, axis=None, indices='all', width=3, src='labels', sparse=False, **kwargs):
         """ Create masks from labels.
 
         Parameters
@@ -297,7 +297,7 @@ class Field(VisualizationMixin):
             np.random.shuffle(labels)
 
         for label in labels:
-            mask = label.add_to_mask(mask, locations=location, width=width)
+            mask = label.add_to_mask(mask, locations=location, width=width, sparse=sparse)
             if indices in ['single', 'random'] and mask.sum() > 0.0:
                 break
         return mask
