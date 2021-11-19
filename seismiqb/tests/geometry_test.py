@@ -1,4 +1,33 @@
-""" Script for running notebook with SeismicGeometry tests."""
+""" Script for running notebook with SeismicGeometry tests.
+
+The test contains some global constants:
+
+DATESTAMP : str
+    Execution date in "YYYY-MM-DD" format.
+    It is used for saving notebooks executions and temporary files.
+TESTS_SCRIPTS_DIR : str
+    Path to the directory with tests .py scripts.
+    It is used for providing paths to files for execution.
+TEST_DIR : str
+    Path to the directory with test results.
+    It is used for saving and opening log files (timings, message).
+
+And you can manage test running with parameters:
+
+DROP_EXTRA_FILES : bool
+    Whether to drop files extra files after execution.
+    Extra files are temporary files and execution savings that relate to successful tests.
+SHOW_MESSAGE : bool
+    Whether to show a detailed tests execution message.
+SHOW_TEST_ERROR_INFO : bool
+    Whether to show error traceback in outputs.
+    Notice that it only works with SHOW_MESSAGE = True.
+GITHUB_MODE : bool
+    Whether to execute tests in GitHub mode.
+    If True, then all files are saved in temporary directories.
+    If False, then all files are saved in local directories.
+
+"""
 import glob
 import json
 import os
@@ -8,13 +37,15 @@ from datetime import date
 from .utils import extract_traceback
 from ..batchflow.utils_notebook import run_notebook
 
-# Constants
+# Workspace constants
 DATESTAMP = date.today().strftime("%Y-%m-%d")
-DROP_EXTRA_FILES = True
-SHOW_TEST_ERROR_INFO = True
 TESTS_SCRIPTS_DIR = os.getenv("TESTS_SCRIPTS_DIR", os.path.dirname(os.path.realpath(__file__))+'/')
 TEST_DIR = os.path.join(TESTS_SCRIPTS_DIR, 'notebooks/geometry_test_files/')
+
+# Execution parameters
+DROP_EXTRA_FILES = True
 SHOW_MESSAGE = True
+SHOW_TEST_ERROR_INFO = True
 GITHUB_MODE = True
 
 def test_geometry(capsys, tmpdir):
@@ -46,12 +77,15 @@ def test_geometry(capsys, tmpdir):
     exec_info = run_notebook(
         path=os.path.join(TESTS_SCRIPTS_DIR, 'notebooks/geometry_test.ipynb'),
         nb_kwargs={
+            # Workspace constants
+            'DATESTAMP': DATESTAMP,
             'NOTEBOOKS_DIR': os.path.join(TESTS_SCRIPTS_DIR, 'notebooks/'),
             'TEST_DIR': TEST_DIR,
-            'DATESTAMP': DATESTAMP,
+            'SAVING_DIR': SAVING_DIR,
+
+            # Execution parameters
             'DROP_EXTRA_FILES': DROP_EXTRA_FILES,
             'SHOW_TEST_ERROR_INFO': SHOW_TEST_ERROR_INFO,
-            'SAVING_DIR': SAVING_DIR,
             'GITHUB_MODE': GITHUB_MODE
         },
         insert_pos=1,

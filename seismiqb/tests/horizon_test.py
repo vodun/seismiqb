@@ -1,4 +1,54 @@
-""" Script for running notebook with SeismicGeometry tests."""
+""" Script for running notebook with Horizon tests.
+
+The test contains some global constants:
+
+DATESTAMP : str
+    Execution date in "YYYY-MM-DD" format.
+    It is used for saving notebooks executions and temporary files.
+TESTS_SCRIPTS_DIR : str
+    Path to the directory with tests .py scripts.
+    It is used for providing paths to files for execution.
+
+And you can manage test running with parameters:
+
+DROP_EXTRA_FILES : bool
+    Whether to drop files extra files after execution.
+    Extra files are temporary files and execution savings that relate to successful tests.
+SHOW_MESSAGE : bool
+    Whether to show a detailed tests execution message.
+SHOW_TEST_ERROR_INFO : bool
+    Whether to show error traceback in outputs.
+    Notice that it only works with SHOW_MESSAGE = True.
+GITHUB_MODE : bool
+    Whether to execute tests in GitHub mode.
+    If True, then all files are saved in temporary directories.
+    If False, then all files are saved in local directories.
+
+You can also manage notebook execution kwargs which relates to cube and horizon for the test:
+
+SYNTHETIC_MODE : bool
+    Whether to create a synthetic data (cube and horizon) or use existed, provided by paths.
+CUBE_PATH : str or None
+    Path to an existed seismic cube.
+    Notice that it is only used with SYNTHETIC_MODE = False.
+HORIZON_PATH : str or None
+    Path to an existed seismic horizon.
+    Notice that it is only used with SYNTHETIC_MODE = False.
+CUBE_SHAPE : sequence of three integers
+    Shape of a synthetic cube.
+GRID_SHAPE: sequence of two integers
+    Sets the shape of grid of support points for surfaces' interpolation (surfaces represent horizons).
+SEED: int or None
+    Seed used for creation of random generator (check out `np.random.default_rng`).
+
+Visualizations in saved execution notebooks are controlled with:
+
+FIGSIZE : sequence of two integers
+    Figures width and height in inches.
+SHOW_FIGURES : bool
+    Whether to show additional figures.
+    Showing some figures can be useful for finding out the reason for the failure of tests.
+"""
 import glob
 import os
 import shutil
@@ -7,12 +57,11 @@ from datetime import date
 from .utils import extract_traceback
 from ..batchflow.utils_notebook import run_notebook
 
-# Constants
-# Workspace
+# Workspace constants
 DATESTAMP = date.today().strftime("%Y-%m-%d")
 TESTS_SCRIPTS_DIR = os.getenv("TESTS_SCRIPTS_DIR", os.path.dirname(os.path.realpath(__file__))+'/')
 
-# Execution
+# Execution parameters
 DROP_EXTRA_FILES = True
 SHOW_MESSAGE = True
 SHOW_TEST_ERROR_INFO = True
@@ -46,25 +95,24 @@ def test_horizon(capsys, tmpdir):
     exec_info = run_notebook(
         path=os.path.join(TESTS_SCRIPTS_DIR, 'notebooks/horizon_test.ipynb'),
         nb_kwargs={
-            # Workspace
+            # Workspace constants
             'DATESTAMP': DATESTAMP,
             'NOTEBOOKS_DIR': os.path.join(TESTS_SCRIPTS_DIR, 'notebooks/'),
             'SAVING_DIR': SAVING_DIR,
 
-            # Synthetic creation
+            # Synthetic creation parameters
             'SYNTHETIC_MODE': True,
             'CUBE_PATH': None,
             'HORIZON_PATH': None,
             'CUBE_SHAPE': (500, 500, 200),
             'GRID_SHAPE': (10, 10),
-            'NUM_REFLECTIONS': 60,
             'SEED': 42,
 
-            # Visualization
+            # Visualization parameters
             'FIGSIZE': (12, 7),
             'SHOW_FIGURES': False, # Whether to show additional figures
 
-            # Execution
+            # Execution parameters
             'DROP_EXTRA_FILES': DROP_EXTRA_FILES,
             'SHOW_TEST_ERROR_INFO': SHOW_TEST_ERROR_INFO,
             'GITHUB_MODE': GITHUB_MODE
@@ -81,7 +129,8 @@ def test_horizon(capsys, tmpdir):
         with open(message_path, "r", encoding="utf-8") as infile:
             msg = infile.readlines()
     else:
-        msg = ['Horizon tests execution failed.\n']
+        msg = ['Horizon tests execution failed.']
+
         if SHOW_TEST_ERROR_INFO:
             # Add error traceback into the message
             msg.append(extract_traceback(path_ipynb=out_path_ipynb))
