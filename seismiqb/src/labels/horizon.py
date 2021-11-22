@@ -16,6 +16,7 @@ from .horizon_merge import MergeMixin
 from .horizon_visualization import VisualizationMixin
 from ..utils import groupby_mean, groupby_min, groupby_max, filtering_function
 from ..utils import make_bezier_figure
+from ..utils import MetaDict
 from ..functional import smooth_out
 
 
@@ -948,9 +949,10 @@ class Horizon(AttributesMixin, MergeMixin, VisualizationMixin):
         HorizonMetrics([self, other]).evaluate('compare', absolute=absolute, offset=offset,
                                                printer=printer, hist=hist, plot=plot)
 
-    def check_proximity(self, other, offset=0):
+    def check_proximity(self, other):
         """ Compute a number of stats on location of `self` relative to the `other` Horizons.
         This method can be used as either bound or static method.
+        !!.
 
         Parameters
         ----------
@@ -962,27 +964,45 @@ class Horizon(AttributesMixin, MergeMixin, VisualizationMixin):
         Returns
         -------
         dictionary with following keys:
-            - `mean` for average distance
-            - `abs_mean` for average of absolute values of point-wise distances
-            - `max`, `abs_max`, `std`, `abs_std`
+            - `l1_matrix` with matrix of depth differences
+            - `l1_mean` for average distance
+            - `l1_abs_mean` for average of absolute values of point-wise distances
+            - `l1_max`, `l1_abs_max`, `l1_std`, `l1_abs_std`
+            - `overlap_size` with number of overlapping points
             - `window_rate` for percentage of traces that are in 5ms from one horizon to the other
-            - `offset_diffs` with point-wise differences
         """
-        _, overlap_info = self.verify_merge(other)
-        diffs = overlap_info.get('diffs', 999) + offset
+        self_full_matrix = self.full_matrix
+        other_full_matrix = other.full_matrix
 
-        overlap_info = {
-            **overlap_info,
-            'mean': np.mean(diffs),
-            'abs_mean': np.mean(np.abs(diffs)),
-            'max': np.max(diffs),
-            'abs_max': np.max(np.abs(diffs)),
-            'std': np.std(diffs),
-            'abs_std': np.std(np.abs(diffs)),
-            'window_rate': np.mean(np.abs(diffs) < (5 / self.field.sample_rate)),
-            'offset_diffs': diffs,
+        l1 = np.where((self_full_matrix != self.FILL_VALUE) & (other_full_matrix != self.FILL_VALUE),
+                    self_full_matrix - other_full_matrix, np.nan)
+        abs_l1 = np.abs(l1)
+
+        overlap_size = np.nansum(~np.isnan(l1))
+        window_rate = np.nansum(abs_l1 < (5 / self.field.sample_rate)) / overlap_size
+
+        present_at_1_absent_at_2 = ((self_full_matrix != self.FILL_VALUE)
+                                    & (other_full_matrix == self.FILL_VALUE)).sum()
+        present_at_2_absent_at_1 = ((self_full_matrix == self.FILL_VALUE)
+                                    & (other_full_matrix != self.FILL_VALUE)).sum()
+
+        info_dict = {
+            'l1_matrix' : l1,
+            'l1_mean' : np.nanmean(l1),
+            'l1_max' : max((np.nanquantile(l1, [0, 1]))),
+            'l1_std' : np.nanstd(l1),
+
+            'l1_abs_mean' : np.nanmean(abs_l1),
+            'l1_abs_max' : np.nanmax(abs_l1),
+            'l1_abs_std' : np.nanstd(abs_l1),
+
+            'overlap_size' : overlap_size,
+            'window_rate' : window_rate,
+
+            'present_at_1_absent_at_2' : present_at_1_absent_at_2,
+            'present_at_2_absent_at_1' : present_at_2_absent_at_1,
         }
-        return overlap_info
+        return MetaDict(info_dict)
 
 
     # Save horizon to disk

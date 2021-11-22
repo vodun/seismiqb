@@ -23,36 +23,37 @@ class MergeStatus(IntEnum):
     # definetely merge
     OVERLAPPING = 4
 
-"""
-5 6 7
-  6 7 8
-
-6, 8
-8 - 6 = 2 overlapping pixels - correct
-adjacency = -1
-
-5 6 7
-      8 9 10
-8, 8
-8 - 8 = 0 overlapping pixels - touching
-adjacency = 1
-
-
-
-    # adjacency = -1 -> try to merge horizons with overlap  of 2 pixels
-    # adjacency = +0 -> try to merge horizons with overlap  of 1 pixel
-    # adjacency = +1 -> try to merge horizons with touching boundaries
-    # adjacency = +2 -> try to merge horizons with gap      of 1 pixel between boundaries
-
-"""
-
+    # Too big of an overlap: no reason to merge
+    TOO_BIG_OVERLAP = 5
 
 
 
 class MergeMixin:
-    """ !!. """
+    """ !!.
+    5 6 7
+    6 7 8
 
-    def verify_merge(self, other, mean_threshold=1.0, max_threshold=2, size_threshold=1, adjacency=0):
+    6, 8
+    8 - 6 = 2 overlapping pixels - correct
+    adjacency = -1
+
+    5 6 7
+        8 9 10
+    8, 8
+    8 - 8 = 0 overlapping pixels - touching
+    adjacency = 1
+
+
+
+        # adjacency = -1 -> try to merge horizons with overlap  of 2 pixels
+        # adjacency = +0 -> try to merge horizons with overlap  of 1 pixel
+        # adjacency = +1 -> try to merge horizons with touching boundaries
+        # adjacency = +2 -> try to merge horizons with gap      of 1 pixel between boundaries
+
+    """
+
+    def verify_merge(self, other, mean_threshold=1.0, max_threshold=2, adjacency=0,
+                     min_size_threshold=1, max_size_threshold=None):
         """ !!. """
         # max_difference_on_overlap strictly less than `max_threshold`
         # separate into `simple_check` and `check_overlap`?
@@ -88,13 +89,18 @@ class MergeMixin:
                 # bboxes are overlapping, but horizons are not
                 status = MergeStatus.SPATIALLY_ADJACENT
 
-            elif size_of_overlap < size_threshold:
+            elif size_of_overlap < min_size_threshold:
                 # the overlap is too small
                 if mean_on_overlap < mean_threshold:
                     status = MergeStatus.TOO_SMALL_OVERLAP
                 else:
                     status = MergeStatus.DEPTH_SEPARATED
-            else: # size_of_overlap >= size_threshold
+            elif max_size_threshold is not None and size_of_overlap > max_size_threshold:
+                if mean_on_overlap < mean_threshold:
+                    status = MergeStatus.TOO_BIG_OVERLAP
+                else:
+                    status = MergeStatus.DEPTH_SEPARATED
+            else: # min_size_threshold <= size_of_overlap <= max_size_threshold
                 if mean_on_overlap <= mean_threshold:
                     status = MergeStatus.OVERLAPPING
                 else:
@@ -254,8 +260,10 @@ class MergeMixin:
         return False
 
 
-    def merge_into(self, horizons, mean_threshold=1., max_threshold=1.2, size_threshold=1, adjacency=1,
-                            max_iters=999, num_merged_threshold=1):
+    def merge_into(self, horizons, mean_threshold=1., max_threshold=1.2, min_size_threshold=1, max_size_threshold=None,
+                   adjacency=1, max_iters=999, num_merged_threshold=1):
+        """ !!. """
+        #pylint: disable=too-many-statements
         horizons = np.array(horizons)
 
         # Keep track of stats
@@ -271,9 +279,9 @@ class MergeMixin:
 
             # Pre-compute all the bounding boxes
             bboxes = [(horizon.i_min, horizon.i_max,
-                    horizon.x_min, horizon.x_max,
-                    horizon.h_min, horizon.h_max)
-                    for horizon in horizons]
+                       horizon.x_min, horizon.x_max,
+                       horizon.h_min, horizon.h_max)
+                      for horizon in horizons]
             bboxes = np.array(bboxes, dtype=np.int32)
 
             base_bbox = np.array([self.i_min, self.i_max,
@@ -316,7 +324,8 @@ class MergeMixin:
                 merge_status = MergeMixin.verify_merge(self, merge_candidate,
                                                        mean_threshold=mean_threshold,
                                                        max_threshold=max_threshold,
-                                                       size_threshold=size_threshold,
+                                                       min_size_threshold=min_size_threshold,
+                                                       max_size_threshold=max_size_threshold,
                                                        adjacency=adjacency)
                 merge_stats[merge_status] += 1
 
@@ -362,12 +371,12 @@ class MergeMixin:
         return self, horizons,  MetaDict(merge_stats)
 
     @staticmethod
-    def merge_list_improved(horizons, mean_threshold=1., max_threshold=2.2, size_threshold=1, adjacency=1,
-                            max_iters=999, num_merged_threshold=1, delete_threshold=0.01, minsize=50):
+    def merge_list(horizons, mean_threshold=1., max_threshold=2.2,
+                   min_size_threshold=1, max_size_threshold=None, adjacency=1,
+                   max_iters=999, num_merged_threshold=1, delete_threshold=0.01):
         """ !!. """
         #pylint: disable=too-many-statements
         # Change `horizons` to other container?
-        # horizons = [horizon for horizon in horizons if len(horizon) >= minsize]
         for horizon in horizons:
             horizon.merge_count = 0
             horizon.id_separated = set()
@@ -468,7 +477,8 @@ class MergeMixin:
                     merge_status = MergeMixin.verify_merge(current_horizon, merge_candidate,
                                                            mean_threshold=mean_threshold,
                                                            max_threshold=max_threshold,
-                                                           size_threshold=size_threshold,
+                                                           min_size_threshold=min_size_threshold,
+                                                           max_size_threshold=max_size_threshold,
                                                            adjacency=adjacency)
                     merge_stats[merge_status] += 1
 
@@ -561,8 +571,8 @@ class MergeMixin:
 
 
 
-    @staticmethod
-    def average_horizons(horizons):
+    @classmethod
+    def average_horizons(cls, horizons):
         """ Average list of horizons into one surface. """
         field = horizons[0].field
         horizon_matrix = np.zeros(field.spatial_shape, dtype=np.float32)
@@ -571,19 +581,19 @@ class MergeMixin:
 
         for horizon in horizons:
             fm = horizon.full_matrix
-            horizon_matrix[fm != Horizon.FILL_VALUE] += fm[fm != Horizon.FILL_VALUE]
-            std_matrix[fm != Horizon.FILL_VALUE] += fm[fm != Horizon.FILL_VALUE] ** 2
-            counts_matrix[fm != Horizon.FILL_VALUE] += 1
+            horizon_matrix[fm != cls.FILL_VALUE] += fm[fm != cls.FILL_VALUE]
+            std_matrix[fm != cls.FILL_VALUE] += fm[fm != cls.FILL_VALUE] ** 2
+            counts_matrix[fm != cls.FILL_VALUE] += 1
 
         horizon_matrix[counts_matrix != 0] /= counts_matrix[counts_matrix != 0]
-        horizon_matrix[counts_matrix == 0] = Horizon.FILL_VALUE
+        horizon_matrix[counts_matrix == 0] = cls.FILL_VALUE
 
         std_matrix[counts_matrix != 0] /= counts_matrix[counts_matrix != 0]
         std_matrix -= horizon_matrix ** 2
         std_matrix = np.sqrt(std_matrix)
         std_matrix[counts_matrix == 0] = np.nan
 
-        averaged_horizon = Horizon(horizon_matrix.astype(np.int32), field=field)
+        averaged_horizon = cls(horizon_matrix.astype(np.int32), field=field)
         return averaged_horizon, {
             'matrix': horizon_matrix,
             'std_matrix': std_matrix,
@@ -598,6 +608,7 @@ class MergeMixin:
 @njit
 def intersect_matrix(first, second, max_threshold):
     """ !!. """
+    #pylint: disable=consider-using-enumerate
     first = first.ravel()
     second = second.ravel()
 
