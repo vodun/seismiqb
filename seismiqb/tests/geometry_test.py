@@ -26,7 +26,6 @@ GITHUB_MODE : bool
     Whether to execute tests in GitHub mode.
     If True, then all files are saved in temporary directories.
     If False, then all files are saved in local directories.
-
 """
 import glob
 import json

@@ -1,4 +1,4 @@
-""" Script for running notebook with Horizon tests.
+ """ Script for running notebook with Horizon tests.
 
 The test contains some global constants:
 
@@ -72,7 +72,7 @@ def test_horizon(capsys, tmpdir):
 
     This test runs ./notebooks/horizon_test.ipynb test file and show execution message.
 
-    Under the hood, this notebook create a fake seismic cube with horizon, saves it
+    Under the hood, this notebook create a fake seismic cube with horizon, saves them
     and runs Horizon tests notebooks (base, manipulations, attributes).
     """
     # Delete old test notebook results
