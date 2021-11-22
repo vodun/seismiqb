@@ -1,4 +1,4 @@
- """ Script for running notebook with Horizon tests.
+""" Script for running notebook with Horizon tests.
 
 The test contains some global constants:
 
