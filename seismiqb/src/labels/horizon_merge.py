@@ -1,0 +1,626 @@
+""" !!. """
+from enum import IntEnum
+from time import perf_counter
+from collections import defaultdict
+
+import numpy as np
+from cv2 import dilate
+from numba import njit
+
+from ..utils import MetaDict
+
+
+class MergeStatus(IntEnum):
+    """ !!. """
+    # definetely not mergeable
+    DEPTH_SEPARATED = 0
+    SPATIALLY_SEPARATED = 1
+    TOO_SMALL_OVERLAP = 2
+
+    # maybe can merge
+    SPATIALLY_ADJACENT = 3
+
+    # definetely merge
+    OVERLAPPING = 4
+
+"""
+5 6 7
+  6 7 8
+
+6, 8
+8 - 6 = 2 overlapping pixels - correct
+adjacency = -1
+
+5 6 7
+      8 9 10
+8, 8
+8 - 8 = 0 overlapping pixels - touching
+adjacency = 1
+
+
+
+    # adjacency = -1 -> try to merge horizons with overlap  of 2 pixels
+    # adjacency = +0 -> try to merge horizons with overlap  of 1 pixel
+    # adjacency = +1 -> try to merge horizons with touching boundaries
+    # adjacency = +2 -> try to merge horizons with gap      of 1 pixel between boundaries
+
+"""
+
+
+
+
+class MergeMixin:
+    """ !!. """
+
+    def verify_merge(self, other, mean_threshold=1.0, max_threshold=2, size_threshold=1, adjacency=0):
+        """ !!. """
+        # max_difference_on_overlap strictly less than `max_threshold`
+        # separate into `simple_check` and `check_overlap`?
+
+
+        # Overlap bbox
+        overlap_i_min, overlap_i_max = max(self.i_min, other.i_min), min(self.i_max, other.i_max) + 1
+        overlap_x_min, overlap_x_max = max(self.x_min, other.x_min), min(self.x_max, other.x_max) + 1
+
+        overlap_size_i = overlap_i_max - overlap_i_min
+        overlap_size_x = overlap_x_max - overlap_x_min
+
+        # Simplest possible check: horizon bboxes are too far from each other
+        if overlap_size_i < 1 - adjacency or overlap_size_x < 1 - adjacency:
+            status = MergeStatus.SPATIALLY_SEPARATED
+        else:
+            status = MergeStatus.SPATIALLY_ADJACENT
+
+
+        # Compare matrices on overlap without adjacency:
+        if status != 1 and overlap_size_i > 0 and overlap_size_x > 0:
+            idx_i = int(overlap_size_i == 0)
+            idx_x = int(overlap_size_x == 0)
+
+            self_overlap = self.matrix[overlap_i_min - self.i_min:overlap_i_max - self.i_min + idx_i,
+                                       overlap_x_min - self.x_min:overlap_x_max - self.x_min + idx_x]
+            other_overlap = other.matrix[overlap_i_min - other.i_min:overlap_i_max - other.i_min + idx_i,
+                                        overlap_x_min - other.x_min:overlap_x_max - other.x_min + idx_x]
+
+            mean_on_overlap, size_of_overlap = intersect_matrix(self_overlap, other_overlap, max_threshold)
+
+            if size_of_overlap == 0:
+                # bboxes are overlapping, but horizons are not
+                status = MergeStatus.SPATIALLY_ADJACENT
+
+            elif size_of_overlap < size_threshold:
+                # the overlap is too small
+                if mean_on_overlap < mean_threshold:
+                    status = MergeStatus.TOO_SMALL_OVERLAP
+                else:
+                    status = MergeStatus.DEPTH_SEPARATED
+            else: # size_of_overlap >= size_threshold
+                if mean_on_overlap <= mean_threshold:
+                    status = MergeStatus.OVERLAPPING
+                else:
+                    status = MergeStatus.DEPTH_SEPARATED
+
+        return status
+
+
+    def overlap_merge(self, other, inplace=False):
+        """ Merge two horizons into one.
+        Note that this function can either merge horizons in-place of the first one (`self`), or create a new instance.
+        """
+        # Create shared background for both horizons
+        shared_i_min, shared_i_max = min(self.i_min, other.i_min), max(self.i_max, other.i_max)
+        shared_x_min, shared_x_max = min(self.x_min, other.x_min), max(self.x_max, other.x_max)
+
+        background = np.zeros((shared_i_max - shared_i_min + 1, shared_x_max - shared_x_min + 1),
+                              dtype=np.int32)
+
+        # Coordinates inside shared for `self` and `other`
+        shared_self_i_min, shared_self_x_min = self.i_min - shared_i_min, self.x_min - shared_x_min
+        shared_other_i_min, shared_other_x_min = other.i_min - shared_i_min, other.x_min - shared_x_min
+
+        # Add both horizons to the background
+        background[shared_self_i_min:shared_self_i_min+self.i_length,
+                   shared_self_x_min:shared_self_x_min+self.x_length] += self.matrix
+
+        background[shared_other_i_min:shared_other_i_min+other.i_length,
+                   shared_other_x_min:shared_other_x_min+other.x_length] += other.matrix
+
+        # Correct overlapping points
+        overlap_i_min, overlap_i_max = max(self.i_min, other.i_min), min(self.i_max, other.i_max) + 1
+        overlap_x_min, overlap_x_max = max(self.x_min, other.x_min), min(self.x_max, other.x_max) + 1
+
+        overlap_i_min -= shared_i_min
+        overlap_i_max -= shared_i_min
+        overlap_x_min -= shared_x_min
+        overlap_x_max -= shared_x_min
+
+        overlap = background[overlap_i_min:overlap_i_max, overlap_x_min:overlap_x_max]
+        mask = overlap >= 0
+        overlap[mask] //= 2
+        overlap[~mask] -= self.FILL_VALUE
+        background[overlap_i_min:overlap_i_max, overlap_x_min:overlap_x_max] = overlap
+
+        background[background == 0] = self.FILL_VALUE
+        length = len(self) + len(other) - mask.sum()
+        # Create new instance or change `self`
+        if inplace:
+            # Clean-up data storages
+            for instance in [self, other]:
+                for attribute in ['_matrix', '_points', '_depths']:
+                    if hasattr(instance, attribute):
+                        delattr(instance, attribute)
+                        setattr(instance, attribute, None)
+
+            # Change `self` inplace
+            self.from_matrix(background, i_min=shared_i_min, x_min=shared_x_min,
+                             h_min=min(self.h_min, other.h_min), h_max=max(self.h_max, other.h_max), length=length)
+            merged = True
+        else:
+            # Return a new instance of horizon
+            from .horizon import Horizon #pylint: disable=import-outside-toplevel
+            merged = Horizon(storage=background, field=self.field, name=self.name,
+                             i_min=shared_i_min, x_min=shared_x_min,
+                             h_min=min(self.h_min, other.h_min), h_max=max(self.h_max, other.h_max), length=length)
+        return merged
+
+
+    def adjacent_merge(self, other, mean_threshold=3.0, adjacency=3, inplace=False):
+        """ Check if adjacent merge (that is merge with some margin) is possible, and, if needed, merge horizons.
+        Note that this function can either merge horizons in-place of the first one (`self`), or create a new instance.
+
+        Parameters
+        ----------
+        self, other : :class:`.Horizon` instances
+            Horizons to merge.
+        mean_threshold : number
+            Height threshold for mean distances.
+        adjacency : int
+            Margin to consider horizons close (spatially).
+        inplace : bool
+            Whether to create new instance or update `self`.
+        """
+        # Simplest possible check: horizons are too far away from one another (depth-wise)
+        overlap_h_min, overlap_h_max = max(self.h_min, other.h_min), min(self.h_max, other.h_max)
+        if overlap_h_max - overlap_h_min < 0:
+            return False
+
+        # Create shared background for both horizons
+        shared_i_min, shared_i_max = min(self.i_min, other.i_min), max(self.i_max, other.i_max)
+        shared_x_min, shared_x_max = min(self.x_min, other.x_min), max(self.x_max, other.x_max)
+
+        background = np.zeros((shared_i_max - shared_i_min + 1, shared_x_max - shared_x_min + 1),
+                              dtype=np.int32)
+
+        # Coordinates inside shared for `self` and `other`
+        shared_self_i_min, shared_self_x_min = self.i_min - shared_i_min, self.x_min - shared_x_min
+        shared_other_i_min, shared_other_x_min = other.i_min - shared_i_min, other.x_min - shared_x_min
+
+        # Put the second of the horizons on background
+        background[shared_other_i_min:shared_other_i_min+other.i_length,
+                   shared_other_x_min:shared_other_x_min+other.x_length] += other.matrix
+
+        # Enlarge the image to account for adjacency
+        kernel = np.ones((3, 3), np.float32)
+        dilated_background = dilate(background.astype(np.float32), kernel,
+                                    iterations=adjacency).astype(np.int32)
+
+        # Make counts: number of horizons in each point; create indices of overlap
+        counts = (dilated_background != 0).astype(np.int32)
+        counts[shared_self_i_min:shared_self_i_min+self.i_length,
+               shared_self_x_min:shared_self_x_min+self.x_length] += 1
+        counts_idx = counts == 2
+
+        # Determine whether horizon can be merged (adjacent and height-close) or not
+        mergeable = False
+        if counts_idx.any():
+            # Put the first horizon on dilated background, compute mean
+            background[shared_self_i_min:shared_self_i_min+self.i_length,
+                       shared_self_x_min:shared_self_x_min+self.x_length] += self.matrix
+
+            # Compute diffs on overlap
+            diffs = background[counts_idx] - dilated_background[counts_idx]
+            diffs = np.abs(diffs)
+            diffs = diffs[diffs < (-self.FILL_VALUE // 2)]
+
+            if len(diffs) != 0 and np.mean(diffs) < mean_threshold:
+                mergeable = True
+
+        if mergeable:
+            background[(background < 0) & (background != self.FILL_VALUE)] -= self.FILL_VALUE
+            background[background == 0] = self.FILL_VALUE
+
+            length = len(self) + len(other) # since there is no direct overlap
+
+            # Create new instance or change `self`
+            if inplace:
+                # Clean-up data storages
+                for instance in [self, other]:
+                    for attribute in ['_matrix', '_points', '_depths']:
+                        if hasattr(instance, attribute):
+                            delattr(instance, attribute)
+                            setattr(instance, attribute, None)
+
+                # Change `self` inplace
+                self.from_matrix(background, i_min=shared_i_min, x_min=shared_x_min,
+                                h_min=min(self.h_min, other.h_min), h_max=max(self.h_max, other.h_max), length=length)
+                merged = True
+            else:
+                # Return a new instance of horizon
+                from .horizon import Horizon #pylint: disable=import-outside-toplevel
+                merged = Horizon(storage=background, field=self.field, name=self.name,
+                                i_min=shared_i_min, x_min=shared_x_min,
+                                h_min=min(self.h_min, other.h_min), h_max=max(self.h_max, other.h_max), length=length)
+            return merged
+        return False
+
+
+    def merge_into(self, horizons, mean_threshold=1., max_threshold=1.2, size_threshold=1, adjacency=1,
+                            max_iters=999, num_merged_threshold=1):
+        horizons = np.array(horizons)
+
+        # Keep track of stats
+        merge_stats = defaultdict(int)
+        merge_stats.update({'iteration_timings' : [],
+                            'merge_candidates': [],
+                            'merges' : []})
+
+        for _ in range(max_iters):
+            start_timing = perf_counter()
+            num_merged = 0
+            indices_merged = set()
+
+            # Pre-compute all the bounding boxes
+            bboxes = [(horizon.i_min, horizon.i_max,
+                    horizon.x_min, horizon.x_max,
+                    horizon.h_min, horizon.h_max)
+                    for horizon in horizons]
+            bboxes = np.array(bboxes, dtype=np.int32)
+
+            base_bbox = np.array([self.i_min, self.i_max,
+                                self.x_min, self.x_max,
+                                self.h_min, self.h_max])
+
+            # Iline-axis
+            overlap_min_i = np.maximum(bboxes[:, 0], base_bbox[0])
+            overlap_max_i = np.minimum(bboxes[:, 1], base_bbox[1]) + 1
+            overlap_size_i = overlap_max_i - overlap_min_i
+            mask_i = (overlap_size_i >= 1 - adjacency)
+            indices_i = np.nonzero(mask_i)[0]
+            bboxes_i = bboxes[indices_i]
+
+            # Crossline-axis
+            overlap_min_x = np.maximum(bboxes_i[:, 2], base_bbox[2])
+            overlap_max_x = np.minimum(bboxes_i[:, 3], base_bbox[3]) + 1
+            overlap_size_x = overlap_max_x - overlap_min_x
+            mask_x = (overlap_size_x >= 1 - adjacency)
+            indices_x = np.nonzero(mask_x)[0]
+            bboxes_x = bboxes_i[indices_x]
+
+            # Height-axis: other threshold
+            overlap_min_h = np.maximum(bboxes_x[:, 4], base_bbox[4])
+            overlap_max_h = np.minimum(bboxes_x[:, 5], base_bbox[5]) + 1
+            overlap_size_h = overlap_max_h - overlap_min_h
+            mask_h = (overlap_size_h >= 1)
+            indices_h = np.nonzero(mask_h)[0]
+            bboxes_h = bboxes_x[indices_h]
+
+            indices = indices_i[indices_x][indices_h]
+            merge_candidates = horizons[indices]
+            _ = bboxes_h
+
+            merge_stats['merge_candidates'].append(len(indices))
+
+            # Merge all possible candidates
+            for idx, merge_candidate in zip(indices, merge_candidates):
+                # Compute the mergeability
+                merge_status = MergeMixin.verify_merge(self, merge_candidate,
+                                                       mean_threshold=mean_threshold,
+                                                       max_threshold=max_threshold,
+                                                       size_threshold=size_threshold,
+                                                       adjacency=adjacency)
+                merge_stats[merge_status] += 1
+
+                # Merge, if needed
+                if merge_status == 4:
+                    # Overlapping horizons: definetely merge
+                    merged = MergeMixin.overlap_merge(self, merge_candidate, inplace=True)
+
+                elif merge_status == 3 and adjacency > 0:
+                    # Adjacent horizons: maybe we can merge it
+                    merged = MergeMixin.adjacent_merge(self, merge_candidate, inplace=True,
+                                                       mean_threshold=mean_threshold,
+                                                       adjacency=adjacency)
+                    merge_stats['merged_adjacent'] += (1 if merged else 0)
+                else:
+                    # Spatially separated or too small of an overlap
+                    # Can't merge for now, but maybe will be able later
+                    merged = False
+
+                # Keep values for clean-up
+                if merged:
+                    indices_merged.add(idx)
+                    num_merged += 1
+
+            # Once in a while, remove merged horizons from `bboxes` and `horizons` arrays
+            if indices_merged:
+                indices_merged = list(indices_merged)
+                horizons = np.delete(horizons, indices_merged, axis=0)
+                bboxes = np.delete(bboxes, indices_merged, axis=0)
+
+                indices_merged = set()
+                merge_stats['num_deletes'] += 1
+
+            # Global iteration info
+            merge_stats['iterations'] += 1
+            merge_stats['merges'].append(num_merged)
+            merge_stats['iteration_timings'].append(round(perf_counter() - start_timing, 2))
+
+            # Exit condition: merged less horizons then threshold
+            if num_merged < num_merged_threshold:
+                break
+
+        return self, horizons,  MetaDict(merge_stats)
+
+    @staticmethod
+    def merge_list_improved(horizons, mean_threshold=1., max_threshold=2.2, size_threshold=1, adjacency=1,
+                            max_iters=999, num_merged_threshold=1, delete_threshold=0.01, minsize=50):
+        """ !!. """
+        #pylint: disable=too-many-statements
+        # Change `horizons` to other container?
+        # horizons = [horizon for horizon in horizons if len(horizon) >= minsize]
+        for horizon in horizons:
+            horizon.merge_count = 0
+            horizon.id_separated = set()
+        horizons = np.array(horizons)
+        rejected_horizons = []
+
+        # Keep track of stats. Pretty much no overhead to the procedure
+        merge_stats = defaultdict(int)
+        merge_stats.update({'global_iteration_timings' : [],
+                            'global_merges' : [],
+                            'num_rejected_horizons' : []})
+
+        # Global iteration: iterate over the entire list, comparing each horizon to each other
+        for _ in range(max_iters):
+            start_timing = perf_counter()
+            num_merged = 0
+            indices_merged = set() # used to periodically clean-up arrays
+
+            # Pre-compute all the bounding boxes
+            bboxes = [(horizon.i_min, horizon.i_max,
+                    horizon.x_min, horizon.x_max,
+                    horizon.h_min, horizon.h_max)
+                    for horizon in horizons]
+            bboxes = np.array(bboxes, dtype=np.int32)
+
+            # Cycle for the base horizons. As we are removing merged horizons from the list, we iterate with `while`
+            i = 0
+            while True:
+                if i >= len(horizons):
+                    break
+                if i in indices_merged:
+                    i += 1
+                    continue
+
+                current_horizon = horizons[i]
+                current_bbox = bboxes[i]
+
+                # Filter: keep only overlapping/adjacent horizons
+                # Compute bbox overlaps: `overlap_size` > 0 means size of common pixels along the axis
+                #                        `overlap_size` = 0 means touching along the axis
+                #                        `overlap_size` < 0 means size of gap between horizons along the axis
+
+                # adjacency = -1 -> try to merge horizons with overlap  of 2 pixels
+                # adjacency = +0 -> try to merge horizons with overlap  of 1 pixel
+                # adjacency = +1 -> try to merge horizons with touching boundaries
+                # adjacency = +2 -> try to merge horizons with gap      of 1 pixel between boundaries
+                # TODO: check, if using height as the first mask is faster
+
+                # Iline-axis
+                overlap_min_i = np.maximum(bboxes[:, 0], current_bbox[0])
+                overlap_max_i = np.minimum(bboxes[:, 1], current_bbox[1]) + 1
+                overlap_size_i = overlap_max_i - overlap_min_i
+                mask_i = (overlap_size_i >= 1 - adjacency)
+                indices_i = np.nonzero(mask_i)[0]
+                bboxes_i = bboxes[indices_i]
+
+                # Crossline-axis
+                overlap_min_x = np.maximum(bboxes_i[:, 2], current_bbox[2])
+                overlap_max_x = np.minimum(bboxes_i[:, 3], current_bbox[3]) + 1
+                overlap_size_x = overlap_max_x - overlap_min_x
+                mask_x = (overlap_size_x >= 1 - adjacency)
+                indices_x = np.nonzero(mask_x)[0]
+                bboxes_x = bboxes_i[indices_x]
+
+                # Height-axis: other threshold
+                overlap_min_h = np.maximum(bboxes_x[:, 4], current_bbox[4])
+                overlap_max_h = np.minimum(bboxes_x[:, 5], current_bbox[5]) + 1
+                overlap_size_h = overlap_max_h - overlap_min_h
+                mask_h = (overlap_size_h >= 1)
+                indices_h = np.nonzero(mask_h)[0]
+                bboxes_h = bboxes_x[indices_h]
+
+                indices = indices_i[indices_x][indices_h]
+                merge_candidates = horizons[indices]
+                _ = bboxes_h # TODO: can be used to pass already computed overlap sizes
+
+                # Merge all possible candidates
+                for idx, merge_candidate in zip(indices, merge_candidates):
+                    merge_stats['merge_candidates'] += 1
+
+                    # Conditions to not use the candidate:
+                    #   - already merged
+                    #   - already verified the impossibility of merge
+                    #   - it is the horizon itself
+                    if idx in indices_merged:
+                        merge_stats['already_merged_hit'] += 1
+                        continue
+                    if (id(merge_candidate) in current_horizon.id_separated or
+                        id(current_horizon) in merge_candidate.id_separated):
+                        merge_stats['id_separated_hit'] += 1
+                        continue
+                    if merge_candidate is current_horizon:
+                        # Can actually merge it with the previous at the cost of code readability
+                        continue
+
+                    # Compute the mergeability
+                    merge_stats['verify'] += 1
+                    merge_status = MergeMixin.verify_merge(current_horizon, merge_candidate,
+                                                           mean_threshold=mean_threshold,
+                                                           max_threshold=max_threshold,
+                                                           size_threshold=size_threshold,
+                                                           adjacency=adjacency)
+                    merge_stats[merge_status] += 1
+
+                    # Merge, if needed
+                    if merge_status == 4:
+                        # Overlapping horizons: definetely merge
+                        merged = MergeMixin.overlap_merge(current_horizon, merge_candidate, inplace=True)
+                        current_horizon.id_separated = current_horizon.id_separated.union(merge_candidate.id_separated)
+
+                    elif merge_status == 3 and adjacency > 0:
+                        # Adjacent horizons: maybe we can merge it
+                        merged = MergeMixin.adjacent_merge(current_horizon, merge_candidate, inplace=True,
+                                                        mean_threshold=mean_threshold,
+                                                        adjacency=adjacency)
+                        merge_stats['merged_adjacent'] += (1 if merged else 0)
+
+                    elif merge_status == 0:
+                        # Depth separated: can't merge and will not be able after other merges
+                        current_horizon.id_separated.add(id(merge_candidate))
+                        merge_candidate.id_separated.add(id(current_horizon))
+                        merged = False
+
+                    else:
+                        # Spatially separated or too small of an overlap
+                        # Can't merge for now, but maybe will be able later
+                        merged = False
+
+                    # Keep values for clean-up
+                    if merged:
+                        current_horizon.merge_count += 1
+                        indices_merged.add(idx)
+                        num_merged += 1
+
+                # Update bbox stats
+                bboxes[i] = (current_horizon.i_min, current_horizon.i_max,
+                             current_horizon.x_min, current_horizon.x_max,
+                             current_horizon.h_min, current_horizon.h_max)
+
+                # Once in a while, remove merged horizons from `bboxes` and `horizons` arrays
+                if len(indices_merged) > int(delete_threshold * len(horizons)):
+                    indices_merged = list(indices_merged)
+                    horizons = np.delete(horizons, indices_merged, axis=0)
+                    bboxes = np.delete(bboxes, indices_merged, axis=0)
+                    i -= sum(1 for idx in indices_merged if idx < i)
+
+                    indices_merged = set()
+                    merge_stats['num_deletes'] += 1
+
+                # Move to the next horizon
+                i += 1
+
+
+            # Clean-up at the end of global iteration
+            if indices_merged:
+                indices_merged = list(indices_merged)
+                horizons = np.delete(horizons, indices_merged, axis=0)
+                bboxes = np.delete(bboxes, indices_merged, axis=0)
+                i -= sum(1 for idx in indices_merged if idx < i)
+
+                merge_stats['num_deletes'] += 1
+
+            # Reject horizons that has not participated in any merges:
+            # they will not be merged in the next iterations as well
+            rejected_horizons_ = [horizon for horizon in horizons
+                                  if horizon.merge_count == 0]
+            rejected_horizons.extend(rejected_horizons_)
+            merge_stats['num_rejected_horizons'].append(len(rejected_horizons_))
+
+            horizons = np.array([horizon for horizon in horizons
+                                if horizon.merge_count > 0])
+
+            # Global iteration info
+            merge_stats['global_iterations'] += 1
+            merge_stats['global_merges'].append(num_merged)
+            merge_stats['global_iteration_timings'].append(round(perf_counter() - start_timing, 2))
+
+            # Exit condition: merged less horizons then threshold
+            if num_merged < num_merged_threshold:
+                break
+
+        # Get back the rejects
+        horizons = list(horizons)
+        horizons.extend(rejected_horizons)
+
+        for horizon in horizons:
+            delattr(horizon, 'merge_count')
+            delattr(horizon, 'id_separated')
+
+        return sorted(horizons, key=len), MetaDict(merge_stats)
+
+
+
+    @staticmethod
+    def average_horizons(horizons):
+        """ Average list of horizons into one surface. """
+        field = horizons[0].field
+        horizon_matrix = np.zeros(field.spatial_shape, dtype=np.float32)
+        std_matrix = np.zeros(field.spatial_shape, dtype=np.float32)
+        counts_matrix = np.zeros(field.spatial_shape, dtype=np.int32)
+
+        for horizon in horizons:
+            fm = horizon.full_matrix
+            horizon_matrix[fm != Horizon.FILL_VALUE] += fm[fm != Horizon.FILL_VALUE]
+            std_matrix[fm != Horizon.FILL_VALUE] += fm[fm != Horizon.FILL_VALUE] ** 2
+            counts_matrix[fm != Horizon.FILL_VALUE] += 1
+
+        horizon_matrix[counts_matrix != 0] /= counts_matrix[counts_matrix != 0]
+        horizon_matrix[counts_matrix == 0] = Horizon.FILL_VALUE
+
+        std_matrix[counts_matrix != 0] /= counts_matrix[counts_matrix != 0]
+        std_matrix -= horizon_matrix ** 2
+        std_matrix = np.sqrt(std_matrix)
+        std_matrix[counts_matrix == 0] = np.nan
+
+        averaged_horizon = Horizon(horizon_matrix.astype(np.int32), field=field)
+        return averaged_horizon, {
+            'matrix': horizon_matrix,
+            'std_matrix': std_matrix,
+        }
+
+
+
+
+
+
+
+@njit
+def intersect_matrix(first, second, max_threshold):
+    """ !!. """
+    first = first.ravel()
+    second = second.ravel()
+
+    s, c = 0, 0 # running sum and count
+
+    for i in range(len(first)):
+        first_h = first[i]
+        second_h = second[i]
+
+        if first_h >= 0:
+            if second_h >= 0:
+                abs_diff = abs(first_h - second_h)
+
+                if abs_diff > max_threshold:
+                    s = 999
+                    c = 1
+                    break
+
+                s += abs_diff
+                c += 1
+
+    if c != 0:
+        mean = s / c
+    else:
+        mean = 999
+    return mean, c

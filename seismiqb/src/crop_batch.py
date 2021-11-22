@@ -1,4 +1,5 @@
 """ Seismic Crop Batch. """
+import os
 import string
 import random
 from copy import copy
@@ -728,6 +729,40 @@ class SeismicCropBatch(Batch):
                     dst.append(horizon_candidate)
         return self
 
+
+    @action
+    @inbatch_parallel(init='indices', target='for')
+    def save_masks(self, ix, src='masks', dst=None, savemode='numpy',
+                    threshold=0.5, mode='mean', minsize=0, prefix='predict'):
+        """ !!. """
+        os.makedirs(dst, exist_ok=True)
+
+        # Get correct mask
+        mask = self.get(ix, src)
+        if self.get(ix, 'orientations'):
+            mask = np.transpose(mask, (1, 0, 2))
+
+        # Get meta parameters of the mask
+        field = self.get(ix, 'fields')
+        origin = [self.get(ix, 'locations')[k].start for k in range(3)]
+        endpoint = [self.get(ix, 'locations')[k].stop for k in range(3)]
+
+        # Extract surfaces
+        horizons = Horizon.from_mask(mask, field=field, origin=origin, mode=mode,
+                                    threshold=threshold, minsize=minsize, prefix=prefix)
+
+        if horizons and len(horizons[-1]) > minsize:
+            horizon = horizons[-1]
+            str_location = '__'.join([f'{start}-{stop}' for start, stop in zip(origin, endpoint)])
+            savepath = os.path.join(dst, f'{prefix}_{str_location}')
+
+            if savemode in ['numpy', 'np']:
+                np.save(savepath, horizon.points)
+
+            elif savemode in ['dump']:
+                horizon.dump(savepath)
+
+        return self
 
     # More component actions
     @action
