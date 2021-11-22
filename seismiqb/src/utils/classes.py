@@ -390,6 +390,7 @@ class Accumulator3D:
             MaxAccumulator3D: ['max', 'maximum'],
             MeanAccumulator3D: ['mean', 'avg', 'average'],
             GMeanAccumulator3D: ['gmean', 'geometric'],
+            ModeAccumulator3D: ['mode']
         }
         aggregation_to_class = {alias: class_ for class_, lst in class_to_aggregation.items()
                                 for alias in lst}
@@ -491,6 +492,36 @@ class GMeanAccumulator3D(Accumulator3D):
         self.remove_placeholder('counts')
 
 
+class ModeAccumulator3D(Accumulator3D):
+    """ Accumulator that takes mode value in overlapping crops. """
+    def __init__(self, shape=None, origin=None, dtype=np.float32,
+                 n_classes=2, transform=None, path=None, **kwargs):
+        # Create placeholder with counters for each class
+        self.fill_value = 0
+        self.n_classes = n_classes
+
+        shape = (*shape, n_classes)
+        origin = (*origin, 0)
+
+        super().__init__(shape=shape, origin=origin, dtype=dtype, transform=transform, path=path, **kwargs)
+
+        self.create_placeholder(name='data', dtype=self.dtype, fill_value=self.fill_value)
+
+    def _update(self, crop, location):
+        # Update class counters in location
+        crop = np.eye(self.n_classes)[crop]
+        self.data[location] += crop
+
+    def _aggregate(self):
+        # Choose the most frequently seen class value
+        if self.type == 'hdf5':
+            for i in range(self.data.shape[0]):
+                self.data[i] = np.argmax(self.data[i], axis=-1)
+
+        elif self.type == 'numpy':
+            self.data = np.argmax(self.data, axis=-1)
+
+
 class AccumulatorBlosc(Accumulator3D):
     """ Accumulate predictions into `BLOSC` file.
     Each of the saved slides supposed to be finalized, e.g. coming from another accumulator.
@@ -552,6 +583,35 @@ class AccumulatorBlosc(Accumulator3D):
         return cls(path=path, aggregation=aggregation, dtype=dtype, transform=transform,
                    shape=grid.shape, origin=grid.origin, orientation=grid.orientation, **kwargs)
 
+
+class LoopedList(list):
+    """ List that loops from given position (default is 0).
+
+        Examples
+        --------
+        >>> l = LoopedList(['a', 'b', 'c'])
+        >>> [l[i] for i in range(9)]
+        ['a', 'b', 'c', 'a', 'b', 'c', 'a', 'b', 'c']
+
+        >>> l = LoopedList(['a', 'b', 'c', 'd'], loop_from=2)
+        >>> [l[i] for i in range(9)]
+        ['a', 'b', 'c', 'd', 'c', 'd', 'c', 'd', 'c']
+
+        >>> l = LoopedList(['a', 'b', 'c', 'd', 'e'], loop_from=-1)
+        >>> [l[i] for i in range(9)]
+        ['a', 'b', 'c', 'd', 'e', 'e', 'e', 'e', 'e']
+    """
+    def __init__(self, *args, loop_from=0, **kwargs):
+        self.loop_from = loop_from
+        super().__init__(*args, **kwargs)
+
+    def __getitem__(self, idx):
+        if idx >= len(self):
+            pos = self.loop_from + len(self) * (self.loop_from < 0)
+            if pos < 0:
+                raise IndexError(f"List of length {len(self)} is looped from {self.loop_from} index")
+            idx = pos + (idx - pos) % (len(self) - pos)
+        return super().__getitem__(idx)
 
 
 class AugmentedList(list):

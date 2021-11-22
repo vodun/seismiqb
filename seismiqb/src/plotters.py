@@ -17,7 +17,7 @@ import plotly.figure_factory as ff
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-from .utils import to_list
+from .utils import to_list, LoopedList
 from ..batchflow import deprecated
 
 
@@ -435,12 +435,13 @@ class MatplotlibPlotter:
         return None
 
     # Rendering methods
+    MASK_COLORS = ['firebrick', 'mediumseagreen', 'thistle', 'darkorange', 'navy', 'gold',
+                   'red', 'turquoise', 'darkorchid', 'darkkhaki', 'royalblue', 'yellow',
+                   'chocolate', 'forestgreen', 'lightpink', 'darkslategray', 'deepskyblue', 'wheat']
 
     IMSHOW_DEFAULTS = {
         # image
-        'cmap': ['Greys_r', 'firebrick', 'mediumseagreen', 'thistle', 'darkorange', 'navy', 'gold',
-                 'red', 'turquoise', 'darkorchid', 'darkkhaki', 'royalblue', 'yellow',
-                 'chocolate', 'forestgreen', 'lightpink', 'darkslategray', 'deepskyblue', 'wheat'],
+        'cmap': LoopedList(['Greys_r', *MASK_COLORS], loop_from=1),
         'facecolor': 'white',
         # axis labels
         'xlabel': '', 'ylabel': '',
@@ -634,9 +635,7 @@ class MatplotlibPlotter:
     HIST_DEFAULTS = {
         # hist
         'bins': 50,
-        'color': ['firebrick', 'mediumseagreen', 'thistle', 'darkorange', 'navy', 'gold',
-                  'red', 'turquoise', 'darkorchid', 'darkkhaki', 'royalblue', 'yellow',
-                  'chocolate', 'forestgreen', 'lightpink', 'darkslategray', 'deepskyblue', 'wheat'],
+        'color': LoopedList(MASK_COLORS),
         'alpha': 0.8,
         'facecolor': 'white',
         # suptitle
@@ -686,14 +685,17 @@ class MatplotlibPlotter:
         return kwargs
 
 
+
+    CURVE_COLORS = ['skyblue', 'sandybrown', 'lightpink', 'mediumseagreen', 'thistle', 'firebrick',
+                    'forestgreen', 'navy', 'gold', 'red', 'turquoise', 'darkorchid',
+                    'darkkhaki', 'royalblue', 'yellow', 'chocolate', 'darkslategray', 'wheat']
+
     CURVE_DEFAULTS = {
         # main
         'rolling_mean': None,
         'rolling_final': None,
         # curve
-        'color': ['skyblue', 'sandybrown', 'lightpink', 'mediumseagreen', 'thistle', 'firebrick',
-                  'forestgreen', 'navy', 'gold', 'red', 'turquoise', 'darkorchid',
-                  'darkkhaki', 'royalblue', 'yellow', 'chocolate', 'darkslategray', 'wheat'],
+        'color': LoopedList(CURVE_COLORS),
         'facecolor': 'white',
         # suptitle
         'suptitle_color': 'k',
