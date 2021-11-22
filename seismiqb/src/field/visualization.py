@@ -300,7 +300,7 @@ class VisualizationMixin:
 
 
     def show(self, attributes='snr', mode='imshow', return_figure=False, short_title=False, savepath=None,
-             load_kwargs=None, **kwargs):
+             bbox=False, load_kwargs=None, **kwargs):
         """ Show one or more field attributes on one figure.
 
         Parameters
@@ -324,6 +324,8 @@ class VisualizationMixin:
             Whether to use only attribute names as titles for axis.
         savepath : str, optional
             Path to save the figure. `**` is changed to a field base directory, `*` is changed to field base name.
+        bbox : bool
+            Whether crop horizon by its bounding box or not.
         load_kwargs : dict
             Loading parameters common for every requested attribute.
         kwargs : dict
@@ -403,8 +405,7 @@ class VisualizationMixin:
         # Instance-dependant parameters: name and plotting bbox
         label_instances = self.apply_nested(lambda dct: dct['label_instance'], attribute_dicts)
         label_instance = [label for label in flatten([label_instances]) if label is not None][0]
-        label_name = label_instance.short_name
-        bbox = label_instance.bbox if hasattr(label_instance, 'bbox') else [[None] * 2] * 2
+        label_name = label_instance.short_name if hasattr(label_instance, 'short_name') else 'custom data'
 
         # Prepare plot defaults
         plot_defaults = {
@@ -414,6 +415,10 @@ class VisualizationMixin:
             'return_figure': True,
         }
 
+        if bbox and hasattr(label_instance, 'bbox'):
+            plot_defaults['xlim'] = tuple(label_instance.bbox[0])
+            plot_defaults['ylim'] = tuple(label_instance.bbox[1][::-1])
+
         # Defaults for chosen mode
         if mode == 'imshow':
             plot_defaults = {
@@ -422,9 +427,7 @@ class VisualizationMixin:
                 'alpha': alphas,
                 'colorbar': True,
                 'xlabel': self.index_headers[0],
-                'ylabel': self.index_headers[1],
-                'xlim': tuple(bbox[0]),
-                'ylim': tuple(bbox[1][::-1]),
+                'ylabel': self.index_headers[1]
             }
         elif mode != 'hist':
             raise ValueError(f"Valid modes are 'imshow' or 'hist', but '{mode}' was given.")

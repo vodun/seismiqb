@@ -154,7 +154,7 @@ class HorizonController(BaseController):
         """
         for idx in dataset.indices:
             field = dataset[idx]
-            field.make_quality_grid(frequencies, **kwargs)
+            field.geometry.make_quality_grid(frequencies, **kwargs)
 
             postfix = f'_{idx}' if len(dataset.indices) > 1 else ''
             plot_image(

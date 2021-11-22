@@ -23,8 +23,6 @@ from .utils import filtering_function, AugmentedDict
 from .labels.fault import insert_fault_into_mask
 from ..batchflow import Sampler, ConstantSampler
 from .plotters import MatplotlibPlotter, plot_image
-from .field import Field
-from .geometry import SeismicGeometry
 
 
 
@@ -726,7 +724,9 @@ class SeismicSampler(Sampler):
     def show_locations(self, **kwargs):
         """ Visualize on field map by using underlying `locations` structure. """
         data = []
-        titles = []
+        title = []
+        xlabel = []
+        ylabel = []
 
         for samplers_list in self.samplers.values():
             field = samplers_list[0].field
@@ -734,22 +734,24 @@ class SeismicSampler(Sampler):
             field_data = [[sampler.orientation_matrix, field.zero_traces] for sampler in samplers_list]
             data.extend(field_data)
 
-            field_titles = [f'{field.displayed_name}: {sampler.displayed_name}' for sampler in samplers_list]
-            titles.extend(field_titles)
+            field_title = [f'{field.displayed_name}: {sampler.displayed_name}' for sampler in samplers_list]
+            title.extend(field_title)
 
-        ncols, nrows = MatplotlibPlotter.infer_cols_rows(n_subplots=len(data), params=kwargs)
-        # add extra axis for legend plot no space left on a grid of inferred cols and rows
-        if ncols * nrows == len(data):
-            nrows += 1
+            xlabel.append(field.index_headers[0])
+            ylabel.append(field.index_headers[1])
+
+        ncols, nrows = MatplotlibPlotter.infer_cols_rows(n_subplots=len(data) + 1, params=kwargs)
 
         kwargs = {
             'cmap': [['Sampler', 'black']] * len(data),
             'alpha': [[1.0, 0.4]] * len(data),
             'ncols': ncols,
             'nrows': nrows,
-            'title': titles,
+            'title': title,
             'vmin': [[1, 0]] * len(data),
             'vmax': [[3, 1]] * len(data),
+            'xlabel': xlabel,
+            'ylabel': ylabel,
             **kwargs
         }
 
@@ -770,7 +772,7 @@ class SeismicSampler(Sampler):
         sampled = self.sample(n)
 
         data = []
-        titles = []
+        title = []
         for field_id in np.unique(sampled[:, 0]):
             field = self.samplers[field_id][0].field
             matrix = np.zeros_like(field.zero_traces, dtype=np.int32)
@@ -786,19 +788,16 @@ class SeismicSampler(Sampler):
             field_data = [matrix, field.zero_traces]
             data.append(field_data)
 
-            title = f'{self.field_names[field_id]}: {len(sampled_)} points'
-            titles.append(title)
+            field_title = f'{field.displayed_name}: {len(sampled_)} points'
+            title.append(field_title)
 
-        ncols, nrows = MatplotlibPlotter.infer_cols_rows(n_subplots=len(data), params=kwargs)
-        # add extra axis for legend plot no space left on a grid of inferred cols and rows
-        if ncols * nrows == len(data):
-            nrows += 1
+        ncols, nrows = MatplotlibPlotter.infer_cols_rows(n_subplots=len(data) + 1, params=kwargs)
 
         kwargs = {
             'matrix_name': 'Sampled slices',
             'cmap': [['Reds', 'black']] * len(data),
             'alpha': [[1.0, 0.4]] * len(data),
-            'title': titles,
+            'title': title,
             'interpolation': 'bilinear',
             'xlabel': field.index_headers[0],
             'ylabel': field.index_headers[1],
