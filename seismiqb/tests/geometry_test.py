@@ -1,20 +1,22 @@
-""" Script for running notebook with SeismicGeometry tests.
+""" Script for running the controller notebook for SeismicGeometry tests.
 
-The test contains some global constants:
+The behaviour of the test is parametrized by the following constants:
 
 DATESTAMP : str
     Execution date in "YYYY-MM-DD" format.
-    It is used for saving notebooks executions and temporary files.
+    Used for saving notebooks executions and temporary files.
 TESTS_SCRIPTS_DIR : str
-    Path to the directory with tests .py scripts.
-    It is used for providing paths to files for execution.
+    Path to the directory with test .py scripts.
+    Used as an entry point to the working directory.
+NOTEBOOKS_DIR : str
+    Path to the directory with test .ipynb files.
 TEST_DIR : str
     Path to the directory with test results.
-    It is used for saving and opening log files (timings, message).
+    Used for saving and opening log files (timings, message).
 
 And you can manage test running with parameters:
 
-DROP_EXTRA_FILES : bool
+REMOVE_EXTRA_FILES : bool
     Whether to drop files extra files after execution.
     Extra files are temporary files and execution savings that relate to successful tests.
 SHOW_MESSAGE : bool
@@ -27,7 +29,7 @@ GITHUB_MODE : bool
     If True, then all files are saved in temporary directories.
     If False, then all files are saved in local directories.
 """
-import glob
+from glob import glob
 import json
 import os
 import pprint
@@ -42,7 +44,7 @@ TESTS_SCRIPTS_DIR = os.getenv("TESTS_SCRIPTS_DIR", os.path.dirname(os.path.realp
 TEST_DIR = os.path.join(TESTS_SCRIPTS_DIR, 'notebooks/geometry_test_files/')
 
 # Execution parameters
-DROP_EXTRA_FILES = True
+REMOVE_EXTRA_FILES = True
 SHOW_MESSAGE = True
 SHOW_TEST_ERROR_INFO = True
 GITHUB_MODE = True
@@ -63,7 +65,7 @@ def test_geometry(capsys, tmpdir):
 
     else:
         # Clear outdatted files
-        previous_output_files = glob.glob(os.path.join(TESTS_SCRIPTS_DIR, 'notebooks/geometry_test_out_*.ipynb'))
+        previous_output_files = glob(os.path.join(TESTS_SCRIPTS_DIR, 'notebooks/geometry_test_out_*.ipynb'))
 
         for file in previous_output_files:
             os.remove(file)
@@ -83,7 +85,7 @@ def test_geometry(capsys, tmpdir):
             'SAVING_DIR': SAVING_DIR,
 
             # Execution parameters
-            'DROP_EXTRA_FILES': DROP_EXTRA_FILES,
+            'REMOVE_EXTRA_FILES': REMOVE_EXTRA_FILES,
             'SHOW_TEST_ERROR_INFO': SHOW_TEST_ERROR_INFO,
             'GITHUB_MODE': GITHUB_MODE
         },
@@ -94,13 +96,13 @@ def test_geometry(capsys, tmpdir):
 
     if exec_info is True:
         # Open message
-        message_path = glob.glob(os.path.join(SAVING_DIR, 'message_*.txt'))[-1]
+        message_path = glob(os.path.join(SAVING_DIR, 'message_*.txt'))[-1]
 
         with open(message_path, "r", encoding="utf-8") as infile:
             msg = infile.readlines()
 
         # Open timings
-        timings_path = glob.glob(os.path.join(SAVING_DIR, 'timings_*.json'))[-1]
+        timings_path = glob(os.path.join(SAVING_DIR, 'timings_*.json'))[-1]
 
         with open(timings_path, "r", encoding="utf-8") as infile:
             timings = json.load(infile)
@@ -116,8 +118,7 @@ def test_geometry(capsys, tmpdir):
     with capsys.disabled():
         # Tests output
         if SHOW_MESSAGE:
-            for line in msg:
-                print(line)
+            print('\n'.join(msg))
 
         pp = pprint.PrettyPrinter()
         pp.pprint(timings)

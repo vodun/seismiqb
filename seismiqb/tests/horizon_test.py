@@ -1,17 +1,22 @@
-""" Script for running notebook with Horizon tests.
+""" Script for running the controller notebook for Horizon tests.
 
-The test contains some global constants:
+The behaviour of the test is parametrized by the following constants:
 
 DATESTAMP : str
     Execution date in "YYYY-MM-DD" format.
-    It is used for saving notebooks executions and temporary files.
+    Used for saving notebooks executions and temporary files.
 TESTS_SCRIPTS_DIR : str
-    Path to the directory with tests .py scripts.
-    It is used for providing paths to files for execution.
+    Path to the directory with test .py scripts.
+    Used as an entry point to the working directory.
+NOTEBOOKS_DIR : str
+    Path to the directory with test .ipynb files.
+SAVING_DIR : str
+    Path to the directory for saving results and temporary files
+    (executed notebooks, logs, data files like cubes, horizons etc.).
 
 And you can manage test running with parameters:
 
-DROP_EXTRA_FILES : bool
+REMOVE_EXTRA_FILES : bool
     Whether to drop files extra files after execution.
     Extra files are temporary files and execution savings that relate to successful tests.
 SHOW_MESSAGE : bool
@@ -49,9 +54,9 @@ SHOW_FIGURES : bool
     Whether to show additional figures.
     Showing some figures can be useful for finding out the reason for the failure of tests.
 """
-import glob
+from glob import glob
 import os
-import shutil
+from shutil import rmtree
 from datetime import date
 
 from .utils import extract_traceback
@@ -62,7 +67,7 @@ DATESTAMP = date.today().strftime("%Y-%m-%d")
 TESTS_SCRIPTS_DIR = os.getenv("TESTS_SCRIPTS_DIR", os.path.dirname(os.path.realpath(__file__))+'/')
 
 # Execution parameters
-DROP_EXTRA_FILES = True
+REMOVE_EXTRA_FILES = True
 SHOW_MESSAGE = True
 SHOW_TEST_ERROR_INFO = True
 GITHUB_MODE = True
@@ -82,7 +87,7 @@ def test_horizon(capsys, tmpdir):
 
     else:
         # Clear outdatted files
-        previous_output_files = glob.glob(os.path.join(TESTS_SCRIPTS_DIR, 'notebooks/horizon_test_out_*.ipynb'))
+        previous_output_files = glob(os.path.join(TESTS_SCRIPTS_DIR, 'notebooks/horizon_test_out_*.ipynb'))
 
         for file in previous_output_files:
             os.remove(file)
@@ -113,7 +118,7 @@ def test_horizon(capsys, tmpdir):
             'SHOW_FIGURES': False, # Whether to show additional figures
 
             # Execution parameters
-            'DROP_EXTRA_FILES': DROP_EXTRA_FILES,
+            'REMOVE_EXTRA_FILES': REMOVE_EXTRA_FILES,
             'SHOW_TEST_ERROR_INFO': SHOW_TEST_ERROR_INFO,
             'GITHUB_MODE': GITHUB_MODE
         },
@@ -124,7 +129,7 @@ def test_horizon(capsys, tmpdir):
 
     if exec_info is True:
         # Open message
-        message_path = glob.glob(os.path.join(SAVING_DIR, 'message_*.txt'))[-1]
+        message_path = glob(os.path.join(SAVING_DIR, 'message_*.txt'))[-1]
 
         with open(message_path, "r", encoding="utf-8") as infile:
             msg = infile.readlines()
@@ -150,9 +155,9 @@ def test_horizon(capsys, tmpdir):
             print()
 
             # Clear directory with extra files
-            if not GITHUB_MODE and DROP_EXTRA_FILES:
+            if not GITHUB_MODE and REMOVE_EXTRA_FILES:
                 try:
-                    shutil.rmtree(SAVING_DIR)
+                    rmtree(SAVING_DIR)
                 except OSError as e:
                     print(f"Can't delete the directory {SAVING_DIR} : {e.strerror}")
 

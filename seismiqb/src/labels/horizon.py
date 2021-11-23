@@ -939,7 +939,7 @@ class Horizon(AttributesMixin, VisualizationMixin):
     def compare(self, other, offset=0, absolute=True, printer=print, hist=True, plot=True):
         """ Compare quality of self against another horizon or sequence of horizons. """
         from ..metrics import HorizonMetrics
-        _ = HorizonMetrics([self, other]).evaluate(
+        HorizonMetrics([self, other]).evaluate(
             'compare', absolute=absolute, offset=offset, printer=printer,
             hist=hist, plot=plot
         )
