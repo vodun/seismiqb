@@ -141,15 +141,15 @@ def test_horizon(capsys, tmpdir):
 
         msg.append('Horizon tests execution failed.')
 
-    last_msg_line = msg[-1]
+    msg = ''.join(msg)
 
     with capsys.disabled():
         # Tests output
         if SHOW_MESSAGE:
-            print('\n'.join(msg))
+            print(msg)
 
         # End of the running message
-        if exec_info is True and last_msg_line.find('fail')==-1:
+        if exec_info is True and msg.find('fail')==-1:
             print()
 
             # Clear directory with extra files

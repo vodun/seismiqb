@@ -118,7 +118,7 @@ def test_geometry(capsys, tmpdir):
     with capsys.disabled():
         # Tests output
         if SHOW_MESSAGE:
-            print('\n'.join(msg))
+            print(''.join(msg))
 
         pp = pprint.PrettyPrinter()
         pp.pprint(timings)
