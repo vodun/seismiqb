@@ -570,7 +570,6 @@ class MergeMixin:
         return sorted(horizons, key=len), MetaDict(merge_stats)
 
 
-
     @classmethod
     def average_horizons(cls, horizons):
         """ Average list of horizons into one surface. """
@@ -601,13 +600,10 @@ class MergeMixin:
 
 
 
-
-
-
-
 @njit
 def intersect_matrix(first, second, max_threshold):
     """ !!. """
+    # TODO: return flag of break/nobreak?
     #pylint: disable=consider-using-enumerate
     first = first.ravel()
     second = second.ravel()
@@ -618,11 +614,12 @@ def intersect_matrix(first, second, max_threshold):
         first_h = first[i]
         second_h = second[i]
 
+        # Check that both values are not `Horizon.FILL_VALUE``
         if first_h >= 0:
             if second_h >= 0:
                 abs_diff = abs(first_h - second_h)
 
-                if abs_diff > max_threshold:
+                if abs_diff > max_threshold: # early stopping on overflow
                     s = 999
                     c = 1
                     break

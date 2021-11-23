@@ -753,7 +753,7 @@ class MetaDict(dict):
 
     @classmethod
     def placeholder(cls):
-        """ Default MetaDict"""
+        """ Default MetaDict. """
         return cls({
             'name': 'UNKNOWN',
             'ru_name': 'Неизвестно',
