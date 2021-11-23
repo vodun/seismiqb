@@ -90,7 +90,7 @@ class FaultController(BaseController):
             'itemwise': True,
             'aggregation': 'max',
             'prefetch': 4,
-            'ratio': (0, 0)
+            'margin': (0, 0)
         }
     })
 
@@ -264,7 +264,6 @@ class FaultController(BaseController):
             .init_variable('loss_history', [])
             .init_model(name='model', model_class=model_class, mode='dynamic', config=model_config)
             .adaptive_expand(src=['images', 'masks'])
-            # .mask_rebatch(axis=-2, threshold=0.8)
             .train_model('model',
                          fetches='loss',
                          images=B('images'),
@@ -312,7 +311,7 @@ class FaultController(BaseController):
     def make_notifier(self):
         """ Make notifier. """
         if self.config['train/visualize_crops']:
-            cube_name = ""#B().unsalt(B('indices')[0])
+            cube_name = B().unsalt(B('indices')[0])
             src = [
                 {'source': [B('images'), B('masks'), cube_name, B('locations')],
                  'name': 'masks', 'loc': B('location'), 'plot_function': self.custom_plotter},
@@ -329,9 +328,7 @@ class FaultController(BaseController):
                     {'source': [B('phases'), None, cube_name, B('locations')],
                     'name': 'phases', 'loc': B('location'), 'plot_function': self.custom_plotter},
                 ]
-            return Notifier(True, graphs=['loss_history', *src],
-            total=self.config['train/n_iters'],
-            figsize=(40, 10))
+            return Notifier(True, graphs=['loss_history', *src], total=self.config['train/n_iters'], figsize=(40, 10))
         return super().make_notifier()
 
     def custom_plotter(self, ax=None, container=None, **kwargs):
@@ -398,7 +395,7 @@ class FaultController(BaseController):
             .init_variable('target', [])
             .predict_model('model', B('images'), fetches=self.config['inference/output'], save_to=B('predictions'))
             .adaptive_squeeze(src='predictions')
-            .zero_bounds(src='predictions', ratio=C('ratio'))
+            .zero_bounds(src='predictions', margin=C('margin'))
             .run_later(D('size'))
         )
 
