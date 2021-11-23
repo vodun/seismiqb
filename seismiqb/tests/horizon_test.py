@@ -133,25 +133,23 @@ def test_horizon(capsys, tmpdir):
 
         with open(message_path, "r", encoding="utf-8") as infile:
             msg = infile.readlines()
-    else:
-        msg = ['Horizon tests execution failed.']
 
+    else:
         if SHOW_TEST_ERROR_INFO:
             # Add error traceback into the message
-            msg.append(extract_traceback(path_ipynb=out_path_ipynb))
+            msg = extract_traceback(path_ipynb=out_path_ipynb)
+
+        msg.append('Horizon tests execution failed.')
+
+    last_msg_line = msg[-1]
 
     with capsys.disabled():
         # Tests output
         if SHOW_MESSAGE:
-            for line in msg:
-                print(line)
-        else:
-            for line in msg:
-                pass
-
+            print('\n'.join(msg))
 
         # End of the running message
-        if exec_info is True and line.find('success')!=-1:
+        if exec_info is True and last_msg_line.find('fail')==-1:
             print()
 
             # Clear directory with extra files
