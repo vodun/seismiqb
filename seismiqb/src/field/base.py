@@ -275,6 +275,8 @@ class Field(VisualizationMixin):
             Width of the resulting label.
         src : str
             Attribute with desired labels.
+        sparse : bool
+            Create mask only for labeled slices (for Faults). Unlabeled slices will be marked by -1.
         """
         # Parse parameters
         if isinstance(location, (int, np.integer)):
