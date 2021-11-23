@@ -473,37 +473,8 @@ class Field(VisualizationMixin):
         return array
 
     # Load matrix from disk
-    def prepare_points(self, points, transform=False, verify=True, **kwargs):
-        """ Prepare matrix in points cloud format (array of (N, 3) shape).
-
-        Parameters
-        ----------
-        points : ndarray
-            Array of points. Each row describes one point inside the cube: two spatial coordinates and depth.
-        transform : bool
-            Whether transform from line coordinates (ilines, xlines) to cubic system.
-        verify : bool
-            Whether to remove points outside of the cube range.
-        """
-        _ = kwargs
-
-        if transform:
-            points = self.lines_to_cubic(points)
-
-        if verify:
-            idx = np.where((points[:, 0] >= 0) &
-                           (points[:, 1] >= 0) &
-                           (points[:, 2] >= 0) &
-                           (points[:, 0] < self.shape[0]) &
-                           (points[:, 1] < self.shape[1]) &
-                           (points[:, 2] < self.shape[2]))[0]
-            points = points[idx]
-
-        return points
-
-
-    def load_matrix_from_file(self, path, dtype=np.int32exit, return_points=True,
-                              fill_value=np.nan, name=None, transform=True, **kwargs):
+    def load_charisma(self, path, dtype=np.int32, return_points=True, fill_value=np.nan,
+                      name=None, transform=True, verify=True, **kwargs):
         """ Load matrix from path to either CHARISMA or REDUCED_CHARISMA csv-like file.
 
         Parameters
@@ -520,61 +491,87 @@ class Field(VisualizationMixin):
             Matrix name.
         transform : bool
             Whether transform from line coordinates (ilines, xlines) to cubic system.
+        verify : bool
+            Whether to remove points outside of the cube range.
         """
         _ = kwargs
         path = self.make_path(path, makedirs=False)
 
-        points = self.load_points_from_file(path=path)
-        points = self.prepare_points(points=points, transform=transform, **kwargs)
+        # Load matrix in points format from a file
+        with open(path, encoding='utf-8') as file:
+            line_len = len(file.readline().split(' '))
+        if line_len == len(self.REDUCED_CHARISMA_SPEC):
+            names = self.REDUCED_CHARISMA_SPEC
+        elif line_len >= len(self.CHARISMA_SPEC):
+            names = self.CHARISMA_SPEC
+        else:
+            raise ValueError('Data must be in CHARISMA or REDUCED_CHARISMA format.')
+
+        df = pd.read_csv(path, sep=r'\s+', names=names, usecols=self.REDUCED_CHARISMA_SPEC)
+        df.sort_values(self.REDUCED_CHARISMA_SPEC, inplace=True)
+        points = df.values
+
+        # Prepare points
+        if transform:
+            points = self.lines_to_cubic(points)
+
+        if verify:
+            idx = np.where((points[:, 0] >= 0) &
+                           (points[:, 1] >= 0) &
+                           (points[:, 2] >= 0) &
+                           (points[:, 0] < self.shape[0]) &
+                           (points[:, 1] < self.shape[1]) &
+                           (points[:, 2] < self.shape[2]))[0]
+            points = points[idx]
+
+        # Fix datatypes
+        points[:, 0] = points[:, 0].astype(np.int32)
+        points[:, 1] = points[:, 1].astype(np.int32)
+
+        if np.issubdtype(dtype, np.integer):
+            points[:, 2] = np.round(points[:, 2])
+
+        points[:, 2] = points[:, 2].astype(dtype)
 
         if return_points:
             return points
 
         # Make a matrix from points and return
-        matrix = np.full(shape=self.shape[:2], fill_value=fill_value, dtype=np.float32)
+        i_min, x_min, _ = np.min(points, axis=0).astype(np.int32)
+        i_max, x_max, _ = np.max(points, axis=0).astype(np.int32)
 
-        if np.issubdtype(dtype, np.integer):
-            points[:, 2] = np.round(points[:, 2])
+        i_length = (i_max - i_min) + 1
+        x_length = (x_max - x_min) + 1
 
-        points = points.astype(dtype)
+        matrix = Horizon.points_to_matrix(points=points, i_min=i_min, x_min=x_min,
+                                          i_length=i_length, x_length=x_length,
+                                          fill_value=fill_value, dtype=dtype)
 
-        matrix[points[:, 0].astype(int), points[:, 1].astype(int)] = points[:, 2]
         return matrix
 
-    @classmethod
-    def load_points_from_file(cls, path):
-        """ Get matrix as point cloud array from a file. """
-        #pylint: disable=anomalous-backslash-in-string
-        with open(path, encoding='utf-8') as file:
-            line_len = len(file.readline().split(' '))
-        if line_len == len(cls.REDUCED_CHARISMA_SPEC):
-            names = cls.REDUCED_CHARISMA_SPEC
-        elif line_len >= len(cls.CHARISMA_SPEC):
-            names = cls.CHARISMA_SPEC
-        else:
-            raise ValueError('Data must be in CHARISMA or REDUCED_CHARISMA format.')
-
-        df = pd.read_csv(path, sep=r'\s+', names=names, usecols=cls.REDUCED_CHARISMA_SPEC)
-        df.sort_values(cls.REDUCED_CHARISMA_SPEC, inplace=True)
-        return df.values
-
     # Save matrix data to disk
-    def dump_charisma(self, points, path, name=None, transform=None):
+    def dump_charisma(self, data, path, dump_points=True, name=None, transform=None):
         """ Save matrix as (N, 3) array of points to a disk in CHARISMA-compatible format.
 
         Parameters
         ----------
-        points : ndarray
-            Array of (N, 3) shape.
+        data : ndarray
+            Array of (N, 3) shape or (i_lines, x_lines) shape.
         path : str
             Path to a file to save array to.
-        transform : None or callable
-            If callable, then applied to points after converting to ilines/xlines coordinate system.
+        dump_points : bool
+            Whether the dumped data is data in the points (N, 3) or matrix (i_lines, x_lines) format.
         name : str
             Dumped object name.
+        transform : None or callable
+            If callable, then applied to points after converting to ilines/xlines coordinate system.
         """
         path = self.make_path(path, name=name)
-        points = self.cubic_to_lines(points)
+
+        if not dump_points:
+            data = Horizon.matrix_to_points(data)
+
+        points = self.cubic_to_lines(data)
 
         # Additional transform
         points = points if transform is None else transform(points)
@@ -584,21 +581,6 @@ class Field(VisualizationMixin):
         df.sort_values(['iline', 'xline'], inplace=True)
         df = df.astype({'iline': np.int32, 'xline': np.int32, 'height': np.float32})
         df.to_csv(path, sep=' ', columns=Horizon.COLUMNS, index=False, header=False)
-
-    def dump_matrix(self, matrix, path, transform=None):
-        """ Save (N_ILINES, N_CROSSLINES) matrix in CHARISMA-compatible format.
-
-        Parameters
-        ----------
-        matrix : ndarray
-            Array of (N_ILINES, N_CROSSLINES) shape with values.
-        path : str
-            Path to a file to save matrix to.
-        transform : None or callable
-            If callable, then applied to points after converting to ilines/xlines coordinate system.
-        """
-        points = Horizon.matrix_to_points(matrix)
-        self.dump_charisma(points, path, transform)
 
     @classmethod
     def is_charisma_like(cls, path, bad_extensions=None, size_threshold=100):

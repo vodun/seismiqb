@@ -79,7 +79,5 @@ def test_field(capsys, tmpdir):
                 pass
 
         # Test exit
-        if exec_info is True and line.find('success')!=-1:
-            print()
-        else:
+        if not(exec_info is True and line.find('success')!=-1):
             assert False, 'Field tests draft failed.\n'

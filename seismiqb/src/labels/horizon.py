@@ -174,8 +174,9 @@ class Horizon(AttributesMixin, VisualizationMixin):
         If the horizon is created not from matrix, evaluated at the time of the first access.
         """
         if self._matrix is None and self.points is not None:
-            self._matrix = self.points_to_matrix(self.points, self.i_min, self.x_min,
-                                                 self.i_length, self.x_length, self.dtype)
+            self._matrix = self.points_to_matrix(points=self.points, i_min=self.i_min, x_min=self.x_min,
+                                                 i_length=self.i_length, x_length=self.x_length,
+                                                 fill_value=self.FILL_VALUE, dtype=self.dtype)
         return self._matrix
 
     @matrix.setter
@@ -183,11 +184,15 @@ class Horizon(AttributesMixin, VisualizationMixin):
         self._matrix = value
 
     @staticmethod
-    def points_to_matrix(points, i_min, x_min, i_length, x_length, dtype=np.int32):
+    def points_to_matrix(points, i_min, x_min, i_length, x_length, fill_value=None, dtype=np.int32):
         """ Convert array of (N, 3) shape to a depth map (matrix). """
-        matrix = np.full((i_length, x_length), Horizon.FILL_VALUE, dtype)
+        fill_value = fill_value if fill_value is not None else Horizon.FILL_VALUE
+
+        matrix = np.full((i_length, x_length), fill_value, dtype)
+
         matrix[points[:, 0].astype(np.int32) - i_min,
                points[:, 1].astype(np.int32) - x_min] = points[:, 2]
+
         return matrix
 
     @property
@@ -319,15 +324,13 @@ class Horizon(AttributesMixin, VisualizationMixin):
 
 
     # Initialization from different containers
-    def from_points(self, points, transform=False, verify=True, dst='points', reset='matrix', **kwargs):
+    def from_points(self, points, verify=True, dst='points', reset='matrix', **kwargs):
         """ Base initialization: from point cloud array of (N, 3) shape.
 
         Parameters
         ----------
         points : ndarray
             Array of points. Each row describes one point inside the cube: two spatial coordinates and depth.
-        transform : bool
-            Whether transform from line coordinates (ilines, xlines) to cubic system.
         verify : bool
             Whether to remove points outside of the cube range.
         dst : str
@@ -337,8 +340,14 @@ class Horizon(AttributesMixin, VisualizationMixin):
         """
         _ = kwargs
 
-        # Transform to cubic coordinates, if needed
-        points = self.field.prepare_points(points=points, transform=transform, verify=verify, **kwargs)
+        if verify:
+            idx = np.where((points[:, 0] >= 0) &
+                           (points[:, 1] >= 0) &
+                           (points[:, 2] >= 0) &
+                           (points[:, 0] < self.field.shape[0]) &
+                           (points[:, 1] < self.field.shape[1]) &
+                           (points[:, 2] < self.field.shape[2]))[0]
+            points = points[idx]
 
         if self.dtype == np.int32:
             points = np.rint(points)
@@ -356,8 +365,11 @@ class Horizon(AttributesMixin, VisualizationMixin):
 
         self.name = os.path.basename(path) if self.name is None else self.name
 
-        points = self.field.load_points_from_file(path=path)
-        self.from_points(points, transform, **kwargs)
+        points = self.field.load_charisma(path=path, dtype=np.int32, return_points=True,
+                                          fill_value=Horizon.FILL_VALUE, name=self.name,
+                                          transform=transform, verify=True)
+
+        self.from_points(points, **kwargs)
 
 
     def from_matrix(self, matrix, i_min, x_min, length=None, **kwargs):
@@ -396,7 +408,11 @@ class Horizon(AttributesMixin, VisualizationMixin):
         _ = kwargs
 
         points = self.dict_to_points(dictionary)
-        self.from_points(points, transform=transform)
+
+        if transform:
+            points = self.field.lines_to_cubic(points)
+
+        self.from_points(points)
 
     @staticmethod
     def dict_to_points(dictionary):
@@ -1220,7 +1236,8 @@ class Horizon(AttributesMixin, VisualizationMixin):
         transform : None or callable
             If callable, then applied to points after converting to ilines/xlines coordinate system.
         """
-        self.field.dump_charisma(points=copy(self.points), path=path, name=self.short_name, transform=transform)
+        self.field.dump_charisma(data=copy(self.points), path=path, dump_points=True,
+                                 name=self.short_name, transform=transform)
 
     def dump_float(self, path, transform=None, kernel_size=7, sigma=2., margin=5):
         """ Smooth out the horizon values, producing floating-point numbers, and dump to the disk.
@@ -1241,4 +1258,4 @@ class Horizon(AttributesMixin, VisualizationMixin):
         """
         matrix = self.matrix_smooth_out(matrix=self.full_matrix, kernel_size=kernel_size, sigma=sigma, margin=margin)
         points = self.matrix_to_points(matrix)
-        self.field.dump_charisma(points=points, path=path, name=self.short_name, transform=transform)
+        self.field.dump_charisma(data=points, path=path, dump_points=True, name=self.short_name, transform=transform)
