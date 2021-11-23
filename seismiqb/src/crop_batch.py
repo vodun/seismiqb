@@ -828,29 +828,31 @@ class SeismicCropBatch(Batch):
         return crop * noise
 
     @apply_parallel
-    def cutout_2d(self, crop, patch_shape, n):
+    def cutout_2d(self, crop, patch_shape, n_patches, fill_value=0):
         """ Change patches of data to zeros.
 
         Parameters
         ----------
         patch_shape : array-like
             Shape or patches along each axis.
-        n : float
+        n_patches : number
             Number of patches to cut.
+        fill_value : number
+            Value to fill patches with.
         """
-        rnd = np.random.RandomState(int(n*100)).uniform
+        rnd = np.random.RandomState(int(n_patches * 100)).uniform
         patch_shape = patch_shape.astype(int)
 
         copy_ = copy(crop)
-        for _ in range(int(n)):
+        for _ in range(int(n_patches)):
             starts = [int(rnd(crop.shape[ax] - patch_shape[ax])) for ax in range(3)]
             stops = [starts[ax] + patch_shape[ax] for ax in range(3)]
             slices = [slice(start, stop) for start, stop in zip(starts, stops)]
-            copy_[tuple(slices)] = 0
+            copy_[tuple(slices)] = fill_value
         return copy_
 
     @apply_parallel
-    def rotate(self, crop, angle):
+    def rotate(self, crop, angle, fill_value=0):
         """ Rotate crop along the first two axes. Angles are defined as Tait-Bryan angles and the sequence of
         extrinsic rotations axes is (axis_2, axis_0, axis_1).
 
@@ -859,23 +861,25 @@ class SeismicCropBatch(Batch):
         angle : float or tuple of floats
             Angles of rotation about each axes (axis_2, axis_0, axis_1). If float, angle of rotation
             about the last axis.
+        fill_value : number
+            Value to put at empty positions appeared after crop roration.
         """
         angle = angle if isinstance(angle, (tuple, list)) else (angle, 0, 0)
-        crop = self._rotate(crop, angle[0])
+        crop = self._rotate(crop, angle[0], fill_value)
         if angle[1] != 0:
             crop = crop.transpose(1, 2, 0)
-            crop = self._rotate(crop, angle[1])
+            crop = self._rotate(crop, angle[1], fill_value)
             crop = crop.transpose(2, 0, 1)
         if angle[2] != 0:
             crop = crop.transpose(2, 0, 1)
-            crop = self._rotate(crop, angle[2])
+            crop = self._rotate(crop, angle[2], fill_value)
             crop = crop.transpose(1, 2, 0)
         return crop
 
-    def _rotate(self, crop, angle):
+    def _rotate(self, crop, angle, fill_value):
         shape = crop.shape
         matrix = cv2.getRotationMatrix2D((shape[1]//2, shape[0]//2), angle, 1)
-        return cv2.warpAffine(crop, matrix, (shape[1], shape[0])).reshape(shape)
+        return cv2.warpAffine(crop, matrix, (shape[1], shape[0]), borderValue=fill_value).reshape(shape)
 
     @apply_parallel
     def flip(self, crop, axis=0, seed=0.1, threshold=0.5):
