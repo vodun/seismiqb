@@ -193,22 +193,25 @@ class Fault(Horizon):
                             dtype=np.int32)
         points = self.points
 
+        if (self.bbox[:, 1] < mask_bbox[:, 0]).any() or (self.bbox[:, 0] >= mask_bbox[:, 1]).any():
+            return mask
+
         if sparse and self.nodes is not None:
             slides_indices = np.unique(self.nodes[:, self.direction])
             indices = np.isin(points[:, self.direction], slides_indices)
             points = points[indices]
-
-        if (self.bbox[:, 1] < mask_bbox[:, 0]).any() or (self.bbox[:, 0] >= mask_bbox[:, 1]).any():
-            return mask
+            mask_pos = np.isin(
+                np.arange(mask.shape[self.direction]),
+                slides_indices - locations[self.direction].start
+            )
+            if mask_pos.any():
+                if self.direction == 0:
+                    # mask[mask_pos] = 0
+                    mask[mask_pos] = np.clip(mask[mask_pos], 0, 1)
+                else:
+                    mask[:, mask_pos] = np.clip(mask[:, mask_pos], 0, 1)
 
         insert_fault_into_mask(mask, points, mask_bbox)
-        if sparse:
-            indices = np.arange(mask.shape[self.direction])
-            pos = ~np.isin(indices, slides_indices - locations[self.direction].start)
-            if self.direction == 0:
-                mask[np.logical_and(pos, ~np.any(mask > 0, axis=(1, 2)))] = -1
-            else:
-                mask[:, np.logical_and(pos, ~np.any(mask > 0, axis=(0, 2)))] = -1
         return mask
 
     @classmethod

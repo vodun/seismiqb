@@ -283,7 +283,10 @@ class Field(VisualizationMixin):
         width = width or max(5, shape[-1] // 100)
 
         # Placeholder
-        mask = np.zeros(shape, dtype=np.float32)
+        if sparse:
+            mask = -np.ones(shape, dtype=np.float32)
+        else:
+            mask = np.zeros(shape, dtype=np.float32)
 
         labels = getattr(self, src)
         labels = [labels] if not isinstance(labels, (tuple, list)) else labels

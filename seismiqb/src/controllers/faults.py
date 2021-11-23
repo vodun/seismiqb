@@ -478,7 +478,7 @@ class FaultController(BaseController):
 
                 origin = [item[0] if item is not None else None for item in ranges]
                 loc = ranges[orientation][0]
-                zoom_slice = [slice(*ranges[i]) for i in range(3) if i != orientation]
+                zoom_slice = tuple([slice(*ranges[i]) for i in range(3) if i != orientation])
 
                 model_prediction = self.inference(dataset, model, idx=cube, ranges=ranges, orientation=orientation)
 
@@ -803,9 +803,10 @@ class FaultController(BaseController):
 
         for i, width in enumerate(dilation):
             slices = [[slice(None) for _ in range(image.ndim)] for _ in range(2)]
+            slices[0][i] = slice(1, None)
+            slices[1][i] = slice(None, -1)
+            slices = [tuple(item) for item in slices]
             for _ in range(1, width):
-                slices[0][i] = slice(1, None)
-                slices[1][i] = slice(None, -1)
                 mask[slices[0]] = np.logical_or(mask[slices[0]], mask[slices[1]])
                 mask[slices[1]] = np.logical_or(mask[slices[0]], mask[slices[1]])
 
