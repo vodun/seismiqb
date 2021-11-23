@@ -475,7 +475,7 @@ class FaultController(BaseController):
 
                 origin = [item[0] if item is not None else None for item in ranges]
                 loc = ranges[orientation][0]
-                zoom_slice = tuple([slice(*ranges[i]) for i in range(3) if i != orientation])
+                zoom_slice = tuple(slice(*ranges[i]) for i in range(3) if i != orientation)
 
                 model_prediction = self.inference(dataset, model, idx=cube, ranges=ranges, orientation=orientation)
 
