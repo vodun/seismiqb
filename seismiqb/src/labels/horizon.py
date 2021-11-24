@@ -175,8 +175,7 @@ class Horizon(AttributesMixin, VisualizationMixin):
         """
         if self._matrix is None and self.points is not None:
             self._matrix = self.points_to_matrix(points=self.points, i_min=self.i_min, x_min=self.x_min,
-                                                 i_length=self.i_length, x_length=self.x_length,
-                                                 fill_value=self.FILL_VALUE, dtype=self.dtype)
+                                                 i_length=self.i_length, x_length=self.x_length, dtype=self.dtype)
         return self._matrix
 
     @matrix.setter
@@ -184,11 +183,9 @@ class Horizon(AttributesMixin, VisualizationMixin):
         self._matrix = value
 
     @staticmethod
-    def points_to_matrix(points, i_min, x_min, i_length, x_length, fill_value=None, dtype=np.int32):
+    def points_to_matrix(points, i_min, x_min, i_length, x_length, dtype=np.int32):
         """ Convert array of (N, 3) shape to a depth map (matrix). """
-        fill_value = fill_value if fill_value is not None else Horizon.FILL_VALUE
-
-        matrix = np.full((i_length, x_length), fill_value, dtype)
+        matrix = np.full((i_length, x_length), Horizon.FILL_VALUE, dtype)
 
         matrix[points[:, 0].astype(np.int32) - i_min,
                points[:, 1].astype(np.int32) - x_min] = points[:, 2]
@@ -369,7 +366,7 @@ class Horizon(AttributesMixin, VisualizationMixin):
                                           fill_value=Horizon.FILL_VALUE, name=self.name,
                                           transform=transform, verify=True)
 
-        self.from_points(points, **kwargs)
+        self.from_points(points, verify=False, **kwargs)
 
 
     def from_matrix(self, matrix, i_min, x_min, length=None, **kwargs):

@@ -453,7 +453,6 @@ class Field(VisualizationMixin):
 
         return result
 
-    # Matrix operations
     # Coordinate transforms
     def lines_to_cubic(self, array):
         """ Convert ilines-xlines to cubic coordinates system. """
@@ -472,23 +471,23 @@ class Field(VisualizationMixin):
         array[:, 2] += self.delay
         return array
 
-    # Load matrix from disk
-    def load_charisma(self, path, dtype=np.int32, return_points=True, fill_value=np.nan,
-                      name=None, transform=True, verify=True, **kwargs):
-        """ Load matrix from path to either CHARISMA or REDUCED_CHARISMA csv-like file.
+    # Load and save data in charisma-compatible format
+    def load_charisma(self, path, dtype=np.int32, format='points', fill_value=np.nan,
+                      transform=True, verify=True, **kwargs):
+        """ Load data from path to either CHARISMA or REDUCED_CHARISMA csv-like file.
 
         Parameters
         ----------
         path : str
-            Path to a file to import matrix from.
+            Path to a file to import data from.
         dtype : data-type
-            Output matrix dtype.
-        return_points : bool
-            Whether to return data in points format.
+            Output dtype.
+        format : str
+            Output array format, can be 'points' or 'matrix'.
+            If format is 'points' then return data as ndarray of (ilines_len, xlines_len, depth) with shape (N, 3).
+            If format is 'matrix' then return data as ndarray of (ilines_len, xlines_len) shape.
         fill_value : int or float
             Value to place into blank spaces.
-        name : str
-            Matrix name.
         transform : bool
             Whether transform from line coordinates (ilines, xlines) to cubic system.
         verify : bool
@@ -497,7 +496,7 @@ class Field(VisualizationMixin):
         _ = kwargs
         path = self.make_path(path, makedirs=False)
 
-        # Load matrix in points format from a file
+        # Load data as a points array from a file
         with open(path, encoding='utf-8') as file:
             line_len = len(file.readline().split(' '))
         if line_len == len(self.REDUCED_CHARISMA_SPEC):
@@ -511,7 +510,7 @@ class Field(VisualizationMixin):
         df.sort_values(self.REDUCED_CHARISMA_SPEC, inplace=True)
         points = df.values
 
-        # Prepare points
+        # Transform and verify points
         if transform:
             points = self.lines_to_cubic(points)
 
@@ -524,34 +523,23 @@ class Field(VisualizationMixin):
                            (points[:, 2] < self.shape[2]))[0]
             points = points[idx]
 
-        # Fix datatypes
-        points[:, 0] = points[:, 0].astype(np.int32)
-        points[:, 1] = points[:, 1].astype(np.int32)
-
+        # Set datatype
         if np.issubdtype(dtype, np.integer):
-            points[:, 2] = np.round(points[:, 2])
+            points = np.round(points)
 
-        points[:, 2] = points[:, 2].astype(dtype)
+        points = points.astype(dtype)
 
-        if return_points:
+        if format == 'points':
             return points
 
         # Make a matrix from points and return
-        i_min, x_min, _ = np.min(points, axis=0).astype(np.int32)
-        i_max, x_max, _ = np.max(points, axis=0).astype(np.int32)
-
-        i_length = (i_max - i_min) + 1
-        x_length = (x_max - x_min) + 1
-
-        matrix = Horizon.points_to_matrix(points=points, i_min=i_min, x_min=x_min,
-                                          i_length=i_length, x_length=x_length,
-                                          fill_value=fill_value, dtype=dtype)
+        matrix = np.full(shape=self.shape[:2], fill_value=fill_value, dtype=dtype)
+        matrix[points[:, 0].astype(np.int32), points[:, 1].astype(np.int32)] = points[:, 2]
 
         return matrix
 
-    # Save matrix data to disk
-    def dump_charisma(self, data, path, dump_points=True, name=None, transform=None):
-        """ Save matrix as (N, 3) array of points to a disk in CHARISMA-compatible format.
+    def dump_charisma(self, data, path, format='points', name=None, transform=None):
+        """ Save data as (N, 3) array of points to a disk in CHARISMA-compatible format.
 
         Parameters
         ----------
@@ -559,8 +547,10 @@ class Field(VisualizationMixin):
             Array of (N, 3) shape or (i_lines, x_lines) shape.
         path : str
             Path to a file to save array to.
-        dump_points : bool
-            Whether the dumped data is data in the points (N, 3) or matrix (i_lines, x_lines) format.
+        format : str
+            Input array format, can be 'points' or 'matrix'.
+            If format is 'points' then input data is a ndarray of (ilines_len, xlines_len, depth) with shape (N, 3).
+            If format is 'matrix' then input data is a ndarray of (ilines_len, xlines_len) shape.
         name : str
             Dumped object name.
         transform : None or callable
@@ -568,8 +558,13 @@ class Field(VisualizationMixin):
         """
         path = self.make_path(path, name=name)
 
-        if not dump_points:
-            data = Horizon.matrix_to_points(data)
+        if format != 'points':
+            # Convert data to points array
+            idx = np.nonzero(data != np.nan)
+
+            data = np.hstack([idx[0].reshape(-1, 1),
+                                idx[1].reshape(-1, 1),
+                                data[idx[0], idx[1]].reshape(-1, 1)])
 
         points = self.cubic_to_lines(data)
 
@@ -577,10 +572,10 @@ class Field(VisualizationMixin):
         points = points if transform is None else transform(points)
 
         # Dump a charisma file
-        df = pd.DataFrame(points, columns=Horizon.COLUMNS)
+        df = pd.DataFrame(points, columns=self.REDUCED_CHARISMA_SPEC)
         df.sort_values(['iline', 'xline'], inplace=True)
         df = df.astype({'iline': np.int32, 'xline': np.int32, 'height': np.float32})
-        df.to_csv(path, sep=' ', columns=Horizon.COLUMNS, index=False, header=False)
+        df.to_csv(path, sep=' ', columns=self.REDUCED_CHARISMA_SPEC, index=False, header=False)
 
     @classmethod
     def is_charisma_like(cls, path, bad_extensions=None, size_threshold=100):
@@ -597,14 +592,14 @@ class Field(VisualizationMixin):
         """
         bad_extensions = bad_extensions or []
         bad_extensions.extend(['.py', '.ipynb', '.ckpt',
-                            '.png', '.jpg',
-                            '.log', '.txt', '.torch'])
+                               '.png', '.jpg',
+                               '.log', '.txt', '.torch'])
 
         try:
             if os.path.isdir(path):
                 return False
 
-            if max([path.endswith(ext) for ext in bad_extensions]):
+            if max(path.endswith(ext) for ext in bad_extensions):
                 return False
 
             if (os.path.getsize(path) / 1024) < size_threshold:
