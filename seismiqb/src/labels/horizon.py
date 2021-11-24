@@ -362,9 +362,9 @@ class Horizon(AttributesMixin, VisualizationMixin):
 
         self.name = os.path.basename(path) if self.name is None else self.name
 
-        points = self.field.load_charisma(path=path, dtype=np.int32, return_points=True,
-                                          fill_value=Horizon.FILL_VALUE, name=self.name,
-                                          transform=transform, verify=True)
+        points = self.field.load_charisma(path=path, dtype=np.int32, format='points',
+                                          fill_value=Horizon.FILL_VALUE, transform=transform,
+                                          verify=True)
 
         self.from_points(points, verify=False, **kwargs)
 
@@ -1233,7 +1233,7 @@ class Horizon(AttributesMixin, VisualizationMixin):
         transform : None or callable
             If callable, then applied to points after converting to ilines/xlines coordinate system.
         """
-        self.field.dump_charisma(data=copy(self.points), path=path, dump_points=True,
+        self.field.dump_charisma(data=copy(self.points), path=path, format='points',
                                  name=self.short_name, transform=transform)
 
     def dump_float(self, path, transform=None, kernel_size=7, sigma=2., margin=5):
@@ -1255,4 +1255,4 @@ class Horizon(AttributesMixin, VisualizationMixin):
         """
         matrix = self.matrix_smooth_out(matrix=self.full_matrix, kernel_size=kernel_size, sigma=sigma, margin=margin)
         points = self.matrix_to_points(matrix)
-        self.field.dump_charisma(data=points, path=path, dump_points=True, name=self.short_name, transform=transform)
+        self.field.dump_charisma(data=points, path=path, format='points', name=self.short_name, transform=transform)
