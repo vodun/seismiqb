@@ -731,14 +731,10 @@ class SeismicSampler(Sampler):
         for samplers_list in self.samplers.values():
             field = samplers_list[0].field
 
-            field_data = [[sampler.orientation_matrix, field.zero_traces] for sampler in samplers_list]
-            data.extend(field_data)
-
-            field_title = [f'{field.displayed_name}: {sampler.displayed_name}' for sampler in samplers_list]
-            title.extend(field_title)
-
-            xlabel.append(field.index_headers[0])
-            ylabel.append(field.index_headers[1])
+            data += [[sampler.orientation_matrix, field.zero_traces] for sampler in samplers_list]
+            title += [f'{field.displayed_name}: {sampler.displayed_name}' for sampler in samplers_list]
+            xlabel += [field.index_headers[0]] * len(samplers_list)
+            ylabel += [field.index_headers[1]] * len(samplers_list)
 
         ncols, nrows = MatplotlibPlotter.infer_cols_rows(n_subplots=len(data) + 1, params=kwargs)
 

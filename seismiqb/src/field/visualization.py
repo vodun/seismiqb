@@ -250,7 +250,8 @@ class VisualizationMixin:
             'suptitle': f'Field `{self.displayed_name}`',
             'cmap': apply_nested(self._make_cmap, data),
             'alpha': apply_nested(self._make_alpha, data),
-            'title': apply_nested(self._make_title, data)
+            'title': [item[0] if isinstance(item, list) else item
+                      for item in flatten([apply_nested(self._make_title, data)])]
         }
 
         if bbox:
@@ -303,8 +304,11 @@ class VisualizationMixin:
             params = {'attribute_name': attribute_name, 'dtype': np.float32, **attribute}
 
             # Add load defaults with respect to attribute name
-            if params['attribute_name'] in ['fourier', 'wavelet', 'fourier_decomposition', 'wavelet_decomposition']:
+            if attribute_name in ['fourier', 'wavelet', 'fourier_decomposition', 'wavelet_decomposition']:
                 params['n_components'] = attribute.get('n_components', 1)
+
+            if attribute_name in ['masks', 'full_binary_matrix']:
+                params['fill_value'] = 0
 
             return params
 
@@ -333,7 +337,7 @@ class VisualizationMixin:
         else:
             data, label = method(_return_label=True, **load_params)
             bbox = label.bbox
-            label_name = label.short_name
+            label_name = label.displayed_name
 
         data = postprocess(data.squeeze())
         data = NamedArray(data, bbox=bbox, attribute_name=attribute_name, label_name=label_name)
