@@ -329,13 +329,16 @@ class VisualizationMixin:
         # Already an array: no loading needed
         if attribute_name == 'user data':
             data = load_params['src']
-            load_params['bbox'] = np.array([[None, None], [None, None]])
             load_params['label_name'] = ''
+            load_params['bbox'] = np.array([[0, data.shape[0]],
+                                            [0, data.shape[1]],
+                                            [0, data.shape[2]] if data.ndim > 2 else [None, None]]
+                                            )
         # Load data with `load_attribute`
         else:
             data, label = method(_return_label=True, **load_params)
-            load_params['bbox'] = label.bbox
             load_params['label_name'] = label.displayed_name
+            load_params['bbox'] = label.bbox
 
         load_params['data'] = postprocess(data.squeeze())
         return load_params
@@ -372,7 +375,7 @@ class VisualizationMixin:
     def _make_title(params):
         label_name = params['label_name']
         attribute_name = params['attribute_name']
-        return f'`{label_name}`\n{attribute_name}'
+        return f'`{label_name}`\n{attribute_name}' if label_name else attribute_name
 
 
     # 2D interactive
