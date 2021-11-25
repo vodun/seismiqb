@@ -2,7 +2,7 @@
 import nbformat
 
 def find_traceback_in_outputs(cell_info):
-    " Find cell output with a traceback and extract the traceback."
+    """ Find cell output with a traceback and extract the traceback. """
     outputs = cell_info.get('outputs', [])
     traceback_msg = ""
 

@@ -10,24 +10,26 @@ TESTS_SCRIPTS_DIR : str
     Used as an entry point to the working directory.
 NOTEBOOKS_DIR : str
     Path to the directory with test .ipynb files.
-SAVING_DIR : str
+OUTPUT_DIR : str
     Path to the directory for saving results and temporary files
     (executed notebooks, logs, data files like cubes, horizons etc.).
 
 And you can manage test running with parameters:
 
+USE_TMP_OUTPUT_DIR: bool
+    Whether to use pytest tmpdir as a workspace.
+    If True, then all files are saved in temporary directories.
+    If False, then all files are saved in local directories.
+REMOVE_OUTDATED_FILES: bool
+    Whether to remove outdated files which relate to previous executions.
 REMOVE_EXTRA_FILES : bool
-    Whether to drop files extra files after execution.
+    Whether to remove extra files after execution.
     Extra files are temporary files and execution savings that relate to successful tests.
 SHOW_MESSAGE : bool
     Whether to show a detailed tests execution message.
 SHOW_TEST_ERROR_INFO : bool
     Whether to show error traceback in outputs.
     Notice that it only works with SHOW_MESSAGE = True.
-GITHUB_MODE : bool
-    Whether to execute tests in GitHub mode.
-    If True, then all files are saved in temporary directories.
-    If False, then all files are saved in local directories.
 
 You can also manage notebook execution kwargs which relates to cube and horizon for the test:
 
@@ -65,12 +67,14 @@ from ..batchflow.utils_notebook import run_notebook
 # Workspace constants
 DATESTAMP = date.today().strftime("%Y-%m-%d")
 TESTS_SCRIPTS_DIR = os.getenv("TESTS_SCRIPTS_DIR", os.path.dirname(os.path.realpath(__file__))+'/')
+OUTPUT_DIR = None
 
 # Execution parameters
+USE_TMP_OUTPUT_DIR = True
+REMOVE_OUTDATED_FILES = True
 REMOVE_EXTRA_FILES = True
 SHOW_MESSAGE = True
 SHOW_TEST_ERROR_INFO = True
-GITHUB_MODE = True
 
 def test_horizon(capsys, tmpdir):
     """ Run Horizon test notebook.
@@ -80,10 +84,12 @@ def test_horizon(capsys, tmpdir):
     Under the hood, this notebook create a fake seismic cube with horizon, saves them
     and runs Horizon tests notebooks (base, manipulations, attributes).
     """
-    # Delete old test notebook results
-    if GITHUB_MODE:
-        SAVING_DIR = tmpdir.mkdir("notebooks").mkdir("horizon_test_files")
-        out_path_ipynb = SAVING_DIR.join(f"horizon_test_out_{DATESTAMP}.ipynb")
+    if USE_TMP_OUTPUT_DIR:
+        # Create tmp workspace
+        OUTPUT_DIR = tmpdir.mkdir("notebooks").mkdir("horizon_test_files")
+        _ = OUTPUT_DIR.mkdir('tmp')
+
+        out_path_ipynb = OUTPUT_DIR.join(f"horizon_test_out_{DATESTAMP}.ipynb")
 
     else:
         # Clear outdatted files
@@ -92,8 +98,9 @@ def test_horizon(capsys, tmpdir):
         for file in previous_output_files:
             os.remove(file)
 
-        # Path to a new test noteboook result
-        SAVING_DIR = os.path.join(TESTS_SCRIPTS_DIR, 'notebooks/horizon_test_files/')
+        if OUTPUT_DIR is None:
+            OUTPUT_DIR = os.path.join(TESTS_SCRIPTS_DIR, 'notebooks/horizon_test_files/')
+
         out_path_ipynb = os.path.join(TESTS_SCRIPTS_DIR, f'notebooks/horizon_test_out_{DATESTAMP}.ipynb')
 
     # Tests execution
@@ -103,7 +110,13 @@ def test_horizon(capsys, tmpdir):
             # Workspace constants
             'DATESTAMP': DATESTAMP,
             'NOTEBOOKS_DIR': os.path.join(TESTS_SCRIPTS_DIR, 'notebooks/'),
-            'SAVING_DIR': SAVING_DIR,
+            'OUTPUT_DIR': OUTPUT_DIR,
+
+            # Execution parameters
+            'USE_TMP_OUTPUT_DIR': USE_TMP_OUTPUT_DIR,
+            'REMOVE_OUTDATED_FILES': REMOVE_OUTDATED_FILES,
+            'REMOVE_EXTRA_FILES': REMOVE_EXTRA_FILES,
+            'SHOW_TEST_ERROR_INFO': SHOW_TEST_ERROR_INFO,
 
             # Synthetic creation parameters
             'SYNTHETIC_MODE': True,
@@ -115,21 +128,17 @@ def test_horizon(capsys, tmpdir):
 
             # Visualization parameters
             'FIGSIZE': (12, 7),
-            'SHOW_FIGURES': False, # Whether to show additional figures
-
-            # Execution parameters
-            'REMOVE_EXTRA_FILES': REMOVE_EXTRA_FILES,
-            'SHOW_TEST_ERROR_INFO': SHOW_TEST_ERROR_INFO,
-            'GITHUB_MODE': GITHUB_MODE
+            'SHOW_FIGURES': False
         },
-        insert_pos=1,
+        insert_pos=2,
         out_path_ipynb=out_path_ipynb,
         display_links=False
     )
 
+    # Tests exit
     if exec_info is True:
         # Open message
-        message_path = glob(os.path.join(SAVING_DIR, 'message_*.txt'))[-1]
+        message_path = glob(os.path.join(OUTPUT_DIR, 'message_*.txt'))[-1]
 
         with open(message_path, "r", encoding="utf-8") as infile:
             msg = infile.readlines()
@@ -139,7 +148,7 @@ def test_horizon(capsys, tmpdir):
             # Add error traceback into the message
             msg = extract_traceback(path_ipynb=out_path_ipynb)
 
-        msg.append('Horizon tests execution failed.')
+        msg.append('\nHorizon tests execution failed.')
 
     msg = ''.join(msg)
 
@@ -150,14 +159,12 @@ def test_horizon(capsys, tmpdir):
 
         # End of the running message
         if exec_info is True and msg.find('fail')==-1:
-            print()
-
             # Clear directory with extra files
-            if not GITHUB_MODE and REMOVE_EXTRA_FILES:
+            if not USE_TMP_OUTPUT_DIR and REMOVE_EXTRA_FILES:
                 try:
-                    rmtree(SAVING_DIR)
+                    rmtree(OUTPUT_DIR)
                 except OSError as e:
-                    print(f"Can't delete the directory {SAVING_DIR} : {e.strerror}")
+                    print(f"Can't delete the directory {OUTPUT_DIR} : {e.strerror}")
 
         else:
             assert False, 'Horizon tests failed.\n'
