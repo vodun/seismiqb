@@ -1,7 +1,7 @@
 """ Mixin with computed along horizon geological attributes. """
 # pylint: disable=too-many-statements
-import numpy as np
 from copy import copy
+import numpy as np
 
 from cv2 import dilate
 from scipy.signal import hilbert, ricker
