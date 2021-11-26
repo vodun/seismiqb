@@ -7,6 +7,7 @@ from matplotlib.cbook import flatten
 from .viewer import FieldViewer
 from ..utils import apply_nested
 from ..plotters import plot_image, MatplotlibPlotter, show_3d
+from ..labels.horizon_attributes import AttributesMixin
 
 
 
@@ -343,32 +344,34 @@ class VisualizationMixin:
         load_params['data'] = postprocess(data.squeeze())
         return load_params
 
+    CMAP_TO_ATTRIBUTE = {
+        'Depths': ['full_matrix'],
+        'Reds': ['spikes', 'quality_map'],
+        'Metric': ['metric']
+    }
+    ATTRIBUTE_TO_CMAP = {attr: cmap for cmap, attributes in CMAP_TO_ATTRIBUTE.items() for attr in attributes}
+
     @staticmethod
     def _make_cmap(params):
-        linkage = {
-            'Depths': ['depths', 'matrix', 'full_matrix'],
-            'Reds': ['spikes', 'quality_map'],
-            'Metric': ['metric', 'metrics'],
-            'generate': ['masks', 'full_binary_matrix']
-        }
-
         attribute_name = params['attribute_name']
-        for cmap, names in linkage.items():
-            if attribute_name in names:
-                if cmap == 'generate':
-                    global_name = ''.join(filter(lambda x: x.isalpha(), attribute_name))
-                    if global_name not in NAME_TO_COLOR:
-                        NAME_TO_COLOR[global_name] = next(COLOR_GENERATOR)
-                    cmap = NAME_TO_COLOR[global_name]
-                return cmap
+        attribute_name = AttributesMixin.ALIAS_TO_ATTRIBUTE.get(attribute_name, attribute_name)
 
-        return 'Basic'
+        if attribute_name == 'full_binary_matrix':
+            global_name = ''.join(filter(lambda x: x.isalpha(), attribute_name))
+            if global_name not in NAME_TO_COLOR:
+                NAME_TO_COLOR[global_name] = next(COLOR_GENERATOR)
+            return NAME_TO_COLOR[global_name]
+
+        return VisualizationMixin.ATTRIBUTE_TO_CMAP.get(attribute_name, 'Basic')
 
     @staticmethod
     def _make_alpha(params):
         attribute_name = params['attribute_name']
-        if attribute_name in ['masks', 'full_binary_matrix']:
+        attribute_name = AttributesMixin.ALIAS_TO_ATTRIBUTE.get(attribute_name, attribute_name)
+
+        if attribute_name in ['full_binary_matrix']:
             return 0.7
+
         return 1.0
 
     @staticmethod
