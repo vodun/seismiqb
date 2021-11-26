@@ -385,12 +385,12 @@ def make_savepath(path, name, extension=''):
     return path
 
 def apply_nested(function, items, **kwargs):
-    """ Apply `function(**kwargs)` to each of `items`.
+    """ Apply `function(**kwargs)` to every item from `items`.
 
     Parameters:
     -----------
     function : callable
-        A function to apply to every item.
+        A function to apply.
     items : misc
         If not a list than the provided function is just applied to the object.
         Otherwise the list is unwrapped recusively and function is applied to every its item that is not a list.
