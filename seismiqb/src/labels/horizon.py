@@ -12,7 +12,7 @@ from scipy.ndimage import find_objects
 from scipy.ndimage.morphology import binary_fill_holes, binary_dilation
 
 from .horizon_attributes import AttributesMixin
-from .horizon_merge import MergeMixin
+from .horizon_extraction import ExtractionMixin
 from .horizon_visualization import VisualizationMixin
 from ..utils import groupby_mean, groupby_min, groupby_max, filtering_function
 from ..utils import make_bezier_figure
@@ -21,7 +21,7 @@ from ..functional import smooth_out
 
 
 
-class Horizon(AttributesMixin, MergeMixin, VisualizationMixin):
+class Horizon(AttributesMixin, ExtractionMixin, VisualizationMixin):
     """ Contains spatially-structured horizon: each point describes a height on a particular (iline, xline).
 
     Initialized from `storage` and `geometry`, where storage can be one of:

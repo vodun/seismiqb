@@ -427,7 +427,9 @@ class SyntheticGenerator():
             containing horizon-heights of selected horizons. If format set to 'mask',
             returns horizons-mask.
         """
-        if mode == 'all':
+        if isinstance(mode, (slice, list)):
+            indices = mode
+        elif mode == 'all':
             indices = slice(0, None)
         elif mode == 'horizons':
             indices = [int(self.reflection_surfaces.shape[0] * height_share)

@@ -7,6 +7,9 @@ import numpy as np
 from cv2 import dilate
 from numba import njit
 
+from skimage.measure import label
+from scipy.ndimage import find_objects
+
 from ..utils import MetaDict
 
 
@@ -28,7 +31,7 @@ class MergeStatus(IntEnum):
 
 
 
-class MergeMixin:
+class ExtractionMixin:
     """ !!.
     5 6 7
     6 7 8
@@ -51,6 +54,269 @@ class MergeMixin:
         # adjacency = +2 -> try to merge horizons with gap      of 1 pixel between boundaries
 
     """
+    #pylint: disable=too-many-statements, too-many-nested-blocks
+    @classmethod
+    def extract_from_mask(cls, mask, field=None, origin=None, minsize=1000,
+                          prefix='extracted', verbose=False, max_iters=999):
+        """ !!. """
+        total_points = int(mask.sum())
+
+        # `num` prefix for horizon count in category, `total` prefix for number of points in category
+        stats = MetaDict({
+            "measurement_timings" : [],
+            "iteration_timings" : [],
+
+            "num_objects" : [],
+            "num_deleted" : [],
+            "num_extracted_easy" : [],
+            "num_extracted_hard" : [],
+
+            "num_easy" : 0,
+            "num_hard" : 0,
+            "num_hard_separated" : 0,
+            "num_hard_joined" : 0,
+            "num_extracted_from_easy" : 0,
+            "num_extracted_from_hard" : 0,
+
+            "total_remaining_points" : [f'{total_points:,}'],
+            "total_deleted_points" : [],
+        })
+
+        if verbose:
+            print(f'Starting from {total_points:,} points in the mask')
+
+        horizons = []
+        for _ in range(max_iters):
+            start_timing = perf_counter()
+            num_deleted = 0
+            num_extracted_easy = 0
+            num_extracted_hard = 0
+            total_deleted_points = 0
+            total_extracted_points = 0
+
+            # Label connected entities
+            labeled = label(mask)
+            objects = find_objects(labeled)
+            stats['measurement_timings'].append(round(perf_counter() - start_timing, 2))
+            stats['num_objects'].append(len(objects))
+
+            for i, slices in enumerate(objects):
+                # Point cloud in `slices` coordinates
+                indices = np.nonzero(labeled[slices] == i + 1)
+                points = np.vstack(indices).T
+
+                # iline, crossline, occurencies_ix, min_ix, max_ix, mean_ix
+                groupped_points = groupby_all(points)
+
+                if len(points) == len(groupped_points):
+                    # Point-cloud extracted cleanly, with no ambiguous points
+                    stats['num_easy'] += 1
+
+                    # Remove from the original mask
+                    horizon_points = points + [slc.start or 0 for slc in slices]
+                    mask[horizon_points[:, 0], horizon_points[:, 1], horizon_points[:, 2]] = 0
+                    num_deleted += 1
+                    total_deleted_points += len(horizon_points)
+
+                    # Horizon points validation: can be expanded
+                    if len(points) < minsize:
+                        continue
+
+                    horizons.append(horizon_points)
+                    num_extracted_easy += 1
+                    total_extracted_points += len(horizon_points)
+                    stats['num_extracted_from_easy'] += 1
+
+                else:
+                    # Point-cloud contains multiple points at some traces
+                    # Extract min/max envelopes, remove them from original mask, repeat the process
+                    # We use separate indexing for spatial/depth coordinates to avoid advanced indexing for columns
+                    stats['num_hard'] += 1
+
+                    mask_min_max = (groupped_points[:, 3] == groupped_points[:, 4])
+                    if mask_min_max.any():
+                        # Joined surface: min==max
+                        at_joined = groupped_points[mask_min_max]
+                        ix_joined = at_joined[:, :2]
+                        h_joined = at_joined[:, 3]
+
+                        # Two separate surfaces: min < max
+                        # Can't be empty: if that is the case, surfaces would be identical -> extracted cleanly
+                        at_separated = groupped_points[~mask_min_max]
+                        ix_separated = at_separated[:, :2]
+                        min_separated = at_separated[:, 3]
+                        max_separated = at_separated[:, 4]
+
+                        surfaces = [(ix_joined, h_joined),
+                                    (ix_separated, min_separated),
+                                    (ix_separated, max_separated)]
+                        stats['num_hard_joined'] += 1
+                    else:
+                        # Two separate surfaces: min < max
+                        ix = groupped_points[:, :2]
+                        min_ = groupped_points[:, 3]
+                        max_ = groupped_points[:, 4]
+
+                        surfaces = [(ix, min_),
+                                    (ix, max_)]
+                        stats['num_hard_separated'] += 1
+
+                    # Put each surface on the blank array and extract connected components
+                    # Then, remove corresponding points from the original array
+                    shape = tuple(slc.stop - slc.start for slc in slices)
+
+                    for ix_coords, h_coords in surfaces:
+                        background = np.zeros(shape, dtype=np.int8)
+                        background[ix_coords[:, 0], ix_coords[:, 1], h_coords] = 1
+
+                        inner_labeled = label(background)
+                        inner_objects = find_objects(inner_labeled)
+
+                        for inner_i, inner_slices in enumerate(inner_objects):
+                            inner_indices = np.nonzero(background[inner_slices] == inner_i + 1)
+                            inner_points = np.vstack(inner_indices).T
+
+                            # Remove from the original mask
+                            horizon_points = inner_points + [(slc.start or 0) + (inner_slc.start or 0)
+                                                            for slc, inner_slc in zip(slices, inner_slices)]
+                            mask[horizon_points[:, 0], horizon_points[:, 1], horizon_points[:, 2]] = 0
+                            num_deleted += 1
+                            total_deleted_points += len(horizon_points)
+
+                            # Horizon points validation: can be expanded
+                            if len(inner_points) < minsize:
+                                continue
+
+                            horizons.append(horizon_points)
+
+                            num_extracted_hard += 1
+                            total_extracted_points += len(horizon_points)
+                            stats['num_extracted_from_hard'] += 1
+
+            # Log iteration stats
+            total_points -= total_deleted_points
+            stats['iteration_timings'].append(round(perf_counter() - start_timing, 2))
+
+            stats['num_deleted'].append(num_deleted)
+            stats['num_extracted_easy'].append(num_extracted_easy)
+            stats['num_extracted_hard'].append(num_extracted_hard)
+
+            stats['total_remaining_points'].append(f'{total_points:,}')
+            stats['total_deleted_points'].append(total_deleted_points)
+
+            if verbose:
+                print(f'Remaining points in the mask: {total_points:,}, num deleted: {num_deleted:>5}, '
+                      f'total extracted points {total_extracted_points:>7,}, '
+                      f'extracted easy: {num_extracted_easy:>3}, extracted hard: {num_extracted_hard:>3}')
+
+            if num_deleted == 0:
+                break
+
+        # Make `Horizon` instances
+        horizons.sort(key=len)
+        horizons = [cls(horizon_points + origin, field=field, name=f'{prefix}_{i}')
+                    for i, horizon_points in enumerate(horizons)]
+        return horizons, stats
+
+
+    @classmethod
+    def extract_from_mask_nostat(cls, mask, field=None, origin=None, minsize=1000,
+                          prefix='extracted', verbose=False, max_iters=999):
+        """ !!. """
+
+        horizons = []
+        for _ in range(max_iters):
+            num_deleted = 0
+
+            # Label connected entities
+            labeled = label(mask)
+            objects = find_objects(labeled)
+
+            for i, slices in enumerate(objects):
+                # Point cloud in `slices` coordinates
+                indices = np.nonzero(labeled[slices] == i + 1)
+                points = np.vstack(indices).T
+
+                # iline, crossline, occurencies_ix, min_ix, max_ix, mean_ix
+                groupped_points = groupby_all(points)
+
+                if len(points) == len(groupped_points):
+                    # Point-cloud extracted cleanly, with no ambiguous points
+                    # Remove from the original mask
+                    horizon_points = points + [slc.start or 0 for slc in slices]
+                    mask[horizon_points[:, 0], horizon_points[:, 1], horizon_points[:, 2]] = 0
+                    num_deleted += 1
+
+                    # Horizon points validation: can be expanded
+                    if len(points) < minsize:
+                        continue
+                    horizons.append(horizon_points)
+
+                else:
+                    # Point-cloud contains multiple points at some traces
+                    # Extract min/max envelopes, remove them from original mask, repeat the process
+                    # We use separate indexing for spatial/depth coordinates to avoid advanced indexing for columns
+                    mask_min_max = (groupped_points[:, 3] == groupped_points[:, 4])
+                    if mask_min_max.any():
+                        # Joined surface: min==max
+                        at_joined = groupped_points[mask_min_max]
+                        ix_joined = at_joined[:, :2]
+                        h_joined = at_joined[:, 3]
+
+                        # Two separate surfaces: min < max
+                        # Can't be empty: if that is the case, surfaces would be identical -> extracted cleanly
+                        at_separated = groupped_points[~mask_min_max]
+                        ix_separated = at_separated[:, :2]
+                        min_separated = at_separated[:, 3]
+                        max_separated = at_separated[:, 4]
+
+                        surfaces = [(ix_joined, h_joined),
+                                    (ix_separated, min_separated),
+                                    (ix_separated, max_separated)]
+                    else:
+                        # Two separate surfaces: min < max
+                        ix = groupped_points[:, :2]
+                        min_ = groupped_points[:, 3]
+                        max_ = groupped_points[:, 4]
+
+                        surfaces = [(ix, min_),
+                                    (ix, max_)]
+
+                    # Put each surface on the blank array and extract connected components
+                    # Then, remove corresponding points from the original array
+                    shape = tuple(slc.stop - slc.start for slc in slices)
+
+                    for ix_coords, h_coords in surfaces:
+                        background = np.zeros(shape, dtype=np.int8)
+                        background[ix_coords[:, 0], ix_coords[:, 1], h_coords] = 1
+
+                        inner_labeled = label(background)
+                        inner_objects = find_objects(inner_labeled)
+
+                        for inner_i, inner_slices in enumerate(inner_objects):
+                            inner_indices = np.nonzero(background[inner_slices] == inner_i + 1)
+                            inner_points = np.vstack(inner_indices).T
+
+                            # Remove from the original mask
+                            horizon_points = inner_points + [(slc.start or 0) + (inner_slc.start or 0)
+                                                            for slc, inner_slc in zip(slices, inner_slices)]
+                            mask[horizon_points[:, 0], horizon_points[:, 1], horizon_points[:, 2]] = 0
+                            num_deleted += 1
+
+                            # Horizon points validation: can be expanded
+                            if len(inner_points) < minsize:
+                                continue
+                            horizons.append(horizon_points)
+
+            if num_deleted == 0:
+                break
+
+        # Make `Horizon` instances
+        horizons.sort(key=len)
+        horizons = [cls(horizon_points + origin, field=field, name=f'{prefix}_{i}')
+                    for i, horizon_points in enumerate(horizons)]
+        return horizons, None
+
 
     def verify_merge(self, other, mean_threshold=1.0, max_threshold=2, adjacency=0,
                      min_size_threshold=1, max_size_threshold=None):
@@ -163,10 +429,9 @@ class MergeMixin:
             merged = True
         else:
             # Return a new instance of horizon
-            from .horizon import Horizon #pylint: disable=import-outside-toplevel
-            merged = Horizon(storage=background, field=self.field, name=self.name,
-                             i_min=shared_i_min, x_min=shared_x_min,
-                             h_min=min(self.h_min, other.h_min), h_max=max(self.h_max, other.h_max), length=length)
+            merged = type(self)(storage=background, field=self.field, name=self.name,
+                                i_min=shared_i_min, x_min=shared_x_min,
+                                h_min=min(self.h_min, other.h_min), h_max=max(self.h_max, other.h_max), length=length)
         return merged
 
 
@@ -252,10 +517,10 @@ class MergeMixin:
                 merged = True
             else:
                 # Return a new instance of horizon
-                from .horizon import Horizon #pylint: disable=import-outside-toplevel
-                merged = Horizon(storage=background, field=self.field, name=self.name,
-                                i_min=shared_i_min, x_min=shared_x_min,
-                                h_min=min(self.h_min, other.h_min), h_max=max(self.h_max, other.h_max), length=length)
+                merged = type(self)(storage=background, field=self.field, name=self.name,
+                                    i_min=shared_i_min, x_min=shared_x_min,
+                                    h_min=min(self.h_min, other.h_min), h_max=max(self.h_max, other.h_max),
+                                    length=length)
             return merged
         return False
 
@@ -263,7 +528,6 @@ class MergeMixin:
     def merge_into(self, horizons, mean_threshold=1., max_threshold=1.2, min_size_threshold=1, max_size_threshold=None,
                    adjacency=1, max_iters=999, num_merged_threshold=1):
         """ !!. """
-        #pylint: disable=too-many-statements
         horizons = np.array(horizons)
 
         # Keep track of stats
@@ -321,24 +585,24 @@ class MergeMixin:
             # Merge all possible candidates
             for idx, merge_candidate in zip(indices, merge_candidates):
                 # Compute the mergeability
-                merge_status = MergeMixin.verify_merge(self, merge_candidate,
-                                                       mean_threshold=mean_threshold,
-                                                       max_threshold=max_threshold,
-                                                       min_size_threshold=min_size_threshold,
-                                                       max_size_threshold=max_size_threshold,
-                                                       adjacency=adjacency)
+                merge_status = ExtractionMixin.verify_merge(self, merge_candidate,
+                                                            mean_threshold=mean_threshold,
+                                                            max_threshold=max_threshold,
+                                                            min_size_threshold=min_size_threshold,
+                                                            max_size_threshold=max_size_threshold,
+                                                            adjacency=adjacency)
                 merge_stats[merge_status] += 1
 
                 # Merge, if needed
                 if merge_status == 4:
                     # Overlapping horizons: definetely merge
-                    merged = MergeMixin.overlap_merge(self, merge_candidate, inplace=True)
+                    merged = ExtractionMixin.overlap_merge(self, merge_candidate, inplace=True)
 
                 elif merge_status == 3 and adjacency > 0:
                     # Adjacent horizons: maybe we can merge it
-                    merged = MergeMixin.adjacent_merge(self, merge_candidate, inplace=True,
-                                                       mean_threshold=mean_threshold,
-                                                       adjacency=adjacency)
+                    merged = ExtractionMixin.adjacent_merge(self, merge_candidate, inplace=True,
+                                                            mean_threshold=mean_threshold,
+                                                            adjacency=adjacency)
                     merge_stats['merged_adjacent'] += (1 if merged else 0)
                 else:
                     # Spatially separated or too small of an overlap
@@ -375,7 +639,6 @@ class MergeMixin:
                    min_size_threshold=1, max_size_threshold=None, adjacency=1,
                    max_iters=999, num_merged_threshold=1, delete_threshold=0.01):
         """ !!. """
-        #pylint: disable=too-many-statements
         # Change `horizons` to other container?
         for horizon in horizons:
             horizon.merge_count = 0
@@ -397,9 +660,9 @@ class MergeMixin:
 
             # Pre-compute all the bounding boxes
             bboxes = [(horizon.i_min, horizon.i_max,
-                    horizon.x_min, horizon.x_max,
-                    horizon.h_min, horizon.h_max)
-                    for horizon in horizons]
+                       horizon.x_min, horizon.x_max,
+                       horizon.h_min, horizon.h_max)
+                      for horizon in horizons]
             bboxes = np.array(bboxes, dtype=np.int32)
 
             # Cycle for the base horizons. As we are removing merged horizons from the list, we iterate with `while`
@@ -469,30 +732,30 @@ class MergeMixin:
                         merge_stats['id_separated_hit'] += 1
                         continue
                     if merge_candidate is current_horizon:
-                        # Can actually merge it with the previous at the cost of code readability
+                        # Can move code to the previous clause at the cost of code readability
                         continue
 
                     # Compute the mergeability
                     merge_stats['verify'] += 1
-                    merge_status = MergeMixin.verify_merge(current_horizon, merge_candidate,
-                                                           mean_threshold=mean_threshold,
-                                                           max_threshold=max_threshold,
-                                                           min_size_threshold=min_size_threshold,
-                                                           max_size_threshold=max_size_threshold,
-                                                           adjacency=adjacency)
+                    merge_status = ExtractionMixin.verify_merge(current_horizon, merge_candidate,
+                                                                mean_threshold=mean_threshold,
+                                                                max_threshold=max_threshold,
+                                                                min_size_threshold=min_size_threshold,
+                                                                max_size_threshold=max_size_threshold,
+                                                                adjacency=adjacency)
                     merge_stats[merge_status] += 1
 
                     # Merge, if needed
                     if merge_status == 4:
                         # Overlapping horizons: definetely merge
-                        merged = MergeMixin.overlap_merge(current_horizon, merge_candidate, inplace=True)
+                        merged = ExtractionMixin.overlap_merge(current_horizon, merge_candidate, inplace=True)
                         current_horizon.id_separated = current_horizon.id_separated.union(merge_candidate.id_separated)
 
                     elif merge_status == 3 and adjacency > 0:
                         # Adjacent horizons: maybe we can merge it
-                        merged = MergeMixin.adjacent_merge(current_horizon, merge_candidate, inplace=True,
-                                                        mean_threshold=mean_threshold,
-                                                        adjacency=adjacency)
+                        merged = ExtractionMixin.adjacent_merge(current_horizon, merge_candidate, inplace=True,
+                                                                mean_threshold=mean_threshold,
+                                                                adjacency=adjacency)
                         merge_stats['merged_adjacent'] += (1 if merged else 0)
 
                     elif merge_status == 0:
@@ -597,6 +860,59 @@ class MergeMixin:
             'matrix': horizon_matrix,
             'std_matrix': std_matrix,
         }
+
+
+
+@njit
+def groupby_all(array):
+    """ !!. """
+    # iline, crossline, occurency, min_, max_, mean_
+    output = np.zeros((len(array), 6), dtype=np.int32)
+    position = 0
+
+    # Initialize values
+    previous = array[0, :2]
+    min_ = array[0, -1]
+    max_ = array[0, -1]
+    s = array[0, -1]
+    c = 1
+
+    for i in range(1, len(array)):
+        current = array[i]
+
+        if previous[1] == current[1] and previous[0] == current[0]:
+            # Same iline, crossline: update values
+            depth_ = current[-1]
+            min_ = min(depth_, min_)
+            max_ = max(depth_, max_)
+            s += depth_
+            c += 1
+
+        else:
+            # New iline, crossline: store stats, re-initialize values
+            output[position, :2] = previous   # iline, crossline
+            output[position, 2] = c           # occurency
+            output[position, 3] = min_        # min_
+            output[position, 4] = max_        # max_
+            output[position, 5] = s / c       # mean_
+            position += 1
+
+            depth_ = current[-1]
+            previous = current[:2]
+            min_ = depth_
+            max_ = depth_
+            s = depth_
+            c = 1
+
+    # The last point
+    output[position, :2] = previous   # iline, crossline
+    output[position, 2] = c           # occurency
+    output[position, 3] = min_        # min_
+    output[position, 4] = max_        # max_
+    output[position, 5] = s / c       # mean_
+    position += 1
+
+    return output[:position]
 
 
 
