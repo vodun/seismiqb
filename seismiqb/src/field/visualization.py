@@ -321,7 +321,7 @@ class VisualizationMixin:
         if attribute_name == 'user data':
             data = load_params['src']
             load_params['label_name'] = ''
-            load_params['bbox'] = np.array([[0, data.shape[0]], [0, data.shape[1]]])
+            load_params['bbox'] = np.array([[0, max] for max in data.shape])
         # Load data with `load_attribute`
         else:
             data, label = method(_return_label=True, **load_params)

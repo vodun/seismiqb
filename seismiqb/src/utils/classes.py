@@ -19,7 +19,7 @@ import bottleneck as bn
 
 import h5py
 
-from .functions import to_list
+from .functions import to_list, flatten_nested
 
 
 
@@ -728,6 +728,7 @@ class AugmentedDict(OrderedDict):
         return self.flatten()
 
 
+
 class MetaDict(dict):
     """ Dictionary that can dump itself on disk in a human-readable and human-editable way.
     Usually describes cube meta info such as name, coordinates (if known) and other useful data.
@@ -892,19 +893,6 @@ def stable_hash(key):
     if not isinstance(key, bytes):
         key = key.encode('ascii')
     return str(blake2b(key).hexdigest())
-
-def flatten_nested(iterable):
-    """ Recursively flatten nested structure of tuples, list and dicts. """
-    result = []
-    if isinstance(iterable, (tuple, list)):
-        for item in iterable:
-            result.extend(flatten_nested(item))
-    elif isinstance(iterable, dict):
-        for key, value in sorted(iterable.items()):
-            result.extend((*flatten_nested(key), *flatten_nested(value)))
-    else:
-        return (iterable,)
-    return tuple(result)
 
 
 

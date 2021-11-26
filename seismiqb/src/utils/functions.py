@@ -385,19 +385,34 @@ def make_savepath(path, name, extension=''):
     return path
 
 def apply_nested(function, items, **kwargs):
-    """ Apply `function` to each of `items`, keeping the same nestedness. Works with lists only. """
-    # Not a list
+    """ Apply `function(**kwargs)` to each of `items`.
+
+    Parameters:
+    -----------
+    function : callable
+        A function to apply to every item.
+    items : misc
+        If not a list than the provided function is just applied to the object.
+        Otherwise the list is unwrapped recusively and function is applied to every its item that is not a list.
+
+    Notes:
+    ------
+    Due to the recursive behavior of the function calculated results nestedness match the nestedness of provided inputs.
+    """
     if not isinstance(items, list):
         return function(items, **kwargs)
 
-    # Simple list
-    if all(not isinstance(item, list) for item in items):
-        return [function(item, **kwargs) for item in items]
+    return [apply_nested(function, item, **kwargs) for item in items]
 
-    # Nested list
+def flatten_nested(iterable):
+    """ Recursively flatten nested structure of tuples, list and dicts. """
     result = []
-    for item in items:
-        item = item if isinstance(item, list) else [item]
-        result.append(apply_nested(function, item, **kwargs))
-
-    return result
+    if isinstance(iterable, (tuple, list)):
+        for item in iterable:
+            result.extend(flatten_nested(item))
+    elif isinstance(iterable, dict):
+        for key, value in sorted(iterable.items()):
+            result.extend((*flatten_nested(key), *flatten_nested(value)))
+    else:
+        return (iterable,)
+    return tuple(result)
