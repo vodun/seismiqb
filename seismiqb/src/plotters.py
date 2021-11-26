@@ -644,7 +644,7 @@ class MatplotlibPlotter:
         # title
         'title_color' : 'k',
         # axis labels
-        'xlabel': '', 'ylabel': '',
+        'xlabel': 'Values', 'ylabel': 'Counts',
         'xlabel_color' : 'k', 'ylabel_color' : 'k',
         # legend
         'legend_size': 10,

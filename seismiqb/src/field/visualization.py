@@ -245,16 +245,14 @@ class VisualizationMixin:
         load_params = apply_nested(self._load_data, load_params, method=self.load_attribute, **(load_kwargs or {}))
         data = apply_nested(lambda params: params['data'], load_params)
 
-        # Plot params for attributes
-        plot_defaults = {
-            'tight_layout': True,
-            'return_figure': True,
-            'suptitle': f'Field `{self.displayed_name}`',
-            'cmap': apply_nested(self._make_cmap, load_params),
-            'alpha': apply_nested(self._make_alpha, load_params),
-            'title': [item[0] if isinstance(item, list) else item
-                      for item in flatten([apply_nested(self._make_title, load_params)])]
-        }
+        # Define plot params
+        plot_defaults = {'tight_layout': True, 'return_figure': True}
+        plot_defaults['suptitle'] = f'Field `{self.displayed_name}`'
+        plot_defaults['cmap'] = apply_nested(self._make_cmap, load_params)
+        plot_defaults['alpha'] = apply_nested(self._make_alpha, load_params)
+
+        titles_list = flatten([apply_nested(self._make_title, load_params)])
+        plot_defaults['title'] = [titles[0] if isinstance(titles, list) else titles for titles in titles_list]
 
         if bbox:
             bboxes_list = apply_nested(lambda params: params['bbox'], load_params)
@@ -262,16 +260,10 @@ class VisualizationMixin:
             plot_defaults['xlim'] = [(lims[0, 0].min(), lims[0, 1].max()) for lims in lims_list]
             plot_defaults['ylim'] = [(lims[1, 1].max(), lims[1, 0].min()) for lims in lims_list]
 
-        # Defaults for chosen mode
         if mode == 'imshow':
-            plot_defaults = {
-                **plot_defaults,
-                'colorbar': True,
-                'xlabel': self.index_headers[0],
-                'ylabel': self.index_headers[1]
-            }
-        elif mode != 'hist':
-            raise ValueError(f"Valid modes are 'imshow' or 'hist', but '{mode}' was given.")
+            plot_defaults['colorbar'] = True
+            plot_defaults['xlabel'] = self.index_headers[0]
+            plot_defaults['ylabel'] = self.index_headers[1]
 
         first_label_name = next(flatten([apply_nested(lambda params: params['label_name'], load_params)]))
         savepath = self.make_path(savepath, name=first_label_name) if savepath is not None else None
