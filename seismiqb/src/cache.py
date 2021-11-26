@@ -99,7 +99,7 @@ class CacheMixin:
                 method_cache_size = self.get_cache_size(cached_methods=[method])
 
                 arguments = list(method.cache()[self].keys())[0][1:]
-                arguments = {key : value for key, value in zip(arguments[::2], arguments[1::2])}
+                arguments = dict(zip(arguments[::2], arguments[1::2]))
 
                 cache_repr_[method.__name__] = {
                     'cache_length': method_cache_length,
