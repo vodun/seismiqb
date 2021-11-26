@@ -92,12 +92,14 @@ def test_horizon(capsys, tmpdir):
         out_path_ipynb = OUTPUT_DIR.join(f"horizon_test_out_{DATESTAMP}.ipynb")
 
     else:
-        # Clear outdatted files
-        previous_output_files = glob(os.path.join(TESTS_SCRIPTS_DIR, 'notebooks/horizon_test_out_*.ipynb'))
+        # Remove outdated executed controller notebook (It is saved near to the original one)
+        if REMOVE_OUTDATED_FILES:
+            previous_output_files = glob(os.path.join(TESTS_SCRIPTS_DIR, 'notebooks/horizon_test_out_*.ipynb'))
 
-        for file in previous_output_files:
-            os.remove(file)
+            for file in previous_output_files:
+                os.remove(file)
 
+        # Create main paths links
         if OUTPUT_DIR is None:
             OUTPUT_DIR = os.path.join(TESTS_SCRIPTS_DIR, 'notebooks/horizon_test_files/')
 

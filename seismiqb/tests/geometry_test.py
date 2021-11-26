@@ -73,6 +73,14 @@ def test_geometry(capsys, tmpdir):
         out_path_ipynb = OUTPUT_DIR.join(f"geometry_test_out_{DATESTAMP}.ipynb")
 
     else:
+        # Remove outdated executed controller notebook (It is saved near to the original one)
+        if REMOVE_OUTDATED_FILES:
+            previous_output_files = glob.glob(os.path.join(TESTS_SCRIPTS_DIR, 'notebooks/geometry_test_out_*.ipynb'))
+
+            for file in previous_output_files:
+                os.remove(file)
+
+        # Create main paths links
         if OUTPUT_DIR is None:
             OUTPUT_DIR = LOGS_DIR
 
