@@ -265,7 +265,7 @@ class MatplotlibPlotter:
             ncols = min(default_ncols, n_subplots)
             nrows = ceil_div(n_subplots, ncols)
         elif ncols is None:
-            ncols = ceil_div(n_subplots, ncols)
+            ncols = ceil_div(n_subplots, nrows)
         elif nrows is None:
             nrows = ceil_div(n_subplots, ncols)
 
