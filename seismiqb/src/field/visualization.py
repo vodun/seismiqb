@@ -257,12 +257,10 @@ class VisualizationMixin:
         }
 
         if bbox:
-            plot_defaults['xlim'] = []
-            plot_defaults['ylim'] = []
-            for lims in apply_nested(lambda params: [params['bbox']], load_params):
-                (x_min, x_max), (y_min, y_max), (_, _) = np.stack(lims).reshape(-1, 3, 2).transpose(1, 2, 0)
-                plot_defaults['xlim'].append((min(x_min), max(x_max)))
-                plot_defaults['ylim'].append((max(y_max), min(y_min)))
+            bboxes_list = apply_nested(lambda params: params['bbox'], load_params)
+            lims_list = [np.stack([bboxes]).transpose(1, 2, 0) for bboxes in bboxes_list]
+            plot_defaults['xlim'] = [(lims[0, 0].min(), lims[0, 1].max()) for lims in lims_list]
+            plot_defaults['ylim'] = [(lims[1, 1].max(), lims[1, 0].min()) for lims in lims_list]
 
         # Defaults for chosen mode
         if mode == 'imshow':
@@ -331,15 +329,12 @@ class VisualizationMixin:
         if attribute_name == 'user data':
             data = load_params['src']
             load_params['label_name'] = ''
-            load_params['bbox'] = np.array([[0, data.shape[0]],
-                                            [0, data.shape[1]],
-                                            [0, data.shape[2]] if data.ndim > 2 else [None, None]]
-                                            )
+            load_params['bbox'] = np.array([[0, data.shape[0]], [0, data.shape[1]]])
         # Load data with `load_attribute`
         else:
             data, label = method(_return_label=True, **load_params)
             load_params['label_name'] = label.displayed_name
-            load_params['bbox'] = label.bbox
+            load_params['bbox'] = label.bbox[:2]
 
         load_params['data'] = postprocess(data.squeeze())
         return load_params
