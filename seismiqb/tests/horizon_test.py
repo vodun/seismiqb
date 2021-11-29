@@ -64,19 +64,13 @@ from datetime import date
 from .utils import extract_traceback
 from ..batchflow.utils_notebook import run_notebook
 
-# Workspace constants
-DATESTAMP = date.today().strftime("%Y-%m-%d")
-TESTS_SCRIPTS_DIR = os.getenv("TESTS_SCRIPTS_DIR", os.path.dirname(os.path.realpath(__file__))+'/')
-OUTPUT_DIR = None
 
-# Execution parameters
-USE_TMP_OUTPUT_DIR = True
-REMOVE_OUTDATED_FILES = True
-REMOVE_EXTRA_FILES = True
-SHOW_MESSAGE = True
-SHOW_TEST_ERROR_INFO = True
-
-def test_horizon(capsys, tmpdir):
+def test_horizon(
+    capsys, tmpdir,
+    OUTPUT_DIR=None, USE_TMP_OUTPUT_DIR=True,
+    REMOVE_OUTDATED_FILES=True, REMOVE_EXTRA_FILES=True,
+    SHOW_MESSAGE=True, SHOW_TEST_ERROR_INFO=True
+):
     """ Run Horizon test notebook.
 
     This test runs ./notebooks/horizon_test.ipynb test file and show execution message.
@@ -84,6 +78,11 @@ def test_horizon(capsys, tmpdir):
     Under the hood, this notebook create a fake seismic cube with horizon, saves them
     and runs Horizon tests notebooks (base, manipulations, attributes).
     """
+    # Get workspace constants
+    DATESTAMP = date.today().strftime("%Y-%m-%d")
+    TESTS_SCRIPTS_DIR = os.getenv("TESTS_SCRIPTS_DIR", os.path.dirname(os.path.realpath(__file__))+'/')
+
+    # Workspace preparation
     if USE_TMP_OUTPUT_DIR:
         # Create tmp workspace
         OUTPUT_DIR = tmpdir.mkdir("notebooks").mkdir("horizon_test_files")

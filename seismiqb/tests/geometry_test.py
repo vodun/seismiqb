@@ -42,20 +42,13 @@ from datetime import date
 from .utils import extract_traceback
 from ..batchflow.utils_notebook import run_notebook
 
-# Workspace constants
-DATESTAMP = date.today().strftime("%Y-%m-%d")
-TESTS_SCRIPTS_DIR = os.getenv("TESTS_SCRIPTS_DIR", os.path.dirname(os.path.realpath(__file__))+'/')
-LOGS_DIR = os.path.join(TESTS_SCRIPTS_DIR, 'notebooks/geometry_test_files/')
-OUTPUT_DIR = None
 
-# Execution parameters
-USE_TMP_OUTPUT_DIR = True
-REMOVE_OUTDATED_FILES = True
-REMOVE_EXTRA_FILES = True
-SHOW_MESSAGE = True
-SHOW_TEST_ERROR_INFO = True
-
-def test_geometry(capsys, tmpdir):
+def test_geometry(
+    capsys, tmpdir,
+    OUTPUT_DIR=None, USE_TMP_OUTPUT_DIR=True,
+    REMOVE_OUTDATED_FILES=True, REMOVE_EXTRA_FILES=True,
+    SHOW_MESSAGE=True, SHOW_TEST_ERROR_INFO=True
+):
     """ Run SeismicGeometry test notebook.
 
     This test runs ./notebooks/geometry_test.ipynb test file and show execution message and
@@ -64,6 +57,12 @@ def test_geometry(capsys, tmpdir):
     Under the hood, this notebook create a fake seismic cube, saves it in different data formats
     and for each format run SeismicGeometry tests.
     """
+    # Get workspace constants
+    DATESTAMP = date.today().strftime("%Y-%m-%d")
+    TESTS_SCRIPTS_DIR = os.getenv("TESTS_SCRIPTS_DIR", os.path.dirname(os.path.realpath(__file__))+'/')
+    LOGS_DIR = os.path.join(TESTS_SCRIPTS_DIR, 'notebooks/geometry_test_files/')
+
+    # Workspace preparation
     if USE_TMP_OUTPUT_DIR:
         # Create tmp workspace
         OUTPUT_DIR = tmpdir.mkdir("notebooks").mkdir("geometry_test_files")
