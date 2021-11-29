@@ -11,7 +11,7 @@ import psutil
 import h5py
 
 from .export import ExportMixin
-from ..cache import CacheMixin
+from ..utils import CacheMixin
 
 from ..utils import file_print, get_environ_flag, lru_cache, transformable
 from ..plotters import plot_image

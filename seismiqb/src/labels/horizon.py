@@ -14,7 +14,7 @@ from scipy.ndimage.morphology import binary_fill_holes, binary_dilation
 
 from .horizon_attributes import AttributesMixin
 from .horizon_visualization import VisualizationMixin
-from ..cache import CacheMixin
+from ..utils import CacheMixin
 from ..utils import groupby_mean, groupby_min, groupby_max, filtering_function
 from ..utils import make_bezier_figure
 from ..functional import smooth_out
