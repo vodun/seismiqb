@@ -4,7 +4,7 @@ from functools import wraps
 from threading import RLock
 from hashlib import blake2b
 from copy import copy
-
+import numpy as np
 
 class lru_cache:
     """ Thread-safe least recent used cache. Must be applied to a class methods.
@@ -178,6 +178,7 @@ class CacheMixin:
         ----------
         cached_methods: list
             A list of methods that cache data.
+            By default, uses all cached methods of the class.
         """
         if cached_methods is None:
             cached_methods = self.get_cached_methods()
@@ -192,6 +193,7 @@ class CacheMixin:
         ----------
         cached_methods: list
             A list of methods that cache data.
+            By default, uses all cached methods of the class.
         """
         if cached_methods is None:
             cached_methods = self.get_cached_methods()
@@ -210,6 +212,7 @@ class CacheMixin:
         ----------
         cached_methods: list
             A list of methods that cache data.
+            By default, uses all cached methods of the class.
         """
         if cached_methods is None:
             cached_methods = self.get_cached_methods()
@@ -217,7 +220,11 @@ class CacheMixin:
         cache_size_accumulator = 0
 
         for method in cached_methods:
-            cache_size_accumulator += sum(item.nbytes / (1024 ** 3) for item in method.cache()[self].values())
+            method_values = list(method.cache()[self].values())
+
+            for values in method_values:
+                if isinstance(values, np.ndarray):
+                    cache_size_accumulator += sum(item.nbytes / (1024 ** 3) for item in method_values)
 
         return cache_size_accumulator
 
