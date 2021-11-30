@@ -615,44 +615,140 @@ class LoopedList(list):
 
 
 class AugmentedList(list):
-    """ List with additional features:
-        - can be indexed with other iterables.
-        - delegates calls to contained objects.
-        For example, `a_list.method()` is equivalent to `[item.method() for item in a_list]`.
-        Can be used to retrieve attributes, properties and call methods.
-        Returns the list of results, which is itself an instance of `AugmentedList`.
-        - auto-completes names to that of contained objects.
+    """ List that delegates attribute retrieval requests to contained objects and can be indexed with other iterables.
+        On successful attribute request returns the list of results, which is itself an instance of `AugmentedList`.
+        Auto-completes names to that of contained objects. Meant to be used for storing homogeneous objects.
+
+        Examples
+        --------
+        1. Let `l` be an `AugmentedList` of objects that have `interpolate` method:
+        >>> l = AugmentedList([horizon_0, horizon_1]):
+        Than the following expression:
+        >>> l.interpolate()
+        Is equvalent to:
+        >>> [horizon_0.interpolate(), horizon_1.interpolate()]
+
+        2. Len `l` be an `AugmentedList` of objects that have `shape` attribute:
+        >>> l = [arr_0, [arr_1], [[arr_3, arr_4]]]
+        Than the following expression:
+        >>> l.shape
+        Is equvalent to:
+        >>> [arr_0.shape, [arr_1.shape], [[arr_3.shape, arr_4.shape]]]
+
+        3. Len `l` be an `AugmentedList` of numbers:
+        >>> l = [x_0, [x_1], x_2]
+        And let `f` be the following lambda function:
+        >>> f = lambda x: x % 2
+        Than the following expression:
+        >>> l.apply(f)
+        Is equvalent to:
+        >>> [f(x_0), [f(x_1)], f(x_2)]
+
+        4. Let `l` be an `AugmentedList` of dictionaries:
+        >>> l = AugmentedList([{'cmap': 'viridis', 'alpha': 1.0},
+                               [{'cmap': 'ocean', 'alpha': 1.0}, {'cmap': 'Reds', 'alpha': 0.7}]])
+        That the following expresion:
+        >>> l.to_dict()
+        Will be evaluated to:
+        >>> {'cmap': ['viridis, ['ocean', 'Reds]], 'alpha': [1.0, [1.0, 0.7]]}
+
+        Notes
+        -----
+        Using `AugmentedList` for heterogeneous objects storage is not recommended, due to the following:
+        1. Tab autocompletion suggests attributes from the first list item only.
+        2. The request of the attribute absent in any of the objects leads to an error.
     """
-    # Advanced indexing
+    def __init__(self, obj=None):
+        """ Perform items recusive casting to `AugmentedList` type if they are lists. """
+        obj = [] if obj is None else obj if isinstance(obj, list) else [obj]
+        super().__init__([type(self)(item) if isinstance(item, list) else item for item in obj])
+
     def __getitem__(self, key):
+        """ Manage indexing via iterable. """
         if isinstance(key, (int, np.integer)):
             return super().__getitem__(key)
-        if isinstance(key, slice):
-            return AugmentedList(super().__getitem__(key))
 
-        return AugmentedList([super().__getitem__(idx) for idx in key])
+        if isinstance(key, slice):
+            return type(self)(super().__getitem__(key))
+
+        return type(self)([super().__getitem__(idx) for idx in key])
 
     # Delegating to contained objects
     def __getattr__(self, key):
+        """ Get attributes of list items, recusively delegating this process to items if they are lists themselves. """
         if len(self) == 0:
             return lambda *args, **kwargs: self
 
-        attribute = getattr(self[0], key)
+        attributes = type(self)([getattr(item, key) for item in self])
 
-        if not callable(attribute):
-            # Attribute or property
-            return AugmentedList([getattr(item, key) for item in self])
+        if not callable(attributes.reference_object):
+            return type(self)(attributes)
 
-        @wraps(attribute)
-        def method_wrapper(*args, **kwargs):
-            return AugmentedList([getattr(item, key)(*args, **kwargs) for item in self])
-        return method_wrapper
+        @wraps(attributes.reference_object)
+        def wrapper(*args, **kwargs):
+            return type(self)([method(*args, **kwargs) for method in attributes])
+
+        return wrapper
+
+    @property
+    def reference_object(self):
+        """ First item of a list taking into account its nestedness. """
+        return self[0].reference_object if isinstance(self[0], type(self)) else self[0]
+
+    def apply(self, func, *args, **kwargs):
+        """ Recursively traverse list items applying given function and return list of results with same nestedness. """
+        result = type(self)()
+
+        for item in self:
+            if isinstance(item, type(self)):
+                res = item.apply(func, *args, **kwargs)
+            else:
+                res = func(item, *args, **kwargs)
+
+            result.append(res)
+
+        return result
+
+    def to_dict(self):
+        """ Convert nested list of dicts to dict of nested lists. Address class docs for usage examples. """
+        if not isinstance(self.reference_object, dict):
+            raise TypeError('Only lists consisting of `dict` items can be converted.')
+
+        result = {}
+
+        # pylint: disable=cell-var-from-loop
+        for key in self.reference_object:
+            try:
+                result[key] = self.apply(lambda dct: dct[key])
+            except KeyError as e:
+                raise ValueError(f'KeyError occured due to absence of key `{key}` in some of list items.') from e
+
+        return result
+
+    @property
+    def flat(self):
+        """ Flat list of items. """
+        return self.flatten()
+
+    def flatten(self, depth=0):
+        """ Reduce list nestedness by flattening its items starting with given depth. By default flattens all items. """
+        res = type(self)()
+
+        for item in self:
+            if isinstance(item, list):
+                item = item.flatten(depth - 1)
+                if depth > 0:
+                    res.append(item)
+                else:
+                    res.extend(item)
+            else:
+                res.append(item)
+
+        return res
 
     def __dir__(self):
         """ Correct autocompletion for delegated methods. """
-        if len(self) != 0:
-            return dir(self[0])
-        return dir(list)
+        return dir(list) if len(self) == 0 else dir(self[0])
 
     # Correct type of operations
     def __add__(self, other):

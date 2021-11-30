@@ -2,10 +2,9 @@
 #pylint: disable=global-variable-undefined
 import numpy as np
 from matplotlib import pyplot as plt
-from matplotlib.cbook import flatten
 
 from .viewer import FieldViewer
-from ..utils import apply_nested
+from ..utils import AugmentedList
 from ..plotters import plot_image, MatplotlibPlotter, show_3d
 from ..labels.horizon_attributes import AttributesMixin
 
@@ -218,22 +217,23 @@ class VisualizationMixin:
                        savepath='~/IMAGES/complex.png')
         """
         # If `*` is present, run `show` multiple times with `*` replaced to a label id
-        wildcard = apply_nested(self._wildcard_check, attributes)
-        if any(flatten([wildcard])):
-            # Get len of each attribute
-            get_labels_len = lambda attr: [len(getattr(self, item)) for item in self.loaded_labels
-                                           if '*' in attr and item in attr]
-            lens = apply_nested(get_labels_len, attributes)
+        attributes = AugmentedList(attributes)
 
-            if len(set(flatten(lens))) != 1:
+        attribute_contains_wildcard = attributes.apply(self._wildcard_check)
+        if any(attribute_contains_wildcard.flat):
+            # Get len of each attribute
+            get_labels_len = lambda attr: AugmentedList([len(getattr(self, item)) for item in self.loaded_labels
+                                                         if '*' in attr and item in attr])
+            labels_lists_lengths = attributes.apply(get_labels_len)
+            if labels_lists_lengths[1:] == labels_lists_lengths[:-1]:
                 raise ValueError('When using `show` with starred-expressions, length of attributes must be the same!')
 
             figures = []
-            n_items = next(flatten(lens))
+            n_items = labels_lists_lengths.reference_object
             for label_num in range(n_items):
                 #pylint: disable=cell-var-from-loop
                 substitutor = lambda attr: attr.replace('*', str(label_num)) if isinstance(attr, str) else attr
-                attributes_ = apply_nested(substitutor, attributes)
+                attributes_ = attributes.apply(substitutor)
 
                 fig = self.show(attributes=attributes_, mode=mode, return_figure=True,
                                 savepath=savepath, bbox=bbox, load_kwargs=load_kwargs, **plot_kwargs)
@@ -241,21 +241,15 @@ class VisualizationMixin:
             return figures if return_figure else None
 
         # Transform load params into dicts, populate them with defaults and load data
-        load_params = apply_nested(self._make_load_params, attributes)
-        load_params = apply_nested(self._load_data, load_params, method=self.load_attribute, **(load_kwargs or {}))
-        data = apply_nested(lambda params: params['data'], load_params)
+        loaded = attributes.apply(self._show_load_data, common_params=load_kwargs)
 
-        # Define plot params
-        plot_defaults = {'tight_layout': True, 'return_figure': True}
+        # Make plot defaults
+        plot_defaults = loaded.apply(self._show_make_defaults).to_dict()
+        plot_defaults['title'] = [item[0] if isinstance(item, list) else item for item in plot_defaults['title']]
         plot_defaults['suptitle'] = f'Field `{self.displayed_name}`'
-        plot_defaults['cmap'] = apply_nested(self._make_cmap, load_params)
-        plot_defaults['alpha'] = apply_nested(self._make_alpha, load_params)
-
-        titles_list = flatten([apply_nested(self._make_title, load_params)])
-        plot_defaults['title'] = [titles[0] if isinstance(titles, list) else titles for titles in titles_list]
 
         if bbox:
-            bboxes_list = apply_nested(lambda params: params['bbox'], load_params)
+            bboxes_list = loaded.apply(lambda params: params['bbox'])
             lims_list = [np.stack([bboxes]).transpose(1, 2, 0) for bboxes in bboxes_list]
             plot_defaults['xlim'] = [(lims[0, 0].min(), lims[0, 1].max()) for lims in lims_list]
             plot_defaults['ylim'] = [(lims[1, 1].max(), lims[1, 0].min()) for lims in lims_list]
@@ -265,11 +259,12 @@ class VisualizationMixin:
             plot_defaults['xlabel'] = self.index_headers[0]
             plot_defaults['ylabel'] = self.index_headers[1]
 
-        first_label_name = next(flatten([apply_nested(lambda params: params['label_name'], load_params)]))
+        first_label_name = loaded.reference_object['label_name']
         savepath = self.make_path(savepath, name=first_label_name) if savepath is not None else None
 
         # Plot image with given params and return resulting figure
-        figure = plot_image(data=data, mode=mode, savepath=savepath, **{**plot_defaults, **plot_kwargs})
+        plot_params = {**plot_defaults, **plot_kwargs}
+        figure = plot_image(mode=mode, savepath=savepath, **plot_params)
         plt.show()
 
         return figure if return_figure else None
@@ -285,87 +280,90 @@ class VisualizationMixin:
             result = False
         return result
 
-    @staticmethod
-    def _make_load_params(attribute):
-        if isinstance(attribute, str):
-            attribute = {'src': attribute}
+    ALIAS_TO_ATTRIBUTE = AttributesMixin.ALIAS_TO_ATTRIBUTE
 
-        # Convert everything to a dictionary
-        if isinstance(attribute, dict):
-            attribute_name = attribute['src'].split('/')[-1]
-            params = {'attribute_name': attribute_name, 'dtype': np.float32, **attribute}
+    def _show_load_data(self, attribute_params, common_params):
+        # Convert params to dict, if provided in a simple form (attribute name to load or ready-to-use numpy array)
+        if isinstance(attribute_params, (str, np.ndarray)):
+            attribute_params = {'src': attribute_params}
+        elif not isinstance(attribute_params, dict):
+            raise TypeError(f'Attribute should be either str, dict or array! Got {type(attribute_params)} instead.')
 
-            # Add load defaults with respect to attribute name
-            if attribute_name in ['fourier', 'wavelet', 'fourier_decomposition', 'wavelet_decomposition']:
-                params['n_components'] = attribute.get('n_components', 1)
+        # Extract attribute name and if it's an alias, convert it to the final attribute name
+        src = attribute_params['src']
+        attribute_name = src.split('/')[-1] if isinstance(src, str) else 'user data'
+        attribute_name = self.ALIAS_TO_ATTRIBUTE.get(attribute_name, attribute_name)
+        loaded = {'attribute_name': attribute_name}
 
-            if attribute_name in ['masks', 'full_binary_matrix']:
-                params['fill_value'] = 0
+        # Make load defaults
+        load_defaults = {'dtype': np.float32}
 
-            return params
+        if attribute_name in ['fourier_decomposition', 'wavelet_decomposition']:
+            load_defaults['n_components'] = 1
 
-        if isinstance(attribute, np.ndarray):
-            params = {'src': attribute, 'attribute_name': 'user data'}
-            return params
+        if attribute_name in ['masks', 'full_binary_matrix']:
+            load_defaults['fill_value'] = 0
 
-        raise TypeError(f'Each attribute should be either str, dict or array! Got {type(attribute)} instead.')
-
-    @staticmethod
-    def _load_data(load_params, method, **load_kwargs):
-        """ Manage data loading depending on load params type. """
-        load_params = {**load_params, **load_kwargs}
+        # Merge defaults with provided parameters
+        load_params = {**load_defaults, **(common_params or dict()), **attribute_params}
         postprocess = load_params.pop('postprocess', lambda x: x)
 
-        attribute_name = load_params['attribute_name']
-        # Already an array: no loading needed
-        if attribute_name == 'user data':
-            data = load_params['src']
-            load_params['label_name'] = ''
-            load_params['bbox'] = np.array([[0, max] for max in data.shape])
-        # Load data with `load_attribute`
+        # Load
+        if not isinstance(src, np.ndarray):
+            data, label = self.load_attribute(_return_label=True, **load_params)
+            loaded['label_name'] = label.displayed_name
+            loaded['bbox'] = label.bbox[:2]
         else:
-            data, label = method(_return_label=True, **load_params)
-            load_params['label_name'] = label.displayed_name
-            load_params['bbox'] = label.bbox[:2]
+            data = src
+            loaded['label_name'] = ''
+            loaded['bbox'] = np.array([[0, max] for max in data.shape])
 
-        load_params['data'] = postprocess(data.squeeze())
-        return load_params
+        loaded['data'] = postprocess(data.squeeze())
+
+        return loaded
 
     CMAP_TO_ATTRIBUTE = {
         'Depths': ['full_matrix'],
         'Reds': ['spikes', 'quality_map'],
         'Metric': ['metric']
     }
-    ATTRIBUTE_TO_CMAP = {attr: cmap for cmap, attributes in CMAP_TO_ATTRIBUTE.items() for attr in attributes}
+    ATTRIBUTE_TO_CMAP = {attr: cmap for cmap, attributes in CMAP_TO_ATTRIBUTE.items()
+                         for attr in attributes}
 
-    @staticmethod
-    def _make_cmap(params):
-        attribute_name = params['attribute_name']
-        attribute_name = AttributesMixin.ALIAS_TO_ATTRIBUTE.get(attribute_name, attribute_name)
+    def _show_make_defaults(self, loaded):
+        params = {'data': loaded['data']}
 
+        attribute_name = loaded['attribute_name']
+        label_name = loaded['label_name']
+
+        # Choose default cmap
         if attribute_name == 'full_binary_matrix':
             global_name = ''.join(filter(lambda x: x.isalpha(), attribute_name))
             if global_name not in NAME_TO_COLOR:
                 NAME_TO_COLOR[global_name] = next(COLOR_GENERATOR)
-            return NAME_TO_COLOR[global_name]
+            cmap = NAME_TO_COLOR[global_name]
+        else:
+            cmap = self.ATTRIBUTE_TO_CMAP.get(attribute_name, 'Basic')
 
-        return VisualizationMixin.ATTRIBUTE_TO_CMAP.get(attribute_name, 'Basic')
+        params['cmap'] = cmap
 
-    @staticmethod
-    def _make_alpha(params):
-        attribute_name = params['attribute_name']
-        attribute_name = AttributesMixin.ALIAS_TO_ATTRIBUTE.get(attribute_name, attribute_name)
-
+        # Choose default alpha
         if attribute_name in ['full_binary_matrix']:
-            return 0.7
+            alpha = 0.7
+        else:
+            alpha = 1.0
 
-        return 1.0
+        params['alpha'] = alpha
 
-    @staticmethod
-    def _make_title(params):
-        label_name = params['label_name']
-        attribute_name = params['attribute_name']
-        return f'`{label_name}`\n{attribute_name}' if label_name else attribute_name
+        # Make title text
+        if label_name:
+            title = f'`{label_name}`\n{attribute_name}'
+        else:
+            title = attribute_name
+
+        params['title'] = title
+
+        return params
 
 
     # 2D interactive
