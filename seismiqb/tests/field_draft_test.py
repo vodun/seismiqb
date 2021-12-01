@@ -43,20 +43,13 @@ from datetime import date
 from .utils import extract_traceback
 from ..batchflow.utils_notebook import run_notebook
 
-# Workspace constants
-DATESTAMP = date.today().strftime("%Y-%m-%d")
-TESTS_SCRIPTS_DIR = os.getenv("TESTS_SCRIPTS_DIR", os.path.dirname(os.path.realpath(__file__))+'/')
-OUTPUT_DIR = None
 
-# Execution parameters
-USE_TMP_OUTPUT_DIR = True
-REMOVE_OUTDATED_FILES = True
-REMOVE_EXTRA_FILES = True
-SHOW_TEST_ERROR_INFO = True
-SHOW_MESSAGE = True
-
-
-def test_field(capsys, tmpdir):
+def test_field(
+    capsys, tmpdir,
+    OUTPUT_DIR=None, USE_TMP_OUTPUT_DIR=True,
+    REMOVE_OUTDATED_FILES=True, REMOVE_EXTRA_FILES=True,
+    SHOW_MESSAGE=True, SHOW_TEST_ERROR_INFO=True
+):
     """ Run Field test notebook draft.
 
     This test runs ./notebooks/field_test_draft.ipynb test file and show execution message.
@@ -64,6 +57,11 @@ def test_field(capsys, tmpdir):
     Under the hood, this notebook create a fake seismic cube (Field), saves it and checks
     matrices savings and loadings in CHARISMA data format.
     """
+    # Get workspace constants
+    DATESTAMP = date.today().strftime("%Y-%m-%d")
+    TESTS_SCRIPTS_DIR = os.getenv("TESTS_SCRIPTS_DIR", os.path.dirname(os.path.realpath(__file__))+'/')
+
+    # Workspace preparation
     if USE_TMP_OUTPUT_DIR:
         # Create tmp workspace
         OUTPUT_DIR = tmpdir.mkdir('notebooks')
