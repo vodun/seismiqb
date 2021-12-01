@@ -78,13 +78,15 @@ class VisualizationMixin:
             'suptitle_label': f'`{self.name}` on field `{self.field.displayed_name}`',
             **kwargs
         }
-        self.field.show(attributes=attributes, mode=mode, short_title=short_title,
+        figure = self.field.show(attributes=attributes, mode=mode, short_title=short_title,
                         return_figure=return_figure, **kwargs)
 
         # Clean-up
         if self.field.loaded_labels[-1] == '_unknown_label':
             self.field._unknown_label = None
             self.field.loaded_labels.pop(-1)
+
+        return figure if return_figure else None
 
 
 
@@ -134,9 +136,7 @@ class VisualizationMixin:
         title = f'Horizon `{self.name}` on cube `{self.field.displayed_name}`\n {header} {loc} out of {total}'
 
         kwargs = {
-            'figsize': (16, 8),
             'title_label': title,
-            'title_y': 1.02,
             'xlabel': xlabel,
             'ylabel': ylabel,
             'extent': (xmin, xmax, ymin, ymax),

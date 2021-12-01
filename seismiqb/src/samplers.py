@@ -234,7 +234,8 @@ class HorizonSampler(BaseSampler):
     """
     dim = 2 + 1 + 6 # dimensionality of sampled points: field_id and label_id, orientation, locations
 
-    def __init__(self, horizon, crop_shape, threshold=0.05, ranges=None, filtering_matrix=None, shift_height=True,
+    def __init__(self, horizon, crop_shape, threshold=0.05, ranges=None, filtering_matrix=None,
+                 shift_height=True, spatial_shift=False,
                  field_id=0, label_id=0, **kwargs):
         field = horizon.field
         matrix = horizon.full_matrix
@@ -256,6 +257,8 @@ class HorizonSampler(BaseSampler):
         if shift_height:
             shift_height = shift_height if isinstance(shift_height, tuple) else (0.9, 0.1)
         self.shift_height = shift_height
+
+        self.spatial_shift = spatial_shift
         super().__init__()
 
     def sample(self, size):
@@ -284,13 +287,32 @@ class HorizonSampler(BaseSampler):
 
     def _sample(self, size):
         idx = np.random.randint(self.n, size=size)
-        sampled = self.locations[idx]
+        sampled = self.locations[idx] # (orientation, i_start, x_start, h_start, i_stop, x_stop, h_stop)
 
         if self.shift_height:
             shift = np.random.randint(low=-int(self.crop_height*self.shift_height[0]),
                                       high=-int(self.crop_height*self.shift_height[1]),
                                       size=(size, 1), dtype=np.int32)
             sampled[:, [3, 6]] += shift
+
+        if self.spatial_shift:
+            shapes_i = sampled[:, 4] - sampled[:, 1]
+            shift_i = np.random.randint(low=-(shapes_i*self.spatial_shift[0][0]).astype(np.int32),
+                                        high=-(shapes_i*self.spatial_shift[0][1]).astype(np.int32),
+                                        size=(size, 1), dtype=np.int32)
+            sampled[:, [1, 4]] += shift_i
+
+            shapes_x = sampled[:, 5] - sampled[:, 2]
+            shift_x = np.random.randint(low=-(shapes_x*self.spatial_shift[1][0]).astype(np.int32),
+                                        high=-(shapes_x*self.spatial_shift[1][1]).astype(np.int32),
+                                        size=(size, 1), dtype=np.int32)
+            sampled[:, [2, 5]] += shift_x
+
+            np.clip(sampled[:, 1], 0, self.field.shape[0] - self.crop_shape[0], out=sampled[:, 1])
+            np.clip(sampled[:, 4], 0 + self.crop_shape[0], self.field.shape[0], out=sampled[:, 4])
+
+            np.clip(sampled[:, 2], 0, self.field.shape[1] - self.crop_shape[1], out=sampled[:, 2])
+            np.clip(sampled[:, 5], 0 + self.crop_shape[1], self.field.shape[1], out=sampled[:, 5])
 
         np.clip(sampled[:, 3], 0, self.field.depth - self.crop_height, out=sampled[:, 3])
         np.clip(sampled[:, 6], 0 + self.crop_height, self.field.depth, out=sampled[:, 6])
@@ -299,7 +321,8 @@ class HorizonSampler(BaseSampler):
 
     def __repr__(self):
         return f'<HorizonSampler for {self.displayed_name}: '\
-               f'crop_shape={tuple(self.crop_shape)}, threshold={self.threshold}, shift_height={self.shift_height}>'
+               f'crop_shape={tuple(self.crop_shape)}, threshold={self.threshold}, '\
+               f'shift_height={self.shift_height}, spatial_shift={self.spatial_shift}>'
 
     @property
     def orientation_matrix(self):

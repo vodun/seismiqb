@@ -13,13 +13,14 @@ from scipy.ndimage.morphology import binary_fill_holes, binary_dilation
 
 from .horizon_attributes import AttributesMixin
 from .horizon_visualization import VisualizationMixin
+from ..utils import CacheMixin
 from ..utils import groupby_mean, groupby_min, groupby_max, filtering_function
 from ..utils import make_bezier_figure
 from ..functional import smooth_out
 
 
 
-class Horizon(AttributesMixin, VisualizationMixin):
+class Horizon(AttributesMixin, CacheMixin, VisualizationMixin):
     """ Contains spatially-structured horizon: each point describes a height on a particular (iline, xline).
 
     Initialized from `storage` and `geometry`, where storage can be one of:
@@ -226,33 +227,6 @@ class Horizon(AttributesMixin, VisualizationMixin):
                                     dtype=np.int32)
         elif storage == 'points':
             self._points = None
-
-    def reset_cache(self):
-        """ Clear cached data. """
-        for name in dir(self):
-            is_property = isinstance(getattr(self.__class__, name, None), property)
-            if name.startswith("__") or 'cache' in name or is_property:
-                continue
-
-            method = getattr(self, name)
-            if callable(method):
-                if hasattr(method, 'cache'):
-                    method.reset_instance(self)
-
-    @property
-    def cache_size(self):
-        """ Total size of cached data. """
-        size = 0
-        for name in dir(self):
-            is_property = isinstance(getattr(self.__class__, name, None), property)
-            if name.startswith("__") or 'cache' in name or is_property:
-                continue
-
-            method = getattr(self, name)
-            if callable(method):
-                if hasattr(method, 'cache'):
-                    size += sum(item.nbytes / (1024 ** 3) for item in method.cache()[self].values())
-        return size
 
     def __copy__(self):
         """ Create a new horizon with the same data.
@@ -906,10 +880,8 @@ class Horizon(AttributesMixin, VisualizationMixin):
     def compare(self, other, offset=0, absolute=True, printer=print, hist=True, plot=True):
         """ Compare quality of self against another horizon or sequence of horizons. """
         from ..metrics import HorizonMetrics
-        _ = HorizonMetrics([self, other]).evaluate(
-            'compare', absolute=absolute, offset=offset, printer=printer,
-            hist=hist, plot=plot
-        )
+        HorizonMetrics([self, other]).evaluate('compare', absolute=absolute, offset=offset,
+                                               printer=printer, hist=hist, plot=plot)
 
     def check_proximity(self, other, offset=0):
         """ Compute a number of stats on location of `self` relative to the `other` Horizons.
@@ -1157,9 +1129,9 @@ class Horizon(AttributesMixin, VisualizationMixin):
         horizons = [horizon for horizon in horizons if len(horizon) >= minsize]
 
         # Iterate over the list of horizons to merge everything that can be merged
+        i = 0
         flag = True
         while flag:
-            i = 0
             # Continue while at least one pair of horizons was merged at previous iteration
             flag = False
             while True:
