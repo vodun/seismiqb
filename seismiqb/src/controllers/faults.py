@@ -9,12 +9,12 @@ import numpy as np
 import torch
 
 from .base import BaseController
-from ..labels import Fault
+from ..labels import Fault, skeletonize
 from ..dataset import SeismicDataset
 from ..geometry import SeismicGeometry
 from ..samplers import SeismicSampler, RegularGrid, FaultSampler, ConstantSampler
 from ..metrics import FaultsMetrics
-from ..utils import adjust_shape_3d, Accumulator3D, skeletonize, GaussianLayer, expand_dims, squueze, faults_sizes
+from ..utils import adjust_shape_3d, Accumulator3D, GaussianLayer, expand_dims, squueze, faults_sizes
 from ..plotters import plot_image
 
 from ...batchflow import Config, Pipeline, Notifier, Monitor
@@ -395,7 +395,7 @@ class FaultController(BaseController):
             .init_variable('target', [])
             .predict_model('model', B('images'), fetches=self.config['inference/output'], save_to=B('predictions'))
             .adaptive_squeeze(src='predictions')
-            .zero_bounds(src='predictions', margin=C('margin'))
+            .fill_bounds(src='predictions', margin=C('margin'))
             .run_later(D('size'))
         )
 

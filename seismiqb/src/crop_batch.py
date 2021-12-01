@@ -1140,7 +1140,7 @@ class SeismicCropBatch(Batch):
         return self
 
     @action
-    def zero_bounds(self, src, dst=None, margin=0.05):
+    def fill_bounds(self, src, dst=None, margin=0.05, fill_value=0):
         """ Fill bounds of crops with zeros. """
         if (np.array(margin) == 0).all():
             return self
@@ -1150,15 +1150,21 @@ class SeismicCropBatch(Batch):
         dst = [dst] if isinstance(dst, str) else dst
 
         if isinstance(margin, (int, float)):
-            margin = (margin, margin)
+            margin = (margin, margin, margin)
 
         for _src, _dst in zip(src, dst):
             crop = getattr(self, _src).copy()
-            pad = [np.floor(crop.shape[i]) * r if isinstance(r, float) else r for i, r in enumerate(margin)]
-            crop[:, :, :pad[0] // 2] = 0
-            crop[:, :, -pad[0] // 2:] = 0
-            crop[:, :, :, :pad[1] // 2] = 0
-            crop[:, :, :, -pad[1] // 2:] = 0
+            pad = [int(np.floor(s) * m) if isinstance(m, float) else m for m, s in zip(margin, crop.shape[1:])]
+            pad = [m if s > 1 else 0 for m, s in zip(pad, crop.shape[1:])]
+            pad = [(item // 2, item - item // 2) for item in pad]
+            print(pad)
+            for i in range(3):
+                slices = [slice(None), slice(None), slice(None), slice(None)]
+                slices[i+1] = slice(pad[i][0])
+                crop[slices] = fill_value
+
+                slices[i+1] = slice(crop.shape[i+1] - pad[i][1], None)
+                crop[slices] = fill_value
             setattr(self, _dst, crop)
         return self
 

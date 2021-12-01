@@ -17,6 +17,7 @@ from ...batchflow.notifier import Notifier
 
 from .horizon import Horizon
 from .fault_triangulation import make_triangulation, triangle_rasterization
+from .fault_postprocessing import faults_sizes
 from ..plotters import show_3d
 from ..geometry import SeismicGeometry
 
@@ -206,8 +207,7 @@ class Fault(Horizon):
             )
             if mask_pos.any():
                 if self.direction == 0:
-                    # mask[mask_pos] = 0
-                    mask[mask_pos] = np.clip(mask[mask_pos], 0, 1)
+                    mask[mask_pos, :] = np.clip(mask[mask_pos, :], 0, 1)
                 else:
                     mask[:, mask_pos] = np.clip(mask[:, mask_pos], 0, 1)
 
@@ -459,25 +459,6 @@ class Fault(Horizon):
             labels = [Fault(item[1].astype('int32'), name=f'fault_{i}', field=field)
                       for i, item in Notifier(pbar)(enumerate(labels))]
         return labels
-
-def faults_sizes(labels):
-    """ Compute sizes of faults.
-
-    Parameters
-    ----------
-    labels : numpy.ndarray
-        array of shape (N, 4) where the first 3 columns are coordinates of points and the last one
-        is for labels
-    Returns
-    -------
-    sizes : numpy.ndarray
-    """
-    sizes = []
-    for array in labels:
-        i_len = (array[:, 0].max() - array[:, 0].min())
-        x_len = (array[:, 1].max() - array[:, 1].min())
-        sizes += [(i_len ** 2 + x_len ** 2) ** 0.5]
-    return np.array(sizes)
 
 def get_sticks(points, n_sticks, n_nodes):
     """ Get sticks from fault which is represented as a cloud of points.

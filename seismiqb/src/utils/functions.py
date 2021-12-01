@@ -385,10 +385,10 @@ def make_savepath(path, name, extension=''):
     return path
 
 def faults_sizes(slide, normalize):
-    """ Compue sizes (depth length) for each connected object. """
+    """ Compute sizes (depth length) for each connected object. """
     sizes = slide.copy()
     labels, n_objects = measurements.label(slide > 0, structure=np.ones((3, 3)))
-    for i in range(n_objects):
+    for i in range(1, n_objects+1):
         size = np.where(labels == i)[-1].ptp()
         if normalize:
             size /= slide.shape[-1]
