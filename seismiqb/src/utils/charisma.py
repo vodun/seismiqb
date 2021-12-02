@@ -5,7 +5,8 @@ import pandas as pd
 
 class CharismaMixin:
     """ Methods for saving and loading data in CHARISMA-compatible format. """
-    
+    #pylint: disable=redefined-builtin
+
     # CHARISMA: default seismic format of storing surfaces inside the 3D volume
     CHARISMA_SPEC = ['INLINE', '_', 'iline', 'XLINE', '__', 'xline', 'cdp_x', 'cdp_y', 'height']
 
@@ -16,7 +17,7 @@ class CharismaMixin:
     def field_reference(self):
         """ Reference to Field for applying methods. """
         return self.field if hasattr(self, 'field') else self
-    
+
     # Load and save data in charisma-compatible format
     def load_charisma(self, path, dtype=np.int32, format='points', fill_value=np.nan,
                       transform=True, verify=True, **kwargs):

@@ -5,7 +5,6 @@ from glob import glob
 from difflib import get_close_matches
 from concurrent.futures import ThreadPoolExecutor
 
-import pandas as pd
 import numpy as np
 
 from ...batchflow.notifier import Notifier
