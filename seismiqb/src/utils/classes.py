@@ -7,6 +7,7 @@ from threading import RLock
 from functools import wraps
 from hashlib import blake2b
 from copy import copy
+from sklearn.linear_model import LinearRegression
 
 import numpy as np
 try:
@@ -19,7 +20,7 @@ import bottleneck as bn
 
 import h5py
 
-from .functions import to_list
+from .functions import to_list, make_weights
 
 
 
@@ -520,6 +521,87 @@ class ModeAccumulator3D(Accumulator3D):
 
         elif self.type == 'numpy':
             self.data = np.argmax(self.data, axis=-1)
+
+class WeightedSumAccumulator3D(Accumulator3D):
+    """ Accumulator that takes mean value of overlapping crops. """
+    def __init__(self, shape=None, origin=None, dtype=np.float32, transform=None, path=None,
+                 make_weights=make_weights, **kwargs):
+        super().__init__(shape=shape, origin=origin, dtype=dtype, transform=transform, path=path, **kwargs)
+
+        self.create_placeholder(name='data', dtype=self.dtype, fill_value=0)
+        self.create_placeholder(name='weights', dtype=np.float32, fill_value=0)
+        self.make_weights = make_weights
+
+    def _update(self, crop, location):
+        # Weights matrix for the incoming crop
+        crop_weights = self.make_weights(crop.shape)
+        self.data[location] = ((crop_weights * crop + self.data[location] * self.weights[location]) /
+                                crop_weights + self.weights[location])
+        self.weights[location] += crop_weights
+
+    def _aggregate(self):
+        # Cleanup
+        self.remove_placeholder('weights')
+
+class RegressionAccumulator(Accumulator3D):
+    """ Accumulator that fits least-squares regression to scale the values of
+    each incoming crop to match the values on the overlap. It also uses weighted sum
+    of crops. The closer to the border of a crop, the lesser the weight. """
+    def __init__(self, shape=None, origin=None, dtype=np.float32, transform=None, path=None,
+                 alpha=0.01, **kwargs):
+        super().__init__(shape=shape, origin=origin, dtype=dtype, transform=transform, path=path, **kwargs)
+
+        # Fill both placeholders with nans: in order to fit the regression
+        # it is important to understand what overlap values are already filled
+        # NOTE: the alternative is to use weighted least squares - in that case fill with zeros
+        # in this case, however, regression can fuck up rather drastically due to outliers
+        self.create_placeholder(name='data', dtype=self.dtype, fill_value=np.nan)
+        self.create_placeholder(name='weights', dtype=np.float32, fill_value=np.nan)
+
+        self.alpha = alpha
+
+    def _update(self, crop, location):
+        # Scale incoming crop to better fit already filled data
+        # Fit is done via least-squares regression
+        overlap_data = self.data[location]
+        overlap_weights = self.weights[location]
+        crop_weights = make_weights(crop.shape, alpha=self.alpha)
+
+        # If some values are already filled, use regression to fit new crop
+        # to what's filled
+        ixs_filled = np.where((~np.isnan(overlap_data)) & (~np.isnan(crop)))
+        ixs_new = np.where(np.isnan(overlap_data))
+
+        if len(ixs_filled[0]) > 0:
+            # Take overlapping values from both data and crop
+            xs = overlap_data[ixs_filled]
+            ys = crop[ixs_filled]
+
+            # Fit new crop to already existing data and transform the crop
+            model = LinearRegression()
+            model.fit(xs.reshape(-1, 1), ys.reshape(-1))
+            a, b = model.coef_[0], model.intercept_
+            crop = (crop - b) / a
+
+            # Update location-slice with weighed average
+            overlap_data[ixs_filled] = ((overlap_weights[ixs_filled] * overlap_data[ixs_filled]
+                                         + crop_weights[ixs_filled] * crop[ixs_filled]) /
+                                        (overlap_weights[ixs_filled] + crop_weights[ixs_filled]))
+
+            # Update weights over overlap
+            overlap_weights[ixs_filled] += crop_weights[ixs_filled]
+
+            # Use values from crop to update the region covered by the crop
+            # and not yet filled
+            overlap_data[ixs_new] = crop[ixs_new]
+            overlap_weights[ixs_new] = crop_weights[ixs_new]
+        else:
+            overlap_data[...] = crop
+            overlap_weights[...] = crop_weights
+
+    def _aggregate(self):
+        # Clean-up
+        self.remove_placeholder('weights')
 
 
 class AccumulatorBlosc(Accumulator3D):
