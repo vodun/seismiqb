@@ -391,6 +391,23 @@ class SeismicGeometry(CacheMixin, ExportMixin):
             return (array - min_) / (max_ - min_)
         raise ValueError('Wrong mode', mode)
 
+    # Coordinates transforms
+    def lines_to_cubic(self, array):
+        """ Convert ilines-xlines to cubic coordinates system. """
+        array[:, 0] -= self.ilines_offset
+        array[:, 1] -= self.xlines_offset
+        array[:, 2] -= self.delay
+        array[:, 2] /= self.sample_rate
+        return array
+
+    def cubic_to_lines(self, array):
+        """ Convert cubic coordinates to ilines-xlines system. """
+        array = array.astype(np.float32)
+        array[:, 0] += self.ilines_offset
+        array[:, 1] += self.xlines_offset
+        array[:, 2] *= self.sample_rate
+        array[:, 2] += self.delay
+        return array
 
     # Spatial matrices
     @property

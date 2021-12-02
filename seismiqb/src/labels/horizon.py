@@ -13,14 +13,14 @@ from scipy.ndimage.morphology import binary_fill_holes, binary_dilation
 
 from .horizon_attributes import AttributesMixin
 from .horizon_visualization import VisualizationMixin
-from ..utils import CacheMixin
+from ..utils import CacheMixin, CharismaMixin
 from ..utils import groupby_mean, groupby_min, groupby_max, filtering_function
 from ..utils import make_bezier_figure
 from ..functional import smooth_out
 
 
 
-class Horizon(AttributesMixin, CacheMixin, VisualizationMixin):
+class Horizon(AttributesMixin, CacheMixin, CharismaMixin, VisualizationMixin):
     """ Contains spatially-structured horizon: each point describes a height on a particular (iline, xline).
 
     Initialized from `storage` and `geometry`, where storage can be one of:
@@ -77,12 +77,6 @@ class Horizon(AttributesMixin, CacheMixin, VisualizationMixin):
         - A wealth of visualization methods: view from above, slices along iline/xline axis, etc.
     """
     #pylint: disable=too-many-public-methods, import-outside-toplevel
-
-    # CHARISMA: default seismic format of storing surfaces inside the 3D volume
-    CHARISMA_SPEC = ['INLINE', '_', 'iline', 'XLINE', '__', 'xline', 'cdp_x', 'cdp_y', 'height']
-
-    # REDUCED_CHARISMA: CHARISMA without redundant columns
-    REDUCED_CHARISMA_SPEC = ['iline', 'xline', 'height']
 
     # Columns that are used from the file
     COLUMNS = ['iline', 'xline', 'height']
@@ -336,9 +330,9 @@ class Horizon(AttributesMixin, CacheMixin, VisualizationMixin):
 
         self.name = os.path.basename(path) if self.name is None else self.name
 
-        points = self.field.load_charisma(path=path, dtype=np.int32, format='points',
-                                          fill_value=Horizon.FILL_VALUE, transform=transform,
-                                          verify=True)
+        points = self.load_charisma(path=path, dtype=np.int32, format='points',
+                                    fill_value=Horizon.FILL_VALUE, transform=transform,
+                                    verify=True)
 
         self.from_points(points, verify=False, **kwargs)
 
@@ -1205,8 +1199,8 @@ class Horizon(AttributesMixin, CacheMixin, VisualizationMixin):
         transform : None or callable
             If callable, then applied to points after converting to ilines/xlines coordinate system.
         """
-        self.field.dump_charisma(data=copy(self.points), path=path, format='points',
-                                 name=self.short_name, transform=transform)
+        self.dump_charisma(data=copy(self.points), path=path, format='points',
+                           name=self.short_name, transform=transform)
 
     def dump_float(self, path, transform=None, kernel_size=7, sigma=2., margin=5):
         """ Smooth out the horizon values, producing floating-point numbers, and dump to the disk.
@@ -1227,4 +1221,4 @@ class Horizon(AttributesMixin, CacheMixin, VisualizationMixin):
         """
         matrix = self.matrix_smooth_out(matrix=self.full_matrix, kernel_size=kernel_size, sigma=sigma, margin=margin)
         points = self.matrix_to_points(matrix)
-        self.field.dump_charisma(data=points, path=path, format='points', name=self.short_name, transform=transform)
+        self.dump_charisma(data=points, path=path, format='points', name=self.short_name, transform=transform)

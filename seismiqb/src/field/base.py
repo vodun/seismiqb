@@ -15,10 +15,11 @@ from ..geometry import SeismicGeometry
 from ..labels import Horizon, Fault
 from ..metrics import FaciesMetrics
 from ..utils import AugmentedList
+from ..utils import CharismaMixin
 
 
 
-class Field(VisualizationMixin):
+class Field(CharismaMixin, VisualizationMixin):
     """ A common container for all information about the field: cube geometry and various labels.
 
     To initialize, one must provide:
@@ -60,12 +61,6 @@ class Field(VisualizationMixin):
     >>> Field(geometry=..., labels='paths/*', labels_class='horizon')
     >>> Field(geometry=..., labels=['paths/1', 'paths/2', 'paths/3'], labels_class='fault')
     """
-
-    # CHARISMA: default seismic format of storing surfaces inside the 3D volume
-    CHARISMA_SPEC = ['INLINE', '_', 'iline', 'XLINE', '__', 'xline', 'cdp_x', 'cdp_y', 'height']
-
-    # REDUCED_CHARISMA: CHARISMA without redundant columns
-    REDUCED_CHARISMA_SPEC = ['iline', 'xline', 'height']
 
 
     #pylint: disable=redefined-builtin
@@ -452,166 +447,3 @@ class Field(VisualizationMixin):
         result = fm.evaluate(metrics)
 
         return result
-
-    # Coordinate transforms
-    def lines_to_cubic(self, array):
-        """ Convert ilines-xlines to cubic coordinates system. """
-        array[:, 0] -= self.ilines_offset
-        array[:, 1] -= self.xlines_offset
-        array[:, 2] -= self.delay
-        array[:, 2] /= self.sample_rate
-        return array
-
-    def cubic_to_lines(self, array):
-        """ Convert cubic coordinates to ilines-xlines system. """
-        array = array.astype(np.float32)
-        array[:, 0] += self.ilines_offset
-        array[:, 1] += self.xlines_offset
-        array[:, 2] *= self.sample_rate
-        array[:, 2] += self.delay
-        return array
-
-    # Load and save data in charisma-compatible format
-    def load_charisma(self, path, dtype=np.int32, format='points', fill_value=np.nan,
-                      transform=True, verify=True, **kwargs):
-        """ Load data from path to either CHARISMA or REDUCED_CHARISMA csv-like file.
-
-        Parameters
-        ----------
-        path : str
-            Path to a file to import data from.
-        dtype : data-type
-            Output dtype.
-        format : str
-            Output array format, can be 'points' or 'matrix'.
-            If format is 'points' then return data as ndarray of (ilines_len, xlines_len, depth) with shape (N, 3).
-            If format is 'matrix' then return data as ndarray of (ilines_len, xlines_len) shape.
-        fill_value : int or float
-            Value to place into blank spaces.
-        transform : bool
-            Whether transform from line coordinates (ilines, xlines) to cubic system.
-        verify : bool
-            Whether to remove points outside of the cube range.
-        """
-        _ = kwargs
-        path = self.make_path(path, makedirs=False)
-
-        # Load data as a points array from a file
-        with open(path, encoding='utf-8') as file:
-            line_len = len(file.readline().split(' '))
-        if line_len == len(self.REDUCED_CHARISMA_SPEC):
-            names = self.REDUCED_CHARISMA_SPEC
-        elif line_len >= len(self.CHARISMA_SPEC):
-            names = self.CHARISMA_SPEC
-        else:
-            raise ValueError('Data must be in CHARISMA or REDUCED_CHARISMA format.')
-
-        df = pd.read_csv(path, sep=r'\s+', names=names, usecols=self.REDUCED_CHARISMA_SPEC)
-        df.sort_values(self.REDUCED_CHARISMA_SPEC, inplace=True)
-        points = df.values
-
-        # Transform and verify points
-        if transform:
-            points = self.lines_to_cubic(points)
-
-        if verify:
-            idx = np.where((points[:, 0] >= 0) &
-                           (points[:, 1] >= 0) &
-                           (points[:, 2] >= 0) &
-                           (points[:, 0] < self.shape[0]) &
-                           (points[:, 1] < self.shape[1]) &
-                           (points[:, 2] < self.shape[2]))[0]
-            points = points[idx]
-
-        # Set datatype
-        if np.issubdtype(dtype, np.integer):
-            points = np.round(points)
-
-        points = points.astype(dtype)
-
-        if format == 'points':
-            return points
-
-        # Make a matrix from points and return
-        matrix = np.full(shape=self.shape[:2], fill_value=fill_value, dtype=dtype)
-        matrix[points[:, 0].astype(np.int32), points[:, 1].astype(np.int32)] = points[:, 2]
-
-        return matrix
-
-    def dump_charisma(self, data, path, format='points', name=None, transform=None):
-        """ Save data as (N, 3) array of points to a disk in CHARISMA-compatible format.
-
-        Parameters
-        ----------
-        data : ndarray
-            Array of (N, 3) shape or (i_lines, x_lines) shape.
-        path : str
-            Path to a file to save array to.
-        format : str
-            Input array format, can be 'points' or 'matrix'.
-            If format is 'points' then input data is a ndarray of (ilines_len, xlines_len, depth) with shape (N, 3).
-            If format is 'matrix' then input data is a ndarray of (ilines_len, xlines_len) shape.
-        name : str
-            Dumped object name.
-        transform : None or callable
-            If callable, then applied to points after converting to ilines/xlines coordinate system.
-        """
-        path = self.make_path(path, name=name)
-
-        if format != 'points':
-            # Convert data to points array
-            idx = np.nonzero(data != np.nan)
-
-            data = np.hstack([idx[0].reshape(-1, 1),
-                                idx[1].reshape(-1, 1),
-                                data[idx[0], idx[1]].reshape(-1, 1)])
-
-        points = self.cubic_to_lines(data)
-
-        # Additional transform
-        points = points if transform is None else transform(points)
-
-        # Dump a charisma file
-        df = pd.DataFrame(points, columns=self.REDUCED_CHARISMA_SPEC)
-        df.sort_values(['iline', 'xline'], inplace=True)
-        df = df.astype({'iline': np.int32, 'xline': np.int32, 'height': np.float32})
-        df.to_csv(path, sep=' ', columns=self.REDUCED_CHARISMA_SPEC, index=False, header=False)
-
-    @classmethod
-    def is_charisma_like(cls, path, bad_extensions=None, size_threshold=100):
-        """ Check if the path looks like the charisma file.
-
-        Parameters
-        ----------
-        path : str
-            Path of file to check.
-        bad_extensions : list, optional
-            If provided, then list of extensions to consider file not charisma-like.
-        size_threshold : number
-            If file size in kilobytes is less, than the threshold, then file is considered not charisma-like.
-        """
-        bad_extensions = bad_extensions or []
-        bad_extensions.extend(['.py', '.ipynb', '.ckpt',
-                               '.png', '.jpg',
-                               '.log', '.txt', '.torch'])
-
-        try:
-            if os.path.isdir(path):
-                return False
-
-            if max(path.endswith(ext) for ext in bad_extensions):
-                return False
-
-            if (os.path.getsize(path) / 1024) < size_threshold:
-                return False
-
-            with open(path, encoding='utf-8') as file:
-                line = file.readline()
-                n = len(line.split(' '))
-
-            is_reduced_charisma = (n == len(cls.REDUCED_CHARISMA_SPEC))
-            is_charisma = (n >= len(cls.CHARISMA_SPEC) and 'INLINE' in line)
-            return is_reduced_charisma or is_charisma
-
-        except UnicodeDecodeError:
-            return False

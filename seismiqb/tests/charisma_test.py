@@ -1,4 +1,4 @@
-""" Script for running the controller notebook for Field tests.
+""" Script for running the controller notebook for CharismaMixin tests.
 
 The behaviour of the test is parametrized by the following constants:
 
@@ -44,15 +44,15 @@ from .utils import extract_traceback
 from ..batchflow.utils_notebook import run_notebook
 
 
-def test_field(
+def test_charisma(
     capsys, tmpdir,
     OUTPUT_DIR=None, USE_TMP_OUTPUT_DIR=True,
     REMOVE_OUTDATED_FILES=True, REMOVE_EXTRA_FILES=True,
     SHOW_MESSAGE=True, SHOW_TEST_ERROR_INFO=True
 ):
-    """ Run Field test notebook draft.
+    """ Run CharismaMixin tests notebook.
 
-    This test runs ./notebooks/field_test_draft.ipynb test file and show execution message.
+    This test runs ./notebooks/charisma_test.ipynb test file and show execution message.
 
     Under the hood, this notebook create a fake seismic cube (Field), saves it and checks
     matrices savings and loadings in CHARISMA data format.
@@ -65,27 +65,27 @@ def test_field(
     if USE_TMP_OUTPUT_DIR:
         # Create tmp workspace
         OUTPUT_DIR = tmpdir.mkdir('notebooks')
-        _ = OUTPUT_DIR.mkdir('field_tests_files')
+        _ = OUTPUT_DIR.mkdir('charisma_tests_files')
 
-        out_path_ipynb = OUTPUT_DIR.join(f"field_test_draft_out_{DATESTAMP}.ipynb")
+        out_path_ipynb = OUTPUT_DIR.join(f"charisma_test_out_{DATESTAMP}.ipynb")
 
     else:
         # Remove outdated executed controller notebook (It is saved near to the original one)
         if REMOVE_OUTDATED_FILES:
-            previous_output_files = glob.glob(os.path.join(TESTS_SCRIPTS_DIR, 'notebooks/field_test_draft_out_*.ipynb'))
+            previous_output_files = glob.glob(os.path.join(TESTS_SCRIPTS_DIR, 'notebooks/charisma_test_out_*.ipynb'))
 
             for file in previous_output_files:
                 os.remove(file)
 
         # Create main paths links
         if OUTPUT_DIR is None:
-            OUTPUT_DIR = os.path.join(TESTS_SCRIPTS_DIR, 'notebooks', 'field_tests_files')
+            OUTPUT_DIR = os.path.join(TESTS_SCRIPTS_DIR, 'notebooks', 'charisma_tests_files')
 
-        out_path_ipynb = os.path.join(TESTS_SCRIPTS_DIR, f'notebooks/field_test_draft_out_{DATESTAMP}.ipynb')
+        out_path_ipynb = os.path.join(TESTS_SCRIPTS_DIR, f'notebooks/charisma_test_out_{DATESTAMP}.ipynb')
 
     # Tests execution
     exec_info = run_notebook(
-        path=os.path.join(TESTS_SCRIPTS_DIR, 'notebooks/field_test_draft.ipynb'),
+        path=os.path.join(TESTS_SCRIPTS_DIR, 'notebooks/charisma_test.ipynb'),
         nb_kwargs={
             # Workspace constants
             'DATESTAMP': DATESTAMP,
@@ -107,14 +107,14 @@ def test_field(
 
     # Tests exit
     if exec_info is True:
-        msg = ['Draft tests for Field were executed successfully.\n']
+        msg = ['Tests for CharismaMixin were executed successfully.\n']
 
     else:
         if SHOW_TEST_ERROR_INFO:
             # Add error traceback into the message
             msg = extract_traceback(path_ipynb=out_path_ipynb)
 
-        msg.append('\nField draft tests execution failed.')
+        msg.append('\nCharismaMixin tests execution failed.')
 
     msg = ''.join(msg)
 
@@ -125,4 +125,4 @@ def test_field(
 
         # End of the running message
         if (not exec_info is True) or msg.find('fail') != -1:
-            assert False, 'Field tests draft failed.\n'
+            assert False, 'CharismaMixin tests failed.\n'
