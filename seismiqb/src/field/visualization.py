@@ -216,32 +216,33 @@ class VisualizationMixin:
                         ['horizons:3/instant_phases', predicted_mask]],
                        savepath='~/IMAGES/complex.png')
         """
-        # If `*` is present, run `show` multiple times with `*` replaced to a label id
-        attributes = AugmentedList(attributes)
+        # Put string and array list items to corresponding dicts under 'src' key
+        load_params = AugmentedList(attributes).apply(lambda x: x if isinstance(x, dict) else {'src': x})
 
-        attribute_contains_wildcard = attributes.apply(self._wildcard_check)
-        if any(attribute_contains_wildcard.flat):
-            # Get len of each attribute
-            get_labels_len = lambda attr: AugmentedList([len(getattr(self, item)) for item in self.loaded_labels
-                                                         if '*' in attr and item in attr])
-            labels_lists_lengths = attributes.apply(get_labels_len)
-            if labels_lists_lengths[1:] == labels_lists_lengths[:-1]:
-                raise ValueError('When using `show` with starred-expressions, length of attributes must be the same!')
+        # Obtain names of labels that require wildcard loading, i,e.
+        # loading of data for every label stored in requested attribute (e.g. 'horizons:*/depths')
+        keep_wildcard_labels = lambda params: params['src'].split(':*/')[0] \
+                                              if isinstance(params['src'], str) \
+                                              and ':*/' in params['src'] else []
+        labels_with_wildcard = load_params.apply(keep_wildcard_labels).flat
 
+        # If list of labels names that require wildcard loading is not empty, run `show` for every label item
+        if labels_with_wildcard:
             figures = []
-            n_items = labels_lists_lengths.reference_object
+            n_items = len(getattr(self, labels_with_wildcard.reference_object))
             for label_num in range(n_items):
                 #pylint: disable=cell-var-from-loop
-                substitutor = lambda attr: attr.replace('*', str(label_num)) if isinstance(attr, str) else attr
-                attributes_ = attributes.apply(substitutor)
+                substitutor = lambda params: {**params, 'src': params['src'].replace('*', str(label_num))} \
+                                             if isinstance(params['src'], str) else params
+                label_attributes = load_params.apply(substitutor)
 
-                fig = self.show(attributes=attributes_, mode=mode, return_figure=True,
+                fig = self.show(attributes=label_attributes, mode=mode, return_figure=True,
                                 savepath=savepath, bbox=bbox, load_kwargs=load_kwargs, **plot_kwargs)
                 figures.append(fig)
             return figures if return_figure else None
 
         # Transform load params into dicts, populate them with defaults and load data
-        loaded = attributes.apply(self._show_load_data, common_params=load_kwargs)
+        loaded = load_params.apply(self._show_load_data, common_params=load_kwargs)
 
         # Make plot defaults
         plot_defaults = loaded.apply(self._show_make_defaults).to_dict()
@@ -270,16 +271,6 @@ class VisualizationMixin:
         return figure if return_figure else None
 
     # Auxilary methods utilized by `show`
-    @staticmethod
-    def _wildcard_check(attribute):
-        if isinstance(attribute, str):
-            result = ':*/' in attribute
-        elif isinstance(attribute, dict):
-            result = ':*/' in attribute['src']
-        else:
-            result = False
-        return result
-
     ALIAS_TO_ATTRIBUTE = AttributesMixin.ALIAS_TO_ATTRIBUTE
 
     def _show_load_data(self, attribute_params, common_params):
@@ -305,7 +296,7 @@ class VisualizationMixin:
             load_defaults['fill_value'] = 0
 
         # Merge defaults with provided parameters
-        load_params = {**load_defaults, **(common_params or dict()), **attribute_params}
+        load_params = {**load_defaults, **(common_params or {}), **attribute_params}
         postprocess = load_params.pop('postprocess', lambda x: x)
 
         # Load

@@ -383,16 +383,3 @@ def make_savepath(path, name, extension=''):
         os.makedirs(dir_path, exist_ok=True)
 
     return path
-
-def flatten_nested(iterable):
-    """ Recursively flatten nested structure of tuples, list and dicts. """
-    result = []
-    if isinstance(iterable, (tuple, list)):
-        for item in iterable:
-            result.extend(flatten_nested(item))
-    elif isinstance(iterable, dict):
-        for key, value in sorted(iterable.items()):
-            result.extend((*flatten_nested(key), *flatten_nested(value)))
-    else:
-        return (iterable,)
-    return tuple(result)
