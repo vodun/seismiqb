@@ -1,19 +1,40 @@
-name: PR
+name: Tests
 
 on:
   pull_request:
     branches:
     - master
 
+  push:
+    branches:
+    - master
+
 jobs:
+
+  set_matrix:
+
+    runs-on: ubuntu-latest
+
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+
+    steps:
+    - id: set-matrix
+      shell: bash
+      run: |
+        if ${{ github.event_name == 'pull_request' }}; then
+          echo "::set-output name=matrix::{\"os\":[\"ubuntu-latest\"], \"python-version\":[3.6, 3.7, 3.8]}"
+        else
+          echo "::set-output name=matrix::{\"os\":[\"ubuntu-latest\", \"windows-latest\"], \"python-version\":[3.6, 3.7, 3.8]}"
+        fi
 
   test_install:
 
     runs-on: ${{ matrix.os }}
+    needs: set_matrix
+
     strategy:
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-        python-version: [3.6, 3.7, 3.8]
+      matrix: ${{fromJSON(needs.set_matrix.outputs.matrix)}}
 
     steps:
     - name: Set up Python ${{ matrix.python-version }} on ${{ matrix.os }}
@@ -29,3 +50,16 @@ jobs:
 
     - name: Run 'import' in installed environment
       run: python -c 'import seismiqb'
+
+    - name: Checkout SeismiQB
+      uses: actions/checkout@v2
+      with:
+        submodules: true
+
+    - name: Run basic tests
+      env:
+        TESTS_SCRIPTS_DIR: ${{ github.workspace }}/seismiqb/tests/
+      working-directory: ${{ github.workspace }}/seismiqb/
+      run: |
+        pip install -U pytest
+        pytest -m "not slow" --disable-pytest-warnings -v --pyargs seismiqb.tests

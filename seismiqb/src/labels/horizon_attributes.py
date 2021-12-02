@@ -50,9 +50,8 @@ class AttributesMixin:
 
     def matrix_set_dtype(self, matrix, dtype):
         """ Change the dtype and fill_value to match it. """
-        mask = (matrix == self.FILL_VALUE) | np.isnan(matrix)
         matrix = matrix.astype(dtype)
-
+        mask = self._matrix_absence_mask(matrix)
         matrix[mask] = self._dtype_to_fill_value(dtype)
         return matrix
 
@@ -67,15 +66,19 @@ class AttributesMixin:
 
     def matrix_fill_to_num(self, matrix, value):
         """ Change the matrix values at points where horizon is absent to a supplied one. """
-        if matrix.dtype == np.int32:
-            mask = (matrix == self.FILL_VALUE)
-        elif matrix.dtype == np.float32:
-            mask = np.isnan(matrix)
-        elif np.issubdtype(matrix.dtype, np.bool):
-            mask = ~matrix
-
+        mask = self._matrix_absence_mask(matrix)
         matrix[mask] = value
         return matrix
+
+    def _matrix_absence_mask(self, matrix):
+        """ Provide bool mask of horizon absence points consistent with shape of given matrix. """
+        if matrix.shape[:2] == self.shape:
+            return ~self.binary_matrix
+        if matrix.shape[:2] == self.field.spatial_shape:
+            return ~self.full_binary_matrix
+        msg = f"Can't define horizon absence mask with respect to provided matrix since its shape {matrix.shape} "\
+                f"doesn't coincide with either horizon shape {self.shape} or field shape {self.field.spatial_shape}."
+        raise ValueError(msg)
 
     def matrix_num_to_fill(self, matrix, value):
         """ Mark points equal to value as absent ones. """
@@ -95,7 +98,6 @@ class AttributesMixin:
         mode : bool, str, optional
             If `min-max` or True, then use min-max scaling.
             If `mean-std`, then use mean-std scaling.
-            If False, don't scale matrix.
         """
         values = matrix[self.presence_matrix]
 
@@ -226,7 +228,7 @@ class AttributesMixin:
 
     def grad_along_axis(self, axis=0):
         """ Change of heights along specified direction. """
-        grad = np.diff(self.matrix, axis=axis, prepend=np.int32(0))
+        grad = np.diff(self.matrix, axis=axis, prepend=self.FILL_VALUE)
         grad[np.abs(grad) > self.h_min] = self.FILL_VALUE
         grad[self.matrix == self.FILL_VALUE] = self.FILL_VALUE
         return grad
