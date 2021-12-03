@@ -736,13 +736,14 @@ class SeismicSampler(Sampler):
             xlabel += [field.index_headers[0]] * len(samplers_list)
             ylabel += [field.index_headers[1]] * len(samplers_list)
 
-        ncols, nrows = MatplotlibPlotter.infer_cols_rows(n_subplots=len(data) + 1, params=kwargs)
+        axes = MatplotlibPlotter.make_or_parse_axes(data=data, mode='imshow', separate=False, all_params=kwargs, fake=1)
 
         kwargs = {
+            'axes': axes,
             'cmap': [['Sampler', 'black']] * len(data),
             'alpha': [[1.0, 0.4]] * len(data),
-            'ncols': ncols,
-            'nrows': nrows,
+            # 'ncols': ncols,
+            # 'nrows': nrows,
             'title': title,
             'vmin': [[1, 0]] * len(data),
             'vmax': [[3, 1]] * len(data),
@@ -751,10 +752,10 @@ class SeismicSampler(Sampler):
             **kwargs
         }
 
-        fig = plot_image(data, return_figure=True, **kwargs)
+        plot_image(data, **kwargs)
 
         legend_params = {
-            'ax': fig.axes[len(data)],
+            'ax': axes[len(data)],
             'color': ('purple','blue','red', 'white', 'gray'),
             'label': ('ILINES and CROSSLINES', 'only ILINES', 'only CROSSLINES', 'restricted', 'dead traces'),
             'size': 20,
@@ -787,9 +788,10 @@ class SeismicSampler(Sampler):
             field_title = f'{field.displayed_name}: {len(sampled_)} points'
             title.append(field_title)
 
-        ncols, nrows = MatplotlibPlotter.infer_cols_rows(n_subplots=len(data) + 1, params=kwargs)
+        axes = MatplotlibPlotter.make_or_parse_axes(data=data, mode='imshow', separate=False, all_params=kwargs, fake=1)
 
         kwargs = {
+            'axes': axes,
             'matrix_name': 'Sampled slices',
             'cmap': [['Reds', 'black']] * len(data),
             'alpha': [[1.0, 0.4]] * len(data),
@@ -797,15 +799,13 @@ class SeismicSampler(Sampler):
             'interpolation': 'bilinear',
             'xlabel': field.index_headers[0],
             'ylabel': field.index_headers[1],
-            'ncols': ncols,
-            'nrows': nrows,
             **kwargs
         }
 
-        fig = plot_image(data, return_figure=True, **kwargs)
+        plot_image(data, **kwargs)
 
         legend_params = {
-            'ax': fig.axes[len(data)],
+            'ax': axes[len(data)],
             'color': ('beige', 'salmon', 'grey'),
             'label': ('alive traces', 'sampled locations', 'dead traces'),
             'size': 20,

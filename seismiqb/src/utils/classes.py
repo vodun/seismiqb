@@ -618,36 +618,17 @@ class AugmentedList(list):
 
         Examples
         --------
-        1. Let `l` be an `AugmentedList` of objects that have `interpolate` method:
-        >>> l = AugmentedList([horizon_0, horizon_1]):
+        1. Let `lst` be an `AugmentedList` of objects that have `mean` method.
         Than the following expression:
-        >>> l.interpolate()
-        Is equvalent to:
-        >>> [horizon_0.interpolate(), horizon_1.interpolate()]
+        >>> lst.mean()
+        Is equivalent to:
+        >>> [item.mean() for item in lst]
 
-        2. Len `l` be an `AugmentedList` of objects that have `shape` attribute:
-        >>> l = [arr_0, [arr_1], [[arr_3, arr_4]]]
+        2. Let `lst` be an `AugmentedList` of objects that have `shape` attribute.
         Than the following expression:
-        >>> l.shape
-        Is equvalent to:
-        >>> [arr_0.shape, [arr_1.shape], [[arr_3.shape, arr_4.shape]]]
-
-        3. Len `l` be an `AugmentedList` of numbers:
-        >>> l = [x_0, [x_1], x_2]
-        And let `f` be the following lambda function:
-        >>> f = lambda x: x % 2
-        Than the following expression:
-        >>> l.apply(f)
-        Is equvalent to:
-        >>> [f(x_0), [f(x_1)], f(x_2)]
-
-        4. Let `l` be an `AugmentedList` of dictionaries:
-        >>> l = AugmentedList([{'cmap': 'viridis', 'alpha': 1.0},
-                               [{'cmap': 'ocean', 'alpha': 1.0}, {'cmap': 'Reds', 'alpha': 0.7}]])
-        That the following expresion:
-        >>> l.to_dict()
-        Will be evaluated to:
-        >>> {'cmap': ['viridis, ['ocean', 'Reds]], 'alpha': [1.0, [1.0, 0.7]]}
+        >>> lst.shape
+        Is equivalent to:
+        >>> [item.shape for item in lst]
 
         Notes
         -----
@@ -655,11 +636,6 @@ class AugmentedList(list):
         1. Tab autocompletion suggests attributes from the first list item only.
         2. The request of the attribute absent in any of the objects leads to an error.
     """
-    def __init__(self, obj=None):
-        """ Perform items recusive casting to `AugmentedList` type if they are lists. """
-        obj = [] if obj is None else obj if isinstance(obj, list) else [obj]
-        super().__init__([type(self)(item) if isinstance(item, list) else item for item in obj])
-
     def __getitem__(self, key):
         """ Manage indexing via iterable. """
         if isinstance(key, (int, np.integer)):
@@ -692,12 +668,64 @@ class AugmentedList(list):
         """ First item of a list taking into account its nestedness. """
         return self[0].reference_object if isinstance(self[0], type(self)) else self[0]
 
-    def apply(self, func, *args, **kwargs):
-        """ Recursively traverse list items applying given function and return list of results with same nestedness. """
+    def __dir__(self):
+        """ Correct autocompletion for delegated methods. """
+        return dir(list) if len(self) == 0 else dir(self[0])
+
+    # Correct type of operations
+    def __add__(self, other):
+        return type(self)(list.__add__(self, other))
+
+    def __radd__(self, other):
+        return self.__add__(other)
+
+    def __mul__(self, other):
+        return type(self)(list.__mul__(self, other))
+
+    def __rmul__(self, other):
+        return self.__mul__(other)
+
+
+class DelegatingList(AugmentedList):
+    """ `AugmentedList` that extends that makes delegation its items' attributes
+
+        Examples
+        --------
+        1. Len `lst` be an `AugmentedList` of objects and `f` be a function that accepts such objects.
+        Than the following expression:
+        >>> lst.apply(f)
+        Is equivalent to:
+        >>> [f(item) for item in lst]
+
+        2. Let `l` be an `AugmentedList` of dictionaries:
+        >>> l = AugmentedList([{'cmap': 'viridis', 'alpha': 1.0},
+                                [{'cmap': 'ocean', 'alpha': 1.0}, {'cmap': 'Reds', 'alpha': 0.7}]])
+        That the following expresion:
+        >>> l.to_dict()
+        Will be evaluated to:
+        >>> {'cmap': ['viridis, ['ocean', 'Reds]], 'alpha': [1.0, [1.0, 0.7]]}
+    """
+    def __init__(self, obj=None):
+        """ Perform items recusive casting to `AugmentedList` type if they are lists. """
+        obj = [] if obj is None else obj if isinstance(obj, list) else [obj]
+        super().__init__([type(self)(item) if isinstance(item, list) else item for item in obj])
+
+    def apply(self, func, *args, shallow=False, **kwargs):
+        """ Recursively traverse list items applying given function and return list of results with same nestedness.
+
+        Parameters
+        ----------
+        func : callable
+            Function to apply to items.
+        shallow : bool
+            If True, apply function directly to outer list items disabling recursive descent.
+        args, kwargs : misc
+            For `func`.
+        """
         result = type(self)()
 
         for item in self:
-            if isinstance(item, type(self)):
+            if isinstance(item, type(self)) and not shallow:
                 res = item.apply(func, *args, **kwargs)
             else:
                 res = func(item, *args, **kwargs)
@@ -728,40 +756,15 @@ class AugmentedList(list):
     @property
     def flat(self):
         """ Flat list of items. """
-        return self.flatten()
-
-    def flatten(self, depth=0):
-        """ Reduce list nestedness by flattening its items starting with given depth. By default flattens all items. """
         res = type(self)()
 
         for item in self:
-            if isinstance(item, list):
-                item = item.flatten(depth - 1)
-                if depth > 0:
-                    res.append(item)
-                else:
-                    res.extend(item)
+            if isinstance(item, type(self)):
+                res.extend(item.flat)
             else:
                 res.append(item)
 
         return res
-
-    def __dir__(self):
-        """ Correct autocompletion for delegated methods. """
-        return dir(list) if len(self) == 0 else dir(self[0])
-
-    # Correct type of operations
-    def __add__(self, other):
-        return type(self)(list.__add__(self, other))
-
-    def __radd__(self, other):
-        return self.__add__(other)
-
-    def __mul__(self, other):
-        return type(self)(list.__mul__(self, other))
-
-    def __rmul__(self, other):
-        return self.__mul__(other)
 
 
 class AugmentedDict(OrderedDict):

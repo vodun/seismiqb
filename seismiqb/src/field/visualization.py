@@ -1,10 +1,13 @@
 """ A mixin with field visualizations. """
 #pylint: disable=global-variable-undefined
+import re
+from collections import defaultdict
+
 import numpy as np
 from matplotlib import pyplot as plt
 
 from .viewer import FieldViewer
-from ..utils import AugmentedList
+from ..utils import DelegatingList, to_list
 from ..plotters import plot_image, MatplotlibPlotter, show_3d
 from ..labels.horizon_attributes import AttributesMixin
 
@@ -159,8 +162,8 @@ class VisualizationMixin:
 
 
     # 2D top-view maps
-    def show(self, attributes='snr', mode='imshow', return_figure=False,
-             savepath=None, bbox=False, load_kwargs=None, **plot_kwargs):
+    def show(self, attributes='snr', mode='imshow', title_pattern='{attributes} of {label_name}',
+             bbox=False, savepath=None, return_figure=False, load_kwargs=None, **plot_kwargs):
         """ Show one or more field attributes on one figure.
 
         Parameters
@@ -178,14 +181,17 @@ class VisualizationMixin:
             For more details, refer to `:func:plot_image`.
         mode : 'imshow' or 'hist'
             Mode to display images.
-        return_figure : bool
-            Whether to return the figure.
-        short_title : bool
-            Whether to use only attribute names as titles for subplots.
-        savepath : str, optional
-            Path to save the figure. `**` is changed to a field base directory, `*` is changed to field base name.
+        title_pattern : str with key substrings to be replaced by corresponding variables values
+            If {src_label} in pattern, replaced by name of labels source (e.g. 'horizons:0').
+            If {label_name} in pattern, replaced by label name (e.g. 'predicted_#3.char').
+            If {attributes} in pattern, replaced by list of attributes names (e.g. '['depths', 'amplitudes']').
+            If multiple labels displayed on single subplot, pattern will be repeated in title for every one of them.
         bbox : bool
             Whether crop horizon by its bounding box or not.
+        savepath : str, optional
+            Path to save the figure. `**` is changed to a field base directory, `*` is changed to field base name.
+        return_figure : bool
+            Whether to return the figure.
         load_kwargs : dict
             Loading parameters common for every requested attribute.
         plot_kwargs : dict
@@ -216,55 +222,59 @@ class VisualizationMixin:
                         ['horizons:3/instant_phases', predicted_mask]],
                        savepath='~/IMAGES/complex.png')
         """
-        # Put string and array list items to corresponding dicts under 'src' key
-        load_params = AugmentedList(attributes).apply(lambda x: x if isinstance(x, dict) else {'src': x})
+        # Wrap given attributes load parameters in a structure that allows applying functions to its nested items
+        load_params = DelegatingList(attributes)
 
-        # Obtain names of labels that require wildcard loading, i,e.
-        # loading of data for every label stored in requested attribute (e.g. 'horizons:*/depths')
-        keep_wildcard_labels = lambda params: params['src'].split(':*/')[0] \
-                                              if isinstance(params['src'], str) \
-                                              and ':*/' in params['src'] else []
-        labels_with_wildcard = load_params.apply(keep_wildcard_labels).flat
+        # Prepare data loading params
+        load_params = load_params.apply(self._make_load_params, common_params=load_kwargs)
 
-        # If list of labels names that require wildcard loading is not empty, run `show` for every label item
-        if labels_with_wildcard:
+        # Extract names of labels sources that require wildcard loading
+        detect_wildcard = lambda params: params['src_labels'] if params['label_num'] == '*' else []
+        labels_require_wildcard_loading = load_params.apply(detect_wildcard).flat
+
+        # If any attributes require wildcard loading, run `show` for every label item
+        if any(labels_require_wildcard_loading):
             figures = []
-            n_items = len(getattr(self, labels_with_wildcard.reference_object))
+
+            reference_labels_source = labels_require_wildcard_loading[0]
+            n_items = len(getattr(self, reference_labels_source))
             for label_num in range(n_items):
                 #pylint: disable=cell-var-from-loop
-                substitutor = lambda params: {**params, 'src': params['src'].replace('*', str(label_num))} \
-                                             if isinstance(params['src'], str) else params
+                substitutor = lambda params: {**params, 'src': params['src'].replace('*', str(label_num))}
                 label_attributes = load_params.apply(substitutor)
 
-                fig = self.show(attributes=label_attributes, mode=mode, return_figure=True,
-                                savepath=savepath, bbox=bbox, load_kwargs=load_kwargs, **plot_kwargs)
+                fig = self.show(attributes=label_attributes, mode=mode, bbox=bbox, title_pattern=title_pattern,
+                                savepath=savepath, return_figure=return_figure, load_kwargs=load_kwargs, **plot_kwargs)
                 figures.append(fig)
+
             return figures if return_figure else None
 
-        # Transform load params into dicts, populate them with defaults and load data
-        loaded = load_params.apply(self._show_load_data, common_params=load_kwargs)
+        data_params = load_params.apply(self._load_data)
 
-        # Make plot defaults
-        plot_defaults = loaded.apply(self._show_make_defaults).to_dict()
-        plot_defaults['title'] = [item[0] if isinstance(item, list) else item for item in plot_defaults['title']]
-        plot_defaults['suptitle'] = f'Field `{self.displayed_name}`'
-
-        if bbox:
-            bboxes_list = loaded.apply(lambda params: params['bbox'])
-            lims_list = [np.stack([bboxes]).transpose(1, 2, 0) for bboxes in bboxes_list]
-            plot_defaults['xlim'] = [(lims[0, 0].min(), lims[0, 1].max()) for lims in lims_list]
-            plot_defaults['ylim'] = [(lims[1, 1].max(), lims[1, 0].min()) for lims in lims_list]
+        # Prepare default plotting parameters
+        plot_params = data_params.apply(self._make_plot_params, mode=mode).to_dict()
+        plot_params['suptitle'] = f'Field `{self.displayed_name}`'
 
         if mode == 'imshow':
-            plot_defaults['colorbar'] = True
-            plot_defaults['xlabel'] = self.index_headers[0]
-            plot_defaults['ylabel'] = self.index_headers[1]
+            plot_params['colorbar'] = True
+            plot_params['xlabel'] = self.index_headers[0]
+            plot_params['ylabel'] = self.index_headers[1]
 
-        first_label_name = loaded.reference_object['label_name']
-        savepath = self.make_path(savepath, name=first_label_name) if savepath is not None else None
+        if title_pattern:
+            plot_params['title'] = data_params.apply(self._make_title, shallow=True, title_pattern=title_pattern)
+
+        if bbox:
+            bboxes_list = data_params.apply(lambda params: params['bbox'])
+            lims_list = [np.stack([bboxes]).transpose(1, 2, 0) for bboxes in bboxes_list]
+            plot_params['xlim'] = [(lims[0, 0].min(), lims[0, 1].max()) for lims in lims_list]
+            plot_params['ylim'] = [(lims[1, 1].max(), lims[1, 0].min()) for lims in lims_list]
+
+        if savepath:
+            first_label_name = data_params.reference_object['label_name']
+            plot_params['savepath'] = self.make_path(savepath, name=first_label_name)
 
         # Plot image with given params and return resulting figure
-        plot_params = {**plot_defaults, **plot_kwargs}
+        plot_params = {**plot_params, **plot_kwargs}
         figure = plot_image(mode=mode, savepath=savepath, **plot_params)
         plt.show()
 
@@ -273,45 +283,57 @@ class VisualizationMixin:
     # Auxilary methods utilized by `show`
     ALIAS_TO_ATTRIBUTE = AttributesMixin.ALIAS_TO_ATTRIBUTE
 
-    def _show_load_data(self, attribute_params, common_params):
-        # Convert params to dict, if provided in a simple form (attribute name to load or ready-to-use numpy array)
-        if isinstance(attribute_params, (str, np.ndarray)):
-            attribute_params = {'src': attribute_params}
-        elif not isinstance(attribute_params, dict):
-            raise TypeError(f'Attribute should be either str, dict or array! Got {type(attribute_params)} instead.')
+    def _make_load_params(self, attribute, common_params):
+        # Transform load parameters into dict if needed, extract string indicating data source to use
+        if isinstance(attribute, str):
+            params = {'src': attribute}
+        elif isinstance(attribute, np.ndarray):
+            params = {'src': 'user data', 'data': attribute}
+        elif isinstance(attribute, dict):
+            params = attribute
+        else:
+            raise TypeError(f'Attribute should be either str, dict or array! Got {type(attribute)} instead.')
 
-        # Extract attribute name and if it's an alias, convert it to the final attribute name
-        src = attribute_params['src']
-        attribute_name = src.split('/')[-1] if isinstance(src, str) else 'user data'
-        attribute_name = self.ALIAS_TO_ATTRIBUTE.get(attribute_name, attribute_name)
-        loaded = {'attribute_name': attribute_name}
+        # Extract source labels names and attribute names, detect if any labels sources require wildcard loading,
+        # i.e. loading of data for every label stored in requested attribute (e.g. 'horizons:*/depths')
+        attribute_name, label_num, src_labels = (re.split(':([0-9, *]+)/', params['src'])[::-1] + ['', 'geometry'])[:3]
+        params['attribute_name'] = self.ALIAS_TO_ATTRIBUTE.get(attribute_name, attribute_name)
+        params['src_labels'] = src_labels
+        params['label_num'] = label_num
 
-        # Make load defaults
-        load_defaults = {'dtype': np.float32}
+        # Make data loading defaults
+        default_params = {'dtype': np.float32}
 
-        if attribute_name in ['fourier_decomposition', 'wavelet_decomposition']:
-            load_defaults['n_components'] = 1
+        if params['attribute_name'] in ['fourier_decomposition', 'wavelet_decomposition']:
+            default_params['n_components'] = 1
 
-        if attribute_name in ['masks', 'full_binary_matrix']:
-            load_defaults['fill_value'] = 0
+        if params['attribute_name'] in ['masks', 'full_binary_matrix']:
+            default_params['fill_value'] = 0
 
         # Merge defaults with provided parameters
-        load_params = {**load_defaults, **(common_params or {}), **attribute_params}
+        params = {**default_params, **(common_params or {}), **params}
+
+        return params
+
+    def _load_data(self, load_params):
+        params = {'attribute_name': load_params.pop('attribute_name'),
+                  'src_labels': load_params.pop('src_labels'),
+                  'label_num': load_params.pop('label_num')}
+
         postprocess = load_params.pop('postprocess', lambda x: x)
 
-        # Load
-        if not isinstance(src, np.ndarray):
+        if 'data' not in load_params:
             data, label = self.load_attribute(_return_label=True, **load_params)
-            loaded['label_name'] = label.displayed_name
-            loaded['bbox'] = label.bbox[:2]
+            params['label_name'] = label.displayed_name
+            params['bbox'] = label.bbox[:2]
         else:
-            data = src
-            loaded['label_name'] = ''
-            loaded['bbox'] = np.array([[0, max] for max in data.shape])
+            data = load_params['data']
+            params['label_name'] = ''
+            params['bbox'] = np.array([[0, max] for max in data.shape])
 
-        loaded['data'] = postprocess(data.squeeze())
+        params['data'] = postprocess(data.squeeze())
 
-        return loaded
+        return params
 
     CMAP_TO_ATTRIBUTE = {
         'Depths': ['full_matrix'],
@@ -321,15 +343,15 @@ class VisualizationMixin:
     ATTRIBUTE_TO_CMAP = {attr: cmap for cmap, attributes in CMAP_TO_ATTRIBUTE.items()
                          for attr in attributes}
 
-    def _show_make_defaults(self, loaded):
-        params = {'data': loaded['data']}
+    def _make_plot_params(self, data_params, mode):
+        params = {'data': data_params['data']}
 
-        attribute_name = loaded['attribute_name']
-        label_name = loaded['label_name']
+        src_labels = data_params['src_labels']
+        attribute_name = data_params['attribute_name']
 
         # Choose default cmap
-        if attribute_name == 'full_binary_matrix':
-            global_name = ''.join(filter(lambda x: x.isalpha(), attribute_name))
+        if attribute_name == 'full_binary_matrix' or mode in ['hist', 'histogramm']:
+            global_name = f"{src_labels}/{attribute_name}"
             if global_name not in NAME_TO_COLOR:
                 NAME_TO_COLOR[global_name] = next(COLOR_GENERATOR)
             cmap = NAME_TO_COLOR[global_name]
@@ -346,16 +368,30 @@ class VisualizationMixin:
 
         params['alpha'] = alpha
 
-        # Make title text
-        if label_name:
-            title = f'`{label_name}`\n{attribute_name}'
-        else:
-            title = attribute_name
-
-        params['title'] = title
-
         return params
 
+    def _make_title(self, data_params, title_pattern):
+        linkage = defaultdict(list)
+
+        for params in to_list(data_params):
+            src_label = params['src_labels']
+            if params['label_num']:
+                src_label += ':' + params['label_num']
+            label_name = params['label_name']
+
+            linkage[(src_label, label_name)].append(params['attribute_name'])
+
+        title = ''
+
+        for (src_label, label_name), attributes in linkage.items():
+            title += '\n' * (title != '')
+            part = title_pattern
+            part = part.replace('{src_label}', src_label)
+            part = part.replace('{label_name}', label_name)
+            part = part.replace('{attributes}', ','.join(attributes))
+            title += part
+
+        return title
 
     # 2D interactive
     def viewer(self, figsize=(8, 8), **kwargs):

@@ -209,7 +209,7 @@ class MatplotlibPlotter:
         return [[item] if isinstance(item, np.ndarray) else item for item in data]
 
     @classmethod
-    def infer_figsize(cls, data, mode, order_axes, ncols, nrows, scale, xlim, ylim):
+    def infer_figsize(cls, data_shapes, mode, order_axes, ncols, nrows, scale, xlim, ylim):
         """" Infer figure size from aspect ratios of provided data. """
         MODE_TO_FIGSIZE = {'wiggle' : (12, 7),
                            'curve': (15, 5)}
@@ -219,14 +219,13 @@ class MatplotlibPlotter:
 
         if mode == 'imshow':
             if not isinstance(xlim, list):
-                xlim = [xlim] * len(data)
+                xlim = [xlim] * len(data_shapes)
             if not isinstance(ylim, list):
-                ylim = [ylim] * len(data)
+                ylim = [ylim] * len(data_shapes)
 
             shapes = []
-            for num, item in enumerate(data):
-                shape = item[0].shape if isinstance(item, list) else item.shape
 
+            for num, shape in enumerate(data_shapes):
                 min_height = xlim[num][0] or 0
                 max_height = xlim[num][1] or shape[order_axes[1]]
                 subplot_height = abs(max_height - min_height)
@@ -236,6 +235,7 @@ class MatplotlibPlotter:
                 subplot_width = abs(max_width - min_width)
 
                 shapes.append((subplot_width, subplot_height))
+
             shapes += [(0, 0)] * (ncols * nrows - len(shapes))
 
             heights, widths = np.array(shapes).reshape((nrows, ncols, 2)).transpose(2, 0, 1)
@@ -245,10 +245,12 @@ class MatplotlibPlotter:
             fig_width = min(30, DEFAULT_COLUMN_WIDTH * ncols)
             fig_height = max(DEFAULT_ROW_HEIGHT * nrows, fig_width * ratio)
             figsize = (fig_width, fig_height)
+
         elif mode == 'hist':
             fig_width = DEFAULT_COLUMN_WIDTH * ncols
             fig_height = DEFAULT_ROW_HEIGHT * nrows
             figsize = (fig_width, fig_height)
+
         else:
             figsize = MODE_TO_FIGSIZE[mode]
 
@@ -272,7 +274,7 @@ class MatplotlibPlotter:
         return ncols, nrows
 
     @classmethod
-    def make_or_parse_axes(cls, data, mode, separate, all_params):
+    def make_or_parse_axes(cls, data, mode, separate, all_params, fake=0):
         """ Create figure and axes if needed, else use provided. """
         axes = all_params.pop('axis', None)
         axes = all_params.pop('axes', axes)
@@ -282,6 +284,7 @@ class MatplotlibPlotter:
         if isinstance(data, list):
             if separate or any(isinstance(item, list) for item in data):
                 n_subplots = len(data)
+        n_subplots += fake
 
         if axes is None:
             FIGURE_KEYS = ['figsize', 'facecolor', 'dpi', 'ncols', 'nrows', 'tight_layout']
@@ -290,12 +293,18 @@ class MatplotlibPlotter:
             ncols, nrows = cls.infer_cols_rows(n_subplots, params)
             params['ncols'], params['nrows'] = ncols, nrows
 
-            order_axes = all_params.get('order_axes', cls.IMSHOW_DEFAULTS['order_axes'])
-            scale = all_params.get('scale', 1)
-            xlim = all_params.get('xlim', (None, None))
-            ylim = all_params.get('ylim', (None, None))
-            default_figsize = cls.infer_figsize(data, mode, order_axes, ncols, nrows, scale, xlim, ylim)
-            params['figsize'] = params.get('figsize', default_figsize)
+            if 'figsize' not in params:
+                if len(data) == 0:
+                    raise ValueError("Cannot infer figsize for a figure with no data.")
+
+                shapes = [item[0].shape if isinstance(item, list) else item.shape for item in data]
+                shapes += [shapes[-1]] * fake
+                order_axes = all_params.get('order_axes', cls.IMSHOW_DEFAULTS['order_axes'])
+                scale = all_params.get('scale', 1)
+                xlim = all_params.get('xlim', (None, None))
+                ylim = all_params.get('ylim', (None, None))
+                default_figsize = cls.infer_figsize(shapes, mode, order_axes, ncols, nrows, scale, xlim, ylim)
+                params['figsize'] = default_figsize
 
             params['tight_layout'] = params.get('tight_layout', True)
 
@@ -531,8 +540,9 @@ class MatplotlibPlotter:
         'wiggle_color': 'k',
         'wiggle_linestyle': '-',
         # curve
-        'color': 'r',
+        'color': MASK_COLORS,
         'marker': 'o',
+        'markersize': 10,
         'linestyle': '',
         # suptitle
         'suptitle_color': 'k',
@@ -623,7 +633,7 @@ class MatplotlibPlotter:
                 curve_y = curve[curve_x]
             # transform height-mask to heights if needed
             elif curve.ndim == 2:
-                curve = (~np.isnan(curve)).nonzero()
+                curve = (curve != 0).nonzero()
                 curve_x = curve[0][(width // 2)::width]
                 curve_y = curve[1][(width // 2)::width]
 

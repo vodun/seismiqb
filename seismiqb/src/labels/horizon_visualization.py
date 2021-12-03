@@ -5,7 +5,7 @@ import numpy as np
 from scipy.spatial import Delaunay
 
 from ..plotters import plot_image, show_3d
-from ..utils import AugmentedList, filter_simplices
+from ..utils import DelegatingList, filter_simplices
 
 
 
@@ -69,7 +69,7 @@ class VisualizationMixin:
 
     def show(self, attributes='depths', mode='imshow', return_figure=False, **kwargs):
         """ Field visualization with custom naming scheme. """
-        attributes = AugmentedList(attributes)
+        attributes = DelegatingList(attributes)
         attributes = attributes.apply(self._show_add_prefix, prefix=self.find_self())
 
         kwargs = {
