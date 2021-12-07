@@ -523,7 +523,12 @@ class ModeAccumulator3D(Accumulator3D):
             self.data = np.argmax(self.data, axis=-1)
 
 class WeightedSumAccumulator3D(Accumulator3D):
-    """ Accumulator that takes mean value of overlapping crops. """
+    """ Accumulator that takes weighted sum of overlapping crops. Accepts function `make_weights`
+    for making weights for each crop into the initialization.
+
+    NOTE: add later support of
+    (i) weights incoming along with a data-crop
+    (ii) make-weights function that accepts incoming crop-data. """
     def __init__(self, shape=None, origin=None, dtype=np.float32, transform=None, path=None,
                  make_weights=make_weights, **kwargs):
         super().__init__(shape=shape, origin=origin, dtype=dtype, transform=transform, path=path, **kwargs)
@@ -544,36 +549,36 @@ class WeightedSumAccumulator3D(Accumulator3D):
         self.remove_placeholder('weights')
 
 class RegressionAccumulator(Accumulator3D):
-    """ Accumulator that fits least-squares regression to scale the values of
-    each incoming crop to match the values on the overlap. It also uses weighted sum
-    of crops. The closer to the border of a crop, the lesser the weight. """
+    """ Accumulator that fits least-squares regression to scale values of
+    each incoming crop to match values of the overlap. In doing so, ignores nan-values.
+    For aggregation uses weighted sum of crops. Weights are controlled by `make_weights`-parameter. """
     def __init__(self, shape=None, origin=None, dtype=np.float32, transform=None, path=None,
-                 alpha=0.01, **kwargs):
+                 make_weights=make_weights, **kwargs):
         super().__init__(shape=shape, origin=origin, dtype=dtype, transform=transform, path=path, **kwargs)
 
         # Fill both placeholders with nans: in order to fit the regression
         # it is important to understand what overlap values are already filled
         # NOTE: the alternative is to use weighted least squares - in that case fill with zeros
-        # in this case, however, regression can fuck up rather drastically due to outliers
+        # in this case, however, regression can fuck up drastically due to outliers
         self.create_placeholder(name='data', dtype=self.dtype, fill_value=np.nan)
         self.create_placeholder(name='weights', dtype=np.float32, fill_value=np.nan)
 
-        self.alpha = alpha
+        self.make_weights = make_weights
 
     def _update(self, crop, location):
         # Scale incoming crop to better fit already filled data
         # Fit is done via least-squares regression
         overlap_data = self.data[location]
         overlap_weights = self.weights[location]
-        crop_weights = make_weights(crop.shape, alpha=self.alpha)
+        crop_weights = self.make_weights(crop.shape)
 
-        # If some values are already filled, use regression to fit new crop
+        # If some of the values are already filled, use regression to fit new crop
         # to what's filled
         ixs_filled = np.where((~np.isnan(overlap_data)) & (~np.isnan(crop)))
         ixs_new = np.where(np.isnan(overlap_data))
 
         if len(ixs_filled[0]) > 0:
-            # Take overlapping values from both data and crop
+            # Take overlap values from data-placeholder and the crop
             xs = overlap_data[ixs_filled]
             ys = crop[ixs_filled]
 
