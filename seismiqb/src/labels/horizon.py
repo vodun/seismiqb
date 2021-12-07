@@ -1,9 +1,9 @@
 """ Horizon class for POST-STACK data. """
+import os
 from copy import copy
 from textwrap import dedent
 from functools import partialmethod
 
-import os
 import numpy as np
 
 from cv2 import dilate
@@ -708,7 +708,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, VisualizationMixin):
             Seed the random numbers generator.
         """
         rng = np.random.default_rng(seed)
-        filtering_matrix = np.zeros_like(self.matrix)
+        filtering_matrix = np.zeros_like(self.full_matrix)
 
         # Generate bezier-like holes
         if isinstance(scale, float):

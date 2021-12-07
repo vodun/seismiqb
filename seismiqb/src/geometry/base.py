@@ -219,7 +219,7 @@ class SeismicGeometry(CacheMixin, ExportMixin):
 
         # Names of different lengths and format: helpful for outside usage
         self.name = os.path.basename(self.path)
-        self.field_name = self.parse_field()
+        self.field_name = self.extract_field_name()
         self.short_name = os.path.splitext(self.name)[0]
         self.long_name = ':'.join(self.path.split('/')[-2:])
         self.format = os.path.splitext(self.path)[1][1:]
@@ -235,7 +235,7 @@ class SeismicGeometry(CacheMixin, ExportMixin):
             self.process(**kwargs)
 
 
-    def parse_field(self):
+    def extract_field_name(self):
         """ Try to parse field from geometry name. """
 
         # search for a sequence of uppercase letters between '_' and '.' symbols

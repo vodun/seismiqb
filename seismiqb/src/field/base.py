@@ -60,8 +60,6 @@ class Field(CharismaMixin, VisualizationMixin):
     >>> Field(geometry=..., labels='paths/*', labels_class='horizon')
     >>> Field(geometry=..., labels=['paths/1', 'paths/2', 'paths/3'], labels_class='fault')
     """
-
-
     #pylint: disable=redefined-builtin
     def __init__(self, geometry, labels=None, labels_class=None, geometry_kwargs=None, labels_kwargs=None, **kwargs):
         # Attributes
