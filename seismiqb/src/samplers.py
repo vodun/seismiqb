@@ -736,10 +736,7 @@ class SeismicSampler(Sampler):
             xlabel += [field.index_headers[0]] * len(samplers_list)
             ylabel += [field.index_headers[1]] * len(samplers_list)
 
-        axes = MatplotlibPlotter.make_or_parse_axes(data=data, mode='imshow', separate=False, all_params=kwargs, fake=1)
-
         kwargs = {
-            'axes': axes,
             'cmap': [['Sampler', 'black']] * len(data),
             'alpha': [[1.0, 0.4]] * len(data),
             # 'ncols': ncols,
@@ -749,19 +746,22 @@ class SeismicSampler(Sampler):
             'vmax': [[3, 1]] * len(data),
             'xlabel': xlabel,
             'ylabel': ylabel,
+            'shapes': 1, # this parameter toggles additional subplot axes creation for further legend display
+            'return_figure': True,
             **kwargs
         }
 
-        plot_image(data, **kwargs)
+        fig = plot_image(data, **kwargs)
 
         legend_params = {
-            'ax': axes[len(data)],
+            'ax': fig.axes[len(data)],
             'color': ('purple','blue','red', 'white', 'gray'),
             'label': ('ILINES and CROSSLINES', 'only ILINES', 'only CROSSLINES', 'restricted', 'dead traces'),
             'size': 20,
             'loc': 10,
             'facecolor': 'silver',
         }
+
         MatplotlibPlotter.add_legend(**legend_params)
 
     def show_sampled(self, n=10000, binary=False, **kwargs):
@@ -788,10 +788,7 @@ class SeismicSampler(Sampler):
             field_title = f'{field.displayed_name}: {len(sampled_)} points'
             title.append(field_title)
 
-        axes = MatplotlibPlotter.make_or_parse_axes(data=data, mode='imshow', separate=False, all_params=kwargs, fake=1)
-
         kwargs = {
-            'axes': axes,
             'matrix_name': 'Sampled slices',
             'cmap': [['Reds', 'black']] * len(data),
             'alpha': [[1.0, 0.4]] * len(data),
@@ -799,19 +796,22 @@ class SeismicSampler(Sampler):
             'interpolation': 'bilinear',
             'xlabel': field.index_headers[0],
             'ylabel': field.index_headers[1],
+            'shapes': 1, # this parameter toggles additional subplot axes creation for further legend display
+            'return_figure': True,
             **kwargs
         }
 
-        plot_image(data, **kwargs)
+        fig = plot_image(data, **kwargs)
 
         legend_params = {
-            'ax': axes[len(data)],
+            'ax': fig.axes[len(data)],
             'color': ('beige', 'salmon', 'grey'),
             'label': ('alive traces', 'sampled locations', 'dead traces'),
             'size': 20,
             'loc': 10,
             'facecolor': 'silver',
         }
+
         MatplotlibPlotter.add_legend(**legend_params)
 
 

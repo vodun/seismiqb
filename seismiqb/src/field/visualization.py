@@ -86,7 +86,6 @@ class VisualizationMixin:
         for src in src_labels:
             masks.append(self.make_mask(location=loc, axis=axis, src=src, width=width, indices=indices))
         mask = sum(masks)
-        mask[mask == 0] = np.nan
 
         # src_labels = src_labels if isinstance(src_labels, (tuple, list)) else [src_labels]
         # masks = []
@@ -328,7 +327,7 @@ class VisualizationMixin:
             params['bbox'] = label.bbox[:2]
         else:
             data = load_params['data']
-            params['label_name'] = ''
+            params['label_name'] = self.displayed_name
             params['bbox'] = np.array([[0, max] for max in data.shape])
 
         params['data'] = postprocess(data.squeeze())
@@ -338,7 +337,8 @@ class VisualizationMixin:
     CMAP_TO_ATTRIBUTE = {
         'Depths': ['full_matrix'],
         'Reds': ['spikes', 'quality_map'],
-        'Metric': ['metric']
+        'Metric': ['metric'],
+        'Reds': ['quality_grid', 'quality_map']
     }
     ATTRIBUTE_TO_CMAP = {attr: cmap for cmap, attributes in CMAP_TO_ATTRIBUTE.items()
                          for attr in attributes}
