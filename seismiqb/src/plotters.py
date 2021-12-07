@@ -316,7 +316,13 @@ class MatplotlibPlotter:
         axes = all_params.pop('axis', axes)
         axes = all_params.pop('ax', axes)
 
-        n_subplots = len(data) + (len(shapes) if isinstance(shapes, list) else shapes)
+        n_subplots = len(data)
+        if isinstance(shapes, list):
+            n_subplots += len(shapes)
+        elif isinstance(shapes, tuple):
+            n_subplots += 1
+        else:
+            n_subplots += shapes
 
         if axes is None:
             FIGURE_KEYS = ['figsize', 'facecolor', 'dpi', 'ncols', 'nrows', 'tight_layout']
@@ -461,6 +467,8 @@ class MatplotlibPlotter:
 
         if show:
             fig.show()
+        else:
+            plt.close()
 
         plot_image.last_figure = fig
         if return_figure:
