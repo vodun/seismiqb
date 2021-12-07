@@ -473,7 +473,10 @@ class SeismicGeometry(CacheMixin, ExportMixin):
             self.make_quality_grid()
         return self._quality_grid
 
-    def make_quality_grid(self, frequencies=(100, 200), iline=True, xline=True, full_lines=True, margin=0, **kwargs):
+    def make_quality_grid(
+        self, frequencies=(100, 200), iline=True, xline=True, full_lines=True,
+        margin=0, elongation=0, filter_outliers=0, **kwargs
+    ):
         """ Create `quality_grid` based on `quality_map`.
 
         Parameters
@@ -486,13 +489,19 @@ class SeismicGeometry(CacheMixin, ExportMixin):
             Whether to make lines on the whole spatial range.
         margin : int
             Margin of boundaries to not include in the grid.
+        elongation : int
+            Number of traces to grid lines elongation.
+        filter_outliers : int
+            A degree of quality map decimation.
+            `filter_outliers` more than zero cuts small complex areas.
         kwargs : dict
             Other parameters of grid making.
         """
         from ..metrics import GeometryMetrics #pylint: disable=import-outside-toplevel
         quality_grid = GeometryMetrics(self).make_grid(self.quality_map, frequencies,
                                                        iline=iline, xline=xline, full_lines=full_lines,
-                                                       margin=margin, **kwargs)
+                                                       margin=margin, elongation=elongation,
+                                                       filter_outliers=filter_outliers, **kwargs)
         self._quality_grid = quality_grid
         return quality_grid
 

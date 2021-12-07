@@ -12,6 +12,7 @@ except ImportError:
 import bottleneck
 import numexpr
 from numba import njit, prange
+from skimage import morphology
 
 from .utils import Accumulator
 
@@ -313,9 +314,14 @@ def digitize(matrix, quantiles):
     digitized[np.isnan(matrix)] = np.nan
     return digitized
 
-
-def gridify(matrix, frequencies, iline=True, xline=True, full_lines=True):
+def gridify(matrix, frequencies, iline=True, xline=True, full_lines=True, elongation=0, filter_outliers=0):
     """ Convert digitized map into grid with various frequencies corresponding to different bins. """
+    elongation //= 2
+
+    # Preprocess a matrix: drop small complex regions from a quality map to make grid thinned
+    footprint =  morphology.disk(filter_outliers)
+    matrix -= morphology.white_tophat(matrix, footprint)
+
     values = np.unique(matrix[~np.isnan(matrix)])
 
     if len(values) != len(frequencies):
@@ -336,14 +342,26 @@ def gridify(matrix, frequencies, iline=True, xline=True, full_lines=True):
             if full_lines:
                 grid[idx_1[mask], :] = 1
             else:
-                grid[idx_1[mask], idx_2[mask]] = 1
+                # repeat indices by 1 axis 2*elongation+1 times for idxs consistency
+                idx_1_indices = np.transpose(np.repeat(idx_1[mask], 2*elongation+1).reshape(len(idx_1[mask]), -1))
+                # make indices for 2 axis increment/decrement in range (-elongation, elongation+1)
+                idx_2_indices = idx_2[mask] + np.arange(-elongation, elongation+1).reshape(-1, 1)
+                idx_2_indices = np.clip(idx_2_indices, 0, matrix.shape[1]-1)
+
+                grid[idx_1_indices, idx_2_indices] = 1
 
         if xline:
             mask = (idx_2 % freq == 0)
             if full_lines:
                 grid[:, idx_2[mask]] = 1
             else:
-                grid[idx_1[mask], idx_2[mask]] = 1
+                # make indices for 1 axis increment/decrement in range (-elongation, elongation+1)
+                idx_1_indices = idx_1[mask] + np.arange(-elongation, elongation+1).reshape(-1, 1)
+                idx_1_indices = np.clip(idx_1_indices, 0, matrix.shape[0]-1)
+                # repeat indices by 1 axis 2*elongation+1 times for idxs consistency
+                idx_2_indices = np.transpose(np.repeat(idx_2[mask], 2*elongation+1).reshape(len(idx_2[mask]), -1))
+
+                grid[idx_1_indices, idx_2_indices] = 1
 
     grid[np.isnan(matrix)] = np.nan
     return grid

@@ -959,9 +959,13 @@ class GeometryMetrics(BaseMetrics):
             'zmin': 0.0, 'zmax': np.nanmax(quality_map),
             **kwargs
         }
+
         return quality_map, plot_dict
 
-    def make_grid(self, quality_map, frequencies, iline=True, xline=True, full_lines=True, margin=0, **kwargs):
+    def make_grid(
+        self, quality_map, frequencies, iline=True, xline=True, full_lines=True,
+        margin=0, elongation=0, filter_outliers=0, **kwargs
+    ):
         """ Create grid with various frequencies based on quality map. """
         _ = kwargs
         if margin:
@@ -976,7 +980,10 @@ class GeometryMetrics(BaseMetrics):
             quality_map[(bad_traces - self.geometry.zero_traces) == 1] = 0.0
 
         pre_grid = np.rint(quality_map)
-        grid = gridify(pre_grid, frequencies, iline, xline, full_lines)
+        grid = gridify(
+            pre_grid, frequencies, iline, xline, full_lines,
+            elongation=elongation, filter_outliers=filter_outliers
+        )
 
         if margin:
             grid[(bad_traces - self.geometry.zero_traces) == 1] = 0
