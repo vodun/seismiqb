@@ -49,11 +49,11 @@ class SyntheticGenerator():
         seed : int or None
             Seed used for creation of random generator (check out `np.random.default_rng`).
         """
-        self.dim = None
         self.rng = rng or np.random.default_rng(seed)
         self.velocities = None
         self.velocity_model = None
         self.density_model = None
+        self.reflectivity_coefficients = None
         self.synthetic = None
         self.num_reflections = None
         self.reflection_surfaces = None
@@ -102,8 +102,7 @@ class SyntheticGenerator():
         return self
 
     def make_upward_velocities(self):
-        """ Make array of upward velocities (with only positive diffs) out of
-        existing array of velocities.
+        """ Make array of upward velocities (with only positive diffs) out of existing array of velocities.
         """
         v0 = self.velocities[0]
         self.upward_velocities = np.cumsum([v0] + np.abs(np.diff(self.velocities)).tolist())
@@ -167,6 +166,18 @@ class SyntheticGenerator():
                             * shape[-1]).astype(np.int).T)
         return np.array(results)
 
+    @classmethod
+    def make_velocity_model_(cls, velocities, surfaces, shape):
+        """ Make 2d or 3d velocity model given shape, vector of velocities and level-surfaces.
+        """
+        if len(shape) in (2, 3):
+            dim = len(shape)
+        else:
+            raise ValueError('Only supports the generation of 2d and 3d synthetic seismic.')
+
+        _make_velocity_model = _make_velocity_model_2d if dim == 2 else _make_velocity_model_3d
+        return _make_velocity_model(velocities, surfaces, shape)
+
     def make_velocity_model(self, shape=(50, 400, 800), grid_shape=(10, 10), perturbation_share=.2):
         """ Make 2d or 3d velocity model out of the array of velocities and store it in the class-instance.
 
@@ -180,26 +191,20 @@ class SyntheticGenerator():
             Sets the limit of random perturbation for surfaces' creation. The limit is set relative to the depth
             of a layer of constant velocity. The larger the value, more 'curved' are the horizons.
         """
-        if len(shape) in (2, 3):
-            self.dim = len(shape)
-        else:
-            raise ValueError('The function only supports the generation of 2d and 3d synthetic seismic.')
-
+        # Make and store surfaces-list to later use them as horizons
         surfaces = self._make_surfaces(self.num_reflections, grid_shape, perturbation_share=perturbation_share,
                                        shape=shape)
-        _make_velocity_model = _make_velocity_model_2d if self.dim == 2 else _make_velocity_model_3d
-        self.velocity_model = _make_velocity_model(self.velocities, surfaces, shape)
-
-        # Store surfaces-list to later use them as horizons
         self.reflection_surfaces = surfaces
+
+        # Make and store velocity-model
+        self.velocity_model = self.make_velocity_model_(self.velocities, surfaces, shape)
         return self
 
     def make_upward_velocity_model(self):
         """ Build velocity-model from array of upward velocities.
         """
-        _make_velocity_model = _make_velocity_model_2d if self.dim == 2 else _make_velocity_model_3d
-        self.upward_velocity_model = _make_velocity_model(self.upward_velocities, self.reflection_surfaces,
-                                                          self.velocity_model.shape)
+        self.upward_velocity_model = self.make_velocity_model_(self.upward_velocities, self.reflection_surfaces,
+                                                               self.velocity_model.shape)
         return self
 
     def _make_elastic_distortion(self, xs, n_points=10, zeros_share=0.2, kind='cubic',
