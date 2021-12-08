@@ -473,10 +473,8 @@ class SeismicGeometry(CacheMixin, ExportMixin):
             self.make_quality_grid()
         return self._quality_grid
 
-    def make_quality_grid(
-        self, frequencies=(100, 200), iline=True, xline=True, full_lines=True,
-        margin=0, elongation=0, filter_outliers=0, **kwargs
-    ):
+    def make_quality_grid(self, frequencies=(100, 200), iline=True, xline=True, full_lines=True,
+                          margin=0, elongation=0, filter_outliers=0, **kwargs):
         """ Create `quality_grid` based on `quality_map`.
 
         Parameters
