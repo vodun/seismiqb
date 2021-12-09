@@ -354,23 +354,25 @@ def make_bezier_figure(n=7, radius=0.2, sharpness=0.05, scale=1.0, shape=(1, 1),
     figure_coordinates = np.unique(np.ceil(curve_segments).astype(int), axis=0)
     return figure_coordinates
 
-def make_weights_1d(num, alpha):
-    result = np.zeros(num)
-    array = np.linspace(alpha, 2, num)
-    result[:num // 2] = array[:num // 2]
-    result[num // 2:] = 2 + alpha - array[num // 2:]
+def linear_kernel_1d(length, alpha):
+    """ Make linear kernel that decreases linearly from a center point
+    to alpha on borders.
+    """
+    result = np.zeros(length)
+    array = np.linspace(alpha, 2, length)
+    result[:length // 2] = array[:length // 2]
+    result[length // 2:] = 2 + alpha - array[length // 2:]
     return result
 
-def make_weights(shape, alpha=.1):
-    """ Generate array of weights ranging from small number to 1.
-    The closer to the border, the lesser the weights reaching minimum value of alpha.
+def linear_kernel_nd(shape, alpha=.1):
+    """ Make kernel that decreases linearly from a center point to alpha on borders.
     """
     result = 1
     for i, axis_len in enumerate(shape):
         if axis_len != 1:
             multiplier_shape = np.ones_like(shape)
             multiplier_shape[i] = axis_len
-            result = result * make_weights_1d(axis_len, alpha).reshape(multiplier_shape)
+            result = result * linear_kernel_1d(axis_len, alpha).reshape(multiplier_shape)
     return result
 
 def get_environ_flag(flag_name, defaults=('0', '1'), convert=int):
