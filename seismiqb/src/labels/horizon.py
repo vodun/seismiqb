@@ -480,6 +480,11 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, VisualizationMixin):
         """ Name without extension. """
         return self.name.split('.')[0]
 
+    @property
+    def displayed_name(self):
+        """ Alias for `short_name`. """
+        return self.short_name
+
 
     # Functions to use to change the horizon
     def apply_to_matrix(self, function, **kwargs):
