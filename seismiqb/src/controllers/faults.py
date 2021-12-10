@@ -566,16 +566,15 @@ class FaultController(BaseController):
             monitor.__enter__()
 
         ppl.run(n_iters=grid.n_iters, notifier=notifier, prefetch=prefetch)
-        prediction = accumulator.aggregate()
-
-        self.log('Finish inference.')
 
         if self.monitor:
             monitor.__exit__(None, None, None)
             monitor.visualize(savepath=self.make_savepath('末 inference_resource.png'), show=self.plot)
+            del monitor
 
-        # if fmt in ['hdf5', 'blosc', 'hdf5', 'qblosc'] and accumulator.file is not None: #TODO: whats wrong with hdf5?
-        #     accumulator.file.close()
+        prediction = accumulator.aggregate()
+
+        self.log('Finish inference.')
 
         return prediction
 
@@ -697,6 +696,7 @@ class FaultController(BaseController):
             pooling = torch.nn.MaxPool3d((1, skeleton_width, 1), stride=1, padding=(0, skeleton_width // 2, 0))
             slide = torch.tensor(slide)
             slide = squueze(pooling(expand_dims(slide)), 2).numpy()
+
             if orientation == 0:
                 dst[i] = slide
             else:

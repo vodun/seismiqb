@@ -351,8 +351,8 @@ class Accumulator3D:
         # Also add alias to `data` dataset, so the resulting cube can be opened by `SeismicGeometry`
         if self.type == 'hdf5':
             self.file['cube_i'] = self.file['data']
-            # self.file.close()
-            # self.file = h5py.File(self.path, 'r')
+            self.file.close()
+            self.file = h5py.File(self.path, 'r+')
             self.data = self.file['data']
 
         self.aggregated = True
@@ -362,9 +362,9 @@ class Accumulator3D:
         """ Aggregate placeholders into resulting array. Changes `data` placeholder inplace. """
         raise NotImplementedError
 
-    def __del__(self):
-        if self.type in ['hdf5', 'blosc'] and self.file is not None:
-            self.file.close()
+    # def __del__(self):
+    #     if self.type in ['hdf5', 'blosc'] and self.file is not None:
+    #         self.file.close()
 
     def clear(self):
         """ Remove placeholders from memory and disk. """
