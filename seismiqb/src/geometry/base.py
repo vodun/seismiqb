@@ -473,8 +473,8 @@ class SeismicGeometry(CacheMixin, ExportMixin):
             self.make_quality_grid()
         return self._quality_grid
 
-    def make_quality_grid(self, frequencies=(100, 200), iline=True, xline=True, full_lines=True,
-                          margin=0, elongation=0, filter_outliers=0, **kwargs):
+    def make_quality_grid(self, frequencies=(100, 200), iline=True, xline=True, margin=0,
+                          elongation='full_lines', filter_outliers=0, **kwargs):
         """ Create `quality_grid` based on `quality_map`.
 
         Parameters
@@ -483,8 +483,6 @@ class SeismicGeometry(CacheMixin, ExportMixin):
             Grid frequencies for individual levels of hardness in `quality_map`.
         iline, xline : bool
             Whether to make lines in grid to account for `ilines`/`xlines`.
-        full_lines : bool
-            Whether to make lines on the whole spatial range.
         margin : int
             Margin of boundaries to not include in the grid.
         elongation : int
@@ -496,10 +494,11 @@ class SeismicGeometry(CacheMixin, ExportMixin):
             Other parameters of grid making.
         """
         from ..metrics import GeometryMetrics #pylint: disable=import-outside-toplevel
-        quality_grid = GeometryMetrics(self).make_grid(self.quality_map, frequencies,
-                                                       iline=iline, xline=xline, full_lines=full_lines,
-                                                       margin=margin, elongation=elongation,
-                                                       filter_outliers=filter_outliers, **kwargs)
+
+        elongation = kwargs.pop('full_lines', elongation) # for old api consistency
+        quality_grid = GeometryMetrics(self).make_grid(self.quality_map, frequencies, iline=iline, xline=xline,
+                                                       margin=margin, elongation=elongation, filter_outliers=filter_outliers,
+                                                       **kwargs)
         self._quality_grid = quality_grid
         return quality_grid
 

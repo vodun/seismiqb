@@ -314,10 +314,47 @@ def digitize(matrix, quantiles):
     digitized[np.isnan(matrix)] = np.nan
     return digitized
 
-def gridify(matrix, frequencies, iline=True, xline=True, full_lines=True, elongation=0, filter_outliers=0):
-    """ Convert digitized map into grid with various frequencies corresponding to different bins. """
-    elongation //= 2
+def elongate_grid(grid, idx_1, idx_2, max_idx_2, transposed, elongation, max_frequency, cut_lines_by_grid):
+    """ Elongate lines on grid on elongation value and cut them if needed.
 
+    Parameters:
+    ----------
+    grid : ndarray
+        A 2D array with grid matrix.
+    idx_1, idx_2 : ndarray
+        Arrays of quality grid points indices by axes.
+    max_idx_2 : int
+        Max possible coordinate of grid point for second array.
+    transposed : bool
+        Whether the idx_1, idx_2 are transposed in relation to the coordinate axes.
+    elongation : int
+        Amount of traces to elongate near the trace on quality map.
+    max_frequency : int
+        Grid frequency for the simplest level of hardness in `quality_map`.
+    cut_lines_by_grid : bool
+        Whether to cut lines by sparse grid.
+    """
+    # Get grid borders if needed
+    if cut_lines_by_grid:
+        down_grid = (idx_2 // max_frequency) * max_frequency
+        up_grid = np.clip(down_grid + max_frequency, 0, max_idx_2)
+
+    for shift in range(-elongation, elongation + 1):
+        indices_2 = idx_2 + shift
+        indices_2 = np.clip(indices_2, 0, max_idx_2)
+
+        if cut_lines_by_grid:
+            indices_2 = np.clip(indices_2, down_grid, up_grid)
+
+        if not transposed:
+            grid[idx_1, indices_2] = 1
+        else:
+            grid[indices_2, idx_1] = 1
+
+    return grid
+
+def gridify(matrix, frequencies, iline=True, xline=True, elongation='full_lines', filter_outliers=0):
+    """ Convert digitized map into grid with various frequencies corresponding to different bins. """
     # Preprocess a matrix: drop small complex regions from a quality map to make grid thinned
     footprint =  morphology.disk(filter_outliers)
     matrix -= morphology.white_tophat(matrix, footprint)
@@ -333,35 +370,38 @@ def gridify(matrix, frequencies, iline=True, xline=True, full_lines=True, elonga
     else:
         frequencies = np.sort(frequencies)[::-1]
 
+    # Parse elongation value if needed
+    if isinstance(elongation, int):
+        elongation_value = elongation // 2
+    elif elongation == 'grid':
+        elongation_value = frequencies[0]
+    elif elongation is False:
+        elongation_value = 0
+
+    cut_lines_by_grid = elongation == 'grid'
+
     grid = np.zeros_like(matrix)
+
     for value, freq in zip(values, frequencies):
         idx_1, idx_2 = np.nonzero(matrix == value)
 
         if iline:
             mask = (idx_1 % freq == 0)
-            if full_lines:
+            if elongation == 'full_lines' or freq == frequencies[0]:
                 grid[idx_1[mask], :] = 1
             else:
-                # repeat indices by 1 axis 2*elongation+1 times for idxs consistency
-                idx_1_indices = np.transpose(np.repeat(idx_1[mask], 2*elongation+1).reshape(len(idx_1[mask]), -1))
-                # make indices for 2 axis increment/decrement in range (-elongation, elongation+1)
-                idx_2_indices = idx_2[mask] + np.arange(-elongation, elongation+1).reshape(-1, 1)
-                idx_2_indices = np.clip(idx_2_indices, 0, matrix.shape[1]-1)
-
-                grid[idx_1_indices, idx_2_indices] = 1
+                grid = elongate_grid(grid=grid, idx_1=idx_1[mask], idx_2=idx_2[mask], max_idx_2=matrix.shape[1]-1,
+                                     transposed=False, elongation=elongation_value, max_frequency=frequencies[0],
+                                     cut_lines_by_grid=cut_lines_by_grid)
 
         if xline:
             mask = (idx_2 % freq == 0)
-            if full_lines:
+            if elongation == 'full_lines' or freq == frequencies[0]:
                 grid[:, idx_2[mask]] = 1
             else:
-                # make indices for 1 axis increment/decrement in range (-elongation, elongation+1)
-                idx_1_indices = idx_1[mask] + np.arange(-elongation, elongation+1).reshape(-1, 1)
-                idx_1_indices = np.clip(idx_1_indices, 0, matrix.shape[0]-1)
-                # repeat indices by 1 axis 2*elongation+1 times for idxs consistency
-                idx_2_indices = np.transpose(np.repeat(idx_2[mask], 2*elongation+1).reshape(len(idx_2[mask]), -1))
-
-                grid[idx_1_indices, idx_2_indices] = 1
+                grid = elongate_grid(grid=grid, idx_1=idx_2[mask], idx_2=idx_1[mask], max_idx_2=matrix.shape[0]-1,
+                                     transposed=True, elongation=elongation_value, max_frequency=frequencies[0],
+                                     cut_lines_by_grid=cut_lines_by_grid)
 
     grid[np.isnan(matrix)] = np.nan
     return grid
