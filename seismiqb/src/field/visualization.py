@@ -274,7 +274,7 @@ class VisualizationMixin:
 
         # Plot image with given params and return resulting figure
         plot_params = {**plot_params, **plot_kwargs}
-        figure = plot_image(mode=mode, savepath=savepath, **plot_params)
+        figure = plot_image(mode=mode, **plot_params)
         plt.show()
 
         return figure if return_figure else None
