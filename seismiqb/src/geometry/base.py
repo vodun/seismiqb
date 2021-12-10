@@ -497,8 +497,8 @@ class SeismicGeometry(CacheMixin, ExportMixin):
 
         elongation = kwargs.pop('full_lines', elongation) # for old api consistency
         quality_grid = GeometryMetrics(self).make_grid(self.quality_map, frequencies, iline=iline, xline=xline,
-                                                       margin=margin, elongation=elongation, filter_outliers=filter_outliers,
-                                                       **kwargs)
+                                                       margin=margin, elongation=elongation,
+                                                       filter_outliers=filter_outliers, **kwargs)
         self._quality_grid = quality_grid
         return quality_grid
 
