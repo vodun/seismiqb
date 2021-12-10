@@ -12,7 +12,8 @@ except ImportError:
 import bottleneck
 import numexpr
 from numba import njit, prange
-from skimage import morphology
+from scipy.ndimage import find_objects
+from skimage.measure import label
 
 from .utils import Accumulator
 
@@ -356,8 +357,19 @@ def elongate_grid(grid, idx_1, idx_2, max_idx_2, transposed, elongation, max_fre
 def gridify(matrix, frequencies, iline=True, xline=True, elongation='full_lines', filter_outliers=0):
     """ Convert digitized map into grid with various frequencies corresponding to different bins. """
     # Preprocess a matrix: drop small complex regions from a quality map to make grid thinned
-    footprint =  morphology.disk(filter_outliers)
-    matrix -= morphology.white_tophat(matrix, footprint)
+    if filter_outliers > 0:
+        # Get connectivity regions
+        labeled = label(matrix > 0)
+        objects = find_objects(labeled)
+
+        # Get and vanish too small connectivity regions
+        for object_slice in objects:
+            obj = matrix[object_slice]
+            obj_points = np.sum(obj)
+
+            if obj_points < filter_outliers:
+                matrix[object_slice] = 0
+
 
     values = np.unique(matrix[~np.isnan(matrix)])
 
