@@ -104,8 +104,7 @@ class SyntheticGenerator():
     def make_upward_velocities(self):
         """ Make array of upward velocities (with only positive diffs) out of existing array of velocities.
         """
-        v0 = self.velocities[0]
-        self.upward_velocities = np.cumsum([v0] + np.abs(np.diff(self.velocities)).tolist())
+        self.upward_velocities = np.cumsum(np.abs(np.diff(self.velocities, prepend=0)))
         return self
 
     def _make_surfaces(self, num_surfaces, grid_shape, shape, kind='cubic', perturbation_share=0.25, shares=None):

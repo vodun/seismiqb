@@ -528,20 +528,21 @@ class WeightedSumAccumulator3D(Accumulator3D):
 
     NOTE: add later support of
     (i) weights incoming along with a data-crop
-    (ii) make-weights function that accepts incoming crop-data. """
+    (ii) make-weights function that accepts incoming crop-data.
+    """
     def __init__(self, shape=None, origin=None, dtype=np.float32, transform=None, path=None,
-                 kernel=linear_kernel_nd, **kwargs):
+                 weights_function=linear_kernel_nd, **kwargs):
         super().__init__(shape=shape, origin=origin, dtype=dtype, transform=transform, path=path, **kwargs)
 
         self.create_placeholder(name='data', dtype=self.dtype, fill_value=0)
         self.create_placeholder(name='weights', dtype=np.float32, fill_value=0)
-        self.kernel = kernel
+        self.weights_function = weights_function
 
     def _update(self, crop, location):
         # Weights matrix for the incoming crop
-        crop_weights = self.kernel(crop.shape)
+        crop_weights = self.weights_function(crop.shape)
         self.data[location] = ((crop_weights * crop + self.data[location] * self.weights[location]) /
-                                crop_weights + self.weights[location])
+                                (crop_weights + self.weights[location]))
         self.weights[location] += crop_weights
 
     def _aggregate(self):
@@ -552,9 +553,13 @@ class RegressionAccumulator(Accumulator3D):
     """ Accumulator that fits least-squares regression to scale values of
     each incoming crop to match values of the overlap. In doing so, ignores nan-values.
     For aggregation uses weighted sum of crops. Weights-making for crops is controlled by
-    `kernel`-parameter. """
+    `weights_function`-parameter.
+
+    NOTE: As of now, relies on the order in which crops with data arrive. When the order of
+    supplied crops is different, the result of aggregation might differ as well.
+    """
     def __init__(self, shape=None, origin=None, dtype=np.float32, transform=None, path=None,
-                 kernel=linear_kernel_nd, **kwargs):
+                 weights_function=linear_kernel_nd, **kwargs):
         super().__init__(shape=shape, origin=origin, dtype=dtype, transform=transform, path=path, **kwargs)
 
         # Fill both placeholders with nans: in order to fit the regression
@@ -564,14 +569,14 @@ class RegressionAccumulator(Accumulator3D):
         self.create_placeholder(name='data', dtype=self.dtype, fill_value=np.nan)
         self.create_placeholder(name='weights', dtype=np.float32, fill_value=np.nan)
 
-        self.kernel = kernel
+        self.weights_function = weights_function
 
     def _update(self, crop, location):
         # Scale incoming crop to better fit already filled data
         # Fit is done via least-squares regression
         overlap_data = self.data[location]
         overlap_weights = self.weights[location]
-        crop_weights = self.kernel(crop.shape)
+        crop_weights = self.weights_function(crop.shape)
 
         # If some of the values are already filled, use regression to fit new crop
         # to what's filled
