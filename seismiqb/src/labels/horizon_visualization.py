@@ -1,12 +1,11 @@
 """ Mixin for horizon visualization. """
-from functools import partial
 from textwrap import dedent
 
 import numpy as np
 from scipy.spatial import Delaunay
 
 from ..plotters import plot_image, show_3d
-from ..utils import filter_simplices
+from ..utils import DelegatingList, filter_simplices
 
 
 
@@ -68,18 +67,16 @@ class VisualizationMixin:
         return attribute
 
 
-    def show(self, attributes='depths', mode='imshow', short_title=True, return_figure=False, **kwargs):
+    def show(self, attributes='depths', mode='imshow', return_figure=False, **kwargs):
         """ Field visualization with custom naming scheme. """
-        prefix = self.find_self()
-        add_prefix = partial(self._show_add_prefix, prefix=prefix)
-        attributes = self.field.apply_nested(add_prefix, attributes)
+        attributes = DelegatingList(attributes)
+        attributes = attributes.apply(self._show_add_prefix, prefix=self.find_self())
 
         kwargs = {
             'suptitle_label': f'`{self.name}` on field `{self.field.displayed_name}`',
             **kwargs
         }
-        figure = self.field.show(attributes=attributes, mode=mode, short_title=short_title,
-                        return_figure=return_figure, **kwargs)
+        figure = self.field.show(attributes=attributes, mode=mode, return_figure=return_figure, **kwargs)
 
         # Clean-up
         if self.field.loaded_labels[-1] == '_unknown_label':
