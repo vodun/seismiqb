@@ -155,6 +155,7 @@ class CacheMixin:
 
     You can use this mixin for cache introspection and clearing cached data.
     """
+    #pylint: disable=redefined-builtin
     def get_cached_methods(self):
         """ Get a list of methods that use caching."""
         methods = []
@@ -291,5 +292,4 @@ class CacheMixin:
 
         if len(df) > 0:
             return df.loc[:, ['cache_length', 'cache_size']]
-        else:
-            return {}
+        return {}
