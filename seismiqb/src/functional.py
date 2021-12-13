@@ -362,7 +362,7 @@ def extend_grid(grid, idx_1, idx_2, max_idx_2, transposed, extension, max_freque
 
     return grid
 
-def gridify(matrix, frequencies, iline=True, xline=True, extension='full', filter_outliers=0):
+def gridify(matrix, frequencies, iline=True, xline=True, extension='cell', filter_outliers=0):
     """ Convert digitized map into grid with various frequencies corresponding to different bins.
 
     Parameters

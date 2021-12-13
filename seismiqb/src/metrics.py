@@ -963,7 +963,7 @@ class GeometryMetrics(BaseMetrics):
         return quality_map, plot_dict
 
     def make_grid(self, quality_map, frequencies, iline=True, xline=True, margin=0,
-                  extension='full', filter_outliers=0, **kwargs):
+                  extension='cell', filter_outliers=0, **kwargs):
         """ Create grid with various frequencies based on quality map. """
         full_lines = kwargs.pop('full_lines', False) # for old api consistency
         extension = 'full' if full_lines else extension
