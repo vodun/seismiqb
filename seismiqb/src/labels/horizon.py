@@ -975,7 +975,7 @@ class Horizon(AttributesMixin, ExtractionMixin, VisualizationMixin):
         other_full_matrix = other.full_matrix
 
         l1 = np.where((self_full_matrix != self.FILL_VALUE) & (other_full_matrix != self.FILL_VALUE),
-                    self_full_matrix - other_full_matrix, np.nan)
+                      self_full_matrix - other_full_matrix, np.nan)
         abs_l1 = np.abs(l1)
 
         overlap_size = np.nansum(~np.isnan(l1))

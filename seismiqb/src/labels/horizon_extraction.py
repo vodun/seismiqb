@@ -178,7 +178,7 @@ class ExtractionMixin:
 
                             # Remove from the original mask
                             horizon_points = inner_points + [(slc.start or 0) + (inner_slc.start or 0)
-                                                            for slc, inner_slc in zip(slices, inner_slices)]
+                                                             for slc, inner_slc in zip(slices, inner_slices)]
                             mask[horizon_points[:, 0], horizon_points[:, 1], horizon_points[:, 2]] = 0
                             num_deleted += 1
                             total_deleted_points += len(horizon_points)
@@ -315,6 +315,7 @@ class ExtractionMixin:
 
         background[background == 0] = self.FILL_VALUE
         length = len(self) + len(other) - mask.sum()
+
         # Create new instance or change `self`
         if inplace:
             # Clean-up data storages
