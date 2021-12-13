@@ -463,7 +463,7 @@ class Horizon(AttributesMixin, ExtractionMixin, VisualizationMixin):
     def from_mask(mask, field=None, origin=None, connectivity=3,
                   mode='mean', threshold=0.5, minsize=0, prefix='predict', **kwargs):
         """ Convert mask to a list of horizons.
-        Returned list is sorted on length of horizons.
+        Returned list is sorted by length of horizons.
 
         Parameters
         ----------
@@ -476,7 +476,7 @@ class Horizon(AttributesMixin, ExtractionMixin, VisualizationMixin):
         mode : str
             Method used for finding the point of a horizon for each iline, xline.
         minsize : int
-            Minimum length of a horizon to be saved.
+            Minimum length of a horizon to be extracted.
         prefix : str
             Name of horizon to use.
         """

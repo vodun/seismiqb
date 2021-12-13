@@ -1,7 +1,9 @@
 """ !!. """
 from enum import IntEnum
 from time import perf_counter
+from operator import attrgetter
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 from cv2 import dilate
@@ -12,18 +14,19 @@ from scipy.ndimage import find_objects
 
 from ..utils import MetaDict
 
-
 class MergeStatus(IntEnum):
-    """ !!. """
-    # definetely not mergeable
+    """ Possible outcomes of the `:meth:~ExtractionMixin.verify_merge`.
+    Values describe the relative position of two horizons.
+    """
+    # Definetely not mergeable
     DEPTH_SEPARATED = 0
     SPATIALLY_SEPARATED = 1
     TOO_SMALL_OVERLAP = 2
 
-    # maybe can merge
+    # Maybe can merge
     SPATIALLY_ADJACENT = 3
 
-    # definetely merge
+    # Definetely merge
     OVERLAPPING = 4
 
     # Too big of an overlap: no reason to merge
@@ -32,9 +35,9 @@ class MergeStatus(IntEnum):
 
 
 class ExtractionMixin:
-    """ !!.
+    """ Methods for horizon extraction from 3D volumes and their later merge.
     5 6 7
-    6 7 8
+      6 7 8
 
     6, 8
     8 - 6 = 2 overlapping pixels - correct
@@ -46,19 +49,54 @@ class ExtractionMixin:
     8 - 8 = 0 overlapping pixels - touching
     adjacency = 1
 
-
-
         # adjacency = -1 -> try to merge horizons with overlap  of 2 pixels
         # adjacency = +0 -> try to merge horizons with overlap  of 1 pixel
         # adjacency = +1 -> try to merge horizons with touching boundaries
         # adjacency = +2 -> try to merge horizons with gap      of 1 pixel between boundaries
 
     """
-    #pylint: disable=too-many-statements, too-many-nested-blocks
+    #pylint: disable=too-many-statements, too-many-nested-blocks, line-too-long
+
     @classmethod
     def extract_from_mask(cls, mask, field=None, origin=None, minsize=1000,
                           prefix='extracted', verbose=False, max_iters=999):
-        """ !!. """
+        """ Extract separate horizon instances from subvolume.
+
+        Basic idea is to find all the connected regions inside the subvolume and mark them as individual horizons.
+        Some of the surfaces touch (either because of being too close or accidentally). To separate them we need to:
+            - if the connected point cloud has multiple labeled points at each trace, then we split it into three parts.
+            One is the minimum envelope of point cloud, the other is the maximum envelope,
+            and the third consists of the points where each trace contains only one point.
+            - each of the three point clouds is split into connected regions itself, which are considered to be
+            individual horizons. We need this step to separate surfaces that are connected by the third point cloud.
+
+        After extracting some points as horizon instance, we remove those points from subvolume.
+        The above is repeated until `max_iters` is reached or no points remain in the original array.
+
+        Returned list of horizons is sorted by length of horizons.
+        The entire procedure is heavily logged, providing timings and statistics in a separate returned dictionary.
+
+        Parameters
+        ----------
+        field : Field
+            Horizon parent field.
+        origin : sequence
+            The upper left coordinate of a `mask` in the cube coordinates.
+        minsize : int
+            Minimum length of a horizon to be extracted.
+        prefix : str
+            Name of horizon to use.
+        verbose : bool
+            Whether to print some of the intermediate statistics.
+        max_iters : int
+            Maximum number of outer iterations (re-labeling the whole cube, extracting surfaces, deleting points).
+
+        Returns
+        -------
+        (list_of_horizons, stats_dict)
+            Tuple with the list of extracted instances as the first element and logging stats as the second.
+        """
+        mask = mask.copy()
         total_points = int(mask.sum())
 
         # `num` prefix for horizon count in category, `total` prefix for number of points in category
@@ -221,10 +259,60 @@ class ExtractionMixin:
 
     def verify_merge(self, other, mean_threshold=1.0, max_threshold=2, adjacency=0,
                      min_size_threshold=1, max_size_threshold=None):
-        """ !!. """
-        # max_difference_on_overlap strictly less than `max_threshold`
-        # separate into `simple_check` and `check_overlap`?
+        """ Compute the relative position of two horizons, based on the thresholding parameters.
 
+        Comparison is split into multiple parts:
+            - the simplest check is to look at horizons bounding boxes.
+            This check is performed with the `adjacency` in mind: by using it, one can allow touching horizons or
+            with gaps of multiple pixels. This parameter's detailed description is below.
+            If the bboxes are too far along ilines/crosslines, then horizons are SPATIALLY_SEPARATED
+
+            - otherwise, we compare horizon matrices on overlap of their bboxes.
+                - if the size of actual overlap is 0, then horizons are SPATIALLY_ADJACENT
+
+                - if the size of actual overlap is lower than the `min_size_threshold`:
+                    - if the mean difference on overlap is lower  than the `mean_threshold`, then horizons are TOO_SMALL_OVERLAP
+                    - if the mean difference on overlap is bigger than the `mean_threshold`, then horizons are DEPTH_SEPARATED
+
+                - if the size of actual overlap is bigger than the `max_size_threshold`:
+                    - if the mean difference on overlap is lower  than the `mean_threshold`, then horizons are TOO_BIG_OVERLAP
+                    - if the mean difference on overlap is bigger than the `mean_threshold`, then horizons are DEPTH_SEPARATED
+
+                - otherwise, the size of overlap is within allowed bounds:
+                    - if the mean difference on overlap is lower  than the `mean_threshold`, then horizons are OVERLAPPING
+                    - if the mean difference on overlap is bigger than the `mean_threshold`, then horizons are DEPTH_SEPARATED
+
+        Parameters
+        ----------
+        self, other
+            Horizons to compare.
+        adjacency : int or sequence of ints
+            Allowed size of the gaps between bounding boxes along each of the axis:
+            - adjacency = +0 means trying to merge horizons with overlap    of 1 pixel
+            - adjacency = +1 means trying to merge horizons with touching   boundaries
+            - adjacency = +2 means trying to merge horizons with gap        of 1 pixel between bboxes
+
+            By using negative values, one can require the overlap of bboxes:
+            - adjacency = -1 means trying to merge horizons with overlap    of 2 pixel
+            If the integer is passed, then the same adjacency rules apply along both iline and crossline directions.
+
+        mean_threshold : number
+            Allowed mean difference on horizons overlap.
+        max_threshold : number
+            Allowed max difference on horizons overlap.
+        min_size_threshold : int
+            Minimum allowed size of the horizons overlap.
+        max_size_threshold : int
+            Maximum allowed size of the horizons overlap. Used only if explicitly passed.
+            Can be used to refrain from merging `almost completely the same horizons`.
+
+        Returns
+        -------
+        MergeStatus to describe relative positions of `self` and `other` horizons.
+        """
+        # Adjacency parsing
+        adjacency = adjacency if isinstance(adjacency, tuple) else (adjacency, adjacency)
+        adjacency_i, adjacency_x = adjacency
 
         # Overlap bbox
         overlap_i_min, overlap_i_max = max(self.i_min, other.i_min), min(self.i_max, other.i_max) + 1
@@ -234,7 +322,7 @@ class ExtractionMixin:
         overlap_size_x = overlap_x_max - overlap_x_min
 
         # Simplest possible check: horizon bboxes are too far from each other
-        if overlap_size_i < 1 - adjacency or overlap_size_x < 1 - adjacency:
+        if overlap_size_i < 1 - adjacency_i or overlap_size_x < 1 - adjacency_x:
             status = MergeStatus.SPATIALLY_SEPARATED
         else:
             status = MergeStatus.SPATIALLY_ADJACENT
@@ -277,8 +365,12 @@ class ExtractionMixin:
 
 
     def overlap_merge(self, other, inplace=False):
-        """ Merge two horizons into one.
-        Note that this function can either merge horizons in-place of the first one (`self`), or create a new instance.
+        """ Merge two horizons into one. Values on overlap are the floored average from the `self` and `other` values.
+        Can either merge horizons in-place of the first one (`self`), or create a new instance.
+
+        TODO: this function is optimized to use only `matrix` storage from both of the horizons,
+        which is the most optimal in current paradigm. Implement the other ways to merge horizons
+        to use them accordingly, i.e. `merge_to_matrix_by_points`, `merge_to_points_by_points` methods.
         """
         # Create shared background for both horizons
         shared_i_min, shared_i_max = min(self.i_min, other.i_min), max(self.i_max, other.i_max)
@@ -318,7 +410,7 @@ class ExtractionMixin:
 
         # Create new instance or change `self`
         if inplace:
-            # Clean-up data storages
+            # Clean-up data storages, just in case
             for instance in [self, other]:
                 for attribute in ['_matrix', '_points', '_depths']:
                     if hasattr(instance, attribute):
@@ -339,7 +431,9 @@ class ExtractionMixin:
 
     def adjacent_merge(self, other, mean_threshold=3.0, adjacency=3, inplace=False):
         """ Check if adjacent merge (that is merge with some margin) is possible, and, if needed, merge horizons.
-        Note that this function can either merge horizons in-place of the first one (`self`), or create a new instance.
+        Can either merge horizons in-place of the first one (`self`), or create a new instance.
+
+        TODO: this function may be outdated and should be used with caution.
 
         Parameters
         ----------
@@ -429,7 +523,35 @@ class ExtractionMixin:
 
     def merge_into(self, horizons, mean_threshold=1., max_threshold=1.2, min_size_threshold=1, max_size_threshold=None,
                    adjacency=1, max_iters=999, num_merged_threshold=1):
-        """ !!. """
+        """ Try to merge instances from the list of `horizons` into `self`.
+
+        For each horizon in the list, we check the possibility to merge it into the current `self` horizon:
+            - first of all, we select candidates to merge by optimized bbox check
+            - for each of the candidates:
+                - we use the `verify_merge` to better check the relations between `candidate` and `self`
+                - depending on the status, merge the candidate into `self` and remove it from the list.
+        The above is repeated until `max_iters` is reached or no horizon from the list can be merged to `self`.
+
+        Parameters
+        ----------
+        horizons : sequence
+            Horizons to merge into `self`.
+        adjacency, mean_threshold, max_threshold, min_size_threshold, max_size_threshold : number
+            Parameters for `:meth:~.verify_merge`.
+        max_iters : int
+            Maximum number of outer iterations (computing candidates, merging them and deleting from the original list).
+        num_merged_threshold : int
+            Minimum amount of merged horizons at outer iteration to perform the next iteration.
+            If the number of merged instances is less than this threshold, we break out of the outer loop.
+
+        Returns
+        -------
+        (self, horizons, stats_dict)
+            A tuple with:
+            - an instance where some of the items in `horizons` were merged to
+            - remaining horizons
+            - dictionary with timings and statistics
+        """
         horizons = np.array(horizons)
 
         # Keep track of stats
@@ -534,14 +656,52 @@ class ExtractionMixin:
             if num_merged < num_merged_threshold:
                 break
 
-        return self, horizons,  MetaDict(merge_stats)
+        return self, horizons, MetaDict(merge_stats)
 
     @staticmethod
     def merge_list(horizons, mean_threshold=1., max_threshold=2.2,
                    min_size_threshold=1, max_size_threshold=None, adjacency=1,
                    max_iters=999, num_merged_threshold=1, delete_threshold=0.01):
-        """ !!. """
-        # Change `horizons` to other container?
+        """ Merge each horizon to each in the `horizons`, until no merges are possible.
+
+        Under the hood, we start by computing the bboxes of all horizons. Then, for each horizon we:
+            - first of all, we select candidates to merge by optimized bbox check
+            - for each of the candidates:
+                - we use the `verify_merge` to better check the relations between `candidate` and `self`
+                - depending on the status, merge the candidate into `self`
+                - remember the index of the candidate to clean up the `horizons` and `bboxes` arrays later.
+        The above is repeated until `max_iters` is reached or no two horizons from the list can be merged.
+
+        We clean-up the `horizons` and `bboxes` only occasionnaly to amortize the costs of the deletion operation.
+        Other optimization is to flag horizons as unmerged at outer iteration: if horizon was not merged to any other,
+        then it would not be merged at any of the subsequent iterations.
+
+        The entire procedure is heavily logged, providing timings and statistics in a separate returned dictionary.
+
+        Parameters
+        ----------
+        adjacency, mean_threshold, max_threshold, min_size_threshold, max_size_threshold : number
+            Parameters for `:meth:~.verify_merge`.
+        max_iters : int
+            Maximum number of outer iterations (computing bboxes, merging each horizon with all possible candidates,
+            deleting from the original list).
+        num_merged_threshold : int
+            Minimum amount of merged horizons at outer iteration to perform the next iteration.
+            If the number of merged instances is less than this threshold, we break out of the outer loop.
+
+        Returns
+        -------
+        (horizons, stats_dict)
+            A tuple with:
+            - remaining horizons
+            - dictionary with timings and statistics
+        """
+        # Adjacency parsing
+        adjacency = adjacency if isinstance(adjacency, tuple) else (adjacency, adjacency)
+        adjacency_i, adjacency_x = adjacency
+
+        # Flag all horizons. If at some iteration the horizon is not merged to any other,
+        # it would not be merged at all (i.e. rejected)
         for horizon in horizons:
             horizon.merge_count = 0
             horizon.id_separated = set()
@@ -594,7 +754,7 @@ class ExtractionMixin:
                 overlap_min_i = np.maximum(bboxes[:, 0], current_bbox[0])
                 overlap_max_i = np.minimum(bboxes[:, 1], current_bbox[1]) + 1
                 overlap_size_i = overlap_max_i - overlap_min_i
-                mask_i = (overlap_size_i >= 1 - adjacency)
+                mask_i = (overlap_size_i >= 1 - adjacency_i)
                 indices_i = np.nonzero(mask_i)[0]
                 bboxes_i = bboxes[indices_i]
 
@@ -602,7 +762,7 @@ class ExtractionMixin:
                 overlap_min_x = np.maximum(bboxes_i[:, 2], current_bbox[2])
                 overlap_max_x = np.minimum(bboxes_i[:, 3], current_bbox[3]) + 1
                 overlap_size_x = overlap_max_x - overlap_min_x
-                mask_x = (overlap_size_x >= 1 - adjacency)
+                mask_x = (overlap_size_x >= 1 - adjacency_x)
                 indices_x = np.nonzero(mask_x)[0]
                 bboxes_x = bboxes_i[indices_x]
 
@@ -644,7 +804,7 @@ class ExtractionMixin:
                                                                 max_threshold=max_threshold,
                                                                 min_size_threshold=min_size_threshold,
                                                                 max_size_threshold=max_size_threshold,
-                                                                adjacency=adjacency)
+                                                                adjacency=(adjacency_i, adjacency_x))
                     merge_stats[merge_status] += 1
 
                     # Merge, if needed
@@ -733,6 +893,70 @@ class ExtractionMixin:
             delattr(horizon, 'id_separated')
 
         return sorted(horizons, key=len), MetaDict(merge_stats)
+
+
+    @staticmethod
+    def merge_list_concurrent(horizons,
+                              max_concurrent_iters=2, max_workers=16, min_workers=4, min_length=1000, multiplier=0.8,
+                              mean_threshold=1., max_threshold=2.2, adjacency=3, minsize=50, max_iters=1,
+                              num_merged_threshold=1, delete_threshold=0.01):
+        """ !!. """
+        for _ in range(max_concurrent_iters):
+            threading_flag, num_workers = ExtractionMixin._compute_threading_parameters(length=len(horizons),
+                                                                                        min_length=min_length,
+                                                                                        max_workers=max_workers,
+                                                                                        min_workers=min_workers,
+                                                                                        multiplier=multiplier)
+            # No more threading is needed
+            if threading_flag is False:
+                break
+
+            horizons.sort(key=attrgetter('i_min'))
+
+            # Split list into chunks for each worker
+            chunk_size = len(horizons) // num_workers
+            chunks = [horizons[idx:idx+chunk_size] for idx in range(0, len(horizons), chunk_size)]
+            if len(chunks[-1]) < min_length:
+                chunks[-2].extend(chunks.pop(-1))
+
+            # Run merging procedure in a separate workers
+            with ThreadPoolExecutor(max_workers=len(chunks)) as executor:
+                function = lambda horizons_list: ExtractionMixin.merge_list(horizons_list,
+                                                                            adjacency=adjacency,
+                                                                            mean_threshold=mean_threshold,
+                                                                            max_threshold=max_threshold,
+                                                                            max_iters=max_iters,
+                                                                            num_merged_threshold=num_merged_threshold,
+                                                                            delete_threshold=delete_threshold)
+                processed = list(executor.map(function, chunks))
+
+            horizons = [horizon for chunk, _ in processed for horizon in chunk]
+
+        # One final merge to combine horizons from different chunks
+        horizons, counter = ExtractionMixin.merge_list(horizons, adjacency=adjacency,
+                                                       mean_threshold=mean_threshold, max_threshold=max_threshold,
+                                                       num_merged_threshold=num_merged_threshold,
+                                                       delete_threshold=delete_threshold)
+        return horizons, counter
+
+    @staticmethod
+    def _compute_threading_parameters(length, max_workers, min_workers, min_length, multiplier=0.8):
+        """ !!. """
+        chunk_size = length // max_workers
+
+        # Each chunk is big enough for current `num_workers=max_workers`, so use them all
+        if chunk_size >= min_length:
+            return True, max_workers
+
+        # Gradually descrease the amount of available workers
+        num_workers = int(multiplier * max_workers)
+        if num_workers >= min_workers:
+            return ExtractionMixin._compute_threading_parameters(length, num_workers,
+                                                                 min_workers=min_workers,
+                                                                 min_length=min_length)
+
+        # Chunks are too small even for the `num_workers=min_workers`
+        return False, None
 
 
     @classmethod
