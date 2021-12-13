@@ -315,8 +315,8 @@ def digitize(matrix, quantiles):
     digitized[np.isnan(matrix)] = np.nan
     return digitized
 
-def elongate_grid(grid, idx_1, idx_2, max_idx_2, transposed, elongation, max_frequency, cut_lines_by_grid):
-    """ Elongate lines on grid on elongation value and cut them if needed.
+def extend_grid(grid, idx_1, idx_2, max_idx_2, transposed, extension, max_frequency, cut_lines_by_grid):
+    """ Extend lines on grid depend on extension value.
 
     Parameters:
     ----------
@@ -328,8 +328,8 @@ def elongate_grid(grid, idx_1, idx_2, max_idx_2, transposed, elongation, max_fre
         Max possible coordinate of grid point for second array.
     transposed : bool
         Whether the idx_1, idx_2 are transposed in relation to the coordinate axes.
-    elongation : int
-        Amount of traces to elongate near the trace on quality map.
+    extension : int
+        Amount of traces to extend near the trace on quality map.
     max_frequency : int
         Grid frequency for the simplest level of hardness in `quality_map`.
     cut_lines_by_grid : bool
@@ -340,36 +340,60 @@ def elongate_grid(grid, idx_1, idx_2, max_idx_2, transposed, elongation, max_fre
         down_grid = (idx_2 // max_frequency) * max_frequency
         up_grid = np.clip(down_grid + max_frequency, 0, max_idx_2)
 
-    for shift in range(-elongation, elongation + 1):
+    for shift in range(-extension, extension + 1):
+        indices_1 = idx_1
         indices_2 = idx_2 + shift
-        indices_2 = np.clip(indices_2, 0, max_idx_2)
+
+        # Filter point out of the field
+        valid_points_indices = np.argwhere((0 < indices_2) & (indices_2 < max_idx_2))
 
         if cut_lines_by_grid:
-            indices_2 = np.clip(indices_2, down_grid, up_grid)
+            # Filter points out of the grid unit
+            valid_points_indices_ = np.argwhere((down_grid < indices_2) & (indices_2 < up_grid))
+            valid_points_indices = np.intersect1d(valid_points_indices, valid_points_indices_)
+
+        indices_2 = indices_2[valid_points_indices]
+        indices_1 = indices_1[valid_points_indices]
 
         if not transposed:
-            grid[idx_1, indices_2] = 1
+            grid[indices_1, indices_2] = 1
         else:
-            grid[indices_2, idx_1] = 1
+            grid[indices_2, indices_1] = 1
 
     return grid
 
-def gridify(matrix, frequencies, iline=True, xline=True, elongation='full_lines', filter_outliers=0):
-    """ Convert digitized map into grid with various frequencies corresponding to different bins. """
+def gridify(matrix, frequencies, iline=True, xline=True, extension='full', filter_outliers=0):
+    """ Convert digitized map into grid with various frequencies corresponding to different bins.
+
+    Parameters
+    ----------
+    frequencies : sequence of numbers
+        Grid frequencies for individual levels of hardness in `quality_map`.
+    iline, xline : bool
+        Whether to make lines in grid to account for `ilines`/`xlines`.
+    extension : 'full', 'cell', False or int
+        Number of traces to grid lines extension.
+        If 'full', then extends quality grid base points to field borders.
+        If 'cell', then extends quality grid base points to sparce grid cells borders.
+        If False, then make no extension.
+        If int, then extends quality grid base points to +-extension//2 neighboring points.
+    filter_outliers : int
+        A degree of quality map decimation.
+        `filter_outliers` more than zero cuts small complex areas.
+    """
     # Preprocess a matrix: drop small complex regions from a quality map to make grid thinned
     if filter_outliers > 0:
-        # Get connectivity regions
+        # Get connectivity objects
         labeled = label(matrix > 0)
         objects = find_objects(labeled)
 
-        # Get and vanish too small connectivity regions
+        # Find and vanish regions that contains too small connectivity objects
         for object_slice in objects:
             obj = matrix[object_slice]
-            obj_points = np.sum(obj)
+            obj_points = obj.sum()
 
             if obj_points < filter_outliers:
                 matrix[object_slice] = 0
-
 
     values = np.unique(matrix[~np.isnan(matrix)])
 
@@ -382,15 +406,15 @@ def gridify(matrix, frequencies, iline=True, xline=True, elongation='full_lines'
     else:
         frequencies = np.sort(frequencies)[::-1]
 
-    # Parse elongation value if needed
-    if isinstance(elongation, int):
-        elongation_value = elongation // 2
-    elif elongation == 'grid':
-        elongation_value = frequencies[0]
-    elif elongation is False:
-        elongation_value = 0
+    # Parse extension value
+    if isinstance(extension, int):
+        extension_value = extension // 2
+    elif extension == 'cell':
+        extension_value = frequencies[0]
+    elif extension is False:
+        extension_value = 0
 
-    cut_lines_by_grid = elongation == 'grid'
+    cut_lines_by_grid = extension == 'cell'
 
     grid = np.zeros_like(matrix)
 
@@ -399,21 +423,21 @@ def gridify(matrix, frequencies, iline=True, xline=True, elongation='full_lines'
 
         if iline:
             mask = (idx_1 % freq == 0)
-            if elongation == 'full_lines' or freq == frequencies[0]:
+            if (extension == 'full') or (freq == frequencies[0]):
                 grid[idx_1[mask], :] = 1
             else:
-                grid = elongate_grid(grid=grid, idx_1=idx_1[mask], idx_2=idx_2[mask], max_idx_2=matrix.shape[1]-1,
-                                     transposed=False, elongation=elongation_value, max_frequency=frequencies[0],
-                                     cut_lines_by_grid=cut_lines_by_grid)
+                grid = extend_grid(grid=grid, idx_1=idx_1[mask], idx_2=idx_2[mask], max_idx_2=matrix.shape[1]-1,
+                                   transposed=False, extension=extension_value, max_frequency=frequencies[0],
+                                   cut_lines_by_grid=cut_lines_by_grid)
 
         if xline:
             mask = (idx_2 % freq == 0)
-            if elongation == 'full_lines' or freq == frequencies[0]:
+            if (extension == 'full') or (freq == frequencies[0]):
                 grid[:, idx_2[mask]] = 1
             else:
-                grid = elongate_grid(grid=grid, idx_1=idx_2[mask], idx_2=idx_1[mask], max_idx_2=matrix.shape[0]-1,
-                                     transposed=True, elongation=elongation_value, max_frequency=frequencies[0],
-                                     cut_lines_by_grid=cut_lines_by_grid)
+                grid = extend_grid(grid=grid, idx_1=idx_2[mask], idx_2=idx_1[mask], max_idx_2=matrix.shape[0]-1,
+                                   transposed=True, extension=extension_value, max_frequency=frequencies[0],
+                                   cut_lines_by_grid=cut_lines_by_grid)
 
     grid[np.isnan(matrix)] = np.nan
     return grid

@@ -963,9 +963,11 @@ class GeometryMetrics(BaseMetrics):
         return quality_map, plot_dict
 
     def make_grid(self, quality_map, frequencies, iline=True, xline=True, margin=0,
-                  elongation='full_lines', filter_outliers=0, **kwargs):
+                  extension='full', filter_outliers=0, **kwargs):
         """ Create grid with various frequencies based on quality map. """
-        elongation = kwargs.pop('full_lines', elongation) # for old api consistency
+        full_lines = kwargs.pop('full_lines', False) # for old api consistency
+        extension = 'full' if full_lines else extension
+
         _ = kwargs
 
         if margin:
@@ -981,7 +983,7 @@ class GeometryMetrics(BaseMetrics):
 
         pre_grid = np.rint(quality_map)
         grid = gridify(matrix=pre_grid, frequencies=frequencies, iline=iline, xline=xline,
-                       elongation=elongation, filter_outliers=filter_outliers)
+                       extension=extension, filter_outliers=filter_outliers)
 
         if margin:
             grid[(bad_traces - self.geometry.zero_traces) == 1] = 0

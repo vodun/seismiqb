@@ -474,7 +474,7 @@ class SeismicGeometry(CacheMixin, ExportMixin):
         return self._quality_grid
 
     def make_quality_grid(self, frequencies=(100, 200), iline=True, xline=True, margin=0,
-                          elongation='full_lines', filter_outliers=0, **kwargs):
+                          extension='full', filter_outliers=0, **kwargs):
         """ Create `quality_grid` based on `quality_map`.
 
         Parameters
@@ -485,8 +485,12 @@ class SeismicGeometry(CacheMixin, ExportMixin):
             Whether to make lines in grid to account for `ilines`/`xlines`.
         margin : int
             Margin of boundaries to not include in the grid.
-        elongation : int
-            Number of traces to grid lines elongation.
+        extension : 'full', 'cell', False or int
+            Number of traces to grid lines extension.
+            If 'full', then extends quality grid base points to field borders.
+            If 'cell', then extends quality grid base points to sparce grid cells borders.
+            If False, then make no extension.
+            If int, then extends quality grid base points to +-extension//2 neighboring points.
         filter_outliers : int
             A degree of quality map decimation.
             `filter_outliers` more than zero cuts small complex areas.
@@ -495,9 +499,11 @@ class SeismicGeometry(CacheMixin, ExportMixin):
         """
         from ..metrics import GeometryMetrics #pylint: disable=import-outside-toplevel
 
-        elongation = kwargs.pop('full_lines', elongation) # for old api consistency
+        full_lines = kwargs.pop('full_lines', False) # for old api consistency
+        extension = 'full' if full_lines else extension
+
         quality_grid = GeometryMetrics(self).make_grid(self.quality_map, frequencies, iline=iline, xline=xline,
-                                                       margin=margin, elongation=elongation,
+                                                       margin=margin, extension=extension,
                                                        filter_outliers=filter_outliers, **kwargs)
         self._quality_grid = quality_grid
         return quality_grid
