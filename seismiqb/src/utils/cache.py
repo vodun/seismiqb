@@ -229,7 +229,7 @@ class CacheMixin:
 
             for values in method_values:
                 if isinstance(values, np.ndarray):
-                    cache_size_accumulator += sum(item.nbytes / (1024 ** 3) for item in values)
+                    cache_size_accumulator += values.nbytes / (1024 ** 3)
 
         return cache_size_accumulator
 
@@ -285,8 +285,8 @@ class CacheMixin:
 
     @property
     def cache_repr(self):
-        """ Pandas DataFrame of cache representation which consists of names, cache length
-        and cache size for each cached method.
+        """ DataFrame with cache representation that contains of names, cache_length
+        and cache_size for each cached method.
         """
         df = self.make_cache_repr(format='df')
 
