@@ -374,12 +374,13 @@ def gridify(matrix, frequencies, iline=True, xline=True, extension='full', filte
     extension : 'full', 'cell', False or int
         Number of traces to grid lines extension.
         If 'full', then extends quality grid base points to field borders.
-        If 'cell', then extends quality grid base points to sparce grid cells borders.
+        If 'cell', then extends quality grid base points to sparse grid cells borders.
         If False, then make no extension.
         If int, then extends quality grid base points to +-extension//2 neighboring points.
     filter_outliers : int
-        A degree of quality map decimation.
-        `filter_outliers` more than zero cuts small complex areas.
+        A degree of quality map thinning.
+        `filter_outliers` more than zero cuts areas that contain too small connectivity regions.
+        Notice that the method cut the squared area with these regions. It is made for more thinning.
     """
     # Preprocess a matrix: drop small complex regions from a quality map to make grid thinned
     if filter_outliers > 0:
