@@ -809,7 +809,7 @@ class SeismicGeometry(CacheMixin, ExportMixin):
     def show_quality_grid(self, **kwargs):
         """ Show quality grid. """
         self.show(matrix=self.quality_grid, cmap='Reds', interpolation='bilinear',
-                  title=f'Quality map of `{self.displayed_name}`')
+                  title=f'Quality grid of `{self.displayed_name}`')
 
 
     # Coordinate conversion

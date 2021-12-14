@@ -139,7 +139,7 @@ class AttributesMixin:
         matrix[dilated2 != self.FILL_VALUE] = dilated2[dilated2 != self.FILL_VALUE]
 
         mask = (dilated1 != self.FILL_VALUE) & (dilated2 != self.FILL_VALUE)
-        matrix[mask] = (dilated1[mask] + dilated2[mask]) / 2
+        matrix[mask] = (dilated1[mask] + dilated2[mask] + 1) // 2
 
         # Fix zero traces
         matrix[np.isnan(self.field.std_matrix)] = np.nan
