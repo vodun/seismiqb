@@ -660,7 +660,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, VisualizationMixin):
         apply_smoothing : bool
             Whether to smooth out the result.
         kwargs : dict
-            Other parameters for grid creation, see `:meth:~.SeismicGeometry.make_grid`.
+            Other parameters for grid creation, see `:meth:~.SeismicGeometry.make_quality_grid`.
         """
         frequencies = frequencies if isinstance(frequencies, (tuple, list)) else [frequencies]
         carcass = copy(self)
