@@ -478,7 +478,7 @@ class SeismicCropBatch(Batch):
         Parameters
         ----------
         src : str
-            Component of batch with mask
+            Component of batch with mask.
         dst : str
             Component of batch to put cut mask in.
         expr : callable, optional.
@@ -500,6 +500,7 @@ class SeismicCropBatch(Batch):
             coords = np.array(coords).astype(np.float).T
             cond = np.ones(shape=coords.shape[0]).astype(bool)
             coords /= np.reshape(mask.shape, newshape=(1, 3))
+
             if low is not None:
                 cond &= np.greater_equal(expr(coords), low)
             if high is not None:
@@ -507,8 +508,58 @@ class SeismicCropBatch(Batch):
             if length is not None:
                 low = 0 if not low else low
                 cond &= np.less_equal(expr(coords), low + length)
+
             coords *= np.reshape(mask.shape, newshape=(1, 3))
             coords = np.round(coords).astype(np.int32)[cond]
+
+            new_mask[coords[:, 0], coords[:, 1], coords[:, 2]] = mask[coords[:, 0],
+                                                                      coords[:, 1],
+                                                                      coords[:, 2]]
+        return new_mask
+
+
+    @action
+    @inbatch_parallel(init='_init_component', post='_assemble', target='for')
+    def filter_tails(self, ix, src, dst, length_ratio, filter_left, p=1.0):
+        """ Filter out left or right part of a crop.
+
+        Parameters:
+        ----------
+        src : str
+            Component of batch with mask.
+        dst : str
+            Component of batch to put cut mask in.
+        length_ratio : float
+            The ratio of the crop lines to be kept.
+        filter_left : bool
+            Whether to filter out the left part of the crop.
+        p : float
+            Probability of applying the transform. Default is 1.
+        """
+        if not (src and dst):
+            raise ValueError('Src and dst must be provided')
+
+        mask = self.get(ix, src)
+        coords = np.where(mask > 0)
+
+        if np.random.binomial(1, 1 - p) or len(coords[0]) == 0:
+            # Nothing to apply
+            new_mask = mask
+        else:
+            new_mask = np.zeros_like(mask)
+            coords = np.array(coords).astype(np.float).T
+
+            # Get the amount of crop lines and kept them on the chosen crop part
+            max_len = mask.shape[0]
+            length = max_len * length_ratio
+
+            if not filter_left:
+                cond = np.less_equal(coords[:, 0], length)
+            else:
+                cond = np.greater_equal(coords[:, 0], max_len-length-1)
+
+            coords = np.round(coords).astype(np.int32)[cond]
+
             new_mask[coords[:, 0], coords[:, 1], coords[:, 2]] = mask[coords[:, 0],
                                                                       coords[:, 1],
                                                                       coords[:, 2]]
