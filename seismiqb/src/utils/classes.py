@@ -542,7 +542,7 @@ class WeightedSumAccumulator3D(Accumulator3D):
         # Weights matrix for the incoming crop
         crop_weights = self.weights_function(crop.shape)
         self.data[location] = ((crop_weights * crop + self.data[location] * self.weights[location]) /
-                                (crop_weights + self.weights[location]))
+                               (crop_weights + self.weights[location]))
         self.weights[location] += crop_weights
 
     def _aggregate(self):
@@ -563,52 +563,51 @@ class RegressionAccumulator(Accumulator3D):
         super().__init__(shape=shape, origin=origin, dtype=dtype, transform=transform, path=path, **kwargs)
 
         # Fill both placeholders with nans: in order to fit the regression
-        # it is important to understand what overlap values are already filled
-        # NOTE: the alternative is to use weighted least squares - in that case fill with zeros
-        # in this case, however, regression can fuck up drastically due to outliers
+        # it is important to understand what overlap values are already filled.
+        # NOTE: perhaps rethink and make weighted regression.
         self.create_placeholder(name='data', dtype=self.dtype, fill_value=np.nan)
         self.create_placeholder(name='weights', dtype=np.float32, fill_value=np.nan)
 
         self.weights_function = weights_function
 
     def _update(self, crop, location):
-        # Scale incoming crop to better fit already filled data
-        # Fit is done via least-squares regression
+        # Scale incoming crop to better fit already filled data.
+        # Fit is done via least-squares regression.
         overlap_data = self.data[location]
         overlap_weights = self.weights[location]
         crop_weights = self.weights_function(crop.shape)
 
         # If some of the values are already filled, use regression to fit new crop
-        # to what's filled
-        ixs_filled = np.where((~np.isnan(overlap_data)) & (~np.isnan(crop)))
-        ixs_new = np.where(np.isnan(overlap_data))
+        # to what's filled.
+        overlap_indices = np.where((~np.isnan(overlap_data)) & (~np.isnan(crop)))
+        new_indices = np.where(np.isnan(overlap_data))
 
-        if len(ixs_filled[0]) > 0:
-            # Take overlap values from data-placeholder and the crop
-            xs = overlap_data[ixs_filled]
-            ys = crop[ixs_filled]
+        if len(overlap_indices[0]) > 0:
+            # Take overlap values from data-placeholder and the crop.
+            xs = overlap_data[overlap_indices]
+            ys = crop[overlap_indices]
 
-            # Fit new crop to already existing data and transform the crop
+            # Fit new crop to already existing data and transform the crop.
             model = LinearRegression()
             model.fit(xs.reshape(-1, 1), ys.reshape(-1))
             a, b = model.coef_[0], model.intercept_
             crop = (crop - b) / a
 
-            # Update location-slice with weighed average
-            overlap_data[ixs_filled] = ((overlap_weights[ixs_filled] * overlap_data[ixs_filled]
-                                         + crop_weights[ixs_filled] * crop[ixs_filled]) /
-                                        (overlap_weights[ixs_filled] + crop_weights[ixs_filled]))
+            # Update location-slice with weighed average.
+            overlap_data[overlap_indices] = ((overlap_weights[overlap_indices] * overlap_data[overlap_indices]
+                                              + crop_weights[overlap_indices] * crop[overlap_indices]) /
+                                             (overlap_weights[overlap_indices] + crop_weights[overlap_indices]))
 
-            # Update weights over overlap
-            overlap_weights[ixs_filled] += crop_weights[ixs_filled]
+            # Update weights over overlap.
+            overlap_weights[overlap_indices] += crop_weights[overlap_indices]
 
             # Use values from crop to update the region covered by the crop
-            # and not yet filled
-            overlap_data[ixs_new] = crop[ixs_new]
-            overlap_weights[ixs_new] = crop_weights[ixs_new]
+            # and not yet filled.
+            self.data[location][new_indices] = crop[new_indices]
+            self.weights[location][new_indices] = crop_weights[new_indices]
         else:
-            overlap_data[...] = crop
-            overlap_weights[...] = crop_weights
+            self.data[location] = crop
+            self.weights[location] = crop_weights
 
     def _aggregate(self):
         # Clean-up
