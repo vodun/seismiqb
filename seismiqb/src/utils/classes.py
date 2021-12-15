@@ -20,7 +20,7 @@ import bottleneck as bn
 
 import h5py
 
-from .functions import to_list, linear_kernel_nd
+from .functions import to_list, triangular_kernel_nd
 
 
 
@@ -531,7 +531,7 @@ class WeightedSumAccumulator3D(Accumulator3D):
     (ii) make-weights function that accepts incoming crop-data.
     """
     def __init__(self, shape=None, origin=None, dtype=np.float32, transform=None, path=None,
-                 weights_function=linear_kernel_nd, **kwargs):
+                 weights_function=triangular_kernel_nd, **kwargs):
         super().__init__(shape=shape, origin=origin, dtype=dtype, transform=transform, path=path, **kwargs)
 
         self.create_placeholder(name='data', dtype=self.dtype, fill_value=0)
@@ -559,7 +559,7 @@ class RegressionAccumulator(Accumulator3D):
     supplied crops is different, the result of aggregation might differ as well.
     """
     def __init__(self, shape=None, origin=None, dtype=np.float32, transform=None, path=None,
-                 weights_function=linear_kernel_nd, **kwargs):
+                 weights_function=triangular_kernel_nd, **kwargs):
         super().__init__(shape=shape, origin=origin, dtype=dtype, transform=transform, path=path, **kwargs)
 
         # Fill both placeholders with nans: in order to fit the regression

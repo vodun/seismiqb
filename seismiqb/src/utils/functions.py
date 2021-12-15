@@ -354,25 +354,22 @@ def make_bezier_figure(n=7, radius=0.2, sharpness=0.05, scale=1.0, shape=(1, 1),
     figure_coordinates = np.unique(np.ceil(curve_segments).astype(int), axis=0)
     return figure_coordinates
 
-def linear_kernel_1d(length, alpha):
-    """ Make linear kernel that decreases linearly from a center point
-    to alpha on borders.
-    """
+def trinagular_kernel_1d(length, alpha=.1):
+    """ Kernel-function that changes linearly from a center point to alpha on borders. """
     result = np.zeros(length)
     array = np.linspace(alpha, 2, length)
     result[:length // 2] = array[:length // 2]
     result[length // 2:] = 2 + alpha - array[length // 2:]
     return result
 
-def linear_kernel_nd(shape, alpha=.1):
-    """ Make kernel that decreases linearly from a center point to alpha on borders.
-    """
+def triangular_kernel_nd(shape, alpha=.1):
+    """ Product of 1d triangular kernels. """
     result = 1
     for i, axis_len in enumerate(shape):
         if axis_len != 1:
             multiplier_shape = np.ones_like(shape)
             multiplier_shape[i] = axis_len
-            result = result * linear_kernel_1d(axis_len, alpha).reshape(multiplier_shape)
+            result = result * trinagular_kernel_1d(axis_len, alpha).reshape(multiplier_shape)
     return result
 
 def get_environ_flag(flag_name, defaults=('0', '1'), convert=int):
