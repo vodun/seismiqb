@@ -546,23 +546,17 @@ class SeismicCropBatch(Batch):
             # Nothing to apply
             new_mask = mask
         else:
-            new_mask = np.zeros_like(mask)
-            coords = np.array(coords).astype(np.float).T
+            new_mask = mask.copy()
 
             # Get the amount of crop lines and kept them on the chosen crop part
             max_len = mask.shape[0]
-            length = max_len * length_ratio
+            length = int(np.round(max_len * length_ratio))
 
-            if not filter_left:
-                cond = np.less_equal(coords[:, 0], length)
+            if filter_left:
+                new_mask[:-length, :] = 0
             else:
-                cond = np.greater_equal(coords[:, 0], max_len-length-1)
+                new_mask[length:, :] = 0
 
-            coords = np.round(coords).astype(np.int32)[cond]
-
-            new_mask[coords[:, 0], coords[:, 1], coords[:, 2]] = mask[coords[:, 0],
-                                                                      coords[:, 1],
-                                                                      coords[:, 2]]
         return new_mask
 
 
