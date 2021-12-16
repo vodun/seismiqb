@@ -13,7 +13,7 @@ from .metrics import HorizonMetrics, GeometryMetrics, FaciesMetrics
 from .samplers import GeometrySampler, HorizonSampler, SeismicSampler, BaseGrid, RegularGrid, ExtensionGrid
 
 # Utilities and helpers
-from .plotters import plot_image, plot_loss
+from .plotters import MatplotlibPlotter, plot_image, plot_loss
 from .functional import *
 from .utils import *
 from .controllers import *

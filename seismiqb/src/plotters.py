@@ -139,7 +139,7 @@ class MatplotlibPlotter:
     To change parameter for title only, one can provide {'title_fontsize': 30}` instead.
     """
     @classmethod
-    def plot(cls, data, mode='imshow', separate=False, **kwargs):
+    def plot(cls, data, mode='imshow', separate=False, shapes=0, return_figure=False, show=True, **kwargs):
         """ Plot manager.
 
         Parses axes from kwargs if provided, else creates them.
@@ -160,6 +160,12 @@ class MatplotlibPlotter:
         separate : bool
             Whether plot images on separate axes instead of putting them all together on a single one.
             Incompatible with 'wiggle' mode.
+        shapes : int or tuple or list of tuples
+            Defines subplots sizes that needed to be created in addition to those created for `data`.
+        return_figure : bool
+            Whether return created figure or not.
+        show : bool
+            Whether display created figure or not.
         kwargs :
             - For one of `imshow`, 'wiggle`, `hist` or `curve` (depending on chosen mode).
               Parameters and data nestedness levels must match.
@@ -180,7 +186,7 @@ class MatplotlibPlotter:
         all_params = {**mode_defaults, **kwargs}
 
         data = cls.make_nested_data(data=data, separate=separate)
-        axes = cls.make_or_parse_axes(mode=mode, n_subplots=len(data), all_params=all_params)
+        axes = cls.make_or_parse_axes(data=data, mode=mode, shapes=shapes, all_params=all_params)
         for ax_num, (ax_data, ax) in enumerate(zip(data, axes)):
             index_condition = None if separate else lambda x: isinstance(x, list)
             ax_params = filter_parameters(all_params, index=ax_num, index_condition=index_condition)
@@ -189,7 +195,12 @@ class MatplotlibPlotter:
 
         [ax.set_axis_off() for ax in axes[len(data):]] # pylint: disable=expression-not-assigned
 
-        return cls.save_and_show(fig=axes[0].figure, **kwargs)
+        # force figure return if no data provided, assuming that the call was made for axis creation
+        if len(data) == 0:
+            return_figure = True
+            show = False
+
+        return cls.save_and_show(fig=axes[0].figure, return_figure=return_figure, show=show, **kwargs)
 
     # Action methods
 
@@ -208,25 +219,126 @@ class MatplotlibPlotter:
             raise ValueError("Arrays list must be flat, when `separate` option is True.")
         return [[item] if isinstance(item, np.ndarray) else item for item in data]
 
-
     @classmethod
-    def make_or_parse_axes(cls, mode, n_subplots, all_params):
-        """ Create figure and axes if needed, else use provided. """
-        MODE_TO_FIGSIZE = {'imshow' : (12, 12),
-                           'hist' : (8, 5),
-                           'wiggle' : (12, 7),
+    def infer_figsize(cls, data, mode, shapes, ncols, nrows,
+                      order_axes=None, scale=1, aspect=None, xlim=(None, None), ylim=(None, None)):
+        """" Infer figure size from aspect ratios of provided data. """
+        MODE_TO_FIGSIZE = {'wiggle' : (12, 7),
                            'curve': (15, 5)}
 
-        axes = all_params.pop('axis', None)
-        axes = all_params.pop('axes', axes)
+        DEFAULT_COLUMN_WIDTH = int(8 * scale)
+        DEFAULT_ROW_HEIGHT = int(5 * scale)
+
+        data_shapes = [np.max([layer_data.shape for layer_data in subplot_data], axis=0) for subplot_data in data]
+        if isinstance(shapes, list):
+            data_shapes += shapes
+        elif isinstance(shapes, tuple):
+            data_shapes += [shapes]
+        elif len(data) > 0:
+            data_shapes += [data_shapes[-1]] * shapes
+        else:
+            raise ValueError("`shapes` might be an integer only when `data` is provided.")
+
+        if mode == 'imshow':
+            if aspect is None:
+                if not isinstance(xlim, list):
+                    xlim = [xlim] * len(data_shapes)
+                if not isinstance(ylim, list):
+                    ylim = [ylim] * len(data_shapes)
+
+                subplots_shapes = []
+                order_axes = order_axes or cls.IMSHOW_DEFAULTS['order_axes']
+
+                for num, shape in enumerate(data_shapes):
+                    min_height = xlim[num][0] or 0
+                    max_height = xlim[num][1] or shape[order_axes[1]]
+                    subplot_height = abs(max_height - min_height)
+
+                    min_width = ylim[num][0] or shape[order_axes[0]]
+                    max_width = ylim[num][1] or 0
+                    subplot_width = abs(max_width - min_width)
+
+                    subplots_shapes.append((subplot_width, subplot_height))
+
+                subplots_shapes += [(0, 0)] * (ncols * nrows - len(subplots_shapes))
+
+                heights, widths = np.array(subplots_shapes).reshape((nrows, ncols, 2)).transpose(2, 0, 1)
+                max_height, max_width = heights.sum(axis=0).max(), widths.sum(axis=1).max()
+                aspect = max_height / max_width
+
+            fig_width = min(30, DEFAULT_COLUMN_WIDTH * ncols)
+            fig_height = max(DEFAULT_ROW_HEIGHT * nrows, fig_width * aspect)
+            figsize = (fig_width, fig_height)
+
+        elif mode == 'hist':
+            fig_width = DEFAULT_COLUMN_WIDTH * ncols
+
+            if aspect is None:
+                fig_height = DEFAULT_ROW_HEIGHT * nrows
+            else:
+                fig_height = fig_width / aspect
+
+            figsize = (fig_width, fig_height)
+
+        else:
+            width, height = MODE_TO_FIGSIZE[mode]
+            width = width * scale
+
+            if aspect is None:
+                height *= scale
+            else:
+                height = width / aspect
+
+            figsize = (width, height)
+
+        return figsize
+
+    @staticmethod
+    def infer_cols_rows(n_subplots, ncols=None, nrows=None, **_):
+        """ Infer number of columns or/and rows for ploting provided number of subplots. """
+        DEFAULT_NCOLS = 4
+        ceil_div = lambda a, b: -(-a // b)
+
+        if ncols is None and nrows is None:
+            ncols = min(DEFAULT_NCOLS, n_subplots)
+            nrows = ceil_div(n_subplots, ncols)
+        elif ncols is None:
+            ncols = ceil_div(n_subplots, nrows)
+        elif nrows is None:
+            nrows = ceil_div(n_subplots, ncols)
+
+        return ncols, nrows
+
+    @classmethod
+    def make_or_parse_axes(cls, data, mode, shapes, all_params):
+        """ Create figure and axes if needed, else use provided. """
+        axes = all_params.pop('axes', None)
+        axes = all_params.pop('axis', axes)
         axes = all_params.pop('ax', axes)
 
+        n_subplots = len(data)
+        if isinstance(shapes, list):
+            n_subplots += len(shapes)
+        elif isinstance(shapes, tuple):
+            n_subplots += 1
+        else:
+            n_subplots += shapes
+
         if axes is None:
-            FIGURE_KEYS = ['figsize', 'facecolor', 'dpi', 'ncols', 'nrows', 'constrained_layout']
+            FIGURE_KEYS = ['figsize', 'facecolor', 'dpi', 'ncols', 'nrows', 'tight_layout']
             params = filter_parameters(all_params, FIGURE_KEYS, prefix='figure_')
-            params['figsize'] = params.get('figsize', MODE_TO_FIGSIZE[mode])
-            if ('ncols' not in params) and ('nrows' not in params):
-                params['ncols'] = n_subplots
+
+            if n_subplots > 0:
+                ncols, nrows = cls.infer_cols_rows(n_subplots, **params)
+                params['ncols'], params['nrows'] = ncols, nrows
+
+                if 'figsize' not in params:
+                    INFER_FIGSIZE_KEYS = ['order_axes', 'scale', 'aspect', 'xlim', 'ylim']
+                    infer_figsize_params = filter_parameters(all_params, INFER_FIGSIZE_KEYS)
+                    params['figsize'] = cls.infer_figsize(data, mode, shapes, ncols, nrows, **infer_figsize_params)
+
+            params['tight_layout'] = params.get('tight_layout', True)
+
             _, axes = plt.subplots(**params)
 
         axes = to_list(axes)
@@ -244,16 +356,16 @@ class MatplotlibPlotter:
         TEXT_KEYS = ['fontsize', 'family', 'color']
 
         # title
-        keys = ['title', 'label', 'y'] + TEXT_KEYS
+        keys = ['title', 'y'] + TEXT_KEYS
         params = filter_parameters(ax_params, keys, prefix='title_', index=ax_num)
-        params['label'] = params.pop('title', None) or params.get('label')
+        params['label'] = params.pop('title', params.pop('label', None))
         if params:
             ax.set_title(**params)
 
         # suptitle
-        keys = ['t', 'y'] + TEXT_KEYS
+        keys = ['suptitle', 't', 'y'] + TEXT_KEYS
         params = filter_parameters(ax_params, keys, prefix='suptitle_')
-        params['t'] = params.get('t') or params.get('suptitle') or params.get('label')
+        params['t'] = params.pop('t', params.pop('suptitle', params.pop('label', None)))
         if params:
             ax.figure.suptitle(**params)
 
@@ -270,9 +382,9 @@ class MatplotlibPlotter:
             ax.set_ylabel(**params)
 
         # aspect
-        params = filter_parameters(ax_params, ['aspect'], prefix='aspect_', index=ax_num)
-        if params:
-            ax.set_aspect(**params)
+        # params = filter_parameters(ax_params, ['aspect'], prefix='aspect_', index=ax_num)
+        # if params:
+        #     ax.set_aspect(**params)
 
         # xticks
         params = filter_parameters(ax_params, ['xticks'], prefix='xticks_', index=ax_num)
@@ -310,7 +422,7 @@ class MatplotlibPlotter:
 
         # colorbar
         if all_params.get('colorbar', False) and mode == 'imshow':
-            keys = ['colorbar', 'fraction', 'aspect', 'fake', 'ax_image']
+            keys = ['colorbar', 'size', 'pad', 'fake', 'ax_image']
             params = filter_parameters(ax_params, keys, prefix='colorbar_', index=ax_num)
             # if colorbar is disabled for subplot, add param to plot fake axis instead to keep proportions
             params['fake'] = not params.pop('colorbar', True)
@@ -352,6 +464,7 @@ class MatplotlibPlotter:
         # save if necessary and render
         if savepath is not None:
             fig.savefig(savepath, **save_kwargs)
+
         if show:
             fig.show()
         else:
@@ -374,8 +487,8 @@ class MatplotlibPlotter:
         # axis labels
         'xlabel': '', 'ylabel': '',
         # colorbar
-        'colorbar_fraction': 3.0,
-        'colorbar_aspect': 30,
+        'colorbar_size': 5,
+        'colorbar_pad': None,
         # ticks
         'labeltop': True,
         'labelright': True,
@@ -459,8 +572,9 @@ class MatplotlibPlotter:
         'wiggle_color': 'k',
         'wiggle_linestyle': '-',
         # curve
-        'color': 'r',
+        'color': MASK_COLORS,
         'marker': 'o',
+        'markersize': 10,
         'linestyle': '',
         # suptitle
         'suptitle_color': 'k',
@@ -551,7 +665,7 @@ class MatplotlibPlotter:
                 curve_y = curve[curve_x]
             # transform height-mask to heights if needed
             elif curve.ndim == 2:
-                curve = (~np.isnan(curve)).nonzero()
+                curve = (curve != 0).nonzero()
                 curve_x = curve[0][(width // 2)::width]
                 curve_y = curve[1][(width // 2)::width]
 
@@ -572,7 +686,7 @@ class MatplotlibPlotter:
         # title
         'title_color' : 'k',
         # axis labels
-        'xlabel': '', 'ylabel': '',
+        'xlabel': 'Values', 'ylabel': 'Counts',
         'xlabel_color' : 'k', 'ylabel_color' : 'k',
         # legend
         'legend_size': 10,
@@ -607,6 +721,11 @@ class MatplotlibPlotter:
         """
         for image_num, array in enumerate(data):
             array = array.flatten()
+
+            bad_values = filter_parameters(kwargs, ['bad_values'], index=image_num)
+            for bad_value in bad_values.get('bad_values', []):
+                array = array[array != bad_value]
+
             params = filter_parameters(kwargs, ['bins', 'color', 'alpha'], prefix='hist_', index=image_num)
             ax.hist(array, **params)
 
@@ -713,6 +832,9 @@ class MatplotlibPlotter:
     METRIC_CMAP.set_bad(color='black')
     register_cmap(name='Metric', cmap=METRIC_CMAP)
 
+    BASIC_CMAP = ListedColormap(get_cmap('ocean')(np.linspace(0.0, 0.9, 100)))
+    register_cmap(name='Basic', cmap=BASIC_CMAP)
+
     DEPTHS_CMAP = ListedColormap(get_cmap('viridis_r')(np.linspace(0.0, 0.5, 100)))
     register_cmap(name='Depths', cmap=DEPTHS_CMAP)
 
@@ -746,12 +868,11 @@ class MatplotlibPlotter:
         return colorsys.hls_to_rgb(h, min(1, l * scale), s = s)
 
     @staticmethod
-    def add_colorbar(ax_image, aspect=30, fraction=0.5, color='black', fake=False):
+    def add_colorbar(ax_image, size=5, pad=None, color='black', fake=False):
         """ Append colorbar to the image on the right. """
         divider = axes_grid1.make_axes_locatable(ax_image.axes)
-        width = axes_grid1.axes_size.AxesY(ax_image.axes, aspect=1./aspect)
-        pad = axes_grid1.axes_size.Fraction(fraction, width)
-        cax = divider.append_axes("right", size=width, pad=pad)
+        pad = size * 1.5 if pad is None else pad
+        cax = divider.append_axes("right", size=f"{size}%", pad=f"{pad}%")
         if fake:
             cax.set_axis_off()
         else:
@@ -760,7 +881,7 @@ class MatplotlibPlotter:
             ax_image.axes.created_colorbar = colorbar
 
     @staticmethod
-    def add_legend(ax, color, label, size, loc):
+    def add_legend(ax, color, label, size, loc, facecolor='white'):
         """ Add patches to legend. All invalid colors are filtered. """
         handles = getattr(ax.get_legend(), 'legendHandles', [])
         colors = [color for color in to_list(color) if is_color_like(color)]
@@ -768,7 +889,7 @@ class MatplotlibPlotter:
         new_patches = [Patch(color=color, label=label) for color, label in zip(colors, labels) if label]
         handles += new_patches
         if handles:
-            ax.legend(handles=handles, loc=loc, prop={'size': size})
+            ax.legend(handles=handles, loc=loc, prop={'size': size}, facecolor=facecolor)
 
 
 
