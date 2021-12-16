@@ -20,7 +20,7 @@ import bottleneck as bn
 
 import h5py
 
-from .functions import to_list, triangular_kernel_nd
+from .functions import to_list, triangular_weights_function_nd
 
 
 
@@ -523,15 +523,14 @@ class ModeAccumulator3D(Accumulator3D):
             self.data = np.argmax(self.data, axis=-1)
 
 class WeightedSumAccumulator3D(Accumulator3D):
-    """ Accumulator that takes weighted sum of overlapping crops. Accepts function `kernel`
+    """ Accumulator that takes weighted sum of overlapping crops. Accepts `weights_function`
     for making weights for each crop into the initialization.
 
     NOTE: add later support of
-    (i) weights incoming along with a data-crop
-    (ii) make-weights function that accepts incoming crop-data.
+    (i) weights incoming along with a data-crop.
     """
     def __init__(self, shape=None, origin=None, dtype=np.float32, transform=None, path=None,
-                 weights_function=triangular_kernel_nd, **kwargs):
+                 weights_function=triangular_weights_function_nd, **kwargs):
         super().__init__(shape=shape, origin=origin, dtype=dtype, transform=transform, path=path, **kwargs)
 
         self.create_placeholder(name='data', dtype=self.dtype, fill_value=0)
@@ -540,7 +539,7 @@ class WeightedSumAccumulator3D(Accumulator3D):
 
     def _update(self, crop, location):
         # Weights matrix for the incoming crop
-        crop_weights = self.weights_function(crop.shape)
+        crop_weights = self.weights_function(crop)
         self.data[location] = ((crop_weights * crop + self.data[location] * self.weights[location]) /
                                (crop_weights + self.weights[location]))
         self.weights[location] += crop_weights
@@ -559,7 +558,7 @@ class RegressionAccumulator(Accumulator3D):
     supplied crops is different, the result of aggregation might differ as well.
     """
     def __init__(self, shape=None, origin=None, dtype=np.float32, transform=None, path=None,
-                 weights_function=triangular_kernel_nd, **kwargs):
+                 weights_function=triangular_weights_function_nd, **kwargs):
         super().__init__(shape=shape, origin=origin, dtype=dtype, transform=transform, path=path, **kwargs)
 
         # Fill both placeholders with nans: in order to fit the regression
@@ -575,7 +574,7 @@ class RegressionAccumulator(Accumulator3D):
         # Fit is done via least-squares regression.
         overlap_data = self.data[location]
         overlap_weights = self.weights[location]
-        crop_weights = self.weights_function(crop.shape)
+        crop_weights = self.weights_function(crop)
 
         # If some of the values are already filled, use regression to fit new crop
         # to what's filled.
@@ -601,8 +600,7 @@ class RegressionAccumulator(Accumulator3D):
             # Update weights over overlap.
             overlap_weights[overlap_indices] += crop_weights[overlap_indices]
 
-            # Use values from crop to update the region covered by the crop
-            # and not yet filled.
+            # Use values from crop to update the region covered by the crop and not yet filled.
             self.data[location][new_indices] = crop[new_indices]
             self.weights[location][new_indices] = crop_weights[new_indices]
         else:

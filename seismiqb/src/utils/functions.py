@@ -362,12 +362,12 @@ def trinagular_kernel_1d(length, alpha=.1):
     result[length // 2:] = 2 + alpha - array[length // 2:]
     return result
 
-def triangular_kernel_nd(shape, alpha=.1):
-    """ Product of 1d triangular kernels. """
+def triangular_weights_function_nd(array, alpha=.1):
+    """ Weights-function given by a product of 1d triangular kernels. """
     result = 1
-    for i, axis_len in enumerate(shape):
+    for i, axis_len in enumerate(array.shape):
         if axis_len != 1:
-            multiplier_shape = np.ones_like(shape)
+            multiplier_shape = np.ones_like(array.shape)
             multiplier_shape[i] = axis_len
             result = result * trinagular_kernel_1d(axis_len, alpha).reshape(multiplier_shape)
     return result
