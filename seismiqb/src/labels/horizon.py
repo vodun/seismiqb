@@ -480,6 +480,11 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, VisualizationMixin):
         """ Name without extension. """
         return self.name.split('.')[0]
 
+    @property
+    def displayed_name(self):
+        """ Alias for `short_name`. """
+        return self.short_name
+
 
     # Functions to use to change the horizon
     def apply_to_matrix(self, function, **kwargs):
@@ -655,7 +660,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, VisualizationMixin):
         apply_smoothing : bool
             Whether to smooth out the result.
         kwargs : dict
-            Other parameters for grid creation, see `:meth:~.SeismicGeometry.make_grid`.
+            Other parameters for grid creation, see `:meth:~.SeismicGeometry.make_quality_grid`.
         """
         frequencies = frequencies if isinstance(frequencies, (tuple, list)) else [frequencies]
         carcass = copy(self)
