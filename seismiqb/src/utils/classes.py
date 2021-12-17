@@ -362,10 +362,6 @@ class Accumulator3D:
         """ Aggregate placeholders into resulting array. Changes `data` placeholder inplace. """
         raise NotImplementedError
 
-    # def __del__(self):
-    #     if self.type in ['hdf5', 'blosc'] and self.file is not None:
-    #         self.file.close()
-
     def clear(self):
         """ Remove placeholders from memory and disk. """
         if self.type in ['hdf5', 'blosc']:

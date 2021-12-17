@@ -1157,7 +1157,6 @@ class SeismicCropBatch(Batch):
             pad = [int(np.floor(s) * m) if isinstance(m, float) else m for m, s in zip(margin, crop.shape[1:])]
             pad = [m if s > 1 else 0 for m, s in zip(pad, crop.shape[1:])]
             pad = [(item // 2, item - item // 2) for item in pad]
-            print(pad)
             for i in range(3):
                 slices = [slice(None), slice(None), slice(None), slice(None)]
                 slices[i+1] = slice(pad[i][0])
