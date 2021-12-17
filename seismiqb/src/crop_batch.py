@@ -540,9 +540,8 @@ class SeismicCropBatch(Batch):
             raise ValueError('Src and dst must be provided')
 
         mask = self.get(ix, src)
-        coords = np.where(mask > 0)
 
-        if np.random.binomial(1, 1 - p) or len(coords[0]) == 0:
+        if np.random.binomial(1, 1 - p):
             # Nothing to apply
             new_mask = mask
         else:
@@ -550,7 +549,7 @@ class SeismicCropBatch(Batch):
 
             # Get the amount of crop lines and kept them on the chosen crop part
             max_len = mask.shape[0]
-            length = int(np.round(max_len * length_ratio))
+            length = round(max_len * length_ratio)
 
             if filter_left:
                 new_mask[:-length, :] = 0
