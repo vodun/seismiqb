@@ -118,6 +118,8 @@ class Fault(Horizon):
             points = self.interpolate_3d(sticks, **kwargs)
             nodes = np.concatenate(sticks.values)
             return points, nodes
+        else:
+            return np.zeros((0, 3)), np.zeros((0, 3))
 
     @classmethod
     def read_file(cls, path):
