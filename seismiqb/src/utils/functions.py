@@ -384,8 +384,8 @@ def make_savepath(path, name, extension=''):
         os.makedirs(dir_path, exist_ok=True)
     return path
 
-def faults_sizes(slide, normalize):
-    """ Compute sizes (depth length) for each connected object. """
+def faults_lengthes(slide, normalize):
+    """ Compute sizes (depth length) for each connected object on 2D slide. """
     sizes = slide.copy()
     labels, n_objects = measurements.label(slide > 0, structure=np.ones((3, 3)))
     for i in range(1, n_objects+1):
@@ -394,3 +394,34 @@ def faults_sizes(slide, normalize):
             size /= slide.shape[-1]
         sizes[labels == i] = size
     return sizes
+
+@njit
+def concat_sorted(first_array, second_array):
+    """ Merge two sorted arrays into sorted array. """
+    buffer = np.zeros((len(first_array) + len(second_array), 3), dtype=np.int32)
+    c = 0
+    i, j = 0, 0
+
+    # Condition is re-evaluated to swapped arrays
+    while i < len(first_array) and j < len(second_array):
+        first_ = first_array[i]
+        second_ = second_array[j]
+
+        # Need to swap or not
+        if second_[0] == first_[0]:
+            if second_[1] < first_[1]:
+                first_array, second_array = second_array, first_array
+                i, j = j, i
+            elif second_[1] == first_[1]:
+                # Same value: no need to duplicate
+                j += 1
+
+        elif second_[0] < first_[0]:
+            first_array, second_array = second_array, first_array
+            i, j = j, i
+
+        buffer[c] = first_array[i]
+        c += 1
+        i += 1
+
+    return buffer[:c]

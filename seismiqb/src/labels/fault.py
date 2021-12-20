@@ -20,6 +20,7 @@ from .fault_triangulation import make_triangulation, triangle_rasterization
 from .fault_postprocessing import faults_sizes
 from ..plotters import show_3d
 from ..geometry import SeismicGeometry
+from ..utils import concat_sorted
 
 
 
@@ -250,9 +251,9 @@ class Fault(Horizon):
 
     def merge(self, other, **kwargs):
         """ Merge two Fault instances"""
-        points = np.concatenate([self.points, other.points], axis=0)
+        points = concat_sorted(self.points, other.points)
         if self.nodes is not None:
-            nodes = np.concatenate([self.nodes, other.nodes], axis=0)
+            nodes = concat_sorted(self.nodes, other.nodes)
         else:
             nodes = None
         return Fault(points, nodes=nodes, field=self.field, **kwargs)

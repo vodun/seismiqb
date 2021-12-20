@@ -14,7 +14,7 @@ from ..dataset import SeismicDataset
 from ..geometry import SeismicGeometry
 from ..samplers import SeismicSampler, RegularGrid, FaultSampler, ConstantSampler
 from ..metrics import FaultsMetrics
-from ..utils import adjust_shape_3d, Accumulator3D, GaussianLayer, expand_dims, squueze, faults_sizes
+from ..utils import adjust_shape_3d, Accumulator3D, GaussianLayer, expand_dims, squueze, faults_lengthes
 from ..plotters import plot_image
 
 from ...batchflow import Config, Pipeline, Notifier, Monitor
@@ -845,9 +845,9 @@ class FaultController(BaseController):
             slide = prediction[i] if orientation == 0 else prediction[:, i]
 
             if multiply:
-                slide = slide * faults_sizes(slide, normalize)
+                slide = slide * faults_lengthes(slide, normalize)
             else:
-                slide = faults_sizes(slide, normalize)
+                slide = faults_lengthes(slide, normalize)
 
             if orientation == 0:
                 dst[i] = slide
@@ -892,7 +892,7 @@ class FaultController(BaseController):
         for i in range(prediction.shape[orientation]):
             slide = prediction[i] if orientation == 0 else prediction[:, i]
 
-            sizes = faults_sizes(slide, normalize)
+            sizes = faults_lengthes(slide, normalize)
 
             if orientation == 0:
                 dst[i] = slide

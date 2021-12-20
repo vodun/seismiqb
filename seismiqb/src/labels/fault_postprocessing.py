@@ -156,7 +156,7 @@ def faults_sizes(labels):
     """
     sizes = []
     for array in labels:
-        i_len = (array[:, 0].max() - array[:, 0].min())
-        x_len = (array[:, 1].max() - array[:, 1].min())
-        sizes += [(i_len ** 2 + x_len ** 2) ** 0.5]
+        i_len = array[:, 0].ptp()
+        x_len = array[:, 1].ptp()
+        sizes.append((i_len ** 2 + x_len ** 2) ** 0.5)
     return np.array(sizes)

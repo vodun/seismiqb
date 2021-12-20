@@ -409,6 +409,10 @@ class SeismicGeometry(CacheMixin, ExportMixin):
         array[:, 2] += self.delay
         return array
 
+    def depth_to_time(self, depthes):
+        """ Convert depth to time. """
+        return depthes * self.sample_rate + self.delay
+
     # Spatial matrices
     @property
     def snr(self):
@@ -822,10 +826,6 @@ class SeismicGeometry(CacheMixin, ExportMixin):
         inverse_matrix = np.linalg.inv(self.rotation_matrix[:, :2])
         lines = (inverse_matrix @ points.T - inverse_matrix @ self.rotation_matrix[:, 2].reshape(2, -1)).T
         return np.rint(lines)
-
-    def depth_to_time(self, depthes):
-        """ Convert depth to time. """
-        return depthes * self.sample_rate + self.delay
 
     def benchmark(self, n_slide=300, projections='ixh', n_crop=300, crop_shapes_min=5, crop_shapes_max=200,
                   use_cache=False, seed=42):
