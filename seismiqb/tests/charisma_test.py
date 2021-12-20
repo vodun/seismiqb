@@ -1,4 +1,4 @@
-""" Script for running the controller notebook for SeismicGeometry tests.
+""" Script for running the controller notebook for CharismaMixin tests.
 
 The behaviour of the test is parametrized by the following constants:
 
@@ -8,10 +8,6 @@ DATESTAMP : str
 TESTS_SCRIPTS_DIR : str
     Path to the directory with test .py scripts.
     Used as an entry point to the working directory.
-LOGS_DIR : str
-    Path to the directory with test logs (timings, message).
-NOTEBOOKS_DIR : str
-    Path to the directory with test .ipynb files.
 OUTPUT_DIR : str
     Path to the directory for saving results and temporary files
     (executed notebooks, logs, data files like cubes, etc.).
@@ -32,74 +28,77 @@ SHOW_MESSAGE : bool
 SHOW_TEST_ERROR_INFO : bool
     Whether to show error traceback in outputs.
     Notice that it only works with SHOW_MESSAGE = True.
+
+You can also manage notebook execution kwargs which relates to cube and horizon for the test:
+
+CUBE_SHAPE : sequence of three integers
+    Shape of a synthetic cube.
+SEED: int or None
+    Seed used for creation of random generator (check out `np.random.default_rng`).
 """
-from glob import glob
-import json
+import glob
 import os
-import pprint
 from datetime import date
 
 from .utils import extract_traceback
 from ..batchflow.utils_notebook import run_notebook
 
 
-def test_geometry(
+def test_charisma(
     capsys, tmpdir,
     OUTPUT_DIR=None, USE_TMP_OUTPUT_DIR=True,
     REMOVE_OUTDATED_FILES=True, REMOVE_EXTRA_FILES=True,
     SHOW_MESSAGE=True, SHOW_TEST_ERROR_INFO=True
 ):
-    """ Run SeismicGeometry test notebook.
+    """ Run CharismaMixin tests notebook.
 
-    This test runs ./notebooks/geometry_test.ipynb test file and show execution message and
-    the most important timings for SeismicGeometry tests.
+    This test runs ./notebooks/charisma_test.ipynb test file and show execution message.
 
-    Under the hood, this notebook create a fake seismic cube, saves it in different data formats
-    and for each format run SeismicGeometry tests.
+    Under the hood, this notebook create a fake seismic cube (Field), saves it and checks
+    matrices savings and loadings in CHARISMA data format.
     """
     # Get workspace constants
     DATESTAMP = date.today().strftime("%Y-%m-%d")
     TESTS_SCRIPTS_DIR = os.getenv("TESTS_SCRIPTS_DIR", os.path.dirname(os.path.realpath(__file__))+'/')
-    LOGS_DIR = os.path.join(TESTS_SCRIPTS_DIR, 'notebooks/geometry_test_files/')
 
     # Workspace preparation
     if USE_TMP_OUTPUT_DIR:
         # Create tmp workspace
-        OUTPUT_DIR = tmpdir.mkdir("notebooks").mkdir("geometry_test_files")
-        _ = OUTPUT_DIR.mkdir("notebooks")
-        _ = OUTPUT_DIR.mkdir("tmp")
+        OUTPUT_DIR = tmpdir.mkdir('notebooks')
+        _ = OUTPUT_DIR.mkdir('charisma_tests_files')
 
-        out_path_ipynb = OUTPUT_DIR.join(f"geometry_test_out_{DATESTAMP}.ipynb")
+        out_path_ipynb = OUTPUT_DIR.join(f"charisma_test_out_{DATESTAMP}.ipynb")
 
     else:
         # Remove outdated executed controller notebook (It is saved near to the original one)
         if REMOVE_OUTDATED_FILES:
-            previous_output_files = glob.glob(os.path.join(TESTS_SCRIPTS_DIR, 'notebooks/geometry_test_out_*.ipynb'))
+            previous_output_files = glob.glob(os.path.join(TESTS_SCRIPTS_DIR, 'notebooks/charisma_test_out_*.ipynb'))
 
             for file in previous_output_files:
                 os.remove(file)
 
         # Create main paths links
         if OUTPUT_DIR is None:
-            OUTPUT_DIR = LOGS_DIR
+            OUTPUT_DIR = os.path.join(TESTS_SCRIPTS_DIR, 'notebooks', 'charisma_tests_files')
 
-        out_path_ipynb = os.path.join(OUTPUT_DIR, f'geometry_test_out_{DATESTAMP}.ipynb')
+        out_path_ipynb = os.path.join(TESTS_SCRIPTS_DIR, f'notebooks/charisma_test_out_{DATESTAMP}.ipynb')
 
     # Tests execution
     exec_info = run_notebook(
-        path=os.path.join(TESTS_SCRIPTS_DIR, 'notebooks/geometry_test.ipynb'),
+        path=os.path.join(TESTS_SCRIPTS_DIR, 'notebooks/charisma_test.ipynb'),
         nb_kwargs={
             # Workspace constants
             'DATESTAMP': DATESTAMP,
-            'NOTEBOOKS_DIR': os.path.join(TESTS_SCRIPTS_DIR, 'notebooks/'),
-            'LOGS_DIR': LOGS_DIR,
             'OUTPUT_DIR': OUTPUT_DIR,
 
             # Execution parameters
             'USE_TMP_OUTPUT_DIR': USE_TMP_OUTPUT_DIR,
             'REMOVE_OUTDATED_FILES': REMOVE_OUTDATED_FILES,
             'REMOVE_EXTRA_FILES': REMOVE_EXTRA_FILES,
-            'SHOW_TEST_ERROR_INFO': SHOW_TEST_ERROR_INFO
+
+             # Data creation parameters
+            'CUBE_SHAPE': (100, 100, 100),
+            'SEED': 10
         },
         insert_pos=2,
         out_path_ipynb=out_path_ipynb,
@@ -108,39 +107,22 @@ def test_geometry(
 
     # Tests exit
     if exec_info is True:
-        # Open message
-        message_path = glob(os.path.join(OUTPUT_DIR, 'message_*.txt'))[-1]
-
-        with open(message_path, "r", encoding="utf-8") as infile:
-            msg = infile.readlines()
-
-        # Open timings
-        timings_path = glob(os.path.join(OUTPUT_DIR, 'timings_*.json'))[-1]
-
-        with open(timings_path, "r", encoding="utf-8") as infile:
-            timings = json.load(infile)
+        msg = ['Tests for CharismaMixin were executed successfully.\n']
 
     else:
-        timings= {'state': 'FAIL'}
-
         if SHOW_TEST_ERROR_INFO:
             # Add error traceback into the message
             msg = extract_traceback(path_ipynb=out_path_ipynb)
 
-        msg += '\nSeismicGeometry tests execution failed.'
+        msg.append('\nCharismaMixin tests execution failed.')
 
-    # Provide output message to the terminal
+    msg = ''.join(msg)
+
     with capsys.disabled():
-        # Tests output
+        # Output message
         if SHOW_MESSAGE:
-            print(''.join(msg))
-
-        pp = pprint.PrettyPrinter()
-        pp.pprint(timings)
-        print('\n')
+            print(msg)
 
         # End of the running message
-        if timings['state']=='OK':
-            print('Tests for SeismicGeometry were executed successfully.\n')
-        else:
-            assert False, 'SeismicGeometry tests failed.\n'
+        if (not exec_info is True) or msg.find('fail') != -1:
+            assert False, 'CharismaMixin tests failed.\n'

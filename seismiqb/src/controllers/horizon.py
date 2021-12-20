@@ -353,7 +353,6 @@ class HorizonController(BaseController):
 
         iterator = predictions if isinstance(predictions, (tuple, list)) else [predictions]
         for horizon in iterator:
-            #
             horizon.show(['depths', 'gradient'], separate=True,
                          show=self.plot, savepath=self.make_savepath('postprocess', 'depth_gradient__before.png'))
 
