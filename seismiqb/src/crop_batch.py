@@ -366,7 +366,7 @@ class SeismicCropBatch(Batch):
     # Loading of labels
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def create_masks(self, ix, dst, indices='all', width=3, src_labels='labels'):
+    def create_masks(self, ix, dst, indices='all', width=3, src_labels='labels', sparse=False):
         """ Create masks from labels in stored `locations`.
 
         Parameters
@@ -382,10 +382,12 @@ class SeismicCropBatch(Batch):
             Width of the resulting label.
         src_labels : str
             Dataset attribute with labels dict.
+        sparse : bool
+            Create mask only for labeled slices (for Faults). Unlabeled slices will be marked by -1.
         """
         field = self.get(ix, 'fields')
         location = self.get(ix, 'locations')
-        return field.make_mask(location=location, width=width, indices=indices, src=src_labels)
+        return field.make_mask(location=location, width=width, indices=indices, src=src_labels, sparse=sparse)
 
 
     @action
@@ -1137,7 +1139,35 @@ class SeismicCropBatch(Batch):
             setattr(self, _dst, crop)
         return self
 
-    def plot_components(self, *components, idx=0, slide=None, **kwargs):
+    @action
+    def fill_bounds(self, src, dst=None, margin=0.05, fill_value=0):
+        """ Fill bounds of crops with zeros. """
+        if (np.array(margin) == 0).all():
+            return self
+
+        dst = dst or src
+        src = [src] if isinstance(src, str) else src
+        dst = [dst] if isinstance(dst, str) else dst
+
+        if isinstance(margin, (int, float)):
+            margin = (margin, margin, margin)
+
+        for _src, _dst in zip(src, dst):
+            crop = getattr(self, _src).copy()
+            pad = [int(np.floor(s) * m) if isinstance(m, float) else m for m, s in zip(margin, crop.shape[1:])]
+            pad = [m if s > 1 else 0 for m, s in zip(pad, crop.shape[1:])]
+            pad = [(item // 2, item - item // 2) for item in pad]
+            for i in range(3):
+                slices = [slice(None), slice(None), slice(None), slice(None)]
+                slices[i+1] = slice(pad[i][0])
+                crop[slices] = fill_value
+
+                slices[i+1] = slice(crop.shape[i+1] - pad[i][1], None)
+                crop[slices] = fill_value
+            setattr(self, _dst, crop)
+        return self
+
+    def plot_components(self, *components, idx=0, slide=None, displayed_name=None, **kwargs):
         """ Plot components of batch.
 
         Parameters
@@ -1161,8 +1191,10 @@ class SeismicCropBatch(Batch):
 
         # Get location
         l = self.locations[idx]
-        field_name = self.unsalt(self.indices[idx])
-        displayed_name = self.dataset[field_name].displayed_name
+
+        if displayed_name is None:
+            field_name = self.unsalt(self.indices[idx])
+            displayed_name = self.dataset.geometries[field_name].displayed_name
 
         if (l[0].stop - l[0].start) == 1:
             suptitle = f'INLINE {l[0].start}   CROSSLINES {l[1].start}:{l[1].stop}   DEPTH {l[2].start}:{l[2].stop}'

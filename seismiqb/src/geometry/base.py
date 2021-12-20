@@ -409,6 +409,10 @@ class SeismicGeometry(CacheMixin, ExportMixin):
         array[:, 2] += self.delay
         return array
 
+    def depth_to_time(self, depthes):
+        """ Convert depth to time. """
+        return depthes * self.sample_rate + self.delay
+
     # Spatial matrices
     @property
     def snr(self):
