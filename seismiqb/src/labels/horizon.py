@@ -890,51 +890,44 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Visua
                                                printer=printer, hist=hist, plot=plot)
 
     def check_proximity(self, other):
-        """ Compute a number of stats on location of `self` relative to the `other` Horizons.
-        This method can be used as either bound or static method.
-        !!.
+        """ Compute a number of stats of location of `self` relative to the `other` Horizons.
 
         Parameters
         ----------
         self, other : Horizon
             Horizons to compare.
-        offset : number
-            Value to shift the first horizon down.
 
         Returns
         -------
         dictionary with following keys:
-            - `l1_matrix` with matrix of depth differences
-            - `l1_mean` for average distance
-            - `l1_abs_mean` for average of absolute values of point-wise distances
-            - `l1_max`, `l1_abs_max`, `l1_std`, `l1_abs_std`
+            - `difference_matrix` with matrix of depth differences
+            - `difference_mean` for average distance
+            - `difference_abs_mean` for average of absolute values of point-wise distances
+            - `difference_max`, `difference_abs_max`, `difference_std`, `difference_abs_std`
             - `overlap_size` with number of overlapping points
             - `window_rate` for percentage of traces that are in 5ms from one horizon to the other
         """
-        self_full_matrix = self.full_matrix
-        other_full_matrix = other.full_matrix
+        difference = np.where((self.full_matrix != self.FILL_VALUE) & (other.full_matrix != self.FILL_VALUE),
+                              self.full_matrix - other.full_matrix, np.nan)
+        abs_difference = np.abs(difference)
 
-        l1 = np.where((self_full_matrix != self.FILL_VALUE) & (other_full_matrix != self.FILL_VALUE),
-                      self_full_matrix - other_full_matrix, np.nan)
-        abs_l1 = np.abs(l1)
+        overlap_size = np.nansum(~np.isnan(difference))
+        window_rate = np.nansum(abs_difference < (5 / self.field.sample_rate)) / overlap_size
 
-        overlap_size = np.nansum(~np.isnan(l1))
-        window_rate = np.nansum(abs_l1 < (5 / self.field.sample_rate)) / overlap_size
-
-        present_at_1_absent_at_2 = ((self_full_matrix != self.FILL_VALUE)
-                                    & (other_full_matrix == self.FILL_VALUE)).sum()
-        present_at_2_absent_at_1 = ((self_full_matrix == self.FILL_VALUE)
-                                    & (other_full_matrix != self.FILL_VALUE)).sum()
+        present_at_1_absent_at_2 = ((self.full_matrix != self.FILL_VALUE)
+                                    & (other.full_matrix == self.FILL_VALUE)).sum()
+        present_at_2_absent_at_1 = ((self.full_matrix == self.FILL_VALUE)
+                                    & (other.full_matrix != self.FILL_VALUE)).sum()
 
         info_dict = {
-            'l1_matrix' : l1,
-            'l1_mean' : np.nanmean(l1),
-            'l1_max' : max((np.nanquantile(l1, [0, 1]))),
-            'l1_std' : np.nanstd(l1),
+            'difference_matrix' : difference,
+            'difference_mean' : np.nanmean(difference),
+            'difference_max' : max((np.nanquantile(difference, [0, 1]))),
+            'difference_std' : np.nanstd(difference),
 
-            'l1_abs_mean' : np.nanmean(abs_l1),
-            'l1_abs_max' : np.nanmax(abs_l1),
-            'l1_abs_std' : np.nanstd(abs_l1),
+            'abs_difference_mean' : np.nanmean(abs_difference),
+            'abs_difference_max' : np.nanmax(abs_difference),
+            'abs_difference_std' : np.nanstd(abs_difference),
 
             'overlap_size' : overlap_size,
             'window_rate' : window_rate,

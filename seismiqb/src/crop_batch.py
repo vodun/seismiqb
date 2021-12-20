@@ -734,10 +734,10 @@ class SeismicCropBatch(Batch):
 
     @action
     @inbatch_parallel(init='indices', target='for')
-    def save_masks(self, ix, src='masks', dst=None, savemode='numpy',
-                    threshold=0.5, mode='mean', minsize=0, prefix='predict'):
-        """ !!. """
-        os.makedirs(dst, exist_ok=True)
+    def save_masks(self, ix, src='masks', save_to=None, savemode='numpy',
+                   threshold=0.5, mode='mean', minsize=0, prefix='predict'):
+        """ Save extracted horizons to disk. """
+        os.makedirs(save_to, exist_ok=True)
 
         # Get correct mask
         mask = self.get(ix, src)
@@ -756,9 +756,9 @@ class SeismicCropBatch(Batch):
         if horizons and len(horizons[-1]) > minsize:
             horizon = horizons[-1]
             str_location = '__'.join([f'{start}-{stop}' for start, stop in zip(origin, endpoint)])
-            savepath = os.path.join(dst, f'{prefix}_{str_location}')
+            savepath = os.path.join(save_to, f'{prefix}_{str_location}')
 
-            if savemode in ['numpy', 'np']:
+            if savemode in ['numpy', 'np', 'npy']:
                 np.save(savepath, horizon.points)
 
             elif savemode in ['dump']:

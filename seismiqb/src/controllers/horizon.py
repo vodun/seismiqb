@@ -228,7 +228,7 @@ class HorizonController(BaseController):
                 hm.evaluate('compare', hist=False,
                             plot=True, show=self.plot,
                             printer=lambda msg: print(msg, file=result_txt),
-                            savepath=self.make_savepath('inference_ix', 'l1.png'))
+                            savepath=self.make_savepath('inference_ix', 'difference.png'))
 
         # Merge all the predictions
         self.log(f'Merge list: {merge_params}')
@@ -443,11 +443,11 @@ class HorizonController(BaseController):
                     hm.evaluate('compare', hist=False,
                                 plot=True, show=self.plot,
                                 printer=lambda msg: print(msg, file=result_txt),
-                                savepath=self.make_savepath(*prefix, name + 'l1.png'))
+                                savepath=self.make_savepath(*prefix, name + 'difference.png'))
 
                 msg = (f'\nPredicted horizon {i} compared to target:'
                        f'\n{horizon.name}'
-                       f'\nwindow_rate={info["window_rate"]:4.3f}\navg error={info["l1_mean"]:4.3f}')
+                       f'\nwindow_rate={info["window_rate"]:4.3f}\navg error={info["difference_mean"]:4.3f}')
                 self.log(indent(msg, ' '*shift))
 
                 if rename:

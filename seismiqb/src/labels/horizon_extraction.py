@@ -35,28 +35,8 @@ class MergeStatus(IntEnum):
 
 
 class ExtractionMixin:
-    """ Methods for horizon extraction from 3D volumes and their later merge.
-    5 6 7
-      6 7 8
-
-    6, 8
-    8 - 6 = 2 overlapping pixels - correct
-    adjacency = -1
-
-    5 6 7
-        8 9 10
-    8, 8
-    8 - 8 = 0 overlapping pixels - touching
-    adjacency = 1
-
-        # adjacency = -1 -> try to merge horizons with overlap  of 2 pixels
-        # adjacency = +0 -> try to merge horizons with overlap  of 1 pixel
-        # adjacency = +1 -> try to merge horizons with touching boundaries
-        # adjacency = +2 -> try to merge horizons with gap      of 1 pixel between boundaries
-
-    """
+    """ Methods for horizon extraction from 3D volumes and their later merge. """
     #pylint: disable=too-many-statements, too-many-nested-blocks, line-too-long
-
     @classmethod
     def extract_from_mask(cls, mask, field=None, origin=None, minsize=1000,
                           prefix='extracted', verbose=False, max_iters=999):
@@ -144,9 +124,9 @@ class ExtractionMixin:
                 points = np.vstack(indices).T
 
                 # iline, crossline, occurencies_ix, min_ix, max_ix, mean_ix
-                groupped_points = groupby_all(points)
+                grouped_points = groupby_all(points)
 
-                if len(points) == len(groupped_points):
+                if len(points) == len(grouped_points):
                     # Point-cloud extracted cleanly, with no ambiguous points
                     stats['num_easy'] += 1
 
@@ -171,16 +151,16 @@ class ExtractionMixin:
                     # We use separate indexing for spatial/depth coordinates to avoid advanced indexing for columns
                     stats['num_hard'] += 1
 
-                    mask_min_max = (groupped_points[:, 3] == groupped_points[:, 4])
+                    mask_min_max = (grouped_points[:, 3] == grouped_points[:, 4])
                     if mask_min_max.any():
                         # Joined surface: min==max
-                        at_joined = groupped_points[mask_min_max]
+                        at_joined = grouped_points[mask_min_max]
                         ix_joined = at_joined[:, :2]
                         h_joined = at_joined[:, 3]
 
                         # Two separate surfaces: min < max
                         # Can't be empty: if that is the case, surfaces would be identical -> extracted cleanly
-                        at_separated = groupped_points[~mask_min_max]
+                        at_separated = grouped_points[~mask_min_max]
                         ix_separated = at_separated[:, :2]
                         min_separated = at_separated[:, 3]
                         max_separated = at_separated[:, 4]
@@ -191,9 +171,9 @@ class ExtractionMixin:
                         stats['num_hard_joined'] += 1
                     else:
                         # Two separate surfaces: min < max
-                        ix = groupped_points[:, :2]
-                        min_ = groupped_points[:, 3]
-                        max_ = groupped_points[:, 4]
+                        ix = grouped_points[:, :2]
+                        min_ = grouped_points[:, 3]
+                        max_ = grouped_points[:, 4]
 
                         surfaces = [(ix, min_),
                                     (ix, max_)]
@@ -573,8 +553,8 @@ class ExtractionMixin:
             bboxes = np.array(bboxes, dtype=np.int32)
 
             base_bbox = np.array([self.i_min, self.i_max,
-                                self.x_min, self.x_max,
-                                self.h_min, self.h_max])
+                                  self.x_min, self.x_max,
+                                  self.h_min, self.h_max])
 
             # Iline-axis
             overlap_min_i = np.maximum(bboxes[:, 0], base_bbox[0])

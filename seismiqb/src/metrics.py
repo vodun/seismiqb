@@ -755,7 +755,7 @@ class HorizonMetrics(BaseMetrics):
             if horizon.field.name == self.horizon.field.name:
                 overlap_info = Horizon.check_proximity(self.horizon, horizon)
                 lst.append((horizon, overlap_info))
-        lst.sort(key=lambda x: abs(x[1].get('l1_mean', 999999)))
+        lst.sort(key=lambda x: abs(x[1].get('difference_mean', 999999)))
         other, overlap_info = lst[0]
         return (other, overlap_info), {} # actual return + fake plot dict
 
@@ -778,7 +778,7 @@ class HorizonMetrics(BaseMetrics):
             raise ValueError('Can compare two horizons exactly or one to the best match from list of horizons. ')
         _ = kwargs
         (other, oinfo), _ = self.find_best_match()
-        metric = oinfo['l1_matrix']
+        metric = oinfo['difference_matrix']
 
 
         if printer is not None:
@@ -788,9 +788,9 @@ class HorizonMetrics(BaseMetrics):
             {other.name.rjust(45)}
             {'—'*45}
             Rate in 5ms:                         {oinfo['window_rate']:8.3f}
-            Mean/std of errors:               {oinfo['l1_mean']:4.2f} / {oinfo['l1_std']:4.2f}
-            Mean/std of abs errors:           {oinfo['l1_abs_mean']:4.2f} / {oinfo['l1_abs_std']:4.2f}
-            Max error/abs error:              {oinfo['l1_max']:4} / {oinfo['l1_abs_max']:4}
+            Mean/std of errors:               {oinfo['difference_mean']:4.2f} / {oinfo['difference_std']:4.2f}
+            Mean/std of abs errors:           {oinfo['difference_abs_mean']:4.2f} / {oinfo['difference_abs_std']:4.2f}
+            Max error/abs error:              {oinfo['difference_max']:4} / {oinfo['difference_abs_max']:4}
             {'—'*45}
             Lengths of horizons:                 {len(self.horizon):8}
                                                  {len(other):8}
@@ -816,8 +816,8 @@ class HorizonMetrics(BaseMetrics):
         if hist:
             hist_dict = {
                 'bins': 100,
-                'xlabel': 'l1-values',
-                'title_label': 'Histogram of l1 differences',
+                'xlabel': 'difference values',
+                'title_label': 'Histogram of horizon differences',
                 **kwargs,
             }
             plot_image(metric, mode='hist', **hist_dict)
