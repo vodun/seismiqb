@@ -1,4 +1,4 @@
-""" !!. """
+""" Method for horizon extraction from 3D volume and their merging. """
 from enum import IntEnum
 from time import perf_counter
 from operator import attrgetter
@@ -900,7 +900,25 @@ class ExtractionMixin:
                               max_concurrent_iters=2, max_workers=16, min_workers=4, min_length=1000, multiplier=0.8,
                               mean_threshold=1., max_threshold=2.2, adjacency=3, minsize=50, max_iters=1,
                               num_merged_threshold=1, delete_threshold=0.01):
-        """ !!. """
+        """ Apply merge procedure in multiple threads.
+        Works by splitting the `horizons` list into multiple chunks, merging everything possible in each chunk,
+        and then applying one final merge to do cross-chunk merges.
+
+        Parameters
+        ----------
+        max_concurrent_iters : int
+            Number of times to split `horizons` into chunks and processing concurrently.
+        max_workers : int
+            Maximum number of chunks / workers to use.
+        min_workers : int
+            Minimum number of chunks / workers. If the optimal amount is lower, then we don't use concurrency at all.
+        min_length : int
+            If the chunk size is lower, we use fewer workers.
+        multiplier : float
+            Decrease in number of workers, if needed.
+        other parameters : dict
+            Passed directly to `merge_list` method.
+        """
         for _ in range(max_concurrent_iters):
             threading_flag, num_workers = ExtractionMixin._compute_threading_parameters(length=len(horizons),
                                                                                         min_length=min_length,
@@ -941,7 +959,7 @@ class ExtractionMixin:
 
     @staticmethod
     def _compute_threading_parameters(length, max_workers, min_workers, min_length, multiplier=0.8):
-        """ !!. """
+        """ Compute whether the concurrency is needed. """
         chunk_size = length // max_workers
 
         # Each chunk is big enough for current `num_workers=max_workers`, so use them all
@@ -991,7 +1009,9 @@ class ExtractionMixin:
 
 @njit
 def groupby_all(array):
-    """ !!. """
+    """ For each trace, compute the number of points on it, min, max and mean values.
+    `array` is expected to be of `(N, 3)` shape. Trace is defined by all points with the same first two coordinates.
+    """
     # iline, crossline, occurency, min_, max_, mean_
     output = np.zeros((len(array), 6), dtype=np.int32)
     position = 0
@@ -1044,7 +1064,9 @@ def groupby_all(array):
 
 @njit
 def intersect_matrix(first, second, max_threshold):
-    """ !!. """
+    """ Given two matrices of equal shapes, compute mean and max differences.
+    If the max difference is bigger than `max_threshold`, we break out of the loop early.
+    """
     # TODO: return flag of break/nobreak?
     #pylint: disable=consider-using-enumerate
     first = first.ravel()
