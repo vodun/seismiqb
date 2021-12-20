@@ -11,15 +11,16 @@ from numba import prange, njit
 
 from sklearn.decomposition import PCA
 from sklearn.neighbors import NearestNeighbors
-from skimage.morphology import skeletonize
-from scipy.ndimage import measurements, binary_erosion, binary_dilation, generate_binary_structure, binary_fill_holes
+from scipy.ndimage import measurements
 
 from ...batchflow.notifier import Notifier
 
 from .horizon import Horizon
 from .fault_triangulation import make_triangulation, triangle_rasterization
+from .fault_postprocessing import faults_sizes
 from ..plotters import show_3d
 from ..geometry import SeismicGeometry
+from ..utils import concat_sorted
 
 
 
@@ -37,6 +38,12 @@ class Fault(Horizon):
     FAULT_STICKS = ['INLINE', 'iline', 'xline', 'cdp_x', 'cdp_y', 'height', 'name', 'number']
     COLUMNS = ['iline', 'xline', 'height', 'name', 'number']
 
+    def __init__(self, *args, nodes=None, **kwargs):
+        self.nodes = None
+        super().__init__(*args, **kwargs)
+        if nodes is not None:
+            self.from_points(nodes, dst='nodes', reset=None, **kwargs)
+
     def from_file(self, path, transform=True, direction=None, **kwargs):
         """ Init from path to either CHARISMA, REDUCED_CHARISMA or FAULT_STICKS csv-like file
         from .npy or .hdf5 file with points.
@@ -46,12 +53,18 @@ class Fault(Horizon):
 
         self.name = os.path.basename(path)
         ext = os.path.splitext(path)[1][1:]
+
         if ext == 'npz':
             npzfile = np.load(path, allow_pickle=False)
             points = npzfile['points']
             transform = False
             nodes = None if len(npzfile['nodes']) == 0 else npzfile['nodes']
             self.format = 'file-npz'
+        elif ext == 'npy':
+            points = np.load(path, allow_pickle=False)
+            transform = False
+            nodes = None
+            self.format = 'file-npy'
         elif ext == 'hdf5':
             cube = SeismicGeometry(path, **kwargs).file_hdf5['cube']
             points = np.stack(np.where(np.array(cube) == 1)).T #TODO: get points in chunks
@@ -67,7 +80,9 @@ class Fault(Horizon):
 
         if direction is None:
             if len(self.points) > 0:
-                self.direction = 0 if self.points[:, 0].ptp() > self.points[:, 1].ptp() else 1
+                mean_depth = int(self.points[:, 2].mean())
+                depth_slice = self.points[self.points[:, 2] == mean_depth]
+                self.direction = 0 if depth_slice[:, 0].ptp() > depth_slice[:, 1].ptp() else 1
             else:
                 self.direction = 0
         elif isinstance(direction, int):
@@ -82,7 +97,8 @@ class Fault(Horizon):
         """ Get point cloud array from file values. """
         df = self.read_file(path)
         if df is not None:
-            df = self.recover_lines_from_cdp(df)
+            if 'cdp_x' in df.columns:
+                df = self.recover_lines_from_cdp(df)
             sticks = self.read_sticks(df, self.name, fix)
             if len(sticks) > 0:
                 sticks = self.sort_sticks(sticks)
@@ -171,7 +187,7 @@ class Fault(Horizon):
             points += [res]
         return np.concatenate(points, axis=0)
 
-    def add_to_mask(self, mask, locations=None, **kwargs):
+    def add_to_mask(self, mask, locations=None, sparse=False, **kwargs):
         """ Add fault to background. """
         mask_bbox = np.array([[locations[0].start, locations[0].stop],
                             [locations[1].start, locations[1].stop],
@@ -181,6 +197,20 @@ class Fault(Horizon):
 
         if (self.bbox[:, 1] < mask_bbox[:, 0]).any() or (self.bbox[:, 0] >= mask_bbox[:, 1]).any():
             return mask
+
+        if sparse and self.nodes is not None:
+            slides_indices = np.unique(self.nodes[:, self.direction])
+            indices = np.isin(points[:, self.direction], slides_indices)
+            points = points[indices]
+            mask_pos = np.isin(
+                np.arange(mask.shape[self.direction]),
+                slides_indices - locations[self.direction].start
+            )
+            if mask_pos.any():
+                if self.direction == 0:
+                    mask[mask_pos, :] = np.clip(mask[mask_pos, :], 0, 1)
+                else:
+                    mask[:, mask_pos] = np.clip(mask[:, mask_pos], 0, 1)
 
         insert_fault_into_mask(mask, points, mask_bbox)
         return mask
@@ -219,6 +249,15 @@ class Fault(Horizon):
         df = pd.read_csv(path, sep=r'\s+', names=cls.FAULT_STICKS)
         df.groupby('name').apply(cls.fault_to_csv, dst=dst)
 
+    def merge(self, other, **kwargs):
+        """ Merge two Fault instances"""
+        points = concat_sorted(self.points, other.points)
+        if self.nodes is not None:
+            nodes = concat_sorted(self.nodes, other.nodes)
+        else:
+            nodes = None
+        return Fault(points, nodes=nodes, field=self.field, **kwargs)
+
     @classmethod
     def fault_to_csv(cls, df, dst):
         """ Save separate fault to csv. """
@@ -229,15 +268,15 @@ class Fault(Horizon):
         path = self.field.make_path(path, name=self.short_name, makedirs=False)
 
         if os.path.exists(path):
-            npzfile = np.load(path, allow_pickle=False)
-            points = np.concatenate([npzfile['points'], self.points], axis=0)
-            if self.nodes is not None:
-                nodes = np.concatenate([npzfile['nodes'], self.nodes], axis=0)
-            else:
-                nodes = npzfile['nodes']
-        else:
-            points = self.points
-            nodes = self.nodes if self.nodes is not None else np.zeros((0, 3), dtype=np.int32)
+            raise ValueError(f'{path} already exists.')
+
+        points = self.points
+        nodes = self.nodes if self.nodes is not None else np.zeros((0, 3), dtype=np.int32)
+
+        folder_name = os.path.dirname(path)
+        if not os.path.exists(folder_name):
+            os.makedirs(folder_name)
+
         np.savez(path, points=points, nodes=nodes, allow_pickle=False)
 
     def split_faults(self, **kwargs):
@@ -353,7 +392,7 @@ class Fault(Horizon):
         """
         # TODO: make chunks along xlines
         if isinstance(array, SeismicGeometry):
-            array = array.file_hdf5
+            array = array.file['cube_i']
         chunk_size = chunk_size or len(array)
         if chunk_size == len(array):
             overlap = 0
@@ -377,39 +416,38 @@ class Fault(Horizon):
             chunks = _chunks()
             total = len(range(0, cube_shape[0], chunk_size-overlap))
 
-        prev_overlap = np.zeros((0, *cube_shape[1:]))
+        prev_overlapped_labels = None
         labels = np.zeros((0, 4), dtype='int32')
         n_objects = 0
 
         for start, item in Notifier(pbar, total=total)(chunks):
             chunk_labels, new_objects = measurements.label(item, structure=np.ones((3, 3, 3))) # labels for new chunk
-            chunk_labels[chunk_labels > 0] += n_objects # shift all values to avoid intersecting with previous labels
-            new_overlap = chunk_labels[:overlap]
+            new_labels = np.where(chunk_labels)
+            new_labels = np.stack([*new_labels, chunk_labels[new_labels] + n_objects], axis = -1)
 
-            if len(prev_overlap) > 0:
-                coords = np.where(prev_overlap > 0)
-                if len(coords[0]) > 0:
-                    # while there are the same objects with different labels repeat procedure
-                    while (new_overlap != prev_overlap).any():
-                        # find overlapping objects and change labels in chunk
-                        chunk_transform = {k: v for k, v in zip(new_overlap[coords], prev_overlap[coords]) if k != v}
-                        for k, v in chunk_transform.items():
-                            chunk_labels[chunk_labels == k] = v
-                        new_overlap = chunk_labels[:overlap]
+            overlapped_labels = new_labels[new_labels[:, 0] < overlap, 3]
+            if prev_overlapped_labels is not None:
+                # while there are the same objects with different labels repeat procedure
+                while (overlapped_labels != prev_overlapped_labels).any():
+                    # find overlapping objects and change labels in new chunk
+                    transform = {k: v for k, v in zip(overlapped_labels, prev_overlapped_labels) if k != v}
 
-                        # find overlapping objects and change labels in processed part of cube
-                        labels_transform = {k: v for k, v in zip(prev_overlap[coords], new_overlap[coords]) if k != v}
-                        for k, v in labels_transform.items():
-                            labels[labels[:, 3] == k, 3] = v
-                            prev_overlap[prev_overlap == k] = v
+                    for k, v in transform.items():
+                        new_labels[new_labels[:, 3] == k, 3] = v
+                    overlapped_labels = new_labels[new_labels[:, 0] < overlap, 3]
+                    transform = {k: v for k, v in zip(prev_overlapped_labels, overlapped_labels) if k != v}
 
-            prev_overlap = chunk_labels[-overlap:]
-            chunk_labels = chunk_labels[overlap:]
+                    # find overlapping objects and change labels in processed part of cube
+                    for k, v in transform.items():
+                        labels[labels[:, 3] == k, 3] = v
+                    prev_overlapped_labels = labels[labels[:, 0] >= start - overlap + 1, 3]
 
-            nonzero_coord = np.where(chunk_labels)
-            chunk_labels = np.stack([*nonzero_coord, chunk_labels[nonzero_coord]], axis = -1)
-            chunk_labels[:, 0] += start
-            labels = np.concatenate([labels, chunk_labels])
+            if start != 0:
+                new_labels = new_labels[new_labels[:, 0] >= overlap]
+
+            new_labels[:, 0] += start
+            labels = np.concatenate([labels, new_labels])
+            prev_overlapped_labels = labels[labels[:, 0] >= start + item.shape[0] - overlap, 3]
             n_objects += new_objects
 
         labels = labels[np.argsort(labels[:, 3])]
@@ -422,78 +460,6 @@ class Fault(Horizon):
             labels = [Fault(item[1].astype('int32'), name=f'fault_{i}', field=field)
                       for i, item in Notifier(pbar)(enumerate(labels))]
         return labels
-
-    @classmethod
-    def skeletonize_faults(cls, prediction, axis=0, threshold=0.1, pbar=True):
-        """ Make faults from binary mask. """
-        prediction_cube = SeismicGeometry(prediction) if isinstance(prediction, str) else prediction
-        processed_faults = np.zeros(prediction_cube.cube_shape)
-        for i in Notifier(pbar)(range(prediction_cube.cube_shape[axis])):
-            slices = [slice(None)] * 2
-            slices[axis] = i
-            slices = tuple(slices)
-            struct = generate_binary_structure(2, 10)
-
-            prediction = prediction_cube.load_slide(i, axis=axis)
-            dilation = binary_dilation(prediction > threshold, struct)
-            holes = binary_fill_holes(dilation, struct)
-            erosion = binary_erosion(holes, generate_binary_structure(2, 1))
-
-            processed_faults[slices] = binary_dilation(skeletonize(erosion, method='lee'))
-
-        return cls.from_mask(processed_faults, prediction_cube, chunk_size=100, pbar=pbar)
-
-    @classmethod
-    def remove_predictions_on_bounds(cls, image, prediction, window=30, dilation=30, padding=True, fill_value=0):
-        """ Remove predictions from cube bounds. """
-        dilation = [dilation] * image.ndim if isinstance(dilation, int) else dilation
-        if padding:
-            pad_width = [(0, 0)] * image.ndim
-            pad_width[-1] = (window // 2, window // 2)
-            image = np.pad(image, pad_width=pad_width)
-
-        shape = (*image.shape[:-1], image.shape[-1] - window + window % 2, window)
-        strides = (*image.strides, image.strides[-1])
-
-        strided = np.lib.stride_tricks.as_strided(image, shape, strides=strides)
-
-        if padding:
-            mask = strided.min(axis=-1) == strided.max(axis=-1)
-        else:
-            mask = np.ones_like(image, dtype=np.bool)
-            slices = [slice(None)] * image.ndim
-            slices[-1] = slice(window // 2, -window // 2 + 1)
-            mask[slices] = strided.min(axis=-1) == strided.max(axis=-1)
-
-        for i, width in enumerate(dilation):
-            slices = [[slice(None) for _ in range(image.ndim)] for _ in range(2)]
-            for _ in range(1, width):
-                slices[0][i] = slice(1, None)
-                slices[1][i] = slice(None, -1)
-                mask[slices[0]] = np.logical_or(mask[slices[0]], mask[slices[1]])
-                mask[slices[1]] = np.logical_or(mask[slices[0]], mask[slices[1]])
-        prediction[mask] = fill_value
-
-        return prediction
-
-def faults_sizes(labels):
-    """ Compute sizes of faults.
-
-    Parameters
-    ----------
-    labels : numpy.ndarray
-        array of shape (N, 4) where the first 3 columns are coordinates of points and the last one
-        is for labels
-    Returns
-    -------
-    sizes : numpy.ndarray
-    """
-    sizes = []
-    for array in labels:
-        i_len = (array[:, 0].max() - array[:, 0].min())
-        x_len = (array[:, 1].max() - array[:, 1].min())
-        sizes += [(i_len ** 2 + x_len ** 2) ** 0.5]
-    return np.array(sizes)
 
 def get_sticks(points, n_sticks, n_nodes):
     """ Get sticks from fault which is represented as a cloud of points.

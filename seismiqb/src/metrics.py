@@ -817,12 +817,12 @@ class HorizonMetrics(BaseMetrics):
             hist_dict = {
                 'bins': 100,
                 'xlabel': 'l1-values',
-                'ylabel': 'N',
                 'title_label': 'Histogram of l1 differences',
+                **kwargs,
             }
             plot_image(metric, mode='hist', **hist_dict)
 
-        title = f'Height differences between {self.horizon.name} and {other.name}'
+        title = f'Height differences between\n{self.horizon.name} and {other.name}'
         plot_dict = {
             'spatial': True,
             'title_label': f'{title} on cube {self.horizon.field.displayed_name}',
@@ -949,11 +949,17 @@ class GeometryMetrics(BaseMetrics):
             'zmin': 0.0, 'zmax': np.nanmax(quality_map),
             **kwargs
         }
+
         return quality_map, plot_dict
 
-    def make_grid(self, quality_map, frequencies, iline=True, xline=True, full_lines=True, margin=0, **kwargs):
+    def make_grid(self, quality_map, frequencies, iline=True, xline=True, margin=0,
+                  extension='cell', filter_outliers=0, **kwargs):
         """ Create grid with various frequencies based on quality map. """
+        full_lines = kwargs.pop('full_lines', False) # for old api consistency
+        extension = 'full' if full_lines else extension
+
         _ = kwargs
+
         if margin:
             bad_traces = np.copy(self.geometry.zero_traces)
             bad_traces[:, 0] = 1
@@ -966,7 +972,8 @@ class GeometryMetrics(BaseMetrics):
             quality_map[(bad_traces - self.geometry.zero_traces) == 1] = 0.0
 
         pre_grid = np.rint(quality_map)
-        grid = gridify(pre_grid, frequencies, iline, xline, full_lines)
+        grid = gridify(matrix=pre_grid, frequencies=frequencies, iline=iline, xline=xline,
+                       extension=extension, filter_outliers=filter_outliers)
 
         if margin:
             grid[(bad_traces - self.geometry.zero_traces) == 1] = 0

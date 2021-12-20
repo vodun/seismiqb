@@ -2,11 +2,8 @@
 import os
 from ast import literal_eval
 from time import perf_counter
-from collections import OrderedDict, defaultdict
-from threading import RLock
+from collections import OrderedDict
 from functools import wraps
-from hashlib import blake2b
-from copy import copy
 
 import numpy as np
 try:
@@ -293,7 +290,7 @@ class Accumulator3D:
             self.path = path
 
             self.file = h5py.File(path, mode='w-')
-        self.type = 'hdf5' if path is not None else 'numpy'
+        self.type = os.path.splitext(path)[1][1:] if path is not None else 'numpy'
 
         self.aggregated = False
         self.kwargs = kwargs
@@ -301,7 +298,7 @@ class Accumulator3D:
     # Placeholder management
     def create_placeholder(self, name=None, dtype=None, fill_value=None):
         """ Create named storage as a dataset of HDF5 or plain array. """
-        if self.type == 'hdf5':
+        if self.type in ('hdf5', 'blosc'):
             placeholder = self.file.create_dataset(name, shape=self.shape, dtype=dtype, fillvalue=fill_value)
         elif self.type == 'numpy':
             placeholder = np.full(shape=self.shape, fill_value=fill_value, dtype=dtype)
@@ -355,8 +352,7 @@ class Accumulator3D:
         if self.type == 'hdf5':
             self.file['cube_i'] = self.file['data']
             self.file.close()
-            self.file = h5py.File(self.path, 'r')
-
+            self.file = h5py.File(self.path, 'r+')
             self.data = self.file['data']
 
         self.aggregated = True
@@ -365,10 +361,6 @@ class Accumulator3D:
     def _aggregate(self):
         """ Aggregate placeholders into resulting array. Changes `data` placeholder inplace. """
         raise NotImplementedError
-
-    def __del__(self):
-        if self.type in ['hdf5', 'blosc']:
-            self.file.close()
 
     def clear(self):
         """ Remove placeholders from memory and disk. """
@@ -615,44 +607,65 @@ class LoopedList(list):
 
 
 class AugmentedList(list):
-    """ List with additional features:
-        - can be indexed with other iterables.
-        - delegates calls to contained objects.
-        For example, `a_list.method()` is equivalent to `[item.method() for item in a_list]`.
-        Can be used to retrieve attributes, properties and call methods.
-        Returns the list of results, which is itself an instance of `AugmentedList`.
-        - auto-completes names to that of contained objects.
+    """ List that delegates attribute retrieval requests to contained objects and can be indexed with other iterables.
+        On successful attribute request returns the list of results, which is itself an instance of `AugmentedList`.
+        Auto-completes names to that of contained objects. Meant to be used for storing homogeneous objects.
+
+        Examples
+        --------
+        1. Let `lst` be an `AugmentedList` of objects that have `mean` method.
+        Than the following expression:
+        >>> lst.mean()
+        Is equivalent to:
+        >>> [item.mean() for item in lst]
+
+        2. Let `lst` be an `AugmentedList` of objects that have `shape` attribute.
+        Than the following expression:
+        >>> lst.shape
+        Is equivalent to:
+        >>> [item.shape for item in lst]
+
+        Notes
+        -----
+        Using `AugmentedList` for heterogeneous objects storage is not recommended, due to the following:
+        1. Tab autocompletion suggests attributes from the first list item only.
+        2. The request of the attribute absent in any of the objects leads to an error.
     """
-    # Advanced indexing
     def __getitem__(self, key):
+        """ Manage indexing via iterable. """
         if isinstance(key, (int, np.integer)):
             return super().__getitem__(key)
-        if isinstance(key, slice):
-            return AugmentedList(super().__getitem__(key))
 
-        return AugmentedList([super().__getitem__(idx) for idx in key])
+        if isinstance(key, slice):
+            return type(self)(super().__getitem__(key))
+
+        return type(self)([super().__getitem__(idx) for idx in key])
 
     # Delegating to contained objects
     def __getattr__(self, key):
+        """ Get attributes of list items, recusively delegating this process to items if they are lists themselves. """
         if len(self) == 0:
             return lambda *args, **kwargs: self
 
-        attribute = getattr(self[0], key)
+        attributes = type(self)([getattr(item, key) for item in self])
 
-        if not callable(attribute):
-            # Attribute or property
-            return AugmentedList([getattr(item, key) for item in self])
+        if not callable(attributes.reference_object):
+            return type(self)(attributes)
 
-        @wraps(attribute)
-        def method_wrapper(*args, **kwargs):
-            return AugmentedList([getattr(item, key)(*args, **kwargs) for item in self])
-        return method_wrapper
+        @wraps(attributes.reference_object)
+        def wrapper(*args, **kwargs):
+            return type(self)([method(*args, **kwargs) for method in attributes])
+
+        return wrapper
+
+    @property
+    def reference_object(self):
+        """ First item of a list taking into account its nestedness. """
+        return self[0].reference_object if isinstance(self[0], type(self)) else self[0]
 
     def __dir__(self):
         """ Correct autocompletion for delegated methods. """
-        if len(self) != 0:
-            return dir(self[0])
-        return dir(list)
+        return dir(list) if len(self) == 0 else dir(self[0])
 
     # Correct type of operations
     def __add__(self, other):
@@ -666,6 +679,87 @@ class AugmentedList(list):
 
     def __rmul__(self, other):
         return self.__mul__(other)
+
+
+class DelegatingList(AugmentedList):
+    """ `AugmentedList` that extends that makes delegation its items' attributes
+
+        Examples
+        --------
+        1. Len `lst` be an `AugmentedList` of objects and `f` be a function that accepts such objects.
+        Than the following expression:
+        >>> lst.apply(f)
+        Is equivalent to:
+        >>> [f(item) for item in lst]
+
+        2. Let `l` be an `AugmentedList` of dictionaries:
+        >>> l = AugmentedList([{'cmap': 'viridis', 'alpha': 1.0},
+                                [{'cmap': 'ocean', 'alpha': 1.0}, {'cmap': 'Reds', 'alpha': 0.7}]])
+        That the following expresion:
+        >>> l.to_dict()
+        Will be evaluated to:
+        >>> {'cmap': ['viridis, ['ocean', 'Reds]], 'alpha': [1.0, [1.0, 0.7]]}
+    """
+    def __init__(self, obj=None):
+        """ Perform items recusive casting to `AugmentedList` type if they are lists. """
+        obj = [] if obj is None else obj if isinstance(obj, list) else [obj]
+        super().__init__([type(self)(item) if isinstance(item, list) else item for item in obj])
+
+    def apply(self, func, *args, shallow=False, **kwargs):
+        """ Recursively traverse list items applying given function and return list of results with same nestedness.
+
+        Parameters
+        ----------
+        func : callable
+            Function to apply to items.
+        shallow : bool
+            If True, apply function directly to outer list items disabling recursive descent.
+        args, kwargs : misc
+            For `func`.
+        """
+        result = type(self)()
+
+        for item in self:
+            if isinstance(item, type(self)) and not shallow:
+                res = item.apply(func, *args, **kwargs)
+            else:
+                res = func(item, *args, **kwargs)
+
+            if isinstance(res, list):
+                res = type(self)(res)
+
+            result.append(res)
+
+        return result
+
+    def to_dict(self):
+        """ Convert nested list of dicts to dict of nested lists. Address class docs for usage examples. """
+        if not isinstance(self.reference_object, dict):
+            raise TypeError('Only lists consisting of `dict` items can be converted.')
+
+        result = {}
+
+        # pylint: disable=cell-var-from-loop
+        for key in self.reference_object:
+            try:
+                result[key] = self.apply(lambda dct: dct[key])
+            except KeyError as e:
+                raise ValueError(f'KeyError occured due to absence of key `{key}` in some of list items.') from e
+
+        return result
+
+    @property
+    def flat(self):
+        """ Flat list of items. """
+        res = type(self)()
+
+        for item in self:
+            if isinstance(item, type(self)):
+                res.extend(item.flat)
+            else:
+                res.append(item)
+
+        return res
 
 
 class AugmentedDict(OrderedDict):
@@ -761,151 +855,6 @@ class MetaDict(dict):
             'longitude': None,
             'info': 'дополнительная информация о кубе'
         })
-
-
-
-class lru_cache:
-    """ Thread-safe least recent used cache. Must be applied to class methods.
-    Adds the `use_cache` argument to the decorated method to control whether the caching logic is applied.
-    Stored values are individual for each instance of the class.
-
-    Parameters
-    ----------
-    maxsize : int
-        Maximum amount of stored values.
-    attributes: None, str or sequence of str
-        Attributes to get from object and use as additions to key.
-    apply_by_default : bool
-        Whether the cache logic is on by default.
-    copy_on_return : bool
-        Whether to copy the object on retrieving from cache.
-
-    Examples
-    --------
-    Store loaded slides::
-
-    @lru_cache(maxsize=128)
-    def load_slide(cube_name, slide_no):
-        pass
-
-    Notes
-    -----
-    All arguments to the decorated method must be hashable.
-    """
-    #pylint: disable=invalid-name, attribute-defined-outside-init
-    def __init__(self, maxsize=None, attributes=None, apply_by_default=True, copy_on_return=False):
-        self.maxsize = maxsize
-        self.apply_by_default = apply_by_default
-        self.copy_on_return = copy_on_return
-
-        # Parse `attributes`
-        if isinstance(attributes, str):
-            self.attributes = [attributes]
-        elif isinstance(attributes, (tuple, list)):
-            self.attributes = attributes
-        else:
-            self.attributes = False
-
-        self.default = Singleton
-        self.lock = RLock()
-        self.reset()
-
-    def reset(self, instance=None):
-        """ Clear cache and stats. """
-        if instance is None:
-            self.cache = defaultdict(OrderedDict)
-            self.is_full = defaultdict(lambda: False)
-            self.stats = defaultdict(lambda: {'hit': 0, 'miss': 0})
-        else:
-            self.cache[instance] = OrderedDict()
-            self.is_full[instance] = False
-            self.stats[instance] = {'hit': 0, 'miss': 0}
-
-    def make_key(self, instance, args, kwargs):
-        """ Create a key from a combination of instance reference, method args, and instance attributes. """
-        key = [instance] + list(args)
-        if kwargs:
-            for k, v in sorted(kwargs.items()):
-                key.append((k, v))
-
-        if self.attributes:
-            for attr in self.attributes:
-                attr_hash = stable_hash(getattr(instance, attr))
-                key.append(attr_hash)
-        return flatten_nested(key)
-
-
-    def __call__(self, func):
-        """ Add the cache to the function. """
-        @wraps(func)
-        def wrapper(instance, *args, **kwargs):
-            use_cache = kwargs.pop('use_cache', self.apply_by_default)
-            copy_on_return = kwargs.pop('copy_on_return', self.copy_on_return)
-
-            # Skip the caching logic and evaluate function directly
-            if not use_cache:
-                result = func(instance, *args, **kwargs)
-                return result
-
-            key = self.make_key(instance, args, kwargs)
-
-            # If result is already in cache, just retrieve it and update its timings
-            with self.lock:
-                result = self.cache[instance].get(key, self.default)
-                if result is not self.default:
-                    del self.cache[instance][key]
-                    self.cache[instance][key] = result
-                    self.stats[instance]['hit'] += 1
-                    return copy(result) if copy_on_return else result
-
-            # The result was not found in cache: evaluate function
-            result = func(instance, *args, **kwargs)
-
-            # Add the result to cache
-            with self.lock:
-                self.stats[instance]['miss'] += 1
-                if key in self.cache[instance]:
-                    pass
-                elif self.is_full[instance]:
-                    self.cache[instance].popitem(last=False)
-                    self.cache[instance][key] = result
-                else:
-                    self.cache[instance][key] = result
-                    self.is_full[instance] = (len(self.cache[instance]) >= self.maxsize)
-            return copy(result) if copy_on_return else result
-
-        wrapper.__name__ = func.__name__
-        wrapper.cache = lambda: self.cache
-        wrapper.stats = lambda: self.stats
-        wrapper.reset = self.reset
-        wrapper.reset_instance = lambda instance: self.reset(instance=instance)
-        return wrapper
-
-
-class SingletonClass:
-    """ There must be only one! """
-Singleton = SingletonClass()
-
-def stable_hash(key):
-    """ Hash that stays the same between different runs of Python interpreter. """
-    if not isinstance(key, (str, bytes)):
-        key = ''.join(sorted(str(key)))
-    if not isinstance(key, bytes):
-        key = key.encode('ascii')
-    return str(blake2b(key).hexdigest())
-
-def flatten_nested(iterable):
-    """ Recursively flatten nested structure of tuples, list and dicts. """
-    result = []
-    if isinstance(iterable, (tuple, list)):
-        for item in iterable:
-            result.extend(flatten_nested(item))
-    elif isinstance(iterable, dict):
-        for key, value in sorted(iterable.items()):
-            result.extend((*flatten_nested(key), *flatten_nested(value)))
-    else:
-        return (iterable,)
-    return tuple(result)
 
 
 

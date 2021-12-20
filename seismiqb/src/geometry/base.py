@@ -11,6 +11,7 @@ import psutil
 import h5py
 
 from .export import ExportMixin
+from ..utils import CacheMixin
 
 from ..utils import file_print, get_environ_flag, lru_cache, transformable
 from ..plotters import plot_image
@@ -79,7 +80,7 @@ def add_descriptors(cls):
 
 
 @add_descriptors
-class SeismicGeometry(ExportMixin):
+class SeismicGeometry(CacheMixin, ExportMixin):
     """ Class to infer information about seismic cube in various formats, and provide API for data loading.
 
     During the SEG-Y processing, a number of statistics are computed. They are saved next to the cube under the
@@ -218,7 +219,7 @@ class SeismicGeometry(ExportMixin):
 
         # Names of different lengths and format: helpful for outside usage
         self.name = os.path.basename(self.path)
-        self.field_name = self.parse_field()
+        self.field_name = self.extract_field_name()
         self.short_name = os.path.splitext(self.name)[0]
         self.long_name = ':'.join(self.path.split('/')[-2:])
         self.format = os.path.splitext(self.path)[1][1:]
@@ -234,7 +235,7 @@ class SeismicGeometry(ExportMixin):
             self.process(**kwargs)
 
 
-    def parse_field(self):
+    def extract_field_name(self):
         """ Try to parse field from geometry name. """
 
         # search for a sequence of uppercase letters between '_' and '.' symbols
@@ -390,6 +391,27 @@ class SeismicGeometry(ExportMixin):
             return (array - min_) / (max_ - min_)
         raise ValueError('Wrong mode', mode)
 
+    # Coordinates transforms
+    def lines_to_cubic(self, array):
+        """ Convert ilines-xlines to cubic coordinates system. """
+        array[:, 0] -= self.ilines_offset
+        array[:, 1] -= self.xlines_offset
+        array[:, 2] -= self.delay
+        array[:, 2] /= self.sample_rate
+        return array
+
+    def cubic_to_lines(self, array):
+        """ Convert cubic coordinates to ilines-xlines system. """
+        array = array.astype(np.float32)
+        array[:, 0] += self.ilines_offset
+        array[:, 1] += self.xlines_offset
+        array[:, 2] *= self.sample_rate
+        array[:, 2] += self.delay
+        return array
+
+    def depth_to_time(self, depthes):
+        """ Convert depth to time. """
+        return depthes * self.sample_rate + self.delay
 
     # Spatial matrices
     @property
@@ -455,7 +477,8 @@ class SeismicGeometry(ExportMixin):
             self.make_quality_grid()
         return self._quality_grid
 
-    def make_quality_grid(self, frequencies=(100, 200), iline=True, xline=True, full_lines=True, margin=0, **kwargs):
+    def make_quality_grid(self, frequencies=(100, 200), iline=True, xline=True, margin=0,
+                          extension='cell', filter_outliers=0, **kwargs):
         """ Create `quality_grid` based on `quality_map`.
 
         Parameters
@@ -464,49 +487,31 @@ class SeismicGeometry(ExportMixin):
             Grid frequencies for individual levels of hardness in `quality_map`.
         iline, xline : bool
             Whether to make lines in grid to account for `ilines`/`xlines`.
-        full_lines : bool
-            Whether to make lines on the whole spatial range.
         margin : int
             Margin of boundaries to not include in the grid.
+        extension : 'full', 'cell', False or int
+            Number of traces to grid lines extension.
+            If 'full', then extends quality grid base points to field borders.
+            If 'cell', then extends quality grid base points to sparse grid cells borders.
+            If False, then make no extension.
+            If int, then extends quality grid base points to +-extension//2 neighboring points.
+        filter_outliers : int
+            A degree of quality map thinning.
+            `filter_outliers` more than zero cuts areas that contain too small connectivity regions.
+            Notice that the method cut the squared area with these regions. It is made for more thinning.
         kwargs : dict
             Other parameters of grid making.
         """
         from ..metrics import GeometryMetrics #pylint: disable=import-outside-toplevel
-        quality_grid = GeometryMetrics(self).make_grid(self.quality_map, frequencies,
-                                                       iline=iline, xline=xline, full_lines=full_lines,
-                                                       margin=margin, **kwargs)
+
+        full_lines = kwargs.pop('full_lines', False) # for old api consistency
+        extension = 'full' if full_lines else extension
+
+        quality_grid = GeometryMetrics(self).make_grid(self.quality_map, frequencies, iline=iline, xline=xline,
+                                                       margin=margin, extension=extension,
+                                                       filter_outliers=filter_outliers, **kwargs)
         self._quality_grid = quality_grid
         return quality_grid
-
-
-    # Cache: introspection and reset
-    def reset_cache(self):
-        """ Clear cached slides. """
-        if self.structured is False:
-            method = self.load_slide
-        else:
-            method = self._cached_load
-        method.reset(instance=self)
-
-    @property
-    def cache_length(self):
-        """ Total amount of cached slides. """
-        if self.structured is False:
-            method = self.load_slide
-        else:
-            method = self._cached_load
-
-        return len(method.cache()[self])
-
-    @property
-    def cache_size(self):
-        """ Total size of cached slides. """
-        if self.structured is False:
-            method = self.load_slide
-        else:
-            method = self._cached_load
-
-        return sum(item.nbytes / (1024 ** 3) for item in method.cache()[self].values())
 
 
     # Properties
@@ -556,6 +561,11 @@ class SeismicGeometry(ExportMixin):
     def shape(self):
         """ Cube 3D shape. Same API, as NumPy. """
         return tuple(self.cube_shape)
+
+    @property
+    def bbox(self):
+        """ Bounding box that define field limits. """
+        return np.array([[0, max] for max in self.shape])
 
     @property
     def spatial_shape(self):
@@ -803,7 +813,7 @@ class SeismicGeometry(ExportMixin):
     def show_quality_grid(self, **kwargs):
         """ Show quality grid. """
         self.show(matrix=self.quality_grid, cmap='Reds', interpolation='bilinear',
-                  title=f'Quality map of `{self.displayed_name}`')
+                  title=f'Quality grid of `{self.displayed_name}`')
 
 
     # Coordinate conversion
