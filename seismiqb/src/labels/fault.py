@@ -129,12 +129,11 @@ class Fault(Horizon):
         df = df.iloc[idx]
 
         sticks = self.read_sticks(df, fix)
-        if len(sticks) > 0:
-            points = self.interpolate_3d(sticks, **kwargs)
-            nodes = np.concatenate(sticks.values)
-            return points, nodes, sticks.values
-        else:
+        if len(sticks) == 0:
             return np.zeros((0, 3)), np.zeros((0, 3)), np.array([])
+        points = self.interpolate_3d(sticks, **kwargs)
+        nodes = np.concatenate(sticks.values)
+        return points, nodes, sticks.values
 
     def read_file(self, path):
         """ Read data frame with sticks. """
