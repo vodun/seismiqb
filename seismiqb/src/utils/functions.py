@@ -425,3 +425,6 @@ def concat_sorted(first_array, second_array):
         i += 1
 
     return buffer[:c]
+
+def split_array(array, labels):
+    return np.split(array, np.unique(labels, return_index=True)[1][1:])
