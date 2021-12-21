@@ -167,8 +167,8 @@ class CharismaMixin:
 
 
     def recover_lines_from_cdp(self, df):
-        """ Fix broken iline and crossline coordinates. If coordinates are out of the cube, 'iline' and 'xline'
-        will be infered from 'cdp_x' and 'cdp_y'. """
+        """ Fix broken iline and crossline coordinates.
+        If coordinates are out of the cube, 'iline' and 'xline' will be infered from 'cdp_x' and 'cdp_y'. """
         i_bounds = [self.field.ilines_offset, self.field.ilines_offset + self.field.cube_shape[0]]
         x_bounds = [self.field.xlines_offset, self.field.xlines_offset + self.field.cube_shape[1]]
 
