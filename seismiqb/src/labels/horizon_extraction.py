@@ -939,7 +939,12 @@ class ExtractionMixin:
 
     @staticmethod
     def _compute_threading_parameters(length, max_workers, min_workers, min_length, multiplier=0.8):
-        """ Compute whether the concurrency is needed. """
+        """ Compute whether the concurrency is needed.
+        Works by computing chunk sizes:
+            - if chunks would be smaller than the `min_length`, discount the number of workers by `multiplier`
+            - if the number of workers is smaller than `min_workers`, no concurrency is needed
+            - otherwise, use current number of workers
+        """
         chunk_size = length // max_workers
 
         # Each chunk is big enough for current `num_workers=max_workers`, so use them all
@@ -959,7 +964,10 @@ class ExtractionMixin:
 
     @classmethod
     def average_horizons(cls, horizons):
-        """ Average list of horizons into one surface. """
+        """ Average list of horizons into one surface.
+        Returns the matrix of averaged horizon, as well as std of provided horizons:
+        the latter can be used as a quality metric.
+        """
         field = horizons[0].field
         horizon_matrix = np.zeros(field.spatial_shape, dtype=np.float32)
         std_matrix = np.zeros(field.spatial_shape, dtype=np.float32)
