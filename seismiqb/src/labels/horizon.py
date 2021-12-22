@@ -77,7 +77,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Visua
 
         - A wealth of visualization methods: view from above, slices along iline/xline axis, etc.
     """
-    #pylint: disable=too-many-public-methods, import-outside-toplevel
+    #pylint: disable=too-many-public-methods, import-outside-toplevel, redefined-builtin
 
     # Columns that are used from the file
     COLUMNS = ['iline', 'xline', 'height']
@@ -86,7 +86,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Visua
     FILL_VALUE = -999999
 
 
-    def __init__(self, storage, field, name=None, dtype=np.int32, **kwargs):
+    def __init__(self, storage, field, format=None, name=None, dtype=np.int32, **kwargs):
         # Meta information
         self.path = None
         self.name = name
@@ -113,7 +113,10 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Visua
         self.field = field
 
         # Check format of storage, then use it to populate attributes
-        if isinstance(storage, str):
+        if format is not None:
+            self.format = format
+
+        elif isinstance(storage, str):
             # path to csv-like file
             self.format = 'file'
 
@@ -922,7 +925,8 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Visua
         info_dict = {
             'difference_matrix' : difference,
             'difference_mean' : np.nanmean(difference),
-            'difference_max' : max((np.nanquantile(difference, [0, 1]))),
+            'difference_max' : np.nanmax(difference),
+            'difference_min' : np.nanmin(difference),
             'difference_std' : np.nanstd(difference),
 
             'abs_difference_mean' : np.nanmean(abs_difference),
@@ -944,7 +948,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Visua
         and number of missing traces is smaller than allowed.
         """
         if threshold_missing == 0:
-            return self.points == other.points
+            return np.array_equal(self.points, other.points)
 
         info = self.check_proximity(other)
         n_missing = max(info['present_at_1_absent_at_2'], info['present_at_2_absent_at_1'])
