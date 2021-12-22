@@ -789,8 +789,8 @@ class HorizonMetrics(BaseMetrics):
             {'—'*45}
             Rate in 5ms:                         {oinfo['window_rate']:8.3f}
             Mean/std of errors:               {oinfo['difference_mean']:4.2f} / {oinfo['difference_std']:4.2f}
-            Mean/std of abs errors:           {oinfo['difference_abs_mean']:4.2f} / {oinfo['difference_abs_std']:4.2f}
-            Max error/abs error:              {oinfo['difference_max']:4} / {oinfo['difference_abs_max']:4}
+            Mean/std of abs errors:           {oinfo['abs_difference_mean']:4.2f} / {oinfo['abs_difference_std']:4.2f}
+            Max error/abs error:              {oinfo['difference_max']:4} / {oinfo['abs_difference_max']:4}
             {'—'*45}
             Lengths of horizons:                 {len(self.horizon):8}
                                                  {len(other):8}

@@ -937,6 +937,19 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Visua
         }
         return MetaDict(info_dict)
 
+    def equal(self, other, threshold_missing=0):
+        """ Return True if the horizons are considered equal, False otherwise.
+        If the `threshold_missing` is zero, then check if the points of `self` and `other` are the same.
+        If the `threshold_missing` is positive, then check that in overlapping points values are the same,
+        and number of missing traces is smaller than allowed.
+        """
+        if threshold_missing == 0:
+            return self.points == other.points
+
+        info = self.check_proximity(other)
+        n_missing = max(info['present_at_1_absent_at_2'], info['present_at_2_absent_at_1'])
+        return info['difference_mean'] == 0 and n_missing < threshold_missing
+
 
     # Save horizon to disk
     def dump(self, path, transform=None):
