@@ -426,6 +426,10 @@ class ExtractionMixin:
         inplace : bool
             Whether to create new instance or update `self`.
         """
+        # Adjacency parsing
+        adjacency = adjacency if isinstance(adjacency, tuple) else (adjacency, adjacency)
+        adjacency_i, adjacency_x = adjacency
+
         # Simplest possible check: horizons are too far away from one another (depth-wise)
         overlap_h_min, overlap_h_max = max(self.h_min, other.h_min), min(self.h_max, other.h_max)
         if overlap_h_max - overlap_h_min < 0:
@@ -435,8 +439,7 @@ class ExtractionMixin:
         shared_i_min, shared_i_max = min(self.i_min, other.i_min), max(self.i_max, other.i_max)
         shared_x_min, shared_x_max = min(self.x_min, other.x_min), max(self.x_max, other.x_max)
 
-        background = np.zeros((shared_i_max - shared_i_min + 1, shared_x_max - shared_x_min + 1),
-                              dtype=np.int32)
+        background = np.zeros((shared_i_max - shared_i_min + 1, shared_x_max - shared_x_min + 1), dtype=np.int32)
 
         # Coordinates inside shared for `self` and `other`
         shared_self_i_min, shared_self_x_min = self.i_min - shared_i_min, self.x_min - shared_x_min
@@ -447,14 +450,13 @@ class ExtractionMixin:
                    shared_other_x_min:shared_other_x_min+other.x_length] += other.matrix
 
         # Enlarge the image to account for adjacency
-        kernel = np.ones((3, 3), np.float32)
-        dilated_background = dilate(background.astype(np.float32), kernel,
-                                    iterations=adjacency).astype(np.int32)
+        kernel = np.ones((1 + 2*adjacency_i, 1 + 2*adjacency_x), np.float32)
+        dilated_background = dilate(background.astype(np.float32), kernel).astype(np.int32)
 
         # Make counts: number of horizons in each point; create indices of overlap
-        counts = (dilated_background != 0).astype(np.int32)
+        counts = (dilated_background > 0).astype(np.int32)
         counts[shared_self_i_min:shared_self_i_min+self.i_length,
-               shared_self_x_min:shared_self_x_min+self.x_length] += 1
+               shared_self_x_min:shared_self_x_min+self.x_length] += (self.matrix > 0).astype(np.int32)
         counts_idx = counts == 2
 
         # Determine whether horizon can be merged (adjacent and height-close) or not
@@ -489,7 +491,7 @@ class ExtractionMixin:
 
                 # Change `self` inplace
                 self.from_matrix(background, i_min=shared_i_min, x_min=shared_x_min,
-                                h_min=min(self.h_min, other.h_min), h_max=max(self.h_max, other.h_max), length=length)
+                                 h_min=min(self.h_min, other.h_min), h_max=max(self.h_max, other.h_max), length=length)
                 merged = True
             else:
                 # Return a new instance of horizon
@@ -533,6 +535,10 @@ class ExtractionMixin:
             - dictionary with timings and statistics
         """
         horizons = np.array(horizons)
+
+        # Adjacency parsing
+        adjacency = adjacency if isinstance(adjacency, tuple) else (adjacency, adjacency)
+        adjacency_i, adjacency_x = adjacency
 
         # Keep track of stats
         merge_stats = defaultdict(int)
@@ -602,7 +608,7 @@ class ExtractionMixin:
                     # Overlapping horizons: definetely merge
                     merged = ExtractionMixin.overlap_merge(self, merge_candidate, inplace=True)
 
-                elif merge_status == 3 and adjacency > 0:
+                elif merge_status == 3 and (adjacency_i > 0 or adjacency_x > 0):
                     # Adjacent horizons: maybe we can merge it
                     merged = ExtractionMixin.adjacent_merge(self, merge_candidate, inplace=True,
                                                             mean_threshold=mean_threshold,
@@ -793,11 +799,11 @@ class ExtractionMixin:
                         merged = ExtractionMixin.overlap_merge(current_horizon, merge_candidate, inplace=True)
                         current_horizon.id_separated = current_horizon.id_separated.union(merge_candidate.id_separated)
 
-                    elif merge_status == 3 and adjacency > 0:
+                    elif merge_status == 3 and (adjacency_i > 0 or adjacency_x > 0):
                         # Adjacent horizons: maybe we can merge it
                         merged = ExtractionMixin.adjacent_merge(current_horizon, merge_candidate, inplace=True,
                                                                 mean_threshold=mean_threshold,
-                                                                adjacency=adjacency)
+                                                                adjacency=(adjacency_i, adjacency_x))
                         merge_stats['merged_adjacent'] += (1 if merged else 0)
 
                     elif merge_status == 0:
