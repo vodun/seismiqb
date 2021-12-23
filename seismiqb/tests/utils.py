@@ -33,7 +33,7 @@ def extract_traceback(path_ipynb, cell_num=None):
         from `seismiqb.batchflow.utils_notebook.run_notebook` in error case.
     """
     traceback_msg = "TRACEBACK: \n"
-    execution_was_failed = False
+    failed = False
     out_notebook = nbformat.read(path_ipynb, as_version=4)
 
     if cell_num is not None:
@@ -43,7 +43,7 @@ def extract_traceback(path_ipynb, cell_num=None):
         has_error_traceback, current_traceback_msg = find_traceback_in_outputs(cell_info=cell_info)
 
         traceback_msg += current_traceback_msg
-        execution_was_failed = execution_was_failed or has_error_traceback
+        failed = failed or has_error_traceback
 
     else:
         # Find a cell with a traceback
@@ -51,6 +51,6 @@ def extract_traceback(path_ipynb, cell_num=None):
             has_error_traceback, current_traceback_msg = find_traceback_in_outputs(cell_info=cell_info)
 
             traceback_msg += current_traceback_msg
-            execution_was_failed = execution_was_failed or has_error_traceback
+            failed = failed or has_error_traceback
 
-    return execution_was_failed, traceback_msg
+    return failed, traceback_msg

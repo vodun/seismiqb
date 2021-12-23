@@ -146,10 +146,10 @@ def test_horizon(
     )
 
     # Tests exit
-    execution_was_failed, traceback_msg = extract_traceback(path_ipynb=out_path_ipynb)
-    execution_was_failed = execution_was_failed or (exec_info is not True)
+    failed, traceback_msg = extract_traceback(path_ipynb=out_path_ipynb)
+    failed = failed or (exec_info is not True)
 
-    if not execution_was_failed:
+    if not failed:
         # Open message
         message_path = glob(os.path.join(OUTPUT_DIR, 'message_*.txt'))[-1]
 
@@ -171,7 +171,7 @@ def test_horizon(
             print(msg)
 
         # End of the running message
-        if (msg.find('fail') == -1) and not execution_was_failed:
+        if (msg.find('fail') == -1) and not failed:
             # Clear directory with extra files
             if not USE_TMP_OUTPUT_DIR and REMOVE_EXTRA_FILES:
                 try:

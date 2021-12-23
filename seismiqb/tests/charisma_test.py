@@ -106,10 +106,10 @@ def test_charisma(
     )
 
     # Tests exit
-    execution_was_failed, traceback_msg = extract_traceback(path_ipynb=out_path_ipynb)
-    execution_was_failed = execution_was_failed or (exec_info is not True)
+    failed, traceback_msg = extract_traceback(path_ipynb=out_path_ipynb)
+    failed = failed or (exec_info is not True)
 
-    if not execution_was_failed:
+    if not failed:
         msg = ['Tests for CharismaMixin were executed successfully.\n']
 
     else:
@@ -127,5 +127,5 @@ def test_charisma(
             print(msg)
 
         # End of the running message
-        if (msg.find('fail') != -1) or execution_was_failed:
+        if (msg.find('fail') != -1) or failed:
             assert False, 'CharismaMixin tests failed.\n'
