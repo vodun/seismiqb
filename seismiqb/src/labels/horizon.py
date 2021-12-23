@@ -86,7 +86,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Visua
     FILL_VALUE = -999999
 
 
-    def __init__(self, storage, field, format=None, name=None, dtype=np.int32, **kwargs):
+    def __init__(self, storage, field, name=None, dtype=np.int32, force_format=None, **kwargs):
         # Meta information
         self.path = None
         self.name = name
@@ -113,8 +113,8 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Visua
         self.field = field
 
         # Check format of storage, then use it to populate attributes
-        if format is not None:
-            self.format = format
+        if force_format is not None:
+            self.format = force_format
 
         elif isinstance(storage, str):
             # path to csv-like file
