@@ -853,13 +853,17 @@ class ExtractionMixin:
 
             # Reject horizons that has not participated in any merges:
             # they will not be merged in the next iterations as well
-            rejected_horizons_ = [horizon for horizon in horizons
-                                  if horizon.merge_count == 0]
-            rejected_horizons.extend(rejected_horizons_)
+            if (adjacency_i <= 0 and adjacency_x <= 0):
+                rejected_horizons_ = [horizon for horizon in horizons
+                                    if horizon.merge_count == 0]
+                rejected_horizons.extend(rejected_horizons_)
+
+                horizons = np.array([horizon for horizon in horizons
+                                    if horizon.merge_count > 0])
+            else:
+                rejected_horizons_ = []
             merge_stats['num_rejected_horizons'].append(len(rejected_horizons_))
 
-            horizons = np.array([horizon for horizon in horizons
-                                if horizon.merge_count > 0])
 
             # Global iteration info
             merge_stats['global_iterations'] += 1
