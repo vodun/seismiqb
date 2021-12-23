@@ -4,6 +4,7 @@ from ast import literal_eval
 from time import perf_counter
 from collections import OrderedDict
 from functools import wraps
+from sklearn.linear_model import LinearRegression
 
 import numpy as np
 try:
@@ -16,7 +17,7 @@ import bottleneck as bn
 
 import h5py
 
-from .functions import to_list
+from .functions import to_list, triangular_weights_function_nd
 
 
 
@@ -512,6 +513,95 @@ class ModeAccumulator3D(Accumulator3D):
 
         elif self.type == 'numpy':
             self.data = np.argmax(self.data, axis=-1)
+
+class WeightedSumAccumulator3D(Accumulator3D):
+    """ Accumulator that takes weighted sum of overlapping crops. Accepts `weights_function`
+    for making weights for each crop into the initialization.
+
+    NOTE: add later support of
+    (i) weights incoming along with a data-crop.
+    """
+    def __init__(self, shape=None, origin=None, dtype=np.float32, transform=None, path=None,
+                 weights_function=triangular_weights_function_nd, **kwargs):
+        super().__init__(shape=shape, origin=origin, dtype=dtype, transform=transform, path=path, **kwargs)
+
+        self.create_placeholder(name='data', dtype=self.dtype, fill_value=0)
+        self.create_placeholder(name='weights', dtype=np.float32, fill_value=0)
+        self.weights_function = weights_function
+
+    def _update(self, crop, location):
+        # Weights matrix for the incoming crop
+        crop_weights = self.weights_function(crop)
+        self.data[location] = ((crop_weights * crop + self.data[location] * self.weights[location]) /
+                               (crop_weights + self.weights[location]))
+        self.weights[location] += crop_weights
+
+    def _aggregate(self):
+        # Cleanup
+        self.remove_placeholder('weights')
+
+class RegressionAccumulator(Accumulator3D):
+    """ Accumulator that fits least-squares regression to scale values of
+    each incoming crop to match values of the overlap. In doing so, ignores nan-values.
+    For aggregation uses weighted sum of crops. Weights-making for crops is controlled by
+    `weights_function`-parameter.
+
+    NOTE: As of now, relies on the order in which crops with data arrive. When the order of
+    supplied crops is different, the result of aggregation might differ as well.
+    """
+    def __init__(self, shape=None, origin=None, dtype=np.float32, transform=None, path=None,
+                 weights_function=triangular_weights_function_nd, **kwargs):
+        super().__init__(shape=shape, origin=origin, dtype=dtype, transform=transform, path=path, **kwargs)
+
+        # Fill both placeholders with nans: in order to fit the regression
+        # it is important to understand what overlap values are already filled.
+        # NOTE: perhaps rethink and make weighted regression.
+        self.create_placeholder(name='data', dtype=self.dtype, fill_value=np.nan)
+        self.create_placeholder(name='weights', dtype=np.float32, fill_value=np.nan)
+
+        self.weights_function = weights_function
+
+    def _update(self, crop, location):
+        # Scale incoming crop to better fit already filled data.
+        # Fit is done via least-squares regression.
+        overlap_data = self.data[location]
+        overlap_weights = self.weights[location]
+        crop_weights = self.weights_function(crop)
+
+        # If some of the values are already filled, use regression to fit new crop
+        # to what's filled.
+        overlap_indices = np.where((~np.isnan(overlap_data)) & (~np.isnan(crop)))
+        new_indices = np.where(np.isnan(overlap_data))
+
+        if len(overlap_indices[0]) > 0:
+            # Take overlap values from data-placeholder and the crop.
+            xs = overlap_data[overlap_indices]
+            ys = crop[overlap_indices]
+
+            # Fit new crop to already existing data and transform the crop.
+            model = LinearRegression()
+            model.fit(xs.reshape(-1, 1), ys.reshape(-1))
+            a, b = model.coef_[0], model.intercept_
+            crop = (crop - b) / a
+
+            # Update location-slice with weighed average.
+            overlap_data[overlap_indices] = ((overlap_weights[overlap_indices] * overlap_data[overlap_indices]
+                                              + crop_weights[overlap_indices] * crop[overlap_indices]) /
+                                             (overlap_weights[overlap_indices] + crop_weights[overlap_indices]))
+
+            # Update weights over overlap.
+            overlap_weights[overlap_indices] += crop_weights[overlap_indices]
+
+            # Use values from crop to update the region covered by the crop and not yet filled.
+            self.data[location][new_indices] = crop[new_indices]
+            self.weights[location][new_indices] = crop_weights[new_indices]
+        else:
+            self.data[location] = crop
+            self.weights[location] = crop_weights
+
+    def _aggregate(self):
+        # Clean-up
+        self.remove_placeholder('weights')
 
 
 class AccumulatorBlosc(Accumulator3D):
