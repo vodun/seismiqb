@@ -518,43 +518,27 @@ class SeismicCropBatch(Batch):
         return new_mask
 
 
-    @action
-    @inbatch_parallel(init='_init_component', post='_assemble', target='for')
-    def filter_tails(self, ix, src, dst, length_ratio, filter_left, p=1.0):
+    @apply_parallel
+    def filter_tails(self, crop, length_ratio, filter_left):
         """ Filter out left or right part of a crop.
 
         Parameters:
         ----------
-        src : str
-            Component of batch with mask.
-        dst : str
-            Component of batch to put cut mask in.
         length_ratio : float
             The ratio of the crop lines to be kept.
         filter_left : bool
             Whether to filter out the left part of the crop.
-        p : float
-            Probability of applying the transform. Default is 1.
         """
-        if not (src and dst):
-            raise ValueError('Src and dst must be provided')
+        new_mask = np.copy(crop)
 
-        mask = self.get(ix, src)
+        # Get the amount of crop lines and kept them on the chosen crop part
+        max_len = new_mask.shape[0]
+        length = round(max_len * length_ratio)
 
-        if np.random.binomial(1, 1 - p):
-            # Nothing to apply
-            new_mask = mask
+        if filter_left:
+            new_mask[:-length, :] = 0
         else:
-            new_mask = mask.copy()
-
-            # Get the amount of crop lines and kept them on the chosen crop part
-            max_len = mask.shape[0]
-            length = round(max_len * length_ratio)
-
-            if filter_left:
-                new_mask[:-length, :] = 0
-            else:
-                new_mask[length:, :] = 0
+            new_mask[length:, :] = 0
 
         return new_mask
 
