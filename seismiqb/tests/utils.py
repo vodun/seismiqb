@@ -6,24 +6,45 @@ import nbformat
 from ..batchflow.utils_notebook import run_notebook
 
 
-def remove_outdated(output_dir, logs_paths=None):
-    """ Remove savings from a previous run. """
-    # Remove an old output directory
-    if os.path.exists(output_dir):
-        try:
-            shutil.rmtree(output_dir)
-        except OSError as e:
-            print(f"Can't delete the directory {output_dir} : {e.strerror}")
+def remove_savings(dirs_to_remove=[], paths_to_remove=[]):
+    """ Remove savings from a previous run.
 
-    if logs_paths is not None:
-        for path in logs_paths:
-            if os.path.exists(path):
-                os.remove(path)
+    Parameters:
+    ----------
+    dirs_to_remove: list of str
+        A list of paths to directories to remove.
+    paths_to_remove: list of str
+        A list of paths to files to remove.
+    """
+    for path in paths_to_remove:
+        if os.path.exists(path):
+            os.remove(path)
 
-def prepare_local(output_dir, remove_outdated_files, logs_paths=None):
-    """ Prepare a local workpspace: remove outdated files and create output directory if needed. """
+    for directory in dirs_to_remove:
+        if os.path.exists(directory):
+            try:
+                shutil.rmtree(directory)
+            except OSError as e:
+                print(f"Can't delete the directory {directory} : {e.strerror}")
+
+
+def prepare_local(output_dir, remove_outdated_files, dirs_to_remove=[], paths_to_remove=[]):
+    """ Prepare a local workpspace: remove outdated files and create output directory if needed.
+
+    Parameters:
+    ----------
+    output_dir : str
+        Path to the directory for saving results and temporary files
+        (executed notebooks, logs, data files like cubes, etc.).
+    remove_outdated_files : bool
+        Whether to remove outdated files which relate to previous executions.
+    dirs_to_remove: list of str
+        A list of paths to directories to remove.
+    paths_to_remove : list of str
+        A list of paths to files to remove.
+    """
     if remove_outdated_files:
-        remove_outdated(output_dir=output_dir, logs_paths=logs_paths)
+        remove_savings(dirs_to_remove=dirs_to_remove, paths_to_remove=paths_to_remove)
 
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
@@ -84,12 +105,30 @@ def extract_traceback(path_ipynb, cell_num=None):
     return failed, traceback_message
 
 
-def execute_test_notebook(test_name, nb_kwargs, datestamp, notebook_output_dir, notebooks_dir, show_test_error_info):
-    """ Execute a test notebook and construct an exit message."""
-    out_path_ipynb = os.path.join(notebook_output_dir, f'{test_name}_test_out_{datestamp}.ipynb')
+def execute_test_notebook(path_ipynb, nb_kwargs, out_path_ipynb,
+                          show_test_error_info, remove_extra_files):
+    """ Execute a test notebook and construct an exit message.
+
+    Parameters:
+    ----------
+    path_ipynb : str
+        Path to a test notebook.
+    nb_kwargs : dict
+        Test notebook kwargs.
+    out_path_ipynb : str
+        Path to save an executed notebook.
+    show_test_error_info : bool
+        Whether to show error traceback in outputs.
+        Notice that it only works with SHOW_MESSAGE = True.
+    remove_extra_files : bool
+        Whether to remove extra files after execution.
+        Extra files are temporary files and execution savings that relate to successful tests.
+    """
+    file_name = path_ipynb.split('/')[-1].split('.')[0]
+    test_name = file_name.replace('_test', '')
 
     exec_info = run_notebook(
-        path=os.path.join(notebooks_dir, f'{test_name}_test.ipynb'),
+        path=path_ipynb,
         nb_kwargs=nb_kwargs,
         insert_pos=2,
         out_path_ipynb=out_path_ipynb,
@@ -102,6 +141,14 @@ def execute_test_notebook(test_name, nb_kwargs, datestamp, notebook_output_dir, 
     if not failed:
         message = f"\'{test_name}\' tests were executed successfully.\n"
 
+        # If everything is OK we can delete the test notebook
+        if remove_extra_files:
+            try:
+                os.remove(out_path_ipynb)
+                message += f'Notebook {out_path_ipynb} executed correctly and was deleted.\n'
+            except OSError as e:
+                print(f"Can't delete the file: {out_path_ipynb} : {e.strerror}")
+
     else:
         message = f"\'{test_name}\'' tests execution failed.\n"
 
@@ -109,5 +156,7 @@ def execute_test_notebook(test_name, nb_kwargs, datestamp, notebook_output_dir, 
             # Add error traceback into the message
             message += traceback_msg
             message += '\n'
+
+        message += f'An ERROR occured in cell number {exec_info} in {out_path_ipynb}\n'
 
     return message, failed

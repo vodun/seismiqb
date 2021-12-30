@@ -1,6 +1,6 @@
-from .template import run_test_notebook
+from .tests_run import run_test_notebook
 
-def _test_geometry(capsys, tmpdir):
+def test_geometry(capsys, tmpdir):
     """ Run SeismicGeometry test notebook.
 
     This test runs ./notebooks/geometry_test.ipynb test file and show execution message and
@@ -8,9 +8,25 @@ def _test_geometry(capsys, tmpdir):
 
     Under the hood, this notebook create a fake seismic cube, saves it in different data formats
     and for each format run SeismicGeometry tests.
+    
+    You can manage the test notebook execution kwargs which relates to cube with parameters:
+
+    CUBE_SHAPE : sequence of three integers
+        Shape of a synthetic cube.
+    SEED: int or None
+        Seed used for creation of random generator (check out `np.random.default_rng`).
     """
-    run_test_notebook(test_name='geometry', test_kwargs={}, capsys=capsys, tmpdir=tmpdir,
-                      messages_paths_regexp=['message_*.txt', 'timings_*.json'])
+    test_kwargs={
+        # Workspace parameters
+        'SAVE_LOGS_REG_EXP': ['geometry_timings_*.json'],
+
+        # Data creation parameters
+        'CUBE_SHAPE': (1000, 200, 400),
+        'SEED': 42
+    }
+
+    run_test_notebook(test_name='geometry', test_kwargs=test_kwargs, capsys=capsys, tmpdir=tmpdir,
+                      messages_paths_regexp=['geometry_message_*.txt', 'geometry_timings_*.json'])
 
 def test_charisma(capsys, tmpdir):
     """ Run CharismaMixin tests notebook.

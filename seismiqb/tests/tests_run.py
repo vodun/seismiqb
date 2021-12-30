@@ -17,6 +17,8 @@ USE_TMP_OUTPUT_DIR: bool
 OUTPUT_DIR : str
     Path to the directory for saving results and temporary files
     (executed notebooks, logs, data files like cubes, etc.).
+LOGS_DIR : str
+    Path to the directory for saving log files (executed notebooks, timings, messages).
 
 And you can manage tests running with parameters:
 
@@ -30,11 +32,13 @@ SHOW_MESSAGE : bool
 SHOW_TEST_ERROR_INFO : bool
     Whether to show error traceback in outputs.
     Notice that it only works with SHOW_MESSAGE = True.
+SAVE_LOGS_REG_EXP : list of str
+    A list of regular expressions for files which should be saved after a test execution.
     
 Visualizations in saved execution notebooks are controlled with:
 
-FIGSIZE : sequence of two integers
-    Figures width and height in inches.
+SCALE : int
+    Figures scale.
 SHOW_FIGURES : bool
     Whether to show additional figures.
     Showing some figures can be useful for finding out the reason for the failure of tests.
@@ -81,9 +85,7 @@ def run_test_notebook(test_name, test_kwargs, capsys, tmpdir, messages_paths_reg
         'DATESTAMP': date.today().strftime("%Y-%m-%d"),
         'TESTS_SCRIPTS_DIR': TESTS_SCRIPTS_DIR,
         'NOTEBOOKS_DIR': os.path.join(TESTS_SCRIPTS_DIR, 'notebooks/'),
-        'USE_TMP_OUTPUT_DIR': False, #os.getenv('SEISMIQB_TEST_USE_TMP_OUTPUT_DIR', True),
-        'OUTPUT_DIR': os.getenv('SEISMIQB_TEST_OUTPUT_DIR', None),
-        'LOGS_DIR': os.path.join(TESTS_SCRIPTS_DIR, 'logs/'),
+        'USE_TMP_OUTPUT_DIR': os.getenv('SEISMIQB_TEST_USE_TMP_OUTPUT_DIR', True),
 
         # Execution parameters
         'REMOVE_OUTDATED_FILES': os.getenv('SEISMIQB_TEST_REMOVE_OUTDATED_FILES', True),
@@ -98,66 +100,66 @@ def run_test_notebook(test_name, test_kwargs, capsys, tmpdir, messages_paths_reg
         # Output parameters
         'VERBOSE': os.getenv('SEISMIQB_TEST_VERBOSE', True),
     }
-    REMOVE_LOGS_FILES = os.getenv('SEISMIQB_TEST_REMOVE_LOGS_FILES', True)
 
     test_variables.update(test_kwargs)
 
 
     # Workspace preparation
+    # Saving logs: in a local case we save logs in the `tests/logs` directory
+    # In tmpdir case we save logs in a temporary directory
     if test_variables['USE_TMP_OUTPUT_DIR']:
-        # (Re)create tmp workspace
-        OUTPUT_DIR = tmpdir.mkdir("notebooks").mkdir(f"{test_name}_test_files")
-        notebook_output_dir = OUTPUT_DIR
-        out_path_ipynb = notebook_output_dir.join(f"{test_name}_test_out_{test_variables['DATESTAMP']}.ipynb")
-    else:
-        # (Re)create local workspace
-        OUTPUT_DIR = os.path.join(test_variables['TESTS_SCRIPTS_DIR'], f"notebooks/{test_name}_tests_files")
-        notebook_output_dir = test_variables['NOTEBOOKS_DIR']
-        out_path_ipynb = os.path.join(notebook_output_dir, f"{test_name}_test_out_{test_variables['DATESTAMP']}.ipynb")
-        
-    test_variables['OUTPUT_DIR'] = OUTPUT_DIR
+        test_variables['OUTPUT_DIR'] = tmpdir.mkdir("notebooks").mkdir(f"{test_name}_test_files")
+        test_variables['LOGS_DIR'] = tmpdir.mkdir("logs")
 
+    else:
+        test_variables['OUTPUT_DIR'] = os.path.join(test_variables['TESTS_SCRIPTS_DIR'], f"notebooks/{test_name}_test_files")
+        test_variables['LOGS_DIR'] = os.path.join(TESTS_SCRIPTS_DIR, 'logs/')
 
     # Run and save the test notebook
     message = ""
-    test_variables['REMOVE_LOGS_FILES'] = False # Because we read messages from logs
+
+    file_name = test_name + '_test'
+    path_ipynb = os.path.join(test_variables['NOTEBOOKS_DIR'], f"{file_name}.ipynb")
+    out_path_ipynb = os.path.join(test_variables['LOGS_DIR'], f"{file_name}_out_{test_variables['DATESTAMP']}.ipynb")
     
-    traceback_message, failed = execute_test_notebook(test_name=test_name, nb_kwargs=test_variables,
-                                                      datestamp=test_variables['DATESTAMP'],
-                                                      notebook_output_dir=notebook_output_dir,
-                                                      notebooks_dir=test_variables['NOTEBOOKS_DIR'],
-                                                      show_test_error_info=test_variables['SHOW_TEST_ERROR_INFO'])
+    traceback_message, failed = execute_test_notebook(path_ipynb=path_ipynb, nb_kwargs=test_variables,
+                                                      out_path_ipynb=out_path_ipynb,
+                                                      show_test_error_info=test_variables['SHOW_TEST_ERROR_INFO'],
+                                                      remove_extra_files=test_variables['REMOVE_EXTRA_FILES'])
+
+    # Extract logs paths that need to be saved
+    SAVE_LOGS_PATHS = []
+    SAVE_LOGS_REG_EXP = test_kwargs.get('SAVE_LOGS_REG_EXP', [])
+
+    if SAVE_LOGS_REG_EXP:
+        for reg_exp in SAVE_LOGS_REG_EXP:
+            paths = glob(os.path.join(test_variables['LOGS_DIR'], reg_exp))
+            SAVE_LOGS_PATHS.extend(paths)
 
     if not failed:
-        if test_variables['SHOW_MESSAGE']:
-            # Open all files with messages and save data into the variable
-            for message_path_regexp in messages_paths_regexp:
-                message_path = glob(os.path.join(test_variables['LOGS_DIR'], message_path_regexp))[-1]
+        # Open all files with messages and save data into the variable and remove unneccessary logs
+        for message_path_regexp in messages_paths_regexp:
+            messages_paths = glob(os.path.join(test_variables['LOGS_DIR'], message_path_regexp))
 
-                extension = message_path.split('.')[-1]
+            for message_path in messages_paths:
+                if test_variables['SHOW_MESSAGE']:
+                    extension = message_path.split('.')[-1]
 
-                # Open message and store it in a pretty string
-                with open(message_path, "r", encoding="utf-8") as infile:
-                    if extension == 'json':
-                        current_message = json.load(infile)
-                        current_message = json.dumps(current_message, indent=4)
-                    else:
-                        current_message = infile.readlines()
-                        current_message = ''.join(current_message)
+                    # Open message and store it in a pretty string
+                    with open(message_path, "r", encoding="utf-8") as infile:
+                        if extension == 'json':
+                            current_message = json.load(infile)
+                            current_message = json.dumps(current_message, indent=4)
+                        else:
+                            current_message = infile.readlines()
+                            current_message = ''.join(current_message)
 
-                message += current_message
-                
-                if REMOVE_LOGS_FILES:
+                    message += current_message
+
+                if not (message_path in SAVE_LOGS_PATHS):
                     os.remove(message_path)
 
-            failed = (message.find('fail') != -1) or failed
-
-        # If everything is OK we can delete the test notebook
-        if (test_variables['REMOVE_EXTRA_FILES']) and (not test_variables['USE_TMP_OUTPUT_DIR']) and (not failed):
-            try:
-                os.remove(out_path_ipynb)
-            except OSError as e:
-                print(f"Can't delete the file: {out_path_ipynb} : {e.strerror}")
+        failed = (message.find('fail') != -1) or failed
 
     else:
         if test_variables['SHOW_TEST_ERROR_INFO']:
