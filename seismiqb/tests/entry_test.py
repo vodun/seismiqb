@@ -1,4 +1,6 @@
+""" This file contains entry points for running tests. """
 from .tests_run import run_test_notebook
+
 
 def test_geometry(capsys, tmpdir):
     """ Run SeismicGeometry test notebook.
@@ -8,7 +10,7 @@ def test_geometry(capsys, tmpdir):
 
     Under the hood, this notebook create a fake seismic cube, saves it in different data formats
     and for each format run SeismicGeometry tests.
-    
+
     You can manage the test notebook execution kwargs which relates to cube with parameters:
 
     CUBE_SHAPE : sequence of three integers
@@ -35,7 +37,7 @@ def test_charisma(capsys, tmpdir):
 
     Under the hood, this notebook create a fake seismic cube (Field), saves it and checks
     matrices savings and loadings in CHARISMA data format.
-    
+
     You can manage the test notebook execution kwargs which relates to cube with parameters:
 
     CUBE_SHAPE : sequence of three integers
@@ -58,7 +60,7 @@ def test_horizon(capsys, tmpdir):
 
     Under the hood, this notebook create a fake seismic cube with horizon, saves them
     and runs Horizon tests notebooks (base, extraction, manipulations, attributes).
-    
+
     You can manage the test notebook execution kwargs which relates to cube and horizon with parameters:
 
     SYNTHETIC_MODE : bool

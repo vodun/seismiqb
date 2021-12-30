@@ -6,7 +6,7 @@ import nbformat
 from ..batchflow.utils_notebook import run_notebook
 
 
-def remove_savings(dirs_to_remove=[], paths_to_remove=[]):
+def remove_savings(dirs_to_remove=None, paths_to_remove=None):
     """ Remove savings from a previous run.
 
     Parameters:
@@ -16,6 +16,11 @@ def remove_savings(dirs_to_remove=[], paths_to_remove=[]):
     paths_to_remove: list of str
         A list of paths to files to remove.
     """
+    if dirs_to_remove is None:
+        dirs_to_remove = []
+    if paths_to_remove is None:
+        paths_to_remove = []
+
     for path in paths_to_remove:
         if os.path.exists(path):
             os.remove(path)
@@ -28,7 +33,7 @@ def remove_savings(dirs_to_remove=[], paths_to_remove=[]):
                 print(f"Can't delete the directory {directory} : {e.strerror}")
 
 
-def prepare_local(output_dir, remove_outdated_files, dirs_to_remove=[], paths_to_remove=[]):
+def prepare_local(output_dir, remove_outdated_files, dirs_to_remove=None, paths_to_remove=None):
     """ Prepare a local workpspace: remove outdated files and create output directory if needed.
 
     Parameters:

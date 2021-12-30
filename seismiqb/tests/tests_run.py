@@ -34,7 +34,7 @@ SHOW_TEST_ERROR_INFO : bool
     Notice that it only works with SHOW_MESSAGE = True.
 SAVE_LOGS_REG_EXP : list of str
     A list of regular expressions for files which should be saved after a test execution.
-    
+
 Visualizations in saved execution notebooks are controlled with:
 
 SCALE : int
@@ -53,8 +53,7 @@ from datetime import date
 from glob import glob
 import json
 
-from .utils import extract_traceback, execute_test_notebook
-from ..batchflow.utils_notebook import run_notebook    
+from .utils import execute_test_notebook
 
 
 def run_test_notebook(test_name, test_kwargs, capsys, tmpdir, messages_paths_regexp=None):
@@ -85,20 +84,20 @@ def run_test_notebook(test_name, test_kwargs, capsys, tmpdir, messages_paths_reg
         'DATESTAMP': date.today().strftime("%Y-%m-%d"),
         'TESTS_SCRIPTS_DIR': TESTS_SCRIPTS_DIR,
         'NOTEBOOKS_DIR': os.path.join(TESTS_SCRIPTS_DIR, 'notebooks/'),
-        'USE_TMP_OUTPUT_DIR': os.getenv('SEISMIQB_TEST_USE_TMP_OUTPUT_DIR', True),
+        'USE_TMP_OUTPUT_DIR': os.getenv('SEISMIQB_TEST_USE_TMP_OUTPUT_DIR') or True,
 
         # Execution parameters
-        'REMOVE_OUTDATED_FILES': os.getenv('SEISMIQB_TEST_REMOVE_OUTDATED_FILES', True),
-        'REMOVE_EXTRA_FILES': os.getenv('SEISMIQB_TEST_REMOVE_EXTRA_FILES', True),
-        'SHOW_MESSAGE': os.getenv('SEISMIQB_TEST_SHOW_MESSAGE', True),
-        'SHOW_TEST_ERROR_INFO': os.getenv('SEISMIQB_TEST_SHOW_ERROR_INFO', True),
-        
+        'REMOVE_OUTDATED_FILES': os.getenv('SEISMIQB_TEST_REMOVE_OUTDATED_FILES') or True,
+        'REMOVE_EXTRA_FILES': os.getenv('SEISMIQB_TEST_REMOVE_EXTRA_FILES') or True,
+        'SHOW_MESSAGE': os.getenv('SEISMIQB_TEST_SHOW_MESSAGE') or True,
+        'SHOW_TEST_ERROR_INFO': os.getenv('SEISMIQB_TEST_SHOW_ERROR_INFO') or True,
+
         # Visualization parameters
-        'FIGSIZE': os.getenv('SEISMIQB_TEST_FIGSIZE', (12, 7)),
-        'SHOW_FIGURES': os.getenv('SEISMIQB_TEST_SHOW_FIGURES', False),
+        'FIGSIZE': os.getenv('SEISMIQB_TEST_FIGSIZE') or (12, 7),
+        'SHOW_FIGURES': os.getenv('SEISMIQB_TEST_SHOW_FIGURES') or False,
 
         # Output parameters
-        'VERBOSE': os.getenv('SEISMIQB_TEST_VERBOSE', True),
+        'VERBOSE': os.getenv('SEISMIQB_TEST_VERBOSE') or True,
     }
 
     test_variables.update(test_kwargs)
@@ -112,7 +111,8 @@ def run_test_notebook(test_name, test_kwargs, capsys, tmpdir, messages_paths_reg
         test_variables['LOGS_DIR'] = tmpdir.mkdir("logs")
 
     else:
-        test_variables['OUTPUT_DIR'] = os.path.join(test_variables['TESTS_SCRIPTS_DIR'], f"notebooks/{test_name}_test_files")
+        test_variables['OUTPUT_DIR'] = os.path.join(test_variables['TESTS_SCRIPTS_DIR'],
+                                                    f"notebooks/{test_name}_test_files")
         test_variables['LOGS_DIR'] = os.path.join(TESTS_SCRIPTS_DIR, 'logs/')
 
     # Run and save the test notebook
@@ -121,7 +121,7 @@ def run_test_notebook(test_name, test_kwargs, capsys, tmpdir, messages_paths_reg
     file_name = test_name + '_test'
     path_ipynb = os.path.join(test_variables['NOTEBOOKS_DIR'], f"{file_name}.ipynb")
     out_path_ipynb = os.path.join(test_variables['LOGS_DIR'], f"{file_name}_out_{test_variables['DATESTAMP']}.ipynb")
-    
+
     traceback_message, failed = execute_test_notebook(path_ipynb=path_ipynb, nb_kwargs=test_variables,
                                                       out_path_ipynb=out_path_ipynb,
                                                       show_test_error_info=test_variables['SHOW_TEST_ERROR_INFO'],
@@ -156,7 +156,7 @@ def run_test_notebook(test_name, test_kwargs, capsys, tmpdir, messages_paths_reg
 
                     message += current_message
 
-                if not (message_path in SAVE_LOGS_PATHS):
+                if not message_path in SAVE_LOGS_PATHS:
                     os.remove(message_path)
 
         failed = (message.find('fail') != -1) or failed
