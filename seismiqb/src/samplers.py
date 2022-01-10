@@ -1117,7 +1117,7 @@ class RegularGrid(BaseGrid):
         self.locations = buffer
 
 
-    def to_chunks(self, size, overlap=0.05):
+    def to_chunks(self, size, overlap=0.05, orientation=None):
         """ Split the current grid into chunks along `orientation` axis.
 
         Parameters
@@ -1132,7 +1132,12 @@ class RegularGrid(BaseGrid):
         -------
         iterator with instances of `RegularGrid`.
         """
-        return RegularGridChunksIterator(grid=self, size=size, overlap=overlap)
+        if orientation is None:
+            if self.orientation != 2:
+                orientation = self.orientation
+            else:
+                raise ValueError('The grid has crops in different orientations: set the `orientation` manually.')
+        return RegularGridChunksIterator(grid=self, size=size, overlap=overlap, orientation=orientation)
 
 
     def __repr__(self):
@@ -1155,29 +1160,30 @@ class RegularGridChunksIterator:
         If integer, then number of slices for overlapping between consecutive chunks.
         If float, then proportion of `size` to overlap between consecutive chunks.
     """
-    def __init__(self, grid, size, overlap):
+    def __init__(self, grid, size, overlap, orientation):
         self.grid = grid
         self.size = size
         self.overlap = overlap
+        self.orientation = orientation
 
         self.step = int(size * (1 - overlap)) if isinstance(overlap, (float, np.float)) else size - overlap
 
     def __iter__(self):
         grid = self.grid
 
-        for start in range(*grid.ranges[grid.orientation], self.step):
-            stop = min(start + self.size, grid.field.shape[grid.orientation])
+        for start in range(*grid.ranges[self.orientation], self.step):
+            stop = min(start + self.size, grid.field.shape[self.orientation])
 
             chunk_ranges = grid.ranges.copy()
-            chunk_ranges[grid.orientation] = [start, stop]
+            chunk_ranges[self.orientation] = [start, stop]
 
             # Filter points beyound chunk ranges along `orientation` axis
-            mask = ((grid.locations[:, 3 + grid.orientation] >= start) &
-                    (grid.locations[:, 6 + grid.orientation] <= stop))
+            mask = ((grid.locations[:, 3 + self.orientation] >= start) &
+                    (grid.locations[:, 6 + self.orientation] <= stop))
             chunk_locations = grid.locations[mask]
 
             yield RegularGrid(locations=chunk_locations, ranges=chunk_ranges, strides=grid.strides,
-                              orientation=grid.orientation, threshold=grid.threshold, field=grid.field,
+                              orientation=self.orientation, threshold=grid.threshold, field=grid.field,
                               crop_shape=grid.original_crop_shape, batch_size=grid.batch_size)
 
     def __len__(self):

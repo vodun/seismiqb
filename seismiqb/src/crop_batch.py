@@ -147,6 +147,14 @@ class SeismicCropBatch(Batch):
         return data
 
 
+    def deepcopy(self):
+        """ Create a copy of a batch with the same `dataset` and `pipeline` references. """
+        #pylint: disable=protected-access
+        new = super().deepcopy()
+        new._dataset = self.dataset
+        new.pipeline = self.pipeline
+        return new
+
     # Core actions
     @action
     def make_locations(self, generator, batch_size=None, passdown=None):
@@ -1202,7 +1210,38 @@ class SeismicCropBatch(Batch):
             setattr(self, _dst, crop)
         return self
 
-    def plot_components(self, *components, idx=0, slide=None, displayed_name=None, **kwargs):
+
+    def get_plot_data(self, idx, components, zoom_slice=None, displayed_name=None):
+        """ Get `components` data for item=`idx` and make title for it. """
+        # Retrieve data
+        data = [getattr(self, component)[idx].squeeze() for component in components]
+        if zoom_slice is not None:
+            data = [item[zoom_slice] for item in data]
+
+        # Make suptitle
+        location = self.locations[idx]
+        i_start, i_end = location[0].start, location[0].stop
+        x_start, x_end = location[1].start, location[1].stop
+        h_start, h_end = location[2].start, location[2].stop
+
+        if (i_end - i_start) == 1:
+            suptitle = f'INLINE={i_start}   CROSSLINES <{x_start}:{x_end}>   DEPTH <{h_start}:{h_end}>'
+            xlabel, ylabel = 'CROSSLINE_3D', 'HEIGHT'
+        elif (x_end - x_start) == 1:
+            suptitle = f'CROSSLINE={x_start}   INLINES <{i_start}:{i_end}>   DEPTH <{h_start}:{h_end}>'
+            xlabel, ylabel = 'INLINE_3D', 'HEIGHT'
+        else:
+            suptitle = f'DEPTH={h_start}  INLINES <{i_start}:{i_end}>   CROSSLINES <{x_start}:{x_end}>'
+            xlabel, ylabel = 'INLINE_3D', 'CROSSLINE_3D'
+
+        # Try to get the name of a field
+        if displayed_name is None:
+            field_name = self.unsalt(self.indices[idx])
+            displayed_name = self.dataset.geometries[field_name].displayed_name
+        suptitle = f'batch_idx={idx}                  `{displayed_name}`\n{suptitle}'
+        return data, suptitle, xlabel, ylabel
+
+    def plot_components(self, *components, idx=0, zoom_slice=None, displayed_name=None, **kwargs):
         """ Plot components of batch.
 
         Parameters
@@ -1212,54 +1251,73 @@ class SeismicCropBatch(Batch):
         idx : int or None
             If int, then index of desired image in list.
             If None, then no indexing is applied.
-        slide : slice
+        zoom_slice : slice
             Indexing element for individual images.
         """
-        # Get components data
-        if idx is not None:
-            data = [getattr(self, comp)[idx].squeeze() for comp in components]
-        else:
-            data = [getattr(self, comp).squeeze() for comp in components]
-
-        if slide is not None:
-            data = [item[slide] for item in data]
-
-        # Get location
-        l = self.locations[idx]
-
-        if displayed_name is None:
-            field_name = self.unsalt(self.indices[idx])
-            displayed_name = self.dataset.geometries[field_name].displayed_name
-
-        if (l[0].stop - l[0].start) == 1:
-            suptitle = f'INLINE {l[0].start}   CROSSLINES {l[1].start}:{l[1].stop}   DEPTH {l[2].start}:{l[2].stop}'
-        elif (l[1].stop - l[1].start) == 1:
-            suptitle = f'CROSSLINE {l[1].start}   INLINES {l[0].start}:{l[0].stop}   DEPTH {l[2].start}:{l[2].stop}'
-        else:
-            suptitle = f'DEPTH {l[2].start}  INLINES {l[0].start}:{l[0].stop}   CROSSLINES {l[1].start}:{l[1].stop}'
-        suptitle = f'batch item {idx}                  {displayed_name}\n{suptitle}'
+        # Get data
+        data, suptitle, xlabel, ylabel = self.get_plot_data(idx=idx, components=components,
+                                                            zoom_slice=zoom_slice, displayed_name=displayed_name)
 
         # Plot parameters
         kwargs = {
-            'figsize': (8 * len(components), 8),
+            'scale': 0.8,
             'suptitle_label': suptitle,
             'title': list(components),
-            'xlabel': 'xlines',
-            'ylabel': 'depth',
+            'xlabel': xlabel,
+            'ylabel': ylabel,
             'cmap': ['gray'] + ['viridis'] * len(components),
             'bad_values': (),
+            'separate': True,
             **kwargs
         }
         return plot_image(data, **kwargs)
 
 
-    def show(self, n=1, separate=True, components=None, **kwargs):
-        """ Plot `n` random batch items. """
+    def show(self, n=1, components=None, **kwargs):
+        """ Plot `n` random batch items as separate figures. """
         available_components = components or ['images', 'masks', 'predictions']
         available_components = [compo for compo in available_components
                                 if hasattr(self, compo)]
 
-        n = min(n, len(self))
+        for idx in self.random.choice(len(self), size=min(n, len(self)), replace=False):
+            self.plot_components(*available_components, idx=idx, **kwargs)
 
-        for idx in self.random.choice(len(self), size=n, replace=False):
-            self.plot_components(*available_components, idx=idx, separate=separate, **kwargs)
+
+    def show_roll(self, n=1, components=None, separate=True, zoom_slice=None, displayed_name=None,
+                  indices=None, **kwargs):
+        """ Plot `n` random batch items on one figure. """
+        available_components = components or ['images', 'masks', 'predictions']
+        available_components = [compo for compo in available_components
+                                if hasattr(self, compo)]
+        if indices is None:
+            indices= self.random.choice(len(self), size=min(n, len(self)), replace=False)
+
+        data, titles, cmaps = [], [], []
+        for idx in indices:
+            data_, suptitle, xlabel, ylabel = self.get_plot_data(idx=idx, components=available_components,
+                                                                 zoom_slice=zoom_slice, displayed_name=displayed_name)
+
+            if separate:
+                data.extend(data_)
+                titles.extend(list(available_components))
+                cmaps.extend(['gray'] + ['viridis'] * (len(available_components) - 1))
+            else:
+                data.append(data_)
+                titles.append('+'.join(available_components))
+                cmaps.append(['gray'] + ['viridis'] * (len(available_components) - 1))
+        suptitle = f'Roll plot for components={available_components}'
+
+        # Plot parameters
+        kwargs = {
+            'scale': 0.8,
+            'ncols': 6,
+            'suptitle_label': suptitle,
+            'title': titles,
+            'xlabel': xlabel,
+            'ylabel': ylabel,
+            'cmap': cmaps,
+            'bad_values': (),
+            'separate': separate,
+            **kwargs
+        }
+        return plot_image(data, **kwargs)
