@@ -182,7 +182,8 @@ class AttributesMixin:
     @property
     def coverage(self):
         """ Ratio between number of present values and number of good traces in cube. """
-        return len(self) / (np.prod(self.field.spatial_shape) - np.sum(self.field.zero_traces))
+        coverage = len(self) / (np.prod(self.field.spatial_shape) - np.sum(self.field.zero_traces))
+        return round(coverage, 5)
 
     @property
     def number_of_holes(self):
@@ -201,6 +202,10 @@ class AttributesMixin:
         """ Ratio of area covered by horizon to total area inside borders. """
         return len(self) / np.sum(self.filled_matrix)
 
+    @property
+    def h_ptp(self):
+        """ Horizon spread across the depth. """
+        return self.h_max - self.h_min
 
     # Matrices computed from depth map
     @property

@@ -14,7 +14,7 @@ from .horizon_attributes import AttributesMixin
 from .horizon_extraction import ExtractionMixin
 from .horizon_visualization import VisualizationMixin
 from ..utils import CacheMixin, CharismaMixin
-from ..utils import groupby_mean, groupby_min, groupby_max, filtering_function
+from ..utils import groupby_mean, groupby_min, groupby_max
 from ..utils import make_bezier_figure
 from ..utils import MetaDict
 from ..functional import smooth_out
@@ -542,7 +542,8 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Visua
 
         def _filtering_function(points, **kwds):
             _ = kwds
-            return filtering_function(points, filtering_matrix)
+            mask = filtering_matrix[points[:, 0], points[:, 1]]
+            return points[mask == 0]
 
         self.apply_to_points(_filtering_function, **kwargs)
 
@@ -967,7 +968,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Visua
             If callable, then applied to points after converting to ilines/xlines coordinate system.
         """
         self.dump_charisma(data=copy(self.points), path=path, format='points',
-                           name=self.short_name, transform=transform)
+                           name=self.name, transform=transform)
 
     def dump_float(self, path, transform=None, kernel_size=7, sigma=2., margin=5):
         """ Smooth out the horizon values, producing floating-point numbers, and dump to the disk.
@@ -988,4 +989,4 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Visua
         """
         matrix = self.matrix_smooth_out(matrix=self.full_matrix, kernel_size=kernel_size, sigma=sigma, margin=margin)
         points = self.matrix_to_points(matrix)
-        self.dump_charisma(data=points, path=path, format='points', name=self.short_name, transform=transform)
+        self.dump_charisma(data=points, path=path, format='points', name=self.name, transform=transform)
