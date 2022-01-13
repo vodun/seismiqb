@@ -228,15 +228,18 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Visua
         elif storage == 'points':
             self._points = None
 
-    def __copy__(self):
+    def copy(self, add_prefix=True):
         """ Create a new horizon with the same data.
 
         Returns
         -------
         A horizon object with new matrix object and a reference to the same field.
         """
+        prefix = 'copy_of_' if add_prefix else ''
         return type(self)(storage=np.copy(self.matrix), field=self.field, i_min=self.i_min, x_min=self.x_min,
-                          name=f"copy_of_{self.name}")
+                          name=f'{prefix}{self.name}')
+
+    __copy__ = copy
 
     def __sub__(self, other):
         if not isinstance(other, type(self)):
@@ -493,6 +496,8 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Visua
     @property
     def displayed_name(self):
         """ Alias for `short_name`. """
+        if self.name is None:
+            return 'unknown_horizon'
         return self.short_name
 
 
@@ -657,7 +662,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Visua
     interpolate = partialmethod(smooth_out, preserve_borders=False)
 
 
-    def make_carcass(self, frequencies=100, regular=True, margin=50, apply_smoothing=False, **kwargs):
+    def make_carcass(self, frequencies=100, regular=True, margin=50, apply_smoothing=False, add_prefix=True, **kwargs):
         """ Cut carcass out of a horizon. Returns a new instance.
 
         Parameters
@@ -674,7 +679,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Visua
             Other parameters for grid creation, see `:meth:~.SeismicGeometry.make_quality_grid`.
         """
         frequencies = frequencies if isinstance(frequencies, (tuple, list)) else [frequencies]
-        carcass = copy(self)
+        carcass = self.copy(add_prefix=add_prefix)
         carcass.name = carcass.name.replace('copy', 'carcass')
 
         if regular:

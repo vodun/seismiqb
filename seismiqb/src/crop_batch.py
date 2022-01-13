@@ -1253,6 +1253,8 @@ class SeismicCropBatch(Batch):
             If None, then no indexing is applied.
         zoom_slice : slice
             Indexing element for individual images.
+        displayed_name : str, optional
+            Name to use as the field name. If not provided, inferred from dataset.
         """
         # Get data
         data, suptitle, xlabel, ylabel = self.get_plot_data(idx=idx, components=components,
