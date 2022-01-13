@@ -21,14 +21,14 @@ def test_geometry(capsys, tmpdir):
     test_kwargs={
         # Workspace parameters
         'SAVE_LOGS_REG_EXP': ['geometry_timings_*.json'],
+        'TEST_OUTPUTS': ['message', 'timings'],
 
         # Data creation parameters
         'CUBE_SHAPE': (1000, 200, 400),
         'SEED': 42
     }
 
-    run_test_notebook(test_name='geometry', test_kwargs=test_kwargs, capsys=capsys, tmpdir=tmpdir,
-                      messages_paths_regexp=['geometry_message_*.txt', 'geometry_timings_*.json'])
+    run_test_notebook(test_name='geometry', test_kwargs=test_kwargs, capsys=capsys, tmpdir=tmpdir)
 
 def test_charisma(capsys, tmpdir):
     """ Run CharismaMixin tests notebook.
@@ -79,7 +79,10 @@ def test_horizon(capsys, tmpdir):
         Seed used for creation of random generator (check out `np.random.default_rng`).
     """
     test_kwargs={
-        # Synthetic creation parameters
+        # Workspace parameters
+        'TEST_OUTPUTS': 'message',
+
+        # Synthetic data creation parameters
         'SYNTHETIC_MODE': True,
         'CUBE_PATH': None,
         'HORIZON_PATH': None,
@@ -88,5 +91,4 @@ def test_horizon(capsys, tmpdir):
         'SEED': 42
     }
 
-    run_test_notebook(test_name='horizon', test_kwargs=test_kwargs, capsys=capsys, tmpdir=tmpdir,
-                      messages_paths_regexp=['horizon_message_*.txt'])
+    run_test_notebook(test_name='horizon', test_kwargs=test_kwargs, capsys=capsys, tmpdir=tmpdir)
