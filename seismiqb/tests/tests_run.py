@@ -119,12 +119,12 @@ def run_test_notebook(test_name, test_kwargs, capsys, tmpdir):
     out_path_ipynb = os.path.join(test_variables['LOGS_DIR'], f"{file_name}_out_{test_variables['DATESTAMP']}.ipynb")
 
 
-    failed, traceback_message, test_outputs = execute_test_notebook(path_ipynb=path_ipynb,
-                                                                    nb_kwargs=test_variables,
-                                                                    nb_outputs=test_outputs_names,
-                                                                    out_path_ipynb=out_path_ipynb,
-                                                                    show_test_error_info=test_variables['SHOW_TEST_ERROR_INFO'],
-                                                                    remove_extra_files=test_variables['REMOVE_EXTRA_FILES'])
+    failed, traceback, test_outputs = execute_test_notebook(path_ipynb=path_ipynb,
+                                                            nb_kwargs=test_variables,
+                                                            nb_outputs=test_outputs_names,
+                                                            out_path_ipynb=out_path_ipynb,
+                                                            show_test_error_info=test_variables['SHOW_TEST_ERROR_INFO'],
+                                                            remove_extra_files=test_variables['REMOVE_EXTRA_FILES'])
     # Logs postprocessing
     if not failed:
         if test_variables['REMOVE_EXTRA_FILES'] and not test_variables['USE_TMP_OUTPUT_DIR']:
@@ -163,5 +163,5 @@ def run_test_notebook(test_name, test_kwargs, capsys, tmpdir):
             print(f"All \'{test_name}\' tests were executed successfully.\n")
         else:
             if test_variables['SHOW_TEST_ERROR_INFO']:
-                print(traceback_message)
+                print(traceback)
             assert False, f"\'{test_name}\' tests failed.\n"

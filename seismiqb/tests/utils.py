@@ -1,7 +1,6 @@
 """ Tests helper functions."""
 import os
 import shutil
-import nbformat
 
 from ..batchflow.utils_notebook import run_notebook
 
