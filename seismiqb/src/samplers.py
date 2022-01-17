@@ -831,6 +831,7 @@ class BaseGrid:
             self.orientation = orientation
             self.origin = origin
             self.endpoint = endpoint
+            self.ranges = np.array([origin, endpoint]).T
             self.shape = endpoint - origin
             self.field = field
             self.field_name = field.short_name
@@ -993,6 +994,36 @@ class BaseGrid:
         self.field.geometry.show(overlay, **kwargs)
 
 
+    def to_chunks(self, size, overlap=0.05, orientation=None):
+        """ Split the current grid into chunks along `orientation` axis.
+
+        Parameters
+        ----------
+        size : int
+            Length of one chunk along the splitting axis.
+        overlap : number
+            If integer, then number of slices for overlapping between consecutive chunks.
+            If float, then proportion of `size` to overlap between consecutive chunks.
+
+        Returns
+        -------
+        iterator with instances of `RegularGrid`.
+        """
+        if orientation is None:
+            if self.orientation != 2:
+                orientation = self.orientation
+
+        if not isinstance(size, (tuple, list)):
+            size = [size, size]
+
+            if orientation is not None:
+                orientation = self.field.geometry.parse_axis(orientation)
+                size[1 - orientation] = None
+
+        if not isinstance(overlap, (tuple, list)):
+            overlap = [overlap, overlap]
+        return RegularGridChunksIterator(grid=self, size=size, overlap=overlap)
+
 
 class RegularGrid(BaseGrid):
     """ Regular grid over the selected `ranges` of cube, covering it with overlapping locations.
@@ -1116,30 +1147,6 @@ class RegularGrid(BaseGrid):
         buffer[:, [6, 7, 8]] += self.crop_shape
         self.locations = buffer
 
-
-    def to_chunks(self, size, overlap=0.05, orientation=None):
-        """ Split the current grid into chunks along `orientation` axis.
-
-        Parameters
-        ----------
-        size : int
-            Length of one chunk along the splitting axis.
-        overlap : number
-            If integer, then number of slices for overlapping between consecutive chunks.
-            If float, then proportion of `size` to overlap between consecutive chunks.
-
-        Returns
-        -------
-        iterator with instances of `RegularGrid`.
-        """
-        if orientation is None:
-            if self.orientation != 2:
-                orientation = self.orientation
-            else:
-                raise ValueError('The grid has crops in different orientations: set the `orientation` manually.')
-        return RegularGridChunksIterator(grid=self, size=size, overlap=overlap, orientation=orientation)
-
-
     def __repr__(self):
         return f'<RegularGrid for {self.field.short_name}: '\
                f'origin={tuple(self.origin)}, endpoint={tuple(self.endpoint)}, crop_shape={tuple(self.crop_shape)}, '\
@@ -1152,43 +1159,73 @@ class RegularGridChunksIterator:
 
     Parameters
     ----------
-    grid : RegularGrid
-        Regular grid to split into chunks.
-    size : int
-        Length of one chunk along the splitting axis.
+    grid : BaseGrid
+        Grid to split into chunks.
+    size : int or None or tuple of two ints or Nones
+        Length of chunks along corresponding axes. `None` indicates that there is no chunking along the axis.
     overlap : number
         If integer, then number of slices for overlapping between consecutive chunks.
         If float, then proportion of `size` to overlap between consecutive chunks.
     """
-    def __init__(self, grid, size, overlap, orientation):
+    def __init__(self, grid, size, overlap):
         self.grid = grid
-        self.size = size
-        self.overlap = overlap
-        self.orientation = orientation
 
-        self.step = int(size * (1 - overlap)) if isinstance(overlap, (float, np.float)) else size - overlap
+        size_i, size_x = size
+        overlap_i, overlap_x = overlap
+
+        if size_i is not None:
+            step_i = int(size_i * (1 - overlap_i)) if isinstance(overlap_i, (float, np.float)) else size_i - overlap_i
+        else:
+            step_i = size_i = self.grid.shape[0]
+
+        if size_x is not None:
+            step_x = int(size_x * (1 - overlap_x)) if isinstance(overlap_x, (float, np.float)) else size_x - overlap_x
+        else:
+            step_x = size_x = self.grid.shape[1]
+
+        self.size_i, self.size_x = size_i, size_x
+        self.step_i, self.step_x = step_i, step_x
+
+        self._iterator = None
+
+    @property
+    def iterator(self):
+        """ Cached sequence of chunks. """
+        if self._iterator is None:
+            iterator = []
+            grid = self.grid
+
+            grid_i = RegularGrid._arange(*grid.ranges[0], self.step_i, grid.endpoint[0] - self.size_i)
+            grid_x = RegularGrid._arange(*grid.ranges[1], self.step_x, grid.endpoint[1] - self.size_x)
+
+            for start_i in grid_i:
+                stop_i = start_i + self.size_i
+                for start_x in grid_x:
+                    stop_x = start_x + self.size_x
+
+                    chunk_origin = np.array([start_i, start_x, grid.origin[2]])
+                    chunk_endpoint = np.array([stop_i, stop_x, grid.endpoint[2]])
+
+                    # Filter points beyound chunk ranges along `orientation` axis
+                    mask = ((grid.locations[:, 3] >= start_i) &
+                            (grid.locations[:, 6] <= stop_i)  &
+                            (grid.locations[:, 4] >= start_x) &
+                            (grid.locations[:, 7] <= stop_x))
+                    chunk_locations = grid.locations[mask]
+
+                    if len(chunk_locations):
+                        chunk_grid = BaseGrid(field=grid.field, locations=chunk_locations,
+                                              origin=chunk_origin, endpoint=chunk_endpoint, batch_size=grid.batch_size)
+                        iterator.append(chunk_grid)
+            self._iterator = iterator
+        return self._iterator
 
     def __iter__(self):
-        grid = self.grid
-
-        for start in range(*grid.ranges[self.orientation], self.step):
-            stop = min(start + self.size, grid.field.shape[self.orientation])
-
-            chunk_ranges = grid.ranges.copy()
-            chunk_ranges[self.orientation] = [start, stop]
-
-            # Filter points beyound chunk ranges along `orientation` axis
-            mask = ((grid.locations[:, 3 + self.orientation] >= start) &
-                    (grid.locations[:, 6 + self.orientation] <= stop))
-            chunk_locations = grid.locations[mask]
-
-            yield RegularGrid(locations=chunk_locations, ranges=chunk_ranges, strides=grid.strides,
-                              orientation=self.orientation, threshold=grid.threshold, field=grid.field,
-                              crop_shape=grid.original_crop_shape, batch_size=grid.batch_size)
+        for chunk_grid in self.iterator:
+            yield chunk_grid
 
     def __len__(self):
-        return len(range(*self.grid.ranges[self.grid.orientation], self.step))
-
+        return len(self.iterator)
 
 
 class ExtensionGrid(BaseGrid):
