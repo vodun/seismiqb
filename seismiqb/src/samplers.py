@@ -12,7 +12,7 @@ transforms them into 3D slices to index the data and other useful info like orig
 Each of the classes provides:
     - `call` method (aliased to either `sample` or `next_batch`), that generates given amount of locations
     - `to_names` method to convert the first two columns of sampled locations into string names of field and label
-    - convinient visualization to explore underlying `locations` structure
+    - convenient visualization to explore underlying `locations` structure
 """
 from itertools import product
 
@@ -111,7 +111,7 @@ class BaseSampler(Sampler):
 class GeometrySampler(BaseSampler):
     """ Generator of crop locations, based on a field. Not intended to be used directly, see `SeismicSampler`.
     Makes locations that:
-        - start from the non-dead trace on a field, exluding those marked by `filtering_matrix`
+        - start from the non-dead trace on a field, excluding those marked by `filtering_matrix`
         - contain more than `threshold` non-dead traces inside
         - don't go beyond cube limits
 
@@ -195,7 +195,7 @@ class GeometrySampler(BaseSampler):
 class HorizonSampler(BaseSampler):
     """ Generator of crop locations, based on a single horizon. Not intended to be used directly, see `SeismicSampler`.
     Makes locations that:
-        - start from the labeled point on horizon, exluding those marked by `filtering_matrix`
+        - start from the labeled point on horizon, excluding those marked by `filtering_matrix`
         - contain more than `threshold` labeled pixels inside
         - don't go beyond cube limits
 
@@ -344,7 +344,7 @@ class FaultSampler(BaseSampler):
     Location is randomized in (-0.4*shape, 0.4*shape) range.
 
     For sampling, we randomly choose `size` rows from `locations`. If some of the sampled locations does not fit the
-    `threshold` constraint or it is imposible to make crop of defined shape, resample until we get exactly
+    `threshold` constraint or it is impossible to make crop of defined shape, resample until we get exactly
     `size` locations.
 
     Parameters
@@ -817,7 +817,7 @@ class SeismicSampler(Sampler):
 
 
 class BaseGrid:
-    """ Determenistic generator of crop locations. """
+    """ Deterministic generator of crop locations. """
     def __init__(self, crop_shape=None, batch_size=64,
                  locations=None, orientation=None, origin=None, endpoint=None, field=None, label_name='unknown'):
         self._iterator = None
@@ -1048,7 +1048,7 @@ class RegularGrid(BaseGrid):
     overlap : sequence, optional
         Overlaps between consecutive crops. Only one of `strides`, `overlap` or `overlap_factor` should be specified.
     overlap_factor : sequence, optional
-        Ratio of overlap between cosecutive crops.
+        Ratio of overlap between consecutive crops.
         Only one of `strides`, `overlap` or `overlap_factor` should be specified.
     batch_size : int
         Number of batches to generate on demand.
@@ -1191,6 +1191,7 @@ class RegularGridChunksIterator:
     @property
     def iterator(self):
         """ Cached sequence of chunks. """
+        # pylint: disable=protected-access
         if self._iterator is None:
             iterator = []
             grid = self.grid
@@ -1206,7 +1207,7 @@ class RegularGridChunksIterator:
                     chunk_origin = np.array([start_i, start_x, grid.origin[2]])
                     chunk_endpoint = np.array([stop_i, stop_x, grid.endpoint[2]])
 
-                    # Filter points beyound chunk ranges along `orientation` axis
+                    # Filter points beyond chunk ranges along `orientation` axis
                     mask = ((grid.locations[:, 3] >= start_i) &
                             (grid.locations[:, 6] <= stop_i)  &
                             (grid.locations[:, 4] >= start_x) &
@@ -1233,7 +1234,7 @@ class ExtensionGrid(BaseGrid):
 
     For each point on the boundary of a horizon, we test 4 possible directions and pick `top` best of them.
     Each location is created so that the original point is `stride` units away from the left/right edge of a crop.
-    Only the locaitons that would potentially add more than `threshold` pixels remain.
+    Only the locations that would potentially add more than `threshold` pixels remain.
 
     Refer to `_make_locations` method and comments for more info about inner workings.
 
@@ -1248,7 +1249,7 @@ class ExtensionGrid(BaseGrid):
     top : int
         Number of the best locations to keep for each point.
     threshold : int
-        Minimum amount of potentially added pixels for each locaiton.
+        Minimum amount of potentially added pixels for each location.
     randomize : bool
         Whether to randomize the loop for computing the potential of each location.
     batch_size : int

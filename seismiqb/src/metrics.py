@@ -1,6 +1,5 @@
 """ Metrics for seismic objects: cubes and horizons. """
 from copy import copy
-from textwrap import dedent
 from itertools import zip_longest
 
 from tqdm.auto import tqdm
@@ -743,98 +742,6 @@ class HorizonMetrics(BaseMetrics):
         }
         return from_device(shifted_slice), plot_dict
 
-
-    def find_best_match(self, **kwargs):
-        """ Find the closest horizon to the first one in the list of passed at initialization. """
-        _ = kwargs
-        if isinstance(self.horizons[1], Horizon):
-            self.horizons[1] = [self.horizons[1]]
-
-        lst = []
-        for horizon in self.horizons[1]:
-            if horizon.field.name == self.horizon.field.name:
-                overlap_info = Horizon.check_proximity(self.horizon, horizon)
-                lst.append((horizon, overlap_info))
-        lst.sort(key=lambda x: abs(x[1].get('difference_mean', 999999)))
-        other, overlap_info = lst[0]
-        return (other, overlap_info), {} # actual return + fake plot dict
-
-
-    def compare(self, offset=0, absolute=True, hist=True, printer=print, **kwargs):
-        """ Compare horizons on against the best match from the list of horizons.
-
-        Parameters
-        ----------
-        offset : number
-            Value to shift horizon down. Can be used to take into account different counting bases.
-        absolute : bool
-            Whether to use absolute values for differences.
-        hist : bool
-            Whether to plot histogram of differences.
-        printer : callable
-            Function to print results, for example `print` or any other callable that can log data.
-        """
-        if len(self.horizons) != 2:
-            raise ValueError('Can compare two horizons exactly or one to the best match from list of horizons. ')
-        _ = kwargs
-        (other, oinfo), _ = self.find_best_match()
-        metric = oinfo['difference_matrix']
-
-
-        if printer is not None:
-            msg = f"""
-            Comparing horizons:
-            {self.horizon.name.rjust(45)}
-            {other.name.rjust(45)}
-            {'—'*45}
-            Rate in 5ms:                         {oinfo['window_rate']:8.3f}
-            Mean/std of errors:               {oinfo['difference_mean']:4.2f} / {oinfo['difference_std']:4.2f}
-            Mean/std of abs errors:           {oinfo['abs_difference_mean']:4.2f} / {oinfo['abs_difference_std']:4.2f}
-            Max error/abs error:              {oinfo['difference_max']:4} / {oinfo['abs_difference_max']:4}
-            {'—'*45}
-            Lengths of horizons:                 {len(self.horizon):8}
-                                                 {len(other):8}
-            {'—'*45}
-            Average heights of horizons:         {(offset + self.horizon.h_mean):8.2f}
-                                                 {other.h_mean:8.2f}
-            {'—'*45}
-            Coverage of horizons:                {self.horizon.coverage:8.4f}
-                                                 {other.coverage:8.4f}
-            {'—'*45}
-            Solidity of horizons:                {self.horizon.solidity:8.4f}
-                                                 {other.solidity:8.4f}
-            {'—'*45}
-            Number of holes in horizons:         {self.horizon.number_of_holes:8}
-                                                 {other.number_of_holes:8}
-            {'—'*45}
-            Additional traces labeled:           {oinfo['present_at_1_absent_at_2']:8}
-            (present in one, absent in other)    {oinfo['present_at_2_absent_at_1']:8}
-            {'—'*45}
-            """
-            printer(dedent(msg))
-
-        if hist:
-            hist_dict = {
-                'bins': 100,
-                'xlabel': 'difference values',
-                'title_label': 'Histogram of horizon differences',
-                **kwargs,
-            }
-            plot_image(metric, mode='hist', **hist_dict)
-
-        title = f'Height differences between\n{self.horizon.name} and {other.name}'
-        plot_dict = {
-            'spatial': True,
-            'title_label': f'{title} on cube {self.horizon.field.displayed_name}',
-            'cmap': 'Reds',
-            'zmin': 0, 'zmax': np.nanmax(metric),
-            'ignore_value': np.nan,
-            'xlabel': 'INLINE_3D', 'ylabel': 'CROSSLINE_3D',
-            'bad_color': 'black',
-            'colorbar': True,
-            **kwargs
-        }
-        return metric, plot_dict
 
 
 class GeometryMetrics(BaseMetrics):
