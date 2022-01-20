@@ -743,6 +743,41 @@ class HorizonMetrics(BaseMetrics):
         return from_device(shifted_slice), plot_dict
 
 
+    # Alias for horizon comparisons
+    def compare(self, *others, clip_value=7, ignore_zeros=True,
+                printer=print, plot=True, return_figure=False, hist_kwargs=None, **kwargs):
+        """ Alias for `Horizon.compare`. """
+        return self.compare(*others, clip_value=clip_value, ignore_zeros=ignore_zeros,
+                            printer=printer, plot=plot, return_figure=return_figure, hist_kwargs=hist_kwargs, **kwargs)
+
+    @staticmethod
+    def compute_prediction_std(horizons):
+        """ Compute std along depth axis of `horizons`. Used as a measurement of stability of predicitons. """
+        field = horizons[0].field
+        fill_value = horizons[0].FILL_VALUE
+
+        mean_matrix = np.zeros(field.spatial_shape, dtype=np.float32)
+        std_matrix = np.zeros(field.spatial_shape, dtype=np.float32)
+        counts_matrix = np.zeros(field.spatial_shape, dtype=np.int32)
+
+        for horizon in horizons:
+            fm = horizon.full_matrix
+            mask = fm != fill_value
+
+            mean_matrix[mask] += fm[mask]
+            std_matrix[mask] += fm[mask] ** 2
+            counts_matrix[mask] += 1
+
+        mean_matrix[counts_matrix != 0] /= counts_matrix[counts_matrix != 0]
+        mean_matrix[counts_matrix == 0] = fill_value
+
+        std_matrix[counts_matrix != 0] /= counts_matrix[counts_matrix != 0]
+        std_matrix -= mean_matrix ** 2
+        std_matrix = np.sqrt(std_matrix)
+        std_matrix[counts_matrix == 0] = np.nan
+
+        return std_matrix
+
 
 class GeometryMetrics(BaseMetrics):
     """ Metrics to asses cube quality. """

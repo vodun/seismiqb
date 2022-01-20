@@ -972,37 +972,6 @@ class ExtractionMixin:
         return False, None
 
 
-    @classmethod
-    def average_horizons(cls, horizons):
-        """ Average list of horizons into one surface.
-        Returns the matrix of averaged horizon, as well as std of provided horizons:
-        the latter can be used as a quality metric.
-        """
-        field = horizons[0].field
-        horizon_matrix = np.zeros(field.spatial_shape, dtype=np.float32)
-        std_matrix = np.zeros(field.spatial_shape, dtype=np.float32)
-        counts_matrix = np.zeros(field.spatial_shape, dtype=np.int32)
-
-        for horizon in horizons:
-            fm = horizon.full_matrix
-            horizon_matrix[fm != cls.FILL_VALUE] += fm[fm != cls.FILL_VALUE]
-            std_matrix[fm != cls.FILL_VALUE] += fm[fm != cls.FILL_VALUE] ** 2
-            counts_matrix[fm != cls.FILL_VALUE] += 1
-
-        horizon_matrix[counts_matrix != 0] /= counts_matrix[counts_matrix != 0]
-        horizon_matrix[counts_matrix == 0] = cls.FILL_VALUE
-
-        std_matrix[counts_matrix != 0] /= counts_matrix[counts_matrix != 0]
-        std_matrix -= horizon_matrix ** 2
-        std_matrix = np.sqrt(std_matrix)
-        std_matrix[counts_matrix == 0] = np.nan
-
-        averaged_horizon = cls(horizon_matrix.astype(np.int32), field=field)
-        return averaged_horizon, {
-            'matrix': horizon_matrix,
-            'std_matrix': std_matrix,
-        }
-
 
 
 @njit
