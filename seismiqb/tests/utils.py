@@ -2,25 +2,23 @@
 import os
 import shutil
 
-from ..batchflow.utils_notebook import run_notebook
+from ..batchflow.run_notebook import run_notebook
 
 
-def remove_savings(dirs_to_remove=None, paths_to_remove=None):
-    """ Remove savings from a previous run.
+def remove_paths(dirs_to_remove=None, files_to_remove=None):
+    """ Remove saves from a previous run.
 
-    Parameters:
+    Parameters
     ----------
     dirs_to_remove: list of str
         A list of paths to directories to remove.
-    paths_to_remove: list of str
+    files_to_remove: list of str
         A list of paths to files to remove.
     """
-    if dirs_to_remove is None:
-        dirs_to_remove = []
-    if paths_to_remove is None:
-        paths_to_remove = []
+    if dirs_to_remove is None:  dirs_to_remove = []
+    if files_to_remove is None: files_to_remove = []
 
-    for path in paths_to_remove:
+    for path in files_to_remove:
         if os.path.exists(path):
             os.remove(path)
 
@@ -32,52 +30,33 @@ def remove_savings(dirs_to_remove=None, paths_to_remove=None):
                 print(f"Can't delete the directory {directory} : {e.strerror}")
 
 
-def prepare_local(output_dir, dirs_to_remove=None, paths_to_remove=None):
-    """ Prepare a local workpspace: remove outdated files and (re)create output directory if needed.
-
-    Parameters:
-    ----------
-    output_dir : str
-        Path to the directory for saving results and temporary files
-        (executed notebooks, logs, data files like cubes, etc.).
-    dirs_to_remove, paths_to_remove
-        Passed directly to :meth:`remove_savings`.
-    """
-    if dirs_to_remove is None:
-        dirs_to_remove = [output_dir]
-    elif output_dir not in dirs_to_remove:
-        dirs_to_remove.append(output_dir)
-
-    remove_savings(dirs_to_remove=dirs_to_remove, paths_to_remove=paths_to_remove)
-
-    os.makedirs(output_dir)
-
-
-def execute_test_notebook(path_ipynb, nb_kwargs, out_path_ipynb,
-                          show_test_error_info, remove_extra_files, nb_outputs=None):
+def execute_test_notebook(path_ipynb, inputs, out_path_ipynb,
+                          show_test_error_info, remove_extra_files, outputs=None):
     """ Execute a test notebook and construct an exit message.
 
-    Parameters:
+    Parameters
     ----------
     path_ipynb : str
         Path to a test notebook.
-    nb_kwargs,  nb_outputs, out_path_ipynb
-        Passed directly to :meth:`..batchflow.utils_notebook.run_notebook`.
+    inputs,  outputs, out_path_ipynb
+        Passed directly to :meth:`..batchflow.run_notebook.run_notebook`.
     show_test_error_info : bool
         Whether to show error traceback in outputs.
         Notice that it only works with SHOW_MESSAGE = True.
     remove_extra_files : bool
         Whether to remove extra files after execution.
-        Extra files are temporary files and execution savings that relate to successful tests.
+        Extra files are temporary files and execution saved files that relate to successful tests.
     """
     file_name = path_ipynb.split('/')[-1].split('.')[0]
     test_name = file_name.replace('_test', '')
+    out_path_db = os.path.splitext(out_path_ipynb)[0] + '_db'
 
     exec_res = run_notebook(
         path=path_ipynb,
-        nb_kwargs=nb_kwargs,
-        nb_outputs=nb_outputs,
-        insert_pos=2,
+        inputs=inputs,
+        outputs=outputs,
+        inputs_pos=2,
+        out_path_db=out_path_db,
         out_path_ipynb=out_path_ipynb,
         display_links=False
     )
@@ -101,7 +80,7 @@ def execute_test_notebook(path_ipynb, nb_kwargs, out_path_ipynb,
             message += exec_res.get('traceback', "")
             message += '\n'
 
-        message += f"An ERROR occured in cell number {exec_res.get('failed cell number', None)} in {out_path_ipynb}\n"
+        message += f"An ERROR occurred in cell number {exec_res.get('failed cell number', None)} in {out_path_ipynb}\n"
 
-    nb_outputs = exec_res.get('nb_outputs', {})
-    return exec_res['failed'], message, nb_outputs
+    outputs = exec_res.get('outputs', {})
+    return exec_res['failed'], message, outputs

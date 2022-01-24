@@ -1,6 +1,6 @@
 """ Script for running controller notebooks for tests.
 
-The behaviour of tests is parametrized by the following constants:
+The behavior of tests is parametrized by the following constants:
 
 DATESTAMP : str
     Execution date in "YYYY-MM-DD" format.
@@ -28,7 +28,7 @@ REMOVE_OUTDATED_FILES: bool
     Whether to remove outdated files which relate to previous executions.
 REMOVE_EXTRA_FILES : bool
     Whether to remove extra files after execution.
-    Extra files are temporary files and execution savings that relate to successful tests.
+    Extra files are temporary files and execution saved files that relate to successful tests.
 SHOW_MESSAGE : bool
     Whether to show a detailed tests execution message.
 SHOW_TEST_ERROR_INFO : bool
@@ -61,7 +61,7 @@ from .utils import execute_test_notebook
 def run_test_notebook(test_name, test_kwargs, capsys, tmpdir):
     """ Prepare a test workspace, execute a test notebook, extract and print an output message.
 
-    Parameters:
+    Parameters
     ----------
     test_name : str
         A test name and a prefix of a test notebook.
@@ -91,7 +91,7 @@ def run_test_notebook(test_name, test_kwargs, capsys, tmpdir):
         'SHOW_TEST_ERROR_INFO': os.getenv('SEISMIQB_TEST_SHOW_ERROR_INFO') or True,
 
         # Visualization parameters
-        'FIGSIZE': os.getenv('SEISMIQB_TEST_FIGSIZE') or (12, 7),
+        'SCALE': os.getenv('SEISMIQB_TEST_SCALE') or 1,
         'SHOW_FIGURES': os.getenv('SEISMIQB_TEST_SHOW_FIGURES') or False,
 
         # Output parameters
@@ -120,8 +120,7 @@ def run_test_notebook(test_name, test_kwargs, capsys, tmpdir):
 
 
     failed, traceback, test_outputs = execute_test_notebook(path_ipynb=path_ipynb,
-                                                            nb_kwargs=test_variables,
-                                                            nb_outputs=test_outputs_names,
+                                                            inputs=test_variables, outputs=test_outputs_names,
                                                             out_path_ipynb=out_path_ipynb,
                                                             show_test_error_info=test_variables['SHOW_TEST_ERROR_INFO'],
                                                             remove_extra_files=test_variables['REMOVE_EXTRA_FILES'])
@@ -137,7 +136,7 @@ def run_test_notebook(test_name, test_kwargs, capsys, tmpdir):
                     paths = glob(os.path.join(test_variables['LOGS_DIR'], reg_exp))
                     SAVE_LOGS_PATHS.extend(paths)
 
-            # Remove unneccessary logs
+            # Remove unnecessary logs
             logs_paths = os.listdir(test_variables['LOGS_DIR'])
 
             for logs_path in logs_paths:
