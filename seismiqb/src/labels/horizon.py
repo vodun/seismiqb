@@ -958,7 +958,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Visua
 
 
     def compare(self, *others, clip_value=7, ignore_zeros=True,
-                printer=print, plot=True, return_figure=False, hist_kwargs=None, **kwargs):
+                printer=print, plot=True, return_figure=False, hist_kwargs=None, show=True, savepath=None, **kwargs):
         """ Compare `self` horizon against the closest in `others`.
         Print textual and show graphical visualization of differences between the two.
         Returns dictionary with collected information: `closest` and `proximity_info`.
@@ -1078,6 +1078,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Visua
             plot_image(hist_data, mode='hist', ax=fig.axes[2], **hist_kwargs)
             MatplotlibPlotter.add_legend(ax=fig.axes[3], **hist_legend_kwargs)
 
+            MatplotlibPlotter.save_and_show(fig=fig, show=show, savepath=savepath)
             if return_figure:
                 returns['figure'] = fig
 
