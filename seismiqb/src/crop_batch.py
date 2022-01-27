@@ -1292,7 +1292,7 @@ class SeismicCropBatch(Batch):
         available_components = [compo for compo in available_components
                                 if hasattr(self, compo)]
         if indices is None:
-            indices= self.random.choice(len(self), size=min(n, len(self)), replace=False)
+            indices = self.random.choice(len(self), size=min(n, len(self)), replace=False)
 
         data, titles, cmaps = [], [], []
         for idx in indices:

@@ -492,7 +492,9 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Visua
     @property
     def short_name(self):
         """ Name without extension. """
-        return self.name.split('.')[0]
+        if self.name is not None:
+            return self.name.split('.')[0]
+        return None
 
     @property
     def displayed_name(self):
