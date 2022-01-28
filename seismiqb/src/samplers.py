@@ -15,7 +15,6 @@ Each of the classes provides:
     - convinient visualization to explore underlying `locations` structure
 """
 from itertools import product
-import warnings
 
 import numpy as np
 from numba import njit
@@ -1338,7 +1337,7 @@ class ExtensionGrid(BaseGrid):
             buffer[directions_iterator, :, 0] = 1
             directions_iterator += 1
 
-        update_coverage_matrix = not (self.mode in ['perspective', 'independent_various'])
+        update_coverage_matrix = self.mode not in ['perspective', 'independent_various']
         if self.randomize and update_coverage_matrix:
             buffer = buffer[np.random.permutation(n_directions)]
         # Array with locations for each of the directions
