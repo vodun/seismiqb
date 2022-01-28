@@ -10,6 +10,7 @@ import cv2
 from scipy.interpolate import interp1d
 from scipy.ndimage import gaussian_filter1d
 from scipy.signal import butter, lfilter, hilbert
+from seismiqb.seismiqb.src.utils.functions import adjust_shape_3d
 
 from ..batchflow import DatasetIndex, Batch, action, inbatch_parallel, SkipBatchException, apply_parallel
 
@@ -889,7 +890,7 @@ class SeismicCropBatch(Batch):
         return copy_
 
     @apply_parallel
-    def rotate(self, crop, angle, fill_value=0):
+    def rotate(self, crop, angle, adjust=False, fill_value=0):
         """ Rotate crop along the first two axes. Angles are defined as Tait-Bryan angles and the sequence of
         extrinsic rotations axes is (axis_2, axis_0, axis_1).
 
@@ -897,12 +898,21 @@ class SeismicCropBatch(Batch):
         ----------
         angle : float or tuple of floats
             Angles of rotation about each axes (axis_2, axis_0, axis_1). If float, angle of rotation
-            about the last axis.
+            about the first axis.
+        adjust : bool
+            Scale image to avoid padding in rotated image (for 2D crops only).
         fill_value : number
             Value to put at empty positions appeared after crop roration.
         """
-        angle = angle if isinstance(angle, (tuple, list)) else (angle, 0, 0)
-        crop = self._rotate(crop, angle[0], fill_value)
+        angle = angle if isinstance(angle, (tuple, list)) else (0, angle, 0)
+        shape = crop.shape
+        if adjust:
+            if crop.shape[0] > 1:
+                raise ValueError("Shape adjusting doesn't applicable to 3D crops")
+            new_shape = adjust_shape_3d(shape=crop.shape, angle=angle)
+            crop = cv2.resize(crop[0], dsize=(new_shape[2], new_shape[1]))[np.newaxis, ...]
+        if angle[0] != 0:
+            crop = self._rotate(crop, angle[0], fill_value)
         if angle[1] != 0:
             crop = crop.transpose(1, 2, 0)
             crop = self._rotate(crop, angle[1], fill_value)
@@ -911,7 +921,13 @@ class SeismicCropBatch(Batch):
             crop = crop.transpose(2, 0, 1)
             crop = self._rotate(crop, angle[2], fill_value)
             crop = crop.transpose(1, 2, 0)
+        crop = self._central_crop(crop, shape)
         return crop
+
+    @apply_parallel
+    def binarize(self, crop, threshold=0.5, dtype=np.float32):
+        """ Binarize image by threshold. """
+        return (crop > threshold).astype(dtype)
 
     def _rotate(self, crop, angle, fill_value):
         shape = crop.shape
@@ -1124,6 +1140,9 @@ class SeismicCropBatch(Batch):
     @apply_parallel
     def central_crop(self, crop, shape):
         """ Central crop of defined shape. """
+        return self._central_crop(crop, shape)
+
+    def _central_crop(self, crop, shape):
         crop_shape = np.array(crop.shape)
         shape = np.array(shape)
         if (shape > crop_shape).any():
