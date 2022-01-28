@@ -1235,25 +1235,18 @@ class ExtensionGrid(BaseGrid):
 
         self.uncovered_before = None
 
-        possible_directions = ['up', 'down', 'left', 'right']
-        direction_modes = {
-            'vertical': ['up', 'down'],
-            'horizontal': ['left', 'right'],
+        allowed_directions = ['up', 'down', 'left', 'right']
 
-            'various': possible_directions,
-            'independent_various': possible_directions,
-            'perspective': possible_directions
-        }
-
-        if self.mode in direction_modes:
-            self.directions = direction_modes[self.mode]
-        elif self.mode in possible_directions:
+        if self.mode in ['various', 'independent_various', 'perspective']:
+            self.directions = allowed_directions
+        elif self.mode in allowed_directions:
             self.directions = [self.mode]
+        elif self.mode == 'vertical':
+            self.directions = ['up', 'down']
+        elif self.mode == 'horizontal':
+            self.directions = ['left', 'right']
         else:
-            # Old behavior equals 'various' mode, so we use this mode on default
-            warnings.warn('Provided wrong `mode` argument, it is automatically changed to `various`.')
-            self.mode = 'various'
-            self.directions = possible_directions
+            raise ValueError('Provided wrong `mode` argument, for possible options look at the docstring.')
 
         super().__init__(crop_shape=crop_shape, batch_size=batch_size)
 
@@ -1291,8 +1284,8 @@ class ExtensionGrid(BaseGrid):
         buffer[:, 6] = heights
 
         # Repeat the same data along new 0-th axis: shift origins/endpoints
-        directions_num = len(self.directions)
-        buffer = np.repeat(buffer[np.newaxis, ...], directions_num, axis=0)
+        n_directions = len(self.directions)
+        buffer = np.repeat(buffer[np.newaxis, ...], n_directions, axis=0)
         directions_iterator = 0
 
         if 'up' in self.directions:
@@ -1347,24 +1340,24 @@ class ExtensionGrid(BaseGrid):
 
         update_coverage_matrix = not (self.mode in ['perspective', 'independent_various'])
         if self.randomize and update_coverage_matrix:
-            buffer = buffer[np.random.permutation(directions_num)]
+            buffer = buffer[np.random.permutation(n_directions)]
         # Array with locations for each of the directions
         # Each 4 consecutive rows are location variants for each point on the boundary
         buffer = buffer.transpose((1, 0, 2)).reshape(-1, 7)
-        self.reviewed_crops = buffer.shape[0]
+        self.n_possible_locations = buffer.shape[0]
 
         # Compute potential addition for each location
         # for 'perspective' and 'independent_various' modes potential calculated independently
         potential = compute_potential(locations=buffer, coverage_matrix=coverage_matrix,
                                       shape=crop_shape, update_coverage_matrix=update_coverage_matrix)
 
-        if self.mode.find('various') != -1:
+        if self.mode in ['various', 'independent_various']:
             # For each trace get the most potential direction index
             # Get argsort for each group of four
-            argsort = potential.reshape(-1, directions_num).argsort(axis=-1)[:, -self.top:].reshape(-1)
+            argsort = potential.reshape(-1, n_directions).argsort(axis=-1)[:, -self.top:].reshape(-1)
 
             # Shift argsorts to original indices
-            shifts = np.repeat(np.arange(0, len(buffer), directions_num, dtype=np.int32), self.top)
+            shifts = np.repeat(np.arange(0, len(buffer), n_directions, dtype=np.int32), self.top)
             indices = argsort + shifts
 
         elif self.mode == 'perspective':
@@ -1373,8 +1366,8 @@ class ExtensionGrid(BaseGrid):
             positive_potential = potential.copy()
             positive_potential[positive_potential < 0] = 0
 
-            perspective_direction_idx = np.argmax(positive_potential.reshape(-1, directions_num).sum(axis=0))
-            indices = range(perspective_direction_idx, len(buffer), directions_num)
+            perspective_direction_idx = np.argmax(positive_potential.reshape(-1, n_directions).sum(axis=0))
+            indices = range(perspective_direction_idx, len(buffer), n_directions)
 
         else:
             indices = slice(None)
@@ -1382,11 +1375,11 @@ class ExtensionGrid(BaseGrid):
         # Keep only top locations; remove locations with too small potential if needed
         potential = potential[indices]
         buffer = buffer[indices, :]
-        self.choosed_crops = buffer.shape[0]
+        self.n_top_locations = buffer.shape[0]
 
         mask = potential > self.threshold
         buffer = buffer[mask]
-        self.approved_crops = buffer.shape[0]
+        self.n_selected_locations = buffer.shape[0]
 
         # Correct the height
         np.clip(buffer[:, 3], 0, self.field.depth - crop_shape[2], out=buffer[:, 3])
@@ -1400,7 +1393,7 @@ class ExtensionGrid(BaseGrid):
         if update_coverage_matrix:
             self.uncovered_best = coverage_matrix.size - coverage_matrix.sum()
         else:
-            # In the perspective mode we choosed the best variant
+            # In the perspective mode we choose the best variant
             self.uncovered_best = self.uncovered_after
 
 
