@@ -1190,7 +1190,7 @@ class ExtensionGrid(BaseGrid):
 
     For each point on the boundary of a horizon, we test 4 possible directions and pick `top` best of them.
     Each location is created so that the original point is `stride` units away from the left/right edge of a crop.
-    Only the locaitons that would potentially add more than `threshold` pixels remain.
+    Only the locations that would potentially add more than `threshold` pixels remain.
 
     Refer to `_make_locations` method and comments for more info about inner workings.
 
@@ -1205,17 +1205,31 @@ class ExtensionGrid(BaseGrid):
     top : int
         Number of the best locations to keep for each point.
     threshold : int
-        Minimum amount of potentially added pixels for each locaiton.
+        Minimum amount of potentially added pixels for each location.
     randomize : bool
         Whether to randomize the loop for computing the potential of each location.
     batch_size : int
         Number of batches to generate on demand.
+    mode : {'best_for_each_independent', 'up', 'down', 'left', 'right',
+            'vertical', 'horizontal', 'best_for_all', 'best_for_each'}
+        Mode for directions of locations to generate.
+        If mode is 'up', 'down', 'left' or 'right', then sample locations with corresponding direction.
+        If 'vertical' ('horizontal'), then sample locations in up and down (right and left) directions.
+        If 'best_for_all', than choose one (best) direction ('up', 'down', 'left' or 'right') with maximal potentially
+        added traces for all border points. And sample locations with this direction.
+        If 'best_for_each', than choose a direction with maximal potentially added traces for each border point
+        depending on other points. And sample locations with corresponding directions for each border point.
+        If 'best_for_each_independent' (default), than choose a direction with maximal potentially added traces
+        for each border point independent of other points. And sample locations with corresponding directions for
+        each border point.
     """
-    def __init__(self, horizon, crop_shape, stride=16, batch_size=64, top=1, threshold=4, randomize=True):
+    def __init__(self, horizon, crop_shape, stride=16, batch_size=64,
+                 top=1, threshold=4, randomize=True, mode='best_for_each_independent'):
         self.top = top
         self.stride = stride
         self.threshold = threshold
         self.randomize = randomize
+        self.mode = mode
 
         self.horizon = horizon
         self.field = horizon.field
@@ -1223,6 +1237,19 @@ class ExtensionGrid(BaseGrid):
         self.label_name = horizon.short_name
 
         self.uncovered_before = None
+
+        allowed_directions = ['up', 'down', 'left', 'right']
+
+        if self.mode in ['best_for_all', 'best_for_each', 'best_for_each_independent']:
+            self.directions = allowed_directions
+        elif self.mode in allowed_directions:
+            self.directions = [self.mode]
+        elif self.mode == 'vertical':
+            self.directions = ['up', 'down']
+        elif self.mode == 'horizontal':
+            self.directions = ['left', 'right']
+        else:
+            raise ValueError('Provided wrong `mode` argument, for possible options look at the docstring.')
 
         super().__init__(crop_shape=crop_shape, batch_size=batch_size)
 
@@ -1251,7 +1278,7 @@ class ExtensionGrid(BaseGrid):
         border_points += (self.horizon.i_min, self.horizon.x_min)
         heights -= crop_shape[2] // 2
 
-        # Buffer for locations
+        # Buffer for locations (orientation, i_start, x_start, h_start, i_stop, x_stop, h_stop).
         buffer = np.empty((len(border_points), 7), dtype=np.int32)
         buffer[:, 0] = 0
         buffer[:, [1, 2]] = border_points
@@ -1260,57 +1287,102 @@ class ExtensionGrid(BaseGrid):
         buffer[:, 6] = heights
 
         # Repeat the same data along new 0-th axis: shift origins/endpoints
-        buffer = np.repeat(buffer[np.newaxis, ...], 4, axis=0)
+        n_directions = len(self.directions)
+        buffer = np.repeat(buffer[np.newaxis, ...], n_directions, axis=0)
+        directions_iterator = 0
 
-        # Crops with fixed INLINE, moving CROSSLINE: [-stride:-stride + shape]
-        buffer[0, :, [2, 5]] -= self.stride
-        np.clip(buffer[0, :, 2], 0, self.field.shape[1], out=buffer[0, :, 2])
-        np.clip(buffer[0, :, 5], 0, self.field.shape[1], out=buffer[0, :, 5])
-        buffer[0, :, [4, 5, 6]] += crop_shape.reshape(-1, 1)
+        if 'up' in self.directions:
+            # Crops with fixed INLINE, moving CROSSLINE: [-stride:-stride + shape]
+            buffer[directions_iterator, :, [2, 5]] -= self.stride
 
-        # Crops with fixed INLINE, moving CROSSLINE: [-shape + stride:+stride]
-        buffer[1, :, [2, 5]] -= (crop_shape[1] - self.stride)
-        np.clip(buffer[1, :, 2], 0, self.field.shape[1] - crop_shape[1], out=buffer[1, :, 2])
-        np.clip(buffer[1, :, 5], 0, self.field.shape[1] - crop_shape[1], out=buffer[1, :, 5])
-        buffer[1, :, [4, 5, 6]] += crop_shape.reshape(-1, 1)
+            np.clip(buffer[directions_iterator, :, 2], 0, self.field.shape[1],
+                    out=buffer[directions_iterator, :, 2])
+            np.clip(buffer[directions_iterator, :, 5], 0, self.field.shape[1],
+                    out=buffer[directions_iterator, :, 5])
 
-        # Crops with fixed CROSSLINE, moving INLINE: [-stride:-stride + shape]
-        buffer[2, :, [1, 4]] -= self.stride
-        np.clip(buffer[2, :, 1], 0, self.field.shape[0], out=buffer[2, :, 1])
-        np.clip(buffer[2, :, 4], 0, self.field.shape[0], out=buffer[2, :, 4])
-        buffer[2, :,  [4, 5, 6]] += crop_shape_t.reshape(-1, 1)
-        buffer[2, :, 0] = 1
+            buffer[directions_iterator, :, [4, 5, 6]] += crop_shape.reshape(-1, 1)
+            directions_iterator += 1
 
-        # Crops with fixed CROSSLINE, moving INLINE: [-shape + stride:+stride]
-        buffer[3, :, [1, 4]] -= (crop_shape[1] - self.stride)
-        np.clip(buffer[3, :, 1], 0, self.field.shape[0] - crop_shape[1], out=buffer[3, :, 1])
-        np.clip(buffer[3, :, 4], 0, self.field.shape[0] - crop_shape[1], out=buffer[3, :, 4])
-        buffer[3, :,  [4, 5, 6]] += crop_shape_t.reshape(-1, 1)
-        buffer[3, :, 0] = 1
+        if 'down' in self.directions:
+            # Crops with fixed INLINE, moving CROSSLINE: [-shape + stride:+stride]
+            buffer[directions_iterator, :, [2, 5]] -= (crop_shape[1] - self.stride)
 
-        if self.randomize:
-            buffer = buffer[np.random.permutation(4)]
+            np.clip(buffer[directions_iterator, :, 2], 0, self.field.shape[1] - crop_shape[1],
+                    out=buffer[directions_iterator, :, 2])
+            np.clip(buffer[directions_iterator, :, 5], 0, self.field.shape[1] - crop_shape[1],
+                    out=buffer[directions_iterator, :, 5])
+
+            buffer[directions_iterator, :, [4, 5, 6]] += crop_shape.reshape(-1, 1)
+            directions_iterator += 1
+
+        if 'left' in self.directions:
+            # Crops with fixed CROSSLINE, moving INLINE: [-stride:-stride + shape]
+            buffer[directions_iterator, :, [1, 4]] -= self.stride
+
+            np.clip(buffer[directions_iterator, :, 1], 0, self.field.shape[0],
+                    out=buffer[directions_iterator, :, 1])
+            np.clip(buffer[directions_iterator, :, 4], 0, self.field.shape[0],
+                    out=buffer[directions_iterator, :, 4])
+
+            buffer[directions_iterator, :,  [4, 5, 6]] += crop_shape_t.reshape(-1, 1)
+            buffer[directions_iterator, :, 0] = 1
+            directions_iterator += 1
+
+        if 'right' in self.directions:
+            # Crops with fixed CROSSLINE, moving INLINE: [-shape + stride:+stride]
+            buffer[directions_iterator, :, [1, 4]] -= (crop_shape[1] - self.stride)
+
+            np.clip(buffer[directions_iterator, :, 1], 0, self.field.shape[0] - crop_shape[1],
+                    out=buffer[directions_iterator, :, 1])
+            np.clip(buffer[directions_iterator, :, 4], 0, self.field.shape[0] - crop_shape[1],
+                    out=buffer[directions_iterator, :, 4])
+
+            buffer[directions_iterator, :,  [4, 5, 6]] += crop_shape_t.reshape(-1, 1)
+            buffer[directions_iterator, :, 0] = 1
+            directions_iterator += 1
+
+        update_coverage_matrix = self.mode not in ['best_for_all', 'best_for_each_independent']
+        if self.randomize and update_coverage_matrix:
+            buffer = buffer[np.random.permutation(n_directions)]
         # Array with locations for each of the directions
         # Each 4 consecutive rows are location variants for each point on the boundary
         buffer = buffer.transpose((1, 0, 2)).reshape(-1, 7)
+        self.n_possible_locations = buffer.shape[0]
 
         # Compute potential addition for each location
-        potential = compute_potential(buffer, coverage_matrix, crop_shape)
-        self.uncovered_best = coverage_matrix.size - coverage_matrix.sum()
+        # for 'best_for_all' and 'best_for_each_independent' modes potential calculated independently
+        potential = compute_potential(locations=buffer, coverage_matrix=coverage_matrix,
+                                      shape=crop_shape, update_coverage_matrix=update_coverage_matrix)
 
-        # Get argsort for each group of four
-        argsort = potential.reshape(-1, 4).argsort(axis=-1)[:, -self.top:].reshape(-1)
+        if self.mode in ['best_for_each', 'best_for_each_independent']:
+            # For each trace get the most potential direction index
+            # Get argsort for each group of four
+            argsort = potential.reshape(-1, n_directions).argsort(axis=-1)[:, -self.top:].reshape(-1)
 
-        # Shift argsorts to original indices
-        shifts = np.repeat(np.arange(0, len(buffer), 4, dtype=np.int32), self.top)
-        indices = argsort + shifts
+            # Shift argsorts to original indices
+            shifts = np.repeat(np.arange(0, len(buffer), n_directions, dtype=np.int32), self.top)
+            indices = argsort + shifts
 
-        # Keep only top locations; remove too locations with small potential
+        elif self.mode == 'best_for_all':
+            # Get indices of locations corresponding to the best direction
+            # The best direction is a direction ('left', 'right', 'up' or 'down') with maximal potentially added traces
+            positive_potential = potential.copy()
+            positive_potential[positive_potential < 0] = 0
+
+            best_direction_idx = np.argmax(positive_potential.reshape(-1, n_directions).sum(axis=0))
+            indices = range(best_direction_idx, len(buffer), n_directions)
+
+        else:
+            indices = slice(None)
+
+        # Keep only top locations; remove locations with too small potential if needed
         potential = potential[indices]
         buffer = buffer[indices, :]
+        self.n_top_locations = buffer.shape[0]
 
         mask = potential > self.threshold
         buffer = buffer[mask]
+        self.n_selected_locations = buffer.shape[0]
 
         # Correct the height
         np.clip(buffer[:, 3], 0, self.field.depth - crop_shape[2], out=buffer[:, 3])
@@ -1320,6 +1392,12 @@ class ExtensionGrid(BaseGrid):
         locations[:, [0, 1]] = -1
         locations[:, 2:9] = buffer
         self.locations = locations
+
+        if update_coverage_matrix:
+            self.uncovered_best = coverage_matrix.size - coverage_matrix.sum()
+        else:
+            # In the 'best_for_all' and 'best_for_each_independent' we don't update the `coverage_matrix``
+            self.uncovered_best = self.uncovered_after
 
 
     @property
@@ -1375,7 +1453,7 @@ class ExtensionGrid(BaseGrid):
             self.field.geometry.show(overlay, **kwargs)
 
 @njit
-def compute_potential(locations, coverage_matrix, shape):
+def compute_potential(locations, coverage_matrix, shape, update_coverage_matrix=True):
     """ For each location, compute the amount of points it would potentially add to the labeling.
     If the shape of a location is not the same, as requested at grid initialization, we place `-1` value instead:
     that is filtered out later.
@@ -1389,7 +1467,9 @@ def compute_potential(locations, coverage_matrix, shape):
         if len(sliced) == area:
             covered = sliced.sum()
             buffer[i] = area - covered
-            coverage_matrix[i_start:i_stop, x_start:x_stop] = True
+
+            if update_coverage_matrix:
+                coverage_matrix[i_start:i_stop, x_start:x_stop] = True
         else:
             buffer[i] = -1
 
