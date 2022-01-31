@@ -489,7 +489,7 @@ class SeismicCropBatch(Batch):
         Parameters
         ----------
         src : str
-            Component of batch with mask
+            Component of batch with mask.
         dst : str
             Component of batch to put cut mask in.
         expr : callable, optional.
@@ -511,6 +511,7 @@ class SeismicCropBatch(Batch):
             coords = np.array(coords).astype(np.float).T
             cond = np.ones(shape=coords.shape[0]).astype(bool)
             coords /= np.reshape(mask.shape, newshape=(1, 3))
+
             if low is not None:
                 cond &= np.greater_equal(expr(coords), low)
             if high is not None:
@@ -518,11 +519,38 @@ class SeismicCropBatch(Batch):
             if length is not None:
                 low = 0 if not low else low
                 cond &= np.less_equal(expr(coords), low + length)
+
             coords *= np.reshape(mask.shape, newshape=(1, 3))
             coords = np.round(coords).astype(np.int32)[cond]
+
             new_mask[coords[:, 0], coords[:, 1], coords[:, 2]] = mask[coords[:, 0],
                                                                       coords[:, 1],
                                                                       coords[:, 2]]
+        return new_mask
+
+
+    @apply_parallel
+    def filter_sides(self, crop, length_ratio, side):
+        """ Filter out left or right side of a crop.
+
+        Parameters:
+        ----------
+        length_ratio : float
+            The ratio of the crop lines to be filtered out.
+        side : str
+            Which side to filter out. Possible options are 'left' or 'right'.
+        """
+        new_mask = np.copy(crop)
+
+        # Get the amount of crop lines and kept them on the chosen crop part
+        max_len = new_mask.shape[0]
+        length = round(max_len * (1 - length_ratio))
+
+        if side == 'left':
+            new_mask[:-length, :] = 0
+        else:
+            new_mask[length:, :] = 0
+
         return new_mask
 
 
