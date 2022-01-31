@@ -1186,7 +1186,7 @@ class ExtensionGrid(BaseGrid):
 
     For each point on the boundary of a horizon, we test 4 possible directions and pick `top` best of them.
     Each location is created so that the original point is `stride` units away from the left/right edge of a crop.
-    Only the locaitons that would potentially add more than `threshold` pixels remain.
+    Only the locations that would potentially add more than `threshold` pixels remain.
 
     Refer to `_make_locations` method and comments for more info about inner workings.
 
@@ -1201,26 +1201,26 @@ class ExtensionGrid(BaseGrid):
     top : int
         Number of the best locations to keep for each point.
     threshold : int
-        Minimum amount of potentially added pixels for each locaiton.
+        Minimum amount of potentially added pixels for each location.
     randomize : bool
         Whether to randomize the loop for computing the potential of each location.
     batch_size : int
         Number of batches to generate on demand.
-    mode : str
-        Mode for directions of crops locations to generate.
-        Possible options are: 'up', 'down', 'left', 'right', 'vertical', 'horizontal',
-        'various', 'independent_various' and 'perspective'.
-        Default is 'various'.
-        If 'up', 'down', 'left', 'right', sample crops with corresponding direction.
-        If 'vertical' ('horizontal'), sample crops in up and down (right and left) directions.
-        If 'perspective', then choose one direction with maximal potentially added traces for all border points.
-        If 'various', then choose a direction with maximal potentially added traces
-        for each border point depending on other points.
-        If 'independent_various', then choose a direction with maximal potentially added traces
-        for each border point independent of other points.
+    mode : {'best_for_each_independent', 'up', 'down', 'left', 'right',
+            'vertical', 'horizontal', 'best_for_all', 'best_for_each'}
+        Mode for directions of locations to generate.
+        If mode is 'up', 'down', 'left' or 'right', then sample locations with corresponding direction.
+        If 'vertical' ('horizontal'), then sample locations in up and down (right and left) directions.
+        If 'best_for_all', than choose one (best) direction ('up', 'down', 'left' or 'right') with maximal potentially
+        added traces for all border points. And sample locations with this direction.
+        If 'best_for_each', than choose a direction with maximal potentially added traces for each border point
+        depending on other points. And sample locations with corresponding directions for each border point.
+        If 'best_for_each_independent' (default), than choose a direction with maximal potentially added traces
+        for each border point independent of other points. And sample locations with corresponding directions for
+        each border point.
     """
     def __init__(self, horizon, crop_shape, stride=16, batch_size=64,
-                 top=1, threshold=4, randomize=True, mode='independent_various'):
+                 top=1, threshold=4, randomize=True, mode='best_for_each_independent'):
         self.top = top
         self.stride = stride
         self.threshold = threshold
@@ -1236,7 +1236,7 @@ class ExtensionGrid(BaseGrid):
 
         allowed_directions = ['up', 'down', 'left', 'right']
 
-        if self.mode in ['various', 'independent_various', 'perspective']:
+        if self.mode in ['best_for_all', 'best_for_each', 'best_for_each_independent']:
             self.directions = allowed_directions
         elif self.mode in allowed_directions:
             self.directions = [self.mode]
@@ -1337,7 +1337,7 @@ class ExtensionGrid(BaseGrid):
             buffer[directions_iterator, :, 0] = 1
             directions_iterator += 1
 
-        update_coverage_matrix = self.mode not in ['perspective', 'independent_various']
+        update_coverage_matrix = self.mode not in ['best_for_all', 'best_for_each_independent']
         if self.randomize and update_coverage_matrix:
             buffer = buffer[np.random.permutation(n_directions)]
         # Array with locations for each of the directions
@@ -1346,11 +1346,11 @@ class ExtensionGrid(BaseGrid):
         self.n_possible_locations = buffer.shape[0]
 
         # Compute potential addition for each location
-        # for 'perspective' and 'independent_various' modes potential calculated independently
+        # for 'best_for_all' and 'best_for_each_independent' modes potential calculated independently
         potential = compute_potential(locations=buffer, coverage_matrix=coverage_matrix,
                                       shape=crop_shape, update_coverage_matrix=update_coverage_matrix)
 
-        if self.mode in ['various', 'independent_various']:
+        if self.mode in ['best_for_each', 'best_for_each_independent']:
             # For each trace get the most potential direction index
             # Get argsort for each group of four
             argsort = potential.reshape(-1, n_directions).argsort(axis=-1)[:, -self.top:].reshape(-1)
@@ -1359,14 +1359,14 @@ class ExtensionGrid(BaseGrid):
             shifts = np.repeat(np.arange(0, len(buffer), n_directions, dtype=np.int32), self.top)
             indices = argsort + shifts
 
-        elif self.mode == 'perspective':
-            # Get indices of locations corresponding to the most perspective direction
-            # The most perspective direction is a direction with maximal potentially added traces
+        elif self.mode == 'best_for_all':
+            # Get indices of locations corresponding to the best direction
+            # The best direction is a direction ('left', 'right', 'up' or 'down') with maximal potentially added traces
             positive_potential = potential.copy()
             positive_potential[positive_potential < 0] = 0
 
-            perspective_direction_idx = np.argmax(positive_potential.reshape(-1, n_directions).sum(axis=0))
-            indices = range(perspective_direction_idx, len(buffer), n_directions)
+            best_direction_idx = np.argmax(positive_potential.reshape(-1, n_directions).sum(axis=0))
+            indices = range(best_direction_idx, len(buffer), n_directions)
 
         else:
             indices = slice(None)
@@ -1392,7 +1392,7 @@ class ExtensionGrid(BaseGrid):
         if update_coverage_matrix:
             self.uncovered_best = coverage_matrix.size - coverage_matrix.sum()
         else:
-            # In the perspective mode we choose the best variant
+            # In the 'best_for_all' and 'best_for_each_independent' we don't update the `coverage_matrix``
             self.uncovered_best = self.uncovered_after
 
 
