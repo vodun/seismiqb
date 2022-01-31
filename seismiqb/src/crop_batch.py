@@ -519,13 +519,13 @@ class SeismicCropBatch(Batch):
 
 
     @apply_parallel
-    def filter_tails(self, crop, length_ratio, side):
-        """ Filter out left or right part of a crop.
+    def filter_sides(self, crop, length_ratio, side):
+        """ Filter out left or right side of a crop.
 
         Parameters:
         ----------
         length_ratio : float
-            The ratio of the crop lines to be kept.
+            The ratio of the crop lines to be filtered out.
         side : str
             Which side to filter out. Possible options are 'left' or 'right'.
         """
@@ -533,7 +533,7 @@ class SeismicCropBatch(Batch):
 
         # Get the amount of crop lines and kept them on the chosen crop part
         max_len = new_mask.shape[0]
-        length = round(max_len * length_ratio)
+        length = round(max_len * (1 - length_ratio))
 
         if side == 'left':
             new_mask[:-length, :] = 0
