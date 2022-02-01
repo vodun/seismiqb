@@ -529,6 +529,8 @@ class SeismicCropBatch(Batch):
         side : str
             Which side to filter out. Possible options are 'left' or 'right'.
         """
+        if not 0 <= length_ratio <= 1:
+            raise ValueError(f"Invalid value {length_ratio:.2f} for `length_ratio`. It must be in interval [0, 1].")
         new_mask = np.copy(crop)
 
         # Get the amount of crop lines and kept them on the chosen crop part
