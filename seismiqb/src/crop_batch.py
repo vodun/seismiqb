@@ -1246,12 +1246,13 @@ class SeismicCropBatch(Batch):
         if zoom_slice is not None:
             data = [item[zoom_slice] for item in data]
 
-        # Make suptitle
+        # Extract location
         location = self.locations[idx]
         i_start, i_end = location[0].start, location[0].stop
         x_start, x_end = location[1].start, location[1].stop
         h_start, h_end = location[2].start, location[2].stop
 
+        # Make suptitle and axis labels
         if (i_end - i_start) == 1:
             suptitle = f'INLINE={i_start}   CROSSLINES <{x_start}:{x_end}>   DEPTH <{h_start}:{h_end}>'
             xlabel, ylabel = 'CROSSLINE_3D', 'HEIGHT'
@@ -1267,7 +1268,16 @@ class SeismicCropBatch(Batch):
             field_name = self.unsalt(self.indices[idx])
             displayed_name = self.dataset.geometries[field_name].displayed_name
         suptitle = f'batch_idx={idx}                  `{displayed_name}`\n{suptitle}'
-        return data, suptitle, xlabel, ylabel
+
+        # Title for individual axis
+        title = list(components)
+        if len(components) >= 1:
+            title[0] += f'\n INLINES <{i_start}:{i_end}>'
+        if len(components) >= 2:
+            title[1] += f'\n CROSSLINES <{x_start}:{x_end}>'
+        if len(components) >= 3:
+            title[2] += f'\n DEPTH <{h_start}:{h_end}>'
+        return data, suptitle, title, xlabel, ylabel
 
     def plot_components(self, *components, idx=0, zoom_slice=None, displayed_name=None, **kwargs):
         """ Plot components of batch.
@@ -1285,8 +1295,8 @@ class SeismicCropBatch(Batch):
             Name to use as the field name. If not provided, inferred from dataset.
         """
         # Get data
-        data, suptitle, xlabel, ylabel = self.get_plot_data(idx=idx, components=components,
-                                                            zoom_slice=zoom_slice, displayed_name=displayed_name)
+        data, suptitle, _, xlabel, ylabel = self.get_plot_data(idx=idx, components=components,
+                                                               zoom_slice=zoom_slice, displayed_name=displayed_name)
 
         # Plot parameters
         kwargs = {
@@ -1324,16 +1334,16 @@ class SeismicCropBatch(Batch):
 
         data, titles, cmaps = [], [], []
         for idx in indices:
-            data_, suptitle, xlabel, ylabel = self.get_plot_data(idx=idx, components=available_components,
+            data_, _, title, xlabel, ylabel = self.get_plot_data(idx=idx, components=available_components,
                                                                  zoom_slice=zoom_slice, displayed_name=displayed_name)
 
             if separate:
                 data.extend(data_)
-                titles.extend(list(available_components))
+                titles.extend(title)
                 cmaps.extend(['gray'] + ['viridis'] * (len(available_components) - 1))
             else:
                 data.append(data_)
-                titles.append('+'.join(available_components))
+                titles.append('\n'.join(title))
                 cmaps.append(['gray'] + ['viridis'] * (len(available_components) - 1))
         suptitle = f'Roll plot for components={available_components}'
 

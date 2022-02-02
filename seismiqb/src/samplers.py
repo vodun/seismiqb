@@ -1196,8 +1196,8 @@ class RegularGridChunksIterator:
             iterator = []
             grid = self.grid
 
-            grid_i = RegularGrid._arange(*grid.ranges[0], self.step_i, grid.endpoint[0] - self.size_i)
-            grid_x = RegularGrid._arange(*grid.ranges[1], self.step_x, grid.endpoint[1] - self.size_x)
+            grid_i = RegularGrid._arange(*grid.ranges[0], self.step_i, max(0, grid.endpoint[0] - self.size_i))
+            grid_x = RegularGrid._arange(*grid.ranges[1], self.step_x, max(0, grid.endpoint[1] - self.size_x))
 
             for start_i in grid_i:
                 stop_i = start_i + self.size_i
@@ -1246,8 +1246,6 @@ class ExtensionGrid(BaseGrid):
         Shape of crop locations to generate. Note that both iline and crossline orientations are used.
     stride : int
         Overlap with already known horizon for each location.
-    top : int
-        Number of the best locations to keep for each point.
     threshold : int
         Minimum amount of potentially added pixels for each location.
     randomize : bool
@@ -1257,21 +1255,27 @@ class ExtensionGrid(BaseGrid):
     mode : {'best_for_each_independent', 'up', 'down', 'left', 'right',
             'vertical', 'horizontal', 'best_for_all', 'best_for_each'}
         Mode for directions of locations to generate.
-        If mode is 'up', 'down', 'left' or 'right', then sample locations with corresponding direction.
-        If 'vertical' ('horizontal'), then sample locations in up and down (right and left) directions.
-        If 'best_for_all', than choose one (best) direction ('up', 'down', 'left' or 'right') with maximal potentially
-        added traces for all border points. And sample locations with this direction.
-        If 'best_for_each', than choose a direction with maximal potentially added traces for each border point
-        depending on other points. And sample locations with corresponding directions for each border point.
-        If 'best_for_each_independent' (default), than choose a direction with maximal potentially added traces
-        for each border point independent of other points. And sample locations with corresponding directions for
-        each border point.
+        If mode is 'up', 'down', 'left' or 'right', then use only that direction.
+        If 'vertical' ('horizontal'), then use up and down (right and left) directions.
+
+        If 'best_for_all',  then select one direction for all points, based on total potentially added points.
+
+        If 'best_for_each', then select direction for each point individually, based on total potentially added points.
+        The potential of locations is computed sequentially: if one of the previous locations already covers area,
+        it is considered to covered for all of the next potentials.
+
+        If 'best_for_each_independent', then select direction for each point individually, based on total potentially
+        added points. The potential of locations is computed independently of other locations.
+
+    top : int
+        Number of the best directions to keep for each point. Relevant only in `best_*` modes.
     """
     def __init__(self, horizon, crop_shape, stride=16, batch_size=64,
-                 top=1, threshold=4, randomize=True, mode='best_for_each_independent'):
+                 top=1, threshold=4, prior_threshold=8, randomize=True, mode='best_for_each'):
         self.top = top
         self.stride = stride
         self.threshold = threshold
+        self.prior_threshold = prior_threshold
         self.randomize = randomize
         self.mode = mode
 
@@ -1388,6 +1392,7 @@ class ExtensionGrid(BaseGrid):
         update_coverage_matrix = self.mode not in ['best_for_all', 'best_for_each_independent']
         if self.randomize and update_coverage_matrix:
             buffer = buffer[np.random.permutation(n_directions)]
+
         # Array with locations for each of the directions
         # Each 4 consecutive rows are location variants for each point on the boundary
         buffer = buffer.transpose((1, 0, 2)).reshape(-1, 7)
@@ -1396,7 +1401,8 @@ class ExtensionGrid(BaseGrid):
         # Compute potential addition for each location
         # for 'best_for_all' and 'best_for_each_independent' modes potential calculated independently
         potential = compute_potential(locations=buffer, coverage_matrix=coverage_matrix,
-                                      shape=crop_shape, update_coverage_matrix=update_coverage_matrix)
+                                      shape=crop_shape, stride=self.stride, prior_threshold=self.prior_threshold,
+                                      update_coverage_matrix=update_coverage_matrix)
 
         if self.mode in ['best_for_each', 'best_for_each_independent']:
             # For each trace get the most potential direction index
@@ -1497,23 +1503,37 @@ class ExtensionGrid(BaseGrid):
             self.field.geometry.show(overlay, **kwargs)
 
 @njit
-def compute_potential(locations, coverage_matrix, shape, update_coverage_matrix=True):
+def compute_potential(locations, coverage_matrix, shape, stride, prior_threshold, update_coverage_matrix=True):
     """ For each location, compute the amount of points it would potentially add to the labeling.
     If the shape of a location is not the same, as requested at grid initialization, we place `-1` value instead:
-    that is filtered out later.
+    that is filtered out later. That is used to filter locations out of field bounds.
+
+    For each location, we also check whether one of its sides (left/right/up/down) contains more
+    than `prior_threshold` covered points.
     """
     area = shape[0] * shape[1]
     buffer = np.empty((len(locations)), dtype=np.int32)
 
-    for i, (_, i_start, x_start, _, i_stop, x_stop, _) in enumerate(locations):
-        sliced = coverage_matrix[i_start:i_stop, x_start:x_stop].ravel()
+    for i, (orientation, i_start, x_start, _, i_stop, x_stop, _) in enumerate(locations):
+        sliced = coverage_matrix[i_start:i_stop, x_start:x_stop]
 
-        if len(sliced) == area:
-            covered = sliced.sum()
-            buffer[i] = area - covered
+        if sliced.size == area:
 
-            if update_coverage_matrix:
-                coverage_matrix[i_start:i_stop, x_start:x_stop] = True
+            if orientation == 0:
+                left, right = sliced[:stride, :].sum(), sliced[:-stride, :].sum()
+                prior = max(left, right)
+            elif orientation == 1:
+                up, down = sliced[:, :stride].sum(), sliced[:, :-stride].sum()
+                prior = max(up, down)
+
+            if prior >= prior_threshold:
+                covered = sliced.sum()
+                buffer[i] = area - covered
+
+                if update_coverage_matrix:
+                    coverage_matrix[i_start:i_stop, x_start:x_stop] = True
+            else:
+                buffer[i] = -1
         else:
             buffer[i] = -1
 

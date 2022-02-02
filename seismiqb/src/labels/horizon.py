@@ -799,6 +799,21 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Visua
         filtering_matrix = binary_dilation(filtering_matrix, iterations=4)
         return filtering_matrix
 
+    def make_holes(self, copy=True, n=10, scale=1.0, max_scale=.25,
+                   max_angles_amount=4, max_sharpness=5.0, locations=None,
+                   points_proportion=1e-5, points_shape=1,
+                   noise_level=0, seed=None):
+        """ Make holes in a of horizon. Optionally, make a copy before filtering. """
+        filtering_matrix = self.make_random_holes_matrix(n=n, scale=scale, max_scale=max_scale,
+                                                         max_angles_amount=max_angles_amount,
+                                                         max_sharpness=max_sharpness, locations=locations,
+                                                         points_proportion=points_proportion, points_shape=points_shape,
+                                                         noise_level=noise_level, seed=seed)
+        self = self if copy is False else self.copy()
+        self.filter(filtering_matrix)
+        return self
+
+    make_holes.__doc__ += '\n' + '\n'.join(make_random_holes_matrix.__doc__.split('\n')[1:])
 
     # Horizon usage: mask generation
     def add_to_mask(self, mask, locations=None, width=3, alpha=1, **kwargs):
