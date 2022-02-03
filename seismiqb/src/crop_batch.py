@@ -545,14 +545,23 @@ class SeismicCropBatch(Batch):
 
         return new_mask
 
-    @apply_parallel
-    def filter_horizons_with_discontinuities(self, crop, depths_threshold=1):
-        """ Filter out horizon masks with discontinuities."""
-        # Get mask and shifted mask for neighboring traces comparison
-        cutted_mask = crop[:, :-1]
-        shifted_mask = crop[:, 1:]
+    @action
+    @inbatch_parallel(init='indices', post='_post_mask_rebatch', target='for',
+                      src='masks', depths_threshold=1, threshold=0)
+    def throw_out_discontinuities(self, ix, src='masks', depths_threshold=1):
+        """ Throw out out horizon masks with discontinuities.
 
-        # Get horizons coordinates on the crop
+        Parameters
+        ----------
+        depths_threshold : int
+            Maximum depth difference on neighboring traces for horizons masks to be kept in the batch.
+        """
+        mask = self.get(ix, src)
+        # Get mask and shifted mask for neighboring traces comparison
+        cutted_mask = mask[:, :-1]
+        shifted_mask = mask[:, 1:]
+
+        # Get horizons coordinates on the mask
         _, x_lines_1, depths_1 = np.where(cutted_mask > 0)
         _, x_lines_2, depths_2 = np.where(shifted_mask > 0)
 
@@ -572,13 +581,10 @@ class SeismicCropBatch(Batch):
                 max_depth_2 = depths_2[mask_2].max()
                 diff_max = np.abs(max_depth_2 - max_depth_1)
 
-                diff = max(diff_min, diff_max)
+                if max(diff_min, diff_max) > depths_threshold:
+                    return 0
 
-                if diff > depths_threshold:
-                    crop[:, :, :] = 0.0
-                    break
-
-        return crop
+        return round(mask.sum())
 
 
     @apply_parallel
