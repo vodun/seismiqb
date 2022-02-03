@@ -1,4 +1,4 @@
-""" Script for running controller notebooks for tests.
+""" Test script for running controller notebooks for tests.
 
 The behavior of tests is parametrized by the following constants:
 
@@ -52,13 +52,20 @@ VERBOSE : bool
 """
 import os
 from datetime import date
-from glob import glob
 import json
+import pytest
 
-from .utils import execute_test_notebook
+from .run_notebook import run_notebook
 
 
-def run_test_notebook(test_name, test_kwargs, capsys, tmpdir):
+testdata = [
+    ('geometry', {'TEST_OUTPUTS': ['message', 'timings']}),
+    ('charisma', {}),
+    ('horizon', {'TEST_OUTPUTS': 'message'})
+]
+
+@pytest.mark.parametrize("test_name,test_kwargs", testdata)
+def test_notebook(test_name, test_kwargs, capsys, tmpdir):
     """ Prepare a test workspace, execute a test notebook, extract and print an output message.
 
     Parameters
@@ -75,7 +82,7 @@ def run_test_notebook(test_name, test_kwargs, capsys, tmpdir):
     # Initialize base test variables
     TESTS_SCRIPTS_DIR = os.getenv("TESTS_SCRIPTS_DIR", os.path.dirname(os.path.realpath(__file__))+'/')
 
-    test_outputs_names = test_kwargs.pop('TEST_OUTPUTS', None)
+    test_outputs = test_kwargs.pop('TEST_OUTPUTS', None)
 
     test_variables = {
         # Workspace constants
@@ -100,12 +107,11 @@ def run_test_notebook(test_name, test_kwargs, capsys, tmpdir):
 
     test_variables.update(test_kwargs)
 
-
     # Workspace preparation
     # Saving logs: in a local case we save logs in the `tests/logs` directory
     # In tmpdir case we save logs in a temporary directory
     if test_variables['USE_TMP_OUTPUT_DIR']:
-        test_variables['OUTPUT_DIR'] = tmpdir.mkdir("notebooks").mkdir(f"{test_name}_test_files")
+        test_variables['OUTPUT_DIR'] = tmpdir.mkdir(f"{test_name}_test_files")
         test_variables['LOGS_DIR'] = tmpdir.mkdir("logs")
 
     else:
@@ -118,49 +124,30 @@ def run_test_notebook(test_name, test_kwargs, capsys, tmpdir):
     path_ipynb = os.path.join(test_variables['NOTEBOOKS_DIR'], f"{file_name}.ipynb")
     out_path_ipynb = os.path.join(test_variables['LOGS_DIR'], f"{file_name}_out_{test_variables['DATESTAMP']}.ipynb")
 
+    exec_res = run_notebook(path=path_ipynb, inputs=test_variables, outputs=test_outputs,
+                            inputs_pos=2, out_path_ipynb=out_path_ipynb, display_links=False)
 
-    failed, traceback, test_outputs = execute_test_notebook(path_ipynb=path_ipynb,
-                                                            inputs=test_variables, outputs=test_outputs_names,
-                                                            out_path_ipynb=out_path_ipynb,
-                                                            show_test_error_info=test_variables['SHOW_TEST_ERROR_INFO'],
-                                                            remove_extra_files=test_variables['REMOVE_EXTRA_FILES'])
-    # Logs postprocessing
-    if not failed:
-        if test_variables['REMOVE_EXTRA_FILES'] and not test_variables['USE_TMP_OUTPUT_DIR']:
-            # Extract logs paths that need to be saved
-            SAVE_LOGS_PATHS = []
-            SAVE_LOGS_REG_EXP = test_kwargs.get('SAVE_LOGS_REG_EXP', [])
-
-            if SAVE_LOGS_REG_EXP:
-                for reg_exp in SAVE_LOGS_REG_EXP:
-                    paths = glob(os.path.join(test_variables['LOGS_DIR'], reg_exp))
-                    SAVE_LOGS_PATHS.extend(paths)
-
-            # Remove unnecessary logs
-            logs_paths = os.listdir(test_variables['LOGS_DIR'])
-
-            for logs_path in logs_paths:
-                if logs_path.find(test_name) != -1:
-                    logs_path = os.path.join(test_variables['LOGS_DIR'], logs_path)
-                    if not logs_path in SAVE_LOGS_PATHS:
-                        os.remove(logs_path)
+    # Logs postprocessing: drop out_path_ipynb if all OK
+    if not exec_res['failed'] and test_variables['REMOVE_EXTRA_FILES']:
+        os.remove(out_path_ipynb)
 
     # Provide output message to the terminal
     with capsys.disabled():
         print(test_variables['DATESTAMP'] + '\n\n')
+
         # Tests output
         if test_variables['SHOW_MESSAGE']:
-            for k, v in test_outputs.items():
+            for k, v in exec_res.get('outputs', {}).items():
                 if isinstance(v, str):
-                    print(k, ':\n', v)
+                    print(f"{k}:\n\n{v}")
                 else:
-                    print(k, ':\n')
+                    print(f"{k}:\n")
                     print(json.dumps(v, indent=4))
 
         # End of the running message
-        if not failed:
+        if not exec_res['failed']:
             print(f"All \'{test_name}\' tests were executed successfully.\n")
         else:
             if test_variables['SHOW_TEST_ERROR_INFO']:
-                print(traceback)
+                print(exec_res['traceback'])
             assert False, f"\'{test_name}\' tests failed.\n"

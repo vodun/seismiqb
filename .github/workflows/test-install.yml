@@ -62,4 +62,4 @@ jobs:
       working-directory: ${{ github.workspace }}/seismiqb/
       run: |
         pip install -U pytest
-        pytest -m "not slow" --disable-pytest-warnings -v --pyargs seismiqb.tests
+        pytest -m "not slow" --tb=line --disable-pytest-warnings -v --pyargs seismiqb.tests
