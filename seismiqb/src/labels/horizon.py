@@ -974,7 +974,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Visua
         return closest, proximity_info
 
 
-    def compare(self, *others, clip_value=7, ignore_zeros=True,
+    def compare(self, *others, clip_value=7, ignore_zeros=True, enlarge=True, width=9,
                 printer=print, plot=True, return_figure=False, hist_kwargs=None, show=True, savepath=None, **kwargs):
         """ Compare `self` horizon against the closest in `others`.
         Print textual and show graphical visualization of differences between the two.
@@ -986,6 +986,10 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Visua
             Clip for differences graph and histogram
         ignore_zeros : bool
             Whether to ignore zero-differences on histogram.
+        enlarge : bool
+            Whether to enlarge the difference matrix, if one of horizons is a carcass.
+        width : int
+            Enlarge width. Works only if `enlarge` is True.
         printer : callable, optional
             Function to use to print textual information
         plot : bool
@@ -1033,14 +1037,19 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Visua
             printer(msg)
 
         if plot:
-            # Main plot: differences matrix
+            # Prepare data
             matrix = proximity_info['difference_matrix']
+            if enlarge and (self.is_carcass or other.is_carcass):
+                matrix = self.matrix_enlarge(matrix, width=width)
+
+            # Field boundaries
             bounds = self.field.zero_traces.copy().astype(np.float32)
             bounds[np.isnan(matrix) & (bounds == 0)] = np.nan
             matrix[bounds == 1] = 0.0
 
+            # Main plot: differences matrix
             kwargs = {
-                'title': f'Depth comparison of `self={self.displayed_name}` and `other={closest.displayed_name}`',
+                'title': f'Depth comparison of `self={self.displayed_name}`\nand `other={closest.displayed_name}`',
                 'suptitle': '',
                 'cmap': ['seismic', 'black'],
                 'bad_color': 'black',
