@@ -899,7 +899,7 @@ class SeismicCropBatch(Batch):
         ----------
         angle : float or tuple of floats
             Angles of rotation about each axes (axis_2, axis_0, axis_1). If float, angle of rotation
-            about the first axis.
+            about the last axis.
         adjust : bool
             Scale image to avoid padding in rotated image (for 2D crops only).
         fill_value : number
@@ -908,10 +908,10 @@ class SeismicCropBatch(Batch):
         angle = angle if isinstance(angle, (tuple, list)) else (angle, 0, 0)
         shape = crop.shape
         if adjust:
-            if crop.shape[0] > 1:
+            if crop.shape[-1] > 1:
                 raise ValueError("Shape adjusting doesn't applicable to 3D crops")
             new_shape = adjust_shape_3d(shape=crop.shape, angle=angle)
-            crop = cv2.resize(crop[0], dsize=(new_shape[2], new_shape[1]))[np.newaxis, ...]
+            crop = cv2.resize(crop[..., 0], dsize=(new_shape[1], new_shape[0]))[..., np.newaxis]
         if angle[0] != 0:
             crop = self._rotate(crop, angle[0], fill_value)
         if angle[1] != 0:
