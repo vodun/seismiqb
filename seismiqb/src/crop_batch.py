@@ -10,14 +10,13 @@ import cv2
 from scipy.interpolate import interp1d
 from scipy.ndimage import gaussian_filter1d
 from scipy.signal import butter, lfilter, hilbert
-from seismiqb.seismiqb.src.utils.functions import adjust_shape_3d
 
 from ..batchflow import DatasetIndex, Batch, action, inbatch_parallel, SkipBatchException, apply_parallel
 
 from .labels import Horizon
 from .plotters import plot_image
 from .synthetic.generator import generate_synthetic
-from .utils import compute_attribute, to_list, AugmentedDict
+from .utils import compute_attribute, to_list, AugmentedDict, adjust_shape_3d
 
 
 AFFIX = '___'
@@ -880,6 +879,8 @@ class SeismicCropBatch(Batch):
         """
         rnd = np.random.RandomState(int(n_patches * 100)).uniform
         patch_shape = patch_shape.astype(int)
+        if len(patch_shape) == 2:
+            patch_shape = np.array([*patch_shape, 1])
 
         copy_ = copy(crop)
         for _ in range(int(n_patches)):
@@ -904,7 +905,7 @@ class SeismicCropBatch(Batch):
         fill_value : number
             Value to put at empty positions appeared after crop roration.
         """
-        angle = angle if isinstance(angle, (tuple, list)) else (0, angle, 0)
+        angle = angle if isinstance(angle, (tuple, list)) else (angle, 0, 0)
         shape = crop.shape
         if adjust:
             if crop.shape[0] > 1:
