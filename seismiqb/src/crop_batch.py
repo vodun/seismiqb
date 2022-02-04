@@ -16,7 +16,7 @@ from ..batchflow import DatasetIndex, Batch, action, inbatch_parallel, SkipBatch
 from .labels import Horizon
 from .plotters import plot_image
 from .synthetic.generator import generate_synthetic
-from .utils import compute_attribute, to_list, AugmentedDict
+from .utils import compute_attribute, to_list, AugmentedDict, DelegatingList
 
 
 AFFIX = '___'
@@ -1239,10 +1239,25 @@ class SeismicCropBatch(Batch):
         return self
 
 
-    def get_plot_data(self, idx, components, zoom_slice=None, displayed_name=None):
+    def get_plot_data(self, idx, components, adjust_masks=True,
+                      zoom_slice=None, displayed_name=None, augment_titles=False):
         """ Get `components` data for item=`idx` and make title for it. """
         # Retrieve data
-        data = [getattr(self, component)[idx].squeeze() for component in components]
+        from .utils import DelegatingList
+        if not components:
+            components = ['images', 'masks', ['images', 'masks'], 'predictions', ['images', 'predictions']]
+            components = DelegatingList(list(components))
+            present_components = components.apply(lambda item: hasattr(self, item))
+            present_components = [item if isinstance(item, bool) else min(item)
+                                  for item in present_components]
+
+            components = [item for item, flag in zip(components, present_components)
+                          if flag is True]
+
+        # Retrieve data
+        components = DelegatingList(list(components))
+        data = components.apply(lambda item: getattr(self, item)[idx].squeeze())
+
         if zoom_slice is not None:
             data = [item[zoom_slice] for item in data]
 
@@ -1269,17 +1284,53 @@ class SeismicCropBatch(Batch):
             displayed_name = self.dataset.geometries[field_name].displayed_name
         suptitle = f'batch_idx={idx}                  `{displayed_name}`\n{suptitle}'
 
-        # Title for individual axis
-        title = list(components)
-        if len(components) >= 1:
-            title[0] += f'\n INLINES <{i_start}:{i_end}>'
-        if len(components) >= 2:
-            title[1] += f'\n CROSSLINES <{x_start}:{x_end}>'
-        if len(components) >= 3:
-            title[2] += f'\n DEPTH <{h_start}:{h_end}>'
-        return data, suptitle, title, xlabel, ylabel
+        # Titles for individual axis
+        title = [str(item) for item in components]
+        if augment_titles:
+            if len(components) >= 1:
+                title[0] += f'\n INLINES <{i_start}:{i_end}>'
+            if len(components) >= 2:
+                title[1] += f'\n CROSSLINES <{x_start}:{x_end}>'
+            if len(components) >= 3:
+                title[2] += f'\n DEPTH <{h_start}:{h_end}>'
 
-    def plot_components(self, *components, idx=0, zoom_slice=None, displayed_name=None, **kwargs):
+        # Cmaps
+        def color_getter(component):
+            if 'mask' in component:
+                return 'red'
+            if 'prediction' in component:
+                return 'viridis'
+            return 'gray'
+        cmaps = components.apply(color_getter)
+        cmaps = [[item] if isinstance(item, str) else item for item in cmaps]
+
+        # Remove some mask values. TODO: improve via better `binarize_masks` in plotter
+        if adjust_masks:
+            for i, component in enumerate(components):
+                if isinstance(component, list):
+                    for j, component_ in enumerate(component):
+
+                        if 'predictions' in component_:
+                            data_ = data[i][j]
+                            if data_.min() >= 0.0 and data_.max() <= 1.0:
+                                data_ = np.ma.array(data_, mask=data_ < 0.5)
+                                data[i][j] = data_
+
+        # Separate: no nested lists in data
+        separate = not max([isinstance(item, list) for item in components])
+
+        plot_params = {
+            'separate': separate,
+            'cmap': cmaps,
+            'suptitle': suptitle,
+            'title': title,
+            'xlabel': xlabel,
+            'ylabel': ylabel,
+        }
+        return data, plot_params
+
+    def plot_components(self, *components, idx=0, zoom_slice=None, displayed_name=None,
+                        augment_titles=False, adjust_masks=True, **kwargs):
         """ Plot components of batch.
 
         Parameters
@@ -1295,19 +1346,14 @@ class SeismicCropBatch(Batch):
             Name to use as the field name. If not provided, inferred from dataset.
         """
         # Get data
-        data, suptitle, _, xlabel, ylabel = self.get_plot_data(idx=idx, components=components,
-                                                               zoom_slice=zoom_slice, displayed_name=displayed_name)
+        data, plot_params = self.get_plot_data(idx=idx, components=components,
+                                               augment_titles=augment_titles, adjust_masks=adjust_masks,
+                                               zoom_slice=zoom_slice, displayed_name=displayed_name)
 
         # Plot parameters
         kwargs = {
             'scale': 0.8,
-            'suptitle_label': suptitle,
-            'title': list(components),
-            'xlabel': xlabel,
-            'ylabel': ylabel,
-            'cmap': ['gray'] + ['viridis'] * len(components),
-            'bad_values': (),
-            'separate': True,
+            **plot_params,
             **kwargs
         }
         return plot_image(data, **kwargs)
@@ -1315,49 +1361,37 @@ class SeismicCropBatch(Batch):
 
     def show(self, n=1, components=None, **kwargs):
         """ Plot `n` random batch items as separate figures. """
-        available_components = components or ['images', 'masks', 'predictions']
-        available_components = [compo for compo in available_components
-                                if hasattr(self, compo)]
-
         for idx in self.random.choice(len(self), size=min(n, len(self)), replace=False):
-            self.plot_components(*available_components, idx=idx, **kwargs)
+            self.plot_components(*components, idx=idx, **kwargs)
 
 
-    def show_roll(self, n=1, components=None, separate=True, zoom_slice=None, displayed_name=None,
-                  indices=None, **kwargs):
+    def show_roll(self, n=1, components=None, zoom_slice=None, displayed_name=None,
+                  augment_titles=True, adjust_masks=True, indices=None, **kwargs):
         """ Plot `n` random batch items on one figure. """
-        available_components = components or ['images', 'masks', 'predictions']
-        available_components = [compo for compo in available_components
-                                if hasattr(self, compo)]
         if indices is None:
             indices = self.random.choice(len(self), size=min(n, len(self)), replace=False)
 
         data, titles, cmaps = [], [], []
         for idx in indices:
-            data_, _, title, xlabel, ylabel = self.get_plot_data(idx=idx, components=available_components,
-                                                                 zoom_slice=zoom_slice, displayed_name=displayed_name)
+            data_, plot_params = self.get_plot_data(idx=idx, components=components,
+                                                    augment_titles=augment_titles, adjust_masks=adjust_masks,
+                                                    zoom_slice=zoom_slice, displayed_name=displayed_name)
+            data.extend(data_)
+            titles.extend(plot_params['title'])
+            cmaps.extend(plot_params['cmap'])
 
-            if separate:
-                data.extend(data_)
-                titles.extend(title)
-                cmaps.extend(['gray'] + ['viridis'] * (len(available_components) - 1))
-            else:
-                data.append(data_)
-                titles.append('\n'.join(title))
-                cmaps.append(['gray'] + ['viridis'] * (len(available_components) - 1))
-        suptitle = f'Roll plot for components={available_components}'
+        suptitle = f'Roll plot'
+        plot_params.update({
+            'cmap': cmaps,
+            'title': titles,
+            'suptitle': suptitle,
+        })
 
         # Plot parameters
         kwargs = {
             'scale': 0.8,
-            'ncols': 6,
-            'suptitle_label': suptitle,
-            'title': titles,
-            'xlabel': xlabel,
-            'ylabel': ylabel,
-            'cmap': cmaps,
-            'bad_values': (),
-            'separate': separate,
+            'ncols': 5,
+            **plot_params,
             **kwargs
         }
         return plot_image(data, **kwargs)
