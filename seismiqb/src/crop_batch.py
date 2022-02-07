@@ -131,11 +131,12 @@ class SeismicCropBatch(Batch):
         then index it with item and return it.
         Otherwise retrieve `component` from batch itself and optionally index it with `item` position in `self.indices`.
         """
-        data = getattr(self.dataset, component, None)
-        if isinstance(data, AugmentedDict):
-            if isinstance(item, str) and self.has_salt(item):
-                item = self.unsalt(item)
-            return data[item]
+        if hasattr(self, 'dataset'):
+            data = getattr(self.dataset, component, None)
+            if isinstance(data, AugmentedDict):
+                if isinstance(item, str) and self.has_salt(item):
+                    item = self.unsalt(item)
+                return data[item]
 
         data = getattr(self, component) if isinstance(component, str) else component
         if item is not None:
@@ -147,12 +148,14 @@ class SeismicCropBatch(Batch):
         return data
 
 
-    def deepcopy(self):
+    def deepcopy(self, preserve=False):
         """ Create a copy of a batch with the same `dataset` and `pipeline` references. """
         #pylint: disable=protected-access
         new = super().deepcopy()
-        new._dataset = self.dataset
-        new.pipeline = self.pipeline
+
+        if preserve:
+            new._dataset = self.dataset
+            new.pipeline = self.pipeline
         return new
 
     # Core actions
@@ -1296,9 +1299,7 @@ class SeismicCropBatch(Batch):
 
         # Cmaps
         def color_getter(component):
-            if 'mask' in component:
-                return 'red'
-            if 'prediction' in component:
+            if 'mask' in component or 'prediction' in component:
                 return 'viridis'
             return 'gray'
         cmaps = components.apply(color_getter)
@@ -1309,8 +1310,9 @@ class SeismicCropBatch(Batch):
             for i, component in enumerate(components):
                 if isinstance(component, list):
                     for j, component_ in enumerate(component):
-
-                        if 'predictions' in component_:
+                        if 'mask' in component_:
+                            cmaps[i][j] = 'red'
+                        elif 'predictions' in component_:
                             data_ = data[i][j]
                             if data_.min() >= 0.0 and data_.max() <= 1.0:
                                 data_ = np.ma.array(data_, mask=data_ < 0.5)
@@ -1362,7 +1364,7 @@ class SeismicCropBatch(Batch):
     def show(self, n=1, components=None, **kwargs):
         """ Plot `n` random batch items as separate figures. """
         for idx in self.random.choice(len(self), size=min(n, len(self)), replace=False):
-            self.plot_components(*components, idx=idx, **kwargs)
+            self.plot_components(*(components or []), idx=idx, **kwargs)
 
 
     def show_roll(self, n=1, components=None, zoom_slice=None, displayed_name=None,
