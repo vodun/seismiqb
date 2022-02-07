@@ -1245,8 +1245,8 @@ class SeismicCropBatch(Batch):
     def get_plot_data(self, idx, components, adjust_masks=True,
                       zoom_slice=None, displayed_name=None, augment_titles=False):
         """ Get `components` data for item=`idx` and make title for it. """
+        #pylint: disable=too-many-nested-blocks, too-many-statements
         # Retrieve data
-        from .utils import DelegatingList
         if not components:
             components = ['images', 'masks', ['images', 'masks'], 'predictions', ['images', 'predictions']]
             components = DelegatingList(list(components))
@@ -1382,11 +1382,10 @@ class SeismicCropBatch(Batch):
             titles.extend(plot_params['title'])
             cmaps.extend(plot_params['cmap'])
 
-        suptitle = f'Roll plot'
         plot_params.update({
             'cmap': cmaps,
             'title': titles,
-            'suptitle': suptitle,
+            'suptitle': '',
         })
 
         # Plot parameters

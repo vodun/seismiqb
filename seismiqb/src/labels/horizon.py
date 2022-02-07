@@ -799,17 +799,18 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Visua
         filtering_matrix = binary_dilation(filtering_matrix, iterations=4)
         return filtering_matrix
 
-    def make_holes(self, copy=True, n=10, scale=1.0, max_scale=.25,
+    def make_holes(self, inplace=False, n=10, scale=1.0, max_scale=.25,
                    max_angles_amount=4, max_sharpness=5.0, locations=None,
                    points_proportion=1e-5, points_shape=1,
                    noise_level=0, seed=None):
         """ Make holes in a of horizon. Optionally, make a copy before filtering. """
+        #pylint: disable=self-cls-assignment
         filtering_matrix = self.make_random_holes_matrix(n=n, scale=scale, max_scale=max_scale,
                                                          max_angles_amount=max_angles_amount,
                                                          max_sharpness=max_sharpness, locations=locations,
                                                          points_proportion=points_proportion, points_shape=points_shape,
                                                          noise_level=noise_level, seed=seed)
-        self = self if copy is False else self.copy()
+        self = self if inplace is True else self.copy()
         self.filter(filtering_matrix)
         return self
 
@@ -974,7 +975,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Visua
         return closest, proximity_info
 
 
-    def compare(self, *others, clip_value=7, ignore_zeros=True, enlarge=True, width=9,
+    def compare(self, *others, clip_value=5, ignore_zeros=False, enlarge=True, width=9,
                 printer=print, plot=True, return_figure=False, hist_kwargs=None, show=True, savepath=None, **kwargs):
         """ Compare `self` horizon against the closest in `others`.
         Print textual and show graphical visualization of differences between the two.
@@ -1069,9 +1070,10 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Visua
             legend_kwargs = {
                 'color': ('white', 'blue', 'red', 'black', 'lightgray'),
                 'label': ('self.depths = other.depths',
-                        'self.depths – other.depths < 0',
-                        'self.depths – other.depths > 0',
-                        'unlabeled in self', 'dead traces'),
+                          'self.depths < other.depths',
+                          'self.depths > other.depths',
+                          'unlabeled in `self`',
+                          'dead traces'),
                 'size': 20,
                 'loc': 10,
                 'facecolor': 'pink',
