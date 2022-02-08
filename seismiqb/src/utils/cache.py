@@ -1,9 +1,11 @@
 """ Thread-safe lru cache class and cache mixin. """
-from collections import OrderedDict, defaultdict
-from functools import wraps
-from threading import RLock
-from hashlib import blake2b
+import os
 from copy import copy
+from functools import wraps
+from hashlib import blake2b
+from threading import RLock
+from collections import OrderedDict, defaultdict
+
 import numpy as np
 import pandas as pd
 
@@ -168,7 +170,7 @@ class CacheMixin:
         for name in dir(self):
             is_property = isinstance(getattr(self.__class__, name, None), property)
 
-            if name.startswith("__") or 'cache' in name or is_property:
+            if name.startswith("__") or is_property:
                 continue
 
             method = getattr(self, name)
