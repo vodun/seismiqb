@@ -89,7 +89,7 @@ class lru_cache:
             use_cache = kwargs.pop('use_cache', self.apply_by_default)
             copy_on_return = kwargs.pop('copy_on_return', self.copy_on_return)
 
-            if os.getenv('SEISMIQB_DISABLE_CACHE', False):
+            if os.getenv('SEISMIQB_DISABLE_CACHE', ""):
                 use_cache = False
 
             # Skip the caching logic and evaluate function directly
