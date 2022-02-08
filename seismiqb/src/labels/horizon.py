@@ -14,10 +14,11 @@ from .horizon_attributes import AttributesMixin
 from .horizon_extraction import ExtractionMixin
 from .horizon_visualization import VisualizationMixin
 from ..utils import CacheMixin, CharismaMixin
-from ..utils import groupby_mean, groupby_min, groupby_max, filtering_function
+from ..utils import groupby_mean, groupby_min, groupby_max
 from ..utils import make_bezier_figure
 from ..utils import MetaDict
 from ..functional import smooth_out
+from ..plotters import plot_image, MatplotlibPlotter
 
 
 
@@ -228,15 +229,18 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Visua
         elif storage == 'points':
             self._points = None
 
-    def __copy__(self):
+    def copy(self, add_prefix=True):
         """ Create a new horizon with the same data.
 
         Returns
         -------
         A horizon object with new matrix object and a reference to the same field.
         """
+        prefix = 'copy_of_' if add_prefix else ''
         return type(self)(storage=np.copy(self.matrix), field=self.field, i_min=self.i_min, x_min=self.x_min,
-                          name=f"copy_of_{self.name}")
+                          name=f'{prefix}{self.name}')
+
+    __copy__ = copy
 
     def __sub__(self, other):
         if not isinstance(other, type(self)):
@@ -488,11 +492,15 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Visua
     @property
     def short_name(self):
         """ Name without extension. """
-        return self.name.split('.')[0]
+        if self.name is not None:
+            return self.name.split('.')[0]
+        return None
 
     @property
     def displayed_name(self):
         """ Alias for `short_name`. """
+        if self.name is None:
+            return 'unknown_horizon'
         return self.short_name
 
 
@@ -542,7 +550,8 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Visua
 
         def _filtering_function(points, **kwds):
             _ = kwds
-            return filtering_function(points, filtering_matrix)
+            mask = filtering_matrix[points[:, 0], points[:, 1]]
+            return points[mask == 0]
 
         self.apply_to_points(_filtering_function, **kwargs)
 
@@ -656,7 +665,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Visua
     interpolate = partialmethod(smooth_out, preserve_borders=False)
 
 
-    def make_carcass(self, frequencies=100, regular=True, margin=50, apply_smoothing=False, **kwargs):
+    def make_carcass(self, frequencies=100, regular=True, margin=50, apply_smoothing=False, add_prefix=True, **kwargs):
         """ Cut carcass out of a horizon. Returns a new instance.
 
         Parameters
@@ -673,7 +682,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Visua
             Other parameters for grid creation, see `:meth:~.SeismicGeometry.make_quality_grid`.
         """
         frequencies = frequencies if isinstance(frequencies, (tuple, list)) else [frequencies]
-        carcass = copy(self)
+        carcass = self.copy(add_prefix=add_prefix)
         carcass.name = carcass.name.replace('copy', 'carcass')
 
         if regular:
@@ -790,6 +799,22 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Visua
         filtering_matrix = binary_dilation(filtering_matrix, iterations=4)
         return filtering_matrix
 
+    def make_holes(self, inplace=False, n=10, scale=1.0, max_scale=.25,
+                   max_angles_amount=4, max_sharpness=5.0, locations=None,
+                   points_proportion=1e-5, points_shape=1,
+                   noise_level=0, seed=None):
+        """ Make holes in a of horizon. Optionally, make a copy before filtering. """
+        #pylint: disable=self-cls-assignment
+        filtering_matrix = self.make_random_holes_matrix(n=n, scale=scale, max_scale=max_scale,
+                                                         max_angles_amount=max_angles_amount,
+                                                         max_sharpness=max_sharpness, locations=locations,
+                                                         points_proportion=points_proportion, points_shape=points_shape,
+                                                         noise_level=noise_level, seed=seed)
+        self = self if inplace is True else self.copy()
+        self.filter(filtering_matrix)
+        return self
+
+    make_holes.__doc__ += '\n' + '\n'.join(make_random_holes_matrix.__doc__.split('\n')[1:])
 
     # Horizon usage: mask generation
     def add_to_mask(self, mask, locations=None, width=3, alpha=1, **kwargs):
@@ -872,25 +897,25 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Visua
         printer : callable
             Function to display message with metrics.
         """
-        msg = f"""
-        Number of labeled points:                         {len(self)}
-        Number of points inside borders:                  {np.sum(self.filled_matrix)}
-        Perimeter (length of borders):                    {self.perimeter}
-        Percentage of labeled non-bad traces:             {self.coverage}
-        Percentage of labeled traces inside borders:      {self.solidity}
-        Number of holes inside borders:                   {self.number_of_holes}
-        """
-        printer(dedent(msg))
+        # Textual part
+        if printer is not None:
+            msg = f"""
+            Number of labeled points:                         {len(self)}
+            Number of points inside borders:                  {np.sum(self.filled_matrix)}
+            Perimeter (length of borders):                    {self.perimeter}
+            Percentage of labeled non-bad traces:             {self.coverage:4.3f}
+            Percentage of labeled traces inside borders:      {self.solidity:4.3f}
+            Number of holes inside borders:                   {self.number_of_holes}
+            """
+            printer(dedent(msg))
+
+        # Visual part
         if compute_metric:
-            return self.metrics.evaluate('support_corrs', supports=supports, agg='nanmean',
-                                         plot=plot, savepath=savepath, **kwargs)
+            from ..metrics import HorizonMetrics # pylint: disable=import-outside-toplevel
+            return HorizonMetrics(self).evaluate('support_corrs', supports=supports, agg='nanmean',
+                                                 plot=plot, savepath=savepath, **kwargs)
         return None
 
-    def compare(self, other, offset=0, absolute=True, printer=print, hist=True, plot=True):
-        """ Compare quality of self against another horizon or sequence of horizons. """
-        from ..metrics import HorizonMetrics
-        HorizonMetrics([self, other]).evaluate('compare', absolute=absolute, offset=offset,
-                                               printer=printer, hist=hist, plot=plot)
 
     def check_proximity(self, other):
         """ Compute a number of stats of location of `self` relative to the `other` Horizons.
@@ -941,6 +966,159 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Visua
         }
         return MetaDict(info_dict)
 
+    def find_closest(self, *others):
+        """ Find closest horizon to `self` in the list of `others`. """
+        proximities = [(other, self.check_proximity(other)) for other in others
+                       if other.field.name == self.field.name]
+
+        closest, proximity_info = min(proximities, key=lambda item: item[1].get('difference_mean', np.inf))
+        return closest, proximity_info
+
+
+    def compare(self, *others, clip_value=5, ignore_zeros=False, enlarge=True, width=9,
+                printer=print, plot=True, return_figure=False, hist_kwargs=None, show=True, savepath=None, **kwargs):
+        """ Compare `self` horizon against the closest in `others`.
+        Print textual and show graphical visualization of differences between the two.
+        Returns dictionary with collected information: `closest` and `proximity_info`.
+
+        Parameters
+        ----------
+        clip_value : number
+            Clip for differences graph and histogram
+        ignore_zeros : bool
+            Whether to ignore zero-differences on histogram.
+        enlarge : bool
+            Whether to enlarge the difference matrix, if one of horizons is a carcass.
+        width : int
+            Enlarge width. Works only if `enlarge` is True.
+        printer : callable, optional
+            Function to use to print textual information
+        plot : bool
+            Whether to plot the graph
+        return_figure : bool
+            Whether to add `figure` to the returned dictionary
+        hist_kwargs, kwargs : dict
+            Parameters for histogram / main graph visualization.
+        """
+        closest, proximity_info = other, oinfo = self.find_closest(*others)
+        returns = {'closest': closest, 'proximity_info': proximity_info}
+
+        msg = f"""
+        Comparing horizons:
+        {self.displayed_name.rjust(45)}
+        {other.displayed_name.rjust(45)}
+        {'—'*45}
+        Rate in 5ms:                         {oinfo['window_rate']:8.3f}
+        Mean / std of errors:            {oinfo['difference_mean']:+4.2f} / {oinfo['difference_std']:4.2f}
+        Mean / std of abs errors:         {oinfo['abs_difference_mean']:4.2f} / {oinfo['abs_difference_std']:4.2f}
+        Max abs error:                           {oinfo['abs_difference_max']:4.0f}
+        {'—'*45}
+        Lengths of horizons:                 {len( self):8}
+                                             {len(other):8}
+        {'—'*45}
+        Average heights of horizons:         { self.h_mean:8.2f}
+                                             {other.h_mean:8.2f}
+        {'—'*45}
+        Coverage of horizons:                { self.coverage:8.4f}
+                                             {other.coverage:8.4f}
+        {'—'*45}
+        Solidity of horizons:                { self.solidity:8.4f}
+                                             {other.solidity:8.4f}
+        {'—'*45}
+        Number of holes in horizons:         { self.number_of_holes:8}
+                                             {other.number_of_holes:8}
+        {'—'*45}
+        Additional traces labeled:           {oinfo['present_at_1_absent_at_2']:8}
+        (present in one, absent in other)    {oinfo['present_at_2_absent_at_1']:8}
+        {'—'*45}
+        """
+        msg = dedent(msg)
+
+        if printer is not None:
+            printer(msg)
+
+        if plot:
+            # Prepare data
+            matrix = proximity_info['difference_matrix']
+            if enlarge and (self.is_carcass or other.is_carcass):
+                matrix = self.matrix_enlarge(matrix, width=width)
+
+            # Field boundaries
+            bounds = self.field.zero_traces.copy().astype(np.float32)
+            bounds[np.isnan(matrix) & (bounds == 0)] = np.nan
+            matrix[bounds == 1] = 0.0
+
+            # Main plot: differences matrix
+            kwargs = {
+                'title': f'Depth comparison of `self={self.displayed_name}`\nand `other={closest.displayed_name}`',
+                'suptitle': '',
+                'cmap': ['seismic', 'black'],
+                'bad_color': 'black',
+                'colorbar': [True, False],
+                'alpha': [1., 0.2],
+                'vmin': [-clip_value, 0],
+                'vmax': [+clip_value, 1],
+
+                'xlabel': self.field.index_headers[0],
+                'ylabel': self.field.index_headers[1],
+
+                'shapes': 3, 'ncols': 2,
+                'return_figure': True,
+                **kwargs,
+            }
+
+            legend_kwargs = {
+                'color': ('white', 'blue', 'red', 'black', 'lightgray'),
+                'label': ('self.depths = other.depths',
+                          'self.depths < other.depths',
+                          'self.depths > other.depths',
+                          'unlabeled in `self`',
+                          'dead traces'),
+                'size': 20,
+                'loc': 10,
+                'facecolor': 'pink',
+            }
+
+            fig = plot_image([matrix, bounds], **kwargs)
+            MatplotlibPlotter.add_legend(ax=fig.axes[1], **legend_kwargs)
+
+            # Histogram and labels
+            hist_kwargs = {
+                'xlabel': 'difference values',
+                'title_label': 'Histogram of horizon depth differences',
+                **(hist_kwargs or {}),
+            }
+
+            graph_msg = '\n'.join(msg.replace('—', '').split('\n')[5:-11])
+            graph_msg = graph_msg.replace('\n' + ' '*20, ', ').replace('\t', ' ')
+            graph_msg = ' '.join(item for item in graph_msg.split('  ') if item)
+
+            hist_legend_kwargs = {
+                'color': 'pink',
+                'label': graph_msg,
+                'size': 14, 'loc': 10,
+                'facecolor': 'pink',
+            }
+
+            hist_data = np.clip(matrix, -clip_value, clip_value)
+            if ignore_zeros:
+                hist_data = hist_data[hist_data != 0.0]
+            plot_image(hist_data, mode='hist', ax=fig.axes[2], **hist_kwargs)
+            MatplotlibPlotter.add_legend(ax=fig.axes[3], **hist_legend_kwargs)
+
+            MatplotlibPlotter.save_and_show(fig=fig, show=show, savepath=savepath)
+            if return_figure:
+                returns['figure'] = fig
+
+        return returns
+
+    def compute_prediction_std(self, others):
+        """ Compute std of predicted horizons along depths and restrict it to `self`. """
+        std_matrix = self.metrics.compute_prediction_std(list(set([self, *others])))
+        std_matrix[self.presence_matrix == False] = np.nan #pylint: disable=singleton-comparison
+        return std_matrix
+
+
     def equal(self, other, threshold_missing=0):
         """ Return True if the horizons are considered equal, False otherwise.
         If the `threshold_missing` is zero, then check if the points of `self` and `other` are the same.
@@ -967,7 +1145,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Visua
             If callable, then applied to points after converting to ilines/xlines coordinate system.
         """
         self.dump_charisma(data=copy(self.points), path=path, format='points',
-                           name=self.short_name, transform=transform)
+                           name=self.name, transform=transform)
 
     def dump_float(self, path, transform=None, kernel_size=7, sigma=2., margin=5):
         """ Smooth out the horizon values, producing floating-point numbers, and dump to the disk.
@@ -988,4 +1166,4 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Visua
         """
         matrix = self.matrix_smooth_out(matrix=self.full_matrix, kernel_size=kernel_size, sigma=sigma, margin=margin)
         points = self.matrix_to_points(matrix)
-        self.dump_charisma(data=points, path=path, format='points', name=self.short_name, transform=transform)
+        self.dump_charisma(data=points, path=path, format='points', name=self.name, transform=transform)
