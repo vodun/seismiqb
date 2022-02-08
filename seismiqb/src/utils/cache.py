@@ -7,6 +7,8 @@ from copy import copy
 import numpy as np
 import pandas as pd
 
+
+
 class lru_cache:
     """ Thread-safe least recent used cache. Must be applied to a class methods.
     Adds the `use_cache` argument to the decorated method to control whether the caching logic is applied.
@@ -84,6 +86,9 @@ class lru_cache:
         def wrapper(instance, *args, **kwargs):
             use_cache = kwargs.pop('use_cache', self.apply_by_default)
             copy_on_return = kwargs.pop('copy_on_return', self.copy_on_return)
+
+            if os.getenv('SEISMIQB_DISABLE_CACHE', False):
+                use_cache = False
 
             # Skip the caching logic and evaluate function directly
             if not use_cache:
