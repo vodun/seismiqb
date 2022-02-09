@@ -952,10 +952,12 @@ class SeismicCropBatch(Batch):
         angle = angle if isinstance(angle, (tuple, list)) else (angle, 0, 0)
         shape = crop.shape
         if adjust:
-            if crop.shape[-1] > 1:
-                raise ValueError("Shape adjusting doesn't applicable to 3D crops")
+            if angle[1] != 0 or angle[2] != 0:
+                raise ValueError("Shape adjusting doesn't applicable to 3D rotations")
             new_shape = adjust_shape_3d(shape=crop.shape, angle=angle)
-            crop = cv2.resize(crop[..., 0], dsize=(new_shape[1], new_shape[0]))[..., np.newaxis]
+            crop = cv2.resize(crop, dsize=(new_shape[1], new_shape[0]))
+            if len(crop.shape) == 2:
+                crop = crop[..., np.newaxis]
         if angle[0] != 0:
             crop = self._rotate(crop, angle[0], fill_value)
         if angle[1] != 0:
