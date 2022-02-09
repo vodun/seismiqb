@@ -911,8 +911,9 @@ class SeismicCropBatch(Batch):
 
         Parameters
         ----------
-        patch_shape : array-like
-            Shape or patches along each axis.
+        patch_shape : int or array-like
+            Shape or patches along each axis. If int, square patches will be generated. If array of length 2,
+            patch will be the same for all channels.
         n_patches : number
             Number of patches to cut.
         fill_value : number
@@ -920,8 +921,10 @@ class SeismicCropBatch(Batch):
         """
         rnd = np.random.RandomState(int(n_patches * 100)).uniform
         patch_shape = patch_shape.astype(int)
+        if isinstance(patch_shape, int):
+            patch_shape = np.array([patch_shape, patch_shape, crop.shape[-1]])
         if len(patch_shape) == 2:
-            patch_shape = np.array([*patch_shape, 1])
+            patch_shape = np.array([*patch_shape, crop.shape[-1]])
 
         copy_ = copy(crop)
         for _ in range(int(n_patches)):
