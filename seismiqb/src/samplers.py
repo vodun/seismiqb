@@ -12,7 +12,7 @@ transforms them into 3D slices to index the data and other useful info like orig
 Each of the classes provides:
     - `call` method (aliased to either `sample` or `next_batch`), that generates given amount of locations
     - `to_names` method to convert the first two columns of sampled locations into string names of field and label
-    - convinient visualization to explore underlying `locations` structure
+    - convenient visualization to explore underlying `locations` structure
 """
 from itertools import product
 
@@ -111,7 +111,7 @@ class BaseSampler(Sampler):
 class GeometrySampler(BaseSampler):
     """ Generator of crop locations, based on a field. Not intended to be used directly, see `SeismicSampler`.
     Makes locations that:
-        - start from the non-dead trace on a field, exluding those marked by `filtering_matrix`
+        - start from the non-dead trace on a field, excluding those marked by `filtering_matrix`
         - contain more than `threshold` non-dead traces inside
         - don't go beyond cube limits
 
@@ -195,7 +195,7 @@ class GeometrySampler(BaseSampler):
 class HorizonSampler(BaseSampler):
     """ Generator of crop locations, based on a single horizon. Not intended to be used directly, see `SeismicSampler`.
     Makes locations that:
-        - start from the labeled point on horizon, exluding those marked by `filtering_matrix`
+        - start from the labeled point on horizon, excluding those marked by `filtering_matrix`
         - contain more than `threshold` labeled pixels inside
         - don't go beyond cube limits
 
@@ -344,7 +344,7 @@ class FaultSampler(BaseSampler):
     Location is randomized in (-0.4*shape, 0.4*shape) range.
 
     For sampling, we randomly choose `size` rows from `locations`. If some of the sampled locations does not fit the
-    `threshold` constraint or it is imposible to make crop of defined shape, resample until we get exactly
+    `threshold` constraint or it is impossible to make crop of defined shape, resample until we get exactly
     `size` locations.
 
     Parameters
@@ -817,7 +817,7 @@ class SeismicSampler(Sampler):
 
 
 class BaseGrid:
-    """ Determenistic generator of crop locations. """
+    """ Deterministic generator of crop locations. """
     def __init__(self, crop_shape=None, batch_size=64,
                  locations=None, orientation=None, origin=None, endpoint=None, field=None, label_name='unknown'):
         self._iterator = None
@@ -831,6 +831,7 @@ class BaseGrid:
             self.orientation = orientation
             self.origin = origin
             self.endpoint = endpoint
+            self.ranges = np.array([origin, endpoint]).T
             self.shape = endpoint - origin
             self.field = field
             self.field_name = field.short_name
@@ -993,6 +994,36 @@ class BaseGrid:
         self.field.geometry.show(overlay, **kwargs)
 
 
+    def to_chunks(self, size, overlap=0.05, orientation=None):
+        """ Split the current grid into chunks along `orientation` axis.
+
+        Parameters
+        ----------
+        size : int
+            Length of one chunk along the splitting axis.
+        overlap : number
+            If integer, then number of slices for overlapping between consecutive chunks.
+            If float, then proportion of `size` to overlap between consecutive chunks.
+
+        Returns
+        -------
+        iterator with instances of `RegularGrid`.
+        """
+        if orientation is None:
+            if self.orientation != 2:
+                orientation = self.orientation
+
+        if not isinstance(size, (tuple, list)):
+            size = [size, size]
+
+            if orientation is not None:
+                orientation = self.field.geometry.parse_axis(orientation)
+                size[1 - orientation] = None
+
+        if not isinstance(overlap, (tuple, list)):
+            overlap = [overlap, overlap]
+        return RegularGridChunksIterator(grid=self, size=size, overlap=overlap)
+
 
 class RegularGrid(BaseGrid):
     """ Regular grid over the selected `ranges` of cube, covering it with overlapping locations.
@@ -1017,7 +1048,7 @@ class RegularGrid(BaseGrid):
     overlap : sequence, optional
         Overlaps between consecutive crops. Only one of `strides`, `overlap` or `overlap_factor` should be specified.
     overlap_factor : sequence, optional
-        Ratio of overlap between cosecutive crops.
+        Ratio of overlap between consecutive crops.
         Only one of `strides`, `overlap` or `overlap_factor` should be specified.
     batch_size : int
         Number of batches to generate on demand.
@@ -1116,25 +1147,6 @@ class RegularGrid(BaseGrid):
         buffer[:, [6, 7, 8]] += self.crop_shape
         self.locations = buffer
 
-
-    def to_chunks(self, size, overlap=0.05):
-        """ Split the current grid into chunks along `orientation` axis.
-
-        Parameters
-        ----------
-        size : int
-            Length of one chunk along the splitting axis.
-        overlap : number
-            If integer, then number of slices for overlapping between consecutive chunks.
-            If float, then proportion of `size` to overlap between consecutive chunks.
-
-        Returns
-        -------
-        iterator with instances of `RegularGrid`.
-        """
-        return RegularGridChunksIterator(grid=self, size=size, overlap=overlap)
-
-
     def __repr__(self):
         return f'<RegularGrid for {self.field.short_name}: '\
                f'origin={tuple(self.origin)}, endpoint={tuple(self.endpoint)}, crop_shape={tuple(self.crop_shape)}, '\
@@ -1147,42 +1159,74 @@ class RegularGridChunksIterator:
 
     Parameters
     ----------
-    grid : RegularGrid
-        Regular grid to split into chunks.
-    size : int
-        Length of one chunk along the splitting axis.
+    grid : BaseGrid
+        Grid to split into chunks.
+    size : int or None or tuple of two ints or Nones
+        Length of chunks along corresponding axes. `None` indicates that there is no chunking along the axis.
     overlap : number
         If integer, then number of slices for overlapping between consecutive chunks.
         If float, then proportion of `size` to overlap between consecutive chunks.
     """
     def __init__(self, grid, size, overlap):
         self.grid = grid
-        self.size = size
-        self.overlap = overlap
 
-        self.step = int(size * (1 - overlap)) if isinstance(overlap, (float, np.float)) else size - overlap
+        size_i, size_x = size
+        overlap_i, overlap_x = overlap
+
+        if size_i is not None:
+            step_i = int(size_i * (1 - overlap_i)) if isinstance(overlap_i, (float, np.float)) else size_i - overlap_i
+        else:
+            step_i = size_i = self.grid.shape[0]
+
+        if size_x is not None:
+            step_x = int(size_x * (1 - overlap_x)) if isinstance(overlap_x, (float, np.float)) else size_x - overlap_x
+        else:
+            step_x = size_x = self.grid.shape[1]
+
+        self.size_i, self.size_x = size_i, size_x
+        self.step_i, self.step_x = step_i, step_x
+
+        self._iterator = None
+
+    @property
+    def iterator(self):
+        """ Cached sequence of chunks. """
+        # pylint: disable=protected-access
+        if self._iterator is None:
+            iterator = []
+            grid = self.grid
+
+            grid_i = RegularGrid._arange(*grid.ranges[0], self.step_i, max(0, grid.endpoint[0] - self.size_i))
+            grid_x = RegularGrid._arange(*grid.ranges[1], self.step_x, max(0, grid.endpoint[1] - self.size_x))
+
+            for start_i in grid_i:
+                stop_i = start_i + self.size_i
+                for start_x in grid_x:
+                    stop_x = start_x + self.size_x
+
+                    chunk_origin = np.array([start_i, start_x, grid.origin[2]])
+                    chunk_endpoint = np.array([stop_i, stop_x, grid.endpoint[2]])
+
+                    # Filter points beyond chunk ranges along `orientation` axis
+                    mask = ((grid.locations[:, 3] >= start_i) &
+                            (grid.locations[:, 6] <= stop_i)  &
+                            (grid.locations[:, 4] >= start_x) &
+                            (grid.locations[:, 7] <= stop_x))
+                    chunk_locations = grid.locations[mask]
+
+                    if len(chunk_locations):
+                        chunk_grid = BaseGrid(field=grid.field, locations=chunk_locations,
+                                              origin=chunk_origin, endpoint=chunk_endpoint, batch_size=grid.batch_size)
+                        iterator.append(chunk_grid)
+            self._iterator = iterator
+        return self._iterator
 
     def __iter__(self):
-        grid = self.grid
-
-        for start in range(*grid.ranges[grid.orientation], self.step):
-            stop = min(start + self.size, grid.field.shape[grid.orientation])
-
-            chunk_ranges = grid.ranges.copy()
-            chunk_ranges[grid.orientation] = [start, stop]
-
-            # Filter points beyound chunk ranges along `orientation` axis
-            mask = ((grid.locations[:, 3 + grid.orientation] >= start) &
-                    (grid.locations[:, 6 + grid.orientation] <= stop))
-            chunk_locations = grid.locations[mask]
-
-            yield RegularGrid(locations=chunk_locations, ranges=chunk_ranges, strides=grid.strides,
-                              orientation=grid.orientation, threshold=grid.threshold, field=grid.field,
-                              crop_shape=grid.original_crop_shape, batch_size=grid.batch_size)
+        for chunk_grid in self.iterator:
+            yield chunk_grid
 
     def __len__(self):
-        return len(range(*self.grid.ranges[self.grid.orientation], self.step))
-
+        return len(self.iterator)
 
 
 class ExtensionGrid(BaseGrid):
@@ -1190,7 +1234,7 @@ class ExtensionGrid(BaseGrid):
 
     For each point on the boundary of a horizon, we test 4 possible directions and pick `top` best of them.
     Each location is created so that the original point is `stride` units away from the left/right edge of a crop.
-    Only the locaitons that would potentially add more than `threshold` pixels remain.
+    Only the locations that would potentially add more than `threshold` pixels remain.
 
     Refer to `_make_locations` method and comments for more info about inner workings.
 
@@ -1202,20 +1246,38 @@ class ExtensionGrid(BaseGrid):
         Shape of crop locations to generate. Note that both iline and crossline orientations are used.
     stride : int
         Overlap with already known horizon for each location.
-    top : int
-        Number of the best locations to keep for each point.
     threshold : int
-        Minimum amount of potentially added pixels for each locaiton.
+        Minimum amount of potentially added pixels for each location.
     randomize : bool
         Whether to randomize the loop for computing the potential of each location.
     batch_size : int
         Number of batches to generate on demand.
+    mode : {'best_for_each_independent', 'up', 'down', 'left', 'right',
+            'vertical', 'horizontal', 'best_for_all', 'best_for_each'}
+        Mode for directions of locations to generate.
+        If mode is 'up', 'down', 'left' or 'right', then use only that direction.
+        If 'vertical' ('horizontal'), then use up and down (right and left) directions.
+
+        If 'best_for_all',  then select one direction for all points, based on total potentially added points.
+
+        If 'best_for_each', then select direction for each point individually, based on total potentially added points.
+        The potential of locations is computed sequentially: if one of the previous locations already covers area,
+        it is considered to covered for all of the next potentials.
+
+        If 'best_for_each_independent', then select direction for each point individually, based on total potentially
+        added points. The potential of locations is computed independently of other locations.
+
+    top : int
+        Number of the best directions to keep for each point. Relevant only in `best_*` modes.
     """
-    def __init__(self, horizon, crop_shape, stride=16, batch_size=64, top=1, threshold=4, randomize=True):
+    def __init__(self, horizon, crop_shape, stride=16, batch_size=64,
+                 top=1, threshold=4, prior_threshold=8, randomize=True, mode='best_for_each'):
         self.top = top
         self.stride = stride
         self.threshold = threshold
+        self.prior_threshold = prior_threshold
         self.randomize = randomize
+        self.mode = mode
 
         self.horizon = horizon
         self.field = horizon.field
@@ -1223,6 +1285,19 @@ class ExtensionGrid(BaseGrid):
         self.label_name = horizon.short_name
 
         self.uncovered_before = None
+
+        allowed_directions = ['up', 'down', 'left', 'right']
+
+        if self.mode in ['best_for_all', 'best_for_each', 'best_for_each_independent']:
+            self.directions = allowed_directions
+        elif self.mode in allowed_directions:
+            self.directions = [self.mode]
+        elif self.mode == 'vertical':
+            self.directions = ['up', 'down']
+        elif self.mode == 'horizontal':
+            self.directions = ['left', 'right']
+        else:
+            raise ValueError('Provided wrong `mode` argument, for possible options look at the docstring.')
 
         super().__init__(crop_shape=crop_shape, batch_size=batch_size)
 
@@ -1251,7 +1326,7 @@ class ExtensionGrid(BaseGrid):
         border_points += (self.horizon.i_min, self.horizon.x_min)
         heights -= crop_shape[2] // 2
 
-        # Buffer for locations
+        # Buffer for locations (orientation, i_start, x_start, h_start, i_stop, x_stop, h_stop).
         buffer = np.empty((len(border_points), 7), dtype=np.int32)
         buffer[:, 0] = 0
         buffer[:, [1, 2]] = border_points
@@ -1260,57 +1335,104 @@ class ExtensionGrid(BaseGrid):
         buffer[:, 6] = heights
 
         # Repeat the same data along new 0-th axis: shift origins/endpoints
-        buffer = np.repeat(buffer[np.newaxis, ...], 4, axis=0)
+        n_directions = len(self.directions)
+        buffer = np.repeat(buffer[np.newaxis, ...], n_directions, axis=0)
+        directions_iterator = 0
 
-        # Crops with fixed INLINE, moving CROSSLINE: [-stride:-stride + shape]
-        buffer[0, :, [2, 5]] -= self.stride
-        np.clip(buffer[0, :, 2], 0, self.field.shape[1], out=buffer[0, :, 2])
-        np.clip(buffer[0, :, 5], 0, self.field.shape[1], out=buffer[0, :, 5])
-        buffer[0, :, [4, 5, 6]] += crop_shape.reshape(-1, 1)
+        if 'up' in self.directions:
+            # Crops with fixed INLINE, moving CROSSLINE: [-stride:-stride + shape]
+            buffer[directions_iterator, :, [2, 5]] -= self.stride
 
-        # Crops with fixed INLINE, moving CROSSLINE: [-shape + stride:+stride]
-        buffer[1, :, [2, 5]] -= (crop_shape[1] - self.stride)
-        np.clip(buffer[1, :, 2], 0, self.field.shape[1] - crop_shape[1], out=buffer[1, :, 2])
-        np.clip(buffer[1, :, 5], 0, self.field.shape[1] - crop_shape[1], out=buffer[1, :, 5])
-        buffer[1, :, [4, 5, 6]] += crop_shape.reshape(-1, 1)
+            np.clip(buffer[directions_iterator, :, 2], 0, self.field.shape[1],
+                    out=buffer[directions_iterator, :, 2])
+            np.clip(buffer[directions_iterator, :, 5], 0, self.field.shape[1],
+                    out=buffer[directions_iterator, :, 5])
 
-        # Crops with fixed CROSSLINE, moving INLINE: [-stride:-stride + shape]
-        buffer[2, :, [1, 4]] -= self.stride
-        np.clip(buffer[2, :, 1], 0, self.field.shape[0], out=buffer[2, :, 1])
-        np.clip(buffer[2, :, 4], 0, self.field.shape[0], out=buffer[2, :, 4])
-        buffer[2, :,  [4, 5, 6]] += crop_shape_t.reshape(-1, 1)
-        buffer[2, :, 0] = 1
+            buffer[directions_iterator, :, [4, 5, 6]] += crop_shape.reshape(-1, 1)
+            directions_iterator += 1
 
-        # Crops with fixed CROSSLINE, moving INLINE: [-shape + stride:+stride]
-        buffer[3, :, [1, 4]] -= (crop_shape[1] - self.stride)
-        np.clip(buffer[3, :, 1], 0, self.field.shape[0] - crop_shape[1], out=buffer[3, :, 1])
-        np.clip(buffer[3, :, 4], 0, self.field.shape[0] - crop_shape[1], out=buffer[3, :, 4])
-        buffer[3, :,  [4, 5, 6]] += crop_shape_t.reshape(-1, 1)
-        buffer[3, :, 0] = 1
+        if 'down' in self.directions:
+            # Crops with fixed INLINE, moving CROSSLINE: [-shape + stride:+stride]
+            buffer[directions_iterator, :, [2, 5]] -= (crop_shape[1] - self.stride)
 
-        if self.randomize:
-            buffer = buffer[np.random.permutation(4)]
+            np.clip(buffer[directions_iterator, :, 2], 0, self.field.shape[1] - crop_shape[1],
+                    out=buffer[directions_iterator, :, 2])
+            np.clip(buffer[directions_iterator, :, 5], 0, self.field.shape[1] - crop_shape[1],
+                    out=buffer[directions_iterator, :, 5])
+
+            buffer[directions_iterator, :, [4, 5, 6]] += crop_shape.reshape(-1, 1)
+            directions_iterator += 1
+
+        if 'left' in self.directions:
+            # Crops with fixed CROSSLINE, moving INLINE: [-stride:-stride + shape]
+            buffer[directions_iterator, :, [1, 4]] -= self.stride
+
+            np.clip(buffer[directions_iterator, :, 1], 0, self.field.shape[0],
+                    out=buffer[directions_iterator, :, 1])
+            np.clip(buffer[directions_iterator, :, 4], 0, self.field.shape[0],
+                    out=buffer[directions_iterator, :, 4])
+
+            buffer[directions_iterator, :,  [4, 5, 6]] += crop_shape_t.reshape(-1, 1)
+            buffer[directions_iterator, :, 0] = 1
+            directions_iterator += 1
+
+        if 'right' in self.directions:
+            # Crops with fixed CROSSLINE, moving INLINE: [-shape + stride:+stride]
+            buffer[directions_iterator, :, [1, 4]] -= (crop_shape[1] - self.stride)
+
+            np.clip(buffer[directions_iterator, :, 1], 0, self.field.shape[0] - crop_shape[1],
+                    out=buffer[directions_iterator, :, 1])
+            np.clip(buffer[directions_iterator, :, 4], 0, self.field.shape[0] - crop_shape[1],
+                    out=buffer[directions_iterator, :, 4])
+
+            buffer[directions_iterator, :,  [4, 5, 6]] += crop_shape_t.reshape(-1, 1)
+            buffer[directions_iterator, :, 0] = 1
+            directions_iterator += 1
+
+        update_coverage_matrix = self.mode not in ['best_for_all', 'best_for_each_independent']
+        if self.randomize and update_coverage_matrix:
+            buffer = buffer[np.random.permutation(n_directions)]
+
         # Array with locations for each of the directions
         # Each 4 consecutive rows are location variants for each point on the boundary
         buffer = buffer.transpose((1, 0, 2)).reshape(-1, 7)
+        self.n_possible_locations = buffer.shape[0]
 
         # Compute potential addition for each location
-        potential = compute_potential(buffer, coverage_matrix, crop_shape)
-        self.uncovered_best = coverage_matrix.size - coverage_matrix.sum()
+        # for 'best_for_all' and 'best_for_each_independent' modes potential calculated independently
+        potential = compute_potential(locations=buffer, coverage_matrix=coverage_matrix,
+                                      shape=crop_shape, stride=self.stride, prior_threshold=self.prior_threshold,
+                                      update_coverage_matrix=update_coverage_matrix)
 
-        # Get argsort for each group of four
-        argsort = potential.reshape(-1, 4).argsort(axis=-1)[:, -self.top:].reshape(-1)
+        if self.mode in ['best_for_each', 'best_for_each_independent']:
+            # For each trace get the most potential direction index
+            # Get argsort for each group of four
+            argsort = potential.reshape(-1, n_directions).argsort(axis=-1)[:, -self.top:].reshape(-1)
 
-        # Shift argsorts to original indices
-        shifts = np.repeat(np.arange(0, len(buffer), 4, dtype=np.int32), self.top)
-        indices = argsort + shifts
+            # Shift argsorts to original indices
+            shifts = np.repeat(np.arange(0, len(buffer), n_directions, dtype=np.int32), self.top)
+            indices = argsort + shifts
 
-        # Keep only top locations; remove too locations with small potential
+        elif self.mode == 'best_for_all':
+            # Get indices of locations corresponding to the best direction
+            # The best direction is a direction ('left', 'right', 'up' or 'down') with maximal potentially added traces
+            positive_potential = potential.copy()
+            positive_potential[positive_potential < 0] = 0
+
+            best_direction_idx = np.argmax(positive_potential.reshape(-1, n_directions).sum(axis=0))
+            indices = range(best_direction_idx, len(buffer), n_directions)
+
+        else:
+            indices = slice(None)
+
+        # Keep only top locations; remove locations with too small potential if needed
         potential = potential[indices]
         buffer = buffer[indices, :]
+        self.n_top_locations = buffer.shape[0]
 
         mask = potential > self.threshold
         buffer = buffer[mask]
+        self.n_selected_locations = buffer.shape[0]
 
         # Correct the height
         np.clip(buffer[:, 3], 0, self.field.depth - crop_shape[2], out=buffer[:, 3])
@@ -1320,6 +1442,12 @@ class ExtensionGrid(BaseGrid):
         locations[:, [0, 1]] = -1
         locations[:, 2:9] = buffer
         self.locations = locations
+
+        if update_coverage_matrix:
+            self.uncovered_best = coverage_matrix.size - coverage_matrix.sum()
+        else:
+            # In the 'best_for_all' and 'best_for_each_independent' we don't update the `coverage_matrix``
+            self.uncovered_best = self.uncovered_after
 
 
     @property
@@ -1375,21 +1503,37 @@ class ExtensionGrid(BaseGrid):
             self.field.geometry.show(overlay, **kwargs)
 
 @njit
-def compute_potential(locations, coverage_matrix, shape):
+def compute_potential(locations, coverage_matrix, shape, stride, prior_threshold, update_coverage_matrix=True):
     """ For each location, compute the amount of points it would potentially add to the labeling.
     If the shape of a location is not the same, as requested at grid initialization, we place `-1` value instead:
-    that is filtered out later.
+    that is filtered out later. That is used to filter locations out of field bounds.
+
+    For each location, we also check whether one of its sides (left/right/up/down) contains more
+    than `prior_threshold` covered points.
     """
     area = shape[0] * shape[1]
     buffer = np.empty((len(locations)), dtype=np.int32)
 
-    for i, (_, i_start, x_start, _, i_stop, x_stop, _) in enumerate(locations):
-        sliced = coverage_matrix[i_start:i_stop, x_start:x_stop].ravel()
+    for i, (orientation, i_start, x_start, _, i_stop, x_stop, _) in enumerate(locations):
+        sliced = coverage_matrix[i_start:i_stop, x_start:x_stop]
 
-        if len(sliced) == area:
-            covered = sliced.sum()
-            buffer[i] = area - covered
-            coverage_matrix[i_start:i_stop, x_start:x_stop] = True
+        if sliced.size == area:
+
+            if orientation == 0:
+                left, right = sliced[:stride, :].sum(), sliced[:-stride, :].sum()
+                prior = max(left, right)
+            elif orientation == 1:
+                up, down = sliced[:, :stride].sum(), sliced[:, :-stride].sum()
+                prior = max(up, down)
+
+            if prior >= prior_threshold:
+                covered = sliced.sum()
+                buffer[i] = area - covered
+
+                if update_coverage_matrix:
+                    coverage_matrix[i_start:i_stop, x_start:x_stop] = True
+            else:
+                buffer[i] = -1
         else:
             buffer[i] = -1
 

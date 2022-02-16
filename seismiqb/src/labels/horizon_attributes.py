@@ -182,7 +182,8 @@ class AttributesMixin:
     @property
     def coverage(self):
         """ Ratio between number of present values and number of good traces in cube. """
-        return len(self) / (np.prod(self.field.spatial_shape) - np.sum(self.field.zero_traces))
+        coverage = len(self) / (np.prod(self.field.spatial_shape) - np.sum(self.field.zero_traces))
+        return round(coverage, 5)
 
     @property
     def number_of_holes(self):
@@ -201,6 +202,10 @@ class AttributesMixin:
         """ Ratio of area covered by horizon to total area inside borders. """
         return len(self) / np.sum(self.filled_matrix)
 
+    @property
+    def h_ptp(self):
+        """ Horizon spread across the depth. """
+        return self.h_max - self.h_min
 
     # Matrices computed from depth map
     @property
@@ -279,7 +284,7 @@ class AttributesMixin:
         chunk_size : int
             Size of data along height axis processed at a time.
         """
-        low = window // 2
+        low = window // 2 - offset
         high = max(window - low, 0)
         chunk_size = min(chunk_size, self.h_max - self.h_min + window)
 
@@ -302,7 +307,7 @@ class AttributesMixin:
             # Convert spatial coordinates to cubic, convert height to current chunk local system
             idx_i += self.i_min
             idx_x += self.x_min
-            heights -= (h_start - offset)
+            heights -= h_start
 
             # Subsequently add values from the cube to background, then shift horizon 1 unit lower
             for j in range(window):

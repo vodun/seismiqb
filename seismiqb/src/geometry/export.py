@@ -2,7 +2,6 @@
 """ Methods to save data as seismic cubes in different formats. """
 import os
 import shutil
-from tqdm.auto import tqdm
 
 import numpy as np
 import h5pickle as h5py
@@ -80,7 +79,8 @@ class ExportMixin:
             file_name = os.path.basename(path_segy)
             shutil.make_archive(os.path.splitext(path_segy)[0], 'zip', dir_name, file_name)
 
-def make_segy_from_array(array, path_segy, zip_segy=True, remove_segy=None, path_spec=None, origin=(0, 0, 0), **kwargs):
+def make_segy_from_array(array, path_segy, zip_segy=True, remove_segy=None, path_spec=None,
+                         origin=(0, 0, 0), pbar=False, **kwargs):
     """ Make a segy-cube from an array. Zip it if needed. Segy-headers are filled by defaults/arguments from kwargs.
 
     Parameters
@@ -129,7 +129,7 @@ def make_segy_from_array(array, path_segy, zip_segy=True, remove_segy=None, path
 
         idx = np.stack(geometry.dataframe.index)
 
-        for c, (i, x) in tqdm(enumerate(idx)):
+        for c, (i, x) in Notifier(pbar)(enumerate(idx)):
             if ilines_offset <= i < ilines_offset + array.shape[0]:
                 if xlines_offset <= x < xlines_offset + array.shape[1]:
                     header = segy.header[c]
@@ -165,7 +165,7 @@ def make_segy_from_array(array, path_segy, zip_segy=True, remove_segy=None, path
             dst_file.text[i] = segyio.tools.create_text_header({1: '...'}) # add header-fetching from kwargs
 
         # Loop over the array and put all the data into new segy-cube
-        for i in tqdm(range(array.shape[0])):
+        for i in Notifier(pbar)(range(array.shape[0])):
             for x in range(array.shape[1]):
                 # create header in here
                 header = dst_file.header[i * array.shape[1] + x]
