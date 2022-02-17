@@ -15,6 +15,7 @@ Each of the classes provides:
     - convenient visualization to explore underlying `locations` structure
 """
 from itertools import product
+from typing import OrderedDict
 
 import numpy as np
 from numba import njit
@@ -1271,7 +1272,8 @@ class ExtensionGrid(BaseGrid):
         Number of the best directions to keep for each point. Relevant only in `best_*` modes.
     """
     def __init__(self, horizon, crop_shape, stride=16, batch_size=64,
-                 top=1, threshold=4, prior_threshold=8, randomize=True, mode='best_for_each'):
+                 top=1, threshold=4, prior_threshold=8, randomize=True, mode='best_for_each',
+                 locations_potential=None):
         self.top = top
         self.stride = stride
         self.threshold = threshold
@@ -1298,6 +1300,8 @@ class ExtensionGrid(BaseGrid):
             self.directions = ['left', 'right']
         else:
             raise ValueError('Provided wrong `mode` argument, for possible options look at the docstring.')
+
+        self.locations_potential = locations_potential or {}
 
         super().__init__(crop_shape=crop_shape, batch_size=batch_size)
 
@@ -1432,7 +1436,22 @@ class ExtensionGrid(BaseGrid):
 
         mask = potential > self.threshold
         buffer = buffer[mask]
+        potential = potential[mask]
         self.n_selected_locations = buffer.shape[0]
+
+        # Remove locations that were tried on the previous step
+        current_locations_potential = OrderedDict({str(loc): pot for loc, pot in zip(buffer, potential)})
+        mask = np.array([True]*len(current_locations_potential))
+
+        for idx, loc in enumerate(current_locations_potential):
+            if self.locations_potential.get(loc, None) == current_locations_potential[loc]:
+                # This location was chosen in the previous step
+                mask[idx] = False
+            else:
+                self.locations_potential[loc] = current_locations_potential[loc]
+
+        buffer = buffer[mask]
+        self.n_filtered_locations = buffer.shape[0]
 
         # Correct the height
         np.clip(buffer[:, 3], 0, self.field.depth - crop_shape[2], out=buffer[:, 3])
