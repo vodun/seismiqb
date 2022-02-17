@@ -15,7 +15,7 @@ Each of the classes provides:
     - convenient visualization to explore underlying `locations` structure
 """
 from itertools import product
-from typing import OrderedDict
+from collections import OrderedDict
 
 import numpy as np
 from numba import njit
@@ -1432,6 +1432,9 @@ class ExtensionGrid(BaseGrid):
         # Keep only top locations; remove locations with too small potential if needed
         potential = potential[indices]
         buffer = buffer[indices, :]
+        # Drop locations duplicates
+        buffer, unique_locations_indices = np.unique(buffer, axis=0, return_index=True)
+        potential = potential[unique_locations_indices]
         self.n_top_locations = buffer.shape[0]
 
         mask = potential > self.threshold
