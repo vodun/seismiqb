@@ -1301,7 +1301,7 @@ class ExtensionGrid(BaseGrid):
         else:
             raise ValueError('Provided wrong `mode` argument, for possible options look at the docstring.')
 
-        self.locations_potential = locations_potential or {}
+        self.locations_potential = locations_potential or set()
 
         super().__init__(crop_shape=crop_shape, batch_size=batch_size)
 
@@ -1443,17 +1443,16 @@ class ExtensionGrid(BaseGrid):
         self.n_selected_locations = buffer.shape[0]
 
         # Remove locations that were tried on the previous step
-        current_locations_potential = OrderedDict({str(loc): pot for loc, pot in zip(buffer, potential)})
-        mask = np.array([True]*len(current_locations_potential))
+        current_locations_potential = np.hstack([buffer, potential.reshape(-1, 1)])
+        current_locations_potential = set([tuple(arr) for arr in current_locations_potential])
 
-        for idx, loc in enumerate(current_locations_potential):
-            if self.locations_potential.get(loc, None) == current_locations_potential[loc]:
-                # This location was chosen in the previous step
-                mask[idx] = False
-            else:
-                self.locations_potential[loc] = current_locations_potential[loc]
+        current_locations_potential -= current_locations_potential.intersection(self.locations_potential)
+        self.locations_potential = self.locations_potential.union(current_locations_potential)
+        if current_locations_potential:
+            buffer = np.array(list(current_locations_potential))[:, :-1]
+        else:
+            buffer = np.empty(shape=(0, 7))
 
-        buffer = buffer[mask]
         self.n_filtered_locations = buffer.shape[0]
 
         # Correct the height
