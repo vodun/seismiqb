@@ -214,8 +214,8 @@ def run_notebook(path, inputs=None, outputs=None, inputs_pos=1, out_path_db=None
         if out_path_db and not failed:
             db_paths = glob(out_path_db + '*')
 
-            for path in db_paths:
-                os.remove(path)
+            for path_ in db_paths:
+                os.remove(path_)
 
         if return_notebook:
             exec_res['notebook'] = notebook
@@ -241,7 +241,7 @@ def notebook_to_html(notebook, out_path_html, display_link):
     html_exporter = HTMLExporter()
     body, _ = html_exporter.from_notebook_node(notebook)
 
-    with open(out_path_html, 'w') as f:
+    with open(out_path_html, 'w', encoding='utf-8') as f:
         f.write(body)
 
     if display_link:
