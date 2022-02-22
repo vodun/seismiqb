@@ -231,8 +231,28 @@ class SeismicGeometry(CacheMixin, ExportMixin):
         self.path_meta = path_meta or os.path.splitext(self.path)[0] + '.meta'
         self.loaded = []
         self.has_stats = False
+
+        self._process = process
+        self._init_kwargs = kwargs
         if process:
             self.process(**kwargs)
+
+
+    def __getstate__(self):
+        self.reset_cache()
+        state = self.__dict__.copy()
+        for name in ['file', 'axis_to_cube', 'cube_i', 'cube_x', 'cube_h']:
+            if name in state:
+                state.pop(name)
+        return state
+
+    def __setstate__(self, state):
+        for key, value in state.items():
+            setattr(self, key, value)
+
+        if self._process:
+            self.process(**self._init_kwargs)
+
 
 
     def extract_field_name(self):

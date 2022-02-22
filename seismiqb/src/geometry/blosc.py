@@ -141,7 +141,8 @@ class BloscFile:
         """ Close the underlying `ZipFile`.
         Unlike most other file formats in Python, actually needed: without that, file becomes corrupted.
         """
-        self.zipfile.close()
+        if hasattr(self, 'zipfile'):
+            self.zipfile.close()
 
     def __enter__(self):
         return self
@@ -207,9 +208,9 @@ class BloscDataset:
         return [item for item in namelist if item.startswith(self.key)]
 
     # Utility
-    def __getattr__(self, name):
+    def __getattr__(self, key):
         """ Re-direct everything to the parent. """
-        return getattr(self.parent, name)
+        return getattr(self.parent, key)
 
     def __repr__(self):
         return f'<BLOSC dataset "{self.key}": shape {tuple(self.shape)}, type {self.dtype}>'
