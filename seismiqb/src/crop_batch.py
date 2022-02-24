@@ -16,7 +16,7 @@ from ..batchflow import DatasetIndex, Batch, action, inbatch_parallel, SkipBatch
 from .labels import Horizon
 from .plotters import plot_image
 from .synthetic.generator import generate_synthetic
-from .utils import compute_attribute, to_list, AugmentedDict
+from .utils import compute_attribute, to_list, AugmentedDict, groupby_max, groupby_min
 
 
 AFFIX = '___'
@@ -547,9 +547,9 @@ class SeismicCropBatch(Batch):
 
     @action
     @inbatch_parallel(init='indices', post='_post_mask_rebatch', target='for',
-                      src='masks', depths_threshold=1, threshold=0)
-    def throw_out_discontinuities(self, ix, src='masks', depths_threshold=1):
-        """ Throw out out horizon masks with discontinuities.
+                      src='masks', depths_threshold=2, threshold=0)
+    def remove_discontinuities(self, ix, src='masks', depths_threshold=2):
+        """ Remove horizon masks with discontinuities.
 
         Parameters
         ----------
@@ -557,32 +557,24 @@ class SeismicCropBatch(Batch):
             Maximum depth difference on neighboring traces for horizons masks to be kept in the batch.
         """
         mask = self.get(ix, src)
-        # Get mask and shifted mask for neighboring traces comparison
-        cutted_mask = mask[:, :-1]
-        shifted_mask = mask[:, 1:]
 
-        # Get horizons coordinates on the mask
-        _, x_lines_1, depths_1 = np.where(cutted_mask > 0)
-        _, x_lines_2, depths_2 = np.where(shifted_mask > 0)
+        horizon_coords = np.array(np.where(mask > 0)).T
 
-        for x in np.unique(x_lines_1):
-            if x in x_lines_2:
-                # For each x_line check discontinuities: get depths diffs and compare with the `depths_threshold`
-                mask_1 = x_lines_1 == x
-                mask_2 = x_lines_2 == x
+        groupby_min_depths = groupby_min(horizon_coords)
+        groupby_max_depths = groupby_max(horizon_coords)
 
-                # Lower horizon depths diff
-                min_depth_1 = depths_1[mask_1].min()
-                min_depth_2 = depths_2[mask_2].min()
-                diff_min = np.abs(min_depth_2 - min_depth_1)
+        cond = groupby_min_depths[:-1, 1] == groupby_min_depths[1:, 1] - 1 # get only subsequent traces
 
-                # Higher horizon depths diff
-                max_depth_1 = depths_1[mask_1].max()
-                max_depth_2 = depths_2[mask_2].max()
-                diff_max = np.abs(max_depth_2 - max_depth_1)
+        mins = groupby_min_depths[:-1, -1][cond]
+        mins_next = groupby_min_depths[1:, -1][cond]
+        upper_ = np.max(np.array([mins, mins_next]), axis=0)
 
-                if max(diff_min, diff_max) > depths_threshold:
-                    return 0
+        maxs = groupby_max_depths[:-1, -1][cond]
+        maxs_next = groupby_max_depths[1:, -1][cond]
+        lower_ = np.min(np.array([maxs, maxs_next]), axis=0)
+
+        if max(upper_ - lower_) > depths_threshold:
+            return 0
 
         return round(mask.sum())
 
