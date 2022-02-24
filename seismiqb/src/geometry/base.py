@@ -372,44 +372,31 @@ class SeismicGeometry(CacheMixin, ExportMixin):
             crop = np.squeeze(crop, axis=tuple(squeeze))
         return crop
 
-    def normalize(self, array, mode=None):
-        """ Normalize array of values cut from the cube.
-        Constants are computed from the entire volume.
-        Constants for normalization are automatically chosen depending on the quantization of the cube.
-
-        Parameters
-        ----------
-        array : ndarray
-            Crop of amplitudes.
-        mode : str
-            If `std`, then data is divided by standard deviation.
-            If `meanstd`, then data is centered and divided by standard deviation.
-            If `minmax`, then data is scaled to [0, 1] via minmax scaling.
-            If `q` or `normalize`, then data is divided by the
-            maximum of absolute values of the 0.01 and 0.99 quantiles.
-            If `q_clip`, then data is clipped to 0.01 and 0.99 quantiles and then divided
-            by the maximum of absolute values of the two.
-        """
-        if mode is None or mode == 'auto':
-            mode = 'std' if self.quantized else 'q'
-
-        if mode == 'std':
-            return array / (self.qnt_std if self.quantized else self.v_std)
-        if mode == 'meanstd':
-            array -= self.qnt_mean if self.quantized else self.v_mean
-            return array / (self.qnt_std if self.quantized else self.v_std)
-
-        if mode == 'q':
-            return array / max(abs(self.v_q01), abs(self.v_q99))
-        if mode == 'q_clip':
-            array = np.clip(array, self.v_q01, self.v_q99)
-            return array / max(abs(self.v_q01), abs(self.v_q99))
-
-        if mode == 'minmax':
-            min_ = self.qnt_min if self.quantized else self.v_min
-            max_ = self.qnt_max if self.quantized else self.v_max
-            return (array - min_) / (max_ - min_)
-        raise ValueError('Wrong mode', mode)
+    @property
+    def normalization_stats(self):
+        """ !!. """
+        if self.quantized:
+            return {
+                'mean': self.qnt_mean,
+                'std': self.qnt_std,
+                'min': self.qnt_min,
+                'max': self.qnt_max,
+                'q_01': self.qnt_q01,
+                'q_05': self.qnt_q05,
+                'q_95': self.qnt_q95,
+                'q_99': self.qnt_q99,
+            }
+        # Not quantized values
+        return {
+            'mean': self.v_mean,
+            'std': self.v_std,
+            'min': self.v_min,
+            'max': self.v_max,
+            'q_01': self.v_q01,
+            'q_05': self.v_q05,
+            'q_95': self.v_q95,
+            'q_99': self.v_q99,
+        }
 
     # Coordinates transforms
     def lines_to_cubic(self, array):
