@@ -106,6 +106,7 @@ class CharismaMixin:
             If callable, then applied to points after converting to ilines/xlines coordinate system.
         """
         path = self.field_reference.make_path(path, name=name)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
 
         if format != 'points':
             # Convert data to points array

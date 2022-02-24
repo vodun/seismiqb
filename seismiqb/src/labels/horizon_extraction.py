@@ -566,7 +566,7 @@ class ExtractionMixin:
             overlap_min_i = np.maximum(bboxes[:, 0], base_bbox[0])
             overlap_max_i = np.minimum(bboxes[:, 1], base_bbox[1]) + 1
             overlap_size_i = overlap_max_i - overlap_min_i
-            mask_i = (overlap_size_i >= 1 - adjacency)
+            mask_i = (overlap_size_i >= 1 - adjacency_i)
             indices_i = np.nonzero(mask_i)[0]
             bboxes_i = bboxes[indices_i]
 
@@ -574,7 +574,7 @@ class ExtractionMixin:
             overlap_min_x = np.maximum(bboxes_i[:, 2], base_bbox[2])
             overlap_max_x = np.minimum(bboxes_i[:, 3], base_bbox[3]) + 1
             overlap_size_x = overlap_max_x - overlap_min_x
-            mask_x = (overlap_size_x >= 1 - adjacency)
+            mask_x = (overlap_size_x >= 1 - adjacency_x)
             indices_x = np.nonzero(mask_x)[0]
             bboxes_x = bboxes_i[indices_x]
 
@@ -639,7 +639,7 @@ class ExtractionMixin:
             merge_stats['iteration_timings'].append(round(perf_counter() - start_timing, 2))
 
             # Exit condition: merged less horizons then threshold
-            if num_merged < num_merged_threshold:
+            if num_merged < num_merged_threshold or len(horizons) == 0:
                 break
 
         return self, horizons, MetaDict(merge_stats)
@@ -971,37 +971,6 @@ class ExtractionMixin:
         # Chunks are too small even for the `num_workers=min_workers`
         return False, None
 
-
-    @classmethod
-    def average_horizons(cls, horizons):
-        """ Average list of horizons into one surface.
-        Returns the matrix of averaged horizon, as well as std of provided horizons:
-        the latter can be used as a quality metric.
-        """
-        field = horizons[0].field
-        horizon_matrix = np.zeros(field.spatial_shape, dtype=np.float32)
-        std_matrix = np.zeros(field.spatial_shape, dtype=np.float32)
-        counts_matrix = np.zeros(field.spatial_shape, dtype=np.int32)
-
-        for horizon in horizons:
-            fm = horizon.full_matrix
-            horizon_matrix[fm != cls.FILL_VALUE] += fm[fm != cls.FILL_VALUE]
-            std_matrix[fm != cls.FILL_VALUE] += fm[fm != cls.FILL_VALUE] ** 2
-            counts_matrix[fm != cls.FILL_VALUE] += 1
-
-        horizon_matrix[counts_matrix != 0] /= counts_matrix[counts_matrix != 0]
-        horizon_matrix[counts_matrix == 0] = cls.FILL_VALUE
-
-        std_matrix[counts_matrix != 0] /= counts_matrix[counts_matrix != 0]
-        std_matrix -= horizon_matrix ** 2
-        std_matrix = np.sqrt(std_matrix)
-        std_matrix[counts_matrix == 0] = np.nan
-
-        averaged_horizon = cls(horizon_matrix.astype(np.int32), field=field)
-        return averaged_horizon, {
-            'matrix': horizon_matrix,
-            'std_matrix': std_matrix,
-        }
 
 
 
