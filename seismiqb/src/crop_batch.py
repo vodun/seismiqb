@@ -308,7 +308,9 @@ class SeismicCropBatch(Batch):
         field = self.get(ix, 'fields')
 
         # Prepare normalization stats
-        if normalization_stats is None:
+        if isinstance(normalization_stats, dict):
+            normalization_stats = normalization_stats[field.short_name]
+        else:
             if from_field:
                 normalization_stats = field.normalization_stats
             else:

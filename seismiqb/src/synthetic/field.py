@@ -137,6 +137,8 @@ class SyntheticField:
         elif 'horizon' in attribute:
             result = generator.fetch_horizons(mode='horizons', horizon_format='mask',
                                               width=kwargs.get('width', 3))
+        elif 'impedance' in attribute:
+            result = generator.velocity_model
         else:
             result = getattr(generator, attribute)
 
