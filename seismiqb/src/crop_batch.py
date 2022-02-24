@@ -562,7 +562,7 @@ class SeismicCropBatch(Batch):
     @inbatch_parallel(init='indices', post='_post_mask_rebatch', target='for',
                       src='masks', depths_threshold=2, threshold=0)
     def remove_discontinuities(self, ix, src='masks', depths_threshold=2):
-        """ Remove horizon masks with discontinuities.
+        """ Remove horizon masks with depth-wise discontinuities on neighboring traces.
 
         Parameters
         ----------
