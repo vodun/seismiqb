@@ -261,17 +261,18 @@ class BaseMetrics:
 
             valid_traces = xp.where(bad_traces_ == 0)
 
-            if self.horizon.is_carcass:
-                carcass_ilines = self.horizon.carcass_ilines
-                carcass_xlines = self.horizon.carcass_xlines
+            if hasattr(self, 'horizon'):
+                if self.horizon.is_carcass:
+                    carcass_ilines = self.horizon.carcass_ilines
+                    carcass_xlines = self.horizon.carcass_xlines
 
-                if xp == cp:
-                    carcass_ilines = to_device(carcass_ilines, device)
-                    carcass_xlines = to_device(carcass_xlines, device)
+                    if xp == cp:
+                        carcass_ilines = to_device(carcass_ilines, device)
+                        carcass_xlines = to_device(carcass_xlines, device)
 
-                mask_i = xp.in1d(valid_traces[0], carcass_ilines)
-                mask_x = xp.in1d(valid_traces[1], carcass_xlines)
-                mask = mask_i & mask_x
+                    mask_i = xp.in1d(valid_traces[0], carcass_ilines)
+                    mask_x = xp.in1d(valid_traces[1], carcass_xlines)
+                    mask = mask_i & mask_x
 
                 valid_traces = (valid_traces[0][mask], valid_traces[1][mask])
 
