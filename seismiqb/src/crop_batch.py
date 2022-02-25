@@ -571,7 +571,7 @@ class SeismicCropBatch(Batch):
         """
         mask = self.get(ix, src)
 
-        horizon_coords = np.array(np.where(mask > 0)).T
+        horizon_coords = np.array(np.nonzero(mask)).T
 
         groupby_min_depths = groupby_min(horizon_coords)
         groupby_max_depths = groupby_max(horizon_coords)
