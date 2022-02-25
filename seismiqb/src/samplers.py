@@ -1577,7 +1577,7 @@ class LocationsPotentialContainer:
         new_locations = grid_locations[~repeated_locations_potential]
         new_potential = grid.potential.reshape(-1, 1)[~repeated_locations_potential]
 
-        print("Repeated locations amount: ", len(grid_locations) - len(new_locations))
+        print(f"Repeated locations amount: {len(grid_locations) - len(new_locations)}")
 
         # Update container: save new potentials for old locations and save new locations with their potential
         if len(new_locations) > 0:
