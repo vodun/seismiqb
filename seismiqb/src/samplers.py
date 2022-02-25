@@ -1272,8 +1272,7 @@ class ExtensionGrid(BaseGrid):
         Number of the best directions to keep for each point. Relevant only in `best_*` modes.
     """
     def __init__(self, horizon, crop_shape, stride=16, batch_size=64,
-                 top=1, threshold=4, prior_threshold=8, randomize=True, mode='best_for_each',
-                 locations_potential=None):
+                 top=1, threshold=4, prior_threshold=8, randomize=True, mode='best_for_each'):
         self.top = top
         self.stride = stride
         self.threshold = threshold
@@ -1300,8 +1299,6 @@ class ExtensionGrid(BaseGrid):
             self.directions = ['left', 'right']
         else:
             raise ValueError('Provided wrong `mode` argument, for possible options look at the docstring.')
-
-        self.locations_potential = locations_potential or set()
 
         super().__init__(crop_shape=crop_shape, batch_size=batch_size)
 
@@ -1432,28 +1429,17 @@ class ExtensionGrid(BaseGrid):
         # Keep only top locations; remove locations with too small potential if needed
         potential = potential[indices]
         buffer = buffer[indices, :]
+
         # Drop locations duplicates
         buffer, unique_locations_indices = np.unique(buffer, axis=0, return_index=True)
         potential = potential[unique_locations_indices]
+
         self.n_top_locations = buffer.shape[0]
 
         mask = potential > self.threshold
         buffer = buffer[mask]
         potential = potential[mask]
         self.n_selected_locations = buffer.shape[0]
-
-        # Remove locations that were tried on the previous step
-        current_locations_potential = np.hstack([buffer, potential.reshape(-1, 1)])
-        current_locations_potential = set([tuple(arr) for arr in current_locations_potential])
-
-        current_locations_potential -= current_locations_potential.intersection(self.locations_potential)
-        self.locations_potential = self.locations_potential.union(current_locations_potential)
-        if current_locations_potential:
-            buffer = np.array(list(current_locations_potential))[:, :-1]
-        else:
-            buffer = np.empty(shape=(0, 7))
-
-        self.n_filtered_locations = buffer.shape[0]
 
         # Correct the height
         np.clip(buffer[:, 3], 0, self.field.depth - crop_shape[2], out=buffer[:, 3])
@@ -1463,6 +1449,7 @@ class ExtensionGrid(BaseGrid):
         locations[:, [0, 1]] = -1
         locations[:, 2:9] = buffer
         self.locations = locations
+        self.potential = potential
 
         if update_coverage_matrix:
             self.uncovered_best = coverage_matrix.size - coverage_matrix.sum()
