@@ -15,7 +15,6 @@ Each of the classes provides:
     - convenient visualization to explore underlying `locations` structure
 """
 from itertools import product
-from collections import OrderedDict
 
 import numpy as np
 from numba import njit
