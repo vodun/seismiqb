@@ -1286,6 +1286,7 @@ class ExtensionGrid(BaseGrid):
         self.label_name = horizon.short_name
 
         self.uncovered_before = None
+        self.locations_stats = {}
 
         allowed_directions = ['up', 'down', 'left', 'right']
 
@@ -1397,7 +1398,7 @@ class ExtensionGrid(BaseGrid):
         # Array with locations for each of the directions
         # Each 4 consecutive rows are location variants for each point on the boundary
         buffer = buffer.transpose((1, 0, 2)).reshape(-1, 7)
-        self.n_possible_locations = buffer.shape[0]
+        self.locations_stats['possible'] = buffer.shape[0]
 
         # Compute potential addition for each location
         # for 'best_for_all' and 'best_for_each_independent' modes potential calculated independently
@@ -1434,12 +1435,12 @@ class ExtensionGrid(BaseGrid):
         buffer, unique_locations_indices = np.unique(buffer, axis=0, return_index=True)
         potential = potential[unique_locations_indices]
 
-        self.n_top_locations = buffer.shape[0]
+        self.locations_stats['top_locations'] = buffer.shape[0]
 
         mask = potential > self.threshold
         buffer = buffer[mask]
         potential = potential[mask]
-        self.n_selected_locations = buffer.shape[0]
+        self.locations_stats['selected'] = buffer.shape[0]
 
         # Correct the height
         np.clip(buffer[:, 3], 0, self.field.depth - crop_shape[2], out=buffer[:, 3])
