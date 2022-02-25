@@ -16,7 +16,8 @@ from ..batchflow import DatasetIndex, Batch, action, inbatch_parallel, SkipBatch
 from .labels import Horizon
 from .plotters import plot_image
 from .synthetic.generator import generate_synthetic
-from .utils import compute_attribute, to_list, AugmentedDict, DelegatingList, groupby_max, groupby_min
+from .utils import compute_attribute, to_list, AugmentedDict, DelegatingList
+from .labels.horizon_extraction import groupby_all
 
 
 AFFIX = '___'
@@ -571,19 +572,18 @@ class SeismicCropBatch(Batch):
         """
         mask = self.get(ix, src)
 
+        # Get horizon coordinates an depths aggregations by i_line and x_line
         horizon_coords = np.array(np.nonzero(mask)).T
+        groupby_all_depths = groupby_all(horizon_coords) # i_line, x_line, occurency, min_depth, max_depth, mean_depth
+        cond = groupby_all_depths[:-1, 1] == groupby_all_depths[1:, 1] - 1 # get only sequential traces
 
-        groupby_min_depths = groupby_min(horizon_coords)
-        groupby_max_depths = groupby_max(horizon_coords)
-
-        cond = groupby_min_depths[:-1, 1] == groupby_min_depths[1:, 1] - 1 # get only subsequent traces
-
-        mins = groupby_min_depths[:-1, -1][cond]
-        mins_next = groupby_min_depths[1:, -1][cond]
+        # Get horizon depths stats
+        mins = groupby_all_depths[:-1, 3][cond]
+        mins_next = groupby_all_depths[1:, 3][cond]
         upper_ = np.max(np.array([mins, mins_next]), axis=0)
 
-        maxs = groupby_max_depths[:-1, -1][cond]
-        maxs_next = groupby_max_depths[1:, -1][cond]
+        maxs = groupby_all_depths[:-1, 4][cond]
+        maxs_next = groupby_all_depths[1:, 4][cond]
         lower_ = np.min(np.array([maxs, maxs_next]), axis=0)
 
         if max(upper_ - lower_) > depths_threshold:
