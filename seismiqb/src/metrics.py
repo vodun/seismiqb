@@ -260,6 +260,21 @@ class BaseMetrics:
                 bad_traces_ = bad_traces
 
             valid_traces = xp.where(bad_traces_ == 0)
+
+            if self.horizon.is_carcass:
+                carcass_ilines = self.horizon.carcass_ilines
+                carcass_xlines = self.horizon.carcass_xlines
+
+                if xp == cp:
+                    carcass_ilines = to_device(carcass_ilines, device)
+                    carcass_xlines = to_device(carcass_xlines, device)
+
+                mask_i = xp.in1d(valid_traces[0], carcass_ilines)
+                mask_x = xp.in1d(valid_traces[1], carcass_xlines)
+                mask = mask_i & mask_x
+
+                valid_traces = (valid_traces[0][mask], valid_traces[1][mask])
+
             indices = xp.random.choice(len(valid_traces[0]), supports)
             support_coords = xp.asarray([valid_traces[0][indices], valid_traces[1][indices]]).T
 
@@ -276,14 +291,17 @@ class BaseMetrics:
         # Compute metric
         pbar = Notifier(pbar, total=len(support_traces))
         accumulator = Accumulator(agg=agg, amortize=amortize, axis=axis, total=len(support_traces))
+
         for i, _ in enumerate(support_traces):
-            computed = function(data_n, support_traces[i], data_stds, support_stds[i])
-            computed[bad_traces == 1] = xp.nan
+            computed = function(data_n[bad_traces != 1], support_traces[i],
+                                data_stds[bad_traces != 1], support_stds[i])
             accumulator.update(computed)
             pbar.update()
         pbar.close()
 
-        result = accumulator.get(final=True)
+        result = xp.full(shape=(data_n.shape[0], data_n.shape[1]), fill_value=xp.nan, dtype=data_n.dtype)
+        result[bad_traces != 1] = accumulator.get(final=True)
+
         return from_device(result)
 
 
