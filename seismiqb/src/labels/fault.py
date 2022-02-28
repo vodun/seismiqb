@@ -497,7 +497,8 @@ def get_sticks(points, n_sticks, n_nodes):
     axis = 0 if np.abs(pca.components_[0][0]) > np.abs(pca.components_[0][1]) else 1
 
     column = points[:, 0] if axis == 0 else points[:, 1]
-    step = max((column.max() - column.min()) // (n_sticks + 1), 1)
+    # step = max((column.max() - column.min()) // (n_sticks + 1), 1)
+    step = n_sticks
 
     points = points[np.argsort(points[:, axis])]
     projections = np.split(points, np.unique(points[:, axis], return_index=True)[1][1:])[::step]
