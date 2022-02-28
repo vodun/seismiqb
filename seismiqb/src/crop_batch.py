@@ -920,11 +920,11 @@ class SeismicCropBatch(Batch):
             Value to fill patches with.
         """
         rnd = np.random.RandomState(int(n_patches * 100)).uniform
-        patch_shape = patch_shape.astype(int)
-        if isinstance(patch_shape, int):
+        if isinstance(patch_shape, (int, float)):
             patch_shape = np.array([patch_shape, patch_shape, crop.shape[-1]])
         if len(patch_shape) == 2:
             patch_shape = np.array([*patch_shape, crop.shape[-1]])
+        patch_shape = patch_shape.astype(int)
 
         copy_ = copy(crop)
         for _ in range(int(n_patches)):
@@ -950,11 +950,11 @@ class SeismicCropBatch(Batch):
             Value to put at empty positions appeared after crop roration.
         """
         angle = angle if isinstance(angle, (tuple, list)) else (angle, 0, 0)
-        shape = crop.shape
+        initial_shape = crop.shape
         if adjust:
             if angle[1] != 0 or angle[2] != 0:
                 raise ValueError("Shape adjusting doesn't applicable to 3D rotations")
-            new_shape = adjust_shape_3d(shape=crop.shape, angle=angle)
+            new_shape = adjust_shape_3d(shape=initial_shape, angle=angle)
             crop = cv2.resize(crop, dsize=(new_shape[1], new_shape[0]))
             if len(crop.shape) == 2:
                 crop = crop[..., np.newaxis]
@@ -968,7 +968,8 @@ class SeismicCropBatch(Batch):
             crop = crop.transpose(2, 0, 1)
             crop = self._rotate(crop, angle[2], fill_value)
             crop = crop.transpose(1, 2, 0)
-        crop = self._central_crop(crop, shape)
+        if adjust:
+            crop = self._central_crop(crop, initial_shape)
         return crop
 
     @apply_parallel
