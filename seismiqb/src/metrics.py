@@ -274,7 +274,7 @@ class BaseMetrics:
                     mask_x = xp.in1d(valid_traces[1], carcass_xlines)
                     mask = mask_i & mask_x
 
-                valid_traces = (valid_traces[0][mask], valid_traces[1][mask])
+                    valid_traces = (valid_traces[0][mask], valid_traces[1][mask])
 
             indices = xp.random.choice(len(valid_traces[0]), supports)
             support_coords = xp.asarray([valid_traces[0][indices], valid_traces[1][indices]]).T
