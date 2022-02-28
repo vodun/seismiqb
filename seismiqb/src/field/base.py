@@ -220,7 +220,7 @@ class Field(CharismaMixin, VisualizationMixin):
     # Inner workings
     def __getattr__(self, key):
         """ Redirect calls for missing attributes, properties and methods to `geometry`. """
-        if hasattr(self.geometry, key):
+        if not key.endswith('state__') and 'geometry' in self.__dict__ and hasattr(self.geometry, key):
             return getattr(self.geometry, key)
         raise AttributeError(f'Attribute `{key}` does not exist in either Field or associated Geometry!')
 
