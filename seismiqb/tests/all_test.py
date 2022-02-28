@@ -68,7 +68,7 @@ tests_params = {
     'DATESTAMP': date.today().strftime("%Y-%m-%d"),
     'TESTS_SCRIPTS_DIR': TESTS_SCRIPTS_DIR,
     'NOTEBOOKS_DIR': os.path.join(TESTS_SCRIPTS_DIR, 'notebooks/'),
-    'USE_TMP_OUTPUT_DIR': False, #os.getenv('SEISMIQB_TEST_USE_TMP_OUTPUT_DIR') or True,
+    'USE_TMP_OUTPUT_DIR': os.getenv('SEISMIQB_TEST_USE_TMP_OUTPUT_DIR') or True,
 
     # Execution parameters
     'REMOVE_OUTDATED_FILES': os.getenv('SEISMIQB_TEST_REMOVE_OUTDATED_FILES') or True,
