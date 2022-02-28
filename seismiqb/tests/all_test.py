@@ -52,13 +52,13 @@ VERBOSE : bool
 """
 import os
 from datetime import date
-from glob import glob
 import json
-from itertools import product
+import re
 import pytest
 
 from .run_notebook import run_notebook
 from .utils import remove_paths
+
 
 # Initialize base tests variables
 TESTS_SCRIPTS_DIR = os.getenv("TESTS_SCRIPTS_DIR", os.path.dirname(os.path.realpath(__file__))+'/')
@@ -68,7 +68,7 @@ tests_params = {
     'DATESTAMP': date.today().strftime("%Y-%m-%d"),
     'TESTS_SCRIPTS_DIR': TESTS_SCRIPTS_DIR,
     'NOTEBOOKS_DIR': os.path.join(TESTS_SCRIPTS_DIR, 'notebooks/'),
-    'USE_TMP_OUTPUT_DIR': os.getenv('SEISMIQB_TEST_USE_TMP_OUTPUT_DIR') or True,
+    'USE_TMP_OUTPUT_DIR': False, #os.getenv('SEISMIQB_TEST_USE_TMP_OUTPUT_DIR') or True,
 
     # Execution parameters
     'REMOVE_OUTDATED_FILES': os.getenv('SEISMIQB_TEST_REMOVE_OUTDATED_FILES') or True,
@@ -84,204 +84,115 @@ tests_params = {
     'VERBOSE': os.getenv('SEISMIQB_TEST_VERBOSE') or True,
 }
 
-# Tests configurations
+
+# Initialize tests configs
 geometry_formats = ['sgy', 'hdf5', 'qhdf5', 'blosc', 'qblosc']
+notebooks_kwargs = (
+    # (notebook file, test kwargs)
+    # Note: kwargs for each notebook in the test will be saved for it and for next notebooks in the test
 
-# Parameters for all tests stages (preparation, main, final)
-all_tests_kwargs = {
-    'geometry': {'TEST_OUTPUTS': ['states', 'timings'],
-                  'FORMATS': geometry_formats},
-    'charisma': {},
-    'horizon': {'TEST_OUTPUTS': ['message']}
-}
-tests_names = all_tests_kwargs.keys()
+    # CharismaMixin test
+    ('charisma_test.ipynb', {'IS_FINAL': True}),
 
-# Iterables
-# Helper
-def get_tests_notebooks(tests_stage_name):
+    # SeismicGeometry test
+    ('geometry_test_preparation.ipynb', {'TEST_OUTPUTS': ['states', 'timings'], 'FORMATS': geometry_formats}),
+    *[('geometry_test_data_format.ipynb', {'FORMAT': f}) for f in geometry_formats],
+    ('geometry_test_final.ipynb', {'IS_FINAL': True}),
+
+    # Horizon test
+    ('horizon_test_preparation.ipynb', {'TEST_OUTPUTS': ['message']}),
+    ('horizon_test_base.ipynb', {}),
+    ('horizon_test_attributes.ipynb', {}),
+    ('horizon_test_manipulations.ipynb', {}),
+    ('horizon_test_extraction.ipynb', {'IS_FINAL': True})
+)
+
+
+# Global variables (for sharing between notebooks in one test)
+tests_workspaces_kwargs = {}
+global_tests_states = {}
+
+
+@pytest.mark.parametrize("notebook_kwargs", notebooks_kwargs)
+def test_run_notebook(notebook_kwargs, tmpdir_factory, capsys):
     """..!!.."""
-    if tests_stage_name != 'main':
-        notebooks = [x for x in test_notebooks_paths if x.find(tests_stage_name) != -1]
+    # Variables and params initialization
+    notebook_basename, test_kwargs_ = notebook_kwargs
+    is_final_notebook = test_kwargs_.pop('IS_FINAL', False)
+    test_name = notebook_basename.split('_')[0]
+    config = test_kwargs_.copy()
+    _ = config.pop('TEST_OUTPUTS', None)
+
+
+    # `test_kwargs` initialization
+    if 'test_kwargs' not in global_tests_states.get(test_name, {}):
+        # Init `test_kwargs`
+        test_kwargs = test_kwargs_
+        test_kwargs.update(tests_params)
     else:
-        notebooks = [x for x in test_notebooks_paths if (x.find('preparation') == -1) and (x.find('final') == -1)]
+        # Extract and update `test_kwargs`
+        test_kwargs = global_tests_states[test_name]['test_kwargs']
+        test_kwargs.update(test_kwargs_)
 
-    params = []
+    # Actualize `test_kwargs`` depend on previous notebooks in the test (for sharing variables, logs, etc.)
+    if test_name in global_tests_states:
+        test_kwargs.update(global_tests_states[test_name].get('outputs', {})) # For saving shared logs
+    else:
+        global_tests_states[test_name] = {}
 
-    for test_name in tests_names:
-        test_notebooks = [x for x in notebooks if x.find(test_name + '_test')!=-1] or [None]
-        params.extend([(test_name, x) for x in test_notebooks])
+    # Initialize test workspace (for the first notebook in the test)
+    if test_name not in tests_workspaces_kwargs:
+        tests_workspaces_kwargs[test_name] = {}
 
-    return params
-
-test_notebooks_paths = glob(tests_params['NOTEBOOKS_DIR'] + '*.ipynb') # all tests notebooks
-
-# Iterables for preparation tests
-preparation_tests_notebooks = get_tests_notebooks(tests_stage_name='preparation')
-
-# Iterables for main tests
-main_tests_notebooks_kwargs = {'geometry_test_data_format': {'FORMAT': geometry_formats}}
-main_tests_notebooks = get_tests_notebooks(tests_stage_name='main')
-
-# Combine test_name, notebooks and notebooks kwargs into params configuration
-main_tests_params = []
-for test_name in tests_names:
-    notebooks = [x[1] for x in main_tests_notebooks if x[0] == test_name]
-
-    for notebook in notebooks:
-        notebook_name = os.path.splitext(os.path.basename(notebook))[0]
-        main_test_kwargs = main_tests_notebooks_kwargs.get(notebook_name, None)
-
-        if main_test_kwargs:
-            for k, values in main_test_kwargs.items():
-                for value in values:
-                    main_tests_params.append((test_name, notebook, {k: value}))
+        if tests_params['USE_TMP_OUTPUT_DIR']:
+            tests_workspaces_kwargs[test_name]['OUTPUT_DIR'] = tmpdir_factory.mktemp(f"{test_name}_test_files")
+            tests_workspaces_kwargs[test_name]['LOGS_DIR'] = tmpdir_factory.mktemp("logs")
         else:
-            main_tests_params.append((test_name, notebook, {}))
+            tests_workspaces_kwargs[test_name]['OUTPUT_DIR'] = os.path.join(tests_params['TESTS_SCRIPTS_DIR'],
+                                                    f"notebooks/{test_name}_test_files")
+            tests_workspaces_kwargs[test_name]['LOGS_DIR'] = os.path.join(tests_params['TESTS_SCRIPTS_DIR'], 'logs/')
 
-# Iterables for final tests
-final_tests_notebooks = get_tests_notebooks(tests_stage_name='final')
+    test_kwargs.update(tests_workspaces_kwargs[test_name])
 
-# Globals tests states
-pytest.states = {}
+    # Run test notebook
+    path_ipynb = os.path.join(test_kwargs['NOTEBOOKS_DIR'], notebook_basename)
+    file_name = os.path.splitext(notebook_basename)[0]
+    suffix = "_" + "_".join(str(k) + "_" + re.sub(r' ', '_', re.sub(r'[^\w^ ]', '', str(v))) for k,v in config.items())
+    out_path_ipynb = os.path.join(test_kwargs['LOGS_DIR'], f"{file_name}_out{suffix}_{test_kwargs['DATESTAMP']}.ipynb")
 
+    exec_res = run_notebook(path=path_ipynb, inputs=test_kwargs, outputs=test_kwargs.get('TEST_OUTPUTS', []),
+                            inputs_pos=2, out_path_ipynb=out_path_ipynb, display_links=False)
 
-# Tests stages fixtures
-@pytest.fixture(scope='session', params=preparation_tests_notebooks)
-def run_preparation(request, tmpdir_factory):
-    """..!!.."""
-    test_name, path_ipynb = request.param
-    test_kwargs = all_tests_kwargs[test_name]
+    if not exec_res['failed'] and test_kwargs['REMOVE_EXTRA_FILES']:
+        os.remove(out_path_ipynb)
 
-    # Workspace preparation
-    if tests_params['USE_TMP_OUTPUT_DIR']:
-        test_kwargs['OUTPUT_DIR'] = tmpdir_factory.mktemp(f"{test_name}_test_files")
-        test_kwargs['LOGS_DIR'] = tmpdir_factory.mktemp("logs")
+    # Update global test state
+    test_failed = global_tests_states[test_name].get('failed', False) & exec_res['failed']
+    test_outputs = global_tests_states[test_name].get('outputs', {})
+    test_outputs.update(exec_res.get('outputs', {}))
 
-    else:
-        test_kwargs['OUTPUT_DIR'] = os.path.join(tests_params['TESTS_SCRIPTS_DIR'],
-                                                 f"notebooks/{test_name}_test_files")
-        test_kwargs['LOGS_DIR'] = os.path.join(tests_params['TESTS_SCRIPTS_DIR'], 'logs/')
-
-    test_kwargs.update(tests_params)
-
-    # Run preparation notebook if exists
-    exec_res = {'failed': False} # Some tests haven't preparation notebooks
-    if path_ipynb:
-        exec_res = run_test_notebook(path_ipynb, test_kwargs)
-
-    states = {
-        test_name: {
-            'test_kwargs': test_kwargs,
-            'failed': exec_res['failed'],
-            'outputs': exec_res.get('outputs', {})
-        }
+    test_state = {
+        'test_kwargs': test_kwargs,
+        'failed': test_failed,
+        'outputs': test_outputs
     }
-    pytest.states.update(states)
-    return exec_res, test_name, path_ipynb
+    global_tests_states[test_name].update(test_state)
 
-@pytest.fixture(scope='session', params=main_tests_params)
-def run_main_notebook(request):
-    """..!!.."""
-    # Extract params from iterables and run main test notebook with params
-    test_name, path_ipynb, ipynb_kwargs = request.param
-    test_kwargs, test_failed, test_outputs = pytest.states[test_name].values()
+    # Clear 'OUTPUT_DIR' after the last notebook in the test
+    if is_final_notebook and tests_params['REMOVE_EXTRA_FILES'] and not tests_params['USE_TMP_OUTPUT_DIR']:
+        remove_paths(paths=tests_workspaces_kwargs[test_name]['OUTPUT_DIR'])
 
-    test_kwargs.update(test_outputs) # For saving shared logs
-
-    if not test_failed:
-        # Extract iterable params configurations
-        suffix = "_" + "_".join(str(v) for v in ipynb_kwargs.values())
-        test_kwargs.update(ipynb_kwargs)
-
-        # Run main test notebooks with params and save test state
-        exec_res = {'failed': False}
-        if path_ipynb:
-            if ipynb_kwargs:
-                print(f"Running `{os.path.basename(path_ipynb)}` test notebook with `{ipynb_kwargs}`.")
-
-            exec_res = run_test_notebook(path_ipynb=path_ipynb, test_kwargs=test_kwargs,
-                                        suffix=suffix)
-
-            test_failed = test_failed or exec_res['failed']
-            test_outputs.update(exec_res.get('outputs', {}))
-
-            test_kwargs.update(test_outputs)
-
-            pytest.states[test_name].update({
-                'failed': test_failed,
-                'outputs': test_outputs
-            })
-    else:
-        exec_res = {'failed': True}
-
-    return exec_res, test_name, path_ipynb, ipynb_kwargs
-
-@pytest.fixture(scope='session', params=final_tests_notebooks)
-def run_final_notebook(request):
-    """..!!.."""
-    test_name, path_ipynb = request.param
-    test_kwargs, test_failed, test_outputs = pytest.states[test_name].values()
-
-    # Run a final notebook if exists
-    exec_res = {'failed': test_failed}
-    if not test_failed and path_ipynb:
-        exec_res = run_test_notebook(path_ipynb, test_kwargs)
-
-        test_failed = test_failed or exec_res['failed']
-        test_outputs.update(exec_res.get('outputs', {}))
-
-        pytest.states[test_name].update({
-            'failed': test_failed,
-            'outputs': test_outputs
-        })
-
-        if test_kwargs['REMOVE_EXTRA_FILES'] and not test_kwargs['USE_TMP_OUTPUT_DIR']:
-            remove_paths(paths=test_kwargs['OUTPUT_DIR'])
-
-    return exec_res, test_name, path_ipynb
-
-
-# Tests calls with terminal outputs
-def test_run_all_preparation_notebooks(run_preparation, capsys):
-    """..!!.."""
-    exec_res, test_name, notebook_path = run_preparation
-
-    message = f"Preparation {'`' + os.path.basename(notebook_path) + '` ' if notebook_path else ''}for {test_name} "\
-              f"execution was {'failed' if exec_res['failed'] else 'successfull'}."
-
-    print_exec_info(exec_res=exec_res, message=message, capsys=capsys)
-
-def test_run_all_main_notebooks(run_main_notebook, capsys):
-    """..!!.."""
-    exec_res, test_name, notebook_path, kwargs = run_main_notebook
-
-    message = f"Main notebook {'`' + os.path.basename(notebook_path) + '` ' if notebook_path else ''}"\
-              f"{'with ' + str(kwargs) if kwargs else ''} "\
-              f"for {test_name} execution was {'failed' if exec_res['failed'] else 'successfull'}."
-
-    print_exec_info(exec_res=exec_res, message=message, capsys=capsys)
-
-def test_run_all_final_notebooks(run_final_notebook, capsys):
-    """..!!.."""
-    exec_res, test_name, notebook_path = run_final_notebook
-
-    message = f"Final stage {'`' + os.path.basename(notebook_path) + '` ' if notebook_path else ''}"\
-                f"for {test_name} execution was {'failed' if exec_res['failed'] else 'successfull'}."
-
-    print_exec_info(exec_res=exec_res, message=message, capsys=capsys)
-
-
-@pytest.mark.parametrize("test_name", tests_names)
-def test_finalize(test_name, capsys):
-    """..!!.."""
-    test_kwargs, test_failed, test_outputs = pytest.states[test_name].values()
-    # Provide outputs to the terminal
+    # Terminal output
     with capsys.disabled():
         print('\n' + test_kwargs['DATESTAMP'])
 
-        # Tests output
+        # Extract traceback if failed
+        if exec_res['failed'] and tests_params['SHOW_TEST_ERROR_INFO']:
+            print(exec_res.get('traceback', ''))
+
+        # Notebook outputs
         if test_kwargs['SHOW_MESSAGE']:
-            for k, v in test_outputs.items():
+            for k, v in exec_res['outputs'].items():
                 if isinstance(v, str):
                     print(f"{k}:\n\n{v}")
                 else:
@@ -289,35 +200,8 @@ def test_finalize(test_name, capsys):
                     print(json.dumps(v, indent=4))
 
         # End of the running message
-        if not test_failed:
-            print(f"\'{test_name}\' tests were executed successfully.\n")
+        notebook_info = f"\'{notebook_basename}\'{' with config=' + str(config) if config else ''} was"
+        if not exec_res['failed']:
+            print(f"{notebook_info} executed successfully.\n")
         else:
-            assert False, f"\'{test_name}\' tests failed.\n"
-
-
-# Helper method
-def run_test_notebook(path_ipynb, test_kwargs, suffix=""):
-    """..!!.."""
-    # Run test notebook 
-    file_name = os.path.splitext(os.path.basename(path_ipynb))[0]
-    out_path_ipynb = os.path.join(test_kwargs['LOGS_DIR'], f"{file_name}_out{suffix}_{test_kwargs['DATESTAMP']}.ipynb")
-
-    exec_res = run_notebook(path=path_ipynb, inputs=test_kwargs, outputs=test_kwargs.get('TEST_OUTPUTS', []),
-                            inputs_pos=2, out_path_ipynb=out_path_ipynb, display_links=False)
-
-    # Logs postprocessing: remove out_path_ipynb if all OK
-    if not exec_res['failed'] and test_kwargs['REMOVE_EXTRA_FILES']:
-        os.remove(out_path_ipynb)
-
-    return exec_res
-
-def print_exec_info(exec_res, message, capsys):
-    """..!!.."""
-    with capsys.disabled():
-        print(message)
-
-    if exec_res['failed']:
-        if tests_params['SHOW_TEST_ERROR_INFO']:
-            with capsys.disabled():
-                print(exec_res.get('traceback', ''))
-        assert False, message
+            assert False, f"{notebook_info} failed.\n"
