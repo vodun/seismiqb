@@ -1559,7 +1559,7 @@ class LocationsPotentialContainer:
         ncols = locations.shape[1]
 
         self.initial_dtype = locations.dtype
-        self.locations_dtype = {'names': ['col_{}'.format(i) for i in range(ncols)],
+        self.locations_dtype = {'names': [f'col_{i}' for i in range(ncols)],
                                           'formats': ncols * [self.initial_dtype]}
 
         self.locations = locations.view(self.locations_dtype)
