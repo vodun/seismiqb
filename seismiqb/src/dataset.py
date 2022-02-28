@@ -46,13 +46,14 @@ class SeismicDataset(Dataset):
 
         if isinstance(index, dict):
             self.fields = AugmentedDict()
-            for geometry, labels in index.items():
-                if isinstance(geometry, (Field, SyntheticField)):
-                    field = geometry
-                    if labels is not None:
-                        field.load_labels(labels=labels, **kwargs)
+            for field_idx, labels_idx in index.items():
+                if isinstance(field_idx, (Field, SyntheticField)):
+                    field = field_idx
+                    if labels_idx is not None:
+                        field.load_labels(labels=labels_idx, **kwargs)
                 else:
-                    field = Field(geometry=geometry, labels=labels, **kwargs)
+                    field = Field(geometry=field_idx, labels=labels_idx, **kwargs)
+
                 self.fields[field.short_name] = field
         else:
             raise TypeError('Dataset should be initialized with a string, a ready-to-use Geometry or Field,'
@@ -128,9 +129,8 @@ class SeismicDataset(Dataset):
     # Textual and visual representation of dataset contents
     def __str__(self):
         msg = f'Seismic Dataset with {len(self)} field{"s" if len(self) > 1 else ""}:\n'
-        for field in self.fields.values():
-            msg += indent(f'{str(field)}\n', prefix='    ')
-        return msg[:-1]
+        msg += '\n\n'.join([indent(str(field), prefix='    ') for field in self.fields.values()])
+        return msg
 
 
     def show_slide(self, loc, idx=0, axis='iline', zoom_slice=None, src_labels='labels', **kwargs):

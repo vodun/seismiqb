@@ -298,51 +298,54 @@ class SeismicCropBatch(Batch):
         # locations = (slice(0, crop.shape[0]), slice(0, crop.shape[1]), slice(0, crop.shape[2]))
         return crop, horizons, faults
 
+
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def normalize(self, ix, mode=None, itemwise=False, src=None, dst=None, q=(0.01, 0.99)):
-        """ Normalize values in crop.
-
-        Parameters
-        ----------
-        mode : callable or str
-            If callable, then directly applied to data.
-            If str, then :meth:`~SeismicGeometry.scaler` applied in one of the modes:
-            - `minmax`: scaled to [0, 1] via minmax scaling.
-            - `q` or `normalize`: divided by the maximum of absolute values
-                                  of the 0.01 and 0.99 quantiles. Quantiles can
-                                  be changed by `q` parameter.
-            - `q_clip`: clipped to 0.01 and 0.99 quantiles and then divided
-                        by the maximum of absolute values of the two. Quantiles can
-                        be changed by `q` parameter.
-        itemwise : bool
-            The way to compute 'min', 'max' and quantiles. If False, stats will be computed
-            for the whole cubes. Otherwise, for each data item separately.
-        q : tuple
-            Left and right quantiles to use.
-        """
+    def normalize(self, ix, src=None, dst=None, mode='meanstd', normalization_stats=None,
+                  from_field=True, clip_to_quantiles=False, q=(0.01, 0.99),  ):
+        """ !!. """
         data = self.get(ix, src)
-        if callable(mode):
-            normalized = mode(data)
-            return normalized
+        field = self.get(ix, 'fields')
 
-        if itemwise:
-            # Adjust data based on the current item only
-            if mode == 'minmax':
-                min_, max_ = data.min(), data.max()
-                normalized = (data - min_) / (max_ - min_) if (max_ != min_) else np.zeros_like(data)
-            else:
-                left, right = np.quantile(data, q)
-                if mode in ['q', 'normalize']:
-                    normalized = 2 * (data - left) / (right - left) - 1 if right != left else np.zeros_like(data)
-                elif mode == 'q_clip':
-                    normalized =  np.clip(data, left, right) / max(abs(left), abs(right))
-                else:
-                    raise ValueError(f'Unknown mode: {mode}')
+        # Prepare normalization stats
+        if isinstance(normalization_stats, dict):
+            normalization_stats = normalization_stats[field.short_name]
         else:
-            field = self.get(ix, 'fields')
-            normalized = field.geometry.normalize(data, mode=mode)
-        return normalized
+            if from_field:
+                normalization_stats = field.normalization_stats
+            else:
+                # Crop-wise stats
+                normalization_stats = {}
+
+                if clip_to_quantiles:
+                    data = np.clip(data, *np.quantile(data, q))
+                    clip_to_quantiles = False
+
+                if 'mean' in mode:
+                    normalization_stats['mean'] = np.mean(data)
+                if 'std' in mode:
+                    normalization_stats['std'] = np.std(data)
+                if 'min' in mode:
+                    normalization_stats['min'] = np.min(data)
+                if 'max' in mode:
+                    normalization_stats['max'] = np.max(data)
+
+        # Clip
+        if clip_to_quantiles:
+            data = np.clip(data, normalization_stats['q_01'], normalization_stats['q_99'])
+
+        # Actual normalization
+        result = data.copy()
+
+        if 'mean' in mode:
+            result -= normalization_stats['mean']
+        if 'std' in mode:
+            result /= normalization_stats['std']
+        if 'min' in mode and 'max' in mode:
+            result = ((result - normalization_stats['min'])
+                    / (normalization_stats['max'] - normalization_stats['min']))
+
+        return result
 
 
     @action
@@ -1285,8 +1288,8 @@ class SeismicCropBatch(Batch):
 
         # Try to get the name of a field
         if displayed_name is None:
-            field_name = self.unsalt(self.indices[idx])
-            displayed_name = self.dataset.geometries[field_name].displayed_name
+            batch_index = self.indices[idx]
+            field_name = self.get(batch_index, 'fields').displayed_name
         suptitle = f'batch_idx={idx}                  `{displayed_name}`\n{suptitle}'
 
         # Titles for individual axis
