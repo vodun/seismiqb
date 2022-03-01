@@ -1449,7 +1449,7 @@ class ExtensionGrid(BaseGrid):
         locations[:, [0, 1]] = -1
         locations[:, 2:9] = buffer
         self.locations = locations
-        self.potential = potential
+        self.potential = potential.reshape(-1, 1)
 
         if update_coverage_matrix:
             self.uncovered_best = coverage_matrix.size - coverage_matrix.sum()
@@ -1548,9 +1548,12 @@ def compute_potential(locations, coverage_matrix, shape, stride, prior_threshold
     return buffer
 
 class LocationsPotentialContainer:
-    """ Container for saving history of `ExtensionGrid` locations and their potential."""
+    """ Container for saving history of `ExtensionGrid`.
+
+    It saves locations and their potential from each grid provided in the method `update_grid_and_container`.
+    Also, it removes repetitions from the grid locations and potentials.
+    """
     def __init__(self, locations=None, potential=None):
-        """ Container initialization: save locations with preferred view and potential."""
         if locations is None:
             locations = np.empty(shape=(0, 9), dtype=np.int32)
         if potential is None:
@@ -1563,21 +1566,34 @@ class LocationsPotentialContainer:
                                           'formats': ncols * [self.initial_dtype]}
 
         self.locations = locations.view(self.locations_dtype)
-        self.potential = potential.reshape(-1, 1)
+        self.potential = potential
+
+        self.stats = {
+            'repeated_locations': [],
+            'total_repeated_locations': 0
+        }
 
     def update_grid_and_container(self, grid):
-        """ Update grid and container locations and potential."""
+        """ Update grid and container locations and potential.
+
+        For the container, we update potentials for existing locations and safe new locations and their potentials.
+        For the grid, we remove locations and potentials pairs that are saved in the container. It helps reduce
+        locations amount and avoid repetitive locations processing such as model inference on these locations.
+        """
         # Choose locations and potential pairs that are not in the container
         grid_locations = grid.locations.view(self.locations_dtype)
 
         repeated_locations = np.in1d(grid_locations, self.locations)
-        repeated_potential = np.in1d(grid.potential.reshape(-1, 1), self.potential)
+        repeated_potential = np.in1d(grid.potential, self.potential)
         repeated_locations_potential = repeated_locations & repeated_potential
 
         new_locations = grid_locations[~repeated_locations_potential]
-        new_potential = grid.potential.reshape(-1, 1)[~repeated_locations_potential]
+        new_potential = grid.potential[~repeated_locations_potential]
 
-        print(f"Repeated locations amount: {len(grid_locations) - len(new_locations)}")
+        # Safe stats
+        repeated_locations = len(grid_locations) - len(new_locations)
+        self.stats['repeated_locations'].append(repeated_locations)
+        self.stats['total_repeated_locations'] += repeated_locations
 
         # Update container: save new potentials for old locations and save new locations with their potential
         if len(new_locations) > 0:
@@ -1595,7 +1611,7 @@ class LocationsPotentialContainer:
             new_locations = new_locations.view(self.initial_dtype).reshape(-1, grid.locations.shape[1])
         else:
             new_locations = np.empty(shape=(0, grid.locations.shape[1]))
-            new_potential = np.empty(shape=(0, grid.potential.shape[1]))
+            new_potential = np.empty(shape=(0, 1))
 
         # Update grid: set locations and grid with values that are not in the container
         grid.locations, grid.potential = new_locations, new_potential
