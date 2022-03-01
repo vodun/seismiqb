@@ -245,9 +245,10 @@ class SyntheticGenerator():
                    perturb_values, perturb_peak, random_invert, fetch_and_update_mask):
         """ Add fault to a velocity model.
         """
-        x0, x1 = fault_coordinates[0][0], fault_coordinates[1][0]
-        y0, y1 = fault_coordinates[0][1], fault_coordinates[1][1]
-        x_low, x_high, y_low, y_high = (0, self.velocity_model.shape[0], min(y0, y1), max(y0, y1))
+        shape = self.velocity_model.shape
+        x0, x1 = int(fault_coordinates[0][0] * shape[0]), int(fault_coordinates[1][0] * shape[0])
+        y0, y1 = int(fault_coordinates[0][1] * shape[1]), int(fault_coordinates[1][1] * shape[1])
+        x_low, x_high, y_low, y_high = (0, shape[0], max(0, min(y0, y1)), min(shape[1], max(y0, y1)))
 
         # y-axis coordinate shift
         y0, y1 = y0 - y_low, y1 - y_low
@@ -504,9 +505,10 @@ class SyntheticGenerator():
         """
         # Convert each fault to the point-cloud format
         point_clouds = []
+        shape = self.velocity_model.shape
         for fault in self.faults_coordinates:
-            x0, x1 = fault[0][0], fault[1][0]
-            y0, y1 = fault[0][1], fault[1][1]
+            x0, x1 = int(fault[0][0] * (shape[0]-1)), int(fault[1][0] * (shape[0]-1))
+            y0, y1 = int(fault[0][1] * (shape[1]-1)), int(fault[1][1] * (shape[1]-1))
             y_low, y_high = min(y0, y1), max(y0, y1)
 
             # Coeffs of the line equation x = ky + b

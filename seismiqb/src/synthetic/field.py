@@ -4,7 +4,6 @@ import numpy as np
 from .generator import SyntheticGenerator
 from ..utils import lru_cache
 
-
 class SyntheticField:
 
     def __init__(self, param_generator=None, data_generator=None, attribute=None, crop_shape=(256, 256),
@@ -78,6 +77,7 @@ class SyntheticField:
                               horizon_multipliers=params['horizon_multipliers'],
                               velocity_limits=params['velocity_limits'])
              .make_velocity_model(shape=shape, grid_shape=params['grid_shape'])
+             .add_faults(faults_coordinates=params['faults_coordinates'])
              .make_density_model(params['density_noise_lims'])
              .make_reflectivity()
              .make_synthetic(ricker_width=params['ricker_width'],
@@ -95,6 +95,11 @@ class SyntheticField:
         rng = np.random.default_rng(seed)
         num_horizons = rng.integers(low=2, high=7, endpoint=True)
 
+        x0 = rng.uniform(0, 1)
+        x1 = np.clip(x0 + rng.uniform(-0.1, 0.1), 0, 1)
+        y0 = np.clip(rng.uniform(-0.1, 0.5), 0, 1)
+        y1 = np.clip(rng.uniform(0.5, 1.1), 0, 1)
+
         return {
             'velocity_limits': (2000, 6000),
 
@@ -104,6 +109,9 @@ class SyntheticField:
             'horizon_multipliers': (rng.choice([-1, 1], size=num_horizons) *
                                     rng.uniform(4, 9, size=num_horizons)),
             # Faults
+            'faults_coordinates': (
+                ((x0, y0), (x1, y1)),
+            ),
 
             # Impedance creation
             'grid_shape': rng.integers(low=5, high=10, size=(1,)),
@@ -137,6 +145,8 @@ class SyntheticField:
         elif 'horizon' in attribute:
             result = generator.fetch_horizons(mode='horizons', horizon_format='mask',
                                               width=kwargs.get('width', 3))
+        elif 'fault' in attribute:
+            result = generator.fetch_faults(faults_format='mask', width=kwargs.get('width', 3))
         elif 'impedance' in attribute:
             result = generator.velocity_model
         else:
