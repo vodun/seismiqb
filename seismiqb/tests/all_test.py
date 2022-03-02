@@ -14,11 +14,9 @@ USE_TMP_OUTPUT_DIR: bool
     Whether to use pytest tmpdir as a workspace.
     If True, then all files are saved in temporary directories.
     If False, then all files are saved in local directories.
-OUTPUT_DIR : str
-    Path to the directory for saving results and temporary files
+TESTS_ROOT_DIR : str
+    Path to the directory for saving results and temporary files for all tests
     (executed notebooks, logs, data files like cubes, etc.).
-LOGS_DIR : str
-    Path to the directory for saving log files (executed notebooks, timings, messages).
 TEST_OUTPUTS : str or iterable of str
     List of notebook locals names that return to output.
 
@@ -57,7 +55,6 @@ import re
 import pytest
 
 from .run_notebook import run_notebook
-from .utils import remove_paths
 
 
 # Initialize base tests variables
@@ -86,118 +83,97 @@ tests_params = {
 
 
 # Initialize tests configs
-geometry_formats = ['sgy', 'hdf5', 'qhdf5', 'blosc', 'qblosc']
-notebooks_kwargs = (
-    # (notebook file, test kwargs)
-    # Note: kwargs for each notebook in the test will be saved for it and for next notebooks in the test
+geometry_formats = ['sgy', 'hdf5'] #, 'qhdf5', 'blosc', 'qblosc']
+notebooks_params = (
+    # (notebook file, test params)
+    # Note: params for each notebook in the test will be saved for it and for next notebooks in the test
 
     # CharismaMixin test
-    ('charisma_test.ipynb', {'IS_FINAL': True}),
+    ('charisma_test.ipynb', {}),
 
     # SeismicGeometry test
     ('geometry_test_preparation.ipynb', {'TEST_OUTPUTS': ['states', 'timings'], 'FORMATS': geometry_formats}),
     *[('geometry_test_data_format.ipynb', {'FORMAT': f}) for f in geometry_formats],
-    ('geometry_test_final.ipynb', {'IS_FINAL': True}),
+    ('geometry_test_final.ipynb', {}),
 
     # Horizon test
     ('horizon_test_preparation.ipynb', {'TEST_OUTPUTS': ['message']}),
     ('horizon_test_base.ipynb', {}),
     ('horizon_test_attributes.ipynb', {}),
     ('horizon_test_manipulations.ipynb', {}),
-    ('horizon_test_extraction.ipynb', {'IS_FINAL': True})
+    ('horizon_test_extraction.ipynb', {})
 )
 
 
 # Global variables (for sharing between notebooks in one test)
-tests_workspaces_kwargs = {}
 global_tests_states = {}
 
 
-@pytest.mark.parametrize("notebook_kwargs", notebooks_kwargs)
+@pytest.mark.parametrize("notebook_kwargs", notebooks_params)
 def test_run_notebook(notebook_kwargs, tmpdir_factory, capsys):
     """..!!.."""
     # Variables and params initialization
-    notebook_basename, test_kwargs_ = notebook_kwargs
-    is_final_notebook = test_kwargs_.pop('IS_FINAL', False)
+    notebook_basename, params_ = notebook_kwargs
     test_name = notebook_basename.split('_')[0]
-    config = test_kwargs_.copy()
+    global_test_state = global_tests_states.get(test_name, {})
+    config = params_.copy()
     _ = config.pop('TEST_OUTPUTS', None)
 
-
-    # `test_kwargs` initialization
-    if 'test_kwargs' not in global_tests_states.get(test_name, {}):
-        # Init `test_kwargs`
-        test_kwargs = test_kwargs_
-        test_kwargs.update(tests_params)
-    else:
-        # Extract and update `test_kwargs`
-        test_kwargs = global_tests_states[test_name]['test_kwargs']
-        test_kwargs.update(test_kwargs_)
-
-    # Actualize `test_kwargs`` depend on previous notebooks in the test (for sharing variables, logs, etc.)
-    if test_name in global_tests_states:
-        test_kwargs.update(global_tests_states[test_name].get('outputs', {})) # For saving shared logs
-    else:
-        global_tests_states[test_name] = {}
-
-    # Initialize test workspace (for the first notebook in the test)
-    if test_name not in tests_workspaces_kwargs:
-        tests_workspaces_kwargs[test_name] = {}
-
+    # Create `root_dir` for all `test_run_notebook` calls
+    if not tests_params.get('TESTS_ROOT_DIR', ''):
         if tests_params['USE_TMP_OUTPUT_DIR']:
-            tests_workspaces_kwargs[test_name]['OUTPUT_DIR'] = tmpdir_factory.mktemp(f"{test_name}_test_files")
-            tests_workspaces_kwargs[test_name]['LOGS_DIR'] = tmpdir_factory.mktemp("logs")
+            tests_params['TESTS_ROOT_DIR'] = tmpdir_factory.mktemp(f"tests_root_dir")
         else:
-            tests_workspaces_kwargs[test_name]['OUTPUT_DIR'] = os.path.join(tests_params['TESTS_SCRIPTS_DIR'],
-                                                    f"notebooks/{test_name}_test_files")
-            tests_workspaces_kwargs[test_name]['LOGS_DIR'] = os.path.join(tests_params['TESTS_SCRIPTS_DIR'], 'logs/')
+            tests_params['TESTS_ROOT_DIR'] = os.path.join(tests_params['TESTS_SCRIPTS_DIR'], "tests_root_dir")
+            os.makedirs(tests_params['TESTS_ROOT_DIR'], exist_ok=True)
 
-    test_kwargs.update(tests_workspaces_kwargs[test_name])
+    # `params` initialization
+    params = global_test_state.get('globals', tests_params)
+    params.update(params_)
 
     # Run test notebook
-    path_ipynb = os.path.join(test_kwargs['NOTEBOOKS_DIR'], notebook_basename)
+    path_ipynb = os.path.join(params['NOTEBOOKS_DIR'], notebook_basename)
     file_name = os.path.splitext(notebook_basename)[0]
     suffix = "_" + "_".join(str(k) + "_" + re.sub(r' ', '_', re.sub(r'[^\w^ ]', '', str(v))) for k,v in config.items())
-    out_path_ipynb = os.path.join(test_kwargs['LOGS_DIR'], f"{file_name}_out{suffix}_{test_kwargs['DATESTAMP']}.ipynb")
+    out_path_ipynb = os.path.join(pytest.root_dir, f"{file_name}_out{suffix}_{params['DATESTAMP']}.ipynb")
 
-    exec_res = run_notebook(path=path_ipynb, inputs=test_kwargs, outputs=test_kwargs.get('TEST_OUTPUTS', []),
+    exec_res = run_notebook(path=path_ipynb, inputs=params, outputs=params.get('TEST_OUTPUTS', []),
                             inputs_pos=2, out_path_ipynb=out_path_ipynb, display_links=False)
 
-    if not exec_res['failed'] and test_kwargs['REMOVE_EXTRA_FILES']:
+    if not exec_res['failed'] and params['REMOVE_EXTRA_FILES']:
         os.remove(out_path_ipynb)
 
     # Update global test state
-    test_failed = global_tests_states[test_name].get('failed', False) & exec_res['failed']
-    test_outputs = global_tests_states[test_name].get('outputs', {})
-    test_outputs.update(exec_res.get('outputs', {}))
+    failed = global_test_state.get('failed', False) & exec_res['failed']
+    globals = global_test_state.get('globals', {})
+    globals.update(params)
+    globals.update(exec_res.get('outputs', {})) # For saving shared logs
 
-    test_state = {
-        'test_kwargs': test_kwargs,
-        'failed': test_failed,
-        'outputs': test_outputs
+    state = {
+        'globals': globals,
+        'failed': failed,
     }
-    global_tests_states[test_name].update(test_state)
-
-    # Clear 'OUTPUT_DIR' after the last notebook in the test
-    if is_final_notebook and tests_params['REMOVE_EXTRA_FILES'] and not tests_params['USE_TMP_OUTPUT_DIR']:
-        remove_paths(paths=tests_workspaces_kwargs[test_name]['OUTPUT_DIR'])
+    if global_test_state:
+        global_tests_states[test_name].update(state)
+    else:
+        global_tests_states[test_name] = state
 
     # Terminal output
     with capsys.disabled():
-        print('\n' + test_kwargs['DATESTAMP'])
+        print('\n' + params['DATESTAMP'])
 
         # Extract traceback if failed
         if exec_res['failed'] and tests_params['SHOW_TEST_ERROR_INFO']:
             print(exec_res.get('traceback', ''))
 
         # Notebook outputs
-        if test_kwargs['SHOW_MESSAGE']:
+        if params['SHOW_MESSAGE']:
             for k, v in exec_res['outputs'].items():
                 if isinstance(v, str):
-                    print(f"{k}:\n\n{v}")
+                    print(f"{k}:\n{v}\n")
                 else:
                     print(f"{k}:\n")
-                    print(json.dumps(v, indent=4))
+                    print(json.dumps(v, indent=4), '\n')
 
         # End of the running message
         notebook_info = f"\'{notebook_basename}\'{' with config=' + str(config) if config else ''} was"
