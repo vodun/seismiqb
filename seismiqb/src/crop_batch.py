@@ -342,8 +342,12 @@ class SeismicCropBatch(Batch):
         if 'std' in mode:
             result /= normalization_stats['std']
         if 'min' in mode and 'max' in mode:
-            result = ((result - normalization_stats['min'])
-                    / (normalization_stats['max'] - normalization_stats['min']))
+            if normalization_stats['max'] == normalization_stats['min']:
+                result = result - normalization_stats['min']
+            else:
+                result = ((result - normalization_stats['min']) / (
+                    normalization_stats['max'] - normalization_stats['min']
+                ))
 
         return result
 

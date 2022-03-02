@@ -126,7 +126,7 @@ class Fault(Horizon):
                         (points[:, 0] < self.field_reference.shape[0]) &
                         (points[:, 1] < self.field_reference.shape[1]) &
                         (points[:, 2] < self.field_reference.shape[2]))[0]
-        df = df.iloc[idx]
+            df = df.iloc[idx]
 
         sticks = self.read_sticks(df, fix)
         if len(sticks) == 0:
