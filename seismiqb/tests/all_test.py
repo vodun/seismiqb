@@ -83,7 +83,7 @@ tests_params = {
 
 
 # Initialize tests configs
-geometry_formats = ['sgy', 'hdf5'] #, 'qhdf5', 'blosc', 'qblosc']
+geometry_formats = ['sgy', 'hdf5', 'qhdf5', 'blosc', 'qblosc']
 notebooks_params = (
     # (notebook file, test params)
     # Note: params for each notebook in the test will be saved for it and for next notebooks in the test
@@ -135,7 +135,7 @@ def test_run_notebook(notebook_kwargs, tmpdir_factory, capsys):
     path_ipynb = os.path.join(params['NOTEBOOKS_DIR'], notebook_basename)
     file_name = os.path.splitext(notebook_basename)[0]
     suffix = "_" + "_".join(str(k) + "_" + re.sub(r' ', '_', re.sub(r'[^\w^ ]', '', str(v))) for k,v in config.items())
-    out_path_ipynb = os.path.join(pytest.root_dir, f"{file_name}_out{suffix}_{params['DATESTAMP']}.ipynb")
+    out_path_ipynb = os.path.join(tests_params['TESTS_ROOT_DIR'], f"{file_name}_out{suffix}_{params['DATESTAMP']}.ipynb")
 
     exec_res = run_notebook(path=path_ipynb, inputs=params, outputs=params.get('TEST_OUTPUTS', []),
                             inputs_pos=2, out_path_ipynb=out_path_ipynb, display_links=False)
