@@ -1,5 +1,6 @@
 """ Functions for generation of 2d and 3d synthetic seismic arrays.
 """
+#pylint: disable=not-an-iterable
 import numpy as np
 from numba import njit, prange
 
@@ -13,7 +14,7 @@ from ..plotters import MatplotlibPlotter, plot_image
 
 @njit(parallel=True)
 def compute_impedance_model(buffer, impedance_vector, horizon_matrices):
-    """ For ."""
+    """ !!. """
     i_range, x_range, depth = buffer.shape
 
     for i in prange(i_range):
@@ -32,6 +33,7 @@ def compute_impedance_model(buffer, impedance_vector, horizon_matrices):
 
 @njit(parallel=True)
 def compute_reflectivity_model(buffer, resistance):
+    """ !!. """
     i_range, x_range, depth = buffer.shape
 
     for i in prange(i_range):
@@ -243,9 +245,10 @@ class NewSyntheticGenerator:
 
     def extract_horizons(self, indices='all', format='mask', width=3):
         """ !!. """
+        #pylint: disable=redefined-builtin
         # Select appropriate horizons
         if isinstance(indices, (slice, list)):
-            indices = indices
+            pass
         elif indices == 'all':
             indices = slice(None)
         elif indices == 'amplified':
@@ -281,10 +284,12 @@ class NewSyntheticGenerator:
 
     @property
     def horizon_instances(self):
+        """ !!. """
         return self.extract_horizons(indices='all', format='instances')
 
     @property
     def horizon_mask(self):
+        """ !!. """
         if self._horizon_mask is None:
             self._horizon_mask = self.extract_horizons(indices='all', format='mask')
         return self._horizon_mask
@@ -325,7 +330,10 @@ class NewSyntheticGenerator:
         fig = plot_image(data, **plot_params)
 
         # Display textual information on the same figure
-        msg = f'shape = {self.shape}\nnum_horizons = {self.num_horizons}\n'
+        msg = f'shape = {self.shape}\nnum_horizons = {self.num_horizons}'
+        msg += f'\nmin_interval = {self.depth_intervals.min() * self.shape[-1]:4.0f}'
+        msg += f'\nmax_interval = {self.depth_intervals.max() * self.shape[-1]:4.0f}'
+        msg += f'\nmean_interval = {self.depth_intervals.mean() * self.shape[-1]:4.0f}'
         legend_params = {
             'color': 'pink',
             'label': msg,

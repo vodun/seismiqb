@@ -5,6 +5,7 @@ from .generator import SyntheticGenerator
 from ..utils import lru_cache
 
 class GeometryMock:
+    """ Mock for SeismicGeometry. """
     def __getattr__(self, _):
         return None
 
@@ -215,7 +216,6 @@ class SyntheticField:
 
     def load_slide(self):
         """ !!. """
-        pass
 
 
     # Normalization
@@ -262,4 +262,3 @@ class SyntheticField:
 
     def show_slide(self):
         """ !!. """
-        pass

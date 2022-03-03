@@ -505,6 +505,7 @@ class SyntheticSampler(Sampler):
         super().__init__()
 
     def sample(self, size):
+        """ Get exactly `size` locations. """
         buffer = np.empty((size, 9), dtype=np.int32)
         buffer[:, 0] = self.field_id
         buffer[:, 1] = self.label_id
