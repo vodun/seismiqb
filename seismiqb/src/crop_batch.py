@@ -1289,7 +1289,7 @@ class SeismicCropBatch(Batch):
         # Try to get the name of a field
         if displayed_name is None:
             batch_index = self.indices[idx]
-            field_name = self.get(batch_index, 'fields').displayed_name
+            displayed_name = self.get(batch_index, 'fields').displayed_name
         suptitle = f'batch_idx={idx}                  `{displayed_name}`\n{suptitle}'
 
         # Titles for individual axis
