@@ -1,10 +1,362 @@
 """ Functions for generation of 2d and 3d synthetic seismic arrays.
 """
 import numpy as np
+from numba import njit, prange
+
+import cv2
 from scipy.interpolate import interp1d, interp2d
 from scipy.ndimage import gaussian_filter, map_coordinates, binary_dilation
 from scipy.signal import ricker, convolve
-from numba import njit
+
+from ..plotters import MatplotlibPlotter, plot_image
+
+
+@njit(parallel=True)
+def compute_impedance_model(buffer, impedance_vector, horizon_matrices):
+    """ For ."""
+    i_range, x_range, depth = buffer.shape
+
+    for i in prange(i_range):
+        for j in range(x_range):
+            indices = horizon_matrices[:, i, j]
+
+            for k, impedance_value in enumerate(impedance_vector[:-1]):
+                start, stop = indices[k], indices[k+1]
+                buffer[i, j, start : stop] = impedance_value
+
+            final = indices[-1]
+            if final < depth:
+                buffer[i, j, final:] = impedance_vector[-1]
+
+    return buffer
+
+@njit(parallel=True)
+def compute_reflectivity_model(buffer, resistance):
+    i_range, x_range, depth = buffer.shape
+
+    for i in prange(i_range):
+        for j in range(x_range):
+            for k in range(1, depth):
+                previous_element, current_element = resistance[i, j, k-1:k+1]
+                buffer[i, j, k] = ((current_element - previous_element) /
+                                   (current_element + previous_element))
+
+            buffer[i, j, 0] = buffer[i, j, 1]
+    return buffer
+
+
+class NewSyntheticGenerator:
+    """ !!. """
+    def __init__(self, rng=None, seed=None):
+        self.rng = rng or np.random.default_rng(seed)
+        self.velocities = None
+        self.velocity_model = None
+        self.density_model = None
+        self.reflectivity_coefficients = None
+        self.synthetic = None
+        self.num_reflections = None
+        self.reflection_surfaces = None
+        self.horizon_heights = ()
+        self.faults_coordinates = ()
+        self.mask = None
+
+        self.amplified_horizon_indices = None
+        self._horizon_mask = None
+
+
+    def make_impedance_vector(self, num_horizons=10, limits=(5_000, 10_000), amplify=None,
+                              randomization='uniform', randomization_scale=0.3):
+        """ !!. """
+        # TODO: maybe, add scale back to initial `limits` range?
+        # Base impedance vector
+        impedance_vector, delta = np.linspace(*limits, num=num_horizons, retstep=True, dtype=np.float32)
+
+        # Generate and apply perturbation. Note the dtype
+        if randomization == 'normal':
+            perturbation = self.rng.standard_normal(size=num_horizons, dtype=np.float32)
+        elif randomization == 'uniform':
+            perturbation = 2 * self.rng.random(size=num_horizons, dtype=np.float32) - 1
+        else:
+            perturbation = 0
+
+        impedance_vector += randomization_scale * delta * perturbation
+
+        # Amplify some of the horizons
+        amplified_horizon_indices = []
+        if amplify:
+            for depth, multiplier in amplify:
+                index = round(depth * num_horizons)
+                impedance_vector[index:] += delta * multiplier
+                amplified_horizon_indices.append(index)
+
+        # Store in the instance
+        self.num_horizons = num_horizons
+        self.impedance_vector = impedance_vector
+        self.amplified_horizon_indices = amplified_horizon_indices
+        return self
+
+
+    def make_horizons(self, shape, num_horizons=None,
+                      horizon_intervals='uniform', interval_randomization=None, interval_randomization_scale=0.1,
+                      horizon_randomization1=True, num_nodes=10, interpolation_kind='cubic', randomization1_scale=0.25,
+                      horizon_randomization2=False, randomization2_scale=0.1):
+        """ !!. """
+        # TODO: maybe, reverse the direction?
+        # Parse parameters
+        shape = shape if len(shape) == 3 else (1, *shape)
+        *spatial_shape, depth = shape
+        num_horizons = num_horizons or self.num_horizons
+
+        # Prepare intervals between horizons
+        if horizon_intervals == 'uniform':
+            depth_intervals = np.ones(num_horizons - 1, dtype=np.float32) / num_horizons
+        elif isinstance(horizon_intervals, np.ndarray):
+            depth_intervals = horizon_intervals
+
+        # Slightly perturb intervals between horizons
+        if interval_randomization == 'normal':
+            perturbation = self.rng.standard_normal(size=num_horizons - 1, dtype=np.float32)
+        elif interval_randomization == 'uniform':
+            perturbation = 2 * self.rng.random(size=num_horizons - 1, dtype=np.float32) - 1
+        else:
+            perturbation = 0
+        depth_intervals += (interval_randomization_scale / num_horizons) * perturbation
+
+        depth_intervals = depth_intervals / depth_intervals.sum()
+
+        # Make horizon matrices: starting from a zero-plane, move to the next `depth_interval` and apply randomizations
+        horizon_matrices = [np.zeros(spatial_shape, dtype=np.float32)]
+
+        for depth_interval in depth_intervals:
+            previous_matrix = horizon_matrices[-1]
+            next_matrix = previous_matrix + depth_interval
+
+            if horizon_randomization1:
+                perturbation_matrix = self.make_randomization1_matrix(shape=spatial_shape, num_nodes=num_nodes,
+                                                                      interpolation_kind=interpolation_kind)
+                next_matrix += randomization1_scale * depth_interval * perturbation_matrix
+
+            if horizon_randomization2: # TODO
+                perturbation_matrix = ...
+                next_matrix += randomization2_scale * depth_interval * perturbation_matrix
+
+            horizon_matrices.append(next_matrix)
+
+        horizon_matrices = np.array(horizon_matrices) * depth
+        horizon_matrices = np.round(horizon_matrices).astype(np.int32)
+
+        self.shape = shape
+        self.depth_intervals = depth_intervals
+        self.horizon_matrices = horizon_matrices
+        return self
+
+
+    def make_randomization1_matrix(self, shape, num_nodes=10, interpolation_kind='cubic'):
+        """ !!. """
+        # Parse parameters
+        squeezed_shape = tuple(s for s in shape if s != 1)
+
+        if len(squeezed_shape) == 1:
+            num_nodes = (num_nodes,) if isinstance(num_nodes, int) else num_nodes
+            interpolator_constructor = interp1d
+        else:
+            num_nodes = (num_nodes, num_nodes) if isinstance(num_nodes, int) else num_nodes
+            interpolator_constructor = interp2d
+
+        # Create interpolator on nodes
+        nodes_grid =  [np.linspace(0, 1, num_nodes_, dtype=np.float32) for num_nodes_ in num_nodes]
+        nodes_matrix = 2 * self.rng.random(size=num_nodes, dtype=np.float32).T - 1
+        # print(nodes_grid, nodes_matrix.shape)
+
+        interpolator = interpolator_constructor(*nodes_grid, nodes_matrix, kind=interpolation_kind)
+
+        # Apply interpolator on actual shape
+        spatial_grid = [np.linspace(0, 1, s, dtype=np.float32) for s in squeezed_shape]
+        spatial_matrix = interpolator(*spatial_grid).T
+
+        return spatial_matrix.astype(np.float32).reshape(shape)
+
+
+    def make_impedance_model(self):
+        """ !!. """
+        buffer = np.empty(self.shape, dtype=np.float32)
+        impedance_model = compute_impedance_model(buffer, self.impedance_vector, self.horizon_matrices)
+        self.impedance_model = impedance_model
+        return self
+
+
+    def make_density_model(self, scale=0.01,
+                           randomization='uniform', randomization_limits=(0.97, 1.03), randomization_scale=0.1):
+        """ !!. """
+        if randomization == 'uniform':
+            a, b = randomization_limits
+            perturbation = (b - a) * self.rng.random(size=self.shape, dtype=np.float32) + a
+        elif randomization == 'normal':
+            perturbation = randomization_scale * self.rng.standard_normal(size=self.shape, dtype=np.float32)
+        else:
+            perturbation = 1.0
+
+        self.density_model = self.impedance_model * perturbation
+        self.density_model *= scale
+        return self
+
+
+    def make_reflectivity_model(self):
+        """ !!.
+        reflectivity = ((resistance[..., 1:] - resistance[..., :-1]) /
+                        (resistance[..., 1:] + resistance[..., :-1]))
+        """
+        buffer = np.empty_like(self.impedance_model)
+        resistance = self.impedance_model * self.density_model
+        reflectivity_model = compute_reflectivity_model(buffer, resistance)
+
+        self.reflectivity_model = reflectivity_model
+        return self
+
+
+    def make_synthetic(self, ricker_width=5, ricker_points=50):
+        """ !!. """
+        wavelet = ricker(ricker_points, ricker_width)
+        wavelet = wavelet.astype(np.float32).reshape(1, ricker_points)
+
+        synthetic = np.empty_like(self.reflectivity_model)
+        for i in range(self.shape[0]):
+            cv2.filter2D(src=self.reflectivity_model[i], ddepth=-1, kernel=wavelet,
+                         dst=synthetic[i], borderType=cv2.BORDER_CONSTANT)
+
+        self.synthetic = synthetic
+        return self
+
+    def postprocess_synthetic(self, sigma=1., kernel_size=9, noise_mul=None):
+        """ !!. """
+        if sigma is not None:
+            self.synthetic = self.apply_gaussian_filter_3d(self.synthetic, kernel_size=kernel_size, sigma=sigma)
+        if noise_mul is not None:
+            perturbation = self.rng.random(size=self.synthetic.shape, dtype=np.float32)
+            self.synthetic += noise_mul * self.synthetic.std() * perturbation
+        return self
+
+    # Extraction
+    @property
+    def increasing_impedance_model(self):
+        return ...
+
+    def extract_horizons(self, indices='all', format='mask', width=3):
+        """ !!. """
+        # Select appropriate horizons
+        if isinstance(indices, (slice, list)):
+            indices = indices
+        elif indices == 'all':
+            indices = slice(None)
+        elif indices == 'amplified':
+            indices = self.amplified_horizon_indices
+        elif 'top' in indices:
+            k = int(indices[3:].strip())
+            impedance_deltas = np.abs(np.diff(self.impedance_vector))
+            indices = np.argsort(impedance_deltas)[::-1][:k]
+        else:
+            raise ValueError(f'Unsupported `indices={indices}`!')
+
+        horizon_matrices = self.horizon_matrices[indices]
+
+        #
+        if 'matrix' in format:
+            result = horizon_matrices
+        elif 'instance' in format:
+            result = ... #TODO
+        elif 'mask' in format:
+            indices = np.nonzero((0 <= horizon_matrices) & (horizon_matrices < self.shape[-1]))
+            result = np.zeros_like(self.impedance_model)
+            result[(*indices[1:], horizon_matrices[indices])] = 1
+
+            if width is not None:
+                kernel = np.ones(width, dtype=np.float32).reshape(1, width)
+
+                for i in range(self.shape[0]):
+                    cv2.filter2D(src=result[i], ddepth=-1, kernel=kernel,
+                                 dst=result[i], borderType=cv2.BORDER_CONSTANT)
+        else:
+            raise ValueError(f'Unsupported `format={format}`!')
+        return result
+
+    @property
+    def horizon_instances(self):
+        return self.extract_horizons(indices='all', format='instances')
+
+    @property
+    def horizon_mask(self):
+        if self._horizon_mask is None:
+            self._horizon_mask = self.extract_horizons(indices='all', format='mask')
+        return self._horizon_mask
+
+
+    # Visualization
+    def show_slide(self, loc=None, axis=0, return_figure=False, **kwargs):
+        """ !!. """
+        #TODO: add the same functionality, as in `SeismicCropBatch.plot_roll`
+        loc = loc or self.shape[axis] // 2
+
+        # Retrieve data
+        attributes = ['impedance_model', 'reflectivity_model', 'synthetic', 'horizon_mask']
+        default_cmaps = ['plasma', 'gray', 'gray', 'gray']
+
+        data, titles, cmaps = [], [], []
+        for attribute, cmap in zip(attributes, default_cmaps):
+            try:
+                image = np.take(getattr(self, attribute), indices=loc, axis=axis)
+                data.append([image])
+                titles.append(f'`{attribute}`')
+                cmaps.append([cmap])
+            except AttributeError:
+                pass
+
+        # Display images
+        plot_params = {
+            'suptitle': f'SyntheticGenerator slide: loc={loc}, axis={axis}',
+            'title': titles,
+            'cmap': cmaps,
+            'colorbar': True,
+            'ncols': 5,
+            'scale': 0.5,
+            'shapes': 1, # this parameter toggles additional subplot axes creation for further legend display
+            'return_figure': True,
+            **kwargs
+        }
+        fig = plot_image(data, **plot_params)
+
+        # Display textual information on the same figure
+        msg = f'shape = {self.shape}\nnum_horizons = {self.num_horizons}\n'
+        legend_params = {
+            'color': 'pink',
+            'label': msg,
+            'size': 14, 'loc': 10,
+            'facecolor': 'pink',
+        }
+        MatplotlibPlotter.add_legend(ax=fig.axes[len(data)], **legend_params)
+
+        if return_figure:
+            return fig
+        return None
+
+
+
+    # Utilities and faster versions of common operations
+    @staticmethod
+    def apply_gaussian_filter_3d(array, kernel_size=9, sigma=1.):
+        """ !!. """
+        kernel_1d = np.linspace(-(kernel_size - 1) / 2., (kernel_size - 1) / 2., kernel_size, dtype=np.float32)
+        kernel_1d = np.exp(-0.5 * np.square(kernel_1d) / np.square(sigma))
+
+        for i in range(array.shape[0]):
+            cv2.sepFilter2D(src=array[i], ddepth=-1, kernelX=kernel_1d.reshape(1, -1), kernelY=kernel_1d.reshape(-1, 1),
+                            dst=array[i], borderType=cv2.BORDER_CONSTANT)
+
+        if array.shape[0] >= 3 * sigma * kernel_size:
+            for j in range(array.shape[1]):
+                cv2.filter2D(src=array[:, j], ddepth=-1, kernel=kernel_1d.reshape(-1, 1),
+                            dst=array[:, j], borderType=cv2.BORDER_CONSTANT)
+        return array
+
 
 
 @njit
