@@ -32,6 +32,8 @@ from .plotters import MatplotlibPlotter, plot_image
 
 class BaseSampler(Sampler):
     """ Common logic of making locations. Refer to the documentation of inherited classes for more details. """
+    dim = 9 # dimensionality of sampled points: field_id and label_id, orientation, locations
+
     def _make_locations(self, field, points, matrix, crop_shape, ranges, threshold, filtering_matrix):
         # Parse parameters
         ranges = ranges if ranges is not None else [None, None, None]

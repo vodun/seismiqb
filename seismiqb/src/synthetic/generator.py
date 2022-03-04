@@ -39,7 +39,7 @@ def compute_reflectivity_model(buffer, resistance):
     for i in prange(i_range):
         for j in range(x_range):
             for k in range(1, depth):
-                previous_element, current_element = resistance[i, j, k-1:k+1]
+                previous_element, current_element = resistance[i, j, k-1], resistance[i, j, k]
                 buffer[i, j, k] = ((current_element - previous_element) /
                                    (current_element + previous_element))
 
@@ -50,19 +50,24 @@ def compute_reflectivity_model(buffer, resistance):
 class NewSyntheticGenerator:
     """ !!. """
     def __init__(self, rng=None, seed=None):
+        # Random number generator. Should be used exclusively throughout the class for randomization
         self.rng = rng or np.random.default_rng(seed)
-        self.velocities = None
-        self.velocity_model = None
-        self.density_model = None
-        self.reflectivity_coefficients = None
-        self.synthetic = None
-        self.num_reflections = None
-        self.reflection_surfaces = None
-        self.horizon_heights = ()
-        self.faults_coordinates = ()
-        self.mask = None
 
+        self.impedance_vector = None
+        self.num_horizons = None
         self.amplified_horizon_indices = None
+
+        self.shape = None
+        self.depth_intervals = None
+        self.horizon_matrices = None
+
+        # Models: arrays of `shape` with different geological attributes of the seismic
+        self.impedance_model = None
+        self.density_model = None
+        self.reflectivity_model = None
+        self.synthetic = None
+
+        # Properties
         self._horizon_mask = None
 
 
@@ -192,14 +197,13 @@ class NewSyntheticGenerator:
         """ !!. """
         if randomization == 'uniform':
             a, b = randomization_limits
-            perturbation = (b - a) * self.rng.random(size=self.shape, dtype=np.float32) + a
+            perturbation = (scale * (b - a)) * self.rng.random(size=self.shape, dtype=np.float32) + (scale * a)
         elif randomization == 'normal':
-            perturbation = randomization_scale * self.rng.standard_normal(size=self.shape, dtype=np.float32)
+            perturbation = scale * randomization_scale * self.rng.standard_normal(size=self.shape, dtype=np.float32)
         else:
-            perturbation = 1.0
+            perturbation = scale * 1.0
 
         self.density_model = self.impedance_model * perturbation
-        self.density_model *= scale
         return self
 
 
@@ -238,9 +242,11 @@ class NewSyntheticGenerator:
             self.synthetic += noise_mul * self.synthetic.std() * perturbation
         return self
 
+
     # Extraction
     @property
     def increasing_impedance_model(self):
+        """ !!. """
         return ...
 
     def extract_horizons(self, indices='all', format='mask', width=3):

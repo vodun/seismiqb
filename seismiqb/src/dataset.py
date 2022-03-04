@@ -95,7 +95,8 @@ class SeismicDataset(Dataset):
     @property
     def geometries(self):
         """ Back-compatibility and conveniency. """
-        return self.get_nested_iterable('geometry')
+        return AugmentedDict({idx : getattr(field, 'geometry') for idx, field in self.fields.items()
+                              if isinstance(field, Field)})
 
 
     def gen_batch(self, batch_size=None, shuffle=False, n_iters=None, n_epochs=None, drop_last=False, **kwargs):

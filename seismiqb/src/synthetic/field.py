@@ -22,7 +22,7 @@ class SyntheticField:
         >>> location = (slice(10, 11), slice(100, 200), slice(1000, 1500))
         >>> synthetic = synthetic_field.get_attribute(location=location, attribute='synthetic')
         >>> impedance = synthetic_field.get_attribute(location=location, attribute='impedance')
-        would make synthetic and impedance images for the same underlying data.
+        would make synthetic and impedance images for the same underlying synthetic model.
 
     Methods `load_seismic` and `make_masks` are thin wrappers around `get_attribute` to make API of this class
     identical to that of `:class:.Field`. Despite that, we don't use abstract classes or other ways to enforce it.
@@ -41,7 +41,8 @@ class SyntheticField:
     data_generator : callable, optional
         If provided, then a callable to populate an instance of `SyntheticGenerator` with data.
         Should take `generator` as the only required argument. Disables the `param_generator` option.
-        Note that the logic of keep
+        Note that the logic of keeping the same instance of `generator` for multiple calls with the same `location`
+        is performed by class internals and still available in that case.
     attribute : str
         Attribute to get from the generator if `labels` are requested.
     crop_shape : tuple of int
@@ -55,12 +56,15 @@ class SyntheticField:
     #pylint: disable=method-hidden, protected-access
     def __init__(self, param_generator=None, data_generator=None, attribute=None, crop_shape=(256, 256),
                  name='synthetic_field', cache_maxsize=128):
-        #
-        self.attribute = attribute
-        self.crop_shape = crop_shape
+        # Data generation
         self.param_generator = param_generator if param_generator is not None else self.default_param_generator
         self.data_generator = data_generator
         self._make_generator = lru_cache(maxsize=cache_maxsize)(self._make_generator)
+        self._cache_maxsize = cache_maxsize
+
+        # Defaults for retrieving attributes
+        self.attribute = attribute
+        self.crop_shape = crop_shape
 
         # String info
         self.path = self.short_path = f'{name}_path'
@@ -99,7 +103,7 @@ class SyntheticField:
     # @lru_cache
     def _make_generator(self, hash_value):
         """ Create a generator instance. During initialization, wrapped in `lru_cache`. """
-        return SyntheticGenerator()
+        return SyntheticGenerator(seed=hash_value)
 
     def _populate_generator(self, generator, location=None, shape=None):
         """ Call `generator` methods to populate it with data: impedance model, horizon surfaces, faults, etc. """
@@ -107,7 +111,6 @@ class SyntheticField:
             return None
 
         if self.data_generator is not None:
-            # Change `generator` in-place!
             self.data_generator(generator)
 
         else:
