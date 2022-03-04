@@ -16,7 +16,7 @@ from ..batchflow import DatasetIndex, Batch, action, inbatch_parallel, SkipBatch
 from .labels import Horizon
 from .plotters import plot_image
 from .synthetic.generator import generate_synthetic
-from .utils import compute_attribute, to_list, AugmentedDict, DelegatingList
+from .utils import compute_attribute, to_list, AugmentedDict, DelegatingList, adjust_shape_3d
 from .labels.horizon_extraction import groupby_all
 
 
@@ -944,14 +944,19 @@ class SeismicCropBatch(Batch):
 
         Parameters
         ----------
-        patch_shape : array-like
-            Shape or patches along each axis.
+        patch_shape : int or array-like
+            Shape or patches along each axis. If int, square patches will be generated. If array of length 2,
+            patch will be the same for all channels.
         n_patches : number
             Number of patches to cut.
         fill_value : number
             Value to fill patches with.
         """
         rnd = np.random.RandomState(int(n_patches * 100)).uniform
+        if isinstance(patch_shape, (int, float)):
+            patch_shape = np.array([patch_shape, patch_shape, crop.shape[-1]])
+        if len(patch_shape) == 2:
+            patch_shape = np.array([*patch_shape, crop.shape[-1]])
         patch_shape = patch_shape.astype(int)
 
         copy_ = copy(crop)
@@ -963,7 +968,7 @@ class SeismicCropBatch(Batch):
         return copy_
 
     @apply_parallel
-    def rotate(self, crop, angle, fill_value=0):
+    def rotate(self, crop, angle, adjust=False, fill_value=0):
         """ Rotate crop along the first two axes. Angles are defined as Tait-Bryan angles and the sequence of
         extrinsic rotations axes is (axis_2, axis_0, axis_1).
 
@@ -972,11 +977,22 @@ class SeismicCropBatch(Batch):
         angle : float or tuple of floats
             Angles of rotation about each axes (axis_2, axis_0, axis_1). If float, angle of rotation
             about the last axis.
+        adjust : bool
+            Scale image to avoid padding in rotated image (for 2D crops only).
         fill_value : number
             Value to put at empty positions appeared after crop roration.
         """
         angle = angle if isinstance(angle, (tuple, list)) else (angle, 0, 0)
-        crop = self._rotate(crop, angle[0], fill_value)
+        initial_shape = crop.shape
+        if adjust:
+            if angle[1] != 0 or angle[2] != 0:
+                raise ValueError("Shape adjusting doesn't applicable to 3D rotations")
+            new_shape = adjust_shape_3d(shape=initial_shape, angle=angle)
+            crop = cv2.resize(crop, dsize=(new_shape[1], new_shape[0]))
+            if len(crop.shape) == 2:
+                crop = crop[..., np.newaxis]
+        if angle[0] != 0:
+            crop = self._rotate(crop, angle[0], fill_value)
         if angle[1] != 0:
             crop = crop.transpose(1, 2, 0)
             crop = self._rotate(crop, angle[1], fill_value)
@@ -985,7 +1001,14 @@ class SeismicCropBatch(Batch):
             crop = crop.transpose(2, 0, 1)
             crop = self._rotate(crop, angle[2], fill_value)
             crop = crop.transpose(1, 2, 0)
+        if adjust:
+            crop = self._central_crop(crop, initial_shape)
         return crop
+
+    @apply_parallel
+    def binarize(self, crop, threshold=0.5, dtype=np.float32):
+        """ Binarize image by threshold. """
+        return (crop > threshold).astype(dtype)
 
     def _rotate(self, crop, angle, fill_value):
         shape = crop.shape
@@ -1198,6 +1221,9 @@ class SeismicCropBatch(Batch):
     @apply_parallel
     def central_crop(self, crop, shape):
         """ Central crop of defined shape. """
+        return self._central_crop(crop, shape)
+
+    def _central_crop(self, crop, shape):
         crop_shape = np.array(crop.shape)
         shape = np.array(shape)
         if (shape > crop_shape).any():
