@@ -297,11 +297,11 @@ class BaseMetrics:
         pbar = Notifier(pbar, total=len(support_traces))
         accumulator = Accumulator(agg=agg, amortize=amortize, axis=axis, total=len(support_traces))
 
-        nonbad_data = data_n[bad_traces != 1]
-        non_bad_stds = data_stds[bad_traces != 1]
+        valid_data = data_n[bad_traces != 1]
+        valid_stds = data_stds[bad_traces != 1]
 
         for i, _ in enumerate(support_traces):
-            computed = function(nonbad_data, support_traces[i], non_bad_stds, support_stds[i])
+            computed = function(valid_data, support_traces[i], valid_stds, support_stds[i])
             accumulator.update(computed)
             pbar.update()
         pbar.close()
