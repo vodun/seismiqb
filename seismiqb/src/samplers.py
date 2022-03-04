@@ -1550,7 +1550,7 @@ def compute_potential(locations, coverage_matrix, shape, stride, prior_threshold
 class LocationsPotentialContainer:
     """ Container for saving history of `ExtensionGrid`.
 
-    It saves locations and their potential from each grid provided in the method `update_grid_and_container`.
+    It saves locations and their potential from each grid provided in the method `update_grid`.
     Also, it removes repetitions from the grid locations and potentials.
     """
     def __init__(self, locations=None, potential=None):
@@ -1573,7 +1573,7 @@ class LocationsPotentialContainer:
             'total_repeated_locations': 0
         }
 
-    def update_grid_and_container(self, grid):
+    def update_grid(self, grid):
         """ Update grid and container locations and potential.
 
         For the container, we update potentials for existing locations and safe new locations and their potentials.
