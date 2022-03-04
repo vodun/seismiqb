@@ -17,6 +17,7 @@ from .labels import Horizon
 from .plotters import plot_image
 from .synthetic.generator import generate_synthetic
 from .utils import compute_attribute, to_list, AugmentedDict, DelegatingList, adjust_shape_3d
+from .labels.horizon_extraction import groupby_all
 
 
 AFFIX = '___'
@@ -557,6 +558,38 @@ class SeismicCropBatch(Batch):
             new_mask[length:, :] = 0
 
         return new_mask
+
+    @action
+    @inbatch_parallel(init='indices', post='_post_mask_rebatch', target='for',
+                      src='masks', depths_threshold=2, threshold=0)
+    def remove_discontinuities(self, ix, src='masks', depths_threshold=2):
+        """ Remove horizon masks with depth-wise discontinuities on neighboring traces.
+
+        Parameters
+        ----------
+        depths_threshold : int
+            Maximum depth difference on neighboring traces for horizons masks to be kept in the batch.
+        """
+        mask = self.get(ix, src)
+
+        # Get horizon coordinates an depths aggregations by i_line and x_line
+        horizon_coords = np.array(np.nonzero(mask)).T
+        groupby_all_depths = groupby_all(horizon_coords) # i_line, x_line, occurency, min_depth, max_depth, mean_depth
+        cond = groupby_all_depths[:-1, 1] == groupby_all_depths[1:, 1] - 1 # get only sequential traces
+
+        # Get horizon depths stats
+        mins = groupby_all_depths[:-1, 3][cond]
+        mins_next = groupby_all_depths[1:, 3][cond]
+        upper_ = np.max(np.array([mins, mins_next]), axis=0)
+
+        maxs = groupby_all_depths[:-1, 4][cond]
+        maxs_next = groupby_all_depths[1:, 4][cond]
+        lower_ = np.min(np.array([maxs, maxs_next]), axis=0)
+
+        if max(upper_ - lower_) > depths_threshold:
+            return 0
+
+        return round(mask.sum())
 
 
     @apply_parallel
