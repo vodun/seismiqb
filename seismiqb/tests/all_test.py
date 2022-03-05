@@ -83,18 +83,18 @@ notebooks_params = (
     # Note: params for each notebook in the test will be saved for it and for next notebooks in the test
 
     # CharismaMixin test
-    # ('charisma_test', {}),
+    ('charisma_test', {}),
 
     # SeismicGeometry test
     ('geometry_test_preparation', {'FORMATS': geometry_formats}),
     *[('geometry_test_data_format', {'TEST_OUTPUTS': ['timings'], 'FORMAT': f}) for f in geometry_formats],
 
     # Horizon test
-    # ('horizon_test_preparation', {}),
-    # ('horizon_test_base', {}),
-    # ('horizon_test_attributes', {}),
-    # ('horizon_test_manipulations', {}),
-    # ('horizon_test_extraction', {'TEST_OUTPUTS': ['message']})
+    ('horizon_test_preparation', {}),
+    ('horizon_test_base', {}),
+    ('horizon_test_attributes', {}),
+    ('horizon_test_manipulations', {}),
+    ('horizon_test_extraction', {'TEST_OUTPUTS': ['message']})
 )
 
 # Create directory for temporary files and results
@@ -111,7 +111,7 @@ def test_run_notebook(notebook_kwargs, capsys):
     params.update(common_params)
 
     # Run test notebook
-    prepare_suffix = lambda v: re.sub(r'[^\w^ ]', '', v).replace(' ', '_') # remove symbols and replace ' ' by '_'
+    prepare_suffix = lambda v: re.sub(r'[^\w^ ]', '', v).replace(' ', '_') # remove symbols and replace spaces
     suffix = "_".join(f"{prepare_suffix(str(v))}" for v in config.values())
 
     path_ipynb = os.path.join(params['NOTEBOOKS_DIR'], f"{filename}.ipynb")
