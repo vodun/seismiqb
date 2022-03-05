@@ -10,10 +10,6 @@ TESTS_SCRIPTS_DIR : str
     Used as an entry point to the working directory.
 NOTEBOOKS_DIR : str
     Path to the directory with test .ipynb files.
-USE_TMP_OUTPUT_DIR: bool
-    Whether to use pytest tmpdir as a workspace.
-    If True, then all files are saved in temporary directories.
-    If False, then all files are saved in local directories.
 TESTS_ROOT_DIR : str
     Path to the directory for saving results and temporary files for all tests
     (executed notebooks, logs, data files like cubes, etc.).
@@ -49,6 +45,8 @@ import os
 from datetime import date
 import json
 import re
+import shutil
+import tempfile
 import pytest
 
 from .run_notebook import run_notebook
@@ -57,12 +55,11 @@ from .run_notebook import run_notebook
 # Initialize base tests variables
 TESTS_SCRIPTS_DIR = os.getenv("TESTS_SCRIPTS_DIR", os.path.dirname(os.path.realpath(__file__))+'/')
 
-tests_params = {
+common_params = {
     # Workspace constants
     'DATESTAMP': date.today().strftime("%Y-%m-%d"),
     'TESTS_SCRIPTS_DIR': TESTS_SCRIPTS_DIR,
     'NOTEBOOKS_DIR': os.path.join(TESTS_SCRIPTS_DIR, 'notebooks/'),
-    'USE_TMP_OUTPUT_DIR': os.getenv('SEISMIQB_TEST_USE_TMP_OUTPUT_DIR') or True,
 
     # Execution parameters
     'REMOVE_OUTDATED_FILES': os.getenv('SEISMIQB_TEST_REMOVE_OUTDATED_FILES') or True,
@@ -86,41 +83,36 @@ notebooks_params = (
     # Note: params for each notebook in the test will be saved for it and for next notebooks in the test
 
     # CharismaMixin test
-    ('charisma_test', {}),
+    # ('charisma_test', {}),
 
     # SeismicGeometry test
     ('geometry_test_preparation', {'FORMATS': geometry_formats}),
     *[('geometry_test_data_format', {'TEST_OUTPUTS': ['timings'], 'FORMAT': f}) for f in geometry_formats],
 
     # Horizon test
-    ('horizon_test_preparation', {}),
-    ('horizon_test_base', {}),
-    ('horizon_test_attributes', {}),
-    ('horizon_test_manipulations', {}),
-    ('horizon_test_extraction', {'TEST_OUTPUTS': ['message']})
+    # ('horizon_test_preparation', {}),
+    # ('horizon_test_base', {}),
+    # ('horizon_test_attributes', {}),
+    # ('horizon_test_manipulations', {}),
+    # ('horizon_test_extraction', {'TEST_OUTPUTS': ['message']})
 )
+
+# Create directory for temporary files and results
+common_params['TESTS_ROOT_DIR'] = tempfile.mkdtemp(prefix='tests_root_dir_', dir='./')
+pytest.failed = False
 
 
 @pytest.mark.parametrize("notebook_kwargs", notebooks_params)
-def test_run_notebook(notebook_kwargs, tmpdir_factory, capsys):
+def test_run_notebook(notebook_kwargs, capsys):
     """..!!.."""
     filename, params = notebook_kwargs
     config = params.copy()
     _ = config.pop('TEST_OUTPUTS', None)
-
-    # Create `root_dir` for all `test_run_notebook` calls
-    if not tests_params.get('TESTS_ROOT_DIR', ''):
-        if tests_params['USE_TMP_OUTPUT_DIR']:
-            tests_params['TESTS_ROOT_DIR'] = tmpdir_factory.mktemp(f"tests_root_dir")
-        else:
-            tests_params['TESTS_ROOT_DIR'] = os.path.join(tests_params['TESTS_SCRIPTS_DIR'], "tests_root_dir")
-            os.makedirs(tests_params['TESTS_ROOT_DIR'], exist_ok=True)
-
-    params.update(tests_params)
+    params.update(common_params)
 
     # Run test notebook
-    remove_symbols = lambda v: re.sub(r' ', '_', re.sub(r'[^\w^ ]', '', str(v)))
-    suffix = "_".join(f"{k}_{remove_symbols(v)}" for k,v in config.items())
+    prepare_suffix = lambda v: re.sub(r'[^\w^ ]', '', v).replace(' ', '_') # remove symbols and replace ' ' by '_'
+    suffix = "_".join(f"{prepare_suffix(str(v))}" for v in config.values())
 
     path_ipynb = os.path.join(params['NOTEBOOKS_DIR'], f"{filename}.ipynb")
     out_path_ipynb = os.path.join(params['TESTS_ROOT_DIR'], f"{filename}_out_{suffix}_{params['DATESTAMP']}.ipynb")
@@ -128,8 +120,14 @@ def test_run_notebook(notebook_kwargs, tmpdir_factory, capsys):
     exec_res = run_notebook(path=path_ipynb, inputs=params, outputs=params.get('TEST_OUTPUTS', []),
                             inputs_pos=2, out_path_ipynb=out_path_ipynb, display_links=False)
 
+    pytest.failed = pytest.failed or exec_res['failed']
+
+    # Clear extra files
     if not exec_res['failed'] and params['REMOVE_EXTRA_FILES']:
         os.remove(out_path_ipynb)
+
+    if (notebook_kwargs == notebooks_params[-1]) and not pytest.failed and common_params['REMOVE_EXTRA_FILES']:
+        shutil.rmtree(common_params['TESTS_ROOT_DIR'])
 
     # Terminal output
     with capsys.disabled():
@@ -140,11 +138,8 @@ def test_run_notebook(notebook_kwargs, tmpdir_factory, capsys):
         # Test outputs
         if params['SHOW_MESSAGE']:
             for k, v in exec_res['outputs'].items():
-                print(f"{k}:\n")
-                if isinstance(v, str):
-                    print(v)
-                else:
-                    print(json.dumps(v, indent=4), '\n')
+                message = v if isinstance(v, str) else json.dumps(v, indent=4)
+                print(f"{k}:\n {message}\n")
 
         # End of the running message
         notebook_info = f"{params['DATESTAMP']} \'{filename}\'{' with config=' + str(config) if config else ''} was"
