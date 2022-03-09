@@ -15,7 +15,6 @@ Each of the classes provides:
     - convenient visualization to explore underlying `locations` structure
 """
 from itertools import product
-import warnings
 from random import choices
 
 import numpy as np
@@ -456,8 +455,8 @@ class HorizonSampler(WeightedSampler):
         kwargs : kwargs for the `weights_mode`
             For the following modes we can manage parameters:
                 - 'grad' mode support all :method:`Horizon.get_gradient_map` kwargs.
-                - 'near_holes' mode support only the 'iterations' argument that provides a max distance between a hole on
-                the horizon surface and nonzero weighted traces.
+                - 'near_holes' mode support only the 'iterations' argument that provides a max distance
+                between a hole on the horizon surface and nonzero weighted traces.
                 - 'ptp' mode support next kwargs:
                     - 'ptp_high': the highest ptp value for weighting. Values bigger than 'ptp_high'
                     have weights equal to 0.
