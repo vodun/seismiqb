@@ -2,6 +2,7 @@
 #pylint: disable=global-variable-undefined
 import re
 from collections import defaultdict
+from itertools import cycle
 
 import numpy as np
 from matplotlib import pyplot as plt
@@ -467,6 +468,10 @@ class VisualizationMixin:
         labels = [getattr(self, src_) if isinstance(src_, str) else [src_] for src_ in src]
         labels = sum(labels, [])
 
+        if isinstance(colors, list):
+            cycled_colors = cycle(colors)
+            colors = [next(cycled_colors) for _ in range(len(labels))]
+
         if colors is None:
             colors = ['green' for label in labels]
         if isinstance(colors, dict):
@@ -475,6 +480,8 @@ class VisualizationMixin:
         simplices_colors = []
         for label, color in zip(labels, colors):
             x, y, z, simplices_ = label.make_triangulation(**triangulation_kwargs)
+            if len(simplices_) == 0:
+                continue
             if x is not None:
                 simplices += [simplices_ + sum([len(item) for item in coords])]
                 simplices_colors += [[color] * len(simplices_)]

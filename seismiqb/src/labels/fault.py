@@ -495,25 +495,25 @@ def get_sticks(points, n_sticks, n_nodes):
     pca = PCA(1)
     pca.fit(points)
     axis = 0 if np.abs(pca.components_[0][0]) > np.abs(pca.components_[0][1]) else 1
-
+    axis = 0
     column = points[:, 0] if axis == 0 else points[:, 1]
     # step = max((column.max() - column.min()) // (n_sticks + 1), 1)
-    step = n_sticks
 
     points = points[np.argsort(points[:, axis])]
-    projections = np.split(points, np.unique(points[:, axis], return_index=True)[1][1:])[::step]
-
+    projections = np.split(points, np.unique(points[:, axis], return_index=True)[1][1:])
+    projections = [item for item in projections if item[:, 2].max() - item[:, 2].min() > 5]
+    step = min(n_sticks, len(projections)-1)
+    projections = projections[::step]
     res = []
 
     for p in projections:
         points_ = thicken_line(p).astype(int)
         loc = p[0, axis]
-        if len(points_) > 3:
-            nodes = approximate_points(points_[:, [1-axis, 2]], n_nodes)
-            nodes_ = np.zeros((len(nodes), 3))
-            nodes_[:, [1-axis, 2]] = nodes
-            nodes_[:, axis] = loc
-            res += [nodes_]
+        nodes = approximate_points(points_[:, [1-axis, 2]], n_nodes)
+        nodes_ = np.zeros((len(nodes), 3))
+        nodes_[:, [1-axis, 2]] = nodes
+        nodes_[:, axis] = loc
+        res += [nodes_]
     return res
 
 def thicken_line(points):
@@ -527,7 +527,8 @@ def approximate_points(points, n_points):
     pca = PCA(1)
     array = pca.fit_transform(points)
 
-    step = (array.max() - array.min()) / (n_points - 1)
+    # step = (array.max() - array.min()) / (n_points - 1)
+    step = n_points
     initial = np.arange(array.min(), array.max() + step / 2, step)
     indices = np.unique(nearest_neighbors(initial.reshape(-1, 1), array.reshape(-1, 1), 1))
     return points[indices]
