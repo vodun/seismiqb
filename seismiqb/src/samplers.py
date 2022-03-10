@@ -122,7 +122,7 @@ class WeightedSampler(BaseSampler):
      - locations_weights : np.ndarray
        An array with weights for each location. It is used in the sampling step for making priorities for locations.
     """
-    def init_weights(self, weights='const', weights_agg='max'):
+    def init_weights(self, weights='const', weights_agg='max', **kwargs):
         """ Weights initialization with the `create_weights` method.
 
         Parameters
@@ -131,13 +131,15 @@ class WeightedSampler(BaseSampler):
             Weights initialization mode (if str) or weights matrix (if ndarray).
             Note that the matrix shape must be equal to the field spatial shape.
         weights_agg : str
-            Weights aggregation option.
-            It is used to aggregate all weights values on the crop to one weight for the location.
+            Weights aggregation option. It is used to aggregate all weights on a crop to one location weight.
+            It is provided directly to the :method:`get_locations_weights`.
+        kwargs : dict
+            kwargs for :meth:`~.WeightedSampler.create_weights`.
         """
         if isinstance(weights, str):
             # Create weights depend on mode
             self.weights_mode = weights
-            weights, locations_weights = self.create_weights(weights_mode=weights)
+            weights, locations_weights = self.create_weights(weights_mode=weights, weights_agg=weights_agg, **kwargs)
         else:
             # Get weights for each location
             self.weights_mode = 'custom matrix'
@@ -182,8 +184,8 @@ class WeightedSampler(BaseSampler):
         weights_mode : str, optional
             Weights creating mode name. It is used for providing info in visualizations.
         weights_agg : str
-            Weights aggregation option.
-            It is used to aggregate all weights on a crop to one location weight.
+            Weights aggregation option. It is used to aggregate all weights on a crop to one location weight.
+            It is provided directly to the :method:`get_locations_weights`.
         """
         self.weights = None
         self.locations_weights = None
@@ -210,11 +212,21 @@ class WeightedSampler(BaseSampler):
         else:
             raise ValueError('Invalid value for the `weights` argument.')
 
-    def create_weights(self, **kwargs):
+    def create_weights(self, weights_mode='constant', weights_agg='max', **kwargs):
         """" A simple weights creating method. It is heavily recommended to redefine this method in inherited classes.
 
         Under the hood, weights are initialized with ones.
         So each location for sampling will have the same priority.
+
+        Parameters
+        ----------
+        weights_mode : str
+            Weights creation option. In this method do nothing, it is here for the API consistency.
+        weights_agg : str
+            Weights aggregation option. It is used to aggregate all weights on a crop to one location weight.
+            It is provided directly to the :method:`get_locations_weights`.
+        kwargs : dict
+            Other parameters of weights creation. In this method do nothing, it is here for the API consistency.
 
         Returns
         -------
@@ -222,14 +234,11 @@ class WeightedSampler(BaseSampler):
             Weights matrix with shape equals to the field spatial shape.
         locations_weights : np.ndarray
             Weights array with weights for each location that aggregated from weights matrix.
-        kwargs : dict
-            Other parameters of weights creation.
-            Possible option is: weights_agg for the :method:`get_locations_weights`.
         """
+        _ = weights_mode, kwargs
         weights = np.ones(self.field.spatial_shape, dtype='float')
         weights[self.field.zero_traces == 1] = np.nan
 
-        weights_agg = kwargs.get('weights_agg', 'max')
         locations_weights = get_locations_weights(locations=self.locations, weights=weights, weights_agg=weights_agg)
         locations_weights = np.nan_to_num(locations_weights, nan=0)
         return weights, locations_weights
@@ -241,6 +250,8 @@ def get_locations_weights(locations, weights, weights_agg='max'):
 
     Parameters
     ----------
+    locations : np.ndarray
+        Locations in (orientation, i_start, x_start, h_start, i_stop, x_stop, h_stop) format.
     weights : np.ndarray
         A weights matrix with shape equals to the field spatial shape.
         It provides weights for each seismic trace.
@@ -254,9 +265,9 @@ def get_locations_weights(locations, weights, weights_agg='max'):
     """
     locations_weights = np.empty((len(locations)), dtype=np.float32)
 
-    for i, (_, i_start, x_start, _, i_end, x_end, _) in enumerate(locations):
+    for i, (_, i_start, x_start, _, i_stop, x_stop, _) in enumerate(locations):
         # Get weights for each trace on the crop and aggregate into one value
-        weights_ = weights[i_start:i_end, x_start:x_end]
+        weights_ = weights[i_start:i_stop, x_start:x_stop]
 
         if weights_agg == 'max':
             locations_weights[i] = np.nanmax(weights_)
@@ -355,7 +366,7 @@ class GeometrySampler(BaseSampler):
 class HorizonSampler(WeightedSampler):
     """ Generator of crop locations, based on a single horizon. Not intended to be used directly, see `SeismicSampler`.
     Makes locations that:
-        - start from the labeled point on horizon, exluding those marked by `filtering_matrix`
+        - start from the labeled point on horizon, excluding those marked by `filtering_matrix`
         - contain more than `threshold` labeled pixels inside
         - don't go beyond cube limits
 
@@ -429,19 +440,19 @@ class HorizonSampler(WeightedSampler):
         # Weights initialization
         weights = kwargs.pop('weights', 'const')
         weights_agg = kwargs.pop('weights_agg', 'max')
-        self.init_weights(weights=weights, weights_agg=weights_agg)
+        self.init_weights(weights=weights, weights_agg=weights_agg, **kwargs)
         super().__init__()
 
-    def create_weights(self, weights_mode, weights_agg='max', **kwargs):
+    def create_weights(self, weights_mode='constant', weights_agg='max', **kwargs):
         """" Creating weights from a string.
 
-        Under the hood, we parse the `weights_mode` string and apply each supported creating method in it.
+        Under the hood, we parse the `weights_mode` string and apply each supported creating method in it using kwargs.
 
         Parameters
         ----------
         weights_mode : str
             A string that provides weights creating options.
-            It can be a combination of substrings:
+            It can be a combination of submodes:
                 - 'const': create weights matrix with ones.
                 - 'grad': create weights matrix as a gradient matrix.
                 - 'corrs': create weights matrix as a support correlations matrix.
@@ -451,15 +462,16 @@ class HorizonSampler(WeightedSampler):
                 the weights matrix is not defined.
             Note that for each option weights are min-max normalized for better combining multiple modes.
         weights_agg : str
-            A weights aggregation parameter which is provided directly to the :method:`get_locations_weights`.
-        kwargs : kwargs for the `weights_mode`
+            Weights aggregation option. It is used to aggregate all weights on a crop to one location weight.
+            It is provided directly to the :method:`get_locations_weights`.
+        kwargs : dict
+            Dictionary where keys are `<weights_mode submodes>_kwargs` and values are dictionaries with kwargs.
             For the following modes we can manage parameters:
-                - 'grad' mode support all :method:`Horizon.get_gradient_map` kwargs.
-                - 'near_holes' mode support only the 'iterations' argument that provides a max distance
+                - 'grad_kwargs' support all :method:`Horizon.get_gradient_map` kwargs.
+                - 'near_holes_kwargs' support only the 'max_distance' argument that provides a max distance
                 between a hole on the horizon surface and nonzero weighted traces.
-                - 'ptp' mode support next kwargs:
-                    - 'ptp_high': the highest ptp value for weighting. Values bigger than 'ptp_high'
-                    have weights equal to 0.
+                - 'ptp_kwargs' support next kwargs:
+                    - 'ptp_high': the highest depths ptp value. Values bigger than 'ptp_high' have weights equal to 0.
                     - 'ptp_weights_map': mapping ptp values to weights values. It can be a dict or a callable.
                     For example, it can be {0: 0.5} (all locations with zero ptp have 0.5 weights) or
                     .. code-block:: python
@@ -476,32 +488,33 @@ class HorizonSampler(WeightedSampler):
             Weights array with weights for each location that aggregated from the weights matrix.
         """
         # `weights` matrix initialization
-        if weights_mode.find('const') != -1:
+        if 'const' in weights_mode:
             weights = np.ones(self.matrix.shape, dtype='float')
         else:
             weights = np.zeros(self.matrix.shape, dtype='float')
 
-        if weights_mode.find('grad') != -1:
+        if 'grad' in weights_mode:
             # Calculate and add gradient matrix to the `weights`
-            weights_ = self.horizon.get_gradient_map(**kwargs)
+            weights_ = self.horizon.get_gradient_map(kwargs.pop('grad_kwargs', {}))
             weights[self.horizon.full_matrix == self.horizon.FILL_VALUE] = np.nan
             weights += self.normalize_weights(weights=weights_)
 
-        if weights_mode.find('corrs') != -1:
+        if 'corrs' in weights_mode:
             # Calculate and add correlations matrix to the `weights`
-            weights_ = self.horizon.metrics.evaluate('support_corrs', supports=100, agg='nanmean', plot=False, **kwargs)
+            weights_ = self.horizon.metrics.evaluate('support_corrs', supports=100, agg='nanmean',
+                                                     plot=False, kwargs=kwargs.pop('corrs_kwargs', {}))
             weights[self.horizon.full_matrix == self.horizon.FILL_VALUE] = np.nan
             weights += self.normalize_weights(weights=weights_)
 
-        if weights_mode.find('near_holes') != -1:
+        if 'near_holes' in weights_mode:
             # Add weights only for traces near holes
+            near_holes_kwargs_ = kwargs.pop('near_holes_kwargs', {'max_distance': 50})
             # Find holes on tha surface (excluding bad traces)
             holes_mask = 1 - (self.horizon.full_binary_matrix + self.horizon.field.zero_traces)
             holes_mask = holes_mask.astype(bool)
 
             # Get area near holes with binary dilation
-            iterations = kwargs.pop('iterations', 50)
-            weights_ = binary_dilation(holes_mask, iterations=iterations)
+            weights_ = binary_dilation(holes_mask, iterations=near_holes_kwargs_.get('max_distance'))
             weights_ = weights_ ^ holes_mask
             weights_ = weights_.astype(float)
 
@@ -519,12 +532,15 @@ class HorizonSampler(WeightedSampler):
         weights[self.horizon.full_matrix == self.horizon.FILL_VALUE] = np.nan
 
         # For 'ptp' mode weights matrix doesn't exist, get only `locations_weights`
-        if self.weights_mode.find('ptp') != -1:
-            weights = None
+        if 'ptp' in weights_mode:
             # For each location get weights as ptp of depths of the horizon
             # and prepare them depend on kwargs
-            ptp_high = self.kwargs.get('ptp_high', None)
-            ptp_weights_map = self.kwargs.get('ptp_weights_map', {0: 0})
+            weights = None
+
+            ptp_kwargs_ = kwargs.pop('ptp_kwargs', {'ptp_high': None, 'ptp_weights_map': {0: 0}})
+            ptp_high = ptp_kwargs_.get('ptp_high')
+            ptp_weights_map = ptp_kwargs_.get('ptp_weights_map')
+
             locations_weights_ = self.locations_ptps.copy()
 
             if isinstance(ptp_weights_map, dict):
@@ -620,7 +636,7 @@ class HorizonSampler(WeightedSampler):
 @njit
 def get_locations_ptps(locations, horizon_full_matrix):
     """ Helper method for the :class:`HorizonSampler`.
-    Extracts locations ptp values of horizon depths.
+    Extracts ptp values of horizon depths on locations.
 
     Parameters
     ----------
@@ -1004,7 +1020,7 @@ class SeismicSampler(Sampler):
         self.mode = mode
         self.baseclass = baseclass
 
-    def create_weights(self, weights_mode, **kwargs):
+    def create_weights(self, weights_mode='constant', weights_agg='max', **kwargs):
         """ Create weights by calling the corresponding method for each sampler in `self.samplers`.
 
         Parameters
@@ -1013,6 +1029,9 @@ class SeismicSampler(Sampler):
             Weights mode for creating weights.
             If str, then `weights_mode` is applied for each sampler.
             If AugmentedDict, then for each sampler applied the corresponding mode.
+        weights_agg : str
+            Weights aggregation option. It is used to aggregate all weights on a crop to one location weight.
+            It is provided directly to the :method:`get_locations_weights`.
         kwargs : dict
             Other parameters of creating samplers weights.
 
@@ -1026,20 +1045,25 @@ class SeismicSampler(Sampler):
 
         if not isinstance(weights_mode, AugmentedDict):
             weights_mode_ = weights_mode
+        if not isinstance(weights_agg, AugmentedDict):
+            weights_agg_ = weights_agg
 
         for idx in self.samplers:
             for i, sampler in enumerate(self.samplers[idx]):
                 if isinstance(weights_mode, AugmentedDict):
                     weights_mode_ = weights_mode[idx][i]
+                if isinstance(weights_mode, AugmentedDict):
+                    weights_agg_ = weights_agg[idx][i]
 
                 # Create and save weights
-                weights_, locations_weights_ = sampler.create_weights(weights_mode=weights_mode_, **kwargs)
+                weights_, locations_weights_ = sampler.create_weights(weights_mode=weights_mode_,
+                                                                      weights_agg=weights_agg_, **kwargs)
                 weights[idx].append(weights_)
                 locations_weights[idx].append(locations_weights_)
 
         return weights, locations_weights
 
-    def set_weights(self, weights, **kwargs):
+    def set_weights(self, weights=None, weights_mode=None):
         """ Set weights of samplers with provided values.
 
         Under the hood, this method calls the `set_weights` method for each sampler in `self.samplers`.
@@ -1050,19 +1074,27 @@ class SeismicSampler(Sampler):
             Weights matrix for each sampler.
             Note that the `weights` parameter can be a weights matrix only in case there is
             only one sampler in `self.samplers`.
+        weights_mode : AugmentedDict or str
+            Weights mode for creating weights.
+            If str, then `weights_mode` is applied for each sampler.
+            If AugmentedDict, then for each sampler applied the corresponding mode.
         kwargs : dict
             Other parameters of setting samplers weights.
         """
         if not isinstance(weights, AugmentedDict):
             weights_ = weights
+        if not isinstance(weights_mode, AugmentedDict):
+            weights_mode_ = weights_mode
 
         for idx in self.samplers:
             for i, sampler in enumerate(self.samplers[idx]):
                 if isinstance(weights, AugmentedDict):
                     weights_ = weights[idx][i]
+                if isinstance(weights_mode, AugmentedDict):
+                    weights_mode_ = weights_mode[idx][i]
 
                 # Set weights
-                sampler.set_weights(weights=weights_, **kwargs)
+                sampler.set_weights(weights=weights_, weights_mode=weights_mode_)
 
     def sample(self, size):
         """ Generate exactly `size` locations. """
