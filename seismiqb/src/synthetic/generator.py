@@ -1,19 +1,21 @@
 """ Functions for generation of 2d and 3d synthetic seismic arrays.
 """
 #pylint: disable=not-an-iterable
+from collections import defaultdict
+
 import numpy as np
 from numba import njit, prange
 
 import cv2
 from scipy.interpolate import interp1d, interp2d
 from scipy.ndimage import gaussian_filter, map_coordinates, binary_dilation
-from scipy.signal import ricker, convolve
+from scipy.signal import ricker, convolve, resample
 
 from ..plotters import MatplotlibPlotter, plot_image
 
 
 @njit(parallel=True)
-def compute_impedance_model(buffer, impedance_vector, horizon_matrices):
+def compute_velocity_model(buffer, velocity_vector, horizon_matrices):
     """ !!. """
     i_range, x_range, depth = buffer.shape
 
@@ -21,47 +23,85 @@ def compute_impedance_model(buffer, impedance_vector, horizon_matrices):
         for j in range(x_range):
             indices = horizon_matrices[:, i, j]
 
-            for k, impedance_value in enumerate(impedance_vector[:-1]):
+            for k, velocity_value in enumerate(velocity_vector[:-1]):
                 start, stop = indices[k], indices[k+1]
-                buffer[i, j, start : stop] = impedance_value
+                buffer[i, j, start : stop] = velocity_value
 
             final = indices[-1]
             if final < depth:
-                buffer[i, j, final:] = impedance_vector[-1]
+                buffer[i, j, final:] = velocity_vector[-1]
 
     return buffer
 
 @njit(parallel=True)
-def compute_reflectivity_model(buffer, resistance):
+def compute_reflectivity_model(buffer, impedance_model):
     """ !!. """
     i_range, x_range, depth = buffer.shape
 
     for i in prange(i_range):
         for j in range(x_range):
+            eps = 2 * impedance_model[i, j, depth // 2]
             for k in range(1, depth):
-                previous_element, current_element = resistance[i, j, k-1], resistance[i, j, k]
+                previous_element, current_element = impedance_model[i, j, k-1], impedance_model[i, j, k]
                 buffer[i, j, k] = ((current_element - previous_element) /
-                                   (current_element + previous_element))
+                                   (current_element + previous_element + eps))
 
             buffer[i, j, 0] = buffer[i, j, 1]
     return buffer
 
+@njit
+def inplace_add(matrix, indices_1, indices_2):
+    """ !!. """
+    for i_1, i_2 in zip(indices_1, indices_2):
+        matrix[i_1, i_2] += 1
+    return matrix
+
+
+@njit
+def find_depths(array, idx_x, depths):
+    """ !!. """
+    array_depth = array.shape[-1]
+    output = np.empty_like(idx_x)
+
+    for i in range(len(output)):
+        idx_x_, depth = idx_x[i], depths[i]
+        closest_idx, closest_diff = 0, array_depth
+
+        for k in range(0, array_depth):
+            idx = array[idx_x_, k]
+            diff = abs(idx - depth)
+            if diff < 1.:
+                closest_idx = k
+                break
+            if diff <= closest_diff:
+                closest_idx = k
+                closest_diff = diff
+
+        output[i] = closest_idx
+    return output
+
+
 
 class NewSyntheticGenerator:
     """ !!. """
-    def __init__(self, rng=None, seed=None):
+    def __init__(self, rng=None, seed=None, **kwargs):
         # Random number generator. Should be used exclusively throughout the class for randomization
         self.rng = rng or np.random.default_rng(seed)
 
-        self.impedance_vector = None
+        self.velocity_vector = None
         self.num_horizons = None
         self.amplified_horizon_indices = None
 
         self.shape = None
+        self.depth = None
         self.depth_intervals = None
         self.horizon_matrices = None
+        self.fault_id = 0
+        self.fault_point_clouds = defaultdict(list) # mapping from inline coordinate to list of point clouds
+        self.fault_paths = {}
 
         # Models: arrays of `shape` with different geological attributes of the seismic
+        self.velocity_model = None
         self.impedance_model = None
         self.density_model = None
         self.reflectivity_model = None
@@ -69,14 +109,19 @@ class NewSyntheticGenerator:
 
         # Properties
         self._horizon_mask = None
+        self._fault_mask = None
+
+        for key, value in kwargs.items():
+            setattr(self, key, value)
 
 
-    def make_impedance_vector(self, num_horizons=10, limits=(5_000, 10_000), amplify=None,
-                              randomization='uniform', randomization_scale=0.3):
+    # Make velocity model: base for seismic generation
+    def make_velocity_vector(self, num_horizons=10, limits=(5_000, 10_000), amplify=None,
+                             randomization='uniform', randomization_scale=0.3):
         """ !!. """
         # TODO: maybe, add scale back to initial `limits` range?
-        # Base impedance vector
-        impedance_vector, delta = np.linspace(*limits, num=num_horizons, retstep=True, dtype=np.float32)
+        # Base velocity vector
+        velocity_vector, delta = np.linspace(*limits, num=num_horizons, retstep=True, dtype=np.float32)
 
         # Generate and apply perturbation. Note the dtype
         if randomization == 'normal':
@@ -86,27 +131,27 @@ class NewSyntheticGenerator:
         else:
             perturbation = 0
 
-        impedance_vector += randomization_scale * delta * perturbation
+        velocity_vector += randomization_scale * delta * perturbation
 
         # Amplify some of the horizons
         amplified_horizon_indices = []
         if amplify:
             for depth, multiplier in amplify:
                 index = round(depth * num_horizons)
-                impedance_vector[index:] += delta * multiplier
+                velocity_vector[index:] += delta * multiplier
                 amplified_horizon_indices.append(index)
 
         # Store in the instance
         self.num_horizons = num_horizons
-        self.impedance_vector = impedance_vector
+        self.velocity_vector = velocity_vector
         self.amplified_horizon_indices = amplified_horizon_indices
         return self
 
-
     def make_horizons(self, shape, num_horizons=None,
                       horizon_intervals='uniform', interval_randomization=None, interval_randomization_scale=0.1,
-                      horizon_randomization1=True, num_nodes=10, interpolation_kind='cubic', randomization1_scale=0.25,
-                      horizon_randomization2=False, randomization2_scale=0.1):
+                      horizon_randomization1=True, randomization1_scale=0.25, num_nodes=10, interpolation_kind='cubic',
+                      horizon_randomization2=False, randomization2_scale=0.1, digitize=True, n_bins=10,
+                      locs_n_range=(2, 10), locs_scale_range=(5, 15), sample_size=None, blur_size=9, blur_sigma=2.):
         """ !!. """
         # TODO: maybe, reverse the direction?
         # Parse parameters
@@ -140,11 +185,17 @@ class NewSyntheticGenerator:
 
             if horizon_randomization1:
                 perturbation_matrix = self.make_randomization1_matrix(shape=spatial_shape, num_nodes=num_nodes,
-                                                                      interpolation_kind=interpolation_kind)
+                                                                      interpolation_kind=interpolation_kind,
+                                                                      rng=self.rng)
                 next_matrix += randomization1_scale * depth_interval * perturbation_matrix
 
-            if horizon_randomization2: # TODO
-                perturbation_matrix = ...
+            if horizon_randomization2:
+                perturbation_matrix = self.make_randomization2_matrix(shape=spatial_shape,
+                                                                      locs_n_range=locs_n_range,
+                                                                      locs_scale_range=locs_scale_range,
+                                                                      sample_size=sample_size,
+                                                                      blur_size=blur_size, blur_sigma=blur_sigma,
+                                                                      digitize=digitize, n_bins=n_bins)
                 next_matrix += randomization2_scale * depth_interval * perturbation_matrix
 
             horizon_matrices.append(next_matrix)
@@ -153,45 +204,179 @@ class NewSyntheticGenerator:
         horizon_matrices = np.round(horizon_matrices).astype(np.int32)
 
         self.shape = shape
+        self.depth = shape[-1]
         self.depth_intervals = depth_intervals
         self.horizon_matrices = horizon_matrices
         return self
 
-
-    def make_randomization1_matrix(self, shape, num_nodes=10, interpolation_kind='cubic'):
-        """ !!. """
-        # Parse parameters
-        squeezed_shape = tuple(s for s in shape if s != 1)
-
-        if len(squeezed_shape) == 1:
-            num_nodes = (num_nodes,) if isinstance(num_nodes, int) else num_nodes
-            interpolator_constructor = interp1d
-        else:
-            num_nodes = (num_nodes, num_nodes) if isinstance(num_nodes, int) else num_nodes
-            interpolator_constructor = interp2d
-
-        # Create interpolator on nodes
-        nodes_grid =  [np.linspace(0, 1, num_nodes_, dtype=np.float32) for num_nodes_ in num_nodes]
-        nodes_matrix = 2 * self.rng.random(size=num_nodes, dtype=np.float32).T - 1
-        # print(nodes_grid, nodes_matrix.shape)
-
-        interpolator = interpolator_constructor(*nodes_grid, nodes_matrix, kind=interpolation_kind)
-
-        # Apply interpolator on actual shape
-        spatial_grid = [np.linspace(0, 1, s, dtype=np.float32) for s in squeezed_shape]
-        spatial_matrix = interpolator(*spatial_grid).T
-
-        return spatial_matrix.astype(np.float32).reshape(shape)
-
-
-    def make_impedance_model(self):
+    def make_velocity_model(self):
         """ !!. """
         buffer = np.empty(self.shape, dtype=np.float32)
-        impedance_model = compute_impedance_model(buffer, self.impedance_vector, self.horizon_matrices)
-        self.impedance_model = impedance_model
+        velocity_model = compute_velocity_model(buffer, self.velocity_vector, self.horizon_matrices)
+        self.velocity_model = velocity_model
         return self
 
 
+    # Modifications of velocity model
+    def make_fault_2d(self, coordinates, max_shift=20, width=3, fault_id=0,
+                      shift_vector=None, shift_sign=+1, mode='sin2', num_zeros=0.1,
+                      perturb_peak=True, perturb_values=True,
+                      ):
+        """ !!. """
+        # Parse parameters
+        point_1, point_2 = coordinates
+        point_1 = point_1 if len(point_1) == 3 else (0, *point_1)
+        point_2 = point_2 if len(point_2) == 3 else (0, *point_2)
+
+        point_1 = tuple(int(c * (s - 1)) if isinstance(c, (float, np.floating)) else c
+                        for c, s in zip(point_1, self.shape))
+        point_2 = tuple(int(c * (s - 1)) if isinstance(c, (float, np.floating)) else c
+                        for c, s in zip(point_2, self.shape))
+
+        (i1, x1, d1), (i2, x2, d2) = point_1, point_2
+        # Make sure that i1 == i2!
+
+        # Define crop of the slide that we work with: ranges along both axis
+        x_low, x_high = 0, self.shape[1]
+        d_low, d_high = min(d1, d2), max(d1, d2)
+        x_len, d_len = x_high - x_low, d_high - d_low
+
+        # Axis meshes: both (x_len, d_len) shape
+        xmesh, dmesh = np.meshgrid(np.arange(x_low, x_high), np.arange(0, d_high - d_low), indexing='ij')
+
+        # Compute the direction vector of a plane
+        d1_, d2_ = d1 - d_low, d2 - d_low
+
+        k = (x2 - x1) / (d2_ - d1_)
+        b = (x1 * d2_ - x2 * d1_) / (d2_ - d1_)
+        kx, kd = (k, 1)
+
+        # Define distance to plane, use it to restrict coordinate shifts to an area
+        # TODO: add curving to the plane (e.g. sine wave)
+        distance = xmesh - kx * dmesh - b                     # range (-inf, + inf)
+        indicator = np.clip(distance / width, 0, 1)           # range [0, 1]: fractions used to imitate transition
+
+        # Make shift vector
+        if shift_vector is not None:
+            if len(shift_vector) != d_len:
+                shift_vector = resample(shift_vector, d_len)
+        else:
+            shift_vector = self.make_shift_vector(d_len, mode=mode, num_zeros=num_zeros, rng=self.rng,
+                                                  perturb_peak=perturb_peak, perturb_values=perturb_values)
+        shift_vector *= shift_sign
+
+        # Final shifts: (x_len, d_len) shaped matrix with shifts for each pixel
+        shifts = max_shift * indicator * shift_vector.reshape(1, -1)
+
+        # Transform velocity model: actually, optional
+        # TODO: test if creating velocity model after adding faults is better
+        if self.velocity_model is not None:
+            map_coordinates(input=self.velocity_model[i1, x_low:x_high, d_low:d_high],
+                            coordinates=(xmesh + kx * shifts, dmesh + kd * shifts),
+                            output=self.velocity_model[i1, x_low:x_high, d_low:d_high],
+                            mode='nearest')
+
+        # Transform horizon matrices: compute indices after shift
+        indices_array = (np.zeros_like(self.velocity_model) +
+                         np.arange(0, self.depth, dtype=np.float32).reshape(1, 1, -1))
+
+        map_coordinates(input=indices_array[i1, x_low:x_high, d_low:d_high],
+                        coordinates=(xmesh + kx * shifts, dmesh + kd * shifts),
+                        output=indices_array[i1, x_low:x_high, d_low:d_high],
+                        mode='nearest')
+
+        horizon_matrices_shifted = self.horizon_matrices.copy()
+        for i, horizon_matrix in enumerate(self.horizon_matrices):
+            # Find the position of original `depth` in the transformed indices
+            idx_x = np.nonzero(horizon_matrix[i1])[0]
+            depths = horizon_matrix[i1][idx_x]
+
+            mask = (0 <= depths) & (depths < self.depth)
+            idx_x, depths = idx_x[mask], depths[mask]
+
+            horizon_matrices_shifted[i][i1][idx_x] = find_depths(indices_array[i1], idx_x, depths)
+
+        # Transform fault point clouds on the same slide
+        shifts_array = np.zeros(self.shape[1:], dtype=np.float32)
+        shifts_array[x_low:x_high, d_low:d_high] = shifts
+
+        updated_point_clouds = []
+        for fault_id, (idx_x, depths) in self.fault_point_clouds[i1]:
+            shifts_ = shifts_array[idx_x, depths]
+            idx_x, depths = idx_x + kx * shifts_, depths + kd * shifts_
+            idx_x, depths = np.round(idx_x).astype(np.int32), np.round(depths).astype(np.int32)
+
+            updated_point_clouds.append((fault_id, (idx_x, depths)))
+        self.fault_point_clouds[i1] = updated_point_clouds
+
+        # Store the added fault point cloud
+        idx_x, depths = np.nonzero((0 <= distance) & (distance / width < 1))
+        idx_x, depths = idx_x.astype(np.int32), depths.astype(np.int32)
+        depths += d_low
+        mask = (d_low <= depths) & (depths < d_high)
+        idx_x, depths = idx_x[mask], depths[mask]
+        self.fault_point_clouds[i1].append((fault_id, (idx_x, depths)))
+
+        self.horizon_matrices = horizon_matrices_shifted
+        self.indices_array = indices_array
+        return self
+
+
+    def make_fault_3d(self, upper_points, lower_points, max_shift=20, width=3,
+                      shift_sign=+1, mode='sin2', num_zeros=0.1, perturb_peak=True, perturb_values=True,):
+        """ !!. """
+        # Prepare points
+        upper_points = tuple(tuple(int(c * (s - 1)) if isinstance(c, (float, np.floating)) else c
+                                   for c, s in zip(point, self.shape))
+                             for point in upper_points)
+        lower_points = tuple(tuple(int(c * (s - 1)) if isinstance(c, (float, np.floating)) else c
+                                   for c, s in zip(point, self.shape))
+                             for point in lower_points)
+
+        # Prepare paths
+        upper_path = []
+        for i in range(len(upper_points) - 1):
+            path = self.make_path(upper_points[i], upper_points[i + 1])
+            upper_path.extend(path)
+        upper_path = sorted(set(upper_path), key=lambda item: item[0])
+
+        lower_path = []
+        for i in range(len(lower_points) - 1):
+            path = self.make_path(lower_points[i], lower_points[i + 1])
+            lower_path.extend(path)
+        lower_path = sorted(set(lower_path), key=lambda item: item[0])
+
+        # Prepare one common shift vector: resampled in each slice
+        shift_vector = self.make_shift_vector(self.depth, mode=mode, num_zeros=num_zeros,
+                                              perturb_peak=perturb_peak, perturb_values=perturb_values, rng=self.rng)
+
+        for upper_point, lower_point in zip(upper_path, lower_path):
+            self.make_fault_2d((upper_point, lower_point), max_shift=max_shift, width=width, fault_id=self.fault_id,
+                               shift_vector=shift_vector, shift_sign=shift_sign)
+
+        self.fault_paths[self.fault_id] = (upper_path, lower_path)
+        self.fault_id += 1
+        return self
+
+    @staticmethod
+    def make_path(point_1, point_2):
+        """ !!. """
+        (i1, x1, d1), (i2, x2, d2) = point_1, point_2
+
+        n = i2 - i1
+        t = np.arange(0, n + 1, dtype=np.int32, )
+
+        i_array = i1 +                   t
+        x_array = x1 + ((x2 - x1) / n) * t
+        d_array = d1 + ((d2 - d1) / n) * t
+
+        x_array = np.round(x_array).astype(np.int32)
+        d_array = np.round(d_array).astype(np.int32)
+
+        return list(zip(i_array, x_array, d_array))
+
+
+    # Generate synthetic seismic, based on velocities
     def make_density_model(self, scale=0.01,
                            randomization='uniform', randomization_limits=(0.97, 1.03), randomization_scale=0.1):
         """ !!. """
@@ -203,9 +388,13 @@ class NewSyntheticGenerator:
         else:
             perturbation = scale * 1.0
 
-        self.density_model = self.impedance_model * perturbation
+        self.density_model = self.velocity_model * perturbation
         return self
 
+    def make_impedance_model(self):
+        """ !!. """
+        self.impedance_model = self.velocity_model * self.density_model
+        return self
 
     def make_reflectivity_model(self):
         """ !!.
@@ -213,12 +402,10 @@ class NewSyntheticGenerator:
                         (resistance[..., 1:] + resistance[..., :-1]))
         """
         buffer = np.empty_like(self.impedance_model)
-        resistance = self.impedance_model * self.density_model
-        reflectivity_model = compute_reflectivity_model(buffer, resistance)
+        reflectivity_model = compute_reflectivity_model(buffer, self.impedance_model)
 
         self.reflectivity_model = reflectivity_model
         return self
-
 
     def make_synthetic(self, ricker_width=5, ricker_points=50):
         """ !!. """
@@ -256,13 +443,13 @@ class NewSyntheticGenerator:
         if isinstance(indices, (slice, list)):
             pass
         elif indices == 'all':
-            indices = slice(None)
+            indices = slice(1, None)
         elif indices == 'amplified':
             indices = self.amplified_horizon_indices
         elif 'top' in indices:
             k = int(indices[3:].strip())
-            impedance_deltas = np.abs(np.diff(self.impedance_vector))
-            indices = np.argsort(impedance_deltas)[::-1][:k]
+            velocity_deltas = np.abs(np.diff(self.velocity_vector))
+            indices = np.argsort(velocity_deltas)[::-1][:k]
         else:
             raise ValueError(f'Unsupported `indices={indices}`!')
 
@@ -274,8 +461,8 @@ class NewSyntheticGenerator:
         elif 'instance' in format:
             result = ... #TODO
         elif 'mask' in format:
-            indices = np.nonzero((0 <= horizon_matrices) & (horizon_matrices < self.shape[-1]))
-            result = np.zeros_like(self.impedance_model)
+            indices = np.nonzero((0 <= horizon_matrices) & (horizon_matrices < self.depth))
+            result = np.zeros(self.shape, dtype=np.float32)
             result[(*indices[1:], horizon_matrices[indices])] = 1
 
             if width is not None:
@@ -284,6 +471,7 @@ class NewSyntheticGenerator:
                 for i in range(self.shape[0]):
                     cv2.filter2D(src=result[i], ddepth=-1, kernel=kernel,
                                  dst=result[i], borderType=cv2.BORDER_CONSTANT)
+            result = np.clip(result, 0, 1)
         else:
             raise ValueError(f'Unsupported `format={format}`!')
         return result
@@ -301,65 +489,240 @@ class NewSyntheticGenerator:
         return self._horizon_mask
 
 
+    def extract_faults(self, format='mask', width=5):
+        """ !!. """
+        if 'cloud' in format:
+            ...
+        elif 'instance' in format:
+            ...
+        elif 'mask' in format:
+            result = np.zeros(self.shape, dtype=np.float32)
+
+            for i in self.fault_point_clouds.keys():
+                for _, (idx_x, depths) in self.fault_point_clouds[i]:
+                    result[i][idx_x, depths] = 1
+
+            if width is not None:
+                kernel = np.ones(width, dtype=np.float32).reshape(width, 1)
+
+                for i in range(self.shape[0]):
+                    cv2.filter2D(src=result[i], ddepth=-1, kernel=kernel,
+                                 dst=result[i], borderType=cv2.BORDER_CONSTANT)
+            result = np.clip(result, 0, 1)
+
+        else:
+            raise ValueError(f'Unsupported `format={format}`!')
+        return result
+
+    @property
+    def fault_mask(self):
+        """ !!. """
+        if self._fault_mask is None:
+            self._fault_mask = self.extract_faults(format='mask')
+        return self._fault_mask
+
+
     # Visualization
-    def show_slide(self, loc=None, axis=0, return_figure=False, **kwargs):
+    def show_slide(self, loc=None, axis=0, velocity_cmap='jet', return_figure=False,
+                   horizon_width=5, fault_width=7, **kwargs):
         """ !!. """
         #TODO: add the same functionality, as in `SeismicCropBatch.plot_roll`
-        loc = loc or self.shape[axis] // 2
+        #TODO: use the same v_min/v_max for all locations
+        try:
+            loc = loc or self.shape[axis] // 2
+            self._horizon_mask_ = self.extract_horizons(width=horizon_width)
+            self._fault_mask_ = self.extract_faults(width=fault_width)
 
-        # Retrieve data
-        attributes = ['impedance_model', 'reflectivity_model', 'synthetic', 'horizon_mask']
-        default_cmaps = ['plasma', 'gray', 'gray', 'gray']
+            # Non-overlapping data
+            attributes = ['velocity_model', 'reflectivity_model', 'synthetic', '_horizon_mask_', '_fault_mask_']
+            default_cmaps = [velocity_cmap, 'gray', 'gray', 'gray', 'gray']
 
-        data, titles, cmaps = [], [], []
-        for attribute, cmap in zip(attributes, default_cmaps):
-            try:
-                image = np.take(getattr(self, attribute), indices=loc, axis=axis)
-                data.append([image])
-                titles.append(f'`{attribute}`')
-                cmaps.append([cmap])
-            except AttributeError:
-                pass
+            data, titles, cmaps = [], [], []
+            for attribute, cmap in zip(attributes, default_cmaps):
+                try:
+                    image = np.take(getattr(self, attribute), indices=loc, axis=axis)
+                    data.append([image])
+                    titles.append(f'`{attribute.strip("_")}`')
+                    cmaps.append([cmap])
+                except AttributeError:
+                    pass
 
-        # Display images
-        plot_params = {
-            'suptitle': f'SyntheticGenerator slide: loc={loc}, axis={axis}',
-            'title': titles,
-            'cmap': cmaps,
-            'colorbar': True,
-            'ncols': 5,
-            'scale': 0.5,
-            'shapes': 1, # this parameter toggles additional subplot axes creation for further legend display
-            'return_figure': True,
-            **kwargs
-        }
-        fig = plot_image(data, **plot_params)
+            # Overlapping data
+            horizon_mask = np.take(self._horizon_mask_, indices=loc, axis=axis)
+            fault_mask = np.take(self._fault_mask_, indices=loc, axis=axis)
 
-        # Display textual information on the same figure
-        msg = f'shape = {self.shape}\nnum_horizons = {self.num_horizons}'
-        msg += f'\nmin_interval = {self.depth_intervals.min() * self.shape[-1]:4.0f}'
-        msg += f'\nmax_interval = {self.depth_intervals.max() * self.shape[-1]:4.0f}'
-        msg += f'\nmean_interval = {self.depth_intervals.mean() * self.shape[-1]:4.0f}'
-        legend_params = {
-            'color': 'pink',
-            'label': msg,
-            'size': 14, 'loc': 10,
-            'facecolor': 'pink',
-        }
-        MatplotlibPlotter.add_legend(ax=fig.axes[len(data)], **legend_params)
+            attributes = ['velocity_model', 'synthetic']
+            default_cmaps = [velocity_cmap, 'gray']
+            for attribute, cmap in zip(attributes, default_cmaps):
+                try:
+                    image = np.take(getattr(self, attribute), indices=loc, axis=axis)
+                    data.append([image, horizon_mask, fault_mask])
+                    titles.append(f'`{attribute} overlayed`')
+                    cmaps.append([cmap, 'red', 'purple'])
+                except AttributeError:
+                    pass
+
+            # Reorder
+            if len(data) == 7:
+                order = [0, 5, 2, 6, 1, 3, 4]
+                data = [data[item] for item in order]
+                titles = [titles[item] for item in order]
+                cmaps = [cmaps[item] for item in order]
+
+            # Display images
+            plot_params = {
+                'suptitle': f'SyntheticGenerator slide: loc={loc}, axis={axis}',
+                'title': titles,
+                'cmap': cmaps,
+                'colorbar': True,
+                'ncols': 4,
+                'scale': 0.5,
+                'shapes': 1, # this parameter toggles additional subplot axes creation for further legend display
+                'return_figure': True,
+                **kwargs
+            }
+            fig = plot_image(data, **plot_params)
+
+            # Display textual information on the same figure
+            msg = f'shape = {self.shape}\nnum_horizons = {self.num_horizons}'
+            msg += f'\nmin_interval = {self.depth_intervals.min() * self.depth:4.0f}'
+            msg += f'\nmax_interval = {self.depth_intervals.max() * self.depth:4.0f}'
+            msg += f'\nmean_interval = {self.depth_intervals.mean() * self.depth:4.0f}'
+            legend_params = {
+                'color': 'pink',
+                'label': msg,
+                'size': 14, 'loc': 10,
+                'facecolor': 'pink',
+            }
+            MatplotlibPlotter.add_legend(ax=fig.axes[len(data)], **legend_params)
+
+        finally:
+            self._horizon_mask_, self._fault_mask_ = None, None
 
         if return_figure:
             return fig
         return None
 
+    def show_stats(self, ):
+        """ !!. """
+        # d = np.arange(1, 1500 + 1)
+        # plot_image(generator.reflectivity_model.mean(axis=(0, 1)), mode='curve')
 
 
     # Utilities and faster versions of common operations
     @staticmethod
-    def apply_gaussian_filter_3d(array, kernel_size=9, sigma=1.):
+    def make_gaussian_kernel_1d(kernel_size, sigma):
         """ !!. """
         kernel_1d = np.linspace(-(kernel_size - 1) / 2., (kernel_size - 1) / 2., kernel_size, dtype=np.float32)
         kernel_1d = np.exp(-0.5 * np.square(kernel_1d) / np.square(sigma))
+        return kernel_1d / kernel_1d.sum()
+
+    @staticmethod
+    def make_randomization1_matrix(shape, num_nodes=10, interpolation_kind='cubic', rng=None):
+        """ !!. """
+        # Parse parameters
+        rng = rng if isinstance(rng, np.random.Generator) else np.random.default_rng(rng)
+        squeezed_shape = tuple(s for s in shape if s != 1)
+
+        if len(squeezed_shape) == 1:
+            num_nodes = (num_nodes,) if isinstance(num_nodes, int) else num_nodes
+            interpolator_constructor = interp1d
+        else:
+            num_nodes = (num_nodes, num_nodes) if isinstance(num_nodes, int) else num_nodes
+            interpolator_constructor = interp2d
+
+        # Create interpolator on nodes
+        nodes_grid =  [np.linspace(0, 1, num_nodes_, dtype=np.float32) for num_nodes_ in num_nodes]
+        nodes_matrix = 2 * rng.random(size=num_nodes, dtype=np.float32).T - 1
+
+        interpolator = interpolator_constructor(*nodes_grid, nodes_matrix, kind=interpolation_kind)
+
+        # Apply interpolator on actual shape
+        spatial_grid = [np.linspace(0, 1, s, dtype=np.float32) for s in squeezed_shape]
+        spatial_matrix = interpolator(*spatial_grid).T
+        return spatial_matrix.astype(np.float32).reshape(shape)
+
+    @staticmethod
+    def make_randomization2_matrix(shape, locs_n_range=(2, 10), locs_scale_range=(5, 15), sample_size=None,
+                                   blur_size=9, blur_sigma=2., digitize=True, n_bins=10, rng=None):
+        # Parse parameters
+        rng = rng if isinstance(rng, np.random.Generator) else np.random.default_rng(rng)
+        sample_size = sample_size or max(10000, np.prod(shape))
+
+        # Generate locations for gaussians
+        locs_n = np.random.randint(*locs_n_range)
+        locs_low = [0 for _ in range(2*locs_n)]
+        locs_high = [shape[i % 2] for i in range(2*locs_n)]
+
+        locs = rng.uniform(low=locs_low, high=locs_high)
+
+        # Sample points from all gaussians
+        locs_scales = rng.uniform(*locs_scale_range, size=2*locs_n)
+        sampled = rng.normal(loc=locs, scale=locs_scales, size=(sample_size, 2*locs_n))
+        sampled = np.round(sampled).astype(np.int32)
+
+        # Prepare indices
+        indices_1, indices_2 = sampled[:, 0::2].reshape(-1), sampled[:, 1::2].reshape(-1)
+        mask_1 = (0 <= indices_1) & (indices_1 < shape[0])
+        mask_2 = (0 <= indices_2) & (indices_2 < shape[1])
+        mask = mask_1 & mask_2
+
+        indices_1 = indices_1[mask]
+        indices_2 = indices_2[mask]
+
+        # Create matrix: add ones at `indices`
+        matrix = np.zeros(shape, dtype=np.float32)
+        matrix = inplace_add(matrix, indices_1, indices_2)
+
+        # Final blur and digitize
+        kernel_1d = NewSyntheticGenerator.make_gaussian_kernel_1d(kernel_size=blur_size, sigma=blur_sigma)
+        cv2.sepFilter2D(src=matrix, ddepth=-1, kernelX=kernel_1d.reshape(1, -1), kernelY=kernel_1d.reshape(-1, 1),
+                        dst=matrix, borderType=cv2.BORDER_CONSTANT)
+        matrix /= matrix.max()
+
+        if digitize:
+            bins = np.linspace(0, 1, n_bins + 1, dtype=np.float32)
+            matrix = np.digitize(matrix, bins).astype(np.float32)
+            matrix /= n_bins
+
+        return matrix
+
+    @staticmethod
+    def make_shift_vector(num_points, mode='sin2', num_zeros=0.2, perturb_peak=True, perturb_values=True, rng=None):
+        """ !!. """
+        # TODO: dtypes? do we need them here (output of this function used for map_coordinates only)
+        # Parse parameters
+        rng = rng if isinstance(rng, np.random.Generator) else np.random.default_rng(rng)
+        num_zeros = int(num_points * num_zeros) if isinstance(num_zeros, (float, np.floating)) else num_zeros
+        num_nonzeros = num_points - num_zeros
+
+        # Compute shifts for non-zeros
+        if mode == 'sin2':
+            x = np.arange(0, num_nonzeros)
+            values = np.sin(np.pi * x / num_nonzeros) ** 2
+
+        if perturb_values:
+            step = 1 / num_nonzeros
+            values += rng.uniform(-step, +step, num_nonzeros)
+
+        # Define ranges of zeroes / actual values
+        left = num_zeros // 2
+        right = num_zeros - left
+
+        if perturb_peak:
+            peak_shift = rng.integers(-left // 2, right // 2)
+            left += peak_shift
+            right -= peak_shift
+
+        # Make vector
+        vector = np.zeros(num_points, dtype=np.float32)
+        vector[left : -right] = values
+        return vector
+
+    @staticmethod
+    def apply_gaussian_filter_3d(array, kernel_size=9, sigma=1.):
+        """ !!. """
+        kernel_1d = NewSyntheticGenerator.make_gaussian_kernel_1d(kernel_size=kernel_size, sigma=sigma)
 
         for i in range(array.shape[0]):
             cv2.sepFilter2D(src=array[i], ddepth=-1, kernelX=kernel_1d.reshape(1, -1), kernelY=kernel_1d.reshape(-1, 1),
@@ -368,7 +731,7 @@ class NewSyntheticGenerator:
         if array.shape[0] >= 3 * sigma * kernel_size:
             for j in range(array.shape[1]):
                 cv2.filter2D(src=array[:, j], ddepth=-1, kernel=kernel_1d.reshape(-1, 1),
-                            dst=array[:, j], borderType=cv2.BORDER_CONSTANT)
+                             dst=array[:, j], borderType=cv2.BORDER_CONSTANT)
         return array
 
 

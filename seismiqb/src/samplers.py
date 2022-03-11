@@ -503,7 +503,7 @@ class SyntheticSampler(Sampler):
         self.kwargs = kwargs
         self.n = 10000 ** 3
 
-        self.name = self.disaplyed_name = field.name
+        self.name = self.displayed_name = field.name
         super().__init__()
 
     def sample(self, size):

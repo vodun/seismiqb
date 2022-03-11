@@ -335,15 +335,16 @@ class SeismicCropBatch(Batch):
             data = np.clip(data, normalization_stats['q_01'], normalization_stats['q_99'])
 
         # Actual normalization
-        result = data.copy()
+        result = data.copy() if data.base is not None else data
 
         if 'mean' in mode:
             result -= normalization_stats['mean']
         if 'std' in mode:
             result /= normalization_stats['std']
         if 'min' in mode and 'max' in mode:
-            result = ((result - normalization_stats['min'])
-                    / (normalization_stats['max'] - normalization_stats['min']))
+            if normalization_stats['max'] != normalization_stats['min']:
+                result = ((result - normalization_stats['min'])
+                        / (normalization_stats['max'] - normalization_stats['min']))
 
         return result
 
