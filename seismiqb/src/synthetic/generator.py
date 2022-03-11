@@ -1,6 +1,6 @@
 """ Functions for generation of 2d and 3d synthetic seismic arrays.
 """
-#pylint: disable=not-an-iterable
+#pylint: disable=not-an-iterable, too-many-arguments, too-many-statements, redefined-builtin
 from collections import defaultdict
 
 import numpy as np
@@ -60,6 +60,7 @@ def inplace_add(matrix, indices_1, indices_2):
 @njit
 def find_depths(array, idx_x, depths):
     """ !!. """
+    #pylint: disable=consider-using-enumerate
     array_depth = array.shape[-1]
     output = np.empty_like(idx_x)
 
@@ -234,12 +235,13 @@ class NewSyntheticGenerator:
                         for c, s in zip(point_2, self.shape))
 
         (i1, x1, d1), (i2, x2, d2) = point_1, point_2
-        # Make sure that i1 == i2!
+        if i1 != i2:
+            raise ValueError(f'Points should be on the same iline! {point_1}, {point_2}')
 
         # Define crop of the slide that we work with: ranges along both axis
         x_low, x_high = 0, self.shape[1]
         d_low, d_high = min(d1, d2), max(d1, d2)
-        x_len, d_len = x_high - x_low, d_high - d_low
+        d_len = d_high - d_low
 
         # Axis meshes: both (x_len, d_len) shape
         xmesh, dmesh = np.meshgrid(np.arange(x_low, x_high), np.arange(0, d_high - d_low), indexing='ij')
@@ -301,12 +303,12 @@ class NewSyntheticGenerator:
         shifts_array[x_low:x_high, d_low:d_high] = shifts
 
         updated_point_clouds = []
-        for fault_id, (idx_x, depths) in self.fault_point_clouds[i1]:
+        for fault_id_, (idx_x, depths) in self.fault_point_clouds[i1]:
             shifts_ = shifts_array[idx_x, depths]
             idx_x, depths = idx_x + kx * shifts_, depths + kd * shifts_
             idx_x, depths = np.round(idx_x).astype(np.int32), np.round(depths).astype(np.int32)
 
-            updated_point_clouds.append((fault_id, (idx_x, depths)))
+            updated_point_clouds.append((fault_id_, (idx_x, depths)))
         self.fault_point_clouds[i1] = updated_point_clouds
 
         # Store the added fault point cloud
@@ -498,8 +500,8 @@ class NewSyntheticGenerator:
         elif 'mask' in format:
             result = np.zeros(self.shape, dtype=np.float32)
 
-            for i in self.fault_point_clouds.keys():
-                for _, (idx_x, depths) in self.fault_point_clouds[i]:
+            for i, point_cloud_list in self.fault_point_clouds.items():
+                for _, (idx_x, depths) in point_cloud_list:
                     result[i][idx_x, depths] = 1
 
             if width is not None:
@@ -645,6 +647,7 @@ class NewSyntheticGenerator:
     @staticmethod
     def make_randomization2_matrix(shape, locs_n_range=(2, 10), locs_scale_range=(5, 15), sample_size=None,
                                    blur_size=9, blur_sigma=2., digitize=True, n_bins=10, rng=None):
+        """ !!. """
         # Parse parameters
         rng = rng if isinstance(rng, np.random.Generator) else np.random.default_rng(rng)
         sample_size = sample_size or max(10000, np.prod(shape))
