@@ -10,13 +10,12 @@ NOTEBOOKS_DIR : str
 TESTS_ROOT_DIR : str
     Path to the directory for saving results and temporary files for all tests
     (executed notebooks, logs, data files like cubes, etc.).
-    Note that in case of success this directory will be removed (if REMOVE_EXTRA_FILES is True).
+    Note that in case of success this directory will be removed (if `REMOVE_ROOT_DIR` is True).
 
 And you can manage tests running with the parameter:
 
-REMOVE_EXTRA_FILES : bool
-    Whether to remove extra files after execution.
-    Extra files are temporary files and saved files that relate to successful tests.
+REMOVE_ROOT_DIR : bool
+    Whether to remove tests root directory files after execution in case of success.
 
 Outputs in saved execution notebooks are controlled with:
 
@@ -48,7 +47,7 @@ common_params = {
     'NOTEBOOKS_DIR': os.path.join(TESTS_SCRIPTS_DIR, 'notebooks/'),
 
     # Execution parameters
-    'REMOVE_EXTRA_FILES': os.getenv('SEISMIQB_TEST_REMOVE_EXTRA_FILES') or True,
+    'REMOVE_ROOT_DIR': os.getenv('SEISMIQB_TEST_REMOVE_ROOT_DIR') or True,
 
     # Visualization parameters
     'SCALE': os.getenv('SEISMIQB_TEST_SCALE') or 1,
@@ -104,11 +103,8 @@ def test_run_notebook(notebook_kwargs, capsys):
 
     pytest.failed = pytest.failed or exec_res['failed']
 
-    # Clear extra files
-    if not exec_res['failed'] and params['REMOVE_EXTRA_FILES']:
-        os.remove(out_path_ipynb)
-
-    if (notebook_kwargs == notebooks_params[-1]) and common_params['REMOVE_EXTRA_FILES'] and not pytest.failed:
+    # Clear test root directory if all tests were successfull
+    if (notebook_kwargs == notebooks_params[-1]) and common_params['REMOVE_ROOT_DIR'] and not pytest.failed:
         shutil.rmtree(common_params['TESTS_ROOT_DIR'])
 
     # Terminal output
