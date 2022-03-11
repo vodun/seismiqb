@@ -1,4 +1,4 @@
-""" Test script for running controller notebooks for tests.
+""" Test script for running tests notebooks.
 
 The behavior of tests is parametrized by the following constants:
 
@@ -6,13 +6,13 @@ DATESTAMP : str
     Execution date in "YYYY-MM-DD" format.
     Used for saving notebooks executions and temporary files.
 NOTEBOOKS_DIR : str
-    Path to the directory with test .ipynb files.
+    Path to the directory with *.ipynb files with tests.
 TESTS_ROOT_DIR : str
     Path to the directory for saving results and temporary files for all tests
     (executed notebooks, logs, data files like cubes, etc.).
-    Note that in case of success this directory can be removed (if REMOVE_EXTRA_FILES is True).
+    Note that in case of success this directory will be removed (if REMOVE_EXTRA_FILES is True).
 
-And you can manage tests running with parameters:
+And you can manage tests running with the parameter:
 
 REMOVE_EXTRA_FILES : bool
     Whether to remove extra files after execution.
@@ -108,7 +108,7 @@ def test_run_notebook(notebook_kwargs, capsys):
     if not exec_res['failed'] and params['REMOVE_EXTRA_FILES']:
         os.remove(out_path_ipynb)
 
-    if (notebook_kwargs == notebooks_params[-1]) and not pytest.failed and common_params['REMOVE_EXTRA_FILES']:
+    if (notebook_kwargs == notebooks_params[-1]) and common_params['REMOVE_EXTRA_FILES'] and not pytest.failed:
         shutil.rmtree(common_params['TESTS_ROOT_DIR'])
 
     # Terminal output
