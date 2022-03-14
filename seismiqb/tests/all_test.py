@@ -11,16 +11,11 @@ TESTS_ROOT_DIR : str
     Path to the directory for saving results and temporary files for all tests
     (executed notebooks, logs, data files like cubes, etc.).
     Note that in case of success this directory will be removed (if `REMOVE_ROOT_DIR` is True).
-
-And you can manage tests running with the parameter:
-
 REMOVE_ROOT_DIR : bool
     Whether to remove tests root directory files after execution in case of success.
 
-Outputs in saved execution notebooks are controlled with:
+Outputs in saved execution notebooks and terminal are controlled with:
 
-SCALE : int
-    Figures scale.
 SHOW_FIGURES : bool
     Whether to show additional figures.
     Showing some figures can be useful for finding out the reason for the failure of tests.
@@ -39,24 +34,20 @@ from .run_notebook import run_notebook
 
 
 # Initialize base tests variables
+pytest.failed = False
 TESTS_SCRIPTS_DIR = os.getenv("TESTS_SCRIPTS_DIR", os.path.dirname(os.path.realpath(__file__))+'/')
 
 common_params = {
-    # Workspace constants
+    # Workspace constants and parameters
     'DATESTAMP': date.today().strftime("%Y-%m-%d"),
     'NOTEBOOKS_DIR': os.path.join(TESTS_SCRIPTS_DIR, 'notebooks/'),
-
-    # Execution parameters
+    'TESTS_ROOT_DIR': tempfile.mkdtemp(prefix='tests_root_dir_', dir='./'),
     'REMOVE_ROOT_DIR': os.getenv('SEISMIQB_TEST_REMOVE_ROOT_DIR') or True,
 
-    # Visualization parameters
-    'SCALE': os.getenv('SEISMIQB_TEST_SCALE') or 1,
+    # Visualization and output parameters (these variables are used in notebooks)
     'SHOW_FIGURES': os.getenv('SEISMIQB_TEST_SHOW_FIGURES') or False,
-
-    # Output parameters
-    'VERBOSE': os.getenv('SEISMIQB_TEST_VERBOSE') or True,
+    'VERBOSE': os.getenv('SEISMIQB_TEST_VERBOSE') or True
 }
-
 
 # Initialize tests configs
 geometry_formats = ['sgy', 'hdf5', 'qhdf5', 'blosc', 'qblosc']
@@ -78,23 +69,19 @@ notebooks_params = (
 )
 
 
-# Create directory for temporary files and results
-common_params['TESTS_ROOT_DIR'] = tempfile.mkdtemp(prefix='tests_root_dir_', dir='./')
-pytest.failed = False
-
-
 @pytest.mark.parametrize("notebook_kwargs", notebooks_params)
 def test_run_notebook(notebook_kwargs, capsys):
     """ Run tests notebooks using kwargs and print outputs in the terminal."""
     filename, params = notebook_kwargs
-    config = params.copy()
-    _ = config.pop('TEST_OUTPUTS', None)
+
+    config = params.copy() # Test configuration for saving outputs and printing information properly
+    _ = config.pop('TEST_OUTPUTS', None) # Remove non-config variables
+    prepare_suffix = lambda v: re.sub(r'[^\w^ ]', '', v).replace(' ', '_') # Remove symbols and replace spaces
+    suffix = "_".join(f"{prepare_suffix(str(v))}" for v in config.values()) # For filenames
+
     params.update(common_params)
 
     # Run test notebook
-    prepare_suffix = lambda v: re.sub(r'[^\w^ ]', '', v).replace(' ', '_') # remove symbols and replace spaces
-    suffix = "_".join(f"{prepare_suffix(str(v))}" for v in config.values())
-
     path_ipynb = os.path.join(params['NOTEBOOKS_DIR'], f"{filename}.ipynb")
     out_path_ipynb = os.path.join(params['TESTS_ROOT_DIR'], f"{filename}_out_{suffix}_{params['DATESTAMP']}.ipynb")
 
@@ -103,7 +90,7 @@ def test_run_notebook(notebook_kwargs, capsys):
 
     pytest.failed = pytest.failed or exec_res['failed']
 
-    # Clear test root directory if all tests were successfull
+    # Remove test root directory if all tests were successfull
     if (notebook_kwargs == notebooks_params[-1]) and common_params['REMOVE_ROOT_DIR'] and not pytest.failed:
         shutil.rmtree(common_params['TESTS_ROOT_DIR'])
 
@@ -113,12 +100,12 @@ def test_run_notebook(notebook_kwargs, capsys):
         if exec_res['failed']:
             print(exec_res.get('traceback', ''))
 
-        # Test outputs
+        # Provide test outputs
         for k, v in exec_res['outputs'].items():
             message = v if isinstance(v, str) else json.dumps(v, indent=4)
             print(f"{k}:\n {message}\n")
 
-        # End of the running message
+        # Print test conclusion
         notebook_info = f"{params['DATESTAMP']} \'{filename}\'{' with config=' + str(config) if config else ''} was"
         if not exec_res['failed']:
             print(f"{notebook_info} executed successfully.\n")
