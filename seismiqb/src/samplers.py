@@ -495,14 +495,14 @@ class HorizonSampler(WeightedSampler):
 
         if 'grad' in weights_mode:
             # Calculate and add gradient matrix to the `weights`
-            weights_ = self.horizon.get_gradient_map(kwargs.pop('grad_kwargs', {}))
+            weights_ = self.horizon.get_gradient_map(kwargs.pop('grad_kwargs', None))
             weights[self.horizon.full_matrix == self.horizon.FILL_VALUE] = np.nan
             weights += self.normalize_weights(weights=weights_)
 
         if 'corrs' in weights_mode:
             # Calculate and add correlations matrix to the `weights`
             weights_ = self.horizon.metrics.evaluate('support_corrs', supports=100, agg='nanmean',
-                                                     plot=False, kwargs=kwargs.pop('corrs_kwargs', {}))
+                                                     plot=False, kwargs=kwargs.pop('corrs_kwargs', None))
             weights[self.horizon.full_matrix == self.horizon.FILL_VALUE] = np.nan
             weights += self.normalize_weights(weights=weights_)
 
@@ -1270,8 +1270,7 @@ class SeismicSampler(Sampler):
 
             data_ = []
             title_ = []
-            xlabel_ = []
-            y_label_ = []
+            n_sampled_ptp = 0
             for sampler in samplers_list:
                 title_prefix = f"{field.displayed_name}: {sampler.displayed_name}"
 
@@ -1279,21 +1278,17 @@ class SeismicSampler(Sampler):
                     if hasattr(sampler, 'sampled_locations_ptps'):
                         data_.extend([sampler.locations_ptps, sampler.sampled_locations_ptps])
                         title_.extend([f"{title_prefix}\nLocations ptps", f"{title_prefix}\nSampled locations ptps"])
-                        xlabel_ = ["ptp"] * 2
-                        y_label_ = ["frequency"] * 2
+                        n_sampled_ptp += 1
                     else:
                         data_.append(sampler.locations_ptps)
                         title_.append(f"{title_prefix}\nLocations ptps")
-                        xlabel_ = ["ptp"]
-                        y_label_ = ["frequency"]
 
             if data_:
                 data += data_
                 title += title_
 
-                xlabel += xlabel_ * len(samplers_list)
-                ylabel += y_label_ * len(samplers_list)
-
+                xlabel += ["ptp"] * (len(samplers_list) + n_sampled_ptp)
+                ylabel += ["frequency"] * (len(samplers_list) + n_sampled_ptp)
 
         kwargs = {
             'color': 'firebrick',
