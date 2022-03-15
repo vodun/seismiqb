@@ -3,6 +3,8 @@ import numpy as np
 
 from .generator import SyntheticGenerator
 from ..utils import lru_cache
+from ..plotters import plot_image
+from ...batchflow import Config
 
 class GeometryMock:
     """ Mock for SeismicGeometry. """
@@ -103,7 +105,7 @@ class SyntheticField:
     # @lru_cache
     def _make_generator(self, hash_value):
         """ Create a generator instance. During initialization, wrapped in `lru_cache`. """
-        return SyntheticGenerator(seed=hash_value)
+        return SyntheticGenerator(seed=abs(hash_value))
 
     def _populate_generator(self, generator, location=None, shape=None):
         """ Call `generator` methods to populate it with data: impedance model, horizon surfaces, faults, etc. """
@@ -115,27 +117,39 @@ class SyntheticField:
 
         else:
             # Generate parameters, use them to populate `generator` in-place
-            params = self.param_generator()
+            params = self.param_generator(rng=generator.rng)
+            params = Config(params)
 
+            # Parse shape: priority is `params['shape']` -> `self.crop_shape` -> `location.shape`
             if shape is None:
-                shape = params.get('shape', self.crop_shape)
-                if shape is None and location is not None:
+                if location is not None:
                     shape = tuple(slc.stop - slc.start for slc in location)
+                elif 'shape' in params:
+                    shape = params['shape']
+                else:
+                    shape = self.crop_shape
 
-            shape = tuple(s for s in shape if s != 1)
-
+            # Compute velocity model, using the velocity vector and horizon matrices
             (generator
-             .make_velocities(num_reflections=params['num_reflections'],
-                              horizon_heights=params['horizon_heights'],
-                              horizon_multipliers=params['horizon_multipliers'],
-                              velocity_limits=params['velocity_limits'])
-             .make_velocity_model(shape=shape, grid_shape=params['grid_shape'])
-             .make_density_model(density_noise_lims=params['density_noise_lims'])
-             .make_reflectivity()
-             .make_synthetic(ricker_width=params['ricker_width'],
-                             ricker_points=params['ricker_points'])
-             .postprocess_synthetic(noise_mul=params['noise_mul'])
+             .make_velocity_vector(**params['make_velocity_vector'])
+             .make_horizons(shape=shape, **params['make_horizons'])
+             .make_velocity_model(**params['make_velocity_model'])
+             )
+
+            # Faults
+            for fault_params in params['make_fault_2d']:
+                generator.make_fault_2d(**fault_params)
+
+            # Finalize synthetic creation
+            (generator
+             .make_density_model(**params['make_density_model'])
+             .make_impedance_model(**params['make_impedance_model'])
+             .make_reflectivity_model(**params['make_reflectivity_model'])
+
+             .make_synthetic(**params['make_synthetic'])
+             .postprocess_synthetic(**params['postprocess_synthetic'])
             )
+
             generator.params = params
 
         generator._populated = True
@@ -143,36 +157,44 @@ class SyntheticField:
 
 
     @staticmethod
-    def default_param_generator(seed=None):
+    def default_param_generator(rng=None):
         """ Sample parameters for synthetic generation. """
-        rng = np.random.default_rng(seed)
-        num_horizons = rng.integers(low=2, high=7, endpoint=True)
+        rng = rng if isinstance(rng, np.random.Generator) else np.random.default_rng(rng)
+
+        num_faults = rng.choice([0, 1, 2, 3], p=[0.7, 0.2, 0.1, 0.0])
+        fault_params = [{'coordinates': 'random',
+                         'max_shift': rng.uniform(20, 40),
+                         'width': rng.uniform(1.0, 4.0)}
+                        for _ in range(num_faults)]
 
         return {
-            'velocity_limits': (2000, 6000),
+            'make_velocity_vector': {'num_horizons': 17,                                            # scales with depth
+                                     'limits': (2000, 6000),
+                                     'randomization_scale': 0.3,
+                                     'amplify_probability': 0.2, 'amplify_range': (2.0, 4.0)},
+            'make_horizons': {'interval_randomization': 'uniform',
+                              'interval_randomization_scale': 0.5,
+                              'interval_min': rng.uniform(0.4, 0.6),
+                              'randomization1_scale': 0.25,
+                              'randomization2_scale': 0.25, 'locs_n_range': (3, 5)},
+            'make_velocity_model': {},
 
-            # Horizons
-            'num_reflections': rng.integers(low=15, high=30, endpoint=True),
-            'horizon_heights': np.sort(rng.uniform(low=.15, high=.95, size=num_horizons)),
-            'horizon_multipliers': (rng.choice([-1, 1], size=num_horizons) *
-                                    rng.uniform(4, 9, size=num_horizons)),
-            # Faults
+            'make_fault_2d': fault_params,
 
-            # Impedance creation
-            'grid_shape': rng.integers(low=5, high=10, size=(1,)),
-            'density_noise_lims': rng.uniform(low=(0.9, 1.0), high=(1.0, 1.1)),
+            'make_density_model': {'randomization_limits': (0.95, 1.05)},
+            'make_impedance_model': {},
+            'make_reflectivity_model': {},
 
-            # Conversion to seismic
-            'ricker_width': rng.uniform(low=3.5, high=5.1),
-            'ricker_points': rng.integers(low=50, high=130, endpoint=True),
-            'noise_mul': rng.uniform(low=0.1, high=0.3),
+            'make_synthetic': {'ricker_width': rng.uniform(4.7, 5.3),
+                               'ricker_points': 100},
+            'postprocess_synthetic': {'sigma': 0.5, 'noise_mul': None},
         }
 
 
     # Getting data
     def get_attribute(self, location=None, shape=None, attribute='synthetic', **kwargs):
         """ Output requested `attribute`. If `location` is not provided, generates a new instance each time.
-        For the same `location` values, uses the same generator instance (and the same reflectivity model):
+        For the same `location` values, uses the same generator instance (with the same reflectivity model):
         >>> location = (slice(10, 11), slice(100, 200), slice(1000, 1500))
         >>> synthetic = synthetic_field.get_attribute(location=location, attribute='synthetic')
         >>> impedance = synthetic_field.get_attribute(location=location, attribute='impedance')
@@ -183,23 +205,27 @@ class SyntheticField:
         if attribute == 'labels':
             attribute = generator.params.get('attribute', self.attribute)
 
+        # Main: velocity, reflectivity, synthetic
         if attribute in ['synthetic', 'geometry', 'image']:
-            result = generator.synthetic
-        elif 'upward' in attribute:
-            generator.make_upward_velocities().make_upward_velocity_model()
-            result = getattr(generator, attribute)
-        elif 'reflections' in attribute:
-            result = generator.fetch_horizons(mode=slice(1, None, 1), horizon_format='mask',
-                                              width=kwargs.get('width', 3))
-        elif 'reflect' in attribute:
-            result = generator.reflectivity_coefficients
-        elif 'horizon' in attribute:
-            result = generator.fetch_horizons(mode='horizons', horizon_format='mask',
-                                              width=kwargs.get('width', 3))
+            result = generator.get_attribute(attribute='synthetic')
         elif 'impedance' in attribute:
-            result = generator.velocity_model
+            result = generator.get_attribute(attribute='velocity_model')
+        elif 'reflect' in attribute:
+            result = generator.get_attribute(attribute='reflectivity_model')
+        elif 'upward' in attribute:
+            result = generator.get_increasing_impedance_model()
+
+        # Labels: horizons and faults
+        elif 'horizons' in attribute:
+            result = generator.get_horizons(indices='all', format='mask', width=kwargs.get('width', 3))
+        elif 'amplified' in attribute:
+            result = generator.get_horizons(indices='amplified', format='mask', width=kwargs.get('width', 3))
+        elif 'fault' in attribute:
+            result = generator.get_faults(format='mask', width=kwargs.get('width', 3))
+
+        # Fallback
         else:
-            result = getattr(generator, attribute)
+            result = generator.get_attribute(attribute=attribute)
 
         if result.dtype != np.float32:
             result = result.astype(np.float32)
@@ -263,5 +289,27 @@ class SyntheticField:
             msg += f':\n    - labels: attribute `{attribute}`'
         return msg
 
-    def show_slide(self):
+    def show_slide(self, location=None, shape=None, **kwargs):
         """ !!. """
+        generator = self.get_generator(location=location, shape=shape)
+        self._last_generator = generator
+        return generator.show_slide(**kwargs)
+
+    def show_roll(self, attribute='synthetic', n=25, **kwargs):
+        """ !!. """
+        data = [[self.get_attribute(attribute=attribute)[0]] for _ in range(n)]
+        cmap = 'gray'
+        titles = list(range(n))
+
+        # Display images
+        plot_params = {
+            'suptitle': f'Roll of `{attribute}`',
+            'title': titles,
+            'cmap': cmap,
+            'colorbar': True,
+            'ncols': 5,
+            'scale': 0.5,
+            **kwargs
+        }
+        return plot_image(data, **plot_params)
+
