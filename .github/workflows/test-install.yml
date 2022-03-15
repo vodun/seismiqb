@@ -58,7 +58,7 @@ jobs:
 
     - name: Run basic tests
       env:
-        TESTS_SCRIPTS_DIR: ${{ github.workspace }}/seismiqb/tests/
+        BASE_DIR: ${{ github.workspace }}
       working-directory: ${{ github.workspace }}/seismiqb/
       run: |
         pip install -U pytest

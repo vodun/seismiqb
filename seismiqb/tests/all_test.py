@@ -2,11 +2,6 @@
 
 The behavior of tests is parametrized by the following constants:
 
-DATESTAMP : str
-    Execution date in "YYYY-MM-DD" format.
-    Used for saving notebooks executions and temporary files.
-NOTEBOOKS_DIR : str
-    Path to the directory with *.ipynb files with tests.
 TESTS_ROOT_DIR : str
     Path to the directory for saving results and temporary files for all tests
     (executed notebooks, logs, data files like cubes, etc.).
@@ -35,12 +30,13 @@ from .run_notebook import run_notebook
 
 # Initialize base tests variables
 pytest.failed = False
-TESTS_SCRIPTS_DIR = os.getenv("TESTS_SCRIPTS_DIR", os.path.dirname(os.path.realpath(__file__))+'/')
+BASE_DIR = os.getenv("BASE_DIR", os.path.normpath(os.path.join(os.path.dirname(os.path.realpath(__file__)), '../..')))
+TESTS_NOTEBOOKS_DIR = os.path.join(BASE_DIR, 'seismiqb/tests/notebooks/') # path to directory with tests notebooks
+# TUTORIALS_DIR = os.path.join(BASE_DIR, 'tutorials/') # path to directory with tutorials
 
 common_params = {
     # Workspace constants and parameters
     'DATESTAMP': date.today().strftime("%Y-%m-%d"),
-    'NOTEBOOKS_DIR': os.path.join(TESTS_SCRIPTS_DIR, 'notebooks/'),
     'TESTS_ROOT_DIR': tempfile.mkdtemp(prefix='tests_root_dir_', dir='./'),
     'REMOVE_ROOT_DIR': os.getenv('SEISMIQB_TEST_REMOVE_ROOT_DIR') or True,
 
@@ -52,38 +48,42 @@ common_params = {
 # Initialize tests configs
 geometry_formats = ['sgy', 'hdf5', 'qhdf5', 'blosc', 'qblosc']
 notebooks_params = (
-    # (notebook filename, test params dict)
+    # (notebook path, test params dict)
     # CharismaMixin test
-    ('charisma_test', {}),
+    (os.path.join(TESTS_NOTEBOOKS_DIR, 'charisma_test.ipynb'), {}),
 
     # SeismicGeometry test
-    ('geometry_test_preparation', {'FORMATS': geometry_formats}),
-    *[('geometry_test_data_format', {'TEST_OUTPUTS': ['timings'], 'FORMAT': f}) for f in geometry_formats],
+    (os.path.join(TESTS_NOTEBOOKS_DIR, 'geometry_test_preparation.ipynb'), {'FORMATS': geometry_formats}),
+    *[(os.path.join(TESTS_NOTEBOOKS_DIR, 'geometry_test_data_format.ipynb'),
+       {'TEST_OUTPUTS': ['timings'], 'FORMAT': f}) for f in geometry_formats],
 
     # Horizon test
-    ('horizon_test_preparation', {}),
-    ('horizon_test_base', {}),
-    ('horizon_test_attributes', {}),
-    ('horizon_test_manipulations', {}),
-    ('horizon_test_extraction', {'TEST_OUTPUTS': ['message']})
+    (os.path.join(TESTS_NOTEBOOKS_DIR, 'horizon_test_preparation.ipynb'), {}),
+    (os.path.join(TESTS_NOTEBOOKS_DIR, 'horizon_test_base.ipynb'), {}),
+    (os.path.join(TESTS_NOTEBOOKS_DIR, 'horizon_test_attributes.ipynb'), {}),
+    (os.path.join(TESTS_NOTEBOOKS_DIR, 'horizon_test_manipulations.ipynb'), {}),
+    (os.path.join(TESTS_NOTEBOOKS_DIR, 'horizon_test_extraction.ipynb'), {'TEST_OUTPUTS': ['message']}),
+
+    # # Tutorials : example for the future, tutorials notebooks needs some refactoring (data and paths changes)
+    # (os.path.join(TUTORIALS_DIR, '01_Geometry_part_1.ipynb'), {})
 )
 
 
 @pytest.mark.parametrize("notebook_kwargs", notebooks_params)
 def test_run_notebook(notebook_kwargs, capsys):
     """ Run tests notebooks using kwargs and print outputs in the terminal."""
-    filename, params = notebook_kwargs
+    path_ipynb, params = notebook_kwargs
+    filename = os.path.splitext(os.path.basename(path_ipynb))[0]
 
     config = params.copy() # Test configuration for saving outputs and printing information properly
     _ = config.pop('TEST_OUTPUTS', None) # Remove non-config variables
-    prepare_suffix = lambda v: re.sub(r'[^\w^ ]', '', v).replace(' ', '_') # Remove symbols and replace spaces
-    suffix = "_".join(f"{prepare_suffix(str(v))}" for v in config.values()) # For filenames
+    filename_suffix = "_".join(f"{prepare_param_value(param_value=value)}" for value in config.values())
 
     params.update(common_params)
 
     # Run test notebook
-    path_ipynb = os.path.join(params['NOTEBOOKS_DIR'], f"{filename}.ipynb")
-    out_path_ipynb = os.path.join(params['TESTS_ROOT_DIR'], f"{filename}_out_{suffix}_{params['DATESTAMP']}.ipynb")
+    out_path_ipynb = os.path.join(params['TESTS_ROOT_DIR'],
+                                  f"{filename}_out_{filename_suffix}_{params['DATESTAMP']}.ipynb")
 
     exec_res = run_notebook(path=path_ipynb, inputs=params, outputs=params.get('TEST_OUTPUTS', []),
                             inputs_pos=2, out_path_ipynb=out_path_ipynb, display_links=False)
@@ -91,8 +91,8 @@ def test_run_notebook(notebook_kwargs, capsys):
     pytest.failed = pytest.failed or exec_res['failed']
 
     # Remove test root directory if all tests were successfull
-    if (notebook_kwargs == notebooks_params[-1]) and common_params['REMOVE_ROOT_DIR'] and not pytest.failed:
-        shutil.rmtree(common_params['TESTS_ROOT_DIR'])
+    if (notebook_kwargs == notebooks_params[-1]) and params['REMOVE_ROOT_DIR'] and not pytest.failed:
+        shutil.rmtree(params['TESTS_ROOT_DIR'])
 
     # Terminal output
     with capsys.disabled():
@@ -111,3 +111,15 @@ def test_run_notebook(notebook_kwargs, capsys):
             print(f"{notebook_info} executed successfully.\n")
         else:
             assert False, f"{notebook_info} failed.\n"
+
+
+# Helper method
+def prepare_param_value(param_value):
+    """ Create a part of a filename suffix from a configuration parameter value. 
+
+    Under the hood we remove all symbols and replace spaces with underscores.
+    """
+    param_value = str(param_value)
+    param_value = re.sub(r'[^\w^ ]', '', param_value) # Remove all symbols except spaces
+    param_value = param_value.replace(' ', '_')
+    return param_value
