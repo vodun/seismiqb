@@ -73,7 +73,7 @@ class Fault(Horizon):
 
         if direction is None:
             if len(self.points) > 0:
-                mean_depth = int(self.points[:, 2].mean())
+                mean_depth = int(np.median(self.points[:, 2]))
                 depth_slice = self.points[self.points[:, 2] == mean_depth]
                 self.direction = 0 if depth_slice[:, 0].ptp() > depth_slice[:, 1].ptp() else 1
             else:
@@ -369,10 +369,10 @@ class Fault(Horizon):
             points = points[points[:, i] <= slices[i].stop]
             points = points[points[:, i] >= slices[i].start]
         if len(points) <= 3:
-            return None, None, None, None
+            return [], [], [], []
         sticks = get_sticks(points, n_sticks, n_nodes)
         simplices = make_triangulation(sticks, True)
-        coords = np.concatenate(sticks)
+        coords = np.concatenate(sticks) if len(sticks) > 0 else np.zeros((0, 3))
         return coords[:, 0], coords[:, 1], coords[:, 2], simplices
 
     @classmethod
@@ -503,6 +503,8 @@ def get_sticks(points, n_sticks, n_nodes):
     projections = np.split(points, np.unique(points[:, axis], return_index=True)[1][1:])
     projections = [item for item in projections if item[:, 2].max() - item[:, 2].min() > 5]
     step = min(n_sticks, len(projections)-1)
+    if step == 0:
+        return []
     projections = projections[::step]
     res = []
 
