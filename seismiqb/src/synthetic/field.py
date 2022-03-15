@@ -312,4 +312,3 @@ class SyntheticField:
             **kwargs
         }
         return plot_image(data, **plot_params)
-

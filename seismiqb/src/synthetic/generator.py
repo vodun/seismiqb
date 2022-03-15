@@ -2,15 +2,14 @@
 """
 #pylint: disable=not-an-iterable, too-many-arguments, too-many-statements, redefined-builtin
 from collections import defaultdict
-from locale import DAY_1
 
 import numpy as np
 from numba import njit, prange
 
 import cv2
 from scipy.interpolate import interp1d, interp2d
-from scipy.ndimage import gaussian_filter, map_coordinates, binary_dilation
-from scipy.signal import ricker, convolve, resample
+from scipy.ndimage import map_coordinates
+from scipy.signal import ricker, resample
 
 from ..plotters import MatplotlibPlotter, plot_image
 
