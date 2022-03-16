@@ -15,7 +15,6 @@ from ..batchflow import DatasetIndex, Batch, action, inbatch_parallel, SkipBatch
 
 from .labels import Horizon
 from .plotters import plot_image
-from .synthetic.generator import generate_synthetic
 from .utils import compute_attribute, to_list, AugmentedDict, DelegatingList
 
 
@@ -263,41 +262,6 @@ class SeismicCropBatch(Batch):
         location = self.get(ix, 'locations')
         return field.load_seismic(location=location, native_slicing=native_slicing, src=src_geometry, **kwargs)
 
-    @action
-    @inbatch_parallel(init='indices', src='indices', target='for', post='_assemble',
-                      dst=('cubes', 'masks', 'faults'))
-    def generate_synthetic(self, ix, dst=None, **kwargs):
-        """ Generate synthetic seismic, corresponding horizons' and faults'
-        masks and put it into batch-components.
-
-        Parameters
-        ----------
-        dst : sequence
-            Sequence of length=3 to put created components in.
-        **kwargs : dict
-            All arguments of `generate_synthetic`-method. See the docstring for more
-            info.
-        """
-        _, _ = self, ix
-
-        # if the requested shape is in fact 2d (for instance [1, 64, 128] or [64, 1, 128])
-        # performs `generate_synthetic` in 2d and then adds the missing axis
-        shape = np.array(kwargs['shape'])
-        if 1 in shape[:2]:
-            kwargs['shape'] = tuple(shape[shape != 1])
-            axis_num = 0 if shape[0] == 1 else 1
-        else:
-            axis_num = None
-
-        # generate synthetic crop, horizons and faults
-        crop, horizons, faults = generate_synthetic(**kwargs)
-        if axis_num is not None:
-            crop, horizons, faults = [np.expand_dims(array, axis=axis_num) for array in (crop, horizons, faults)]
-
-        # set locations if needed
-        # locations = (slice(0, crop.shape[0]), slice(0, crop.shape[1]), slice(0, crop.shape[2]))
-        return crop, horizons, faults
-
 
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
@@ -335,19 +299,16 @@ class SeismicCropBatch(Batch):
             data = np.clip(data, normalization_stats['q_01'], normalization_stats['q_99'])
 
         # Actual normalization
-        result = data.copy()
+        result = data.copy() if data.base is not None else data
 
         if 'mean' in mode:
             result -= normalization_stats['mean']
         if 'std' in mode:
             result /= normalization_stats['std']
         if 'min' in mode and 'max' in mode:
-            if normalization_stats['max'] == normalization_stats['min']:
-                result = result - normalization_stats['min']
-            else:
-                result = ((result - normalization_stats['min']) / (
-                    normalization_stats['max'] - normalization_stats['min']
-                ))
+            if normalization_stats['max'] != normalization_stats['min']:
+                result = ((result - normalization_stats['min'])
+                        / (normalization_stats['max'] - normalization_stats['min']))
 
         return result
 
@@ -1293,7 +1254,7 @@ class SeismicCropBatch(Batch):
         # Try to get the name of a field
         if displayed_name is None:
             batch_index = self.indices[idx]
-            field_name = self.get(batch_index, 'fields').displayed_name
+            displayed_name = self.get(batch_index, 'fields').displayed_name
         suptitle = f'batch_idx={idx}                  `{displayed_name}`\n{suptitle}'
 
         # Titles for individual axis
