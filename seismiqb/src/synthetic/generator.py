@@ -202,6 +202,9 @@ class SyntheticGenerator:
         `randomization1_*` changes surfaces in a smooth node-based way.
         `randomization2_*` uses mixture of Gaussians to add defined peaks to horizon surfaces.
 
+        Optinally pads the `shape` so that all of the subsequent computations are performed on a slightly bigger shape.
+        Used to avoid border effects and correctly processed by `get_*` methods.
+
         Parameters
         ----------
         shape : tuple of ints
@@ -226,8 +229,8 @@ class SyntheticGenerator:
             Scale of surface perturbation of the first type with relation to its interval to the previous layer.
         num_nodes : int
             Number of nodes for creating grid. The bigger, the more oscillations.
-        interpolation_kind : {'cubic'}
-            Type of interpolation from nodes to spatial shape.
+        interpolation_kind : str or int, optional
+            Kind of interpolation to use. Refer to `scipy.interpolate.interp2d` for further explanation.
 
         randomization2_scale : number
             Scale of surface perturbation of the second type with relation to its interval to the previous layer.
@@ -321,7 +324,46 @@ class SyntheticGenerator:
     def make_fault_2d(self, coordinates, max_shift=20, width=3, fault_id=0,
                       shift_vector=None, shift_sign=+1, mode='sin2', num_zeros=0.1,
                       perturb_peak=True, perturb_values=True):
-        """ !!. """
+        """ Add an elastic distortion to simulate fault on velocity model.
+        Also transforms `horizon_matrices`, so that all of the attributes are synchronized.
+
+        For a given segment, defined by `coordinates`, we do the following:
+            - create a `shift_vector`, which defines the amplitude of produced fault and its patterns.
+            - based on a segment, create a direction vector
+            - compute distances to the segment for each point: it is used to scale the amount of distortion.
+            The closer the point to the segment itself, the sharper its shift would be.
+            - for each pixel in the velocity model, shift its coordinate to a new one, based on
+            `shift_vector`, `direction_vector` and `distance`.
+            - re-map the velocity model to new coordinates.
+
+        Parameters
+        ----------
+        coordinates : str or tuple of tuples of two numbers
+            If str 'random', then coordinates will be generated automatically by :meth:`.make_fault_coordinates_2d`.
+            If tuple of tuple of two ints, then pixel coordinates of the segment: ((x1, d1), (x2, d2)).
+            If tuple of tuple of two floats, then unit coordinates of the segment, which are scaled back to
+            the integer pixel coordinates by multiplying provided numbers by `shape`.
+        max_shift : number
+            Maximum distance to shift pixels along segment.
+        width : number
+            Number of pixels for smooth transition from no shift to max shift. Can be used to model flexures.
+        fault_id : int
+            Technical parameter, should not be used.
+        shift_vector : np.ndarray, optional
+            If provided, used as `shift_vector`. May be resampled to match the length of fault segment.
+            If provided, `mode`, `num_zero`, `pertub_peak` and `perturb_values` are not used.
+        shift_sign : {-1, +1}
+            +1 means that the shifted part would be moved down, -1 means moving up.
+        mode : {'sin2'}
+            Mode for making shift vector. Changes the pattern of shifts along chosen direction.
+        num_zeros : number
+            Proportion of zeros on the sides of created `shift_vector`.
+            0.2 means that rougly 10% from each side are going to be filled with zeros.
+        perturb_peak : bool
+            Whether to randomly shift the peak of `shift_vector` to the sides.
+        perturb_values : bool
+            Whether to add small randomization to values in the `shift_vector`.
+        """
         # Parse parameters
         if coordinates == 'random':
             coordinates = self.make_fault_coordinates_2d()
@@ -425,7 +467,21 @@ class SyntheticGenerator:
 
     def make_fault_3d(self, upper_points, lower_points, max_shift=20, width=3,
                       shift_sign=+1, mode='sin2', num_zeros=0.1, perturb_peak=True, perturb_values=True,):
-        """ !!. """
+        """ Create a fault in 3D.
+        Works by making coordinates along polylines of upper and lower points, and making 2D faults for each slide.
+        Uses the same `shift_vector` on each slide, so that fault surface is continuous.
+
+        Parameters
+        ----------
+        upper_points : tuple of tuples of three numbers
+            Coordinates in space to connect by a continuous path. Used as the first coordinate in the 2D fault making.
+        lower_points : tuple of tuples of three numbers
+            Coordinates in space to connect by a continuous path. Used as the second coordinate in the 2D fault making.
+        shift_sign, mode, num_zeros, perturb_peak, perturb_values : dict
+            Used to create one common `shift_vector` for all slides.
+        max_shift, width : dict
+            Same as in :meth:`.make_fault_2d`.
+        """
         # Prepare points
         upper_points = tuple(tuple(int(c * (s - 1)) if isinstance(c, (float, np.floating)) else c
                                    for c, s in zip(point, self.shape_padded))
@@ -461,7 +517,7 @@ class SyntheticGenerator:
 
 
     def make_fault_coordinates_2d(self, margin=0.1, d1_range=(0.1, 0.25), d2_range=(0.75, 0.9)):
-        """ !!. """
+        """ Sample a pair of points for 2D fault segment, avoiding the image edges. """
         x1 = self.rng.uniform(low=0+margin, high=1-margin)
         x2 = x1 + self.rng.uniform(low=-margin, high=+margin)
 
@@ -471,7 +527,7 @@ class SyntheticGenerator:
 
     @staticmethod
     def make_path(point_1, point_2):
-        """ !!. """
+        """ Rasterize path between `point_1` and `point_2` in 3D space. """
         (i1, x1, d1), (i2, x2, d2) = point_1, point_2
 
         n = i2 - i1
@@ -490,7 +546,19 @@ class SyntheticGenerator:
     # Generate synthetic seismic, based on velocities
     def make_density_model(self, scale=0.01,
                            randomization='uniform', randomization_limits=(0.97, 1.03), randomization_scale=0.1):
-        """ !!. """
+        """ Make density model as velocity model with minor multiplicative perturbations.
+
+        Parameters
+        ----------
+        scale : number
+            Multiplier for output density model. Used to decay values.
+        randomization : {None, 'uniform', 'normal'}
+            Type of perturbations to apply.
+        randomization_limits : tuple of two numbers
+            Limits for generated perturbation. Used only in 'uniform' mode.
+        randomization_scale : number
+            Scale of generated perturbation. Used only in 'normal' mode.
+        """
         if randomization == 'uniform':
             a, b = randomization_limits
             perturbation = (scale * (b - a)) * self.rng.random(size=self.shape_padded, dtype=np.float32) + (scale * a)
@@ -504,14 +572,16 @@ class SyntheticGenerator:
         return self
 
     def make_impedance_model(self):
-        """ !!. """
+        """ Make impedance as the product of density and velocity models. """
         self.impedance_model = self.velocity_model * self.density_model
         return self
 
     def make_reflectivity_model(self):
-        """ !!.
-        reflectivity = ((resistance[..., 1:] - resistance[..., :-1]) /
-                        (resistance[..., 1:] + resistance[..., :-1]))
+        """ Compute reflectivity as the ratio between differences and sums for successive layers of impedance.
+        To condition this fraction, we add the doubled ~mean impedance to the denominator.
+
+        reflectivity = ((impedance[..., 1:] - impedance[..., :-1]) /
+                        (impedance[..., 1:] + impedance[..., :-1]))
         """
         buffer = np.empty_like(self.impedance_model)
         reflectivity_model = compute_reflectivity_model(buffer, self.impedance_model)
@@ -520,7 +590,7 @@ class SyntheticGenerator:
         return self
 
     def make_synthetic(self, ricker_width=5, ricker_points=50):
-        """ !!. """
+        """ Produce seismic image by convolving reflectivity with Ricker wavelet. """
         wavelet = ricker(ricker_points, ricker_width)
         wavelet = wavelet.astype(np.float32).reshape(1, ricker_points)
         wavelet *= 100
@@ -533,12 +603,27 @@ class SyntheticGenerator:
         self.synthetic = synthetic
         return self
 
-    def postprocess_synthetic(self, sigma=1., kernel_size=9, noise_mode=None, noise_mul=0.02):
-        """ !!. """
+    def postprocess_synthetic(self, sigma=1., kernel_size=9, clip=True, noise_mode=None, noise_mul=0.2):
+        """ Apply blur, clip and noise to the generated synthetic.
+        Clipping is done by shifting values outside of (0.01, 0.99) quantiles closer to the distribution.
+
+        Parameters
+        ----------
+        sigma : number
+            Scale for gaussian blurring.
+        kernel_size : int
+            Size of the kernel for gaussian blurring.
+        clip : bool
+            Whether to clip amplitude values to (0.01, 0.99) quantiles.
+        noise_mode : {None, 'uniform', 'normal'}
+            Type of noise to add to seismic image.
+        noise_mul : number
+            SNR of added perturbation.
+        """
         if sigma is not None:
             self.synthetic = self.apply_gaussian_filter_3d(self.synthetic, kernel_size=kernel_size, sigma=sigma)
 
-        if True:
+        if clip:
             left, right = np.quantile(self.synthetic, [0.01, 0.99])
             mask = self.synthetic > right
             self.synthetic[mask] = self.synthetic[mask] - (self.synthetic.max() - right)
@@ -562,7 +647,7 @@ class SyntheticGenerator:
 
     # Finalization
     def finalize_array(self, array, loc=None, axis=0, angle=None):
-        """ !!. """
+        """ Slice the array to match requested `shape` (without padding), index along desired axis, if needed. """
         if not self.finalized:
             slc = [slice(-s, None) for s in self.shape]
             array = array[slc]
@@ -574,8 +659,13 @@ class SyntheticGenerator:
             array = np.take(array, indices=loc, axis=axis)
         return array
 
-    def finalize_attributes(self):
-        """ !!. """
+    def finalize(self):
+        """ Slice all `*_model` attributes, as well as the `horizon_matrices` and `fault_point_clouds`
+        to correctly account for effects of padding.
+        """
+        if self.finalized:
+            return None
+
         slc = [slice(-s, None) for s in self.shape]
         padding_i, padding_x, padding_d = self.padding
 
@@ -606,23 +696,27 @@ class SyntheticGenerator:
 
         self.finalized = True
         self.padding = (0, 0, 0)
+        self.depth_intervals *= (self.depth_padded / self.depth)
         self.shape_padded = self.shape
         self.depth_padded = self.depth
+        return None
 
-    def finalize(self, delete=('density_model', 'impedance_model')):
-        """ !!. """
+    def cleanup(self, delete=('density_model', 'impedance_model')):
+        """ Delete some of the attributes. Useful in generation pipelines. """
         for attribute in delete:
             delattr(self, attribute)
 
     # Attribute getters
     def get_attribute(self, attribute='synthetic', loc=None, axis=0):
-        """ !!. """
+        """ Get a value of desired attribute while correctly accounting for padding of shapes. """
         result = getattr(self, attribute)
         result = self.finalize_array(result, loc=loc, axis=axis)
         return result
 
     def get_horizons(self, indices='all', format='mask', width=3, loc=None, axis=0):
-        """ !!. """
+        """ Extract horizons as a mask, list of separate horizon matrices or instances.
+        Correctly accounts for effects of padding.
+        """
         #pylint: disable=redefined-builtin
         # Select appropriate horizons
         if isinstance(indices, (slice, list)):
@@ -644,7 +738,7 @@ class SyntheticGenerator:
         if 'matrix' in format:
             result = horizon_matrices
         elif 'instance' in format:
-            result = ... #TODO
+            result = ...
         elif 'mask' in format:
             indices = np.nonzero((0 <= horizon_matrices) & (horizon_matrices < self.depth_padded))
             result = np.zeros(self.shape_padded, dtype=np.float32)
@@ -663,7 +757,9 @@ class SyntheticGenerator:
         return result
 
     def get_faults(self, format='mask', width=5, loc=None, axis=0):
-        """ !!. """
+        """ Extract faults as a mask, list of separate point clouds or instances.
+        Correctly accounts for effects of padding.
+        """
         if 'cloud' in format:
             ...
         elif 'instance' in format:
@@ -688,14 +784,21 @@ class SyntheticGenerator:
         return result
 
     def get_increasing_impedance_model(self):
-        """ !!. """
-        return ...
+        """ TODO. """
 
 
     # Visualization
     def show_slide(self, loc=None, axis=0, velocity_cmap='jet', return_figure=False,
                    remove_padding=True, horizon_width=5, fault_width=7, **kwargs):
-        """ !!. """
+        """ Show a figure with pre-defined graphs:
+            - velocity
+            - velocity, overlayed with horizons and  faults
+            - seismic image
+            - seismic image, overlayed with horizons and faults
+            - reflectivity
+            - horizon mask
+            - fault mask
+        """
         #TODO: add the same functionality, as in `SeismicCropBatch.plot_roll`
         #TODO: use the same v_min/v_max for all locations
         loc = loc or self.shape[axis] // 2
@@ -750,7 +853,12 @@ class SyntheticGenerator:
         return None
 
     def show_stats(self, return_figure=False, **kwargs):
-        """ !!. """
+        """ Show a figure with pre-defined graphs:
+            - histogram of amplitudes
+            - mean of amplitudes along depth
+            - velocity vector
+            - layer sizes
+        """
         kwargs = {
             'nrows': 2,
             'shapes': 3,
@@ -778,14 +886,26 @@ class SyntheticGenerator:
     # Utilities and faster versions of common operations
     @staticmethod
     def make_gaussian_kernel_1d(kernel_size, sigma):
-        """ !!. """
+        """ Create a 1d gaussian kernel. """
         kernel_1d = np.linspace(-(kernel_size - 1) / 2., (kernel_size - 1) / 2., kernel_size, dtype=np.float32)
         kernel_1d = np.exp(-0.5 * np.square(kernel_1d) / np.square(sigma))
         return kernel_1d / kernel_1d.sum()
 
     @staticmethod
     def make_randomization1_matrix(shape, num_nodes=10, interpolation_kind='cubic', rng=None):
-        """ !!. """
+        """ Create 1d/2d perturbation matrix. Under the hood, uses sparse grid of nodes with uniform perturbations,
+        which is then interpolated into desired `shape`.
+
+        Parameters
+        ----------
+        num_nodes : int or tuple of int
+            Number of nodes along each axis. If int, the same value is used for both axis.
+            The more nodes, the more oscillations would be produced.
+        interpolation_kind : str or int, optional
+            Kind of interpolation to use. Refer to `scipy.interpolate.interp2d` for further explanation.
+        rng : np.random.Generator or int, optional
+            Random Number Generator or seed to create one.
+        """
         # Parse parameters
         rng = rng if isinstance(rng, np.random.Generator) else np.random.default_rng(rng)
         squeezed_shape = tuple(s for s in shape if s != 1)
@@ -812,7 +932,27 @@ class SyntheticGenerator:
     def make_randomization2_matrix(shape, locs_n_range=(2, 10), locs_scale_range=(5, 15), sample_size=None,
                                    blur_size=9, blur_sigma=2., digitize=True, n_bins=20, output_range=(0.0, 1.0),
                                    rng=None):
-        """ !!. """
+        """ Create 1d/2d perturbation matrix. Under the hood, we use a mixture of Gaussians with uniformly distributed
+        locations and scales (in both directions) to sample shifts for each pixel.
+
+        Parameters
+        ----------
+        locs_n_range : tuple of two ints
+            Range for generating the number of Gaussians in the mixture.
+        locs_scale_range : tuple of two numbers
+            Range for generating the scale of Gaussians in the mixture.
+        sample_size : number, optional
+            If provided, then the number of sampled points. Default is the spatial shape size.
+        blur_size, blur_sigma : number, number
+            Parameters of Gaussian blur for post-processing of perturbation matrix.
+        digitize, n_bins : bool, int
+            Whether to binarize the perturbation matrix. Used to add sharpness and jiggle to horizons.
+        output_range : tuple of two numbers
+            Range to scale the perturbation, which defines the overall direction.
+            For example, (0.0, 1.0) value would mean that perturbation shifts the surface only in the down direction.
+        rng : np.random.Generator or int, optional
+            Random Number Generator or seed to create one.
+        """
         # Parse parameters
         rng = rng if isinstance(rng, np.random.Generator) else np.random.default_rng(rng)
         sample_size = sample_size or min(10000, 5*np.prod(shape))
@@ -859,8 +999,21 @@ class SyntheticGenerator:
 
     @staticmethod
     def make_shift_vector(num_points, mode='sin2', num_zeros=0.2, perturb_peak=True, perturb_values=True, rng=None):
-        """ !!. """
-        # TODO: dtypes? do we need them here (output of this function used for map_coordinates only)
+        """ Create a vector of pixel shifts.
+
+        Parameters
+        ----------
+        mode : {'sin2'}
+            Mode for making shift vector. Changes the pattern of shifts along chosen direction.
+        num_zeros : number
+            Proportion of zeros on the sides of created `shift_vector`.
+            0.2 means that rougly 10% from each side are going to be filled with zeros.
+        perturb_peak : bool
+            Whether to randomly shift the peak of `shift_vector` to the sides.
+        perturb_values : bool
+            Whether to add small randomization to values in the `shift_vector`.
+        """
+        # TODO: dtypes? Do we even need them here (output of this function used for map_coordinates only)
         # Parse parameters
         rng = rng if isinstance(rng, np.random.Generator) else np.random.default_rng(rng)
         num_zeros = int(num_points * num_zeros) if isinstance(num_zeros, (float, np.floating)) else num_zeros
@@ -891,7 +1044,7 @@ class SyntheticGenerator:
 
     @staticmethod
     def apply_gaussian_filter_3d(array, kernel_size=9, sigma=1.):
-        """ !!. """
+        """ Apply gaussian filter in 3d in optimal way (with opencv convolutions). """
         kernel_1d = SyntheticGenerator.make_gaussian_kernel_1d(kernel_size=kernel_size, sigma=sigma)
 
         for i in range(array.shape[0]):
@@ -908,7 +1061,7 @@ class SyntheticGenerator:
 
 @njit(parallel=True)
 def compute_velocity_model(buffer, velocity_vector, horizon_matrices):
-    """ !!. """
+    """ Compute the velocity model by depth-wise stretching `velocity_vector` along `horizon_matrices`. """
     i_range, x_range, depth = buffer.shape
 
     for i in prange(i_range):
@@ -927,7 +1080,12 @@ def compute_velocity_model(buffer, velocity_vector, horizon_matrices):
 
 @njit(parallel=True)
 def compute_reflectivity_model(buffer, impedance_model):
-    """ !!. """
+    """ Compute reflectivity as the ratio between differences and sums for successive layers of impedance.
+    To condition this fraction, we add the doubled ~mean impedance to the denominator.
+
+    reflectivity = ((impedance[..., 1:] - impedance[..., :-1]) /
+                    (impedance[..., 1:] + impedance[..., :-1]))
+    """
     i_range, x_range, depth = buffer.shape
 
     for i in prange(i_range):
@@ -943,7 +1101,10 @@ def compute_reflectivity_model(buffer, impedance_model):
 
 @njit
 def inplace_add(matrix, indices_1, indices_2):
-    """ !!. """
+    """ Inplace addition of ones into `matrix` at `indices_1, indices_2` position.
+    The difference with numpy indexing `matrix[indices_1, indices_2] += 1` is in fact that numpy would not add twice
+    at the same element, resulting in different outputs.
+    """
     for i_1, i_2 in zip(indices_1, indices_2):
         matrix[i_1, i_2] += 1
     return matrix
@@ -951,7 +1112,9 @@ def inplace_add(matrix, indices_1, indices_2):
 
 @njit
 def find_depths(array, idx_x, depths):
-    """ !!. """
+    """ For each pair of (x coordinate, depth) from `idx_x` and `depths`, find the closest value in `array`.
+    Early breaks if found exactly that depth.
+    """
     #pylint: disable=consider-using-enumerate
     array_depth = array.shape[-1]
     output = np.empty_like(idx_x)
