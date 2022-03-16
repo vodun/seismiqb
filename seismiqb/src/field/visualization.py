@@ -401,12 +401,12 @@ class VisualizationMixin:
 
     # 3D interactive
     def show_3d(self, src='labels', aspect_ratio=None, zoom_slice=None,
-                 n_points=100, threshold=100, n_sticks=100, n_nodes=10,
+                 n_points=100, threshold=100, sticks_step=100, stick_nodes_step=10,
                  slides=None, margin=(0, 0, 20), colors=None, **kwargs):
         """ Interactive 3D plot for some elements of a field.
         Roughly, does the following:
             - take some faults and/or horizons
-            - select `n` points to represent the horizon surface and `n_sticks` and `n_nodes` for each fault
+            - select `n` points to represent the horizon surface and `sticks_step` and `stick_nodes_step` for each fault
             - triangulate those points
             - remove some of the triangles on conditions
             - use Plotly to draw the tri-surface
@@ -427,10 +427,10 @@ class VisualizationMixin:
             The more, the better the image is and the slower it is displayed.
         threshold : number
             Threshold to remove triangles with bigger height differences in vertices.
-        n_sticks : int
-            Number of sticks for each fault.
-        n_nodes : int
-            Number of nodes for each stick.
+        sticks_step : int
+            Number of slides between sticks.
+        stick_nodes_step : int
+            Distance between stick nodes
         slides : list of tuples
             Each tuple is pair of location and axis to load slide from seismic cube.
         margin : tuple of ints
@@ -460,8 +460,8 @@ class VisualizationMixin:
         triangulation_kwargs = {
             'n_points': n_points,
             'threshold': threshold,
-            'n_sticks': n_sticks,
-            'n_nodes': n_nodes,
+            'sticks_step': sticks_step,
+            'stick_nodes_step': stick_nodes_step,
             'slices': zoom_slice
         }
 

@@ -305,7 +305,7 @@ class Fault(Horizon):
         array[self.points[:, 0], self.points[:, 1], self.points[:, 2]] = 1
         return self.from_mask(array, cube_shape=self.field.shape, field=self.field, **kwargs)
 
-    def show_3d(self, n_sticks=100, n_nodes=10, z_ratio=1., zoom_slice=None, show_axes=True,
+    def show_3d(self, sticks_step=100, stick_nodes_step=10, z_ratio=1., zoom_slice=None, show_axes=True,
                 width=1200, height=1200, margin=20, savepath=None, **kwargs):
         """ Interactive 3D plot. Roughly, does the following:
             - select `n` points to represent the horizon surface
@@ -315,10 +315,10 @@ class Fault(Horizon):
 
         Parameters
         ----------
-        n_sticks : int
-            Number of sticks for each fault.
-        n_nodes : int
-            Number of nodes for each stick.
+        sticks_step : int
+            Number of slides between sticks.
+        stick_nodes_step : int
+            Distance between stick nodes
         z_ratio : int
             Aspect ratio between height axis and spatial ones.
         zoom_slice : tuple of slices or None.
@@ -341,20 +341,20 @@ class Fault(Horizon):
             zoom_slice = [slice(0, i) for i in self.field.shape]
         zoom_slice[-1] = slice(self.h_min, self.h_max)
         margin = [margin] * 3 if isinstance(margin, int) else margin
-        x, y, z, simplices = self.make_triangulation(n_sticks, n_nodes, zoom_slice)
+        x, y, z, simplices = self.make_triangulation(sticks_step, stick_nodes_step, zoom_slice)
 
         show_3d(x, y, z, simplices, title, zoom_slice, None, show_axes, aspect_ratio,
                 axis_labels, width, height, margin, savepath, **kwargs)
 
-    def make_triangulation(self, n_sticks, n_nodes, slices, **kwargs):
+    def make_triangulation(self, sticks_step, stick_nodes_step, slices, **kwargs):
         """ Create triangultaion of fault.
 
         Parameters
         ----------
-        n_sticks : int
-            Number of sticks to create.
-        n_nodes : int
-            Number of nodes for each stick.
+        sticks_step : int
+            Number of slides between sticks.
+        stick_nodes_step : int
+            Distance between stick nodes
         slices : tuple
             Region to process.
 
@@ -370,7 +370,7 @@ class Fault(Horizon):
             points = points[points[:, i] >= slices[i].start]
         if len(points) <= 3:
             return [], [], [], []
-        sticks = get_sticks(points, n_sticks, n_nodes)
+        sticks = get_sticks(points, sticks_step, stick_nodes_step)
         simplices = make_triangulation(sticks, True)
         coords = np.concatenate(sticks) if len(sticks) > 0 else np.zeros((0, 3))
         return coords[:, 0], coords[:, 1], coords[:, 2], simplices
@@ -475,17 +475,17 @@ class Fault(Horizon):
                       for i, item in Notifier(pbar)(enumerate(labels))]
         return labels
 
-def get_sticks(points, n_sticks, n_nodes):
+def get_sticks(points, sticks_step, stick_nodes_step):
     """ Get sticks from fault which is represented as a cloud of points.
 
     Parameters
     ----------
     points : np.ndarray
         Fault points.
-    n_sticks : int
-        Number of sticks to create.
-    n_nodes : int
-        Number of nodes for each stick.
+    sticks_step : int
+        Number of slides between sticks.
+    stick_nodes_step : int
+        Distance between stick nodes
 
     Returns
     -------
@@ -496,13 +496,11 @@ def get_sticks(points, n_sticks, n_nodes):
     pca.fit(points)
     axis = 0 if np.abs(pca.components_[0][0]) > np.abs(pca.components_[0][1]) else 1
     axis = 0
-    column = points[:, 0] if axis == 0 else points[:, 1]
-    # step = max((column.max() - column.min()) // (n_sticks + 1), 1)
 
     points = points[np.argsort(points[:, axis])]
     projections = np.split(points, np.unique(points[:, axis], return_index=True)[1][1:])
     projections = [item for item in projections if item[:, 2].max() - item[:, 2].min() > 5]
-    step = min(n_sticks, len(projections)-1)
+    step = min(sticks_step, len(projections)-1)
     if step == 0:
         return []
     projections = projections[::step]
@@ -511,7 +509,7 @@ def get_sticks(points, n_sticks, n_nodes):
     for p in projections:
         points_ = thicken_line(p).astype(int)
         loc = p[0, axis]
-        nodes = approximate_points(points_[:, [1-axis, 2]], n_nodes)
+        nodes = approximate_points(points_[:, [1-axis, 2]], stick_nodes_step)
         nodes_ = np.zeros((len(nodes), 3))
         nodes_[:, [1-axis, 2]] = nodes
         nodes_[:, axis] = loc
