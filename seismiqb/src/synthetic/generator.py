@@ -16,7 +16,80 @@ from ..plotters import MatplotlibPlotter, plot_image
 
 
 class SyntheticGenerator:
-    """ !!. """
+    """ A class for synthetic generation.
+
+    The process is split into a number of methods, which are supposed to be chained.
+    Each of the methods has a lot of parameters, which control the exact randomization that is used for generation.
+    Here, we overview the overall process, explain key concepts and outline potential improvements.
+
+    1. `make_velocity_vector` is used to create an increasing (almost everywhere) vector of velocities in desired range.
+    This vector defines the textural patterns of the resulting seismic: colors and color differences of layers.
+        - Randomization allows to create a non-linear sequence of velocities, as well as to add some sharper peaks
+        (larger differences) to the vector: those would correspond to a better seen (amplified) horizons.
+    This method defines the number of horizons in the resulting synthetic image.
+    The result is `velocity_vector` attribute of (num_horizons,) shape.
+
+    2. `make_horizons` creates a sequence of almost conforming surfaces.
+    They define structural patterns of the resulting seismic: where the layers are and how they interact.
+    In the simplest case, horizons are just uniformly spaced surfaces.
+        - The first randomization is to change spacing between surfaces: this makes layers thicker / thinner.
+        - The second randomization is to perturb the surfaces itself: the key here is to repeat this perturbation on all
+        of subsequent surfaces. To this end, each next horizon matrix starts as a shifted version of the previous one.
+        We support multiple types of such perturbations:
+            - One uses a small number of spatial nodes to create uniformly distributed shifts, which are then
+            interpolated to match the requested spatial shape: this results in smooth vertical changes.
+            Number of nodes controls frequency of peaks; yet, the horizon lines would still be featureless.
+            - The other uses a mixture of Gaussians with randomized locations and scales to add 'clusters' of shifts.
+            This results in much more defined peaks, and also introduces some jiggle into the horizons.
+            Parameters allow to control number of added peaks, their spatial/depth size, and the overall direction.
+            Note that this kind of noise is highly desirable, but slow to compute.
+            - TODO: Perlin noise.
+            The hope is that it would produce similar results to the mixture of Gaussians, but much faster.
+    This method defines the resulting shape of the produced synthetic image.
+    The result is `horizon_matrices` attribute of (num_horizons, *spatial_shape) shape.
+
+    3. `make_velocity_model` stretches the `velocity_vector` along `horizon_matrices` depth-wise.
+        - TODO: add spatial randomization.
+        Model small amplitude changes along horizons, as well as modify inter-horizon space.
+    The result is `velocity_model` attribute of (*spatial_shape, depth) shape.
+
+    4. `make_fault_2d` and `make_fault_3d` add elastic discontinueties on the velocity model.
+    Modifies `horizon_matrices`, so all of the attributes are synchronized and correctly transformed.
+    Can be used multiple times to add faults on the same image: each next fault will affect all of the previous ones.
+    In 2D case, parametrized by a segment coordinates. In 3D case, fault is defined by upper and lower polylines,
+    which are used to create segment coordinates for each 2D slide.
+
+    5. `make_density_model`, `make_impedance_model`, `make_reflectivity_model` produce (*spatial_shape, depth) arrays.
+        - `density_model` is a slightly perturbed `velocity_model`.
+        - `impedance_model` is an element-wise product of `velocity_model` and `density_model`.
+        - `reflectivity_model` is a ratio between difference and sum of `impedance_model` in subsequent layers.
+        To condition this fraction, we add the doubled ~mean impedance to the denominator.
+
+    6. `make_synthetic` convolves the `reflectivity_model` with Ricker wavelet.
+
+    7. `postprocess_synthetic` and `postprocess_synthetic_2d` apply noise and blurring to make synthetic more realistic.
+
+    That concludes the usual pipeline of synthetic generation. Additional features and methods:
+        - `get_*` methods extract the actual data from the generator.
+        Whether you need the synthetic image, horizon mask or something else, use those methods:
+        never access instance attributes, as some array operations are applied only when the data is actually requested.
+
+        - Shape padding. `make_horizons` allows to pad the `shape` to a bigger size, which makes all of the methods
+        create slightly bigger arrays. The reason for padding is to avoid various border effects.
+        At data access via `get_*` methods, the arrays are sliced to match the originally requested `shape`: that is
+        one of the reasons to use `get_*` methods exclusively for data retrieval.
+
+        - `finalize` method can be used to delete some of the unnecessary attributes (mostly, `*_model` arrays) and
+        free up some memory. A usual generator uses 5 (*spatial_shape, depth)-shaped buffers:
+            - `velocity_model`,
+            - `density_model`,
+            - `impedance_model`,
+            - `reflectivity_model`,
+            - `synthetic`,
+        of which you may need only one or two. Reducing the memory footprint is always a good idea!
+
+        - `show_slide` and `show_stats` can be used to visualize produced results and assess distributions.
+    """
     def __init__(self, rng=None, seed=None, **kwargs):
         # Random number generator. Should be used exclusively throughout the class for randomization
         self.rng = rng or np.random.default_rng(seed)
@@ -47,10 +120,6 @@ class SyntheticGenerator:
         self.reflectivity_model = None
         self.synthetic = None
 
-        # Properties
-        self._horizon_mask = None
-        self._fault_mask = None
-
         for key, value in kwargs.items():
             setattr(self, key, value)
 
@@ -59,8 +128,35 @@ class SyntheticGenerator:
     def make_velocity_vector(self, num_horizons=10, limits=(5_000, 10_000),
                              randomization='uniform', randomization_scale=0.3,
                              amplify_probability=0.2, amplify_range=(2.0, 4.0), amplify_sign_probability=0.8):
-        """ !!. """
-        # TODO: maybe, add scale back to initial `limits` range?
+        """ Create an almost increasing vector of velocities, which defines textural patterns of resulting seismic.
+
+        In the simplest case, is just a `num_horizons`-sized linspace of `limits`.
+        `randomization_*` parameters control perturbations of this linspace and randomizes layer transitions.
+        `amplify_*` parameters allow to make some of the horizons more visible. The first horizon can't be amplified.
+
+        Parameters
+        ----------
+        num_horizons : int
+            Number of desired horizons.
+        limits : tuple of two int
+            Minimum and maximum velocity. Not matched exactly and can be exceeded in both directions.
+            # TODO: maybe, add scale back option to preserve `limits`?
+
+        randomization : {None, 'normal', 'uniform'}
+            Type of randomization to apply. Generates a zero-centered noise, which perturbs the original linspace.
+        randomization_scale : number
+            Scale of applied randomization with relation to (limits_diff / num_horizons).
+            A scale of 1.0 means that perturbation can result in the same difference, as the original linspace.
+
+        amplify_probability : number
+            Probability of a horizon to be amplified.
+        amplify_range : tuple of two numbers
+            Range to uniformly sample the size of horizon amplification with relation to (limits_diff / num_horizons).
+            The bigger it is, the sharper the contrast between layers.
+        amplify_sign_probability : number
+            Chance to invert the size of amplification. Due to this, velocity vector may not be always increasing.
+            TODO: maybe, should be applied to all velocities?
+        """
         # Base velocity vector
         velocity_vector, delta = np.linspace(*limits, num=num_horizons, retstep=True, dtype=np.float32)
 
@@ -85,18 +181,70 @@ class SyntheticGenerator:
                 velocity_vector[index:] += delta * sign * multiplier
                 amplified_horizon_indices.append(index)
 
+        # Resulting velocity vector may be outside of upper range. Split this difference across both ranges
+        velocity_vector -= (velocity_vector.max() - limits[1]) / 2
+
         # Store in the instance
         self.num_horizons = num_horizons
         self.velocity_vector = velocity_vector
         self.amplified_horizon_indices = amplified_horizon_indices
         return self
 
-    def make_horizons(self, shape, padding=(16, 32), num_horizons=None, horizon_intervals='uniform',
+    def make_horizons(self, shape, padding=(16, 32), num_horizons=None,
                       interval_randomization=None, interval_randomization_scale=0.1, interval_min=0.5,
                       randomization1_scale=0.25, num_nodes=10, interpolation_kind='cubic',
-                      randomization2_scale=0.1, digitize=True, n_bins=10,
-                      locs_n_range=(2, 10), locs_scale_range=(5, 15), sample_size=None, blur_size=9, blur_sigma=2.):
-        """ !!. """
+                      randomization2_scale=0.1, locs_n_range=(2, 10), locs_scale_range=(5, 15), sample_size=None,
+                      blur_size=9, blur_sigma=2.0, digitize=True, n_bins=20, output_range=(-0.2, 0.8)):
+        """ Create a sequence of almost conforming horizons, which define structural features of the produced seismic.
+
+        In the simplest case, a creates uniformly spaced surfaces.
+        `interval_*` parameters changes distances between surfaces.
+        `randomization1_*` changes surfaces in a smooth node-based way.
+        `randomization2_*` uses mixture of Gaussians to add defined peaks to horizon surfaces.
+
+        Parameters
+        ----------
+        shape : tuple of ints
+            Desired shape of created seismic images.
+        padding : tuple of ints
+            Padding along each of the axis. If used, then all of the computations in this method and others would be
+            performed with slightly bigger shape, and the final slicing is used in `get_*` methods.
+            Note that axes of size 1 (in case of 2D seismic) are not padded.
+        num_horizons : int, optional
+            If provided, then the number of horizons to create. Default is the number of horizons in `velocity_vector`.
+
+        interval_randomization : {None, 'uniform', 'normal'}
+            Type of randomization to apply to intervals between horizons.
+            Generates a zero-centered noise, which perturbs the original equally-spaced intervals.
+        interval_randomization_scale : number
+            Scale of applied interval randomization with relation to (depth / num_horizons).
+            A scale of 1.0 means that perturbation can result in horizons running one to other.
+        interval_min : number
+            Smallest allowed interval after perturbation with relation to (depth / num_horizons).
+
+        randomization1_scale : number
+            Scale of surface perturbation of the first type with relation to its interval to the previous layer.
+        num_nodes : int
+            Number of nodes for creating grid. The bigger, the more oscillations.
+        interpolation_kind : {'cubic'}
+            Type of interpolation from nodes to spatial shape.
+
+        randomization2_scale : number
+            Scale of surface perturbation of the second type with relation to its interval to the previous layer.
+        locs_n_range : tuple of two ints
+            Range for generating the number of Gaussians in the mixture.
+        locs_scale_range : tuple of two numbers
+            Range for generating the scale of Gaussians in the mixture.
+        sample_size : number, optional
+            If provided, then the number of sampled points. Default is the spatial shape size.
+        blur_size, blur_sigma : number, number
+            Parameters of Gaussian blur for post-processing of perturbation matrix.
+        digitize, n_bins : bool, int
+            Whether to binarize the perturbation matrix. Used to add sharpness and jiggle to horizons.
+        output_range : tuple of two numbers
+            Range to scale the perturbation, which defines the overall direction.
+            For example, (0.0, 1.0) value would mean that perturbation shifts the surface only in the down direction.
+        """
         # TODO: maybe, reverse the direction?
         # Parse parameters
         shape = shape if len(shape) == 3 else (1, *shape)
@@ -109,10 +257,7 @@ class SyntheticGenerator:
         num_horizons = num_horizons or self.num_horizons
 
         # Prepare intervals between horizons
-        if horizon_intervals == 'uniform':
-            depth_intervals = np.ones(num_horizons - 1, dtype=np.float32) / num_horizons
-        elif isinstance(horizon_intervals, np.ndarray):
-            depth_intervals = horizon_intervals
+        depth_intervals = np.ones(num_horizons - 1, dtype=np.float32) / num_horizons
 
         # Slightly perturb intervals between horizons
         if interval_randomization == 'normal':
@@ -146,7 +291,8 @@ class SyntheticGenerator:
                                                                       locs_scale_range=locs_scale_range,
                                                                       sample_size=sample_size,
                                                                       blur_size=blur_size, blur_sigma=blur_sigma,
-                                                                      digitize=digitize, n_bins=n_bins)
+                                                                      digitize=digitize, n_bins=n_bins,
+                                                                      output_range=output_range)
                 next_matrix += randomization2_scale * depth_interval * perturbation_matrix
 
             horizon_matrices.append(next_matrix)
@@ -164,7 +310,7 @@ class SyntheticGenerator:
         return self
 
     def make_velocity_model(self):
-        """ !!. """
+        """ Compute the velocity model by depth-wise stretching `velocity_vector` along `horizon_matrices`. """
         buffer = np.empty(self.shape_padded, dtype=np.float32)
         velocity_model = compute_velocity_model(buffer, self.velocity_vector, self.horizon_matrices)
         self.velocity_model = velocity_model
@@ -377,6 +523,7 @@ class SyntheticGenerator:
         """ !!. """
         wavelet = ricker(ricker_points, ricker_width)
         wavelet = wavelet.astype(np.float32).reshape(1, ricker_points)
+        wavelet *= 100
 
         synthetic = np.empty_like(self.reflectivity_model)
         for i in range(self.shape_padded[0]):
@@ -386,16 +533,26 @@ class SyntheticGenerator:
         self.synthetic = synthetic
         return self
 
-    def postprocess_synthetic(self, sigma=1., kernel_size=9, noise_mul=None):
+    def postprocess_synthetic(self, sigma=1., kernel_size=9, noise_mode=None, noise_mul=0.02):
         """ !!. """
         if sigma is not None:
             self.synthetic = self.apply_gaussian_filter_3d(self.synthetic, kernel_size=kernel_size, sigma=sigma)
-        if noise_mul is not None:
-            left, right = np.quantile(self.synthetic, (0.05, 0.95))
-            mask = (left < self.synthetic) & (self.synthetic < right)
 
-            perturbation = 2 * self.rng.random(size=mask.sum(), dtype=np.float32) - 1
-            self.synthetic[mask] += noise_mul * perturbation
+        if True:
+            left, right = np.quantile(self.synthetic, [0.01, 0.99])
+            mask = self.synthetic > right
+            self.synthetic[mask] = self.synthetic[mask] - (self.synthetic.max() - right)
+
+            mask = self.synthetic < left
+            self.synthetic[mask] = self.synthetic[mask] - (self.synthetic.min() - left)
+
+        if noise_mode is None:
+            perturbation = 0
+        elif noise_mode == 'normal':
+            perturbation = self.rng.standard_normal(size=self.shape_padded, dtype=np.float32)
+        elif noise_mode == 'uniform':
+            perturbation = 2 * self.rng.random(size=self.shape_padded, dtype=np.float32) - 1
+        self.synthetic += (noise_mul * self.synthetic.std()) * perturbation
 
         return self
 
@@ -403,6 +560,7 @@ class SyntheticGenerator:
         """ TODO: Perlin noise. """
 
 
+    # Finalization
     def finalize_array(self, array, loc=None, axis=0, angle=None):
         """ !!. """
         if not self.finalized:
@@ -451,6 +609,10 @@ class SyntheticGenerator:
         self.shape_padded = self.shape
         self.depth_padded = self.depth
 
+    def finalize(self, delete=('density_model', 'impedance_model')):
+        """ !!. """
+        for attribute in delete:
+            delattr(self, attribute)
 
     # Attribute getters
     def get_attribute(self, attribute='synthetic', loc=None, axis=0):
@@ -587,6 +749,31 @@ class SyntheticGenerator:
             return fig
         return None
 
+    def show_stats(self, return_figure=False, **kwargs):
+        """ !!. """
+        kwargs = {
+            'nrows': 2,
+            'shapes': 3,
+            'return_figure': True,
+            **kwargs
+        }
+        fig = plot_image(self.get_attribute(), mode='hist',
+                         title='amplitude histogram', **kwargs)
+
+        plot_image(self.synthetic.mean(axis=(0, 1)), mode='curve', ax=fig.axes[1],
+                   title='amplitude / depth', xlabel='depth', ylabel='mean amplitude')
+
+        plot_image(self.velocity_vector, mode='curve',
+                   title='velocity vector', xlabel='horizon index', ylabel='velocity',
+                   ax=fig.axes[2])
+
+        plot_image(self.depth_intervals, mode='curve', ax=fig.axes[3],
+                   title='layer size', xlabel='horizon index', ylabel='size')
+
+        if return_figure:
+            return fig
+        return None
+
 
     # Utilities and faster versions of common operations
     @staticmethod
@@ -623,7 +810,8 @@ class SyntheticGenerator:
 
     @staticmethod
     def make_randomization2_matrix(shape, locs_n_range=(2, 10), locs_scale_range=(5, 15), sample_size=None,
-                                   blur_size=9, blur_sigma=2., digitize=True, n_bins=10, rng=None):
+                                   blur_size=9, blur_sigma=2., digitize=True, n_bins=20, output_range=(0.0, 1.0),
+                                   rng=None):
         """ !!. """
         # Parse parameters
         rng = rng if isinstance(rng, np.random.Generator) else np.random.default_rng(rng)
@@ -663,8 +851,10 @@ class SyntheticGenerator:
         if digitize:
             bins = np.linspace(0, 1, n_bins + 1, dtype=np.float32)
             matrix = np.digitize(matrix, bins).astype(np.float32)
+            matrix -= 1
             matrix /= n_bins
 
+        matrix = (output_range[1] - output_range[0]) * matrix + output_range[0]
         return matrix
 
     @staticmethod
@@ -713,7 +903,6 @@ class SyntheticGenerator:
                 cv2.filter2D(src=array[:, j], ddepth=-1, kernel=kernel_1d.reshape(-1, 1),
                              dst=array[:, j], borderType=cv2.BORDER_CONSTANT)
         return array
-
 
 
 
