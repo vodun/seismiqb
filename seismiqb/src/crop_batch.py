@@ -1271,7 +1271,7 @@ class SeismicCropBatch(Batch):
         data = components.apply(lambda item: getattr(self, item)[idx].squeeze())
 
         if zoom_slice is not None:
-            data = [item[zoom_slice] for item in data]
+            data = data.apply(lambda item: item[zoom_slice])
 
         # Extract location
         location = self.locations[idx]
