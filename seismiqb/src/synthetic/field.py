@@ -148,6 +148,7 @@ class SyntheticField:
 
              .make_synthetic(**params['make_synthetic'])
              .postprocess_synthetic(**params['postprocess_synthetic'])
+             .cleanup(**params['cleanup'])
             )
 
             generator.params = params
@@ -164,6 +165,7 @@ class SyntheticField:
         num_faults = rng.choice([0, 1, 2, 3], p=[0.7, 0.2, 0.1, 0.0])
         fault_params = [{'coordinates': 'random',
                          'max_shift': rng.uniform(20, 40),
+                         'shift_sign': rng.choice([-1, 1]),
                          'width': rng.uniform(1.0, 4.0)}
                         for _ in range(num_faults)]
 
@@ -187,7 +189,9 @@ class SyntheticField:
 
             'make_synthetic': {'ricker_width': rng.uniform(4.7, 5.3),
                                'ricker_points': 100},
-            'postprocess_synthetic': {'sigma': 0.5, 'noise_mul': None},
+            'postprocess_synthetic': {'sigma': 0.5,
+                                      'noise_mode': 'normal', 'noise_mul': rng.uniform(0.2, 0.6)},
+            'cleanup': {'delete': []},
         }
 
 
@@ -247,8 +251,30 @@ class SyntheticField:
         """ !!. """
 
 
+    # Utilities
+    @classmethod
+    def velocity_to_seismic(cls, velocity, ricker_width=4.3):
+            """ Generate synthetic seismic out of velocity predictions. """
+            result = []
+            for velocity_array in velocity:
+                generator = SyntheticGenerator()
+
+                # Generating synthetic out of predicted velocity for all items
+                generator.velocity_model = velocity_array
+                generator.shape = generator.shape_padded = velocity_array.shape
+                generator.depth = generator.depth_padded = velocity_array.shape[-1]
+
+                (generator
+                 .make_density_model(randomization=None)
+                 .make_impedance_model()
+                 .make_reflectivity_model()
+                 .make_synthetic(ricker_width=ricker_width, ricker_points=100))
+                result.append(generator.synthetic)
+
+            return np.stack(result).astype(np.float32)
+
     # Normalization
-    def make_normalization_stats(self, n=1000, shape=None, attribute='synthetic'):
+    def make_normalization_stats(self, n=100, shape=None, attribute='synthetic'):
         """ Compute normalization stats (`mean`, `std`, `min`, `max`, quantiles) from `n` generated `attributes`. """
         data = [self.get_attribute(shape=shape or self.crop_shape, attribute=attribute) for _ in range(n)]
         data = np.array(data)
@@ -275,7 +301,7 @@ class SyntheticField:
             self.make_normalization_stats()
         return self._normalization_stats
 
-    # Vis
+    # Visualization
     def __repr__(self):
         return f"""<SyntheticField `{self.displayed_name}` at {hex(id(self))}>"""
 
@@ -290,13 +316,13 @@ class SyntheticField:
         return msg
 
     def show_slide(self, location=None, shape=None, **kwargs):
-        """ !!. """
+        """ Create one generator and show underlying models, synthetic and masks. """
         generator = self.get_generator(location=location, shape=shape)
         self._last_generator = generator
         return generator.show_slide(**kwargs)
 
     def show_roll(self, attribute='synthetic', n=25, **kwargs):
-        """ !!. """
+        """ Show attribute-images for a number of generators. """
         data = [[self.get_attribute(attribute=attribute)[0]] for _ in range(n)]
         cmap = 'gray'
         titles = list(range(n))
