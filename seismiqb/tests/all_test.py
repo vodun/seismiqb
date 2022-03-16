@@ -75,9 +75,9 @@ def test_run_notebook(notebook_kwargs, capsys):
     path_ipynb, params = notebook_kwargs
     filename = os.path.splitext(os.path.basename(path_ipynb))[0]
 
-    config = params.copy() # Test configuration for saving outputs and printing information properly
-    _ = config.pop('TEST_OUTPUTS', None) # Remove non-config variables
-    filename_suffix = "_".join(f"{prepare_param_value(param_value=value)}" for value in config.values())
+    test_outputs = params.pop('TEST_OUTPUTS', []) # Non-config param
+    config = str(params) # For printing outputs
+    filename_suffix = f"{prepare_str(config=config)}" # Replace symbols
 
     params.update(common_params)
 
@@ -85,7 +85,7 @@ def test_run_notebook(notebook_kwargs, capsys):
     out_path_ipynb = os.path.join(params['TESTS_ROOT_DIR'],
                                   f"{filename}_out_{filename_suffix}_{params['DATESTAMP']}.ipynb")
 
-    exec_res = run_notebook(path=path_ipynb, inputs=params, outputs=params.get('TEST_OUTPUTS', []),
+    exec_res = run_notebook(path=path_ipynb, inputs=params, outputs=test_outputs,
                             inputs_pos=2, out_path_ipynb=out_path_ipynb, display_links=False)
 
     pytest.failed = pytest.failed or exec_res['failed']
@@ -106,7 +106,7 @@ def test_run_notebook(notebook_kwargs, capsys):
             print(f"{k}:\n {message}\n")
 
         # Print test conclusion
-        notebook_info = f"{params['DATESTAMP']} \'{filename}\'{' with config=' + str(config) if config else ''} was"
+        notebook_info = f"{params['DATESTAMP']} \'{filename}\'{' with config=' + config if config!='{}' else ''} was"
         if not exec_res['failed']:
             print(f"{notebook_info} executed successfully.\n")
         else:
@@ -114,12 +114,11 @@ def test_run_notebook(notebook_kwargs, capsys):
 
 
 # Helper method
-def prepare_param_value(param_value):
-    """ Create a part of a filename suffix from a configuration parameter value. 
+def prepare_str(config):
+    """ Create a part of a filename suffix from a configuration dict string.
 
     Under the hood we remove all symbols and replace spaces with underscores.
     """
-    param_value = str(param_value)
-    param_value = re.sub(r'[^\w^ ]', '', param_value) # Remove all symbols except spaces
-    param_value = param_value.replace(' ', '_')
-    return param_value
+    config = re.sub(r'[^\w^ ]', '', config) # Remove all symbols except spaces
+    config = config.replace(' ', '_')
+    return config
