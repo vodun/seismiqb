@@ -14,7 +14,7 @@ from .export import ExportMixin
 from ..utils import CacheMixin
 
 from ..utils import file_print, get_environ_flag, lru_cache, transformable
-from ..plotters import plot_image
+from ..plot import plot
 
 
 
@@ -753,7 +753,7 @@ class SeismicGeometry(CacheMixin, ExportMixin):
             **kwargs
             }
         matrix = getattr(self, matrix) if isinstance(matrix, str) else matrix
-        return plot_image(matrix, **kwargs)
+        return plot(matrix, **kwargs)
 
     def show_histogram(self, normalize=None, bins=50, **kwargs):
         """ Show distribution of amplitudes in `trace_container`. Optionally applies chosen normalization. """
@@ -769,7 +769,7 @@ class SeismicGeometry(CacheMixin, ExportMixin):
             'ylabel': 'density',
             **kwargs
         }
-        return plot_image(data, backend='matplotlib', bins=bins, mode='hist', **kwargs)
+        return plot(data, bins=bins, mode='hist', **kwargs)
 
     def show_slide(self, loc=None, start=None, end=None, step=1, axis=0, zoom_slice=None, stable=True, **kwargs):
         """ Show seismic slide in desired place.
@@ -824,7 +824,7 @@ class SeismicGeometry(CacheMixin, ExportMixin):
             'labelright': False,
             **kwargs
         }
-        return plot_image(slide, **kwargs)
+        return plot(slide, **kwargs)
 
     def show_quality_map(self, **kwargs):
         """ Show quality map. """

@@ -8,12 +8,11 @@ from matplotlib import pyplot as plt
 
 from .viewer import FieldViewer
 from ..utils import DelegatingList, to_list
-from ..plotters import plot_image, MatplotlibPlotter, show_3d
+from ..plot import plot
+from ..plotters import show_3d
 from ..labels.horizon_attributes import AttributesMixin
 
-
-
-COLOR_GENERATOR = iter(MatplotlibPlotter.MASK_COLORS)
+COLOR_GENERATOR = iter(plot.MASK_COLORS)
 NAME_TO_COLOR = {}
 
 
@@ -123,20 +122,21 @@ class VisualizationMixin:
             'xlabel': xlabel,
             'ylabel': ylabel,
             'extent': (xmin, xmax, ymin, ymax),
-            'legend': False,
+            'legend': ', '.join(src_labels),
             'labeltop': False,
             'labelright': False,
             'curve_width': width,
-            'grid': [False, True],
+            'grid': [None, 'both'],
             'colorbar': [True, False],
             **kwargs
         }
-        return plot_image(data=[seismic_slide, mask], **kwargs)
+
+        return plot(data=[seismic_slide, mask], **kwargs)
 
 
     # 2D depth slice
     def show_points(self, src='labels', **kwargs):
-        """ Plot 2D map of points. """
+        """ Plot 2D map of labels points. Meant to be used with spatially disjoint objects (e.g. faults). """
         map_ = np.zeros(self.spatial_shape)
         denum = np.zeros(self.spatial_shape)
 
@@ -157,12 +157,12 @@ class VisualizationMixin:
             'colorbar': True,
             **kwargs
         }
-        return plot_image([map_, self.zero_traces], **kwargs)
+        return plot([map_, self.zero_traces], **kwargs)
 
 
     # 2D top-view maps
     def show(self, attributes='snr', mode='imshow', title_pattern='{attributes} of {label_name}',
-             bbox=False, savepath=None, return_figure=False, load_kwargs=None, **plot_kwargs):
+             bbox=False, savepath=None, load_kwargs=None, show=True, **plot_kwargs):
         """ Show one or more field attributes on one figure.
 
         Parameters
@@ -177,7 +177,7 @@ class VisualizationMixin:
             as well as other parameters for `:meth:.load_attribute`.
             If sequence of them, then either should be a list to display loaded entities one over the other,
             or nested list to define separate axis and overlaying for each of them.
-            For more details, refer to `:func:plot_image`.
+            For more details, refer to `:func:plot`.
         mode : 'imshow' or 'hist'
             Mode to display images.
         title_pattern : str with key substrings to be replaced by corresponding variables values
@@ -189,8 +189,6 @@ class VisualizationMixin:
             Whether crop horizon by its bounding box or not.
         savepath : str, optional
             Path to save the figure. `**` is changed to a field base directory, `*` is changed to field base name.
-        return_figure : bool
-            Whether to return the figure.
         load_kwargs : dict
             Loading parameters common for every requested attribute.
         plot_kwargs : dict
@@ -242,17 +240,19 @@ class VisualizationMixin:
                 substitutor = lambda params: {**params, 'src': params['src'].replace('*', str(label_num))}
                 label_attributes = load_params.apply(substitutor)
 
-                fig = self.show(attributes=label_attributes, mode=mode, bbox=bbox, title_pattern=title_pattern,
-                                savepath=savepath, return_figure=return_figure, load_kwargs=load_kwargs, **plot_kwargs)
-                figures.append(fig)
+                canvas = self.show(attributes=label_attributes, mode=mode, bbox=bbox, title_pattern=title_pattern,
+                                   savepath=savepath, load_kwargs=load_kwargs, show=show, **plot_kwargs)
+                canvas.show()
+                figures.append(canvas)
 
-            return figures if return_figure else None
+            return figures
 
         data_params = load_params.apply(self._load_data)
 
         # Prepare default plotting parameters
         plot_params = data_params.apply(self._make_plot_params, mode=mode).to_dict()
-        plot_params['suptitle'] = f'Field `{self.displayed_name}`'
+        plot_params = {**plot_params, **plot_kwargs}
+        # plot_params['suptitle'] = f'Field `{self.displayed_name}`' # TODO
 
         if mode == 'imshow':
             plot_params['colorbar'] = True
@@ -273,11 +273,7 @@ class VisualizationMixin:
             plot_params['savepath'] = self.make_path(savepath, name=first_label_name)
 
         # Plot image with given params and return resulting figure
-        plot_params = {**plot_params, **plot_kwargs}
-        figure = plot_image(mode=mode, return_figure=return_figure, **plot_params)
-        plt.show()
-
-        return figure if return_figure else None
+        return plot(mode=mode, **plot_params)
 
     # Auxilary methods utilized by `show`
     ALIAS_TO_ATTRIBUTE = AttributesMixin.ALIAS_TO_ATTRIBUTE
@@ -381,7 +377,6 @@ class VisualizationMixin:
             linkage[(src_label, label_name)].append(params['attribute_name'])
 
         title = ''
-
         for (src_label, label_name), attributes in linkage.items():
             title += '\n' * (title != '')
             part = title_pattern

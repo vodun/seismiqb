@@ -12,8 +12,8 @@ from .labels import Horizon, UnstructuredHorizon, Fault, GeoBody
 from .metrics import HorizonMetrics, GeometryMetrics, FaultsMetrics, FaciesMetrics
 from .samplers import GeometrySampler, HorizonSampler, FaultSampler, ConstantSampler, \
                       SeismicSampler, BaseGrid, RegularGrid, ExtensionGrid, LocationsPotentialContainer
+from .plot import plot
 
 # Utilities and helpers
-from .plotters import MatplotlibPlotter, plot_image, plot_loss
 from .functional import *
 from .utils import *

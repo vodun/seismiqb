@@ -4,7 +4,8 @@ from textwrap import dedent
 import numpy as np
 from scipy.spatial import Delaunay
 
-from ..plotters import plot_image, show_3d
+from ..plot import plot
+from ..plotters import show_3d
 from ..utils import AugmentedList, DelegatingList, filter_simplices
 
 
@@ -67,7 +68,7 @@ class VisualizationMixin:
         return attribute
 
 
-    def show(self, attributes='depths', mode='imshow', return_figure=False, **kwargs):
+    def show(self, attributes='depths', mode='imshow', return_figure=False, show=True, **kwargs):
         """ Field visualization with custom naming scheme. """
         attributes = DelegatingList(attributes)
         attributes = attributes.apply(self._show_add_prefix, prefix=self.find_self())
@@ -76,14 +77,14 @@ class VisualizationMixin:
             'suptitle_label': f'`{self.name}` on field `{self.field.displayed_name}`',
             **kwargs
         }
-        figure = self.field.show(attributes=attributes, mode=mode, return_figure=return_figure, **kwargs)
+        canvas = self.field.show(attributes=attributes, mode=mode, return_figure=return_figure, show=show, **kwargs)
 
         # Clean-up
         if self.field.loaded_labels[-1] == '_unknown_label':
             delattr(self.field, '_unknown_label')
             self.field.loaded_labels.pop(-1)
 
-        return figure if return_figure else None
+        return canvas
 
 
 
@@ -145,7 +146,7 @@ class VisualizationMixin:
             'colorbar': [True, False],
             **kwargs
         }
-        return plot_image(data=[seismic_slide, mask], **kwargs)
+        return plot(data=[seismic_slide, mask], **kwargs)
 
     # 3D
     def show_3d(self, n_points=100, threshold=100., z_ratio=1., zoom_slice=None, show_axes=True,

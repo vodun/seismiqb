@@ -22,7 +22,7 @@ from numba import njit
 from .utils import filtering_function, AugmentedDict
 from .labels.fault import insert_fault_into_mask
 from ..batchflow import Sampler, ConstantSampler
-from .plotters import MatplotlibPlotter, plot_image
+from .plot import plot
 
 
 
@@ -736,6 +736,8 @@ class SeismicSampler(Sampler):
             xlabel += [field.index_headers[0]] * len(samplers_list)
             ylabel += [field.index_headers[1]] * len(samplers_list)
 
+        data.append(None) # reserve extra subplot for future legend
+
         kwargs = {
             'cmap': [['Sampler', 'black']] * len(data),
             'alpha': [[1.0, 0.4]] * len(data),
@@ -746,15 +748,14 @@ class SeismicSampler(Sampler):
             'vmax': [[3, 1]] * len(data),
             'xlabel': xlabel,
             'ylabel': ylabel,
-            'shapes': 1, # this parameter toggles additional subplot axes creation for further legend display
-            'return_figure': True,
             **kwargs
         }
 
-        fig = plot_image(data, **kwargs)
+        canvas = plot(data, **kwargs)
 
         legend_params = {
-            'ax': fig.axes[len(data)],
+            'mode': 'imshow',
+            'ax': canvas.axes[-1],
             'color': ('purple','blue','red', 'white', 'gray'),
             'label': ('ILINES and CROSSLINES', 'only ILINES', 'only CROSSLINES', 'restricted', 'dead traces'),
             'size': 20,
@@ -762,7 +763,9 @@ class SeismicSampler(Sampler):
             'facecolor': 'silver',
         }
 
-        MatplotlibPlotter.add_legend(**legend_params)
+        canvas.add_legend(**legend_params)
+
+        return canvas
 
     def show_sampled(self, n=10000, binary=False, **kwargs):
         """ Visualize on field map by sampling `n` crop locations. """
@@ -788,6 +791,8 @@ class SeismicSampler(Sampler):
             field_title = f'{field.displayed_name}: {len(sampled_)} points'
             title.append(field_title)
 
+        data.append(None) # reserve extra subplot for future legend
+
         kwargs = {
             'matrix_name': 'Sampled slices',
             'cmap': [['Reds', 'black']] * len(data),
@@ -796,15 +801,14 @@ class SeismicSampler(Sampler):
             'interpolation': 'bilinear',
             'xlabel': field.index_headers[0],
             'ylabel': field.index_headers[1],
-            'shapes': 1, # this parameter toggles additional subplot axes creation for further legend display
-            'return_figure': True,
             **kwargs
         }
 
-        fig = plot_image(data, **kwargs)
+        canvas = plot(data, **kwargs)
 
         legend_params = {
-            'ax': fig.axes[len(data)],
+            'mode': 'imshow',
+            'ax': canvas.axes[-1],
             'color': ('beige', 'salmon', 'grey'),
             'label': ('alive traces', 'sampled locations', 'dead traces'),
             'size': 20,
@@ -812,7 +816,9 @@ class SeismicSampler(Sampler):
             'facecolor': 'silver',
         }
 
-        MatplotlibPlotter.add_legend(**legend_params)
+        canvas.add_legend(**legend_params)
+
+        return canvas
 
 
 

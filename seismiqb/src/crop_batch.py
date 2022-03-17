@@ -14,7 +14,7 @@ from scipy.signal import butter, lfilter, hilbert
 from ..batchflow import DatasetIndex, Batch, action, inbatch_parallel, SkipBatchException, apply_parallel
 
 from .labels import Horizon
-from .plotters import plot_image
+from .plot import plot
 from .synthetic.generator import generate_synthetic
 from .utils import compute_attribute, to_list, AugmentedDict, DelegatingList, adjust_shape_3d
 from .labels.horizon_extraction import groupby_all
@@ -1362,7 +1362,7 @@ class SeismicCropBatch(Batch):
         def color_getter(component):
             if 'mask' in component or 'prediction' in component:
                 return 'viridis'
-            return 'gray'
+            return 'Greys'
         cmaps = components.apply(color_getter)
         cmaps = [[item] if isinstance(item, str) else item for item in cmaps]
 
@@ -1380,15 +1380,16 @@ class SeismicCropBatch(Batch):
                                 data[i][j] = data_
 
         # Separate: no nested lists in data
-        separate = not max([isinstance(item, list) for item in components])
+        combine = 'separate' if not max([isinstance(item, list) for item in components]) else 'overlay'
 
         plot_params = {
-            'separate': separate,
+            'combine': combine,
             'cmap': cmaps,
             'suptitle': suptitle,
             'title': title,
             'xlabel': xlabel,
             'ylabel': ylabel,
+            'ncols': len(components)
         }
         return data, plot_params
 
@@ -1419,7 +1420,7 @@ class SeismicCropBatch(Batch):
             **plot_params,
             **kwargs
         }
-        return plot_image(data, **kwargs)
+        return plot(data, **kwargs)
 
 
     def show(self, n=1, components=None, **kwargs):
@@ -1447,13 +1448,12 @@ class SeismicCropBatch(Batch):
             'cmap': cmaps,
             'title': titles,
             'suptitle': '',
+            'scale': 0.8
         })
 
         # Plot parameters
         kwargs = {
-            'scale': 0.8,
-            'ncols': 5,
             **plot_params,
             **kwargs
         }
-        return plot_image(data, **kwargs)
+        return plot(data, **kwargs)

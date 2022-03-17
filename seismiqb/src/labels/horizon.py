@@ -18,7 +18,7 @@ from ..utils import groupby_mean, groupby_min, groupby_max
 from ..utils import make_bezier_figure
 from ..utils import MetaDict
 from ..functional import smooth_out
-from ..plotters import plot_image, MatplotlibPlotter
+from ..plot import plot
 
 
 
@@ -885,7 +885,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Visua
         from ..metrics import HorizonMetrics
         return HorizonMetrics(self)
 
-    def evaluate(self, compute_metric=True, supports=50, plot=True, savepath=None, printer=print, **kwargs):
+    def evaluate(self, compute_metric=True, supports=50, show=True, savepath=None, printer=print, **kwargs):
         """ Compute crucial metrics of a horizon.
 
         Parameters
@@ -913,7 +913,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Visua
         if compute_metric:
             from ..metrics import HorizonMetrics # pylint: disable=import-outside-toplevel
             return HorizonMetrics(self).evaluate('support_corrs', supports=supports, agg='nanmean',
-                                                 plot=plot, savepath=savepath, **kwargs)
+                                                 show=show, savepath=savepath, **kwargs)
         return None
 
 
@@ -976,7 +976,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Visua
 
 
     def compare(self, *others, clip_value=5, ignore_zeros=False, enlarge=True, width=9,
-                printer=print, plot=True, return_figure=False, hist_kwargs=None, show=True, savepath=None, **kwargs):
+                printer=print, show=True, hist_kwargs=None, savepath=None, **kwargs):
         """ Compare `self` horizon against the closest in `others`.
         Print textual and show graphical visualization of differences between the two.
         Returns dictionary with collected information: `closest` and `proximity_info`.
@@ -993,10 +993,8 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Visua
             Enlarge width. Works only if `enlarge` is True.
         printer : callable, optional
             Function to use to print textual information
-        plot : bool
-            Whether to plot the graph
-        return_figure : bool
-            Whether to add `figure` to the returned dictionary
+        show : bool
+            Whether to show the graph.
         hist_kwargs, kwargs : dict
             Parameters for histogram / main graph visualization.
         """
@@ -1037,7 +1035,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Visua
         if printer is not None:
             printer(msg)
 
-        if plot:
+        if show:
             # Prepare data
             matrix = proximity_info['difference_matrix']
             if enlarge and (self.is_carcass or other.is_carcass):
@@ -1062,7 +1060,8 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Visua
                 'xlabel': self.field.index_headers[0],
                 'ylabel': self.field.index_headers[1],
 
-                'shapes': 3, 'ncols': 2,
+                'ncols': 2,
+                'nrows': 2,
                 'return_figure': True,
                 **kwargs,
             }
@@ -1079,13 +1078,14 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Visua
                 'facecolor': 'pink',
             }
 
-            fig = plot_image([matrix, bounds], **kwargs)
-            MatplotlibPlotter.add_legend(ax=fig.axes[1], **legend_kwargs)
+            canvas = plot([matrix, bounds], **kwargs)
+            canvas.add_legend(mode='imshow', ax=1, **legend_kwargs)
 
             # Histogram and labels
             hist_kwargs = {
                 'xlabel': 'difference values',
                 'title_label': 'Histogram of horizon depth differences',
+                'ncols': 2,
                 **(hist_kwargs or {}),
             }
 
@@ -1094,21 +1094,24 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Visua
             graph_msg = ' '.join(item for item in graph_msg.split('  ') if item)
 
             hist_legend_kwargs = {
-                'color': 'pink',
+                'color': 'none',
                 'label': graph_msg,
                 'size': 14, 'loc': 10,
-                'facecolor': 'pink',
+                'facecolor': 'pink'
             }
 
             hist_data = np.clip(matrix, -clip_value, clip_value)
-            if ignore_zeros:
-                hist_data = hist_data[hist_data != 0.0]
-            plot_image(hist_data, mode='hist', ax=fig.axes[2], **hist_kwargs)
-            MatplotlibPlotter.add_legend(ax=fig.axes[3], **hist_legend_kwargs)
 
-            MatplotlibPlotter.save_and_show(fig=fig, show=show, savepath=savepath)
-            if return_figure:
-                returns['figure'] = fig
+            if ignore_zeros:
+                hist_kwargs['mask_values'] = 0
+
+            canvas.plot(hist_data, mode='hist', ax=2, **hist_kwargs)
+            canvas.add_legend(mode='hist', ax=3, **hist_legend_kwargs)
+            canvas.show()
+
+            if savepath is not None:
+                canvas.save({'savepath': savepath})
+            returns['figure'] = canvas.fig
 
         return returns
 

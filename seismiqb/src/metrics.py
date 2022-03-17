@@ -22,7 +22,7 @@ from .utils import Accumulator, to_list
 from .functional import to_device, from_device
 from .functional import correlation, crosscorrelation, btch, kl, js, hellinger, tv, hilbert
 from .functional import smooth_out, digitize, gridify, perturb, histo_reduce
-from .plotters import plot_image
+from .plot import plot
 
 
 
@@ -59,7 +59,7 @@ class BaseMetrics:
     EPS = 0.00001
 
 
-    def evaluate(self, metric, plot=False, plot_supports=False, enlarge=True, width=5, **kwargs):
+    def evaluate(self, metric, plot_supports=False, enlarge=True, width=5, show=True, **kwargs):
         """ Calculate desired metric, apply aggregation, then plot resulting metric-map.
         To plot the results, set `plot` argument to True.
 
@@ -67,18 +67,18 @@ class BaseMetrics:
         ----------
         metric : str
             Name of metric to evaluate.
+        plot_supports : bool
+            Whether to show support traces on resulting image. Works only if `plot` set to True.
         enlarge : bool
             Whether to apply `:meth:.Horizon.matrix_enlarge` to the result.
         width : int
             Widening for the metric. Works only if `enlarge` set to True.
-        plot : bool
-            Whether to use `:func:.plot_image` to show the result.
-        plot_supports : bool
-            Whether to show support traces on resulting image. Works only if `plot` set to True.
+        show : bool
+            Whether to use `:func:.plot` to show the result.
         kwargs : dict
             Arguments to be passed in metric-calculation methods
             (see `:meth:.compute_local` and `:meth:.compute_support`),
-            as well as plotting arguments (see `:func:.plot_image`).
+            as well as plotting arguments (see `:func:.plot`).
         """
         if 'support' in metric:
             kwargs = {**self.SUPPORT_DEFAULTS, **kwargs}
@@ -96,18 +96,19 @@ class BaseMetrics:
         if hasattr(self, 'horizon') and self.horizon.is_carcass and enlarge:
             metric_val = self.horizon.matrix_enlarge(metric_val, width)
 
-        if plot:
+        if show:
             plot_dict = {**self.PLOT_DEFAULTS, **plot_dict}
-            figure = plot_image(metric_val, **plot_dict, return_figure=True)
+            canvas = plot(metric_val, **plot_dict)
+            canvas.show()
 
             if 'support' in metric and plot_supports:
                 support_coords = self._last_evaluation['support_coords']
-                figure.axes[0].scatter(support_coords[:, 0],
+                canvas.axes[0].scatter(support_coords[:, 0],
                                        support_coords[:, 1], s=33, marker='.', c='blue')
 
             # Store for debug / introspection purposes
             self._last_evaluation['plot_dict'] = plot_dict
-            self._last_evaluation['figure'] = figure
+            self._last_evaluation['figure'] = canvas.fig
         return metric_val
 
 
@@ -339,7 +340,7 @@ class BaseMetrics:
 
         title, plot_defaults = self.get_plot_defaults()
         n_supports = supports if isinstance(supports, int) else len(supports)
-        title = f'Support correlation with {n_supports} supports with `{agg}` aggregation\nfor {title}'
+        title = f'Support correlation with {n_supports} supports\nwith `{agg}` aggregation\nfor {title}'
         plot_dict = {
             **plot_defaults,
             'title_label': title,
@@ -713,7 +714,7 @@ class HorizonMetrics(BaseMetrics):
         plot_dict = {
             **plot_defaults,
             'figsize': (20, 7),
-            'separate': True,
+            'combine': 'separate',
             'suptitle_label': title,
             'title_label': ['mean', 'max'],
             'cmap': 'Reds_r',
@@ -769,11 +770,10 @@ class HorizonMetrics(BaseMetrics):
 
 
     # Alias for horizon comparisons
-    def compare(self, *others, clip_value=7, ignore_zeros=True,
-                printer=print, plot=True, return_figure=False, hist_kwargs=None, **kwargs):
+    def compare(self, *others, clip_value=7, ignore_zeros=True, printer=print, show=True, hist_kwargs=None, **kwargs):
         """ Alias for `Horizon.compare`. """
-        return self.compare(*others, clip_value=clip_value, ignore_zeros=ignore_zeros,
-                            printer=printer, plot=plot, return_figure=return_figure, hist_kwargs=hist_kwargs, **kwargs)
+        return self.horizon.compare(*others, clip_value=clip_value, ignore_zeros=ignore_zeros,
+                            show=show, printer=printer, hist_kwargs=hist_kwargs, **kwargs)
 
     @staticmethod
     def compute_prediction_std(horizons):
@@ -894,7 +894,7 @@ class GeometryMetrics(BaseMetrics):
                 elif 'support' in metric_name:
                     kwds = copy(support_params)
 
-                metric = self.evaluate(metric_name, plot=False, **kwds)
+                metric = self.evaluate(metric_name, **kwds)
                 computed_metrics.append(metric)
 
         accumulator = Accumulator(agg=agg, amortize=amortize, axis=axis)

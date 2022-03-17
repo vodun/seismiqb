@@ -10,10 +10,9 @@ from ..batchflow import DatasetIndex, Dataset, Pipeline
 from .field import Field
 from .synthetic import SyntheticField
 from .geometry import SeismicGeometry
-from .plotters import plot_image
 from .crop_batch import SeismicCropBatch
 from .utils import AugmentedDict
-
+from .plot import plot
 
 class SeismicDataset(Dataset):
     """ Container of fields.
@@ -180,6 +179,7 @@ class SeismicDataset(Dataset):
             pipeline = pipeline + labels_pipeline
 
         batch = (pipeline << self).next_batch()
+        # TODO: Make every horizon mask creation individual to allow their distinction while plot.
         imgs = [np.squeeze(getattr(batch, comp)) for comp in components]
         xmin, xmax, ymin, ymax = 0, imgs[0].shape[0], imgs[0].shape[1], 0
 
@@ -207,10 +207,11 @@ class SeismicDataset(Dataset):
             'xlabel': xlabel,
             'ylabel': ylabel,
             'extent': (xmin, xmax, ymin, ymax),
-            'legend': False, # TODO: Make every horizon mask creation individual to allow their distinction while plot.
+            'legend': src_labels,
             **kwargs
         }
-        return plot_image(imgs, **kwargs)
+
+        return plot(imgs, **kwargs)
 
     # Facies
     def evaluate_facies(self, src_horizons, src_true=None, src_pred=None, metrics='dice'):
