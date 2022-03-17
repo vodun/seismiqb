@@ -37,7 +37,7 @@ class DummyFile:
 class SeismicGeometryArray(SeismicGeometryHDF5):
     """ Numpy array stored in memory as a  SeismicGeometry"""
     #pylint: disable=attribute-defined-outside-init, access-member-before-definition
-    def process(self, array, num_keep=10000, **kwargs):
+    def process(self, array, num_keep=10000, collect_stats=True, **kwargs):
         """ Store references to data array. """
         self.array = array
 
@@ -49,7 +49,7 @@ class SeismicGeometryArray(SeismicGeometryHDF5):
 
         self.add_attributes(**kwargs)
 
-        if not self.has_stats:
+        if not self.has_stats and collect_stats:
             self.zero_traces = np.zeros(self.cube_shape[:2], dtype=np.int8)
             self.zero_traces[(np.min(self.array, axis=2) == 0) & (np.max(self.array, axis=2) == 0)] = 1
 
@@ -68,6 +68,11 @@ class SeismicGeometryArray(SeismicGeometryHDF5):
         self.area = -1.
         self.segy_path = '_dummypath'
         self.quantized = False
+
+    def _cached_load(self, cube, loc, **kwargs):
+        """ Load one slide of data from a supplied cube projection. """
+        _ = kwargs
+        return cube[loc, :, :]
 
     @property
     def file_size(self):

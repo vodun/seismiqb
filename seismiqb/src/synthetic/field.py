@@ -254,24 +254,24 @@ class SyntheticField:
     # Utilities
     @classmethod
     def velocity_to_seismic(cls, velocity, ricker_width=4.3):
-            """ Generate synthetic seismic out of velocity predictions. """
-            result = []
-            for velocity_array in velocity:
-                generator = SyntheticGenerator()
+        """ Generate synthetic seismic out of velocity predictions. """
+        result = []
+        for velocity_array in velocity:
+            generator = SyntheticGenerator()
 
-                # Generating synthetic out of predicted velocity for all items
-                generator.velocity_model = velocity_array
-                generator.shape = generator.shape_padded = velocity_array.shape
-                generator.depth = generator.depth_padded = velocity_array.shape[-1]
+            # Generating synthetic out of predicted velocity for all items
+            generator.velocity_model = velocity_array
+            generator.shape = generator.shape_padded = velocity_array.shape
+            generator.depth = generator.depth_padded = velocity_array.shape[-1]
 
-                (generator
-                 .make_density_model(randomization=None)
-                 .make_impedance_model()
-                 .make_reflectivity_model()
-                 .make_synthetic(ricker_width=ricker_width, ricker_points=100))
-                result.append(generator.synthetic)
+            (generator
+                .make_density_model(randomization=None)
+                .make_impedance_model()
+                .make_reflectivity_model()
+                .make_synthetic(ricker_width=ricker_width, ricker_points=100))
+            result.append(generator.synthetic)
 
-            return np.stack(result).astype(np.float32)
+        return np.stack(result).astype(np.float32)
 
     # Normalization
     def make_normalization_stats(self, n=100, shape=None, attribute='synthetic'):

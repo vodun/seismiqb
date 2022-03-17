@@ -1,6 +1,6 @@
-""" Functions for generation of 2d and 3d synthetic seismic arrays.
-"""
+""" Generation of synthetic seismic. """
 #pylint: disable=not-an-iterable, too-many-arguments, too-many-statements, redefined-builtin
+import os
 from collections import defaultdict
 
 import numpy as np
@@ -11,6 +11,9 @@ from scipy.interpolate import interp1d, interp2d
 from scipy.ndimage import map_coordinates
 from scipy.signal import ricker, resample
 
+from ..field import Field
+from ..labels import Horizon, Fault
+from ..geometry import array_to_sgy
 from ..plotters import MatplotlibPlotter, plot_image
 
 
@@ -122,7 +125,6 @@ class SyntheticGenerator:
 
         for key, value in kwargs.items():
             setattr(self, key, value)
-
 
     # Make velocity model: base for seismic generation
     def make_velocity_vector(self, num_horizons=10, limits=(5_000, 10_000),
@@ -319,7 +321,6 @@ class SyntheticGenerator:
         self.velocity_model = velocity_model
         return self
 
-
     # Modifications of velocity model
     def make_fault_2d(self, coordinates, max_shift=20, width=3, fault_id=0,
                       shift_vector=None, shift_sign=+1, mode='sin2', num_zeros=0.1,
@@ -464,7 +465,6 @@ class SyntheticGenerator:
         self.fault_coordinates.append((point_1, point_2))
         return self
 
-
     def make_fault_3d(self, upper_points, lower_points, max_shift=20, width=3,
                       shift_sign=+1, mode='sin2', num_zeros=0.1, perturb_peak=True, perturb_values=True,):
         """ Create a fault in 3D.
@@ -514,7 +514,6 @@ class SyntheticGenerator:
         self.fault_paths[self.fault_id] = (upper_path, lower_path)
         self.fault_id += 1
         return self
-
 
     def make_fault_coordinates_2d(self, margin=0.1, d1_range=(0.1, 0.25), d2_range=(0.75, 0.9)):
         """ Sample a pair of points for 2D fault segment, avoiding the image edges. """
@@ -625,11 +624,7 @@ class SyntheticGenerator:
 
         if clip:
             left, right = np.quantile(self.synthetic, [0.01, 0.99])
-            mask = self.synthetic > right
-            self.synthetic[mask] = self.synthetic[mask] - (self.synthetic.max() - right)
-
-            mask = self.synthetic < left
-            self.synthetic[mask] = self.synthetic[mask] - (self.synthetic.min() - left)
+            self.synthetic = np.clip(self.synthetic, left, right)
 
         if noise_mode is None:
             perturbation = 0
@@ -706,12 +701,19 @@ class SyntheticGenerator:
         for attribute in delete:
             delattr(self, attribute)
 
+
     # Attribute getters
     def get_attribute(self, attribute='synthetic', loc=None, axis=0):
         """ Get a value of desired attribute while correctly accounting for padding of shapes. """
         result = getattr(self, attribute)
         result = self.finalize_array(result, loc=loc, axis=axis)
         return result
+
+    def get_field(self):
+        """ !!. """
+        synthetic = self.finalize_array(self.synthetic)
+        field = Field('array.dummyarray', geometry_kwargs={'array': synthetic})
+        return field
 
     def get_horizons(self, indices='all', format='mask', width=3, loc=None, axis=0):
         """ Extract horizons as a mask, list of separate horizon matrices or instances.
@@ -736,9 +738,13 @@ class SyntheticGenerator:
 
         #
         if 'matrix' in format:
+            self.finalize()
             result = horizon_matrices
         elif 'instance' in format:
-            result = ...
+            self.finalize()
+            field = self.get_field()
+            result = [Horizon(matrix, field=field, name=f'horizon_{i}')
+                      for i, matrix in enumerate(horizon_matrices)]
         elif 'mask' in format:
             indices = np.nonzero((0 <= horizon_matrices) & (horizon_matrices < self.depth_padded))
             result = np.zeros(self.shape_padded, dtype=np.float32)
@@ -761,7 +767,17 @@ class SyntheticGenerator:
         Correctly accounts for effects of padding.
         """
         if 'cloud' in format:
-            ...
+            # Collect point clouds with the same `fault_id`
+            result = defaultdict(list)
+            for i, pc_list in self.fault_point_clouds.items():
+                for fault_id, (idx_x, depths) in pc_list:
+                    point_cloud = np.stack([np.full_like(idx_x, fill_value=i), idx_x, depths]).T
+                    result[fault_id].append(point_cloud)
+
+            # Vstack points cloud for each `fault_id`
+            for fault_id, pc_list in result.items():
+                result[fault_id] = np.vstack(pc_list)
+            result = list(result.values())
         elif 'instance' in format:
             ...
         elif 'mask' in format:
@@ -881,6 +897,57 @@ class SyntheticGenerator:
         if return_figure:
             return fig
         return None
+
+
+    # Storing to disk
+    def dump(self, path, save_qblosc=True, save_carcasses=True, carcass_frequency=30, pbar='t'):
+        """ !!. """
+        # Prepare paths
+        name = os.path.basename(path.strip('/'))
+
+        for class_dir in ['FAULTS', 'HORIZONS']:
+            new_dir = os.path.join(path, 'INPUTS', class_dir)
+            os.makedirs(new_dir, exist_ok=True)
+
+        cube_path_sgy = os.path.join(path, f'{name}.sgy')
+        cube_path_qblosc = os.path.join(path, f'{name}.qblosc')
+        horizon_path = os.path.join(path, 'INPUTS/HORIZONS/FULL/$.char')
+        carcass_path = os.path.join(path, 'INPUTS/HORIZONS/CARCASS/$.char')
+        fault_path = os.path.join(path, 'INPUTS/FAULTS/$.npz')
+
+        # Geometries: SEG-Y and QBLOSC
+        self.finalize()
+        array_to_sgy(self.synthetic, cube_path_sgy, zip_segy=False, pbar=pbar)
+        field = Field(cube_path_sgy, geometry_kwargs={'pbar': pbar})
+        if save_qblosc:
+            geometry_converted = field.geometry.convert(format='qblosc', pbar=pbar)
+            field = Field(geometry_converted)
+
+        # Horizons: extract from matrices with correct names, save
+        horizons = []
+        for i, matrix in enumerate(self.horizon_matrices):
+            name = f'horizon_{i}'
+            if i in self.amplified_horizon_indices:
+                name = 'amplified_' + name
+            horizon = Horizon(matrix, field=field, name=name)
+            horizons.append(horizon)
+        field.load_labels({'horizons': horizons}, labels_class='horizon')
+        field.horizons.dump(horizon_path)
+
+        # Carcasses: make and save
+        if save_carcasses:
+            carcasses = field.horizons.make_carcass(frequencies=carcass_frequency, margin=5)
+            field.load_labels({'carcasses': carcasses}, labels_class='horizon')
+            carcasses.dump(carcass_path)
+
+        # Faults
+        faults = self.get_faults(format='point_clouds')
+        faults = [Fault(point_cloud, field=field, name=f'fault_{i}')
+                  for i, point_cloud in enumerate(faults)]
+        field.load_labels({'faults': faults}, labels_class=Fault, pbar=False)
+        field.faults.dump_points(fault_path)
+
+        return field
 
 
     # Utilities and faster versions of common operations
