@@ -240,7 +240,7 @@ class SyntheticField:
         return np.stack(result).astype(np.float32)
 
     # Normalization
-    def make_normalization_stats(self, n=100, shape=None, attribute='synthetic'):
+    def make_normalization_stats(self, n=100, shape=(1, 256, 256), attribute='synthetic'):
         """ Compute normalization stats (`mean`, `std`, `min`, `max`, quantiles) from `n` generated `attributes`. """
         data = [self.get_attribute(shape=shape, attribute=attribute) for _ in range(n)]
         data = np.array(data)

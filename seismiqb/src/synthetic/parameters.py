@@ -39,7 +39,7 @@ class ParamGeneratorFactory:
         fault_params = [self.make_fault_params(rng=rng) for _ in range(num_faults)]
 
         config = Config({
-            'make_velocity_vector': {'num_horizons': num_horizons,                                            # scales with depth
+            'make_velocity_vector': {'num_horizons': num_horizons,                                  # scales with depth
                                      'limits': (2000, 6000),
                                      'randomization': 'uniform', 'randomization_scale': 0.3,
                                      'amplify_probability': 0.2, 'amplify_range': (2.0, 4.0),
