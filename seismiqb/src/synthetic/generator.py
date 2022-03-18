@@ -192,7 +192,7 @@ class SyntheticGenerator:
         self.amplified_horizon_indices = amplified_horizon_indices
         return self
 
-    def make_horizons(self, shape, padding=(16, 32), num_horizons=None,
+    def make_horizons(self, shape, padding=(0, 16, 32), num_horizons=None,
                       interval_randomization=None, interval_randomization_scale=0.1, interval_min=0.5,
                       randomization1_scale=0.25, num_nodes=10, interpolation_kind='cubic',
                       randomization2_scale=0.1, locs_n_range=(2, 10), locs_scale_range=(5, 15), sample_size=None,
@@ -297,7 +297,8 @@ class SyntheticGenerator:
                                                                       sample_size=sample_size,
                                                                       blur_size=blur_size, blur_sigma=blur_sigma,
                                                                       digitize=digitize, n_bins=n_bins,
-                                                                      output_range=output_range)
+                                                                      output_range=output_range,
+                                                                      rng=self.rng)
                 next_matrix += randomization2_scale * depth_interval * perturbation_matrix
 
             horizon_matrices.append(next_matrix)
@@ -324,7 +325,7 @@ class SyntheticGenerator:
     # Modifications of velocity model
     def make_fault_2d(self, coordinates, max_shift=20, width=3, fault_id=0,
                       shift_vector=None, shift_sign=+1, mode='sin2', num_zeros=0.1,
-                      perturb_peak=True, perturb_values=True):
+                      perturb_peak=True, perturb_values=True, update_horizon_matrices=True):
         """ Add an elastic distortion to simulate fault on velocity model.
         Also transforms `horizon_matrices`, so that all of the attributes are synchronized.
 
@@ -364,10 +365,13 @@ class SyntheticGenerator:
             Whether to randomly shift the peak of `shift_vector` to the sides.
         perturb_values : bool
             Whether to add small randomization to values in the `shift_vector`.
+        update_horizon_matrices : bool
+            Whether to update existing horizon matrices by produced elastic distortions.
+            Can be set to False to speed up computations in case horizons are not needed.
         """
         # Parse parameters
         if coordinates == 'random':
-            coordinates = self.make_fault_coordinates_2d()
+            coordinates = self.make_fault_coordinates_2d(coordinates)
 
         point_1, point_2 = coordinates
         point_1 = point_1 if len(point_1) == 3 else (0, *point_1)
@@ -515,8 +519,11 @@ class SyntheticGenerator:
         self.fault_id += 1
         return self
 
-    def make_fault_coordinates_2d(self, margin=0.1, d1_range=(0.1, 0.25), d2_range=(0.75, 0.9)):
-        """ Sample a pair of points for 2D fault segment, avoiding the image edges. """
+    def make_fault_coordinates_2d(self, mode='random', margin=0.1, d1_range=(0.1, 0.25), d2_range=(0.75, 0.9)):
+        """ Sample a pair of points for 2D fault segment, avoiding the image edges.
+        `mode` is not used currently, but passed from `make_fault_2d` and can be used for new randomizations.
+        """
+        _ = mode
         x1 = self.rng.uniform(low=0+margin, high=1-margin)
         x2 = x1 + self.rng.uniform(low=-margin, high=+margin)
 
@@ -901,7 +908,37 @@ class SyntheticGenerator:
 
     # Storing to disk
     def dump(self, path, save_qblosc=True, save_carcasses=True, carcass_frequency=30, pbar='t'):
-        """ !!. """
+        """ Dump generated contents to a disk in a field format. Returns a re-loaded field with that data.
+        Creates directory with a following structure:
+
+        NAME/
+        ├── NAME.sgy
+        ├── NAME.meta
+        ├── NAME.qblosc (optional)
+        └──  INPUTS/
+            ├── FAULTS/
+            │   └── fault_{i}.npz
+            └── HORIZONS/
+                └── FULL/
+                │   └── horizon_{i}.char
+                └── CARCASS/ (optional)
+                    └── carcass_of_horizon_{i}.char
+
+        Name is the basename of `path`.
+
+        Parameters
+        ----------
+        path : str
+            Path to save the contents. Basename of the path is used as field name.
+        save_qblosc : bool
+            Whether to convert the SEG-Y to a QBLOSC.
+        save_carcasses : bool
+            Whether to save carcasses of horizons.
+        carcass_frequency : int
+            Frequency of carcass making.
+        pbar : bool or str
+            Identifier of progress bar to use. 't' is text-based progress bar. False disables progress bar.
+        """
         # Prepare paths
         name = os.path.basename(path.strip('/'))
 
@@ -910,7 +947,6 @@ class SyntheticGenerator:
             os.makedirs(new_dir, exist_ok=True)
 
         cube_path_sgy = os.path.join(path, f'{name}.sgy')
-        cube_path_qblosc = os.path.join(path, f'{name}.qblosc')
         horizon_path = os.path.join(path, 'INPUTS/HORIZONS/FULL/$.char')
         carcass_path = os.path.join(path, 'INPUTS/HORIZONS/CARCASS/$.char')
         fault_path = os.path.join(path, 'INPUTS/FAULTS/$.npz')
@@ -1025,7 +1061,7 @@ class SyntheticGenerator:
         sample_size = sample_size or min(10000, 5*np.prod(shape))
 
         # Generate locations for gaussians
-        locs_n = np.random.randint(*locs_n_range)
+        locs_n = rng.integers(*locs_n_range, dtype=np.int32)
         locs_low = [0 for _ in range(2*locs_n)]
         locs_high = [shape[i % 2] for i in range(2*locs_n)]
 
