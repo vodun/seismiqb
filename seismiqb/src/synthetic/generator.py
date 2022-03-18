@@ -717,7 +717,7 @@ class SyntheticGenerator:
         return result
 
     def get_field(self):
-        """ !!. """
+        """ Creates a field with generated synthetic as underlying geometry. """
         synthetic = self.finalize_array(self.synthetic)
         field = Field('array.dummyarray', geometry_kwargs={'array': synthetic})
         return field

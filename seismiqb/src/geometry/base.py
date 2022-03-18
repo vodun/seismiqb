@@ -374,7 +374,7 @@ class SeismicGeometry(CacheMixin, ExportMixin):
 
     @property
     def normalization_stats(self):
-        """ !!. """
+        """ Values for performing normalization of data from the field. """
         if self.quantized:
             return {
                 'mean': self.qnt_mean,

@@ -494,7 +494,10 @@ class FaultSampler(BaseSampler):
 
 
 class SyntheticSampler(Sampler):
-    """ !!. """
+    """ A sampler for synthetic fields (and their labels).
+    As every synthetically generated crop is completely valid from a sampling point of view,
+    we just return placeholder random locations of the desired `crop_shape`.
+    """
     def __init__(self, field, crop_shape, field_id=None, label_id=None, **kwargs):
         self.field = field
         self.crop_shape = crop_shape

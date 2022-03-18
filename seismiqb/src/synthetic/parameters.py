@@ -22,7 +22,7 @@ class ParamGeneratorFactory:
 
 
     def make_fault_params(self, rng):
-        """ !!. """
+        """ Create parameters for fault adding. Works only for 2d distortions. """
         return {'coordinates': 'random',
                 'max_shift': rng.uniform(20, 40),
                 'shift_sign': rng.choice([-1, 1]),
