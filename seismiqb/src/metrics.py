@@ -201,7 +201,7 @@ class BaseMetrics:
         result = accumulator.get(final=True)
         return from_device(result)
 
-    def compute_support(self, function, data, bad_traces, supports, safe_strip=0,
+    def compute_support(self, function, data, bad_traces, supports, safe_strip=0, carcass_mode=False,
                         normalize=True, agg='mean', amortize=False, axis=0, device='cpu', pbar=None):
         """ Compute metric in a support fashion, using `function` to compare all the traces
         against a set of (randomly chosen or supplied) reference ones.
@@ -223,6 +223,11 @@ class BaseMetrics:
         supports : int or ndarray
             If int, then number of supports to generate randomly from non-bad traces.
             If ndarray, then should be of (N, 2) shape and contain coordinates of reference traces.
+        safe_strip : int
+            Margin for computing metrics safely.
+        carcass_mode : bool
+            Whether to use carcass intersection nodes as supports traces.
+            Notice that it works only for a carcass.
         normalize : bool
             Whether the data should be zero-meaned before computing metric.
         agg : str
@@ -260,6 +265,21 @@ class BaseMetrics:
                 bad_traces_ = bad_traces
 
             valid_traces = xp.where(bad_traces_ == 0)
+
+            if carcass_mode and hasattr(self, 'horizon') and self.horizon.is_carcass:
+                carcass_ilines = self.horizon.carcass_ilines
+                carcass_xlines = self.horizon.carcass_xlines
+
+                if xp == cp:
+                    carcass_ilines = to_device(carcass_ilines, device)
+                    carcass_xlines = to_device(carcass_xlines, device)
+
+                mask_i = xp.in1d(valid_traces[0], carcass_ilines)
+                mask_x = xp.in1d(valid_traces[1], carcass_xlines)
+                mask = mask_i & mask_x
+
+                valid_traces = (valid_traces[0][mask], valid_traces[1][mask])
+
             indices = xp.random.choice(len(valid_traces[0]), supports)
             support_coords = xp.asarray([valid_traces[0][indices], valid_traces[1][indices]]).T
 
@@ -276,14 +296,19 @@ class BaseMetrics:
         # Compute metric
         pbar = Notifier(pbar, total=len(support_traces))
         accumulator = Accumulator(agg=agg, amortize=amortize, axis=axis, total=len(support_traces))
+
+        valid_data = data_n[bad_traces != 1]
+        valid_stds = data_stds[bad_traces != 1]
+
         for i, _ in enumerate(support_traces):
-            computed = function(data_n, support_traces[i], data_stds, support_stds[i])
-            computed[bad_traces == 1] = xp.nan
+            computed = function(valid_data, support_traces[i], valid_stds, support_stds[i])
             accumulator.update(computed)
             pbar.update()
         pbar.close()
 
-        result = accumulator.get(final=True)
+        result = xp.full(shape=(data_n.shape[0], data_n.shape[1]), fill_value=xp.nan, dtype=data_n.dtype)
+        result[bad_traces != 1] = accumulator.get(final=True)
+
         return from_device(result)
 
 
@@ -304,11 +329,11 @@ class BaseMetrics:
         }
         return metric, plot_dict
 
-    def support_corrs(self, supports=100, safe_strip=0, normalize=True, agg='mean', amortize=False,
+    def support_corrs(self, supports=100, safe_strip=0, carcass_mode=False, normalize=True, agg='mean', amortize=False,
                       device='cpu', pbar=None, **kwargs):
         """ Compute correlation against reference traces. """
         metric = self.compute_support(function=correlation, data=self.data, bad_traces=self.bad_traces,
-                                      supports=supports, safe_strip=safe_strip,
+                                      supports=supports, safe_strip=safe_strip, carcass_mode=carcass_mode,
                                       normalize=normalize, agg=agg, device=device, amortize=amortize,
                                       pbar=pbar)
 
@@ -345,11 +370,11 @@ class BaseMetrics:
         }
         return metric, plot_dict
 
-    def support_crosscorrs(self, supports=100, safe_strip=0, normalize=False, agg='mean', amortize=False,
-                           device='cpu', pbar=None, **kwargs):
+    def support_crosscorrs(self, supports=100, safe_strip=0, carcass_mode=False, normalize=False,
+                           agg='mean', amortize=False, device='cpu', pbar=None, **kwargs):
         """ Compute cross-correlation against reference traces. """
         metric = self.compute_support(function=crosscorrelation, data=self.data, bad_traces=self.bad_traces,
-                                      supports=supports, safe_strip=safe_strip,
+                                      supports=supports, safe_strip=safe_strip, carcass_mode=carcass_mode,
                                       normalize=normalize, agg=agg, amortize=amortize, device=device, pbar=pbar)
         zvalue = np.nanquantile(np.abs(metric), 0.98).astype(np.int32)
 
@@ -383,11 +408,11 @@ class BaseMetrics:
         }
         return metric, plot_dict
 
-    def support_btch(self, supports=100, safe_strip=0, normalize=False, agg='mean', amortize=False,
+    def support_btch(self, supports=100, safe_strip=0, carcass_mode=False, normalize=False, agg='mean', amortize=False,
                      device='cpu', pbar=None, **kwargs):
         """ Compute Bhattacharyya divergence against reference traces. """
         metric = self.compute_support(function=btch, data=self.probs, bad_traces=self.bad_traces,
-                                      supports=supports, safe_strip=safe_strip,
+                                      supports=supports, safe_strip=safe_strip, carcass_mode=carcass_mode,
                                       normalize=normalize, agg=agg, amortize=amortize, device=device, pbar=pbar)
 
         title, plot_defaults = self.get_plot_defaults()
@@ -419,11 +444,11 @@ class BaseMetrics:
         }
         return metric, plot_dict
 
-    def support_kl(self, supports=100, safe_strip=0, normalize=False, agg='mean', amortize=False,
+    def support_kl(self, supports=100, safe_strip=0, carcass_mode=False, normalize=False, agg='mean', amortize=False,
                    device='cpu', pbar=None, **kwargs):
         """ Compute Kullback-Leibler divergence against reference traces. """
         metric = self.compute_support(function=kl, data=self.probs, bad_traces=self.bad_traces,
-                                      supports=supports, safe_strip=safe_strip,
+                                      supports=supports, safe_strip=safe_strip, carcass_mode=carcass_mode,
                                       normalize=normalize, agg=agg, amortize=amortize,
                                       device=device, pbar=pbar)
 
@@ -455,11 +480,11 @@ class BaseMetrics:
         }
         return metric, plot_dict
 
-    def support_js(self, supports=100, safe_strip=0, normalize=False, agg='mean', amortize=False,
+    def support_js(self, supports=100, safe_strip=0, carcass_mode=False, normalize=False, agg='mean', amortize=False,
                    device='cpu', pbar=None, **kwargs):
         """ Compute Jensen-Shannon divergence against reference traces. """
         metric = self.compute_support(function=js, data=self.probs, bad_traces=self.bad_traces,
-                                      supports=supports, safe_strip=safe_strip,
+                                      supports=supports, safe_strip=safe_strip, carcass_mode=carcass_mode,
                                       normalize=normalize, agg=agg, amortize=amortize,
                                       device=device, pbar=pbar)
 
@@ -492,11 +517,11 @@ class BaseMetrics:
         }
         return metric, plot_dict
 
-    def support_hellinger(self, supports=100, safe_strip=0, normalize=False, agg='mean', amortize=False,
-                          device='cpu', pbar=None, **kwargs):
+    def support_hellinger(self, supports=100, safe_strip=0, carcass_mode=False, normalize=False,
+                          agg='mean', amortize=False, device='cpu', pbar=None, **kwargs):
         """ Compute Hellinger distance against reference traces. """
         metric = self.compute_support(function=hellinger, data=self.probs, bad_traces=self.bad_traces,
-                                      supports=supports, safe_strip=safe_strip,
+                                      supports=supports, safe_strip=safe_strip, carcass_mode=carcass_mode,
                                       normalize=normalize, agg=agg, amortize=amortize,
                                       device=device, pbar=pbar)
 
@@ -528,11 +553,11 @@ class BaseMetrics:
         }
         return metric, plot_dict
 
-    def support_tv(self, supports=100, safe_strip=0, normalize=False, agg='mean', amortize=False,
+    def support_tv(self, supports=100, safe_strip=0, carcass_mode=False, normalize=False, agg='mean', amortize=False,
                    device='cpu', pbar=None, **kwargs):
         """ Compute total variation against reference traces. """
         metric = self.compute_support(function=tv, data=self.probs, bad_traces=self.bad_traces,
-                                      supports=supports, safe_strip=safe_strip,
+                                      supports=supports, safe_strip=safe_strip, carcass_mode=carcass_mode,
                                       normalize=normalize, agg=agg, amortize=amortize,
                                       device=device, pbar=pbar)
 

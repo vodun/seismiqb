@@ -605,7 +605,7 @@ class ExtractionMixin:
 
                 # Merge, if needed
                 if merge_status == 4:
-                    # Overlapping horizons: definetely merge
+                    # Overlapping horizons: definitely merge
                     merged = ExtractionMixin.overlap_merge(self, merge_candidate, inplace=True)
 
                 elif merge_status == 3 and (adjacency_i > 0 or adjacency_x > 0):

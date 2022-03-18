@@ -41,7 +41,7 @@ import os
 from datetime import date
 
 from .utils import extract_traceback
-from ..batchflow.utils_notebook import run_notebook
+from ..batchflow import run_notebook
 
 
 def test_charisma(

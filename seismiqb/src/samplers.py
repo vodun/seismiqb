@@ -1340,6 +1340,7 @@ class ExtensionGrid(BaseGrid):
         self.label_name = horizon.short_name
 
         self.uncovered_before = None
+        self.locations_stats = {}
 
         allowed_directions = ['up', 'down', 'left', 'right']
 
@@ -1451,7 +1452,7 @@ class ExtensionGrid(BaseGrid):
         # Array with locations for each of the directions
         # Each 4 consecutive rows are location variants for each point on the boundary
         buffer = buffer.transpose((1, 0, 2)).reshape(-1, 7)
-        self.n_possible_locations = buffer.shape[0]
+        self.locations_stats['possible'] = buffer.shape[0]
 
         # Compute potential addition for each location
         # for 'best_for_all' and 'best_for_each_independent' modes potential calculated independently
@@ -1483,11 +1484,17 @@ class ExtensionGrid(BaseGrid):
         # Keep only top locations; remove locations with too small potential if needed
         potential = potential[indices]
         buffer = buffer[indices, :]
-        self.n_top_locations = buffer.shape[0]
+
+        # Drop locations duplicates
+        buffer, unique_locations_indices = np.unique(buffer, axis=0, return_index=True)
+        potential = potential[unique_locations_indices]
+
+        self.locations_stats['top_locations'] = buffer.shape[0]
 
         mask = potential > self.threshold
         buffer = buffer[mask]
-        self.n_selected_locations = buffer.shape[0]
+        potential = potential[mask]
+        self.locations_stats['selected'] = buffer.shape[0]
 
         # Correct the height
         np.clip(buffer[:, 3], 0, self.field.depth - crop_shape[2], out=buffer[:, 3])
@@ -1497,6 +1504,7 @@ class ExtensionGrid(BaseGrid):
         locations[:, [0, 1]] = -1
         locations[:, 2:9] = buffer
         self.locations = locations
+        self.potential = potential.reshape(-1, 1)
 
         if update_coverage_matrix:
             self.uncovered_best = coverage_matrix.size - coverage_matrix.sum()
@@ -1593,3 +1601,72 @@ def compute_potential(locations, coverage_matrix, shape, stride, prior_threshold
             buffer[i] = -1
 
     return buffer
+
+class LocationsPotentialContainer:
+    """ Container for saving history of `ExtensionGrid`.
+
+    It saves locations and their potential from each grid provided in the method `update_grid`.
+    Also, it removes repetitions from the grid locations and potentials.
+    """
+    def __init__(self, locations=None, potential=None):
+        if locations is None:
+            locations = np.empty(shape=(0, 9), dtype=np.int32)
+        if potential is None:
+            potential = np.empty(shape=(0, 1), dtype=np.int32)
+
+        ncols = locations.shape[1]
+
+        self.initial_dtype = locations.dtype
+        self.locations_dtype = {'names': [f'col_{i}' for i in range(ncols)],
+                                          'formats': ncols * [self.initial_dtype]}
+
+        self.locations = locations.view(self.locations_dtype)
+        self.potential = potential
+
+        self.stats = {
+            'repeated_locations': [],
+            'total_repeated_locations': 0
+        }
+
+    def update_grid(self, grid):
+        """ Update grid and container locations and potential.
+
+        For the container, we update potentials for existing locations and safe new locations and their potentials.
+        For the grid, we remove locations and potentials pairs that are saved in the container. It helps reduce
+        locations amount and avoid repetitive locations processing such as model inference on these locations.
+        """
+        # Choose locations and potential pairs that are not in the container
+        grid_locations = grid.locations.view(self.locations_dtype)
+
+        repeated_locations = np.in1d(grid_locations, self.locations)
+        repeated_potential = np.in1d(grid.potential, self.potential)
+        repeated_locations_potential = repeated_locations & repeated_potential
+
+        new_locations = grid_locations[~repeated_locations_potential]
+        new_potential = grid.potential[~repeated_locations_potential]
+
+        # Safe stats
+        repeated_locations = len(grid_locations) - len(new_locations)
+        self.stats['repeated_locations'].append(repeated_locations)
+        self.stats['total_repeated_locations'] += repeated_locations
+
+        # Update container: save new potentials for old locations and save new locations with their potential
+        if len(new_locations) > 0:
+            if len(self.locations) > 0:
+                repeated_locations_history = np.in1d(self.locations, new_locations)
+                locations = self.locations[~repeated_locations_history]
+                potential = self.potential[~repeated_locations_history]
+
+                self.locations = np.vstack([locations, new_locations])
+                self.potential = np.vstack([potential, new_potential])
+            else:
+                self.locations = new_locations
+                self.potential = new_potential
+
+            new_locations = new_locations.view(self.initial_dtype).reshape(-1, grid.locations.shape[1])
+        else:
+            new_locations = np.empty(shape=(0, grid.locations.shape[1]))
+            new_potential = np.empty(shape=(0, 1))
+
+        # Update grid: set locations and grid with values that are not in the container
+        grid.locations, grid.potential = new_locations, new_potential
