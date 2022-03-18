@@ -1,4 +1,4 @@
-""" Placeholder for a synthetic field. """
+""" A wrapper around `SyntheticGenerator` to provide the same API, as regular `:class:.Field`. """
 import numpy as np
 
 from .generator import SyntheticGenerator
@@ -20,15 +20,20 @@ class SyntheticField:
         - define a `param_generator` function, that returns a dictionary with parameters of seismic generation.
         The parameters may be randomized, so the generated data is different each time.
         - initialize an instance of this class.
-        - use `get_attribute` method to get synthetic images, horizon/fault masks, impedance models.
+        - use `get_attribute` method to get synthetic images, horizon/fault masks, velocity models.
         In order to ensure that they match one another, supply the same `location` (triplet of slices), for example:
         >>> location = (slice(10, 11), slice(100, 200), slice(1000, 1500))
         >>> synthetic = synthetic_field.get_attribute(location=location, attribute='synthetic')
-        >>> impedance = synthetic_field.get_attribute(location=location, attribute='impedance')
-        would make synthetic and impedance images for the same underlying synthetic model.
+        >>> velocity = synthetic_field.get_attribute(location=location, attribute='velocity')
+        would make synthetic and velocity images for the same underlying synthetic model.
+
+    Using the same generator for multiple calls with different requested attributes relies on LRU caching of
+    the generator instances. Due to this, the `cache_maxsize` should always be bigger than the number of successive
+    calls to `get_attribute` with the same `attribute`. If synthetic field is used in any data loading pipelines,
+    this traslates to having `cache_maxsize` bigger than the `batch_size`.
 
     Methods `load_seismic` and `make_masks` are thin wrappers around `get_attribute` to make API of this class
-    identical to that of `:class:.Field`. Despite that, we don't use abstract classes or other ways to enforce it.
+    identical to that of `:class:.Field`.
 
     Under the hood, we keep track of internal cache (with `location` as key) to use the same instance of generator
     multiple times. The size of cache is parametrized at initialization and should be bigger than the batch size.
@@ -57,16 +62,12 @@ class SyntheticField:
         Number of cached generators. Should be equal or bigger than the batch size.
     """
     #pylint: disable=method-hidden, protected-access
-    def __init__(self, param_generator=None, data_generator=None, attribute=None,
-                 name='synthetic_field', cache_maxsize=128):
+    def __init__(self, param_generator=None, data_generator=None, name='synthetic_field', cache_maxsize=128):
         # Data generation
         self.param_generator = param_generator if param_generator is not None else default_param_generator
         self.data_generator = data_generator
         self._make_generator = lru_cache(maxsize=cache_maxsize)(self._make_generator)
         self._cache_maxsize = cache_maxsize
-
-        # Defaults for retrieving attributes
-        self.attribute = attribute
 
         # String info
         self.path = self.short_path = f'{name}_path'
@@ -166,7 +167,7 @@ class SyntheticField:
         generator = self.get_generator(location=location, shape=shape)
 
         if attribute == 'labels':
-            attribute = generator.params.get('attribute', self.attribute)
+            attribute = generator.params['attribute']
 
         # Main: velocity, reflectivity, synthetic
         if attribute in ['synthetic', 'geometry', 'image']:
@@ -274,11 +275,10 @@ class SyntheticField:
     def __str__(self):
         msg = f"SyntheticField `{self.displayed_name}`"
 
-        attribute = self.attribute
-        if attribute is None and self.param_generator is not None:
+        if self.param_generator is not None:
             attribute = self.param_generator.get('attribute')
-        if attribute is not None:
-            msg += f':\n    - labels: attribute `{attribute}`'
+            if attribute is not None:
+                msg += f':\n    - labels: attribute `{attribute}`'
         return msg
 
     def show_slide(self, location=None, shape=None, **kwargs):

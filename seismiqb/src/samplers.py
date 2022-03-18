@@ -501,7 +501,8 @@ class SyntheticSampler(Sampler):
         self.field_id = field_id
         self.label_id = label_id
         self.kwargs = kwargs
-        self.n = 10000 ** 3
+        self._n = 10000
+        self.n = self._n ** 3
 
         self.name = self.displayed_name = field.name
         super().__init__()
@@ -513,7 +514,7 @@ class SyntheticSampler(Sampler):
         buffer[:, 1] = self.label_id
         buffer[:, 2] = 0
 
-        start_point = np.random.randint(low=(0, 0, 0), high=(10000, 10000, 10000),
+        start_point = np.random.randint(low=(0, 0, 0), high=(self._n, self._n, self._n),
                                         size=(size, 3), dtype=np.int32)
         end_point = start_point + self.crop_shape
         buffer[:, [3, 4, 5]] = start_point

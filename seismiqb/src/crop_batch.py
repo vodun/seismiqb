@@ -266,8 +266,30 @@ class SeismicCropBatch(Batch):
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
     def normalize(self, ix, src=None, dst=None, mode='meanstd', normalization_stats=None,
-                  from_field=True, clip_to_quantiles=False, q=(0.01, 0.99),  ):
-        """ !!. """
+                  from_field=True, clip_to_quantiles=False, q=(0.01, 0.99)):
+        """ Normalize `src` with.
+        Depenging on the parameters, stats for normalization will be taken from (in order of priority):
+            - supplied `normalization_stats`, if provided
+            - the field that created this `src`, if `from_field`
+            - computed from `src` data directly
+
+        TODO: streamline the entire process of normalization.
+
+        Parameters
+        ----------
+        mode : {'mean', 'std', 'meanstd', 'minmax'} or callable
+            If str, then normalization description.
+            If callable, then it will be called on `src` data with additional `normalization_stats` argument.
+        normalization_stats : dict, optional
+            If provided, then used to get statistics for normalization.
+        from_field : bool
+            If True, then normalization stats are taken from attacked field.
+        clip_to_quantiles : bool
+            Whether to clip the data to quantiles, specified by `q` parameter.
+            Quantile values are taken from `normalization_stats`, provided by either of the ways.
+        q : tuple of numbers
+            Quantiles for clipping. Used as keys to `normalization_stats`, provided by either of the ways.
+        """
         data = self.get(ix, src)
         field = self.get(ix, 'fields')
 
@@ -301,6 +323,8 @@ class SeismicCropBatch(Batch):
         # Actual normalization
         result = data.copy() if data.base is not None else data
 
+        if callable(mode):
+            result = mode(result, normalization_stats)
         if 'mean' in mode:
             result -= normalization_stats['mean']
         if 'std' in mode:
@@ -309,7 +333,8 @@ class SeismicCropBatch(Batch):
             if normalization_stats['max'] != normalization_stats['min']:
                 result = ((result - normalization_stats['min'])
                         / (normalization_stats['max'] - normalization_stats['min']))
-
+            else:
+                result = result - normalization_stats['min']
         return result
 
 

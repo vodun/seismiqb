@@ -35,7 +35,7 @@ class DummyFile:
 
 
 class SeismicGeometryArray(SeismicGeometryHDF5):
-    """ Numpy array stored in memory as a  SeismicGeometry"""
+    """ Numpy array stored in memory as a SeismicGeometry"""
     #pylint: disable=attribute-defined-outside-init, access-member-before-definition
     def process(self, array, num_keep=10000, collect_stats=True, **kwargs):
         """ Store references to data array. """

@@ -10,7 +10,7 @@ class ParamGeneratorFactory:
 
     Each of the values in `config` can be a callable: in this case, it will be called with no arguments to make config.
     """
-    def __init__(self, config=None, horizon_frequency=25, faults_p=(0.7, 0.3), faults_config=None):
+    def __init__(self, config=None, attribute='labels', horizon_frequency=25, faults_p=(0.7, 0.3), faults_config=None):
         config = config if config is not None else {}
         self.config = Config(config)
 
@@ -39,6 +39,7 @@ class ParamGeneratorFactory:
         fault_params = [self.make_fault_params(rng=rng) for _ in range(num_faults)]
 
         config = Config({
+            'attribute': self.attribute,
             'make_velocity_vector': {'num_horizons': num_horizons,                                  # scales with depth
                                      'limits': (2000, 6000),
                                      'randomization': 'uniform', 'randomization_scale': 0.3,
