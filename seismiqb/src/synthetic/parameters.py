@@ -13,6 +13,7 @@ class ParamGeneratorFactory:
     def __init__(self, config=None, attribute='labels', horizon_frequency=25, faults_p=(0.7, 0.3), faults_config=None):
         config = config if config is not None else {}
         self.config = Config(config)
+        self.attribute = attribute
 
         self.horizon_frequency = horizon_frequency
 

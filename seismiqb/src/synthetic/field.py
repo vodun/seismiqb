@@ -62,12 +62,17 @@ class SyntheticField:
         Number of cached generators. Should be equal or bigger than the batch size.
     """
     #pylint: disable=method-hidden, protected-access
-    def __init__(self, param_generator=None, data_generator=None, name='synthetic_field', cache_maxsize=128):
+    def __init__(self, param_generator=None, data_generator=None, name='synthetic_field', cache_maxsize=128,
+                 default_attribute=None, default_shape=None):
         # Data generation
         self.param_generator = param_generator if param_generator is not None else default_param_generator
         self.data_generator = data_generator
         self._make_generator = lru_cache(maxsize=cache_maxsize)(self._make_generator)
         self._cache_maxsize = cache_maxsize
+
+        # Defaults
+        self.default_attribute = default_attribute
+        self.default_shape = default_shape
 
         # String info
         self.path = self.short_path = f'{name}_path'
@@ -95,10 +100,11 @@ class SyntheticField:
         If called with the same parameters twice, returns the same instance: `location` is used as a hash value.
         """
         if location is None:
-            if shape is not None:
-                location = self.shape_to_location(shape=shape)
-            else:
-                raise ValueError('Supply either `location` or `shape`!')
+            shape = shape if shape is not None else self.default_shape
+
+            if shape is None:
+                raise ValueError('Shape is undefined: pass it directly or supply a `default_shape` at initialization!')
+            location = self.shape_to_location(shape)
 
         hash_value = self.location_to_hash(location)
 
@@ -163,11 +169,17 @@ class SyntheticField:
         >>> impedance = synthetic_field.get_attribute(location=location, attribute='impedance')
         """
         _ = kwargs
+        if attribute == 'labels':
+            if self.default_attribute is not None:
+                attribute = self.default_attribute
+            else:
+                attribute = generator.params.get('attribute')
+
+            if attribute is None:
+                raise ValueError('Attribute `labels` is undefined: use `default_attribute`'
+                                 'or a key in `param_generator` to define what to retrieve!')
 
         generator = self.get_generator(location=location, shape=shape)
-
-        if attribute == 'labels':
-            attribute = generator.params['attribute']
 
         # Main: velocity, reflectivity, synthetic
         if attribute in ['synthetic', 'geometry', 'image']:
@@ -241,7 +253,7 @@ class SyntheticField:
         return np.stack(result).astype(np.float32)
 
     # Normalization
-    def make_normalization_stats(self, n=100, shape=(1, 256, 256), attribute='synthetic'):
+    def make_normalization_stats(self, n=100, shape=None, attribute='synthetic'):
         """ Compute normalization stats (`mean`, `std`, `min`, `max`, quantiles) from `n` generated `attributes`. """
         data = [self.get_attribute(shape=shape, attribute=attribute) for _ in range(n)]
         data = np.array(data)
