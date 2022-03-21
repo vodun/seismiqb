@@ -743,15 +743,17 @@ class SyntheticGenerator:
 
         horizon_matrices = self.horizon_matrices[indices]
 
-        #
+        # Actual retrieval in requested format. Note that `finalize` is not always applied
         if 'matrix' in format:
             self.finalize()
             result = horizon_matrices
+
         elif 'instance' in format:
             self.finalize()
             field = self.get_field()
             result = [Horizon(matrix, field=field, name=f'horizon_{i}')
                       for i, matrix in enumerate(horizon_matrices)]
+
         elif 'mask' in format:
             indices = np.nonzero((0 <= horizon_matrices) & (horizon_matrices < self.depth_padded))
             result = np.zeros(self.shape_padded, dtype=np.float32)
@@ -774,6 +776,8 @@ class SyntheticGenerator:
         Correctly accounts for effects of padding.
         """
         if 'cloud' in format:
+            self.finalize()
+
             # Collect point clouds with the same `fault_id`
             result = defaultdict(list)
             for i, pc_list in self.fault_point_clouds.items():
@@ -785,8 +789,14 @@ class SyntheticGenerator:
             for fault_id, pc_list in result.items():
                 result[fault_id] = np.vstack(pc_list)
             result = list(result.values())
+
         elif 'instance' in format:
-            ...
+            point_clouds = self.get_faults(format='point_clouds')
+            field = self.get_field()
+
+            result = [Fault(point_cloud, field=field, name=f'fault_{i}')
+                      for i, point_cloud in enumerate(point_clouds)]
+
         elif 'mask' in format:
             result = np.zeros(self.shape_padded, dtype=np.float32)
 

@@ -169,6 +169,10 @@ class SyntheticField:
         >>> impedance = synthetic_field.get_attribute(location=location, attribute='impedance')
         """
         _ = kwargs
+
+        generator = self.get_generator(location=location, shape=shape)
+
+        # Select what is `labels`
         if attribute == 'labels':
             if self.default_attribute is not None:
                 attribute = self.default_attribute
@@ -178,8 +182,6 @@ class SyntheticField:
             if attribute is None:
                 raise ValueError('Attribute `labels` is undefined: use `default_attribute`'
                                  'or a key in `param_generator` to define what to retrieve!')
-
-        generator = self.get_generator(location=location, shape=shape)
 
         # Main: velocity, reflectivity, synthetic
         if attribute in ['synthetic', 'geometry', 'image']:
