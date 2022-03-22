@@ -7,7 +7,7 @@ import numpy as np
 import h5pickle as h5py
 import segyio
 
-from ...batchflow.notifier import Notifier
+from batchflow.notifier import Notifier
 
 class ExportMixin:
     """ Container for methods to save data as seismic cubes in different formats. """

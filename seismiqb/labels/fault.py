@@ -13,7 +13,7 @@ from sklearn.decomposition import PCA
 from sklearn.neighbors import NearestNeighbors
 from scipy.ndimage import measurements
 
-from ...batchflow.notifier import Notifier
+from batchflow.notifier import Notifier
 
 from .horizon import Horizon
 from .fault_triangulation import make_triangulation, triangle_rasterization

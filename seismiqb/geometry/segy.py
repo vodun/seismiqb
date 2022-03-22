@@ -8,9 +8,9 @@ import h5pickle as h5py
 import segyio
 import cv2
 
+from batchflow import Notifier
 from .base import SeismicGeometry
 from ..utils import find_min_max, lru_cache, SafeIO
-from ...batchflow import Notifier
 
 
 

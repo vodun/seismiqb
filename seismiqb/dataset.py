@@ -5,7 +5,7 @@ from textwrap import indent
 import numpy as np
 import pandas as pd
 
-from ..batchflow import DatasetIndex, Dataset, Pipeline
+from batchflow import DatasetIndex, Dataset, Pipeline
 
 from .field import Field, SyntheticField
 from .geometry import SeismicGeometry

@@ -3,7 +3,7 @@ import numpy as np
 
 from ..utils import lru_cache
 from ..plotters import plot_image
-from ...batchflow import Config
+from batchflow import Config
 
 class GeometryMock:
     """ Mock for SeismicGeometry. """
