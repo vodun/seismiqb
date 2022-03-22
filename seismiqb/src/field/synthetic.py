@@ -61,11 +61,11 @@ class SyntheticField:
     """
     GENERATOR_CONSTRUCTOR = None
 
-    #pylint: disable=method-hidden, protected-access
+    #pylint: disable=method-hidden, protected-access, not-callable
     def __init__(self, param_generator=None, data_generator=None, name='synthetic_field', cache_maxsize=128,
                  default_attribute=None, default_shape=None):
         # Data generation
-        self.param_generator = param_generator if param_generator is not None else default_param_generator
+        self.param_generator = param_generator
         self.data_generator = data_generator
         self._make_generator = lru_cache(maxsize=cache_maxsize)(self._make_generator)
         self._cache_maxsize = cache_maxsize
