@@ -7,8 +7,7 @@ import pandas as pd
 
 from ..batchflow import DatasetIndex, Dataset, Pipeline
 
-from .field import Field
-from .synthetic import SyntheticField
+from .field import Field, SyntheticField
 from .geometry import SeismicGeometry
 from .plotters import plot_image
 from .crop_batch import SeismicCropBatch
@@ -46,13 +45,14 @@ class SeismicDataset(Dataset):
 
         if isinstance(index, dict):
             self.fields = AugmentedDict()
-            for geometry, labels in index.items():
-                if isinstance(geometry, (Field, SyntheticField)):
-                    field = geometry
-                    if labels is not None:
-                        field.load_labels(labels=labels, **kwargs)
+            for field_idx, labels_idx in index.items():
+                if isinstance(field_idx, (Field, SyntheticField)):
+                    field = field_idx
+                    if labels_idx is not None:
+                        field.load_labels(labels=labels_idx, **kwargs)
                 else:
-                    field = Field(geometry=geometry, labels=labels, **kwargs)
+                    field = Field(geometry=field_idx, labels=labels_idx, **kwargs)
+
                 self.fields[field.short_name] = field
         else:
             raise TypeError('Dataset should be initialized with a string, a ready-to-use Geometry or Field,'
@@ -94,7 +94,8 @@ class SeismicDataset(Dataset):
     @property
     def geometries(self):
         """ Back-compatibility and conveniency. """
-        return self.get_nested_iterable('geometry')
+        return AugmentedDict({idx : getattr(field, 'geometry') for idx, field in self.fields.items()
+                              if isinstance(field, Field)})
 
 
     def gen_batch(self, batch_size=None, shuffle=False, n_iters=None, n_epochs=None, drop_last=False, **kwargs):
@@ -128,9 +129,8 @@ class SeismicDataset(Dataset):
     # Textual and visual representation of dataset contents
     def __str__(self):
         msg = f'Seismic Dataset with {len(self)} field{"s" if len(self) > 1 else ""}:\n'
-        for field in self.fields.values():
-            msg += indent(f'{str(field)}\n', prefix='    ')
-        return msg[:-1]
+        msg += '\n\n'.join([indent(str(field), prefix='    ') for field in self.fields.values()])
+        return msg
 
 
     def show_slide(self, loc, idx=0, axis='iline', zoom_slice=None, src_labels='labels', **kwargs):

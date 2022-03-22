@@ -19,6 +19,9 @@ from itertools import product
 import numpy as np
 from numba import njit
 
+from .labels import Horizon, Fault
+from .field import Field, SyntheticField
+from .geometry import SeismicGeometry
 from .utils import filtering_function, AugmentedDict
 from .labels.fault import insert_fault_into_mask
 from ..batchflow import Sampler, ConstantSampler
@@ -28,6 +31,8 @@ from .plotters import MatplotlibPlotter, plot_image
 
 class BaseSampler(Sampler):
     """ Common logic of making locations. Refer to the documentation of inherited classes for more details. """
+    dim = 9 # dimensionality of sampled points: field_id and label_id, orientation, locations
+
     def _make_locations(self, field, points, matrix, crop_shape, ranges, threshold, filtering_matrix):
         # Parse parameters
         ranges = ranges if ranges is not None else [None, None, None]
@@ -144,8 +149,6 @@ class GeometrySampler(BaseSampler):
     field_id, label_id : int
         Used as the first two columns of sampled values.
     """
-    dim = 2 + 1 + 6 # dimensionality of sampled points: field_id and label_id, orientation, locations
-
     def __init__(self, field, crop_shape, threshold=0.05, ranges=None, filtering_matrix=None,
                  field_id=0, label_id=0, **kwargs):
         matrix = (1 - field.zero_traces).astype(np.float32)
@@ -191,7 +194,6 @@ class GeometrySampler(BaseSampler):
                f'crop_shape={tuple(self.crop_shape)}, threshold={self.threshold}>'
 
 
-
 class HorizonSampler(BaseSampler):
     """ Generator of crop locations, based on a single horizon. Not intended to be used directly, see `SeismicSampler`.
     Makes locations that:
@@ -232,8 +234,6 @@ class HorizonSampler(BaseSampler):
     shift_height : bool
         Whether apply random shift to height locations of sampled horizon points or not.
     """
-    dim = 2 + 1 + 6 # dimensionality of sampled points: field_id and label_id, orientation, locations
-
     def __init__(self, horizon, crop_shape, threshold=0.05, ranges=None, filtering_matrix=None,
                  shift_height=True, spatial_shift=False,
                  field_id=0, label_id=0, **kwargs):
@@ -332,7 +332,6 @@ class HorizonSampler(BaseSampler):
         return orientation_matrix
 
 
-
 class FaultSampler(BaseSampler):
     """ Generator of crop locations, based on a single fault. Not intended to be used directly, see `SeismicSampler`.
     Makes locations that:
@@ -367,8 +366,6 @@ class FaultSampler(BaseSampler):
     transpose : bool
         Create transposed crop locations or not.
     """
-    dim = 2 + 1 + 6 # dimensionality of sampled points: field_id and label_id, orientation, locations
-
     def __init__(self, fault, crop_shape, threshold=0, ranges=None, extend=True, transpose=False,
                  field_id=0, label_id=0, **kwargs):
         field = fault.field
@@ -494,6 +491,39 @@ class FaultSampler(BaseSampler):
         return f'<FaultSampler for {self.displayed_name}: '\
                f'crop_shape={tuple(self.crop_shape)}, threshold={self.threshold}>'
 
+
+class SyntheticSampler(Sampler):
+    """ A sampler for synthetic fields (and their labels).
+    As every synthetically generated crop is completely valid from a sampling point of view,
+    we just return placeholder random locations of the desired `crop_shape`.
+    """
+    def __init__(self, field, crop_shape, field_id=None, label_id=None, **kwargs):
+        self.field = field
+        self.crop_shape = crop_shape
+        self.field_id = field_id
+        self.label_id = label_id
+        self.kwargs = kwargs
+        self._n = 10000
+        self.n = self._n ** 3
+
+        self.name = self.displayed_name = field.name
+        super().__init__()
+
+    def sample(self, size):
+        """ Get exactly `size` locations. """
+        buffer = np.empty((size, 9), dtype=np.int32)
+        buffer[:, 0] = self.field_id
+        buffer[:, 1] = self.label_id
+        buffer[:, 2] = 0
+
+        start_point = np.random.randint(low=(0, 0, 0), high=(self._n, self._n, self._n),
+                                        size=(size, 3), dtype=np.int32)
+        end_point = start_point + self.crop_shape
+        buffer[:, [3, 4, 5]] = start_point
+        buffer[:, [6, 7, 8]] = end_point
+        return buffer
+
+
 @njit
 def spatial_check_points(points, matrix, crop_shape, i_mask, x_mask, threshold):
     """ Compute points, which would generate crops with more than `threshold` labeled pixels.
@@ -542,8 +572,6 @@ def spatial_check_points(points, matrix, crop_shape, i_mask, x_mask, threshold):
                 buffer[counter, :] = point_i, point_x, np.int32(h_mean), np.int32(1)
                 counter += 1
     return buffer[:counter]
-
-
 
 @njit
 def spatial_check_sampled(locations, matrix, threshold):
@@ -613,6 +641,7 @@ def volumetric_check_sampled(locations, points, crop_shape, crop_shape_t, thresh
 
     return condition
 
+
 class SeismicSampler(Sampler):
     """ Mixture of samplers for multiple cubes with multiple labels.
     Used to sample crop locations in the format of
@@ -642,62 +671,89 @@ class SeismicSampler(Sampler):
     kwargs : dict
         Other parameters of initializing label samplers.
     """
-    CLASS_TO_MODE = {
-        GeometrySampler: ['geometry', 'cube', 'field'],
-        HorizonSampler: ['horizon', 'surface'],
-        FaultSampler: ['fault']
+    LABELCLASS_TO_SAMPLERCLASS = {
+        Field: GeometrySampler,
+        SyntheticField: SyntheticSampler,
+        SeismicGeometry: GeometrySampler,
+        Horizon: HorizonSampler,
+        Fault: FaultSampler,
     }
-    MODE_TO_CLASS = {mode : class_
-                     for class_, mode_list in CLASS_TO_MODE.items()
-                     for mode in mode_list}
 
-    def __init__(self, labels, crop_shape, proportions=None, mode='geometry',
+    @classmethod
+    def labelclass_to_samplerclass(cls, labelclass):
+        """ Mapping between label classes and used samplers.
+        Uses `issubclass` check in addition to getitem.
+        """
+        samplerclass = cls.LABELCLASS_TO_SAMPLERCLASS.get(labelclass)
+        if samplerclass is not None:
+            return samplerclass
+
+        for class_, samplerclass in cls.LABELCLASS_TO_SAMPLERCLASS.items():
+            if issubclass(labelclass, class_):
+                return samplerclass
+        raise KeyError(f'Unable to determine the sampler class for `{labelclass}`')
+
+
+    def __init__(self, labels, crop_shape, proportions=None,
                  threshold=0.05, ranges=None, filtering_matrix=None, shift_height=True, **kwargs):
-        baseclass = self.MODE_TO_CLASS[mode] if isinstance(mode, str) else mode
+        # One sampler of each `label` for each `field`
+        names, sampler_classes = {}, {}
+        samplers = AugmentedDict({field_name: [] for field_name in labels.keys()})
 
-        names, field_names = {}, {}
-        sampler = 0 & ConstantSampler(np.int32(0), dim=baseclass.dim)
-        samplers = AugmentedDict({idx: [] for idx in labels.keys()})
-
-        proportions = proportions or [1 / len(labels) for _ in labels]
-
-        for (field_id, ((idx, list_labels), p)) in enumerate(zip(labels.items(), proportions)):
+        for field_id, (field_name, list_labels) in enumerate(labels.items()):
             list_labels = list_labels if isinstance(list_labels, (tuple, list)) else [list_labels]
 
             # Unpack parameters
-            crop_shape_ = crop_shape[idx] if isinstance(crop_shape, dict) else crop_shape
-            threshold_ = threshold[idx] if isinstance(threshold, dict) else threshold
-            filtering_matrix_ = filtering_matrix[idx] if isinstance(filtering_matrix, dict) else filtering_matrix
-            ranges_ = ranges[idx] if isinstance(ranges, dict) else ranges
+            crop_shape_ = crop_shape[field_name] if isinstance(crop_shape, dict) else crop_shape
+            threshold_ = threshold[field_name] if isinstance(threshold, dict) else threshold
+            filtering_matrix_ = filtering_matrix[field_name] if isinstance(filtering_matrix, dict) else filtering_matrix
+            ranges_ = ranges[field_name] if isinstance(ranges, dict) else ranges
 
-            # Mixture for each cube
-            cube_sampler = 0 & ConstantSampler(np.int32(0), dim=baseclass.dim)
+            # Mixture for each field
+            label_classes = [type(label) for label in list_labels]
+            if len(set(label_classes)) != 1:
+                raise ValueError(f'Labels contain different classes, {set(label_classes)}!')
+            sampler_class = self.labelclass_to_samplerclass(label_classes[0])
+            sampler_classes[field_id] = sampler_class
+
             for label_id, label in enumerate(list_labels):
-                label_sampler = baseclass(label, crop_shape=crop_shape_, threshold=threshold_,
-                                          ranges=ranges_, filtering_matrix=filtering_matrix_,
-                                          field_id=field_id, label_id=label_id, shift_height=shift_height,
-                                          **kwargs)
+
+                label_sampler = sampler_class(label, crop_shape=crop_shape_, threshold=threshold_,
+                                              ranges=ranges_, filtering_matrix=filtering_matrix_,
+                                              field_id=field_id, label_id=label_id, shift_height=shift_height,
+                                              **kwargs)
 
                 if label_sampler.n != 0:
-                    cube_sampler = cube_sampler | label_sampler
+                    samplers[field_name].append(label_sampler)
+                    names[(field_id, label_id)] = (field_name, label.short_name)
 
-                    samplers[idx].append(label_sampler)
-                    names[(field_id, label_id)] = (idx, label.short_name)
+        # Resulting sampler
+        n_present_fields = sum(len(sampler_list) != 0 for sampler_list in samplers.values())
+        proportions = proportions or [1 / n_present_fields for _ in labels]
+        final_weights = AugmentedDict({idx: [] for idx in labels.keys()})
 
-            # Resulting mixture
-            sampler = sampler | (p & cube_sampler)
-            field_names[field_id] = idx
+        sampler = 0 & ConstantSampler(np.int32(0), dim=9)
+
+        for (field_name, sampler_list), p in zip(samplers.items(), proportions):
+            if len(sampler_list) != 0:
+                label_weight = 1 / len(sampler_list)
+
+                for label_sampler in sampler_list:
+                    w = p * label_weight
+                    final_weights[field_name].append(w)
+                    sampler = sampler | (w & label_sampler)
+
 
         self.sampler = sampler
         self.samplers = samplers
         self.names = names
-        self.field_names = field_names
+        self.sampler_classes = sampler_classes
+        self.final_weights = final_weights
 
         self.crop_shape = crop_shape
         self.threshold = threshold
         self.proportions = proportions
-        self.mode = mode
-        self.baseclass = baseclass
+
 
     def sample(self, size):
         """ Generate exactly `size` locations. """
@@ -731,10 +787,11 @@ class SeismicSampler(Sampler):
         for samplers_list in self.samplers.values():
             field = samplers_list[0].field
 
-            data += [[sampler.orientation_matrix, field.zero_traces] for sampler in samplers_list]
-            title += [f'{field.displayed_name}: {sampler.displayed_name}' for sampler in samplers_list]
-            xlabel += [field.index_headers[0]] * len(samplers_list)
-            ylabel += [field.index_headers[1]] * len(samplers_list)
+            if not isinstance(field, SyntheticField):
+                data += [[sampler.orientation_matrix, field.zero_traces] for sampler in samplers_list]
+                title += [f'{field.displayed_name}: {sampler.displayed_name}' for sampler in samplers_list]
+                xlabel += [field.index_headers[0]] * len(samplers_list)
+                ylabel += [field.index_headers[1]] * len(samplers_list)
 
         kwargs = {
             'cmap': [['Sampler', 'black']] * len(data),
@@ -772,21 +829,23 @@ class SeismicSampler(Sampler):
         title = []
         for field_id in np.unique(sampled[:, 0]):
             field = self.samplers[field_id][0].field
-            matrix = np.zeros_like(field.zero_traces, dtype=np.int32)
 
-            sampled_ = sampled[sampled[:, 0] == field_id]
-            for (_, _, _, point_i_start, point_x_start, _,
-                          point_i_stop,  point_x_stop,  _) in sampled_:
-                matrix[point_i_start:point_i_stop, point_x_start:point_x_stop] += 1
-            if binary:
-                matrix[matrix > 0] = 1
-                kwargs['bad_values'] = ()
+            if not isinstance(field, SyntheticField):
+                matrix = np.zeros_like(field.zero_traces, dtype=np.int32)
 
-            field_data = [matrix, field.zero_traces]
-            data.append(field_data)
+                sampled_ = sampled[sampled[:, 0] == field_id]
+                for (_, _, _, point_i_start, point_x_start, _,
+                            point_i_stop,  point_x_stop,  _) in sampled_:
+                    matrix[point_i_start:point_i_stop, point_x_start:point_x_stop] += 1
+                if binary:
+                    matrix[matrix > 0] = 1
+                    kwargs['bad_values'] = ()
 
-            field_title = f'{field.displayed_name}: {len(sampled_)} points'
-            title.append(field_title)
+                field_data = [matrix, field.zero_traces]
+                data.append(field_data)
+
+                field_title = f'{field.displayed_name}: {len(sampled_)} points'
+                title.append(field_title)
 
         kwargs = {
             'matrix_name': 'Sampled slices',

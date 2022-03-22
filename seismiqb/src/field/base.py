@@ -191,6 +191,10 @@ class Field(CharismaMixin, VisualizationMixin):
 
     def _load_fault(self, path, filter=True, fix=True, **kwargs):
         """ Load a single fault from path. """
+        if isinstance(path, Fault):
+            path.field = self
+            return path
+
         fault = Fault(path, field=self, fix=fix, **kwargs)
 
         if filter and fault.format != 'file-npz':

@@ -58,7 +58,7 @@ class VisualizationMixin:
                 labels_msg += f'\n         {" "*len(label_src)}and {len(names)} more item(s)'
             labels_msg += ']\n'
             msg += labels_msg
-        return msg
+        return msg[:-1]
 
     # 2D along axis
     def show_slide(self, loc, width=None, axis='i', zoom_slice=None,

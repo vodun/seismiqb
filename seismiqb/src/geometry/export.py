@@ -165,7 +165,7 @@ def make_segy_from_array(array, path_segy, zip_segy=True, remove_segy=None, path
             dst_file.text[i] = segyio.tools.create_text_header({1: '...'}) # add header-fetching from kwargs
 
         # Loop over the array and put all the data into new segy-cube
-        for i in Notifier(pbar)(range(array.shape[0])):
+        for i in Notifier(pbar, desc='array to sgy')(range(array.shape[0])):
             for x in range(array.shape[1]):
                 # create header in here
                 header = dst_file.header[i * array.shape[1] + x]
@@ -195,3 +195,5 @@ def make_segy_from_array(array, path_segy, zip_segy=True, remove_segy=None, path
         shutil.make_archive(os.path.splitext(path_segy)[0], 'zip', dir_name, file_name)
     if remove_segy:
         os.remove(path_segy)
+
+array_to_sgy = make_segy_from_array

@@ -129,6 +129,7 @@ class lru_cache:
         wrapper.stats = lambda: self.stats
         wrapper.reset = self.reset
         wrapper.reset_instance = lambda instance: self.reset(instance=instance)
+        wrapper.cache_instance = self
         return wrapper
 
 class SingletonClass:
