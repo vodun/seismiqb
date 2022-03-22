@@ -1,9 +1,9 @@
 """ A wrapper around `SyntheticGenerator` to provide the same API, as regular `:class:.Field`. """
 import numpy as np
 
+from batchflow import Config
 from ..utils import lru_cache
 from ..plotters import plot_image
-from batchflow import Config
 
 class GeometryMock:
     """ Mock for SeismicGeometry. """
