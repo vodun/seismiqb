@@ -7,8 +7,7 @@ import pandas as pd
 
 from ..batchflow import DatasetIndex, Dataset, Pipeline
 
-from .field import Field
-from .synthetic import SyntheticField
+from .field import Field, SyntheticField
 from .geometry import SeismicGeometry
 from .plotters import plot_image
 from .crop_batch import SeismicCropBatch

@@ -5,8 +5,7 @@ from .dataset import SeismicDataset
 from .crop_batch import SeismicCropBatch
 
 # Data entities
-from .field import Field
-from .synthetic import SyntheticGenerator, SyntheticField, ParamGeneratorFactory, default_param_generator
+from .field import Field, SyntheticField
 from .geometry import SeismicGeometry, BloscFile, array_to_sgy
 from .labels import Horizon, UnstructuredHorizon, Fault, GeoBody
 from .metrics import HorizonMetrics, GeometryMetrics, FaultsMetrics, FaciesMetrics

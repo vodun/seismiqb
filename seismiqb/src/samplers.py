@@ -20,8 +20,7 @@ import numpy as np
 from numba import njit
 
 from .labels import Horizon, Fault
-from .field import Field
-from .synthetic import SyntheticField
+from .field import Field, SyntheticField
 from .geometry import SeismicGeometry
 from .utils import filtering_function, AugmentedDict
 from .labels.fault import insert_fault_into_mask
@@ -680,18 +679,23 @@ class SeismicSampler(Sampler):
         Fault: FaultSampler,
     }
 
-    CLASS_TO_MODE = {
-        GeometrySampler: ['geometry', 'cube', 'field'],
-        HorizonSampler: ['horizon', 'surface'],
-        FaultSampler: ['fault']
-    }
-    MODE_TO_CLASS = {mode : class_
-                     for class_, mode_list in CLASS_TO_MODE.items()
-                     for mode in mode_list}
+    @classmethod
+    def labelclass_to_samplerclass(cls, labelclass):
+        """ Mapping between label classes and used samplers.
+        Uses `issubclass` check in addition to getitem.
+        """
+        samplerclass = cls.LABELCLASS_TO_SAMPLERCLASS.get(labelclass)
+        if samplerclass is not None:
+            return samplerclass
+
+        for class_, samplerclass in cls.LABELCLASS_TO_SAMPLERCLASS.items():
+            if issubclass(labelclass, class_):
+                return samplerclass
+        raise KeyError(f'Unable to determine the sampler class for `{labelclass}`')
+
 
     def __init__(self, labels, crop_shape, proportions=None,
                  threshold=0.05, ranges=None, filtering_matrix=None, shift_height=True, **kwargs):
-
         # One sampler of each `label` for each `field`
         names, sampler_classes = {}, {}
         samplers = AugmentedDict({field_name: [] for field_name in labels.keys()})
@@ -709,7 +713,7 @@ class SeismicSampler(Sampler):
             label_classes = [type(label) for label in list_labels]
             if len(set(label_classes)) != 1:
                 raise ValueError(f'Labels contain different classes, {set(label_classes)}!')
-            sampler_class = self.LABELCLASS_TO_SAMPLERCLASS[label_classes[0]]
+            sampler_class = self.labelclass_to_samplerclass(label_classes[0])
             sampler_classes[field_id] = sampler_class
 
             for label_id, label in enumerate(list_labels):

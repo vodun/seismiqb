@@ -1,8 +1,6 @@
 """ A wrapper around `SyntheticGenerator` to provide the same API, as regular `:class:.Field`. """
 import numpy as np
 
-from .generator import SyntheticGenerator
-from .parameters import default_param_generator
 from ..utils import lru_cache
 from ..plotters import plot_image
 from ...batchflow import Config
@@ -61,6 +59,8 @@ class SyntheticField:
     cache_maxsize : int
         Number of cached generators. Should be equal or bigger than the batch size.
     """
+    GENERATOR_CONSTRUCTOR = None
+
     #pylint: disable=method-hidden, protected-access
     def __init__(self, param_generator=None, data_generator=None, name='synthetic_field', cache_maxsize=128,
                  default_attribute=None, default_shape=None):
@@ -115,7 +115,7 @@ class SyntheticField:
     # @lru_cache
     def _make_generator(self, hash_value):
         """ Create a generator instance. During initialization, wrapped in `lru_cache`. """
-        return SyntheticGenerator(seed=abs(hash_value))
+        return self.GENERATOR_CONSTRUCTOR(seed=abs(hash_value))
 
     def _populate_generator(self, generator, location=None):
         """ Call `generator` methods to populate it with data: impedance model, horizon surfaces, faults, etc. """
@@ -238,7 +238,7 @@ class SyntheticField:
         """ Generate synthetic seismic out of velocity predictions. """
         result = []
         for velocity_array in velocity:
-            generator = SyntheticGenerator()
+            generator = cls.GENERATOR_CONSTRUCTOR()
 
             # Generating synthetic out of predicted velocity for all items
             generator.velocity_model = velocity_array
