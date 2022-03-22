@@ -10,9 +10,9 @@ from scipy.ndimage import find_objects
 from skimage.measure import label
 
 
+from batchflow import HistoSampler
 from ..plotters import plot_image
 from ..utils import groupby_min, groupby_max
-from ...batchflow import HistoSampler
 
 
 

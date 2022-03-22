@@ -15,7 +15,7 @@ except ImportError:
 import cv2
 import pandas as pd
 
-from ..batchflow.notifier import Notifier
+from batchflow.notifier import Notifier
 
 from .labels import Horizon
 from .utils import Accumulator, to_list

@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 
-from ...batchflow.notifier import Notifier
+from batchflow.notifier import Notifier
 
 from .visualization import VisualizationMixin
 from ..geometry import SeismicGeometry

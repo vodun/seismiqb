@@ -19,12 +19,12 @@ from itertools import product
 import numpy as np
 from numba import njit
 
+from batchflow import Sampler, ConstantSampler
 from .labels import Horizon, Fault
 from .field import Field, SyntheticField
 from .geometry import SeismicGeometry
 from .utils import filtering_function, AugmentedDict
 from .labels.fault import insert_fault_into_mask
-from ..batchflow import Sampler, ConstantSampler
 from .plotters import MatplotlibPlotter, plot_image
 
 
