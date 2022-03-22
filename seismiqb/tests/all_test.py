@@ -51,17 +51,17 @@ notebooks_params = (
     # CharismaMixin test
     (os.path.join(TESTS_NOTEBOOKS_DIR, 'charisma_test.ipynb'), {}),
 
-    # # SeismicGeometry test
-    # (os.path.join(TESTS_NOTEBOOKS_DIR, 'geometry_test_preparation.ipynb'), {'FORMATS': geometry_formats}),
-    # *[(os.path.join(TESTS_NOTEBOOKS_DIR, 'geometry_test_data_format.ipynb'),
-    #    {'TEST_OUTPUTS': ['timings'], 'FORMAT': f}) for f in geometry_formats],
+    # SeismicGeometry test
+    (os.path.join(TESTS_NOTEBOOKS_DIR, 'geometry_test_preparation.ipynb'), {'FORMATS': geometry_formats}),
+    *[(os.path.join(TESTS_NOTEBOOKS_DIR, 'geometry_test_data_format.ipynb'),
+       {'TEST_OUTPUTS': ['timings'], 'FORMAT': f}) for f in geometry_formats],
 
     # Horizon test
     (os.path.join(TESTS_NOTEBOOKS_DIR, 'horizon_test_preparation.ipynb'), {}),
     (os.path.join(TESTS_NOTEBOOKS_DIR, 'horizon_test_base.ipynb'), {}),
-    # (os.path.join(TESTS_NOTEBOOKS_DIR, 'horizon_test_attributes.ipynb'), {}),
-    # (os.path.join(TESTS_NOTEBOOKS_DIR, 'horizon_test_manipulations.ipynb'), {}),
-    # (os.path.join(TESTS_NOTEBOOKS_DIR, 'horizon_test_extraction.ipynb'), {'TEST_OUTPUTS': ['message']}),
+    (os.path.join(TESTS_NOTEBOOKS_DIR, 'horizon_test_attributes.ipynb'), {}),
+    (os.path.join(TESTS_NOTEBOOKS_DIR, 'horizon_test_manipulations.ipynb'), {}),
+    (os.path.join(TESTS_NOTEBOOKS_DIR, 'horizon_test_extraction.ipynb'), {'TEST_OUTPUTS': ['message']}),
 
     # # Tutorials : example for the future, tutorials notebooks needs some refactoring (data and paths changes)
     # (os.path.join(TUTORIALS_DIR, '01_Geometry_part_1.ipynb'), {})
