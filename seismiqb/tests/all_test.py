@@ -24,8 +24,7 @@ import re
 import shutil
 import tempfile
 import pytest
-
-from .run_notebook import run_notebook
+from nbtools import run_notebook
 
 
 # Initialize base tests variables

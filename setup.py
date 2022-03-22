@@ -31,6 +31,7 @@ setup(
         'numba>=0.43.0',
         'scikit_image>=0.16.2',
         'nbconvert>=5.6.1',
+        'py-nbtools>=0.9.3',
         'plotly>=4.3.0',
         'feather_format>=0.4.0',
         'dask[dataframe]>=2.8.1',
