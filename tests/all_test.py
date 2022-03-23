@@ -24,19 +24,20 @@ import re
 import shutil
 import tempfile
 import pytest
+
 from nbtools import run_notebook
 
 
 # Initialize base tests variables
 pytest.failed = False
-BASE_DIR =  os.path.normpath(os.getenv("BASE_DIR", os.path.join(os.path.dirname(os.path.realpath(__file__)), '../..')))
-TESTS_NOTEBOOKS_DIR = os.path.join(BASE_DIR, 'seismiqb/tests/notebooks/') # path to directory with tests notebooks
+BASE_DIR =  os.path.normpath(os.getenv("BASE_DIR", os.path.join(os.path.dirname(os.path.realpath(__file__)), '../../seismiqb')))
+TESTS_NOTEBOOKS_DIR = os.path.join(BASE_DIR, 'tests/notebooks/') # path to directory with tests notebooks
 # TUTORIALS_DIR = os.path.join(BASE_DIR, 'tutorials/') # path to directory with tutorials
 
 common_params = {
     # Workspace constants and parameters
     'DATESTAMP': date.today().strftime("%Y-%m-%d"),
-    'TESTS_ROOT_DIR': tempfile.mkdtemp(prefix='tests_root_dir_', dir='./'),
+    'TESTS_ROOT_DIR': tempfile.mkdtemp(prefix='tests_root_dir_', dir=BASE_DIR),
     'REMOVE_ROOT_DIR': os.getenv('SEISMIQB_TEST_REMOVE_ROOT_DIR') or True,
 
     # Visualization and output parameters (these variables are used in notebooks)
@@ -85,7 +86,8 @@ def test_run_notebook(notebook_kwargs, capsys):
                                   f"{filename}_out_{filename_suffix}_{params['DATESTAMP']}.ipynb")
 
     exec_res = run_notebook(path=path_ipynb, inputs=params, outputs=test_outputs,
-                            inputs_pos=2, out_path_ipynb=out_path_ipynb, display_links=False)
+                            inputs_pos=2, working_dir=os.path.dirname(path_ipynb),
+                            out_path_ipynb=out_path_ipynb, display_links=False)
 
     pytest.failed = pytest.failed or exec_res['failed']
 
