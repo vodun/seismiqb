@@ -24,7 +24,6 @@ import re
 import shutil
 import tempfile
 import pytest
-
 from nbtools import run_notebook
 
 

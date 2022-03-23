@@ -59,7 +59,7 @@ jobs:
 
     - name: Run basic tests
       env:
-        BASE_DIR: ${{ github.workspace }}/..
+        BASE_DIR: ${{ github.workspace }}
       run: |
         pip install -U pytest
         pytest -m "not slow" --tb=line --disable-pytest-warnings -v --pyargs
