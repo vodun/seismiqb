@@ -23,9 +23,9 @@ jobs:
       shell: bash
       run: |
         if ${{ github.event_name == 'pull_request' }}; then
-          echo "::set-output name=matrix::{\"os\":[\"ubuntu-latest\"], \"python-version\":[3.6, 3.7, 3.8]}"
+          echo "::set-output name=matrix::{\"os\":[\"ubuntu-latest\"], \"python-version\":[3.7, 3.8]}"
         else
-          echo "::set-output name=matrix::{\"os\":[\"ubuntu-latest\", \"windows-latest\"], \"python-version\":[3.6, 3.7, 3.8]}"
+          echo "::set-output name=matrix::{\"os\":[\"ubuntu-latest\", \"windows-latest\"], \"python-version\":[3.7, 3.8]}"
         fi
 
   test_install:
@@ -35,6 +35,7 @@ jobs:
 
     strategy:
       matrix: ${{fromJSON(needs.set_matrix.outputs.matrix)}}
+      fail-fast: false
 
     steps:
     - name: Set up Python ${{ matrix.python-version }} on ${{ matrix.os }}
@@ -58,8 +59,7 @@ jobs:
 
     - name: Run basic tests
       env:
-        TESTS_SCRIPTS_DIR: ${{ github.workspace }}/seismiqb/tests/
-      working-directory: ${{ github.workspace }}/seismiqb/
+        BASE_DIR: ${{ github.workspace }}/..
       run: |
         pip install -U pytest
-        # pytest -m "not slow" --disable-pytest-warnings -v --pyargs seismiqb.tests
+        pytest -m "not slow" --tb=line --disable-pytest-warnings -v --pyargs

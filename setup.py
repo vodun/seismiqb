@@ -20,7 +20,7 @@ setup(
     platforms='any',
     install_requires=[
         'batchflow==0.6.0',
-        'py-nbtools>=0.9.0'
+        'py-nbtools>=0.9.4',
         'numpy>=1.16.0',
         'scipy>=1.3.3',
         'pandas>=1.0.0',
