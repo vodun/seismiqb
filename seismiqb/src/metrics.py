@@ -22,7 +22,7 @@ from .utils import Accumulator, to_list
 from .functional import to_device, from_device
 from .functional import correlation, crosscorrelation, btch, kl, js, hellinger, tv, hilbert
 from .functional import smooth_out, digitize, gridify, perturb, histo_reduce
-from .plot import plot
+from .plotters import plot
 
 
 

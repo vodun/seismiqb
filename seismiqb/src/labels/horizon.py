@@ -18,7 +18,7 @@ from ..utils import groupby_mean, groupby_min, groupby_max
 from ..utils import make_bezier_figure
 from ..utils import MetaDict
 from ..functional import smooth_out
-from ..plot import plot
+from ..plotters import plot
 
 
 

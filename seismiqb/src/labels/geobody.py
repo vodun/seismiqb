@@ -10,7 +10,7 @@ from scipy.ndimage import find_objects
 from skimage.measure import label
 
 
-from ..plotters import plot_image
+from ..plotters import plot
 from ..utils import groupby_min, groupby_max
 from ...batchflow import HistoSampler
 
@@ -414,7 +414,7 @@ class GeoBody:
             **kwargs
             }
         matrix[matrix == fill_value] = np.nan
-        return plot_image(matrix, **kwargs)
+        return plot(matrix, **kwargs)
 
     def show_slide(self, loc, width=3, axis='i', order_axes=None, zoom_slice=None, **kwargs):
         """ Show slide with geobody on it.
@@ -474,4 +474,4 @@ class GeoBody:
             **kwargs
             }
 
-        return plot_image([seismic_slide, mask], order_axes=order_axes, **kwargs)
+        return plot([seismic_slide, mask], order_axes=order_axes, **kwargs)

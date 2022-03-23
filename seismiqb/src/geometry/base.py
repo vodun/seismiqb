@@ -14,7 +14,7 @@ from .export import ExportMixin
 from ..utils import CacheMixin
 
 from ..utils import file_print, get_environ_flag, lru_cache, transformable
-from ..plot import plot
+from ..plotters import plot
 
 
 

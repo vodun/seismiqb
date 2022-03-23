@@ -14,7 +14,7 @@ from scipy.signal import butter, lfilter, hilbert
 from ..batchflow import DatasetIndex, Batch, action, inbatch_parallel, SkipBatchException, apply_parallel
 
 from .labels import Horizon
-from .plot import plot
+from .plotters import plot
 from .synthetic.generator import generate_synthetic
 from .utils import compute_attribute, to_list, AugmentedDict, DelegatingList, adjust_shape_3d
 from .labels.horizon_extraction import groupby_all

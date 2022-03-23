@@ -4,12 +4,10 @@ import re
 from collections import defaultdict
 
 import numpy as np
-from matplotlib import pyplot as plt
 
 from .viewer import FieldViewer
 from ..utils import DelegatingList, to_list
-from ..plot import plot
-from ..plotters import show_3d
+from ..plotters import plot, show_3d
 from ..labels.horizon_attributes import AttributesMixin
 
 COLOR_GENERATOR = iter(plot.MASK_COLORS)

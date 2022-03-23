@@ -4,8 +4,7 @@ from textwrap import dedent
 import numpy as np
 from scipy.spatial import Delaunay
 
-from ..plot import plot
-from ..plotters import show_3d
+from ..plotters import plot, show_3d
 from ..utils import AugmentedList, DelegatingList, filter_simplices
 
 

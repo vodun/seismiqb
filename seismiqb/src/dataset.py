@@ -12,7 +12,7 @@ from .synthetic import SyntheticField
 from .geometry import SeismicGeometry
 from .crop_batch import SeismicCropBatch
 from .utils import AugmentedDict
-from .plot import plot
+from .plotters import plot
 
 class SeismicDataset(Dataset):
     """ Container of fields.

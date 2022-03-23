@@ -22,7 +22,7 @@ from numba import njit
 from .utils import filtering_function, AugmentedDict
 from .labels.fault import insert_fault_into_mask
 from ..batchflow import Sampler, ConstantSampler
-from .plot import plot
+from .plotters import plot
 
 
 
