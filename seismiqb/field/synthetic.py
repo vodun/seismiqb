@@ -142,6 +142,10 @@ class SyntheticField:
             for fault_params in params['make_fault_2d']:
                 generator.make_fault_2d(**fault_params)
 
+            # Faults
+            for fault_params in params['make_fault_3d']:
+                generator.make_fault_3d(**fault_params)
+
             # Finalize synthetic creation
             (generator
              .make_density_model(**params['make_density_model'])
