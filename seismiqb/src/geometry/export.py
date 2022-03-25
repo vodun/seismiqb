@@ -165,27 +165,29 @@ def make_segy_from_array(array, path_segy, zip_segy=True, remove_segy=None, path
             dst_file.text[i] = segyio.tools.create_text_header({1: '...'}) # add header-fetching from kwargs
 
         # Loop over the array and put all the data into new segy-cube
-        for i in Notifier(pbar)(range(array.shape[0])):
-            for x in range(array.shape[1]):
-                # create header in here
-                header = dst_file.header[i * array.shape[1] + x]
+        for c, (i, x) in Notifier(pbar)(enumerate(idx)):
+            i, x = i - ilines_offset, x - xlines_offset
+        # for i in Notifier(pbar)(range(array.shape[0])):
+            # for x in range(array.shape[1]):
+            # create header in here
+            header = dst_file.header[c]
 
-                # change inline and xline in trace-header
-                header[segyio.TraceField.INLINE_3D] = i + ilines_offset
-                header[segyio.TraceField.CROSSLINE_3D] = x + xlines_offset
-                header[segyio.TraceField.CDP_X] = cdpx[i, x]
-                header[segyio.TraceField.CDP_Y] = cdpy[i, x]
+            # change inline and xline in trace-header
+            header[segyio.TraceField.INLINE_3D] = i + ilines_offset
+            header[segyio.TraceField.CROSSLINE_3D] = x + xlines_offset
+            header[segyio.TraceField.CDP_X] = cdpx[i, x]
+            header[segyio.TraceField.CDP_Y] = cdpy[i, x]
 
-                # change depth-related fields in trace-header
-                header[segyio.TraceField.TRACE_SAMPLE_COUNT] = array.shape[2]
-                header[segyio.TraceField.TRACE_SAMPLE_INTERVAL] = sample_rate
-                header[segyio.TraceField.DelayRecordingTime] = delay
+            # change depth-related fields in trace-header
+            header[segyio.TraceField.TRACE_SAMPLE_COUNT] = array.shape[2]
+            header[segyio.TraceField.TRACE_SAMPLE_INTERVAL] = sample_rate
+            header[segyio.TraceField.DelayRecordingTime] = delay
 
-                # copy the trace from the array
-                trace = array[i, x]
-                dst_file.trace[i * array.shape[1] + x] = trace
+            # copy the trace from the array
+            trace = array[i, x]
+            dst_file.trace[c] = trace
 
-        dst_file.bin = {segyio.BinField.Traces: array.shape[0] * array.shape[1],
+        dst_file.bin = {segyio.BinField.Traces: len(idx),#array.shape[0] * array.shape[1],
                         segyio.BinField.Samples: array.shape[2],
                         segyio.BinField.Interval: sample_rate}
 

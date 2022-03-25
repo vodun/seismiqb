@@ -475,6 +475,9 @@ class Fault(Horizon):
                       for i, item in Notifier(pbar)(enumerate(labels))]
         return labels
 
+    def __repr__(self):
+        return f"""<Fault `{self.name}` for `{self.field.displayed_name}` at {hex(id(self))}>"""
+
 def get_sticks(points, sticks_step, stick_nodes_step):
     """ Get sticks from fault which is represented as a cloud of points.
 
