@@ -156,6 +156,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Visua
     @points.setter
     def points(self, value):
         self._points = value
+        self.reset_storage('matrix')
 
     @staticmethod
     def matrix_to_points(matrix):
@@ -181,6 +182,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Visua
     @matrix.setter
     def matrix(self, value):
         self._matrix = value
+        self.reset_storage('points')
 
     @staticmethod
     def points_to_matrix(points, i_min, x_min, i_length, x_length, dtype=np.int32):
@@ -364,7 +366,6 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Visua
 
         self.i_length = (self.i_max - self.i_min) + 1
         self.x_length = (self.x_max - self.x_min) + 1
-        self.reset_storage('points')
 
         # Populate lazy properties with supplied values
         self._h_min, self._h_max, self._len = h_min, h_max, length
@@ -505,55 +506,13 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Visua
             return 'unknown_horizon'
         return self.short_name
 
-
-    # Functions to use to change the horizon
-    def apply_to_matrix(self, function, **kwargs):
-        """ Apply passed function to matrix storage.
-        Automatically synchronizes the instance after.
-
-        Parameters
-        ----------
-        function : callable
-            Applied to matrix storage directly.
-            Can return either new_matrix, new_i_min, new_x_min or new_matrix only.
-        kwargs : dict
-            Additional arguments to pass to the function.
-        """
-        result = function(self.matrix, **kwargs)
-        if isinstance(result, tuple) and len(result) == 3:
-            matrix, i_min, x_min = result
-        else:
-            matrix, i_min, x_min = result, self.i_min, self.x_min
-        self.matrix, self.i_min, self.x_min = matrix, i_min, x_min
-
-        self.reset_storage('points') # applied to matrix, so we need to re-create points
-
-    def apply_to_points(self, function, **kwargs):
-        """ Apply passed function to points storage.
-        Automatically synchronizes the instance after.
-
-        Parameters
-        ----------
-        function : callable
-            Applied to points storage directly.
-        kwargs : dict
-            Additional arguments to pass to the function.
-        """
-        self.points = function(self.points, **kwargs)
-        self.reset_storage('matrix') # applied to points, so we need to re-create matrix
-
-
     def filter_points(self, filtering_matrix=None, **kwargs):
         """ Remove points that correspond to 1's in `filtering_matrix` from points storage. """
         if filtering_matrix is None:
             filtering_matrix = self.field.zero_traces
 
-        def _filtering_function(points, **kwds):
-            _ = kwds
-            mask = filtering_matrix[points[:, 0], points[:, 1]]
-            return points[mask == 0]
-
-        self.apply_to_points(_filtering_function, **kwargs)
+        mask = filtering_matrix[self.points[:, 0], self.points[:, 1]]
+        self.points = self.points[mask == 0]
 
     def filter_matrix(self, filtering_matrix=None, **kwargs):
         """ Remove points that correspond to 1's in `filtering_matrix` from matrix storage. """
@@ -563,12 +522,8 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Visua
         idx_i, idx_x = np.asarray(filtering_matrix[self.i_min:self.i_max + 1,
                                                    self.x_min:self.x_max + 1] == 1).nonzero()
 
-        def _filtering_function(matrix, **kwds):
-            _ = kwds
-            matrix[idx_i, idx_x] = self.FILL_VALUE
-            return matrix
-
-        self.apply_to_matrix(_filtering_function, **kwargs)
+        self.matrix[idx_i, idx_x] = self.FILL_VALUE
+        self.reset_storage('points')
 
     filter = filter_points
 
@@ -628,7 +583,6 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Visua
         mask_x = np.isin(self.points[:, 1], uniques[counts > threshold][::factor[1]])
 
         self.points = self.points[mask_i + mask_x]
-        self.reset_storage('matrix')
 
     def smooth_out(self, kernel=None, kernel_size=3, sigma=0.8, iters=1, preserve_borders=True, margin=5, **kwargs):
         """ Convolve the horizon with gaussian kernel with special treatment to absent points:
@@ -651,16 +605,14 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Visua
         preserve_borders : bool
             Whether or not to allow method label additional points.
         """
-        def smoothing_function(matrix):
-            smoothed = smooth_out(matrix, kernel=kernel,
-                                  kernel_size=kernel_size, sigma=sigma, margin=margin,
-                                  fill_value=self.FILL_VALUE, preserve=preserve_borders, iters=iters)
-            smoothed = np.rint(smoothed).astype(np.int32)
-            smoothed[self.field.zero_traces[self.i_min:self.i_max + 1,
-                                            self.x_min:self.x_max + 1] == 1] = self.FILL_VALUE
-            return smoothed
+        smoothed = smooth_out(self.matrix, kernel=kernel,
+                              kernel_size=kernel_size, sigma=sigma, margin=margin,
+                              fill_value=self.FILL_VALUE, preserve=preserve_borders, iters=iters)
+        smoothed = np.rint(smoothed).astype(np.int32)
+        smoothed[self.field.zero_traces[self.i_min:self.i_max + 1,
+                                        self.x_min:self.x_max + 1] == 1] = self.FILL_VALUE
 
-        self.apply_to_matrix(smoothing_function, **kwargs)
+        self.matrix = smoothed
 
     interpolate = partialmethod(smooth_out, preserve_borders=False)
 
