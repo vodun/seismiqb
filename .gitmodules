@@ -1,3 +1,0 @@
-[submodule "seismiqb/batchflow"]
-	path = seismiqb/batchflow
-	url = https://github.com/analysiscenter/batchflow.git
