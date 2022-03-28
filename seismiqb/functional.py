@@ -186,8 +186,8 @@ def special_convolve(matrix, mode='convolve', kernel_size=3, kernel=None, iters=
     fill_value : number
         Value to ignore in convolutions.
     preserve : bool
-        If False, then all the missing values remain missing in the resulting array.
-        If True, then missing values are filled with weighted average of nearby points.
+        If True, then all the missing values remain missing in the resulting array.
+        If False, then missing values are filled with weighted average of nearby points.
     margin : number
         If the distance between anchor point and the point inside filter is bigger than the margin,
         then the point is ignored in convolutions.
@@ -210,7 +210,7 @@ def special_convolve(matrix, mode='convolve', kernel_size=3, kernel=None, iters=
     kernel_size = kernel.shape[0]
     result = np.pad(matrix, kernel_size, constant_values=np.nan)
 
-    # Apply smoothing multiple times. Note that there is no dtype conversion in between
+    # Apply `function` multiple times. Note that there is no dtype conversion in between
     for _ in range(iters):
         result = function(result, kernel, preserve=preserve, margin=margin)
     result = result[kernel_size:-kernel_size, kernel_size:-kernel_size]
@@ -228,7 +228,7 @@ def special_convolve(matrix, mode='convolve', kernel_size=3, kernel=None, iters=
 def _convolve(src, kernel, preserve, margin):
     """ Jit-accelerated function to apply 2d convolution with special care for nan values. """
     #pylint: disable=too-many-nested-blocks, consider-using-enumerate, not-an-iterable
-    k = int(np.floor(kernel.shape[0] / 2))
+    k = kernel.shape[0] // 2
     raveled_kernel = kernel.ravel() / np.sum(kernel)
 
     i_range, x_range = src.shape
@@ -241,10 +241,10 @@ def _convolve(src, kernel, preserve, margin):
             if (preserve is True) and isnan(central):
                 continue
 
-            element = src[iline-k:iline+k+1, xline-k:xline+k+1]
+            element = src[iline-k:iline+k+1, xline-k:xline+k+1].ravel()
 
             s, sum_weights = np.float32(0), np.float32(0)
-            for item, weight in zip(element.ravel(), raveled_kernel):
+            for item, weight in zip(element, raveled_kernel):
                 if not isnan(item):
                     if abs(item - central) <= margin or isnan(central):
                         s += item * weight
@@ -260,7 +260,7 @@ def _medfilt(src, kernel, preserve, margin):
     # margin = 0: median across all non-equal-to-self elements in kernel
     # margin = -1: median across all elements in kernel
     #pylint: disable=too-many-nested-blocks, consider-using-enumerate, not-an-iterable
-    k = int(np.floor(kernel.shape[0] / 2))
+    k = kernel.shape[0] // 2
 
     i_range, x_range = src.shape
     dst = src.copy()
@@ -268,6 +268,7 @@ def _medfilt(src, kernel, preserve, margin):
     for iline in prange(k, i_range - k):
         for xline in range(k, x_range - k):
             central = src[iline, xline]
+
             if (preserve is True) and isnan(central):
                 continue
 
@@ -302,7 +303,7 @@ def smooth_out(matrix, mode='convolve', kernel_size=3, sigma=2.0, kernel=None, i
 
 
 def digitize(matrix, quantiles):
-    """ Convert continious metric into binarized version with thresholds defined by `quantiles`. """
+    """ Convert continuous metric into binarized version with thresholds defined by `quantiles`. """
     bins = np.nanquantile(matrix, np.sort(quantiles)[::-1])
 
     if len(bins) > 1:
