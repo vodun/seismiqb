@@ -52,6 +52,8 @@ class Fault(Horizon):
             force_format = 'file'
         elif isinstance(storage, np.ndarray):
             force_format = 'points'
+        elif isinstance(storage, dict):
+            force_format = 'objects'
 
         super().__init__(storage, *args, force_format=force_format, reset=None, **kwargs)
         self.set_direction(direction)
@@ -94,6 +96,11 @@ class Fault(Horizon):
     @simplices.setter
     def simplices(self, value):
         self._simplices = value
+
+    def from_objects(self, storage, **kwargs):
+        self.from_points(storage['points'], verify=False, **kwargs)
+        for key in ['sticks', 'nodes', 'simplices']:
+            setattr(self, key, storage.get(key))
 
     def from_file(self, path, transform=True, verify=True, direction=None, **kwargs):
         """ Init from path to either CHARISMA, REDUCED_CHARISMA or FAULT_STICKS csv-like file
@@ -233,7 +240,7 @@ class Fault(Horizon):
         self.sticks = get_sticks(points, sticks_step, stick_nodes_step)
         self.simplices, self.nodes = sticks_to_simplices(self.sticks, return_indices=True)
 
-    def add_to_mask(self, mask, locations=None, sparse=False, **kwargs):
+    def add_to_mask(self, mask, locations=None, width=8, **kwargs):
         """ Add fault to background. """
         mask_bbox = np.array([[locations[0].start, locations[0].stop],
                             [locations[1].start, locations[1].stop],
@@ -244,21 +251,20 @@ class Fault(Horizon):
         if (self.bbox[:, 1] < mask_bbox[:, 0]).any() or (self.bbox[:, 0] >= mask_bbox[:, 1]).any():
             return mask
 
-        if sparse and self.nodes is not None:
-            slides_indices = np.unique(self.nodes[:, self.direction])
-            indices = np.isin(points[:, self.direction], slides_indices)
-            points = points[indices]
-            mask_pos = np.isin(
-                np.arange(mask.shape[self.direction]),
-                slides_indices - locations[self.direction].start
-            )
-            if mask_pos.any():
-                if self.direction == 0:
-                    mask[mask_pos, :] = np.clip(mask[mask_pos, :], 0, 1)
-                else:
-                    mask[:, mask_pos] = np.clip(mask[:, mask_pos], 0, 1)
-
-        insert_fault_into_mask(mask, points, mask_bbox)
+        # import pdb; pdb.set_trace()
+        # slides_indices = np.unique(self.nodes[:, self.direction])
+        # indices = np.isin(points[:, self.direction], slides_indices)
+        # points = points[indices]
+        # mask_pos = np.isin(
+        #     np.arange(mask.shape[self.direction]),
+        #     slides_indices - locations[self.direction].start
+        # )
+        # if mask_pos.any():
+        #     if self.direction == 0:
+        #         mask[mask_pos, :] = np.clip(mask[mask_pos, :], 0, 1)
+        #     else:
+        #         mask[:, mask_pos] = np.clip(mask[:, mask_pos], 0, 1)
+        insert_fault_into_mask(mask, points, mask_bbox, width=width)
         return mask
 
     @classmethod
@@ -412,12 +418,13 @@ def nearest_neighbors(values, all_values, n_neighbors=10):
     return nn.kneighbors(values)[1].flatten()
 
 @njit(parallel=True)
-def insert_fault_into_mask(mask, points, mask_bbox):
+def insert_fault_into_mask(mask, points, mask_bbox, width):
     """ Add new points into binary mask. """
     #pylint: disable=not-an-iterable
     for i in prange(len(points)):
-        point = points[i]
-        if (point[0] >= mask_bbox[0][0]) and (point[0] < mask_bbox[0][1]):
-            if (point[1] >= mask_bbox[1][0]) and (point[1] < mask_bbox[1][1]):
-                if (point[2] >= mask_bbox[2][0]) and (point[2] < mask_bbox[2][1]):
-                    mask[point[0] - mask_bbox[0][0], point[1] - mask_bbox[1][0], point[2] - mask_bbox[2][0]] = 1
+        points_with_width = [[points[i][0], points[i][1]+step, points[i][2]] for step in range(-width // 2, width // 2 + width % 2)]
+        for point in points_with_width:
+            if (point[0] >= mask_bbox[0][0]) and (point[0] < mask_bbox[0][1]):
+                if (point[1] >= mask_bbox[1][0]) and (point[1] < mask_bbox[1][1]):
+                    if (point[2] >= mask_bbox[2][0]) and (point[2] < mask_bbox[2][1]):
+                        mask[point[0] - mask_bbox[0][0], point[1] - mask_bbox[1][0], point[2] - mask_bbox[2][0]] = 1
