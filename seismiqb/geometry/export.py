@@ -167,8 +167,6 @@ def make_segy_from_array(array, path_segy, zip_segy=True, remove_segy=None, path
         # Loop over the array and put all the data into new segy-cube
         for c, (i, x) in Notifier(pbar, desc='array to sgy')(enumerate(idx)):
             i, x = i - ilines_offset, x - xlines_offset
-        # for i in Notifier(pbar)(range(array.shape[0])):
-            # for x in range(array.shape[1]):
             # create header in here
             header = dst_file.header[c]
 

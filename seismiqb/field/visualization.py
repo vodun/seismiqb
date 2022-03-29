@@ -401,7 +401,7 @@ class VisualizationMixin:
 
     # 3D interactive
     def show_3d(self, src='labels', aspect_ratio=None, zoom_slice=None,
-                 n_points=100, threshold=100, sticks_step=100, stick_nodes_step=10,
+                 n_points=100, threshold=100, sticks_step=10, stick_nodes_step=10,
                  slides=None, margin=(0, 0, 20), colors=None, **kwargs):
         """ Interactive 3D plot for some elements of a field.
         Roughly, does the following:

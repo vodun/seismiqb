@@ -32,12 +32,12 @@ def triangle_rasterization(points, width=1):
                     i += 1
     return _points[:i]
 
-def make_triangulation(points, return_indices=False):
+def sticks_to_simplices(sticks, return_indices=False):
     """ Compute triangulation of the fault.
 
     Parameters
     ----------
-    points : numpy.ndarray
+    sticks : numpy.ndarray
         Array of sticks. Each item of array is a stick: sequence of 3D points.
     return_indices : bool
         If True, function will return indices of stick nodes in flatten array.
@@ -48,20 +48,27 @@ def make_triangulation(points, return_indices=False):
         numpy.ndarray of length N where N is the number of simplices. Each item is a sequence of coordinates of each
         vertex (if `return_indices=False`) or indices of nodes in initial flatten array.
     """
-    triangles = []
+    simplices = []
+    nodes = np.concatenate(sticks)
+
     if return_indices:
-        n_points = np.cumsum([0, *[len(item) for item in points]])
-        points = np.array([np.arange(len(points[i])) + n_points[i] for i in range(len(points))])
-    for s1, s2 in zip(points[:-1], points[1:]):
+        n_nodes = np.cumsum([0, *[len(item) for item in sticks]])
+        sticks = np.array([np.arange(len(sticks[i])) + n_nodes[i] for i in range(len(sticks))], dtype=object)
+    for s1, s2 in zip(sticks[:-1], sticks[1:]):
         if len(s1) > len(s2):
             s1, s2 = s2, s1
         n = len(s1)
-        nodes = [item for sublist in zip(s1, s2[:n]) for item in sublist]
-        nodes = [nodes[i:i+3] for i in range(len(nodes[:-2]))] if len(nodes) > 2 else []
-        nodes += [[s1[-1], s2[i], s2[i+1]] for i in range(n-1, len(s2)-1)]
-        triangles += nodes
-    return np.array(triangles)
+        nodes_to_connect = [item for sublist in zip(s1, s2[:n]) for item in sublist]
+        triangles = [nodes_to_connect[i:i+3] for i in range(len(nodes_to_connect[:-2]))] if len(nodes_to_connect) > 2 else []
+        triangles += [[s1[-1], s2[i], s2[i+1]] for i in range(n-1, len(s2)-1)]
+        simplices += triangles
+    return np.array(simplices), nodes
 
+def simplices_to_points(simplices, nodes, width=1):
+    points = []
+    for triangle in simplices:
+        points.append(triangle_rasterization(nodes[triangle].astype('float32'), width))
+    return np.concatenate(points, axis=0).astype('int32')
 
 @njit
 def distance_to_triangle(triangle, node):
@@ -81,6 +88,9 @@ def distance_to_triangle(triangle, node):
     det = a * c - b * b
     s = b * e - c * d
     t = b * d - a * e
+
+    if det == 0:
+        return 0.
 
     # Terible tree of conditionals to determine in which region of the diagram
     # shown above the projection of the point into the triangle-plane lies.

@@ -16,13 +16,16 @@ from scipy.ndimage import measurements
 from batchflow.notifier import Notifier
 
 from .horizon import Horizon
-from .fault_triangulation import make_triangulation, triangle_rasterization
+from .fault_triangulation import sticks_to_simplices, simplices_to_points
 from .fault_postprocessing import faults_sizes
 from ..plotters import show_3d
 from ..geometry import SeismicGeometry
 from ..utils import concat_sorted, split_array
 
 
+
+class FaultLoadingException(Exception): pass
+class EmptySticksException(FaultLoadingException): pass
 
 class Fault(Horizon):
     """ Contains points of fault.
@@ -38,39 +41,22 @@ class Fault(Horizon):
     FAULT_STICKS = ['INLINE', 'iline', 'xline', 'cdp_x', 'cdp_y', 'height', 'name', 'number']
     COLUMNS = ['iline', 'xline', 'height', 'name', 'number']
 
-    def __init__(self, *args, nodes=None, **kwargs):
-        self.nodes = None
-        self.sticks = None
-        super().__init__(*args, **kwargs)
-        if nodes is not None:
-            self.from_points(nodes, dst='nodes', reset=None, **kwargs)
+    def __init__(self, storage, direction=None, *args, **kwargs):
+        # self.points = None
+        self._sticks = None
+        self._nodes = None
+        self._simplices = None
+        self.direction = None
 
-    def from_file(self, path, transform=True, verify=True, direction=None, **kwargs):
-        """ Init from path to either CHARISMA, REDUCED_CHARISMA or FAULT_STICKS csv-like file
-        or from numpy formats.
-        """
-        path = self.field.make_path(path, makedirs=False)
-        self.path = path
+        if isinstance(storage, str):
+            force_format = 'file'
+        elif isinstance(storage, np.ndarray):
+            force_format = 'points'
 
-        self.name = os.path.basename(path)
-        ext = os.path.splitext(path)[1][1:]
+        super().__init__(storage, *args, force_format=force_format, reset=None, **kwargs)
+        self.set_direction(direction)
 
-        if ext == 'npz':
-            points, nodes, sticks = self.load_npz(path)
-            self.format = 'file-npz'
-        elif ext == 'npy':
-            points, nodes, sticks = self.load_npy(path)
-            self.format = 'file-npy'
-        else:
-            points, nodes, sticks = self.load_fault_sticks(path, transform, verify, **kwargs)
-            self.format = 'file-csv'
-
-        self.from_points(points, verify=False, **kwargs)
-        if nodes is not None:
-            self.from_points(nodes, dst='nodes', verify=False, reset=None, **kwargs)
-        if sticks is not None:
-            self.sticks = sticks
-
+    def set_direction(self, direction):
         if direction is None:
             if len(self.points) > 0:
                 mean_depth = int(np.median(self.points[:, 2]))
@@ -85,39 +71,60 @@ class Fault(Horizon):
         else:
             self.direction = direction[self.field.short_name][self.name]
 
-    def load_npz(self, path):
-        """ Load fault points, nodes and sticks from npz file. """
-        npzfile = np.load(path, allow_pickle=False)
-        points, nodes, stick_labels = npzfile['points'], npzfile['nodes'], npzfile['stick_labels']
-        if len(stick_labels) != len(nodes):
-            raise ValueError('nodes and stick_labels must be of the same length.')
-        if len(nodes) == 0:
-            nodes = None
-            sticks = None
+    @property
+    def sticks(self):
+        return self._sticks
+
+    @sticks.setter
+    def sticks(self, value):
+        self._sticks = value
+
+    @property
+    def nodes(self):
+        return self._nodes
+
+    @nodes.setter
+    def nodes(self, value):
+        self._nodes = value
+
+    @property
+    def simplices(self):
+        return self._simplices
+
+    @simplices.setter
+    def simplices(self, value):
+        self._simplices = value
+
+    def from_file(self, path, transform=True, verify=True, direction=None, **kwargs):
+        """ Init from path to either CHARISMA, REDUCED_CHARISMA or FAULT_STICKS csv-like file
+        or from numpy formats.
+        """
+        path = self.field.make_path(path, makedirs=False)
+        self.path = path
+
+        self.name = os.path.basename(path)
+        ext = os.path.splitext(path)[1][1:]
+
+        if ext == 'npz':
+            self.load_npz(path)
+            self.format = 'file-npz'
+        elif ext == 'npy':
+            self.load_npy(path)
+            self.format = 'file-npy'
         else:
-            sticks = np.array(split_array(nodes, stick_labels), dtype=object)
-        return points, nodes, sticks
+            self.load_charisma(path, transform, verify, **kwargs)
+            self.format = 'file-charisma'
 
-    def load_npy(self, path):
-        """ Load fault points from npy file. """
-        points = np.load(path, allow_pickle=False)
-        nodes = None
-        sticks = None
-        return points, nodes, sticks
-
-    def load_fault_sticks(self, path, transform=True, verify=True, fix=False, **kwargs):
+    def load_charisma(self, path, transform=True, verify=True, fix=False, width=3, **kwargs):
         """ Get point cloud array from file values. """
-        df = self.read_file(path)
-        if df is None:
-            return np.zeros((0, 3)), np.zeros((0, 3)), np.array([])
-
+        df = self.create_df(path)
         if 'cdp_x' in df.columns:
             df = self.recover_lines_from_cdp(df)
 
         points = df[self.REDUCED_CHARISMA_SPEC].values
         if transform:
             points = self.field_reference.geometry.lines_to_cubic(points)
-            df[self.REDUCED_CHARISMA_SPEC] = points
+        df[self.REDUCED_CHARISMA_SPEC] = points.astype(np.int32)
 
         if verify:
             idx = np.where((points[:, 0] >= 0) &
@@ -128,33 +135,35 @@ class Fault(Horizon):
                         (points[:, 2] < self.field_reference.shape[2]))[0]
             df = df.iloc[idx]
 
-        sticks = self.read_sticks(df, fix)
-        if len(sticks) == 0:
-            return np.zeros((0, 3)), np.zeros((0, 3)), np.array([])
-        points = self.interpolate_3d(sticks, **kwargs)
-        nodes = np.concatenate(sticks.values)
-        return points, nodes, sticks.values
+        self.sticks = self.csv_to_sticks(df, fix)
+        if len(self.sticks) > 0:
+            self.simplices, self.nodes = sticks_to_simplices(self.sticks, return_indices=True)
+            points = simplices_to_points(self.simplices, self.nodes, width=width)
+        else:
+            self.simplices, self.nodes, points = np.array([]), np.zeros((0, 3), dtype='int32'), np.zeros((0, 3), dtype='int32')
+        self.from_points(points, verify=False)
 
-    def read_file(self, path):
-        """ Read data frame with sticks. """
+    @classmethod
+    def create_df(cls, path):
         with open(path, encoding='utf-8') as file:
             line_len = len([item for item in file.readline().split(' ') if len(item) > 0])
 
         if line_len == 0:
-            return None
+            # self.simplices, self.nodes, self.points = np.array([]), np.zeros((0, 3), dtype='int32'), np.zeros((0, 3), dtype='int32')
+            return pd.DataFrame({})
 
         if line_len == 3:
-            names = self.REDUCED_CHARISMA_SPEC
+            names = cls.REDUCED_CHARISMA_SPEC
         elif line_len == 8:
-            names = self.FAULT_STICKS
+            names = cls.FAULT_STICKS
         elif line_len >= 9:
-            names = self.CHARISMA_SPEC
+            names = cls.CHARISMA_SPEC
         else:
             raise ValueError('Fault labels must be in FAULT_STICKS, CHARISMA or REDUCED_CHARISMA format.')
 
         return pd.read_csv(path, sep=r'\s+', names=names)
 
-    def read_sticks(self, df, fix=False):
+    def csv_to_sticks(self, df, fix=False):
         """ Transform initial fault dataframe to array of sticks. """
         if 'number' in df.columns: # fault file has stick index
             col = 'number'
@@ -181,23 +190,48 @@ class Fault(Horizon):
             if len(sticks) == 1:
                 warnings.warn(f'{self.name}: Fault has an only one stick')
                 sticks = pd.Series()
+            elif len(sticks) == 0:
+                warnings.warn(f'{self.name}: Empty file')
+                sticks = pd.Series()
+            #Order sticks with respect of fault direction. Is necessary to perform following triangulation.
+            if len(sticks) > 0:
+                pca = PCA(1)
+                coords = pca.fit_transform(np.array([stick[0][:2] for stick in sticks.values]))
+                indices = np.array([i for _, i in sorted(zip(coords, range(len(sticks))))])
+                sticks = sticks.iloc[indices]
+        return sticks.values
 
-        #Order sticks with respect of fault direction. Is necessary to perform following triangulation.
-        if len(sticks) > 0:
-            pca = PCA(1)
-            coords = pca.fit_transform(np.array([stick[0][:2] for stick in sticks.values]))
-            indices = np.array([i for _, i in sorted(zip(coords, range(len(sticks))))])
-            return sticks.iloc[indices]
-        return sticks
+    def load_npz(self, path):
+        """ Load fault points, nodes and sticks from npz file. """
+        npzfile = np.load(path, allow_pickle=True)
+        self.from_points(npzfile['points'], verify=False)
+        self.nodes = npzfile['nodes']
+        self.simplices = npzfile['simplices']
+        self.sticks = npzfile['sticks']
 
-    def interpolate_3d(self, sticks, width=1, **kwargs):
-        """ Interpolate fault sticks as a surface. """
-        triangles = make_triangulation(sticks)
-        points = []
-        for triangle in triangles:
-            res = triangle_rasterization(triangle, width)
-            points += [res]
-        return np.concatenate(points, axis=0)
+    def dump_points(self, path):
+        """ Dump points. """
+        path = self.field.make_path(path, name=self.short_name, makedirs=False)
+
+        if os.path.exists(path):
+            raise ValueError(f'{path} already exists.')
+
+        folder_name = os.path.dirname(path)
+        if not os.path.exists(folder_name):
+            os.makedirs(folder_name)
+
+        np.savez(path, points=self.points, nodes=self.nodes, simplices=self.simplices, sticks=self.sticks, allow_pickle=True) # TODO: what about allow_pickle?
+
+    def points_to_sticks(self, slices=None, sticks_step=10, stick_nodes_step=10):
+        points = self.points.copy()
+        if slices is not None:
+            for i in range(3):
+                points = points[points[:, i] <= slices[i].stop]
+                points = points[points[:, i] >= slices[i].start]
+        if len(points) <= 3:
+            return [], [], [], []
+        self.sticks = get_sticks(points, sticks_step, stick_nodes_step)
+        self.simplices, self.nodes = sticks_to_simplices(self.sticks, return_indices=True)
 
     def add_to_mask(self, mask, locations=None, sparse=False, **kwargs):
         """ Add fault to background. """
@@ -240,15 +274,15 @@ class Fault(Horizon):
         """
         for filename in glob.glob(path):
             try:
-                df = cls.read_file(filename)
+                df = cls.create_df(filename)
             except ValueError:
                 print(filename, ': wrong format')
             else:
                 if 'name' in df.columns and len(df.name.unique()) > 1:
-                    print(filename, ': fault file must be splitted.')
-                elif len(cls.read_sticks(df)) == 1:
+                    print(filename, ': file must be splitted.')
+                elif len(cls.csv_to_sticks(cls, df)) == 1:
                     print(filename, ': fault has an only one stick')
-                elif any(cls.read_sticks(df).apply(len) == 1):
+                elif any([len(item) == 1 for item in cls.csv_to_sticks(cls, df)]):
                     print(filename, ': fault has one point stick')
                 elif verbose:
                     print(filename, ': OK')
@@ -261,51 +295,12 @@ class Fault(Horizon):
         df = pd.read_csv(path, sep=r'\s+', names=cls.FAULT_STICKS)
         df.groupby('name').apply(cls.fault_to_csv, dst=dst)
 
-    def merge(self, other, **kwargs):
-        """ Merge two Fault instances"""
-        points = concat_sorted(self.points, other.points)
-        if self.nodes is not None:
-            nodes = concat_sorted(self.nodes, other.nodes)
-        else:
-            nodes = None
-        return Fault(points, nodes=nodes, field=self.field, **kwargs)
-
     @classmethod
     def fault_to_csv(cls, df, dst):
         """ Save the fault to csv. """
         df.to_csv(os.path.join(dst, df.name), sep=' ', header=False, index=False)
 
-    def dump_points(self, path):
-        """ Dump points. """
-        path = self.field.make_path(path, name=self.short_name, makedirs=False)
-
-        if os.path.exists(path):
-            raise ValueError(f'{path} already exists.')
-
-        points = self.points
-        nodes = self.nodes if self.nodes is not None else np.zeros((0, 3), dtype=np.int32)
-        sticks = self.sticks if self.sticks is not None else []
-        stick_labels = sum([[i] * len(item) for i, item in enumerate(sticks)], [])
-
-        folder_name = os.path.dirname(path)
-        if not os.path.exists(folder_name):
-            os.makedirs(folder_name)
-
-        np.savez(path, points=points, nodes=nodes, stick_labels=stick_labels) # TODO: what about allow_pickle?
-
-    def split_faults(self, **kwargs):
-        """ Split file with faults points into separate connected faults.
-
-        Parameters
-        ----------
-        **kwargs
-            Arguments for `split_faults` function.
-        """
-        array = np.zeros(self.field.shape)
-        array[self.points[:, 0], self.points[:, 1], self.points[:, 2]] = 1
-        return self.from_mask(array, cube_shape=self.field.shape, field=self.field, **kwargs)
-
-    def show_3d(self, sticks_step=100, stick_nodes_step=10, z_ratio=1., zoom_slice=None, show_axes=True,
+    def show_3d(self, sticks_step=10, stick_nodes_step=10, z_ratio=1., zoom_slice=None, show_axes=True,
                 width=1200, height=1200, margin=20, savepath=None, **kwargs):
         """ Interactive 3D plot. Roughly, does the following:
             - select `n` points to represent the horizon surface
@@ -346,134 +341,9 @@ class Fault(Horizon):
         show_3d(x, y, z, simplices, title, zoom_slice, None, show_axes, aspect_ratio,
                 axis_labels, width, height, margin, savepath, **kwargs)
 
-    def make_triangulation(self, sticks_step, stick_nodes_step, slices, **kwargs):
-        """ Create triangultaion of fault.
+    def make_triangulation(self, *args, **kwargs):
+        return self.nodes[:, 0], self.nodes[:, 1], self.nodes[:, 2], self.simplices
 
-        Parameters
-        ----------
-        sticks_step : int
-            Number of slides between sticks.
-        stick_nodes_step : int
-            Distance between stick nodes
-        slices : tuple
-            Region to process.
-
-        Returns
-        -------
-        x, y, z, simplices
-            `x`, `y` and `z` are numpy.ndarrays of triangle vertices, `simplices` is (N, 3) array where each row
-            represent triangle. Elements of row are indices of points that are vertices of triangle.
-        """
-        points = self.points.copy()
-        for i in range(3):
-            points = points[points[:, i] <= slices[i].stop]
-            points = points[points[:, i] >= slices[i].start]
-        if len(points) <= 3:
-            return [], [], [], []
-        sticks = get_sticks(points, sticks_step, stick_nodes_step)
-        simplices = make_triangulation(sticks, True)
-        coords = np.concatenate(sticks) if len(sticks) > 0 else np.zeros((0, 3))
-        return coords[:, 0], coords[:, 1], coords[:, 2], simplices
-
-    @classmethod
-    def from_mask(cls, array, field=None, chunk_size=None, threshold=None, overlap=1, pbar=False,
-                  cube_shape=None, fmt='mask'):
-        """ Label faults in an array.
-
-        Parameters
-        ----------
-        array : numpy.ndarray or SeismicGeometry
-            binary mask of faults or array of coordinates.
-        field : Field or None
-            Where the fault is.
-        chunk_size : int
-            size of chunks to apply `measurements.label`.
-        threshold : float or None
-            threshold to drop small faults.
-        overlap : int
-            size of overlap to join faults from different chunks.
-        pbar : bool
-            progress bar
-        cube_shape : tuple
-            shape of cube. If fmt='mask', can be infered from array.
-        fmt : str
-            if 'mask', array is a binary mask of faults. If 'points', array consists of coordinates of fault points.
-
-        Returns
-        -------
-        numpy.ndarray
-            array of shape (n_faults, ) where each item is array of fault points of shape (N_i, 3).
-        """
-        # TODO: make chunks along xlines
-        if isinstance(array, SeismicGeometry):
-            array = array.file['cube_i']
-        chunk_size = chunk_size or len(array)
-        if chunk_size == len(array):
-            overlap = 0
-
-        if cube_shape is None and fmt == 'points':
-            raise ValueError("If fmt='points', cube_shape must be specified")
-
-        cube_shape = cube_shape or array.shape
-
-        if fmt == 'mask':
-            chunks = [(start, array[start:start+chunk_size]) for start in range(0, cube_shape[0], chunk_size-overlap)]
-            total = len(chunks)
-        else:
-            def _chunks():
-                for start in range(0, cube_shape[0], chunk_size-overlap):
-                    chunk = np.zeros((chunk_size, *cube_shape[1:]))
-                    points = array[array[:, 0] < start+chunk_size]
-                    points = points[points[:, 0] >= start]
-                    chunk[points[:, 0]-start, points[:, 1], points[:, 2]] = 1
-                    yield (start, chunk)
-            chunks = _chunks()
-            total = len(range(0, cube_shape[0], chunk_size-overlap))
-
-        prev_overlapped_labels = None
-        labels = np.zeros((0, 4), dtype='int32')
-        n_objects = 0
-
-        for start, item in Notifier(pbar, total=total)(chunks):
-            chunk_labels, new_objects = measurements.label(item, structure=np.ones((3, 3, 3))) # labels for new chunk
-            new_labels = np.where(chunk_labels)
-            new_labels = np.stack([*new_labels, chunk_labels[new_labels] + n_objects], axis = -1)
-
-            overlapped_labels = new_labels[new_labels[:, 0] < overlap, 3]
-            if prev_overlapped_labels is not None:
-                # while there are the same objects with different labels repeat procedure
-                while (overlapped_labels != prev_overlapped_labels).any():
-                    # find overlapping objects and change labels in new chunk
-                    transform = {k: v for k, v in zip(overlapped_labels, prev_overlapped_labels) if k != v}
-
-                    for k, v in transform.items():
-                        new_labels[new_labels[:, 3] == k, 3] = v
-                    overlapped_labels = new_labels[new_labels[:, 0] < overlap, 3]
-                    transform = {k: v for k, v in zip(prev_overlapped_labels, overlapped_labels) if k != v}
-
-                    # find overlapping objects and change labels in processed part of cube
-                    for k, v in transform.items():
-                        labels[labels[:, 3] == k, 3] = v
-                    prev_overlapped_labels = labels[labels[:, 0] >= start - overlap + 1, 3]
-
-            if start != 0:
-                new_labels = new_labels[new_labels[:, 0] >= overlap]
-
-            new_labels[:, 0] += start
-            labels = np.concatenate([labels, new_labels])
-            prev_overlapped_labels = labels[labels[:, 0] >= start + item.shape[0] - overlap, 3]
-            n_objects += new_objects
-
-        labels = labels[np.argsort(labels[:, 3])]
-        labels = np.array(split_array(labels[:, :-1], labels[:, 3]), dtype=object)
-        sizes = faults_sizes(labels)
-        labels = sorted(zip(sizes, labels), key=lambda x: x[0], reverse=True)
-        if threshold:
-            labels = [item for item in labels if item[0] >= threshold]
-        if field is not None:
-            labels = [Fault(item[1].astype('int32'), name=f'fault_{i}', field=field)
-                      for i, item in Notifier(pbar)(enumerate(labels))]
-        return labels
 
     def __repr__(self):
         return f"""<Fault `{self.name}` for `{self.field.displayed_name}` at {hex(id(self))}>"""
