@@ -8,6 +8,7 @@ from cv2 import dilate
 from scipy.signal import ricker
 from scipy.ndimage import convolve
 from scipy.ndimage.morphology import binary_fill_holes, binary_erosion, binary_dilation
+from skimage.measure import label
 from sklearn.decomposition import PCA
 
 from ..functional import smooth_out, special_convolve, hilbert

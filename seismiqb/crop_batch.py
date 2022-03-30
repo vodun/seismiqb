@@ -1235,6 +1235,7 @@ class SeismicCropBatch(Batch):
 
     @apply_parallel
     def invert(self, crop):
+        """ Change sign. """
         return -crop
 
     @action

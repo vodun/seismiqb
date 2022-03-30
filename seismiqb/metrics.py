@@ -1186,12 +1186,12 @@ class FaciesMetrics():
             kwargs = {}
 
             if true_label is not None:
-                true = true_label.load_attribute('masks', fill_value=0)
+                true = true_label.load_attribute('mask', fill_value=0)
                 true = true[horizon.presence_matrix]
                 kwargs['true'] = true
 
             if pred_label is not None:
-                pred = pred_label.load_attribute('masks', fill_value=0)
+                pred = pred_label.load_attribute('mask', fill_value=0)
                 pred = pred[horizon.presence_matrix]
                 kwargs['pred'] = pred
 

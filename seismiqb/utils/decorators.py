@@ -43,7 +43,7 @@ def transformable(method):
         if on_full and hasattr(instance, 'matrix_put_on_full'):
             result = instance.matrix_put_on_full(result)
         if channels is not None:
-            if channels == 'mid':
+            if channels == 'middle':
                 channels = result.shape[2] // 2
             channels = to_list(channels)
             result = result[:, :, channels]

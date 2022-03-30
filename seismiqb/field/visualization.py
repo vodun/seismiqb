@@ -306,7 +306,7 @@ class VisualizationMixin:
         default_params = {'dtype': np.float32}
 
         if params['attribute_name'] in ['instantaneous_amplitudes', 'instantaneous_phases']:
-            default_params['channels'] = 'mid'
+            default_params['channels'] = 'middle'
 
         if params['attribute_name'] in ['fourier_decomposition', 'wavelet_decomposition']:
             default_params['n_components'] = 1
