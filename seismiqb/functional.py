@@ -234,20 +234,10 @@ def _convolve(src, kernel, preserve, margin):
 
     dst = src.copy()
 
-    # Get strided src
-    itemsize = src.itemsize
-    overlap = kernel.shape[0] - 1
-
-    out_array_shape = (src.shape[0] - overlap, src.shape[1] - overlap, *kernel.shape)
-
-    out_array_strides = ((kernel.shape[0]-overlap)*src.shape[1]*itemsize,
-                         (kernel.shape[1]-overlap)*itemsize,
-                         src.shape[1]*itemsize, itemsize)
-
-    strided_src = as_strided(src, shape=out_array_shape, strides=out_array_strides)
+    strided_src = sliding_window_view(src=src, window_shape=kernel.shape)
 
     # Convolution: iter over strides and apply kernel
-    for iline in prange(out_array_shape[0]):
+    for iline in prange(strided_src.shape[0]):
         for xline, element in enumerate(strided_src[iline]):
             central = element[k, k]
 
@@ -274,20 +264,10 @@ def _medfilt(src, kernel, preserve, margin):
     k = kernel.shape[0] // 2
     dst = src.copy()
 
-    # Get strided src
-    itemsize = src.itemsize
-    overlap = kernel.shape[0] - 1
-
-    out_array_shape = (src.shape[0] - overlap, src.shape[1] - overlap, *kernel.shape)
-
-    out_array_strides = ((kernel.shape[0]-overlap)*src.shape[1]*itemsize, 
-                         (kernel.shape[1]-overlap)*itemsize, 
-                         src.shape[1]*itemsize, itemsize)
-
-    strided_src = as_strided(src, shape=out_array_shape, strides=out_array_strides)
+    strided_src = sliding_window_view(src=src, window_shape=kernel.shape)
 
     # Apply median filter
-    for iline in prange(out_array_shape[0]):
+    for iline in prange(strided_src.shape[0]):
         for xline, element in enumerate(strided_src[iline]):
             central = element[k, k]
             raveled_element = element.ravel()
@@ -312,6 +292,22 @@ def _medfilt(src, kernel, preserve, margin):
                 dst[iline+k, xline+k] = np.median(raveled_element[mask_distant])
     return dst
 
+@njit
+def sliding_window_view(src, window_shape):
+    """ Make a sliding window view for an `src` 2d-array.
+
+    It is an analog of `numpy.lib.stride_tricks.sliding_window_view` for compatibility with numpy < 1.20.0.
+    """
+    itemsize = src.itemsize
+    overlap = window_shape[0] - 1
+
+    out_array_shape = (src.shape[0] - overlap, src.shape[1] - overlap, *window_shape)
+
+    out_array_strides = ((window_shape[0]-overlap)*src.shape[1]*itemsize,
+                         (window_shape[1]-overlap)*itemsize,
+                         src.shape[1]*itemsize, itemsize)
+
+    return as_strided(src, shape=out_array_shape, strides=out_array_strides)
 
 def smooth_out(matrix, mode='convolve', kernel_size=3, sigma=2.0, kernel=None, iters=1,
                fill_value=None, preserve=True, margin=np.inf, **_):
