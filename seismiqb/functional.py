@@ -3,6 +3,7 @@ from math import isnan, ceil
 from warnings import warn
 
 import numpy as np
+from numpy.lib.stride_tricks import as_strided
 try:
     import cupy as cp
     CUPY_AVAILABLE = True
@@ -231,27 +232,37 @@ def _convolve(src, kernel, preserve, margin):
     k = kernel.shape[0] // 2
     raveled_kernel = kernel.ravel() / np.sum(kernel)
 
-    i_range, x_range = src.shape
     dst = src.copy()
 
-    for iline in prange(k, i_range - k):
-        for xline in range(k, x_range - k):
-            central = src[iline, xline]
+    # Get strided src
+    itemsize = src.itemsize
+    overlap = kernel.shape[0] - 1
+
+    out_array_shape = (src.shape[0] - overlap, src.shape[1] - overlap, *kernel.shape)
+
+    out_array_strides = ((kernel.shape[0]-overlap)*src.shape[1]*itemsize,
+                         (kernel.shape[1]-overlap)*itemsize,
+                         src.shape[1]*itemsize, itemsize)
+
+    strided_src = as_strided(src, shape=out_array_shape, strides=out_array_strides)
+
+    # Convolution: iter over strides and apply kernel
+    for iline in prange(out_array_shape[0]):
+        for xline, element in enumerate(strided_src[iline]):
+            central = element[k, k]
 
             if (preserve is True) and isnan(central):
                 continue
 
-            element = src[iline-k:iline+k+1, xline-k:xline+k+1].ravel()
-
             s, sum_weights = np.float32(0), np.float32(0)
-            for item, weight in zip(element, raveled_kernel):
+            for item, weight in zip(element.ravel(), raveled_kernel):
                 if not isnan(item):
                     if abs(item - central) <= margin or isnan(central):
                         s += item * weight
                         sum_weights += weight
 
             if sum_weights != 0.0:
-                dst[iline, xline] = s / sum_weights
+                dst[iline+k, xline+k] = s / sum_weights
     return dst
 
 @njit(parallel=True)
@@ -261,24 +272,33 @@ def _medfilt(src, kernel, preserve, margin):
     # margin = -1: median across all elements in kernel
     #pylint: disable=too-many-nested-blocks, consider-using-enumerate, not-an-iterable
     k = kernel.shape[0] // 2
-
-    i_range, x_range = src.shape
     dst = src.copy()
 
-    for iline in prange(k, i_range - k):
-        for xline in range(k, x_range - k):
-            central = src[iline, xline]
+    # Get strided src
+    itemsize = src.itemsize
+    overlap = kernel.shape[0] - 1
+
+    out_array_shape = (src.shape[0] - overlap, src.shape[1] - overlap, *kernel.shape)
+
+    out_array_strides = ((kernel.shape[0]-overlap)*src.shape[1]*itemsize, 
+                         (kernel.shape[1]-overlap)*itemsize, 
+                         src.shape[1]*itemsize, itemsize)
+
+    strided_src = as_strided(src, shape=out_array_shape, strides=out_array_strides)
+
+    # Apply median filter
+    for iline in prange(out_array_shape[0]):
+        for xline, element in enumerate(strided_src[iline]):
+            central = element[k, k]
+            raveled_element = element.ravel()
 
             if (preserve is True) and isnan(central):
                 continue
 
-            element = src[iline-k:iline+k+1, xline-k:xline+k+1].ravel()
-
             # 0 for close, 1 for distant, 2 for nan
-            indicator = np.zeros_like(element)
+            indicator = np.zeros_like(raveled_element)
 
-            for i in range(len(element)):
-                item = element[i]
+            for i, item in enumerate(raveled_element):
                 if not isnan(item):
                     if (abs(item - central) > margin) or isnan(central):
                         indicator[i] = np.float32(1)
@@ -289,7 +309,7 @@ def _medfilt(src, kernel, preserve, margin):
             mask_distant = indicator == np.float32(1)
             n_distant = mask_distant.sum()
             if n_distant > n_close:
-                dst[iline, xline] = np.median(element[mask_distant])
+                dst[iline+k, xline+k] = np.median(raveled_element[mask_distant])
     return dst
 
 
