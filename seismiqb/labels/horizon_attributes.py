@@ -165,7 +165,7 @@ class AttributesMixin:
     @property
     def binary_matrix(self):
         """ Boolean matrix with `true` values at places where horizon is present and `false` everywhere else. """
-        return (self.matrix > 0).astype(np.bool)
+        return self.matrix > 0
 
     @property
     def presence_matrix(self):
@@ -542,7 +542,7 @@ class AttributesMixin:
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     @transformable
     def get_metric(self, metric='support_corrs', supports=50, agg='nanmean', **kwargs):
-        """ Cached metrics calcucaltion with disabled plotting option.
+        """ Cached metrics calculation with disabled plotting option.
 
         Parameters
         ----------
@@ -559,7 +559,7 @@ class AttributesMixin:
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     @transformable
     def get_fourier_decomposition(self, window=50, **_):
-        """ Cached fourier transform calculation follower by dimensionaluty reduction via PCA.
+        """ Cached fourier transform calculation follower by dimensionality reduction via PCA.
 
         Parameters
         ----------
@@ -573,7 +573,7 @@ class AttributesMixin:
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     @transformable
     def get_wavelet_decomposition(self, widths=range(1, 14, 3), window=50, **_):
-        """ Cached wavelet transform calculation followed by dimensionaluty reduction via PCA.
+        """ Cached wavelet transform calculation followed by dimensionality reduction via PCA.
 
         Parameters
         ----------
@@ -614,7 +614,7 @@ class AttributesMixin:
         zeros = sign[:, :, :-1] == 0
         cross[zeros] = 2
 
-        # obtain indices of first sign change occurences for every trace
+        # obtain indices of first sign change occurrences for every trace
         # if trace doesn't change sign, corresponding index of sign change is 0
         cross_indices = np.argmax(cross == 2, axis=-1)
 

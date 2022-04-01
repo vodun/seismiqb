@@ -212,11 +212,10 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
         if storage == 'matrix':
             self._matrix = None
             if len(self.points) > 0:
-                self._h_min = self.points[:, 2].min().astype(self.dtype)
-                self._h_max = self.points[:, 2].max().astype(self.dtype)
+                i_min, x_min, h_min = np.min(self.points, axis=0)
+                i_max, x_max, h_max = np.max(self.points, axis=0)
 
-                i_min, x_min, _ = np.min(self.points, axis=0)
-                i_max, x_max, _ = np.max(self.points, axis=0)
+                self._h_min, self._h_max = h_min.astype(self.dtype), h_max.astype(self.dtype)
                 self.i_min, self.i_max, self.x_min, self.x_max = int(i_min), int(i_max), int(x_min), int(x_max)
 
                 self.i_length = (self.i_max - self.i_min) + 1
@@ -325,9 +324,11 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
                            (points[:, 2] < self.field.shape[2]))[0]
             points = points[idx]
 
-        if self.dtype == np.int32:
+        if np.issubdtype(self.dtype, np.integer):
             points = np.rint(points)
-        setattr(self, dst, points.astype(self.dtype))
+        if points.dtype != self.dtype:
+            points = points.astype(self.dtype)
+        setattr(self, dst, points)
 
         # Collect stats on separate axes. Note that depth stats are properties
         if reset:
