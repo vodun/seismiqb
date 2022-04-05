@@ -1,8 +1,8 @@
-"""Utility functions for tests."""
+""" Utility functions for tests."""
 import numpy as np
 
 def generate_synthetic(shape=(500, 500, 300), i_scale=5, i_frequency=0.02, x_scale=5, x_frequency=0.05):
-    """Create synthetic data cube and horizon for tests."""
+    """ Create synthetic data cube and horizon for tests."""
     i_shape, x_shape, depth = shape
     synthetic = np.empty(shape, dtype=np.float32)
     matrix = np.empty(shape[:2], dtype=np.int32)
