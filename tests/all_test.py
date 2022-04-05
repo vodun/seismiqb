@@ -15,8 +15,8 @@ VERBOSE : bool
     Whether to print in the terminal additional information from tests.
 
 To add a new test you just need to add a new tuple (notebook path, test params) in the `notebooks_params` variable.
-Also, this variable manages internal parameter values and outputs variables names for each individual test.
-For more, read the comment above the `notebooks_params` initialization.
+Also, this variable manages notebooks execution order, internal parameter values and outputs variables names for each
+individual test. For more, read the comment above the `notebooks_params` initialization.
 
 After all parameters initializations the main `test_run_notebook` function is called.
 Under the hood, the function parses test kwargs, runs a test notebook with a given configuration,
@@ -55,6 +55,7 @@ common_params = {
 # The params dict contains 'inputs' and 'outputs' keys, where the 'inputs' is a dict with test parameters to pass to
 # the test notebook, and the 'outputs' contains names of variables to return from the test notebook.
 # Note that 'inputs' and 'outputs' are optional parameters.
+# Also, note that notebooks will be executed in the order that they are defined in this variable.
 geometry_formats = ['sgy', 'hdf5', 'qhdf5', 'blosc', 'qblosc']
 notebooks_params = (
     # Tests configurations:
@@ -119,7 +120,7 @@ def test_run_notebook(notebook_kwargs, capsys):
         # Print test outputs
         for k, v in exec_res.get('outputs', {}).items():
             message = v if isinstance(v, str) else json.dumps(v, indent=4)
-            print(f"{k}:\n {message}\n")
+            print(f"{k}:\n{message}\n")
 
         # Provide test conclusion
         notebook_info = f"`{filename}`{' with config=' + config if config!='{}' else ''}"
