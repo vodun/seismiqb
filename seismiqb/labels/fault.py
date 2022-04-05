@@ -2,7 +2,6 @@
 
 import os
 import glob
-from urllib.parse import non_hierarchical
 import warnings
 
 import numpy as np
@@ -12,21 +11,12 @@ from numba import prange, njit
 
 from sklearn.decomposition import PCA
 from sklearn.neighbors import NearestNeighbors
-from scipy.ndimage import measurements
-
-from batchflow.notifier import Notifier
 
 from .horizon import Horizon
 from .fault_triangulation import sticks_to_simplices, simplices_to_points
-from .fault_postprocessing import faults_sizes
 from ..plotters import show_3d
-from ..geometry import SeismicGeometry
-from ..utils import concat_sorted, split_array
+from ..utils import split_array
 
-
-
-class FaultLoadingException(Exception): pass
-class EmptySticksException(FaultLoadingException): pass
 
 class Fault(Horizon):
     """ Contains points of fault.
@@ -40,10 +30,10 @@ class Fault(Horizon):
     FAULT_STICKS = ['INLINE', 'iline', 'xline', 'cdp_x', 'cdp_y', 'height', 'name', 'number']
     COLUMNS = ['iline', 'xline', 'height', 'name', 'number']
 
-    def __init__(self, storage, direction=None, *args, **kwargs):
-        self._sticks = None
-        self._nodes = None
-        self._simplices = None
+    def __init__(self, storage, *args, direction=None, **kwargs):
+        self.sticks = None
+        self.nodes = None
+        self.simplices = None
         self.direction = None
 
         if isinstance(storage, str):
@@ -72,30 +62,6 @@ class Fault(Horizon):
             self.direction = direction[self.field.short_name]
         else:
             self.direction = direction[self.field.short_name][self.name]
-
-    @property
-    def sticks(self):
-        return self._sticks
-
-    @sticks.setter
-    def sticks(self, value):
-        self._sticks = value
-
-    @property
-    def nodes(self):
-        return self._nodes
-
-    @nodes.setter
-    def nodes(self, value):
-        self._nodes = value
-
-    @property
-    def simplices(self):
-        return self._simplices
-
-    @simplices.setter
-    def simplices(self, value):
-        self._simplices = value
 
     def from_objects(self, storage, **kwargs):
         """ Load fault from dict with 'points', 'nodes', 'simplices' and 'sticks'. """
@@ -148,16 +114,17 @@ class Fault(Horizon):
             self.simplices, self.nodes = sticks_to_simplices(self.sticks, return_indices=True)
             points = simplices_to_points(self.simplices, self.nodes, width=width)
         else:
-            self.simplices, self.nodes, points = np.array([]), np.zeros((0, 3), dtype='int32'), np.zeros((0, 3), dtype='int32')
+            self.simplices, self.nodes = np.array([]), np.zeros((0, 3), dtype='int32')
+            points = np.zeros((0, 3), dtype='int32')
         self.from_points(points, verify=False)
 
     @classmethod
     def create_df(cls, path):
+        """ Create pandas.DataFrame from CHARISMA file. """
         with open(path, encoding='utf-8') as file:
             line_len = len([item for item in file.readline().split(' ') if len(item) > 0])
 
         if line_len == 0:
-            # self.simplices, self.nodes, self.points = np.array([]), np.zeros((0, 3), dtype='int32'), np.zeros((0, 3), dtype='int32')
             return pd.DataFrame({})
 
         if line_len == 3:
@@ -233,7 +200,8 @@ class Fault(Horizon):
         if not os.path.exists(folder_name):
             os.makedirs(folder_name)
 
-        np.savez(path, points=self.points, nodes=self.nodes, simplices=self.simplices, sticks=self.sticks, allow_pickle=True) # TODO: what about allow_pickle?
+        np.savez(path, points=self.points, nodes=self.nodes, simplices=self.simplices,
+                 sticks=self.sticks, allow_pickle=True) # TODO: what about allow_pickle?
 
     def points_to_sticks(self, slices=None, sticks_step=10, stick_nodes_step=10):
         """ Create sticks from fault points. """
@@ -243,12 +211,16 @@ class Fault(Horizon):
                 points = points[points[:, i] <= slices[i].stop]
                 points = points[points[:, i] >= slices[i].start]
         if len(points) <= 3:
-            return [], [], [], []
-        self.sticks = get_sticks(points, sticks_step, stick_nodes_step)
-        self.simplices, self.nodes = sticks_to_simplices(self.sticks, return_indices=True)
+            self.sticks = []
+            self.simplices = np.zeros((0, 3))
+            self.nodes = np.zeros((0, 3))
+        else:
+            self.sticks = get_sticks(points, sticks_step, stick_nodes_step)
+            self.simplices, self.nodes = sticks_to_simplices(self.sticks, return_indices=True)
 
     def add_to_mask(self, mask, locations=None, width=1, **kwargs):
         """ Add fault to background. """
+        _ = kwargs
         mask_bbox = np.array([[locations[0].start, locations[0].stop],
                             [locations[1].start, locations[1].stop],
                             [locations[2].start, locations[2].stop]],
@@ -282,7 +254,7 @@ class Fault(Horizon):
                     print(filename, ': file must be splitted.')
                 elif len(cls.csv_to_sticks(cls, df)) == 1:
                     print(filename, ': fault has an only one stick')
-                elif any([len(item) == 1 for item in cls.csv_to_sticks(cls, df)]):
+                elif any(len(item) == 1 for item in cls.csv_to_sticks(cls, df)):
                     print(filename, ': fault has one point stick')
                 elif verbose:
                     print(filename, ': OK')

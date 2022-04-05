@@ -59,12 +59,31 @@ def sticks_to_simplices(sticks, return_indices=False):
             s1, s2 = s2, s1
         n = len(s1)
         nodes_to_connect = [item for sublist in zip(s1, s2[:n]) for item in sublist]
-        triangles = [nodes_to_connect[i:i+3] for i in range(len(nodes_to_connect[:-2]))] if len(nodes_to_connect) > 2 else []
+        if len(nodes_to_connect) > 2:
+            triangles = [nodes_to_connect[i:i+3] for i in range(len(nodes_to_connect[:-2]))]
+        else:
+            triangles = []
         triangles += [[s1[-1], s2[i], s2[i+1]] for i in range(n-1, len(s2)-1)]
         simplices += triangles
     return np.array(simplices), nodes
 
 def simplices_to_points(simplices, nodes, width=1):
+    """ Interpolate triangulation.
+
+    Parameters
+    ----------
+    simplices : numpy.ndarray
+        Array of shape (n_simplices, 3) with indices of nodes to connect into triangle.
+    nodes : numpy.ndarray
+        Array of shape (n_nodes, 3) with coordinates.
+    width : int, optional
+        Thickness of the simplex to draw, by default 1.
+
+    Returns
+    -------
+    numpy.ndarray
+        Array of shape (n_points, 3)
+    """
     points = []
     for triangle in simplices:
         points.append(triangle_rasterization(nodes[triangle].astype('float32'), width))
