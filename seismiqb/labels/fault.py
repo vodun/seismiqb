@@ -2,6 +2,7 @@
 
 import os
 import glob
+from urllib.parse import non_hierarchical
 import warnings
 
 import numpy as np
@@ -30,19 +31,16 @@ class EmptySticksException(FaultLoadingException): pass
 class Fault(Horizon):
     """ Contains points of fault.
 
-    Initialized from `storage` and `geometry`.
-
-    Storage can be one of:
-        - csv-like file in CHARISMA, REDUCED_CHARISMA or FAULT_STICKS format.
-        - ndarray of (N, 3) shape.
-        - hdf5 file as a binary mask for cube.
+    Initialized from `storage` and `geometry`, where storage can be one of:
+        - csv-like file in CHARISMA or REDUCED_CHARISMA format.
+        - npy file with ndarray of (N, 3) shape or array itself.
+        - npz file with 'points', 'nodes', 'simplices' and 'sticks' or dict with the same keys.
     """
     #pylint: disable=attribute-defined-outside-init
     FAULT_STICKS = ['INLINE', 'iline', 'xline', 'cdp_x', 'cdp_y', 'height', 'name', 'number']
     COLUMNS = ['iline', 'xline', 'height', 'name', 'number']
 
     def __init__(self, storage, direction=None, *args, **kwargs):
-        # self.points = None
         self._sticks = None
         self._nodes = None
         self._simplices = None
@@ -59,6 +57,7 @@ class Fault(Horizon):
         self.set_direction(direction)
 
     def set_direction(self, direction):
+        """ Find azimuth of the fault. """
         if direction is None:
             if len(self.points) > 0:
                 mean_depth = int(np.median(self.points[:, 2]))
@@ -66,6 +65,7 @@ class Fault(Horizon):
                 self.direction = 0 if depth_slice[:, 0].ptp() > depth_slice[:, 1].ptp() else 1
             else:
                 self.direction = 0
+            # TODO: azimuth from charisma
         elif isinstance(direction, int):
             self.direction = direction
         elif isinstance(direction[self.field.short_name], int):
@@ -98,13 +98,14 @@ class Fault(Horizon):
         self._simplices = value
 
     def from_objects(self, storage, **kwargs):
+        """ Load fault from dict with 'points', 'nodes', 'simplices' and 'sticks'. """
         self.from_points(storage['points'], verify=False, **kwargs)
         for key in ['sticks', 'nodes', 'simplices']:
             setattr(self, key, storage.get(key))
 
     def from_file(self, path, transform=True, verify=True, direction=None, **kwargs):
         """ Init from path to either CHARISMA, REDUCED_CHARISMA or FAULT_STICKS csv-like file
-        or from numpy formats.
+        or from npy/npz.
         """
         path = self.field.make_path(path, makedirs=False)
         self.path = path
@@ -210,14 +211,19 @@ class Fault(Horizon):
 
     def load_npz(self, path):
         """ Load fault points, nodes and sticks from npz file. """
-        npzfile = np.load(path, allow_pickle=True)
+        npzfile = np.load(path, allow_pickle=True) #TODO: remove allow_pickle
         self.from_points(npzfile['points'], verify=False)
-        self.nodes = npzfile['nodes']
-        self.simplices = npzfile['simplices']
-        self.sticks = npzfile['sticks']
+        self.nodes = npzfile.get('nodes')
+        self.simplices = npzfile.get('simplices')
+        self.sticks = npzfile.get('sticks')
+
+    def load_npy(self, path):
+        """ Load fault points from npy file. """
+        points = np.load(path)
+        self.from_points(points, verify=False)
 
     def dump_points(self, path):
-        """ Dump points. """
+        """ Dump fault to npz. """
         path = self.field.make_path(path, name=self.short_name, makedirs=False)
 
         if os.path.exists(path):
@@ -230,6 +236,7 @@ class Fault(Horizon):
         np.savez(path, points=self.points, nodes=self.nodes, simplices=self.simplices, sticks=self.sticks, allow_pickle=True) # TODO: what about allow_pickle?
 
     def points_to_sticks(self, slices=None, sticks_step=10, stick_nodes_step=10):
+        """ Create sticks from fault points. """
         points = self.points.copy()
         if slices is not None:
             for i in range(3):
@@ -240,7 +247,7 @@ class Fault(Horizon):
         self.sticks = get_sticks(points, sticks_step, stick_nodes_step)
         self.simplices, self.nodes = sticks_to_simplices(self.sticks, return_indices=True)
 
-    def add_to_mask(self, mask, locations=None, width=8, **kwargs):
+    def add_to_mask(self, mask, locations=None, width=1, **kwargs):
         """ Add fault to background. """
         mask_bbox = np.array([[locations[0].start, locations[0].stop],
                             [locations[1].start, locations[1].stop],
@@ -251,20 +258,7 @@ class Fault(Horizon):
         if (self.bbox[:, 1] < mask_bbox[:, 0]).any() or (self.bbox[:, 0] >= mask_bbox[:, 1]).any():
             return mask
 
-        # import pdb; pdb.set_trace()
-        # slides_indices = np.unique(self.nodes[:, self.direction])
-        # indices = np.isin(points[:, self.direction], slides_indices)
-        # points = points[indices]
-        # mask_pos = np.isin(
-        #     np.arange(mask.shape[self.direction]),
-        #     slides_indices - locations[self.direction].start
-        # )
-        # if mask_pos.any():
-        #     if self.direction == 0:
-        #         mask[mask_pos, :] = np.clip(mask[mask_pos, :], 0, 1)
-        #     else:
-        #         mask[:, mask_pos] = np.clip(mask[:, mask_pos], 0, 1)
-        insert_fault_into_mask(mask, points, mask_bbox, width=width)
+        insert_fault_into_mask(mask, points, mask_bbox, width=width, axis=1-self.direction)
         return mask
 
     @classmethod
@@ -342,12 +336,15 @@ class Fault(Horizon):
             zoom_slice = [slice(0, i) for i in self.field.shape]
         zoom_slice[-1] = slice(self.h_min, self.h_max)
         margin = [margin] * 3 if isinstance(margin, int) else margin
-        x, y, z, simplices = self.make_triangulation(sticks_step, stick_nodes_step, zoom_slice)
+        x, y, z, simplices = self.make_triangulation(zoom_slice, sticks_step, stick_nodes_step)
 
         show_3d(x, y, z, simplices, title, zoom_slice, None, show_axes, aspect_ratio,
                 axis_labels, width, height, margin, savepath, **kwargs)
 
-    def make_triangulation(self, *args, **kwargs):
+    def make_triangulation(self, slices, sticks_step, stick_nodes_step, *args, **kwargs):
+        """ Return triangulation of the fault. It will created if needed. """
+        if self.simplices is None:
+            self.points_to_sticks(slices, sticks_step, stick_nodes_step)
         return self.nodes[:, 0], self.nodes[:, 1], self.nodes[:, 2], self.simplices
 
 
@@ -374,7 +371,6 @@ def get_sticks(points, sticks_step, stick_nodes_step):
     pca = PCA(1)
     pca.fit(points)
     axis = 0 if np.abs(pca.components_[0][0]) > np.abs(pca.components_[0][1]) else 1
-    axis = 0
 
     points = points[np.argsort(points[:, axis])]
     projections = np.split(points, np.unique(points[:, axis], return_index=True)[1][1:])
@@ -418,13 +414,19 @@ def nearest_neighbors(values, all_values, n_neighbors=10):
     return nn.kneighbors(values)[1].flatten()
 
 @njit(parallel=True)
-def insert_fault_into_mask(mask, points, mask_bbox, width):
+def insert_fault_into_mask(mask, points, mask_bbox, width, axis):
     """ Add new points into binary mask. """
     #pylint: disable=not-an-iterable
+
     for i in prange(len(points)):
-        points_with_width = [[points[i][0], points[i][1]+step, points[i][2]] for step in range(-width // 2, width // 2 + width % 2)]
-        for point in points_with_width:
-            if (point[0] >= mask_bbox[0][0]) and (point[0] < mask_bbox[0][1]):
-                if (point[1] >= mask_bbox[1][0]) and (point[1] < mask_bbox[1][1]):
-                    if (point[2] >= mask_bbox[2][0]) and (point[2] < mask_bbox[2][1]):
-                        mask[point[0] - mask_bbox[0][0], point[1] - mask_bbox[1][0], point[2] - mask_bbox[2][0]] = 1
+        point = points[i]
+        if (point[0] >= mask_bbox[0][0]) and (point[0] < mask_bbox[0][1]):
+            if (point[1] >= mask_bbox[1][0]) and (point[1] < mask_bbox[1][1]):
+                if (point[2] >= mask_bbox[2][0]) and (point[2] < mask_bbox[2][1]):
+                    slices = [slice(point[j] - mask_bbox[j][0], point[j] - mask_bbox[j][0]+1) for j in range(3)]
+                    if width > 1:
+                        slices[axis] = slice(
+                            max(0, point[axis] - mask_bbox[axis][0] - (width // 2)),
+                            min(point[axis] - mask_bbox[axis][0] + width // 2 + width % 2, mask.shape[axis])
+                        )
+                    mask[slices[0], slices[1], slices[2]] = 1
