@@ -7,12 +7,12 @@ TESTS_ROOT_DIR : str
     (executed notebooks, logs, data files like cubes, etc.).
     Note that in case of success this directory will be removed (if `REMOVE_ROOT_DIR` is True).
 REMOVE_ROOT_DIR : bool
-    Whether to remove tests root directory after execution in case of success.
+    Whether to remove tests root directory after execution in case of completion of tests without failures.
 SHOW_FIGURES : bool
     Whether to show additional figures in the executed notebooks.
     Showing some figures can be useful for finding out the reason for the failure of tests.
 VERBOSE : bool
-    Whether to print additional information from tests.
+    Whether to print in the terminal additional information from tests.
 
 To add a new test you just need to add a new tuple (notebook path, test params) in the `notebooks_params` variable.
 Also, this variable manages internal parameter values and outputs variables names for each individual test.
@@ -42,12 +42,12 @@ TESTS_NOTEBOOKS_DIR = os.path.join(BASE_DIR, 'tests/notebooks/') # path to the d
 # Initialize common parameters for all tests notebooks
 common_params = {
     # Workspace constants and parameters
-    'TESTS_ROOT_DIR': os.getenv('SEISMIQB_TESTS_ROOT_DIR') or tempfile.mkdtemp(prefix='tests_root_dir_', dir=BASE_DIR),
-    'REMOVE_ROOT_DIR': os.getenv('SEISMIQB_TESTS_REMOVE_ROOT_DIR') or True,
+    'TESTS_ROOT_DIR': os.getenv('SEISMIQB_TESTS_ROOT_DIR', tempfile.mkdtemp(prefix='tests_root_dir_', dir=BASE_DIR)),
+    'REMOVE_ROOT_DIR': os.getenv('SEISMIQB_TESTS_REMOVE_ROOT_DIR', 'True') == 'True',
 
     # Visualization and output parameters (these variables are used in notebooks)
-    'SHOW_FIGURES': os.getenv('SEISMIQB_TESTS_SHOW_FIGURES') or False,
-    'VERBOSE': os.getenv('SEISMIQB_TESTS_VERBOSE') or True
+    'SHOW_FIGURES': os.getenv('SEISMIQB_TESTS_SHOW_FIGURES', 'False') == 'True',
+    'VERBOSE': os.getenv('SEISMIQB_TESTS_VERBOSE', 'True') == 'True'
 }
 
 # Initialize tests configurations
