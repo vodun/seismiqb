@@ -35,7 +35,6 @@ TESTS_NOTEBOOKS_DIR = os.path.join(BASE_DIR, 'tests/notebooks/') # path to direc
 
 common_params = {
     # Workspace constants and parameters
-    'DATESTAMP': date.today().strftime("%Y-%m-%d"),
     'TESTS_ROOT_DIR': tempfile.mkdtemp(prefix='tests_root_dir_', dir=BASE_DIR),
     'REMOVE_ROOT_DIR': os.getenv('SEISMIQB_TEST_REMOVE_ROOT_DIR') or True,
 
@@ -82,7 +81,7 @@ def test_run_notebook(notebook_kwargs, capsys):
 
     # Run test notebook
     out_path_ipynb = os.path.join(params['TESTS_ROOT_DIR'],
-                                  f"{filename}_out_{filename_suffix}_{params['DATESTAMP']}.ipynb")
+                                  f"{filename}_out_{filename_suffix}.ipynb")
 
     exec_res = run_notebook(path=path_ipynb, inputs=params, outputs=test_outputs,
                             inputs_pos=2, working_dir=os.path.dirname(path_ipynb),
@@ -106,7 +105,7 @@ def test_run_notebook(notebook_kwargs, capsys):
             print(f"{k}:\n {message}\n")
 
         # Print test conclusion
-        notebook_info = f"{params['DATESTAMP']} \'{filename}\'{' with config=' + config if config!='{}' else ''} was"
+        notebook_info = f"\'{filename}\'{' with config=' + config if config!='{}' else ''} was"
         if not exec_res['failed']:
             print(f"{notebook_info} executed successfully.\n")
         else:
