@@ -49,7 +49,12 @@ class Fault(Horizon):
     def set_direction(self, direction):
         """ Find azimuth of the fault. """
         if direction is None:
-            if len(self.points) > 0:
+            if self.sticks is not None:
+                if len(np.unique(self.sticks[0][:, 0])) == 1:
+                    self.direction = 0
+                elif len(np.unique(self.sticks[0][:, 1])) == 1:
+                    self.direction = 1
+            if self.direction is None and len(self.points) > 0:
                 mean_depth = int(np.median(self.points[:, 2]))
                 depth_slice = self.points[self.points[:, 2] == mean_depth]
                 self.direction = 0 if depth_slice[:, 0].ptp() > depth_slice[:, 1].ptp() else 1
@@ -178,15 +183,18 @@ class Fault(Horizon):
 
     def load_npz(self, path):
         """ Load fault points, nodes and sticks from npz file. """
-        npzfile = np.load(path, allow_pickle=True) #TODO: remove allow_pickle
+        npzfile = np.load(path, allow_pickle=False)
         self.from_points(npzfile['points'], verify=False)
         self.nodes = npzfile.get('nodes')
         self.simplices = npzfile.get('simplices')
-        self.sticks = npzfile.get('sticks')
+        sticks = npzfile.get('sticks')
+
+        sticks_labels = npzfile.get('sticks_labels')
+        self.sticks = self.labeled_array_to_sticks(sticks, sticks_labels)
 
     def load_npy(self, path):
         """ Load fault points from npy file. """
-        points = np.load(path)
+        points = np.load(path, allow_pickle=False)
         self.from_points(points, verify=False)
 
     def dump_points(self, path):
@@ -200,8 +208,16 @@ class Fault(Horizon):
         if not os.path.exists(folder_name):
             os.makedirs(folder_name)
 
+        sticks, sticks_labels = self.sticks_to_labeled_array(self.sticks)
         np.savez(path, points=self.points, nodes=self.nodes, simplices=self.simplices,
-                 sticks=self.sticks, allow_pickle=True) # TODO: what about allow_pickle?
+                 sticks=sticks, sticks_labels=sticks_labels)
+
+    def sticks_to_labeled_array(self, sticks):
+        labels = sum([[i] * len(item) for i, item in enumerate(sticks)], [])
+        return np.concatenate(sticks), labels
+
+    def labeled_array_to_sticks(self, sticks, labels):
+        return np.array(split_array(sticks, labels), dtype=object)
 
     def points_to_sticks(self, slices=None, sticks_step=10, stick_nodes_step=10):
         """ Create sticks from fault points. """
@@ -215,7 +231,7 @@ class Fault(Horizon):
             self.simplices = np.zeros((0, 3))
             self.nodes = np.zeros((0, 3))
         else:
-            self.sticks = get_sticks(points, sticks_step, stick_nodes_step)
+            self.sticks = self.get_sticks(points, sticks_step, stick_nodes_step)
             self.simplices, self.nodes = sticks_to_simplices(self.sticks, return_indices=True)
 
     def add_to_mask(self, mask, locations=None, width=1, **kwargs):
@@ -323,45 +339,48 @@ class Fault(Horizon):
     def __repr__(self):
         return f"""<Fault `{self.name}` for `{self.field.displayed_name}` at {hex(id(self))}>"""
 
-def get_sticks(points, sticks_step, stick_nodes_step):
-    """ Get sticks from fault which is represented as a cloud of points.
+    def get_sticks(self, points, sticks_step, stick_nodes_step):
+        """ Get sticks from fault which is represented as a cloud of points.
 
-    Parameters
-    ----------
-    points : np.ndarray
-        Fault points.
-    sticks_step : int
-        Number of slides between sticks.
-    stick_nodes_step : int
-        Distance between stick nodes
+        Parameters
+        ----------
+        points : np.ndarray
+            Fault points.
+        sticks_step : int
+            Number of slides between sticks.
+        stick_nodes_step : int
+            Distance between stick nodes
 
-    Returns
-    -------
-    numpy.ndarray
-        Array of sticks. Each item of array is a stick: sequence of 3D points.
-    """
-    pca = PCA(1)
-    pca.fit(points)
-    axis = 0 if np.abs(pca.components_[0][0]) > np.abs(pca.components_[0][1]) else 1
+        Returns
+        -------
+        numpy.ndarray
+            Array of sticks. Each item of array is a stick: sequence of 3D points.
+        """
+        if self.direction is not None:
+            axis = self.direction
+        else:
+            pca = PCA(1)
+            pca.fit(points)
+            axis = 0 if np.abs(pca.components_[0][0]) > np.abs(pca.components_[0][1]) else 1
 
-    points = points[np.argsort(points[:, axis])]
-    projections = np.split(points, np.unique(points[:, axis], return_index=True)[1][1:])
-    projections = [item for item in projections if item[:, 2].max() - item[:, 2].min() > 5]
-    step = min(sticks_step, len(projections)-1)
-    if step == 0:
-        return []
-    projections = projections[::step]
-    res = []
+        points = points[np.argsort(points[:, axis])]
+        projections = np.split(points, np.unique(points[:, axis], return_index=True)[1][1:])
+        projections = [item for item in projections if item[:, 2].max() - item[:, 2].min() > 5]
+        step = min(sticks_step, len(projections)-1)
+        if step == 0:
+            return []
+        projections = projections[::step]
+        res = []
 
-    for p in projections:
-        points_ = thicken_line(p).astype(int)
-        loc = p[0, axis]
-        nodes = approximate_points(points_[:, [1-axis, 2]], stick_nodes_step)
-        nodes_ = np.zeros((len(nodes), 3))
-        nodes_[:, [1-axis, 2]] = nodes
-        nodes_[:, axis] = loc
-        res += [nodes_]
-    return res
+        for p in projections:
+            points_ = thicken_line(p).astype(int)
+            loc = p[0, axis]
+            nodes = approximate_points(points_[:, [1-axis, 2]], stick_nodes_step)
+            nodes_ = np.zeros((len(nodes), 3))
+            nodes_[:, [1-axis, 2]] = nodes
+            nodes_[:, axis] = loc
+            res += [nodes_]
+        return res
 
 def thicken_line(points):
     """ Make thick line. """
