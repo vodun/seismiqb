@@ -1,4 +1,5 @@
 """ Contains various functions for mathematical/geological transforms. """
+from functools import partial
 from math import isnan, ceil
 from warnings import warn
 
@@ -165,7 +166,7 @@ def make_gaussian_kernel(kernel_size=3, sigma=1.):
 
 
 def special_convolve(matrix, mode='convolve', kernel_size=3, kernel=None, iters=1,
-                     fill_value=None, preserve=True, margin=np.inf, **_):
+                     fill_value=None, preserve=True, margin=np.inf, **kwargs):
     """ Convolve the matrix with a given kernel.
     A special treatment is given to the missing points (marked with either `fill_value` or `np.nan`),
     and to areas with high variance.
@@ -194,10 +195,14 @@ def special_convolve(matrix, mode='convolve', kernel_size=3, kernel=None, iters=
         Can be used for separate smoothening on sides of discontinuity.
     """
     # Choose the filtering function
-    if mode.startswith('c'):
-        function = _convolve
-    else:
+    if mode.startswith('m'):
         function = _medfilt
+    else:
+        function = _convolve
+
+    if mode.startswith('smooth') and kernel is None:
+        sigma = kwargs.pop('sigma', 2.0)
+        kernel = make_gaussian_kernel(kernel_size=kernel_size, sigma=sigma)
 
     # Convert all the fill values to nans
     matrix = matrix.astype(np.float32).copy()
@@ -223,6 +228,8 @@ def special_convolve(matrix, mode='convolve', kernel_size=3, kernel=None, iters=
     if fill_value is not None:
         result[np.isnan(result)] = fill_value
     return result
+
+smooth_out = partial(special_convolve, mode='smooth')
 
 @njit(parallel=True)
 def _convolve(src, kernel, preserve, margin):
@@ -290,15 +297,6 @@ def _medfilt(src, kernel, preserve, margin):
             if n_distant > n_close:
                 dst[iline, xline] = np.median(element[mask_distant])
     return dst
-
-def smooth_out(matrix, mode='convolve', kernel_size=3, sigma=2.0, kernel=None, iters=1,
-               fill_value=None, preserve=True, margin=np.inf, **_):
-    """ `special_convolve` with a Gaussian kernel. """
-    if kernel is None:
-        kernel = make_gaussian_kernel(kernel_size=kernel_size, sigma=sigma)
-    return special_convolve(matrix, mode=mode, kernel=kernel, iters=iters,
-                            fill_value=fill_value, preserve=preserve, margin=margin)
-
 
 def digitize(matrix, quantiles):
     """ Convert continuous metric into binarized version with thresholds defined by `quantiles`. """
