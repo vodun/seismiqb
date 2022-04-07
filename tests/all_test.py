@@ -15,7 +15,7 @@ VERBOSE : bool
 One more noteworthy constant for tests control is:
 
 REMOVE_ROOT_DIR : bool
-    Whether to remove TESTS_ROOT_DIR after execution in case of completion of tests without failures.
+    Whether to remove `TESTS_ROOT_DIR` after execution in case of all tests completion without failures.
 
 Another important script part is the `notebooks_params` variable which manages notebooks execution order,
 internal parameter values and outputs variables names for each individual test.
@@ -45,8 +45,6 @@ REMOVE_ROOT_DIR = bool(int(os.getenv('SEISMIQB_TESTS_REMOVE_ROOT_DIR', '1')))
 # Parameters for each test notebooks
 common_params = {
     'TESTS_ROOT_DIR': os.getenv('SEISMIQB_TESTS_ROOT_DIR', tempfile.mkdtemp(prefix='tests_root_dir_', dir=BASE_DIR)),
-
-    # Visualization and output parameters
     'SHOW_FIGURES': bool(int(os.getenv('SEISMIQB_TESTS_SHOW_FIGURES', '0'))),
     'VERBOSE': bool(int(os.getenv('SEISMIQB_TESTS_VERBOSE', '1')))
 }
@@ -82,8 +80,8 @@ notebooks_params = (
 
 
 @pytest.mark.parametrize("notebook_kwargs", notebooks_params)
-def test_run_notebook(notebook_kwargs, capsys):
-    """ Run tests notebooks using kwargs and print outputs in the terminal."""
+def test_run_notebook(notebook_kwargs, capsys, cleanup_fixture):
+    """ Run tests notebooks using kwargs and print outputs in the terminal. """
     # Parse kwargs
     path_ipynb, params = notebook_kwargs
     filename = os.path.splitext(os.path.basename(path_ipynb))[0]
@@ -97,7 +95,7 @@ def test_run_notebook(notebook_kwargs, capsys):
 
     # Run test notebook
     out_path_ipynb = os.path.join(common_params['TESTS_ROOT_DIR'],
-                                  f"{filename}_out_{filename_suffix}.ipynb")
+                                f"{filename}_out_{filename_suffix}.ipynb")
 
     exec_res = run_notebook(path=path_ipynb, inputs=inputs, outputs=outputs,
                             inputs_pos=2, working_dir=os.path.dirname(path_ipynb),
@@ -123,8 +121,13 @@ def test_run_notebook(notebook_kwargs, capsys):
         else:
             assert False, f"{notebook_info} failed.\n"
 
+@pytest.fixture(scope="module")
+def cleanup_fixture():
+    """ Remove `TESTS_ROOT_DIR` in case of all tests completion without failures. """
+    # Run all tests in the module
+    yield
     # Remove TESTS_ROOT_DIR if all tests were successfull
-    if (notebook_kwargs == notebooks_params[-1]) and REMOVE_ROOT_DIR and not pytest.failed:
+    if REMOVE_ROOT_DIR and not pytest.failed:
         shutil.rmtree(common_params['TESTS_ROOT_DIR'])
 
 
