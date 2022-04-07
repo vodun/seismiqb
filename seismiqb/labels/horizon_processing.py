@@ -1,4 +1,4 @@
-""" Mixin for horizon processings. """
+""" Mixin for horizon processing. """
 from functools import partialmethod
 
 import numpy as np
