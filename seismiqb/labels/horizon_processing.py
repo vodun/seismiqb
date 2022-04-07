@@ -1,3 +1,4 @@
+""" Mixin for horizon processings. """
 from functools import partialmethod
 
 import numpy as np
@@ -148,6 +149,7 @@ class ProcessingMixin:
         kwargs : dict
             Other parameters for grid creation, see `:meth:~.SeismicGeometry.make_quality_grid`.
         """
+        #pylint: disable=import-outside-toplevel
         frequencies = frequencies if isinstance(frequencies, (tuple, list)) else [frequencies]
         carcass = self.copy(add_prefix=add_prefix)
         carcass.name = carcass.name.replace('copy', 'carcass')
