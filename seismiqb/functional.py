@@ -232,17 +232,17 @@ def _convolve(src, kernel, preserve, margin):
     k = kernel.shape[0] // 2
     raveled_kernel = kernel.ravel() / np.sum(kernel)
 
+    i_range, x_range = src.shape
     dst = src.copy()
 
-    strided_src = sliding_window_view(src=src, window_shape=kernel.shape)
-
-    # Convolution: iter over strides and apply kernel
-    for iline in prange(strided_src.shape[0]):
-        for xline, element in enumerate(strided_src[iline]):
-            central = element[k, k]
+    for iline in prange(k, i_range - k):
+        for xline in range(k, x_range - k):
+            central = src[iline, xline]
 
             if (preserve is True) and isnan(central):
                 continue
+
+            element = src[iline-k:iline+k+1, xline-k:xline+k+1]
 
             s, sum_weights = np.float32(0), np.float32(0)
             for item, weight in zip(element.ravel(), raveled_kernel):
@@ -252,7 +252,7 @@ def _convolve(src, kernel, preserve, margin):
                         sum_weights += weight
 
             if sum_weights != 0.0:
-                dst[iline+k, xline+k] = s / sum_weights
+                dst[iline, xline] = s / sum_weights
     return dst
 
 @njit(parallel=True)
@@ -262,23 +262,23 @@ def _medfilt(src, kernel, preserve, margin):
     # margin = -1: median across all elements in kernel
     #pylint: disable=too-many-nested-blocks, consider-using-enumerate, not-an-iterable
     k = kernel.shape[0] // 2
+
+    i_range, x_range = src.shape
     dst = src.copy()
 
-    strided_src = sliding_window_view(src=src, window_shape=kernel.shape)
-
-    # Apply median filter
-    for iline in prange(strided_src.shape[0]):
-        for xline, element in enumerate(strided_src[iline]):
-            central = element[k, k]
-            raveled_element = element.ravel()
+    for iline in prange(k, i_range - k):
+        for xline in range(k, x_range - k):
+            central = src[iline, xline]
 
             if (preserve is True) and isnan(central):
                 continue
 
-            # 0 for close, 1 for distant, 2 for nan
-            indicator = np.zeros_like(raveled_element)
+            element = src[iline-k:iline+k+1, xline-k:xline+k+1].ravel()
 
-            for i, item in enumerate(raveled_element):
+            # 0 for close, 1 for distant, 2 for nan
+            indicator = np.zeros_like(element)
+
+            for i, item in enumerate(element):
                 if not isnan(item):
                     if (abs(item - central) > margin) or isnan(central):
                         indicator[i] = np.float32(1)
@@ -289,25 +289,8 @@ def _medfilt(src, kernel, preserve, margin):
             mask_distant = indicator == np.float32(1)
             n_distant = mask_distant.sum()
             if n_distant > n_close:
-                dst[iline+k, xline+k] = np.median(raveled_element[mask_distant])
+                dst[iline, xline] = np.median(element[mask_distant])
     return dst
-
-@njit
-def sliding_window_view(src, window_shape):
-    """ Make a sliding window view for an `src` 2d-array.
-
-    It is an analog of `numpy.lib.stride_tricks.sliding_window_view` for compatibility with numpy < 1.20.0.
-    """
-    itemsize = src.itemsize
-    overlap = window_shape[0] - 1
-
-    out_array_shape = (src.shape[0] - overlap, src.shape[1] - overlap, *window_shape)
-
-    out_array_strides = ((window_shape[0]-overlap)*src.shape[1]*itemsize,
-                         (window_shape[1]-overlap)*itemsize,
-                         src.shape[1]*itemsize, itemsize)
-
-    return as_strided(src, shape=out_array_shape, strides=out_array_strides)
 
 def smooth_out(matrix, mode='convolve', kernel_size=3, sigma=2.0, kernel=None, iters=1,
                fill_value=None, preserve=True, margin=np.inf, **_):

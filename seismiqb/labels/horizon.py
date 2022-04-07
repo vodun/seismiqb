@@ -153,7 +153,6 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
     @points.setter
     def points(self, value):
         self._points = value
-        self.reset_storage('matrix')
 
     @staticmethod
     def matrix_to_points(matrix):
@@ -179,7 +178,6 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
     @matrix.setter
     def matrix(self, value):
         self._matrix = value
-        self.reset_storage('points')
 
     @staticmethod
     def points_to_matrix(points, i_min, x_min, i_length, x_length, dtype=np.int32):

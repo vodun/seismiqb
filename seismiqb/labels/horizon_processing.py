@@ -9,15 +9,13 @@ from ..functional import smooth_out
 from ..utils import make_bezier_figure
 
 class ProcessingMixin:
-    """Methods for horizon processing.
+    """ Methods for horizon processing.
 
-    These methods transform horizon structure and storages: matrix and/or points.
-    The main classes of these methods are:
-    - Filtering methods to cut out some surface regions.
-    - Horizon transformations such as smoothing and thinning.
-    - Surface distortions by adding holes or creating carcass.
-    All of these methods affect horizon structure and as a consequence matrix and points storages.
-    So, be careful with these transformations: their result is a new horizon surface.
+    This class contains methods which can be divided into the following groups:
+        - Filtering methods to cut out some surface regions.
+        - Horizon transformations such as smoothing and thinning.
+        - Surface distortions such as holes or carcass creation.
+    All of these methods affect horizon structure, so be careful with them: their result is a new horizon surface.
     """
     # Filtering methods
     def filter_points(self, filtering_matrix=None, **kwargs):
@@ -27,6 +25,7 @@ class ProcessingMixin:
 
         mask = filtering_matrix[self.points[:, 0], self.points[:, 1]]
         self.points = self.points[mask == 0]
+        self.reset_storage('matrix')
 
     def filter_matrix(self, filtering_matrix=None, **kwargs):
         """ Remove points that correspond to 1's in `filtering_matrix` from matrix storage. """
@@ -97,6 +96,7 @@ class ProcessingMixin:
         mask_x = np.isin(self.points[:, 1], uniques[counts > threshold][::factor[1]])
 
         self.points = self.points[mask_i + mask_x]
+        self.reset_storage('matrix')
 
     def smooth_out(self, kernel=None, kernel_size=3, sigma=0.8, iters=1, preserve_borders=True, margin=5, **kwargs):
         """ Convolve the horizon with gaussian kernel with special treatment to absent points:
@@ -127,6 +127,7 @@ class ProcessingMixin:
                                         self.x_min:self.x_max + 1] == 1] = self.FILL_VALUE
 
         self.matrix = smoothed
+        self.reset_storage('points')
 
     interpolate = partialmethod(smooth_out, preserve_borders=False)
 
