@@ -3,7 +3,6 @@ from math import isnan, ceil
 from warnings import warn
 
 import numpy as np
-from numpy.lib.stride_tricks import as_strided
 try:
     import cupy as cp
     CUPY_AVAILABLE = True
