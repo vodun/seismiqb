@@ -647,9 +647,9 @@ class AttributesMixin:
     @transformable
     def get_median_diff_map(self, kernel_size=11, margin=0, iters=2, threshold=2, **_):
         """ Compute difference between depth map and its median filtered counterpart. """
-        convolved = median_filter(self.full_matrix, kernel_size=kernel_size, iters=iters,
-                                  margin=margin, fill_value=self.FILL_VALUE)
-        spikes = self.full_matrix - convolved
+        medfilt = median_filter(self.full_matrix, kernel_size=kernel_size, iters=iters,
+                                margin=margin, fill_value=self.FILL_VALUE)
+        spikes = self.full_matrix - medfilt
 
         if threshold is not None:
             spikes[np.abs(spikes) < threshold] = 0

@@ -153,7 +153,7 @@ class ProcessingMixin:
         self.matrix = smoothed
         self.reset_storage('points')
 
-    def interpolate(self, kernel=None, kernel_size=3, sigma=0.8, iters=1, margin=5, **_):
+    def interpolate(self, kernel=None, kernel_size=3, sigma=0.8, iters=1, **_):
         """ Interpolate horizon surface on the regions with missing traces.
 
         Under the hood, we fill missing traces with smoothed neighbor values.

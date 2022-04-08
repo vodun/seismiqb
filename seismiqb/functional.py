@@ -167,13 +167,13 @@ def process_missing_values(function):
     """ Decorator which apply a special care for the missing points in a `matrix`
     which marked with either `fill_value` or `np.nan`. """
     def wrapper(matrix, kernel_size=3, iters=1, fill_value=None,
-                preserve=True, margin=np.inf, **kwargs):
+                preserve=True, **kwargs):
         # Convert all the fill values to nans
         matrix = matrix.astype(np.float32).copy()
         if fill_value is not None:
             matrix[matrix == fill_value] = np.nan
 
-        result = function(matrix=matrix, kernel_size=kernel_size, iters=iters, **kwargs)
+        result = function(matrix=matrix, kernel_size=kernel_size, iters=iters, preserve=preserve, **kwargs)
 
         # Remove all the unwanted values
         if preserve:
@@ -319,6 +319,9 @@ def _interpolate(src, kernel):
                 continue
 
             element = src[iline-k:iline+k+1, xline-k:xline+k+1]
+
+            if np.all(np.isnan(element)):
+                continue
 
             s, sum_weights = np.float32(0), np.float32(0)
             for item, weight in zip(element.ravel(), raveled_kernel):
