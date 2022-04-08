@@ -1,6 +1,7 @@
 """ Mixin with computed along horizon geological attributes. """
 # pylint: disable=too-many-statements
 from copy import copy
+from functools import cached_property
 
 import numpy as np
 
@@ -157,26 +158,25 @@ class AttributesMixin:
 
 
     # Technical matrices
-    @property
-    @lru_cache(maxsize=1)
+    @cached_property
     def full_matrix(self):
         """ A method for getting matrix in cubic coordinates. Allows for introspectable cache. """
         return self.matrix_put_on_full(self.matrix)
 
-    @property
-    @lru_cache(maxsize=1)
+    @cached_property
     def binary_matrix(self):
         """ Boolean matrix with `True` values at places where horizon is present and `False` everywhere else. """
         return (self.matrix != self.FILL_VALUE).astype(np.bool)
 
-    @property
-    @lru_cache(maxsize=1)
+    @cached_property
     def full_binary_matrix(self):
         """ A method for getting binary matrix in cubic coordinates. Allows for introspectable cache. """
         return self.matrix_put_on_full(self.binary_matrix)
 
-    # an alias
-    mask = full_binary_matrix
+    @property
+    def mask(self):
+        """ An alias. """
+        return self.full_binary_matrix
 
 
     # Scalars computed from depth map
