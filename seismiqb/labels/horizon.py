@@ -1115,7 +1115,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Visua
     def compute_prediction_std(self, others):
         """ Compute std of predicted horizons along depths and restrict it to `self`. """
         std_matrix = self.metrics.compute_prediction_std(list(set([self, *others])))
-        std_matrix[self.presence_matrix == False] = np.nan #pylint: disable=singleton-comparison
+        std_matrix[self.mask == False] = np.nan #pylint: disable=singleton-comparison
         return std_matrix
 
 
