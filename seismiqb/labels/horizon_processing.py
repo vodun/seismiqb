@@ -1,12 +1,10 @@
 """ Mixin for horizon processing. """
-from functools import partialmethod
-
 import numpy as np
 
 from skimage.measure import label
-from scipy.ndimage.morphology import binary_fill_holes, binary_dilation
+from scipy.ndimage.morphology import binary_fill_holes, binary_dilation, binary_erosion
 
-from ..functional import smooth_out
+from ..functional import smooth_out, interpolate
 from ..utils import make_bezier_figure
 
 class ProcessingMixin:
@@ -19,19 +17,31 @@ class ProcessingMixin:
     All of these methods affect horizon structure, so be careful with them: their result is a new horizon surface.
     """
     # Filtering methods
-    def filter_points(self, filtering_matrix=None, **kwargs):
+    def filter_points(self, filtering_matrix=None, margin=0, **kwargs):
         """ Remove points that correspond to 1's in `filtering_matrix` from points storage. """
         if filtering_matrix is None:
             filtering_matrix = self.field.zero_traces
+        if margin > 0:
+            filtering_matrix = binary_dilation(filtering_matrix, structure=np.ones((margin, margin)))
+            filtering_matrix[:margin, :] = 1
+            filtering_matrix[:, :margin] = 1
+            filtering_matrix[-margin:, :] = 1
+            filtering_matrix[:, -margin:] = 1
 
         mask = filtering_matrix[self.points[:, 0], self.points[:, 1]]
         self.points = self.points[mask == 0]
         self.reset_storage('matrix')
 
-    def filter_matrix(self, filtering_matrix=None, **kwargs):
+    def filter_matrix(self, filtering_matrix=None, margin=0, **kwargs):
         """ Remove points that correspond to 1's in `filtering_matrix` from matrix storage. """
         if filtering_matrix is None:
             filtering_matrix = self.field.zero_traces
+        if margin > 0:
+            filtering_matrix = binary_dilation(filtering_matrix, structure=np.ones((margin, margin)))
+            filtering_matrix[:margin, :] = 1
+            filtering_matrix[:, :margin] = 1
+            filtering_matrix[-margin:, :] = 1
+            filtering_matrix[:, -margin:] = 1
 
         idx_i, idx_x = np.asarray(filtering_matrix[self.i_min:self.i_max + 1,
                                                    self.x_min:self.x_max + 1] == 1).nonzero()
@@ -62,17 +72,29 @@ class ProcessingMixin:
 
     despike = filter_spikes
 
-    def filter_disconnected_regions(self):
+    def filter_disconnected_regions(self, erosion_rate=0):
         """ Remove regions, not connected to the largest component of a horizon. """
-        labeled = label(self.presence_matrix)
+        if erosion_rate > 0:
+            structure = np.ones((3, 3))
+            matrix = binary_erosion(self.presence_matrix, structure, iterations=erosion_rate)
+        else:
+            matrix = self.presence_matrix
+
+        labeled = label(matrix)
         values, counts = np.unique(labeled, return_counts=True)
         counts = counts[values != 0]
         values = values[values != 0]
 
         object_id = values[np.argmax(counts)]
 
-        filtering_matrix = self.presence_matrix.copy()
-        filtering_matrix[labeled == object_id] = 0
+        filtering_matrix = np.zeros_like(self.presence_matrix)
+        filtering_matrix[labeled == object_id] = 1
+
+        if erosion_rate > 0:
+            filtering_matrix = binary_dilation(filtering_matrix, structure, iterations=erosion_rate)
+
+        filtering_matrix = filtering_matrix == 0
+
         self.filter(filtering_matrix)
 
 
@@ -99,7 +121,7 @@ class ProcessingMixin:
         self.points = self.points[mask_i + mask_x]
         self.reset_storage('matrix')
 
-    def smooth_out(self, kernel=None, kernel_size=3, sigma=0.8, iters=1, preserve_borders=True, margin=5, **kwargs):
+    def smooth_out(self, kernel=None, kernel_size=3, sigma=0.8, iters=1, preserve_borders=True, margin=5, **_):
         """ Convolve the horizon with gaussian kernel with special treatment to absent points:
         if the point was present in the original horizon, then it is changed to a weighted sum of all
         present points nearby;
@@ -123,6 +145,7 @@ class ProcessingMixin:
         smoothed = smooth_out(self.matrix, kernel=kernel,
                               kernel_size=kernel_size, sigma=sigma, margin=margin,
                               fill_value=self.FILL_VALUE, preserve=preserve_borders, iters=iters)
+
         smoothed = np.rint(smoothed).astype(np.int32)
         smoothed[self.field.zero_traces[self.i_min:self.i_max + 1,
                                         self.x_min:self.x_max + 1] == 1] = self.FILL_VALUE
@@ -130,7 +153,20 @@ class ProcessingMixin:
         self.matrix = smoothed
         self.reset_storage('points')
 
-    interpolate = partialmethod(smooth_out, preserve_borders=False)
+    def interpolate(self, kernel=None, kernel_size=3, sigma=0.8, iters=1, margin=5, **_):
+        """ Interpolate horizon surface on the regions with missing traces.
+
+        Under the hood, we make smoothening without preserving missing values and restore horizon surface where it was defined.
+        """
+        interpolated = interpolate(self.matrix, kernel=kernel, kernel_size=kernel_size,
+                                   sigma=sigma, fill_value=self.FILL_VALUE, iters=iters)
+
+        interpolated = np.rint(interpolated).astype(np.int32)
+        interpolated[self.field.zero_traces[self.i_min:self.i_max + 1,
+                                        self.x_min:self.x_max + 1] == 1] = self.FILL_VALUE
+
+        self.matrix = interpolated
+        self.reset_storage('points')
 
     # Horizon distortions
     def make_carcass(self, frequencies=100, regular=True, margin=50, apply_smoothing=False, add_prefix=True, **kwargs):

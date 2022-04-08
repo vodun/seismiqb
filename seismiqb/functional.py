@@ -173,8 +173,7 @@ def process_missing_values(function):
         if fill_value is not None:
             matrix[matrix == fill_value] = np.nan
 
-        result = function(matrix=matrix, kernel_size=kernel_size, iters=iters,
-                          preserve=preserve, margin=margin, **kwargs)
+        result = function(matrix=matrix, kernel_size=kernel_size, iters=iters, **kwargs)
 
         # Remove all the unwanted values
         if preserve:
@@ -219,7 +218,7 @@ def convolve(matrix, kernel_size=3, kernel=None, iters=1,
     kernel_size = kernel.shape[0]
     result = np.pad(matrix, kernel_size, constant_values=np.nan)
 
-    # Apply `function` multiple times. Note that there is no dtype conversion in between
+    # Apply `_convolve` multiple times. Note that there is no dtype conversion in between
     for _ in range(iters):
         result = _convolve(src=result, kernel=kernel, preserve=preserve, margin=margin)
 
@@ -229,7 +228,7 @@ def convolve(matrix, kernel_size=3, kernel=None, iters=1,
 
 def smooth_out(matrix, kernel_size=3, kernel=None, iters=1,
                preserve=True, margin=np.inf, sigma=2.0, **kwargs):
-    """ Matrix smoothening via convolution with a gaussian kernel with a special treatment to the missing points.
+    """ Matrix smoothening via convolution with a gaussian kernel with a special treatment to missing points.
 
     For more read the doc for :func:`convolve`.
     """
@@ -238,6 +237,23 @@ def smooth_out(matrix, kernel_size=3, kernel=None, iters=1,
 
     result = convolve(matrix=matrix, kernel=kernel, iters=iters,
                       preserve=preserve, margin=margin, **kwargs)
+    return result
+
+@process_missing_values
+def interpolate(matrix, kernel_size=3, kernel=None, iters=1, sigma=2.0, **_):
+    """ Make 2d interpolation as applying a gaussian kernel to missing points. """
+    if kernel is None:
+        kernel = make_gaussian_kernel(kernel_size=kernel_size, sigma=sigma)
+
+    kernel_size = kernel.shape[0]
+    result = np.pad(matrix, kernel_size, constant_values=np.nan)
+
+    # Apply `_interpolate` multiple times. Note that there is no dtype conversion in between
+    for _ in range(iters):
+        result = _interpolate(src=result, kernel=kernel)
+
+    result = result[kernel_size:-kernel_size, kernel_size:-kernel_size]
+
     return result
 
 @process_missing_values
@@ -277,10 +293,38 @@ def _convolve(src, kernel, preserve, margin):
 
             s, sum_weights = np.float32(0), np.float32(0)
             for item, weight in zip(element.ravel(), raveled_kernel):
+                if not isnan(item) and (abs(item - central) <= margin or isnan(central)):
+                    s += item * weight
+                    sum_weights += weight
+
+            if sum_weights != 0.0:
+                dst[iline, xline] = s / sum_weights
+    return dst
+
+@njit(parallel=True)
+def _interpolate(src, kernel):
+    """ Jit-accelerated function to apply 2d interpolation to nan values. """
+    #pylint: disable=too-many-nested-blocks, consider-using-enumerate, not-an-iterable
+    k = kernel.shape[0] // 2
+    raveled_kernel = kernel.ravel() / np.sum(kernel)
+
+    i_range, x_range = src.shape
+    dst = src.copy()
+
+    for iline in prange(k, i_range - k):
+        for xline in range(k, x_range - k):
+            central = src[iline, xline]
+
+            if not isnan(central):
+                continue
+
+            element = src[iline-k:iline+k+1, xline-k:xline+k+1]
+
+            s, sum_weights = np.float32(0), np.float32(0)
+            for item, weight in zip(element.ravel(), raveled_kernel):
                 if not isnan(item):
-                    if abs(item - central) <= margin or isnan(central):
-                        s += item * weight
-                        sum_weights += weight
+                    s += item * weight
+                    sum_weights += weight
 
             if sum_weights != 0.0:
                 dst[iline, xline] = s / sum_weights
