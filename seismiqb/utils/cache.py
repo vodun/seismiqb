@@ -224,8 +224,8 @@ class CacheMixin:
         reset_properties, reset_methods = self.get_cached_objects(properties, methods)
 
         for property_ in reset_properties:
-            print(property_)
-            delattr(self, property_)
+            if property_ in self.__dict__:
+                delattr(self, property_)
 
         for method in reset_methods:
             method.reset(instance=self)
