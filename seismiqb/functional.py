@@ -1,5 +1,4 @@
 """ Contains various functions for mathematical/geological transforms. """
-from functools import partial
 from math import isnan, ceil
 from warnings import warn
 
