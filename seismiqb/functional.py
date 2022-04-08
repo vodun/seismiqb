@@ -164,9 +164,32 @@ def make_gaussian_kernel(kernel_size=3, sigma=1.):
     gaussian_kernel = (kernel / np.sum(kernel).astype(np.float32))
     return gaussian_kernel
 
+def process_missing_values(function):
+    """ Decorator which apply a special care for the missing points in a `matrix`
+    which marked with either `fill_value` or `np.nan`. """
+    def wrapper(matrix, kernel_size=3, iters=1, fill_value=None,
+                preserve=True, margin=np.inf, **kwargs):
+        # Convert all the fill values to nans
+        matrix = matrix.astype(np.float32).copy()
+        if fill_value is not None:
+            matrix[matrix == fill_value] = np.nan
 
-def special_convolve(matrix, mode='convolve', kernel_size=3, kernel=None, iters=1,
-                     fill_value=None, preserve=True, margin=np.inf, **kwargs):
+        result = function(matrix=matrix, kernel_size=kernel_size, iters=iters,
+                          preserve=preserve, margin=margin, **kwargs)
+
+        # Remove all the unwanted values
+        if preserve:
+            result[np.isnan(matrix)] = np.nan
+
+        # Convert nans back to fill value
+        if fill_value is not None:
+            result[np.isnan(result)] = fill_value
+        return result
+    return wrapper
+
+@process_missing_values
+def convolve(matrix, kernel_size=3, kernel=None, iters=1,
+             preserve=True, margin=np.inf, **_):
     """ Convolve the matrix with a given kernel.
     A special treatment is given to the missing points (marked with either `fill_value` or `np.nan`),
     and to areas with high variance.
@@ -174,16 +197,13 @@ def special_convolve(matrix, mode='convolve', kernel_size=3, kernel=None, iters=
     Parameters
     ----------
     matrix : ndarray
-        Array to smooth values in.
-    mode : str
-        If 'convolve', then use convolutions with a kernel to compute result.
-        Otherwise, use median values in a kernel to compute result.
+        Array to convolve values in.
     kernel_size : int
         If the kernel is not provided, shape of the square kernel with ones.
     kernel : ndarray or None
         Kernel to convolve with.
     iters : int
-        Number of smoothening iterations to perform.
+        Number of convolve iterations to perform.
     fill_value : number
         Value to ignore in convolutions.
     preserve : bool
@@ -194,42 +214,48 @@ def special_convolve(matrix, mode='convolve', kernel_size=3, kernel=None, iters=
         then the point is ignored in convolutions.
         Can be used for separate smoothening on sides of discontinuity.
     """
-    # Choose the filtering function
-    if mode.startswith('m'):
-        function = _medfilt
-    else:
-        function = _convolve
-
-    if mode.startswith('smooth') and kernel is None:
-        sigma = kwargs.pop('sigma', 2.0)
-        kernel = make_gaussian_kernel(kernel_size=kernel_size, sigma=sigma)
-
-    # Convert all the fill values to nans
-    matrix = matrix.astype(np.float32).copy()
-    if fill_value is not None:
-        matrix[matrix == fill_value] = np.nan
-
-    # Make the kernel, if needed. Pad the input
     if kernel is None:
         kernel = np.ones((kernel_size, kernel_size), dtype=np.float32)
+
     kernel_size = kernel.shape[0]
     result = np.pad(matrix, kernel_size, constant_values=np.nan)
 
     # Apply `function` multiple times. Note that there is no dtype conversion in between
     for _ in range(iters):
-        result = function(result, kernel, preserve=preserve, margin=margin)
+        result = _convolve(src=result, kernel=kernel, preserve=preserve, margin=margin)
+
     result = result[kernel_size:-kernel_size, kernel_size:-kernel_size]
 
-    # Remove all the unwanted values
-    if preserve:
-        result[np.isnan(matrix)] = np.nan
-
-    # Convert nans back to fill value
-    if fill_value is not None:
-        result[np.isnan(result)] = fill_value
     return result
 
-smooth_out = partial(special_convolve, mode='smooth')
+def smooth_out(matrix, kernel_size=3, kernel=None, iters=1,
+               preserve=True, margin=np.inf, sigma=2.0, **kwargs):
+    """ Matrix smoothening via convolution with a gaussian kernel with a special treatment to the missing points.
+
+    For more read the doc for :func:`convolve`.
+    """
+    if kernel is None:
+        kernel = make_gaussian_kernel(kernel_size=kernel_size, sigma=sigma)
+
+    result = convolve(matrix=matrix, kernel=kernel, iters=iters,
+                      preserve=preserve, margin=margin, **kwargs)
+    return result
+
+@process_missing_values
+def median_filter(matrix, kernel_size=3, iters=1, preserve=True, margin=np.inf, **_):
+    """ 2d median filter with special care for nan values.
+
+    Parameters are the same as in the :func:`convolve`.
+    """
+    result = np.pad(matrix, kernel_size, constant_values=np.nan)
+
+    # Apply `function` multiple times. Note that there is no dtype conversion in between
+    for _ in range(iters):
+        result = _medfilt(src=result, kernel_size=kernel_size, preserve=preserve, margin=margin)
+
+    result = result[kernel_size:-kernel_size, kernel_size:-kernel_size]
+
+    return result
 
 @njit(parallel=True)
 def _convolve(src, kernel, preserve, margin):
@@ -262,12 +288,12 @@ def _convolve(src, kernel, preserve, margin):
     return dst
 
 @njit(parallel=True)
-def _medfilt(src, kernel, preserve, margin):
+def _medfilt(src, kernel_size, preserve, margin):
     """ Jit-accelerated function to apply 2d median filter with special care for nan values. """
     # margin = 0: median across all non-equal-to-self elements in kernel
     # margin = -1: median across all elements in kernel
     #pylint: disable=too-many-nested-blocks, consider-using-enumerate, not-an-iterable
-    k = kernel.shape[0] // 2
+    k = kernel_size // 2
 
     i_range, x_range = src.shape
     dst = src.copy()

@@ -10,7 +10,7 @@ from scipy.ndimage.morphology import binary_fill_holes, binary_erosion, binary_d
 from skimage.measure import label
 from sklearn.decomposition import PCA
 
-from ..functional import smooth_out, special_convolve
+from ..functional import smooth_out, median_filter
 from ..utils import transformable, lru_cache
 
 
@@ -645,10 +645,10 @@ class AttributesMixin:
     # Despiking maps
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     @transformable
-    def get_median_diff_map(self, convolve_mode='m', kernel_size=11, kernel=None, margin=0, iters=2, threshold=2, **_):
+    def get_median_diff_map(self, kernel_size=11, margin=0, iters=2, threshold=2, **_):
         """ Compute difference between depth map and its median filtered counterpart. """
-        convolved = special_convolve(self.full_matrix, mode=convolve_mode, kernel=kernel, kernel_size=kernel_size,
-                                     margin=margin, iters=iters, fill_value=self.FILL_VALUE)
+        convolved = median_filter(self.full_matrix, kernel_size=kernel_size, iters=iters,
+                                  margin=margin, fill_value=self.FILL_VALUE)
         spikes = self.full_matrix - convolved
 
         if threshold is not None:
