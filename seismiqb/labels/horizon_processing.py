@@ -156,9 +156,9 @@ class ProcessingMixin:
     def interpolate(self, kernel=None, kernel_size=3, sigma=0.8, iters=1, margin=5, **_):
         """ Interpolate horizon surface on the regions with missing traces.
 
-        Under the hood, we make smoothening without preserving missing values and restore horizon surface where it was defined.
+        Under the hood, we fill missing traces with smoothed neighbor values.
         """
-        interpolated = interpolate(self.matrix, kernel=kernel, kernel_size=kernel_size,
+        interpolated = interpolate(self.matrix, kernel=kernel, kernel_size=kernel_size, preserve=False,
                                    sigma=sigma, fill_value=self.FILL_VALUE, iters=iters)
 
         interpolated = np.rint(interpolated).astype(np.int32)
