@@ -1,5 +1,6 @@
 """ Contains various functions for mathematical/geological transforms. """
 from math import isnan, ceil
+from functools import wraps
 from warnings import warn
 
 import numpy as np
@@ -163,20 +164,27 @@ def make_gaussian_kernel(kernel_size=3, sigma=1.):
     gaussian_kernel = (kernel / np.sum(kernel).astype(np.float32))
     return gaussian_kernel
 
-def process_missing_values(function):
-    """ Decorator which apply a special care for the missing points in a `matrix`
+def process_missings(function):
+    """ Decorator which apply a special treatment for the missing points in a `matrix`
     which marked with either `fill_value` or `np.nan`. """
-    def wrapper(matrix, kernel_size=3, iters=1, fill_value=None,
-                preserve=True, **kwargs):
-        # Convert all the fill values to nans
+    @wraps(function)
+    def wrapper(matrix, fill_value=None, **kwargs):
+        # Parse arguments
+        preserve_missings = kwargs.get('preserve_missings', False)
+
+        if function.__name__ == 'interpolate':
+            preserve_missings = False # We interpolate surface to missing points
+
+        # Convert all fill values to nans
         matrix = matrix.astype(np.float32).copy()
         if fill_value is not None:
             matrix[matrix == fill_value] = np.nan
 
-        result = function(matrix=matrix, kernel_size=kernel_size, iters=iters, preserve=preserve, **kwargs)
+        # Apply function
+        result = function(matrix=matrix, **kwargs)
 
         # Remove all the unwanted values
-        if preserve:
+        if preserve_missings:
             result[np.isnan(matrix)] = np.nan
 
         # Convert nans back to fill value
@@ -185,11 +193,11 @@ def process_missing_values(function):
         return result
     return wrapper
 
-@process_missing_values
+@process_missings
 def convolve(matrix, kernel_size=3, kernel=None, iters=1,
-             preserve=True, margin=np.inf, **_):
+             fill_value=None, preserve_missings=True, margin=np.inf, **_):
     """ Convolve the matrix with a given kernel.
-    A special treatment is given to the missing points (marked with either `fill_value` or `np.nan`),
+    A special treatment is given to missing points (marked with either `fill_value` or `np.nan`),
     and to areas with high variance.
 
     Parameters
@@ -203,8 +211,8 @@ def convolve(matrix, kernel_size=3, kernel=None, iters=1,
     iters : int
         Number of convolve iterations to perform.
     fill_value : number
-        Value to ignore in convolutions.
-    preserve : bool
+        Value which is interpreted as `np.nan` in computations.
+    preserve_missings : bool
         If True, then all the missing values remain missing in the resulting array.
         If False, then missing values are filled with weighted average of nearby points.
     margin : number
@@ -212,6 +220,8 @@ def convolve(matrix, kernel_size=3, kernel=None, iters=1,
         then the point is ignored in convolutions.
         Can be used for separate smoothening on sides of discontinuity.
     """
+    _ = fill_value # This value is passed only to the decorator
+
     if kernel is None:
         kernel = np.ones((kernel_size, kernel_size), dtype=np.float32)
 
@@ -220,28 +230,50 @@ def convolve(matrix, kernel_size=3, kernel=None, iters=1,
 
     # Apply `_convolve` multiple times. Note that there is no dtype conversion in between
     for _ in range(iters):
-        result = _convolve(src=result, kernel=kernel, preserve=preserve, margin=margin)
+        result = _convolve(src=result, kernel=kernel, preserve_missings=preserve_missings, margin=margin)
 
     result = result[kernel_size:-kernel_size, kernel_size:-kernel_size]
 
     return result
 
-def smooth_out(matrix, kernel_size=3, kernel=None, iters=1,
-               preserve=True, margin=np.inf, sigma=2.0, **kwargs):
-    """ Matrix smoothening via convolution with a gaussian kernel with a special treatment to missing points.
-
-    For more read the doc for :func:`convolve`.
-    """
+def smooth_out(matrix, kernel_size=3, kernel=None, iters=1, fill_value=None,
+               preserve_missings=True, margin=np.inf, sigma=2.0, **kwargs):
+    """ Matrix smoothening via convolution with a gaussian kernel. """
     if kernel is None:
         kernel = make_gaussian_kernel(kernel_size=kernel_size, sigma=sigma)
 
-    result = convolve(matrix=matrix, kernel=kernel, iters=iters,
-                      preserve=preserve, margin=margin, **kwargs)
+    result = convolve(matrix=matrix, kernel=kernel, iters=iters, fill_value=fill_value,
+                      preserve_missings=preserve_missings, margin=margin, **kwargs)
     return result
 
-@process_missing_values
-def interpolate(matrix, kernel_size=3, kernel=None, iters=1, sigma=2.0, **_):
-    """ Make 2d interpolation as applying a gaussian kernel to missing points. """
+sigma_doc = "sigma : float\n\tStandard deviation for a gaussian kernel creation."
+smooth_out.__doc__ += '\n' + '\n'.join(convolve.__doc__.split('\n')[1:]) + sigma_doc
+
+@process_missings
+def interpolate(matrix, kernel_size=3, kernel=None, iters=1, fill_value=None, margin=None, sigma=2.0, **_):
+    """ Make 2d interpolation in missing points, marked with either `fill_value` or `np.nan`.
+    Interpolation is made as a weighted average of neighboring points, where weights are defined as
+    a gaussian kernel (if kernel is None).
+
+    Parameters
+    ----------
+    matrix : ndarray
+        Array to make interpolation in.
+    kernel_size : int
+        If the kernel is not provided, shape of the square gaussian kernel.
+    kernel : ndarray or None
+        Kernel to apply to missing points.
+    iters : int
+        Number of interpolation iterations to perform.
+    fill_value : number
+        Value to interpolate besides `np.nan`.
+    margin : number
+        A maximum ptp between values in a squared window for which we apply interpolation.
+    sigma : float
+        Standard deviation for a gaussian kernel creation.
+    """
+    _ = fill_value # This value is passed only to the decorator
+
     if kernel is None:
         kernel = make_gaussian_kernel(kernel_size=kernel_size, sigma=sigma)
 
@@ -250,30 +282,49 @@ def interpolate(matrix, kernel_size=3, kernel=None, iters=1, sigma=2.0, **_):
 
     # Apply `_interpolate` multiple times. Note that there is no dtype conversion in between
     for _ in range(iters):
-        result = _interpolate(src=result, kernel=kernel)
+        result = _interpolate(src=result, kernel=kernel, margin=margin)
 
     result = result[kernel_size:-kernel_size, kernel_size:-kernel_size]
 
     return result
 
-@process_missing_values
-def median_filter(matrix, kernel_size=3, iters=1, preserve=True, margin=np.inf, **_):
-    """ 2d median filter with special care for nan values.
+@process_missings
+def median_filter(matrix, kernel_size=3, iters=1, fill_value=None, preserve_missings=True, margin=np.inf, **_):
+    """ 2d median filter with special care for nan values (marked with either `fill_value` or `np.nan`),
+    and to areas with high variance.
 
-    Parameters are the same as in the :func:`convolve`.
+    Parameters
+    ----------
+    matrix : ndarray
+        Array to filter values in.
+    kernel_size : int
+        Shape of the square kernel in which to apply filter.
+    iters : int
+        Number of filter iterations to perform.
+    fill_value : number
+        Value to ignore in computations.
+    preserve_missings : bool
+        If True, then all the missing values remain missing in the resulting array.
+        If False, then missing values are filled with weighted average of nearby points.
+    margin : number
+        If the distance between anchor point and the point inside filter is bigger than the margin,
+        then the point is ignored in filtering.
+        Can be used for separate smoothening on sides of discontinuity.
     """
+    _ = fill_value # This value is passed only to the decorator
+
     result = np.pad(matrix, kernel_size, constant_values=np.nan)
 
-    # Apply `function` multiple times. Note that there is no dtype conversion in between
+    # Apply `_medfilt` multiple times. Note that there is no dtype conversion in between
     for _ in range(iters):
-        result = _medfilt(src=result, kernel_size=kernel_size, preserve=preserve, margin=margin)
+        result = _medfilt(src=result, kernel_size=kernel_size, preserve_missings=preserve_missings, margin=margin)
 
     result = result[kernel_size:-kernel_size, kernel_size:-kernel_size]
 
     return result
 
 @njit(parallel=True)
-def _convolve(src, kernel, preserve, margin):
+def _convolve(src, kernel, preserve_missings, margin):
     """ Jit-accelerated function to apply 2d convolution with special care for nan values. """
     #pylint: disable=too-many-nested-blocks, consider-using-enumerate, not-an-iterable
     k = kernel.shape[0] // 2
@@ -286,9 +337,10 @@ def _convolve(src, kernel, preserve, margin):
         for xline in range(k, x_range - k):
             central = src[iline, xline]
 
-            if (preserve is True) and isnan(central):
-                continue
+            if (preserve_missings is True) and isnan(central):
+                continue # Do nothing with nans
 
+            # Get values in the squared window and apply kernel to them
             element = src[iline-k:iline+k+1, xline-k:xline+k+1]
 
             s, sum_weights = np.float32(0), np.float32(0)
@@ -302,7 +354,7 @@ def _convolve(src, kernel, preserve, margin):
     return dst
 
 @njit(parallel=True)
-def _interpolate(src, kernel):
+def _interpolate(src, kernel, margin=None):
     """ Jit-accelerated function to apply 2d interpolation to nan values. """
     #pylint: disable=too-many-nested-blocks, consider-using-enumerate, not-an-iterable
     k = kernel.shape[0] // 2
@@ -316,13 +368,20 @@ def _interpolate(src, kernel):
             central = src[iline, xline]
 
             if not isnan(central):
-                continue
+                continue # We interpolate values only to nan points
 
+            # Get neighbors and check whether we can interpolate them
             element = src[iline-k:iline+k+1, xline-k:xline+k+1]
 
-            if np.all(np.isnan(element)):
+            if np.all(np.isnan(element)): # No values
                 continue
 
+            if margin is not None: # Is the difference between values in the window too high
+                nanmax, nanmin = np.nanmax(element), np.nanmin(element)
+                if nanmax - nanmin > margin:
+                    continue
+
+            # Apply kernel to neighbors to get value for interpolated point
             s, sum_weights = np.float32(0), np.float32(0)
             for item, weight in zip(element.ravel(), raveled_kernel):
                 if not isnan(item):
@@ -334,7 +393,7 @@ def _interpolate(src, kernel):
     return dst
 
 @njit(parallel=True)
-def _medfilt(src, kernel_size, preserve, margin):
+def _medfilt(src, kernel_size, preserve_missings, margin):
     """ Jit-accelerated function to apply 2d median filter with special care for nan values. """
     # margin = 0: median across all non-equal-to-self elements in kernel
     # margin = -1: median across all elements in kernel
@@ -348,11 +407,12 @@ def _medfilt(src, kernel_size, preserve, margin):
         for xline in range(k, x_range - k):
             central = src[iline, xline]
 
-            if (preserve is True) and isnan(central):
-                continue
+            if (preserve_missings is True) and isnan(central):
+                continue # Do nothing with nans
 
             element = src[iline-k:iline+k+1, xline-k:xline+k+1].ravel()
 
+            # Find elements which are close or distant for the `central`
             # 0 for close, 1 for distant, 2 for nan
             indicator = np.zeros_like(element)
 
@@ -363,6 +423,7 @@ def _medfilt(src, kernel_size, preserve, margin):
                 else:
                     indicator[i] = np.float32(2)
 
+            # If there are more close points than distant in the window, then find median of close points
             n_close = (indicator == np.float32(0)).sum()
             mask_distant = indicator == np.float32(1)
             n_distant = mask_distant.sum()

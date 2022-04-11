@@ -121,7 +121,7 @@ class ProcessingMixin:
         self.points = self.points[mask_i + mask_x]
         self.reset_storage('matrix')
 
-    def smooth_out(self, kernel=None, kernel_size=3, sigma=0.8, iters=1, preserve_borders=True, margin=5, **_):
+    def smooth_out(self, kernel=None, kernel_size=3, iters=1, preserve_missings=True, margin=5, sigma=0.8, **_):
         """ Convolve the horizon with gaussian kernel with special treatment to absent points:
         if the point was present in the original horizon, then it is changed to a weighted sum of all
         present points nearby;
@@ -134,17 +134,21 @@ class ProcessingMixin:
             If passed, then ready-to-use kernel. Otherwise, gaussian kernel will be created.
         kernel_size : int
             Size of gaussian filter.
+        iters : int
+            Number of times to apply smoothing filter.
+        preserve_missings : bool
+            Whether or not to allow method label additional points.
+        margin : number
+            If the distance between anchor point and the point inside filter is bigger than the margin,
+            then the point is ignored in convolutions.
+            Can be used for separate smoothening on sides of discontinuity.
         sigma : number
             Standard deviation (spread or “width”) for gaussian kernel.
             The lower, the more weight is put into the point itself.
-        iters : int
-            Number of times to apply smoothing filter.
-        preserve_borders : bool
-            Whether or not to allow method label additional points.
         """
-        smoothed = smooth_out(self.matrix, kernel=kernel,
-                              kernel_size=kernel_size, sigma=sigma, margin=margin,
-                              fill_value=self.FILL_VALUE, preserve=preserve_borders, iters=iters)
+        smoothed = smooth_out(self.matrix, kernel=kernel, kernel_size=kernel_size, iters=iters,
+                              preserve_missings=preserve_missings, fill_value=self.FILL_VALUE,
+                              margin=margin, sigma=sigma)
 
         smoothed = np.rint(smoothed).astype(np.int32)
         smoothed[self.field.zero_traces[self.i_min:self.i_max + 1,
@@ -153,13 +157,29 @@ class ProcessingMixin:
         self.matrix = smoothed
         self.reset_storage('points')
 
-    def interpolate(self, kernel=None, kernel_size=3, sigma=0.8, iters=1, **_):
+    def interpolate(self, kernel=None, kernel_size=3, iters=1, margin=None, sigma=0.8, **_):
         """ Interpolate horizon surface on the regions with missing traces.
 
-        Under the hood, we fill missing traces with smoothed neighbor values.
+        Under the hood, we fill missing traces with weighted neighbor values.
+
+        Parameters
+        ----------
+        matrix : ndarray
+            Array to make interpolation in.
+        kernel : ndarray or None
+            Kernel to apply to missing points.
+        kernel_size : int
+            If the kernel is not provided, shape of the square gaussian kernel.
+        iters : int
+            Number of interpolation iterations to perform.
+        margin : number
+            A maximum ptp between values in a squared window for which we apply interpolation.
+        sigma : float
+            Standard deviation for a gaussian kernel creation.
         """
-        interpolated = interpolate(self.matrix, kernel=kernel, kernel_size=kernel_size, preserve=False,
-                                   sigma=sigma, fill_value=self.FILL_VALUE, iters=iters)
+        interpolated = interpolate(self.matrix, kernel=kernel, kernel_size=kernel_size,
+                                   preserve=False, fill_value=self.FILL_VALUE, iters=iters,
+                                   margin=margin, sigma=sigma)
 
         interpolated = np.rint(interpolated).astype(np.int32)
         interpolated[self.field.zero_traces[self.i_min:self.i_max + 1,
@@ -199,7 +219,7 @@ class ProcessingMixin:
 
         carcass.filter(filtering_matrix=1-grid)
         if apply_smoothing:
-            carcass.smooth_out(preserve_borders=False)
+            carcass.smooth_out(preserve_missings=False)
         return carcass
 
     def make_random_holes_matrix(self, n=10, scale=1.0, max_scale=.25,
