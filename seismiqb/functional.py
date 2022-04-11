@@ -250,7 +250,7 @@ sigma_doc = "sigma : float\n\tStandard deviation for a gaussian kernel creation.
 smooth_out.__doc__ += '\n' + '\n'.join(convolve.__doc__.split('\n')[1:]) + sigma_doc
 
 @process_missings
-def interpolate(matrix, kernel_size=3, kernel=None, iters=1, fill_value=None, margin=None, sigma=2.0, **_):
+def interpolate(matrix, kernel_size=3, kernel=None, iters=1, fill_value=None, min_neighbors=0, margin=None, sigma=2.0, **_):
     """ Make 2d interpolation in missing points, marked with either `fill_value` or `np.nan`.
     Interpolation is made as a weighted average of neighboring points, where weights are defined as
     a gaussian kernel (if kernel is None).
@@ -267,6 +267,10 @@ def interpolate(matrix, kernel_size=3, kernel=None, iters=1, fill_value=None, ma
         Number of interpolation iterations to perform.
     fill_value : number
         Value to interpolate besides `np.nan`.
+    min_neighbors: int or float
+        Minimal of non-missing neighboring points in a window to interpolate a central point.
+        If int, then it is an amount of points.
+        If float, then it is a points ratio.
     margin : number
         A maximum ptp between values in a squared window for which we apply interpolation.
     sigma : float
@@ -277,12 +281,15 @@ def interpolate(matrix, kernel_size=3, kernel=None, iters=1, fill_value=None, ma
     if kernel is None:
         kernel = make_gaussian_kernel(kernel_size=kernel_size, sigma=sigma)
 
+    if isinstance(min_neighbors, float):
+        min_neighbors = round(min_neighbors * kernel.size)
+
     kernel_size = kernel.shape[0]
     result = np.pad(matrix, kernel_size, constant_values=np.nan)
 
     # Apply `_interpolate` multiple times. Note that there is no dtype conversion in between
     for _ in range(iters):
-        result = _interpolate(src=result, kernel=kernel, margin=margin)
+        result = _interpolate(src=result, kernel=kernel, min_neighbors=min_neighbors, margin=margin)
 
     result = result[kernel_size:-kernel_size, kernel_size:-kernel_size]
 
@@ -354,7 +361,7 @@ def _convolve(src, kernel, preserve_missings, margin):
     return dst
 
 @njit(parallel=True)
-def _interpolate(src, kernel, margin=None):
+def _interpolate(src, kernel, min_neighbors, margin=None):
     """ Jit-accelerated function to apply 2d interpolation to nan values. """
     #pylint: disable=too-many-nested-blocks, consider-using-enumerate, not-an-iterable
     k = kernel.shape[0] // 2
@@ -373,7 +380,8 @@ def _interpolate(src, kernel, margin=None):
             # Get neighbors and check whether we can interpolate them
             element = src[iline-k:iline+k+1, xline-k:xline+k+1]
 
-            if np.all(np.isnan(element)): # No values
+            notnan_neighbors = kernel.size - np.nansum(np.isnan(element))
+            if notnan_neighbors < min_neighbors:
                 continue
 
             if margin is not None: # Is the difference between values in the window too high

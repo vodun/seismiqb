@@ -17,7 +17,7 @@ class ProcessingMixin:
     All of these methods affect horizon structure, so be careful with them: their result is a new horizon surface.
     """
     # Filtering methods
-    def filter_points(self, filtering_matrix=None, margin=0, **kwargs):
+    def filter_points(self, filtering_matrix=None, margin=0, **_):
         """ Remove points that correspond to 1's in `filtering_matrix` from points storage. """
         if filtering_matrix is None:
             filtering_matrix = self.field.zero_traces
@@ -32,7 +32,7 @@ class ProcessingMixin:
         self.points = self.points[mask == 0]
         self.reset_storage('matrix')
 
-    def filter_matrix(self, filtering_matrix=None, margin=0, **kwargs):
+    def filter_matrix(self, filtering_matrix=None, margin=0, **_):
         """ Remove points that correspond to 1's in `filtering_matrix` from matrix storage. """
         if filtering_matrix is None:
             filtering_matrix = self.field.zero_traces
@@ -157,21 +157,23 @@ class ProcessingMixin:
         self.matrix = smoothed
         self.reset_storage('points')
 
-    def interpolate(self, kernel=None, kernel_size=3, iters=1, margin=None, sigma=0.8, **_):
+    def interpolate(self, kernel=None, kernel_size=3, iters=1, min_neighbors=0, margin=None, sigma=0.8, **_):
         """ Interpolate horizon surface on the regions with missing traces.
 
         Under the hood, we fill missing traces with weighted neighbor values.
 
         Parameters
         ----------
-        matrix : ndarray
-            Array to make interpolation in.
         kernel : ndarray or None
             Kernel to apply to missing points.
         kernel_size : int
             If the kernel is not provided, shape of the square gaussian kernel.
         iters : int
             Number of interpolation iterations to perform.
+        min_neighbors: int or float
+            Minimal of non-missing neighboring points in a window to interpolate a central point.
+            If int, then it is an amount of points.
+            If float, then it is a points ratio.
         margin : number
             A maximum ptp between values in a squared window for which we apply interpolation.
         sigma : float
@@ -179,7 +181,7 @@ class ProcessingMixin:
         """
         interpolated = interpolate(self.matrix, kernel=kernel, kernel_size=kernel_size,
                                    preserve=False, fill_value=self.FILL_VALUE, iters=iters,
-                                   margin=margin, sigma=sigma)
+                                   min_neighbors=min_neighbors, margin=margin, sigma=sigma)
 
         interpolated = np.rint(interpolated).astype(np.int32)
         interpolated[self.field.zero_traces[self.i_min:self.i_max + 1,
