@@ -250,7 +250,8 @@ sigma_doc = "sigma : float\n\tStandard deviation for a gaussian kernel creation.
 smooth_out.__doc__ += '\n' + '\n'.join(convolve.__doc__.split('\n')[1:]) + sigma_doc
 
 @process_missings
-def interpolate(matrix, kernel_size=3, kernel=None, iters=1, fill_value=None, min_neighbors=0, margin=None, sigma=2.0, **_):
+def interpolate(matrix, kernel_size=3, kernel=None, iters=1, fill_value=None,
+                min_neighbors=0, margin=None, sigma=2.0, **_):
     """ Make 2d interpolation in missing points, marked with either `fill_value` or `np.nan`.
     Interpolation is made as a weighted average of neighboring points, where weights are defined as
     a gaussian kernel (if kernel is None).
