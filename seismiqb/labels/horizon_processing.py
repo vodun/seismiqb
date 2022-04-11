@@ -222,10 +222,10 @@ class ProcessingMixin:
             carcass.smooth_out(preserve_missings=False)
         return carcass
 
-    def make_random_holes_matrix(self, n=10, scale=1.0, max_scale=.25,
-                                 max_angles_amount=4, max_sharpness=5.0, locations=None,
-                                 points_proportion=1e-5, points_shape=1,
-                                 noise_level=0, seed=None):
+    def generate_holes_matrix(self, n=10, scale=1.0, max_scale=.25,
+                              max_angles_amount=4, max_sharpness=5.0, locations=None,
+                              points_proportion=1e-5, points_shape=1,
+                              noise_level=0, seed=None):
         """ Create matrix of random holes for horizon.
 
         Holes can be bezier-like figures or points-like.
@@ -260,6 +260,7 @@ class ProcessingMixin:
         filtering_matrix = np.zeros_like(self.full_matrix)
 
         # Generate bezier-like holes
+        # Generate figures scales
         if isinstance(scale, float):
             scales = []
             sampling_scale = int(
@@ -273,11 +274,14 @@ class ProcessingMixin:
         else:
             scales = scale
 
+        # Generate figures-like holes locations
         if locations is None:
             idxs = rng.choice(len(self), size=n)
             locations = self.points[idxs, :2]
 
         coordinates = [] # container for all types of holes, represented by their coordinates
+
+        # Generate figures inside the field
         for location, figure_scale in zip(locations, scales):
             n_key_points = rng.integers(2, max_angles_amount + 1)
             radius = rng.random()
@@ -287,6 +291,7 @@ class ProcessingMixin:
                                                     scale=figure_scale, shape=self.shape, seed=seed)
             figure_coordinates += location
 
+            # Shift figures if they are out of field bounds
             negative_coords_shift = np.min(np.vstack([figure_coordinates, [0, 0]]), axis=0)
             huge_coords_shift = np.max(np.vstack([figure_coordinates - self.shape, [0, 0]]), axis=0)
             figure_coordinates -= (huge_coords_shift + negative_coords_shift + 1)
@@ -300,10 +305,13 @@ class ProcessingMixin:
             locations = self.points[idxs, :2]
 
             filtering_matrix[locations[:, 0], locations[:, 1]] = 1
+
             if isinstance(points_shape, int):
                 points_shape = (points_shape, points_shape)
             filtering_matrix = binary_dilation(filtering_matrix, np.ones(points_shape))
+
             coordinates.append(np.argwhere(filtering_matrix > 0))
+
         coordinates = np.concatenate(coordinates)
 
         # Add noise and filtering matrix transformations
@@ -313,6 +321,7 @@ class ProcessingMixin:
                                size=coordinates.shape)
             coordinates = np.unique(np.vstack([coordinates, noise.astype(int)]), axis=0)
 
+        # Add valid coordinates onto filtering matrix
         idx = np.where((coordinates[:, 0] >= 0) &
                        (coordinates[:, 1] >= 0) &
                        (coordinates[:, 0] < self.i_length) &
@@ -320,6 +329,8 @@ class ProcessingMixin:
         coordinates = coordinates[idx]
 
         filtering_matrix[coordinates[:, 0], coordinates[:, 1]] = 1
+
+        # Process holes
         filtering_matrix = binary_fill_holes(filtering_matrix)
         filtering_matrix = binary_dilation(filtering_matrix, iterations=4)
         return filtering_matrix
@@ -328,15 +339,16 @@ class ProcessingMixin:
                    max_angles_amount=4, max_sharpness=5.0, locations=None,
                    points_proportion=1e-5, points_shape=1,
                    noise_level=0, seed=None):
-        """ Make holes in a of horizon. Optionally, make a copy before filtering. """
+        """ Make holes in a horizon. Optionally, make a copy before filtering. """
         #pylint: disable=self-cls-assignment
-        filtering_matrix = self.make_random_holes_matrix(n=n, scale=scale, max_scale=max_scale,
-                                                         max_angles_amount=max_angles_amount,
-                                                         max_sharpness=max_sharpness, locations=locations,
-                                                         points_proportion=points_proportion, points_shape=points_shape,
-                                                         noise_level=noise_level, seed=seed)
+        filtering_matrix = self.generate_holes_matrix(n=n, scale=scale, max_scale=max_scale,
+                                                      max_angles_amount=max_angles_amount,
+                                                      max_sharpness=max_sharpness, locations=locations,
+                                                      points_proportion=points_proportion, points_shape=points_shape,
+                                                      noise_level=noise_level, seed=seed)
+
         self = self if inplace is True else self.copy()
         self.filter(filtering_matrix)
         return self
 
-    make_holes.__doc__ += '\n' + '\n'.join(make_random_holes_matrix.__doc__.split('\n')[1:])
+    make_holes.__doc__ += '\n' + '\n'.join(generate_holes_matrix.__doc__.split('\n')[1:])
