@@ -164,8 +164,20 @@ class CacheMixin:
     You can use this mixin for cache introspection and clearing cached data.
     """
     #pylint: disable=redefined-builtin
-    def get_cached_objects(self, properties, methods):
-        """ Get a list of methods and properties that use caching."""
+    def get_cached_objects(self, properties=True, methods=True):
+        """ Get names of properties and methods that use caching.
+
+        Parameters:
+        ----------
+        properties: bool or list
+            If a bool, indicates whether get names of all class properties that use caching or none.
+            If a list, use it as a first return value (assuming it already contains names of cached properties).
+            By default, return names of all cached properties of the class.
+        methods: bool or list
+            If a bool, indicates whether get names of all class methods using cache or none.
+            If a list, use it as a second return value (assuming it already contains names of cached methods).
+            By default, return names of all cached methods of the class.
+        """
         if properties is False:
             get_properties = False
             properties = []
@@ -202,7 +214,7 @@ class CacheMixin:
 
             instance_obj = getattr(self, name)
             if get_methods and callable(instance_obj) and hasattr(instance_obj, 'cache'):
-                methods.append(instance_obj)
+                methods.append(name)
 
         return properties, methods
 
@@ -215,7 +227,6 @@ class CacheMixin:
             If a bool, indicates whether every cached class property must be reset.
             If a list, must contain names of cached properties to reset.
             By default, reset all cached properties of the class.
-
         methods: bool or list
             If a bool, indicates whether every cached class method must be reset.
             If a list, must contain names of cached methods to reset.
@@ -223,15 +234,15 @@ class CacheMixin:
         """
         reset_properties, reset_methods = self.get_cached_objects(properties, methods)
 
-        for property_ in reset_properties:
-            if property_ in self.__dict__:
-                delattr(self, property_)
+        for property_name in reset_properties:
+            if property_name in self.__dict__:
+                delattr(self, property_name)
 
-        for method in reset_methods:
-            method.reset(instance=self)
+        for method_name in reset_methods:
+            getattr(self, method_name).reset(instance=self)
 
     def get_cache_length(self, properties=True, methods=True):
-        """ Clear cached data.
+        """ Get total amount of cached objects for specified properties and methods.
 
         Parameters:
         ----------
@@ -239,7 +250,6 @@ class CacheMixin:
             If a bool, indicates whether every cached class property must be accounted.
             If a list, must contain names of cached properties to account.
             By default, account all cached properties of the class.
-
         methods: bool or list
             If a bool, indicates whether every cached class method must be accounted.
             If a list, must contain names of cached methods to account.
@@ -249,17 +259,18 @@ class CacheMixin:
 
         cache_length_accumulator = 0
 
-        for property_ in cached_properties:
-            if property_ in self.__dict__:
+        for property_name in cached_properties:
+            if property_name in self.__dict__:
                 cache_length_accumulator += 1
 
-        for method in cached_methods:
-            cache_length_accumulator += len(method.cache()[self])
+        for method_name in cached_methods:
+            method_cache = getattr(self, method_name).cache()
+            cache_length_accumulator += len(method_cache[self])
 
         return cache_length_accumulator
 
     def get_cache_size(self, properties=True, methods=True):
-        """ Total size of cached objects for specified methods.
+        """ Get total size of cached objects for specified properties and methods.
 
         Parameters:
         ----------
@@ -267,7 +278,6 @@ class CacheMixin:
             If a bool, indicates whether every cached class property must be accounted.
             If a list, must contain names of cached properties to account.
             By default, account all cached properties of the class.
-
         methods: bool or list
             If a bool, indicates whether every cached class method must be accounted.
             If a list, must contain names of cached methods to account.
@@ -279,14 +289,15 @@ class CacheMixin:
 
         # Accumulate cache size over all cached methods and properties
         # Each term is a size of cached numpy array
-        for property_ in cached_properties:
-            property_value = getattr(self, property_)
+        for property_name in cached_properties:
+            property_value = getattr(self, property_name)
 
             if isinstance(property_value, np.ndarray):
                 cache_size_accumulator += property_value.nbytes / (1024 ** 3)
 
-        for method in cached_methods:
-            method_values = list(method.cache()[self].values())
+        for method_name in cached_methods:
+            method_cache = getattr(self, method_name).cache()
+            method_values = list(method_cache[self].values())
 
             for values in method_values:
                 if isinstance(values, np.ndarray):
@@ -319,28 +330,29 @@ class CacheMixin:
 
         # Creation of a dictionary of cache representation for each method and property
         # with cache_length, cache_size and arguments
-        for property_ in cached_properties:
-            property_cache_lenth = self.get_cache_length(properties=[property_], methods=False)
+        for property_name in cached_properties:
+            property_cache_lenth = self.get_cache_length(properties=[property_name], methods=False)
 
             if property_cache_lenth:
-                property_cache_size = self.get_cache_size(properties=[property_], methods=False)
+                property_cache_size = self.get_cache_size(properties=[property_name], methods=False)
 
-                cache_repr_[property_] = {
+                cache_repr_[property_name] = {
                     'cache_length': property_cache_lenth,
                     'cache_size': property_cache_size,
                     'arguments': None
                 }
 
-        for method in cached_methods:
-            method_cache_length = self.get_cache_length(properties=False, methods=[method])
+        for method_name in cached_methods:
+            method_cache_length = self.get_cache_length(properties=False, methods=[method_name])
 
             if method_cache_length:
-                method_cache_size = self.get_cache_size(properties=False, methods=[method])
+                method_cache_size = self.get_cache_size(properties=False, methods=[method_name])
 
-                arguments = list(method.cache()[self].keys())[0][1:]
+                method_cache = getattr(self, method_name).cache()
+                arguments = list(method_cache[self].keys())[0][1:]
                 arguments = dict(zip(arguments[::2], arguments[1::2]))
 
-                cache_repr_[method.__name__] = {
+                cache_repr_[method_name] = {
                     'cache_length': method_cache_length,
                     'cache_size': method_cache_size,
                     'arguments': arguments
@@ -365,4 +377,4 @@ class CacheMixin:
 
         if len(df) > 0:
             return df.loc[:, ['cache_length', 'cache_size']]
-        return {}
+        return None
