@@ -313,6 +313,29 @@ class CacheMixin:
         """ Total size of cached objects. """
         return self.get_cache_size()
 
+    def make_object_cache_repr(self, object_name, object_type):
+        """ Make repr of object's cache if its length is nonzero else return None. """
+        object_cache_length = self.get_cache_length(objects=[object_name])
+        if object_cache_length == 0:
+            return None
+
+        object_cache_size = self.get_cache_size(objects=[object_name])
+
+        if object_type == 'property':
+            arguments = None
+        elif object_type == 'method':
+            method_cache = getattr(self, object_name).cache()
+            arguments = list(method_cache[self].keys())[0][1:]
+            arguments = dict(zip(arguments[::2], arguments[1::2]))
+
+        object_cache_repr = {
+            'cache_length': object_cache_length,
+            'cache_size': object_cache_size,
+            'arguments': arguments
+            }
+
+        return object_cache_repr
+
     def make_cache_repr(self, format='dict'):
         """ Cache representation that consists of names of methods that cache data,
         information about cache length, size, and arguments for each method.
@@ -329,32 +352,14 @@ class CacheMixin:
         # Creation of a dictionary of cache representation for each method and property
         # with cache_length, cache_size and arguments
         for property_name in cached_properties:
-            property_cache_length = self.get_cache_length(objects=[property_name])
-
-            if property_cache_length:
-                property_cache_size = self.get_cache_size(objects=[property_name])
-
-                cache_repr_[property_name] = {
-                    'cache_length': property_cache_length,
-                    'cache_size': property_cache_size,
-                    'arguments': None
-                }
+            property_cache_repr = self.make_object_cache_repr(object_name=property_name, object_type='property')
+            if property_cache_repr is not None:
+                cache_repr_[property_name] = property_cache_repr
 
         for method_name in cached_methods:
-            method_cache_length = self.get_cache_length(objects=[method_name])
-
-            if method_cache_length:
-                method_cache_size = self.get_cache_size(objects=[method_name])
-
-                method_cache = getattr(self, method_name).cache()
-                arguments = list(method_cache[self].keys())[0][1:]
-                arguments = dict(zip(arguments[::2], arguments[1::2]))
-
-                cache_repr_[method_name] = {
-                    'cache_length': method_cache_length,
-                    'cache_size': method_cache_size,
-                    'arguments': arguments
-                }
+            method_cache_repr = self.make_object_cache_repr(object_name=method_name, object_type='method')
+            if method_cache_repr is not None:
+                cache_repr_[method_name] = method_cache_repr
 
         # Convertation to pandas dataframe
         if format == 'df':
