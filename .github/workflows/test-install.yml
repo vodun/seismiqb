@@ -23,9 +23,9 @@ jobs:
       shell: bash
       run: |
         if ${{ github.event_name == 'pull_request' }}; then
-          echo "::set-output name=matrix::{\"os\":[\"ubuntu-latest\"], \"python-version\":[3.7, 3.8]}"
+          echo "::set-output name=matrix::{\"os\":[\"ubuntu-latest\"], \"python-version\":[3.8]}"
         else
-          echo "::set-output name=matrix::{\"os\":[\"ubuntu-latest\", \"windows-latest\"], \"python-version\":[3.7, 3.8]}"
+          echo "::set-output name=matrix::{\"os\":[\"ubuntu-latest\", \"windows-latest\"], \"python-version\":[3.8]}"
         fi
 
   test_install:
