@@ -158,7 +158,7 @@ class AttributesMixin:
 
 
     # Technical matrices
-    @cached_property
+    @property
     def full_matrix(self):
         """ A method for getting matrix in cubic coordinates. Allows for introspectable cache. """
         return self.matrix_put_on_full(self.matrix)
