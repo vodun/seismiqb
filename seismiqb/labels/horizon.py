@@ -322,7 +322,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
                            (points[:, 2] < self.field.shape[2]))[0]
             points = points[idx]
 
-        if np.issubdtype(self.dtype, np.integer):
+        if self.dtype == np.int32:
             points = np.rint(points)
         if points.dtype != self.dtype:
             points = points.astype(self.dtype)
@@ -352,7 +352,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
         _ = kwargs
 
         if matrix.dtype != self.dtype:
-            if np.issubdtype(self.dtype, np.integer):
+            if self.dtype == np.int32:
                 matrix = np.rint(matrix)
             matrix = matrix.astype(self.dtype)
         self.matrix = matrix

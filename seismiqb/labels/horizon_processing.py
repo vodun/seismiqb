@@ -180,7 +180,7 @@ class ProcessingMixin:
             Standard deviation for a gaussian kernel creation.
         """
         interpolated = interpolate(self.matrix, kernel=kernel, kernel_size=kernel_size,
-                                   preserve=False, fill_value=self.FILL_VALUE, iters=iters,
+                                   fill_value=self.FILL_VALUE, iters=iters,
                                    min_neighbors=min_neighbors, margin=margin, sigma=sigma)
 
         interpolated = np.rint(interpolated).astype(np.int32)

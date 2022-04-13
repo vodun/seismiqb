@@ -164,35 +164,53 @@ def make_gaussian_kernel(kernel_size=3, sigma=1.):
     gaussian_kernel = (kernel / np.sum(kernel).astype(np.float32))
     return gaussian_kernel
 
-def process_missings(function):
-    """ Decorator which apply a special treatment for the missing points in a `matrix`
-    which marked with either `fill_value` or `np.nan`. """
+def process_fill_values(function):
+    """ Decorator which applies a special treatment to the missing points marked with `fill_value`.
+
+    Under the hood, this decorator converts missing values to `np.nan` and after applying the decorated function
+    makes the reverse transformation.
+
+    Note, that the decorator expects that the decorated function does not change the `matrix` inplace.
+    """
     @wraps(function)
     def wrapper(matrix, fill_value=None, **kwargs):
-        # Parse arguments
-        preserve_missings = kwargs.get('preserve_missings', False)
-
-        if function.__name__ == 'interpolate':
-            preserve_missings = False # We interpolate surface to missing points
-
         # Convert all fill values to nans
-        matrix = matrix.astype(np.float32).copy()
+        if not isinstance(matrix, np.float32):
+            matrix = matrix.astype(np.float32)
+
         if fill_value is not None:
             matrix[matrix == fill_value] = np.nan
 
         # Apply function
         result = function(matrix=matrix, **kwargs)
 
-        # Remove all the unwanted values
-        if preserve_missings:
-            result[np.isnan(matrix)] = np.nan
-
-        # Convert nans back to fill value
+        # Convert nans back to the `fill_value`
         if fill_value is not None:
             result[np.isnan(result)] = fill_value
         return result
     return wrapper
 
+def process_missings(function):
+    """ Decorator which applies a special treatment to the missing points in a `matrix` marked with `np.nan`.
+
+    Under the hood, this decorator preserve missing values from changing if needed.
+
+    Note, that the decorator expects that the decorated function does not change the `matrix` inplace.
+    Note, that if you want to operate with fill values as with nans, you need primarily to call
+    the :func:`process_fill_values` decorator.
+    """
+    @wraps(function)
+    def wrapper(matrix, preserve_missings=True, **kwargs):
+        # Apply function
+        result = function(matrix=matrix, preserve_missings=preserve_missings, **kwargs)
+
+        # Remove all the unwanted values
+        if preserve_missings:
+            result[np.isnan(matrix)] = np.nan
+        return result
+    return wrapper
+
+@process_fill_values
 @process_missings
 def convolve(matrix, kernel_size=3, kernel=None, iters=1,
              fill_value=None, preserve_missings=True, margin=np.inf, **_):
@@ -249,7 +267,7 @@ def smooth_out(matrix, kernel_size=3, kernel=None, iters=1, fill_value=None,
 sigma_doc = "sigma : float\n\tStandard deviation for a gaussian kernel creation."
 smooth_out.__doc__ += '\n' + '\n'.join(convolve.__doc__.split('\n')[1:]) + sigma_doc
 
-@process_missings
+@process_fill_values
 def interpolate(matrix, kernel_size=3, kernel=None, iters=1, fill_value=None,
                 min_neighbors=0, margin=None, sigma=2.0, **_):
     """ Make 2d interpolation in missing points, marked with either `fill_value` or `np.nan`.
@@ -296,6 +314,7 @@ def interpolate(matrix, kernel_size=3, kernel=None, iters=1, fill_value=None,
 
     return result
 
+@process_fill_values
 @process_missings
 def median_filter(matrix, kernel_size=3, iters=1, fill_value=None, preserve_missings=True, margin=np.inf, **_):
     """ 2d median filter with special care for nan values (marked with either `fill_value` or `np.nan`),
@@ -362,7 +381,7 @@ def _convolve(src, kernel, preserve_missings, margin):
     return dst
 
 @njit(parallel=True)
-def _interpolate(src, kernel, min_neighbors, margin=None):
+def _interpolate(src, kernel, min_neighbors=1, margin=None):
     """ Jit-accelerated function to apply 2d interpolation to nan values. """
     #pylint: disable=too-many-nested-blocks, consider-using-enumerate, not-an-iterable
     k = kernel.shape[0] // 2
@@ -379,20 +398,31 @@ def _interpolate(src, kernel, min_neighbors, margin=None):
                 continue # We interpolate values only to nan points
 
             # Get neighbors and check whether we can interpolate them
-            element = src[iline-k:iline+k+1, xline-k:xline+k+1]
+            element = src[iline-k:iline+k+1, xline-k:xline+k+1].ravel()
 
-            notnan_neighbors = kernel.size - np.nansum(np.isnan(element))
+            notnan_neighbors = kernel.size - np.isnan(element).sum()
             if notnan_neighbors < min_neighbors:
                 continue
 
-            if margin is not None: # Is the difference between values in the window too high
-                nanmax, nanmin = np.nanmax(element), np.nanmin(element)
+            # Compare ptp with margin
+            if margin is not None:
+                nanmax, nanmin = np.float32(element[0]), np.float32(element[0])
+
+                for item in element:
+                    if not isnan(item):
+                        if isnan(nanmax):
+                            nanmax = item
+                            nanmin = item
+                        else:
+                            nanmax = max(item, nanmax)
+                            nanmin = min(item, nanmin)
+
                 if nanmax - nanmin > margin:
                     continue
 
             # Apply kernel to neighbors to get value for interpolated point
             s, sum_weights = np.float32(0), np.float32(0)
-            for item, weight in zip(element.ravel(), raveled_kernel):
+            for item, weight in zip(element, raveled_kernel):
                 if not isnan(item):
                     s += item * weight
                     sum_weights += weight
