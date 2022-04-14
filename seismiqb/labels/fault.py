@@ -222,10 +222,12 @@ class Fault(Horizon):
                  sticks=sticks, sticks_labels=sticks_labels)
 
     def sticks_to_labeled_array(self, sticks):
+        """ Auxilary method to dump fault into npz with allow_pickle=False. """
         labels = sum([[i] * len(item) for i, item in enumerate(sticks)], [])
         return np.concatenate(sticks), labels
 
     def labeled_array_to_sticks(self, sticks, labels):
+        """ Auxilary method to dump fault into npz with allow_pickle=False. """
         return np.array(split_array(sticks, labels), dtype=object)
 
     def points_to_sticks(self, slices=None, sticks_step=10, stick_nodes_step=10):
