@@ -1,4 +1,5 @@
 """ Mixin for horizon visualization. """
+from copy import copy
 from textwrap import dedent
 
 import numpy as np
@@ -70,6 +71,7 @@ class VisualizationMixin:
     def show(self, attributes='depths', mode='imshow', return_figure=False, **kwargs):
         """ Field visualization with custom naming scheme. """
         attributes = DelegatingList(attributes)
+        attributes = attributes.apply(lambda item: copy(item) if isinstance(item, dict) else item)
         attributes = attributes.apply(self._show_add_prefix, prefix=self.find_self())
 
         kwargs = {
