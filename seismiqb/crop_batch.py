@@ -1233,6 +1233,11 @@ class SeismicCropBatch(Batch):
         scale = self.random.uniform(1-scale, 1+scale)
         return (crop + shift)*scale
 
+    @apply_parallel
+    def invert(self, crop):
+        """ Change sign. """
+        return -crop
+
     @action
     def adaptive_expand(self, src, dst=None, channels='first'):
         """ Add channels dimension to 4D components if needed. If component data has shape `(batch_size, 1, n_x, n_d)`,
