@@ -190,28 +190,7 @@ def process_fill_values(function):
         return result
     return wrapper
 
-def process_missings(function):
-    """ Decorator which applies a special treatment to the missing points in a `matrix` marked with `np.nan`.
-
-    Under the hood, this decorator preserve missing values from changing if needed.
-
-    Note, that the decorator expects that the decorated function does not change the `matrix` inplace.
-    Note, that if you want to operate with fill values as with nans, you need primarily to call
-    the :func:`process_fill_values` decorator.
-    """
-    @wraps(function)
-    def wrapper(matrix, preserve_missings=True, **kwargs):
-        # Apply function
-        result = function(matrix=matrix, preserve_missings=preserve_missings, **kwargs)
-
-        # Remove all the unwanted values
-        if preserve_missings:
-            result[np.isnan(matrix)] = np.nan
-        return result
-    return wrapper
-
 @process_fill_values
-@process_missings
 def convolve(matrix, kernel_size=3, kernel=None, iters=1,
              fill_value=None, preserve_missings=True, margin=np.inf, **_):
     """ Convolve the matrix with a given kernel.
@@ -251,6 +230,10 @@ def convolve(matrix, kernel_size=3, kernel=None, iters=1,
         result = _convolve(src=result, kernel=kernel, preserve_missings=preserve_missings, margin=margin)
 
     result = result[kernel_size:-kernel_size, kernel_size:-kernel_size]
+
+    # Remove all the unwanted values
+    if preserve_missings:
+        result[np.isnan(matrix)] = np.nan
 
     return result
 
@@ -315,7 +298,6 @@ def interpolate(matrix, kernel_size=3, kernel=None, iters=1, fill_value=None,
     return result
 
 @process_fill_values
-@process_missings
 def median_filter(matrix, kernel_size=3, iters=1, fill_value=None, preserve_missings=True, margin=np.inf, **_):
     """ 2d median filter with special care for nan values (marked with either `fill_value` or `np.nan`),
     and to areas with high variance.
@@ -347,6 +329,10 @@ def median_filter(matrix, kernel_size=3, iters=1, fill_value=None, preserve_miss
         result = _medfilt(src=result, kernel_size=kernel_size, preserve_missings=preserve_missings, margin=margin)
 
     result = result[kernel_size:-kernel_size, kernel_size:-kernel_size]
+
+    # Remove all the unwanted values
+    if preserve_missings:
+        result[np.isnan(matrix)] = np.nan
 
     return result
 
