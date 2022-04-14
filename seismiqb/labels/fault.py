@@ -49,7 +49,7 @@ class Fault(Horizon):
     def set_direction(self, direction):
         """ Find azimuth of the fault. """
         if direction is None:
-            if self.sticks is not None:
+            if self.sticks is not None and len(self.sticks) > 0:
                 if len(np.unique(self.sticks[0][:, 0])) == 1:
                     self.direction = 0
                 elif len(np.unique(self.sticks[0][:, 1])) == 1:
@@ -100,7 +100,13 @@ class Fault(Horizon):
         if 'cdp_x' in df.columns:
             df = self.recover_lines_from_cdp(df)
 
-        points = df[self.REDUCED_CHARISMA_SPEC].values
+        if len(df) > 0:
+            points = df[self.REDUCED_CHARISMA_SPEC].values
+        else:
+            self.simplices, self.nodes = np.array([]), np.zeros((0, 3), dtype='int32')
+            points = np.zeros((0, 3), dtype='int32')
+            self.from_points(points, verify=False)
+            return
         if transform:
             points = self.field_reference.geometry.lines_to_cubic(points)
         df[self.REDUCED_CHARISMA_SPEC] = points.astype(np.int32)
@@ -208,7 +214,10 @@ class Fault(Horizon):
         if not os.path.exists(folder_name):
             os.makedirs(folder_name)
 
-        sticks, sticks_labels = self.sticks_to_labeled_array(self.sticks)
+        if self.sticks is not None:
+            sticks, sticks_labels = self.sticks_to_labeled_array(self.sticks)
+        else:
+            sticks, sticks_labels = np.zeros((0, 3)), np.zeros((0, 1))
         np.savez(path, points=self.points, nodes=self.nodes, simplices=self.simplices,
                  sticks=sticks, sticks_labels=sticks_labels)
 

@@ -20,8 +20,8 @@ def triangle_rasterization(points, width=1):
     numpy.ndarray
         array of size N x 3 where N is a number of points in rasterization.
     """
-    shape = np.array([np.max(points[:, i]) - np.min(points[:, i]) for i in range(3)])
-    _points = np.zeros((int((shape[0] + 2) * (shape[1] + 2) * (shape[2] + 2)), 3))
+    max_n_points = np.int32(triangle_volume(points, width))
+    _points = np.empty((max_n_points, 3))
     i = 0
     for x in range(int(np.min(points[:, 0])), int(np.max(points[:, 0])+1)): # pylint: disable=not-an-iterable
         for y in range(int(np.min(points[:, 1])), int(np.max(points[:, 1]+1))):
@@ -31,6 +31,24 @@ def triangle_rasterization(points, width=1):
                     _points[i] = node
                     i += 1
     return _points[:i]
+
+@njit
+def triangle_volume(points, width):
+    """ Compute triangle volume to estimate the number of points. """
+    a = np.abs(points[0] - points[1])
+    a = np.sqrt(a.dot(a))
+    b = np.abs(points[0] - points[2])
+    b = np.sqrt(b.dot(b))
+    c = np.abs(points[2] - points[1])
+    c = np.sqrt(c.dot(c))
+
+    p = (a + b + c) / 2
+    S = (p * (p - a) * (p - b) * (p - c)) ** 0.5
+    r = S / p
+    r_ = (r + width)
+    p_ = p * r_ / r
+    return (p_ * r_) * width
+
 
 def sticks_to_simplices(sticks, return_indices=False):
     """ Compute triangulation of the fault.
