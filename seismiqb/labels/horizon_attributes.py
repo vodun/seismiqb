@@ -395,9 +395,8 @@ class AttributesMixin:
         'instant_amplitudes': ['instant_amplitudes', 'iamplitudes'],
         'fourier_decomposition': ['fourier', 'fourier_decomposition'],
         'wavelet_decomposition': ['wavelet', 'wavelet_decomposition'],
-        'median_diff': ['median_diff', 'mdiff'],
-        'grad': ['grad', 'gradient'],
-        'spikes': ['spikes'],
+        'median_diff': ['median_diff', 'mdiff', 'median_spikes', 'spikes'],
+        'grad': ['grad', 'gradient', 'gradient_spikes', 'grad_spikes'],
     }
     ALIAS_TO_ATTRIBUTE = {alias: name for name, aliases in ATTRIBUTE_TO_ALIAS.items() for alias in aliases}
 
@@ -410,7 +409,6 @@ class AttributesMixin:
         'wavelet_decomposition' : 'get_wavelet_decomposition',
         'median_diff': 'get_median_diff_map',
         'grad': 'get_gradient_map',
-        'spikes': 'get_spikes_map',
     }
 
     def load_attribute(self, src, location=None, use_cache=True, enlarge=False, **kwargs):
@@ -645,7 +643,7 @@ class AttributesMixin:
     # Despiking maps
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     @transformable
-    def get_median_diff_map(self, kernel_size=11, margin=0, iters=2, threshold=2, **_):
+    def get_median_diff_map(self, kernel_size=11, margin=0, iters=2, threshold=2, dilation=0, **_):
         """ Compute difference between depth map and its median filtered counterpart. """
         medfilt = median_filter(self.full_matrix, kernel_size=kernel_size, iters=iters,
                                 margin=margin, fill_value=self.FILL_VALUE)
@@ -654,17 +652,24 @@ class AttributesMixin:
         if threshold is not None:
             spikes[np.abs(spikes) < threshold] = 0
         spikes[self.field.zero_traces == 1] = np.nan
+
+        if dilation:
+            spikes = np.nan_to_num(spikes)
+            spikes = binary_dilation(spikes, iterations=dilation).astype(np.float32)
+            spikes[self.field.zero_traces == 1] = np.nan
         return spikes
 
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     @transformable
-    def get_gradient_map(self, threshold=None, **_):
+    def get_gradient_map(self, threshold=1, dilation=2, **_):
         """ Compute combined gradient map along both directions.
 
         Parameters
         ----------
         threshold : number
             Threshold to consider a difference to be a spike.
+        dilation : int
+            Number of iterations for binary dilation algorithm to increase the spikes.
         """
         grad_i = self.load_attribute('grad_i', on_full=True, dtype=np.float32, use_cache=False)
         grad_x = self.load_attribute('grad_x', on_full=True, dtype=np.float32, use_cache=False)
@@ -679,37 +684,9 @@ class AttributesMixin:
         grad = grad_i + grad_x
         grad[np.abs(grad) > self.h_min] = np.nan
         grad[self.field.zero_traces == 1] = np.nan
-        return grad
-
-
-    @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
-    @transformable
-    def get_spikes_map(self, spikes_mode='median', threshold=1., dilation=5,
-                       kernel_size=11, kernel=None, margin=0, iters=2, **_):
-        """ Locate spikes on a horizon.
-
-        Parameters
-        ----------
-        mode : str
-            If 'gradient', then use gradient map to locate spikes.
-            If 'median', then use median diffs to locate spikes.
-        threshold : number
-            Threshold to consider a difference to be a spike.
-        dilation : int
-            Number of iterations for binary dilation algorithm to increase the spikes.
-        kernel_size, kernel, margin, iters
-            Parameters for median differences computation.
-        """
-        if spikes_mode.startswith('m'):
-            spikes = self.load_attribute('median_diff', mode='m', kernel=kernel, kernel_size=kernel_size,
-                                         margin=margin, iters=iters, threshold=threshold)
-        elif spikes_mode.startswith('g'):
-            spikes = self.load_attribute('gradient', threshold=threshold)
-        else:
-            raise ValueError(f'Wrong mode passed, {spikes_mode}')
 
         if dilation:
-            spikes = np.nan_to_num(spikes)
-            spikes = binary_dilation(spikes, iterations=dilation).astype(np.float32)
-            spikes[self.field.zero_traces == 1] = np.nan
-        return spikes
+            grad = np.nan_to_num(grad)
+            grad = binary_dilation(grad, iterations=dilation).astype(np.float32)
+            grad[self.field.zero_traces == 1] = np.nan
+        return grad
