@@ -158,7 +158,7 @@ class ProcessingMixin:
         self.reset_storage('points')
 
     def edge_preserving_smooth_out(self, kernel_size=3, sigma_spatial=0.8, iters=1,
-                                   preserve_missings=True, margin=5, sigma_range=0.1, **_):
+                                   preserve_missings=True, margin=5, sigma_range=2.0, **_):
         """ Apply a bilateral filtering on horizon surface with special treatment to absent points:
         if the point was present in the original horizon, then it is changed to a weighted sum of all
         present points nearby;

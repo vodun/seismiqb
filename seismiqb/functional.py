@@ -238,8 +238,8 @@ def convolve(matrix, kernel_size=3, kernel=None, iters=1,
     return result
 
 @process_fill_values
-def bilateral_filter(matrix, kernel_size=3, sigma_spatial=2.0, iters=1, fill_value=None,
-                     preserve_missings=True, margin=np.inf, sigma_range=0.1, **_):
+def bilateral_filter(matrix, kernel_size=3, sigma_spatial=0.8, iters=1, fill_value=None,
+                     preserve_missings=True, margin=np.inf, sigma_range=2.0, **_):
     """ Bilateral filtering with a special treatment is given to missing points
     (marked with either `fill_value` or `np.nan`), and to areas with high variance.
 
@@ -450,7 +450,6 @@ def _bilateral_filter(src, kernel, margin, sigma=0.1):
             if sum_weights != 0.0:
                 dst[iline, xline] = s / sum_weights
     return dst
-
 
 @njit(parallel=True)
 def _interpolate(src, kernel, min_neighbors=1, margin=None):
