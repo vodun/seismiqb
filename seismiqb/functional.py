@@ -160,7 +160,7 @@ def make_gaussian_kernel(kernel_size=3, sigma=1.):
     """ Create Gaussian kernel with given parameters: kernel size and std. """
     ax = np.linspace(-(kernel_size - 1) / 2., (kernel_size - 1) / 2., kernel_size)
     x_points, y_points = np.meshgrid(ax, ax)
-    kernel = np.exp(-0.5 * (np.square(x_points) + np.square(y_points)) / np.square(sigma))
+    kernel = np.exp(-0.5 * (np.square(x_points) + np.square(y_points)) / sigma**2)
     gaussian_kernel = (kernel / np.sum(kernel).astype(np.float32))
     return gaussian_kernel
 
@@ -228,6 +228,54 @@ def convolve(matrix, kernel_size=3, kernel=None, iters=1,
     # Apply `_convolve` multiple times. Note that there is no dtype conversion in between
     for _ in range(iters):
         result = _convolve(src=result, kernel=kernel, preserve_missings=preserve_missings, margin=margin)
+
+    result = result[kernel_size:-kernel_size, kernel_size:-kernel_size]
+
+    # Remove all the unwanted values
+    if preserve_missings:
+        result[np.isnan(matrix)] = np.nan
+
+    return result
+
+@process_fill_values
+def bilateral_filter(matrix, kernel_size=3, sigma_spatial=2.0, iters=1, fill_value=None,
+                     preserve_missings=True, margin=np.inf, sigma_range=0.1, **_):
+    """ Bilateral filtering with a special treatment is given to missing points
+    (marked with either `fill_value` or `np.nan`), and to areas with high variance.
+
+    Bilateral filtering is an edge-preserving smoothening.
+
+    Parameters
+    ----------
+    matrix : ndarray
+        Array to filter values in.
+    kernel_size : int
+        If the kernel is not provided, shape of the squared gaussian kernel.
+    sigma_spatial : float
+        Standard deviation for a gaussian kernel creation.
+    iters : int
+        Number of filtering iterations to perform.
+    fill_value : number
+        Value which is interpreted as `np.nan` in computations.
+    preserve_missings : bool
+        If True, then all the missing values remain missing in the resulting array.
+        If False, then missing values are filled with weighted average of nearby points.
+    margin : number
+        If the distance between anchor point and the point inside filter is bigger than the margin,
+        then the point is ignored in convolutions.
+        Can be used for separate smoothening on sides of discontinuity.
+    sigma_range : float
+        Standard deviation for a range gaussian for additional weight.
+    """
+    _ = fill_value # This value is passed only to the decorator
+    kernel = make_gaussian_kernel(kernel_size=kernel_size, sigma=sigma_spatial)
+
+    kernel_size = kernel.shape[0]
+    result = np.pad(matrix, kernel_size, constant_values=np.nan)
+
+    # Apply `_convolve` multiple times. Note that there is no dtype conversion in between
+    for _ in range(iters):
+        result = _bilateral_filter(src=result, kernel=kernel, margin=margin, sigma=sigma_range)
 
     result = result[kernel_size:-kernel_size, kernel_size:-kernel_size]
 
@@ -351,7 +399,7 @@ def _convolve(src, kernel, preserve_missings, margin):
             central = src[iline, xline]
 
             if (preserve_missings is True) and isnan(central):
-                continue # Do nothing with nans
+                continue
 
             # Get values in the squared window and apply kernel to them
             element = src[iline-k:iline+k+1, xline-k:xline+k+1]
@@ -365,6 +413,44 @@ def _convolve(src, kernel, preserve_missings, margin):
             if sum_weights != 0.0:
                 dst[iline, xline] = s / sum_weights
     return dst
+
+@njit(parallel=True)
+def _bilateral_filter(src, kernel, margin, sigma=0.1):
+    """ Jit-accelerated function to apply 2d bilateral filtering with special care for nan values.
+
+    The difference between :func:`_convolve` and :func:`_bilateral_filter` is in additional weight multiplier,
+    which is a gaussian of difference of convolved elements.
+    """
+    #pylint: disable=too-many-nested-blocks, consider-using-enumerate, not-an-iterable
+    k = kernel.shape[0] // 2
+    raveled_kernel = kernel.ravel() / np.sum(kernel)
+    sigma_squared = sigma**2
+
+    i_range, x_range = src.shape
+    dst = src.copy()
+
+    for iline in prange(k, i_range - k):
+        for xline in range(k, x_range - k):
+            central = src[iline, xline]
+
+            if isnan(central):
+                continue # Because can't evaluate additional multiplier
+
+            # Get values in the squared window and apply kernel to them
+            element = src[iline-k:iline+k+1, xline-k:xline+k+1].ravel()
+
+            s, sum_weights = np.float32(0), np.float32(0)
+            for item, weight in zip(element, raveled_kernel):
+                if not isnan(item) and (abs(item - central) <= margin):
+                    weight *= np.exp(-0.5*((item - central)**2)/sigma_squared)
+
+                    s += item * weight
+                    sum_weights += weight
+
+            if sum_weights != 0.0:
+                dst[iline, xline] = s / sum_weights
+    return dst
+
 
 @njit(parallel=True)
 def _interpolate(src, kernel, min_neighbors=1, margin=None):
@@ -433,7 +519,7 @@ def _medfilt(src, kernel_size, preserve_missings, margin):
             central = src[iline, xline]
 
             if (preserve_missings is True) and isnan(central):
-                continue # Do nothing with nans
+                continue
 
             element = src[iline-k:iline+k+1, xline-k:xline+k+1].ravel()
 

@@ -4,7 +4,7 @@ import numpy as np
 from skimage.measure import label
 from scipy.ndimage.morphology import binary_fill_holes, binary_dilation, binary_erosion
 
-from ..functional import smooth_out, interpolate
+from ..functional import smooth_out, interpolate, bilateral_filter
 from ..utils import make_bezier_figure
 
 class ProcessingMixin:
@@ -149,6 +149,42 @@ class ProcessingMixin:
         smoothed = smooth_out(self.matrix, kernel=kernel, kernel_size=kernel_size, iters=iters,
                               preserve_missings=preserve_missings, fill_value=self.FILL_VALUE,
                               margin=margin, sigma=sigma)
+
+        smoothed = np.rint(smoothed).astype(np.int32)
+        smoothed[self.field.zero_traces[self.i_min:self.i_max + 1,
+                                        self.x_min:self.x_max + 1] == 1] = self.FILL_VALUE
+
+        self.matrix = smoothed
+        self.reset_storage('points')
+
+    def edge_preserving_smooth_out(self, kernel_size=3, sigma_spatial=0.8, iters=1,
+                                   preserve_missings=True, margin=5, sigma_range=0.1, **_):
+        """ Apply a bilateral filtering on horizon surface with special treatment to absent points:
+        if the point was present in the original horizon, then it is changed to a weighted sum of all
+        present points nearby;
+        if the point was absent in the original horizon and there is at least one non-fill point nearby,
+        then it is changed to a weighted sum of all present points nearby.
+
+        Parameters
+        ----------
+        kernel_size : int
+            Size of gaussian filter.
+        sigma_spatial : float
+            Standard deviation for a gaussian kernel creation.
+        iters : int
+            Number of times to apply smoothing filter.
+        preserve_missings : bool
+            Whether or not to allow method label additional points.
+        margin : number
+            If the distance between anchor point and the point inside filter is bigger than the margin,
+            then the point is ignored in convolutions.
+            Can be used for separate smoothening on sides of discontinuity.
+        sigma_range : float
+            Standard deviation for a range gaussian for additional weight.
+        """
+        smoothed = bilateral_filter(self.matrix, kernel_size=kernel_size, sigma_spatial=sigma_spatial,
+                                    iters=iters, preserve_missings=preserve_missings, fill_value=self.FILL_VALUE,
+                                    margin=margin, sigma_range=sigma_range)
 
         smoothed = np.rint(smoothed).astype(np.int32)
         smoothed[self.field.zero_traces[self.i_min:self.i_max + 1,
