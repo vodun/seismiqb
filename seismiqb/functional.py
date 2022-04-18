@@ -227,7 +227,8 @@ def convolve(matrix, kernel_size=3, kernel=None, iters=1,
 
     # Apply `_convolve` multiple times. Note that there is no dtype conversion in between
     for _ in range(iters):
-        result = _convolve(src=result, kernel=kernel, preserve_missings=preserve_missings, distance_threshold=distance_threshold)
+        result = _convolve(src=result, kernel=kernel, preserve_missings=preserve_missings,
+                           distance_threshold=distance_threshold)
 
     result = result[kernel_size:-kernel_size, kernel_size:-kernel_size]
 
@@ -339,14 +340,16 @@ def interpolate(matrix, kernel_size=3, kernel=None, iters=1, fill_value=None,
 
     # Apply `_interpolate` multiple times. Note that there is no dtype conversion in between
     for _ in range(iters):
-        result = _interpolate(src=result, kernel=kernel, min_neighbors=min_neighbors, max_distance_threshold=max_distance_threshold)
+        result = _interpolate(src=result, kernel=kernel, min_neighbors=min_neighbors,
+                              max_distance_threshold=max_distance_threshold)
 
     result = result[kernel_size:-kernel_size, kernel_size:-kernel_size]
 
     return result
 
 @process_fill_values
-def median_filter(matrix, kernel_size=3, iters=1, fill_value=None, preserve_missings=True, distance_threshold=np.inf, **_):
+def median_filter(matrix, kernel_size=3, iters=1, fill_value=None, preserve_missings=True,
+                  distance_threshold=np.inf, **_):
     """ 2d median filter with special care for nan values (marked with either `fill_value` or `np.nan`),
     and to areas with high variance.
 

@@ -51,7 +51,8 @@ class ProcessingMixin:
 
     filter = filter_points
 
-    def filter_spikes(self, mode='gradient', spikes_threshold=1., dilation=5, kernel_size=11, distance_threshold=0, iters=2):
+    def filter_spikes(self, mode='gradient', spikes_threshold=1., dilation=5, kernel_size=11,
+                      distance_threshold=0, iters=2):
         """ Remove spikes from horizon. Works inplace.
 
         Parameters
@@ -125,7 +126,8 @@ class ProcessingMixin:
         self.points = self.points[mask_i + mask_x]
         self.reset_storage('matrix')
 
-    def smooth_out(self, kernel=None, kernel_size=3, iters=1, preserve_missings=True, distance_threshold=5, sigma=0.8, **_):
+    def smooth_out(self, kernel=None, kernel_size=3, iters=1, preserve_missings=True, distance_threshold=5,
+                   sigma=0.8, **_):
         """ Convolve the horizon with gaussian kernel with special treatment to absent points:
         if the point was present in the original horizon, then it is changed to a weighted sum of all
         present points nearby;
@@ -197,7 +199,8 @@ class ProcessingMixin:
         self.matrix = smoothed
         self.reset_storage('points')
 
-    def interpolate(self, kernel=None, kernel_size=3, iters=1, min_neighbors=0, max_distance_threshold=None, sigma=0.8, **_):
+    def interpolate(self, kernel=None, kernel_size=3, iters=1, min_neighbors=0, max_distance_threshold=None,
+                    sigma=0.8, **_):
         """ Interpolate horizon surface on the regions with missing traces.
 
         Under the hood, we fill missing traces with weighted neighbor values.
@@ -221,7 +224,8 @@ class ProcessingMixin:
         """
         interpolated = interpolate(self.matrix, kernel=kernel, kernel_size=kernel_size,
                                    fill_value=self.FILL_VALUE, iters=iters,
-                                   min_neighbors=min_neighbors, max_distance_threshold=max_distance_threshold, sigma=sigma)
+                                   min_neighbors=min_neighbors, max_distance_threshold=max_distance_threshold,
+                                   sigma=sigma)
 
         interpolated = np.rint(interpolated).astype(np.int32)
         interpolated[self.field.zero_traces[self.i_min:self.i_max + 1,
