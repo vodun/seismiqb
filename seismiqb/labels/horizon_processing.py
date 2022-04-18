@@ -51,7 +51,7 @@ class ProcessingMixin:
 
     filter = filter_points
 
-    def filter_spikes(self, mode='gradient', threshold=1., dilation=5, kernel_size=11, kernel=None, margin=0, iters=2):
+    def filter_spikes(self, mode='gradient', spikes_threshold=1., dilation=5, kernel_size=11, distance_threshold=0, iters=2):
         """ Remove spikes from horizon. Works inplace.
 
         Parameters
@@ -59,15 +59,19 @@ class ProcessingMixin:
         mode : str
             If 'gradient', then use gradient map to locate spikes.
             If 'median', then use median diffs to locate spikes.
-        threshold : number
-            Threshold to consider a difference to be a spike,
+        spikes_threshold : number
+            Threshold to consider a difference to be a spike.
         dilation : int
             Number of iterations for binary dilation algorithm to increase the spikes.
-        kernel_size, kernel, margin, iters
+        kernel_size, distance_threshold, iters
             Parameters for median differences computation.
         """
-        spikes = self.load_attribute('spikes', spikes_mode=mode, threshold=threshold, dilation=dilation,
-                                     kernel_size=kernel_size, kernel=kernel, margin=margin, iters=iters)
+        if 'grad' in mode:
+            spikes = self.load_attribute('grad_spikes', spikes_threshold=spikes_threshold, dilation=dilation)
+        else:
+            spikes = self.load_attribute('median_spikes', spikes_threshold=spikes_threshold, dilation=dilation,
+                                         kernel_size=kernel_size, distance_threshold=distance_threshold, iters=iters)
+
         self.filter(spikes)
 
     despike = filter_spikes
@@ -121,7 +125,7 @@ class ProcessingMixin:
         self.points = self.points[mask_i + mask_x]
         self.reset_storage('matrix')
 
-    def smooth_out(self, kernel=None, kernel_size=3, iters=1, preserve_missings=True, margin=5, sigma=0.8, **_):
+    def smooth_out(self, kernel=None, kernel_size=3, iters=1, preserve_missings=True, distance_threshold=5, sigma=0.8, **_):
         """ Convolve the horizon with gaussian kernel with special treatment to absent points:
         if the point was present in the original horizon, then it is changed to a weighted sum of all
         present points nearby;
@@ -138,8 +142,8 @@ class ProcessingMixin:
             Number of times to apply smoothing filter.
         preserve_missings : bool
             Whether or not to allow method label additional points.
-        margin : number
-            If the distance between anchor point and the point inside filter is bigger than the margin,
+        distance_threshold : number
+            If the distance between anchor point and the point inside filter is bigger than the threshold,
             then the point is ignored in convolutions.
             Can be used for separate smoothening on sides of discontinuity.
         sigma : number
@@ -148,7 +152,7 @@ class ProcessingMixin:
         """
         smoothed = smooth_out(self.matrix, kernel=kernel, kernel_size=kernel_size, iters=iters,
                               preserve_missings=preserve_missings, fill_value=self.FILL_VALUE,
-                              margin=margin, sigma=sigma)
+                              distance_threshold=distance_threshold, sigma=sigma)
 
         smoothed = np.rint(smoothed).astype(np.int32)
         smoothed[self.field.zero_traces[self.i_min:self.i_max + 1,
@@ -158,7 +162,7 @@ class ProcessingMixin:
         self.reset_storage('points')
 
     def edge_preserving_smooth_out(self, kernel_size=3, sigma_spatial=0.8, iters=1,
-                                   preserve_missings=True, margin=5, sigma_range=2.0, **_):
+                                   preserve_missings=True, distance_threshold=5, sigma_range=2.0, **_):
         """ Apply a bilateral filtering on horizon surface with special treatment to absent points:
         if the point was present in the original horizon, then it is changed to a weighted sum of all
         present points nearby;
@@ -175,8 +179,8 @@ class ProcessingMixin:
             Number of times to apply smoothing filter.
         preserve_missings : bool
             Whether or not to allow method label additional points.
-        margin : number
-            If the distance between anchor point and the point inside filter is bigger than the margin,
+        distance_threshold : number
+            If the distance between anchor point and the point inside filter is bigger than the threshold,
             then the point is ignored in convolutions.
             Can be used for separate smoothening on sides of discontinuity.
         sigma_range : float
@@ -184,7 +188,7 @@ class ProcessingMixin:
         """
         smoothed = bilateral_filter(self.matrix, kernel_size=kernel_size, sigma_spatial=sigma_spatial,
                                     iters=iters, preserve_missings=preserve_missings, fill_value=self.FILL_VALUE,
-                                    margin=margin, sigma_range=sigma_range)
+                                    distance_threshold=distance_threshold, sigma_range=sigma_range)
 
         smoothed = np.rint(smoothed).astype(np.int32)
         smoothed[self.field.zero_traces[self.i_min:self.i_max + 1,
@@ -193,7 +197,7 @@ class ProcessingMixin:
         self.matrix = smoothed
         self.reset_storage('points')
 
-    def interpolate(self, kernel=None, kernel_size=3, iters=1, min_neighbors=0, margin=None, sigma=0.8, **_):
+    def interpolate(self, kernel=None, kernel_size=3, iters=1, min_neighbors=0, max_distance_threshold=None, sigma=0.8, **_):
         """ Interpolate horizon surface on the regions with missing traces.
 
         Under the hood, we fill missing traces with weighted neighbor values.
@@ -210,14 +214,14 @@ class ProcessingMixin:
             Minimal of non-missing neighboring points in a window to interpolate a central point.
             If int, then it is an amount of points.
             If float, then it is a points ratio.
-        margin : number
-            A maximum ptp between values in a squared window for which we apply interpolation.
+        max_distance_threshold : number
+            A maximum distance between values in a squared window for which we apply interpolation.
         sigma : float
             Standard deviation for a gaussian kernel creation.
         """
         interpolated = interpolate(self.matrix, kernel=kernel, kernel_size=kernel_size,
                                    fill_value=self.FILL_VALUE, iters=iters,
-                                   min_neighbors=min_neighbors, margin=margin, sigma=sigma)
+                                   min_neighbors=min_neighbors, max_distance_threshold=max_distance_threshold, sigma=sigma)
 
         interpolated = np.rint(interpolated).astype(np.int32)
         interpolated[self.field.zero_traces[self.i_min:self.i_max + 1,

@@ -192,7 +192,7 @@ def process_fill_values(function):
 
 @process_fill_values
 def convolve(matrix, kernel_size=3, kernel=None, iters=1,
-             fill_value=None, preserve_missings=True, margin=np.inf, **_):
+             fill_value=None, preserve_missings=True, distance_threshold=np.inf, **_):
     """ Convolve the matrix with a given kernel.
     A special treatment is given to missing points (marked with either `fill_value` or `np.nan`),
     and to areas with high variance.
@@ -212,8 +212,8 @@ def convolve(matrix, kernel_size=3, kernel=None, iters=1,
     preserve_missings : bool
         If True, then all the missing values remain missing in the resulting array.
         If False, then missing values are filled with weighted average of nearby points.
-    margin : number
-        If the distance between anchor point and the point inside filter is bigger than the margin,
+    distance_threshold : number
+        If the distance between anchor point and the point inside filter is bigger than the threshold,
         then the point is ignored in convolutions.
         Can be used for separate smoothening on sides of discontinuity.
     """
@@ -227,7 +227,7 @@ def convolve(matrix, kernel_size=3, kernel=None, iters=1,
 
     # Apply `_convolve` multiple times. Note that there is no dtype conversion in between
     for _ in range(iters):
-        result = _convolve(src=result, kernel=kernel, preserve_missings=preserve_missings, margin=margin)
+        result = _convolve(src=result, kernel=kernel, preserve_missings=preserve_missings, distance_threshold=distance_threshold)
 
     result = result[kernel_size:-kernel_size, kernel_size:-kernel_size]
 
@@ -239,7 +239,7 @@ def convolve(matrix, kernel_size=3, kernel=None, iters=1,
 
 @process_fill_values
 def bilateral_filter(matrix, kernel_size=3, sigma_spatial=0.8, iters=1, fill_value=None,
-                     preserve_missings=True, margin=np.inf, sigma_range=2.0, **_):
+                     preserve_missings=True, distance_threshold=np.inf, sigma_range=2.0, **_):
     """ Bilateral filtering with a special treatment is given to missing points
     (marked with either `fill_value` or `np.nan`), and to areas with high variance.
 
@@ -260,8 +260,8 @@ def bilateral_filter(matrix, kernel_size=3, sigma_spatial=0.8, iters=1, fill_val
     preserve_missings : bool
         If True, then all the missing values remain missing in the resulting array.
         If False, then missing values are filled with weighted average of nearby points.
-    margin : number
-        If the distance between anchor point and the point inside filter is bigger than the margin,
+    distance_threshold : number
+        If the distance between anchor point and the point inside filter is bigger than the threshold,
         then the point is ignored in convolutions.
         Can be used for separate smoothening on sides of discontinuity.
     sigma_range : float
@@ -273,9 +273,9 @@ def bilateral_filter(matrix, kernel_size=3, sigma_spatial=0.8, iters=1, fill_val
     kernel_size = kernel.shape[0]
     result = np.pad(matrix, kernel_size, constant_values=np.nan)
 
-    # Apply `_convolve` multiple times. Note that there is no dtype conversion in between
+    # Apply `_bilateral_filter` multiple times. Note that there is no dtype conversion in between
     for _ in range(iters):
-        result = _bilateral_filter(src=result, kernel=kernel, margin=margin, sigma=sigma_range)
+        result = _bilateral_filter(src=result, kernel=kernel, distance_threshold=distance_threshold, sigma=sigma_range)
 
     result = result[kernel_size:-kernel_size, kernel_size:-kernel_size]
 
@@ -286,13 +286,13 @@ def bilateral_filter(matrix, kernel_size=3, sigma_spatial=0.8, iters=1, fill_val
     return result
 
 def smooth_out(matrix, kernel_size=3, kernel=None, iters=1, fill_value=None,
-               preserve_missings=True, margin=np.inf, sigma=2.0, **kwargs):
+               preserve_missings=True, distance_threshold=np.inf, sigma=2.0, **kwargs):
     """ Matrix smoothening via convolution with a gaussian kernel. """
     if kernel is None:
         kernel = make_gaussian_kernel(kernel_size=kernel_size, sigma=sigma)
 
     result = convolve(matrix=matrix, kernel=kernel, iters=iters, fill_value=fill_value,
-                      preserve_missings=preserve_missings, margin=margin, **kwargs)
+                      preserve_missings=preserve_missings, distance_threshold=distance_threshold, **kwargs)
     return result
 
 sigma_doc = "sigma : float\n\tStandard deviation for a gaussian kernel creation."
@@ -300,7 +300,7 @@ smooth_out.__doc__ += '\n' + '\n'.join(convolve.__doc__.split('\n')[1:]) + sigma
 
 @process_fill_values
 def interpolate(matrix, kernel_size=3, kernel=None, iters=1, fill_value=None,
-                min_neighbors=0, margin=None, sigma=2.0, **_):
+                min_neighbors=0, max_distance_threshold=None, sigma=2.0, **_):
     """ Make 2d interpolation in missing points, marked with either `fill_value` or `np.nan`.
     Interpolation is made as a weighted average of neighboring points, where weights are defined as
     a gaussian kernel (if kernel is None).
@@ -321,8 +321,8 @@ def interpolate(matrix, kernel_size=3, kernel=None, iters=1, fill_value=None,
         Minimal of non-missing neighboring points in a window to interpolate a central point.
         If int, then it is an amount of points.
         If float, then it is a points ratio.
-    margin : number
-        A maximum ptp between values in a squared window for which we apply interpolation.
+    max_distance_threshold : number
+        A maximum distance between values in a squared window for which we apply interpolation.
     sigma : float
         Standard deviation for a gaussian kernel creation.
     """
@@ -339,14 +339,14 @@ def interpolate(matrix, kernel_size=3, kernel=None, iters=1, fill_value=None,
 
     # Apply `_interpolate` multiple times. Note that there is no dtype conversion in between
     for _ in range(iters):
-        result = _interpolate(src=result, kernel=kernel, min_neighbors=min_neighbors, margin=margin)
+        result = _interpolate(src=result, kernel=kernel, min_neighbors=min_neighbors, max_distance_threshold=max_distance_threshold)
 
     result = result[kernel_size:-kernel_size, kernel_size:-kernel_size]
 
     return result
 
 @process_fill_values
-def median_filter(matrix, kernel_size=3, iters=1, fill_value=None, preserve_missings=True, margin=np.inf, **_):
+def median_filter(matrix, kernel_size=3, iters=1, fill_value=None, preserve_missings=True, distance_threshold=np.inf, **_):
     """ 2d median filter with special care for nan values (marked with either `fill_value` or `np.nan`),
     and to areas with high variance.
 
@@ -363,8 +363,8 @@ def median_filter(matrix, kernel_size=3, iters=1, fill_value=None, preserve_miss
     preserve_missings : bool
         If True, then all the missing values remain missing in the resulting array.
         If False, then missing values are filled with weighted average of nearby points.
-    margin : number
-        If the distance between anchor point and the point inside filter is bigger than the margin,
+    distance_threshold : number
+        If the distance between anchor point and the point inside filter is bigger than the threshold,
         then the point is ignored in filtering.
         Can be used for separate smoothening on sides of discontinuity.
     """
@@ -374,7 +374,8 @@ def median_filter(matrix, kernel_size=3, iters=1, fill_value=None, preserve_miss
 
     # Apply `_medfilt` multiple times. Note that there is no dtype conversion in between
     for _ in range(iters):
-        result = _medfilt(src=result, kernel_size=kernel_size, preserve_missings=preserve_missings, margin=margin)
+        result = _medfilt(src=result, kernel_size=kernel_size, preserve_missings=preserve_missings,
+                          distance_threshold=distance_threshold)
 
     result = result[kernel_size:-kernel_size, kernel_size:-kernel_size]
 
@@ -385,7 +386,7 @@ def median_filter(matrix, kernel_size=3, iters=1, fill_value=None, preserve_miss
     return result
 
 @njit(parallel=True)
-def _convolve(src, kernel, preserve_missings, margin):
+def _convolve(src, kernel, preserve_missings, distance_threshold):
     """ Jit-accelerated function to apply 2d convolution with special care for nan values. """
     #pylint: disable=too-many-nested-blocks, consider-using-enumerate, not-an-iterable
     k = kernel.shape[0] // 2
@@ -406,7 +407,7 @@ def _convolve(src, kernel, preserve_missings, margin):
 
             s, sum_weights = np.float32(0), np.float32(0)
             for item, weight in zip(element.ravel(), raveled_kernel):
-                if not isnan(item) and (abs(item - central) <= margin or isnan(central)):
+                if not isnan(item) and (abs(item - central) <= distance_threshold or isnan(central)):
                     s += item * weight
                     sum_weights += weight
 
@@ -415,7 +416,7 @@ def _convolve(src, kernel, preserve_missings, margin):
     return dst
 
 @njit(parallel=True)
-def _bilateral_filter(src, kernel, margin, sigma=0.1):
+def _bilateral_filter(src, kernel, distance_threshold, sigma=0.1):
     """ Jit-accelerated function to apply 2d bilateral filtering with special care for nan values.
 
     The difference between :func:`_convolve` and :func:`_bilateral_filter` is in additional weight multiplier,
@@ -441,7 +442,7 @@ def _bilateral_filter(src, kernel, margin, sigma=0.1):
 
             s, sum_weights = np.float32(0), np.float32(0)
             for item, weight in zip(element, raveled_kernel):
-                if not isnan(item) and (abs(item - central) <= margin):
+                if not isnan(item) and (abs(item - central) <= distance_threshold):
                     weight *= np.exp(-0.5*((item - central)**2)/sigma_squared)
 
                     s += item * weight
@@ -452,7 +453,7 @@ def _bilateral_filter(src, kernel, margin, sigma=0.1):
     return dst
 
 @njit(parallel=True)
-def _interpolate(src, kernel, min_neighbors=1, margin=None):
+def _interpolate(src, kernel, min_neighbors=1, max_distance_threshold=None):
     """ Jit-accelerated function to apply 2d interpolation to nan values. """
     #pylint: disable=too-many-nested-blocks, consider-using-enumerate, not-an-iterable
     k = kernel.shape[0] // 2
@@ -475,8 +476,8 @@ def _interpolate(src, kernel, min_neighbors=1, margin=None):
             if notnan_neighbors < min_neighbors:
                 continue
 
-            # Compare ptp with margin
-            if margin is not None:
+            # Compare ptp with the max_distance_threshold
+            if max_distance_threshold is not None:
                 nanmax, nanmin = np.float32(element[0]), np.float32(element[0])
 
                 for item in element:
@@ -488,7 +489,7 @@ def _interpolate(src, kernel, min_neighbors=1, margin=None):
                             nanmax = max(item, nanmax)
                             nanmin = min(item, nanmin)
 
-                if nanmax - nanmin > margin:
+                if nanmax - nanmin > max_distance_threshold:
                     continue
 
             # Apply kernel to neighbors to get value for interpolated point
@@ -503,10 +504,10 @@ def _interpolate(src, kernel, min_neighbors=1, margin=None):
     return dst
 
 @njit(parallel=True)
-def _medfilt(src, kernel_size, preserve_missings, margin):
+def _medfilt(src, kernel_size, preserve_missings, distance_threshold):
     """ Jit-accelerated function to apply 2d median filter with special care for nan values. """
-    # margin = 0: median across all non-equal-to-self elements in kernel
-    # margin = -1: median across all elements in kernel
+    # distance_threshold = 0: median across all non-equal-to-self elements in kernel
+    # distance_threshold = -1: median across all elements in kernel
     #pylint: disable=too-many-nested-blocks, consider-using-enumerate, not-an-iterable
     k = kernel_size // 2
 
@@ -528,7 +529,7 @@ def _medfilt(src, kernel_size, preserve_missings, margin):
 
             for i, item in enumerate(element):
                 if not isnan(item):
-                    if (abs(item - central) > margin) or isnan(central):
+                    if (abs(item - central) > distance_threshold) or isnan(central):
                         indicator[i] = np.float32(1)
                 else:
                     indicator[i] = np.float32(2)

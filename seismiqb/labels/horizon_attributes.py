@@ -643,14 +643,24 @@ class AttributesMixin:
     # Despiking maps
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     @transformable
-    def get_median_diff_map(self, kernel_size=11, margin=0, iters=2, threshold=2, dilation=0, **_):
-        """ Compute difference between depth map and its median filtered counterpart. """
-        medfilt = median_filter(self.full_matrix, kernel_size=kernel_size, iters=iters,
-                                margin=margin, fill_value=self.FILL_VALUE)
+    def get_median_diff_map(self, spikes_threshold=2, dilation=0, kernel_size=11, distance_threshold=0, iters=2, **_):
+        """ Compute difference between depth map and its median filtered counterpart.
+
+        Parameters
+        ----------
+        spikes_threshold : number
+            Threshold to consider a difference to be a spike.
+        dilation : int
+            Number of iterations for binary dilation algorithm to increase the spikes.
+        kernel_size, distance_threshold, iters
+            Parameters for median differences computation.
+        """
+        medfilt = median_filter(self.full_matrix, kernel_size=kernel_size, distance_threshold=distance_threshold,
+                                iters=iters, fill_value=self.FILL_VALUE)
         spikes = self.full_matrix - medfilt
 
-        if threshold is not None:
-            spikes[np.abs(spikes) < threshold] = 0
+        if spikes_threshold is not None:
+            spikes[np.abs(spikes) < spikes_threshold] = 0
         spikes[self.field.zero_traces == 1] = np.nan
 
         if dilation:
@@ -661,12 +671,12 @@ class AttributesMixin:
 
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     @transformable
-    def get_gradient_map(self, threshold=1, dilation=2, **_):
+    def get_gradient_map(self, spikes_threshold=1, dilation=2, **_):
         """ Compute combined gradient map along both directions.
 
         Parameters
         ----------
-        threshold : number
+        spikes_threshold : number
             Threshold to consider a difference to be a spike.
         dilation : int
             Number of iterations for binary dilation algorithm to increase the spikes.
@@ -674,9 +684,9 @@ class AttributesMixin:
         grad_i = self.load_attribute('grad_i', on_full=True, dtype=np.float32, use_cache=False)
         grad_x = self.load_attribute('grad_x', on_full=True, dtype=np.float32, use_cache=False)
 
-        if threshold is not None:
-            grad_i[np.abs(grad_i) <= threshold] = 0
-            grad_x[np.abs(grad_x) <= threshold] = 0
+        if spikes_threshold is not None:
+            grad_i[np.abs(grad_i) <= spikes_threshold] = 0
+            grad_x[np.abs(grad_x) <= spikes_threshold] = 0
 
         grad_i[grad_i == self.FILL_VALUE] = np.nan
         grad_x[grad_x == self.FILL_VALUE] = np.nan
