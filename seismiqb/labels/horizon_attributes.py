@@ -1,16 +1,18 @@
 """ Mixin with computed along horizon geological attributes. """
 # pylint: disable=too-many-statements
 from copy import copy
+from functools import cached_property
+
 import numpy as np
 
 from cv2 import dilate
-from scipy.signal import hilbert, ricker
+from scipy.signal import ricker
 from scipy.ndimage import convolve
 from scipy.ndimage.morphology import binary_fill_holes, binary_erosion, binary_dilation
 from skimage.measure import label
 from sklearn.decomposition import PCA
 
-from ..functional import smooth_out, median_filter
+from ..functional import smooth_out, median_filter, hilbert
 from ..utils import transformable, lru_cache
 
 
@@ -18,7 +20,7 @@ from ..utils import transformable, lru_cache
 class AttributesMixin:
     """ Geological attributes along horizon:
     - scalars computed from its depth map only: number of holes, perimeter, coverage
-    - matrices computed from its depth map only: presence matrix, gradients along directions, etc
+    - matrices computed from its depth map only: presence mask, gradients along directions, etc
     - properties of a carcass
     - methods to cut data from the cube along horizon
     - matrices derived from amplitudes along horizon: instant amplitudes/phases, decompositions, etc.
@@ -29,14 +31,6 @@ class AttributesMixin:
     Method for getting desired attributes is `load_attribute`. It works with nested keys, i.e. one can get attributes
     of horizon subsets. Address method documentation for further details.
     """
-    #pylint: disable=unexpected-keyword-arg
-    def __getattr__(self, key):
-        if key.startswith('full_'):
-            key = key.replace('full_', '')
-            matrix = getattr(self, key)
-            return self.matrix_put_on_full(matrix)
-        raise AttributeError(key)
-
     # Modify computed matrices
     def _dtype_to_fill_value(self, dtype):
         if dtype == np.int32:
@@ -59,7 +53,9 @@ class AttributesMixin:
     def matrix_put_on_full(self, matrix):
         """ Convert matrix from being horizon-shaped to cube-shaped. """
         if matrix.shape[:2] != self.field.spatial_shape:
-            background = np.full(self.field.spatial_shape, self._dtype_to_fill_value(matrix.dtype), dtype=matrix.dtype)
+            background = np.full(shape=self.field.spatial_shape,
+                                 fill_value=self._dtype_to_fill_value(matrix.dtype),
+                                 dtype=matrix.dtype)
             background[self.i_min:self.i_max + 1, self.x_min:self.x_max + 1] = matrix
         else:
             background = matrix.copy()
@@ -100,7 +96,7 @@ class AttributesMixin:
             If `min-max` or True, then use min-max scaling.
             If `mean-std`, then use mean-std scaling.
         """
-        values = matrix[self.presence_matrix]
+        values = matrix[self.full_binary_matrix]
 
         if mode in ['min-max', True]:
             min_, max_ = np.nanmin(values), np.nanmax(values)
@@ -163,18 +159,23 @@ class AttributesMixin:
 
     # Technical matrices
     @property
+    def full_matrix(self):
+        """ A method for getting matrix in cubic coordinates. Allows for introspectable cache. """
+        return self.matrix_put_on_full(self.matrix)
+
+    @cached_property
     def binary_matrix(self):
-        """ Boolean matrix with `true` values at places where horizon is present and `false` everywhere else. """
-        return self.matrix > 0
+        """ Boolean matrix with `True` values at places where horizon is present and `False` everywhere else. """
+        return (self.matrix != self.FILL_VALUE).astype(np.bool)
+
+    @cached_property
+    def full_binary_matrix(self):
+        """ A method for getting binary matrix in cubic coordinates. Allows for introspectable cache. """
+        return self.matrix_put_on_full(self.binary_matrix)
 
     @property
-    def presence_matrix(self):
-        """ A convenient alias for binary matrix in cubic coordinate system. """
-        return self._presence_matrix()
-
-    @lru_cache(maxsize=1)
-    def _presence_matrix(self):
-        """ A method for getting binary matrix in cubic coordinates. Allows for introspectable cache. """
+    def mask(self):
+        """ An alias. """
         return self.full_binary_matrix
 
 
@@ -287,7 +288,6 @@ class AttributesMixin:
         low = window // 2 - offset
         high = max(window - low, 0)
         chunk_size = min(chunk_size, self.h_max - self.h_min + window)
-
         background = np.zeros((self.field.ilines_len, self.field.xlines_len, window), dtype=np.float32)
 
         for h_start in range(max(low, self.h_min), self.h_max + 1, chunk_size):
@@ -318,7 +318,7 @@ class AttributesMixin:
                 idx_x = idx_x[mask]
                 heights = heights[mask]
 
-        background[~self.presence_matrix] = np.nan
+        background[~self.full_binary_matrix] = np.nan
         return background
 
 
@@ -385,14 +385,14 @@ class AttributesMixin:
     # Generic attributes loading
     ATTRIBUTE_TO_ALIAS = {
         # Properties
-        'full_matrix': ['full_matrix', 'heights', 'depths'],
-        'full_binary_matrix': ['full_binary_matrix', 'presence_matrix', 'masks'],
+        'full_matrix': ['full_matrix', 'depths'],
+        'full_binary_matrix': ['full_binary_matrix', 'mask'],
 
         # Created by `get_*` methods
         'amplitudes': ['amplitudes', 'cube_values'],
         'metric': ['metric', 'metrics'],
-        'instant_phases': ['instant_phases', 'iphases'],
-        'instant_amplitudes': ['instant_amplitudes', 'iamplitudes'],
+        'instantaneous_phases': ['instant_phases', 'iphases'],
+        'instantaneous_amplitudes': ['instant_amplitudes', 'iamplitudes'],
         'fourier_decomposition': ['fourier', 'fourier_decomposition'],
         'wavelet_decomposition': ['wavelet', 'wavelet_decomposition'],
         'median_diff': ['median_diff', 'mdiff', 'median_spikes', 'spikes'],
@@ -403,8 +403,8 @@ class AttributesMixin:
     ATTRIBUTE_TO_METHOD = {
         'amplitudes' : 'get_cube_values',
         'metric' : 'get_metric',
-        'instant_phases' : 'get_instantaneous_phases',
-        'instant_amplitudes' : 'get_instantaneous_amplitudes',
+        'instantaneous_phases' : 'get_instantaneous_phases',
+        'instantaneous_amplitudes' : 'get_instantaneous_amplitudes',
         'fourier_decomposition' : 'get_fourier_decomposition',
         'wavelet_decomposition' : 'get_wavelet_decomposition',
         'median_diff': 'get_median_diff_map',
@@ -424,14 +424,14 @@ class AttributesMixin:
             Key of the desired attribute. Valid attributes are either properties or aliases, defined
             by `ALIAS_TO_ATTRIBUTE` mapping, for example:
 
-            - 'cube_values' or 'amplitudes': cube values;
-            - 'depths' or 'full_matrix': horizon depth map in cubic coordinates;
-            - 'metrics': random support metrics matrix.
-            - 'instant_phases': instantaneous phase;
-            - 'instant_amplitudes': instantaneous amplitude;
-            - 'fourier' or 'fourier_decomposition': fourier transform with optional PCA;
-            - 'wavelet' or 'wavelet decomposition': wavelet transform with optional PCA;
-            - 'masks' or 'full_binary_matrix': mask of horizon;
+            - 'cube_values' or 'amplitudes': cube values at horizon points;
+            - 'metrics' or 'metric': horizon random support metrics.
+            - 'instantaneous_phases', 'instant_phases' or 'iphases': instantaneous phase;
+            - 'instantaneous_amplitudes', 'instant_amplitudes' or 'iamplitudes': instantaneous amplitude;
+            - 'fourier_decomposition' or 'fourier': fourier transform with optional PCA;
+            - 'wavelet decomposition' or 'wavelet': wavelet transform with optional PCA;
+            - 'full_matrix' or 'depths': horizon depth map in cubic coordinates;
+            - 'full_binary_matrix' or 'mask': mask of horizon presence;
         location : sequence of 3 slices
             First two slices are used as `iline` and `xline` ranges to cut crop from.
             Last 'depth' slice is not used, since points are sampled exactly on horizon.
@@ -440,7 +440,7 @@ class AttributesMixin:
             Whether to enlarge carcass maps. Defaults to True, if the horizon is a carcass, False otherwise.
             Should be used only for visualization purposes.
         kwargs :
-            Passed directly to attribute-evaluating methods from :attr:`.ATTRIBUTE_TO_METHOD` depending on `src`.
+            Passed directly to attribute-evaluating methods from :attr:`.ALIAS_TO_ATTRIBUTE` depending on `src`.
 
         Examples
         --------
@@ -453,14 +453,21 @@ class AttributesMixin:
         Load 'metrics' attribute with specific evaluation parameter and following normalization.
         >>> horizon.load_attribute('metrics', metric='local_corrs', normalize='min-max')
         """
-        src = self.ALIAS_TO_ATTRIBUTE.get(src, src)
+        src = copy(src)
+        if isinstance(src, str):
+            src_name = src
+        if isinstance(src, dict):
+            src_name = src.pop('src')
+            kwargs.update(src)
+
+        src_name = self.ALIAS_TO_ATTRIBUTE.get(src_name, src_name)
         enlarge = enlarge and self.is_carcass
 
-        if src in self.ATTRIBUTE_TO_METHOD:
-            method = self.ATTRIBUTE_TO_METHOD[src]
+        if src_name in self.ATTRIBUTE_TO_METHOD:
+            method = self.ATTRIBUTE_TO_METHOD[src_name]
             data = getattr(self, method)(use_cache=use_cache, enlarge=enlarge, **kwargs)
         else:
-            data = self.get_property(src, enlarge=enlarge, **kwargs)
+            data = self.get_property(src_name, enlarge=enlarge, **kwargs)
 
         # TODO: Someday, we would need to re-write attribute loading methods
         # so they use locations not to crop the loaded result, but to load attribute only at location.
@@ -483,58 +490,49 @@ class AttributesMixin:
 
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     @transformable
-    def get_instantaneous_amplitudes(self, window=23, depths=None, **kwargs):
+    def get_instantaneous_amplitudes(self, window=11, offset=0, **kwargs):
         """ Calculate instantaneous amplitude along the horizon.
 
         Parameters
         ----------
         window : int
             Width of cube values cutout along horizon to use for attribute calculation.
-        depths : slice, sequence of int or None
-            Which depth channels of resulted array to return.
-            If slice or sequence of int, used for slicing calculated attribute along last axis.
-            If None, infer middle channel index from 'window' and slice at it calculated attribute along last axis.
+        offset : int
+            Constant shift of cube values cutout up or down from the horizon surface.
         kwargs :
             Passed directly to :meth:`.get_cube_values`.
 
         Notes
         -----
-        Keep in mind, that Hilbert transform produces artifacts at signal start and end. Therefore if you want to get
-        an attribute with `N` channels along depth axis, you should provide `window` broader then `N`. E.g. in call
-        `label.get_instantaneous_amplitudes(depths=range(10, 21), window=41)` the attribute will be first calculated
-        by array of `(xlines, ilines, 41)` shape and then the slice `[..., ..., 10:21]` of them will be returned.
+        Since Hilbert transform produces artifacts at signal start and end, if one's intenston is to use `n` channels
+        of the resulting array, the `window` parameter value should better be somewhat bigger than the value of `n`.
         """
-        depths = [window // 2] if depths is None else depths
-        amplitudes = self.get_cube_values(window, use_cache=False, **kwargs)
-        result = np.abs(hilbert(amplitudes)).astype(np.float32)[:, :, depths]
+        amplitudes = self.get_cube_values(window=window, offset=offset, use_cache=False, **kwargs)
+        result = np.abs(hilbert(amplitudes)).astype(np.float32)
         return result
 
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     @transformable
-    def get_instantaneous_phases(self, window=23, depths=None, **kwargs):
+    def get_instantaneous_phases(self, window=11, offset=0, **kwargs):
         """ Calculate instantaneous phase along the horizon.
 
         Parameters
         ----------
         window : int
             Width of cube values cutout along horizon to use for attribute calculation.
-        depths : slice, sequence of int or None
-            Which depth channels of resulted array to return.
-            If slice or sequence of int, used for slicing calculated attribute along last axis.
-            If None, infer middle channel index from 'window' and slice at it calculated attribute along last axis.
+        offset : int
+            Constant shift of cube values cutout up or down from the horizon surface.
         kwargs :
             Passed directly to :meth:`.get_cube_values`.
 
+
         Notes
         -----
-        Keep in mind, that Hilbert transform produces artifacts at signal start and end. Therefore if you want to get
-        an attribute with `N` channels along depth axis, you should provide `window` broader then `N`. E.g. in call
-        `label.get_instantaneous_phases(depths=range(10, 21), window=41)` the attribute will be first calculated
-        by array of `(xlines, ilines, 41)` shape and then the slice `[..., ..., 10:21]` of them will be returned.
+        Since Hilbert transform produces artifacts at signal start and end, if one's intenston is to use `n` channels
+        of the resulting array, the `window` parameter value should better be somewhat bigger than the value of `n`.
         """
-        depths = [window // 2] if depths is None else depths
-        amplitudes = self.get_cube_values(window, use_cache=False, **kwargs)
-        result = np.angle(hilbert(amplitudes)).astype(np.float32)[:, :, depths]
+        amplitudes = self.get_cube_values(window=window, offset=offset, use_cache=False, **kwargs)
+        result = np.angle(hilbert(amplitudes)).astype(np.float32)
         return result
 
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)

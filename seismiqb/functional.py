@@ -586,7 +586,7 @@ def extend_grid(grid, idx_1, idx_2, max_idx_2, transposed, extension, max_freque
         indices_2 = idx_2 + shift
 
         # Filter point out of the field
-        valid_points_indices = np.argwhere((0 < indices_2) & (indices_2 < max_idx_2))
+        valid_points_indices = np.argwhere((indices_2 > 0) & (indices_2 < max_idx_2))
 
         if cut_lines_by_grid:
             # Filter points out of the grid unit

@@ -244,7 +244,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
         if not isinstance(other, type(self)):
             raise TypeError(f"Operands types do not match. Got {type(self)} and {type(other)}.")
 
-        presence = other.presence_matrix
+        presence = other.full_binary_matrix
         discrepancies = self.full_matrix[presence] != other.full_matrix[presence]
         if discrepancies.any():
             raise ValueError("Horizons have different depths where present.")
@@ -801,7 +801,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
     def compute_prediction_std(self, others):
         """ Compute std of predicted horizons along depths and restrict it to `self`. """
         std_matrix = self.metrics.compute_prediction_std(list(set([self, *others])))
-        std_matrix[self.presence_matrix == False] = np.nan #pylint: disable=singleton-comparison
+        std_matrix[self.mask == False] = np.nan #pylint: disable=singleton-comparison
         return std_matrix
 
 
