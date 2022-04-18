@@ -80,9 +80,9 @@ class ProcessingMixin:
         """ Remove regions, not connected to the largest component of a horizon. """
         if erosion_rate > 0:
             structure = np.ones((3, 3))
-            matrix = binary_erosion(self.presence_matrix, structure, iterations=erosion_rate)
+            matrix = binary_erosion(self.mask, structure, iterations=erosion_rate)
         else:
-            matrix = self.presence_matrix
+            matrix = self.mask
 
         labeled = label(matrix)
         values, counts = np.unique(labeled, return_counts=True)
@@ -91,7 +91,7 @@ class ProcessingMixin:
 
         object_id = values[np.argmax(counts)]
 
-        filtering_matrix = np.zeros_like(self.presence_matrix)
+        filtering_matrix = np.zeros_like(self.mask)
         filtering_matrix[labeled == object_id] = 1
 
         if erosion_rate > 0:
