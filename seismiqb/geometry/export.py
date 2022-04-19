@@ -153,6 +153,7 @@ def make_segy_from_array(array, path_segy, zip_segy=True, remove_segy=None, path
         spec.xlines = np.arange(array.shape[1])
         ilines_offset = 0
         xlines_offset = 0
+        idx = np.stack(np.meshgrid(np.arange(array.shape[0]), np.arange(array.shape[1])), axis=-1).reshape(-1, 2)
 
         # parse headers' kwargs
         sample_rate = int(kwargs.get('sample_rate', 2000))
