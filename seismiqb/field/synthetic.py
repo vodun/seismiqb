@@ -139,10 +139,10 @@ class SyntheticField:
              )
 
             # Faults
-            for fault_params in params['make_fault_2d']:
+            for fault_params in params.get('make_fault_2d', []):
                 generator.make_fault_2d(**fault_params)
 
-            for fault_params in params['make_fault_3d']:
+            for fault_params in params.get('make_fault_3d', []):
                 generator.make_fault_3d(**fault_params)
 
             # Finalize synthetic creation
@@ -198,7 +198,13 @@ class SyntheticField:
 
         # Labels: horizons and faults
         elif 'horizon' in attribute:
-            result = generator.get_horizons(indices='all', format='mask', width=kwargs.get('width', 3))
+            kwargs = {
+                'indices': 'all',
+                'width': 3,
+                'format': 'mask',
+                **kwargs
+            }
+            result = generator.get_horizons(**kwargs)
         elif 'amplified' in attribute:
             result = generator.get_horizons(indices='amplified', format='mask', width=kwargs.get('width', 3))
         elif 'fault' in attribute:
