@@ -3,7 +3,9 @@
 from copy import copy
 from functools import cached_property
 
+from math import isnan
 import numpy as np
+from numba import njit, prange
 
 from cv2 import dilate
 from scipy.signal import ricker
@@ -243,12 +245,12 @@ class AttributesMixin:
     @property
     def grad_i(self):
         """ Change of heights along iline direction. """
-        return self.grad_along_axis(0)
+        return self.grad_along_axis(1)
 
     @property
     def grad_x(self):
         """ Change of heights along xline direction. """
-        return self.grad_along_axis(1)
+        return self.grad_along_axis(0)
 
 
     # Carcass properties: should be used only if the horizon is a carcass
@@ -395,8 +397,8 @@ class AttributesMixin:
         'instantaneous_amplitudes': ['instant_amplitudes', 'iamplitudes'],
         'fourier_decomposition': ['fourier', 'fourier_decomposition'],
         'wavelet_decomposition': ['wavelet', 'wavelet_decomposition'],
-        'median_diff': ['median_diff', 'mdiff', 'median_spikes', 'spikes'],
-        'grad': ['grad', 'gradient', 'gradient_spikes', 'grad_spikes'],
+        'median_diff': ['median_diff', 'mdiff', 'median_faults'],
+        'grad': ['grad', 'gradient', 'gradient_diff', 'gradient_faults'],
     }
     ALIAS_TO_ATTRIBUTE = {alias: name for name, aliases in ATTRIBUTE_TO_ALIAS.items() for alias in aliases}
 
@@ -409,6 +411,7 @@ class AttributesMixin:
         'wavelet_decomposition' : 'get_wavelet_decomposition',
         'median_diff': 'get_median_diff_map',
         'grad': 'get_gradient_map',
+        'spikes': 'get_spikes_mask'
     }
 
     def load_attribute(self, src, location=None, use_cache=True, enlarge=False, **kwargs):
@@ -698,3 +701,110 @@ class AttributesMixin:
             grad = binary_dilation(grad, iterations=dilation).astype(np.float32)
             grad[self.field.zero_traces == 1] = np.nan
         return grad
+
+    @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
+    @transformable
+    def get_spikes_mask(self, spike_max_width=7, spike_min_height=5, close_depths_threshold=2, dilation=0):
+        """ Get spikes mask for the horizon.
+
+        We suppose that spikes are huge depth changes with invert depth changes in a fixed size window.
+        As a window we take a line segment with `spike_max_width` length for ilines and xlines.
+
+        Parameters
+        ----------
+        spike_max_width : int
+            Maximum possible spike width.
+        spike_min_height : int
+            Minimum possible spike height.
+        close_depths_threshold : int
+            Threshold to consider that the depths are close, and we can assume that they are almost the same.
+        dilation : int
+            Number of iterations for binary dilation algorithm to increase the spikes.
+        """
+        matrix = self.full_matrix.astype(np.float32)
+        matrix[matrix == self.FILL_VALUE] = np.nan
+
+        spikes_along_i = _spikes_along_axis(matrix=matrix, axis=0,
+                                            spike_max_width=spike_max_width, spike_min_height=spike_min_height,
+                                            close_depths_threshold=close_depths_threshold)
+        spikes_along_x = _spikes_along_axis(matrix=matrix, axis=1,
+                                            spike_max_width=spike_max_width, spike_min_height=spike_min_height,
+                                            close_depths_threshold=close_depths_threshold)
+
+        spikes = spikes_along_x + spikes_along_i
+        spikes[spikes > 0] = 1
+        spikes[self.field.zero_traces == 1] = np.nan
+
+        if dilation:
+            spikes = np.nan_to_num(spikes)
+            spikes = binary_dilation(spikes, iterations=dilation).astype(np.float32)
+            spikes[self.field.zero_traces == 1] = np.nan
+
+        return spikes
+
+# Helper functions
+@njit(parallel=True)
+def _spikes_along_axis(matrix, axis=0, spike_max_width=5, spike_min_height=3, close_depths_threshold=2):
+    """ Get spikes mask along axis. """
+    if axis == 1:
+        matrix = matrix.T
+
+    spikes_mask = np.zeros_like(matrix)
+    line_length = matrix.shape[1]
+
+    for line_idx in prange(matrix.shape[0]):
+        line = matrix[line_idx]
+
+        for previous_point_idx in range(line_length-1):
+            point_idx = previous_point_idx + 1
+
+            if isnan(line[previous_point_idx]) or isnan(line[point_idx]):
+                continue
+
+            depths_diff = line[point_idx] - line[previous_point_idx]
+
+            if np.abs(depths_diff) < spike_min_height: # Current point is not suspicious to be a spike endpoint
+                continue
+
+            # Previous point can be a spikes' left endpoint
+            # We plan to check the interval [previous_point_idx, previous_point_idx + spike_max_width) for a spike
+            # We exclude the endpoint for proper depth differences computations
+            endpoint = previous_point_idx + spike_max_width
+            if endpoint >= line_length:
+                endpoint = line_length - 1
+            potential_right_spike_range = range(previous_point_idx, endpoint-1, 1)
+
+            # Current point can be a spikes' right endpoint
+            # We plan to check the interval (point_idx - spike_max_width, point_idx] for a spike
+            endpoint = point_idx - spike_max_width
+            if endpoint < 0:
+                endpoint = 0
+            potential_left_spike_range = range(point_idx, endpoint+1, -1)
+
+            # Next we check that we have a inverted depths changes in a potential spike window
+            # We suppose that depth on the spikes' endpoint is close to the depth on the spikes' startpoint
+            # So, we accumulate all depths changes starts on the spikes' startpoint while accumulator value
+            # is more than `close_depths_threshold`
+            for potential_spike_range in (potential_right_spike_range, potential_left_spike_range):
+                depths_diff_accumulator = 0
+
+                for spike_point_idx in potential_spike_range:
+                    spike_point_neighbor_idx = spike_point_idx + potential_spike_range.step
+
+                    if isnan(line[spike_point_neighbor_idx]) or isnan(line[spike_point_idx]):
+                        depths_diff = 0
+                    else:
+                        depths_diff = line[spike_point_neighbor_idx] - line[spike_point_idx]
+
+                    depths_diff_accumulator += depths_diff
+
+                    if np.abs(depths_diff_accumulator) <= close_depths_threshold:
+                        spike_slice_stop = spike_point_neighbor_idx + potential_spike_range.step
+                        spike_slice = slice(potential_spike_range.start, spike_slice_stop, potential_spike_range.step)
+                        spikes_mask[line_idx, spike_slice] = 1
+                        break
+
+    if axis == 1:
+        spikes_mask = spikes_mask.T
+
+    return spikes_mask
