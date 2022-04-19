@@ -724,14 +724,16 @@ class AttributesMixin:
         matrix = self.full_matrix.astype(np.float32)
         matrix[matrix == self.FILL_VALUE] = np.nan
 
-        spikes_along_i = _spikes_along_axis(matrix=matrix, axis=0,
-                                            spike_max_width=spike_max_width, spike_min_height=spike_min_height,
-                                            close_depths_threshold=close_depths_threshold)
-        spikes_along_x = _spikes_along_axis(matrix=matrix, axis=1,
-                                            spike_max_width=spike_max_width, spike_min_height=spike_min_height,
-                                            close_depths_threshold=close_depths_threshold)
+        spikes = np.zeros_like(matrix)
 
-        spikes = spikes_along_x + spikes_along_i
+        # We try to find spikes on four directions: from up to down, from down to up, from left to right, from right to left
+        for rotation_num in range(1, 5):
+            matrix = np.rot90(matrix)
+            rotated_spikes = _get_spikes(matrix=matrix,
+                                         spike_max_width=spike_max_width, spike_min_height=spike_min_height,
+                                         close_depths_threshold=close_depths_threshold)
+            spikes += np.rot90(rotated_spikes, k=4-rotation_num)
+
         spikes[spikes > 0] = 1
         spikes[self.field.zero_traces == 1] = np.nan
 
@@ -744,67 +746,50 @@ class AttributesMixin:
 
 # Helper functions
 @njit(parallel=True)
-def _spikes_along_axis(matrix, axis=0, spike_max_width=5, spike_min_height=3, close_depths_threshold=2):
-    """ Get spikes mask along axis. """
-    if axis == 1:
-        matrix = matrix.T
+def _get_spikes(matrix, spike_max_width=5, spike_min_height=3, close_depths_threshold=2):
+    """ Get spikes mask for a matrix for the fixed search direction: from up to down, from left to right.
 
+    We iterate over matrix lines from left to right and try to find too huge depths differences.
+    If too huge difference was found, we check points on the right side to the difference point to
+    find an inverted depth difference.
+    """
     spikes_mask = np.zeros_like(matrix)
     line_length = matrix.shape[1]
 
     for line_idx in prange(matrix.shape[0]):
         line = matrix[line_idx]
 
-        for previous_point_idx in range(line_length-1):
-            point_idx = previous_point_idx + 1
+        for previous_idx in range(line_length-1):
+            point_idx = previous_idx + 1
 
-            if isnan(line[previous_point_idx]) or isnan(line[point_idx]):
+            if isnan(line[previous_idx]) or isnan(line[point_idx]):
                 continue
 
-            depths_diff = line[point_idx] - line[previous_point_idx]
+            depths_diff = line[point_idx] - line[previous_idx]
 
-            if np.abs(depths_diff) < spike_min_height: # Current point is not suspicious to be a spike endpoint
+            if np.abs(depths_diff) < spike_min_height:
                 continue
 
-            # Previous point can be a spikes' left endpoint
-            # We plan to check the interval [previous_point_idx, previous_point_idx + spike_max_width) for a spike
-            # We exclude the endpoint for proper depth differences computations
-            endpoint = previous_point_idx + spike_max_width
-            if endpoint >= line_length:
-                endpoint = line_length - 1
-            potential_right_spike_range = range(previous_point_idx, endpoint-1, 1)
+            # Previous point can be a spikes' start point
+            # Get range of points indices where spike is
+            spike_start_idx = previous_idx
+            spike_potential_end_idx = spike_start_idx + spike_max_width
 
-            # Current point can be a spikes' right endpoint
-            # We plan to check the interval (point_idx - spike_max_width, point_idx] for a spike
-            endpoint = point_idx - spike_max_width
-            if endpoint < 0:
-                endpoint = 0
-            potential_left_spike_range = range(point_idx, endpoint+1, -1)
+            if spike_potential_end_idx >= line_length:
+                spike_potential_end_idx = line_length - 1
 
-            # Next we check that we have a inverted depths changes in a potential spike window
-            # We suppose that depth on the spikes' endpoint is close to the depth on the spikes' startpoint
-            # So, we accumulate all depths changes starts on the spikes' startpoint while accumulator value
-            # is more than `close_depths_threshold`
-            for potential_spike_range in (potential_right_spike_range, potential_left_spike_range):
-                depths_diff_accumulator = 0
+            # We suppose that depth on the spikes' end point is close to the depth on the spikes' start point
+            spike_start_point_depth = line[spike_start_idx]
 
-                for spike_point_idx in potential_spike_range:
-                    spike_point_neighbor_idx = spike_point_idx + potential_spike_range.step
+            # We know depths difference for `spike_start_idx`+1, so we start from `spike_start_idx`+2:
+            for spike_point_idx in range(spike_start_idx+2, spike_potential_end_idx):
+                depth = line[spike_point_idx]
 
-                    if isnan(line[spike_point_neighbor_idx]) or isnan(line[spike_point_idx]):
-                        depths_diff = 0
-                    else:
-                        depths_diff = line[spike_point_neighbor_idx] - line[spike_point_idx]
+                if not isnan(depth):
+                    depths_diff = np.abs(spike_start_point_depth - depth)
 
-                    depths_diff_accumulator += depths_diff
-
-                    if np.abs(depths_diff_accumulator) <= close_depths_threshold:
-                        spike_slice_stop = spike_point_neighbor_idx + potential_spike_range.step
-                        spike_slice = slice(potential_spike_range.start, spike_slice_stop, potential_spike_range.step)
-                        spikes_mask[line_idx, spike_slice] = 1
+                    if depths_diff <= close_depths_threshold:
+                        spikes_mask[line_idx, slice(spike_start_idx, spike_point_idx+1)] = 1
                         break
-
-    if axis == 1:
-        spikes_mask = spikes_mask.T
 
     return spikes_mask
