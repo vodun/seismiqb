@@ -153,7 +153,7 @@ def make_segy_from_array(array, path_segy, zip_segy=True, remove_segy=None, path
         spec.xlines = np.arange(array.shape[1])
         ilines_offset = 0
         xlines_offset = 0
-        idx = np.stack(np.meshgrid(np.arange(array.shape[1]), np.arange(array.shape[0])), axis=-1).reshape(-1, 2)
+        idx = np.stack(np.meshgrid(np.arange(array.shape[1]), np.arange(array.shape[0])), axis=-1).reshape(-1, 2)[:, [1, 0]]
 
         # parse headers' kwargs
         sample_rate = int(kwargs.get('sample_rate', 2000))
@@ -166,7 +166,7 @@ def make_segy_from_array(array, path_segy, zip_segy=True, remove_segy=None, path
             dst_file.text[i] = segyio.tools.create_text_header({1: '...'}) # add header-fetching from kwargs
 
         # Loop over the array and put all the data into new segy-cube
-        for c, (x, i) in Notifier(pbar, desc='array to sgy')(enumerate(idx)):
+        for c, (i, x) in Notifier(pbar, desc='array to sgy')(enumerate(idx)):
             i, x = i - ilines_offset, x - xlines_offset
             # create header in here
             header = dst_file.header[c]
