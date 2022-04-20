@@ -1,7 +1,7 @@
 """ Mixin with computed along horizon geological attributes. """
 # pylint: disable=too-many-statements
 from copy import copy
-from functools import cached_property
+from functools import cached_property, wraps
 
 from math import isnan
 import numpy as np
@@ -641,70 +641,84 @@ class AttributesMixin:
         return result
 
 
-    # Despiking maps
+    # Maps with faults and spikes
+    def dilate(function):
+        """ Apply the binary dilation to a matrix with preservation of zero traces."""
+        @wraps(function)
+        def _wrapper(self, *args, **kwargs):
+            dilation_iterations = kwargs.pop('dilation_iterations', 0)
+            matrix = function(self, *args, **kwargs)
+
+            if dilation_iterations:
+                matrix = np.nan_to_num(matrix)
+                matrix = binary_dilation(matrix, iterations=dilation_iterations).astype(np.float32)
+                matrix[self.field.zero_traces == 1] = np.nan
+            return matrix
+        return _wrapper
+
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     @transformable
-    def get_median_diff_map(self, spikes_threshold=2, dilation=0, kernel_size=11, distance_threshold=0, iters=2, **_):
+    @dilate
+    def get_median_diff_map(self, median_diff_threshold=2, dilation_iterations=0, kernel_size=11, distance_threshold=0, iters=2, **_):
         """ Compute difference between depth map and its median filtered counterpart.
 
         Parameters
         ----------
-        spikes_threshold : number
-            Threshold to consider a difference to be a spike.
-        dilation : int
-            Number of iterations for binary dilation algorithm to increase the spikes.
+        median_diff_threshold : number
+            Threshold to consider a difference between matrix and median value is not significant.
+        dilation_iterations : int
+            Number of iterations for binary dilation algorithm to increase areas with significant
+            differences between matrix and median values.
         kernel_size, distance_threshold, iters
             Parameters for median differences computation.
         """
+        _ = dilation_iterations # This value is passed only to the decorator
+
         medfilt = median_filter(self.full_matrix, kernel_size=kernel_size, distance_threshold=distance_threshold,
                                 iters=iters, fill_value=self.FILL_VALUE)
-        spikes = self.full_matrix - medfilt
+        median_diff = self.full_matrix - medfilt
 
-        if spikes_threshold is not None:
-            spikes[np.abs(spikes) < spikes_threshold] = 0
-        spikes[self.field.zero_traces == 1] = np.nan
+        if median_diff_threshold is not None:
+            median_diff[np.abs(median_diff) < median_diff_threshold] = 0
 
-        if dilation:
-            spikes = np.nan_to_num(spikes)
-            spikes = binary_dilation(spikes, iterations=dilation).astype(np.float32)
-            spikes[self.field.zero_traces == 1] = np.nan
-        return spikes
+        median_diff[self.field.zero_traces == 1] = np.nan
+        return median_diff
 
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     @transformable
-    def get_gradient_map(self, spikes_threshold=1, dilation=2, **_):
+    @dilate
+    def get_gradient_map(self, grad_threshold=1, dilation_iterations=2, **_):
         """ Compute combined gradient map along both directions.
 
         Parameters
         ----------
-        spikes_threshold : number
-            Threshold to consider a difference to be a spike.
-        dilation : int
-            Number of iterations for binary dilation algorithm to increase the spikes.
+        grad_threshold : number
+            Threshold to consider a gradient value is not significant.
+        dilation_iterations : int
+            Number of iterations for binary dilation algorithm to increase areas with significant gradients values.
         """
+        _ = dilation_iterations # This value is passed only to the decorator
+
         grad_i = self.load_attribute('grad_i', on_full=True, dtype=np.float32, use_cache=False)
         grad_x = self.load_attribute('grad_x', on_full=True, dtype=np.float32, use_cache=False)
 
-        if spikes_threshold is not None:
-            grad_i[np.abs(grad_i) <= spikes_threshold] = 0
-            grad_x[np.abs(grad_x) <= spikes_threshold] = 0
+        if grad_threshold is not None:
+            grad_i[np.abs(grad_i) <= grad_threshold] = 0
+            grad_x[np.abs(grad_x) <= grad_threshold] = 0
 
         grad_i[grad_i == self.FILL_VALUE] = np.nan
         grad_x[grad_x == self.FILL_VALUE] = np.nan
 
         grad = grad_i + grad_x
         grad[np.abs(grad) > self.h_min] = np.nan
-        grad[self.field.zero_traces == 1] = np.nan
 
-        if dilation:
-            grad = np.nan_to_num(grad)
-            grad = binary_dilation(grad, iterations=dilation).astype(np.float32)
-            grad[self.field.zero_traces == 1] = np.nan
+        grad[self.field.zero_traces == 1] = np.nan
         return grad
 
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     @transformable
-    def get_spikes_mask(self, spike_max_width=7, spike_min_height=5, close_depths_threshold=2, dilation=0):
+    @dilate
+    def get_spikes_mask(self, spike_max_width=7, spike_min_height=5, close_depths_threshold=2, dilation_iterations=0):
         """ Get spikes mask for the horizon.
 
         We suppose that spikes are huge depth changes with invert depth changes in a fixed size window.
@@ -717,10 +731,12 @@ class AttributesMixin:
         spike_min_height : int
             Minimum possible spike height.
         close_depths_threshold : int
-            Threshold to consider that the depths are close, and we can assume that they are almost the same.
-        dilation : int
+            Threshold to consider that the depths are close.
+        dilation_iterations : int
             Number of iterations for binary dilation algorithm to increase the spikes.
         """
+        _ = dilation_iterations # This value is passed only to the decorator
+
         matrix = self.full_matrix.astype(np.float32)
         matrix[matrix == self.FILL_VALUE] = np.nan
 
@@ -735,23 +751,19 @@ class AttributesMixin:
             spikes += np.rot90(rotated_spikes, k=4-rotation_num)
 
         spikes[spikes > 0] = 1
+
         spikes[self.field.zero_traces == 1] = np.nan
-
-        if dilation:
-            spikes = np.nan_to_num(spikes)
-            spikes = binary_dilation(spikes, iterations=dilation).astype(np.float32)
-            spikes[self.field.zero_traces == 1] = np.nan
-
         return spikes
 
 # Helper functions
 @njit(parallel=True)
 def _get_spikes(matrix, spike_max_width=5, spike_min_height=3, close_depths_threshold=2):
-    """ Get spikes mask for a matrix for the fixed search direction: from up to down, from left to right.
+    """ Find spikes on a matrix for the fixed search direction: from up to down, from left to right.
 
-    We iterate over matrix lines from left to right and try to find too huge depths differences.
-    If too huge difference was found, we check points on the right side to the difference point to
-    find an inverted depth difference.
+    We iterate over matrix lines from left to right and try to find too huge depths differences
+    on neighboring points. These neighbors can be spike's starting points.
+    If start points were found, we check points on the right of them to find spike's end points.
+    We suppose that a depth on the spikes' end point is close to a depth on the spike's start point.
     """
     spikes_mask = np.zeros_like(matrix)
     line_length = matrix.shape[1]
@@ -760,36 +772,34 @@ def _get_spikes(matrix, spike_max_width=5, spike_min_height=3, close_depths_thre
         line = matrix[line_idx]
 
         for previous_idx in range(line_length-1):
-            point_idx = previous_idx + 1
+            # Check that points can be spike's starts points: find too huge depths differences
+            current_idx = previous_idx + 1
 
-            if isnan(line[previous_idx]) or isnan(line[point_idx]):
+            if isnan(line[previous_idx]) or isnan(line[current_idx]):
                 continue
 
-            depths_diff = line[point_idx] - line[previous_idx]
+            depths_diff = line[current_idx] - line[previous_idx]
 
             if np.abs(depths_diff) < spike_min_height:
                 continue
 
-            # Previous point can be a spikes' start point
-            # Get range of points indices where spike is
-            spike_start_idx = previous_idx
+            # Get range of points indices where the spike can be and
+            # find a point with a depth close to a depth before the spike
+            spike_start_idx = current_idx
             spike_potential_end_idx = spike_start_idx + spike_max_width
 
             if spike_potential_end_idx >= line_length:
                 spike_potential_end_idx = line_length - 1
 
-            # We suppose that depth on the spikes' end point is close to the depth on the spikes' start point
-            spike_start_point_depth = line[spike_start_idx]
+            normal_depth = line[spike_start_idx-1] # depth before the spike
 
-            # We know depths difference for `spike_start_idx`+1, so we start from `spike_start_idx`+2:
-            for spike_point_idx in range(spike_start_idx+2, spike_potential_end_idx):
+            for spike_point_idx in range(spike_start_idx+1, spike_potential_end_idx):
                 depth = line[spike_point_idx]
 
                 if not isnan(depth):
-                    depths_diff = np.abs(spike_start_point_depth - depth)
-
+                    depths_diff = np.abs(normal_depth - depth)
                     if depths_diff <= close_depths_threshold:
-                        spikes_mask[line_idx, slice(spike_start_idx, spike_point_idx+1)] = 1
+                        spikes_mask[line_idx, slice(spike_start_idx, spike_point_idx)] = 1
                         break
 
     return spikes_mask
