@@ -36,11 +36,13 @@ def triangle_rasterization(points, width=1):
 def triangle_volume(points, width):
     """ Compute triangle volume to estimate the number of points. """
     a = np.abs(points[0] - points[1])
-    a = np.sqrt(a.dot(a))
+    a = np.sqrt(a[0] ** 2 + a[1] ** 2 + a[2] ** 2)
+
     b = np.abs(points[0] - points[2])
-    b = np.sqrt(b.dot(b))
+    b = np.sqrt(b[0] ** 2 + b[1] ** 2 + b[2] ** 2)
+
     c = np.abs(points[2] - points[1])
-    c = np.sqrt(c.dot(c))
+    c = np.sqrt(c[0] ** 2 + c[1] ** 2 + c[2] ** 2)
 
     p = (a + b + c) / 2
     S = (p * (p - a) * (p - b) * (p - c)) ** 0.5

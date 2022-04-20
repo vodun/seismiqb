@@ -443,31 +443,3 @@ def concat_sorted(first_array, second_array):
         i += 1
 
     return buffer[:c]
-
-@njit
-def split_array(array, labels):
-    """ Split (groupby) array by values from labels. Labels must be sorted and all groups must be contiguous. """
-    positions = []
-    for i in range(1, len(labels)):
-        if labels[i] != labels[i-1]:
-            positions.append(i)
-
-    return np.split(array, positions)
-
-@njit
-def thicken_line(points, axis=0):
-    """ Make thick line. """
-    line = np.zeros_like(points)
-    p = points[0].copy()
-    n = 1
-    pos = 0
-    for i in range(1, len(points)):
-        if points[i, axis] == points[i-1, axis]:
-            p += points[i]
-            n += 1
-        if (i == len(points) - 1) or (points[i, axis] != points[i-1, axis]):
-            line[pos] = p / n
-            n = 1
-            pos += 1
-            p = points[i].copy()
-    return line[:pos]

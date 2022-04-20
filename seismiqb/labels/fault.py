@@ -14,8 +14,8 @@ from sklearn.neighbors import NearestNeighbors
 
 from .horizon import Horizon
 from .fault_triangulation import sticks_to_simplices, simplices_to_points
+from .fault_postprocessing import split_array, thicken_line
 from ..plotters import show_3d
-from ..utils import split_array
 
 
 class Fault(Horizon):
@@ -384,7 +384,8 @@ class Fault(Horizon):
         res = []
 
         for p in projections:
-            points_ = thicken_line(p).astype(int)
+            p = p[np.argsort(p[:, -1])]
+            points_ = thicken_line(p, axis=-1).astype(int)
             loc = p[0, axis]
             nodes = approximate_points(points_[:, [1-axis, 2]], stick_nodes_step)
             nodes_ = np.zeros((len(nodes), 3))
@@ -392,12 +393,6 @@ class Fault(Horizon):
             nodes_[:, axis] = loc
             res += [nodes_]
         return res
-
-def thicken_line(points):
-    """ Make thick line. """
-    points = points[np.argsort(points[:, -1])]
-    splitted = split_array(points, points[:, -1])
-    return np.stack([np.mean(item, axis=0) for item in splitted], axis=0)
 
 def approximate_points(points, n_points):
     """ Approximate points by stick. """
