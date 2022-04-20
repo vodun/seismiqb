@@ -1,7 +1,7 @@
 """ Mixin with computed along horizon geological attributes. """
 # pylint: disable=too-many-statements
 from copy import copy
-from functools import cached_property, wraps
+from functools import cached_property
 
 from math import isnan
 import numpy as np
@@ -702,20 +702,21 @@ class AttributesMixin:
 
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     @transformable
-    def get_spikes_mask(self, spike_max_width=7, spike_min_height=5, close_depths_threshold=2, dilation_iterations=0):
+    def get_spikes_mask(self, spike_spatial_maxsize=7, spike_depth_minsize=5, close_depths_threshold=2,
+                        dilation_iterations=0):
         """ Get spikes mask for the horizon.
 
         We suppose that spikes are huge depth changes with invert depth changes in a fixed size window.
-        As a window we take a line segment with `spike_max_width` length for ilines and xlines.
+        As a window we take a line segment with `spike_spatial_maxsize` length along ilines or xlines.
 
         Parameters
         ----------
-        spike_max_width : int
-            Maximum possible spike width.
-        spike_min_height : int
-            Minimum possible spike height.
+        spike_spatial_maxsize : int
+            Maximum possible spike size along the iline or xline axes.
+        spike_depth_minsize : int
+            Minimum possible spike size along the depth axis.
         close_depths_threshold : int
-            Threshold to consider that the depths are close.
+            Threshold to consider that depths are close.
         dilation_iterations : int
             Number of iterations for binary dilation algorithm to increase the spikes.
         """
@@ -730,9 +731,10 @@ class AttributesMixin:
         # from up to down, from down to up, from left to right, from right to left
         for rotation_num in range(1, 5):
             matrix = np.rot90(matrix)
-            rotated_spikes = _get_spikes(matrix=matrix,
-                                         spike_max_width=spike_max_width, spike_min_height=spike_min_height,
-                                         close_depths_threshold=close_depths_threshold)
+            rotated_spikes = _get_spikes_along_line(matrix=matrix,
+                                                    spike_spatial_maxsize=spike_spatial_maxsize,
+                                                    spike_depth_minsize=spike_depth_minsize,
+                                                    close_depths_threshold=close_depths_threshold)
             spikes += np.rot90(rotated_spikes, k=4-rotation_num)
 
         spikes[spikes > 0] = 1
@@ -742,13 +744,14 @@ class AttributesMixin:
 
 # Helper functions
 @njit(parallel=True)
-def _get_spikes(matrix, spike_max_width=5, spike_min_height=3, close_depths_threshold=2):
+def _get_spikes_along_line(matrix, spike_spatial_maxsize=5, spike_depth_minsize=3, close_depths_threshold=2):
     """ Find spikes on a matrix for the fixed search direction: from up to down, from left to right.
 
-    We iterate over matrix lines from left to right and try to find too huge depths differences
-    on neighboring points. These neighbors can be spike's starting points.
-    If start points were found, we check points on the right of them to find spike's end points.
-    We suppose that a depth on the spikes' end point is close to a depth on the spike's start point.
+    Function iterates over matrix lines and find too huge depth differences on neighboring points.
+    These points can be spike's starting points.
+    If start points were found, we check points on the right of them to find spike's end point.
+    We suppose that a depth on the point next to the spikes' end point is close to a depth
+    on the point before the spike's start point.
     """
     spikes_mask = np.zeros_like(matrix)
     line_length = matrix.shape[1]
@@ -757,7 +760,7 @@ def _get_spikes(matrix, spike_max_width=5, spike_min_height=3, close_depths_thre
         line = matrix[line_idx]
 
         for previous_idx in range(line_length-1):
-            # Check that points can be spike's starts points: find too huge depths differences
+            # Check that point can be a spike's start point: find too huge depth difference
             current_idx = previous_idx + 1
 
             if isnan(line[previous_idx]) or isnan(line[current_idx]):
@@ -765,26 +768,27 @@ def _get_spikes(matrix, spike_max_width=5, spike_min_height=3, close_depths_thre
 
             depths_diff = line[current_idx] - line[previous_idx]
 
-            if np.abs(depths_diff) < spike_min_height:
+            if np.abs(depths_diff) < spike_depth_minsize:
                 continue
 
-            # Get range of points indices where the spike can be and
+            # Check a range of points indices where the spike can be and
             # find a point with a depth close to a depth before the spike
             spike_start_idx = current_idx
-            spike_potential_end_idx = spike_start_idx + spike_max_width
+            spike_potential_end_idx = spike_start_idx + spike_spatial_maxsize
 
             if spike_potential_end_idx >= line_length:
                 spike_potential_end_idx = line_length - 1
 
-            normal_depth = line[spike_start_idx-1] # depth before the spike
+            standard_depth = line[spike_start_idx-1] # depth before the spike
 
-            for spike_point_idx in range(spike_start_idx+1, spike_potential_end_idx):
-                depth = line[spike_point_idx]
+            for spike_potential_point_idx in range(spike_start_idx+1, spike_potential_end_idx):
+                depth = line[spike_potential_point_idx]
 
                 if not isnan(depth):
-                    depths_diff = np.abs(normal_depth - depth)
+                    depths_diff = np.abs(standard_depth - depth)
+
                     if depths_diff <= close_depths_threshold:
-                        spikes_mask[line_idx, slice(spike_start_idx, spike_point_idx)] = 1
+                        spikes_mask[line_idx, slice(spike_start_idx, spike_potential_point_idx)] = 1
                         break
 
     return spikes_mask

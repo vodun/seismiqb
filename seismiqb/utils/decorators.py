@@ -15,7 +15,7 @@ def transformable(method):
         - normalize values
         - apply binary dilation
         - reduce dimensionality via PCA transform
-        - view data as atleast 3d array.        
+        - view data as atleast 3d array.
     By default, does nothing.
 
     Parameters
