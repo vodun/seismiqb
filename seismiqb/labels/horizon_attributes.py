@@ -10,7 +10,7 @@ from numba import njit, prange
 from cv2 import dilate
 from scipy.signal import ricker
 from scipy.ndimage import convolve
-from scipy.ndimage.morphology import binary_fill_holes, binary_erosion, binary_dilation
+from scipy.ndimage.morphology import binary_fill_holes, binary_erosion
 from skimage.measure import label
 from sklearn.decomposition import PCA
 
@@ -642,24 +642,10 @@ class AttributesMixin:
 
 
     # Maps with faults and spikes
-    def dilate(function):
-        """ Apply the binary dilation to a matrix with preservation of zero traces."""
-        @wraps(function)
-        def _wrapper(self, *args, **kwargs):
-            dilation_iterations = kwargs.pop('dilation_iterations', 0)
-            matrix = function(self, *args, **kwargs)
-
-            if dilation_iterations:
-                matrix = np.nan_to_num(matrix)
-                matrix = binary_dilation(matrix, iterations=dilation_iterations).astype(np.float32)
-                matrix[self.field.zero_traces == 1] = np.nan
-            return matrix
-        return _wrapper
-
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     @transformable
-    @dilate
-    def get_median_diff_map(self, median_diff_threshold=2, dilation_iterations=0, kernel_size=11, distance_threshold=0, iters=2, **_):
+    def get_median_diff_map(self, median_diff_threshold=2, dilation_iterations=0, kernel_size=11,
+                            distance_threshold=0, iters=2, **_):
         """ Compute difference between depth map and its median filtered counterpart.
 
         Parameters
@@ -686,7 +672,6 @@ class AttributesMixin:
 
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     @transformable
-    @dilate
     def get_gradient_map(self, grad_threshold=1, dilation_iterations=2, **_):
         """ Compute combined gradient map along both directions.
 
@@ -717,7 +702,6 @@ class AttributesMixin:
 
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     @transformable
-    @dilate
     def get_spikes_mask(self, spike_max_width=7, spike_min_height=5, close_depths_threshold=2, dilation_iterations=0):
         """ Get spikes mask for the horizon.
 
@@ -742,7 +726,8 @@ class AttributesMixin:
 
         spikes = np.zeros_like(matrix)
 
-        # We try to find spikes on four directions: from up to down, from down to up, from left to right, from right to left
+        # We try to find spikes on four directions:
+        # from up to down, from down to up, from left to right, from right to left
         for rotation_num in range(1, 5):
             matrix = np.rot90(matrix)
             rotated_spikes = _get_spikes(matrix=matrix,
@@ -768,7 +753,7 @@ def _get_spikes(matrix, spike_max_width=5, spike_min_height=3, close_depths_thre
     spikes_mask = np.zeros_like(matrix)
     line_length = matrix.shape[1]
 
-    for line_idx in prange(matrix.shape[0]):
+    for line_idx in prange(matrix.shape[0]): #pylint: disable=not-an-iterable
         line = matrix[line_idx]
 
         for previous_idx in range(line_length-1):
