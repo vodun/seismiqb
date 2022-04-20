@@ -14,15 +14,17 @@ class ProcessingMixin:
         - Filtering methods to cut out some surface regions.
         - Horizon transformations such as smoothing and thinning.
         - Surface distortions such as holes or carcass creation.
-    All of these methods affect horizon structure, so be careful with them: their result is a new horizon surface.
+    Be careful: all of these methods change horizon structure inplace.
     """
     # Filtering methods
-    def filter_points(self, filtering_matrix=None, margin=0, **_):
+    def filter(self, filtering_matrix=None, margin=0, **_):
         """ Remove points that correspond to 1's in `filtering_matrix` from points storage. """
         if filtering_matrix is None:
             filtering_matrix = self.field.zero_traces
+
         if margin > 0:
             filtering_matrix = binary_dilation(filtering_matrix, structure=np.ones((margin, margin)))
+
             filtering_matrix[:margin, :] = 1
             filtering_matrix[:, :margin] = 1
             filtering_matrix[-margin:, :] = 1
@@ -32,48 +34,15 @@ class ProcessingMixin:
         self.points = self.points[mask == 0]
         self.reset_storage('matrix')
 
-    def filter_matrix(self, filtering_matrix=None, margin=0, **_):
-        """ Remove points that correspond to 1's in `filtering_matrix` from matrix storage. """
-        if filtering_matrix is None:
-            filtering_matrix = self.field.zero_traces
-        if margin > 0:
-            filtering_matrix = binary_dilation(filtering_matrix, structure=np.ones((margin, margin)))
-            filtering_matrix[:margin, :] = 1
-            filtering_matrix[:, :margin] = 1
-            filtering_matrix[-margin:, :] = 1
-            filtering_matrix[:, -margin:] = 1
+    def filter_spikes(self, spike_spatial_maxsize=7, spike_depth_minsize=5, close_depths_threshold=2,
+                      dilation_iterations=0):
+        """ Remove spikes from the horizon. Works inplace. """
+        spikes_mask = self.load_attribute('spikes', spike_spatial_maxsize=spike_spatial_maxsize,
+                                          spike_depth_minsize=spike_depth_minsize,
+                                          close_depths_threshold=close_depths_threshold,
+                                          dilation_iterations=dilation_iterations)
 
-        idx_i, idx_x = np.asarray(filtering_matrix[self.i_min:self.i_max + 1,
-                                                   self.x_min:self.x_max + 1] == 1).nonzero()
-
-        self.matrix[idx_i, idx_x] = self.FILL_VALUE
-        self.reset_storage('points')
-
-    filter = filter_points
-
-    def filter_spikes(self, mode='gradient', spikes_threshold=1., dilation=5, kernel_size=11,
-                      distance_threshold=0, iters=2):
-        """ Remove spikes from horizon. Works inplace.
-
-        Parameters
-        ----------
-        mode : str
-            If 'gradient', then use gradient map to locate spikes.
-            If 'median', then use median diffs to locate spikes.
-        spikes_threshold : number
-            Threshold to consider a difference to be a spike.
-        dilation : int
-            Number of iterations for binary dilation algorithm to increase the spikes.
-        kernel_size, distance_threshold, iters
-            Parameters for median differences computation.
-        """
-        if 'grad' in mode:
-            spikes = self.load_attribute('grad_spikes', spikes_threshold=spikes_threshold, dilation=dilation)
-        else:
-            spikes = self.load_attribute('median_spikes', spikes_threshold=spikes_threshold, dilation=dilation,
-                                         kernel_size=kernel_size, distance_threshold=distance_threshold, iters=iters)
-
-        self.filter(spikes)
+        self.filter(spikes_mask)
 
     despike = filter_spikes
 

@@ -473,7 +473,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
         result.name = name or self.name
 
         filtering_matrix = (matrix < 0.5).astype(int)
-        result.filter_matrix(filtering_matrix)
+        result.filter(filtering_matrix)
 
         return result
 
