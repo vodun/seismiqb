@@ -25,7 +25,7 @@ class ProcessingMixin:
         """ Remove points that correspond to 1's in `filtering_matrix` from the horizon surface.
 
         Note, this method can change horizon inplace or create a new instance.
-        In either case it returns a filtered horizon instance.
+        In either case it returns a processed horizon instance.
 
         Parameters
         ----------
@@ -69,14 +69,14 @@ class ProcessingMixin:
         """ Remove spikes from the horizon.
 
         Note, this method can change horizon inplace or create a new instance. By default works inplace.
-        In either case it returns a filtered horizon instance.
+        In either case it returns a processed horizon instance.
         """
-        spikes_mask = self.load_attribute('spikes', spike_spatial_maxsize=spike_spatial_maxsize,
-                                          spike_depth_minsize=spike_depth_minsize,
-                                          close_depths_threshold=close_depths_threshold,
-                                          dilation_iterations=dilation_iterations)
+        spikes = self.load_attribute('spikes', spike_spatial_maxsize=spike_spatial_maxsize,
+                                     spike_depth_minsize=spike_depth_minsize,
+                                     close_depths_threshold=close_depths_threshold,
+                                     dilation_iterations=dilation_iterations)
 
-        return self.filter(spikes_mask, inplace=inplace)
+        return self.filter(spikes, inplace=inplace)
 
     despike = filter_spikes
 
@@ -84,7 +84,7 @@ class ProcessingMixin:
         """ Remove regions, not connected to the largest component of a horizon.
 
         Note, this method can change horizon inplace or create a new instance. By default works inplace.
-        In either case it returns a filtered horizon instance.
+        In either case it returns a processed horizon instance.
         """
         if erosion_rate > 0:
             structure = np.ones((3, 3))
@@ -110,12 +110,12 @@ class ProcessingMixin:
         return self.filter(filtering_matrix, inplace=inplace)
 
 
-    # Horizon surface transforms
+    # Horizon surface transformations
     def thin_out(self, factor=1, threshold=256, inplace=True):
         """ Thin out the horizon by keeping only each `factor`-th line.
 
         Note, this method can change horizon inplace or create a new instance. By default works inplace.
-        In either case it returns a filtered horizon instance.
+        In either case it returns a processed horizon instance.
 
         Parameters
         ----------
@@ -150,36 +150,51 @@ class ProcessingMixin:
             name = 'thinned_' + self.name if self.name is not None else None
             return type(self)(storage=points, field=self.field, name=name)
 
-    def smooth_out(self, mode='convolve', kernel=None, kernel_size=3, iters=1, preserve_missings=True,
-                   distance_threshold=5, sigma=0.8, inplace=True):
-        """ Convolve the horizon with gaussian kernel with special treatment to absent points:
-        if the point was present in the original horizon, then it is changed to a weighted sum of all
-        present points nearby;
-        if the point was absent in the original horizon and there is at least one non-fill point nearby,
-        then it is changed to a weighted sum of all present points nearby.
+    def smooth_out(self, mode='convolve', iters=1,
+                   kernel_size=3, sigma_spatial=0.8, kernel=None, sigma_range=2.0,
+                   depths_variance_threshold=5, inplace=True):
+        """ Smooth out the horizon surface.
+
+        Smoothening is applied with a special treatment to absent points:
+            - if `preserve_missings=True`, then missing points remain absent in the resulting surface.
+            - if `preserve_missings=False`, then missing points are changed to a weighted sum of all
+            present points nearby.
+
+        This method supports two types of smoothening:
+            - if `mode='convolve'`, then the method uses a convolution with a given or a gaussian kernel.
+            - if `mode='bilateral'`, then the method applies a bilateral filtering with a given or a gaussian kernel.
+        Bilateral filtering is an edge-preserving smoothening, which ignores areas with faults.
+
+        Be careful with `sigma_range` value:
+            - The higher the `sigma_range` value, the more 'bilateral' result looks like a 'convolve' result.
+            - If the `sigma_range` too low, then no smoothening applied.
 
         Note, this method can change horizon inplace or create a new instance. By default works inplace.
-        In either case it returns a filtered horizon instance.
+        In either case it returns a processed horizon instance.
 
         Parameters
         ----------
         mode : str
-            convolve or bilateral
+            Smoothening type mode. Can be 'convolve' or 'bilateral'.
+            If 'convolve', then the method makes a convolution with a given kernel.
+            If 'bilateral', then the method applies a bilateral filtering with a given kernel.
+        iters : int
+            Number of times to apply smoothing.
+        kernel_size : int
+            Size of a created gaussian filter if `kernel` is None.
+        sigma_spatial : number
+            Standard deviation (spread or “width”) for gaussian kernel.
+            The lower, the more weight is put into the point itself.
         kernel : ndarray or None
             If passed, then ready-to-use kernel. Otherwise, gaussian kernel will be created.
-        kernel_size : int
-            Size of gaussian filter.
-        iters : int
-            Number of times to apply smoothing filter.
-        preserve_missings : bool
-            Whether or not to allow method label additional points.
-        distance_threshold : number
+        sigma_range : number
+            Standard deviation for additional weight which smooth differences in depth values.
+            The lower, the more weight is put into the depths differences between point in a window.
+            Note, if it is too low, then no smoothening is applied.
+        depths_variance_threshold : number
             If the distance between anchor point and the point inside filter is bigger than the threshold,
             then the point is ignored in convolutions.
             Can be used for separate smoothening on sides of discontinuity.
-        sigma : number
-            Standard deviation (spread or “width”) for gaussian kernel.
-            The lower, the more weight is put into the point itself.
         inplace : bool
             Whether to apply operation inplace or return a new Horizon object.
 
@@ -188,9 +203,9 @@ class ProcessingMixin:
         :class:`~.Horizon`
             Processed horizon instance. A new instance if `inplace` is False, `self` otherwise.
         """
-        result = self.matrix_smooth_out(matrix=self.matrix, mode=mode, kernel=kernel, kernel_size=kernel_size,
-                                        sigma=sigma, distance_threshold=distance_threshold, iters=iters,
-                                        preserve_missings=preserve_missings)
+        result = self.matrix_smooth_out(matrix=self.matrix, mode=mode, iters=iters,
+                                        kernel_size=kernel_size, sigma_spatial=sigma_spatial, kernel=kernel,
+                                        sigma_range=sigma_range, depths_variance_threshold=depths_variance_threshold)
 
         if inplace:
             self.matrix = result
@@ -200,31 +215,30 @@ class ProcessingMixin:
             name = 'smoothed_' + self.name if self.name is not None else None
             return type(self)(storage=result, field=self.field, name=name)
 
-    def interpolate(self, kernel=None, kernel_size=3, iters=1, min_neighbors=0, max_distance_threshold=None,
-                    sigma=0.8, inplace=True):
+    def interpolate(self, iters=1, kernel_size=3, sigma=0.8, kernel=None,
+                    min_filled_neighbors=0, depths_variance_threshold=None, inplace=True):
         """ Interpolate horizon surface on the regions with missing traces.
 
         Under the hood, we fill missing traces with weighted neighbor values.
 
         Note, this method can change horizon inplace or create a new instance. By default works inplace.
-        In either case it returns a filtered horizon instance.
+        In either case it returns a processed horizon instance.
 
         Parameters
         ----------
-        kernel : ndarray or None
-            Kernel to apply to missing points.
-        kernel_size : int
-            If the kernel is not provided, shape of the square gaussian kernel.
         iters : int
             Number of interpolation iterations to perform.
-        min_neighbors: int or float
-            Minimal of non-missing neighboring points in a window to interpolate a central point.
-            If int, then it is an amount of points.
-            If float, then it is a points ratio.
-        max_distance_threshold : number
+        kernel_size : int
+            If the kernel is not provided, shape of the square gaussian kernel.
+        sigma : number
+            Standard deviation (spread or “width”) for gaussian kernel.
+            The lower, the more weight is put into the point itself.
+        kernel : ndarray or None
+            Kernel to apply to missing points.
+        min_filled_neighbors: int
+            Minimal amount of non-missing neighboring points in a window to interpolate a central point.
+        depths_variance_threshold : number
             A maximum distance between values in a squared window for which we apply interpolation.
-        sigma : float
-            Standard deviation for a gaussian kernel creation.
         inplace : bool
             Whether to apply operation inplace or return a new Horizon object.
 
@@ -236,17 +250,14 @@ class ProcessingMixin:
         if kernel is None:
             kernel = make_gaussian_kernel(kernel_size=kernel_size, sigma=sigma)
 
-        if isinstance(min_neighbors, float):
-            min_neighbors = round(min_neighbors * kernel.size)
-
         result = self.matrix.astype(np.float32)
         result[self.matrix == self.FILL_VALUE] = np.nan
 
         # Apply `_interpolate` multiple times. Note that there is no dtype conversion in between
         # Also the method returns a new object
         for _ in range(iters):
-            result = _interpolate(src=result, kernel=kernel, min_neighbors=min_neighbors,
-                                  max_distance_threshold=max_distance_threshold)
+            result = _interpolate(src=result, kernel=kernel, min_filled_neighbors=min_filled_neighbors,
+                                  depths_variance_threshold=depths_variance_threshold)
 
         result[np.isnan(result)] = self.FILL_VALUE
         result = np.rint(result).astype(np.int32)
@@ -263,7 +274,7 @@ class ProcessingMixin:
             return type(self)(storage=result, field=self.field, name=name)
 
     # Horizon distortions
-    def make_carcass(self, frequencies=100, regular=True, margin=50, apply_smoothing=False, add_prefix=True, **kwargs):
+    def make_carcass(self, frequencies=100, regular=True, margin=50, interpolate=False, add_prefix=True, **kwargs):
         """ Cut carcass out of a horizon. Returns a new instance.
 
         Parameters
@@ -274,8 +285,8 @@ class ProcessingMixin:
             Whether to make regular lines or base lines on geometry quality map.
         margin : int
             Margin from geometry edges to exclude from carcass.
-        apply_smoothing : bool
-            Whether to smooth out the result.
+        interpolate : bool
+            Whether to interpolate the result.
         kwargs : dict
             Other parameters for grid creation, see `:meth:~.SeismicGeometry.make_quality_grid`.
         """
@@ -292,8 +303,8 @@ class ProcessingMixin:
             grid = self.field.geometry.make_quality_grid(frequencies, margin=margin, **kwargs)
 
         carcass.filter(filtering_matrix=1-grid)
-        if apply_smoothing:
-            carcass.smooth_out(preserve_missings=False)
+        if interpolate:
+            carcass.interpolate()
         return carcass
 
     def generate_holes_matrix(self, n=10, scale=1.0, max_scale=.25,
@@ -413,10 +424,10 @@ class ProcessingMixin:
                    max_angles_amount=4, max_sharpness=5.0, locations=None,
                    points_proportion=1e-5, points_shape=1,
                    noise_level=0, seed=None):
-        """ Make holes in a horizon.
+        """ Make holes on a horizon surface.
 
         Note, this method can change horizon inplace or create a new instance. By default creates a new instance.
-        In either case it returns a filtered horizon instance.
+        In either case it returns a processed horizon instance.
         """
         #pylint: disable=self-cls-assignment
         filtering_matrix = self.generate_holes_matrix(n=n, scale=scale, max_scale=max_scale,
@@ -431,7 +442,7 @@ class ProcessingMixin:
 
 # Helper functions
 @njit(parallel=True)
-def _interpolate(src, kernel, min_neighbors=1, max_distance_threshold=None):
+def _interpolate(src, kernel, min_filled_neighbors=1, depths_variance_threshold=None):
     """ Jit-accelerated function to apply 2d interpolation to nan values. """
     #pylint: disable=too-many-nested-blocks, consider-using-enumerate, not-an-iterable
     k = kernel.shape[0] // 2
@@ -451,12 +462,12 @@ def _interpolate(src, kernel, min_neighbors=1, max_distance_threshold=None):
             element = src[max(0, iline-k):min(iline+k+1, i_range),
                           max(0, xline-k):min(xline+k+1, x_range)].ravel()
 
-            notnan_neighbors = kernel.size - np.isnan(element).sum()
-            if notnan_neighbors < min_neighbors:
+            filled_neighbors = kernel.size - np.isnan(element).sum()
+            if filled_neighbors < min_filled_neighbors:
                 continue
 
             # Compare ptp with the max_distance_threshold
-            if max_distance_threshold is not None:
+            if depths_variance_threshold is not None:
                 nanmax, nanmin = np.float32(element[0]), np.float32(element[0])
 
                 for item in element:
@@ -468,7 +479,7 @@ def _interpolate(src, kernel, min_neighbors=1, max_distance_threshold=None):
                             nanmax = max(item, nanmax)
                             nanmin = min(item, nanmin)
 
-                if nanmax - nanmin > max_distance_threshold:
+                if nanmax - nanmin > depths_variance_threshold:
                     continue
 
             # Apply kernel to neighbors to get value for interpolated point

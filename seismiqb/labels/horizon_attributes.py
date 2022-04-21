@@ -110,51 +110,44 @@ class AttributesMixin:
             raise ValueError(f'Unknown normalization mode `{mode}`.')
         return matrix
 
-
-    def matrix_smooth_out(self, matrix, mode='convolve', kernel=None, kernel_size=7, sigma=2.,
-                          distance_threshold=5, iters=1, preserve_missings=True, sigma_range=2.0):
+    def matrix_smooth_out(self, matrix, mode='convolve', iters=1,
+                          kernel_size=7, sigma_spatial=2., kernel=None, sigma_range=2.0,
+                          depths_diff_threshold=5):
         """ Smooth the depth matrix to produce floating point numbers.
-        ..!!..
+
+        For more read :meth:`~.Horizon.smooth_out` doc.
         """
         if 'conv' in mode:
-            smoothening_function = _convolve
-            kwargs = {'preserve_missings': preserve_missings}
+            smoothening_function, kwargs = _convolve, {}
         else:
-            smoothening_function = _bilateral_filter
-            kwargs = {'sigma': sigma_range}
+            smoothening_function, kwargs = _bilateral_filter, {'sigma_range': sigma_range}
 
         if kernel is None:
-            kernel = make_gaussian_kernel(kernel_size=kernel_size, sigma=sigma)
+            kernel = make_gaussian_kernel(kernel_size=kernel_size, sigma=sigma_spatial)
 
-        if isinstance(matrix, np.float32):
-            result = matrix.copy()
-        else:
-            result = matrix.astype(np.float32)
-
+        result = matrix.astype(np.float32)
         result[result == self.FILL_VALUE] = np.nan
 
         # Apply smoothening multiple times. Note that there is no dtype conversion in between
         # Also the method returns a new object
         for _ in range(iters):
             result = smoothening_function(src=result, kernel=kernel,
-                                          distance_threshold=distance_threshold, **kwargs)
+                                          depths_diff_threshold=depths_diff_threshold,
+                                          **kwargs)
 
         # Remove all unwanted values
-        if preserve_missings:
-            result[matrix == self.FILL_VALUE] = self.FILL_VALUE
-            result[np.isnan(matrix)] = self.FILL_VALUE
+        result[(matrix == self.FILL_VALUE) | np.isnan(matrix) | np.isnan(result)] = self.FILL_VALUE
 
-        result[np.isnan(result)] = self.FILL_VALUE
         result = np.rint(result).astype(np.int32)
 
-        if result.shape == self.field.zero_traces.shape:
-            result[self.field.zero_traces == 1] = self.FILL_VALUE
-        elif result.shape == self.shape:
-            result[self.field.zero_traces[self.i_min:self.i_max + 1,
-                                          self.x_min:self.x_max + 1] == 1] = self.FILL_VALUE
+        if matrix.shape == self.full_matrix.shape:
+            zero_traces = self.field.zero_traces == 1
+        elif matrix.shape == self.matrix.shape:
+            zero_traces = self.field.zero_traces[self.i_min:self.i_max + 1, self.x_min:self.x_max + 1] == 1
         else:
-            raise ValueError("Invalid matrix shape for smoothening!")
+            raise ValueError("Invalid matrix shape: it must be equal to `self.matrix` or `self.full_matrix` shape")
 
+        result[zero_traces] = self.FILL_VALUE
         return result
 
     def matrix_enlarge(self, matrix, width=3):
@@ -684,19 +677,24 @@ class AttributesMixin:
     # Maps with faults and spikes
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     @transformable
-    def get_median_diff_map(self, median_diff_threshold=2, dilation_iterations=0, kernel_size=11,
-                            distance_threshold=0, iters=2, **_):
+    def get_median_diff_map(self, iters=2, window_size=11, depths_diff_threshold=0,
+                            median_diff_threshold=2, dilation_iterations=0, **_):
         """ Compute difference between depth map and its median filtered counterpart.
 
         Parameters
         ----------
+        iters : int
+            Number of median filter iterations to perform.
+        window_size : int
+            A window size to compute the median in.
+        depths_diff_threshold : number
+            If the distance between anchor point and the point inside filter is bigger than the threshold,
+            then the point is ignored in filter.
         median_diff_threshold : number
             Threshold to consider a difference between matrix and median value is not significant.
         dilation_iterations : int
             Number of iterations for binary dilation algorithm to increase areas with significant
-            differences between matrix and median values.
-        kernel_size, distance_threshold, iters
-            Parameters for median differences computation.
+            differences between matrix and median filter.
         """
         _ = dilation_iterations # This value is passed only to the decorator
 
@@ -706,8 +704,8 @@ class AttributesMixin:
         # Apply `_medfilt` multiple times. Note that there is no dtype conversion in between
         # Also the method returns a new object
         for _ in range(iters):
-            medfilt = _medfilt(src=medfilt, kernel_size=kernel_size, preserve_missings=True,
-                               distance_threshold=distance_threshold)
+            medfilt = _medfilt(src=medfilt, window_size=window_size, preserve_missings=True,
+                               depths_diff_threshold=depths_diff_threshold)
 
         median_diff = self.full_matrix - medfilt
 
@@ -775,7 +773,7 @@ class AttributesMixin:
         spikes = np.zeros_like(matrix)
 
         # We try to find spikes on four directions:
-        # from up to down, from down to up, from left to right, from right to left
+        # from left to right, from up to down, from right to left, from down to up
         for rotation_num in range(1, 5):
             matrix = np.rot90(matrix)
             rotated_spikes = _get_spikes_along_line(matrix=matrix,
@@ -785,7 +783,6 @@ class AttributesMixin:
             spikes += np.rot90(rotated_spikes, k=4-rotation_num)
 
         spikes[spikes > 0] = 1
-
         spikes[self.field.zero_traces == 1] = np.nan
         return spikes
 
@@ -794,8 +791,9 @@ class AttributesMixin:
 def _get_spikes_along_line(matrix, spike_spatial_maxsize=5, spike_depth_minsize=3, close_depths_threshold=2):
     """ Find spikes on a matrix for the fixed search direction: from up to down, from left to right.
 
-    Function iterates over matrix lines and find too huge depth differences on neighboring points.
-    These points can be spike's starting points.
+    Under the hood, the function iterates over matrix lines and find too huge depth differences on neighboring points.
+    These points might be spike's starting points.
+
     If start points were found, we check points on the right of them to find spike's end point.
     We suppose that a depth on the point next to the spikes' end point is close to a depth
     on the point before the spike's start point.
@@ -826,7 +824,7 @@ def _get_spikes_along_line(matrix, spike_spatial_maxsize=5, spike_depth_minsize=
             if spike_potential_end_idx >= line_length:
                 spike_potential_end_idx = line_length - 1
 
-            standard_depth = line[spike_start_idx-1] # depth before the spike
+            standard_depth = line[spike_start_idx-1]
 
             for spike_potential_point_idx in range(spike_start_idx+1, spike_potential_end_idx):
                 depth = line[spike_potential_point_idx]
@@ -841,7 +839,7 @@ def _get_spikes_along_line(matrix, spike_spatial_maxsize=5, spike_depth_minsize=
     return spikes_mask
 
 @njit(parallel=True)
-def _convolve(src, kernel, preserve_missings, distance_threshold):
+def _convolve(src, kernel, depths_diff_threshold):
     """ Jit-accelerated function to apply 2d convolution with special care for nan values. """
     #pylint: disable=too-many-nested-blocks, consider-using-enumerate, not-an-iterable
     k = kernel.shape[0] // 2
@@ -854,7 +852,7 @@ def _convolve(src, kernel, preserve_missings, distance_threshold):
         for xline in range(0, x_range):
             central = src[iline, xline]
 
-            if (preserve_missings is True) and isnan(central):
+            if isnan(central):
                 continue
 
             # Get values in the squared window and apply kernel to them
@@ -863,7 +861,7 @@ def _convolve(src, kernel, preserve_missings, distance_threshold):
 
             s, sum_weights = np.float32(0), np.float32(0)
             for item, weight in zip(element, raveled_kernel):
-                if not isnan(item) and (abs(item - central) <= distance_threshold or isnan(central)):
+                if not isnan(item) and (abs(item - central) <= depths_diff_threshold):
                     s += item * weight
                     sum_weights += weight
 
@@ -872,7 +870,7 @@ def _convolve(src, kernel, preserve_missings, distance_threshold):
     return dst
 
 @njit(parallel=True)
-def _bilateral_filter(src, kernel, distance_threshold, sigma=0.1):
+def _bilateral_filter(src, kernel, depths_diff_threshold, sigma_range=0.1):
     """ Jit-accelerated function to apply 2d bilateral filtering with special care for nan values.
 
     The difference between :func:`_convolve` and :func:`_bilateral_filter` is in additional weight multiplier,
@@ -881,7 +879,7 @@ def _bilateral_filter(src, kernel, distance_threshold, sigma=0.1):
     #pylint: disable=too-many-nested-blocks, consider-using-enumerate, not-an-iterable
     k = kernel.shape[0] // 2
     raveled_kernel = kernel.ravel() / np.sum(kernel)
-    sigma_squared = sigma**2
+    sigma_squared = sigma_range**2
 
     i_range, x_range = src.shape
     dst = src.copy()
@@ -899,7 +897,7 @@ def _bilateral_filter(src, kernel, distance_threshold, sigma=0.1):
 
             s, sum_weights = np.float32(0), np.float32(0)
             for item, weight in zip(element, raveled_kernel):
-                if not isnan(item) and (abs(item - central) <= distance_threshold):
+                if not isnan(item) and (abs(item - central) <= depths_diff_threshold):
                     weight *= np.exp(-0.5*((item - central)**2)/sigma_squared)
 
                     s += item * weight
@@ -910,12 +908,12 @@ def _bilateral_filter(src, kernel, distance_threshold, sigma=0.1):
     return dst
 
 @njit(parallel=True)
-def _medfilt(src, kernel_size, preserve_missings, distance_threshold):
+def _medfilt(src, window_size, preserve_missings, depths_diff_threshold):
     """ Jit-accelerated function to apply 2d median filter with special care for `np.nan` values. """
-    # distance_threshold = 0: median across all non-equal-to-self elements in kernel
-    # distance_threshold = -1: median across all elements in kernel
+    # depths_diff_threshold = 0: median across all non-equal-to-self elements in window
+    # depths_diff_threshold = -1: median across all elements in window
     #pylint: disable=too-many-nested-blocks, consider-using-enumerate, not-an-iterable
-    k = kernel_size // 2
+    k = window_size // 2
 
     i_range, x_range = src.shape
     dst = src.copy()
@@ -936,7 +934,7 @@ def _medfilt(src, kernel_size, preserve_missings, distance_threshold):
 
             for i, item in enumerate(element):
                 if not isnan(item):
-                    if (abs(item - central) > distance_threshold) or isnan(central):
+                    if (abs(item - central) > depths_diff_threshold) or isnan(central):
                         indicator[i] = np.float32(1)
                 else:
                     indicator[i] = np.float32(2)
