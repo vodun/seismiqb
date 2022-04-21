@@ -21,7 +21,7 @@ from .labels import Horizon
 from .utils import Accumulator, to_list
 from .functional import to_device, from_device
 from .functional import correlation, crosscorrelation, btch, kl, js, hellinger, tv, hilbert
-from .functional import smooth_out, digitize, gridify, perturb, histo_reduce
+from .functional import digitize, gridify, perturb, histo_reduce
 from .plotters import plot_image
 
 
@@ -49,11 +49,6 @@ class BaseMetrics:
         'agg': 'nanmean',
         'device': 'gpu',
         'amortize': True,
-    }
-
-    SMOOTHING_DEFAULTS = {
-        'kernel_size': 21,
-        'sigma': 10.0,
     }
 
     EPS = 0.00001
@@ -862,8 +857,8 @@ class GeometryMetrics(BaseMetrics):
 
 
     def quality_map(self, quantiles, metric_names=None, computed_metrics=None,
-                    agg='mean', amortize=False, axis=0, apply_smoothing=False,
-                    smoothing_params=None, local_params=None, support_params=None, **kwargs):
+                    agg='mean', amortize=False, axis=0,
+                    local_params=None, support_params=None, **kwargs):
         """ Create a quality map based on number of metrics.
 
         Parameters
@@ -874,16 +869,14 @@ class GeometryMetrics(BaseMetrics):
             Which metrics to use to assess hardness of data.
         reduce_func : str
             Function to reduce multiple metrics into one spatial map.
-        smoothing_params, local_params, support_params : dicts
-            Additional parameters for smoothening, local metrics, support metrics.
+        local_params, support_params : dicts
+            Additional parameters for local metrics and support metrics.
         """
         _ = kwargs
         computed_metrics = computed_metrics or []
-        smoothing_params = smoothing_params or self.SMOOTHING_DEFAULTS
         local_params = local_params or self.LOCAL_DEFAULTS
         support_params = support_params or self.SUPPORT_DEFAULTS
 
-        smoothing_params = {**self.SMOOTHING_DEFAULTS, **smoothing_params, **kwargs}
         local_params = {**self.LOCAL_DEFAULTS, **local_params, **kwargs}
         support_params = {**self.SUPPORT_DEFAULTS, **support_params, **kwargs}
 
@@ -899,14 +892,9 @@ class GeometryMetrics(BaseMetrics):
 
         accumulator = Accumulator(agg=agg, amortize=amortize, axis=axis)
         for metric_matrix in computed_metrics:
-            if apply_smoothing:
-                metric_matrix = smooth_out(metric_matrix, **smoothing_params)
             digitized = digitize(metric_matrix, quantiles)
             accumulator.update(digitized)
         quality_map = accumulator.get(final=True)
-
-        if apply_smoothing:
-            quality_map = smooth_out(quality_map, **smoothing_params)
 
         title, plot_defaults = self.get_plot_defaults()
         plot_dict = {

@@ -1,10 +1,12 @@
 """ Mixin for horizon processing. """
+from math import isnan
 import numpy as np
+from numba import njit, prange
 
 from skimage.measure import label
 from scipy.ndimage.morphology import binary_fill_holes, binary_dilation, binary_erosion
 
-from ..functional import smooth_out, interpolate, bilateral_filter
+from ..functional import make_gaussian_kernel
 from ..utils import make_bezier_figure
 
 class ProcessingMixin:
@@ -72,7 +74,7 @@ class ProcessingMixin:
         self.filter(filtering_matrix)
 
 
-    # Pre-defined transforms of a horizon
+    # Horizon surface transforms
     def thin_out(self, factor=1, threshold=256):
         """ Thin out the horizon by keeping only each `factor`-th line.
 
@@ -95,7 +97,7 @@ class ProcessingMixin:
         self.points = self.points[mask_i + mask_x]
         self.reset_storage('matrix')
 
-    def smooth_out(self, kernel=None, kernel_size=3, iters=1, preserve_missings=True, distance_threshold=5,
+    def smooth_out(self, mode='convolve', kernel=None, kernel_size=3, iters=1, preserve_missings=True, distance_threshold=5,
                    sigma=0.8, **_):
         """ Convolve the horizon with gaussian kernel with special treatment to absent points:
         if the point was present in the original horizon, then it is changed to a weighted sum of all
@@ -105,6 +107,8 @@ class ProcessingMixin:
 
         Parameters
         ----------
+        mode : str
+            convolve or bilateral
         kernel : ndarray or None
             If passed, then ready-to-use kernel. Otherwise, gaussian kernel will be created.
         kernel_size : int
@@ -121,51 +125,11 @@ class ProcessingMixin:
             Standard deviation (spread or “width”) for gaussian kernel.
             The lower, the more weight is put into the point itself.
         """
-        smoothed = smooth_out(self.matrix, kernel=kernel, kernel_size=kernel_size, iters=iters,
-                              preserve_missings=preserve_missings, fill_value=self.FILL_VALUE,
-                              distance_threshold=distance_threshold, sigma=sigma)
+        result = self.matrix_smooth_out(matrix=self.matrix, mode=mode, kernel=kernel, kernel_size=kernel_size, sigma=sigma,
+                                        distance_threshold=distance_threshold, iters=iters,
+                                        preserve_missings=preserve_missings)
 
-        smoothed = np.rint(smoothed).astype(np.int32)
-        smoothed[self.field.zero_traces[self.i_min:self.i_max + 1,
-                                        self.x_min:self.x_max + 1] == 1] = self.FILL_VALUE
-
-        self.matrix = smoothed
-        self.reset_storage('points')
-
-    def edge_preserving_smooth_out(self, kernel_size=3, sigma_spatial=0.8, iters=1,
-                                   preserve_missings=True, distance_threshold=5, sigma_range=2.0, **_):
-        """ Apply a bilateral filtering on horizon surface with special treatment to absent points:
-        if the point was present in the original horizon, then it is changed to a weighted sum of all
-        present points nearby;
-        if the point was absent in the original horizon and there is at least one non-fill point nearby,
-        then it is changed to a weighted sum of all present points nearby.
-
-        Parameters
-        ----------
-        kernel_size : int
-            Size of gaussian filter.
-        sigma_spatial : float
-            Standard deviation for a gaussian kernel creation.
-        iters : int
-            Number of times to apply smoothing filter.
-        preserve_missings : bool
-            Whether or not to allow method label additional points.
-        distance_threshold : number
-            If the distance between anchor point and the point inside filter is bigger than the threshold,
-            then the point is ignored in convolutions.
-            Can be used for separate smoothening on sides of discontinuity.
-        sigma_range : float
-            Standard deviation for a range gaussian for additional weight.
-        """
-        smoothed = bilateral_filter(self.matrix, kernel_size=kernel_size, sigma_spatial=sigma_spatial,
-                                    iters=iters, preserve_missings=preserve_missings, fill_value=self.FILL_VALUE,
-                                    distance_threshold=distance_threshold, sigma_range=sigma_range)
-
-        smoothed = np.rint(smoothed).astype(np.int32)
-        smoothed[self.field.zero_traces[self.i_min:self.i_max + 1,
-                                        self.x_min:self.x_max + 1] == 1] = self.FILL_VALUE
-
-        self.matrix = smoothed
+        self.matrix = result
         self.reset_storage('points')
 
     def interpolate(self, kernel=None, kernel_size=3, iters=1, min_neighbors=0, max_distance_threshold=None,
@@ -191,16 +155,28 @@ class ProcessingMixin:
         sigma : float
             Standard deviation for a gaussian kernel creation.
         """
-        interpolated = interpolate(self.matrix, kernel=kernel, kernel_size=kernel_size,
-                                   fill_value=self.FILL_VALUE, iters=iters,
-                                   min_neighbors=min_neighbors, max_distance_threshold=max_distance_threshold,
-                                   sigma=sigma)
+        if kernel is None:
+            kernel = make_gaussian_kernel(kernel_size=kernel_size, sigma=sigma)
 
-        interpolated = np.rint(interpolated).astype(np.int32)
-        interpolated[self.field.zero_traces[self.i_min:self.i_max + 1,
-                                        self.x_min:self.x_max + 1] == 1] = self.FILL_VALUE
+        if isinstance(min_neighbors, float):
+            min_neighbors = round(min_neighbors * kernel.size)
 
-        self.matrix = interpolated
+        result = self.matrix.astype(np.float32)
+        result[self.matrix == self.FILL_VALUE] = np.nan
+
+        # Apply `_interpolate` multiple times. Note that there is no dtype conversion in between
+        # Also the method returns a new object
+        for _ in range(iters):
+            result = _interpolate(src=result, kernel=kernel, min_neighbors=min_neighbors,
+                                  max_distance_threshold=max_distance_threshold)
+
+        result[np.isnan(result)] = self.FILL_VALUE
+        result = np.rint(result).astype(np.int32)
+
+        result[self.field.zero_traces[self.i_min:self.i_max + 1,
+                                      self.x_min:self.x_max + 1] == 1] = self.FILL_VALUE
+
+        self.matrix = result
         self.reset_storage('points')
 
     # Horizon distortions
@@ -367,3 +343,56 @@ class ProcessingMixin:
         return self
 
     make_holes.__doc__ += '\n' + '\n'.join(generate_holes_matrix.__doc__.split('\n')[1:])
+
+# Helper functions
+@njit(parallel=True)
+def _interpolate(src, kernel, min_neighbors=1, max_distance_threshold=None):
+    """ Jit-accelerated function to apply 2d interpolation to nan values. """
+    #pylint: disable=too-many-nested-blocks, consider-using-enumerate, not-an-iterable
+    k = kernel.shape[0] // 2
+    raveled_kernel = kernel.ravel() / np.sum(kernel)
+
+    i_range, x_range = src.shape
+    dst = src.copy()
+
+    for iline in prange(0, i_range):
+        for xline in range(0, x_range):
+            central = src[iline, xline]
+
+            if not isnan(central):
+                continue # We interpolate values only to nan points
+
+            # Get neighbors and check whether we can interpolate them
+            element = src[max(0, iline-k):min(iline+k+1, i_range),
+                          max(0, xline-k):min(xline+k+1, x_range)].ravel()
+
+            notnan_neighbors = kernel.size - np.isnan(element).sum()
+            if notnan_neighbors < min_neighbors:
+                continue
+
+            # Compare ptp with the max_distance_threshold
+            if max_distance_threshold is not None:
+                nanmax, nanmin = np.float32(element[0]), np.float32(element[0])
+
+                for item in element:
+                    if not isnan(item):
+                        if isnan(nanmax):
+                            nanmax = item
+                            nanmin = item
+                        else:
+                            nanmax = max(item, nanmax)
+                            nanmin = min(item, nanmin)
+
+                if nanmax - nanmin > max_distance_threshold:
+                    continue
+
+            # Apply kernel to neighbors to get value for interpolated point
+            s, sum_weights = np.float32(0), np.float32(0)
+            for item, weight in zip(element, raveled_kernel):
+                if not isnan(item):
+                    s += item * weight
+                    sum_weights += weight
+
+            if sum_weights != 0.0:
+                dst[iline, xline] = s / sum_weights
+    return dst

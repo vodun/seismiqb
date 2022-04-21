@@ -833,7 +833,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
         self.dump_charisma(data=copy(self.points), path=path, format='points',
                            name=self.name, transform=transform)
 
-    def dump_float(self, path, transform=None, kernel_size=7, sigma=2., margin=5):
+    def dump_float(self, path, transform=None, kernel_size=7, sigma=2., distance_threshold=5):
         """ Smooth out the horizon values, producing floating-point numbers, and dump to the disk.
 
         Parameters
@@ -850,6 +850,8 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
             During the filtering, not include in the computation all the points that are
             further away from the current, than the margin.
         """
-        matrix = self.matrix_smooth_out(matrix=self.full_matrix, kernel_size=kernel_size, sigma=sigma, margin=margin)
+        matrix = self.matrix_smooth_out(matrix=self.full_matrix, kernel_size=kernel_size, sigma=sigma,
+                                        distance_threshold=distance_threshold)
+
         points = self.matrix_to_points(matrix)
         self.dump_charisma(data=points, path=path, format='points', name=self.name, transform=transform)

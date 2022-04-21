@@ -14,7 +14,7 @@ from scipy.ndimage.morphology import binary_fill_holes, binary_erosion
 from skimage.measure import label
 from sklearn.decomposition import PCA
 
-from ..functional import smooth_out, median_filter, hilbert
+from ..functional import hilbert, make_gaussian_kernel
 from ..utils import transformable, lru_cache
 
 
@@ -111,11 +111,51 @@ class AttributesMixin:
         return matrix
 
 
-    def matrix_smooth_out(self, matrix, kernel=None, kernel_size=7, sigma=2., margin=5, iters=1):
-        """ Smooth the depth matrix to produce floating point numbers. """
-        smoothed = smooth_out(matrix, kernel=kernel, kernel_size=kernel_size, sigma=sigma,
-                              margin=margin, fill_value=self.FILL_VALUE, preserve=True, iters=iters)
-        return smoothed
+    def matrix_smooth_out(self, matrix, mode='convolve', kernel=None, kernel_size=7, sigma=2.,
+                          distance_threshold=5, iters=1, preserve_missings=True, sigma_range=2.0):
+        """ Smooth the depth matrix to produce floating point numbers.
+        ..!!..
+        """
+        if 'conv' in mode:
+            smoothening_function = _convolve
+            kwargs = {'preserve_missings': preserve_missings}
+        else:
+            smoothening_function = _bilateral_filter
+            kwargs = {'sigma': sigma_range}
+
+        if kernel is None:
+            kernel = make_gaussian_kernel(kernel_size=kernel_size, sigma=sigma)
+
+        if isinstance(matrix, np.float32):
+            result = matrix.copy()
+        else:
+            result = matrix.astype(np.float32)
+
+        result[result == self.FILL_VALUE] = np.nan
+
+        # Apply smoothening multiple times. Note that there is no dtype conversion in between
+        # Also the method returns a new object
+        for _ in range(iters):
+            result = smoothening_function(src=result, kernel=kernel,
+                                          distance_threshold=distance_threshold, **kwargs)
+
+        # Remove all unwanted values
+        if preserve_missings:
+            result[matrix == self.FILL_VALUE] = self.FILL_VALUE
+            result[np.isnan(matrix)] = self.FILL_VALUE
+
+        result[np.isnan(result)] = self.FILL_VALUE
+        result = np.rint(result).astype(np.int32)
+
+        if result.shape == self.field.zero_traces.shape:
+            result[self.field.zero_traces == 1] = self.FILL_VALUE
+        elif result.shape == self.shape:
+            result[self.field.zero_traces[self.i_min:self.i_max + 1,
+                                          self.x_min:self.x_max + 1] == 1] = self.FILL_VALUE
+        else:
+            raise ValueError("Invalid matrix shape for smoothening!")
+
+        return result
 
     def matrix_enlarge(self, matrix, width=3):
         """ Increase visibility of a sparse carcass metric. Should be used only for visualization purposes. """
@@ -660,14 +700,21 @@ class AttributesMixin:
         """
         _ = dilation_iterations # This value is passed only to the decorator
 
-        medfilt = median_filter(self.full_matrix, kernel_size=kernel_size, distance_threshold=distance_threshold,
-                                iters=iters, fill_value=self.FILL_VALUE)
+        medfilt = self.full_matrix.astype(np.float32)
+        medfilt[self.full_matrix == self.FILL_VALUE] = np.nan
+
+        # Apply `_medfilt` multiple times. Note that there is no dtype conversion in between
+        # Also the method returns a new object
+        for _ in range(iters):
+            medfilt = _medfilt(src=medfilt, kernel_size=kernel_size, preserve_missings=True,
+                               distance_threshold=distance_threshold)
+
         median_diff = self.full_matrix - medfilt
 
         if median_diff_threshold is not None:
             median_diff[np.abs(median_diff) < median_diff_threshold] = 0
 
-        median_diff[self.field.zero_traces == 1] = np.nan
+        median_diff[self.full_matrix == self.FILL_VALUE] = np.nan
         return median_diff
 
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
@@ -792,3 +839,112 @@ def _get_spikes_along_line(matrix, spike_spatial_maxsize=5, spike_depth_minsize=
                         break
 
     return spikes_mask
+
+@njit(parallel=True)
+def _convolve(src, kernel, preserve_missings, distance_threshold):
+    """ Jit-accelerated function to apply 2d convolution with special care for nan values. """
+    #pylint: disable=too-many-nested-blocks, consider-using-enumerate, not-an-iterable
+    k = kernel.shape[0] // 2
+    raveled_kernel = kernel.ravel() / np.sum(kernel)
+
+    i_range, x_range = src.shape
+    dst = src.copy()
+
+    for iline in prange(0, i_range):
+        for xline in range(0, x_range):
+            central = src[iline, xline]
+
+            if (preserve_missings is True) and isnan(central):
+                continue
+
+            # Get values in the squared window and apply kernel to them
+            element = src[max(0, iline-k):min(iline+k+1, i_range),
+                          max(0, xline-k):min(xline+k+1, x_range)].ravel()
+
+            s, sum_weights = np.float32(0), np.float32(0)
+            for item, weight in zip(element, raveled_kernel):
+                if not isnan(item) and (abs(item - central) <= distance_threshold or isnan(central)):
+                    s += item * weight
+                    sum_weights += weight
+
+            if sum_weights != 0.0:
+                dst[iline, xline] = s / sum_weights
+    return dst
+
+@njit(parallel=True)
+def _bilateral_filter(src, kernel, distance_threshold, sigma=0.1):
+    """ Jit-accelerated function to apply 2d bilateral filtering with special care for nan values.
+
+    The difference between :func:`_convolve` and :func:`_bilateral_filter` is in additional weight multiplier,
+    which is a gaussian of difference of convolved elements.
+    """
+    #pylint: disable=too-many-nested-blocks, consider-using-enumerate, not-an-iterable
+    k = kernel.shape[0] // 2
+    raveled_kernel = kernel.ravel() / np.sum(kernel)
+    sigma_squared = sigma**2
+
+    i_range, x_range = src.shape
+    dst = src.copy()
+
+    for iline in prange(0, i_range):
+        for xline in range(0, x_range):
+            central = src[iline, xline]
+
+            if isnan(central):
+                continue # Because can't evaluate additional multiplier
+
+            # Get values in the squared window and apply kernel to them
+            element = src[max(0, iline-k):min(iline+k+1, i_range),
+                          max(0, xline-k):min(xline+k+1, x_range)].ravel()
+
+            s, sum_weights = np.float32(0), np.float32(0)
+            for item, weight in zip(element, raveled_kernel):
+                if not isnan(item) and (abs(item - central) <= distance_threshold):
+                    weight *= np.exp(-0.5*((item - central)**2)/sigma_squared)
+
+                    s += item * weight
+                    sum_weights += weight
+
+            if sum_weights != 0.0:
+                dst[iline, xline] = s / sum_weights
+    return dst
+
+@njit(parallel=True)
+def _medfilt(src, kernel_size, preserve_missings, distance_threshold):
+    """ Jit-accelerated function to apply 2d median filter with special care for `np.nan` values. """
+    # distance_threshold = 0: median across all non-equal-to-self elements in kernel
+    # distance_threshold = -1: median across all elements in kernel
+    #pylint: disable=too-many-nested-blocks, consider-using-enumerate, not-an-iterable
+    k = kernel_size // 2
+
+    i_range, x_range = src.shape
+    dst = src.copy()
+
+    for iline in prange(0, i_range):
+        for xline in range(0, x_range):
+            central = src[iline, xline]
+
+            if preserve_missings and isnan(central):
+                continue
+
+            element = src[max(0, iline-k):min(iline+k+1, i_range),
+                          max(0, xline-k):min(xline+k+1, x_range)].ravel()
+
+            # Find elements which are close or distant for the `central`
+            # 0 for close, 1 for distant, 2 for nan
+            indicator = np.zeros_like(element)
+
+            for i, item in enumerate(element):
+                if not isnan(item):
+                    if (abs(item - central) > distance_threshold) or isnan(central):
+                        indicator[i] = np.float32(1)
+                else:
+                    indicator[i] = np.float32(2)
+
+            # If there are more distant points than close in the window, then find median of distant points
+            n_close = (indicator == np.float32(0)).sum()
+            mask_distant = indicator == np.float32(1)
+            n_distant = mask_distant.sum()
+            if n_distant > n_close:
+                dst[iline, xline] = np.median(element[mask_distant])
+    return dst
