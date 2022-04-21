@@ -16,11 +16,32 @@ class ProcessingMixin:
         - Filtering methods to cut out some surface regions.
         - Horizon transformations such as smoothing and thinning.
         - Surface distortions such as holes or carcass creation.
-    Be careful: all of these methods change horizon structure inplace.
+
+    Note, almost all of these methods can change horizon surface inplace or create a new instance.
+    In either case they return a filtered horizon instance.
     """
     # Filtering methods
-    def filter(self, filtering_matrix=None, margin=0, **_):
-        """ Remove points that correspond to 1's in `filtering_matrix` from points storage. """
+    def filter(self, filtering_matrix=None, margin=0, inplace=True, **_):
+        """ Remove points that correspond to 1's in `filtering_matrix` from the horizon surface.
+
+        Note, this method can change horizon inplace or create a new instance.
+        In either case it returns a filtered horizon instance.
+
+        Parameters
+        ----------
+        filtering_matrix : np.ndarray
+            Mask of points to cut out from the horizon.
+            If None, then remove points corresponding to zero traces.
+        margin : int
+            Amount of traces to cut out near to boundaries considering `filtering_matrix` appliance.
+        inplace : bool
+            Whether to apply operation inplace or return a new Horizon object.
+
+        Returns
+        -------
+        :class:`~.Horizon`
+            Processed horizon instance. A new instance if `inplace` is False, `self` otherwise.
+        """
         if filtering_matrix is None:
             filtering_matrix = self.field.zero_traces
 
@@ -33,23 +54,38 @@ class ProcessingMixin:
             filtering_matrix[:, -margin:] = 1
 
         mask = filtering_matrix[self.points[:, 0], self.points[:, 1]]
-        self.points = self.points[mask == 0]
-        self.reset_storage('matrix')
+        points = self.points[mask == 0]
+
+        if inplace:
+            self.points = points
+            self.reset_storage('matrix')
+            return self
+        else:
+            name = 'filtered_' + self.name if self.name is not None else None
+            return type(self)(storage=points, field=self.field, name=name)
 
     def filter_spikes(self, spike_spatial_maxsize=7, spike_depth_minsize=5, close_depths_threshold=2,
-                      dilation_iterations=0):
-        """ Remove spikes from the horizon. Works inplace. """
+                      dilation_iterations=0, inplace=True):
+        """ Remove spikes from the horizon.
+
+        Note, this method can change horizon inplace or create a new instance. By default works inplace.
+        In either case it returns a filtered horizon instance.
+        """
         spikes_mask = self.load_attribute('spikes', spike_spatial_maxsize=spike_spatial_maxsize,
                                           spike_depth_minsize=spike_depth_minsize,
                                           close_depths_threshold=close_depths_threshold,
                                           dilation_iterations=dilation_iterations)
 
-        self.filter(spikes_mask)
+        return self.filter(spikes_mask, inplace=inplace)
 
     despike = filter_spikes
 
-    def filter_disconnected_regions(self, erosion_rate=0):
-        """ Remove regions, not connected to the largest component of a horizon. """
+    def filter_disconnected_regions(self, erosion_rate=0, inplace=True):
+        """ Remove regions, not connected to the largest component of a horizon.
+
+        Note, this method can change horizon inplace or create a new instance. By default works inplace.
+        In either case it returns a filtered horizon instance.
+        """
         if erosion_rate > 0:
             structure = np.ones((3, 3))
             matrix = binary_erosion(self.mask, structure, iterations=erosion_rate)
@@ -71,12 +107,15 @@ class ProcessingMixin:
 
         filtering_matrix = filtering_matrix == 0
 
-        self.filter(filtering_matrix)
+        return self.filter(filtering_matrix, inplace=inplace)
 
 
     # Horizon surface transforms
-    def thin_out(self, factor=1, threshold=256):
+    def thin_out(self, factor=1, threshold=256, inplace=True):
         """ Thin out the horizon by keeping only each `factor`-th line.
+
+        Note, this method can change horizon inplace or create a new instance. By default works inplace.
+        In either case it returns a filtered horizon instance.
 
         Parameters
         ----------
@@ -84,6 +123,13 @@ class ProcessingMixin:
             Frequency of lines to keep along ilines and xlines direction.
         threshold : integer
             Minimal amount of points in a line to keep.
+        inplace : bool
+            Whether to apply operation inplace or return a new Horizon object.
+
+        Returns
+        -------
+        :class:`~.Horizon`
+            Processed horizon instance. A new instance if `inplace` is False, `self` otherwise.
         """
         if isinstance(factor, int):
             factor = (factor, factor)
@@ -94,16 +140,26 @@ class ProcessingMixin:
         uniques, counts = np.unique(self.points[:, 1], return_counts=True)
         mask_x = np.isin(self.points[:, 1], uniques[counts > threshold][::factor[1]])
 
-        self.points = self.points[mask_i + mask_x]
-        self.reset_storage('matrix')
+        points = self.points[mask_i + mask_x]
 
-    def smooth_out(self, mode='convolve', kernel=None, kernel_size=3, iters=1, preserve_missings=True, distance_threshold=5,
-                   sigma=0.8, **_):
+        if inplace:
+            self.points = points
+            self.reset_storage('matrix')
+            return self
+        else:
+            name = 'thinned_' + self.name if self.name is not None else None
+            return type(self)(storage=points, field=self.field, name=name)
+
+    def smooth_out(self, mode='convolve', kernel=None, kernel_size=3, iters=1, preserve_missings=True,
+                   distance_threshold=5, sigma=0.8, inplace=True):
         """ Convolve the horizon with gaussian kernel with special treatment to absent points:
         if the point was present in the original horizon, then it is changed to a weighted sum of all
         present points nearby;
         if the point was absent in the original horizon and there is at least one non-fill point nearby,
         then it is changed to a weighted sum of all present points nearby.
+
+        Note, this method can change horizon inplace or create a new instance. By default works inplace.
+        In either case it returns a filtered horizon instance.
 
         Parameters
         ----------
@@ -124,19 +180,34 @@ class ProcessingMixin:
         sigma : number
             Standard deviation (spread or “width”) for gaussian kernel.
             The lower, the more weight is put into the point itself.
+        inplace : bool
+            Whether to apply operation inplace or return a new Horizon object.
+
+        Returns
+        -------
+        :class:`~.Horizon`
+            Processed horizon instance. A new instance if `inplace` is False, `self` otherwise.
         """
-        result = self.matrix_smooth_out(matrix=self.matrix, mode=mode, kernel=kernel, kernel_size=kernel_size, sigma=sigma,
-                                        distance_threshold=distance_threshold, iters=iters,
+        result = self.matrix_smooth_out(matrix=self.matrix, mode=mode, kernel=kernel, kernel_size=kernel_size,
+                                        sigma=sigma, distance_threshold=distance_threshold, iters=iters,
                                         preserve_missings=preserve_missings)
 
-        self.matrix = result
-        self.reset_storage('points')
+        if inplace:
+            self.matrix = result
+            self.reset_storage('points')
+            return self
+        else:
+            name = 'smoothed_' + self.name if self.name is not None else None
+            return type(self)(storage=result, field=self.field, name=name)
 
     def interpolate(self, kernel=None, kernel_size=3, iters=1, min_neighbors=0, max_distance_threshold=None,
-                    sigma=0.8, **_):
+                    sigma=0.8, inplace=True):
         """ Interpolate horizon surface on the regions with missing traces.
 
         Under the hood, we fill missing traces with weighted neighbor values.
+
+        Note, this method can change horizon inplace or create a new instance. By default works inplace.
+        In either case it returns a filtered horizon instance.
 
         Parameters
         ----------
@@ -154,6 +225,13 @@ class ProcessingMixin:
             A maximum distance between values in a squared window for which we apply interpolation.
         sigma : float
             Standard deviation for a gaussian kernel creation.
+        inplace : bool
+            Whether to apply operation inplace or return a new Horizon object.
+
+        Returns
+        -------
+        :class:`~.Horizon`
+            Processed horizon instance. A new instance if `inplace` is False, `self` otherwise.
         """
         if kernel is None:
             kernel = make_gaussian_kernel(kernel_size=kernel_size, sigma=sigma)
@@ -176,8 +254,13 @@ class ProcessingMixin:
         result[self.field.zero_traces[self.i_min:self.i_max + 1,
                                       self.x_min:self.x_max + 1] == 1] = self.FILL_VALUE
 
-        self.matrix = result
-        self.reset_storage('points')
+        if inplace:
+            self.matrix = result
+            self.reset_storage('points')
+            return self
+        else:
+            name = 'interpolated_' + self.name if self.name is not None else None
+            return type(self)(storage=result, field=self.field, name=name)
 
     # Horizon distortions
     def make_carcass(self, frequencies=100, regular=True, margin=50, apply_smoothing=False, add_prefix=True, **kwargs):
@@ -330,7 +413,11 @@ class ProcessingMixin:
                    max_angles_amount=4, max_sharpness=5.0, locations=None,
                    points_proportion=1e-5, points_shape=1,
                    noise_level=0, seed=None):
-        """ Make holes in a horizon. Optionally, make a copy before filtering. """
+        """ Make holes in a horizon.
+
+        Note, this method can change horizon inplace or create a new instance. By default creates a new instance.
+        In either case it returns a filtered horizon instance.
+        """
         #pylint: disable=self-cls-assignment
         filtering_matrix = self.generate_holes_matrix(n=n, scale=scale, max_scale=max_scale,
                                                       max_angles_amount=max_angles_amount,
@@ -338,9 +425,7 @@ class ProcessingMixin:
                                                       points_proportion=points_proportion, points_shape=points_shape,
                                                       noise_level=noise_level, seed=seed)
 
-        self = self if inplace is True else self.copy()
-        self.filter(filtering_matrix)
-        return self
+        return self.filter(filtering_matrix, inplace=inplace)
 
     make_holes.__doc__ += '\n' + '\n'.join(generate_holes_matrix.__doc__.split('\n')[1:])
 
