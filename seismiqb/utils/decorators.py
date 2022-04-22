@@ -11,7 +11,6 @@ def transformable(method):
         - change values at absent points to a desired value
         - set dtype of a matrix
         - normalize values
-        - apply binary dilation
         - reduce dimensionality via PCA transform
         - view data as atleast 3d array.
     By default, does nothing.
@@ -41,28 +40,21 @@ def transformable(method):
 
         if dtype and hasattr(instance, 'matrix_set_dtype'):
             result = instance.matrix_set_dtype(result, dtype=dtype)
-
         if on_full and hasattr(instance, 'matrix_put_on_full'):
             result = instance.matrix_put_on_full(result)
-
         if channels is not None:
             if channels == 'middle':
                 channels = result.shape[2] // 2
             channels = to_list(channels)
             result = result[:, :, channels]
-
         if normalize and hasattr(instance, 'matrix_normalize'):
             result = instance.matrix_normalize(result, normalize)
-
         if fill_value is not None and hasattr(instance, 'matrix_fill_to_num'):
             result = instance.matrix_fill_to_num(result, value=fill_value)
-
         if enlarge and hasattr(instance, 'matrix_enlarge'):
             result = instance.matrix_enlarge(result, width=enlarge_width)
-
         if atleast_3d:
             result = np.atleast_3d(result)
-
         if n_components is not None and hasattr(instance, 'pca_transform'):
             if result.ndim != 3:
                 raise ValueError(f'PCA transformation can be applied only to 3D arrays, got `{result.ndim}`')

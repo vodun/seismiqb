@@ -876,8 +876,6 @@ class GeometryMetrics(BaseMetrics):
             Function to reduce multiple metrics into one spatial map.
         smoothing_params, local_params, support_params : dicts
             Additional parameters for smoothening, local metrics, support metrics.
-        local_params, support_params : dicts
-            Additional parameters for local metrics and support metrics.
         """
         _ = kwargs
         computed_metrics = computed_metrics or []
