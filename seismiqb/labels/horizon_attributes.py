@@ -117,7 +117,7 @@ class AttributesMixin:
 
         For more read :meth:`~.Horizon.smooth_out` doc.
         """
-        if not (matrix.shape == self.full_matrix.shape or matrix.shape == self.matrix.shape):
+        if not matrix.shape in (self.full_matrix.shape, self.matrix.shape):
             raise ValueError("Invalid matrix shape: it must be equal to `self.matrix` or `self.full_matrix` shape")
 
         if 'conv' in mode:
