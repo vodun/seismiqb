@@ -850,7 +850,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
             During the filtering, not include in the computation all the points that are
             further away from the current, than the margin.
         """
-        smoothed_horizon = self.smooth_out(mode='convolve', kernel_size=kernel_size, sigma_spatial=sigma,
-                                           depths_diff_threshold=depths_diff_threshold, inplace=False)
+        smoothed = self.smooth_out(mode='convolve', kernel_size=kernel_size, sigma_spatial=sigma,
+                                   depths_diff_threshold=depths_diff_threshold, inplace=False)
 
-        self.dump_charisma(data=smoothed_horizon.points, path=path, format='points', name=self.name, transform=transform)
+        self.dump_charisma(data=smoothed.points, path=path, format='points', name=self.name, transform=transform)

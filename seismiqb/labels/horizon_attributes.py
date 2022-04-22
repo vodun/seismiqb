@@ -1,10 +1,9 @@
 """ Mixin with computed along horizon geological attributes. """
 # pylint: disable=too-many-statements
 from copy import copy
-from functools import cached_property
+from functools import cached_property, wraps
 
 from math import isnan
-from functools import wraps
 import numpy as np
 from numba import njit, prange
 
@@ -15,12 +14,12 @@ from scipy.ndimage.morphology import binary_dilation, binary_fill_holes, binary_
 from skimage.measure import label
 from sklearn.decomposition import PCA
 
-from ..functional import hilbert, make_gaussian_kernel
+from ..functional import hilbert
 from ..utils import transformable, lru_cache
 
 
 
-def dilation(method):
+def apply_dilation(method):
     """ Decorator to apply binary dilation to the method result matrix with zero traces preserving.
 
     Parameters
@@ -30,7 +29,7 @@ def dilation(method):
         If None, False or 0, then don't apply binary dilation.
     """
     @wraps(method)
-    def _wrapper(instance, dilation=None, *args, **kwargs):
+    def _wrapper(instance, *args, dilation=None, **kwargs):
         result = method(instance, *args, **kwargs)
         fill_value = np.nan if isinstance(result, np.float32) else instance.FILL_VALUE
 
@@ -660,7 +659,7 @@ class AttributesMixin:
     # Maps with faults and spikes
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     @transformable
-    @dilation
+    @apply_dilation
     def get_median_diff_map(self, iters=2, window_size=11, depths_diff_threshold=0,
                             median_diff_threshold=2, dilation=0, **_):
         """ Compute difference between depth map and its median filtered counterpart.
@@ -701,7 +700,7 @@ class AttributesMixin:
 
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     @transformable
-    @dilation
+    @apply_dilation
     def get_gradient_map(self, grad_threshold=1, dilation=2, **_):
         """ Compute combined gradient map along both directions.
 
@@ -732,7 +731,7 @@ class AttributesMixin:
 
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     @transformable
-    @dilation
+    @apply_dilation
     def get_spikes_mask(self, spike_spatial_maxsize=7, spike_depth_minsize=5, close_depths_threshold=2,
                         dilation=0):
         """ Get spikes mask for the horizon.
