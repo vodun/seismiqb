@@ -60,9 +60,9 @@ class ProcessingMixin:
             self.points = points
             self.reset_storage('matrix')
             return self
-        else:
-            name = 'filtered_' + self.name if self.name is not None else None
-            return type(self)(storage=points, field=self.field, name=name)
+
+        name = 'filtered_' + self.name if self.name is not None else None
+        return type(self)(storage=points, field=self.field, name=name)
 
     def filter_spikes(self, spike_spatial_maxsize=7, spike_depth_minsize=5, close_depths_threshold=2,
                       dilation_iterations=0, inplace=True):
@@ -146,9 +146,9 @@ class ProcessingMixin:
             self.points = points
             self.reset_storage('matrix')
             return self
-        else:
-            name = 'thinned_' + self.name if self.name is not None else None
-            return type(self)(storage=points, field=self.field, name=name)
+
+        name = 'thinned_' + self.name if self.name is not None else None
+        return type(self)(storage=points, field=self.field, name=name)
 
     def smooth_out(self, mode='convolve', iters=1,
                    kernel_size=3, sigma_spatial=0.8, kernel=None, sigma_range=2.0,
@@ -211,9 +211,9 @@ class ProcessingMixin:
             self.matrix = result
             self.reset_storage('points')
             return self
-        else:
-            name = 'smoothed_' + self.name if self.name is not None else None
-            return type(self)(storage=result, field=self.field, name=name)
+
+        name = 'smoothed_' + self.name if self.name is not None else None
+        return type(self)(storage=result, field=self.field, name=name)
 
     def interpolate(self, iters=1, kernel_size=3, sigma=0.8, kernel=None,
                     min_filled_neighbors=0, depths_variance_threshold=None, inplace=True):
@@ -269,9 +269,9 @@ class ProcessingMixin:
             self.matrix = result
             self.reset_storage('points')
             return self
-        else:
-            name = 'interpolated_' + self.name if self.name is not None else None
-            return type(self)(storage=result, field=self.field, name=name)
+
+        name = 'interpolated_' + self.name if self.name is not None else None
+        return type(self)(storage=result, field=self.field, name=name)
 
     # Horizon distortions
     def make_carcass(self, frequencies=100, regular=True, margin=50, interpolate=False, add_prefix=True, **kwargs):

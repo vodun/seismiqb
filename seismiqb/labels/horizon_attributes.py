@@ -117,6 +117,9 @@ class AttributesMixin:
 
         For more read :meth:`~.Horizon.smooth_out` doc.
         """
+        if not (matrix.shape == self.full_matrix.shape or matrix.shape == self.matrix.shape):
+            raise ValueError("Invalid matrix shape: it must be equal to `self.matrix` or `self.full_matrix` shape")
+
         if 'conv' in mode:
             smoothening_function, kwargs = _convolve, {}
         else:
@@ -144,8 +147,6 @@ class AttributesMixin:
             zero_traces = self.field.zero_traces == 1
         elif matrix.shape == self.matrix.shape:
             zero_traces = self.field.zero_traces[self.i_min:self.i_max + 1, self.x_min:self.x_max + 1] == 1
-        else:
-            raise ValueError("Invalid matrix shape: it must be equal to `self.matrix` or `self.full_matrix` shape")
 
         result[zero_traces] = self.FILL_VALUE
         return result

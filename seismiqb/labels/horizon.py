@@ -850,7 +850,8 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
             During the filtering, not include in the computation all the points that are
             further away from the current, than the margin.
         """
-        matrix = self.matrix_smooth_out(matrix=self.full_matrix, mode='convolve', kernel_size=kernel_size, sigma_spatial=sigma,
+        matrix = self.matrix_smooth_out(matrix=self.full_matrix, mode='convolve',
+                                        kernel_size=kernel_size, sigma_spatial=sigma,
                                         depths_diff_threshold=depths_diff_threshold)
 
         points = self.matrix_to_points(matrix)
