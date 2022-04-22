@@ -6,6 +6,8 @@ TESTS_ROOT_DIR : str
     Path to the directory for saving results and temporary files for all tests
     (executed notebooks, logs, data files like cubes, etc.).
     Note that the directory will be removed if `REMOVE_ROOT_DIR` is True and no one test failed.
+REMOVE_EXTRA_FILES : bool
+    Whether to remove extra files such as executed tests notebooks without failures.
 SHOW_FIGURES : bool
     Whether to show additional figures in the executed notebooks.
     Showing some figures can be useful for finding out the reason for the tests failure.
@@ -40,11 +42,13 @@ from nbtools import run_notebook
 # Base tests variables for entire test process
 pytest.failed = False
 BASE_DIR =  os.path.normpath(os.getenv('BASE_DIR', os.path.join(os.path.dirname(os.path.realpath(__file__)), '../../seismiqb')))
+TESTS_DIR = os.path.join(BASE_DIR, 'tests')
 REMOVE_ROOT_DIR = bool(int(os.getenv('SEISMIQB_TESTS_REMOVE_ROOT_DIR', '1')))
 
 # Parameters for each test notebooks
 common_params = {
-    'TESTS_ROOT_DIR': os.getenv('SEISMIQB_TESTS_ROOT_DIR', tempfile.mkdtemp(prefix='tests_root_dir_', dir=BASE_DIR)),
+    'TESTS_ROOT_DIR': os.getenv('SEISMIQB_TESTS_ROOT_DIR', tempfile.mkdtemp(prefix='tests_root_dir_', dir=TESTS_DIR)),
+    'REMOVE_EXTRA_FILES': bool(int(os.getenv('SEISMIQB_REMOVE_EXTRA_FILES', '1'))),
     'SHOW_FIGURES': bool(int(os.getenv('SEISMIQB_TESTS_SHOW_FIGURES', '0'))),
     'VERBOSE': bool(int(os.getenv('SEISMIQB_TESTS_VERBOSE', '1')))
 }
@@ -61,18 +65,18 @@ notebooks_params = (
     (os.path.join(TESTS_NOTEBOOKS_DIR, 'charisma_test.ipynb'), {}),
 
     # SeismicGeometry test
-    (os.path.join(TESTS_NOTEBOOKS_DIR, 'geometry_test_preparation.ipynb'),
+    (os.path.join(TESTS_NOTEBOOKS_DIR, 'geometry_test_01_preparation.ipynb'),
      {'inputs': {'FORMATS': geometry_formats}}),
 
-    *[(os.path.join(TESTS_NOTEBOOKS_DIR, 'geometry_test_data_format.ipynb'),
+    *[(os.path.join(TESTS_NOTEBOOKS_DIR, 'geometry_test_02_data_format.ipynb'),
        {'inputs': {'FORMAT': data_format}, 'outputs': 'timings'}) for data_format in geometry_formats],
 
     # Horizon test
-    (os.path.join(TESTS_NOTEBOOKS_DIR, 'horizon_test_preparation.ipynb'), {}),
-    (os.path.join(TESTS_NOTEBOOKS_DIR, 'horizon_test_base.ipynb'), {}),
-    (os.path.join(TESTS_NOTEBOOKS_DIR, 'horizon_test_attributes.ipynb'), {}),
-    (os.path.join(TESTS_NOTEBOOKS_DIR, 'horizon_test_manipulations.ipynb'), {}),
-    (os.path.join(TESTS_NOTEBOOKS_DIR, 'horizon_test_extraction.ipynb'), {'outputs': 'message'}),
+    (os.path.join(TESTS_NOTEBOOKS_DIR, 'horizon_test_01_preparation.ipynb'), {}),
+    (os.path.join(TESTS_NOTEBOOKS_DIR, 'horizon_test_02_base.ipynb'), {}),
+    (os.path.join(TESTS_NOTEBOOKS_DIR, 'horizon_test_03_attributes.ipynb'), {}),
+    (os.path.join(TESTS_NOTEBOOKS_DIR, 'horizon_test_04_manipulations.ipynb'), {}),
+    (os.path.join(TESTS_NOTEBOOKS_DIR, 'horizon_test_05_extraction.ipynb'), {'outputs': 'message'}),
 
     # TODO: add tutorials
     # (os.path.join(TUTORIALS_DIR, '01_Geometry_part_1.ipynb'), {})
@@ -95,19 +99,25 @@ def test_run_notebook(notebook_kwargs, capsys, cleanup_fixture):
 
     # Run test notebook
     out_path_ipynb = os.path.join(common_params['TESTS_ROOT_DIR'],
-                                f"{filename}_out_{filename_suffix}.ipynb")
+                                  f"{filename}_out_{filename_suffix}.ipynb")
 
     exec_res = run_notebook(path=path_ipynb, inputs=inputs, outputs=outputs,
                             inputs_pos=2, working_dir=os.path.dirname(path_ipynb),
                             out_path_ipynb=out_path_ipynb, display_links=False)
 
+    if not exec_res['failed'] and common_params['REMOVE_EXTRA_FILES']:
+        os.remove(out_path_ipynb)
+
     pytest.failed = pytest.failed or exec_res['failed']
 
     # Terminal output
     with capsys.disabled():
+        notebook_info = f"`{filename}.ipynb`{' with inputs=' + inputs_repr if inputs_repr!='{}' else ''}"
+
         # Extract traceback
         if exec_res['failed']:
             print(exec_res.get('traceback', ''))
+            print(f"\n{notebook_info} failed in the cell number {exec_res.get('failed cell number', None)}.\n")
 
         # Print test outputs
         for k, v in exec_res.get('outputs', {}).items():
@@ -115,7 +125,6 @@ def test_run_notebook(notebook_kwargs, capsys, cleanup_fixture):
             print(f"{k}:\n{message}\n")
 
         # Provide test conclusion
-        notebook_info = f"`{filename}`{' with inputs=' + inputs_repr if inputs_repr!='{}' else ''}"
         if not exec_res['failed']:
             print(f"{notebook_info} was executed successfully.\n")
         else:
