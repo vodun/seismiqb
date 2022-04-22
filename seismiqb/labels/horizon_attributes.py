@@ -4,19 +4,42 @@ from copy import copy
 from functools import cached_property
 
 from math import isnan
+from functools import wraps
 import numpy as np
 from numba import njit, prange
 
 from cv2 import dilate
 from scipy.signal import ricker
 from scipy.ndimage import convolve
-from scipy.ndimage.morphology import binary_fill_holes, binary_erosion
+from scipy.ndimage.morphology import binary_dilation, binary_fill_holes, binary_erosion
 from skimage.measure import label
 from sklearn.decomposition import PCA
 
 from ..functional import hilbert, make_gaussian_kernel
 from ..utils import transformable, lru_cache
 
+
+
+def dilation(method):
+    """ Decorator to apply binary dilation to the method result matrix with zero traces preserving.
+
+    Parameters
+    ----------
+    dilation : int
+        Number of iterations for binary dilation algorithm.
+        If None, False or 0, then don't apply binary dilation.
+    """
+    @wraps(method)
+    def _wrapper(instance, dilation=None, *args, **kwargs):
+        result = method(instance, *args, **kwargs)
+        fill_value = np.nan if isinstance(result, np.float32) else instance.FILL_VALUE
+
+        if dilation:
+            result = np.nan_to_num(result)
+            result = binary_dilation(result, iterations=dilation)
+            result[instance.field.zero_traces == 1] = fill_value
+        return result
+    return _wrapper
 
 
 class AttributesMixin:
@@ -109,47 +132,6 @@ class AttributesMixin:
         else:
             raise ValueError(f'Unknown normalization mode `{mode}`.')
         return matrix
-
-    def matrix_smooth_out(self, matrix, mode='convolve', iters=1,
-                          kernel_size=7, sigma_spatial=2., kernel=None, sigma_range=2.0,
-                          depths_diff_threshold=5):
-        """ Smooth the depth matrix to produce floating point numbers.
-
-        For more read :meth:`~.Horizon.smooth_out` doc.
-        """
-        if not matrix.shape in (self.full_matrix.shape, self.matrix.shape):
-            raise ValueError("Invalid matrix shape: it must be equal to `self.matrix` or `self.full_matrix` shape")
-
-        if 'conv' in mode:
-            smoothening_function, kwargs = _convolve, {}
-        else:
-            smoothening_function, kwargs = _bilateral_filter, {'sigma_range': sigma_range}
-
-        if kernel is None:
-            kernel = make_gaussian_kernel(kernel_size=kernel_size, sigma=sigma_spatial)
-
-        result = matrix.astype(np.float32)
-        result[result == self.FILL_VALUE] = np.nan
-
-        # Apply smoothening multiple times. Note that there is no dtype conversion in between
-        # Also the method returns a new object
-        for _ in range(iters):
-            result = smoothening_function(src=result, kernel=kernel,
-                                          depths_diff_threshold=depths_diff_threshold,
-                                          **kwargs)
-
-        # Remove all unwanted values
-        result[(matrix == self.FILL_VALUE) | np.isnan(matrix) | np.isnan(result)] = self.FILL_VALUE
-
-        result = np.rint(result).astype(np.int32)
-
-        if matrix.shape == self.full_matrix.shape:
-            zero_traces = self.field.zero_traces == 1
-        elif matrix.shape == self.matrix.shape:
-            zero_traces = self.field.zero_traces[self.i_min:self.i_max + 1, self.x_min:self.x_max + 1] == 1
-
-        result[zero_traces] = self.FILL_VALUE
-        return result
 
     def matrix_enlarge(self, matrix, width=3):
         """ Increase visibility of a sparse carcass metric. Should be used only for visualization purposes. """
@@ -678,8 +660,9 @@ class AttributesMixin:
     # Maps with faults and spikes
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     @transformable
+    @dilation
     def get_median_diff_map(self, iters=2, window_size=11, depths_diff_threshold=0,
-                            median_diff_threshold=2, dilation_iterations=0, **_):
+                            median_diff_threshold=2, dilation=0, **_):
         """ Compute difference between depth map and its median filtered counterpart.
 
         Parameters
@@ -693,11 +676,11 @@ class AttributesMixin:
             then the point is ignored in filter.
         median_diff_threshold : number
             Threshold to consider a difference between matrix and median value is not significant.
-        dilation_iterations : int
+        dilation : int
             Number of iterations for binary dilation algorithm to increase areas with significant
             differences between matrix and median filter.
         """
-        _ = dilation_iterations # This value is passed only to the decorator
+        _ = dilation # This value is passed only to the decorator
 
         medfilt = self.full_matrix.astype(np.float32)
         medfilt[self.full_matrix == self.FILL_VALUE] = np.nan
@@ -718,17 +701,18 @@ class AttributesMixin:
 
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     @transformable
-    def get_gradient_map(self, grad_threshold=1, dilation_iterations=2, **_):
+    @dilation
+    def get_gradient_map(self, grad_threshold=1, dilation=2, **_):
         """ Compute combined gradient map along both directions.
 
         Parameters
         ----------
         grad_threshold : number
             Threshold to consider a gradient value is not significant.
-        dilation_iterations : int
+        dilation : int
             Number of iterations for binary dilation algorithm to increase areas with significant gradients values.
         """
-        _ = dilation_iterations # This value is passed only to the decorator
+        _ = dilation # This value is passed only to the decorator
 
         grad_i = self.load_attribute('grad_i', on_full=True, dtype=np.float32, use_cache=False)
         grad_x = self.load_attribute('grad_x', on_full=True, dtype=np.float32, use_cache=False)
@@ -748,12 +732,10 @@ class AttributesMixin:
 
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     @transformable
+    @dilation
     def get_spikes_mask(self, spike_spatial_maxsize=7, spike_depth_minsize=5, close_depths_threshold=2,
-                        dilation_iterations=0):
+                        dilation=0):
         """ Get spikes mask for the horizon.
-
-        We suppose that spikes are huge depth changes with invert depth changes in a fixed size window.
-        As a window we take a line segment with `spike_spatial_maxsize` length along ilines or xlines.
 
         Parameters
         ----------
@@ -763,10 +745,10 @@ class AttributesMixin:
             Minimum possible spike size along the depth axis.
         close_depths_threshold : int
             Threshold to consider that depths are close.
-        dilation_iterations : int
+        dilation : int
             Number of iterations for binary dilation algorithm to increase the spikes.
         """
-        _ = dilation_iterations # This value is passed only to the decorator
+        _ = dilation # This value is passed only to the decorator
 
         matrix = self.full_matrix.astype(np.float32)
         matrix[matrix == self.FILL_VALUE] = np.nan
@@ -838,75 +820,6 @@ def _get_spikes_along_line(matrix, spike_spatial_maxsize=5, spike_depth_minsize=
                         break
 
     return spikes_mask
-
-@njit(parallel=True)
-def _convolve(src, kernel, depths_diff_threshold):
-    """ Jit-accelerated function to apply 2d convolution with special care for nan values. """
-    #pylint: disable=too-many-nested-blocks, consider-using-enumerate, not-an-iterable
-    k = kernel.shape[0] // 2
-    raveled_kernel = kernel.ravel() / np.sum(kernel)
-
-    i_range, x_range = src.shape
-    dst = src.copy()
-
-    for iline in prange(0, i_range):
-        for xline in range(0, x_range):
-            central = src[iline, xline]
-
-            if isnan(central):
-                continue
-
-            # Get values in the squared window and apply kernel to them
-            element = src[max(0, iline-k):min(iline+k+1, i_range),
-                          max(0, xline-k):min(xline+k+1, x_range)].ravel()
-
-            s, sum_weights = np.float32(0), np.float32(0)
-            for item, weight in zip(element, raveled_kernel):
-                if not isnan(item) and (abs(item - central) <= depths_diff_threshold):
-                    s += item * weight
-                    sum_weights += weight
-
-            if sum_weights != 0.0:
-                dst[iline, xline] = s / sum_weights
-    return dst
-
-@njit(parallel=True)
-def _bilateral_filter(src, kernel, depths_diff_threshold, sigma_range=0.1):
-    """ Jit-accelerated function to apply 2d bilateral filtering with special care for nan values.
-
-    The difference between :func:`_convolve` and :func:`_bilateral_filter` is in additional weight multiplier,
-    which is a gaussian of difference of convolved elements.
-    """
-    #pylint: disable=too-many-nested-blocks, consider-using-enumerate, not-an-iterable
-    k = kernel.shape[0] // 2
-    raveled_kernel = kernel.ravel() / np.sum(kernel)
-    sigma_squared = sigma_range**2
-
-    i_range, x_range = src.shape
-    dst = src.copy()
-
-    for iline in prange(0, i_range):
-        for xline in range(0, x_range):
-            central = src[iline, xline]
-
-            if isnan(central):
-                continue # Because can't evaluate additional multiplier
-
-            # Get values in the squared window and apply kernel to them
-            element = src[max(0, iline-k):min(iline+k+1, i_range),
-                          max(0, xline-k):min(xline+k+1, x_range)].ravel()
-
-            s, sum_weights = np.float32(0), np.float32(0)
-            for item, weight in zip(element, raveled_kernel):
-                if not isnan(item) and (abs(item - central) <= depths_diff_threshold):
-                    weight *= np.exp(-0.5*((item - central)**2)/sigma_squared)
-
-                    s += item * weight
-                    sum_weights += weight
-
-            if sum_weights != 0.0:
-                dst[iline, xline] = s / sum_weights
-    return dst
 
 @njit(parallel=True)
 def _medfilt(src, window_size, preserve_missings, depths_diff_threshold):

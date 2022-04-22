@@ -2,8 +2,6 @@
 from functools import wraps
 import numpy as np
 
-from scipy.ndimage.morphology import binary_dilation
-
 from . import to_list
 
 
@@ -30,9 +28,6 @@ def transformable(method):
         If `min-max` or True, then use min-max scaling.
         If `mean-std`, then use mean-std scaling.
         If False, don't scale matrix.
-    dilation_iterations : int
-        Number of iterations for binary dilation algorithm.
-        If 0, than don't apply binary dilation.
     n_components : number, optional
         If integer, then number of components to keep after PCA transformation.
         If float in (0, 1) range, then amount of variance to be explained after PCA transformation.
@@ -41,7 +36,7 @@ def transformable(method):
     """
     @wraps(method)
     def wrapper(instance, *args, dtype=None, on_full=False, channels=None, normalize=False, fill_value=None,
-                dilation_iterations=0, enlarge=False, enlarge_width=10, atleast_3d=False, n_components=None, **kwargs):
+                enlarge=False, enlarge_width=10, atleast_3d=False, n_components=None, **kwargs):
         result = method(instance, *args, **kwargs)
 
         if dtype and hasattr(instance, 'matrix_set_dtype'):
@@ -58,11 +53,6 @@ def transformable(method):
 
         if normalize and hasattr(instance, 'matrix_normalize'):
             result = instance.matrix_normalize(result, normalize)
-
-        if dilation_iterations:
-            result = np.nan_to_num(result)
-            result = binary_dilation(result, iterations=dilation_iterations).astype(np.float32)
-            result[instance.field.zero_traces == 1] = np.nan
 
         if fill_value is not None and hasattr(instance, 'matrix_fill_to_num'):
             result = instance.matrix_fill_to_num(result, value=fill_value)

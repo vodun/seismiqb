@@ -21,21 +21,25 @@ class ProcessingMixin:
     In either case they return a filtered horizon instance.
     """
     # Filtering methods
-    def filter(self, filtering_matrix=None, margin=0, inplace=True, **_):
+    def filter(self, filtering_matrix=None, margin=0, inplace=True, **kwargs):
         """ Remove points that correspond to 1's in `filtering_matrix` from the horizon surface.
 
-        Note, this method can change horizon inplace or create a new instance.
+        Note, this method may change horizon inplace or create a new instance.
         In either case it returns a processed horizon instance.
 
         Parameters
         ----------
-        filtering_matrix : np.ndarray
+        filtering_matrix : None, str or np.ndarray
             Mask of points to cut out from the horizon.
             If None, then remove points corresponding to zero traces.
+            If str, then remove points corresponding to the `filtering_matrix` attribute.
+            If np.ndarray, then used as filtering mask.
         margin : int
             Amount of traces to cut out near to boundaries considering `filtering_matrix` appliance.
         inplace : bool
             Whether to apply operation inplace or return a new Horizon object.
+        kwargs : dict
+            Arguments to be passed in the loading attribute method in case when filtering_matrix is a str.
 
         Returns
         -------
@@ -44,9 +48,12 @@ class ProcessingMixin:
         """
         if filtering_matrix is None:
             filtering_matrix = self.field.zero_traces
+        elif isinstance(filtering_matrix, str):
+            filtering_matrix = self.load_attribute(filtering_matrix, **kwargs)
+            filtering_matrix[np.abs(filtering_matrix) > 1] = 1
 
         if margin > 0:
-            filtering_matrix = binary_dilation(filtering_matrix, structure=np.ones((margin, margin)))
+            filtering_matrix = binary_dilation(filtering_matrix, iterations=margin)
 
             filtering_matrix[:margin, :] = 1
             filtering_matrix[:, :margin] = 1
@@ -68,7 +75,7 @@ class ProcessingMixin:
                       dilation_iterations=0, inplace=True):
         """ Remove spikes from the horizon.
 
-        Note, this method can change horizon inplace or create a new instance. By default works inplace.
+        Note, this method may change horizon inplace or create a new instance. By default works inplace.
         In either case it returns a processed horizon instance.
         """
         spikes = self.load_attribute('spikes', spike_spatial_maxsize=spike_spatial_maxsize,
@@ -83,7 +90,7 @@ class ProcessingMixin:
     def filter_disconnected_regions(self, erosion_rate=0, inplace=True):
         """ Remove regions, not connected to the largest component of a horizon.
 
-        Note, this method can change horizon inplace or create a new instance. By default works inplace.
+        Note, this method may change horizon inplace or create a new instance. By default works inplace.
         In either case it returns a processed horizon instance.
         """
         if erosion_rate > 0:
@@ -114,7 +121,7 @@ class ProcessingMixin:
     def thin_out(self, factor=1, threshold=256, inplace=True):
         """ Thin out the horizon by keeping only each `factor`-th line.
 
-        Note, this method can change horizon inplace or create a new instance. By default works inplace.
+        Note, this method may change horizon inplace or create a new instance. By default works inplace.
         In either case it returns a processed horizon instance.
 
         Parameters
@@ -152,7 +159,7 @@ class ProcessingMixin:
 
     def smooth_out(self, mode='convolve', iters=1,
                    kernel_size=3, sigma_spatial=0.8, kernel=None, sigma_range=2.0,
-                   depths_variance_threshold=5, inplace=True):
+                   depths_diff_threshold=5, inplace=True):
         """ Smooth out the horizon surface.
 
         Smoothening is applied with a special treatment to absent points:
@@ -169,7 +176,7 @@ class ProcessingMixin:
             - The higher the `sigma_range` value, the more 'bilateral' result looks like a 'convolve' result.
             - If the `sigma_range` too low, then no smoothening applied.
 
-        Note, this method can change horizon inplace or create a new instance. By default works inplace.
+        Note, this method may change horizon inplace or create a new instance. By default works inplace.
         In either case it returns a processed horizon instance.
 
         Parameters
@@ -191,7 +198,7 @@ class ProcessingMixin:
             Standard deviation for additional weight which smooth differences in depth values.
             The lower, the more weight is put into the depths differences between point in a window.
             Note, if it is too low, then no smoothening is applied.
-        depths_variance_threshold : number
+        depths_diff_threshold : number
             If the distance between anchor point and the point inside filter is bigger than the threshold,
             then the point is ignored in convolutions.
             Can be used for separate smoothening on sides of discontinuity.
@@ -203,9 +210,28 @@ class ProcessingMixin:
         :class:`~.Horizon`
             Processed horizon instance. A new instance if `inplace` is False, `self` otherwise.
         """
-        result = self.matrix_smooth_out(matrix=self.matrix, mode=mode, iters=iters,
-                                        kernel_size=kernel_size, sigma_spatial=sigma_spatial, kernel=kernel,
-                                        sigma_range=sigma_range, depths_variance_threshold=depths_variance_threshold)
+        if 'conv' in mode:
+            smoothening_function, kwargs = _convolve, {}
+        else:
+            smoothening_function, kwargs = _bilateral_filter, {'sigma_range': sigma_range}
+
+        if kernel is None:
+            kernel = make_gaussian_kernel(kernel_size=kernel_size, sigma=sigma_spatial)
+
+        result = self.matrix.astype(np.float32)
+        result[result == self.FILL_VALUE] = np.nan
+
+        # Apply smoothening multiple times. Note that there is no dtype conversion in between
+        # Also the method returns a new object
+        for _ in range(iters):
+            result = smoothening_function(src=result, kernel=kernel,
+                                          depths_diff_threshold=depths_diff_threshold,
+                                          **kwargs)
+
+        result[(self.matrix == self.FILL_VALUE) | np.isnan(result)] = self.FILL_VALUE
+        result = np.rint(result).astype(np.int32)
+        result[self.field.zero_traces[self.i_min:self.i_max + 1,
+                                      self.x_min:self.x_max + 1] == 1] = self.FILL_VALUE
 
         if inplace:
             self.matrix = result
@@ -216,12 +242,12 @@ class ProcessingMixin:
         return type(self)(storage=result, field=self.field, name=name)
 
     def interpolate(self, iters=1, kernel_size=3, sigma=0.8, kernel=None,
-                    min_filled_neighbors=0, depths_variance_threshold=None, inplace=True):
+                    min_present_neighbors=0, max_depth_ptp=None, inplace=True):
         """ Interpolate horizon surface on the regions with missing traces.
 
         Under the hood, we fill missing traces with weighted neighbor values.
 
-        Note, this method can change horizon inplace or create a new instance. By default works inplace.
+        Note, this method may change horizon inplace or create a new instance. By default works inplace.
         In either case it returns a processed horizon instance.
 
         Parameters
@@ -234,10 +260,10 @@ class ProcessingMixin:
             Standard deviation (spread or “width”) for gaussian kernel.
             The lower, the more weight is put into the point itself.
         kernel : ndarray or None
-            Kernel to apply to missing points.
-        min_filled_neighbors: int
+            Interpolation weights kernel.
+        min_present_neighbors : int
             Minimal amount of non-missing neighboring points in a window to interpolate a central point.
-        depths_variance_threshold : number
+        max_depth_ptp : number
             A maximum distance between values in a squared window for which we apply interpolation.
         inplace : bool
             Whether to apply operation inplace or return a new Horizon object.
@@ -256,8 +282,8 @@ class ProcessingMixin:
         # Apply `_interpolate` multiple times. Note that there is no dtype conversion in between
         # Also the method returns a new object
         for _ in range(iters):
-            result = _interpolate(src=result, kernel=kernel, min_filled_neighbors=min_filled_neighbors,
-                                  depths_variance_threshold=depths_variance_threshold)
+            result = _interpolate(src=result, kernel=kernel, min_present_neighbors=min_present_neighbors,
+                                  max_depth_ptp=max_depth_ptp)
 
         result[np.isnan(result)] = self.FILL_VALUE
         result = np.rint(result).astype(np.int32)
@@ -426,7 +452,7 @@ class ProcessingMixin:
                    noise_level=0, seed=None):
         """ Make holes on a horizon surface.
 
-        Note, this method can change horizon inplace or create a new instance. By default creates a new instance.
+        Note, this method may change horizon inplace or create a new instance. By default creates a new instance.
         In either case it returns a processed horizon instance.
         """
         #pylint: disable=self-cls-assignment
@@ -442,7 +468,76 @@ class ProcessingMixin:
 
 # Helper functions
 @njit(parallel=True)
-def _interpolate(src, kernel, min_filled_neighbors=1, depths_variance_threshold=None):
+def _convolve(src, kernel, depths_diff_threshold):
+    """ Jit-accelerated function to apply 2d convolution with special care for nan values. """
+    #pylint: disable=too-many-nested-blocks, consider-using-enumerate, not-an-iterable
+    k = kernel.shape[0] // 2
+    raveled_kernel = kernel.ravel() / np.sum(kernel)
+
+    i_range, x_range = src.shape
+    dst = src.copy()
+
+    for iline in prange(0, i_range):
+        for xline in range(0, x_range):
+            central = src[iline, xline]
+
+            if isnan(central):
+                continue
+
+            # Get values in the squared window and apply kernel to them
+            element = src[max(0, iline-k):min(iline+k+1, i_range),
+                          max(0, xline-k):min(xline+k+1, x_range)].ravel()
+
+            s, sum_weights = np.float32(0), np.float32(0)
+            for item, weight in zip(element, raveled_kernel):
+                if not isnan(item) and (abs(item - central) <= depths_diff_threshold):
+                    s += item * weight
+                    sum_weights += weight
+
+            if sum_weights != 0.0:
+                dst[iline, xline] = s / sum_weights
+    return dst
+
+@njit(parallel=True)
+def _bilateral_filter(src, kernel, depths_diff_threshold, sigma_range=0.1):
+    """ Jit-accelerated function to apply 2d bilateral filtering with special care for nan values.
+
+    The difference between :func:`_convolve` and :func:`_bilateral_filter` is in additional weight multiplier,
+    which is a gaussian of difference of convolved elements.
+    """
+    #pylint: disable=too-many-nested-blocks, consider-using-enumerate, not-an-iterable
+    k = kernel.shape[0] // 2
+    raveled_kernel = kernel.ravel() / np.sum(kernel)
+    sigma_squared = sigma_range**2
+
+    i_range, x_range = src.shape
+    dst = src.copy()
+
+    for iline in prange(0, i_range):
+        for xline in range(0, x_range):
+            central = src[iline, xline]
+
+            if isnan(central):
+                continue # Because can't evaluate additional multiplier
+
+            # Get values in the squared window and apply kernel to them
+            element = src[max(0, iline-k):min(iline+k+1, i_range),
+                          max(0, xline-k):min(xline+k+1, x_range)].ravel()
+
+            s, sum_weights = np.float32(0), np.float32(0)
+            for item, weight in zip(element, raveled_kernel):
+                if not isnan(item) and (abs(item - central) <= depths_diff_threshold):
+                    weight *= np.exp(-0.5*((item - central)**2)/sigma_squared)
+
+                    s += item * weight
+                    sum_weights += weight
+
+            if sum_weights != 0.0:
+                dst[iline, xline] = s / sum_weights
+    return dst
+
+@njit(parallel=True)
+def _interpolate(src, kernel, min_present_neighbors=1, max_depth_ptp=None):
     """ Jit-accelerated function to apply 2d interpolation to nan values. """
     #pylint: disable=too-many-nested-blocks, consider-using-enumerate, not-an-iterable
     k = kernel.shape[0] // 2
@@ -463,11 +558,11 @@ def _interpolate(src, kernel, min_filled_neighbors=1, depths_variance_threshold=
                           max(0, xline-k):min(xline+k+1, x_range)].ravel()
 
             filled_neighbors = kernel.size - np.isnan(element).sum()
-            if filled_neighbors < min_filled_neighbors:
+            if filled_neighbors < min_present_neighbors:
                 continue
 
             # Compare ptp with the max_distance_threshold
-            if depths_variance_threshold is not None:
+            if max_depth_ptp is not None:
                 nanmax, nanmin = np.float32(element[0]), np.float32(element[0])
 
                 for item in element:
@@ -479,7 +574,7 @@ def _interpolate(src, kernel, min_filled_neighbors=1, depths_variance_threshold=
                             nanmax = max(item, nanmax)
                             nanmin = min(item, nanmin)
 
-                if nanmax - nanmin > depths_variance_threshold:
+                if nanmax - nanmin > max_depth_ptp:
                     continue
 
             # Apply kernel to neighbors to get value for interpolated point
