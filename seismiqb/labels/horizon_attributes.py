@@ -31,11 +31,13 @@ def apply_dilation(method):
     @wraps(method)
     def _wrapper(instance, *args, dilation=None, **kwargs):
         result = method(instance, *args, **kwargs)
-        fill_value = np.nan if isinstance(result, np.float32) else instance.FILL_VALUE
 
         if dilation:
+            fill_value = np.nan if isinstance(result, np.float32) else instance.FILL_VALUE
+
             result = np.nan_to_num(result)
             result = binary_dilation(result, iterations=dilation)
+
             result[instance.field.zero_traces == 1] = fill_value
         return result
     return _wrapper
