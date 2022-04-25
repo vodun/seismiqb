@@ -2,20 +2,20 @@
 
 Each test execution is controlled by the following constants that are declared in the `common_params` dict:
 
-TESTS_ROOT_DIR : str
-    Path to the directory for saving results and temporary files for all tests
-    (executed notebooks, logs, data files like cubes, etc.).
-    Note that the directory will be removed if `REMOVE_ROOT_DIR` is True and no one test failed.
 REMOVE_EXTRA_FILES : bool
-    Whether to remove extra files such as executed tests notebooks without failures.
+    Whether to remove extra files such as executed notebooks without failures.
 SHOW_FIGURES : bool
     Whether to show additional figures in the executed notebooks.
     Showing some figures can be useful for finding out the reason for the tests failure.
 VERBOSE : bool
     Whether to print in the terminal additional information from tests.
 
-One more noteworthy constant for tests control is:
+Other noteworthy variables for tests control is:
 
+TESTS_ROOT_DIR : str
+    Path to the directory for saving results and temporary files for all tests
+    (executed notebooks, logs, data files like cubes, etc.).
+    Note that the directory will be removed if `REMOVE_ROOT_DIR` is True and no one test failed.
 REMOVE_ROOT_DIR : bool
     Whether to remove `TESTS_ROOT_DIR` after execution in case of all tests completion without failures.
 
@@ -43,11 +43,11 @@ from nbtools import run_notebook
 pytest.failed = False
 BASE_DIR =  os.path.normpath(os.getenv('BASE_DIR', os.path.join(os.path.dirname(os.path.realpath(__file__)), '../../seismiqb')))
 TESTS_DIR = os.path.join(BASE_DIR, 'tests')
+TESTS_ROOT_DIR = os.getenv('SEISMIQB_TESTS_ROOT_DIR', tempfile.mkdtemp(prefix='tests_root_dir_', dir=TESTS_DIR))
 REMOVE_ROOT_DIR = bool(int(os.getenv('SEISMIQB_TESTS_REMOVE_ROOT_DIR', '1')))
 
 # Parameters for each test notebooks
 common_params = {
-    'TESTS_ROOT_DIR': os.getenv('SEISMIQB_TESTS_ROOT_DIR', tempfile.mkdtemp(prefix='tests_root_dir_', dir=TESTS_DIR)),
     'REMOVE_EXTRA_FILES': bool(int(os.getenv('SEISMIQB_REMOVE_EXTRA_FILES', '1'))),
     'SHOW_FIGURES': bool(int(os.getenv('SEISMIQB_TESTS_SHOW_FIGURES', '0'))),
     'VERBOSE': bool(int(os.getenv('SEISMIQB_TESTS_VERBOSE', '1')))
@@ -98,11 +98,10 @@ def test_run_notebook(notebook_kwargs, capsys, cleanup_fixture):
     inputs.update(common_params)
 
     # Run test notebook
-    out_path_ipynb = os.path.join(common_params['TESTS_ROOT_DIR'],
-                                  f"{filename}_out_{filename_suffix}.ipynb")
+    out_path_ipynb = os.path.join(TESTS_ROOT_DIR, f"{filename}_out_{filename_suffix}.ipynb")
 
     exec_res = run_notebook(path=path_ipynb, inputs=inputs, outputs=outputs,
-                            inputs_pos=2, working_dir=os.path.dirname(path_ipynb),
+                            inputs_pos=2, working_dir=TESTS_ROOT_DIR,
                             out_path_ipynb=out_path_ipynb, display_links=False)
 
     if not exec_res['failed'] and common_params['REMOVE_EXTRA_FILES']:
@@ -137,7 +136,7 @@ def cleanup_fixture():
     yield
     # Remove TESTS_ROOT_DIR if all tests were successfull
     if REMOVE_ROOT_DIR and not pytest.failed:
-        shutil.rmtree(common_params['TESTS_ROOT_DIR'])
+        shutil.rmtree(TESTS_ROOT_DIR)
 
 
 # Helper method

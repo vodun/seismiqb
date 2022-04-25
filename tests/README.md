@@ -4,11 +4,11 @@
 
 Before you add your test notebook to the running tests list, you need to make **simple preparations**:
 
-1. If your test saves any files, you need to initialize the path variable `TESTS_ROOT_DIR` inside the notebook and create a test's **own directory** inside the `TESTS_ROOT_DIR`.
-    * `TESTS_ROOT_DIR` is a path to the directory for saving files for **all running tests**.
-    * A separate directory inside the `TESTS_ROOT_DIR` will prevent from mixing up files from different tests.
+1. If your test saves any files, it is higly recommended to use relative paths and create a test's **own directory** for saving files.
 
-2. All **changeable parameters** (the `TESTS_ROOT_DIR` included) must be initialized on the first or on the second notebook cells. All manipulations with them must be done on cells number 3 or higher.
+All files will be saved in the shared `TESTS_ROOT_DIR` directory (`'seismiqb\tests\test_root_dir_*'`), so a separate directory inside the `TESTS_ROOT_DIR` will prevent from mixing up files from different tests.
+
+2. All **changeable parameters** must be initialized on the first or on the second notebook cells. All manipulations with them must be done on cells number 3 or higher.
 
 This is caused because the `run_notebook_test.py` inserts a new cell with parameters initialization between cells number 2 and 3.
 
@@ -93,7 +93,7 @@ Notebook execution failed
 `example_test.ipynb` failed in the cell number 6.
 ```
 
-2. The notebook **wasn't executed**. In this case there are no traceback above this message. The reason for this situation is some external execution error such as out of memory.
+2. The notebook **wasn't executed**. In this case there are no traceback above this message. The reason for this situation is some internal execution error such as out of memory.
 
 ```python
 run_notebook_test.py ---------------------------------------------------------------------------
