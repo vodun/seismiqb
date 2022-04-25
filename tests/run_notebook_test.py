@@ -10,7 +10,7 @@ SHOW_FIGURES : bool
 VERBOSE : bool
     Whether to print in the terminal additional information from tests.
 
-Other noteworthy variables for tests control is:
+Other noteworthy variables for tests control are:
 
 TESTS_ROOT_DIR : str
     Path to the directory for saving results and temporary files for all tests
