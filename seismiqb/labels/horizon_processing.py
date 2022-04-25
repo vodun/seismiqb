@@ -159,7 +159,7 @@ class ProcessingMixin:
 
     def smooth_out(self, mode='convolve', iters=1,
                    kernel_size=3, sigma_spatial=0.8, kernel=None, sigma_range=2.0,
-                   depths_diff_threshold=5, inplace=True):
+                   max_depth_difference=5, inplace=True):
         """ Smooth out the horizon surface.
 
         Smoothening is applied with a special treatment to absent points:
@@ -198,9 +198,9 @@ class ProcessingMixin:
             Standard deviation for additional weight which smooth differences in depth values.
             The lower, the more weight is put into the depths differences between point in a window.
             Note, if it is too low, then no smoothening is applied.
-        depths_diff_threshold : number
+        max_depth_difference : number
             If the distance between anchor point and the point inside filter is bigger than the threshold,
-            then the point is ignored in convolutions.
+            then the point is ignored in smoothening.
             Can be used for separate smoothening on sides of discontinuity.
         inplace : bool
             Whether to apply operation inplace or return a new Horizon object.
@@ -225,7 +225,7 @@ class ProcessingMixin:
         # Also the method returns a new object
         for _ in range(iters):
             result = smoothening_function(src=result, kernel=kernel,
-                                          depths_diff_threshold=depths_diff_threshold,
+                                          max_depth_difference=max_depth_difference,
                                           **kwargs)
 
         result[(self.matrix == self.FILL_VALUE) | np.isnan(result)] = self.FILL_VALUE
@@ -468,7 +468,7 @@ class ProcessingMixin:
 
 # Helper functions
 @njit(parallel=True)
-def _convolve(src, kernel, depths_diff_threshold):
+def _convolve(src, kernel, max_depth_difference):
     """ Jit-accelerated function to apply 2d convolution with special care for nan values. """
     #pylint: disable=too-many-nested-blocks, consider-using-enumerate, not-an-iterable
     k = kernel.shape[0] // 2
@@ -490,7 +490,7 @@ def _convolve(src, kernel, depths_diff_threshold):
 
             s, sum_weights = np.float32(0), np.float32(0)
             for item, weight in zip(element, raveled_kernel):
-                if not isnan(item) and (abs(item - central) <= depths_diff_threshold):
+                if not isnan(item) and (abs(item - central) <= max_depth_difference):
                     s += item * weight
                     sum_weights += weight
 
@@ -499,7 +499,7 @@ def _convolve(src, kernel, depths_diff_threshold):
     return dst
 
 @njit(parallel=True)
-def _bilateral_filter(src, kernel, depths_diff_threshold, sigma_range=0.1):
+def _bilateral_filter(src, kernel, max_depth_difference, sigma_range=0.1):
     """ Jit-accelerated function to apply 2d bilateral filtering with special care for nan values.
 
     The difference between :func:`_convolve` and :func:`_bilateral_filter` is in additional weight multiplier,
@@ -526,7 +526,7 @@ def _bilateral_filter(src, kernel, depths_diff_threshold, sigma_range=0.1):
 
             s, sum_weights = np.float32(0), np.float32(0)
             for item, weight in zip(element, raveled_kernel):
-                if not isnan(item) and (abs(item - central) <= depths_diff_threshold):
+                if not isnan(item) and (abs(item - central) <= max_depth_difference):
                     weight *= np.exp(-0.5*((item - central)**2)/sigma_squared)
 
                     s += item * weight

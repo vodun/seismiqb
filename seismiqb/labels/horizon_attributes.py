@@ -662,8 +662,8 @@ class AttributesMixin:
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     @transformable
     @apply_dilation
-    def get_median_diff_map(self, iters=2, window_size=11, depths_diff_threshold=0,
-                            median_diff_threshold=2, dilation=0, **_):
+    def get_median_diff_map(self, iters=2, window_size=11, max_depth_difference=0,
+                            threshold=2, dilation=0, **_):
         """ Compute difference between depth map and its median filtered counterpart.
 
         Parameters
@@ -672,11 +672,11 @@ class AttributesMixin:
             Number of median filter iterations to perform.
         window_size : int
             A window size to compute the median in.
-        depths_diff_threshold : number
+        max_depth_difference : number
             If the distance between anchor point and the point inside filter is bigger than the threshold,
             then the point is ignored in filter.
-        median_diff_threshold : number
-            Threshold to consider a difference between matrix and median value is not significant.
+        threshold : number
+            Threshold to consider a difference between matrix and median value is insignificant.
         dilation : int
             Number of iterations for binary dilation algorithm to increase areas with significant
             differences between matrix and median filter.
@@ -690,12 +690,12 @@ class AttributesMixin:
         # Also the method returns a new object
         for _ in range(iters):
             medfilt = _medfilt(src=medfilt, window_size=window_size, preserve_missings=True,
-                               depths_diff_threshold=depths_diff_threshold)
+                               max_depth_difference=max_depth_difference)
 
         median_diff = self.full_matrix - medfilt
 
-        if median_diff_threshold is not None:
-            median_diff[np.abs(median_diff) < median_diff_threshold] = 0
+        if threshold is not None:
+            median_diff[np.abs(median_diff) < threshold] = 0
 
         median_diff[self.full_matrix == self.FILL_VALUE] = np.nan
         return median_diff
@@ -703,13 +703,13 @@ class AttributesMixin:
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     @transformable
     @apply_dilation
-    def get_gradient_map(self, grad_threshold=1, dilation=2, **_):
+    def get_gradient_map(self, threshold=1, dilation=2, **_):
         """ Compute combined gradient map along both directions.
 
         Parameters
         ----------
-        grad_threshold : number
-            Threshold to consider a gradient value is not significant.
+        threshold : number
+            Threshold to consider a gradient value is insignificant.
         dilation : int
             Number of iterations for binary dilation algorithm to increase areas with significant gradients values.
         """
@@ -718,9 +718,9 @@ class AttributesMixin:
         grad_i = self.load_attribute('grad_i', on_full=True, dtype=np.float32, use_cache=False)
         grad_x = self.load_attribute('grad_x', on_full=True, dtype=np.float32, use_cache=False)
 
-        if grad_threshold is not None:
-            grad_i[np.abs(grad_i) <= grad_threshold] = 0
-            grad_x[np.abs(grad_x) <= grad_threshold] = 0
+        if threshold is not None:
+            grad_i[np.abs(grad_i) <= threshold] = 0
+            grad_x[np.abs(grad_x) <= threshold] = 0
 
         grad_i[grad_i == self.FILL_VALUE] = np.nan
         grad_x[grad_x == self.FILL_VALUE] = np.nan
@@ -734,18 +734,20 @@ class AttributesMixin:
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     @transformable
     @apply_dilation
-    def get_spikes_mask(self, spike_spatial_maxsize=7, spike_depth_minsize=5, close_depths_threshold=2,
+    def get_spikes_mask(self, max_spike_width=7, min_spike_height=5, max_depths_distance=2,
                         dilation=0):
         """ Get spikes mask for the horizon.
 
         Parameters
         ----------
-        spike_spatial_maxsize : int
+        max_spike_width : int
             Maximum possible spike size along the iline or xline axes.
-        spike_depth_minsize : int
+        min_spike_height : int
             Minimum possible spike size along the depth axis.
-        close_depths_threshold : int
+        max_depths_distance : int
             Threshold to consider that depths are close.
+            If points has difference in depth not more than this threshold, then we
+            assume that depths are almost the same.
         dilation : int
             Number of iterations for binary dilation algorithm to increase the spikes.
         """
@@ -761,9 +763,9 @@ class AttributesMixin:
         for rotation_num in range(1, 5):
             matrix = np.rot90(matrix)
             rotated_spikes = _get_spikes_along_line(matrix=matrix,
-                                                    spike_spatial_maxsize=spike_spatial_maxsize,
-                                                    spike_depth_minsize=spike_depth_minsize,
-                                                    close_depths_threshold=close_depths_threshold)
+                                                    max_spike_width=max_spike_width,
+                                                    min_spike_height=min_spike_height,
+                                                    max_depths_distance=max_depths_distance)
             spikes += np.rot90(rotated_spikes, k=4-rotation_num)
 
         spikes[spikes > 0] = 1
@@ -772,7 +774,7 @@ class AttributesMixin:
 
 # Helper functions
 @njit(parallel=True)
-def _get_spikes_along_line(matrix, spike_spatial_maxsize=5, spike_depth_minsize=3, close_depths_threshold=2):
+def _get_spikes_along_line(matrix, max_spike_width=5, min_spike_height=3, max_depths_distance=2):
     """ Find spikes on a matrix for the fixed search direction: from up to down, from left to right.
 
     Under the hood, the function iterates over matrix lines and find too huge depth differences on neighboring points.
@@ -797,13 +799,13 @@ def _get_spikes_along_line(matrix, spike_spatial_maxsize=5, spike_depth_minsize=
 
             depths_diff = line[current_idx] - line[previous_idx]
 
-            if np.abs(depths_diff) < spike_depth_minsize:
+            if np.abs(depths_diff) < min_spike_height:
                 continue
 
             # Check a range of points indices where the spike can be and
             # find a point with a depth close to a depth before the spike
             spike_start_idx = current_idx
-            spike_potential_end_idx = spike_start_idx + spike_spatial_maxsize
+            spike_potential_end_idx = spike_start_idx + max_spike_width
 
             if spike_potential_end_idx >= line_length:
                 spike_potential_end_idx = line_length - 1
@@ -816,17 +818,17 @@ def _get_spikes_along_line(matrix, spike_spatial_maxsize=5, spike_depth_minsize=
                 if not isnan(depth):
                     depths_diff = np.abs(standard_depth - depth)
 
-                    if depths_diff <= close_depths_threshold:
+                    if depths_diff <= max_depths_distance:
                         spikes_mask[line_idx, slice(spike_start_idx, spike_potential_point_idx)] = 1
                         break
 
     return spikes_mask
 
 @njit(parallel=True)
-def _medfilt(src, window_size, preserve_missings, depths_diff_threshold):
+def _medfilt(src, window_size, preserve_missings, max_depth_difference):
     """ Jit-accelerated function to apply 2d median filter with special care for `np.nan` values. """
-    # depths_diff_threshold = 0: median across all non-equal-to-self elements in window
-    # depths_diff_threshold = -1: median across all elements in window
+    # max_depth_difference = 0: median across all non-equal-to-self elements in window
+    # max_depth_difference = -1: median across all elements in window
     #pylint: disable=too-many-nested-blocks, consider-using-enumerate, not-an-iterable
     k = window_size // 2
 
@@ -849,7 +851,7 @@ def _medfilt(src, window_size, preserve_missings, depths_diff_threshold):
 
             for i, item in enumerate(element):
                 if not isnan(item):
-                    if (abs(item - central) > depths_diff_threshold) or isnan(central):
+                    if (abs(item - central) > max_depth_difference) or isnan(central):
                         indicator[i] = np.float32(1)
                 else:
                     indicator[i] = np.float32(2)

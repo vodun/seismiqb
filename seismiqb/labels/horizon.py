@@ -833,7 +833,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
         self.dump_charisma(data=copy(self.points), path=path, format='points',
                            name=self.name, transform=transform)
 
-    def dump_float(self, path, transform=None, kernel_size=7, sigma=2., depths_diff_threshold=5):
+    def dump_float(self, path, transform=None, kernel_size=7, sigma=2., max_depth_difference=5):
         """ Smooth out the horizon values, producing floating-point numbers, and dump to the disk.
 
         Parameters
@@ -846,11 +846,12 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
             Size of the filtering kernel.
         sigma : number
             Standard deviation of the Gaussian kernel.
-        depths_diff_threshold : number
-            During the filtering, not include in the computation all the points that are
-            further away from the current, than the margin.
+        max_depth_difference : number
+            If the distance between anchor point and the point inside filter is bigger than the threshold,
+            then the point is ignored in smoothening.
+            Can be used for separate smoothening on sides of discontinuity.
         """
         smoothed = self.smooth_out(mode='convolve', kernel_size=kernel_size, sigma_spatial=sigma,
-                                   depths_diff_threshold=depths_diff_threshold, inplace=False)
+                                   max_depth_difference=max_depth_difference, inplace=False)
 
         self.dump_charisma(data=smoothed.points, path=path, format='points', name=self.name, transform=transform)
