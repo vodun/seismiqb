@@ -3,6 +3,7 @@ from math import isnan
 import numpy as np
 from numba import njit, prange
 
+from cv2 import inpaint
 from skimage.measure import label
 from scipy.ndimage.morphology import binary_fill_holes, binary_dilation, binary_erosion
 
@@ -297,6 +298,61 @@ class ProcessingMixin:
             return self
 
         name = 'interpolated_' + self.name if self.name is not None else None
+        return type(self)(storage=result, field=self.field, name=name)
+
+    def inpainting(self, inpaint_radius=1, neighbors_radius=1, method=0, inplace=True):
+        """ Inpaint horizon surface on the regions with missing traces.
+
+        Under the hood, the method uses the inpainting method from OpenCV.
+
+        Note, this method may change horizon inplace or create a new instance. By default works inplace.
+        In either case it returns a processed horizon instance.
+
+        Parameters
+        ----------
+        inpaint_radius : int
+            Radius of traces to inpaint near horizon boundaries.
+            When the surface has huge missing regions, we don't want to fill them completely, because
+            inpainting too far from existing horizon traces can be made with huge errors.
+        neighbors_radius : int
+            Parameter passed to the :meth:`cv2.inpaint` as `inpaintRadius`.
+            Radius of a circular neighborhood of each point inpainted that is considered by the algorithm.
+        method : int
+            Parameter passed to the :meth:`cv2.inpaint` as `flags`. Can be 0 or 1.
+            If 0, then Navier-Stokes algorithm is used.
+            If 1, then Telea algorithm is used.
+        inplace : bool
+            Whether to apply operation inplace or return a new Horizon object.
+
+        Returns
+        -------
+        :class:`~.Horizon`
+            Processed horizon instance. A new instance if `inplace` is False, `self` otherwise.
+        """
+        image = self.matrix.astype(np.uint16) # dtype conversion for compatibility with the OpenCV method
+        zero_traces = self.field.zero_traces[self.i_min:self.i_max + 1,
+                                             self.x_min:self.x_max + 1]
+
+        # We use all empty traces as inpainting mask because it is important for correct boundary conditions
+        # in differential equations, that are used in the inpainting method
+        holes_mask = (self.matrix == self.FILL_VALUE).astype(np.uint8)
+        holes_mask[zero_traces == 1] = 1
+
+        result = inpaint(src=image, inpaintMask=holes_mask, inpaintRadius=neighbors_radius, flags=method)
+        result = result.astype(self.dtype)
+
+        # Filtering mask to remove traces, that are too far from existing traces
+        filtering_mask = binary_erosion(holes_mask, iterations=inpaint_radius).astype(int)
+
+        result[filtering_mask == 1] = self.FILL_VALUE
+        result[zero_traces == 1] = self.FILL_VALUE
+
+        if inplace:
+            self.matrix = result
+            self.reset_storage('points')
+            return self
+
+        name = 'inpainted_' + self.name if self.name is not None else None
         return type(self)(storage=result, field=self.field, name=name)
 
     # Horizon distortions
