@@ -1,5 +1,6 @@
 """ Mixin for horizon processing. """
 from math import isnan
+from functools import partialmethod
 import numpy as np
 from numba import njit, prange
 
@@ -72,21 +73,7 @@ class ProcessingMixin:
         name = 'filtered_' + self.name if self.name is not None else None
         return type(self)(storage=points, field=self.field, name=name)
 
-    def filter_spikes(self, spike_spatial_maxsize=7, spike_depth_minsize=5, close_depths_threshold=2,
-                      dilation_iterations=0, inplace=True):
-        """ Remove spikes from the horizon.
-
-        Note, this method may change horizon inplace or create a new instance. By default works inplace.
-        In either case it returns a processed horizon instance.
-        """
-        spikes = self.load_attribute('spikes', spike_spatial_maxsize=spike_spatial_maxsize,
-                                     spike_depth_minsize=spike_depth_minsize,
-                                     close_depths_threshold=close_depths_threshold,
-                                     dilation_iterations=dilation_iterations)
-
-        return self.filter(spikes, inplace=inplace)
-
-    despike = filter_spikes
+    despike = partialmethod(filter, filtering_matrix='spikes')
 
     def filter_disconnected_regions(self, erosion_rate=0, inplace=True):
         """ Remove regions, not connected to the largest component of a horizon.
@@ -119,66 +106,25 @@ class ProcessingMixin:
 
 
     # Horizon surface transformations
-    def thin_out(self, factor=1, threshold=256, inplace=True):
-        """ Thin out the horizon by keeping only each `factor`-th line.
-
-        Note, this method may change horizon inplace or create a new instance. By default works inplace.
-        In either case it returns a processed horizon instance.
-
-        Parameters
-        ----------
-        factor : integer or sequence of two integers
-            Frequency of lines to keep along ilines and xlines direction.
-        threshold : integer
-            Minimal amount of points in a line to keep.
-        inplace : bool
-            Whether to apply operation inplace or return a new Horizon object.
-
-        Returns
-        -------
-        :class:`~.Horizon`
-            Processed horizon instance. A new instance if `inplace` is False, `self` otherwise.
-        """
-        if isinstance(factor, int):
-            factor = (factor, factor)
-
-        uniques, counts = np.unique(self.points[:, 0], return_counts=True)
-        mask_i = np.isin(self.points[:, 0], uniques[counts > threshold][::factor[0]])
-
-        uniques, counts = np.unique(self.points[:, 1], return_counts=True)
-        mask_x = np.isin(self.points[:, 1], uniques[counts > threshold][::factor[1]])
-
-        points = self.points[mask_i + mask_x]
-
-        if inplace:
-            self.points = points
-            self.reset_storage('matrix')
-            return self
-
-        name = 'thinned_' + self.name if self.name is not None else None
-        return type(self)(storage=points, field=self.field, name=name)
-
     def smooth_out(self, mode='convolve', iters=1,
                    kernel_size=3, sigma_spatial=0.8, kernel=None, sigma_range=2.0,
-                   max_depth_difference=5, inplace=True):
+                   max_depth_difference=5, inplace=True, dtype=None):
         """ Smooth out the horizon surface.
 
-        Smoothening is applied with a special treatment to absent points:
-            - if `preserve_missings=True`, then missing points remain absent in the resulting surface.
-            - if `preserve_missings=False`, then missing points are changed to a weighted sum of all
-            present points nearby.
+        Smoothening is applied without absent points changing.
 
         This method supports two types of smoothening:
             - if `mode='convolve'`, then the method uses a convolution with a given or a gaussian kernel.
             - if `mode='bilateral'`, then the method applies a bilateral filtering with a given or a gaussian kernel.
-        Bilateral filtering is an edge-preserving smoothening, which ignores areas with faults.
-
-        Be careful with `sigma_range` value:
-            - The higher the `sigma_range` value, the more 'bilateral' result looks like a 'convolve' result.
-            - If the `sigma_range` too low, then no smoothening applied.
+            Bilateral filtering is an edge-preserving smoothening, which ignores areas with faults.
+            Be careful with `sigma_range` value:
+                - The higher the `sigma_range` value, the more 'bilateral' result looks like a 'convolve' result.
+                - If the `sigma_range` too low, then no smoothening applied.
 
         Note, this method may change horizon inplace or create a new instance. By default works inplace.
         In either case it returns a processed horizon instance.
+
+        Note, that the method makes dtype conversion only if the parameter `inplace` is False.
 
         Parameters
         ----------
@@ -205,6 +151,8 @@ class ProcessingMixin:
             Can be used for separate smoothening on sides of discontinuity.
         inplace : bool
             Whether to apply operation inplace or return a new Horizon object.
+        dtype : type
+            Output horizon dtype. Supported only if `inplace` is False.
 
         Returns
         -------
@@ -216,8 +164,8 @@ class ProcessingMixin:
         else:
             smoothening_function, kwargs = _bilateral_filter, {'sigma_range': sigma_range}
 
-        if kernel is None:
-            kernel = make_gaussian_kernel(kernel_size=kernel_size, sigma=sigma_spatial)
+        kernel = kernel if kernel is not None else make_gaussian_kernel(kernel_size=kernel_size, sigma=sigma_spatial)
+        dtype = dtype if dtype is not None else self.dtype
 
         result = self.matrix.astype(np.float32)
         result[result == self.FILL_VALUE] = np.nan
@@ -230,9 +178,11 @@ class ProcessingMixin:
                                           **kwargs)
 
         result[(self.matrix == self.FILL_VALUE) | np.isnan(result)] = self.FILL_VALUE
-        result = np.rint(result).astype(np.int32)
         result[self.field.zero_traces[self.i_min:self.i_max + 1,
                                       self.x_min:self.x_max + 1] == 1] = self.FILL_VALUE
+
+        if self.dtype==np.int32 or (dtype == np.int32 and inplace is False):
+            result = np.rint(result).astype(np.int32)
 
         if inplace:
             self.matrix = result
@@ -240,7 +190,7 @@ class ProcessingMixin:
             return self
 
         name = 'smoothed_' + self.name if self.name is not None else None
-        return type(self)(storage=result, field=self.field, name=name)
+        return type(self)(storage=result, i_min=self.i_min, x_min=self.x_min, field=self.field, name=name, dtype=dtype)
 
     def interpolate(self, iters=1, kernel_size=3, sigma=0.8, kernel=None,
                     min_present_neighbors=0, max_depth_ptp=None, inplace=True):
@@ -274,8 +224,7 @@ class ProcessingMixin:
         :class:`~.Horizon`
             Processed horizon instance. A new instance if `inplace` is False, `self` otherwise.
         """
-        if kernel is None:
-            kernel = make_gaussian_kernel(kernel_size=kernel_size, sigma=sigma)
+        kernel = kernel if kernel is not None else make_gaussian_kernel(kernel_size=kernel_size, sigma=sigma)
 
         result = self.matrix.astype(np.float32)
         result[self.matrix == self.FILL_VALUE] = np.nan
@@ -287,10 +236,11 @@ class ProcessingMixin:
                                   max_depth_ptp=max_depth_ptp)
 
         result[np.isnan(result)] = self.FILL_VALUE
-        result = np.rint(result).astype(np.int32)
-
         result[self.field.zero_traces[self.i_min:self.i_max + 1,
                                       self.x_min:self.x_max + 1] == 1] = self.FILL_VALUE
+
+        if self.dtype == np.int32:
+            result = np.rint(result).astype(np.int32)
 
         if inplace:
             self.matrix = result
@@ -298,7 +248,7 @@ class ProcessingMixin:
             return self
 
         name = 'interpolated_' + self.name if self.name is not None else None
-        return type(self)(storage=result, field=self.field, name=name)
+        return type(self)(storage=result, i_min=self.i_min, x_min=self.x_min, field=self.field, name=name)
 
     def inpainting(self, inpaint_radius=1, neighbors_radius=1, method=0, inplace=True):
         """ Inpaint horizon surface on the regions with missing traces.
@@ -353,9 +303,48 @@ class ProcessingMixin:
             return self
 
         name = 'inpainted_' + self.name if self.name is not None else None
-        return type(self)(storage=result, field=self.field, name=name)
+        return type(self)(storage=result, i_min=self.i_min, x_min=self.x_min, field=self.field, name=name)
 
     # Horizon distortions
+    def thin_out(self, factor=1, threshold=256, inplace=True):
+        """ Thin out the horizon by keeping only each `factor`-th line.
+
+        Note, this method may change horizon inplace or create a new instance. By default works inplace.
+        In either case it returns a processed horizon instance.
+
+        Parameters
+        ----------
+        factor : integer or sequence of two integers
+            Frequency of lines to keep along ilines and xlines direction.
+        threshold : integer
+            Minimal amount of points in a line to keep.
+        inplace : bool
+            Whether to apply operation inplace or return a new Horizon object.
+
+        Returns
+        -------
+        :class:`~.Horizon`
+            Processed horizon instance. A new instance if `inplace` is False, `self` otherwise.
+        """
+        if isinstance(factor, int):
+            factor = (factor, factor)
+
+        uniques, counts = np.unique(self.points[:, 0], return_counts=True)
+        mask_i = np.isin(self.points[:, 0], uniques[counts > threshold][::factor[0]])
+
+        uniques, counts = np.unique(self.points[:, 1], return_counts=True)
+        mask_x = np.isin(self.points[:, 1], uniques[counts > threshold][::factor[1]])
+
+        points = self.points[mask_i + mask_x]
+
+        if inplace:
+            self.points = points
+            self.reset_storage('matrix')
+            return self
+
+        name = 'thinned_' + self.name if self.name is not None else None
+        return type(self)(storage=points, field=self.field, name=name)
+
     def make_carcass(self, frequencies=100, regular=True, margin=50, interpolate=False, add_prefix=True, **kwargs):
         """ Cut carcass out of a horizon. Returns a new instance.
 
