@@ -815,12 +815,22 @@ class SeismicGeometry(CacheMixin, ExportMixin):
 
     def show_quality_map(self, **kwargs):
         """ Show quality map. """
-        self.show(matrix=self.quality_map, cmap='Reds', title=f'Quality map of `{self.displayed_name}`')
+        plot_params = {
+            'cmap': 'Reds',
+            'title': f'Quality map of `{self.displayed_name}`',
+            **kwargs
+        }
+        self.show(matrix=self.quality_map, **plot_params)
 
     def show_quality_grid(self, **kwargs):
         """ Show quality grid. """
-        self.show(matrix=self.quality_grid, cmap='Reds', interpolation='bilinear',
-                  title=f'Quality grid of `{self.displayed_name}`')
+        plot_params = {
+            'cmap': 'Reds',
+            'interpolation': 'bilinear',
+            'title': f'Quality grid of `{self.displayed_name}`',
+            **kwargs
+        }
+        self.show(matrix=self.quality_grid, **plot_params)
 
 
     # Coordinate conversion
