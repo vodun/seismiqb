@@ -40,6 +40,10 @@ That's all, now you know how to add new tests!
 
 # Additional information
 
+## Good practices for test notebooks
+
+Some recommended optional practices for creating good test notebooks are recorded in the `seismiqb/tests/template_test.ipynb`.
+
 ## More about `TESTS_ROOT_DIR`
 
 `TESTS_ROOT_DIR` is a shared directory for saving files for **all running tests**.
