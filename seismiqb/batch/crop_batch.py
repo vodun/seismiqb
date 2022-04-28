@@ -1,8 +1,8 @@
 """ Seismic Crop Batch. """
-import os
-import string
-import random
 from copy import copy
+import os
+import random
+import string
 from warnings import warn
 
 import numpy as np
@@ -13,10 +13,10 @@ from scipy.signal import butter, lfilter, hilbert
 
 from batchflow import DatasetIndex, Batch, action, inbatch_parallel, SkipBatchException, apply_parallel
 
-from .labels import Horizon
-from .plotters import plot_image
-from .utils import compute_attribute, to_list, AugmentedDict, DelegatingList, adjust_shape_3d
-from .labels.horizon_extraction import groupby_all
+from .visualization_batch import VisualizationMixin
+from ..labels import Horizon
+from ..utils import compute_attribute, to_list, AugmentedDict, adjust_shape_3d
+from ..labels.horizon_extraction import groupby_all
 
 
 
@@ -26,7 +26,7 @@ SIZE_SALT = len(AFFIX) + SIZE_POSTFIX
 CHARS = string.ascii_uppercase + string.digits
 
 
-class SeismicCropBatch(Batch):
+class SeismicCropBatch(Batch, VisualizationMixin):
     """ Batch with ability to generate 3d-crops of various shapes.
 
     The first action in any pipeline with this class should be `make_locations` to transform batch index from
@@ -1298,159 +1298,3 @@ class SeismicCropBatch(Batch):
                 crop[slices] = fill_value
             setattr(self, _dst, crop)
         return self
-
-
-    def get_plot_data(self, idx, components, adjust_masks=True,
-                      zoom_slice=None, displayed_name=None, augment_titles=False):
-        """ Get `components` data for item=`idx` and make title for it. """
-        #pylint: disable=too-many-nested-blocks, too-many-statements
-        # Retrieve data
-        if not components:
-            components = ['images', 'masks', ['images', 'masks'], 'predictions', ['images', 'predictions']]
-            components = DelegatingList(list(components))
-            present_components = components.apply(lambda item: hasattr(self, item))
-            present_components = [item if isinstance(item, bool) else min(item)
-                                  for item in present_components]
-
-            components = [item for item, flag in zip(components, present_components)
-                          if flag is True]
-
-        # Retrieve data
-        components = DelegatingList(list(components))
-        data = components.apply(lambda item: getattr(self, item)[idx].squeeze())
-
-        if zoom_slice is not None:
-            data = [item[zoom_slice] for item in data]
-
-        # Extract location
-        location = self.locations[idx]
-        i_start, i_end = location[0].start, location[0].stop
-        x_start, x_end = location[1].start, location[1].stop
-        h_start, h_end = location[2].start, location[2].stop
-
-        # Make suptitle and axis labels
-        if (i_end - i_start) == 1:
-            suptitle = f'INLINE={i_start}   CROSSLINES <{x_start}:{x_end}>   DEPTH <{h_start}:{h_end}>'
-            xlabel, ylabel = 'CROSSLINE_3D', 'HEIGHT'
-        elif (x_end - x_start) == 1:
-            suptitle = f'CROSSLINE={x_start}   INLINES <{i_start}:{i_end}>   DEPTH <{h_start}:{h_end}>'
-            xlabel, ylabel = 'INLINE_3D', 'HEIGHT'
-        else:
-            suptitle = f'DEPTH={h_start}  INLINES <{i_start}:{i_end}>   CROSSLINES <{x_start}:{x_end}>'
-            xlabel, ylabel = 'INLINE_3D', 'CROSSLINE_3D'
-
-        # Try to get the name of a field
-        if displayed_name is None:
-            batch_index = self.indices[idx]
-            displayed_name = self.get(batch_index, 'fields').displayed_name
-        suptitle = f'batch_idx={idx}                  `{displayed_name}`\n{suptitle}'
-
-        # Titles for individual axis
-        title = [str(item) for item in components]
-        if augment_titles:
-            if len(components) >= 1:
-                title[0] += f'\n INLINES <{i_start}:{i_end}>'
-            if len(components) >= 2:
-                title[1] += f'\n CROSSLINES <{x_start}:{x_end}>'
-            if len(components) >= 3:
-                title[2] += f'\n DEPTH <{h_start}:{h_end}>'
-
-        # Cmaps
-        def color_getter(component):
-            if 'mask' in component or 'prediction' in component:
-                return 'viridis'
-            return 'gray'
-        cmaps = components.apply(color_getter)
-        cmaps = [[item] if isinstance(item, str) else item for item in cmaps]
-
-        # Remove some mask values. TODO: improve via better `binarize_masks` in plotter
-        if adjust_masks:
-            for i, component in enumerate(components):
-                if isinstance(component, list):
-                    for j, component_ in enumerate(component):
-                        if 'mask' in component_:
-                            cmaps[i][j] = 'red'
-                        elif 'predictions' in component_:
-                            data_ = data[i][j]
-                            if data_.min() >= 0.0 and data_.max() <= 1.0:
-                                data_ = np.ma.array(data_, mask=data_ < 0.5)
-                                data[i][j] = data_
-
-        # Separate: no nested lists in data
-        separate = not max([isinstance(item, list) for item in components])
-
-        plot_params = {
-            'separate': separate,
-            'cmap': cmaps,
-            'suptitle': suptitle,
-            'title': title,
-            'xlabel': xlabel,
-            'ylabel': ylabel,
-        }
-        return data, plot_params
-
-    def plot_components(self, *components, idx=0, zoom_slice=None, displayed_name=None,
-                        augment_titles=False, adjust_masks=True, **kwargs):
-        """ Plot components of batch.
-
-        Parameters
-        ----------
-        components : str or sequence of str
-            Components to get from batch and draw.
-        idx : int or None
-            If int, then index of desired image in list.
-            If None, then no indexing is applied.
-        zoom_slice : slice
-            Indexing element for individual images.
-        displayed_name : str, optional
-            Name to use as the field name. If not provided, inferred from dataset.
-        """
-        # Get data
-        data, plot_params = self.get_plot_data(idx=idx, components=components,
-                                               augment_titles=augment_titles, adjust_masks=adjust_masks,
-                                               zoom_slice=zoom_slice, displayed_name=displayed_name)
-
-        # Plot parameters
-        kwargs = {
-            'scale': 0.8,
-            **plot_params,
-            **kwargs
-        }
-        return plot_image(data, **kwargs)
-
-
-    def show(self, n=1, components=None, **kwargs):
-        """ Plot `n` random batch items as separate figures. """
-        for idx in self.random.choice(len(self), size=min(n, len(self)), replace=False):
-            self.plot_components(*(components or []), idx=idx, **kwargs)
-
-
-    def show_roll(self, n=1, components=None, zoom_slice=None, displayed_name=None,
-                  augment_titles=True, adjust_masks=True, indices=None, **kwargs):
-        """ Plot `n` random batch items on one figure. """
-        if indices is None:
-            indices = self.random.choice(len(self), size=min(n, len(self)), replace=False)
-
-        data, titles, cmaps = [], [], []
-        for idx in indices:
-            data_, plot_params = self.get_plot_data(idx=idx, components=components,
-                                                    augment_titles=augment_titles, adjust_masks=adjust_masks,
-                                                    zoom_slice=zoom_slice, displayed_name=displayed_name)
-            data.extend(data_)
-            titles.extend(plot_params['title'])
-            cmaps.extend(plot_params['cmap'])
-
-        plot_params.update({
-            'cmap': cmaps,
-            'title': titles,
-            'suptitle': '',
-        })
-
-        # Plot parameters
-        kwargs = {
-            'scale': 0.8,
-            'ncols': 5,
-            **plot_params,
-            **kwargs
-        }
-        return plot_image(data, **kwargs)

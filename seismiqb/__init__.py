@@ -2,7 +2,7 @@
 # pylint: disable=wildcard-import
 # Core primitives
 from .dataset import SeismicDataset
-from .crop_batch import SeismicCropBatch
+from .batch.crop_batch import SeismicCropBatch
 
 # Data entities
 from .field import Field, SyntheticField
