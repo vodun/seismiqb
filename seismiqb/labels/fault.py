@@ -151,6 +151,8 @@ class Fault(Horizon):
 
     def csv_to_sticks(self, df, fix=False):
         """ Transform initial fault dataframe to array of sticks. """
+        if len(df) == 0:
+            raise ValueError('Empty DataFrame (possibly wrong coordinates).')
         if 'number' in df.columns: # fault file has stick index
             col = 'number'
         elif df.iline.iloc[0] == df.iline.iloc[1]: # there is stick points with the same iline
