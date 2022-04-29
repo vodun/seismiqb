@@ -29,6 +29,10 @@ the `params_dict` may have optional keys 'inputs' and 'outputs':
 After all parameters initializations the `test_run_notebook` function is called.
 Under the hood, the function parses test arguments, runs test notebooks with given configurations,
 catches execution information such as traceback and internal variables values, and provides them to the terminal output.
+
+Out file names processed from execution count, executed notebook and passed inputs into it.
+Correspondence between out file name and its test configuration is saved in
+`seismiqb/tests/tests_root_dir_*/out_files_info.json`.
 """
 import os
 import json
@@ -41,6 +45,7 @@ from nbtools import run_notebook
 
 # Base tests variables for entire test process
 pytest.failed = False
+pytest.out_files_info = {}
 BASE_DIR =  os.path.normpath(os.getenv('BASE_DIR', os.path.join(os.path.dirname(os.path.realpath(__file__)), '../../seismiqb')))
 TESTS_DIR = os.path.join(BASE_DIR, 'tests')
 TESTS_ROOT_DIR = os.getenv('SEISMIQB_TESTS_ROOT_DIR', tempfile.mkdtemp(prefix='tests_root_dir_', dir=TESTS_DIR))
@@ -84,34 +89,35 @@ notebooks_params = (
 
 
 @pytest.mark.parametrize("notebook_kwargs", notebooks_params)
-def test_run_notebook(notebook_kwargs, capsys, cleanup_fixture):
+def test_run_notebook(notebook_kwargs, capsys, finalize_fixture):
     """ Run tests notebooks using kwargs and print outputs in the terminal. """
     # Parse kwargs
     path_ipynb, params = notebook_kwargs
-    filename = os.path.splitext(os.path.basename(path_ipynb))[0]
+    filename = os.path.basename(path_ipynb)
 
     outputs = params.pop('outputs', None)
     inputs = params.pop('inputs', {})
     inputs_repr = str(inputs) # for printing output info
-    filename_suffix = f"{make_suffix(inputs_repr=inputs_repr)}" # inputs_repr in a correct format for file naming
+    out_filename = create_out_filename(input_filename=filename, inputs=inputs)
+    pytest.out_files_info[out_filename] = {'filename': filename, 'inputs': inputs.copy()}
 
     inputs.update(common_params)
 
     # Run test notebook
-    out_path_ipynb = os.path.join(TESTS_ROOT_DIR, f"{filename}_out_{filename_suffix}.ipynb")
-
+    out_path_ipynb = os.path.join(TESTS_ROOT_DIR, out_filename)
     exec_res = run_notebook(path=path_ipynb, inputs=inputs, outputs=outputs,
                             inputs_pos=2, working_dir=TESTS_ROOT_DIR,
                             out_path_ipynb=out_path_ipynb, display_links=False)
 
     if not exec_res['failed'] and common_params['REMOVE_EXTRA_FILES']:
         os.remove(out_path_ipynb)
+        del pytest.out_files_info[out_filename]
 
     pytest.failed = pytest.failed or exec_res['failed']
 
     # Terminal output
     with capsys.disabled():
-        notebook_info = f"`{filename}.ipynb`{' with inputs=' + inputs_repr if inputs_repr!='{}' else ''}"
+        notebook_info = f"`{filename}`{' with inputs=' + inputs_repr if inputs_repr!='{}' else ''}"
 
         # Extract traceback
         if exec_res['failed']:
@@ -124,24 +130,85 @@ def test_run_notebook(notebook_kwargs, capsys, cleanup_fixture):
             print(f"{k}:\n{message}\n")
 
         # Provide test conclusion
+        if out_filename in pytest.out_files_info:
+            print((f"Execution of {notebook_info} saved in `{out_filename}`.\n"))
+
         if not exec_res['failed']:
             print(f"{notebook_info} was executed successfully.\n")
         else:
-            assert False, f"{notebook_info} failed.\n"
+            assert False, f"{notebook_info} failed, look at `{out_filename}`.\n"
 
 @pytest.fixture(scope="module")
-def cleanup_fixture():
-    """ Remove `TESTS_ROOT_DIR` in case of all tests completion without failures. """
+def finalize_fixture():
+    """ Final steps, when all test configurations completed.
+
+    When the last test was completed, this fixture:
+        - Dump information about correspondence between saved out files and test configuration
+        (executed notebook file name and its inputs).
+        - Removes `TESTS_ROOT_DIR` in case of all tests completion without failures.
+    Note, if `TESTS_ROOT_DIR` was removed, then there is no need in dumping information about deleted files.
+    """
     # Run all tests in the module
     yield
+
     # Remove TESTS_ROOT_DIR if all tests were successfull
     if REMOVE_ROOT_DIR and not pytest.failed:
         shutil.rmtree(TESTS_ROOT_DIR)
 
+    # If TESTS_ROOT_DIR exists, then dump information about out files
+    else:
+        dump_path = os.path.join(TESTS_ROOT_DIR, 'out_files_info.json')
+        with open(dump_path, 'w') as dump_file:
+            json.dump(pytest.out_files_info, dump_file, indent=4)
 
-# Helper method
-def make_suffix(inputs_repr):
-    """ Create a correct filename suffix from a string. Removes non-letter symbols and replaces spaces with underscores. """
-    inputs_repr = re.sub(r'[^\w^ ]', '', inputs_repr) # Remove all non-letter symbols except spaces
-    inputs_repr = inputs_repr.replace(' ', '_')
-    return inputs_repr
+
+# Helper function
+NUM_ITERATOR = iter(range(1, len(notebooks_params)+1))
+
+def create_out_filename(input_filename, inputs):
+    """ Creates out notebook filename.
+
+    Out notebook filename consists of:
+        - Executed notebook basename
+        - Numeration prefix (which is equal to the test configuration execution order)
+        - Processed input parameters as suffix.
+
+    `inputs` dict is converted to a string in the following format:
+    `'<key_1>_<processed_value_1>_<key_2>_<processed_value_2>_<...>'`
+
+    Where values are processed depends on their type:
+        - If value is a path string, then we add only basename without extension to the suffix.
+        - In other cases we remove all non-string literals from its string representation
+        and replace spaces with underscores. This is useful for cases when inputs contain lists, tuples, or dicts.
+
+    Parameters
+    ----------
+    input_filename : str
+        A basename of notebook for execution in tests.
+    inputs : dict
+        Dict of input parameters which were passed into the `input_filename` notebook.
+    """
+    # Prepare filename prefix which is a file num
+    file_num = str(next(NUM_ITERATOR))
+    file_num = file_num if len(file_num) > 1 else '0' + file_num
+
+    # Prepare filename suffix which is a short params repr
+    inputs_short_repr = ""
+
+    for param_name, param_value in inputs.items():
+        param_value = str(param_value)
+
+        if os.path.exists(param_value):
+            # Cut long paths
+            param_value = os.path.splitext(os.path.basename(param_value))[0]
+        else:
+            # Create a correct filename substring for lists, tuples, dicts
+            param_value = re.sub(r'[^\w^ ]', '', param_value) # Remove all non-letter symbols except spaces
+            param_value = param_value.replace(' ', '_')
+
+        inputs_short_repr += param_name + '_' + param_value + '_'
+
+    filename_without_ext = os.path.splitext(input_filename)[0]
+
+    out_filename = f"{file_num}_{filename_without_ext}_out_{inputs_short_repr[:-1]}.ipynb"
+    return out_filename
