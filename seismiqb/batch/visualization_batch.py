@@ -9,10 +9,10 @@ from ..utils import to_list, DelegatingList
 
 
 
-class VisualizationMixin():
+class VisualizationMixin:
     """ Methods for batch components visualizations. """
-    def get_plot_data(self, component, idx, zoom, clip, dilate):
-        """ Get component from batch by name and index, optionally slice it, clip by threshold and dilate.
+    def get_component_data(self, component, idx, zoom, clip, dilate):
+        """ Get component data from batch by name and index, optionally slice it, clip by threshold and dilate.
 
         Parameters
         ----------
@@ -103,7 +103,7 @@ class VisualizationMixin():
         """
         components = DelegatingList(components)
 
-        data = components.apply(self.get_plot_data, idx=idx, clip=clip, dilate=dilate, zoom=zoom)
+        data = components.apply(self.get_component_data, idx=idx, clip=clip, dilate=dilate, zoom=zoom)
         cmap = components.apply(lambda item: 'Reds' if 'mask' in item or 'prediction' in item else 'Greys_r')
 
         # TODO: Remove on plotter update
