@@ -39,7 +39,15 @@ class VisualizationMixin():
         if zoom is not None:
             data = data[zoom]
 
-        if isinstance(dilate, str):
+        if dilate == False:
+            dilate = []
+        elif dilate == True:
+            dilate = ['masks', 'predictions']
+        elif isinstance(dilate, int):
+            dilate = {'masks': dilate, 'predictions': dilate}
+        elif isinstance(dilate, tuple):
+            dilate = {'masks': dilate, 'predictions': dilate}
+        elif isinstance(dilate, str):
             dilate = [dilate]
 
         if component in dilate:
@@ -48,17 +56,12 @@ class VisualizationMixin():
                 dilation_config = dilate[component]
                 if isinstance(dilation_config, int):
                     dilation_config = {'iterations': dilation_config}
+                if isinstance(dilation_config, tuple):
+                    dilation_config = {'kernel': np.ones(dilation_config, dtype=np.uint8)}
                 elif isinstance(dilation_config, (str, np.ndarray)):
                     dilation_config = {'kernel': dilation_config}
 
-            dilation_config = {'kernel': 'vertical', **dilation_config}
-
-            # Note, that since plotter always view data with `axes_order=(1, 2, 0)`,
-            # the `kernel` parameter below is created already transposed
-            if dilation_config['kernel'] == 'horizontal':
-                dilation_config['kernel'] = np.ones((3, 1), dtype=np.uint8)
-            elif dilation_config['kernel'] == 'vertical':
-                dilation_config['kernel'] = np.ones((1, 3), dtype=np.uint8)
+            dilation_config = {'kernel': np.ones((1, 3), dtype=np.uint8), **dilation_config}
 
             data = dilation(data, **dilation_config)
 
@@ -191,20 +194,22 @@ class VisualizationMixin():
         augment_titles : bool
             Whether add data location string representation to titles or not.
 
-        Examples
-        --------
-        - Show 'images' and 'masks' batch components side to side and dilate 'masks'
-        >>> batch.plot(['images', 'masks'], dilate='masks')
+        Clipping and dilation examples
+        ------------------------
+        - Dilate 'masks' and 'predictions' (default components to enlarge when `dilate=True`):
+        >>> batch.plot(['masks', 'predictions'], dilate=True)
 
-        - Show 'images', 'masks' over 'images and 'predictions' over 'images' and clip 'predictions' by 0.5 threshold
-        >>> batch.plot(['images', ['images', 'masks'], ['images', 'predictions]], clip='predictions')
+        - Dilate 'predictions' 3 times (again, applied to default components only):
+        >>> batch.plot(['images', 'predictions'], dilate=3)
 
-        - Show 'masks' and 'predictions' components side to side,
-          clipping predictions by 0.7 threshold and dilating masks along the horizontal axis
-        >>> batch.plot(['masks', 'predictions'], clip={'predictions': 0.7}, dilate={'masks': 'horizontal'})
+        - Dilate 'masks' and clip 'predictions':
+        >>> batch.plot(['images', 'masks', 'predictions'], dilate='masks', clip='predictions')
 
-        - Show
-        >>> batch.plot([['images', 'masks']], dilate)
+        - Dilate 'masks' with kernel `np.ones([1, 1, 1])` and clip 'predictions' by 0.7 threshold:
+        >>> batch.plot(['masks', 'predictions'], clip={'predictions': 0.7}, dilate={'masks': (3, 1)})
+
+        - Dilate 'predictions' with custom `kernel` 10 times:
+        >>> batch.plot('predictions', dilate={'predictions': {'kernel': kernel, 'iterations': 10}})
         """
         if components is None:
             components = self.default_plot_components
@@ -253,6 +258,23 @@ class VisualizationMixin():
             Field name to show in suptitle instead of default.
         augment_titles : bool
             Whether add data location string representation to titles or not.
+
+        Clipping and dilation examples
+        ------------------------
+        - Dilate 'masks' and 'predictions' (default components to enlarge when `dilate=True`):
+        >>> batch.plot(['masks', 'predictions'], dilate=True)
+
+        - Dilate 'predictions' 3 times (again, applied to default components only):
+        >>> batch.plot(['images', 'predictions'], dilate=3)
+
+        - Dilate 'masks' and clip 'predictions':
+        >>> batch.plot(['images', 'masks', 'predictions'], dilate='masks', clip='predictions')
+
+        - Dilate 'masks' with kernel `np.ones([1, 1, 1])` and clip 'predictions' by 0.7 threshold:
+        >>> batch.plot(['masks', 'predictions'], clip={'predictions': 0.7}, dilate={'masks': (3, 1)})
+
+        - Dilate 'predictions' with custom `kernel` 10 times:
+        >>> batch.plot('predictions', dilate={'predictions': {'kernel': kernel, 'iterations': 10}})
         """
         if indices is None:
             indices = self.random.choice(len(self), size=min(n, len(self)), replace=False)
