@@ -14,10 +14,10 @@ from ..utils import make_bezier_figure
 class ProcessingMixin:
     """ Methods for horizon processing.
 
-    This class contains methods which can be divided into the following groups:
-        - Filtering methods to cut out some surface regions.
-        - Horizon transformations such as smoothing and thinning.
-        - Surface distortions such as holes or carcass creation.
+    Contains methods for:
+        - Removing or adding points to the horizon surface.
+        - Smoothing out the horizon surface.
+        - Cutting shapes (holes or carcasses) from the horizon surface.
 
     Note, almost all of these methods can change horizon surface inplace or create a new instance.
     In either case they return a filtered horizon instance.
@@ -181,7 +181,7 @@ class ProcessingMixin:
         result[self.field.zero_traces[self.i_min:self.i_max + 1,
                                       self.x_min:self.x_max + 1] == 1] = self.FILL_VALUE
 
-        if self.dtype==np.int32 or (dtype == np.int32 and inplace is False):
+        if dtype == np.int32 or (self.dtype == np.int32 and inplace is True):
             result = np.rint(result).astype(np.int32)
 
         if inplace:

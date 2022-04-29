@@ -340,7 +340,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
 
         self.name = os.path.basename(path) if self.name is None else self.name
 
-        points = self.load_charisma(path=path, dtype=np.int32, format='points',
+        points = self.load_charisma(path=path, dtype=self.dtype, format='points',
                                     fill_value=Horizon.FILL_VALUE, transform=transform,
                                     verify=True)
 
@@ -852,6 +852,6 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
             Can be used for separate smoothening on sides of discontinuity.
         """
         smoothed = self.smooth_out(mode='convolve', kernel_size=kernel_size, sigma_spatial=sigma,
-                                   max_depth_difference=max_depth_difference, inplace=False)
+                                   max_depth_difference=max_depth_difference, inplace=False, dtype=np.float32)
 
         self.dump_charisma(data=smoothed.points, path=path, format='points', name=self.name, transform=transform)
