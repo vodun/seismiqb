@@ -30,7 +30,7 @@ After all parameters initializations the `test_run_notebook` function is called.
 Under the hood, the function parses test arguments, runs test notebooks with given configurations,
 catches execution information such as traceback and internal variables values, and provides them to the terminal output.
 
-Out file names processed from execution count, executed notebook and passed inputs into it.
+Output file names processed from the execution count, the executed notebook name and passed inputs into it.
 Correspondence between out file name and its test configuration is saved in
 `seismiqb/tests/tests_root_dir_*/out_files_info.json`.
 """
@@ -98,7 +98,7 @@ def test_run_notebook(notebook_kwargs, capsys, finalize_fixture):
     outputs = params.pop('outputs', None)
     inputs = params.pop('inputs', {})
     inputs_repr = str(inputs) # for printing output info
-    out_filename = create_out_filename(input_filename=filename, inputs=inputs)
+    out_filename = create_output_filename(input_filename=filename, inputs=inputs)
     pytest.out_files_info[out_filename] = {'filename': filename, 'inputs': inputs.copy()}
 
     inputs.update(common_params)
@@ -140,13 +140,13 @@ def test_run_notebook(notebook_kwargs, capsys, finalize_fixture):
 
 @pytest.fixture(scope="module")
 def finalize_fixture():
-    """ Final steps, when all test configurations completed.
+    """ Final steps after all tests completion.
 
-    When the last test was completed, this fixture:
+    When the last test is completed, this fixture:
         - Dump information about correspondence between saved out files and test configuration
-        (executed notebook file name and its inputs).
-        - Removes `TESTS_ROOT_DIR` in case of all tests completion without failures.
-    Note, if `TESTS_ROOT_DIR` was removed, then there is no need in dumping information about deleted files.
+        (the executed notebook file name and its inputs).
+        - Removes `TESTS_ROOT_DIR` in case of all tests completion without failures (if needed).
+    Note, if `TESTS_ROOT_DIR` is removed, then there is no need in dumping information about deleted files.
     """
     # Run all tests in the module
     yield
@@ -158,6 +158,7 @@ def finalize_fixture():
     # If TESTS_ROOT_DIR exists, then dump information about out files
     else:
         dump_path = os.path.join(TESTS_ROOT_DIR, 'out_files_info.json')
+
         with open(dump_path, 'w') as dump_file:
             json.dump(pytest.out_files_info, dump_file, indent=4)
 
@@ -165,10 +166,10 @@ def finalize_fixture():
 # Helper function
 NUM_ITERATOR = iter(range(1, len(notebooks_params)+1))
 
-def create_out_filename(input_filename, inputs):
-    """ Creates out notebook filename.
+def create_output_filename(input_filename, inputs):
+    """ Creates output notebook filename.
 
-    Out notebook filename consists of:
+    Output notebook filename consists of:
         - Executed notebook basename
         - Numeration prefix (which is equal to the test configuration execution order)
         - Processed input parameters as suffix.
