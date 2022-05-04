@@ -190,8 +190,7 @@ def create_output_filename(input_filename, inputs):
         Dict of input parameters which were passed into the `input_filename` notebook.
     """
     # Prepare filename prefix which is a file num
-    file_num = str(next(NUM_ITERATOR))
-    file_num = file_num if len(file_num) > 1 else '0' + file_num
+    file_num = str(next(NUM_ITERATOR)).zfill(2)
 
     # Prepare filename suffix which is a short params repr
     inputs_short_repr = ""
