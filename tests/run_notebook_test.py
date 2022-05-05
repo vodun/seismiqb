@@ -53,7 +53,7 @@ REMOVE_ROOT_DIR = bool(int(os.getenv('SEISMIQB_TESTS_REMOVE_ROOT_DIR', '1')))
 
 # Parameters for each test notebooks
 common_params = {
-    'REMOVE_EXTRA_FILES': bool(int(os.getenv('SEISMIQB_REMOVE_EXTRA_FILES', '1'))),
+    'REMOVE_EXTRA_FILES': bool(int(os.getenv('SEISMIQB_TESTS_REMOVE_EXTRA_FILES', '1'))),
     'SHOW_FIGURES': bool(int(os.getenv('SEISMIQB_TESTS_SHOW_FIGURES', '0'))),
     'VERBOSE': bool(int(os.getenv('SEISMIQB_TESTS_VERBOSE', '1')))
 }
