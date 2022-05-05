@@ -213,8 +213,8 @@ class VisualizationMixin:
         """
         if components is None:
             components = self.default_plot_components
-        else:
-            components = to_list(components)
+        elif isinstance(components, str):
+            components = [components]
 
         plot_config = self.get_plot_config(components=components, idx=idx,
                                            zoom=zoom, clip=clip, dilate=dilate,
@@ -283,8 +283,8 @@ class VisualizationMixin:
 
         if components is None:
             components = self.default_plot_components
-        else:
-            components = to_list(components)
+        elif isinstance(components, str):
+            components = [components]
 
         plot_config = defaultdict(list)
         for idx in indices:
