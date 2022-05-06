@@ -4,7 +4,7 @@ from functools import partialmethod
 import numpy as np
 from numba import njit, prange
 
-from cv2 import inpaint
+from cv2 import inpaint as cv2_inpaint
 from skimage.measure import label
 from scipy.ndimage.morphology import binary_fill_holes, binary_dilation, binary_erosion
 
@@ -23,10 +23,10 @@ class ProcessingMixin:
     In either case they return a filtered horizon instance.
     """
     # Filtering methods
-    def filter(self, filtering_matrix=None, margin=0, inplace=True, **kwargs):
+    def filter(self, filtering_matrix=None, margin=0, inplace=False, **kwargs):
         """ Remove points that correspond to 1's in `filtering_matrix` from the horizon surface.
 
-        Note, this method may change horizon inplace or create a new instance.
+        Note, this method may change horizon inplace or create a new instance. By default creates a new instance.
         In either case it returns a processed horizon instance.
 
         Parameters
@@ -75,10 +75,10 @@ class ProcessingMixin:
 
     despike = partialmethod(filter, filtering_matrix='spikes')
 
-    def filter_disconnected_regions(self, erosion_rate=0, inplace=True):
+    def filter_disconnected_regions(self, erosion_rate=0, inplace=False):
         """ Remove regions, not connected to the largest component of a horizon.
 
-        Note, this method may change horizon inplace or create a new instance. By default works inplace.
+        Note, this method may change horizon inplace or create a new instance. By default creates a new instance.
         In either case it returns a processed horizon instance.
         """
         if erosion_rate > 0:
@@ -108,7 +108,7 @@ class ProcessingMixin:
     # Horizon surface transformations
     def smooth_out(self, mode='convolve', iters=1,
                    kernel_size=3, sigma_spatial=0.8, kernel=None, sigma_range=2.0,
-                   max_depth_difference=5, inplace=True, dtype=None):
+                   max_depth_difference=5, inplace=False, dtype=None):
         """ Smooth out the horizon surface.
 
         Smoothening is applied without absent points changing.
@@ -121,7 +121,7 @@ class ProcessingMixin:
                 - The higher the `sigma_range` value, the more 'bilateral' result looks like a 'convolve' result.
                 - If the `sigma_range` too low, then no smoothening applied.
 
-        Note, this method may change horizon inplace or create a new instance. By default works inplace.
+        Note, this method may change horizon inplace or create a new instance. By default creates a new instance.
         In either case it returns a processed horizon instance.
 
         Note, that the method makes dtype conversion only if the parameter `inplace` is False.
@@ -193,12 +193,12 @@ class ProcessingMixin:
         return type(self)(storage=result, i_min=self.i_min, x_min=self.x_min, field=self.field, name=name, dtype=dtype)
 
     def interpolate(self, iters=1, kernel_size=3, sigma=0.8, kernel=None,
-                    min_present_neighbors=0, max_depth_ptp=None, inplace=True):
+                    min_present_neighbors=0, max_depth_ptp=None, inplace=False):
         """ Interpolate horizon surface on the regions with missing traces.
 
         Under the hood, we fill missing traces with weighted neighbor values.
 
-        Note, this method may change horizon inplace or create a new instance. By default works inplace.
+        Note, this method may change horizon inplace or create a new instance. By default creates a new instance.
         In either case it returns a processed horizon instance.
 
         Parameters
@@ -250,12 +250,12 @@ class ProcessingMixin:
         name = 'interpolated_' + self.name if self.name is not None else None
         return type(self)(storage=result, i_min=self.i_min, x_min=self.x_min, field=self.field, name=name)
 
-    def inpainting(self, inpaint_radius=1, neighbors_radius=1, method=0, inplace=True):
+    def inpaint(self, inpaint_radius=1, neighbors_radius=1, method=0, inplace=False):
         """ Inpaint horizon surface on the regions with missing traces.
 
         Under the hood, the method uses the inpainting method from OpenCV.
 
-        Note, this method may change horizon inplace or create a new instance. By default works inplace.
+        Note, this method may change horizon inplace or create a new instance. By default creates a new instance.
         In either case it returns a processed horizon instance.
 
         Parameters
@@ -288,14 +288,16 @@ class ProcessingMixin:
         holes_mask = (self.matrix == self.FILL_VALUE).astype(np.uint8)
         holes_mask[zero_traces == 1] = 1
 
-        result = inpaint(src=image, inpaintMask=holes_mask, inpaintRadius=neighbors_radius, flags=method)
+        result = cv2_inpaint(src=image, inpaintMask=holes_mask, inpaintRadius=neighbors_radius, flags=method)
         result = result.astype(self.dtype)
 
         # Filtering mask to remove traces, that are too far from existing traces
-        filtering_mask = binary_erosion(holes_mask, iterations=inpaint_radius).astype(int)
+        too_far_traces_mask = binary_erosion(holes_mask, iterations=inpaint_radius).astype(int)
 
-        result[filtering_mask == 1] = self.FILL_VALUE
-        result[zero_traces == 1] = self.FILL_VALUE
+        # Filter traces with anomalies (can be caused by boundary conditions in equations on horizon borders)
+        anomalies_mask = (result > self.h_max + 10) | (result < self.h_min - 10)
+
+        result[(too_far_traces_mask == 1) | (anomalies_mask == 1) | (zero_traces == 1)] = self.FILL_VALUE
 
         if inplace:
             self.matrix = result
@@ -306,10 +308,10 @@ class ProcessingMixin:
         return type(self)(storage=result, i_min=self.i_min, x_min=self.x_min, field=self.field, name=name)
 
     # Horizon distortions
-    def thin_out(self, factor=1, threshold=256, inplace=True):
+    def thin_out(self, factor=1, threshold=256, inplace=False):
         """ Thin out the horizon by keeping only each `factor`-th line.
 
-        Note, this method may change horizon inplace or create a new instance. By default works inplace.
+        Note, this method may change horizon inplace or create a new instance. By default creates a new instance.
         In either case it returns a processed horizon instance.
 
         Parameters
@@ -373,9 +375,9 @@ class ProcessingMixin:
         else:
             grid = self.field.geometry.make_quality_grid(frequencies, margin=margin, **kwargs)
 
-        carcass.filter(filtering_matrix=1-grid)
+        carcass.filter(filtering_matrix=1-grid, inplace=True)
         if interpolate:
-            carcass.interpolate()
+            carcass.interpolate(inplace=True)
         return carcass
 
     def generate_holes_matrix(self, n=10, scale=1.0, max_scale=.25,
