@@ -11,7 +11,7 @@ from ..utils import to_list, DelegatingList
 
 class VisualizationMixin:
     """ Methods for batch components visualizations. """
-    def get_component_data(self, component, idx, zoom, clip, dilate):
+    def get_component_data(self, component, idx, zoom, dilate, clip):
         """ Get component data from batch by name and index, optionally slice it, clip by threshold and dilate.
 
         Parameters
@@ -22,59 +22,72 @@ class VisualizationMixin:
             Index of batch component to retrieve.
         zoom : tuple of two slices
             Additional limits to show batch components in.
-        clip : str, sequence or dict
-            If str or sequence of str, must specify components name(s) which data should be clipped by 0.5 threshold.
-            If a dict, keys must specify components names which data should be clipped
-            and values shoud specify corresponding clip thresholds.
         dilate : str, sequence or dict
+            Controls components data enlargment.
+            Default components to dilate are ('masks', 'predictions') and default dilation kernel is [1, 1, 1].
+            If a bool, controls whether default components should be dilated or not with default kernel.
+            If an int, control number of times default components should be dilated with default kernel.
+            If a tuple of two ints, defines a shape of kernel filled with ones to use for default components dilation.
             If str or sequence of str, must specify components name(s) which data should be dilated.
-            If a dict, keys must specify dilation parameters:
-            - if an int, specifies number of dilation iterations;
-            - if 'horizontal' or 'vertical', specifies corresponding dilation kernel ([1, 1, 1] or [1, 1, 1].T);
-            - if a np.ndarray, specifies dilation kernel;
-            - if a dict, specifies parameter for `cv2.dilate`.
+            If a dict, keys must be either int/tuple with same meaning as above or a dict of params for `cv2.dilate`.
+        clip : str, sequence or dict
+            Controls masking of components data lower than threshold.
+            Default clip component is 'predictions' and default clip threshold is 0.5.
+            If bool, toggles clipping for default components data by default threshold.
+            If float, used as a threshold for clipping of default components data.
+            If str or sequence of str, must specify components names which data should be clipped by default threshold.
+            If a dict, keys must specify components names which data should be clipped and values should specify
+            corresponding clip thresholds.
         """
         data = getattr(self, component)[idx].squeeze()
 
         if zoom is not None:
             data = data[zoom]
 
-        if dilate == False:
-            dilate = []
-        elif dilate == True:
-            dilate = ['masks', 'predictions']
+        default_kernel = np.ones((1, 3), dtype=np.uint8)
+        if dilate is False:
+            dilate = {}
+        elif dilate is True:
+            dilate = {'masks': default_kernel, 'predictions': default_kernel}
         elif isinstance(dilate, int):
             dilate = {'masks': dilate, 'predictions': dilate}
         elif isinstance(dilate, tuple):
             dilate = {'masks': dilate, 'predictions': dilate}
         elif isinstance(dilate, str):
-            dilate = [dilate]
+            dilate = {dilate: default_kernel}
+        elif isinstance(dilate, list):
+            dilate = {component: default_kernel for component in dilate}
 
         if component in dilate:
-            dilation_config = {}
-            if isinstance(dilate, dict):
-                dilation_config = dilate[component]
-                if isinstance(dilation_config, int):
-                    dilation_config = {'iterations': dilation_config}
-                if isinstance(dilation_config, tuple):
-                    dilation_config = {'kernel': np.ones(dilation_config, dtype=np.uint8)}
-                elif isinstance(dilation_config, (str, np.ndarray)):
-                    dilation_config = {'kernel': dilation_config}
-
-            dilation_config = {'kernel': np.ones((1, 3), dtype=np.uint8), **dilation_config}
+            dilation_config = dilate[component]
+            if isinstance(dilation_config, int):
+                dilation_config = {'iterations': dilation_config, 'kernel': default_kernel}
+            if isinstance(dilation_config, tuple):
+                dilation_config = {'iterations': 1, 'kernel': np.ones(dilation_config, dtype=np.uint8)}
+            elif isinstance(dilation_config, (str, np.ndarray)):
+                dilation_config = {'iterations': 1, 'kernel': dilation_config}
 
             data = dilation(data, **dilation_config)
 
-        if isinstance(clip, str):
-            clip = [clip]
+        default_threshold = 0.5
+        if clip is False:
+            clip = {}
+        elif clip is True:
+            clip = {'predictions': default_threshold}
+        elif isinstance(clip, float):
+            clip = {'predictions': clip}
+        elif isinstance(clip, str):
+            clip = {clip: default_threshold}
+        elif isinstance(clip, list):
+            clip = {component: default_threshold for component in clip}
 
         if component in clip:
-            threshold = clip[component] if isinstance(clip, dict) else 0.5
+            threshold = clip[component]
             data = np.ma.masked_array(data, data < threshold)
 
         return data
 
-    def get_plot_config(self, components, idx, zoom, clip, dilate, displayed_name, augment_titles):
+    def get_plot_config(self, components, idx, zoom, dilate, clip, displayed_name, augment_titles):
         """ Get batch components data for specified index and make its plot config.
 
         Parameters
@@ -85,17 +98,22 @@ class VisualizationMixin:
             Index of batch component to retrieve.
         zoom : tuple of two slices
             Additional limits to show batch components in.
-        clip : str, sequence or dict
-            If str or sequence of str, must specify components name(s) which data should be clipped by 0.5 threshold.
-            If a dict, keys must specify components names which data should be clipped
-            and values shoud specify corresponding clip thresholds.
         dilate : str, sequence or dict
+            Controls components data enlargment.
+            Default components to dilate are ('masks', 'predictions') and default dilation kernel is [1, 1, 1].
+            If a bool, controls whether default components should be dilated or not with default kernel.
+            If an int, control number of times default components should be dilated with default kernel.
+            If a tuple of two ints, defines a shape of kernel filled with ones to use for default components dilation.
             If str or sequence of str, must specify components name(s) which data should be dilated.
-            If a dict, keys must specify dilation parameters:
-            - if an int, specifies number of dilation iterations;
-            - if 'horizontal' or 'vertical', specifies corresponding dilation kernel ([1, 1, 1] or [1, 1, 1].T);
-            - if a np.ndarray, specifies dilation kernel;
-            - if a dict, specifies parameter for `scipy.ndimage.binary_dilation`.
+            If a dict, keys must be either int/tuple with same meaning as above or a dict of params for `cv2.dilate`.
+        clip : str, sequence or dict
+            Controls masking of components data lower than threshold.
+            Default clip component is 'predictions' and default clip threshold is 0.5.
+            If bool, toggles clipping for default components data by default threshold.
+            If float, used as a threshold for clipping of default components data.
+            If str or sequence of str, must specify components names which data should be clipped by default threshold.
+            If a dict, keys must specify components names which data should be clipped and values should specify
+            corresponding clip thresholds.
         diplayed_name : str
             Field name to show in suptitle instead of default.
         augment_titles : bool
@@ -166,7 +184,7 @@ class VisualizationMixin:
         components = components.filter(lambda item: hasattr(self, item))
         return components
 
-    def plot(self, components=None, idx=0, zoom=None, clip=(), dilate=(),
+    def plot(self, components=None, idx=0, zoom=None, dilate=False, clip=False,
              displayed_name=None, augment_titles=False, **kwargs):
         """ Plot components of batch for specific index.
 
@@ -178,17 +196,22 @@ class VisualizationMixin:
             Index of batch component to retrieve.
         zoom : tuple of two slices
             Additional limits to show batch components in.
-        clip : str, sequence or dict
-            If str or sequence of str, must specify components name(s) which data should be clipped by 0.5 threshold.
-            If a dict, keys must specify components names which data should be clipped
-            and values shoud specify corresponding clip thresholds.
         dilate : str, sequence or dict
+            Controls components data enlargment.
+            Default components to dilate are ('masks', 'predictions') and default dilation kernel is [1, 1, 1].
+            If a bool, controls whether default components should be dilated or not with default kernel.
+            If an int, control number of times default components should be dilated with default kernel.
+            If a tuple of two ints, defines a shape of kernel filled with ones to use for default components dilation.
             If str or sequence of str, must specify components name(s) which data should be dilated.
-            If a dict, keys must specify dilation parameters:
-            - if an int, specifies number of dilation iterations;
-            - if 'horizontal' or 'vertical', specifies corresponding dilation kernel ([1, 1, 1] or [1, 1, 1].T);
-            - if a np.ndarray, specifies dilation kernel;
-            - if a dict, specifies parameter for `scipy.ndimage.binary_dilation`.
+            If a dict, keys must be either int/tuple with same meaning as above or a dict of params for `cv2.dilate`.
+        clip : str, sequence or dict
+            Controls masking of components data lower than threshold.
+            Default clip component is 'predictions' and default clip threshold is 0.5.
+            If bool, toggles clipping for default components data by default threshold.
+            If float, used as a threshold for clipping of default components data.
+            If str or sequence of str, must specify components names which data should be clipped by default threshold.
+            If a dict, keys must specify components names which data should be clipped and values should specify
+            corresponding clip thresholds.
         diplayed_name : str
             Field name to show in suptitle instead of default.
         augment_titles : bool
@@ -217,7 +240,7 @@ class VisualizationMixin:
             components = [components]
 
         plot_config = self.get_plot_config(components=components, idx=idx,
-                                           zoom=zoom, clip=clip, dilate=dilate,
+                                           zoom=zoom, dilate=dilate, clip=clip,
                                            displayed_name=displayed_name, augment_titles=augment_titles)
 
         plot_config = {
@@ -229,7 +252,7 @@ class VisualizationMixin:
         }
         return plot_image(**plot_config)
 
-    def roll_plot(self, n=1, components=None, indices=None, zoom=None, clip='predictions', dilate=(),
+    def roll_plot(self, n=1, components=None, indices=None, zoom=None, dilate=False, clip=False,
                   displayed_name=None, augment_titles=True, **kwargs):
         """ Plot `n` random batch items on one figure.
 
@@ -243,17 +266,22 @@ class VisualizationMixin:
             Index of batch component to retrieve.
         zoom : tuple of two slices
             Additional limits to show batch components in.
-        clip : str, sequence or dict
-            If str or sequence of str, must specify components name(s) which data should be clipped by 0.5 threshold.
-            If a dict, keys must specify components names which data should be clipped
-            and values shoud specify corresponding clip thresholds.
         dilate : str, sequence or dict
+            Controls components data enlargment.
+            Default components to dilate are ('masks', 'predictions') and default dilation kernel is [1, 1, 1].
+            If a bool, controls whether default components should be dilated or not with default kernel.
+            If an int, control number of times default components should be dilated with default kernel.
+            If a tuple of two ints, defines a shape of kernel filled with ones to use for default components dilation.
             If str or sequence of str, must specify components name(s) which data should be dilated.
-            If a dict, keys must specify dilation parameters:
-            - if an int, specifies number of dilation iterations;
-            - if 'horizontal' or 'vertical', specifies corresponding dilation kernel ([1, 1, 1] or [1, 1, 1].T);
-            - if a np.ndarray, specifies dilation kernel;
-            - if a dict, specifies parameter for `scipy.ndimage.binary_dilation`.
+            If a dict, keys must be either int/tuple with same meaning as above or a dict of params for `cv2.dilate`.
+        clip : str, sequence or dict
+            Controls masking of components data lower than threshold.
+            Default clip component is 'predictions' and default clip threshold is 0.5.
+            If bool, toggles clipping for default components data by default threshold.
+            If float, used as a threshold for clipping of default components data.
+            If str or sequence of str, must specify components names which data should be clipped by default threshold.
+            If a dict, keys must specify components names which data should be clipped and values should specify
+            corresponding clip thresholds.
         diplayed_name : str
             Field name to show in suptitle instead of default.
         augment_titles : bool
@@ -289,7 +317,7 @@ class VisualizationMixin:
         plot_config = defaultdict(list)
         for idx in indices:
             plot_config_idx = self.get_plot_config(components=components, idx=idx,
-                                                   zoom=zoom, clip=clip, dilate=dilate,
+                                                   zoom=zoom, dilate=dilate, clip=clip,
                                                    displayed_name=displayed_name, augment_titles=augment_titles)
             _ = plot_config_idx.pop('suptitle')
 
