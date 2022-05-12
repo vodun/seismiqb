@@ -1,5 +1,6 @@
 """ Metrics for seismic objects: cubes and horizons. """
 from copy import copy
+from textwrap import dedent
 from itertools import zip_longest
 
 from tqdm.auto import tqdm
@@ -22,7 +23,7 @@ from .utils import Accumulator, to_list
 from .functional import to_device, from_device
 from .functional import correlation, crosscorrelation, btch, kl, js, hellinger, tv, hilbert
 from .functional import smooth_out, digitize, gridify, perturb, histo_reduce
-from .plotters import plot_image
+from .plotters import plot_image, MatplotlibPlotter
 
 
 
@@ -109,7 +110,6 @@ class BaseMetrics:
             self._last_evaluation['plot_dict'] = plot_dict
             self._last_evaluation['figure'] = figure
         return metric_val
-
 
     def compute_local(self, function, data, bad_traces, kernel_size=3,
                       normalize=True, agg='mean', amortize=False, axis=0, device='cpu', pbar=None):
@@ -287,6 +287,9 @@ class BaseMetrics:
             support_coords = xp.asarray(supports)
 
         # Save for plot and introspection
+        if not hasattr(self, '_last_evaluation'):
+            self._last_evaluation = {}
+
         self._last_evaluation['support_coords'] = from_device(support_coords)
 
         # Generate support traces
@@ -329,10 +332,16 @@ class BaseMetrics:
         }
         return metric, plot_dict
 
-    def support_corrs(self, supports=100, safe_strip=0, carcass_mode=False, normalize=True, agg='mean', amortize=False,
-                      device='cpu', pbar=None, **kwargs):
+    def support_corrs(self, data=None, bad_traces=None, supports=100, safe_strip=0, carcass_mode=False,
+                      normalize=True, agg='mean', amortize=False, device='cpu', pbar=None, **kwargs):
         """ Compute correlation against reference traces. """
-        metric = self.compute_support(function=correlation, data=self.data, bad_traces=self.bad_traces,
+        if data is None:
+            data = self.data
+
+        if bad_traces is None:
+            bad_traces = self.bad_traces
+
+        metric = self.compute_support(function=correlation, data=data, bad_traces=bad_traces,
                                       supports=supports, safe_strip=safe_strip, carcass_mode=carcass_mode,
                                       normalize=normalize, agg=agg, device=device, amortize=amortize,
                                       pbar=pbar)
@@ -370,10 +379,16 @@ class BaseMetrics:
         }
         return metric, plot_dict
 
-    def support_crosscorrs(self, supports=100, safe_strip=0, carcass_mode=False, normalize=False,
-                           agg='mean', amortize=False, device='cpu', pbar=None, **kwargs):
+    def support_crosscorrs(self, data=None, bad_traces=None, supports=100, safe_strip=0, carcass_mode=False,
+                           normalize=False, agg='mean', amortize=False, device='cpu', pbar=None, **kwargs):
         """ Compute cross-correlation against reference traces. """
-        metric = self.compute_support(function=crosscorrelation, data=self.data, bad_traces=self.bad_traces,
+        if data is None:
+            data = self.data
+
+        if bad_traces is None:
+            bad_traces = self.bad_traces
+
+        metric = self.compute_support(function=crosscorrelation, data=data, bad_traces=bad_traces,
                                       supports=supports, safe_strip=safe_strip, carcass_mode=carcass_mode,
                                       normalize=normalize, agg=agg, amortize=amortize, device=device, pbar=pbar)
         zvalue = np.nanquantile(np.abs(metric), 0.98).astype(np.int32)
@@ -408,10 +423,19 @@ class BaseMetrics:
         }
         return metric, plot_dict
 
-    def support_btch(self, supports=100, safe_strip=0, carcass_mode=False, normalize=False, agg='mean', amortize=False,
-                     device='cpu', pbar=None, **kwargs):
+    def support_btch(self, data=None, bad_traces=None, supports=100, safe_strip=0, carcass_mode=False,
+                     normalize=False, agg='mean', amortize=False, device='cpu', pbar=None, **kwargs):
         """ Compute Bhattacharyya divergence against reference traces. """
-        metric = self.compute_support(function=btch, data=self.probs, bad_traces=self.bad_traces,
+        if data is None:
+            probs = self.probs
+        else:
+            horizon = kwargs.pop('horizon', self.horizon)
+            probs = HorizonMetrics.get_probs(data=data, horizon=horizon, eps=self.EPS)
+
+        if bad_traces is None:
+            bad_traces = self.bad_traces
+
+        metric = self.compute_support(function=btch, data=probs, bad_traces=bad_traces,
                                       supports=supports, safe_strip=safe_strip, carcass_mode=carcass_mode,
                                       normalize=normalize, agg=agg, amortize=amortize, device=device, pbar=pbar)
 
@@ -444,10 +468,19 @@ class BaseMetrics:
         }
         return metric, plot_dict
 
-    def support_kl(self, supports=100, safe_strip=0, carcass_mode=False, normalize=False, agg='mean', amortize=False,
-                   device='cpu', pbar=None, **kwargs):
+    def support_kl(self, data=None, bad_traces=None, supports=100, safe_strip=0, carcass_mode=False,
+                   normalize=False, agg='mean', amortize=False, device='cpu', pbar=None, **kwargs):
         """ Compute Kullback-Leibler divergence against reference traces. """
-        metric = self.compute_support(function=kl, data=self.probs, bad_traces=self.bad_traces,
+        if data is None:
+            probs = self.probs
+        else:
+            horizon = kwargs.pop('horizon', self.horizon)
+            probs = HorizonMetrics.get_probs(data=data, horizon=horizon, eps=self.EPS)
+
+        if bad_traces is None:
+            bad_traces = self.bad_traces
+
+        metric = self.compute_support(function=kl, data=probs, bad_traces=bad_traces,
                                       supports=supports, safe_strip=safe_strip, carcass_mode=carcass_mode,
                                       normalize=normalize, agg=agg, amortize=amortize,
                                       device=device, pbar=pbar)
@@ -480,10 +513,19 @@ class BaseMetrics:
         }
         return metric, plot_dict
 
-    def support_js(self, supports=100, safe_strip=0, carcass_mode=False, normalize=False, agg='mean', amortize=False,
-                   device='cpu', pbar=None, **kwargs):
+    def support_js(self, data=None, bad_traces=None, supports=100, safe_strip=0, carcass_mode=False,
+                   normalize=False, agg='mean', amortize=False, device='cpu', pbar=None, **kwargs):
         """ Compute Jensen-Shannon divergence against reference traces. """
-        metric = self.compute_support(function=js, data=self.probs, bad_traces=self.bad_traces,
+        if data is None:
+            probs = self.probs
+        else:
+            horizon = kwargs.pop('horizon', self.horizon)
+            probs = HorizonMetrics.get_probs(data=data, horizon=horizon, eps=self.EPS)
+
+        if bad_traces is None:
+            bad_traces = self.bad_traces
+
+        metric = self.compute_support(function=js, data=probs, bad_traces=bad_traces,
                                       supports=supports, safe_strip=safe_strip, carcass_mode=carcass_mode,
                                       normalize=normalize, agg=agg, amortize=amortize,
                                       device=device, pbar=pbar)
@@ -517,10 +559,19 @@ class BaseMetrics:
         }
         return metric, plot_dict
 
-    def support_hellinger(self, supports=100, safe_strip=0, carcass_mode=False, normalize=False,
-                          agg='mean', amortize=False, device='cpu', pbar=None, **kwargs):
+    def support_hellinger(self, data=None, bad_traces=None, supports=100, safe_strip=0, carcass_mode=False,
+                          normalize=False, agg='mean', amortize=False, device='cpu', pbar=None, **kwargs):
         """ Compute Hellinger distance against reference traces. """
-        metric = self.compute_support(function=hellinger, data=self.probs, bad_traces=self.bad_traces,
+        if data is None:
+            probs = self.probs
+        else:
+            horizon = kwargs.pop('horizon', self.horizon)
+            probs = HorizonMetrics.get_probs(data=data, horizon=horizon, eps=self.EPS)
+
+        if bad_traces is None:
+            bad_traces = self.bad_traces
+
+        metric = self.compute_support(function=hellinger, data=probs, bad_traces=bad_traces,
                                       supports=supports, safe_strip=safe_strip, carcass_mode=carcass_mode,
                                       normalize=normalize, agg=agg, amortize=amortize,
                                       device=device, pbar=pbar)
@@ -553,10 +604,19 @@ class BaseMetrics:
         }
         return metric, plot_dict
 
-    def support_tv(self, supports=100, safe_strip=0, carcass_mode=False, normalize=False, agg='mean', amortize=False,
-                   device='cpu', pbar=None, **kwargs):
+    def support_tv(self, data=None, bad_traces=None, supports=100, safe_strip=0, carcass_mode=False,
+                   normalize=False, agg='mean', amortize=False, device='cpu', pbar=None, **kwargs):
         """ Compute total variation against reference traces. """
-        metric = self.compute_support(function=tv, data=self.probs, bad_traces=self.bad_traces,
+        if data is None:
+            probs = self.probs
+        else:
+            horizon = kwargs.pop('horizon', self.horizon)
+            probs = HorizonMetrics.get_probs(data=data, horizon=horizon, eps=self.EPS)
+
+        if bad_traces is None:
+            bad_traces = self.bad_traces
+
+        metric = self.compute_support(function=tv, data=probs, bad_traces=bad_traces,
                                       supports=supports, safe_strip=safe_strip, carcass_mode=carcass_mode,
                                       normalize=normalize, agg=agg, amortize=amortize,
                                       device=device, pbar=pbar)
@@ -620,6 +680,70 @@ class HorizonMetrics(BaseMetrics):
         self._probs = None
         self._bad_traces = None
 
+    def evaluate_support(self, horizons=None, metric='support_corrs', bad_traces=None, supports=100, safe_strip=0,
+                         device='cpu', seed=None, **kwargs):
+        """ ..!!.. """
+        if horizons is None:
+            horizons = self.horizons
+
+        xp = cp if (CUPY_AVAILABLE and device == 'gpu') else np
+
+        horizons_bad_traces = []
+
+        # Generate support coordinates
+        if isinstance(supports, int):
+            # Get bad traces for all compared horizons
+            if bad_traces is None:
+                bad_traces_ = xp.zeros(shape=horizons[0].field.spatial_shape, dtype=int)
+            else:
+                bad_traces_ = to_device(bad_traces.copy(), device)
+
+            for horizon in horizons:
+                horizon_bad_traces = (horizon.full_matrix == horizon.FILL_VALUE).astype(int)
+                horizon_bad_traces = to_device(horizon_bad_traces, device)
+
+                horizons_bad_traces.append(horizon_bad_traces)
+                bad_traces_ |= horizon_bad_traces
+
+            if safe_strip:
+                bad_traces_[:, :safe_strip], bad_traces_[:, -safe_strip:] = 1, 1
+                bad_traces_[:safe_strip, :], bad_traces_[-safe_strip:, :] = 1, 1
+
+            # Choose supports traces
+            valid_traces = xp.where(bad_traces_ == 0)
+
+            rng = xp.random.default_rng(seed=seed)
+            indices = rng.integers(low=0, high=len(valid_traces[0]), size=supports)
+
+            support_coords = xp.asarray([valid_traces[0][indices], valid_traces[1][indices]]).T
+
+        elif isinstance(supports, (tuple, list, np.ndarray)):
+            support_coords = xp.asarray(supports)
+
+        # Evaluate support metric for all horizons
+        metrics = []
+
+        for idx, horizon in enumerate(horizons):
+            # Get horizon data and bad traces for metric evaluation
+            horizon_data = horizon.get_cube_values(window=self.window, offset=self.offset, chunk_size=self.chunk_size)
+            horizon_data[horizon_data == horizon.FILL_VALUE] = np.nan
+
+            horizon_data = to_device(horizon_data, device)
+
+            if len(horizons_bad_traces) == len(horizons):
+                horizon_bad_traces = horizons_bad_traces[idx]
+            else:
+                horizon_bad_traces = (horizon.full_matrix == horizon.FILL_VALUE).astype(int)
+                horizon_bad_traces = to_device(horizon_bad_traces, device)
+
+            # Evaluate metric and save it
+            horizon_metric = self.evaluate(metric=metric, data=horizon_data, bad_traces=horizon_bad_traces,
+                                           supports=support_coords, horizon=horizon, **kwargs)
+
+            metrics.append(horizon_metric)
+
+        return metrics
+
 
     def get_plot_defaults(self):
         """ Axis labels and horizon/cube names in the title. """
@@ -642,9 +766,14 @@ class HorizonMetrics(BaseMetrics):
     def probs(self):
         """ Probabilistic interpretation of `data`. """
         if self._probs is None:
-            hist_matrix = histo_reduce(self.data, self.horizon.field.bins)
-            self._probs = hist_matrix / np.sum(hist_matrix, axis=-1, keepdims=True) + self.EPS
+            self._probs = HorizonMetrics.get_probs(data=self.data, horizon=self.horizon, eps=self.EPS)
         return self._probs
+
+    @staticmethod
+    def get_probs(data, horizon, eps=BaseMetrics.EPS):
+        hist_matrix = histo_reduce(data, horizon.field.bins)
+        _probs = hist_matrix / np.sum(hist_matrix, axis=-1, keepdims=True) + eps
+        return _probs
 
     @property
     def bad_traces(self):
@@ -767,13 +896,142 @@ class HorizonMetrics(BaseMetrics):
         }
         return from_device(shifted_slice), plot_dict
 
+    def compare(self, *others, clip_value=7, ignore_zeros=False, enlarge=True, width=9,
+                printer=print, plot=True, return_figure=False, hist_kwargs=None, show=True, savepath=None, **kwargs):
+        """ Compare `self` horizon against the closest in `others`.
+        Print textual and show graphical visualization of differences between the two.
+        Returns dictionary with collected information: `closest` and `proximity_info`.
 
-    # Alias for horizon comparisons
-    def compare(self, *others, clip_value=7, ignore_zeros=True,
-                printer=print, plot=True, return_figure=False, hist_kwargs=None, **kwargs):
-        """ Alias for `Horizon.compare`. """
-        return self.compare(*others, clip_value=clip_value, ignore_zeros=ignore_zeros,
-                            printer=printer, plot=plot, return_figure=return_figure, hist_kwargs=hist_kwargs, **kwargs)
+        Parameters
+        ----------
+        clip_value : number
+            Clip for differences graph and histogram
+        ignore_zeros : bool
+            Whether to ignore zero-differences on histogram.
+        enlarge : bool
+            Whether to enlarge the difference matrix, if one of horizons is a carcass.
+        width : int
+            Enlarge width. Works only if `enlarge` is True.
+        printer : callable, optional
+            Function to use to print textual information
+        plot : bool
+            Whether to plot the graph
+        return_figure : bool
+            Whether to add `figure` to the returned dictionary
+        hist_kwargs, kwargs : dict
+            Parameters for histogram / main graph visualization.
+        """
+        closest, proximity_info = other, oinfo = self.horizon.find_closest(*others)
+        returns = {'closest': closest, 'proximity_info': proximity_info}
+
+        msg = f"""
+        Comparing horizons:
+        {self.horizon.displayed_name.rjust(45)}
+        {other.displayed_name.rjust(45)}
+        {'—'*45}
+        Rate in 5ms:                         {oinfo['window_rate']:8.3f}
+        Mean / std of errors:            {oinfo['difference_mean']:+4.2f} / {oinfo['difference_std']:4.2f}
+        Mean / std of abs errors:         {oinfo['abs_difference_mean']:4.2f} / {oinfo['abs_difference_std']:4.2f}
+        Max abs error:                           {oinfo['abs_difference_max']:4.0f}
+        {'—'*45}
+        Lengths of horizons:                 {len(self.horizon):8}
+                                             {       len(other):8}
+        {'—'*45}
+        Average heights of horizons:         {self.horizon.h_mean:8.2f}
+                                             {       other.h_mean:8.2f}
+        {'—'*45}
+        Coverage of horizons:                {self.horizon.coverage:8.4f}
+                                             {       other.coverage:8.4f}
+        {'—'*45}
+        Solidity of horizons:                {self.horizon.solidity:8.4f}
+                                             {       other.solidity:8.4f}
+        {'—'*45}
+        Number of holes in horizons:         {self.horizon.number_of_holes:8}
+                                             {       other.number_of_holes:8}
+        {'—'*45}
+        Additional traces labeled:           {oinfo['present_at_1_absent_at_2']:8}
+        (present in one, absent in other)    {oinfo['present_at_2_absent_at_1']:8}
+        {'—'*45}
+        """
+        msg = dedent(msg)
+
+        if printer is not None:
+            printer(msg)
+
+        if plot:
+            # Prepare data
+            matrix = proximity_info['difference_matrix']
+            if enlarge and (self.horizon.is_carcass or other.is_carcass):
+                matrix = self.horizon.matrix_enlarge(matrix, width=width)
+
+            # Field boundaries
+            bounds = self.horizon.field.zero_traces.copy().astype(np.float32)
+            bounds[np.isnan(matrix) & (bounds == 0)] = np.nan
+            matrix[bounds == 1] = 0.0
+
+            # Main plot: differences matrix
+            kwargs = {
+                'title': f'Depth comparison of `self={self.horizon.displayed_name}`\nand `other={closest.displayed_name}`',
+                'suptitle': '',
+                'cmap': ['seismic', 'black'],
+                'bad_color': 'black',
+                'colorbar': [True, False],
+                'alpha': [1., 0.2],
+                'vmin': [-clip_value, 0],
+                'vmax': [+clip_value, 1],
+
+                'xlabel': self.horizon.field.index_headers[0],
+                'ylabel': self.horizon.field.index_headers[1],
+
+                'shapes': 3, 'ncols': 2,
+                'return_figure': True,
+                **kwargs,
+            }
+
+            legend_kwargs = {
+                'color': ('white', 'blue', 'red', 'black', 'lightgray'),
+                'label': ('self.depths = other.depths',
+                          'self.depths < other.depths',
+                          'self.depths > other.depths',
+                          'unlabeled in `self`',
+                          'dead traces'),
+                'size': 20,
+                'loc': 10,
+                'facecolor': 'pink',
+            }
+
+            fig = plot_image([matrix, bounds], **kwargs)
+            MatplotlibPlotter.add_legend(ax=fig.axes[1], **legend_kwargs)
+
+            # Histogram and labels
+            hist_kwargs = {
+                'xlabel': 'difference values',
+                'title_label': 'Histogram of horizon depth differences',
+                **(hist_kwargs or {}),
+            }
+
+            graph_msg = '\n'.join(msg.replace('—', '').split('\n')[5:-11])
+            graph_msg = graph_msg.replace('\n' + ' '*20, ', ').replace('\t', ' ')
+            graph_msg = ' '.join(item for item in graph_msg.split('  ') if item)
+
+            hist_legend_kwargs = {
+                'color': 'pink',
+                'label': graph_msg,
+                'size': 14, 'loc': 10,
+                'facecolor': 'pink',
+            }
+
+            hist_data = np.clip(matrix, -clip_value, clip_value)
+            if ignore_zeros:
+                hist_data = hist_data[hist_data != 0.0]
+            plot_image(hist_data, mode='hist', ax=fig.axes[2], **hist_kwargs)
+            MatplotlibPlotter.add_legend(ax=fig.axes[3], **hist_legend_kwargs)
+
+            MatplotlibPlotter.save_and_show(fig=fig, show=show, savepath=savepath)
+            if return_figure:
+                returns['figure'] = fig
+
+        return returns
 
     @staticmethod
     def compute_prediction_std(horizons):
