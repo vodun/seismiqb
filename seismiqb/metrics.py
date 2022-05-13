@@ -332,16 +332,10 @@ class BaseMetrics:
         }
         return metric, plot_dict
 
-    def support_corrs(self, data=None, bad_traces=None, supports=100, safe_strip=0, carcass_mode=False,
-                      normalize=True, agg='mean', amortize=False, device='cpu', pbar=None, **kwargs):
+    def support_corrs(self, supports=100, safe_strip=0, carcass_mode=False, normalize=True, agg='mean', amortize=False,
+                      device='cpu', pbar=None, **kwargs):
         """ Compute correlation against reference traces. """
-        if data is None:
-            data = self.data
-
-        if bad_traces is None:
-            bad_traces = self.bad_traces
-
-        metric = self.compute_support(function=correlation, data=data, bad_traces=bad_traces,
+        metric = self.compute_support(function=correlation, data=self.data, bad_traces=self.bad_traces,
                                       supports=supports, safe_strip=safe_strip, carcass_mode=carcass_mode,
                                       normalize=normalize, agg=agg, device=device, amortize=amortize,
                                       pbar=pbar)
@@ -379,16 +373,10 @@ class BaseMetrics:
         }
         return metric, plot_dict
 
-    def support_crosscorrs(self, data=None, bad_traces=None, supports=100, safe_strip=0, carcass_mode=False,
-                           normalize=False, agg='mean', amortize=False, device='cpu', pbar=None, **kwargs):
+    def support_crosscorrs(self, supports=100, safe_strip=0, carcass_mode=False, normalize=False,
+                           agg='mean', amortize=False, device='cpu', pbar=None, **kwargs):
         """ Compute cross-correlation against reference traces. """
-        if data is None:
-            data = self.data
-
-        if bad_traces is None:
-            bad_traces = self.bad_traces
-
-        metric = self.compute_support(function=crosscorrelation, data=data, bad_traces=bad_traces,
+        metric = self.compute_support(function=crosscorrelation, data=self.data, bad_traces=self.bad_traces,
                                       supports=supports, safe_strip=safe_strip, carcass_mode=carcass_mode,
                                       normalize=normalize, agg=agg, amortize=amortize, device=device, pbar=pbar)
         zvalue = np.nanquantile(np.abs(metric), 0.98).astype(np.int32)
@@ -423,19 +411,10 @@ class BaseMetrics:
         }
         return metric, plot_dict
 
-    def support_btch(self, data=None, bad_traces=None, supports=100, safe_strip=0, carcass_mode=False,
-                     normalize=False, agg='mean', amortize=False, device='cpu', pbar=None, **kwargs):
+    def support_btch(self, supports=100, safe_strip=0, carcass_mode=False, normalize=False, agg='mean', amortize=False,
+                     device='cpu', pbar=None, **kwargs):
         """ Compute Bhattacharyya divergence against reference traces. """
-        if data is None:
-            probs = self.probs
-        else:
-            horizon = kwargs.pop('horizon', self.horizon)
-            probs = HorizonMetrics.get_probs(data=data, horizon=horizon, eps=self.EPS)
-
-        if bad_traces is None:
-            bad_traces = self.bad_traces
-
-        metric = self.compute_support(function=btch, data=probs, bad_traces=bad_traces,
+        metric = self.compute_support(function=btch, data=self.probs, bad_traces=self.bad_traces,
                                       supports=supports, safe_strip=safe_strip, carcass_mode=carcass_mode,
                                       normalize=normalize, agg=agg, amortize=amortize, device=device, pbar=pbar)
 
@@ -468,19 +447,10 @@ class BaseMetrics:
         }
         return metric, plot_dict
 
-    def support_kl(self, data=None, bad_traces=None, supports=100, safe_strip=0, carcass_mode=False,
-                   normalize=False, agg='mean', amortize=False, device='cpu', pbar=None, **kwargs):
+    def support_kl(self, supports=100, safe_strip=0, carcass_mode=False, normalize=False, agg='mean', amortize=False,
+                   device='cpu', pbar=None, **kwargs):
         """ Compute Kullback-Leibler divergence against reference traces. """
-        if data is None:
-            probs = self.probs
-        else:
-            horizon = kwargs.pop('horizon', self.horizon)
-            probs = HorizonMetrics.get_probs(data=data, horizon=horizon, eps=self.EPS)
-
-        if bad_traces is None:
-            bad_traces = self.bad_traces
-
-        metric = self.compute_support(function=kl, data=probs, bad_traces=bad_traces,
+        metric = self.compute_support(function=kl, data=self.probs, bad_traces=self.bad_traces,
                                       supports=supports, safe_strip=safe_strip, carcass_mode=carcass_mode,
                                       normalize=normalize, agg=agg, amortize=amortize,
                                       device=device, pbar=pbar)
@@ -513,19 +483,10 @@ class BaseMetrics:
         }
         return metric, plot_dict
 
-    def support_js(self, data=None, bad_traces=None, supports=100, safe_strip=0, carcass_mode=False,
-                   normalize=False, agg='mean', amortize=False, device='cpu', pbar=None, **kwargs):
+    def support_js(self, supports=100, safe_strip=0, carcass_mode=False, normalize=False, agg='mean', amortize=False,
+                   device='cpu', pbar=None, **kwargs):
         """ Compute Jensen-Shannon divergence against reference traces. """
-        if data is None:
-            probs = self.probs
-        else:
-            horizon = kwargs.pop('horizon', self.horizon)
-            probs = HorizonMetrics.get_probs(data=data, horizon=horizon, eps=self.EPS)
-
-        if bad_traces is None:
-            bad_traces = self.bad_traces
-
-        metric = self.compute_support(function=js, data=probs, bad_traces=bad_traces,
+        metric = self.compute_support(function=js, data=self.probs, bad_traces=self.bad_traces,
                                       supports=supports, safe_strip=safe_strip, carcass_mode=carcass_mode,
                                       normalize=normalize, agg=agg, amortize=amortize,
                                       device=device, pbar=pbar)
@@ -559,19 +520,10 @@ class BaseMetrics:
         }
         return metric, plot_dict
 
-    def support_hellinger(self, data=None, bad_traces=None, supports=100, safe_strip=0, carcass_mode=False,
-                          normalize=False, agg='mean', amortize=False, device='cpu', pbar=None, **kwargs):
+    def support_hellinger(self, supports=100, safe_strip=0, carcass_mode=False, normalize=False,
+                          agg='mean', amortize=False, device='cpu', pbar=None, **kwargs):
         """ Compute Hellinger distance against reference traces. """
-        if data is None:
-            probs = self.probs
-        else:
-            horizon = kwargs.pop('horizon', self.horizon)
-            probs = HorizonMetrics.get_probs(data=data, horizon=horizon, eps=self.EPS)
-
-        if bad_traces is None:
-            bad_traces = self.bad_traces
-
-        metric = self.compute_support(function=hellinger, data=probs, bad_traces=bad_traces,
+        metric = self.compute_support(function=hellinger, data=self.probs, bad_traces=self.bad_traces,
                                       supports=supports, safe_strip=safe_strip, carcass_mode=carcass_mode,
                                       normalize=normalize, agg=agg, amortize=amortize,
                                       device=device, pbar=pbar)
@@ -604,19 +556,10 @@ class BaseMetrics:
         }
         return metric, plot_dict
 
-    def support_tv(self, data=None, bad_traces=None, supports=100, safe_strip=0, carcass_mode=False,
-                   normalize=False, agg='mean', amortize=False, device='cpu', pbar=None, **kwargs):
+    def support_tv(self, supports=100, safe_strip=0, carcass_mode=False, normalize=False, agg='mean', amortize=False,
+                   device='cpu', pbar=None, **kwargs):
         """ Compute total variation against reference traces. """
-        if data is None:
-            probs = self.probs
-        else:
-            horizon = kwargs.pop('horizon', self.horizon)
-            probs = HorizonMetrics.get_probs(data=data, horizon=horizon, eps=self.EPS)
-
-        if bad_traces is None:
-            bad_traces = self.bad_traces
-
-        metric = self.compute_support(function=tv, data=probs, bad_traces=bad_traces,
+        metric = self.compute_support(function=tv, data=self.probs, bad_traces=self.bad_traces,
                                       supports=supports, safe_strip=safe_strip, carcass_mode=carcass_mode,
                                       normalize=normalize, agg=agg, amortize=amortize,
                                       device=device, pbar=pbar)
@@ -680,12 +623,10 @@ class HorizonMetrics(BaseMetrics):
         self._probs = None
         self._bad_traces = None
 
-    def evaluate_support(self, horizons=None, metric='support_corrs', bad_traces=None, supports=100, safe_strip=0,
+    @classmethod
+    def evaluate_support(cls, horizons, metric='support_corrs', bad_traces=None, supports=100, safe_strip=0,
                          device='cpu', seed=None, **kwargs):
         """ ..!!.. """
-        if horizons is None:
-            horizons = self.horizons
-
         xp = cp if (CUPY_AVAILABLE and device == 'gpu') else np
 
         horizons_bad_traces = []
@@ -723,23 +664,8 @@ class HorizonMetrics(BaseMetrics):
         # Evaluate support metric for all horizons
         metrics = []
 
-        for idx, horizon in enumerate(horizons):
-            # Get horizon data and bad traces for metric evaluation
-            horizon_data = horizon.get_cube_values(window=self.window, offset=self.offset, chunk_size=self.chunk_size)
-            horizon_data[horizon_data == horizon.FILL_VALUE] = np.nan
-
-            horizon_data = to_device(horizon_data, device)
-
-            if len(horizons_bad_traces) == len(horizons):
-                horizon_bad_traces = horizons_bad_traces[idx]
-            else:
-                horizon_bad_traces = (horizon.full_matrix == horizon.FILL_VALUE).astype(int)
-                horizon_bad_traces = to_device(horizon_bad_traces, device)
-
-            # Evaluate metric and save it
-            horizon_metric = self.evaluate(metric=metric, data=horizon_data, bad_traces=horizon_bad_traces,
-                                           supports=support_coords, horizon=horizon, **kwargs)
-
+        for horizon in horizons:
+            horizon_metric = cls(horizon).evaluate(metric=metric, supports=support_coords, horizon=horizon, **kwargs)
             metrics.append(horizon_metric)
 
         return metrics
@@ -1032,6 +958,8 @@ class HorizonMetrics(BaseMetrics):
                 returns['figure'] = fig
 
         return returns
+
+    Horizon.compare.__doc__ = compare.__doc__
 
     @staticmethod
     def compute_prediction_std(horizons):

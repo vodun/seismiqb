@@ -976,7 +976,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Visua
     # Alias for horizon comparisons
     def compare(self, *others, clip_value=5, ignore_zeros=True,
                 printer=print, plot=True, return_figure=False, hist_kwargs=None, **kwargs):
-        """ Alias for `Horizon.compare`. """
+        """ Alias for `HorizonMetrics.compare`. """
         return self.metrics.compare(*others, clip_value=clip_value, ignore_zeros=ignore_zeros,
                                     printer=printer, plot=plot, return_figure=return_figure,
                                     hist_kwargs=hist_kwargs, **kwargs)
