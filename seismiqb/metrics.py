@@ -692,14 +692,9 @@ class HorizonMetrics(BaseMetrics):
     def probs(self):
         """ Probabilistic interpretation of `data`. """
         if self._probs is None:
-            self._probs = HorizonMetrics.get_probs(data=self.data, horizon=self.horizon, eps=self.EPS)
+            hist_matrix = histo_reduce(self.data, self.horizon.field.bins)
+            self._probs = hist_matrix / np.sum(hist_matrix, axis=-1, keepdims=True) + self.EPS
         return self._probs
-
-    @staticmethod
-    def get_probs(data, horizon, eps=BaseMetrics.EPS):
-        hist_matrix = histo_reduce(data, horizon.field.bins)
-        _probs = hist_matrix / np.sum(hist_matrix, axis=-1, keepdims=True) + eps
-        return _probs
 
     @property
     def bad_traces(self):
@@ -897,7 +892,8 @@ class HorizonMetrics(BaseMetrics):
 
             # Main plot: differences matrix
             kwargs = {
-                'title': f'Depth comparison of `self={self.horizon.displayed_name}`\nand `other={closest.displayed_name}`',
+                'title': (f'Depth comparison of `self={self.horizon.displayed_name}`\n'
+                          f'and `other={closest.displayed_name}`'),
                 'suptitle': '',
                 'cmap': ['seismic', 'black'],
                 'bad_color': 'black',
