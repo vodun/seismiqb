@@ -6,9 +6,9 @@ Before adding a new test notebook to the list of automatically executed tests, m
 
 1. If the test notebook saves any files, it is highly recommended to use relative paths and create a test's **own directory** for saving files.
 
-All files saved to the `TESTS_ROOT_DIR` directory `'seismiqb\tests\test_root_dir_*'`, which is shared between all test notebooks. So, separate test directories inside the `TESTS_ROOT_DIR` prevent from mixing up files from different tests.
+The `TESTS_ROOT_DIR` (`'seismiqb\tests\test_root_dir_*'`) is a directory from which all relative paths start. `TESTS_ROOT_DIR` is shared between all test notebooks and creating separate test directories inside it prevents from mixing up files from different tests.
 
-2. All **changeable parameters** must be initialized in the first or second notebook cells. All of the actual testing must be done after the cell number 2.
+2. All **externally parameterized variables** must be initialized with default values in the first or second notebook cells. All of the actual testing must be done after the cell number 2.
 
 This is because the `run_notebook_test.py` inserts a new cell with parameters initialization between cells number 2 and 3.
 
@@ -21,7 +21,7 @@ So, the recommended notebook structure is:
 
 Once the notebook is prepared, it can be added to the list of automatically executed notebooks.
 
-For this provide a `(notebook_path, params_dict)` tuple into the `notebooks_params` variable inside the `run_notebook_test.py`.
+In order to do that provide a `(notebook_path, params_dict)` tuple into the `notebooks_params` variable inside the `run_notebook_test.py`.
 
 The `params_dict` is a dictionary with optional `'inputs'` and `'outputs'` keys:
 * If the test notebook must be executed with **new parameters values**, just add them in the `'inputs'` in the dictionary format `{'parameter_name': 'parameter_value'}`.
@@ -56,7 +56,7 @@ In this case saved notebooks can be checked to find out the failure reason.
 ## More about the `notebooks_params` variable
 
 The important details are:
-* Notebooks are executed in the order in which they are defined in the `notebooks_params`.
+* Notebooks are executed in the order they are defined in the `notebooks_params`.
 * For the notebook execution with different parameters configurations, all of them must be provided into the `notebooks_params`:
 
 ```python
@@ -138,4 +138,4 @@ Example of `out_files_info.json`:
 }
 ```
 
-In this example executions number 2,3 and 4 was executed with failures. Other executions was **not** failed, so, they wasn't saved.
+In this example executions number 2,3 and 4 was executed with failures. Other executions did **not** fail and therefore, they weren't saved.
