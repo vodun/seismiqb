@@ -373,7 +373,7 @@ class SeismicCropBatch(Batch):
     # Loading of labels
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def create_masks(self, ix, dst, indices='all', width=3, src_labels='labels', sparse=False):
+    def create_masks(self, ix, dst, indices='all', width=3, src_labels='labels'):
         """ Create masks from labels in stored `locations`.
 
         Parameters
@@ -389,12 +389,10 @@ class SeismicCropBatch(Batch):
             Width of the resulting label.
         src_labels : str
             Dataset attribute with labels dict.
-        sparse : bool
-            Create mask only for labeled slices (for Faults). Unlabeled slices will be marked by -1.
         """
         field = self.get(ix, 'fields')
         location = self.get(ix, 'locations')
-        return field.make_mask(location=location, width=width, indices=indices, src=src_labels, sparse=sparse)
+        return field.make_mask(location=location, width=width, indices=indices, src=src_labels)
 
 
     @action
@@ -1181,31 +1179,30 @@ class SeismicCropBatch(Batch):
         return lfilter(b, a, crop, axis=1)
 
     @apply_parallel
-    def sign(self, crop):
+    def sign_transform(self, crop):
         """ Element-wise indication of the sign of a number. """
         return np.sign(crop)
 
     @apply_parallel
-    def analytic_transform(self, crop, axis=1, mode='phase'):
-        """ Compute instantaneous phase or frequency via the Hilbert transform.
-
-        Parameters
-        ----------
-        axis : int
-            Axis of transformation. Intended to be used after `rotate_axes`, so default value
-            is to make transform along depth dimension.
-        mode : str
-            If 'phase', compute instantaneous phase.
-            If 'freq', compute instantaneous frequency.
-        """
+    def instant_amplitudes_transform(self, crop, axis=-1):
+        """ Compute instantaneous amplitudes along the depth axis. """
         analytic = hilbert(crop, axis=axis)
-        phase = np.unwrap(np.angle(analytic))
+        return np.abs(analytic).astype(np.float32)
 
-        if mode == 'phase':
-            return phase
-        if 'freq' in mode:
-            return np.diff(phase, axis=axis, prepend=0) / (2*np.pi)
-        raise ValueError('Unknown `mode` parameter.')
+
+    @apply_parallel
+    def instant_phases_transform(self, crop, axis=-1):
+        """ Compute instantaneous phases along the depth axis. """
+        analytic = hilbert(crop, axis=axis)
+        return np.angle(analytic).astype(np.float32)
+
+    @apply_parallel
+    def frequencies_transform(self, crop, axis=-1):
+        """ Compute frequencies along the depth axis. """
+        analytic = hilbert(crop, axis=axis)
+        iphases = np.angle(analytic).astype(np.float32)
+        return np.diff(iphases, axis=-1, prepend=0) / (2 * np.pi)
+
 
     @apply_parallel
     def gaussian_filter(self, crop, axis=1, sigma=2, order=0):
@@ -1322,7 +1319,7 @@ class SeismicCropBatch(Batch):
         data = components.apply(lambda item: getattr(self, item)[idx].squeeze())
 
         if zoom_slice is not None:
-            data = [item[zoom_slice] for item in data]
+            data = data.apply(lambda item: item[zoom_slice])
 
         # Extract location
         location = self.locations[idx]
