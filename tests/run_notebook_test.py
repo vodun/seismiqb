@@ -71,7 +71,7 @@ notebooks_params = (
     (os.path.join(TESTS_NOTEBOOKS_DIR, 'horizon_test_preparation.ipynb'), {}),
     (os.path.join(TESTS_NOTEBOOKS_DIR, 'horizon_test_base.ipynb'), {}),
     (os.path.join(TESTS_NOTEBOOKS_DIR, 'horizon_test_attributes.ipynb'), {}),
-    (os.path.join(TESTS_NOTEBOOKS_DIR, 'horizon_test_manipulations.ipynb'), {}),
+    (os.path.join(TESTS_NOTEBOOKS_DIR, 'horizon_test_processing.ipynb'), {}),
     (os.path.join(TESTS_NOTEBOOKS_DIR, 'horizon_test_extraction.ipynb'), {'outputs': 'message'}),
 
     # TODO: add tutorials
@@ -105,9 +105,12 @@ def test_run_notebook(notebook_kwargs, capsys, cleanup_fixture):
 
     # Terminal output
     with capsys.disabled():
+        notebook_info = f"`{filename}`{' with inputs=' + inputs_repr if inputs_repr!='{}' else ''}"
+
         # Extract traceback
         if exec_res['failed']:
             print(exec_res.get('traceback', ''))
+            print(f"{notebook_info} failed in the cell number {exec_res.get('failed cell number', None)}.\n")
 
         # Print test outputs
         for k, v in exec_res.get('outputs', {}).items():
@@ -115,7 +118,6 @@ def test_run_notebook(notebook_kwargs, capsys, cleanup_fixture):
             print(f"{k}:\n{message}\n")
 
         # Provide test conclusion
-        notebook_info = f"`{filename}`{' with inputs=' + inputs_repr if inputs_repr!='{}' else ''}"
         if not exec_res['failed']:
             print(f"{notebook_info} was executed successfully.\n")
         else:
