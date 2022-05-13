@@ -1,20 +1,46 @@
 """ Mixin with computed along horizon geological attributes. """
 # pylint: disable=too-many-statements
 from copy import copy
-from functools import cached_property
+from functools import cached_property, wraps
 
+from math import isnan
 import numpy as np
+from numba import njit, prange
 
 from cv2 import dilate
 from scipy.signal import ricker
 from scipy.ndimage import convolve
-from scipy.ndimage.morphology import binary_fill_holes, binary_erosion, binary_dilation
+from scipy.ndimage.morphology import binary_dilation, binary_fill_holes, binary_erosion
 from skimage.measure import label
 from sklearn.decomposition import PCA
 
-from ..functional import smooth_out, special_convolve, hilbert
+from ..functional import hilbert
 from ..utils import transformable, lru_cache
 
+
+
+def apply_dilation(method):
+    """ Decorator to apply binary dilation to the method result matrix with zero traces preserving.
+
+    Parameters
+    ----------
+    dilation : int
+        Number of iterations for binary dilation algorithm.
+        If None, False or 0, then don't apply binary dilation.
+    """
+    @wraps(method)
+    def _wrapper(instance, *args, dilation=None, **kwargs):
+        result = method(instance, *args, **kwargs)
+
+        if dilation:
+            fill_value = np.nan if isinstance(result, np.float32) else instance.FILL_VALUE
+
+            result = np.nan_to_num(result)
+            result = binary_dilation(result, iterations=dilation)
+
+            result[instance.field.zero_traces == 1] = fill_value
+        return result
+    return _wrapper
 
 
 class AttributesMixin:
@@ -107,13 +133,6 @@ class AttributesMixin:
         else:
             raise ValueError(f'Unknown normalization mode `{mode}`.')
         return matrix
-
-
-    def matrix_smooth_out(self, matrix, kernel=None, kernel_size=7, sigma=2., margin=5, iters=1):
-        """ Smooth the depth matrix to produce floating point numbers. """
-        smoothed = smooth_out(matrix, kernel=kernel, kernel_size=kernel_size, sigma=sigma,
-                              margin=margin, fill_value=self.FILL_VALUE, preserve=True, iters=iters)
-        return smoothed
 
     def matrix_enlarge(self, matrix, width=3):
         """ Increase visibility of a sparse carcass metric. Should be used only for visualization purposes. """
@@ -243,12 +262,12 @@ class AttributesMixin:
     @property
     def grad_i(self):
         """ Change of heights along iline direction. """
-        return self.grad_along_axis(0)
+        return self.grad_along_axis(1)
 
     @property
     def grad_x(self):
         """ Change of heights along xline direction. """
-        return self.grad_along_axis(1)
+        return self.grad_along_axis(0)
 
 
     # Carcass properties: should be used only if the horizon is a carcass
@@ -395,9 +414,8 @@ class AttributesMixin:
         'instantaneous_amplitudes': ['instant_amplitudes', 'iamplitudes'],
         'fourier_decomposition': ['fourier', 'fourier_decomposition'],
         'wavelet_decomposition': ['wavelet', 'wavelet_decomposition'],
-        'median_diff': ['median_diff', 'mdiff'],
-        'grad': ['grad', 'gradient'],
-        'spikes': ['spikes'],
+        'median_diff': ['median_diff', 'mdiff', 'median_faults'],
+        'grad': ['grad', 'gradient', 'gradient_diff', 'gradient_faults'],
     }
     ALIAS_TO_ATTRIBUTE = {alias: name for name, aliases in ATTRIBUTE_TO_ALIAS.items() for alias in aliases}
 
@@ -410,7 +428,7 @@ class AttributesMixin:
         'wavelet_decomposition' : 'get_wavelet_decomposition',
         'median_diff': 'get_median_diff_map',
         'grad': 'get_gradient_map',
-        'spikes': 'get_spikes_map'
+        'spikes': 'get_spikes_mask'
     }
 
     def load_attribute(self, src, location=None, use_cache=True, enlarge=False, **kwargs):
@@ -540,7 +558,7 @@ class AttributesMixin:
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     @transformable
     def get_metric(self, metric='support_corrs', supports=50, agg='nanmean', **kwargs):
-        """ Cached metrics calcucaltion with disabled plotting option.
+        """ Cached metrics calculation with disabled plotting option.
 
         Parameters
         ----------
@@ -557,7 +575,7 @@ class AttributesMixin:
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     @transformable
     def get_fourier_decomposition(self, window=50, **_):
-        """ Cached fourier transform calculation follower by dimensionaluty reduction via PCA.
+        """ Cached fourier transform calculation follower by dimensionality reduction via PCA.
 
         Parameters
         ----------
@@ -571,7 +589,7 @@ class AttributesMixin:
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     @transformable
     def get_wavelet_decomposition(self, widths=range(1, 14, 3), window=50, **_):
-        """ Cached wavelet transform calculation followed by dimensionaluty reduction via PCA.
+        """ Cached wavelet transform calculation followed by dimensionality reduction via PCA.
 
         Parameters
         ----------
@@ -612,7 +630,7 @@ class AttributesMixin:
         zeros = sign[:, :, :-1] == 0
         cross[zeros] = 2
 
-        # obtain indices of first sign change occurences for every trace
+        # obtain indices of first sign change occurrences for every trace
         # if trace doesn't change sign, corresponding index of sign change is 0
         cross_indices = np.argmax(cross == 2, axis=-1)
 
@@ -640,30 +658,63 @@ class AttributesMixin:
         return result
 
 
-    # Despiking maps
+    # Maps with faults and spikes
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     @transformable
-    def get_median_diff_map(self, convolve_mode='m', kernel_size=11, kernel=None, margin=0, iters=2, threshold=2, **_):
-        """ Compute difference between depth map and its median filtered counterpart. """
-        convolved = special_convolve(self.full_matrix, mode=convolve_mode, kernel=kernel, kernel_size=kernel_size,
-                                     margin=margin, iters=iters, fill_value=self.FILL_VALUE)
-        spikes = self.full_matrix - convolved
+    @apply_dilation
+    def get_median_diff_map(self, iters=2, window_size=11, max_depth_difference=0,
+                            threshold=2, dilation=0, **_):
+        """ Compute difference between depth map and its median filtered counterpart.
+
+        Parameters
+        ----------
+        iters : int
+            Number of median filter iterations to perform.
+        window_size : int
+            A window size to compute the median in.
+        max_depth_difference : number
+            If the distance between anchor point and the point inside filter is bigger than the threshold,
+            then the point is ignored in filter.
+        threshold : number
+            Threshold to consider a difference between matrix and median value is insignificant.
+        dilation : int
+            Number of iterations for binary dilation algorithm to increase areas with significant
+            differences between matrix and median filter.
+        """
+        _ = dilation # This value is passed only to the decorator
+
+        medfilt = self.full_matrix.astype(np.float32)
+        medfilt[self.full_matrix == self.FILL_VALUE] = np.nan
+
+        # Apply `_medfilt` multiple times. Note that there is no dtype conversion in between
+        # Also the method returns a new object
+        for _ in range(iters):
+            medfilt = _medfilt(src=medfilt, window_size=window_size, preserve_missings=True,
+                               max_depth_difference=max_depth_difference)
+
+        median_diff = self.full_matrix - medfilt
 
         if threshold is not None:
-            spikes[np.abs(spikes) < threshold] = 0
-        spikes[self.field.zero_traces == 1] = np.nan
-        return spikes
+            median_diff[np.abs(median_diff) < threshold] = 0
+
+        median_diff[self.full_matrix == self.FILL_VALUE] = np.nan
+        return median_diff
 
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     @transformable
-    def get_gradient_map(self, threshold=None, **_):
+    @apply_dilation
+    def get_gradient_map(self, threshold=1, dilation=2, **_):
         """ Compute combined gradient map along both directions.
 
         Parameters
         ----------
         threshold : number
-            Threshold to consider a difference to be a spike.
+            Threshold to consider a gradient value is insignificant.
+        dilation : int
+            Number of iterations for binary dilation algorithm to increase areas with significant gradients values.
         """
+        _ = dilation # This value is passed only to the decorator
+
         grad_i = self.load_attribute('grad_i', on_full=True, dtype=np.float32, use_cache=False)
         grad_x = self.load_attribute('grad_x', on_full=True, dtype=np.float32, use_cache=False)
 
@@ -676,38 +727,139 @@ class AttributesMixin:
 
         grad = grad_i + grad_x
         grad[np.abs(grad) > self.h_min] = np.nan
+
         grad[self.field.zero_traces == 1] = np.nan
         return grad
 
-
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     @transformable
-    def get_spikes_map(self, spikes_mode='median', threshold=1., dilation=5,
-                       kernel_size=11, kernel=None, margin=0, iters=2, **_):
-        """ Locate spikes on a horizon.
+    @apply_dilation
+    def get_spikes_mask(self, max_spike_width=7, min_spike_height=5, max_depths_distance=2,
+                        dilation=0):
+        """ Get spikes mask for the horizon.
 
         Parameters
         ----------
-        mode : str
-            If 'gradient', then use gradient map to locate spikes.
-            If 'median', then use median diffs to locate spikes.
-        threshold : number
-            Threshold to consider a difference to be a spike.
+        max_spike_width : int
+            Maximum possible spike size along the iline or xline axes.
+        min_spike_height : int
+            Minimum possible spike size along the depth axis.
+        max_depths_distance : int
+            Threshold to consider that depths are close.
+            If points has difference in depth not more than this threshold, then we
+            assume that depths are almost the same.
         dilation : int
             Number of iterations for binary dilation algorithm to increase the spikes.
-        kernel_size, kernel, margin, iters
-            Parameters for median differences computation.
         """
-        if spikes_mode.startswith('m'):
-            spikes = self.load_attribute('median_diff', mode='m', kernel=kernel, kernel_size=kernel_size,
-                                         margin=margin, iters=iters, threshold=threshold)
-        elif spikes_mode.startswith('g'):
-            spikes = self.load_attribute('gradient', threshold=threshold)
-        else:
-            raise ValueError(f'Wrong mode passed, {spikes_mode}')
+        _ = dilation # This value is passed only to the decorator
 
-        if dilation:
-            spikes = np.nan_to_num(spikes)
-            spikes = binary_dilation(spikes, iterations=dilation).astype(np.float32)
-            spikes[self.field.zero_traces == 1] = np.nan
+        matrix = self.full_matrix.astype(np.float32)
+        matrix[matrix == self.FILL_VALUE] = np.nan
+
+        spikes = np.zeros_like(matrix)
+
+        # We try to find spikes on four directions:
+        # from left to right, from up to down, from right to left, from down to up
+        for rotation_num in range(1, 5):
+            matrix = np.rot90(matrix)
+            rotated_spikes = _get_spikes_along_line(matrix=matrix,
+                                                    max_spike_width=max_spike_width,
+                                                    min_spike_height=min_spike_height,
+                                                    max_depths_distance=max_depths_distance)
+            spikes += np.rot90(rotated_spikes, k=4-rotation_num)
+
+        spikes[spikes > 0] = 1
+        spikes[self.field.zero_traces == 1] = np.nan
         return spikes
+
+# Helper functions
+@njit(parallel=True)
+def _get_spikes_along_line(matrix, max_spike_width=5, min_spike_height=3, max_depths_distance=2):
+    """ Find spikes on a matrix for the fixed search direction: from up to down, from left to right.
+
+    Under the hood, the function iterates over matrix lines and find too huge depth differences on neighboring points.
+    These points might be spike's starting points.
+
+    If start points were found, we check points on the right of them to find spike's end point.
+    We suppose that a depth on the point next to the spikes' end point is close to a depth
+    on the point before the spike's start point.
+    """
+    spikes_mask = np.zeros_like(matrix)
+    line_length = matrix.shape[1]
+
+    for line_idx in prange(matrix.shape[0]): #pylint: disable=not-an-iterable
+        line = matrix[line_idx]
+
+        for previous_idx in range(line_length-1):
+            # Check that point can be a spike's start point: find too huge depth difference
+            current_idx = previous_idx + 1
+
+            if isnan(line[previous_idx]) or isnan(line[current_idx]):
+                continue
+
+            depths_diff = line[current_idx] - line[previous_idx]
+
+            if np.abs(depths_diff) < min_spike_height:
+                continue
+
+            # Check a range of points indices where the spike can be and
+            # find a point with a depth close to a depth before the spike
+            spike_start_idx = current_idx
+            spike_potential_end_idx = spike_start_idx + max_spike_width
+
+            if spike_potential_end_idx >= line_length:
+                spike_potential_end_idx = line_length - 1
+
+            standard_depth = line[spike_start_idx-1]
+
+            for spike_potential_point_idx in range(spike_start_idx+1, spike_potential_end_idx):
+                depth = line[spike_potential_point_idx]
+
+                if not isnan(depth):
+                    depths_diff = np.abs(standard_depth - depth)
+
+                    if depths_diff <= max_depths_distance:
+                        spikes_mask[line_idx, slice(spike_start_idx, spike_potential_point_idx)] = 1
+                        break
+
+    return spikes_mask
+
+@njit(parallel=True)
+def _medfilt(src, window_size, preserve_missings, max_depth_difference):
+    """ Jit-accelerated function to apply 2d median filter with special care for `np.nan` values. """
+    # max_depth_difference = 0: median across all non-equal-to-self elements in window
+    # max_depth_difference = -1: median across all elements in window
+    #pylint: disable=too-many-nested-blocks, consider-using-enumerate, not-an-iterable
+    k = window_size // 2
+
+    i_range, x_range = src.shape
+    dst = src.copy()
+
+    for iline in prange(0, i_range):
+        for xline in range(0, x_range):
+            central = src[iline, xline]
+
+            if preserve_missings and isnan(central):
+                continue
+
+            element = src[max(0, iline-k):min(iline+k+1, i_range),
+                          max(0, xline-k):min(xline+k+1, x_range)].ravel()
+
+            # Find elements which are close or distant for the `central`
+            # 0 for close, 1 for distant, 2 for nan
+            indicator = np.zeros_like(element)
+
+            for i, item in enumerate(element):
+                if not isnan(item):
+                    if (abs(item - central) > max_depth_difference) or isnan(central):
+                        indicator[i] = np.float32(1)
+                else:
+                    indicator[i] = np.float32(2)
+
+            # If there are more distant points than close in the window, then find median of distant points
+            n_close = (indicator == np.float32(0)).sum()
+            mask_distant = indicator == np.float32(1)
+            n_distant = mask_distant.sum()
+            if n_distant > n_close:
+                dst[iline, xline] = np.median(element[mask_distant])
+    return dst
