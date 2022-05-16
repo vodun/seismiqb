@@ -91,10 +91,10 @@ class Fault(Horizon):
             self.load_npy(path)
             self.format = 'file-npy'
         else:
-            self.load_charisma(path, transform, verify, **kwargs)
+            self.load_fault_sticks(path, transform, verify, **kwargs)
             self.format = 'file-charisma'
 
-    def load_charisma(self, path, transform=True, verify=True, fix=False, width=3, **kwargs):
+    def load_fault_sticks(self, path, transform=True, verify=True, fix=False, width=3, **kwargs):
         """ Get point cloud array from file values. """
         df = self.create_df(path)
         if 'cdp_x' in df.columns:
