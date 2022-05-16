@@ -133,7 +133,7 @@ def distance_to_triangle(triangle, node):
     if det == 0:
         return 0.
 
-    # Terible tree of conditionals to determine in which region of the diagram
+    # Terrible tree of conditionals to determine in which region of the diagram
     # shown above the projection of the point into the triangle-plane lies.
     if (s + t) <= det:
         if s < 0.0:
