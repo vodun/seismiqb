@@ -172,7 +172,7 @@ def split_array(array, labels):
     return np.split(array, positions)
 
 @njit
-def thicken_line(points, axis=0):
+def thin_line(points, axis=0):
     """ Make thick line. """
     line = np.zeros_like(points)
     p = points[0].copy()

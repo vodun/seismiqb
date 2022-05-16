@@ -14,7 +14,7 @@ from sklearn.neighbors import NearestNeighbors
 
 from .horizon import Horizon
 from .fault_triangulation import sticks_to_simplices, simplices_to_points
-from .fault_postprocessing import split_array, thicken_line
+from .fault_postprocessing import split_array, thin_line
 from ..plotters import show_3d
 
 
@@ -387,7 +387,7 @@ class Fault(Horizon):
 
         for p in projections:
             p = p[np.argsort(p[:, -1])]
-            points_ = thicken_line(p, axis=-1).astype(int)
+            points_ = thin_line(p, axis=-1).astype(int)
             loc = p[0, axis]
             nodes = approximate_points(points_[:, [1-axis, 2]], stick_nodes_step)
             nodes_ = np.zeros((len(nodes), 3))
