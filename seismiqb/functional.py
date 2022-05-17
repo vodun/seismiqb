@@ -159,6 +159,13 @@ def instantaneous_phase(array, continuous=False, axis=-1):
         phase = xp.abs(phase)
     return phase
 
+def instantaneous_amplitude(array, axis=-1):
+    """ Compute instantaneous amplitude. """
+    xp = cp.get_array_module(array) if CUPY_AVAILABLE else np
+    array = hilbert(array, axis=axis)
+    amplitude = xp.abs(array)
+    return amplitude
+
 def make_gaussian_kernel(kernel_size=3, sigma=1.):
     """ Create Gaussian kernel with given parameters: kernel size and std. """
     ax = np.linspace(-(kernel_size - 1) / 2., (kernel_size - 1) / 2., kernel_size)

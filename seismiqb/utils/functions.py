@@ -443,7 +443,3 @@ def concat_sorted(first_array, second_array):
         i += 1
 
     return buffer[:c]
-
-def split_array(array, labels):
-    """ Split (groupby) array by values from labels. Labels must be sorted and all groups must be contiguous. """
-    return np.split(array, np.unique(labels, return_index=True)[1][1:])

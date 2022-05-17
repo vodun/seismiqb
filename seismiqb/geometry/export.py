@@ -122,26 +122,29 @@ def make_segy_from_array(array, path_segy, zip_segy=True, remove_segy=None, path
         from .base import SeismicGeometry #pylint: disable=import-outside-toplevel
         geometry = SeismicGeometry(path_spec)
         segy = geometry.segyfile
-        ilines_offset = origin[0] + geometry.ilines_offset
-        xlines_offset = origin[1] + geometry.xlines_offset
         sample_rate = int(geometry.sample_rate)
         delay = origin[2] * sample_rate + int(geometry.delay)
 
         idx = np.stack(geometry.dataframe.index)
+        mask = np.zeros(len(idx), dtype='bool')
 
         for c, (i, x) in Notifier(pbar)(enumerate(idx)):
-            if ilines_offset <= i < ilines_offset + array.shape[0]:
-                if xlines_offset <= x < xlines_offset + array.shape[1]:
+            i = geometry.uniques_inversed[0][i]
+            x = geometry.uniques_inversed[1][x]
+            if origin[0] <= i < origin[0] + array.shape[0]:
+                if origin[1] <= x < origin[1] + array.shape[1]:
                     header = segy.header[c]
-                    cdpx[i - ilines_offset, x - xlines_offset] = header[segyio.TraceField.CDP_X]
-                    cdpy[i - ilines_offset, x - xlines_offset] = header[segyio.TraceField.CDP_Y]
+                    mask[c] = True
+                    cdpx[i - origin[0], x - origin[1]] = header[segyio.TraceField.CDP_X]
+                    cdpy[i - origin[0], x - origin[1]] = header[segyio.TraceField.CDP_Y]
+        idx = idx[mask]
 
         spec = segyio.spec()
         spec.sorting = None if segy.sorting is None else int(segy.sorting)
         spec.format = None if segy.format is None else int(segy.format)
         spec.samples = range(array.shape[2])
-        spec.ilines = np.arange(ilines_offset, array.shape[0]+ilines_offset)
-        spec.xlines = np.arange(xlines_offset, array.shape[1]+xlines_offset)
+        spec.ilines = geometry.uniques[0][origin[0]:origin[0]+array.shape[0]]
+        spec.xlines = geometry.uniques[1][origin[1]:origin[1]+array.shape[1]]
 
     else:
         # make and fill up segy-spec using kwargs and array-info
@@ -151,8 +154,9 @@ def make_segy_from_array(array, path_segy, zip_segy=True, remove_segy=None, path
         spec.samples = range(array.shape[2])
         spec.ilines = np.arange(array.shape[0])
         spec.xlines = np.arange(array.shape[1])
-        ilines_offset = 0
-        xlines_offset = 0
+        idx = np.stack(
+            np.meshgrid(np.arange(array.shape[1]), np.arange(array.shape[0])), axis=-1
+        ).reshape(-1, 2)[:, [1, 0]]
 
         # parse headers' kwargs
         sample_rate = int(kwargs.get('sample_rate', 2000))
@@ -165,27 +169,32 @@ def make_segy_from_array(array, path_segy, zip_segy=True, remove_segy=None, path
             dst_file.text[i] = segyio.tools.create_text_header({1: '...'}) # add header-fetching from kwargs
 
         # Loop over the array and put all the data into new segy-cube
-        for i in Notifier(pbar, desc='array to sgy')(range(array.shape[0])):
-            for x in range(array.shape[1]):
-                # create header in here
-                header = dst_file.header[i * array.shape[1] + x]
+        for c, (i, x) in Notifier(pbar, desc='array to sgy')(enumerate(idx)):
+            # create header in here
+            header = dst_file.header[c]
 
-                # change inline and xline in trace-header
-                header[segyio.TraceField.INLINE_3D] = i + ilines_offset
-                header[segyio.TraceField.CROSSLINE_3D] = x + xlines_offset
-                header[segyio.TraceField.CDP_X] = cdpx[i, x]
-                header[segyio.TraceField.CDP_Y] = cdpy[i, x]
+            # change inline and xline in trace-header
+            header[segyio.TraceField.INLINE_3D] = i
+            header[segyio.TraceField.CROSSLINE_3D] = x
 
-                # change depth-related fields in trace-header
-                header[segyio.TraceField.TRACE_SAMPLE_COUNT] = array.shape[2]
-                header[segyio.TraceField.TRACE_SAMPLE_INTERVAL] = sample_rate
-                header[segyio.TraceField.DelayRecordingTime] = delay
+            if path_spec:
+                i = geometry.uniques_inversed[0][i]
+                x = geometry.uniques_inversed[1][x]
+            i, x = i - origin[0], x - origin[1]
 
-                # copy the trace from the array
-                trace = array[i, x]
-                dst_file.trace[i * array.shape[1] + x] = trace
+            header[segyio.TraceField.CDP_X] = cdpx[i, x]
+            header[segyio.TraceField.CDP_Y] = cdpy[i, x]
 
-        dst_file.bin = {segyio.BinField.Traces: array.shape[0] * array.shape[1],
+            # change depth-related fields in trace-header
+            header[segyio.TraceField.TRACE_SAMPLE_COUNT] = array.shape[2]
+            header[segyio.TraceField.TRACE_SAMPLE_INTERVAL] = sample_rate
+            header[segyio.TraceField.DelayRecordingTime] = delay
+
+            # copy the trace from the array
+            trace = array[i, x]
+            dst_file.trace[c] = trace
+
+        dst_file.bin = {segyio.BinField.Traces: len(idx),#array.shape[0] * array.shape[1],
                         segyio.BinField.Samples: array.shape[2],
                         segyio.BinField.Interval: sample_rate}
 
