@@ -699,18 +699,18 @@ class HorizonMetrics(BaseMetrics):
         if isinstance(supports, int):
             # Get bad traces for all compared horizons
             if bad_traces is None:
-                bad_traces_ = xp.zeros(shape=horizons[0].field.spatial_shape, dtype=int)
+                bad_traces = xp.zeros(shape=horizons[0].field.spatial_shape, dtype=int)
             else:
-                bad_traces_ = to_device(bad_traces.copy(), device)
+                bad_traces = to_device(bad_traces.copy(), device)
 
             for horizon in horizons:
                 horizon_bad_traces = (horizon.full_matrix == horizon.FILL_VALUE).astype(int)
                 horizon_bad_traces = to_device(horizon_bad_traces, device)
 
                 horizons_bad_traces.append(horizon_bad_traces)
-                bad_traces_ |= horizon_bad_traces
+                bad_traces |= horizon_bad_traces
 
-        support_coords = BaseMetrics.find_supports(supports=supports, bad_traces=bad_traces_,
+        support_coords = BaseMetrics.find_supports(supports=supports, bad_traces=bad_traces,
                                                    safe_strip=safe_strip, carcass_mode=False,
                                                    horizon=None, device=device, seed=seed)
 
