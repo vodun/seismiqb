@@ -201,8 +201,74 @@ class BaseMetrics:
         result = accumulator.get(final=True)
         return from_device(result)
 
+    @staticmethod
+    def find_supports(supports, bad_traces, safe_strip, carcass_mode=False, horizon=None,
+                      device='cpu', seed=None):
+        """ Find valid supports coordinates.
+
+        Parameters
+        ----------
+        supports : int or ndarray
+            If int, then number of supports to generate randomly from non-bad traces.
+            If ndarray, then should be of (N, 2) shape and contain coordinates of reference traces.
+        bad_traces : ndarray
+            2D matrix of traces where the metric should not be computed.
+        safe_strip : int
+            Margin for computing metrics safely.
+        carcass_mode : bool
+            Whether to use carcass intersection nodes as supports traces.
+            Notice that it works only for a carcass.
+            Note, if `carcass_mode` is True, then the `horizon` argument must be provided.
+        horizon : :class:`.Horizon`, optional
+            Instance of a carcass horizon for which to create supports in intersection points.
+        device : str
+            Device specificator. Can be either string (`cpu`, `gpu:4`) or integer (`4`).
+        seed : int, optional
+            Seed the random numbers generator.
+        """
+        xp = cp if (CUPY_AVAILABLE and device != 'cpu') else np
+
+        if isinstance(supports, int):
+            if safe_strip:
+                bad_traces = bad_traces.copy()
+                bad_traces[:, :safe_strip], bad_traces[:, -safe_strip:] = 1, 1
+                bad_traces[:safe_strip, :], bad_traces[-safe_strip:, :] = 1, 1
+
+            valid_traces = xp.where(bad_traces == 0)
+
+            if carcass_mode and (horizon is not None) and horizon.is_carcass:
+                carcass_ilines = horizon.carcass_ilines
+                carcass_xlines = horizon.carcass_xlines
+
+                carcass_ilines = to_device(carcass_ilines, device)
+                carcass_xlines = to_device(carcass_xlines, device)
+
+                mask_i = xp.in1d(valid_traces[0], carcass_ilines)
+                mask_x = xp.in1d(valid_traces[1], carcass_xlines)
+                mask = mask_i & mask_x
+
+                valid_traces = (valid_traces[0][mask], valid_traces[1][mask])
+
+            rng = xp.random.default_rng(seed=seed)
+            indices = rng.integers(low=0, high=len(valid_traces[0]), size=supports)
+
+            support_coords = xp.asarray([valid_traces[0][indices], valid_traces[1][indices]]).T
+
+        elif isinstance(supports, (tuple, list, np.ndarray)):
+            support_coords = xp.asarray(supports)
+
+        else:
+            raise TypeError('Unknown type for the `supports` argument. '
+                            'It must be one of: int, tuple, list or np.ndarray.')
+
+        if len(support_coords) == 0:
+            raise ValueError('No valid support coordinates was found. '
+                             'Check input surfaces for available common points.')
+
+        return support_coords
+
     def compute_support(self, function, data, bad_traces, supports, safe_strip=0, carcass_mode=False,
-                        normalize=True, agg='mean', amortize=False, axis=0, device='cpu', pbar=None):
+                        normalize=True, agg='mean', amortize=False, axis=0, device='cpu', pbar=None, seed=None):
         """ Compute metric in a support fashion, using `function` to compare all the traces
         against a set of (randomly chosen or supplied) reference ones.
         Results of comparisons are aggregated via `agg` function.
@@ -241,6 +307,8 @@ class BaseMetrics:
             Device specificator. Can be either string (`cpu`, `gpu:4`) or integer (`4`).
         pbar : type or None
             Progress bar to use.
+        seed : int, optional
+            Seed the random numbers generator for supports coordinates.
         """
         # Transfer to GPU, if needed
         data = to_device(data, device)
@@ -255,36 +323,10 @@ class BaseMetrics:
         else:
             data_n = data
 
-        # Generate support coordinates
-        if isinstance(supports, int):
-            if safe_strip:
-                bad_traces_ = bad_traces.copy()
-                bad_traces_[:, :safe_strip], bad_traces_[:, -safe_strip:] = 1, 1
-                bad_traces_[:safe_strip, :], bad_traces_[-safe_strip:, :] = 1, 1
-            else:
-                bad_traces_ = bad_traces
-
-            valid_traces = xp.where(bad_traces_ == 0)
-
-            if carcass_mode and hasattr(self, 'horizon') and self.horizon.is_carcass:
-                carcass_ilines = self.horizon.carcass_ilines
-                carcass_xlines = self.horizon.carcass_xlines
-
-                if xp == cp:
-                    carcass_ilines = to_device(carcass_ilines, device)
-                    carcass_xlines = to_device(carcass_xlines, device)
-
-                mask_i = xp.in1d(valid_traces[0], carcass_ilines)
-                mask_x = xp.in1d(valid_traces[1], carcass_xlines)
-                mask = mask_i & mask_x
-
-                valid_traces = (valid_traces[0][mask], valid_traces[1][mask])
-
-            indices = xp.random.choice(len(valid_traces[0]), supports)
-            support_coords = xp.asarray([valid_traces[0][indices], valid_traces[1][indices]]).T
-
-        elif isinstance(supports, (tuple, list, np.ndarray)):
-            support_coords = xp.asarray(supports)
+        horizon = getattr(self, 'horizon', None)
+        support_coords = BaseMetrics.find_supports(supports=supports, bad_traces=bad_traces,
+                                                   safe_strip=safe_strip, carcass_mode=carcass_mode,
+                                                   horizon=horizon, device=device, seed=seed)
 
         # Save for plot and introspection
         if not hasattr(self, '_last_evaluation'):
@@ -623,11 +665,33 @@ class HorizonMetrics(BaseMetrics):
         self._probs = None
         self._bad_traces = None
 
+
     @classmethod
-    def evaluate_support(cls, horizons, metric='support_corrs', bad_traces=None, supports=100, safe_strip=0,
+    def evaluate_support(cls, horizons, metric='support_corrs', supports=100, bad_traces=None, safe_strip=0,
                          device='cpu', seed=None, **kwargs):
-        """ ..!!.. """
-        xp = cp if (CUPY_AVAILABLE and device == 'gpu') else np
+        """ Evaluate support metric for given horizons using same support coordinates.
+
+        Parameters
+        ----------
+        horizons : list of :class:`.Horizon`
+            List of horizon instances for which evaluate the metric.
+        metric : str
+            Name of metric to evaluate.
+        supports : int or ndarray
+            If int, then number of supports to generate randomly from non-bad traces.
+            If ndarray, then should be of (N, 2) shape and contain coordinates of reference traces.
+        bad_traces : ndarray
+            2D matrix of traces where the metric should not be computed.
+        safe_strip : int
+            Margin for computing metrics safely.
+        device : str
+            Device specificator. Can be either string (`cpu`, `gpu:4`) or integer (`4`).
+        seed : int, optional
+            Seed the random numbers generator.
+        kwargs : dict
+            Additional keyword arguments for the :meth:`.HorizonMetrics.evaluate`.
+        """
+        xp = cp if (CUPY_AVAILABLE and device != 'cpu') else np
 
         horizons_bad_traces = []
 
@@ -646,22 +710,10 @@ class HorizonMetrics(BaseMetrics):
                 horizons_bad_traces.append(horizon_bad_traces)
                 bad_traces_ |= horizon_bad_traces
 
-            if safe_strip:
-                bad_traces_[:, :safe_strip], bad_traces_[:, -safe_strip:] = 1, 1
-                bad_traces_[:safe_strip, :], bad_traces_[-safe_strip:, :] = 1, 1
+        support_coords = BaseMetrics.find_supports(supports=supports, bad_traces=bad_traces_,
+                                                   safe_strip=safe_strip, carcass_mode=False,
+                                                   horizon=None, device=device, seed=seed)
 
-            # Choose supports traces
-            valid_traces = xp.where(bad_traces_ == 0)
-
-            rng = xp.random.default_rng(seed=seed)
-            indices = rng.integers(low=0, high=len(valid_traces[0]), size=supports)
-
-            support_coords = xp.asarray([valid_traces[0][indices], valid_traces[1][indices]]).T
-
-        elif isinstance(supports, (tuple, list, np.ndarray)):
-            support_coords = xp.asarray(supports)
-
-        # Evaluate support metric for all horizons
         metrics = []
 
         for horizon in horizons:
