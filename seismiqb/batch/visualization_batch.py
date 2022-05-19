@@ -136,13 +136,13 @@ class VisualizationMixin:
         # Make suptitle and axis labels
         if (i_end - i_start) == 1:
             location_description = f'INLINE={i_start}', f'CROSSLINES <{x_start}:{x_end}>', f'DEPTH <{h_start}:{h_end}>'
-            xlabel, ylabel = 'CROSSLINE_3D', 'HEIGHT'
+            xlabel, ylabel = 'CROSSLINE', 'HEIGHT'
         elif (x_end - x_start) == 1:
             location_description = f'CROSSLINE={x_start}', f'INLINES <{i_start}:{i_end}>', f'DEPTH <{h_start}:{h_end}>'
-            xlabel, ylabel = 'INLINE_3D', 'HEIGHT'
+            xlabel, ylabel = 'INLINE', 'HEIGHT'
         else:
             location_description = f'DEPTH={h_start}', f'INLINES <{i_start}:{i_end}>', f'CROSSLINES <{x_start}:{x_end}>'
-            xlabel, ylabel = 'INLINE_3D', 'CROSSLINE_3D'
+            xlabel, ylabel = 'INLINE', 'CROSSLINE'
         suptitle = '   '.join(location_description)
 
         xlabel = [xlabel] * len(components)
@@ -181,7 +181,9 @@ class VisualizationMixin:
         """ Return a list of default components to plot, that are actually present in batch. """
         components = ['images', 'masks', ['images', 'masks'], 'predictions', ['images', 'predictions']]
         components = DelegatingList(components)
-        components = components.filter(lambda item: hasattr(self, item))
+        component_present = lambda item: hasattr(self, item) if isinstance(item, str) \
+                                         else all(hasattr(self, subitem) for subitem in item)
+        components = components.filter(component_present, shallow=True)
         return components
 
     def plot(self, components=None, idx=0, zoom=None, dilate=False, clip=False,
@@ -332,4 +334,4 @@ class VisualizationMixin:
             **kwargs
         }
 
-        plot_image(**plot_config)
+        return plot_image(**plot_config)
