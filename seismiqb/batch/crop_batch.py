@@ -1215,20 +1215,20 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         return self._central_crop(crop, shape)
 
     def _central_crop(self, crop, shape):
-        crop_shape = np.array(crop.shape)
-        shape = np.array(shape)
-        if (shape > crop_shape).any():
-            raise ValueError(f"shape can't be large then crop shape ({crop_shape}) but {shape} was given.")
-        corner = crop_shape // 2 - shape // 2
-        slices = tuple(slice(start, start+length) for start, length in zip(corner, shape))
+        old_shape = np.array(crop.shape)
+        new_shape = np.array(shape)
+        if (new_shape > old_shape).any():
+            raise ValueError(f"New crop shape ({new_shape}) can't be larger than old crop shape ({old_shape}).")
+        corner = old_shape // 2 - new_shape // 2
+        slices = tuple(slice(start, start + length) for start, length in zip(corner, new_shape))
         return crop[slices]
 
     @apply_parallel
     def translate(self, crop, shift=5, scale=0.0):
         """ Add and multiply values by uniformly sampled values. """
         shift = self.random.uniform(-shift, shift)
-        scale = self.random.uniform(1-scale, 1+scale)
-        return (crop + shift)*scale
+        scale = self.random.uniform(1 - scale, 1 + scale)
+        return (crop + shift) * scale
 
     @apply_parallel
     def invert(self, crop):
