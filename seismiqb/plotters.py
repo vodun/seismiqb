@@ -843,6 +843,14 @@ class MatplotlibPlotter:
                                    ColorConverter().to_rgb('purple')])
     register_cmap(name='Sampler', cmap=SAMPLER_CMAP)
 
+    SEISMIC2_CDICT = {
+        'red': [[0.0, None, 0.0], [0.25, 0.5, 0.5], [0.5, 1., 1], [0.75, 0.75, 0.75], [1.0, 1, None]],
+        'green': [[0.0, None, 0.0], [0.25, 0.5, 0.5], [0.5, 1., 1], [0.75, 0.25, 0.25], [1.0, 0., None]],
+        'blue': [[0.0, None, 1.0], [0.25, 0.5, 0.5], [0.5, 1., 1], [0.75, 0., 0.0], [1.0, 0.0, None]],
+    }
+    SEISMIC2_CMAP = LinearSegmentedColormap('Seismic2', SEISMIC2_CDICT)
+    register_cmap(name='Seismic2', cmap=SEISMIC2_CMAP)
+
     # Supplementary methods
 
     @staticmethod

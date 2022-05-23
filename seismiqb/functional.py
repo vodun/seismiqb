@@ -1,5 +1,5 @@
 """ Contains various functions for mathematical/geological transforms. """
-from math import isnan, ceil
+from math import ceil
 from warnings import warn
 
 import numpy as np
@@ -16,6 +16,10 @@ from scipy.ndimage import find_objects
 from skimage.measure import label
 
 from .utils import Accumulator
+
+def smooth_out(matrix, **_):
+    """ Stub. """
+    return matrix
 
 
 
@@ -155,154 +159,23 @@ def instantaneous_phase(array, continuous=False, axis=-1):
         phase = xp.abs(phase)
     return phase
 
+def instantaneous_amplitude(array, axis=-1):
+    """ Compute instantaneous amplitude. """
+    xp = cp.get_array_module(array) if CUPY_AVAILABLE else np
+    array = hilbert(array, axis=axis)
+    amplitude = xp.abs(array)
+    return amplitude
+
 def make_gaussian_kernel(kernel_size=3, sigma=1.):
     """ Create Gaussian kernel with given parameters: kernel size and std. """
     ax = np.linspace(-(kernel_size - 1) / 2., (kernel_size - 1) / 2., kernel_size)
     x_points, y_points = np.meshgrid(ax, ax)
-    kernel = np.exp(-0.5 * (np.square(x_points) + np.square(y_points)) / np.square(sigma))
+    kernel = np.exp(-0.5 * (x_points**2 + y_points**2) / sigma**2)
     gaussian_kernel = (kernel / np.sum(kernel).astype(np.float32))
     return gaussian_kernel
 
-
-def special_convolve(matrix, mode='convolve', kernel_size=3, kernel=None, iters=1,
-                     fill_value=None, preserve=True, margin=np.inf, **_):
-    """ Convolve the matrix with a given kernel.
-    A special treatment is given to the missing points (marked with either `fill_value` or `np.nan`),
-    and to areas with high variance.
-
-    Parameters
-    ----------
-    matrix : ndarray
-        Array to smooth values in.
-    mode : str
-        If 'convolve', then use convolutions with a kernel to compute result.
-        Otherwise, use median values in a kernel to compute result.
-    kernel_size : int
-        If the kernel is not provided, shape of the square kernel with ones.
-    kernel : ndarray or None
-        Kernel to convolve with.
-    iters : int
-        Number of smoothening iterations to perform.
-    fill_value : number
-        Value to ignore in convolutions.
-    preserve : bool
-        If False, then all the missing values remain missing in the resulting array.
-        If True, then missing values are filled with weighted average of nearby points.
-    margin : number
-        If the distance between anchor point and the point inside filter is bigger than the margin,
-        then the point is ignored in convolutions.
-        Can be used for separate smoothening on sides of discontinuity.
-    """
-    # Choose the filtering function
-    if mode.startswith('c'):
-        function = _convolve
-    else:
-        function = _medfilt
-
-    # Convert all the fill values to nans
-    matrix = matrix.astype(np.float32).copy()
-    if fill_value is not None:
-        matrix[matrix == fill_value] = np.nan
-
-    # Make the kernel, if needed. Pad the input
-    if kernel is None:
-        kernel = np.ones((kernel_size, kernel_size), dtype=np.float32)
-    kernel_size = kernel.shape[0]
-    result = np.pad(matrix, kernel_size, constant_values=np.nan)
-
-    # Apply smoothing multiple times. Note that there is no dtype conversion in between
-    for _ in range(iters):
-        result = function(result, kernel, preserve=preserve, margin=margin)
-    result = result[kernel_size:-kernel_size, kernel_size:-kernel_size]
-
-    # Remove all the unwanted values
-    if preserve:
-        result[np.isnan(matrix)] = np.nan
-
-    # Convert nans back to fill value
-    if fill_value is not None:
-        result[np.isnan(result)] = fill_value
-    return result
-
-@njit(parallel=True)
-def _convolve(src, kernel, preserve, margin):
-    """ Jit-accelerated function to apply 2d convolution with special care for nan values. """
-    #pylint: disable=too-many-nested-blocks, consider-using-enumerate, not-an-iterable
-    k = int(np.floor(kernel.shape[0] / 2))
-    raveled_kernel = kernel.ravel() / np.sum(kernel)
-
-    i_range, x_range = src.shape
-    dst = src.copy()
-
-    for iline in prange(k, i_range - k):
-        for xline in range(k, x_range - k):
-            central = src[iline, xline]
-
-            if (preserve is True) and isnan(central):
-                continue
-
-            element = src[iline-k:iline+k+1, xline-k:xline+k+1]
-
-            s, sum_weights = np.float32(0), np.float32(0)
-            for item, weight in zip(element.ravel(), raveled_kernel):
-                if not isnan(item):
-                    if abs(item - central) <= margin or isnan(central):
-                        s += item * weight
-                        sum_weights += weight
-
-            if sum_weights != 0.0:
-                dst[iline, xline] = s / sum_weights
-    return dst
-
-@njit(parallel=True)
-def _medfilt(src, kernel, preserve, margin):
-    """ Jit-accelerated function to apply 2d median filter with special care for nan values. """
-    # margin = 0: median across all non-equal-to-self elements in kernel
-    # margin = -1: median across all elements in kernel
-    #pylint: disable=too-many-nested-blocks, consider-using-enumerate, not-an-iterable
-    k = int(np.floor(kernel.shape[0] / 2))
-
-    i_range, x_range = src.shape
-    dst = src.copy()
-
-    for iline in prange(k, i_range - k):
-        for xline in range(k, x_range - k):
-            central = src[iline, xline]
-            if (preserve is True) and isnan(central):
-                continue
-
-            element = src[iline-k:iline+k+1, xline-k:xline+k+1].ravel()
-
-            # 0 for close, 1 for distant, 2 for nan
-            indicator = np.zeros_like(element)
-
-            for i in range(len(element)):
-                item = element[i]
-                if not isnan(item):
-                    if (abs(item - central) > margin) or isnan(central):
-                        indicator[i] = np.float32(1)
-                else:
-                    indicator[i] = np.float32(2)
-
-            n_close = (indicator == np.float32(0)).sum()
-            mask_distant = indicator == np.float32(1)
-            n_distant = mask_distant.sum()
-            if n_distant > n_close:
-                dst[iline, xline] = np.median(element[mask_distant])
-    return dst
-
-
-def smooth_out(matrix, mode='convolve', kernel_size=3, sigma=2.0, kernel=None, iters=1,
-               fill_value=None, preserve=True, margin=np.inf, **_):
-    """ `special_convolve` with a Gaussian kernel. """
-    if kernel is None:
-        kernel = make_gaussian_kernel(kernel_size=kernel_size, sigma=sigma)
-    return special_convolve(matrix, mode=mode, kernel=kernel, iters=iters,
-                            fill_value=fill_value, preserve=preserve, margin=margin)
-
-
 def digitize(matrix, quantiles):
-    """ Convert continious metric into binarized version with thresholds defined by `quantiles`. """
+    """ Convert continuous metric into binarized version with thresholds defined by `quantiles`. """
     bins = np.nanquantile(matrix, np.sort(quantiles)[::-1])
 
     if len(bins) > 1:
