@@ -305,7 +305,7 @@ class Fault(Horizon):
         array[self.points[:, 0], self.points[:, 1], self.points[:, 2]] = 1
         return self.from_mask(array, cube_shape=self.field.shape, field=self.field, **kwargs)
 
-    def show_3d(self, n_sticks=100, n_nodes=10, z_ratio=1., zoom_slice=None, show_axes=True,
+    def show_3d(self, n_sticks=100, n_nodes=10, z_ratio=1., zoom=None, show_axes=True,
                 width=1200, height=1200, margin=20, savepath=None, **kwargs):
         """ Interactive 3D plot. Roughly, does the following:
             - select `n` points to represent the horizon surface
@@ -321,7 +321,7 @@ class Fault(Horizon):
             Number of nodes for each stick.
         z_ratio : int
             Aspect ratio between height axis and spatial ones.
-        zoom_slice : tuple of slices or None.
+        zoom : tuple of slices or None.
             Crop from cube to show. If None, the whole cube volume will be shown.
         show_axes : bool
             Whether to show axes and their labels.
@@ -337,13 +337,13 @@ class Fault(Horizon):
         title = f'Fault `{self.name}` on `{self.field.displayed_name}`'
         aspect_ratio = (self.i_length / self.x_length, 1, z_ratio)
         axis_labels = (self.field.index_headers[0], self.field.index_headers[1], 'DEPTH')
-        if zoom_slice is None:
-            zoom_slice = [slice(0, i) for i in self.field.shape]
-        zoom_slice[-1] = slice(self.h_min, self.h_max)
+        if zoom is None:
+            zoom = [slice(0, i) for i in self.field.shape]
+        zoom[-1] = slice(self.h_min, self.h_max)
         margin = [margin] * 3 if isinstance(margin, int) else margin
-        x, y, z, simplices = self.make_triangulation(n_sticks, n_nodes, zoom_slice)
+        x, y, z, simplices = self.make_triangulation(n_sticks, n_nodes, zoom)
 
-        show_3d(x, y, z, simplices, title, zoom_slice, None, show_axes, aspect_ratio,
+        show_3d(x, y, z, simplices, title, zoom, None, show_axes, aspect_ratio,
                 axis_labels, width, height, margin, savepath, **kwargs)
 
     def make_triangulation(self, n_sticks, n_nodes, slices, **kwargs):

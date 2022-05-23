@@ -1207,7 +1207,7 @@ class PlotlyPlotter:
 
         cls.save_and_show(fig, **ax_params)
 
-def show_3d(x, y, z, simplices, title, zoom_slice, colors=None, show_axes=True, aspect_ratio=(1, 1, 1),
+def show_3d(x, y, z, simplices, title, zoom, colors=None, show_axes=True, aspect_ratio=(1, 1, 1),
             axis_labels=None, width=1200, height=1200, margin=(0, 0, 20), savepath=None,
             images=None, resize_factor=2, colorscale='Greys', **kwargs):
     """ Interactive 3D plot for some elements of cube.
@@ -1221,7 +1221,7 @@ def show_3d(x, y, z, simplices, title, zoom_slice, colors=None, show_axes=True, 
         that are vertices of triangle.
     title : str
         Title of plot.
-    zoom_slice : tuple of slices
+    zoom : tuple of slices
         Crop from cube to show.
     colors : list or None
         List of colors for each simplex.
@@ -1271,11 +1271,11 @@ def show_3d(x, y, z, simplices, title, zoom_slice, colors=None, show_axes=True, 
                 np.linspace(0, shape[1], image.shape[1])
             )
             if axis == 0:
-                x, y, z = loc * np.ones_like(image), grid[0].T + zoom_slice[1].start, grid[1].T + zoom_slice[2].start
+                x, y, z = loc * np.ones_like(image), grid[0].T + zoom[1].start, grid[1].T + zoom[2].start
             elif axis == 1:
-                y, x, z = loc * np.ones_like(image), grid[0].T + zoom_slice[0].start, grid[1].T + zoom_slice[2].start
+                y, x, z = loc * np.ones_like(image), grid[0].T + zoom[0].start, grid[1].T + zoom[2].start
             else:
-                z, x, y = loc * np.ones_like(image), grid[0].T + zoom_slice[0].start, grid[1].T + zoom_slice[1].start
+                z, x, y = loc * np.ones_like(image), grid[0].T + zoom[0].start, grid[1].T + zoom[1].start
             fig.add_surface(x=x, y=y, z=z, surfacecolor=np.flipud(image),
                             showscale=False, colorscale='Greys')
     # Update scene with title, labels and axes
@@ -1285,17 +1285,17 @@ def show_3d(x, y, z, simplices, title, zoom_slice, colors=None, show_axes=True, 
                 'xaxis': {
                     'title': axis_labels[0] if show_axes else '',
                     'showticklabels': show_axes,
-                    'range': [zoom_slice[0].stop + margin[0], zoom_slice[0].start - margin[0]]
+                    'range': [zoom[0].stop + margin[0], zoom[0].start - margin[0]]
                 },
                 'yaxis': {
                     'title': axis_labels[1] if show_axes else '',
                     'showticklabels': show_axes,
-                    'range': [zoom_slice[1].start + margin[1], zoom_slice[1].stop - margin[1]]
+                    'range': [zoom[1].start + margin[1], zoom[1].stop - margin[1]]
                 },
                 'zaxis': {
                     'title': axis_labels[2] if show_axes else '',
                     'showticklabels': show_axes,
-                    'range': [zoom_slice[2].stop + margin[2], zoom_slice[2].start - margin[2]]
+                    'range': [zoom[2].stop + margin[2], zoom[2].start - margin[2]]
                 },
                 'camera_eye': {
                     "x": 1.25, "y": 1.5, "z": 1.5
