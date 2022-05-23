@@ -10,7 +10,7 @@ from batchflow import DatasetIndex, Dataset, Pipeline
 from .field import Field, SyntheticField
 from .geometry import SeismicGeometry
 from .plotters import plot_image
-from .batch.crop_batch import SeismicCropBatch
+from .batch import SeismicCropBatch
 from .utils import AugmentedDict
 
 
