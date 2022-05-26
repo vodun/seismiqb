@@ -9,7 +9,7 @@ import numpy as np
 import cv2
 from scipy.interpolate import interp1d
 from scipy.ndimage import gaussian_filter1d
-from scipy.signal import butter, lfilter, hilbert
+from scipy.signal import butter, sosfiltfilt, hilbert
 
 from batchflow import DatasetIndex, Batch, action, inbatch_parallel, SkipBatchException, apply_parallel
 
@@ -1150,33 +1150,31 @@ class SeismicCropBatch(Batch):
                                   interpolation=cv2.INTER_LINEAR)
         return distorted_img.reshape(crop.shape)
 
-    @apply_parallel
-    def bandwidth_filter(self, crop, lowcut=None, highcut=None, fs=1, order=3):
-        """ Keep only frequences between lowcut and highcut.
-
-        Notes
-        -----
-        Use it before other augmentations, especially before ones that add lots of zeros.
+    @action
+    @inbatch_parallel(init='indices', post='_assemble', target='for')
+    def bandpass_filter(self, ix, src, dst, lowcut=None, highcut=None, order=4, sign=True):
+        """ Keep only frequencies between `lowcut` and `highcut`.
 
         Parameters
         ----------
         lowcut : float
-            Lower bound for frequences kept.
+            Lower bound for frequencies kept.
         highcut : float
-            Upper bound for frequences kept.
-        fs : float
-            Sampling rate.
+            Upper bound for frequencies kept.
         order : int
             Filtering order.
+        sign : bool
+            Whether to keep only signs of resulting image.
         """
-        nyq = 0.5 * fs
-        if lowcut is None:
-            b, a = butter(order, highcut / nyq, btype='high')
-        elif highcut is None:
-            b, a = butter(order, lowcut / nyq, btype='low')
-        else:
-            b, a = butter(order, [lowcut / nyq, highcut / nyq], btype='band')
-        return lfilter(b, a, crop, axis=1)
+        field = self.get(ix, 'fields')
+        nyq = 0.5 / (field.sample_rate * 10e-4)
+        crop = self.get(ix, src)
+
+        sos = butter(order, [lowcut / nyq, highcut / nyq], btype='band', output='sos')
+        filtered = sosfiltfilt(sos, crop, axis=1)
+        if sign:
+            filtered = np.sign(filtered)
+        return filtered
 
     @apply_parallel
     def sign_transform(self, crop):
