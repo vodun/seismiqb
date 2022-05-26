@@ -1,7 +1,9 @@
 """ A mixin with field visualizations. """
 #pylint: disable=global-variable-undefined
 import re
+from copy import copy
 from collections import defaultdict
+from itertools import cycle
 
 import numpy as np
 from matplotlib import pyplot as plt
@@ -202,7 +204,7 @@ class VisualizationMixin:
         >>> field.show('mean_matrix')
 
         Display attribute of a fan over the geometry map:
-        >>> field.show(['mean_matrix', 'fans:0/masks'])
+        >>> field.show(['mean_matrix', 'fans:0/mask'])
 
         Display attributes on separate axis:
         >>> field.show(['mean_matrix', 'horizons:0/fourier', custom_data_array], separate=True)
@@ -217,12 +219,13 @@ class VisualizationMixin:
 
         Display several attributes on multiple axes with overlays and save it near the cube:
         >>> field.show(['geometry/std_matrix', 'horizons:3/amplitudes',
-                        ['horizons:3/instant_phases', 'fans:3/masks'],
+                        ['horizons:3/instant_phases', 'fans:3/mask'],
                         ['horizons:3/instant_phases', predicted_mask]],
                        savepath='~/IMAGES/complex.png')
         """
         # Wrap given attributes load parameters in a structure that allows applying functions to its nested items
         load_params = DelegatingList(attributes)
+        load_params = load_params.apply(lambda item: copy(item) if isinstance(item, dict) else item)
 
         # Prepare data loading params
         load_params = load_params.apply(self._make_load_params, common_params=load_kwargs)
@@ -303,11 +306,14 @@ class VisualizationMixin:
         # Make data loading defaults
         default_params = {'dtype': np.float32}
 
+        if params['attribute_name'] in ['instantaneous_amplitudes', 'instantaneous_phases']:
+            default_params['channels'] = 'middle'
+
         if params['attribute_name'] in ['fourier_decomposition', 'wavelet_decomposition']:
             default_params['n_components'] = 1
 
-        if params['attribute_name'] in ['masks', 'full_binary_matrix']:
-            default_params['fill_value'] = 0
+        if attribute_name in ['mask', 'full_binary_matrix']:
+            params['fill_value'] = 0
 
         # Merge defaults with provided parameters
         params = {**default_params, **(common_params or {}), **params}
@@ -373,6 +379,8 @@ class VisualizationMixin:
         linkage = defaultdict(list)
 
         for params in to_list(data_params):
+            if isinstance(params, list):
+                params = params[0]
             src_label = params['src_labels']
             if params['label_num']:
                 src_label += ':' + params['label_num']
@@ -400,12 +408,12 @@ class VisualizationMixin:
 
     # 3D interactive
     def show_3d(self, src='labels', aspect_ratio=None, zoom_slice=None,
-                 n_points=100, threshold=100, n_sticks=100, n_nodes=10,
+                 n_points=100, threshold=100, sticks_step=10, stick_nodes_step=10,
                  slides=None, margin=(0, 0, 20), colors=None, **kwargs):
         """ Interactive 3D plot for some elements of a field.
         Roughly, does the following:
             - take some faults and/or horizons
-            - select `n` points to represent the horizon surface and `n_sticks` and `n_nodes` for each fault
+            - select `n` points to represent the horizon surface and `sticks_step` and `stick_nodes_step` for each fault
             - triangulate those points
             - remove some of the triangles on conditions
             - use Plotly to draw the tri-surface
@@ -426,10 +434,10 @@ class VisualizationMixin:
             The more, the better the image is and the slower it is displayed.
         threshold : number
             Threshold to remove triangles with bigger height differences in vertices.
-        n_sticks : int
-            Number of sticks for each fault.
-        n_nodes : int
-            Number of nodes for each stick.
+        sticks_step : int
+            Number of slides between sticks.
+        stick_nodes_step : int
+            Distance between stick nodes
         slides : list of tuples
             Each tuple is pair of location and axis to load slide from seismic cube.
         margin : tuple of ints
@@ -459,13 +467,17 @@ class VisualizationMixin:
         triangulation_kwargs = {
             'n_points': n_points,
             'threshold': threshold,
-            'n_sticks': n_sticks,
-            'n_nodes': n_nodes,
+            'sticks_step': sticks_step,
+            'stick_nodes_step': stick_nodes_step,
             'slices': zoom_slice
         }
 
         labels = [getattr(self, src_) if isinstance(src_, str) else [src_] for src_ in src]
         labels = sum(labels, [])
+
+        if isinstance(colors, list):
+            cycled_colors = cycle(colors)
+            colors = [next(cycled_colors) for _ in range(len(labels))]
 
         if colors is None:
             colors = ['green' for label in labels]
@@ -475,6 +487,8 @@ class VisualizationMixin:
         simplices_colors = []
         for label, color in zip(labels, colors):
             x, y, z, simplices_ = label.make_triangulation(**triangulation_kwargs)
+            if len(simplices_) == 0:
+                continue
             if x is not None:
                 simplices += [simplices_ + sum([len(item) for item in coords])]
                 simplices_colors += [[color] * len(simplices_)]

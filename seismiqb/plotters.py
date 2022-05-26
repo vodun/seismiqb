@@ -171,8 +171,8 @@ class MatplotlibPlotter:
               Parameters and data nestedness levels must match.
               Every param with 'imshow_', 'wiggle_', 'hist_' or 'curve_' prefix is redirected to corresponding method.
             - For `annotate_axis`.
-              Every param with 'title_', 'suptitle_', 'xlabel_', 'ylabel_', 'xticks_', 'yticks_', 'ticks_', 'xlim_',
-              'ylim_', colorbar_', 'legend_' or 'grid_' prefix is redirected to corresponding matplotlib method.
+              Every param with 'title_', 'suptitle_', 'xlabel_', 'ylabel_', 'xticks_', 'yticks_', 'xlim_', 'ylim_',
+              colorbar_', 'legend_' or 'grid_' prefix is redirected to corresponding matplotlib method.
               Also 'facecolor', 'set_axisbelow', 'disable_axes' arguments are accepted.
         """
         if mode == 'wiggle' and separate:
@@ -842,6 +842,14 @@ class MatplotlibPlotter:
                                    ColorConverter().to_rgb('red'),
                                    ColorConverter().to_rgb('purple')])
     register_cmap(name='Sampler', cmap=SAMPLER_CMAP)
+
+    SEISMIC2_CDICT = {
+        'red': [[0.0, None, 0.0], [0.25, 0.5, 0.5], [0.5, 1., 1], [0.75, 0.75, 0.75], [1.0, 1, None]],
+        'green': [[0.0, None, 0.0], [0.25, 0.5, 0.5], [0.5, 1., 1], [0.75, 0.25, 0.25], [1.0, 0., None]],
+        'blue': [[0.0, None, 1.0], [0.25, 0.5, 0.5], [0.5, 1., 1], [0.75, 0., 0.0], [1.0, 0.0, None]],
+    }
+    SEISMIC2_CMAP = LinearSegmentedColormap('Seismic2', SEISMIC2_CDICT)
+    register_cmap(name='Seismic2', cmap=SEISMIC2_CMAP)
 
     # Supplementary methods
 

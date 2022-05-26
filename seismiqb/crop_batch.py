@@ -373,7 +373,7 @@ class SeismicCropBatch(Batch):
     # Loading of labels
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def create_masks(self, ix, dst, indices='all', width=3, src_labels='labels', sparse=False):
+    def create_masks(self, ix, dst, indices='all', width=3, src_labels='labels'):
         """ Create masks from labels in stored `locations`.
 
         Parameters
@@ -389,12 +389,10 @@ class SeismicCropBatch(Batch):
             Width of the resulting label.
         src_labels : str
             Dataset attribute with labels dict.
-        sparse : bool
-            Create mask only for labeled slices (for Faults). Unlabeled slices will be marked by -1.
         """
         field = self.get(ix, 'fields')
         location = self.get(ix, 'locations')
-        return field.make_mask(location=location, width=width, indices=indices, src=src_labels, sparse=sparse)
+        return field.make_mask(location=location, width=width, indices=indices, src=src_labels)
 
 
     @action
@@ -1229,6 +1227,11 @@ class SeismicCropBatch(Batch):
         shift = self.random.uniform(-shift, shift)
         scale = self.random.uniform(1-scale, 1+scale)
         return (crop + shift)*scale
+
+    @apply_parallel
+    def invert(self, crop):
+        """ Change sign. """
+        return -crop
 
     @action
     def adaptive_expand(self, src, dst=None, channels='first'):

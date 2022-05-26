@@ -20,24 +20,46 @@ def triangle_rasterization(points, width=1):
     numpy.ndarray
         array of size N x 3 where N is a number of points in rasterization.
     """
-    shape = np.array([np.max(points[:, i]) - np.min(points[:, i]) for i in range(3)])
-    _points = np.zeros((int((shape[0] + 2) * (shape[1] + 2) * (shape[2] + 2)), 3))
+    max_n_points = np.int32(triangle_volume(points, width))
+    _points = np.empty((max_n_points, 3))
     i = 0
-    for x in range(int(np.min(points[:, 0])), int(np.max(points[:, 0])+1)): # pylint: disable=not-an-iterable
-        for y in range(int(np.min(points[:, 1])), int(np.max(points[:, 1]+1))):
-            for z in range(int(np.min(points[:, 2])), int(np.max(points[:, 2]+1))):
+    r_margin = width - width // 2
+    l_margin = width // 2
+    for x in range(int(np.min(points[:, 0]))-l_margin, int(np.max(points[:, 0]))+r_margin): # pylint: disable=not-an-iterable
+        for y in range(int(np.min(points[:, 1]))-l_margin, int(np.max(points[:, 1])+r_margin)):
+            for z in range(int(np.min(points[:, 2]))-l_margin, int(np.max(points[:, 2]))+r_margin):
                 node = np.array([x, y, z])
-                if distance_to_triangle(points, node) < 0.5 * width:
+                if distance_to_triangle(points, node) <= width / 2:
                     _points[i] = node
                     i += 1
     return _points[:i]
 
-def make_triangulation(points, return_indices=False):
+@njit
+def triangle_volume(points, width):
+    """ Compute triangle volume to estimate the number of points. """
+    a = points[0] - points[1]
+    a = np.sqrt(a[0] ** 2 + a[1] ** 2 + a[2] ** 2)
+
+    b = points[0] - points[2]
+    b = np.sqrt(b[0] ** 2 + b[1] ** 2 + b[2] ** 2)
+
+    c = points[2] - points[1]
+    c = np.sqrt(c[0] ** 2 + c[1] ** 2 + c[2] ** 2)
+
+    p = (a + b + c) / 2
+    S = (p * (p - a) * (p - b) * (p - c)) ** 0.5
+    r = S / p
+    r_ = (r + width)
+    p_ = p * r_ / r
+    return (p_ * r_) * (width + 1)
+
+
+def sticks_to_simplices(sticks, return_indices=False):
     """ Compute triangulation of the fault.
 
     Parameters
     ----------
-    points : numpy.ndarray
+    sticks : numpy.ndarray
         Array of sticks. Each item of array is a stick: sequence of 3D points.
     return_indices : bool
         If True, function will return indices of stick nodes in flatten array.
@@ -48,20 +70,46 @@ def make_triangulation(points, return_indices=False):
         numpy.ndarray of length N where N is the number of simplices. Each item is a sequence of coordinates of each
         vertex (if `return_indices=False`) or indices of nodes in initial flatten array.
     """
-    triangles = []
+    simplices = []
+    nodes = np.concatenate(sticks)
+
     if return_indices:
-        n_points = np.cumsum([0, *[len(item) for item in points]])
-        points = np.array([np.arange(len(points[i])) + n_points[i] for i in range(len(points))])
-    for s1, s2 in zip(points[:-1], points[1:]):
+        n_nodes = np.cumsum([0, *[len(item) for item in sticks]])
+        sticks = np.array([np.arange(len(sticks[i])) + n_nodes[i] for i in range(len(sticks))], dtype=object)
+    for s1, s2 in zip(sticks[:-1], sticks[1:]):
         if len(s1) > len(s2):
             s1, s2 = s2, s1
         n = len(s1)
-        nodes = [item for sublist in zip(s1, s2[:n]) for item in sublist]
-        nodes = [nodes[i:i+3] for i in range(len(nodes[:-2]))] if len(nodes) > 2 else []
-        nodes += [[s1[-1], s2[i], s2[i+1]] for i in range(n-1, len(s2)-1)]
-        triangles += nodes
-    return np.array(triangles)
+        nodes_to_connect = [item for sublist in zip(s1, s2[:n]) for item in sublist]
+        if len(nodes_to_connect) > 2:
+            triangles = [nodes_to_connect[i:i+3] for i in range(len(nodes_to_connect[:-2]))]
+        else:
+            triangles = []
+        triangles += [[s1[-1], s2[i], s2[i+1]] for i in range(n-1, len(s2)-1)]
+        simplices += triangles
+    return np.array(simplices), nodes
 
+def simplices_to_points(simplices, nodes, width=1):
+    """ Interpolate triangulation.
+
+    Parameters
+    ----------
+    simplices : numpy.ndarray
+        Array of shape (n_simplices, 3) with indices of nodes to connect into triangle.
+    nodes : numpy.ndarray
+        Array of shape (n_nodes, 3) with coordinates.
+    width : int, optional
+        Thickness of the simplex to draw, by default 1.
+
+    Returns
+    -------
+    numpy.ndarray
+        Array of shape (n_points, 3)
+    """
+    points = []
+    for triangle in simplices:
+        points.append(triangle_rasterization(nodes[triangle].astype('float32'), width))
+    return np.concatenate(points, axis=0).astype('int32')
 
 @njit
 def distance_to_triangle(triangle, node):
@@ -82,7 +130,10 @@ def distance_to_triangle(triangle, node):
     s = b * e - c * d
     t = b * d - a * e
 
-    # Terible tree of conditionals to determine in which region of the diagram
+    if det == 0:
+        return 0.
+
+    # Terrible tree of conditionals to determine in which region of the diagram
     # shown above the projection of the point into the triangle-plane lies.
     if (s + t) <= det:
         if s < 0.0:
