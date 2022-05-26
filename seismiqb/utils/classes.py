@@ -383,6 +383,7 @@ class Accumulator3D:
             MaxAccumulator3D: ['max', 'maximum'],
             MeanAccumulator3D: ['mean', 'avg', 'average'],
             GMeanAccumulator3D: ['gmean', 'geometric'],
+            WeightedSumAccumulator3D: ['weighted'],
             ModeAccumulator3D: ['mode']
         }
         aggregation_to_class = {alias: class_ for class_, lst in class_to_aggregation.items()
