@@ -174,9 +174,9 @@ class Field(CharismaMixin, VisualizationMixin):
         """ Load a single horizon from path. """
         horizon = Horizon(path, field=self, **kwargs)
         if filter:
-            horizon.filter()
+            horizon.filter(inplace=True)
         if interpolate:
-            horizon.interpolate()
+            horizon.interpolate(inplace=True)
         return horizon
 
 
