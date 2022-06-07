@@ -1319,7 +1319,7 @@ def show_3d(x, y, z, simplices, title, zoom_slice, colors=None, show_axes=True, 
 
     if isinstance(savepath, str):
         ext = os.path.splitext(savepath)[1][1:]
-        if ext == '.html':
+        if ext == 'html':
             fig.write_html(savepath)
         elif ext in ['png', 'jpg', 'jpeg', 'pdf']:
             fig.write_image(savepath, format=ext)
