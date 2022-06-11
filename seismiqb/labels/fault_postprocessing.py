@@ -5,7 +5,7 @@ from numba import njit, prange
 from numba.types import bool_
 
 @njit(parallel=True)
-def skeletonize(slide, width=5, rel_height=0.5, threshold=0.05):
+def skeletonize(slide, width=5, rel_height=0.5, prominence=0.05, threshold=0.05):
     """ Perform skeletonize of faults on 2D slide
 
     Parameters
@@ -25,12 +25,12 @@ def skeletonize(slide, width=5, rel_height=0.5, threshold=0.05):
     skeletonized_slide = np.zeros_like(slide)
     for i in prange(slide.shape[1]): #pylint: disable=not-an-iterable
         x = slide[:, i]
-        peaks = find_peaks(x, width=width, rel_height=rel_height, threshold=threshold)[0]
+        peaks, _ = find_peaks(x, width=width, prominence=prominence, rel_height=rel_height, threshold=threshold)
         skeletonized_slide[peaks, i] = 1
     return skeletonized_slide
 
 @njit
-def find_peaks(x, width=5, rel_height=0.5, threshold=0.05):
+def find_peaks(x, width=5, prominence=0.05, rel_height=0.5, threshold=0.05):
     """ See :meth:`scipy.signal.find_peaks`. """
     lmax = (x[1:] - x[:-1] >= 0)
     rmax = (x[:-1] - x[1:] >= 0)
@@ -43,7 +43,8 @@ def find_peaks(x, width=5, rel_height=0.5, threshold=0.05):
 
     prominences, left_bases, right_bases = _peak_prominences(x, peaks, -1)
     widths = _peak_widths(x, peaks, rel_height, prominences, left_bases, right_bases)
-    return peaks[widths[0] >= width], None
+    mask = np.logical_and(widths[0] >= width, prominences >= prominence)
+    return peaks[mask], prominences[mask]
 
 @njit
 def _peak_prominences(x, peaks, wlen):
