@@ -45,10 +45,10 @@ class BaseSampler(Sampler):
         n_threshold = np.int32(crop_shape[0] * crop_shape[1] * threshold)
 
         # Keep only points, that can be a starting point for a crop of given shape
-        i_mask = ((ranges[:2, 0] < points[:, :2]).all(axis=1) &
-                  ((points[:, :2] + crop_shape[:2]) < ranges[:2, 1]).all(axis=1))
-        x_mask = ((ranges[:2, 0] < points[:, :2]).all(axis=1) &
-                  ((points[:, :2] + crop_shape_t[:2]) < ranges[:2, 1]).all(axis=1))
+        i_mask = ((ranges[:2, 0] <= points[:, :2]).all(axis=1) &
+                  ((points[:, :2] +   crop_shape[:2]) <= ranges[:2, 1]).all(axis=1))
+        x_mask = ((ranges[:2, 0] <= points[:, :2]).all(axis=1) &
+                  ((points[:, :2] + crop_shape_t[:2]) <= ranges[:2, 1]).all(axis=1))
         mask = i_mask | x_mask
 
         points = points[mask]
