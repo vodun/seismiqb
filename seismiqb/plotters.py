@@ -1,5 +1,6 @@
 """ Plot functions. """
 # pylint: disable=too-many-statements
+import os
 from numbers import Number
 from copy import copy
 import colorsys
@@ -1217,7 +1218,7 @@ class PlotlyPlotter:
 
 def show_3d(x, y, z, simplices, title, zoom_slice, colors=None, show_axes=True, aspect_ratio=(1, 1, 1),
             axis_labels=None, width=1200, height=1200, margin=(0, 0, 20), savepath=None,
-            images=None, resize_factor=2, colorscale='Greys', **kwargs):
+            images=None, resize_factor=2, colorscale='Greys', show=True, **kwargs):
     """ Interactive 3D plot for some elements of cube.
 
     Parameters
@@ -1251,6 +1252,8 @@ def show_3d(x, y, z, simplices, title, zoom_slice, colors=None, show_axes=True, 
         Resize factor for seismic slides. Is needed to spedify loading and ploting of seismic slices.
     colorscale : str
         Colormap for seismic slides.
+    show : bool
+        Whether to show figure.
     kwargs : dict
         Other arguments of plot creation.
     """
@@ -1311,7 +1314,12 @@ def show_3d(x, y, z, simplices, title, zoom_slice, colors=None, show_axes=True, 
             }
         }
     )
-    fig.show()
+    if show:
+        fig.show()
 
-    if savepath:
-        fig.write_html(savepath)
+    if isinstance(savepath, str):
+        ext = os.path.splitext(savepath)[1][1:]
+        if ext == 'html':
+            fig.write_html(savepath)
+        elif ext in ['png', 'jpg', 'jpeg', 'pdf']:
+            fig.write_image(savepath, format=ext)
