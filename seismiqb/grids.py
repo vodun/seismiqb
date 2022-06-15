@@ -1,4 +1,16 @@
-""" !!. """
+""" Generator of predetermined locations based on field or current state of labeled surface. Mainly used for inference.
+
+Locations describe the cube and the exact place to load from in the following format:
+(field_id, label_id, orientation, i_start, x_start, h_start, i_stop, x_stop, h_stop).
+
+Locations are passed to `make_locations` method of `SeismicCropBatch`, which
+transforms them into 3D slices to index the data and other useful info like origin points, shapes and orientation.
+
+Each of the classes provides:
+    - `call` method (aliased to either `sample` or `next_batch`), that generates given amount of locations
+    - `to_names` method to convert the first two columns of sampled locations into string names of field and label
+    - convenient visualization to explore underlying `locations` structure
+"""
 from itertools import product
 
 import numpy as np

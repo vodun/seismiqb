@@ -1,7 +1,4 @@
-""" Generator of locations of two types: Samplers and Grids.
-
-Samplers are making random (label-dependant) locations to train models, while
-Grids create predetermined locations based on field or current state of labeled surface and are used for inference.
+""" Generator of (label-dependant) randomized locations, mainly for model training.
 
 Locations describe the cube and the exact place to load from in the following format:
 (field_id, label_id, orientation, i_start, x_start, h_start, i_stop, x_stop, h_stop).
