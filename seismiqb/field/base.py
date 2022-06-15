@@ -87,7 +87,7 @@ class Field(CharismaMixin, VisualizationMixin):
     }
     NAME_TO_METHOD = {name: method for method, names in METHOD_TO_NAMES.items() for name in names}
 
-    def load_labels(self, labels=None, labels_class=None, **labels_kwargs):
+    def load_labels(self, labels=None, labels_class=None, mode='w', **labels_kwargs):
         """ Load labels and store them in the instance. Refer to the class documentation for details. """
         if isinstance(labels, str):
             labels = self.make_path(labels, makedirs=False)
@@ -133,15 +133,24 @@ class Field(CharismaMixin, VisualizationMixin):
             method = getattr(self, method_name)
             result = method(label_src, **labels_kwargs)
 
-            setattr(self, label_dst, result)
-            self.loaded_labels.append(label_dst)
+            if mode == 'w':
+                setattr(self, label_dst, result)
+                self.loaded_labels.append(label_dst)
+            else:
+                if not hasattr(self, label_dst):
+                    setattr(self, label_dst, AugmentedList())
+                else:
+                    getattr(self, label_dst).extend(result)
+
+                if label_dst not in self.loaded_labels:
+                    self.loaded_labels.append(label_dst)
 
             if 'labels' not in labels and not self.labels:
                 setattr(self, 'labels', result)
 
     @staticmethod
     def _filter_paths(paths):
-        """ Remove paths fors service files. """
+        """ Remove paths for service files. """
         return [path for path in paths
                 if not isinstance(path, str) or \
                 not any(ext in path for ext in ['.dvc', '.gitignore', '.meta'])]
