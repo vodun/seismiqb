@@ -513,7 +513,7 @@ class VisualizationMixin:
 
         images = []
         if slides is not None:
-            for i, (loc, axis) in enumerate(slides):
+            for loc, axis in slides:
                 image = self.geometry.load_slide(loc, axis=axis)
                 if axis == 0:
                     image = image[zoom_slice[1:]]

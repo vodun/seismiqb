@@ -193,7 +193,7 @@ def make_segy_from_array(array, path_segy, zip_segy=True, remove_segy=None, path
             # copy the trace from the array
             trace = array[i, x]
             dst_file.trace[c] = trace
-        import pdb; pdb.set_trace()
+
         dst_file.bin = {segyio.BinField.Traces: len(idx),#array.shape[0] * array.shape[1],
                         segyio.BinField.Samples: array.shape[2],
                         segyio.BinField.Interval: sample_rate * 1000}

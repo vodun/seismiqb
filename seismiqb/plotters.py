@@ -1248,6 +1248,8 @@ def show_3d(x, y, z, simplices, title, zoom_slice, colors=None, show_axes=True, 
         Path to save interactive html to.
     images : list of tuples
         Each tuple is triplet of image, location and axis to load slide from seismic cube.
+    bounds : bool or int
+        Whether to draw bounds on slides. If int, width of the border.
     resize_factor : float
         Resize factor for seismic slides. Is needed to spedify loading and ploting of seismic slices.
     colorscale : str
@@ -1269,6 +1271,11 @@ def show_3d(x, y, z, simplices, title, zoom_slice, colors=None, show_axes=True, 
         'aspectratio': {'x': aspect_ratio[0], 'y': aspect_ratio[1], 'z': aspect_ratio[2]},
         **kwargs
     }
+    if isinstance(colorscale, str) and colorscale in plt.colormaps():
+        cmap = get_cmap(colorscale)
+        levels = np.arange(0, 256, 1) / 255
+        colorscale = [(level, f'rgb({r * 255}, {g * 255}, {b * 255})') for (r, g, b, _), level in zip(cmap(levels), levels)]
+
     if simplices is not None:
         if colors is not None:
             fig = ff.create_trisurf(x=x, y=y, z=z, color_func=colors, simplices=simplices, **kwargs)
