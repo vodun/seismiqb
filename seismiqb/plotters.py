@@ -1256,6 +1256,8 @@ def show_3d(x, y, z, simplices, title, zoom_slice, colors=None, show_axes=True, 
         Colormap for seismic slides.
     show : bool
         Whether to show figure.
+    camera_eye : dict
+        Parameters for initial camera view.
     kwargs : dict
         Other arguments of plot creation.
     """
