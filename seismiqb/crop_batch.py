@@ -1152,7 +1152,7 @@ class SeismicCropBatch(Batch):
 
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def bandpass_filter(self, ix, src, dst, lowcut=None, highcut=None, order=4, sign=True):
+    def bandpass_filter(self, ix, src, dst, lowcut=None, highcut=None, axis=1, order=4, sign=True):
         """ Keep only frequencies between `lowcut` and `highcut`.
 
         Parameters
@@ -1171,7 +1171,7 @@ class SeismicCropBatch(Batch):
         crop = self.get(ix, src)
 
         sos = butter(order, [lowcut / nyq, highcut / nyq], btype='band', output='sos')
-        filtered = sosfiltfilt(sos, crop, axis=1)
+        filtered = sosfiltfilt(sos, crop, axis=axis)
         if sign:
             filtered = np.sign(filtered)
         return filtered
