@@ -486,17 +486,23 @@ class VisualizationMixin:
 
         simplices_colors = []
         for label, color in zip(labels, colors):
-            x, y, z, simplices_ = label.make_triangulation(**triangulation_kwargs)
-            if len(simplices_) == 0:
-                continue
-            if x is not None:
-                simplices += [simplices_ + sum([len(item) for item in coords])]
-                simplices_colors += [[color] * len(simplices_)]
-                coords += [np.stack([x, y, z], axis=1)]
+            if label is not None:
+                x, y, z, simplices_ = label.make_triangulation(**triangulation_kwargs)
+                if len(simplices_) == 0:
+                    continue
+                if x is not None:
+                    simplices += [simplices_ + sum([len(item) for item in coords])]
+                    simplices_colors += [[color] * len(simplices_)]
+                    coords += [np.stack([x, y, z], axis=1)]
 
-        simplices = np.concatenate(simplices, axis=0)
-        coords = np.concatenate(coords, axis=0)
-        simplices_colors = np.concatenate(simplices_colors)
+        if len(simplices) > 0:
+            simplices = np.concatenate(simplices, axis=0)
+            coords = np.concatenate(coords, axis=0)
+            simplices_colors = np.concatenate(simplices_colors)
+        else:
+            simplices = None
+            coords = np.zeros((0, 3))
+            simplices_colors = None
         title = self.displayed_name
 
         default_aspect_ratio = (self.shape[0] / self.shape[1], 1, 1)
@@ -507,7 +513,7 @@ class VisualizationMixin:
 
         images = []
         if slides is not None:
-            for loc, axis in slides:
+            for i, (loc, axis) in enumerate(slides):
                 image = self.geometry.load_slide(loc, axis=axis)
                 if axis == 0:
                     image = image[zoom_slice[1:]]
