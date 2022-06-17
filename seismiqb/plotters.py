@@ -1276,7 +1276,10 @@ def show_3d(x, y, z, simplices, title, zoom_slice, colors=None, show_axes=True, 
     if isinstance(colorscale, str) and colorscale in plt.colormaps():
         cmap = get_cmap(colorscale)
         levels = np.arange(0, 256, 1) / 255
-        colorscale = [(level, f'rgb({r * 255}, {g * 255}, {b * 255})') for (r, g, b, _), level in zip(cmap(levels), levels)]
+        colorscale = [
+            (level, f'rgb({r * 255}, {g * 255}, {b * 255})')
+            for (r, g, b, _), level in zip(cmap(levels), levels)
+        ]
 
     if simplices is not None:
         if colors is not None:

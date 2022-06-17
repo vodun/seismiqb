@@ -1,5 +1,5 @@
 """ A mixin with field visualizations. """
-#pylint: disable=global-variable-undefined
+#pylint: disable=global-variable-undefined, too-many-statements
 import re
 from copy import copy
 from collections import defaultdict
@@ -480,7 +480,7 @@ class VisualizationMixin:
             colors = [next(cycled_colors) for _ in range(len(labels))]
 
         if colors is None:
-            colors = ['green' for label in labels]
+            colors = ['green' for _ in labels]
         if isinstance(colors, dict):
             colors = [colors.get(type(label).__name__, colors.get('all', 'green')) for label in labels]
 
