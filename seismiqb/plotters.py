@@ -1218,7 +1218,7 @@ class PlotlyPlotter:
 
 def show_3d(x, y, z, simplices, title, zoom_slice, colors=None, show_axes=True, aspect_ratio=(1, 1, 1),
             axis_labels=None, width=1200, height=1200, margin=(0, 0, 20), savepath=None,
-            images=None, bounds=False, resize_factor=2, colorscale='Greys', show=True, camera_eye=None, **kwargs):
+            images=None, bounds=False, resize_factor=2, colorscale='Greys', show=True, camera=None, **kwargs):
     """ Interactive 3D plot for some elements of cube.
 
     Parameters
@@ -1256,7 +1256,7 @@ def show_3d(x, y, z, simplices, title, zoom_slice, colors=None, show_axes=True, 
         Colormap for seismic slides.
     show : bool
         Whether to show figure.
-    camera_eye : dict
+    camera : dict
         Parameters for initial camera view.
     kwargs : dict
         Other arguments of plot creation.
@@ -1333,9 +1333,7 @@ def show_3d(x, y, z, simplices, title, zoom_slice, colors=None, show_axes=True, 
                     'showticklabels': show_axes,
                     'range': [zoom_slice[2].stop + margin[2], zoom_slice[2].start - margin[2]]
                 },
-                'camera_eye': camera_eye or {
-                    "x": 1.25, "y": 1.5, "z": 1.5
-                },
+                'camera': camera or {'eye': {"x": 1.25, "y": 1.5, "z": 1.5}},
             }
         }
     )
