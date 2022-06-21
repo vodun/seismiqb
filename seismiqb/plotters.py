@@ -1218,7 +1218,7 @@ class PlotlyPlotter:
 
 def show_3d(x, y, z, simplices, title, zoom_slice, colors=None, show_axes=True, aspect_ratio=(1, 1, 1),
             axis_labels=None, width=1200, height=1200, margin=(0, 0, 20), savepath=None,
-            images=None, resize_factor=2, colorscale='Greys', show=True, **kwargs):
+            images=None, bounds=False, resize_factor=2, colorscale='Greys', show=True, camera=None, **kwargs):
     """ Interactive 3D plot for some elements of cube.
 
     Parameters
@@ -1248,12 +1248,16 @@ def show_3d(x, y, z, simplices, title, zoom_slice, colors=None, show_axes=True, 
         Path to save interactive html to.
     images : list of tuples
         Each tuple is triplet of image, location and axis to load slide from seismic cube.
+    bounds : bool or int
+        Whether to draw bounds on slides. If int, width of the border.
     resize_factor : float
         Resize factor for seismic slides. Is needed to spedify loading and ploting of seismic slices.
     colorscale : str
         Colormap for seismic slides.
     show : bool
         Whether to show figure.
+    camera : dict
+        Parameters for initial camera view.
     kwargs : dict
         Other arguments of plot creation.
     """
@@ -1269,14 +1273,33 @@ def show_3d(x, y, z, simplices, title, zoom_slice, colors=None, show_axes=True, 
         'aspectratio': {'x': aspect_ratio[0], 'y': aspect_ratio[1], 'z': aspect_ratio[2]},
         **kwargs
     }
-    if colors is not None:
-        fig = ff.create_trisurf(x=x, y=y, z=z, color_func=colors, simplices=simplices, **kwargs)
+    if isinstance(colorscale, str) and colorscale in plt.colormaps():
+        cmap = get_cmap(colorscale)
+        levels = np.arange(0, 256, 1) / 255
+        colorscale = [
+            (level, f'rgb({r * 255}, {g * 255}, {b * 255})')
+            for (r, g, b, _), level in zip(cmap(levels), levels)
+        ]
+
+    if simplices is not None:
+        if colors is not None:
+            fig = ff.create_trisurf(x=x, y=y, z=z, color_func=colors, simplices=simplices, **kwargs)
+        else:
+            fig = ff.create_trisurf(x=x, y=y, z=z, simplices=simplices, **kwargs)
     else:
-        fig = ff.create_trisurf(x=x, y=y, z=z, simplices=simplices, **kwargs)
+        fig = go.Figure()
     if images is not None:
         for image, loc, axis in images:
             shape = image.shape
             image = cv2.resize(image, tuple(np.array(shape) // resize_factor))[::-1]
+            if bounds:
+                bounds = int(bounds)
+                fill = image.max()
+                image[:bounds, :] = fill
+                image[-bounds:, :] = fill
+                image[:, :bounds] = fill
+                image[:, -bounds:] = fill
+
             grid = np.meshgrid(
                 np.linspace(0, shape[0], image.shape[0]),
                 np.linspace(0, shape[1], image.shape[1])
@@ -1288,10 +1311,12 @@ def show_3d(x, y, z, simplices, title, zoom_slice, colors=None, show_axes=True, 
             else:
                 z, x, y = loc * np.ones_like(image), grid[0].T + zoom_slice[0].start, grid[1].T + zoom_slice[1].start
             fig.add_surface(x=x, y=y, z=z, surfacecolor=np.flipud(image),
-                            showscale=False, colorscale='Greys')
+                            showscale=False, colorscale=colorscale)
     # Update scene with title, labels and axes
     fig.update_layout(
         {
+            'width': kwargs['width'],
+            'height': kwargs['height'],
             'scene': {
                 'xaxis': {
                     'title': axis_labels[0] if show_axes else '',
@@ -1308,9 +1333,7 @@ def show_3d(x, y, z, simplices, title, zoom_slice, colors=None, show_axes=True, 
                     'showticklabels': show_axes,
                     'range': [zoom_slice[2].stop + margin[2], zoom_slice[2].start - margin[2]]
                 },
-                'camera_eye': {
-                    "x": 1.25, "y": 1.5, "z": 1.5
-                },
+                'camera': camera or {'eye': {"x": 1.25, "y": 1.5, "z": 1.5}},
             }
         }
     )
