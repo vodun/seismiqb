@@ -715,6 +715,18 @@ class SeismicCropBatch(Batch):
         return mask_
 
 
+    @apply_parallel
+    def smooth_labels(self, crop, eps=0.05):
+        """ Smooth labeling for segmentation mask:
+            - change `1`'s to `1 - eps`
+            - change `0`'s to `eps`
+        Assumes that the mask is binary.
+        """
+        label_mask = crop == 1
+        crop[label_mask] = 1 - eps
+        crop[~label_mask] = eps
+        return crop
+
     # Predictions
     @action
     @inbatch_parallel(init='indices', post=None, target='for')
