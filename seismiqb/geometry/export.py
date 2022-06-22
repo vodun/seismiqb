@@ -159,7 +159,7 @@ def make_segy_from_array(array, path_segy, zip_segy=True, remove_segy=None, path
         ).reshape(-1, 2)[:, [1, 0]]
 
         # parse headers' kwargs
-        sample_rate = int(kwargs.get('sample_rate', 2000))
+        sample_rate = int(kwargs.get('sample_rate', 2))
         delay = int(kwargs.get('delay', 0))
 
     with segyio.create(path_segy, spec) as dst_file:
@@ -187,7 +187,7 @@ def make_segy_from_array(array, path_segy, zip_segy=True, remove_segy=None, path
 
             # change depth-related fields in trace-header
             header[segyio.TraceField.TRACE_SAMPLE_COUNT] = array.shape[2]
-            header[segyio.TraceField.TRACE_SAMPLE_INTERVAL] = sample_rate
+            header[segyio.TraceField.TRACE_SAMPLE_INTERVAL] = sample_rate * 1000
             header[segyio.TraceField.DelayRecordingTime] = delay
 
             # copy the trace from the array
@@ -196,7 +196,7 @@ def make_segy_from_array(array, path_segy, zip_segy=True, remove_segy=None, path
 
         dst_file.bin = {segyio.BinField.Traces: len(idx),#array.shape[0] * array.shape[1],
                         segyio.BinField.Samples: array.shape[2],
-                        segyio.BinField.Interval: sample_rate}
+                        segyio.BinField.Interval: sample_rate * 1000}
 
     if zip_segy:
         dir_name = os.path.dirname(os.path.abspath(path_segy))

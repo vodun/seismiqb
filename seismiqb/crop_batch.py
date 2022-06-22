@@ -715,6 +715,18 @@ class SeismicCropBatch(Batch):
         return mask_
 
 
+    @apply_parallel
+    def smooth_labels(self, crop, eps=0.05):
+        """ Smooth labeling for segmentation mask:
+            - change `1`'s to `1 - eps`
+            - change `0`'s to `eps`
+        Assumes that the mask is binary.
+        """
+        label_mask = crop == 1
+        crop[label_mask] = 1 - eps
+        crop[~label_mask] = eps
+        return crop
+
     # Predictions
     @action
     @inbatch_parallel(init='indices', post=None, target='for')
@@ -1152,7 +1164,7 @@ class SeismicCropBatch(Batch):
 
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def bandpass_filter(self, ix, src, dst, lowcut=None, highcut=None, order=4, sign=True):
+    def bandpass_filter(self, ix, src, dst, lowcut=None, highcut=None, axis=1, order=4, sign=True):
         """ Keep only frequencies between `lowcut` and `highcut`.
 
         Parameters
@@ -1171,7 +1183,7 @@ class SeismicCropBatch(Batch):
         crop = self.get(ix, src)
 
         sos = butter(order, [lowcut / nyq, highcut / nyq], btype='band', output='sos')
-        filtered = sosfiltfilt(sos, crop, axis=1)
+        filtered = sosfiltfilt(sos, crop, axis=axis)
         if sign:
             filtered = np.sign(filtered)
         return filtered

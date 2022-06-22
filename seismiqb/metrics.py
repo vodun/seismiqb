@@ -1,5 +1,6 @@
 """ Metrics for seismic objects: cubes and horizons. """
 from copy import copy
+from textwrap import dedent
 from itertools import zip_longest
 
 from tqdm.auto import tqdm
@@ -22,7 +23,7 @@ from .utils import Accumulator, to_list
 from .functional import to_device, from_device
 from .functional import correlation, crosscorrelation, btch, kl, js, hellinger, tv, hilbert
 from .functional import smooth_out, digitize, gridify, perturb, histo_reduce
-from .plotters import plot_image
+from .plotters import plot_image, MatplotlibPlotter
 
 
 
@@ -109,7 +110,6 @@ class BaseMetrics:
             self._last_evaluation['plot_dict'] = plot_dict
             self._last_evaluation['figure'] = figure
         return metric_val
-
 
     def compute_local(self, function, data, bad_traces, kernel_size=3,
                       normalize=True, agg='mean', amortize=False, axis=0, device='cpu', pbar=None):
@@ -201,8 +201,74 @@ class BaseMetrics:
         result = accumulator.get(final=True)
         return from_device(result)
 
+    @staticmethod
+    def find_supports(supports, bad_traces, safe_strip, carcass_mode=False, horizon=None,
+                      device='cpu', seed=None):
+        """ Find valid supports coordinates.
+
+        Parameters
+        ----------
+        supports : int or ndarray
+            If int, then number of supports to generate randomly from non-bad traces.
+            If ndarray, then should be of (N, 2) shape and contain coordinates of reference traces.
+        bad_traces : ndarray
+            2D matrix of traces where the metric should not be computed.
+        safe_strip : int
+            Margin for computing metrics safely.
+        carcass_mode : bool
+            Whether to use carcass intersection nodes as supports traces.
+            Notice that it works only for a carcass.
+            Note, if `carcass_mode` is True, then the `horizon` argument must be provided.
+        horizon : :class:`.Horizon`, optional
+            Instance of a carcass horizon for which to create supports in intersection points.
+        device : str
+            Device specificator. Can be either string (`cpu`, `gpu:4`) or integer (`4`).
+        seed : int, optional
+            Seed the random numbers generator.
+        """
+        xp = cp if (CUPY_AVAILABLE and device != 'cpu') else np
+
+        if isinstance(supports, int):
+            if safe_strip:
+                bad_traces = bad_traces.copy()
+                bad_traces[:, :safe_strip], bad_traces[:, -safe_strip:] = 1, 1
+                bad_traces[:safe_strip, :], bad_traces[-safe_strip:, :] = 1, 1
+
+            valid_traces = xp.where(bad_traces == 0)
+
+            if carcass_mode and (horizon is not None) and horizon.is_carcass:
+                carcass_ilines = horizon.carcass_ilines
+                carcass_xlines = horizon.carcass_xlines
+
+                carcass_ilines = to_device(carcass_ilines, device)
+                carcass_xlines = to_device(carcass_xlines, device)
+
+                mask_i = xp.in1d(valid_traces[0], carcass_ilines)
+                mask_x = xp.in1d(valid_traces[1], carcass_xlines)
+                mask = mask_i & mask_x
+
+                valid_traces = (valid_traces[0][mask], valid_traces[1][mask])
+
+            rng = xp.random.default_rng(seed=seed)
+            indices = rng.integers(low=0, high=len(valid_traces[0]), size=supports)
+
+            support_coords = xp.asarray([valid_traces[0][indices], valid_traces[1][indices]]).T
+
+        elif isinstance(supports, (tuple, list, np.ndarray)):
+            support_coords = xp.asarray(supports)
+
+        else:
+            raise TypeError('Unknown type for the `supports` argument. '
+                            'It must be one of: int, tuple, list or np.ndarray.')
+
+        if len(support_coords) == 0:
+            raise ValueError('No valid support coordinates was found. '
+                             'Check input surfaces for available common points.')
+
+        return support_coords
+
     def compute_support(self, function, data, bad_traces, supports, safe_strip=0, carcass_mode=False,
-                        normalize=True, agg='mean', amortize=False, axis=0, device='cpu', pbar=None):
+                        normalize=True, agg='mean', amortize=False, axis=0, device='cpu', pbar=None, seed=None):
         """ Compute metric in a support fashion, using `function` to compare all the traces
         against a set of (randomly chosen or supplied) reference ones.
         Results of comparisons are aggregated via `agg` function.
@@ -241,6 +307,8 @@ class BaseMetrics:
             Device specificator. Can be either string (`cpu`, `gpu:4`) or integer (`4`).
         pbar : type or None
             Progress bar to use.
+        seed : int, optional
+            Seed the random numbers generator for supports coordinates.
         """
         # Transfer to GPU, if needed
         data = to_device(data, device)
@@ -255,38 +323,15 @@ class BaseMetrics:
         else:
             data_n = data
 
-        # Generate support coordinates
-        if isinstance(supports, int):
-            if safe_strip:
-                bad_traces_ = bad_traces.copy()
-                bad_traces_[:, :safe_strip], bad_traces_[:, -safe_strip:] = 1, 1
-                bad_traces_[:safe_strip, :], bad_traces_[-safe_strip:, :] = 1, 1
-            else:
-                bad_traces_ = bad_traces
-
-            valid_traces = xp.where(bad_traces_ == 0)
-
-            if carcass_mode and hasattr(self, 'horizon') and self.horizon.is_carcass:
-                carcass_ilines = self.horizon.carcass_ilines
-                carcass_xlines = self.horizon.carcass_xlines
-
-                if xp == cp:
-                    carcass_ilines = to_device(carcass_ilines, device)
-                    carcass_xlines = to_device(carcass_xlines, device)
-
-                mask_i = xp.in1d(valid_traces[0], carcass_ilines)
-                mask_x = xp.in1d(valid_traces[1], carcass_xlines)
-                mask = mask_i & mask_x
-
-                valid_traces = (valid_traces[0][mask], valid_traces[1][mask])
-
-            indices = xp.random.choice(len(valid_traces[0]), supports)
-            support_coords = xp.asarray([valid_traces[0][indices], valid_traces[1][indices]]).T
-
-        elif isinstance(supports, (tuple, list, np.ndarray)):
-            support_coords = xp.asarray(supports)
+        horizon = getattr(self, 'horizon', None)
+        support_coords = BaseMetrics.find_supports(supports=supports, bad_traces=bad_traces,
+                                                   safe_strip=safe_strip, carcass_mode=carcass_mode,
+                                                   horizon=horizon, device=device, seed=seed)
 
         # Save for plot and introspection
+        if not hasattr(self, '_last_evaluation'):
+            self._last_evaluation = {}
+
         self._last_evaluation['support_coords'] = from_device(support_coords)
 
         # Generate support traces
@@ -621,6 +666,63 @@ class HorizonMetrics(BaseMetrics):
         self._bad_traces = None
 
 
+    @classmethod
+    def evaluate_support(cls, horizons, metric='support_corrs', supports=100, bad_traces=None, safe_strip=0,
+                         device='cpu', seed=None, **kwargs):
+        """ Evaluate support metric for given horizons using same support coordinates.
+
+        Parameters
+        ----------
+        horizons : list of :class:`.Horizon`
+            List of horizon instances for which evaluate the metric.
+        metric : str
+            Name of metric to evaluate.
+        supports : int or ndarray
+            If int, then number of supports to generate randomly from non-bad traces.
+            If ndarray, then should be of (N, 2) shape and contain coordinates of reference traces.
+        bad_traces : ndarray
+            2D matrix of traces where the metric should not be computed.
+        safe_strip : int
+            Margin for computing metrics safely.
+        device : str
+            Device specificator. Can be either string (`cpu`, `gpu:4`) or integer (`4`).
+        seed : int, optional
+            Seed the random numbers generator.
+        kwargs : dict
+            Additional keyword arguments for the :meth:`.HorizonMetrics.evaluate`.
+        """
+        xp = cp if (CUPY_AVAILABLE and device != 'cpu') else np
+
+        horizons_bad_traces = []
+
+        # Generate support coordinates
+        if isinstance(supports, int):
+            # Get bad traces for all compared horizons
+            if bad_traces is None:
+                bad_traces = xp.zeros(shape=horizons[0].field.spatial_shape, dtype=int)
+            else:
+                bad_traces = to_device(bad_traces.copy(), device)
+
+            for horizon in horizons:
+                horizon_bad_traces = (horizon.full_matrix == horizon.FILL_VALUE).astype(int)
+                horizon_bad_traces = to_device(horizon_bad_traces, device)
+
+                horizons_bad_traces.append(horizon_bad_traces)
+                bad_traces |= horizon_bad_traces
+
+        support_coords = BaseMetrics.find_supports(supports=supports, bad_traces=bad_traces,
+                                                   safe_strip=safe_strip, carcass_mode=False,
+                                                   horizon=None, device=device, seed=seed)
+
+        metrics = []
+
+        for horizon in horizons:
+            horizon_metric = cls(horizon).evaluate(metric=metric, supports=support_coords, horizon=horizon, **kwargs)
+            metrics.append(horizon_metric)
+
+        return metrics
+
+
     def get_plot_defaults(self):
         """ Axis labels and horizon/cube names in the title. """
         title = f'horizon `{self.name}` on cube `{self.horizon.field.displayed_name}`'
@@ -767,13 +869,145 @@ class HorizonMetrics(BaseMetrics):
         }
         return from_device(shifted_slice), plot_dict
 
+    def compare(self, *others, clip_value=7, ignore_zeros=False, enlarge=True, width=9,
+                printer=print, plot=True, return_figure=False, hist_kwargs=None, show=True, savepath=None, **kwargs):
+        """ Compare `self` horizon against the closest in `others`.
+        Print textual and show graphical visualization of differences between the two.
+        Returns dictionary with collected information: `closest` and `proximity_info`.
 
-    # Alias for horizon comparisons
-    def compare(self, *others, clip_value=7, ignore_zeros=True,
-                printer=print, plot=True, return_figure=False, hist_kwargs=None, **kwargs):
-        """ Alias for `Horizon.compare`. """
-        return self.compare(*others, clip_value=clip_value, ignore_zeros=ignore_zeros,
-                            printer=printer, plot=plot, return_figure=return_figure, hist_kwargs=hist_kwargs, **kwargs)
+        Parameters
+        ----------
+        clip_value : number
+            Clip for differences graph and histogram
+        ignore_zeros : bool
+            Whether to ignore zero-differences on histogram.
+        enlarge : bool
+            Whether to enlarge the difference matrix, if one of horizons is a carcass.
+        width : int
+            Enlarge width. Works only if `enlarge` is True.
+        printer : callable, optional
+            Function to use to print textual information
+        plot : bool
+            Whether to plot the graph
+        return_figure : bool
+            Whether to add `figure` to the returned dictionary
+        hist_kwargs, kwargs : dict
+            Parameters for histogram / main graph visualization.
+        """
+        closest, proximity_info = other, oinfo = self.horizon.find_closest(*others)
+        returns = {'closest': closest, 'proximity_info': proximity_info}
+
+        msg = f"""
+        Comparing horizons:
+        {self.horizon.displayed_name.rjust(45)}
+        {other.displayed_name.rjust(45)}
+        {'—'*45}
+        Rate in 5ms:                         {oinfo['window_rate']:8.3f}
+        Mean / std of errors:            {oinfo['difference_mean']:+4.2f} / {oinfo['difference_std']:4.2f}
+        Mean / std of abs errors:         {oinfo['abs_difference_mean']:4.2f} / {oinfo['abs_difference_std']:4.2f}
+        Max abs error:                           {oinfo['abs_difference_max']:4.0f}
+        {'—'*45}
+        Lengths of horizons:                 {len(self.horizon):8}
+                                             {       len(other):8}
+        {'—'*45}
+        Average heights of horizons:         {self.horizon.h_mean:8.2f}
+                                             {       other.h_mean:8.2f}
+        {'—'*45}
+        Coverage of horizons:                {self.horizon.coverage:8.4f}
+                                             {       other.coverage:8.4f}
+        {'—'*45}
+        Solidity of horizons:                {self.horizon.solidity:8.4f}
+                                             {       other.solidity:8.4f}
+        {'—'*45}
+        Number of holes in horizons:         {self.horizon.number_of_holes:8}
+                                             {       other.number_of_holes:8}
+        {'—'*45}
+        Additional traces labeled:           {oinfo['present_at_1_absent_at_2']:8}
+        (present in one, absent in other)    {oinfo['present_at_2_absent_at_1']:8}
+        {'—'*45}
+        """
+        msg = dedent(msg)
+
+        if printer is not None:
+            printer(msg)
+
+        if plot:
+            # Prepare data
+            matrix = proximity_info['difference_matrix']
+            if enlarge and (self.horizon.is_carcass or other.is_carcass):
+                matrix = self.horizon.matrix_enlarge(matrix, width=width)
+
+            # Field boundaries
+            bounds = self.horizon.field.zero_traces.copy().astype(np.float32)
+            bounds[np.isnan(matrix) & (bounds == 0)] = np.nan
+            matrix[bounds == 1] = 0.0
+
+            # Main plot: differences matrix
+            kwargs = {
+                'title': (f'Depth comparison of `self={self.horizon.displayed_name}`\n'
+                          f'and `other={closest.displayed_name}`'),
+                'suptitle': '',
+                'cmap': ['seismic', 'black'],
+                'bad_color': 'black',
+                'colorbar': [True, False],
+                'alpha': [1., 0.2],
+                'vmin': [-clip_value, 0],
+                'vmax': [+clip_value, 1],
+
+                'xlabel': self.horizon.field.index_headers[0],
+                'ylabel': self.horizon.field.index_headers[1],
+
+                'shapes': 3, 'ncols': 2,
+                'return_figure': True,
+                **kwargs,
+            }
+
+            legend_kwargs = {
+                'color': ('white', 'blue', 'red', 'black', 'lightgray'),
+                'label': ('self.depths = other.depths',
+                          'self.depths < other.depths',
+                          'self.depths > other.depths',
+                          'unlabeled in `self`',
+                          'dead traces'),
+                'size': 20,
+                'loc': 10,
+                'facecolor': 'pink',
+            }
+
+            fig = plot_image([matrix, bounds], **kwargs)
+            MatplotlibPlotter.add_legend(ax=fig.axes[1], **legend_kwargs)
+
+            # Histogram and labels
+            hist_kwargs = {
+                'xlabel': 'difference values',
+                'title_label': 'Histogram of horizon depth differences',
+                **(hist_kwargs or {}),
+            }
+
+            graph_msg = '\n'.join(msg.replace('—', '').split('\n')[5:-11])
+            graph_msg = graph_msg.replace('\n' + ' '*20, ', ').replace('\t', ' ')
+            graph_msg = ' '.join(item for item in graph_msg.split('  ') if item)
+
+            hist_legend_kwargs = {
+                'color': 'pink',
+                'label': graph_msg,
+                'size': 14, 'loc': 10,
+                'facecolor': 'pink',
+            }
+
+            hist_data = np.clip(matrix, -clip_value, clip_value)
+            if ignore_zeros:
+                hist_data = hist_data[hist_data != 0.0]
+            plot_image(hist_data, mode='hist', ax=fig.axes[2], **hist_kwargs)
+            MatplotlibPlotter.add_legend(ax=fig.axes[3], **hist_legend_kwargs)
+
+            MatplotlibPlotter.save_and_show(fig=fig, show=show, savepath=savepath)
+            if return_figure:
+                returns['figure'] = fig
+
+        return returns
+
+    Horizon.compare.__doc__ = compare.__doc__
 
     @staticmethod
     def compute_prediction_std(horizons):

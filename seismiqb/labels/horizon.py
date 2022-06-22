@@ -15,7 +15,6 @@ from .horizon_visualization import VisualizationMixin
 from ..utils import CacheMixin, CharismaMixin
 from ..utils import groupby_mean, groupby_min, groupby_max
 from ..utils import MetaDict
-from ..plotters import plot_image, MatplotlibPlotter
 
 
 
@@ -660,143 +659,13 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
         closest, proximity_info = min(proximities, key=lambda item: item[1].get('difference_mean', np.inf))
         return closest, proximity_info
 
-
-    def compare(self, *others, clip_value=5, ignore_zeros=False, enlarge=True, width=9,
-                printer=print, plot=True, return_figure=False, hist_kwargs=None, show=True, savepath=None, **kwargs):
-        """ Compare `self` horizon against the closest in `others`.
-        Print textual and show graphical visualization of differences between the two.
-        Returns dictionary with collected information: `closest` and `proximity_info`.
-
-        Parameters
-        ----------
-        clip_value : number
-            Clip for differences graph and histogram
-        ignore_zeros : bool
-            Whether to ignore zero-differences on histogram.
-        enlarge : bool
-            Whether to enlarge the difference matrix, if one of horizons is a carcass.
-        width : int
-            Enlarge width. Works only if `enlarge` is True.
-        printer : callable, optional
-            Function to use to print textual information
-        plot : bool
-            Whether to plot the graph
-        return_figure : bool
-            Whether to add `figure` to the returned dictionary
-        hist_kwargs, kwargs : dict
-            Parameters for histogram / main graph visualization.
-        """
-        closest, proximity_info = other, oinfo = self.find_closest(*others)
-        returns = {'closest': closest, 'proximity_info': proximity_info}
-
-        msg = f"""
-        Comparing horizons:
-        {self.displayed_name.rjust(45)}
-        {other.displayed_name.rjust(45)}
-        {'—'*45}
-        Rate in 5ms:                         {oinfo['window_rate']:8.3f}
-        Mean / std of errors:            {oinfo['difference_mean']:+4.2f} / {oinfo['difference_std']:4.2f}
-        Mean / std of abs errors:         {oinfo['abs_difference_mean']:4.2f} / {oinfo['abs_difference_std']:4.2f}
-        Max abs error:                           {oinfo['abs_difference_max']:4.0f}
-        {'—'*45}
-        Lengths of horizons:                 {len( self):8}
-                                             {len(other):8}
-        {'—'*45}
-        Average heights of horizons:         { self.h_mean:8.2f}
-                                             {other.h_mean:8.2f}
-        {'—'*45}
-        Coverage of horizons:                { self.coverage:8.4f}
-                                             {other.coverage:8.4f}
-        {'—'*45}
-        Solidity of horizons:                { self.solidity:8.4f}
-                                             {other.solidity:8.4f}
-        {'—'*45}
-        Number of holes in horizons:         { self.number_of_holes:8}
-                                             {other.number_of_holes:8}
-        {'—'*45}
-        Additional traces labeled:           {oinfo['present_at_1_absent_at_2']:8}
-        (present in one, absent in other)    {oinfo['present_at_2_absent_at_1']:8}
-        {'—'*45}
-        """
-        msg = dedent(msg)
-
-        if printer is not None:
-            printer(msg)
-
-        if plot:
-            # Prepare data
-            matrix = proximity_info['difference_matrix']
-            if enlarge and (self.is_carcass or other.is_carcass):
-                matrix = self.matrix_enlarge(matrix, width=width)
-
-            # Field boundaries
-            bounds = self.field.zero_traces.copy().astype(np.float32)
-            bounds[np.isnan(matrix) & (bounds == 0)] = np.nan
-            matrix[bounds == 1] = 0.0
-
-            # Main plot: differences matrix
-            kwargs = {
-                'title': f'Depth comparison of `self={self.displayed_name}`\nand `other={closest.displayed_name}`',
-                'suptitle': '',
-                'cmap': ['seismic', 'black'],
-                'bad_color': 'black',
-                'colorbar': [True, False],
-                'alpha': [1., 0.2],
-                'vmin': [-clip_value, 0],
-                'vmax': [+clip_value, 1],
-
-                'xlabel': self.field.index_headers[0],
-                'ylabel': self.field.index_headers[1],
-
-                'shapes': 3, 'ncols': 2,
-                'return_figure': True,
-                **kwargs,
-            }
-
-            legend_kwargs = {
-                'color': ('white', 'blue', 'red', 'black', 'lightgray'),
-                'label': ('self.depths = other.depths',
-                          'self.depths < other.depths',
-                          'self.depths > other.depths',
-                          'unlabeled in `self`',
-                          'dead traces'),
-                'size': 20,
-                'loc': 10,
-                'facecolor': 'pink',
-            }
-
-            fig = plot_image([matrix, bounds], **kwargs)
-            MatplotlibPlotter.add_legend(ax=fig.axes[1], **legend_kwargs)
-
-            # Histogram and labels
-            hist_kwargs = {
-                'xlabel': 'difference values',
-                'title_label': 'Histogram of horizon depth differences',
-                **(hist_kwargs or {}),
-            }
-
-            graph_msg = '\n'.join(msg.replace('—', '').split('\n')[5:-11])
-            graph_msg = graph_msg.replace('\n' + ' '*20, ', ').replace('\t', ' ')
-            graph_msg = ' '.join(item for item in graph_msg.split('  ') if item)
-
-            hist_legend_kwargs = {
-                'color': 'pink',
-                'label': graph_msg,
-                'size': 14, 'loc': 10,
-                'facecolor': 'pink',
-            }
-
-            hist_data = np.clip(matrix, -clip_value, clip_value)
-            if ignore_zeros:
-                hist_data = hist_data[hist_data != 0.0]
-            plot_image(hist_data, mode='hist', ax=fig.axes[2], **hist_kwargs)
-            MatplotlibPlotter.add_legend(ax=fig.axes[3], **hist_legend_kwargs)
-
-            MatplotlibPlotter.save_and_show(fig=fig, show=show, savepath=savepath)
-            if return_figure:
-                returns['figure'] = fig
-
-        return returns
+    # Alias for horizon comparisons
+    def compare(self, *others, clip_value=5, ignore_zeros=True,
+                printer=print, plot=True, return_figure=False, hist_kwargs=None, **kwargs):
+        """ Alias for `HorizonMetrics.compare`. """
+        return self.metrics.compare(*others, clip_value=clip_value, ignore_zeros=ignore_zeros,
+                                    printer=printer, plot=plot, return_figure=return_figure,
+                                    hist_kwargs=hist_kwargs, **kwargs)
 
     def compute_prediction_std(self, others):
         """ Compute std of predicted horizons along depths and restrict it to `self`. """

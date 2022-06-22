@@ -1,5 +1,5 @@
 """ A mixin with field visualizations. """
-#pylint: disable=global-variable-undefined
+#pylint: disable=global-variable-undefined, too-many-statements
 import re
 from copy import copy
 from collections import defaultdict
@@ -480,23 +480,29 @@ class VisualizationMixin:
             colors = [next(cycled_colors) for _ in range(len(labels))]
 
         if colors is None:
-            colors = ['green' for label in labels]
+            colors = ['green' for _ in labels]
         if isinstance(colors, dict):
             colors = [colors.get(type(label).__name__, colors.get('all', 'green')) for label in labels]
 
         simplices_colors = []
         for label, color in zip(labels, colors):
-            x, y, z, simplices_ = label.make_triangulation(**triangulation_kwargs)
-            if len(simplices_) == 0:
-                continue
-            if x is not None:
-                simplices += [simplices_ + sum([len(item) for item in coords])]
-                simplices_colors += [[color] * len(simplices_)]
-                coords += [np.stack([x, y, z], axis=1)]
+            if label is not None:
+                x, y, z, simplices_ = label.make_triangulation(**triangulation_kwargs)
+                if len(simplices_) == 0:
+                    continue
+                if x is not None:
+                    simplices += [simplices_ + sum([len(item) for item in coords])]
+                    simplices_colors += [[color] * len(simplices_)]
+                    coords += [np.stack([x, y, z], axis=1)]
 
-        simplices = np.concatenate(simplices, axis=0)
-        coords = np.concatenate(coords, axis=0)
-        simplices_colors = np.concatenate(simplices_colors)
+        if len(simplices) > 0:
+            simplices = np.concatenate(simplices, axis=0)
+            coords = np.concatenate(coords, axis=0)
+            simplices_colors = np.concatenate(simplices_colors)
+        else:
+            simplices = None
+            coords = np.zeros((0, 3))
+            simplices_colors = None
         title = self.displayed_name
 
         default_aspect_ratio = (self.shape[0] / self.shape[1], 1, 1)
