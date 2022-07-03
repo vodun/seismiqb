@@ -1189,54 +1189,6 @@ class SeismicCropBatch(Batch):
             filtered = np.sign(filtered)
         return filtered
 
-    @action
-    def show_frequencies(self, indices=(0, ), src='images', trace_indices=((0, 0), (-1, -1)),
-                         axis=2, d=None):
-        """ Show fourier frequency spectrum of a component. Uses picked traces and item-indices.
-        Traces are 1d slices of a component along a choses axis. Uses units of Nyquist frequency
-        when depicting the spectrum to achieve consistency with `bandpass_filter`-action.
-
-        Parameters:
-        -----------
-        indices: int or tuple or list
-            Takes items with these indices to demonstrate the spectrum.
-        src: str
-            The component, which spectrum is shown.
-        trace_indices: tuple or list of tuples
-            Uses traces with these indices.
-        axis: int
-            Axis along which traces are taken. By default set to 2. This value correpsonds
-            to depth, which is the most natural direction to research the spectrum.
-        d: float or None
-            By default, `show_frequencies` uses Nyquist units. Supports using chosen units whenever
-            `d` is supplied.
-        """
-        indices = indices if isinstance(indices, (list, tuple)) else (indices, )
-        insert_index = len(trace_indices[0]) if axis == -1 else axis
-        plot_data = []
-
-        # Iterate over item-indices and traces, gather info about spectrum.
-        for idx in indices:
-            field = self.get(self.indices[idx], 'fields')
-            if d is None:
-                nyq = 0.5 / (field.sample_rate * 10e-4)
-                d = 1 / nyq
-
-            data = self.get(self.indices[idx], src)
-            freqs = fftfreq(data.shape[axis], d)
-            plotter = None
-
-            for trace_idx in trace_indices:
-                trace_idx = tuple(np.insert(np.array(trace_idx, dtype=np.object_), insert_index, slice(0, None)))
-                amplitudes = fft(data[trace_idx])[1 : data.shape[axis]//2]
-                frequencies = freqs[1 : data.shape[axis]//2]
-                plot_data.append((frequencies, np.abs(amplitudes)))
-
-        plot_label = [f'IDX: {idx}   TRACE: {trace_idx}' for idx in indices for trace_idx in trace_indices]
-        plot_title = f'Spectrum of {src}-component'
-        return plot_image(plot_data, mode='curve', label=plot_label, xlabel='Frequencies, HZ', ylabel='Squared Amplitudes',
-                          title=plot_title)
-
     @apply_parallel
     def sign_transform(self, crop):
         """ Element-wise indication of the sign of a number. """
@@ -1512,3 +1464,49 @@ class SeismicCropBatch(Batch):
             **kwargs
         }
         return plot_image(data, **kwargs)
+
+    def show_frequencies(self, indices=(0, ), src='images', trace_indices=((0, 0), (-1, -1)),
+                         axis=2, d=None):
+        """ Show Fourier frequency spectrum of a component. Uses picked traces and item-indices.
+        Traces are 1d slices of a component along a choses axis. Uses units of Nyquist frequency
+        when depicting the spectrum to achieve consistency with action `bandpass_filter`.
+
+        Parameters:
+        -----------
+        indices: int or tuple or list
+            Takes items with these indices to demonstrate the spectrum.
+        src: str
+            The component, which spectrum is shown.
+        trace_indices: tuple or list of tuples
+            Uses traces with these indices.
+        axis: int
+            Axis along which traces are taken. By default set to 2. This value correpsonds
+            to depth, which is the most natural direction to research the spectrum.
+        d: float or None
+            By default, `show_frequencies` uses Nyquist units. Supports using chosen units whenever
+            `d` is supplied.
+        """
+        indices = indices if isinstance(indices, (list, tuple)) else (indices, )
+        insert_index = len(trace_indices[0]) if axis == -1 else axis
+        plot_data = []
+
+        # Iterate over item-indices and traces, gather info about spectrum.
+        for idx in indices:
+            field = self.get(self.indices[idx], 'fields')
+            if d is None:
+                nyq = 0.5 / (field.sample_rate * 10e-4)
+                d = 1 / nyq
+
+            data = self.get(self.indices[idx], src)
+            freqs = fftfreq(data.shape[axis], d)
+
+            for trace_idx in trace_indices:
+                trace_idx = tuple(np.insert(np.array(trace_idx, dtype=np.object_), insert_index, slice(0, None)))
+                amplitudes = fft(data[trace_idx])[1 : data.shape[axis]//2]
+                frequencies = freqs[1 : data.shape[axis]//2]
+                plot_data.append((frequencies, np.abs(amplitudes)))
+
+        plot_label = [f'IDX: {idx}   TRACE: {trace_idx}' for idx in indices for trace_idx in trace_indices]
+        plot_title = f'Spectrum of {src}-component'
+        return plot_image(plot_data, mode='curve', label=plot_label, xlabel='Frequencies, HZ',
+                          ylabel='Squared Amplitudes', title=plot_title)
