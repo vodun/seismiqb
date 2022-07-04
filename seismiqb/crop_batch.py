@@ -1465,14 +1465,17 @@ class SeismicCropBatch(Batch):
         }
         return plot_image(data, **kwargs)
 
-    def show_frequencies(self, indices=(0, ), src='images', trace_indices=((0, 0), (-1, -1)),
-                         axis=2, d=None):
-        """ Show Fourier frequency spectrum of a component. Uses picked traces and item-indices.
-        Traces are 1d slices of a component along a choses axis. Uses units of Nyquist frequency
-        when depicting the spectrum to achieve consistency with action `bandpass_filter`.
+    def show_frequencies(self, indices=(0, ), src='images', trace_indices=((0, 0), (-1, -1)), axis=2, d=None):
+        """ Show Fourier frequency spectrum of a component. X-axis of the plot corresponds to frequency
+        values in Hz while y-axis stands for amplitudes of specific frequencies.
 
-        Parameters:
-        -----------
+        For the analysis the method selects specific traces and item-indices. Traces are 1d slices taken along an axis.
+
+        Uses units of Nyquist frequency when depicting the spectrum. In this way achieves consistency with
+        action `bandpass_filter`.
+
+        Parameters
+        ----------
         indices: int or tuple or list
             Takes items with these indices to demonstrate the spectrum.
         src: str
@@ -1483,8 +1486,8 @@ class SeismicCropBatch(Batch):
             Axis along which traces are taken. By default set to 2. This value correpsonds
             to depth, which is the most natural direction to research the spectrum.
         d: float or None
-            By default, `show_frequencies` uses Nyquist units. Supports using chosen units whenever
-            `d` is supplied.
+            By default, `show_frequencies` uses Nyquist units. Whenever `d` is supplied, uses specified
+            units.
         """
         indices = indices if isinstance(indices, (list, tuple)) else (indices, )
         insert_index = len(trace_indices[0]) if axis == -1 else axis
@@ -1508,5 +1511,5 @@ class SeismicCropBatch(Batch):
 
         plot_label = [f'IDX: {idx}   TRACE: {trace_idx}' for idx in indices for trace_idx in trace_indices]
         plot_title = f'Spectrum of {src}-component'
-        return plot_image(plot_data, mode='curve', label=plot_label, xlabel='Frequencies, HZ',
-                          ylabel='Squared Amplitudes', title=plot_title)
+        return plot_image(plot_data, mode='curve', label=plot_label, xlabel='Frequency, HZ',
+                          ylabel='Amplitude', title=plot_title)
