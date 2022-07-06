@@ -1465,7 +1465,8 @@ class SeismicCropBatch(Batch):
         }
         return plot_image(data, **kwargs)
 
-    def show_frequencies(self, indices=(0, ), src='images', trace_indices=((0, 0), (-1, -1)), axis=2, d=None):
+    def show_frequencies(self, indices=(0, ), src='images', trace_indices=((0, 0), (-1, -1)), axis=2, d=None,
+                         displayed_name=None, **kwargs):
         """ Show Fourier frequency spectrum of a component. X-axis of the plot corresponds to frequency
         values in Hz while y-axis stands for amplitudes of specific frequencies.
 
@@ -1488,10 +1489,15 @@ class SeismicCropBatch(Batch):
         d: float or None
             By default, `show_frequencies` uses Nyquist units. Whenever `d` is supplied, uses specified
             units.
+        displayed_name: str or None
+            Whenever supplied, assumes that traces are taken from field with this name.
+        kwargs: dict
+            Arguments for customizing plot. For instance, removing/changing labels and titles.
         """
         indices = indices if isinstance(indices, (list, tuple)) else (indices, )
         insert_index = len(trace_indices[0]) if axis == -1 else axis
         plot_data = []
+        plot_label = []
 
         # Iterate over item-indices and traces, gather info about spectrum.
         for idx in indices:
@@ -1500,16 +1506,26 @@ class SeismicCropBatch(Batch):
                 nyq = 0.5 / (field.sample_rate * 10e-4)
                 d = 1 / nyq
 
+            # Try to get the name of a field
+            if displayed_name is None:
+                displayed_name = field.displayed_name
+
             data = self.get(self.indices[idx], src)
             freqs = fftfreq(data.shape[axis], d)
+            frequencies = freqs[1 : data.shape[axis]//2]
 
             for trace_idx in trace_indices:
-                trace_idx = tuple(np.insert(np.array(trace_idx, dtype=np.object_), insert_index, slice(0, None)))
-                amplitudes = fft(data[trace_idx])[1 : data.shape[axis]//2]
-                frequencies = freqs[1 : data.shape[axis]//2]
+                trace_idx_ = tuple(np.insert(np.array(trace_idx, dtype=np.object_), insert_index, slice(0, None)))
+                amplitudes = fft(data[trace_idx_])[1 : data.shape[axis]//2]
                 plot_data.append((frequencies, np.abs(amplitudes)))
+                plot_label.append(f'FIELD: {displayed_name}   IDX: {idx}   TRACE: {trace_idx}')
 
-        plot_label = [f'IDX: {idx}   TRACE: {trace_idx}' for idx in indices for trace_idx in trace_indices]
-        plot_title = f'Spectrum of {src}-component'
-        return plot(plot_data, mode='curve', label=plot_label, xlabel='Frequency, HZ',
-                    ylabel='Amplitude', title=plot_title)
+        plot_params = {'title': f'Spectrum of {src}-component',
+                       'label': plot_label,
+                       'xlabel': 'Frequency, HZ',
+                       'ylabel': 'Amplitude'}
+        kwargs = {
+            **plot_params,
+            **kwargs
+        }
+        return plot(plot_data, mode='curve', **kwargs)
