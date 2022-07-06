@@ -9,6 +9,7 @@ import segyio
 
 from batchflow.notifier import Notifier
 
+
 class ExportMixin:
     """ Container for methods to save data as seismic cubes in different formats. """
     def make_sgy(self, path_hdf5=None, path_spec=None, postfix='',
@@ -206,3 +207,63 @@ def make_segy_from_array(array, path_segy, zip_segy=True, remove_segy=None, path
         os.remove(path_segy)
 
 array_to_sgy = make_segy_from_array
+
+def make_blosc_from_array(array, path_blosc, projections='ixh', pbar=True, **kwargs):
+    """ Save numpy array as in the blosc format.
+
+    Parameters
+    ----------
+    array : np.ndarray
+        Data for the blosc-cube.
+    path_blosc : str
+        Path to store new cube.
+    projections : str
+        Which projections of data to store: `i` for iline one, `x` for the crossline, `h` for depth.
+    pbar : bool
+        Whether to show progress bar during conversion.
+    kwargs : dict
+        Other parameters, passed directly to the file constructor of chosen format.
+        If format is `blosc`:
+            - `cname` for algorithm of compression. Default is `lz4hc`.
+            - `clevel` for level of compression. Default is 6.
+            - `shuffle` for bitshuffle during compression. Default is False.
+    """
+    # TODO: This function is a simplified version of :meth:`~SeismicGeometrySEGY.convert`, optimize code for both
+    from .base import parse_axis_
+    from .blosc import BloscFile
+    from .converted import SeismicGeometryConverted
+
+    if os.path.exists(path_blosc):
+        os.remove(path_blosc)
+
+    constructor, mode = BloscFile, 'w'
+
+    with constructor(path_blosc, mode=mode, **kwargs) as file:
+        total = (('i' in projections) * array.shape[0] +
+                 ('x' in projections) * array.shape[1] +
+                 ('h' in projections) * array.shape[2])
+        progress_bar = Notifier(pbar, total=total)
+        name = os.path.basename(path_blosc)
+
+        for p in projections:
+            axis = parse_axis_(axis=p)
+            cube_name = SeismicGeometryConverted.AXIS_TO_NAME[axis]
+            order = SeismicGeometryConverted.AXIS_TO_ORDER[axis]
+            cube = file.create_dataset(cube_name, shape=np.array(array.shape)[order], dtype=np.float32)
+
+            progress_bar.set_description(f'Creating {name}; {p}-projection')
+            for idx in range(array.shape[axis]):
+                # Get slide
+                locations = [slice(None)] * len(array.shape)
+                locations[axis] = slice(idx, idx + 1)
+                slide = array[tuple(locations)].squeeze()
+
+                slide = slide.T if axis == 1 else slide
+
+                # TODO: add quantization
+
+                cube[idx, :, :] = slide
+                progress_bar.update()
+        progress_bar.close()
+
+array_to_blosc = make_blosc_from_array

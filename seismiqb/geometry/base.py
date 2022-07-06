@@ -276,12 +276,8 @@ class SeismicGeometry(CacheMixin, ExportMixin):
         if isinstance(axis, str):
             if axis in self.index_headers:
                 axis = self.index_headers.index(axis)
-            elif axis in ['i', 'il', 'iline']:
-                axis = 0
-            elif axis in ['x', 'xl', 'xline']:
-                axis = 1
-            elif axis in ['h', 'height', 'depth']:
-                axis = 2
+            else:
+                axis = parse_axis_(axis)
         return axis
 
     def make_slide_locations(self, loc, axis=0):
@@ -930,3 +926,14 @@ class SeismicGeometry(CacheMixin, ExportMixin):
 
         self.reset_cache()
         return timings
+
+def parse_axis_(axis):
+    """ Convert string representation of an axis into integer, if needed. """
+    if isinstance(axis, str):
+        if axis in ['i', 'il', 'iline']:
+            axis = 0
+        elif axis in ['x', 'xl', 'xline']:
+            axis = 1
+        elif axis in ['h', 'height', 'depth']:
+            axis = 2
+    return axis
