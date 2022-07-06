@@ -174,8 +174,8 @@ class VisualizationMixin:
 
         plot_config = defaultdict(list)
         for idx in indices:
-            plot_config_idx = self.get_plot_config(components=components, idx=idx,
-                                                   zoom=zoom, displayed_name=displayed_name, augment_titles=augment_titles)
+            plot_config_idx = self.get_plot_config(components=components, idx=idx, zoom=zoom,
+                                                   displayed_name=displayed_name, augment_titles=augment_titles)
             _ = plot_config_idx.pop('suptitle')
 
             for name, value in plot_config_idx.items():

@@ -732,7 +732,7 @@ class SeismicGeometry(CacheMixin, ExportMixin):
         """ Show geometry related top-view map. """
         matrix_name = matrix if isinstance(matrix, str) else kwargs.get('matrix_name', 'custom matrix')
         kwargs = {
-            'cmap': 'viridis_r',
+            'cmap': 'magma',
             'title': f'`{matrix_name}` map of cube `{self.displayed_name}`',
             'xlabel': self.index_headers[0],
             'ylabel': self.index_headers[1],

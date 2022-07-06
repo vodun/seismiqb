@@ -356,7 +356,7 @@ class VisualizationMixin:
                 NAME_TO_COLOR[global_name] = next(COLOR_GENERATOR)
             cmap = NAME_TO_COLOR[global_name]
         else:
-            cmap = self.ATTRIBUTE_TO_CMAP.get(attribute_name, 'Basic')
+            cmap = self.ATTRIBUTE_TO_CMAP.get(attribute_name, 'Seismic')
 
         params['cmap'] = cmap
 

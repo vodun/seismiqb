@@ -13,6 +13,6 @@ from .samplers import GeometrySampler, HorizonSampler, FaultSampler, ConstantSam
 from .grids import  BaseGrid, RegularGrid, ExtensionGrid, LocationsPotentialContainer
 
 # Utilities and helpers
-from .plotters import plot
 from .functional import *
 from .utils import *
+from .plotters import *
