@@ -857,10 +857,10 @@ class SeismicSampler(Sampler):
         plotter = plot(data, **kwargs)
 
         legend_params = {
-            'mode': 'imshow',
+            'mode': 'image',
             'color': ('beige', 'salmon', 'grey'),
             'label': ('alive traces', 'sampled locations', 'dead traces'),
-            'size': 20,
+            'size': 25,
             'loc': 10,
             'facecolor': 'silver',
         }

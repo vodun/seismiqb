@@ -750,13 +750,13 @@ class SeismicGeometry(CacheMixin, ExportMixin):
 
         kwargs = {
             'title': (f'Amplitude distribution for {self.short_name}' +
-                      f'\n Mean/std: {np.mean(data):3.3}/{np.std(data):3.3}'),
+                      f'\n Mean/std: {np.mean(data):3.3f}/{np.std(data):3.3f}'),
             'label': 'Amplitudes histogram',
             'xlabel': 'amplitude',
             'ylabel': 'density',
             **kwargs
         }
-        return plot(data, bins=bins, mode='hist', **kwargs)
+        return plot(data, bins=bins, mode='histogram', **kwargs)
 
     def show_slide(self, loc=None, start=None, end=None, step=1, axis=0, zoom_slice=None, stable=True, **kwargs):
         """ Show seismic slide in desired place.

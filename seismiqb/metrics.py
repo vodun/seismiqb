@@ -956,7 +956,7 @@ class HorizonMetrics(BaseMetrics):
                 'xlabel': self.horizon.field.index_headers[0],
                 'ylabel': self.horizon.field.index_headers[1],
 
-                'shapes': 3, 'ncols': 2,
+                'ncols': 4,
                 'return_figure': True,
                 **kwargs,
             }
@@ -970,7 +970,6 @@ class HorizonMetrics(BaseMetrics):
                           'dead traces'),
                 'size': 20,
                 'loc': 10,
-                'facecolor': 'pink',
             }
 
             plotter = plot([matrix, bounds], **kwargs)
@@ -987,20 +986,15 @@ class HorizonMetrics(BaseMetrics):
             graph_msg = graph_msg.replace('\n' + ' '*20, ', ').replace('\t', ' ')
             graph_msg = ' '.join(item for item in graph_msg.split('  ') if item)
 
-            hist_legend_kwargs = {
-                'color': 'pink',
-                'label': graph_msg,
-                'size': 14, 'loc': 10,
-                'facecolor': 'pink',
-            }
-
             hist_data = np.clip(matrix, -clip_value, clip_value)
             if ignore_zeros:
                 hist_data = hist_data[hist_data != 0.0]
-            plotter = plot(hist_data, mode='hist', positions=2, show=show, **hist_kwargs)
-            plotter[3].add_legend(**hist_legend_kwargs)
 
-            plotter.save(savepath=savepath)
+            plotter(hist_data, mode='histogram', positions=2, show=show, **hist_kwargs)
+            plotter[3].add_text(graph_msg, size=15)
+
+            if savepath is not None:
+                plotter.save(savepath=savepath)
             returns['plotter'] = plotter
 
         return returns

@@ -15,7 +15,6 @@ from .horizon_visualization import VisualizationMixin
 from ..utils import CacheMixin, CharismaMixin
 from ..utils import groupby_mean, groupby_min, groupby_max
 from ..utils import MetaDict
-from ..functional import smooth_out
 
 
 

@@ -3,7 +3,7 @@ import numpy as np
 
 from batchflow import Config
 from ..utils import lru_cache
-from ..plotters import plot_image
+from ..plotters import plot
 
 class GeometryMock:
     """ Mock for SeismicGeometry. """
@@ -326,4 +326,4 @@ class SyntheticField:
             'scale': 0.5,
             **kwargs
         }
-        return plot_image(data, **plot_params)
+        return plot(data, **plot_params)

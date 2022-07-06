@@ -1,7 +1,6 @@
 """ Plot functions. """
 # pylint: disable=too-many-statements
 import os
-from copy import copy
 
 import cv2
 import numpy as np
@@ -48,11 +47,7 @@ register_cmap(name='Sampler', cmap=SAMPLER_CMAP)
 class plot(batchflow_plot):
     """ Wrapper over original `plot` with custom defaults. """
     def __init__(self, *args, **kwargs):
-        defaults = {
-            'order_axes': (1, 0, 2),
-            'scale': 1.5
-        }
-        kwargs = {**defaults, **kwargs}
+        kwargs = {'transpose': (1, 0, 2), **kwargs}
         super().__init__(*args, **kwargs)
 
 

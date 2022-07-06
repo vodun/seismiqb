@@ -6,13 +6,14 @@ from collections import defaultdict
 from itertools import cycle
 
 import numpy as np
+from batchflow.plotter.plot import Subplot
 
 from .viewer import FieldViewer
 from ..utils import DelegatingList, to_list
 from ..plotters import plot, show_3d
 from ..labels.horizon_attributes import AttributesMixin
 
-COLOR_GENERATOR = iter(plot.MASK_COLORS)
+COLOR_GENERATOR = iter(Subplot.MASK_COLORS)
 NAME_TO_COLOR = {}
 
 
@@ -118,6 +119,7 @@ class VisualizationMixin:
         title = f'Field `{self.displayed_name}`\n {header} {loc} out of {total}'
 
         kwargs = {
+            'cmap': ['Greys_r', 'firebrick'],
             'title_label': title,
             'xlabel': xlabel,
             'ylabel': ylabel,
@@ -127,7 +129,7 @@ class VisualizationMixin:
             'labelright': False,
             'curve_width': width,
             'grid': [None, 'both'],
-            'colorbar': [True, False],
+            'colorbar': [True, None],
             **kwargs
         }
 
@@ -161,7 +163,7 @@ class VisualizationMixin:
 
 
     # 2D top-view maps
-    def show(self, attributes='snr', mode='imshow', title_pattern='{attributes} of {label_name}',
+    def show(self, attributes='snr', mode='image', title_pattern='{attributes} of {label_name}',
              bbox=False, savepath=None, load_kwargs=None, show=True, **plot_kwargs):
         """ Show one or more field attributes on one figure.
 
@@ -178,7 +180,7 @@ class VisualizationMixin:
             If sequence of them, then either should be a list to display loaded entities one over the other,
             or nested list to define separate axis and overlaying for each of them.
             For more details, refer to `:func:plot`.
-        mode : 'imshow' or 'hist'
+        mode : 'image' or 'histogram'
             Mode to display images.
         title_pattern : str with key substrings to be replaced by corresponding variables values
             If {src_label} in pattern, replaced by name of labels source (e.g. 'horizons:0').
@@ -243,7 +245,6 @@ class VisualizationMixin:
 
                 canvas = self.show(attributes=label_attributes, mode=mode, bbox=bbox, title_pattern=title_pattern,
                                    savepath=savepath, load_kwargs=load_kwargs, show=show, **plot_kwargs)
-                canvas.show()
                 figures.append(canvas)
 
             return figures
@@ -255,7 +256,7 @@ class VisualizationMixin:
         plot_params = {**plot_params, **plot_kwargs}
         # plot_params['suptitle'] = f'Field `{self.displayed_name}`' # TODO
 
-        if mode == 'imshow':
+        if mode == 'image':
             plot_params['colorbar'] = True
             plot_params['xlabel'] = self.index_headers[0]
             plot_params['ylabel'] = self.index_headers[1]
@@ -349,7 +350,7 @@ class VisualizationMixin:
         attribute_name = data_params['attribute_name']
 
         # Choose default cmap
-        if attribute_name == 'full_binary_matrix' or mode in ['hist', 'histogramm']:
+        if attribute_name == 'full_binary_matrix' or mode == 'histogram':
             global_name = f"{src_labels}/{attribute_name}"
             if global_name not in NAME_TO_COLOR:
                 NAME_TO_COLOR[global_name] = next(COLOR_GENERATOR)

@@ -68,7 +68,7 @@ class VisualizationMixin:
         return attribute
 
 
-    def show(self, attributes='depths', mode='imshow', return_figure=False, show=True, **kwargs):
+    def show(self, attributes='depths', mode='image', return_figure=False, show=True, **kwargs):
         """ Field visualization with custom naming scheme. """
         attributes = DelegatingList(attributes)
         attributes = attributes.apply(lambda item: copy(item) if isinstance(item, dict) else item)
