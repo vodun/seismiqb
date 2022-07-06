@@ -12,7 +12,7 @@ from scipy.ndimage import gaussian_filter1d
 from scipy.signal import butter, sosfiltfilt, hilbert
 from scipy.fftpack import fft, fftfreq
 
-from batchflow import DatasetIndex, Batch, action, inbatch_parallel, SkipBatchException, apply_parallel
+from batchflow import DatasetIndex, Batch, action, inbatch_parallel, SkipBatchException, apply_parallel, plot
 
 from .labels import Horizon
 from .plotters import plot_image
@@ -1511,5 +1511,5 @@ class SeismicCropBatch(Batch):
 
         plot_label = [f'IDX: {idx}   TRACE: {trace_idx}' for idx in indices for trace_idx in trace_indices]
         plot_title = f'Spectrum of {src}-component'
-        return plot_image(plot_data, mode='curve', label=plot_label, xlabel='Frequency, HZ',
-                          ylabel='Amplitude', title=plot_title)
+        return plot(plot_data, mode='curve', label=plot_label, xlabel='Frequency, HZ',
+                    ylabel='Amplitude', title=plot_title)
