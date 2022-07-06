@@ -758,7 +758,7 @@ class SeismicGeometry(CacheMixin, ExportMixin):
         }
         return plot(data, bins=bins, mode='histogram', **kwargs)
 
-    def show_slide(self, loc=None, start=None, end=None, step=1, axis=0, zoom_slice=None, stable=True, **kwargs):
+    def show_slide(self, loc=None, start=None, end=None, step=1, axis=0, zoom=None, stable=True, **kwargs):
         """ Show seismic slide in desired place.
         Under the hood relies on :meth:`load_slide`, so works with geometries in any formats.
 
@@ -768,7 +768,7 @@ class SeismicGeometry(CacheMixin, ExportMixin):
             Number of slide to load.
         axis : int or str
             Axis to load slide along.
-        zoom_slice : tuple
+        zoom : tuple
             Tuple of slices to apply directly to 2d images.
         start, end, step : int
             Parameters of slice loading for 1D index.
@@ -779,12 +779,12 @@ class SeismicGeometry(CacheMixin, ExportMixin):
         slide = self.load_slide(loc=loc, start=start, end=end, step=step, axis=axis, stable=stable)
         xmin, xmax, ymin, ymax = 0, slide.shape[0], slide.shape[1], 0
 
-        if zoom_slice:
-            slide = slide[zoom_slice]
-            xmin = zoom_slice[0].start or xmin
-            xmax = zoom_slice[0].stop or xmax
-            ymin = zoom_slice[1].stop or ymin
-            ymax = zoom_slice[1].start or ymax
+        if zoom:
+            slide = slide[zoom]
+            xmin = zoom[0].start or xmin
+            xmax = zoom[0].stop or xmax
+            ymin = zoom[1].stop or ymin
+            ymax = zoom[1].start or ymax
 
         # Plot params
         if len(self.index_headers) > 1:

@@ -176,6 +176,32 @@ class DelegatingList(AugmentedList):
 
         return result
 
+    def filter(self, func, *args, shallow=False, **kwargs):
+        """ Recursively apply given filtering function to list items and return those items for which function is true.
+
+        Parameters
+        ----------
+        func : callable
+            Filtering function to apply to items. Should return either False or True.
+        shallow : bool
+            If True, apply function directly to outer list items disabling recursive descent.
+        args, kwargs : misc
+            For `func`.
+        """
+        result = type(self)()
+
+        for item in self:
+            if isinstance(item, type(self)) and not shallow:
+                res = item.filter(func, *args, **kwargs)
+                if len(res) > 0:
+                    result.append(res)
+            else:
+                res = func(item, *args, **kwargs)
+                if res:
+                    result.append(item)
+
+        return result
+
     def to_dict(self):
         """ Convert nested list of dicts to dict of nested lists. Address class docs for usage examples. """
         if not isinstance(self.reference_object, dict):

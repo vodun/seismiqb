@@ -61,7 +61,7 @@ class VisualizationMixin:
         return msg[:-1]
 
     # 2D along axis
-    def show_slide(self, loc, width=None, axis='i', zoom_slice=None,
+    def show_slide(self, loc, width=None, axis='i', zoom=None,
                    src_geometry='geometry', src_labels='labels', indices='all', **kwargs):
         """ Show slide with horizon on it.
 
@@ -73,7 +73,7 @@ class VisualizationMixin:
             Horizon thickness. If None given, set to 1% of seismic slide height.
         axis : int
             Number of axis to load slide along.
-        zoom_slice : tuple
+        zoom : tuple
             Tuple of slices to apply directly to 2d images.
         """
         axis = self.geometry.parse_axis(axis)
@@ -96,13 +96,13 @@ class VisualizationMixin:
         seismic_slide, mask = np.squeeze(seismic_slide), np.squeeze(mask)
         xmin, xmax, ymin, ymax = 0, seismic_slide.shape[0], seismic_slide.shape[1], 0
 
-        if zoom_slice:
-            seismic_slide = seismic_slide[zoom_slice]
-            mask = mask[zoom_slice]
-            xmin = zoom_slice[0].start or xmin
-            xmax = zoom_slice[0].stop or xmax
-            ymin = zoom_slice[1].stop or ymin
-            ymax = zoom_slice[1].start or ymax
+        if zoom:
+            seismic_slide = seismic_slide[zoom]
+            mask = mask[zoom]
+            xmin = zoom[0].start or xmin
+            xmax = zoom[0].stop or xmax
+            ymin = zoom[1].stop or ymin
+            ymax = zoom[1].start or ymax
 
         # defaults for plotting if not supplied in kwargs
         header = self.geometry.axis_names[axis]
@@ -401,9 +401,9 @@ class VisualizationMixin:
 
 
     # 3D interactive
-    def show_3d(self, src='labels', aspect_ratio=None, zoom_slice=None,
-                 n_points=100, threshold=100, sticks_step=10, stick_nodes_step=10,
-                 slides=None, margin=(0, 0, 20), colors=None, **kwargs):
+    def show_3d(self, src='labels', aspect_ratio=None, zoom=None,
+                n_points=100, threshold=100, sticks_step=10, stick_nodes_step=10,
+                slides=None, margin=(0, 0, 20), colors=None, **kwargs):
         """ Interactive 3D plot for some elements of a field.
         Roughly, does the following:
             - take some faults and/or horizons
@@ -421,7 +421,7 @@ class VisualizationMixin:
         aspect_ratio : None, tuple of floats or Nones
             Aspect ratio for each axis. Each None in the resulting tuple will be replaced by item from
             `(geometry.cube_shape[0] / geometry.cube_shape[1], 1, 1)`.
-        zoom_slice : tuple of slices or None
+        zoom : tuple of slices or None
             Crop from cube to show. By default, the whole cube volume will be shown.
         n_points : int
             Number of points for horizon surface creation.
@@ -451,19 +451,19 @@ class VisualizationMixin:
         coords = []
         simplices = []
 
-        if zoom_slice is None:
-            zoom_slice = [slice(0, s) for s in self.shape]
+        if zoom is None:
+            zoom = [slice(0, s) for s in self.shape]
         else:
-            zoom_slice = [
-                slice(item.start or 0, item.stop or stop) for item, stop in zip(zoom_slice, self.shape)
+            zoom = [
+                slice(item.start or 0, item.stop or stop) for item, stop in zip(zoom, self.shape)
             ]
-        zoom_slice = tuple(zoom_slice)
+        zoom = tuple(zoom)
         triangulation_kwargs = {
             'n_points': n_points,
             'threshold': threshold,
             'sticks_step': sticks_step,
             'stick_nodes_step': stick_nodes_step,
-            'slices': zoom_slice
+            'slices': zoom
         }
 
         labels = [getattr(self, src_) if isinstance(src_, str) else [src_] for src_ in src]
@@ -510,12 +510,12 @@ class VisualizationMixin:
             for loc, axis in slides:
                 image = self.geometry.load_slide(loc, axis=axis)
                 if axis == 0:
-                    image = image[zoom_slice[1:]]
+                    image = image[zoom[1:]]
                 elif axis == 1:
-                    image = image[zoom_slice[0], zoom_slice[-1]]
+                    image = image[zoom[0], zoom[-1]]
                 else:
-                    image = image[zoom_slice[:-1]]
+                    image = image[zoom[:-1]]
                 images += [(image, loc, axis)]
 
-        show_3d(coords[:, 0], coords[:, 1], coords[:, 2], simplices, title, zoom_slice, simplices_colors, margin=margin,
+        show_3d(coords[:, 0], coords[:, 1], coords[:, 2], simplices, title, zoom, simplices_colors, margin=margin,
                 aspect_ratio=aspect_ratio, axis_labels=axis_labels, images=images, **kwargs)

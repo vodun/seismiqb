@@ -9,7 +9,7 @@ from batchflow import DatasetIndex, Dataset, Pipeline
 
 from .field import Field, SyntheticField
 from .geometry import SeismicGeometry
-from .crop_batch import SeismicCropBatch
+from .batch import SeismicCropBatch
 from .utils import AugmentedDict
 from .plotters import plot
 
@@ -132,7 +132,7 @@ class SeismicDataset(Dataset):
         return msg
 
 
-    def show_slide(self, loc, idx=0, axis='iline', zoom_slice=None, src_labels='labels', **kwargs):
+    def show_slide(self, loc, idx=0, axis='iline', zoom=None, src_labels='labels', **kwargs):
         """ Show slide of the given cube on the given line.
 
         Parameters
@@ -141,7 +141,7 @@ class SeismicDataset(Dataset):
             Number of slide to load.
         axis : int or str
             Number or name of axis to load slide along.
-        zoom_slice : tuple of slices
+        zoom : tuple of slices
             Tuple of slices to apply directly to 2d images.
         idx : str, int
             Number of cube in the index to use.
@@ -183,12 +183,12 @@ class SeismicDataset(Dataset):
         imgs = [np.squeeze(getattr(batch, comp)) for comp in components]
         xmin, xmax, ymin, ymax = 0, imgs[0].shape[0], imgs[0].shape[1], 0
 
-        if zoom_slice:
-            imgs = [img[zoom_slice] for img in imgs]
-            xmin = zoom_slice[0].start or xmin
-            xmax = zoom_slice[0].stop or xmax
-            ymin = zoom_slice[1].stop or ymin
-            ymax = zoom_slice[1].start or ymax
+        if zoom:
+            imgs = [img[zoom] for img in imgs]
+            xmin = zoom[0].start or xmin
+            xmax = zoom[0].stop or xmax
+            ymin = zoom[1].stop or ymin
+            ymax = zoom[1].start or ymax
 
         # Plotting defaults
         header = geometry.axis_names[axis]
