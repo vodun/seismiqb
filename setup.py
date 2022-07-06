@@ -3,7 +3,7 @@
 from setuptools import setup, find_packages
 import re
 
-with open('seismiqb/__init__.py', 'r') as f:
+with open('__init__.py', 'r') as f:
     version = re.search(r'^__version__\s*=\s*[\'"]([^\'"]*)[\'"]', f.read(), re.MULTILINE).group(1)
 
 setup(
@@ -19,6 +19,8 @@ setup(
     zip_safe=False,
     platforms='any',
     install_requires=[
+        'batchflow==0.6.0',
+        'py-nbtools>=0.9.5',
         'numpy>=1.16.0',
         'scipy>=1.3.3',
         'pandas>=1.0.0',
