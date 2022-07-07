@@ -60,7 +60,7 @@ class BaseMetrics:
     EPS = 0.00001
 
 
-    def evaluate(self, metric, plot_supports=False, enlarge=True, width=5, visualize=True, **kwargs):
+    def evaluate(self, metric, plot_supports=False, enlarge=True, width=5, visualize=True, savepath=None, **kwargs):
         """ Calculate desired metric, apply aggregation, then plot resulting metric-map.
         To plot the results, set `plot` argument to True.
 
@@ -76,6 +76,8 @@ class BaseMetrics:
             Widening for the metric. Works only if `enlarge` set to True.
         visualize : bool
             Whether to use `:func:.plot` to show the result.
+        savepath : None or str
+            Where to save visualization.
         kwargs : dict
             Arguments to be passed in metric-calculation methods
             (see `:meth:.compute_local` and `:meth:.compute_support`),
@@ -88,7 +90,7 @@ class BaseMetrics:
 
         self._last_evaluation = {**kwargs}
         metric_fn = getattr(self, metric)
-        metric_map, plot_dict = metric_fn(**kwargs)
+        metric_map, plot_config = metric_fn(**kwargs)
 
         if cp is not np and cp.cuda.is_available():
             # pylint: disable=protected-access
@@ -98,15 +100,16 @@ class BaseMetrics:
             metric_map = self.horizon.matrix_enlarge(metric_map, width)
 
         if visualize:
-            plot_dict = {**self.PLOT_DEFAULTS, **plot_dict}
-            plotter = plot(metric_map, **plot_dict)
+            plot_config = {**self.PLOT_DEFAULTS, **plot_config}
+            if savepath is not None:
+                plot_config['savepath'] = self.horizon.field.make_path(savepath, name=self.name)
+            plotter = plot(metric_map, **plot_config)
 
             if 'support' in metric and plot_supports:
                 support_coords = self._last_evaluation['support_coords']
                 plotter[0].ax.scatter(support_coords[:, 0], support_coords[:, 1], s=33, marker='.', c='blue')
 
             # Store for debug / introspection purposes
-            self._last_evaluation['plot_dict'] = plot_dict
             self._last_evaluation['plotter'] = plotter
         return metric_map
 
@@ -365,13 +368,13 @@ class BaseMetrics:
 
         title, plot_defaults = self.get_plot_defaults()
         title = f'Local correlation, k={kernel_size}, with `{agg}` aggregation\nfor {title}'
-        plot_dict = {
+        plot_config = {
             **plot_defaults,
             'title_label': title,
-            'zmin': -1.0, 'zmax': 1.0,
+            'zmin': -1.0, 'vmax': 1.0,
             **kwargs
         }
-        return metric, plot_dict
+        return metric, plot_config
 
     def support_corrs(self, supports=100, safe_strip=0, carcass_mode=False, normalize=True, agg='mean', amortize=False,
                       device='cpu', pbar=None, **kwargs):
@@ -384,15 +387,15 @@ class BaseMetrics:
         title, plot_defaults = self.get_plot_defaults()
         n_supports = supports if isinstance(supports, int) else len(supports)
         title = f'Support correlation with {n_supports} supports\nwith `{agg}` aggregation\nfor {title}'
-        plot_dict = {
+        plot_config = {
             **plot_defaults,
             'title_label': title,
-            'zmin': -1.0, 'zmax': 1.0,
+            'zmin': -1.0, 'vmax': 1.0,
             'colorbar': True,
             'bad_color': 'k',
             **kwargs
         }
-        return metric, plot_dict
+        return metric, plot_config
 
 
     def local_crosscorrs(self, kernel_size=3, normalize=False, agg='mean', amortize=False,
@@ -405,14 +408,14 @@ class BaseMetrics:
 
         title, plot_defaults = self.get_plot_defaults()
         title = f'Local cross-correlation, k={kernel_size}, with `{agg}` aggregation\nfor {title}'
-        plot_dict = {
+        plot_config = {
             **plot_defaults,
             'title_label': title,
             'cmap': 'seismic_r',
-            'zmin': -zvalue, 'zmax': zvalue,
+            'zmin': -zvalue, 'vmax': zvalue,
             **kwargs
         }
-        return metric, plot_dict
+        return metric, plot_config
 
     def support_crosscorrs(self, supports=100, safe_strip=0, carcass_mode=False, normalize=False,
                            agg='mean', amortize=False, device='cpu', pbar=None, **kwargs):
@@ -425,14 +428,14 @@ class BaseMetrics:
         title, plot_defaults = self.get_plot_defaults()
         n_supports = supports if isinstance(supports, int) else len(supports)
         title = f'Support cross-correlation with {n_supports} supports with `{agg}` aggregation\nfor {title}'
-        plot_dict = {
+        plot_config = {
             **plot_defaults,
             'title_label': title,
             'cmap': 'seismic_r',
-            'zmin': -zvalue, 'zmax': zvalue,
+            'zmin': -zvalue, 'vmax': zvalue,
             **kwargs
         }
-        return metric, plot_dict
+        return metric, plot_config
 
 
     def local_btch(self, kernel_size=3, normalize=False, agg='mean', amortize=False,
@@ -444,13 +447,13 @@ class BaseMetrics:
 
         title, plot_defaults = self.get_plot_defaults()
         title = f'Local Bhattacharyya divergence, k={kernel_size}, with `{agg}` aggregation\nfor {title}'
-        plot_dict = {
+        plot_config = {
             **plot_defaults,
             'title_label': title,
-            'zmin': 0.0, 'zmax': 1.0,
+            'zmin': 0.0, 'vmax': 1.0,
             **kwargs
         }
-        return metric, plot_dict
+        return metric, plot_config
 
     def support_btch(self, supports=100, safe_strip=0, carcass_mode=False, normalize=False, agg='mean', amortize=False,
                      device='cpu', pbar=None, **kwargs):
@@ -462,13 +465,13 @@ class BaseMetrics:
         title, plot_defaults = self.get_plot_defaults()
         n_supports = supports if isinstance(supports, int) else len(supports)
         title = f'Support Bhattacharyya divergence with {n_supports} supports with `{agg}` aggregation\nfor {title}'
-        plot_dict = {
+        plot_config = {
             **plot_defaults,
             'title_label': title,
-            'zmin': 0.0, 'zmax': 1.0,
+            'zmin': 0.0, 'vmax': 1.0,
             **kwargs
         }
-        return metric, plot_dict
+        return metric, plot_config
 
 
     def local_kl(self, kernel_size=3, normalize=False, agg='mean', amortize=False,
@@ -480,13 +483,13 @@ class BaseMetrics:
 
         title, plot_defaults = self.get_plot_defaults()
         title = f'Local KL divergence, k={kernel_size}, with `{agg}` aggregation\nfor {title}'
-        plot_dict = {
+        plot_config = {
             **plot_defaults,
             'title_label': title,
-            'zmin': None, 'zmax': None,
+            'zmin': None, 'vmax': None,
             **kwargs
         }
-        return metric, plot_dict
+        return metric, plot_config
 
     def support_kl(self, supports=100, safe_strip=0, carcass_mode=False, normalize=False, agg='mean', amortize=False,
                    device='cpu', pbar=None, **kwargs):
@@ -499,13 +502,13 @@ class BaseMetrics:
         title, plot_defaults = self.get_plot_defaults()
         n_supports = supports if isinstance(supports, int) else len(supports)
         title = f'Support KL divergence with {n_supports} supports with `{agg}` aggregation\nfor {title}'
-        plot_dict = {
+        plot_config = {
             **plot_defaults,
             'title_label': title,
-            'zmin': None, 'zmax': None,
+            'zmin': None, 'vmax': None,
             **kwargs
         }
-        return metric, plot_dict
+        return metric, plot_config
 
 
     def local_js(self, kernel_size=3, normalize=False, agg='mean', amortize=False, device='cpu', pbar=None, **kwargs):
@@ -516,13 +519,13 @@ class BaseMetrics:
 
         title, plot_defaults = self.get_plot_defaults()
         title = f'Local JS divergence, k={kernel_size}, with `{agg}` aggregation\nfor {title}'
-        plot_dict = {
+        plot_config = {
             **plot_defaults,
             'title_label': title,
-            'zmin': None, 'zmax': None,
+            'zmin': None, 'vmax': None,
             **kwargs
         }
-        return metric, plot_dict
+        return metric, plot_config
 
     def support_js(self, supports=100, safe_strip=0, carcass_mode=False, normalize=False, agg='mean', amortize=False,
                    device='cpu', pbar=None, **kwargs):
@@ -535,13 +538,13 @@ class BaseMetrics:
         title, plot_defaults = self.get_plot_defaults()
         n_supports = supports if isinstance(supports, int) else len(supports)
         title = f'Support JS divergence with {n_supports} supports with `{agg}` aggregation\nfor {title}'
-        plot_dict = {
+        plot_config = {
             **plot_defaults,
             'title_label': title,
-            'zmin': None, 'zmax': None,
+            'zmin': None, 'vmax': None,
             **kwargs
         }
-        return metric, plot_dict
+        return metric, plot_config
 
 
     def local_hellinger(self, kernel_size=3, normalize=False, agg='mean', amortize=False,
@@ -553,13 +556,13 @@ class BaseMetrics:
 
         title, plot_defaults = self.get_plot_defaults()
         title = f'Local Hellinger distance, k={kernel_size}, with `{agg}` aggregation\nfor {title}'
-        plot_dict = {
+        plot_config = {
             **plot_defaults,
             'title_label': title,
-            'zmin': None, 'zmax': None,
+            'zmin': None, 'vmax': None,
             **kwargs
         }
-        return metric, plot_dict
+        return metric, plot_config
 
     def support_hellinger(self, supports=100, safe_strip=0, carcass_mode=False, normalize=False,
                           agg='mean', amortize=False, device='cpu', pbar=None, **kwargs):
@@ -572,13 +575,13 @@ class BaseMetrics:
         title, plot_defaults = self.get_plot_defaults()
         n_supports = supports if isinstance(supports, int) else len(supports)
         title = f'Support Hellinger distance with {n_supports} supports with `{agg}` aggregation\nfor {title}'
-        plot_dict = {
+        plot_config = {
             **plot_defaults,
             'title_label': title,
-            'zmin': None, 'zmax': None,
+            'zmin': None, 'vmax': None,
             **kwargs
         }
-        return metric, plot_dict
+        return metric, plot_config
 
 
     def local_tv(self, kernel_size=3, normalize=False, agg='mean', amortize=False, device='cpu', pbar=None, **kwargs):
@@ -589,13 +592,13 @@ class BaseMetrics:
 
         title, plot_defaults = self.get_plot_defaults()
         title = f'Local total variation, k={kernel_size}, with `{agg}` aggregation\nfor {title}'
-        plot_dict = {
+        plot_config = {
             **plot_defaults,
             'title_label': title,
-            'zmin': None, 'zmax': None,
+            'zmin': None, 'vmax': None,
             **kwargs
         }
-        return metric, plot_dict
+        return metric, plot_config
 
     def support_tv(self, supports=100, safe_strip=0, carcass_mode=False, normalize=False, agg='mean', amortize=False,
                    device='cpu', pbar=None, **kwargs):
@@ -608,13 +611,13 @@ class BaseMetrics:
         title, plot_defaults = self.get_plot_defaults()
         n_supports = supports if isinstance(supports, int) else len(supports)
         title = f'Support total variation with {n_supports} supports with `{agg}` aggregation\nfor {title}'
-        plot_dict = {
+        plot_config = {
             **plot_defaults,
             'title_label': title,
-            'zmin': None, 'zmax': None,
+            'zmin': None, 'vmax': None,
             **kwargs
         }
-        return metric, plot_dict
+        return metric, plot_config
 
 
 
@@ -811,17 +814,17 @@ class HorizonMetrics(BaseMetrics):
 
         title, plot_defaults = self.get_plot_defaults()
         title = f'Perturbed metrics\nfor {title}'
-        plot_dict = {
+        plot_config = {
             **plot_defaults,
             'figsize': (20, 7),
             'combine': 'separate',
             'suptitle_label': title,
             'title_label': ['mean', 'max'],
             'cmap': 'Reds_r',
-            'zmin': [0.0, -0.5], 'zmax': 0.5,
+            'zmin': [0.0, -0.5], 'vmax': 0.5,
             **kwargs
         }
-        return (diff_mean, diff_max), plot_dict
+        return (diff_mean, diff_max), plot_config
 
 
     def instantaneous_phase(self, device='cpu', **kwargs):
@@ -857,16 +860,16 @@ class HorizonMetrics(BaseMetrics):
 
         title, plot_defaults = self.get_plot_defaults()
         title = f'Instantaneous phase\nfor {title}'
-        plot_dict = {
+        plot_config = {
             **plot_defaults,
             'title_label': title,
             'cmap': 'seismic',
-            'zmin': -np.pi, 'zmax': np.pi,
+            'zmin': -np.pi, 'vmax': np.pi,
             'colorbar': True,
             'bad_color': 'k',
             **kwargs
         }
-        return from_device(shifted_slice), plot_dict
+        return from_device(shifted_slice), plot_config
 
     def compare(self, *others, clip_value=7, ignore_zeros=False, enlarge=True, width=9,
                 printer=print, visualize=True, hist_kwargs=None, show=True, savepath=None, **kwargs):
@@ -1136,15 +1139,15 @@ class GeometryMetrics(BaseMetrics):
             quality_map = smooth_out(quality_map, **smoothing_params)
 
         title, plot_defaults = self.get_plot_defaults()
-        plot_dict = {
+        plot_config = {
             **plot_defaults,
             'title_label': f'Quality map for {title}',
             'cmap': 'Reds',
-            'zmin': 0.0, 'zmax': np.nanmax(quality_map),
+            'zmin': 0.0, 'vmax': np.nanmax(quality_map),
             **kwargs
         }
 
-        return quality_map, plot_dict
+        return quality_map, plot_config
 
     def make_grid(self, quality_map, frequencies, iline=True, xline=True, margin=0,
                   extension='cell', filter_outliers=0, **kwargs):
@@ -1195,15 +1198,15 @@ class GeometryMetrics(BaseMetrics):
             metric[store_key] = func(*traces, **kwargs)
 
         title = f"tracewise {func}"
-        plot_dict = {
+        plot_config = {
             'title_label': f'{title} for `{self.name}` on cube `{self.geometry.displayed_name}`',
             'cmap': 'seismic',
-            'zmin': None, 'zmax': None,
+            'zmin': None, 'vmax': None,
             'ignore_value': np.nan,
             'xlabel': 'INLINE_3D', 'ylabel': 'CROSSLINE_3D',
             **kwargs
         }
-        return metric, plot_dict
+        return metric, plot_config
 
     def tracewise_unsafe(self, func, l=3, pbar=True, **kwargs):
         """ Apply `func` to compare two cubes tracewise in an unsafe way:
@@ -1222,15 +1225,15 @@ class GeometryMetrics(BaseMetrics):
             metric[store_key] = func(*traces, **kwargs)
 
         title = f"tracewise unsafe {func}"
-        plot_dict = {
+        plot_config = {
             'title_label': f'{title} for {self.name} on cube {self.geometry.displayed_name}',
             'cmap': 'seismic',
-            'zmin': None, 'zmax': None,
+            'zmin': None, 'vmax': None,
             'ignore_value': np.nan,
             'xlabel': 'INLINE_3D', 'ylabel': 'CROSSLINE_3D',
             **kwargs
         }
-        return metric, plot_dict
+        return metric, plot_config
 
 
     def blockwise(self, func, l=3, pbar=True, kernel=(5, 5), block_size=(1000, 1000),
@@ -1271,14 +1274,14 @@ class GeometryMetrics(BaseMetrics):
                             prog_bar.update(1)
 
         title = f"Blockwise {func}"
-        plot_dict = {
+        plot_config = {
             'title_label': f'{title} for {self.name} on cube {self.geometry.displayed_name}',
             'cmap': 'seismic',
-            'zmin': None, 'zmax': None,
+            'zmin': None, 'vmax': None,
             'ignore_value': np.nan,
             **kwargs
         }
-        return metric, plot_dict
+        return metric, plot_config
 
 
 class FaultsMetrics:
@@ -1338,7 +1341,7 @@ class FaultsMetrics:
         return result
 
 
-class FaciesMetrics():
+class FaciesMetrics:
     """ Evaluate facies metrics.
     To get the value of a particular metric, use :meth:`.evaluate`::
         FaciesMetrics(horizon, true_label, pred_label).evaluate('dice')
