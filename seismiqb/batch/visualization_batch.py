@@ -133,7 +133,6 @@ class VisualizationMixin:
 
         plot_config = {
             'scale': 0.8,
-            'separate': not max([isinstance(item, list) for item in components]),
             **plot_config,
             **kwargs
         }
@@ -183,7 +182,6 @@ class VisualizationMixin:
 
         plot_config = {
             'scale': 0.8,
-            'separate': not max([isinstance(item, list) for item in components]),
             **plot_config,
             **kwargs
         }

@@ -792,8 +792,6 @@ class SeismicSampler(Sampler):
         kwargs = {
             'cmap': [['Sampler', 'black']] * len(data),
             'alpha': [[1.0, 0.4]] * len(data),
-            # 'ncols': ncols,
-            # 'nrows': nrows,
             'title': title,
             'vmin': [[1, 0]] * len(data),
             'vmax': [[3, 1]] * len(data),

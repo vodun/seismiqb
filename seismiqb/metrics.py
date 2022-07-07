@@ -88,18 +88,18 @@ class BaseMetrics:
 
         self._last_evaluation = {**kwargs}
         metric_fn = getattr(self, metric)
-        metric_val, plot_dict = metric_fn(**kwargs)
+        metric_map, plot_dict = metric_fn(**kwargs)
 
         if cp is not np and cp.cuda.is_available():
             # pylint: disable=protected-access
             cp._default_memory_pool.free_all_blocks()
 
         if hasattr(self, 'horizon') and self.horizon.is_carcass and enlarge:
-            metric_val = self.horizon.matrix_enlarge(metric_val, width)
+            metric_map = self.horizon.matrix_enlarge(metric_map, width)
 
         if visualize:
             plot_dict = {**self.PLOT_DEFAULTS, **plot_dict}
-            plotter = plot(metric_val, **plot_dict)
+            plotter = plot(metric_map, **plot_dict)
 
             if 'support' in metric and plot_supports:
                 support_coords = self._last_evaluation['support_coords']
@@ -108,7 +108,7 @@ class BaseMetrics:
             # Store for debug / introspection purposes
             self._last_evaluation['plot_dict'] = plot_dict
             self._last_evaluation['plotter'] = plotter
-        return metric_val
+        return metric_map
 
     def compute_local(self, function, data, bad_traces, kernel_size=3,
                       normalize=True, agg='mean', amortize=False, axis=0, device='cpu', pbar=None):

@@ -205,15 +205,15 @@ class VisualizationMixin:
         >>> field.show(['mean_matrix', 'fans:0/mask'])
 
         Display attributes on separate axis:
-        >>> field.show(['mean_matrix', 'horizons:0/fourier', custom_data_array], separate=True)
+        >>> field.show(['mean_matrix', 'horizons:0/fourier', custom_data_array], combine='separate')
 
         Use various parameters for each of the plots:
         >>> field.show([{'src': 'labels:0/fourier', 'window': 20, 'normalize': True},
                         {'src': 'labels:0/fourier', 'window': 40, 'n_components': 3}],
-                       separate=True)
+                       combine='separate')
 
         Display amplitudes and gradients for each of the horizons in a field:
-        >>> field.show(['horizons:*/amplitudes', 'horizons:*/gradient'], separate=True)
+        >>> field.show(['horizons:*/amplitudes', 'horizons:*/gradient'], combine='separate')
 
         Display several attributes on multiple axes with overlays and save it near the cube:
         >>> field.show(['geometry/std_matrix', 'horizons:3/amplitudes',

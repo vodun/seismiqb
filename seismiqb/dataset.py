@@ -180,11 +180,11 @@ class SeismicDataset(Dataset):
 
         batch = (pipeline << self).next_batch()
         # TODO: Make every horizon mask creation individual to allow their distinction while plot.
-        imgs = [np.squeeze(getattr(batch, comp)) for comp in components]
-        xmin, xmax, ymin, ymax = 0, imgs[0].shape[0], imgs[0].shape[1], 0
+        images = [np.squeeze(getattr(batch, comp)) for comp in components]
+        xmin, xmax, ymin, ymax = 0, images[0].shape[0], images[0].shape[1], 0
 
         if zoom:
-            imgs = [img[zoom] for img in imgs]
+            images = [img[zoom] for img in images]
             xmin = zoom[0].start or xmin
             xmax = zoom[0].stop or xmax
             ymin = zoom[1].stop or ymin
@@ -211,7 +211,7 @@ class SeismicDataset(Dataset):
             **kwargs
         }
 
-        return plot(imgs, **kwargs)
+        return plot(images, **kwargs)
 
     # Facies
     def evaluate_facies(self, src_horizons, src_true=None, src_pred=None, metrics='dice'):

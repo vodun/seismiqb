@@ -416,7 +416,7 @@ class GeoBody:
         matrix[matrix == fill_value] = np.nan
         return plot(matrix, **kwargs)
 
-    def show_slide(self, loc, width=3, axis='i', order_axes=None, zoom=None, **kwargs):
+    def show_slide(self, loc, width=3, axis='i', transpose=None, zoom=None, **kwargs):
         """ Show slide with geobody on it.
 
         Parameters
@@ -474,4 +474,4 @@ class GeoBody:
             **kwargs
             }
 
-        return plot([seismic_slide, mask], order_axes=order_axes, **kwargs)
+        return plot([seismic_slide, mask], transpose=transpose, **kwargs)
