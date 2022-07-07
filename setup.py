@@ -19,7 +19,7 @@ setup(
     zip_safe=False,
     platforms='any',
     install_requires=[
-        'batchflow==0.6.0',
+        'batchflow==0.7.5',
         'py-nbtools>=0.9.5',
         'numpy>=1.16.0',
         'scipy>=1.3.3',
