@@ -782,6 +782,9 @@ class SeismicSampler(Sampler):
         for samplers_list in self.samplers.values():
             field = samplers_list[0].field
 
+            if isinstance(field, SyntheticField):
+                continue
+
             data += [[sampler.orientation_matrix, field.zero_traces] for sampler in samplers_list]
             title += [f'{field.displayed_name}: {sampler.displayed_name}' for sampler in samplers_list]
             xlabel += [field.index_headers[0]] * len(samplers_list)
@@ -823,15 +826,17 @@ class SeismicSampler(Sampler):
         title = []
         for field_id in np.unique(sampled[:, 0]):
             field = self.samplers[field_id][0].field
+
+            if isinstance(field, SyntheticField):
+                continue
+
             matrix = np.zeros_like(field.zero_traces, dtype=np.int32)
 
             sampled_ = sampled[sampled[:, 0] == field_id]
-            for (_, _, _, point_i_start, point_x_start, _,
-                          point_i_stop,  point_x_stop,  _) in sampled_:
-                matrix[point_i_start:point_i_stop, point_x_start:point_x_stop] += 1
+            for (_, _, _, point_i_start, point_x_start, _, point_i_stop,  point_x_stop,  _) in sampled_:
+                matrix[point_i_start : point_i_stop, point_x_start : point_x_stop] += 1
             if binary:
                 matrix[matrix > 0] = 1
-                kwargs['bad_values'] = ()
 
             field_data = [matrix, field.zero_traces]
             data.append(field_data)
