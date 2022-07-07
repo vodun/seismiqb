@@ -234,7 +234,7 @@ class VisualizationMixin:
 
         # If any attributes require wildcard loading, run `show` for every label item
         if any(labels_require_wildcard_loading):
-            figures = []
+            plotters = []
 
             reference_labels_source = labels_require_wildcard_loading[0]
             n_items = len(getattr(self, reference_labels_source))
@@ -243,11 +243,11 @@ class VisualizationMixin:
                 substitutor = lambda params: {**params, 'src': params['src'].replace('*', str(label_num))}
                 label_attributes = load_params.apply(substitutor)
 
-                canvas = self.show(attributes=label_attributes, mode=mode, bbox=bbox, title_pattern=title_pattern,
-                                   savepath=savepath, load_kwargs=load_kwargs, show=show, **plot_kwargs)
-                figures.append(canvas)
+                plotter = self.show(attributes=label_attributes, mode=mode, bbox=bbox, title_pattern=title_pattern,
+                                    savepath=savepath, load_kwargs=load_kwargs, show=show, **plot_kwargs)
+                plotters.append(plotter)
 
-            return figures
+            return plotters
 
         data_params = load_params.apply(self._load_data)
 

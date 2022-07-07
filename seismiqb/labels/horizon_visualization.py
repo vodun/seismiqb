@@ -78,14 +78,14 @@ class VisualizationMixin:
             'suptitle_label': f'`{self.name}` on field `{self.field.displayed_name}`',
             **kwargs
         }
-        canvas = self.field.show(attributes=attributes, mode=mode, return_figure=return_figure, show=show, **kwargs)
+        plotter = self.field.show(attributes=attributes, mode=mode, return_figure=return_figure, show=show, **kwargs)
 
         # Clean-up
         if self.field.loaded_labels[-1] == '_unknown_label':
             delattr(self.field, '_unknown_label')
             self.field.loaded_labels.pop(-1)
 
-        return canvas
+        return plotter
 
 
 

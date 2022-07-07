@@ -994,6 +994,7 @@ class HorizonMetrics(BaseMetrics):
             plotter[3].add_text(graph_msg, size=15)
 
             if savepath is not None:
+                savepath = self.horizon.field.make_path(savepath, name=self.name)
                 plotter.save(savepath=savepath)
             returns['plotter'] = plotter
 

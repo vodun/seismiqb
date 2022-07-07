@@ -597,8 +597,9 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
         # Visual part
         if compute_metric:
             from ..metrics import HorizonMetrics # pylint: disable=import-outside-toplevel
-            return HorizonMetrics(self).evaluate('support_corrs', supports=supports, agg='nanmean',
-                                                 show=show, savepath=savepath, **kwargs)
+            if savepath is not None:
+                kwargs['savepath'] = self.field.make_path(savepath, name=self.short_name)
+            return HorizonMetrics(self).evaluate('support_corrs', supports=supports, agg='nanmean', show=show, **kwargs)
         return None
 
 
