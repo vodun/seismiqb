@@ -398,7 +398,7 @@ class SeismicCropBatch(Batch):
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
     def create_regression_masks(self, ix, dst, indices='all', src_labels='labels', scale=False):
-        """ !!. """
+        """ Create masks with relative depth. """
         field = self.get(ix, 'fields')
         location = self.get(ix, 'locations')
         return field.make_regression_mask(location=location, indices=indices, src=src_labels, scale=scale)
@@ -1212,6 +1212,7 @@ class SeismicCropBatch(Batch):
     @apply_parallel
     def equalize(self, crop, mode='default'):
         """ Apply histogram equalization. """
+        #pylint: disable=import-outside-toplevel
         import torch
         import kornia
 
