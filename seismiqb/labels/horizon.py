@@ -570,7 +570,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
         from ..metrics import HorizonMetrics
         return HorizonMetrics(self)
 
-    def evaluate(self, compute_metric=True, supports=50, plot=True, savepath=None, printer=print, **kwargs):
+    def evaluate(self, compute_metric=True, supports=50, show=True, savepath=None, printer=print, **kwargs):
         """ Compute crucial metrics of a horizon.
 
         Parameters
@@ -597,8 +597,9 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
         # Visual part
         if compute_metric:
             from ..metrics import HorizonMetrics # pylint: disable=import-outside-toplevel
-            return HorizonMetrics(self).evaluate('support_corrs', supports=supports, agg='nanmean',
-                                                 plot=plot, savepath=savepath, **kwargs)
+            if savepath is not None:
+                kwargs['savepath'] = self.field.make_path(savepath, name=self.short_name)
+            return HorizonMetrics(self).evaluate('support_corrs', supports=supports, agg='nanmean', show=show, **kwargs)
         return None
 
 
@@ -661,10 +662,10 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
 
     # Alias for horizon comparisons
     def compare(self, *others, clip_value=5, ignore_zeros=True,
-                printer=print, plot=True, return_figure=False, hist_kwargs=None, **kwargs):
+                printer=print, visualize=True, return_figure=False, hist_kwargs=None, **kwargs):
         """ Alias for `HorizonMetrics.compare`. """
         return self.metrics.compare(*others, clip_value=clip_value, ignore_zeros=ignore_zeros,
-                                    printer=printer, plot=plot, return_figure=return_figure,
+                                    printer=printer, visualize=visualize, return_figure=return_figure,
                                     hist_kwargs=hist_kwargs, **kwargs)
 
     def compute_prediction_std(self, others):

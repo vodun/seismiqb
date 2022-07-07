@@ -395,7 +395,7 @@ class Field(CharismaMixin, VisualizationMixin):
 
         Parameters
         ----------
-        pat : str
+        path : str
             Path to process.
         name : str
             Replacement for `*` symbol.

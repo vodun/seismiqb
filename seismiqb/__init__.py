@@ -2,7 +2,7 @@
 # pylint: disable=wildcard-import
 # Core primitives
 from .dataset import SeismicDataset
-from .crop_batch import SeismicCropBatch
+from .batch import SeismicCropBatch
 
 # Data entities
 from .field import Field, SyntheticField
@@ -13,6 +13,6 @@ from .samplers import GeometrySampler, HorizonSampler, FaultSampler, ConstantSam
 from .grids import  BaseGrid, RegularGrid, ExtensionGrid, LocationsPotentialContainer
 
 # Utilities and helpers
-from .plotters import MatplotlibPlotter, plot_image, plot_loss
 from .functional import *
 from .utils import *
+from .plotters import *

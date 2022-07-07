@@ -9,10 +9,9 @@ from batchflow import DatasetIndex, Dataset, Pipeline
 
 from .field import Field, SyntheticField
 from .geometry import SeismicGeometry
-from .plotters import plot_image
-from .crop_batch import SeismicCropBatch
+from .batch import SeismicCropBatch
 from .utils import AugmentedDict
-
+from .plotters import plot
 
 class SeismicDataset(Dataset):
     """ Container of fields.
@@ -133,7 +132,7 @@ class SeismicDataset(Dataset):
         return msg
 
 
-    def show_slide(self, loc, idx=0, axis='iline', zoom_slice=None, src_labels='labels', **kwargs):
+    def show_slide(self, loc, idx=0, axis='iline', zoom=None, src_labels='labels', **kwargs):
         """ Show slide of the given cube on the given line.
 
         Parameters
@@ -142,7 +141,7 @@ class SeismicDataset(Dataset):
             Number of slide to load.
         axis : int or str
             Number or name of axis to load slide along.
-        zoom_slice : tuple of slices
+        zoom : tuple of slices
             Tuple of slices to apply directly to 2d images.
         idx : str, int
             Number of cube in the index to use.
@@ -180,15 +179,16 @@ class SeismicDataset(Dataset):
             pipeline = pipeline + labels_pipeline
 
         batch = (pipeline << self).next_batch()
-        imgs = [np.squeeze(getattr(batch, comp)) for comp in components]
-        xmin, xmax, ymin, ymax = 0, imgs[0].shape[0], imgs[0].shape[1], 0
+        # TODO: Make every horizon mask creation individual to allow their distinction while plot.
+        images = [np.squeeze(getattr(batch, comp)) for comp in components]
+        xmin, xmax, ymin, ymax = 0, images[0].shape[0], images[0].shape[1], 0
 
-        if zoom_slice:
-            imgs = [img[zoom_slice] for img in imgs]
-            xmin = zoom_slice[0].start or xmin
-            xmax = zoom_slice[0].stop or xmax
-            ymin = zoom_slice[1].stop or ymin
-            ymax = zoom_slice[1].start or ymax
+        if zoom:
+            images = [img[zoom] for img in images]
+            xmin = zoom[0].start or xmin
+            xmax = zoom[0].stop or xmax
+            ymin = zoom[1].stop or ymin
+            ymax = zoom[1].start or ymax
 
         # Plotting defaults
         header = geometry.axis_names[axis]
@@ -207,10 +207,11 @@ class SeismicDataset(Dataset):
             'xlabel': xlabel,
             'ylabel': ylabel,
             'extent': (xmin, xmax, ymin, ymax),
-            'legend': False, # TODO: Make every horizon mask creation individual to allow their distinction while plot.
+            'legend': src_labels,
             **kwargs
         }
-        return plot_image(imgs, **kwargs)
+
+        return plot(images, **kwargs)
 
     # Facies
     def evaluate_facies(self, src_horizons, src_true=None, src_pred=None, metrics='dice'):
