@@ -11,7 +11,7 @@ from skimage.measure import label
 
 
 from batchflow import HistoSampler
-from ..plotters import plot_image
+from ..plotters import plot
 from ..utils import groupby_min, groupby_max
 
 
@@ -414,9 +414,9 @@ class GeoBody:
             **kwargs
             }
         matrix[matrix == fill_value] = np.nan
-        return plot_image(matrix, **kwargs)
+        return plot(matrix, **kwargs)
 
-    def show_slide(self, loc, width=3, axis='i', order_axes=None, zoom_slice=None, **kwargs):
+    def show_slide(self, loc, width=3, axis='i', transpose=None, zoom=None, **kwargs):
         """ Show slide with geobody on it.
 
         Parameters
@@ -441,11 +441,11 @@ class GeoBody:
         xticks = list(range(seismic_slide.shape[0]))
         yticks = list(range(seismic_slide.shape[1]))
 
-        if zoom_slice:
-            seismic_slide = seismic_slide[zoom_slice]
-            mask = mask[zoom_slice]
-            xticks = xticks[zoom_slice[0]]
-            yticks = yticks[zoom_slice[1]]
+        if zoom:
+            seismic_slide = seismic_slide[zoom]
+            mask = mask[zoom]
+            xticks = xticks[zoom[0]]
+            yticks = yticks[zoom[1]]
 
         # defaults for plotting if not supplied in kwargs
         if axis in [0, 1]:
@@ -474,4 +474,4 @@ class GeoBody:
             **kwargs
             }
 
-        return plot_image([seismic_slide, mask], order_axes=order_axes, **kwargs)
+        return plot([seismic_slide, mask], transpose=transpose, **kwargs)

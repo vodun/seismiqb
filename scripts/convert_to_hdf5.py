@@ -4,7 +4,7 @@ import sys
 
 from utils import make_config
 
-sys.path.append('..')
+sys.path.insert(0, '..')
 from seismiqb import SeismicGeometry
 
 

@@ -5,7 +5,7 @@ from textwrap import dedent
 import numpy as np
 from scipy.spatial import Delaunay
 
-from ..plotters import plot_image, show_3d
+from ..plotters import plot, show_3d
 from ..utils import AugmentedList, DelegatingList, filter_simplices
 
 
@@ -68,7 +68,7 @@ class VisualizationMixin:
         return attribute
 
 
-    def show(self, attributes='depths', mode='imshow', return_figure=False, **kwargs):
+    def show(self, attributes='depths', mode='image', return_figure=False, show=True, **kwargs):
         """ Field visualization with custom naming scheme. """
         attributes = DelegatingList(attributes)
         attributes = attributes.apply(lambda item: copy(item) if isinstance(item, dict) else item)
@@ -78,18 +78,18 @@ class VisualizationMixin:
             'suptitle_label': f'`{self.name}` on field `{self.field.displayed_name}`',
             **kwargs
         }
-        figure = self.field.show(attributes=attributes, mode=mode, return_figure=return_figure, **kwargs)
+        plotter = self.field.show(attributes=attributes, mode=mode, return_figure=return_figure, show=show, **kwargs)
 
         # Clean-up
         if self.field.loaded_labels[-1] == '_unknown_label':
             delattr(self.field, '_unknown_label')
             self.field.loaded_labels.pop(-1)
 
-        return figure if return_figure else None
+        return plotter
 
 
 
-    def show_slide(self, loc, width=None, axis='i', zoom_slice=None, **kwargs):
+    def show_slide(self, loc, width=None, axis='i', zoom=None, **kwargs):
         """ Show slide with horizon on it.
 
         Parameters
@@ -100,7 +100,7 @@ class VisualizationMixin:
             Horizon thickness. If None given, set to 1% of seismic slide height.
         axis : int
             Number of axis to load slide along.
-        zoom_slice : tuple
+        zoom : tuple
             Tuple of slices to apply directly to 2d images.
         """
         # Make `locations` for slide loading
@@ -112,13 +112,13 @@ class VisualizationMixin:
         seismic_slide, mask = np.squeeze(seismic_slide), np.squeeze(mask)
         xmin, xmax, ymin, ymax = 0, seismic_slide.shape[0], seismic_slide.shape[1], 0
 
-        if zoom_slice:
-            seismic_slide = seismic_slide[zoom_slice]
-            mask = mask[zoom_slice]
-            xmin = zoom_slice[0].start or xmin
-            xmax = zoom_slice[0].stop or xmax
-            ymin = zoom_slice[1].stop or ymin
-            ymax = zoom_slice[1].start or ymax
+        if zoom:
+            seismic_slide = seismic_slide[zoom]
+            mask = mask[zoom]
+            xmin = zoom[0].start or xmin
+            xmax = zoom[0].stop or xmax
+            ymin = zoom[1].stop or ymin
+            ymax = zoom[1].start or ymax
 
         # defaults for plotting if not supplied in kwargs
         header = self.field.axis_names[axis]
@@ -147,10 +147,10 @@ class VisualizationMixin:
             'colorbar': [True, False],
             **kwargs
         }
-        return plot_image(data=[seismic_slide, mask], **kwargs)
+        return plot(data=[seismic_slide, mask], **kwargs)
 
     # 3D
-    def show_3d(self, n_points=100, threshold=100., z_ratio=1., zoom_slice=None, show_axes=True,
+    def show_3d(self, n_points=100, threshold=100., z_ratio=1., zoom=None, show_axes=True,
                 width=1200, height=1200, margin=(0, 0, 100), savepath=None, **kwargs):
         """ Interactive 3D plot. Roughly, does the following:
             - select `n` points to represent the horizon surface
@@ -167,7 +167,7 @@ class VisualizationMixin:
             Threshold to remove triangles with bigger height differences in vertices.
         z_ratio : int
             Aspect ratio between height axis and spatial ones.
-        zoom_slice : tuple of slices
+        zoom : tuple of slices
             Crop from cube to show.
         show_axes : bool
             Whether to show axes and their labels.
@@ -183,13 +183,13 @@ class VisualizationMixin:
         title = f'Horizon `{self.short_name}` on `{self.field.displayed_name}`'
         aspect_ratio = (self.i_length / self.x_length, 1, z_ratio)
         axis_labels = (self.field.index_headers[0], self.field.index_headers[1], 'DEPTH')
-        if zoom_slice is None:
-            zoom_slice = [slice(0, i) for i in self.field.shape]
-        zoom_slice[-1] = slice(self.h_min, self.h_max)
+        if zoom is None:
+            zoom = [slice(0, i) for i in self.field.shape]
+        zoom[-1] = slice(self.h_min, self.h_max)
 
-        x, y, z, simplices = self.make_triangulation(n_points, threshold, zoom_slice)
+        x, y, z, simplices = self.make_triangulation(n_points, threshold, zoom)
 
-        show_3d(x, y, z, simplices, title, zoom_slice, None, show_axes, aspect_ratio,
+        show_3d(x, y, z, simplices, title, zoom, None, show_axes, aspect_ratio,
                 axis_labels, width, height, margin, savepath, **kwargs)
 
     def make_triangulation(self, n_points, threshold, slices, **kwargs):

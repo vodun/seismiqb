@@ -7,7 +7,7 @@ from itertools import product
 import numpy as np
 import pandas as pd
 
-from ..plotters import plot_image
+from ..plotters import plot
 from ..utils import round_to_array
 
 
@@ -279,4 +279,4 @@ class UnstructuredHorizon:
             'ylabel': 'Depth', 'y': 1.015,
             **kwargs
         }
-        return plot_image([seismic_slide, mask], **kwargs)
+        return plot([seismic_slide, mask], **kwargs)
