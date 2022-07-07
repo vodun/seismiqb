@@ -270,7 +270,7 @@ class SeismicCropBatch(Batch):
     def normalize(self, ix, src=None, dst=None, mode='meanstd', normalization_stats=None,
                   from_field=True, clip_to_quantiles=False, q=(0.01, 0.99)):
         """ Normalize `src` with.
-        Depenging on the parameters, stats for normalization will be taken from (in order of priority):
+        Depending on the parameters, stats for normalization will be taken from (in order of priority):
             - supplied `normalization_stats`, if provided
             - the field that created this `src`, if `from_field`
             - computed from `src` data directly
@@ -393,6 +393,15 @@ class SeismicCropBatch(Batch):
         field = self.get(ix, 'fields')
         location = self.get(ix, 'locations')
         return field.make_mask(location=location, width=width, indices=indices, src=src_labels)
+
+
+    @action
+    @inbatch_parallel(init='indices', post='_assemble', target='for')
+    def create_regression_masks(self, ix, dst, indices='all', src_labels='labels', scale=False):
+        """ !!. """
+        field = self.get(ix, 'fields')
+        location = self.get(ix, 'locations')
+        return field.make_regression_mask(location=location, indices=indices, src=src_labels, scale=scale)
 
 
     @action
@@ -1198,6 +1207,20 @@ class SeismicCropBatch(Batch):
         """ Compute instantaneous amplitudes along the depth axis. """
         analytic = hilbert(crop, axis=axis)
         return np.abs(analytic).astype(np.float32)
+
+
+    @apply_parallel
+    def equalize(self, crop, mode='default'):
+        """ Apply histogram equalization. """
+        import torch
+        import kornia
+
+        crop_ = torch.from_numpy(crop)
+        if mode == 'default':
+            crop_ = kornia.enhance.equalize(crop_)
+        else:
+            crop_ = kornia.enhance.equalize_clahe(crop_)
+        return crop_.numpy()
 
 
     @apply_parallel

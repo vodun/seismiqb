@@ -550,6 +550,34 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
 
         return mask
 
+
+    def add_to_regression_mask(self, mask, locations, scale=False):
+        """ Add depth matrix at `locations` to `mask`. """
+        mask_bbox = np.array([[slc.start, slc.stop] for slc in locations], dtype=np.int32)
+
+        # Getting coordinates of overlap in cubic system
+        (mask_i_min, mask_i_max), (mask_x_min, mask_x_max), (mask_h_min, mask_h_max) = mask_bbox
+
+        i_min, i_max = max(self.i_min, mask_i_min), min(self.i_max + 1, mask_i_max)
+        x_min, x_max = max(self.x_min, mask_x_min), min(self.x_max + 1, mask_x_max)
+
+        if i_max > i_min and x_max > x_min:
+            overlap = self.matrix[i_min - self.i_min : i_max - self.i_min,
+                                  x_min - self.x_min : x_max - self.x_min]
+
+            # Coordinates of points to use in overlap local system
+            idx_i, idx_x = np.asarray((overlap != self.FILL_VALUE) &
+                                      (overlap >= mask_h_min) &
+                                      (overlap <= mask_h_max)).nonzero()
+            heights = overlap[idx_i, idx_x].astype(np.float32)
+
+            if scale:
+                heights -= mask_h_min
+                heights /= (mask_h_max - mask_h_min)
+
+            mask[idx_i, idx_x] = heights
+        return mask
+
     def load_slide(self, loc, axis=0, width=3):
         """ Create a mask at desired location along supplied axis. """
         axis = self.field.geometry.parse_axis(axis)
