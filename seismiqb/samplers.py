@@ -724,6 +724,9 @@ class SeismicSampler(Sampler):
 
         # Resulting sampler
         n_present_fields = sum(len(sampler_list) != 0 for sampler_list in samplers.values())
+        if n_present_fields == 0:
+            raise ValueError('Empty sampler!')
+
         proportions = proportions or [1 / n_present_fields for _ in labels]
         final_weights = AugmentedDict({idx: [] for idx in labels.keys()})
 

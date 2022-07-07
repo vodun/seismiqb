@@ -376,7 +376,7 @@ class SeismicGeometry(CacheMixin, ExportMixin):
     def normalization_stats(self):
         """ Values for performing normalization of data from the field. """
         if self.quantized:
-            return {
+            normalization_stats = {
                 'mean': self.qnt_mean,
                 'std': self.qnt_std,
                 'min': self.qnt_min,
@@ -386,17 +386,19 @@ class SeismicGeometry(CacheMixin, ExportMixin):
                 'q_95': self.qnt_q95,
                 'q_99': self.qnt_q99,
             }
-        # Not quantized values
-        return {
-            'mean': self.v_mean,
-            'std': self.v_std,
-            'min': self.v_min,
-            'max': self.v_max,
-            'q_01': self.v_q01,
-            'q_05': self.v_q05,
-            'q_95': self.v_q95,
-            'q_99': self.v_q99,
-        }
+        else:
+            normalization_stats = {
+                'mean': self.v_mean,
+                'std': self.v_std,
+                'min': self.v_min,
+                'max': self.v_max,
+                'q_01': self.v_q01,
+                'q_05': self.v_q05,
+                'q_95': self.v_q95,
+                'q_99': self.v_q99,
+            }
+        normalization_stats = {key : float(value) for key, value in normalization_stats.items()}
+        return normalization_stats
 
     # Coordinates transforms
     def lines_to_cubic(self, array):

@@ -906,6 +906,9 @@ class HorizonMetrics(BaseMetrics):
         Mean / std of errors:            {oinfo['difference_mean']:+4.2f} / {oinfo['difference_std']:4.2f}
         Mean / std of abs errors:         {oinfo['abs_difference_mean']:4.2f} / {oinfo['abs_difference_std']:4.2f}
         Max abs error:                           {oinfo['abs_difference_max']:4.0f}
+        Accuracy@0:                       {oinfo['accuracy@0']:4.2f}
+        Accuracy@1:                       {oinfo['accuracy@1']:4.2f}
+        Accuracy@2:                       {oinfo['accuracy@2']:4.2f}
         {'—'*45}
         Lengths of horizons:                 {len(self.horizon):8}
                                              {       len(other):8}
@@ -915,9 +918,6 @@ class HorizonMetrics(BaseMetrics):
         {'—'*45}
         Coverage of horizons:                {self.horizon.coverage:8.4f}
                                              {       other.coverage:8.4f}
-        {'—'*45}
-        Solidity of horizons:                {self.horizon.solidity:8.4f}
-                                             {       other.solidity:8.4f}
         {'—'*45}
         Number of holes in horizons:         {self.horizon.number_of_holes:8}
                                              {       other.number_of_holes:8}
@@ -933,7 +933,7 @@ class HorizonMetrics(BaseMetrics):
 
         if plot:
             # Prepare data
-            matrix = proximity_info['difference_matrix']
+            matrix = proximity_info['difference_matrix'].copy()
             if enlarge and (self.horizon.is_carcass or other.is_carcass):
                 matrix = self.horizon.matrix_enlarge(matrix, width=width)
 

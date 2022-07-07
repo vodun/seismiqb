@@ -13,7 +13,7 @@ from .horizon_extraction import ExtractionMixin
 from .horizon_processing import ProcessingMixin
 from .horizon_visualization import VisualizationMixin
 from ..utils import CacheMixin, CharismaMixin
-from ..utils import groupby_mean, groupby_min, groupby_max
+from ..utils import groupby_mean, groupby_min, groupby_max, groupby_prob
 from ..utils import MetaDict
 
 
@@ -422,11 +422,13 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
         """
         _ = kwargs
         if mode in ['mean', 'avg']:
-            group_function = groupby_mean
+            group_function = lambda array, _: groupby_mean(array)
         elif mode in ['min']:
-            group_function = groupby_min
+            group_function = lambda array, _: groupby_min(array)
         elif mode in ['max']:
-            group_function = groupby_max
+            group_function = lambda array, _: groupby_max(array)
+        elif mode in ['prob']:
+            group_function = groupby_prob
 
         # Labeled connected regions with an integer
         labeled = label(mask >= threshold, connectivity=connectivity)
@@ -444,8 +446,9 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
 
                 if len(indices[0]) >= minsize:
                     coords = np.vstack([indices[i] + sl[i].start for i in range(3)]).T
+                    values = mask[coords[:, 0], coords[:, 1], coords[:, 2]]
 
-                    points = group_function(coords) + origin
+                    points = group_function(coords, values) + origin
                     horizons.append(Horizon(storage=points, field=field, name=f'{prefix}_{i}'))
 
         horizons.sort(key=len)
@@ -648,35 +651,48 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
             - `overlap_size` with number of overlapping points
             - `window_rate` for percentage of traces that are in 5ms from one horizon to the other
         """
+        # Compute diffs
         difference = np.where((self.full_matrix != self.FILL_VALUE) & (other.full_matrix != self.FILL_VALUE),
                               self.full_matrix - other.full_matrix, np.nan)
-        abs_difference = np.abs(difference)
 
-        overlap_size = np.nansum(~np.isnan(difference))
-        window_rate = np.nansum(abs_difference < (5 / self.field.sample_rate)) / overlap_size
+        mask = ~np.isnan(difference)
+        overlap_size = np.sum(mask)
+        masked_difference = difference[mask]
+        masked_abs_difference = np.abs(masked_difference)
+        window_rate = np.sum(masked_abs_difference < (5 / self.field.sample_rate)) / overlap_size
 
         present_at_1_absent_at_2 = ((self.full_matrix != self.FILL_VALUE)
                                     & (other.full_matrix == self.FILL_VALUE)).sum()
         present_at_2_absent_at_1 = ((self.full_matrix == self.FILL_VALUE)
                                     & (other.full_matrix != self.FILL_VALUE)).sum()
 
+        if masked_difference.size == 0:
+            masked_difference = masked_abs_difference = np.array([np.nan], dtype=np.float32)
+
         info_dict = {
             'difference_matrix' : difference,
-            'difference_mean' : np.nanmean(difference),
-            'difference_max' : np.nanmax(difference),
-            'difference_min' : np.nanmin(difference),
-            'difference_std' : np.nanstd(difference),
+            'difference_mean' : np.mean(masked_difference),
+            'difference_max' : np.max(masked_difference),
+            'difference_min' : np.min(masked_difference),
+            'difference_std' : np.std(masked_difference),
 
-            'abs_difference_mean' : np.nanmean(abs_difference),
-            'abs_difference_max' : np.nanmax(abs_difference),
-            'abs_difference_std' : np.nanstd(abs_difference),
+            'abs_difference_mean' : np.mean(masked_abs_difference),
+            'abs_difference_max' : np.max(masked_abs_difference),
+            'abs_difference_std' : np.std(masked_abs_difference),
 
-            'overlap_size' : overlap_size,
-            'window_rate' : window_rate,
+            'accuracy@0': np.mean(masked_abs_difference == 0),
+            'accuracy@1': np.mean(masked_abs_difference <= 1),
+            'accuracy@2': np.mean(masked_abs_difference <= 2),
+
+            'overlap_size': overlap_size,
+            'overlap_coverage': overlap_size / self.field.nonzero_traces,
+            'window_rate':  window_rate,
 
             'present_at_1_absent_at_2' : present_at_1_absent_at_2,
             'present_at_2_absent_at_1' : present_at_2_absent_at_1,
         }
+        info_dict = {key : round(value, 4) if isinstance(value, (float, np.floating)) else value
+                     for key, value in info_dict.items()}
         return MetaDict(info_dict)
 
     def find_closest(self, *others):
