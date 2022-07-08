@@ -1,5 +1,6 @@
 """ A mixin with batch visualizations. """
 from collections import defaultdict
+import numpy as np
 
 from ..plotters import plot
 from ..utils import to_list, DelegatingList
@@ -27,7 +28,7 @@ class VisualizationMixin:
 
         return data
 
-    def get_plot_config(self, components, idx, zoom, displayed_name, augment_titles):
+    def get_plot_config(self, components, idx, zoom, displayed_name, augment_titles, adjust_masks):
         """ Get batch components data for specified index and make its plot config.
 
         Parameters
@@ -38,15 +39,27 @@ class VisualizationMixin:
             Index of batch component to retrieve.
         zoom : tuple of two slices
             Additional limits to show batch components in.
-        diplayed_name : str
+        displayed_name : str
             Field name to show in suptitle instead of default.
         augment_titles : bool
             Whether add data location string representation to titles or not.
         """
+        #pylint: disable=too-many-nested-blocks
         components = DelegatingList(components)
 
         data = components.apply(self.get_component_data, idx=idx, zoom=zoom)
-        cmap = components.apply(lambda item: 'Reds' if 'mask' in item or 'prediction' in item else 'Greys_r')
+        cmap = components.apply(lambda item: 'viridis' if 'mask' in item or 'prediction' in item else 'Greys_r')
+
+        # Remove some mask values. TODO: improve via better `binarize_masks` in plotter
+        if adjust_masks:
+            for i, component in enumerate(components):
+                if isinstance(component, list):
+                    for j, component_ in enumerate(component):
+                        if 'prediction' in component_:
+                            data_ = data[i][j]
+                            if data_.min() >= 0.0 and data_.max() <= 1.0:
+                                data_ = np.ma.array(data_, mask=data_ < 0.5)
+                                data[i][j] = data_
 
         # Extract location
         location = self.locations[idx]
@@ -107,7 +120,8 @@ class VisualizationMixin:
         components = components.filter(component_present, shallow=True)
         return components
 
-    def plot(self, components=None, idx=0, zoom=None, displayed_name=None, augment_titles=False, **kwargs):
+    def plot(self, components=None, idx=0, zoom=None, displayed_name=None,
+             augment_titles=False, adjust_masks=True, **kwargs):
         """ Plot components of batch for specific index.
 
         Parameters
@@ -128,8 +142,8 @@ class VisualizationMixin:
         elif isinstance(components, str):
             components = [components]
 
-        plot_config = self.get_plot_config(components=components, idx=idx,
-                                           zoom=zoom, displayed_name=displayed_name, augment_titles=augment_titles)
+        plot_config = self.get_plot_config(components=components, idx=idx, zoom=zoom, displayed_name=displayed_name,
+                                           augment_titles=augment_titles, adjust_masks=adjust_masks)
 
         plot_config = {
             'scale': 0.8,
@@ -143,7 +157,7 @@ class VisualizationMixin:
         return plot(**plot_config)
 
     def plot_roll(self, n=1, components=None, indices=None, zoom=None,
-                  displayed_name=None, augment_titles=True, **kwargs):
+                  displayed_name=None, augment_titles=True, adjust_masks=True, **kwargs):
         """ Plot `n` random batch items on one figure.
 
         Parameters
@@ -174,7 +188,8 @@ class VisualizationMixin:
         plot_config = defaultdict(list)
         for idx in indices:
             plot_config_idx = self.get_plot_config(components=components, idx=idx, zoom=zoom,
-                                                   displayed_name=displayed_name, augment_titles=augment_titles)
+                                                   displayed_name=displayed_name,
+                                                   augment_titles=augment_titles, adjust_masks=adjust_masks)
             _ = plot_config_idx.pop('suptitle')
 
             for name, value in plot_config_idx.items():

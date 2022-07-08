@@ -601,7 +601,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
         from ..metrics import HorizonMetrics
         return HorizonMetrics(self)
 
-    def evaluate(self, compute_metric=True, supports=50, show=True, savepath=None, printer=print, **kwargs):
+    def evaluate(self, compute_metric=True, supports=50, visualize=True, savepath=None, printer=print, **kwargs):
         """ Compute crucial metrics of a horizon.
 
         Parameters
@@ -630,7 +630,8 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
             from ..metrics import HorizonMetrics # pylint: disable=import-outside-toplevel
             if savepath is not None:
                 kwargs['savepath'] = self.field.make_path(savepath, name=self.short_name)
-            return HorizonMetrics(self).evaluate('support_corrs', supports=supports, agg='nanmean', show=show, **kwargs)
+            return HorizonMetrics(self).evaluate('support_corrs', supports=supports, agg='nanmean',
+                                                 visualize=visualize, **kwargs)
         return None
 
 

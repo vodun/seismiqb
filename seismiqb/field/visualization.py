@@ -261,7 +261,7 @@ class VisualizationMixin:
             plot_params['xlabel'] = self.index_headers[0]
             plot_params['ylabel'] = self.index_headers[1]
 
-        if title_pattern:
+        if title_pattern and 'title' not in plot_params:
             plot_params['title'] = data_params.apply(self._make_title, shallow=True, title_pattern=title_pattern)
 
         if bbox:
@@ -275,7 +275,7 @@ class VisualizationMixin:
             plot_params['savepath'] = self.make_path(savepath, name=first_label_name)
 
         # Plot image with given params and return resulting figure
-        return plot(mode=mode, **plot_params)
+        return plot(mode=mode, show=show, **plot_params)
 
     # Auxilary methods utilized by `show`
     ALIAS_TO_ATTRIBUTE = AttributesMixin.ALIAS_TO_ATTRIBUTE

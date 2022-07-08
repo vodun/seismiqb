@@ -908,9 +908,9 @@ class HorizonMetrics(BaseMetrics):
         Mean / std of errors:            {oinfo['difference_mean']:+4.2f} / {oinfo['difference_std']:4.2f}
         Mean / std of abs errors:         {oinfo['abs_difference_mean']:4.2f} / {oinfo['abs_difference_std']:4.2f}
         Max abs error:                           {oinfo['abs_difference_max']:4.0f}
-        Accuracy@0:                       {oinfo['accuracy@0']:4.2f}
-        Accuracy@1:                       {oinfo['accuracy@1']:4.2f}
-        Accuracy@2:                       {oinfo['accuracy@2']:4.2f}
+        Accuracy@0:                              {oinfo['accuracy@0']:4.2f}
+        Accuracy@1:                              {oinfo['accuracy@1']:4.2f}
+        Accuracy@2:                              {oinfo['accuracy@2']:4.2f}
         {'—'*45}
         Lengths of horizons:                 {len(self.horizon):8}
                                              {       len(other):8}
@@ -959,7 +959,7 @@ class HorizonMetrics(BaseMetrics):
                 'xlabel': self.horizon.field.index_headers[0],
                 'ylabel': self.horizon.field.index_headers[1],
 
-                'ncols': 4,
+                'ncols': 2, 'nrows': 2,
                 'return_figure': True,
                 **kwargs,
             }
