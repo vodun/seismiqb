@@ -390,8 +390,8 @@ class SeismicGeometry(CacheMixin, ExportMixin):
             normalization_stats = {
                 'mean': self.v_mean,
                 'std': self.v_std,
-                'min': self.v_min,
-                'max': self.v_max,
+                'min': -128,
+                'max': +127,
                 'q_01': self.v_q01,
                 'q_05': self.v_q05,
                 'q_95': self.v_q95,

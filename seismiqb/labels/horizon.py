@@ -413,21 +413,23 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
             The upper left coordinate of a `mask` in the cube coordinates.
         threshold : float
             Parameter of mask-thresholding.
-        mode : str
-            Method used for finding the point of a horizon for each iline, xline.
+        mode : str, {'mean', 'min', 'max', 'prob'}
+            Method used for finding the point of a horizon for each trace in each connected component.
+            If `mean/min/max`, then we take mean/min/max value of labeled points on a trace.
+            If `prob`, then we take weighted sum of labeled points on a trace.
         minsize : int
             Minimum length of a horizon to be extracted.
         prefix : str
             Name of horizon to use.
         """
         _ = kwargs
-        if mode in ['mean', 'avg']:
+        if 'mean' in mode:
             group_function = lambda array, _: groupby_mean(array)
-        elif mode in ['min']:
+        elif 'min' in mode:
             group_function = lambda array, _: groupby_min(array)
-        elif mode in ['max']:
+        elif 'max' in mode:
             group_function = lambda array, _: groupby_max(array)
-        elif mode in ['prob']:
+        elif 'prob' in mode:
             group_function = groupby_prob
 
         # Labeled connected regions with an integer

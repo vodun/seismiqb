@@ -908,12 +908,12 @@ class HorizonMetrics(BaseMetrics):
         Mean / std of errors:            {oinfo['difference_mean']:+4.2f} / {oinfo['difference_std']:4.2f}
         Mean / std of abs errors:         {oinfo['abs_difference_mean']:4.2f} / {oinfo['abs_difference_std']:4.2f}
         Max abs error:                           {oinfo['abs_difference_max']:4.0f}
-        Accuracy@0:                              {oinfo['accuracy@0']:4.2f}
-        Accuracy@1:                              {oinfo['accuracy@1']:4.2f}
-        Accuracy@2:                              {oinfo['accuracy@2']:4.2f}
+        Accuracy@0:                             {oinfo['accuracy@0']:4.3f}
+        Accuracy@1:                             {oinfo['accuracy@1']:4.3f}
+        Accuracy@2:                             {oinfo['accuracy@2']:4.3f}
         {'—'*45}
-        Lengths of horizons:                 {len(self.horizon):8}
-                                             {       len(other):8}
+        Lengths of horizons:               {len(self.horizon):10,}
+                                           {       len(other):10,}
         {'—'*45}
         Average heights of horizons:         {self.horizon.h_mean:8.2f}
                                              {       other.h_mean:8.2f}
@@ -946,8 +946,8 @@ class HorizonMetrics(BaseMetrics):
 
             # Main plot: differences matrix
             kwargs = {
-                'title': (f'Depth comparison of `self={self.horizon.displayed_name}`\n'
-                          f'and `other={closest.displayed_name}`'),
+                'title': (f'Depth comparison\n'
+                          f'`self={self.horizon.displayed_name}` and `other={closest.displayed_name}`'),
                 'suptitle': '',
                 'cmap': ['seismic', 'black'],
                 'bad_color': 'black',
@@ -981,17 +981,21 @@ class HorizonMetrics(BaseMetrics):
             # Histogram and labels
             hist_kwargs = {
                 'xlabel': 'difference values',
-                'title_label': 'Histogram of horizon depth differences',
+                'ylabel': 'counts',
+                'title': 'Histogram of horizon depth differences',
                 **(hist_kwargs or {}),
             }
 
-            graph_msg = '\n'.join(msg.replace('—', '').split('\n')[5:-11])
+            graph_msg = '\n'.join(msg.replace('—', '').split('\n')[5:-7])
             graph_msg = graph_msg.replace('\n' + ' '*20, ', ').replace('\t', ' ')
-            graph_msg = ' '.join(item for item in graph_msg.split('  ') if item)
+            graph_msg = ' '.join(item for item in graph_msg.split('  ') if item).strip('\n')
 
+            matrix = proximity_info['difference_matrix'].copy()
             hist_data = np.clip(matrix, -clip_value, clip_value)
             if ignore_zeros:
-                hist_data = hist_data[hist_data != 0.0]
+                zero_mask = hist_data == 0.0
+                hist_data = hist_data[~zero_mask]
+                graph_msg += f'\nNumber of zeros in histogram: {zero_mask.sum()}'
 
             plotter(hist_data, mode='histogram', positions=2, show=show, **hist_kwargs)
             plotter[3].add_text(graph_msg, size=15)
