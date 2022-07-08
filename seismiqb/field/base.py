@@ -322,6 +322,20 @@ class Field(CharismaMixin, VisualizationMixin):
         return mask
 
 
+    def make_regression_mask(self, location, axis=None, indices='all', src='labels', **kwargs):
+        """ Create regression mask from labels. Works only with horizons. """
+        #
+        labels = getattr(self, src)
+        labels = [labels] if not isinstance(labels, (tuple, list)) else labels
+
+        if len(labels) > 1:
+            pass
+        else:
+            shape = tuple(slc.stop - slc.start for slc in location[:2])
+            mask = np.full((*shape, 1), -1, dtype=np.float32)
+            labels[0].add_to_regression_mask(mask=mask[..., 0], locations=location, **kwargs)
+        return mask
+
     # Attribute retrieval
     def load_attribute(self, src, _return_label=False, **kwargs):
         """ Load desired geological attribute from geometry or labels.

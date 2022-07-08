@@ -724,6 +724,9 @@ class SeismicSampler(Sampler):
 
         # Resulting sampler
         n_present_fields = sum(len(sampler_list) != 0 for sampler_list in samplers.values())
+        if n_present_fields == 0:
+            raise ValueError('Empty sampler!')
+
         proportions = proportions or [1 / n_present_fields for _ in labels]
         final_weights = AugmentedDict({idx: [] for idx in labels.keys()})
 
@@ -772,7 +775,7 @@ class SeismicSampler(Sampler):
                 msg += f'\n        {sampler}'
         return msg
 
-    def show_locations(self, **kwargs):
+    def show_locations(self, savepath=None, **kwargs):
         """ Visualize on field map by using underlying `locations` structure. """
         data = []
         title = []
@@ -815,10 +818,11 @@ class SeismicSampler(Sampler):
         }
 
         plotter[-1].add_legend(**legend_params)
-
+        if savepath is not None:
+            plotter.save(savepath=savepath)
         return plotter
 
-    def show_sampled(self, n=10000, binary=False, **kwargs):
+    def show_sampled(self, n=10000, binary=False, savepath=None, **kwargs):
         """ Visualize on field map by sampling `n` crop locations. """
         sampled = self.sample(n)
 
@@ -869,5 +873,6 @@ class SeismicSampler(Sampler):
         }
 
         plotter[-1].add_legend(**legend_params)
-
+        if savepath is not None:
+            plotter.save(savepath=savepath)
         return plotter

@@ -568,7 +568,7 @@ class AttributesMixin:
             Passed directly to :meth:`.HorizonMetrics.evaluate`.
         """
         metrics = self.metrics.evaluate(metric=metric, supports=supports, agg=agg,
-                                        enlarge=False, plot=False, savepath=None, **kwargs)
+                                        enlarge=False, visualize=False, savepath=None, **kwargs)
         return metrics
 
 
