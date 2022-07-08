@@ -366,6 +366,10 @@ class VisualizationMixin:
         else:
             alpha = 1.0
 
+        # Bounds for metrics
+        if 'metric' in attribute_name:
+            params['vmin'], params['vmax'] = -1.0, 1.0
+
         params['alpha'] = alpha
 
         return params

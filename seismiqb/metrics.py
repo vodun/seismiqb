@@ -905,8 +905,8 @@ class HorizonMetrics(BaseMetrics):
         {other.displayed_name.rjust(45)}
         {'—'*45}
         Rate in 5ms:                         {oinfo['window_rate']:8.3f}
-        Mean / std of errors:            {oinfo['difference_mean']:+4.2f} / {oinfo['difference_std']:4.2f}
-        Mean / std of abs errors:         {oinfo['abs_difference_mean']:4.2f} / {oinfo['abs_difference_std']:4.2f}
+        Mean / std of errors:          {oinfo['difference_mean']:+6.2f} / {oinfo['difference_std']:5.2f}
+        Mean / std of abs errors:       {oinfo['abs_difference_mean']:5.2f} / {oinfo['abs_difference_std']:5.2f}
         Max abs error:                           {oinfo['abs_difference_max']:4.0f}
         Accuracy@0:                             {oinfo['accuracy@0']:4.3f}
         Accuracy@1:                             {oinfo['accuracy@1']:4.3f}
@@ -950,7 +950,7 @@ class HorizonMetrics(BaseMetrics):
                           f'`self={self.horizon.displayed_name}` and `other={closest.displayed_name}`'),
                 'suptitle': '',
                 'cmap': ['seismic', 'black'],
-                'bad_color': 'black',
+                'mask_color': 'black',
                 'colorbar': [True, False],
                 'alpha': [1., 0.2],
                 'vmin': [-clip_value, 0],
