@@ -252,30 +252,30 @@ class VisualizationMixin:
         data_params = load_params.apply(self._load_data)
 
         # Prepare default plotting parameters
-        plot_params = data_params.apply(self._make_plot_params, mode=mode).to_dict()
-        plot_params = {**plot_params, **plot_kwargs}
-        # plot_params['suptitle'] = f'Field `{self.displayed_name}`' # TODO
+        plot_config = data_params.apply(self._make_plot_config, mode=mode).to_dict()
+        plot_config = {**plot_config, **plot_kwargs}
+        # plot_config['suptitle'] = f'Field `{self.displayed_name}`' # TODO
 
         if mode == 'image':
-            plot_params['colorbar'] = True
-            plot_params['xlabel'] = self.index_headers[0]
-            plot_params['ylabel'] = self.index_headers[1]
+            plot_config['colorbar'] = True
+            plot_config['xlabel'] = self.index_headers[0]
+            plot_config['ylabel'] = self.index_headers[1]
 
-        if title_pattern and 'title' not in plot_params:
-            plot_params['title'] = data_params.apply(self._make_title, shallow=True, title_pattern=title_pattern)
+        if title_pattern and 'title' not in plot_config:
+            plot_config['title'] = data_params.apply(self._make_title, shallow=True, title_pattern=title_pattern)
 
         if bbox:
             bboxes_list = data_params.apply(lambda params: params['bbox'])
             lims_list = [np.stack([bboxes]).transpose(1, 2, 0) for bboxes in bboxes_list]
-            plot_params['xlim'] = [(lims[0, 0].min(), lims[0, 1].max()) for lims in lims_list]
-            plot_params['ylim'] = [(lims[1, 1].max(), lims[1, 0].min()) for lims in lims_list]
+            plot_config['xlim'] = [(lims[0, 0].min(), lims[0, 1].max()) for lims in lims_list]
+            plot_config['ylim'] = [(lims[1, 1].max(), lims[1, 0].min()) for lims in lims_list]
 
         if savepath:
             first_label_name = data_params.reference_object['label_name']
-            plot_params['savepath'] = self.make_path(savepath, name=first_label_name)
+            plot_config['savepath'] = self.make_path(savepath, name=first_label_name)
 
         # Plot image with given params and return resulting figure
-        return plot(mode=mode, show=show, **plot_params)
+        return plot(mode=mode, show=show, **plot_config)
 
     # Auxilary methods utilized by `show`
     ALIAS_TO_ATTRIBUTE = AttributesMixin.ALIAS_TO_ATTRIBUTE
@@ -343,7 +343,7 @@ class VisualizationMixin:
     ATTRIBUTE_TO_CMAP = {attr: cmap for cmap, attributes in CMAP_TO_ATTRIBUTE.items()
                          for attr in attributes}
 
-    def _make_plot_params(self, data_params, mode):
+    def _make_plot_config(self, data_params, mode):
         params = {'data': data_params['data']}
 
         src_labels = data_params['src_labels']
