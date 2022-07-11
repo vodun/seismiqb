@@ -328,6 +328,7 @@ class RegularGrid(BaseGrid):
         x_grid = self._arange(*x_args)
         h_grid = self._arange(*h_args)
         self.unfiltered_length = len(i_grid) * len(x_grid) * len(h_grid)
+        self._i_grid, self._x_grid, self._h_grid = i_grid, x_grid, h_grid
 
         # Create points: origins for each crop
         points = []

@@ -36,7 +36,7 @@ class MergeStatus(IntEnum):
 
 class ExtractionMixin:
     """ Methods for horizon extraction from 3D volumes and their later merge. """
-    #pylint: disable=too-many-statements, too-many-nested-blocks, line-too-long
+    #pylint: disable=too-many-statements, too-many-nested-blocks, line-too-long, protected-access
     @classmethod
     def extract_from_mask(cls, mask, field=None, origin=None, minsize=1000,
                           prefix='extracted', verbose=False, max_iters=999):
@@ -391,15 +391,16 @@ class ExtractionMixin:
         # Create new instance or change `self`
         if inplace:
             # Clean-up data storages, just in case
-            for instance in [self, other]:
-                for attribute in ['_matrix', '_points', '_depths']:
-                    if hasattr(instance, attribute):
-                        delattr(instance, attribute)
-                        setattr(instance, attribute, None)
+            # for instance in [self, other]:
+            #     for attribute in ['_matrix', '_points', '_depths']:
+            #         if hasattr(instance, attribute):
+            #             delattr(instance, attribute)
+            #             setattr(instance, attribute, None)
 
             # Change `self` inplace
             self.from_matrix(background, i_min=shared_i_min, x_min=shared_x_min,
                              h_min=min(self.h_min, other.h_min), h_max=max(self.h_max, other.h_max), length=length)
+            self.reset_storage('points')
             merged = True
         else:
             # Return a new instance of horizon
@@ -483,15 +484,16 @@ class ExtractionMixin:
             # Create new instance or change `self`
             if inplace:
                 # Clean-up data storages
-                for instance in [self, other]:
-                    for attribute in ['_matrix', '_points', '_depths']:
-                        if hasattr(instance, attribute):
-                            delattr(instance, attribute)
-                            setattr(instance, attribute, None)
+                # for instance in [self, other]:
+                #     for attribute in ['_matrix', '_points', '_depths']:
+                #         if hasattr(instance, attribute):
+                #             delattr(instance, attribute)
+                #             setattr(instance, attribute, None)
 
                 # Change `self` inplace
                 self.from_matrix(background, i_min=shared_i_min, x_min=shared_x_min,
                                  h_min=min(self.h_min, other.h_min), h_max=max(self.h_max, other.h_max), length=length)
+                self.reset_storage('points')
                 merged = True
             else:
                 # Return a new instance of horizon
@@ -642,6 +644,8 @@ class ExtractionMixin:
             if num_merged < num_merged_threshold or len(horizons) == 0:
                 break
 
+        horizons = [horizon for horizon in horizons
+                    if (horizon._points is not None or horizon._matrix is not None) and len(horizon) > 0]
         return self, horizons, MetaDict(merge_stats)
 
     @staticmethod
@@ -855,7 +859,7 @@ class ExtractionMixin:
             # they will not be merged in the next iterations as well
             if (adjacency_i <= 0 and adjacency_x <= 0):
                 rejected_horizons_ = [horizon for horizon in horizons
-                                    if horizon.merge_count == 0]
+                                      if horizon.merge_count == 0]
                 rejected_horizons.extend(rejected_horizons_)
 
                 horizons = np.array([horizon for horizon in horizons
@@ -882,6 +886,8 @@ class ExtractionMixin:
             delattr(horizon, 'merge_count')
             delattr(horizon, 'id_separated')
 
+        horizons = [horizon for horizon in horizons
+                    if (horizon._points is not None or horizon._matrix is not None) and len(horizon) > 0]
         return sorted(horizons, key=len), MetaDict(merge_stats)
 
 
@@ -970,7 +976,6 @@ class ExtractionMixin:
 
         # Chunks are too small even for the `num_workers=min_workers`
         return False, None
-
 
 
 

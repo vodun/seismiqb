@@ -3,7 +3,7 @@ import numpy as np
 
 from batchflow import Config
 from ..utils import lru_cache
-from ..plotters import plot_image
+from ..plotters import plot
 
 class GeometryMock:
     """ Mock for SeismicGeometry. """
@@ -310,20 +310,17 @@ class SyntheticField:
         self._last_generator = generator
         return generator.show_slide(**kwargs)
 
-    def show_roll(self, shape=None, attribute='synthetic', n=25, **kwargs):
+    def plot_roll(self, shape=None, attribute='synthetic', n=25, **kwargs):
         """ Show attribute-images for a number of generators. """
         data = [[self.get_attribute(shape=shape, attribute=attribute)[0]] for _ in range(n)]
-        cmap = 'gray'
-        titles = list(range(n))
 
         # Display images
-        plot_params = {
+        plot_config = {
             'suptitle': f'Roll of `{attribute}`',
-            'title': titles,
-            'cmap': cmap,
+            'title': list(range(n)),
+            'cmap': 'Seismic2',
             'colorbar': True,
             'ncols': 5,
-            'scale': 0.5,
             **kwargs
         }
-        return plot_image(data, **plot_params)
+        return plot(data, **plot_config)

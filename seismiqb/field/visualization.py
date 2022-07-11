@@ -6,16 +6,14 @@ from collections import defaultdict
 from itertools import cycle
 
 import numpy as np
-from matplotlib import pyplot as plt
+from batchflow.plotter.plot import Subplot
 
 from .viewer import FieldViewer
 from ..utils import DelegatingList, to_list
-from ..plotters import plot_image, MatplotlibPlotter, show_3d
+from ..plotters import plot, show_3d
 from ..labels.horizon_attributes import AttributesMixin
 
-
-
-COLOR_GENERATOR = iter(MatplotlibPlotter.MASK_COLORS)
+COLOR_GENERATOR = iter(Subplot.MASK_COLORS)
 NAME_TO_COLOR = {}
 
 
@@ -63,7 +61,7 @@ class VisualizationMixin:
         return msg[:-1]
 
     # 2D along axis
-    def show_slide(self, loc, width=None, axis='i', zoom_slice=None,
+    def show_slide(self, loc, width=None, axis='i', zoom=None,
                    src_geometry='geometry', src_labels='labels', indices='all', **kwargs):
         """ Show slide with horizon on it.
 
@@ -75,7 +73,7 @@ class VisualizationMixin:
             Horizon thickness. If None given, set to 1% of seismic slide height.
         axis : int
             Number of axis to load slide along.
-        zoom_slice : tuple
+        zoom : tuple
             Tuple of slices to apply directly to 2d images.
         """
         axis = self.geometry.parse_axis(axis)
@@ -98,13 +96,13 @@ class VisualizationMixin:
         seismic_slide, mask = np.squeeze(seismic_slide), np.squeeze(mask)
         xmin, xmax, ymin, ymax = 0, seismic_slide.shape[0], seismic_slide.shape[1], 0
 
-        if zoom_slice:
-            seismic_slide = seismic_slide[zoom_slice]
-            mask = mask[zoom_slice]
-            xmin = zoom_slice[0].start or xmin
-            xmax = zoom_slice[0].stop or xmax
-            ymin = zoom_slice[1].stop or ymin
-            ymax = zoom_slice[1].start or ymax
+        if zoom:
+            seismic_slide = seismic_slide[zoom]
+            mask = mask[zoom]
+            xmin = zoom[0].start or xmin
+            xmax = zoom[0].stop or xmax
+            ymin = zoom[1].stop or ymin
+            ymax = zoom[1].start or ymax
 
         # defaults for plotting if not supplied in kwargs
         header = self.geometry.axis_names[axis]
@@ -121,24 +119,26 @@ class VisualizationMixin:
         title = f'Field `{self.displayed_name}`\n {header} {loc} out of {total}'
 
         kwargs = {
+            'cmap': ['Greys_r', 'firebrick'],
             'title_label': title,
             'xlabel': xlabel,
             'ylabel': ylabel,
             'extent': (xmin, xmax, ymin, ymax),
-            'legend': False,
+            'legend': ', '.join(src_labels),
             'labeltop': False,
             'labelright': False,
             'curve_width': width,
-            'grid': [False, True],
-            'colorbar': [True, False],
+            'grid': [None, 'both'],
+            'colorbar': [True, None],
             **kwargs
         }
-        return plot_image(data=[seismic_slide, mask], **kwargs)
+
+        return plot(data=[seismic_slide, mask], **kwargs)
 
 
     # 2D depth slice
     def show_points(self, src='labels', **kwargs):
-        """ Plot 2D map of points. """
+        """ Plot 2D map of labels points. Meant to be used with spatially disjoint objects (e.g. faults). """
         map_ = np.zeros(self.spatial_shape)
         denum = np.zeros(self.spatial_shape)
 
@@ -159,12 +159,12 @@ class VisualizationMixin:
             'colorbar': True,
             **kwargs
         }
-        return plot_image([map_, self.zero_traces], **kwargs)
+        return plot([map_, self.zero_traces], **kwargs)
 
 
     # 2D top-view maps
-    def show(self, attributes='snr', mode='imshow', title_pattern='{attributes} of {label_name}',
-             bbox=False, savepath=None, return_figure=False, load_kwargs=None, **plot_kwargs):
+    def show(self, attributes='snr', mode='image', title_pattern='{attributes} of {label_name}',
+             bbox=False, savepath=None, load_kwargs=None, show=True, **plot_kwargs):
         """ Show one or more field attributes on one figure.
 
         Parameters
@@ -179,8 +179,8 @@ class VisualizationMixin:
             as well as other parameters for `:meth:.load_attribute`.
             If sequence of them, then either should be a list to display loaded entities one over the other,
             or nested list to define separate axis and overlaying for each of them.
-            For more details, refer to `:func:plot_image`.
-        mode : 'imshow' or 'hist'
+            For more details, refer to `:func:plot`.
+        mode : 'image' or 'histogram'
             Mode to display images.
         title_pattern : str with key substrings to be replaced by corresponding variables values
             If {src_label} in pattern, replaced by name of labels source (e.g. 'horizons:0').
@@ -191,8 +191,6 @@ class VisualizationMixin:
             Whether crop horizon by its bounding box or not.
         savepath : str, optional
             Path to save the figure. `**` is changed to a field base directory, `*` is changed to field base name.
-        return_figure : bool
-            Whether to return the figure.
         load_kwargs : dict
             Loading parameters common for every requested attribute.
         plot_kwargs : dict
@@ -207,15 +205,15 @@ class VisualizationMixin:
         >>> field.show(['mean_matrix', 'fans:0/mask'])
 
         Display attributes on separate axis:
-        >>> field.show(['mean_matrix', 'horizons:0/fourier', custom_data_array], separate=True)
+        >>> field.show(['mean_matrix', 'horizons:0/fourier', custom_data_array], combine='separate')
 
         Use various parameters for each of the plots:
         >>> field.show([{'src': 'labels:0/fourier', 'window': 20, 'normalize': True},
                         {'src': 'labels:0/fourier', 'window': 40, 'n_components': 3}],
-                       separate=True)
+                       combine='separate')
 
         Display amplitudes and gradients for each of the horizons in a field:
-        >>> field.show(['horizons:*/amplitudes', 'horizons:*/gradient'], separate=True)
+        >>> field.show(['horizons:*/amplitudes', 'horizons:*/gradient'], combine='separate')
 
         Display several attributes on multiple axes with overlays and save it near the cube:
         >>> field.show(['geometry/std_matrix', 'horizons:3/amplitudes',
@@ -236,7 +234,7 @@ class VisualizationMixin:
 
         # If any attributes require wildcard loading, run `show` for every label item
         if any(labels_require_wildcard_loading):
-            figures = []
+            plotters = []
 
             reference_labels_source = labels_require_wildcard_loading[0]
             n_items = len(getattr(self, reference_labels_source))
@@ -245,24 +243,25 @@ class VisualizationMixin:
                 substitutor = lambda params: {**params, 'src': params['src'].replace('*', str(label_num))}
                 label_attributes = load_params.apply(substitutor)
 
-                fig = self.show(attributes=label_attributes, mode=mode, bbox=bbox, title_pattern=title_pattern,
-                                savepath=savepath, return_figure=return_figure, load_kwargs=load_kwargs, **plot_kwargs)
-                figures.append(fig)
+                plotter = self.show(attributes=label_attributes, mode=mode, bbox=bbox, title_pattern=title_pattern,
+                                    savepath=savepath, load_kwargs=load_kwargs, show=show, **plot_kwargs)
+                plotters.append(plotter)
 
-            return figures if return_figure else None
+            return plotters
 
         data_params = load_params.apply(self._load_data)
 
         # Prepare default plotting parameters
         plot_params = data_params.apply(self._make_plot_params, mode=mode).to_dict()
-        plot_params['suptitle'] = f'Field `{self.displayed_name}`'
+        plot_params = {**plot_params, **plot_kwargs}
+        # plot_params['suptitle'] = f'Field `{self.displayed_name}`' # TODO
 
-        if mode == 'imshow':
+        if mode == 'image':
             plot_params['colorbar'] = True
             plot_params['xlabel'] = self.index_headers[0]
             plot_params['ylabel'] = self.index_headers[1]
 
-        if title_pattern:
+        if title_pattern and 'title' not in plot_params:
             plot_params['title'] = data_params.apply(self._make_title, shallow=True, title_pattern=title_pattern)
 
         if bbox:
@@ -276,11 +275,7 @@ class VisualizationMixin:
             plot_params['savepath'] = self.make_path(savepath, name=first_label_name)
 
         # Plot image with given params and return resulting figure
-        plot_params = {**plot_params, **plot_kwargs}
-        figure = plot_image(mode=mode, return_figure=return_figure, **plot_params)
-        plt.show()
-
-        return figure if return_figure else None
+        return plot(mode=mode, show=show, **plot_params)
 
     # Auxilary methods utilized by `show`
     ALIAS_TO_ATTRIBUTE = AttributesMixin.ALIAS_TO_ATTRIBUTE
@@ -355,13 +350,13 @@ class VisualizationMixin:
         attribute_name = data_params['attribute_name']
 
         # Choose default cmap
-        if attribute_name == 'full_binary_matrix' or mode in ['hist', 'histogramm']:
+        if attribute_name == 'full_binary_matrix' or mode == 'histogram':
             global_name = f"{src_labels}/{attribute_name}"
             if global_name not in NAME_TO_COLOR:
                 NAME_TO_COLOR[global_name] = next(COLOR_GENERATOR)
             cmap = NAME_TO_COLOR[global_name]
         else:
-            cmap = self.ATTRIBUTE_TO_CMAP.get(attribute_name, 'Basic')
+            cmap = self.ATTRIBUTE_TO_CMAP.get(attribute_name, 'Seismic')
 
         params['cmap'] = cmap
 
@@ -370,6 +365,10 @@ class VisualizationMixin:
             alpha = 0.7
         else:
             alpha = 1.0
+
+        # Bounds for metrics
+        if 'metric' in attribute_name:
+            params['vmin'], params['vmax'] = -1.0, 1.0
 
         params['alpha'] = alpha
 
@@ -389,7 +388,6 @@ class VisualizationMixin:
             linkage[(src_label, label_name)].append(params['attribute_name'])
 
         title = ''
-
         for (src_label, label_name), attributes in linkage.items():
             title += '\n' * (title != '')
             part = title_pattern
@@ -407,9 +405,9 @@ class VisualizationMixin:
 
 
     # 3D interactive
-    def show_3d(self, src='labels', aspect_ratio=None, zoom_slice=None,
-                 n_points=100, threshold=100, sticks_step=10, stick_nodes_step=10,
-                 slides=None, margin=(0, 0, 20), colors=None, **kwargs):
+    def show_3d(self, src='labels', aspect_ratio=None, zoom=None,
+                n_points=100, threshold=100, sticks_step=10, stick_nodes_step=10,
+                slides=None, margin=(0, 0, 20), colors=None, **kwargs):
         """ Interactive 3D plot for some elements of a field.
         Roughly, does the following:
             - take some faults and/or horizons
@@ -427,7 +425,7 @@ class VisualizationMixin:
         aspect_ratio : None, tuple of floats or Nones
             Aspect ratio for each axis. Each None in the resulting tuple will be replaced by item from
             `(geometry.cube_shape[0] / geometry.cube_shape[1], 1, 1)`.
-        zoom_slice : tuple of slices or None
+        zoom : tuple of slices or None
             Crop from cube to show. By default, the whole cube volume will be shown.
         n_points : int
             Number of points for horizon surface creation.
@@ -457,19 +455,19 @@ class VisualizationMixin:
         coords = []
         simplices = []
 
-        if zoom_slice is None:
-            zoom_slice = [slice(0, s) for s in self.shape]
+        if zoom is None:
+            zoom = [slice(0, s) for s in self.shape]
         else:
-            zoom_slice = [
-                slice(item.start or 0, item.stop or stop) for item, stop in zip(zoom_slice, self.shape)
+            zoom = [
+                slice(item.start or 0, item.stop or stop) for item, stop in zip(zoom, self.shape)
             ]
-        zoom_slice = tuple(zoom_slice)
+        zoom = tuple(zoom)
         triangulation_kwargs = {
             'n_points': n_points,
             'threshold': threshold,
             'sticks_step': sticks_step,
             'stick_nodes_step': stick_nodes_step,
-            'slices': zoom_slice
+            'slices': zoom
         }
 
         labels = [getattr(self, src_) if isinstance(src_, str) else [src_] for src_ in src]
@@ -516,12 +514,12 @@ class VisualizationMixin:
             for loc, axis in slides:
                 image = self.geometry.load_slide(loc, axis=axis)
                 if axis == 0:
-                    image = image[zoom_slice[1:]]
+                    image = image[zoom[1:]]
                 elif axis == 1:
-                    image = image[zoom_slice[0], zoom_slice[-1]]
+                    image = image[zoom[0], zoom[-1]]
                 else:
-                    image = image[zoom_slice[:-1]]
+                    image = image[zoom[:-1]]
                 images += [(image, loc, axis)]
 
-        show_3d(coords[:, 0], coords[:, 1], coords[:, 2], simplices, title, zoom_slice, simplices_colors, margin=margin,
+        show_3d(coords[:, 0], coords[:, 1], coords[:, 2], simplices, title, zoom, simplices_colors, margin=margin,
                 aspect_ratio=aspect_ratio, axis_labels=axis_labels, images=images, **kwargs)

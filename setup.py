@@ -19,7 +19,7 @@ setup(
     zip_safe=False,
     platforms='any',
     install_requires=[
-        'batchflow==0.6.0',
+        'batchflow==0.7.5',
         'py-nbtools>=0.9.5',
         'numpy>=1.16.0',
         'scipy>=1.3.3',
@@ -52,6 +52,7 @@ setup(
         'pytest>=5.3.1',
         'torch>=1.3.0',
         'ipywidgets>=7.0',
+        'torchvision>=0.1.3',
     ],
     extras_require={
         'cupy': ['cupy>=8.1.0'],
