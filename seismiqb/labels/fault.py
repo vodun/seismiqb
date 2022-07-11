@@ -236,7 +236,6 @@ class Fault(Horizon):
         charisma = []
         if self.sticks is None:
             self.sticks = self.get_sticks(self.points, sticks_step, stick_nodes_step)
-        print(path, os.path.basename(path))
         for stick_idx, stick in enumerate(self.sticks):
             stick = self.field.geometry.cubic_to_lines(stick).astype(int)
             cdp = self.field.geometry.lines_to_cdp(stick[:, :2])
