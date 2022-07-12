@@ -16,7 +16,17 @@ def skeletonize(slide, width=5, rel_height=0.5, prominence=0.05, threshold=0.05,
         width of the resulting skeleton, by default 5
     rel_height, threshold : float, optional
         parameters of :meth:~.find_peaks`
-
+    prominence : float
+        prominence threshold value
+    threshold : float
+        nullify values ​​below the threshold
+    mode : int (from 0 to 4)
+        what value will be at skeleton
+        0: ones
+        1: peak prominences
+        2: values from initial slide
+        3: values from initial slide multiplied by prominences
+        4: average between values from initial slide and prominences
     Returns
     -------
     numpy.ndarray
@@ -25,7 +35,8 @@ def skeletonize(slide, width=5, rel_height=0.5, prominence=0.05, threshold=0.05,
     skeletonized_slide = np.zeros_like(slide)
     for i in prange(slide.shape[1]): #pylint: disable=not-an-iterable
         x = slide[:, i]
-        peaks, prominences = find_peaks(x, width=width, prominence=prominence, rel_height=rel_height, threshold=threshold)
+        peaks, prominences = find_peaks(x, width=width, prominence=prominence,
+                                        rel_height=rel_height, threshold=threshold)
         if mode == 0:
             skeletonized_slide[peaks, i] = 1
         elif mode == 1:
