@@ -92,7 +92,7 @@ class Fault(Horizon):
             self.format = 'file-npy'
         else:
             self.load_fault_sticks(path, transform, verify, **kwargs)
-            self.format = 'file-charisma'
+            self.format = 'file-sticks'
 
     def load_fault_sticks(self, path, transform=True, verify=True, fix=False, width=3, **kwargs):
         """ Get point cloud array from file values. """
@@ -229,11 +229,11 @@ class Fault(Horizon):
         np.savez(path, points=self.points, nodes=self.nodes, simplices=self.simplices,
                  sticks=sticks, sticks_labels=sticks_labels)
 
-    def dump_charisma(self, path, sticks_step=10, stick_nodes_step=10):
-        """ Dump fault to charisma. """
+    def dump_sticks(self, path, sticks_step=10, stick_nodes_step=10):
+        """ Dump fault sticks. """
         path = self._prepare_path(path)
 
-        charisma = []
+        sticks_df = []
         if self.sticks is None:
             self.sticks = self.get_sticks(self.points, sticks_step, stick_nodes_step)
         for stick_idx, stick in enumerate(self.sticks):
@@ -249,9 +249,9 @@ class Fault(Horizon):
                 'name': os.path.basename(path),
                 'number': stick_idx
             }
-            charisma.append(pd.DataFrame(df))
-        charisma = pd.concat(charisma)
-        charisma.to_csv(path, header=False, index=False, sep=' ')
+            sticks_df.append(pd.DataFrame(df))
+        sticks_df = pd.concat(sticks_df)
+        sticks_df.to_csv(path, header=False, index=False, sep=' ')
 
     def sticks_to_labeled_array(self, sticks):
         """ Auxilary method to dump fault into npz with allow_pickle=False. """
