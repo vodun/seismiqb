@@ -807,7 +807,7 @@ class SeismicGeometry(CacheMixin, ExportMixin):
             'title': title,
             'xlabel': xlabel,
             'ylabel': ylabel,
-            'cmap': 'gray',
+            'cmap': 'Greys_r',
             'extent': (xmin, xmax, ymin, ymax),
             'labeltop': False,
             'labelright': False,

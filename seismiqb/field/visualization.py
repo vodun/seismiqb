@@ -61,8 +61,8 @@ class VisualizationMixin:
         return msg[:-1]
 
     # 2D along axis
-    def show_slide(self, loc, width=None, axis='i', zoom=None,
-                   src_geometry='geometry', src_labels='labels', indices='all', **kwargs):
+    def show_slide(self, loc, width=None, axis='i', zoom=None, src_geometry='geometry', src_labels='labels',
+                   indices='all', augment_mask=True, **kwargs):
         """ Show slide with horizon on it.
 
         Parameters
@@ -119,8 +119,8 @@ class VisualizationMixin:
         title = f'Field `{self.displayed_name}`\n {header} {loc} out of {total}'
 
         kwargs = {
-            'cmap': ['Greys_r', 'firebrick'],
-            'title_label': title,
+            'cmap': ['Greys_r', 'darkorange'],
+            'title': title,
             'xlabel': xlabel,
             'ylabel': ylabel,
             'extent': (xmin, xmax, ymin, ymax),
@@ -130,6 +130,7 @@ class VisualizationMixin:
             'curve_width': width,
             'grid': [None, 'both'],
             'colorbar': [True, None],
+            'augment_mask': augment_mask,
             **kwargs
         }
 
@@ -151,12 +152,12 @@ class VisualizationMixin:
 
         labels_class = type(getattr(self, src)[0]).__name__
         kwargs = {
-            'title_label': f'{labels_class}s on {self.displayed_name}',
+            'title': f'{labels_class}s on {self.displayed_name}',
             'xlabel': self.index_headers[0],
             'ylabel': self.index_headers[1],
             'cmap': ['Reds', 'black'],
-            'alpha': [1.0, 0.4],
             'colorbar': True,
+            'augment_mask': True,
             **kwargs
         }
         return plot([map_, self.zero_traces], **kwargs)
@@ -254,7 +255,12 @@ class VisualizationMixin:
         # Prepare default plotting parameters
         plot_config = data_params.apply(self._make_plot_config, mode=mode).to_dict()
         plot_config = {**plot_config, **plot_kwargs}
-        # plot_config['suptitle'] = f'Field `{self.displayed_name}`' # TODO
+
+        plot_config = {
+            'suptitle': f'Field `{self.displayed_name}`',
+            'augment_mask': True,
+            **plot_config
+        }
 
         if mode == 'image':
             plot_config['colorbar'] = True
@@ -489,7 +495,7 @@ class VisualizationMixin:
                 if len(simplices_) == 0:
                     continue
                 if x is not None:
-                    simplices += [simplices_ + sum([len(item) for item in coords])]
+                    simplices += [simplices_ + sum(len(item) for item in coords)]
                     simplices_colors += [[color] * len(simplices_)]
                     coords += [np.stack([x, y, z], axis=1)]
 

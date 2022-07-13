@@ -5,6 +5,11 @@ import batchflow
 
 class plot(batchflow.plot):
     """ Wrapper over original `plot` with custom defaults. """
+    COMMON_DEFAULTS = {
+        **batchflow.plot.COMMON_DEFAULTS,
+        'suptitle_size': 30,
+    }
+
     IMAGE_DEFAULTS = {
         **batchflow.plot.IMAGE_DEFAULTS,
         'labeltop': True,

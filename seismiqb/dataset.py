@@ -132,7 +132,7 @@ class SeismicDataset(Dataset):
         return msg
 
 
-    def show_slide(self, loc, idx=0, axis='iline', zoom=None, src_labels='labels', **kwargs):
+    def show_slide(self, loc, idx=0, axis='iline', zoom=None, src_labels='labels', width=5, indices='all', **kwargs):
         """ Show slide of the given cube on the given line.
 
         Parameters
@@ -171,8 +171,6 @@ class SeismicDataset(Dataset):
                     .normalize(src='images'))
 
         if 'masks' in components:
-            indices = kwargs.pop('indices', 'all')
-            width = kwargs.pop('width', crop_shape[-1] // 100)
             labels_pipeline = (Pipeline()
                                .create_masks(src_labels=src_labels, dst='masks', width=width, indices=indices))
 
@@ -180,11 +178,11 @@ class SeismicDataset(Dataset):
 
         batch = (pipeline << self).next_batch()
         # TODO: Make every horizon mask creation individual to allow their distinction while plot.
-        images = [np.squeeze(getattr(batch, comp)) for comp in components]
-        xmin, xmax, ymin, ymax = 0, images[0].shape[0], images[0].shape[1], 0
+        data = [np.squeeze(getattr(batch, comp)) for comp in components]
+        xmin, xmax, ymin, ymax = 0, data[0].shape[0], data[0].shape[1], 0
 
         if zoom:
-            images = [img[zoom] for img in images]
+            data = [image[zoom] for image in data]
             xmin = zoom[0].start or xmin
             xmax = zoom[0].stop or xmax
             ymin = zoom[1].stop or ymin
@@ -202,16 +200,17 @@ class SeismicDataset(Dataset):
             ylabel = geometry.index_headers[1]
 
         kwargs = {
-            'title_label': f'Data slice on cube `{geometry.displayed_name}`\n {header} {loc} out of {total}',
-            'title_y': 1.01,
+            'cmap': ['Greys_r', 'darkorange'],
+            'title': f'Data slice on cube `{geometry.displayed_name}`\n {header} {loc} out of {total}',
             'xlabel': xlabel,
             'ylabel': ylabel,
             'extent': (xmin, xmax, ymin, ymax),
             'legend': src_labels,
+            'augment_mask': True,
             **kwargs
         }
 
-        return plot(images, **kwargs)
+        return plot(data, **kwargs)
 
     # Facies
     def evaluate_facies(self, src_horizons, src_true=None, src_pred=None, metrics='dice'):

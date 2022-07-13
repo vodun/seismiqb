@@ -470,7 +470,6 @@ class GeoBody:
             'ylabel': ylabel,
             'xticks': xticks,
             'yticks': yticks,
-            'y': 1.02,
             **kwargs
             }
 

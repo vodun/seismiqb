@@ -34,7 +34,7 @@ class BaseMetrics:
     # pylint: disable=attribute-defined-outside-init, blacklisted-name
     PLOT_DEFAULTS = {
         'cmap': 'Metric',
-        'fill_color': 'black'
+        'mask_color': 'black'
     }
 
     LOCAL_DEFAULTS = {
@@ -370,8 +370,8 @@ class BaseMetrics:
         title = f'Local correlation, k={kernel_size}, with `{agg}` aggregation\nfor {title}'
         plot_config = {
             **plot_defaults,
-            'title_label': title,
-            'zmin': -1.0, 'vmax': 1.0,
+            'title': title,
+            'vmin': -1.0, 'vmax': 1.0,
             **kwargs
         }
         return metric, plot_config
@@ -389,8 +389,8 @@ class BaseMetrics:
         title = f'Support correlation with {n_supports} supports\nwith `{agg}` aggregation\nfor {title}'
         plot_config = {
             **plot_defaults,
-            'title_label': title,
-            'zmin': -1.0, 'vmax': 1.0,
+            'title': title,
+            'vmin': -1.0, 'vmax': 1.0,
             'colorbar': True,
             'bad_color': 'k',
             **kwargs
@@ -410,9 +410,9 @@ class BaseMetrics:
         title = f'Local cross-correlation, k={kernel_size}, with `{agg}` aggregation\nfor {title}'
         plot_config = {
             **plot_defaults,
-            'title_label': title,
+            'title': title,
             'cmap': 'seismic_r',
-            'zmin': -zvalue, 'vmax': zvalue,
+            'vmin': -zvalue, 'vmax': zvalue,
             **kwargs
         }
         return metric, plot_config
@@ -430,9 +430,9 @@ class BaseMetrics:
         title = f'Support cross-correlation with {n_supports} supports with `{agg}` aggregation\nfor {title}'
         plot_config = {
             **plot_defaults,
-            'title_label': title,
+            'title': title,
             'cmap': 'seismic_r',
-            'zmin': -zvalue, 'vmax': zvalue,
+            'vmin': -zvalue, 'vmax': zvalue,
             **kwargs
         }
         return metric, plot_config
@@ -449,8 +449,8 @@ class BaseMetrics:
         title = f'Local Bhattacharyya divergence, k={kernel_size}, with `{agg}` aggregation\nfor {title}'
         plot_config = {
             **plot_defaults,
-            'title_label': title,
-            'zmin': 0.0, 'vmax': 1.0,
+            'title': title,
+            'vmin': 0.0, 'vmax': 1.0,
             **kwargs
         }
         return metric, plot_config
@@ -467,8 +467,8 @@ class BaseMetrics:
         title = f'Support Bhattacharyya divergence with {n_supports} supports with `{agg}` aggregation\nfor {title}'
         plot_config = {
             **plot_defaults,
-            'title_label': title,
-            'zmin': 0.0, 'vmax': 1.0,
+            'title': title,
+            'vmin': 0.0, 'vmax': 1.0,
             **kwargs
         }
         return metric, plot_config
@@ -485,8 +485,8 @@ class BaseMetrics:
         title = f'Local KL divergence, k={kernel_size}, with `{agg}` aggregation\nfor {title}'
         plot_config = {
             **plot_defaults,
-            'title_label': title,
-            'zmin': None, 'vmax': None,
+            'title': title,
+            'vmin': None, 'vmax': None,
             **kwargs
         }
         return metric, plot_config
@@ -504,8 +504,8 @@ class BaseMetrics:
         title = f'Support KL divergence with {n_supports} supports with `{agg}` aggregation\nfor {title}'
         plot_config = {
             **plot_defaults,
-            'title_label': title,
-            'zmin': None, 'vmax': None,
+            'title': title,
+            'vmin': None, 'vmax': None,
             **kwargs
         }
         return metric, plot_config
@@ -521,8 +521,8 @@ class BaseMetrics:
         title = f'Local JS divergence, k={kernel_size}, with `{agg}` aggregation\nfor {title}'
         plot_config = {
             **plot_defaults,
-            'title_label': title,
-            'zmin': None, 'vmax': None,
+            'title': title,
+            'vmin': None, 'vmax': None,
             **kwargs
         }
         return metric, plot_config
@@ -540,8 +540,8 @@ class BaseMetrics:
         title = f'Support JS divergence with {n_supports} supports with `{agg}` aggregation\nfor {title}'
         plot_config = {
             **plot_defaults,
-            'title_label': title,
-            'zmin': None, 'vmax': None,
+            'title': title,
+            'vmin': None, 'vmax': None,
             **kwargs
         }
         return metric, plot_config
@@ -558,8 +558,8 @@ class BaseMetrics:
         title = f'Local Hellinger distance, k={kernel_size}, with `{agg}` aggregation\nfor {title}'
         plot_config = {
             **plot_defaults,
-            'title_label': title,
-            'zmin': None, 'vmax': None,
+            'title': title,
+            'vmin': None, 'vmax': None,
             **kwargs
         }
         return metric, plot_config
@@ -577,8 +577,8 @@ class BaseMetrics:
         title = f'Support Hellinger distance with {n_supports} supports with `{agg}` aggregation\nfor {title}'
         plot_config = {
             **plot_defaults,
-            'title_label': title,
-            'zmin': None, 'vmax': None,
+            'title': title,
+            'vmin': None, 'vmax': None,
             **kwargs
         }
         return metric, plot_config
@@ -594,8 +594,8 @@ class BaseMetrics:
         title = f'Local total variation, k={kernel_size}, with `{agg}` aggregation\nfor {title}'
         plot_config = {
             **plot_defaults,
-            'title_label': title,
-            'zmin': None, 'vmax': None,
+            'title': title,
+            'vmin': None, 'vmax': None,
             **kwargs
         }
         return metric, plot_config
@@ -613,8 +613,8 @@ class BaseMetrics:
         title = f'Support total variation with {n_supports} supports with `{agg}` aggregation\nfor {title}'
         plot_config = {
             **plot_defaults,
-            'title_label': title,
-            'zmin': None, 'vmax': None,
+            'title': title,
+            'vmin': None, 'vmax': None,
             **kwargs
         }
         return metric, plot_config
@@ -812,19 +812,18 @@ class HorizonMetrics(BaseMetrics):
         diff_mean = horizon_metric - pb_mean
         diff_max = horizon_metric - pb_max
 
-        title, plot_defaults = self.get_plot_defaults()
-        title = f'Perturbed metrics\nfor {title}'
+        suptitle, plot_defaults = self.get_plot_defaults()
+
         plot_config = {
             **plot_defaults,
-            'figsize': (20, 7),
             'combine': 'separate',
-            'suptitle_label': title,
-            'title_label': ['mean', 'max'],
+            'suptitle': f'Perturbed metrics\nfor {suptitle}',
+            'title': ['mean', 'max'],
             'cmap': 'Reds_r',
-            'zmin': [0.0, -0.5], 'vmax': 0.5,
+            'vmin': [0.0, -0.5], 'vmax': 0.5,
             **kwargs
         }
-        return (diff_mean, diff_max), plot_config
+        return [diff_mean, diff_max], plot_config
 
 
     def instantaneous_phase(self, device='cpu', **kwargs):
@@ -862,9 +861,9 @@ class HorizonMetrics(BaseMetrics):
         title = f'Instantaneous phase\nfor {title}'
         plot_config = {
             **plot_defaults,
-            'title_label': title,
+            'title': title,
             'cmap': 'seismic',
-            'zmin': -np.pi, 'vmax': np.pi,
+            'vmin': -np.pi, 'vmax': np.pi,
             'colorbar': True,
             'bad_color': 'k',
             **kwargs
@@ -891,8 +890,6 @@ class HorizonMetrics(BaseMetrics):
             Function to use to print textual information
         visualize : bool
             Whether to plot the graph
-        return_figure : bool
-            Whether to add `figure` to the returned dictionary
         hist_kwargs, kwargs : dict
             Parameters for histogram / main graph visualization.
         """
@@ -940,19 +937,18 @@ class HorizonMetrics(BaseMetrics):
                 matrix = self.horizon.matrix_enlarge(matrix, width=width)
 
             # Field boundaries
-            bounds = self.horizon.field.zero_traces.copy().astype(np.float32)
-            bounds[np.isnan(matrix) & (bounds == 0)] = np.nan
-            matrix[bounds == 1] = 0.0
+            bounds = self.horizon.field.zero_traces
+            # bounds[np.isnan(matrix) & (bounds == 0)] = np.nan
+            # matrix[bounds == 1] = 0.0
 
             # Main plot: differences matrix
             kwargs = {
                 'title': (f'Depth comparison\n'
                           f'`self={self.horizon.displayed_name}` and `other={closest.displayed_name}`'),
                 'suptitle': '',
-                'cmap': ['seismic', 'black'],
-                'mask_color': 'black',
-                'colorbar': [True, False],
-                'alpha': [1., 0.2],
+                'cmap': ['seismic', 'lightgray'],
+                'mask_color': ['black', (0, 0, 0, 0)],
+                'colorbar': True,
                 'vmin': [-clip_value, 0],
                 'vmax': [+clip_value, 1],
 
@@ -960,22 +956,23 @@ class HorizonMetrics(BaseMetrics):
                 'ylabel': self.horizon.field.index_headers[1],
 
                 'ncols': 2, 'nrows': 2,
-                'return_figure': True,
+                'augment_mask': True,
                 **kwargs,
             }
+
+            plotter = plot([matrix, bounds], **kwargs)
 
             legend_kwargs = {
                 'color': ('white', 'blue', 'red', 'black', 'lightgray'),
                 'label': ('self.depths = other.depths',
                           'self.depths < other.depths',
                           'self.depths > other.depths',
-                          'unlabeled in `self`',
+                          'unlabeled traces',
                           'dead traces'),
                 'size': 20,
                 'loc': 10,
             }
 
-            plotter = plot([matrix, bounds], **kwargs)
             plotter[1].add_legend(**legend_kwargs)
 
             # Histogram and labels
@@ -1145,9 +1142,9 @@ class GeometryMetrics(BaseMetrics):
         title, plot_defaults = self.get_plot_defaults()
         plot_config = {
             **plot_defaults,
-            'title_label': f'Quality map for {title}',
+            'title': f'Quality map for {title}',
             'cmap': 'Reds',
-            'zmin': 0.0, 'vmax': np.nanmax(quality_map),
+            'vmin': 0.0, 'vmax': np.nanmax(quality_map),
             **kwargs
         }
 
@@ -1203,9 +1200,9 @@ class GeometryMetrics(BaseMetrics):
 
         title = f"tracewise {func}"
         plot_config = {
-            'title_label': f'{title} for `{self.name}` on cube `{self.geometry.displayed_name}`',
+            'title': f'{title} for `{self.name}` on cube `{self.geometry.displayed_name}`',
             'cmap': 'seismic',
-            'zmin': None, 'vmax': None,
+            'vmin': None, 'vmax': None,
             'ignore_value': np.nan,
             'xlabel': 'INLINE_3D', 'ylabel': 'CROSSLINE_3D',
             **kwargs
@@ -1230,9 +1227,9 @@ class GeometryMetrics(BaseMetrics):
 
         title = f"tracewise unsafe {func}"
         plot_config = {
-            'title_label': f'{title} for {self.name} on cube {self.geometry.displayed_name}',
+            'title': f'{title} for {self.name} on cube {self.geometry.displayed_name}',
             'cmap': 'seismic',
-            'zmin': None, 'vmax': None,
+            'vmin': None, 'vmax': None,
             'ignore_value': np.nan,
             'xlabel': 'INLINE_3D', 'ylabel': 'CROSSLINE_3D',
             **kwargs
@@ -1279,9 +1276,9 @@ class GeometryMetrics(BaseMetrics):
 
         title = f"Blockwise {func}"
         plot_config = {
-            'title_label': f'{title} for {self.name} on cube {self.geometry.displayed_name}',
+            'title': f'{title} for {self.name} on cube {self.geometry.displayed_name}',
             'cmap': 'seismic',
-            'zmin': None, 'vmax': None,
+            'vmin': None, 'vmax': None,
             'ignore_value': np.nan,
             **kwargs
         }

@@ -273,7 +273,7 @@ class UnstructuredHorizon:
 
         # set defaults if needed and plot the slide
         kwargs = {
-            'title_label': (f'U-horizon `{self.name}` on `{self.cube_name}`' + '\n ' +
+            'title': (f'U-horizon `{self.name}` on `{self.cube_name}`' + '\n ' +
                       f'{self.geometry.index_headers[axis]} {loc} out of {self.geometry.lens[axis]}'),
             'xlabel': self.geometry.index_headers[1 - axis],
             'ylabel': 'Depth', 'y': 1.015,

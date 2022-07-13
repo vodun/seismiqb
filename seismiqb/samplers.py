@@ -793,19 +793,18 @@ class SeismicSampler(Sampler):
             xlabel += [field.index_headers[0]] * len(samplers_list)
             ylabel += [field.index_headers[1]] * len(samplers_list)
 
-        data.append(None) # reserve extra subplot for future legend
-
         plot_config = {
-            'cmap': [['Sampler', 'gray']] * len(self.samplers),
-            # 'alpha': [[1.0, 0.4]] * len(self.samplers),
+            'cmap': [['Sampler', 'gray']] * len(data),
             'title': title,
-            'vmin': [[1, 0]] * len(self.samplers),
-            'vmax': [[3, 1]] * len(self.samplers),
+            'vmin': [[1, 0]] * len(data),
+            'vmax': [[3, 1]] * len(data),
             'xlabel': xlabel,
             'ylabel': ylabel,
             'augment_mask': True,
             **kwargs
         }
+
+        data.append(None) # reserve extra subplot for future legend
 
         plotter = plot(data, **plot_config)
 
@@ -863,6 +862,7 @@ class SeismicSampler(Sampler):
             'interpolation': 'bilinear',
             'xlabel': field.index_headers[0],
             'ylabel': field.index_headers[1],
+            'augment_mask': True,
             **kwargs
         }
 

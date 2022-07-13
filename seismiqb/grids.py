@@ -162,35 +162,35 @@ class BaseGrid:
             Other parameters to pass to the plotting function.
         """
         n_patches = n_patches or int(np.sqrt(len(self))) // 5
-        fig = self.field.geometry.show('zero_traces', cmap='Gray', colorbar=False, return_figure=True, **kwargs)
-        ax = fig.axes
+        plotter = self.field.geometry.show('zero_traces', cmap='Gray', colorbar=False, **kwargs)
+        ax = plotter[0].ax
 
         if grid:
             spatial = self.locations[:, [3, 4]]
             for i in np.unique(spatial[:, 0]):
                 sliced = spatial[spatial[:, 0] == i][:, 1]
-                ax[0].vlines(i, sliced.min(), sliced.max(), colors='pink')
+                ax.vlines(i, sliced.min(), sliced.max(), colors='pink')
 
             spatial = self.locations[:, [3, 4]]
             for x in np.unique(spatial[:, 1]):
                 sliced = spatial[spatial[:, 1] == x][:, 0]
-                ax[0].hlines(x, sliced.min(), sliced.max(), colors='pink')
+                ax.hlines(x, sliced.min(), sliced.max(), colors='pink')
 
         if markers:
-            ax[0].scatter(self.locations[:, 3], self.locations[:, 3], marker='x', linewidth=0.1, color='r')
+            ax.scatter(self.locations[:, 3], self.locations[:, 3], marker='x', linewidth=0.1, color='r')
 
         overlay = np.zeros_like(self.field.zero_traces)
         for n in range(0, len(self), len(self)//n_patches - 1):
             slc = tuple(slice(o, e) for o, e in zip(self.locations[n, [3, 4]], self.locations[n, [6, 7]]))
             overlay[slc] = 1
-            ax[0].scatter(*self.locations[n, [3, 4]], marker='x', linewidth=3, color='g')
+            ax.scatter(*self.locations[n, [3, 4]], marker='x', linewidth=3, color='g')
 
         kwargs = {
             'cmap': 'green',
             'alpha': 0.3,
             'colorbar': False,
             'matrix_name': 'Grid visualization',
-            'ax': ax[0],
+            'ax': ax,
             **kwargs,
         }
         self.field.geometry.show(overlay, **kwargs)
@@ -690,13 +690,13 @@ class ExtensionGrid(BaseGrid):
         """
         hm = self.horizon.full_matrix.astype(np.float32)
         hm[hm < 0] = np.nan
-        fig = self.field.geometry.show(hm, cmap='Depths', colorbar=False, return_figure=True, **kwargs)
-        ax = fig.axes
+        plotter = self.field.geometry.show(hm, cmap='Depths', colorbar=False, **kwargs)
+        ax = plotter[0].ax
 
-        self.field.geometry.show('zero_traces', ax=ax[0], cmap='Grey', colorbar=False, **kwargs)
+        self.field.geometry.show('zero_traces', ax=ax, cmap='Grey', colorbar=False, **kwargs)
 
         if markers:
-            ax[0].scatter(self.locations[:, 3], self.locations[:, 4], marker='x', linewidth=0.1, color='r')
+            ax.scatter(self.locations[:, 3], self.locations[:, 4], marker='x', linewidth=0.1, color='r')
 
         if overlay:
             overlay = np.zeros_like(self.field.zero_traces)
@@ -709,7 +709,7 @@ class ExtensionGrid(BaseGrid):
                 'alpha': 0.3,
                 'colorbar': False,
                 'title': f'Extension Grid on `{self.label_name}`',
-                'ax': ax[0],
+                'ax': ax,
                 **kwargs,
             }
             self.field.geometry.show(overlay, **kwargs)

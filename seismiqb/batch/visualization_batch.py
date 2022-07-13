@@ -28,7 +28,7 @@ class VisualizationMixin:
 
         return data
 
-    def get_plot_config(self, components, idx, zoom, displayed_name, augment_titles, adjust_masks):
+    def get_plot_config(self, components, idx, zoom, displayed_name, augment_title, augment_prediction):
         """ Get batch components data for specified index and make its plot config.
 
         Parameters
@@ -41,17 +41,17 @@ class VisualizationMixin:
             Additional limits to show batch components in.
         displayed_name : str
             Field name to show in suptitle instead of default.
-        augment_titles : bool
+        augment_title : bool
             Whether add data location string representation to titles or not.
         """
         #pylint: disable=too-many-nested-blocks
         components = DelegatingList(components)
 
         data = components.apply(self.get_component_data, idx=idx, zoom=zoom)
-        cmap = components.apply(lambda item: 'viridis' if 'mask' in item or 'prediction' in item else 'Greys_r')
+        cmap = components.apply(lambda item: 'darkorange' if 'mask' in item or 'prediction' in item else 'Greys_r')
 
         # Remove some mask values. TODO: improve via better `binarize_masks` in plotter
-        if adjust_masks:
+        if augment_prediction:
             for i, component in enumerate(components):
                 if isinstance(component, list):
                     for j, component_ in enumerate(component):
@@ -91,7 +91,7 @@ class VisualizationMixin:
         # Titles for individual axis
         title = [str(item) for item in components]
         # TODO: Replace with `set_xticklabels` parametrization
-        if augment_titles:
+        if augment_title:
             if len(components) >= 1:
                 title[0] += '\n' + location_description[0]
             if len(components) >= 2:
@@ -121,7 +121,7 @@ class VisualizationMixin:
         return components
 
     def plot(self, components=None, idx=0, zoom=None, displayed_name=None,
-             augment_titles=False, adjust_masks=True, **kwargs):
+             augment_title=False, augment_mask=True, augment_prediction=True, **kwargs):
         """ Plot components of batch for specific index.
 
         Parameters
@@ -134,7 +134,7 @@ class VisualizationMixin:
             Additional limits to show batch components in.
         diplayed_name : str
             Field name to show in suptitle instead of default.
-        augment_titles : bool
+        augment_title : bool
             Whether add data location string representation to titles or not.
         """
         if components is None:
@@ -143,10 +143,11 @@ class VisualizationMixin:
             components = [components]
 
         plot_config = self.get_plot_config(components=components, idx=idx, zoom=zoom, displayed_name=displayed_name,
-                                           augment_titles=augment_titles, adjust_masks=adjust_masks)
+                                           augment_title=augment_title, augment_prediction=augment_prediction)
 
         plot_config = {
             'scale': 0.8,
+            'augment_mask': augment_mask,
             **plot_config,
             **kwargs
         }
@@ -156,8 +157,8 @@ class VisualizationMixin:
 
         return plot(**plot_config)
 
-    def plot_roll(self, n=1, components=None, indices=None, zoom=None,
-                  displayed_name=None, augment_titles=True, adjust_masks=True, **kwargs):
+    def plot_roll(self, n=1, components=None, indices=None, zoom=None, displayed_name=None,
+                  augment_title=True, augment_mask=True, augment_prediction=True, **kwargs):
         """ Plot `n` random batch items on one figure.
 
         Parameters
@@ -172,7 +173,7 @@ class VisualizationMixin:
             Additional limits to show batch components in.
         diplayed_name : str
             Field name to show in suptitle instead of default.
-        augment_titles : bool
+        augment_title : bool
             Whether add data location string representation to titles or not.
         """
         if indices is None:
@@ -188,8 +189,8 @@ class VisualizationMixin:
         plot_config = defaultdict(list)
         for idx in indices:
             plot_config_idx = self.get_plot_config(components=components, idx=idx, zoom=zoom,
-                                                   displayed_name=displayed_name,
-                                                   augment_titles=augment_titles, adjust_masks=adjust_masks)
+                                                   displayed_name=displayed_name, augment_title=augment_title,
+                                                   augment_prediction=augment_prediction)
             _ = plot_config_idx.pop('suptitle')
 
             for name, value in plot_config_idx.items():
@@ -197,6 +198,7 @@ class VisualizationMixin:
 
         plot_config = {
             'scale': 0.8,
+            'augment_mask': augment_mask,
             **plot_config,
             **kwargs
         }
