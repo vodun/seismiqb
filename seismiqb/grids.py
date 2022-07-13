@@ -16,6 +16,8 @@ from itertools import product
 import numpy as np
 from numba import njit
 
+from .utils import make_ranges
+
 
 
 class BaseGrid:
@@ -273,8 +275,7 @@ class RegularGrid(BaseGrid):
             strides = strides if orientation == 0 else strides[[1, 0, 2]]
 
         # Make ranges
-        ranges = [item if item is not None else [0, c] for item, c in zip(ranges, field.shape)]
-        ranges = [[max(0, item[0]), min(c, item[1])] for item, c in zip(ranges, field.shape)]
+        ranges = make_ranges(ranges, field.shape)
         ranges = np.array(ranges)
         self.ranges = ranges
 

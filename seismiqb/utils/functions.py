@@ -477,3 +477,20 @@ def concat_sorted(first_array, second_array):
         i += 1
 
     return buffer[:c]
+
+def make_ranges(ranges, shape):
+    """ Fill Nones in ranges tuple.
+
+    Example
+    -------
+        None -> (0, shape[0]), (0, shape[1]), (0, shape[2])
+        None, None, None -> (0, shape[0]), (0, shape[1]), (0, shape[2])
+        (-10, shape[0]+2), (0, 100), (0, None) -> (0, shape[0]), (0, 100), (0, shape[2])
+        (10, 20), (10, 20), (10, 20) -> (10, 20), (10, 20), (10, 20)
+    """
+    if ranges is None:
+        ranges = [None, None, None]
+    ranges = [(0, c) if item is None else item for item, c in zip(ranges, shape)]
+    ranges = [(item[0] or 0, item[1] or c) for item, c in zip(ranges, shape)]
+    ranges = [(max(0, item[0]), min(c, item[1])) for item, c in zip(ranges, shape)]
+    return tuple(ranges)
