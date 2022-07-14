@@ -479,7 +479,12 @@ def concat_sorted(first_array, second_array):
     return buffer[:c]
 
 def make_ranges(ranges, shape):
-    """ Fill Nones in ranges tuple.
+    """ Make a `ranges` tuple, valid for indexing 3-dimensional arrays:
+        - each element is clipped to `(0, shape[i])` range,
+        - None elements are changed to `(0, shape[i])`,
+        - None at the first place of tuple-element is changed by 0
+        - None at the second place of tuple-element is changed by `shape[i]`
+        If `ranges` is None, then treated as a tuple of three None's.
 
     Example
     -------
