@@ -92,7 +92,7 @@ class Fault(Horizon):
             self.format = 'file-npy'
         else:
             self.load_fault_sticks(path, transform, verify, **kwargs)
-            self.format = 'file-charisma'
+            self.format = 'file-sticks'
 
     def load_fault_sticks(self, path, transform=True, verify=True, fix=False, width=3, **kwargs):
         """ Get point cloud array from file values. """
@@ -205,8 +205,7 @@ class Fault(Horizon):
         points = np.load(path, allow_pickle=False)
         self.from_points(points, verify=False)
 
-    def dump_points(self, path):
-        """ Dump fault to npz. """
+    def _prepare_path(self, path):
         path = self.field.make_path(path, name=self.short_name, makedirs=False)
 
         if os.path.exists(path):
@@ -216,12 +215,43 @@ class Fault(Horizon):
         if not os.path.exists(folder_name):
             os.makedirs(folder_name)
 
+        return path
+
+    def dump_points(self, path):
+        """ Dump fault to npz. """
+        path = self._prepare_path(path)
+
         if self.sticks is not None:
             sticks, sticks_labels = self.sticks_to_labeled_array(self.sticks)
         else:
             sticks, sticks_labels = np.zeros((0, 3)), np.zeros((0, 1))
+
         np.savez(path, points=self.points, nodes=self.nodes, simplices=self.simplices,
                  sticks=sticks, sticks_labels=sticks_labels)
+
+    def dump_sticks(self, path, sticks_step=10, stick_nodes_step=10):
+        """ Dump fault sticks. """
+        path = self._prepare_path(path)
+
+        sticks_df = []
+        if self.sticks is None:
+            self.sticks = self.get_sticks(self.points, sticks_step, stick_nodes_step)
+        for stick_idx, stick in enumerate(self.sticks):
+            stick = self.field.geometry.cubic_to_lines(stick).astype(int)
+            cdp = self.field.geometry.lines_to_cdp(stick[:, :2])
+            df = {
+                'INLINE-': 'INLINE-',
+                'iline': stick[:, 0],
+                'xline': stick[:, 1],
+                'cdp_x': cdp[:, 0],
+                'cdp_y': cdp[:, 1],
+                'height': stick[:, 2],
+                'name': os.path.basename(path),
+                'number': stick_idx
+            }
+            sticks_df.append(pd.DataFrame(df))
+        sticks_df = pd.concat(sticks_df)
+        sticks_df.to_csv(path, header=False, index=False, sep=' ')
 
     def sticks_to_labeled_array(self, sticks):
         """ Auxilary method to dump fault into npz with allow_pickle=False. """
