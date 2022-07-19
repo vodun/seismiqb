@@ -120,6 +120,10 @@ class Field(CharismaMixin, VisualizationMixin):
             if label_class is None:
                 raise TypeError(f"Can't determine the label class for `{label_dst}`!")
 
+            if isinstance(label_class, str):
+                method = self.NAME_TO_METHOD[label_class]
+                label_class = self.METHOD_TO_NAMES[method][-1]
+
             # Process paths: get rid of service files
             if isinstance(label_src, str):
                 label_src = self.make_path(label_src, makedirs=False)
@@ -131,7 +135,7 @@ class Field(CharismaMixin, VisualizationMixin):
             # Load desired labels, based on class
             method_name = self.NAME_TO_METHOD[label_class]
             method = getattr(self, method_name)
-            result = method(label_src, **labels_kwargs)
+            result = method(label_src, label_class=label_class, **labels_kwargs)
 
             if mode == 'w':
                 setattr(self, label_dst, result)
@@ -155,7 +159,8 @@ class Field(CharismaMixin, VisualizationMixin):
                 if not isinstance(path, str) or \
                 not any(ext in path for ext in ['.dvc', '.gitignore', '.meta'])]
 
-    def _load_horizons(self, paths, max_workers=4, filter=True, interpolate=False, sort=True, **kwargs):
+    def _load_horizons(self, paths, max_workers=4, filter=True, interpolate=False, sort=True,
+                       label_class=Horizon, **kwargs):
         """ Load horizons from paths or re-use already created ones. """
         # Separate paths from ready-to-use instances
         horizons, paths_to_load = [], []
@@ -164,13 +169,14 @@ class Field(CharismaMixin, VisualizationMixin):
                 paths_ = self._filter_paths(glob(item))
                 paths_to_load.extend(paths_)
 
-            elif isinstance(item, Horizon):
+            elif isinstance(item, label_class):
                 item.field = self
                 horizons.append(item)
 
         # Load from paths in multiple threads
         with ThreadPoolExecutor(max_workers=min(max_workers, len(paths_to_load) or 1)) as executor:
-            function = lambda path: self._load_horizon(path, filter=filter, interpolate=interpolate, **kwargs)
+            function = lambda path: self._load_horizon(path, filter=filter, interpolate=interpolate,
+                                                       constructor_class=label_class, **kwargs)
             loaded = list(executor.map(function, paths_to_load))
         horizons.extend(loaded)
 
@@ -179,9 +185,9 @@ class Field(CharismaMixin, VisualizationMixin):
             horizons.sort(key=lambda label: getattr(label, sort))
         return horizons
 
-    def _load_horizon(self, path, filter=True, interpolate=False, **kwargs):
+    def _load_horizon(self, path, filter=True, interpolate=False, constructor_class=Horizon, **kwargs):
         """ Load a single horizon from path. """
-        horizon = Horizon(path, field=self, **kwargs)
+        horizon = constructor_class(path, field=self, **kwargs)
         if filter:
             horizon.filter(inplace=True)
         if interpolate:
@@ -189,35 +195,36 @@ class Field(CharismaMixin, VisualizationMixin):
         return horizon
 
 
-    def _load_faults(self, paths, max_workers=4, pbar=True, filter=True, fix=True, **kwargs):
+    def _load_faults(self, paths, max_workers=4, pbar=True, filter=True, fix=True, label_class=Fault, **kwargs):
         """ Load faults from paths. """
         with ThreadPoolExecutor(max_workers=min(max_workers, len(paths) or 1)) as executor:
-            function = lambda path: self._load_fault(path, filter=filter, fix=fix, **kwargs)
+            function = lambda path: self._load_fault(path, filter=filter, fix=fix,
+                                                     constructor_class=label_class, **kwargs)
             loaded = list(Notifier(pbar, total=len(paths))(executor.map(function, paths)))
 
         faults = [fault for fault in loaded if len(fault) > 0]
         return faults
 
-    def _load_fault(self, path, filter=True, fix=True, **kwargs):
+    def _load_fault(self, path, filter=True, fix=True, constructor_class=Fault, **kwargs):
         """ Load a single fault from path. """
-        if isinstance(path, Fault):
+        if isinstance(path, constructor_class):
             path.field = self
             return path
 
-        fault = Fault(path, field=self, fix=fix, **kwargs)
+        fault = constructor_class(path, field=self, fix=fix, **kwargs)
 
         if filter and fault.format != 'file-npz':
             fault.filter()
         return fault
 
-    def _load_geometries(self, paths, **kwargs):
+    def _load_geometries(self, paths, label_class=SeismicGeometry, **kwargs):
         if isinstance(paths, str):
             path = paths
         if isinstance(paths, (tuple, list)):
             if len(paths) > 1:
                 raise ValueError(f'Path for Geometry loading is non-unique!, {paths}')
             path = paths[0]
-        return SeismicGeometry(path, **kwargs)
+        return label_class(path, **kwargs)
 
     # Other methods of initialization
     @classmethod
