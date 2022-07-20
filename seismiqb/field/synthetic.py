@@ -133,7 +133,8 @@ class SyntheticField:
 
             # Compute velocity model, using the velocity vector and horizon matrices
             (generator
-             .make_velocity_vector(**params['make_velocity_vector'])
+             .configure(**params['configure'])
+             .make_velocities(**params['make_velocities'])
              .make_horizons(**params['make_horizons'])
              .make_velocity_model(**params['make_velocity_model'])
              )
