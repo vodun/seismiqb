@@ -310,13 +310,10 @@ class ExtractionMixin:
 
         # Compare matrices on overlap without adjacency:
         if status != 1 and overlap_size_i > 0 and overlap_size_x > 0:
-            idx_i = int(overlap_size_i == 0)
-            idx_x = int(overlap_size_x == 0)
-
-            self_overlap = self.matrix[overlap_i_min - self.i_min:overlap_i_max - self.i_min + idx_i,
-                                       overlap_x_min - self.x_min:overlap_x_max - self.x_min + idx_x]
-            other_overlap = other.matrix[overlap_i_min - other.i_min:overlap_i_max - other.i_min + idx_i,
-                                        overlap_x_min - other.x_min:overlap_x_max - other.x_min + idx_x]
+            self_overlap = self.matrix[overlap_i_min - self.i_min:overlap_i_max - self.i_min,
+                                       overlap_x_min - self.x_min:overlap_x_max - self.x_min]
+            other_overlap = other.matrix[overlap_i_min - other.i_min:overlap_i_max - other.i_min,
+                                        overlap_x_min - other.x_min:overlap_x_max - other.x_min]
 
             mean_on_overlap, size_of_overlap = intersect_matrix(self_overlap, other_overlap, max_threshold)
 
@@ -391,16 +388,16 @@ class ExtractionMixin:
         # Create new instance or change `self`
         if inplace:
             # Clean-up data storages, just in case
-            # for instance in [self, other]:
-            #     for attribute in ['_matrix', '_points', '_depths']:
-            #         if hasattr(instance, attribute):
-            #             delattr(instance, attribute)
-            #             setattr(instance, attribute, None)
+            for instance in [self, other]:
+                for attribute in ['_matrix', '_points', '_depths']:
+                    if hasattr(instance, attribute):
+                        delattr(instance, attribute)
+                        setattr(instance, attribute, None)
 
             # Change `self` inplace
             self.from_matrix(background, i_min=shared_i_min, x_min=shared_x_min,
                              h_min=min(self.h_min, other.h_min), h_max=max(self.h_max, other.h_max), length=length)
-            self.reset_storage('points')
+            # self.reset_storage('points')
             merged = True
         else:
             # Return a new instance of horizon
@@ -484,16 +481,16 @@ class ExtractionMixin:
             # Create new instance or change `self`
             if inplace:
                 # Clean-up data storages
-                # for instance in [self, other]:
-                #     for attribute in ['_matrix', '_points', '_depths']:
-                #         if hasattr(instance, attribute):
-                #             delattr(instance, attribute)
-                #             setattr(instance, attribute, None)
+                for instance in [self, other]:
+                    for attribute in ['_matrix', '_points', '_depths']:
+                        if hasattr(instance, attribute):
+                            delattr(instance, attribute)
+                            setattr(instance, attribute, None)
 
                 # Change `self` inplace
                 self.from_matrix(background, i_min=shared_i_min, x_min=shared_x_min,
                                  h_min=min(self.h_min, other.h_min), h_max=max(self.h_max, other.h_max), length=length)
-                self.reset_storage('points')
+                # self.reset_storage('points')
                 merged = True
             else:
                 # Return a new instance of horizon
