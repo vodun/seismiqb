@@ -113,7 +113,8 @@ def simplices_to_points(simplices, nodes, width=1):
 
 @njit
 def distance_to_triangle(triangle, node):
-    """ https://gist.github.com/joshuashaffer/99d58e4ccbd37ca5d96e """
+    """ Paper: https://www.geometrictools.com/Documentation/DistancePoint3Triangle3.pdf
+    Realization: https://gist.github.com/joshuashaffer/99d58e4ccbd37ca5d96e """
     # pylint: disable=invalid-name, too-many-nested-blocks, too-many-branches, too-many-statements
     B = triangle[0, :]
     E0 = triangle[1, :] - B

@@ -499,3 +499,13 @@ def make_ranges(ranges, shape):
     ranges = [(item[0] or 0, item[1] or c) for item, c in zip(ranges, shape)]
     ranges = [(max(0, item[0]), min(c, item[1])) for item, c in zip(ranges, shape)]
     return tuple(ranges)
+
+def make_interior_points_mask(points, cube_shape):
+    """ Create mask for points inside of the cube. """
+    mask = np.where((points[:, 0] >= 0) &
+                    (points[:, 1] >= 0) &
+                    (points[:, 2] >= 0) &
+                    (points[:, 0] < cube_shape[0]) &
+                    (points[:, 1] < cube_shape[1]) &
+                    (points[:, 2] < cube_shape[2]))[0]
+    return mask

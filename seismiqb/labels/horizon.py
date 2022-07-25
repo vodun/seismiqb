@@ -13,7 +13,7 @@ from .horizon_extraction import ExtractionMixin
 from .horizon_processing import ProcessingMixin
 from .horizon_visualization import VisualizationMixin
 from ..utils import CacheMixin, CharismaMixin
-from ..utils import groupby_mean, groupby_min, groupby_max, groupby_prob
+from ..utils import groupby_mean, groupby_min, groupby_max, groupby_prob, make_interior_points_mask
 from ..utils import MetaDict
 
 
@@ -313,13 +313,8 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
         _ = kwargs
 
         if verify:
-            idx = np.where((points[:, 0] >= 0) &
-                           (points[:, 1] >= 0) &
-                           (points[:, 2] >= 0) &
-                           (points[:, 0] < self.field.shape[0]) &
-                           (points[:, 1] < self.field.shape[1]) &
-                           (points[:, 2] < self.field.shape[2]))[0]
-            points = points[idx]
+            mask = make_interior_points_mask(points, self.field.shape)
+            points = points[mask]
 
         if self.dtype == np.int32:
             points = np.rint(points)
