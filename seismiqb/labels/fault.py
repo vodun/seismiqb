@@ -267,8 +267,8 @@ class FaultVisualizationMixin(VisualizationMixin):
 
         return self.show_slide(loc=int(np.mean(self.bbox[axis])), zoom=zoom, axis=axis, **kwargs)
 
-    def show_3d(self, sticks_step=10, stick_nodes_step=10, z_ratio=1., zoom=None, show_axes=True,
-                width=1200, height=1200, margin=20, savepath=None, **kwargs):
+    def show_3d(self, sticks_step=10, stick_nodes_step=10, z_ratio=1., colors='green',
+                zoom=None, margin=20, **kwargs):
         """ Interactive 3D plot. Roughly, does the following:
             - select `n` points to represent the horizon surface
             - triangulate those points
@@ -286,11 +286,11 @@ class FaultVisualizationMixin(VisualizationMixin):
         zoom : tuple of slices or None.
             Crop from cube to show. If None, the whole cube volume will be shown.
         show_axes : bool
-            Whether to show axes and their labels.
+            Whether to show axes and their labels, by default True
         width, height : int
-            Size of the image.
+            Size of the image, by default 1200, 1200
         margin : int
-            Added margin from below and above along height axis.
+            Added margin from below and above along height axis, by default 20
         savepath : str
             Path to save interactive html to.
         kwargs : dict
@@ -299,14 +299,17 @@ class FaultVisualizationMixin(VisualizationMixin):
         title = f'Fault `{self.name}` on `{self.field.displayed_name}`'
         aspect_ratio = (self.i_length / self.x_length, 1, z_ratio)
         axis_labels = (self.field.index_headers[0], self.field.index_headers[1], 'DEPTH')
+
         if zoom is None:
             zoom = [slice(0, i) for i in self.field.shape]
-        zoom[-1] = slice(self.h_min, self.h_max)
+        zoom[-1] = slice(self.h_min, self.h_max+1)
         margin = [margin] * 3 if isinstance(margin, int) else margin
         x, y, z, simplices = self.make_triangulation(zoom, sticks_step, stick_nodes_step)
+        if isinstance(colors, str):
+            colors = [colors for _ in simplices]
 
-        show_3d(x, y, z, simplices, title, zoom, None, show_axes, aspect_ratio,
-                axis_labels, width, height, margin, savepath, **kwargs)
+        show_3d(x, y, z, simplices, title=title, zoom=zoom, aspect_ratio=aspect_ratio,
+                axis_labels=axis_labels, margin=margin, colors=colors, **kwargs)
 
     def make_triangulation(self, slices, sticks_step, stick_nodes_step, *args, **kwargs):
         """ Return triangulation of the fault. It will created if needed. """
@@ -332,7 +335,6 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, CoordinatesMixin, FaultVi
             format = 'points'
         elif isinstance(storage, dict):
             format = 'objects'
-
         getattr(self, f'from_{format}')(storage, **kwargs)
 
         # if self.direction is None:
@@ -408,6 +410,8 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, CoordinatesMixin, FaultVi
         self.path = path
 
         self.name = os.path.basename(path)
+        self.short_name = os.path.splitext(self.name)[0]
+
         ext = os.path.splitext(path)[1][1:]
 
         if ext == 'npz':
@@ -488,7 +492,8 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, CoordinatesMixin, FaultVi
     def __len__(self):
         """ Number of labeled traces. """
         # TODO
-        return 1
+        # return np.prod(self.bbox[:, 1] - self.bbox[:, 0] + 1)
+        return len(self.points)
         # if self._len is None:
         #     if self._points is not None:
         #         self._len = len(self.points)

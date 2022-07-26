@@ -386,6 +386,8 @@ class FaultSampler(BaseSampler):
     def interpolated_nodes(self):
         """ Create locations in non-labeled slides between labeled slides. """
         slides = np.unique(self.nodes[:, self.direction])
+        if len(slides) == 1:
+            return self.nodes
         locations = []
         for i, slide in enumerate(slides):
             left = slides[max(i-1, 0)]
@@ -695,6 +697,8 @@ class SeismicSampler(Sampler):
         names, sampler_classes = {}, {}
         samplers = AugmentedDict({field_name: [] for field_name in labels.keys()})
 
+        labels_weights = []
+
         for field_id, (field_name, list_labels) in enumerate(labels.items()):
             list_labels = list_labels if isinstance(list_labels, (tuple, list)) else [list_labels]
 
@@ -722,6 +726,10 @@ class SeismicSampler(Sampler):
                     samplers[field_name].append(label_sampler)
                     names[(field_id, label_id)] = (field_name, label.short_name)
 
+            weights = np.array([len(label) for label in list_labels])
+            weights = weights / weights.sum()
+            labels_weights.append(weights)
+
         # Resulting sampler
         n_present_fields = sum(len(sampler_list) != 0 for sampler_list in samplers.values())
         if n_present_fields == 0:
@@ -732,11 +740,9 @@ class SeismicSampler(Sampler):
 
         sampler = 0 & ConstantSampler(np.int32(0), dim=9)
 
-        for (field_name, sampler_list), p in zip(samplers.items(), proportions):
+        for (field_name, sampler_list), p, l in zip(samplers.items(), proportions, labels_weights):
             if len(sampler_list) != 0:
-                label_weight = 1 / len(sampler_list)
-
-                for label_sampler in sampler_list:
+                for label_sampler, label_weight in zip(sampler_list, l):
                     w = p * label_weight
                     final_weights[field_name].append(w)
                     sampler = sampler | (w & label_sampler)
