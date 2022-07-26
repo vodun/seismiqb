@@ -54,13 +54,12 @@ class VisualizationMixin:
 
         if augment_prediction:
             for i, component in enumerate(components):
-                if isinstance(component, list):
-                    for j, component_ in enumerate(component):
-                        if 'prediction' in component_:
-                            data_ = data[i][j]
-                            if data_.min() >= 0.0 and data_.max() <= 1.0:
-                                data_ = np.ma.array(data_, mask=data_ < 0.5)
-                                data[i][j] = data_
+                for j, component_ in enumerate(component):
+                    if 'prediction' in component_:
+                        data_ = data[i][j]
+                        if data_.min() >= 0.0 and data_.max() <= 1.0:
+                            data_ = np.ma.array(data_, mask=data_ < 0.5)
+                            data[i][j] = data_
 
         # Extract location
         location = self.locations[idx]
@@ -90,7 +89,7 @@ class VisualizationMixin:
         suptitle = f'batch_idx={idx}                  `{displayed_name}`\n{suptitle}'
 
         # Titles for individual axis
-        title = [str(item) for item in components]
+        title = [', '.join(item) for item in components]
         # TODO: Replace with `set_xticklabels` parametrization
         if augment_title:
             if len(components) >= 1:
@@ -114,11 +113,9 @@ class VisualizationMixin:
     @property
     def default_plot_components(self):
         """ Return a list of default components to plot, that are actually present in batch. """
-        components = ['images', 'masks', ['images', 'masks'], 'predictions', ['images', 'predictions']]
+        components = [['images'], ['masks'], ['images', 'masks'], ['predictions'], ['images', 'predictions']]
         components = DelegatingList(components)
-        component_present = lambda item: hasattr(self, item) if isinstance(item, str) \
-                                         else all(hasattr(self, subitem) for subitem in item)
-        components = components.filter(component_present, shallow=True)
+        components = components.filter(lambda item: all(hasattr(self, subitem) for subitem in item), shallow=True)
         return components
 
     def plot(self, components=None, idx=0, zoom=None, displayed_name=None,
@@ -145,7 +142,9 @@ class VisualizationMixin:
         if components is None:
             components = self.default_plot_components
         elif isinstance(components, str):
-            components = [components]
+            components = [[components]]
+        else:
+            components = [to_list(item) for item in components]
 
         plot_config = self.get_plot_config(components=components, idx=idx, zoom=zoom, displayed_name=displayed_name,
                                            augment_title=augment_title, augment_prediction=augment_prediction)
@@ -193,7 +192,10 @@ class VisualizationMixin:
         if components is None:
             components = self.default_plot_components
         elif isinstance(components, str):
-            components = [components]
+            components = [[components]]
+        else:
+            components = [to_list(item) for item in components]
+
 
         plot_config = defaultdict(list)
         for idx in indices:
