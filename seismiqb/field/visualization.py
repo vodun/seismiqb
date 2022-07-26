@@ -62,7 +62,7 @@ class VisualizationMixin:
 
     # 2D along axis
     def show_slide(self, loc, width=None, axis='i', zoom=None, src_geometry='geometry', src_labels='labels',
-                   indices='all', augment_mask=True, **kwargs):
+                   indices='all', augment_mask=True, plotter=plot, **kwargs):
         """ Show slide with horizon on it.
 
         Parameters
@@ -116,11 +116,10 @@ class VisualizationMixin:
             ylabel = self.geometry.index_headers[1]
             total = self.geometry.depth
 
-        title = f'Field `{self.displayed_name}`\n {header} {loc} out of {total}'
-
         kwargs = {
             'cmap': ['Greys_r', 'darkorange'],
-            'title': title,
+            'title': f'{header} {loc} out of {total}',
+            'suptitle':  f'Field `{self.displayed_name}`',
             'xlabel': xlabel,
             'ylabel': ylabel,
             'extent': (xmin, xmax, ymin, ymax),
@@ -134,11 +133,11 @@ class VisualizationMixin:
             **kwargs
         }
 
-        return plot(data=[seismic_slide, mask], **kwargs)
+        return plotter(data=[seismic_slide, mask], **kwargs)
 
 
     # 2D depth slice
-    def show_points(self, src='labels', **kwargs):
+    def show_points(self, src='labels', plotter=plot, **kwargs):
         """ Plot 2D map of labels points. Meant to be used with spatially disjoint objects (e.g. faults). """
         map_ = np.zeros(self.spatial_shape)
         denum = np.zeros(self.spatial_shape)
@@ -152,7 +151,7 @@ class VisualizationMixin:
 
         labels_class = type(getattr(self, src)[0]).__name__
         kwargs = {
-            'title': f'{labels_class}s on {self.displayed_name}',
+            'title': f'{labels_class}s on `{self.displayed_name}`',
             'xlabel': self.index_headers[0],
             'ylabel': self.index_headers[1],
             'cmap': ['Reds', 'black'],
@@ -160,12 +159,12 @@ class VisualizationMixin:
             'augment_mask': True,
             **kwargs
         }
-        return plot([map_, self.zero_traces], **kwargs)
+        return plotter([map_, self.zero_traces], **kwargs)
 
 
     # 2D top-view maps
     def show(self, attributes='snr', mode='image', title_pattern='{attributes} of {label_name}',
-             bbox=False, savepath=None, load_kwargs=None, show=True, **plot_kwargs):
+             bbox=False, savepath=None, load_kwargs=None, show=True, plotter=plot, **kwargs):
         """ Show one or more field attributes on one figure.
 
         Parameters
@@ -194,7 +193,12 @@ class VisualizationMixin:
             Path to save the figure. `**` is changed to a field base directory, `*` is changed to field base name.
         load_kwargs : dict
             Loading parameters common for every requested attribute.
-        plot_kwargs : dict
+        show : bool
+            Whether to show created plot or not.
+        plotter : instance of `plot`
+            Plotter instance to use.
+            Combined with `positions` parameter allows using subplots of already existing plotter.
+        kwargs : dict
             Additional parameters for plot creation.
 
         Examples
@@ -245,7 +249,7 @@ class VisualizationMixin:
                 label_attributes = load_params.apply(substitutor)
 
                 plotter = self.show(attributes=label_attributes, mode=mode, bbox=bbox, title_pattern=title_pattern,
-                                    savepath=savepath, load_kwargs=load_kwargs, show=show, **plot_kwargs)
+                                    savepath=savepath, load_kwargs=load_kwargs, show=show, plotter=plotter, **kwargs)
                 plotters.append(plotter)
 
             return plotters
@@ -254,7 +258,7 @@ class VisualizationMixin:
 
         # Prepare default plotting parameters
         plot_config = data_params.apply(self._make_plot_config, mode=mode).to_dict()
-        plot_config = {**plot_config, **plot_kwargs}
+        plot_config = {**plot_config, **kwargs}
 
         plot_config = {
             'suptitle': f'Field `{self.displayed_name}`',
@@ -281,7 +285,7 @@ class VisualizationMixin:
             plot_config['savepath'] = self.make_path(savepath, name=first_label_name)
 
         # Plot image with given params and return resulting figure
-        return plot(mode=mode, show=show, **plot_config)
+        return plotter(mode=mode, show=show, **plot_config)
 
     # Auxilary methods utilized by `show`
     ALIAS_TO_ATTRIBUTE = AttributesMixin.ALIAS_TO_ATTRIBUTE

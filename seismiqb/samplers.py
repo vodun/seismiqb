@@ -775,7 +775,7 @@ class SeismicSampler(Sampler):
                 msg += f'\n        {sampler}'
         return msg
 
-    def show_locations(self, savepath=None, **kwargs):
+    def show_locations(self, savepath=None, plotter=plot, **kwargs):
         """ Visualize on field map by using underlying `locations` structure. """
         data = []
         title = []
@@ -806,7 +806,7 @@ class SeismicSampler(Sampler):
 
         data.append(None) # reserve extra subplot for future legend
 
-        plotter = plot(data, **plot_config)
+        plotter = plotter(data, **plot_config)
 
         legend_config = {
             'mode': 'image',
@@ -824,7 +824,7 @@ class SeismicSampler(Sampler):
 
         return plotter
 
-    def show_sampled(self, n=10000, binary=False, savepath=None, **kwargs):
+    def show_sampled(self, n=10000, binary=False, savepath=None, plotter=plot, **kwargs):
         """ Visualize on field map by sampling `n` crop locations. """
         sampled = self.sample(n)
 
@@ -866,7 +866,7 @@ class SeismicSampler(Sampler):
             **kwargs
         }
 
-        plotter = plot(data, **plot_config)
+        plotter = plotter(data, **plot_config)
 
         legend_config = {
             'mode': 'image',

@@ -89,7 +89,7 @@ class VisualizationMixin:
 
 
 
-    def show_slide(self, loc, width=None, axis='i', zoom=None, **kwargs):
+    def show_slide(self, loc, width=None, axis='i', zoom=None, plotter=plot, **kwargs):
         """ Show slide with horizon on it.
 
         Parameters
@@ -102,6 +102,9 @@ class VisualizationMixin:
             Number of axis to load slide along.
         zoom : tuple
             Tuple of slices to apply directly to 2d images.
+        plotter : instance of `plot`
+            Plotter instance to use.
+            Combined with `positions` parameter allows using subplots of already existing plotter.
         """
         # Make `locations` for slide loading
         axis = self.field.geometry.parse_axis(axis)
@@ -147,7 +150,7 @@ class VisualizationMixin:
             'colorbar': [True, False],
             **kwargs
         }
-        return plot(data=[seismic_slide, mask], **kwargs)
+        return plotter(data=[seismic_slide, mask], **kwargs)
 
     # 3D
     def show_3d(self, n_points=100, threshold=100., z_ratio=1., zoom=None, show_axes=True,

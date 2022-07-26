@@ -18,6 +18,3 @@ class plot(batchflow.plot):
         'ylabel_size': 22,
         'transpose': (1, 0, 2)
     }
-
-    def _ipython_display_(self):
-        return None

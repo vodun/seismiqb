@@ -60,7 +60,8 @@ class BaseMetrics:
     EPS = 0.00001
 
 
-    def evaluate(self, metric, plot_supports=False, enlarge=True, width=5, visualize=True, savepath=None, **kwargs):
+    def evaluate(self, metric, plot_supports=False, enlarge=True,
+                 width=5, visualize=True, savepath=None, plotter=plot, **kwargs):
         """ Calculate desired metric, apply aggregation, then plot resulting metric-map.
         To plot the results, set `plot` argument to True.
 
@@ -78,6 +79,9 @@ class BaseMetrics:
             Whether to use `:func:.plot` to show the result.
         savepath : None or str
             Where to save visualization.
+        plotter : instance of `plot`
+            Plotter instance to use.
+            Combined with `positions` parameter allows using subplots of already existing plotter.
         kwargs : dict
             Arguments to be passed in metric-calculation methods
             (see `:meth:.compute_local` and `:meth:.compute_support`),
@@ -103,7 +107,7 @@ class BaseMetrics:
             plot_config = {**self.PLOT_DEFAULTS, **plot_config}
             if savepath is not None:
                 plot_config['savepath'] = self.horizon.field.make_path(savepath, name=self.name)
-            plotter = plot(metric_map, **plot_config)
+            plotter = plotter(metric_map, **plot_config)
 
             if 'support' in metric and plot_supports:
                 support_coords = self._last_evaluation['support_coords']
@@ -870,8 +874,8 @@ class HorizonMetrics(BaseMetrics):
         }
         return from_device(shifted_slice), plot_config
 
-    def compare(self, *others, clip_value=7, ignore_zeros=False, enlarge=True, width=9,
-                printer=print, visualize=True, hist_kwargs=None, show=True, savepath=None, **kwargs):
+    def compare(self, *others, clip_value=7, ignore_zeros=False, enlarge=True, width=9, printer=print,
+                visualize=True, hist_kwargs=None, show=True, savepath=None, **kwargs):
         """ Compare `self` horizon against the closest in `others`.
         Print textual and show graphical visualization of differences between the two.
         Returns dictionary with collected information: `closest` and `proximity_info`.
@@ -892,6 +896,10 @@ class HorizonMetrics(BaseMetrics):
             Whether to plot the graph
         hist_kwargs, kwargs : dict
             Parameters for histogram / main graph visualization.
+        show : bool
+            Whether to show created plot or not.
+        savepath : str
+            Path to save the plot to.
         """
         closest, proximity_info = other, oinfo = self.horizon.find_closest(*others)
         returns = {'closest': closest, 'proximity_info': proximity_info}
@@ -955,7 +963,7 @@ class HorizonMetrics(BaseMetrics):
                 'xlabel': self.horizon.field.index_headers[0],
                 'ylabel': self.horizon.field.index_headers[1],
 
-                'ncols': 2, 'nrows': 2,
+                'ncols': 2,
                 'augment_mask': True,
                 **kwargs,
             }
@@ -980,6 +988,7 @@ class HorizonMetrics(BaseMetrics):
                 'xlabel': 'difference values',
                 'ylabel': 'counts',
                 'title': 'Histogram of horizon depth differences',
+                'ncols': 2,
                 **(hist_kwargs or {}),
             }
 
@@ -994,12 +1003,14 @@ class HorizonMetrics(BaseMetrics):
                 hist_data = hist_data[~zero_mask]
                 graph_msg += f'\nNumber of zeros in histogram: {zero_mask.sum()}'
 
-            plotter(hist_data, mode='histogram', positions=2, show=show, **hist_kwargs)
-            plotter[3].add_text(graph_msg, size=15)
+            hist_plotter = plot(hist_data, mode='histogram', show=show, **hist_kwargs)
+            hist_plotter[1].add_text(graph_msg, size=15)
 
             if savepath is not None:
                 savepath = self.horizon.field.make_path(savepath, name=self.name)
                 plotter.save(savepath=savepath)
+                hist_plotter.save(savepath=savepath.replace('.', '_histogram.'))
+
             returns['plotter'] = plotter
 
         return returns

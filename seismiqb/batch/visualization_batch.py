@@ -43,6 +43,8 @@ class VisualizationMixin:
             Field name to show in suptitle instead of default.
         augment_title : bool
             Whether add data location string representation to titles or not.
+        augment_prediction : bool
+            If True, hide values smaller than 0.5 in 'predictions' batch component.
         """
         #pylint: disable=too-many-nested-blocks
         components = DelegatingList(components)
@@ -50,7 +52,6 @@ class VisualizationMixin:
         data = components.apply(self.get_component_data, idx=idx, zoom=zoom)
         cmap = components.apply(lambda item: 'darkorange' if 'mask' in item or 'prediction' in item else 'Greys_r')
 
-        # Remove some mask values. TODO: improve via better `binarize_masks` in plotter
         if augment_prediction:
             for i, component in enumerate(components):
                 if isinstance(component, list):
@@ -135,7 +136,11 @@ class VisualizationMixin:
         diplayed_name : str
             Field name to show in suptitle instead of default.
         augment_title : bool
-            Whether add data location string representation to titles or not.
+            If True, add data location string representation to titles.
+        augment_mask: bool
+            If True, hide 0s in binary mask and automatically choose color for 1s.
+        augment_prediction : bool
+            If True, hide values smaller than 0.5 in 'predictions' batch component.
         """
         if components is None:
             components = self.default_plot_components
@@ -175,6 +180,10 @@ class VisualizationMixin:
             Field name to show in suptitle instead of default.
         augment_title : bool
             Whether add data location string representation to titles or not.
+        augment_mask: bool
+            If True, hide 0s in binary mask and automatically choose color for 1s.
+        augment_prediction : bool
+            If True, hide values smaller than 0.5 in 'predictions' batch component.
         """
         if indices is None:
             indices = self.random.choice(len(self), size=min(n, len(self)), replace=False)

@@ -257,7 +257,6 @@ class SeismicGeometry(CacheMixin, ExportMixin):
 
     def extract_field_name(self):
         """ Try to parse field from geometry name. """
-
         # search for a sequence of uppercase letters between '_' and '.' symbols
         field_search = re.search(r'_([A-Z]+?)\.', self.name)
         if field_search is None:
@@ -730,7 +729,7 @@ class SeismicGeometry(CacheMixin, ExportMixin):
 
 
     # Visual representation
-    def show(self, matrix='snr', **kwargs):
+    def show(self, matrix='snr', plotter=plot, **kwargs):
         """ Show geometry related top-view map. """
         matrix_name = matrix if isinstance(matrix, str) else kwargs.get('matrix_name', 'custom matrix')
         kwargs = {
@@ -742,9 +741,9 @@ class SeismicGeometry(CacheMixin, ExportMixin):
             **kwargs
             }
         matrix = getattr(self, matrix) if isinstance(matrix, str) else matrix
-        return plot(matrix, **kwargs)
+        return plotter(matrix, **kwargs)
 
-    def show_histogram(self, normalize=None, bins=50, **kwargs):
+    def show_histogram(self, normalize=None, bins=50, plotter=plot, **kwargs):
         """ Show distribution of amplitudes in `trace_container`. Optionally applies chosen normalization. """
         data = np.copy(self.trace_container)
         if normalize:
@@ -758,9 +757,9 @@ class SeismicGeometry(CacheMixin, ExportMixin):
             'ylabel': 'density',
             **kwargs
         }
-        return plot(data, bins=bins, mode='histogram', **kwargs)
+        return plotter(data, bins=bins, mode='histogram', **kwargs)
 
-    def show_slide(self, loc=None, start=None, end=None, step=1, axis=0, zoom=None, stable=True, **kwargs):
+    def show_slide(self, loc, start=None, end=None, step=1, axis=0, zoom=None, stable=True, plotter=plot, **kwargs):
         """ Show seismic slide in desired place.
         Under the hood relies on :meth:`load_slide`, so works with geometries in any formats.
 
@@ -776,6 +775,9 @@ class SeismicGeometry(CacheMixin, ExportMixin):
             Parameters of slice loading for 1D index.
         stable : bool
             Whether or not to use the same sorting order as in the segyfile.
+        plotter : instance of `plot`
+            Plotter instance to use.
+            Combined with `positions` parameter allows using subplots of already existing plotter.
         """
         axis = self.parse_axis(axis)
         slide = self.load_slide(loc=loc, start=start, end=end, step=step, axis=axis, stable=stable)
@@ -805,15 +807,17 @@ class SeismicGeometry(CacheMixin, ExportMixin):
 
         kwargs = {
             'title': title,
+            'suptitle':  f'Field `{self.displayed_name}`',
             'xlabel': xlabel,
             'ylabel': ylabel,
             'cmap': 'Greys_r',
+            'colorbar': True,
             'extent': (xmin, xmax, ymin, ymax),
             'labeltop': False,
             'labelright': False,
             **kwargs
         }
-        return plot(slide, **kwargs)
+        return plotter(slide, **kwargs)
 
     def show_quality_map(self, **kwargs):
         """ Show quality map. """

@@ -132,21 +132,32 @@ class SeismicDataset(Dataset):
         return msg
 
 
-    def show_slide(self, loc, idx=0, axis='iline', zoom=None, src_labels='labels', width=5, indices='all', **kwargs):
+    def show_slide(self, loc, idx=0, axis='iline', zoom=None, src_labels='labels',
+                   indices='all', width=5, plotter=plot, **kwargs):
         """ Show slide of the given cube on the given line.
 
         Parameters
         ----------
         loc : int
             Number of slide to load.
+        idx : str, int
+            Number of cube in the index to use.
         axis : int or str
             Number or name of axis to load slide along.
         zoom : tuple of slices
             Tuple of slices to apply directly to 2d images.
-        idx : str, int
-            Number of cube in the index to use.
         src_labels : str
             Dataset components to show as labels.
+        indices : str, int or sequence of ints
+            Which labels to use in mask creation.
+            If 'all', then use all labels.
+            If 'single' or `random`, then use one random label.
+            If int or array-like, then element(s) are interpreted as indices of desired labels.
+        width : int
+            Width of the resulting label.
+        plotter : instance of `plot`
+            Plotter instance to use.
+            Combined with `positions` parameter allows using subplots of already existing plotter.
         """
         components = ('images', 'masks') if getattr(self, src_labels)[idx] else ('images',)
         cube_name = self.indices[idx]
@@ -210,7 +221,7 @@ class SeismicDataset(Dataset):
             **kwargs
         }
 
-        return plot(data, **kwargs)
+        return plotter(data, **kwargs)
 
     # Facies
     def evaluate_facies(self, src_horizons, src_true=None, src_pred=None, metrics='dice'):
