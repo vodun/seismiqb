@@ -11,14 +11,14 @@ from scipy.ndimage import find_objects
 from .horizon_attributes import AttributesMixin
 from .horizon_extraction import ExtractionMixin
 from .horizon_processing import ProcessingMixin
-from .horizon_visualization import VisualizationMixin
+from .horizon_visualization import HorizonVisualizationMixin
 from ..utils import CacheMixin, CharismaMixin
 from ..utils import groupby_mean, groupby_min, groupby_max, groupby_prob, make_interior_points_mask
 from ..utils import MetaDict
 
 
 
-class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, ProcessingMixin, VisualizationMixin):
+class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, ProcessingMixin, HorizonVisualizationMixin):
     """ Contains spatially-structured horizon: each point describes a height on a particular (iline, xline).
 
     Initialized from `storage` and `geometry`, where storage can be one of:
@@ -577,17 +577,6 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
 
             mask[idx_i, idx_x] = heights
         return mask
-
-    def load_slide(self, loc, axis=0, width=3):
-        """ Create a mask at desired location along supplied axis. """
-        axis = self.field.geometry.parse_axis(axis)
-        locations = self.field.geometry.make_slide_locations(loc, axis=axis)
-        shape = np.array([(slc.stop - slc.start) for slc in locations])
-        width = width or max(5, shape[-1] // 100)
-
-        mask = np.zeros(shape, dtype=np.float32)
-        mask = self.add_to_mask(mask, locations=locations, width=width)
-        return np.squeeze(mask)
 
 
     # Evaluate horizon on its own / against other(s)

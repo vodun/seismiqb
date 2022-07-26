@@ -22,7 +22,9 @@ def generate_synthetic(shape=(500, 500, 300), i_scale=5, i_frequency=0.02, x_sca
 
     sticks = []
     for loc in np.linspace(0, shape[sticks_direction]-1, n_sticks).astype(np.int32):
-        nodes = np.linspace(0, shape[1-sticks_direction]-1, n_nodes).astype(np.int32)
+        start = int(0.4 * (shape[1-sticks_direction]-1))
+        end = int(0.6 * (shape[1-sticks_direction]-1))
+        nodes = np.linspace(start, end, n_nodes).astype(np.int32)
         depthes = np.linspace(0, shape[2]-1, n_nodes).astype(np.int32)
         array = np.stack([nodes, depthes], axis=1)
         array = np.insert(array, sticks_direction, loc, axis=1)

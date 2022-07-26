@@ -10,129 +10,22 @@ import pandas as pd
 from numba import prange, njit
 
 from sklearn.decomposition import PCA
-from sklearn.neighbors import NearestNeighbors
 
 from .horizon import Horizon
 from .fault_triangulation import sticks_to_simplices, simplices_to_points
 from .fault_postprocessing import split_array, thin_line
 from .fault_approximation import points_to_sticks
+from .mixins import VisualizationMixin, CoordinatesMixin
 from ..plotters import show_3d
+from ..utils import CharismaMixin, make_interior_points_mask
 
-
-class Fault(Horizon):
-    """ Contains points of fault.
-
-    Initialized from `storage` and `geometry`, where storage can be one of:
-        - csv-like file in CHARISMA or REDUCED_CHARISMA format.
-        - npy file with ndarray of (N, 3) shape or array itself.
-        - npz file with 'points', 'nodes', 'simplices' and 'sticks' or dict with the same keys.
-    """
-    #pylint: disable=attribute-defined-outside-init
-    FAULT_STICKS = ['INLINE', 'iline', 'xline', 'cdp_x', 'cdp_y', 'height', 'name', 'number']
-    COLUMNS = ['iline', 'xline', 'height', 'name', 'number']
-
-    def __init__(self, storage, *args, direction=None, **kwargs):
-        self.sticks = None
-        self.nodes = None
-        self.simplices = None
-        self.direction = None
-
-        if isinstance(storage, str):
-            force_format = 'file'
-        elif isinstance(storage, np.ndarray):
-            force_format = 'points'
-        elif isinstance(storage, dict):
-            force_format = 'objects'
-
-        super().__init__(storage, *args, force_format=force_format, reset=None, **kwargs)
-        self.set_direction(direction)
-
-    def set_direction(self, direction):
-        """ Find azimuth of the fault. """
-        if direction is None:
-            if self.sticks is not None and len(self.sticks) > 0:
-                if len(np.unique(self.sticks[0][:, 0])) == 1:
-                    self.direction = 0
-                elif len(np.unique(self.sticks[0][:, 1])) == 1:
-                    self.direction = 1
-            if self.direction is None and len(self.points) > 0:
-                mean_depth = int(np.median(self.points[:, 2]))
-                depth_slice = self.points[self.points[:, 2] == mean_depth]
-                self.direction = 0 if depth_slice[:, 0].ptp() > depth_slice[:, 1].ptp() else 1
-            else:
-                self.direction = 0
-            # TODO: azimuth from charisma
-        elif isinstance(direction, int):
-            self.direction = direction
-        elif isinstance(direction[self.field.short_name], int):
-            self.direction = direction[self.field.short_name]
-        else:
-            self.direction = direction[self.field.short_name][self.name]
-
-    def from_objects(self, storage, **kwargs):
-        """ Load fault from dict with 'points', 'nodes', 'simplices' and 'sticks'. """
-        self.from_points(storage['points'], verify=False, **kwargs)
-        for key in ['sticks', 'nodes', 'simplices']:
-            setattr(self, key, storage.get(key))
-
-    def from_file(self, path, transform=True, verify=True, direction=None, **kwargs):
-        """ Init from path to either CHARISMA, REDUCED_CHARISMA or FAULT_STICKS csv-like file
-        or from npy/npz.
-        """
-        path = self.field.make_path(path, makedirs=False)
-        self.path = path
-
-        self.name = os.path.basename(path)
-        ext = os.path.splitext(path)[1][1:]
-
-        if ext == 'npz':
-            self.load_npz(path)
-            self.format = 'file-npz'
-        elif ext == 'npy':
-            self.load_npy(path)
-            self.format = 'file-npy'
-        else:
-            self.load_fault_sticks(path, transform, verify, **kwargs)
-            self.format = 'file-sticks'
-
-    def load_fault_sticks(self, path, transform=True, verify=True, fix=False, width=3, **kwargs):
-        """ Get point cloud array from file values. """
-        df = self.create_df(path)
-        if 'cdp_x' in df.columns:
-            df = self.recover_lines_from_cdp(df)
-
-        if len(df) > 0:
-            points = df[self.REDUCED_CHARISMA_SPEC].values
-        else:
-            self.simplices, self.nodes = np.array([]), np.zeros((0, 3), dtype='int32')
-            points = np.zeros((0, 3), dtype='int32')
-            self.from_points(points, verify=False)
-            return
-        if transform:
-            points = self.field_reference.geometry.lines_to_cubic(points)
-        df[self.REDUCED_CHARISMA_SPEC] = points.astype(np.int32)
-
-        if verify:
-            idx = np.where((points[:, 0] >= 0) &
-                        (points[:, 1] >= 0) &
-                        (points[:, 2] >= 0) &
-                        (points[:, 0] < self.field_reference.shape[0]) &
-                        (points[:, 1] < self.field_reference.shape[1]) &
-                        (points[:, 2] < self.field_reference.shape[2]))[0]
-            df = df.iloc[idx]
-
-        self.sticks = self.csv_to_sticks(df, fix)
-        if len(self.sticks) > 0:
-            self.simplices, self.nodes = sticks_to_simplices(self.sticks, return_indices=True)
-            points = simplices_to_points(self.simplices, self.nodes, width=width)
-        else:
-            self.simplices, self.nodes = np.array([]), np.zeros((0, 3), dtype='int32')
-            points = np.zeros((0, 3), dtype='int32')
-        self.from_points(points, verify=False)
+class FaultSticksMixin(CharismaMixin):
+    FAULT_STICKS_SPEC = ['INLINE', 'iline', 'xline', 'cdp_x', 'cdp_y', 'height', 'name', 'number']
+    REDUCED_FAULT_STICKS_SPEC = ['iline', 'xline', 'height', 'name', 'number']
 
     @classmethod
-    def create_df(cls, path):
-        """ Create pandas.DataFrame from CHARISMA file. """
+    def read_df(cls, path):
+        """ Create pandas.DataFrame from FaultSticks/CHARISMA file. """
         with open(path, encoding='utf-8') as file:
             line_len = len([item for item in file.readline().split(' ') if len(item) > 0])
 
@@ -141,8 +34,10 @@ class Fault(Horizon):
 
         if line_len == 3:
             names = cls.REDUCED_CHARISMA_SPEC
+        elif line_len == 5:
+            names = cls.REDUCED_FAULT_STICKS_SPEC
         elif line_len == 8:
-            names = cls.FAULT_STICKS
+            names = cls.FAULT_STICKS_SPEC
         elif line_len >= 9:
             names = cls.CHARISMA_SPEC
         else:
@@ -150,93 +45,93 @@ class Fault(Horizon):
 
         return pd.read_csv(path, sep=r'\s+', names=names)
 
-    def csv_to_sticks(self, df, fix=False):
+    def df_to_sticks(self, df, return_direction=False):
         """ Transform initial fault dataframe to array of sticks. """
         if len(df) == 0:
             raise ValueError('Empty DataFrame (possibly wrong coordinates).')
-        if 'number' in df.columns: # fault file has stick index
+        if 'number' in df.columns: # Dataframe has stick index
             col = 'number'
-        elif df.iline.iloc[0] == df.iline.iloc[1]: # there is stick points with the same iline
+            direction = None
+        elif df.iline.iloc[0] == df.iline.iloc[1]: # Use iline as an index
             col = 'iline'
-        elif df.xline.iloc[0] == df.xline.iloc[1]: # there is stick points with the same xline
+            direction = 0
+        elif df.xline.iloc[0] == df.xline.iloc[1]: # Use xline as an index
             col = 'xline'
+            direction = 1
         else:
             raise ValueError('Wrong format of sticks: there is no column to group points into sticks.')
+
         df = df.sort_values('height')
         sticks = df.groupby(col).apply(lambda x: x[Horizon.COLUMNS].values).reset_index(drop=True)
-        if fix:
-            # Remove sticks with horizontal parts.
-            mask = sticks.apply(lambda x: len(np.unique(np.array(x)[:, 2])) == len(x))
-            if not mask.all():
-                warnings.warn(f'{self.name}: Fault has horizontal parts of sticks.')
-            sticks = sticks.loc[mask]
-            # Remove sticks with one node.
-            mask = sticks.apply(len) > 1
-            if not mask.all():
-                warnings.warn(f'{self.name}: Fault has one-point sticks.')
-            sticks = sticks.loc[mask]
-            # Filter faults with one stick.
-            if len(sticks) == 1:
-                warnings.warn(f'{self.name}: Fault has an only one stick')
-                sticks = pd.Series()
-            elif len(sticks) == 0:
-                warnings.warn(f'{self.name}: Empty file')
-                sticks = pd.Series()
-            #Order sticks with respect of fault direction. Is necessary to perform following triangulation.
-            if len(sticks) > 0:
-                pca = PCA(1)
-                coords = pca.fit_transform(np.array([stick[0][:2] for stick in sticks.values]))
-                indices = np.array([i for _, i in sorted(zip(coords, range(len(sticks))))])
-                sticks = sticks.iloc[indices]
-        return sticks.values
 
-    def load_npz(self, path):
-        """ Load fault points, nodes and sticks from npz file. """
-        npzfile = np.load(path, allow_pickle=False)
-        self.from_points(npzfile['points'], verify=False)
-        self.nodes = npzfile.get('nodes')
-        self.simplices = npzfile.get('simplices')
-        sticks = npzfile.get('sticks')
-
-        sticks_labels = npzfile.get('sticks_labels')
-        self.sticks = self.labeled_array_to_sticks(sticks, sticks_labels)
-
-    def load_npy(self, path):
-        """ Load fault points from npy file. """
-        points = np.load(path, allow_pickle=False)
-        self.from_points(points, verify=False)
-
-    def _prepare_path(self, path):
-        path = self.field.make_path(path, name=self.short_name, makedirs=False)
-
-        if os.path.exists(path):
-            raise ValueError(f'{path} already exists.')
-
-        folder_name = os.path.dirname(path)
-        if not os.path.exists(folder_name):
-            os.makedirs(folder_name)
-
-        return path
-
-    def dump_points(self, path):
-        """ Dump fault to npz. """
-        path = self._prepare_path(path)
-
-        if self.sticks is not None:
-            sticks, sticks_labels = self.sticks_to_labeled_array(self.sticks)
+        if return_direction:
+            return sticks, direction
         else:
-            sticks, sticks_labels = np.zeros((0, 3)), np.zeros((0, 1))
+            return sticks
 
-        np.savez(path, points=self.points, nodes=self.nodes, simplices=self.simplices,
-                 sticks=sticks, sticks_labels=sticks_labels)
+    def remove_broken_sticks(self, sticks):
+        # Remove sticks with horizontal parts.
+        mask = sticks.apply(lambda x: len(np.unique(np.array(x)[:, 2])) == len(x))
+        if not mask.all():
+            warnings.warn(f'{self.name}: Fault has horizontal parts of sticks.')
+        sticks = sticks.loc[mask]
 
-    def dump_sticks(self, path, sticks_step=10, stick_nodes_step=10):
+        # Remove sticks with one node.
+        mask = sticks.apply(len) > 1
+        if not mask.all():
+            warnings.warn(f'{self.name}: Fault has one-point sticks.')
+        sticks = sticks.loc[mask]
+
+        # Filter faults with one stick.
+        if len(sticks) == 1:
+            warnings.warn(f'{self.name}: Fault has an only one stick')
+            sticks = pd.Series()
+        elif len(sticks) == 0:
+            warnings.warn(f'{self.name}: Empty file')
+            sticks = pd.Series()
+
+        return sticks
+
+    def load_fault_sticks(self, path, transform=True, verify=True,
+                          recover_lines=True, remove_broken_sticks=False, **kwargs):
+        """ Get point cloud array from file values. """
+        df = self.read_df(path)
+
+        if len(df) == 0:
+            return
+
+        if recover_lines and 'cdp_x' in df.columns:
+            df = self.recover_lines_from_cdp(df)
+
+        points = df[self.REDUCED_CHARISMA_SPEC].values
+
+        if transform:
+            points = self.field_reference.geometry.lines_to_cubic(points)
+        df[self.REDUCED_CHARISMA_SPEC] = np.round(points).astype(np.int32)
+
+        if verify:
+            mask = make_interior_points_mask(points, self.field_reference.shape)
+            df = df.iloc[mask]
+
+        sticks, direction = self.df_to_sticks(df, return_direction=True)
+        if remove_broken_sticks:
+            sticks = self.remove_broken_sticks(sticks)
+
+        # Order sticks with respect of fault direction. Is necessary to perform following triangulation.
+        if len(sticks) > 0:
+            pca = PCA(1)
+            coords = pca.fit_transform(np.array([stick[0][:2] for stick in sticks.values]))
+            indices = np.array([i for _, i in sorted(zip(coords, range(len(sticks))))])
+            sticks = sticks.iloc[indices]
+
+        self._sticks = sticks.values
+        self.direction = direction
+
+    def dump_fault_sticks(self, path, sticks_step=10, stick_nodes_step=10):
         """ Dump fault sticks. """
-        path = self._prepare_path(path)
+        path = self.field.make_path(path, name=self.field.short_name, makedirs=False)
 
         sticks_df = []
-        if self.sticks is None:
-            self.sticks = self.get_sticks(self.points, sticks_step, stick_nodes_step)
         for stick_idx, stick in enumerate(self.sticks):
             stick = self.field.geometry.cubic_to_lines(stick).astype(int)
             cdp = self.field.geometry.lines_to_cdp(stick[:, :2])
@@ -254,44 +149,9 @@ class Fault(Horizon):
         sticks_df = pd.concat(sticks_df)
         sticks_df.to_csv(path, header=False, index=False, sep=' ')
 
-    def sticks_to_labeled_array(self, sticks):
-        """ Auxilary method to dump fault into npz with allow_pickle=False. """
-        labels = sum([[i] * len(item) for i, item in enumerate(sticks)], [])
-        return np.concatenate(sticks), labels
-
-    def labeled_array_to_sticks(self, sticks, labels):
-        """ Auxilary method to dump fault into npz with allow_pickle=False. """
-        return np.array(split_array(sticks, labels), dtype=object)
-
-    def points_to_sticks(self, slices=None, sticks_step=10, stick_nodes_step=10):
-        """ Create sticks from fault points. """
-        points = self.points.copy()
-        if slices is not None:
-            for i in range(3):
-                points = points[points[:, i] <= slices[i].stop]
-                points = points[points[:, i] >= slices[i].start]
-        if len(points) <= 3:
-            self.sticks = []
-            self.simplices = np.zeros((0, 3))
-            self.nodes = np.zeros((0, 3))
-        else:
-            self.sticks = self.get_sticks(points, sticks_step, stick_nodes_step)
-            self.simplices, self.nodes = sticks_to_simplices(self.sticks, return_indices=True)
-
-    def add_to_mask(self, mask, locations=None, width=1, **kwargs):
-        """ Add fault to background. """
-        _ = kwargs
-        mask_bbox = np.array([[locations[0].start, locations[0].stop],
-                            [locations[1].start, locations[1].stop],
-                            [locations[2].start, locations[2].stop]],
-                            dtype=np.int32)
-        points = self.points
-
-        if (self.bbox[:, 1] < mask_bbox[:, 0]).any() or (self.bbox[:, 0] >= mask_bbox[:, 1]).any():
-            return mask
-
-        insert_fault_into_mask(mask, points, mask_bbox, width=width, axis=1-self.direction)
-        return mask
+    def show_file(self):
+        with open(self.path, 'r') as f:
+            print(f.read())
 
     @classmethod
     def check_format(cls, path, verbose=False):
@@ -305,18 +165,31 @@ class Fault(Horizon):
             response if file is succesfully readed.
         """
         for filename in glob.glob(path):
+            if os.path.splitext(filename)[1] == '.dvc':
+                continue
             try:
-                df = cls.create_df(filename)
+                df = cls.read_df(filename)
+                sticks = cls.df_to_sticks(cls, df)
             except ValueError:
                 print(filename, ': wrong format')
             else:
                 if 'name' in df.columns and len(df.name.unique()) > 1:
                     print(filename, ': file must be splitted.')
-                elif len(cls.csv_to_sticks(cls, df)) == 1:
+                    continue
+
+                if len(sticks) == 1:
                     print(filename, ': fault has an only one stick')
-                elif any(len(item) == 1 for item in cls.csv_to_sticks(cls, df)):
+                    continue
+
+                if any(len(item) == 1 for item in sticks):
                     print(filename, ': fault has one point stick')
-                elif verbose:
+                    continue
+                mask = sticks.apply(lambda x: len(np.unique(np.array(x)[:, 2])) == len(x))
+                if not mask.all():
+                    print(filename, ': fault has horizontal parts of sticks.')
+                    continue
+
+                if verbose:
                     print(filename, ': OK')
 
     @classmethod
@@ -331,6 +204,68 @@ class Fault(Horizon):
     def fault_to_csv(cls, df, dst):
         """ Save the fault to csv. """
         df.to_csv(os.path.join(dst, df.name), sep=' ', header=False, index=False)
+
+class FaultSerializationMixin:
+    def load_npz(self, path):
+        """ Load fault points, nodes and sticks from npz file. """
+        npzfile = np.load(path, allow_pickle=False)
+
+        sticks = npzfile.get('sticks')
+        sticks_labels = npzfile.get('sticks_labels')
+
+        self.from_objects({
+            'points': npzfile['points'],
+            'nodes': npzfile.get('nodes'),
+            'simplices': npzfile.get('simplices'),
+            'sticks': self.labeled_array_to_sticks(sticks, sticks_labels),
+        })
+
+        self.direction = npzfile.get('direction')
+
+    def load_npy(self, path):
+        """ Load fault points from npy file. """
+        points = np.load(path, allow_pickle=False)
+        self._points = points
+
+    def dump_points(self, path):
+        """ Dump fault to npz. """
+        path = self.field.make_path(path, name=self.field.short_name, makedirs=False)
+
+        if self.has_component('sticks'):
+            sticks, sticks_labels = self.sticks_to_labeled_array(self.sticks)
+        else:
+            sticks, sticks_labels = np.zeros((0, 3)), np.zeros((0, 1))
+
+        np.savez(path, points=self._points, nodes=self._nodes, simplices=self._simplices,
+                 sticks=sticks, sticks_labels=sticks_labels)#, direction=self.direction)
+
+
+    def sticks_to_labeled_array(self, sticks):
+        """ Auxilary method to dump fault into npz with allow_pickle=False. """
+        labels = sum([[i] * len(item) for i, item in enumerate(sticks)], [])
+        return np.concatenate(sticks), labels
+
+    def labeled_array_to_sticks(self, sticks, labels):
+        """ Auxilary method to dump fault into npz with allow_pickle=False. """
+        return np.array(split_array(sticks, labels), dtype=object)
+
+
+class FaultVisualizationMixin(VisualizationMixin):
+    def __repr__(self):
+        return f"""<Fault `{self.name}` for `{self.field.displayed_name}` at {hex(id(self))}>"""
+
+    def show_slide(self, loc, **kwargs):
+        cmap = kwargs.get('cmap', ['Greys_r', 'red'])
+        width = kwargs.get('width', 5)
+
+        kwargs = {**kwargs, 'cmap': cmap, 'width': width}
+        super().show_slide(loc, **kwargs)
+
+    def show(self, axis=0, centering=True, zoom=None, **kwargs):
+        if centering and zoom is None:
+            zoom = [slice(max(0, self.bbox[i][0]-20), min(self.bbox[i][1]+20, self.field.shape[i])) for i in range(3) if i != axis]
+
+        return self.show_slide(loc=int(np.mean(self.bbox[axis])), zoom=zoom, axis=axis, **kwargs)
 
     def show_3d(self, sticks_step=10, stick_nodes_step=10, z_ratio=1., zoom=None, show_axes=True,
                 width=1200, height=1200, margin=20, savepath=None, **kwargs):
@@ -375,213 +310,12 @@ class Fault(Horizon):
 
     def make_triangulation(self, slices, sticks_step, stick_nodes_step, *args, **kwargs):
         """ Return triangulation of the fault. It will created if needed. """
-        if self.simplices is None:
-            self.points_to_sticks(slices, sticks_step, stick_nodes_step)
-        return self.nodes[:, 0], self.nodes[:, 1], self.nodes[:, 2], self.simplices
+        if len(self.simplices) > 0:
+            return self.nodes[:, 0], self.nodes[:, 1], self.nodes[:, 2], self.simplices
+        fake_fault = get_fake_one_stick_fault(self)
+        return fake_fault.make_triangulation(slices, sticks_step, stick_nodes_step, *args, **kwargs)
 
-
-    def __repr__(self):
-        return f"""<Fault `{self.name}` for `{self.field.displayed_name}` at {hex(id(self))}>"""
-
-    def get_sticks(self, points, sticks_step, stick_nodes_step):
-        """ Get sticks from fault which is represented as a cloud of points.
-
-        Parameters
-        ----------
-        points : np.ndarray
-            Fault points.
-        sticks_step : int
-            Number of slides between sticks.
-        stick_nodes_step : int
-            Distance between stick nodes
-
-        Returns
-        -------
-        numpy.ndarray
-            Array of sticks. Each item of array is a stick: sequence of 3D points.
-        """
-        if self.direction is not None:
-            axis = self.direction
-        else:
-            pca = PCA(1)
-            pca.fit(points)
-            axis = 0 if np.abs(pca.components_[0][0]) > np.abs(pca.components_[0][1]) else 1
-
-        points = points[np.argsort(points[:, axis])]
-        projections = np.split(points, np.unique(points[:, axis], return_index=True)[1][1:])
-        projections = [item for item in projections if item[:, 2].max() - item[:, 2].min() > 5]
-        step = min(sticks_step, len(projections)-1)
-        if step == 0:
-            return []
-        projections = projections[::step]
-        res = []
-
-        for p in projections:
-            p = p[np.argsort(p[:, -1])]
-            points_ = thin_line(p, axis=-1).astype(int)
-            loc = p[0, axis]
-            nodes = approximate_points(points_[:, [1-axis, 2]], stick_nodes_step)
-            nodes_ = np.zeros((len(nodes), 3))
-            nodes_[:, [1-axis, 2]] = nodes
-            nodes_[:, axis] = loc
-            res += [nodes_]
-        return res
-
-# def approximate_points(points, n_points):
-#     """ Approximate points by stick. """
-#     pca = PCA(1)
-#     array = pca.fit_transform(points)
-
-#     # step = (array.max() - array.min()) / (n_points - 1)
-#     step = n_points
-#     initial = np.arange(array.min(), array.max() + step / 2, step)
-#     indices = np.unique(nearest_neighbors(initial.reshape(-1, 1), array.reshape(-1, 1), 1))
-#     return points[indices]
-
-# def nearest_neighbors(values, all_values, n_neighbors=10):
-#     """ Find nearest neighbours for each `value` items in `all_values`. """
-#     nn = NearestNeighbors(n_neighbors=n_neighbors).fit(all_values)
-#     return nn.kneighbors(values)[1].flatten()
-
-@njit(parallel=True)
-def insert_fault_into_mask(mask, points, mask_bbox, width, axis):
-    """ Add new points into binary mask. """
-    #pylint: disable=not-an-iterable
-
-    for i in prange(len(points)):
-        point = points[i]
-        if (point[0] >= mask_bbox[0][0]) and (point[0] < mask_bbox[0][1]):
-            if (point[1] >= mask_bbox[1][0]) and (point[1] < mask_bbox[1][1]):
-                if (point[2] >= mask_bbox[2][0]) and (point[2] < mask_bbox[2][1]):
-                    slices = [slice(point[j] - mask_bbox[j][0], point[j] - mask_bbox[j][0]+1) for j in range(3)]
-                    if width > 1:
-                        slices[axis] = slice(
-                            max(0, point[axis] - mask_bbox[axis][0] - (width // 2)),
-                            min(point[axis] - mask_bbox[axis][0] + width // 2 + width % 2, mask.shape[axis])
-                        )
-                    mask[slices[0], slices[1], slices[2]] = 1
-
-from ..utils import CharismaMixin, make_interior_points_mask
-
-class FaultSticksMixin(CharismaMixin):
-    FAULT_STICKS_SPEC = ['INLINE', 'iline', 'xline', 'cdp_x', 'cdp_y', 'height', 'name', 'number']
-    REDUCED_FAULT_STICKS_SPEC = ['iline', 'xline', 'height', 'name', 'number']
-
-    @classmethod
-    def read_df(cls, path):
-        """ Create pandas.DataFrame from FaultSticks/CHARISMA file. """
-        with open(path, encoding='utf-8') as file:
-            line_len = len([item for item in file.readline().split(' ') if len(item) > 0])
-
-        if line_len == 0:
-            return pd.DataFrame({})
-
-        if line_len == 3:
-            names = cls.REDUCED_CHARISMA_SPEC
-        elif line_len == 5:
-            names = cls.REDUCED_FAULT_STICKS_SPEC
-        elif line_len == 8:
-            names = cls.FAULT_STICKS_SPEC
-        elif line_len >= 9:
-            names = cls.CHARISMA_SPEC
-        else:
-            raise ValueError('Fault labels must be in FAULT_STICKS, CHARISMA or REDUCED_CHARISMA format.')
-
-        return pd.read_csv(path, sep=r'\s+', names=names)
-
-    def df_to_sticks(self, df):
-        """ Transform initial fault dataframe to array of sticks. """
-        if len(df) == 0:
-            raise ValueError('Empty DataFrame (possibly wrong coordinates).')
-        if 'number' in df.columns: # Dataframe has stick index
-            col = 'number'
-        elif df.iline.iloc[0] == df.iline.iloc[1]: # Use iline as an index
-            col = 'iline'
-        elif df.xline.iloc[0] == df.xline.iloc[1]: # Use xline as an index
-            col = 'xline'
-        else:
-            raise ValueError('Wrong format of sticks: there is no column to group points into sticks.')
-
-        df = df.sort_values('height')
-        sticks = df.groupby(col).apply(lambda x: x[Horizon.COLUMNS].values).reset_index(drop=True)
-
-        return sticks
-
-    def remove_broken_sticks(self, sticks):
-        # Remove sticks with horizontal parts.
-        mask = sticks.apply(lambda x: len(np.unique(np.array(x)[:, 2])) == len(x))
-        if not mask.all():
-            warnings.warn(f'{self.name}: Fault has horizontal parts of sticks.')
-        sticks = sticks.loc[mask]
-        # Remove sticks with one node.
-        mask = sticks.apply(len) > 1
-        if not mask.all():
-            warnings.warn(f'{self.name}: Fault has one-point sticks.')
-        sticks = sticks.loc[mask]
-        # Filter faults with one stick.
-        if len(sticks) == 1:
-            warnings.warn(f'{self.name}: Fault has an only one stick')
-            sticks = pd.Series()
-        elif len(sticks) == 0:
-            warnings.warn(f'{self.name}: Empty file')
-            sticks = pd.Series()
-        # Order sticks with respect of fault direction. Is necessary to perform following triangulation.
-        if len(sticks) > 0:
-            pca = PCA(1)
-            coords = pca.fit_transform(np.array([stick[0][:2] for stick in sticks.values]))
-            indices = np.array([i for _, i in sorted(zip(coords, range(len(sticks))))])
-            sticks = sticks.iloc[indices]
-        return sticks
-
-    def load_fault_sticks(self, path, transform=True, verify=True,
-                          recover_lines=True, remove_broken_sticks=False, **kwargs):
-        """ Get point cloud array from file values. """
-        df = self.read_df(path)
-
-        if len(df) == 0:
-            return
-
-        if recover_lines and 'cdp_x' in df.columns:
-            df = self.recover_lines_from_cdp(df)
-
-        points = df[self.REDUCED_CHARISMA_SPEC].values
-
-        if transform:
-            points = self.field_reference.geometry.lines_to_cubic(points)
-        df[self.REDUCED_CHARISMA_SPEC] = np.round(points).astype(np.int32)
-
-        if verify:
-            mask = make_interior_points_mask(points, self.field_reference.shape)
-            df = df.iloc[mask]
-
-        sticks = self.df_to_sticks(df)
-        if remove_broken_sticks:
-            sticks = self.remove_broken_sticks(sticks)
-        self._sticks = sticks.values
-
-    def dump_fault_sticks(self, path, sticks_step=10, stick_nodes_step=10):
-        """ Dump fault sticks. """
-        path = self.field.make_path(path, name=self.field.short_name, makedirs=False)
-
-        sticks_df = []
-        for stick_idx, stick in enumerate(self.sticks):
-            stick = self.field.geometry.cubic_to_lines(stick).astype(int)
-            cdp = self.field.geometry.lines_to_cdp(stick[:, :2])
-            df = {
-                'INLINE-': 'INLINE-',
-                'iline': stick[:, 0],
-                'xline': stick[:, 1],
-                'cdp_x': cdp[:, 0],
-                'cdp_y': cdp[:, 1],
-                'height': stick[:, 2],
-                'name': os.path.basename(path),
-                'number': stick_idx
-            }
-            sticks_df.append(pd.DataFrame(df))
-        sticks_df = pd.concat(sticks_df)
-        sticks_df.to_csv(path, header=False, index=False, sep=' ')
-
-class Fault(FaultSticksMixin):
+class Fault(FaultSticksMixin, FaultSerializationMixin, CoordinatesMixin, FaultVisualizationMixin):
     def __init__(self, storage, field, name=None, direction=None, **kwargs):
         self.name = name
         self.field = field
@@ -590,7 +324,7 @@ class Fault(FaultSticksMixin):
         self._sticks = None
         self._nodes = None
         self._simplices = None
-        self._direction = None
+        self.direction = None
 
         if isinstance(storage, str):
             format = 'file'
@@ -600,7 +334,37 @@ class Fault(FaultSticksMixin):
             format = 'objects'
 
         getattr(self, f'from_{format}')(storage, **kwargs)
+
+        # if self.direction is None:
         self.set_direction(direction)
+        self.create_stats()
+
+    def filter(self):
+        pass
+
+    def has_component(self, component):
+        return getattr(self, '_'+component) is not None
+
+    def create_stats(self):
+        if self.has_component('points'):
+            data = self.points
+        elif self.has_component('nodes'):
+            data = self.nodes
+        else:
+            data = np.concatenate(self.sticks)
+
+        i_min, x_min, h_min = np.min(data, axis=0)
+        i_max, x_max, h_max = np.max(data, axis=0)
+
+        self.h_min, self.h_max = int(h_min), int(h_max)
+        self.i_min, self.i_max, self.x_min, self.x_max = int(i_min), int(i_max), int(x_min), int(x_max)
+
+        self.i_length = (self.i_max - self.i_min) + 1
+        self.x_length = (self.x_max - self.x_min) + 1
+        self.bbox = np.array([[self.i_min, self.i_max],
+                            [self.x_min, self.x_max],
+                            [self.h_min, self.h_max]],
+                            dtype=np.int32)
 
     def set_direction(self, direction):
         """ Find azimuth of the fault. """
@@ -633,11 +397,8 @@ class Fault(FaultSticksMixin):
                 points = points[points[:, i] >= slices[i].start]
         if len(points) <= 3:
             self.sticks = []
-            self.simplices = np.zeros((0, 3))
-            self.nodes = np.zeros((0, 3))
         else:
             self.sticks = self.get_sticks(points, sticks_step, stick_nodes_step)
-            self.simplices, self.nodes = sticks_to_simplices(self.sticks, return_indices=True)
 
     def from_file(self, path, **kwargs):
         """ Init from path to either CHARISMA, REDUCED_CHARISMA or FAULT_STICKS csv-like file
@@ -691,7 +452,12 @@ class Fault(FaultSticksMixin):
         if self._points is None:
             if self._simplices is None and self._sticks is None:
                 raise AttributeError("`points` can't be created.")
-            self._points = simplices_to_points(self.simplices, self.nodes, width=1)
+            if len(self.simplices) > 1:
+                self._points = simplices_to_points(self.simplices, self.nodes, width=1)
+            elif len(self.nodes) > 0:
+                fake_fault = get_fake_one_stick_fault(self)
+                points = fake_fault.points
+                self._points = points[points[:, self.direction] == self.sticks[0][0, self.direction]]
 
         return self._points
 
@@ -704,4 +470,61 @@ class Fault(FaultSticksMixin):
 
         return self._sticks
 
+    def add_to_mask(self, mask, locations=None, width=1, **kwargs):
+        """ Add fault to background. """
+        _ = kwargs
+        mask_bbox = np.array([[locations[0].start, locations[0].stop],
+                            [locations[1].start, locations[1].stop],
+                            [locations[2].start, locations[2].stop]],
+                            dtype=np.int32)
+        points = self.points
+
+        if (self.bbox[:, 1] < mask_bbox[:, 0]).any() or (self.bbox[:, 0] >= mask_bbox[:, 1]).any():
+            return mask
+
+        insert_fault_into_mask(mask, points, mask_bbox, width=width, axis=1-self.direction)
+        return mask
+
+    def __len__(self):
+        """ Number of labeled traces. """
+        # TODO
+        return 1
+        # if self._len is None:
+        #     if self._points is not None:
+        #         self._len = len(self.points)
+        #     else:
+        #         self._len = len(self.depths)
+        # return self._len
+
 # TODO: points_to_sticks at region
+
+@njit(parallel=True)
+def insert_fault_into_mask(mask, points, mask_bbox, width, axis):
+    """ Add new points into binary mask. """
+    #pylint: disable=not-an-iterable
+
+    for i in prange(len(points)):
+        point = points[i]
+        if (point[0] >= mask_bbox[0][0]) and (point[0] < mask_bbox[0][1]):
+            if (point[1] >= mask_bbox[1][0]) and (point[1] < mask_bbox[1][1]):
+                if (point[2] >= mask_bbox[2][0]) and (point[2] < mask_bbox[2][1]):
+                    slices = [slice(point[j] - mask_bbox[j][0], point[j] - mask_bbox[j][0]+1) for j in range(3)]
+                    if width > 1:
+                        slices[axis] = slice(
+                            max(0, point[axis] - mask_bbox[axis][0] - (width // 2)),
+                            min(point[axis] - mask_bbox[axis][0] + width // 2 + width % 2, mask.shape[axis])
+                        )
+                    mask[slices[0], slices[1], slices[2]] = 1
+
+def get_fake_one_stick_fault(fault):
+    if len(set(fault.sticks[0][:, 0])) > 1 and len(set(fault.sticks[0][:, 1])) > 1:
+        raise ValueError('!!')
+    stick = fault.sticks[0]
+    stick_2 = stick.copy()
+    loc = stick[0, fault.direction]
+    stick_2[:, fault.direction] = loc - 1 if loc >= 1 else loc + 1
+
+    fake_fault = Fault({'sticks': np.array([stick, stick_2])}, direction=fault.direction,
+                       field=fault.field)
+
+    return fake_fault
