@@ -946,8 +946,6 @@ class HorizonMetrics(BaseMetrics):
 
             # Field boundaries
             bounds = self.horizon.field.zero_traces
-            # bounds[np.isnan(matrix) & (bounds == 0)] = np.nan
-            # matrix[bounds == 1] = 0.0
 
             # Main plot: differences matrix
             kwargs = {
