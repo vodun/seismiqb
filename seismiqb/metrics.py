@@ -1032,6 +1032,7 @@ class HorizonMetrics(BaseMetrics):
 
         std_matrix[counts_matrix != 0] /= counts_matrix[counts_matrix != 0]
         std_matrix -= mean_matrix ** 2
+        std_matrix[std_matrix < 0] = 0
         std_matrix = np.sqrt(std_matrix)
         std_matrix[counts_matrix == 0] = np.nan
 
