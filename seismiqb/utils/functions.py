@@ -1,6 +1,7 @@
 """ Utility functions. """
 import os
 from math import atan
+from tkinter.messagebox import NO
 
 import numpy as np
 import torch
@@ -499,6 +500,15 @@ def make_ranges(ranges, shape):
     ranges = [(item[0] or 0, item[1] or c) for item, c in zip(ranges, shape)]
     ranges = [(max(0, item[0]), min(c, item[1])) for item, c in zip(ranges, shape)]
     return tuple(ranges)
+
+def make_slices(slices, shape):
+    if slices is None:
+        ranges = None
+    else:
+        ranges = [slice(None) if item is None else (item.start, item.stop) for item in slices]
+
+    ranges = make_ranges(ranges, shape)
+    return tuple([slice(*item) for item in ranges])
 
 def make_interior_points_mask(points, cube_shape):
     """ Create mask for points inside of the cube. """

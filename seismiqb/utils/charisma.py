@@ -1,7 +1,9 @@
 """ Charisma mixin for saving and loading data in CHARISMA-compatible format. """
 import os
+
 import numpy as np
 import pandas as pd
+
 from .functions import make_interior_points_mask
 
 class CharismaMixin:
