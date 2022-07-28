@@ -1,3 +1,5 @@
+""" Approximation utilities to convert cloud of points to sticks. """
+
 import numpy as np
 from sklearn.decomposition import PCA
 from sklearn.neighbors import NearestNeighbors

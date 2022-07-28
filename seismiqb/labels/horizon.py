@@ -21,7 +21,7 @@ from ..utils import MetaDict
 class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, ProcessingMixin, HorizonVisualizationMixin):
     """ Contains spatially-structured horizon: each point describes a height on a particular (iline, xline).
 
-    Initialized from `storage` and `geometry`, where storage can be one of:
+    Initialized from `storage` and `field`, where storage can be one of:
         - csv-like file in CHARISMA or REDUCED_CHARISMA format.
         - ndarray of (N, 3) shape.
         - ndarray of (ilines_len, xlines_len) shape.

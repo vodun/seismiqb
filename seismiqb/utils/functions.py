@@ -519,3 +519,21 @@ def make_interior_points_mask(points, cube_shape):
                     (points[:, 1] < cube_shape[1]) &
                     (points[:, 2] < cube_shape[2]))[0]
     return mask
+
+@njit(parallel=True)
+def insert_points_into_mask(mask, points, mask_bbox, width, axis):
+    """ Add new points into binary mask. """
+    #pylint: disable=not-an-iterable
+
+    for i in prange(len(points)):
+        point = points[i]
+        if (point[0] >= mask_bbox[0][0]) and (point[0] < mask_bbox[0][1]):
+            if (point[1] >= mask_bbox[1][0]) and (point[1] < mask_bbox[1][1]):
+                if (point[2] >= mask_bbox[2][0]) and (point[2] < mask_bbox[2][1]):
+                    slices = [slice(point[j] - mask_bbox[j][0], point[j] - mask_bbox[j][0]+1) for j in range(3)]
+                    if width > 1:
+                        slices[axis] = slice(
+                            max(0, point[axis] - mask_bbox[axis][0] - (width // 2)),
+                            min(point[axis] - mask_bbox[axis][0] + width // 2 + width % 2, mask.shape[axis])
+                        )
+                    mask[slices[0], slices[1], slices[2]] = 1

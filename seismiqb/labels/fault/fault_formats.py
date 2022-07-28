@@ -1,3 +1,5 @@
+""" Mixins to deal with fault storing files. """
+
 import os
 import glob
 import warnings
@@ -10,6 +12,7 @@ from .fault_postprocessing import split_array
 from ...utils import CharismaMixin, make_interior_points_mask
 
 class FaultSticksMixin(CharismaMixin):
+    """ Mixin to load and dump FaultSticks. """
     FAULT_STICKS_SPEC = ['INLINE', 'iline', 'xline', 'cdp_x', 'cdp_y', 'height', 'name', 'number']
     REDUCED_FAULT_STICKS_SPEC = ['iline', 'xline', 'height', 'name', 'number']
 
@@ -36,30 +39,33 @@ class FaultSticksMixin(CharismaMixin):
         return pd.read_csv(path, sep=r'\s+', names=names)
 
     def df_to_sticks(self, df, return_direction=False):
-        """ Transform initial fault dataframe to array of sticks. """
+        """ Transform initial pandas.DataFrame with sticks to array of sticks. """
         if len(df) == 0:
             raise ValueError('Empty DataFrame (possibly wrong coordinates).')
-        if 'number' in df.columns: # Dataframe has stick index
-            col = 'number'
-            direction = None
-        elif df.iline.iloc[0] == df.iline.iloc[1]: # Use iline as an index
+        col, direction = None, None
+
+        ilines_diff = sum(df.iline[1:].values - df.iline[:-1].values == 0)
+        xlines_diff = sum(df.xline[1:].values - df.xline[:-1].values == 0)
+        if ilines_diff > xlines_diff: # Use iline as an index
             col = 'iline'
             direction = 0
-        elif df.xline.iloc[0] == df.xline.iloc[1]: # Use xline as an index
+        else: # Use xline as an index
             col = 'xline'
             direction = 1
-        else:
+
+        if 'number' in df.columns: # Dataframe has stick index
+            col = 'number'
+
+        if col is None:
             raise ValueError('Wrong format of sticks: there is no column to group points into sticks.')
 
         df = df.sort_values('height')
         sticks = df.groupby(col).apply(lambda x: x[self.COLUMNS].values).reset_index(drop=True)
 
-        if return_direction:
-            return sticks, direction
-        else:
-            return sticks
+        return (sticks, direction) if return_direction else sticks
 
     def remove_broken_sticks(self, sticks):
+        """ Remove <<strange>> sticks. """
         # Remove sticks with horizontal parts.
         mask = sticks.apply(lambda x: len(np.unique(np.array(x)[:, 2])) == len(x))
         if not mask.all():
@@ -84,10 +90,12 @@ class FaultSticksMixin(CharismaMixin):
 
     def load_fault_sticks(self, path, transform=True, verify=True,
                           recover_lines=True, remove_broken_sticks=False, **kwargs):
-        """ Get point cloud array from file values. """
+        """ Get sticks from csv file. """
         df = self.read_df(path)
 
         if len(df) == 0:
+            self._sticks = [[]]
+            self.direction = 1
             return
 
         if recover_lines and 'cdp_x' in df.columns:
@@ -115,6 +123,16 @@ class FaultSticksMixin(CharismaMixin):
             sticks = sticks.iloc[indices]
 
         self._sticks = sticks.values
+
+        # fix several slides sticks
+        if direction is not None:
+            ptp = np.array([np.ptp(stick[:, direction]) for stick in self.sticks])
+            if (ptp > 2).any():
+                warnings.warn(f"{self.path}: there sticks on several slides in both directions")
+
+            for stick in self.sticks[np.logical_and(ptp > 0, ptp <= 2)]:
+                stick[:, direction] = stick[0, direction]
+
         self.direction = direction
 
     def dump_fault_sticks(self, path, sticks_step=10, stick_nodes_step=10):
@@ -140,7 +158,8 @@ class FaultSticksMixin(CharismaMixin):
         sticks_df.to_csv(path, header=False, index=False, sep=' ')
 
     def show_file(self):
-        with open(self.path, 'r') as f:
+        """ Show initial FaultSticks file. """
+        with open(self.path, encoding='utf-8') as f:
             print(f.read())
 
     @classmethod
@@ -197,6 +216,7 @@ class FaultSticksMixin(CharismaMixin):
 
 
 class FaultSerializationMixin:
+    """ Mixin for npy/npz storage of fault components (points, sticks, nodes, simplices). """
     def load_npz(self, path):
         """ Load fault points, nodes and sticks from npz file. """
         npzfile = np.load(path, allow_pickle=False)
@@ -218,9 +238,9 @@ class FaultSerializationMixin:
         points = np.load(path, allow_pickle=False)
         self._points = points
 
-    def dump_points(self, path):
+    def dump_npz(self, path):
         """ Dump fault to npz. """
-        path = self.field.make_path(path, name=self.field.short_name, makedirs=False)
+        path = self.field.make_path(path, name=self.short_name, makedirs=False)
 
         if self.has_component('sticks'):
             sticks, sticks_labels = self.sticks_to_labeled_array(self.sticks)
@@ -228,7 +248,7 @@ class FaultSerializationMixin:
             sticks, sticks_labels = np.zeros((0, 3)), np.zeros((0, 1))
 
         np.savez(path, points=self._points, nodes=self._nodes, simplices=self._simplices,
-                 sticks=sticks, sticks_labels=sticks_labels)#, direction=self.direction)
+                 sticks=sticks, sticks_labels=sticks_labels, direction=self.direction)
 
 
     def sticks_to_labeled_array(self, sticks):

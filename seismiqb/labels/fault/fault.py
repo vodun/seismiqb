@@ -2,17 +2,46 @@
 
 import os
 import numpy as np
-from numba import prange, njit
 
 from .fault_triangulation import sticks_to_simplices, triangle_rasterization
 from .fault_approximation import points_to_sticks
-from .fault_visualization import FaultVisualizationMixin
+from .fault_visualization import FaultVisualizationMixin, get_fake_one_stick_fault
 from ..mixins import CoordinatesMixin
+from ...utils import insert_points_into_mask
 from .fault_formats import FaultSticksMixin, FaultSerializationMixin
 
 
 class Fault(FaultSticksMixin, FaultSerializationMixin, CoordinatesMixin, FaultVisualizationMixin):
-    # Columns that are used from the file
+    """ Class to represent Fault object. Each fault has 3 representations:
+        - sticks : polylines that approximate fault surface. Usually are placed on a sequence
+                   of ilines or crosslines.
+        - nodes and simplices : approximation of the surface by triangulation
+        - points : cloud of surface points
+
+    All representation can be converted to each other:
+        sticks -> (nodes, simplices) -> points -> sticks
+    Note that convertion from points to sticks leads to loss of information due to the approximation.
+
+    Initialized from `storage` and `field`, where storage can be one of:
+        - csv-like file in FAULT_STICKS format.
+        - npy file with ndarray of (N, 3) shape or array itself.
+        - npz file with 'points', 'nodes', 'simplices' and 'sticks' or dict with the same keys.
+
+    Parameters
+    ----------
+    storage : str, numpy.ndarray or dict
+        str - path to file (FaultSticks or npy/npz)
+        numpy.ndarray of (N, 3) shape - array of fault points
+        dict - fault data: points, sticks, nodes and/or simplices. Can include one of them.
+    field : Field
+
+    name : str, optional
+        fault name, by default None
+    direction : int or None, optional
+        direction of the fault surface, by default None
+    """
+
+    # Columns used from the file
     COLUMNS = ['iline', 'xline', 'height']
 
     def __init__(self, storage, field, name=None, direction=None, **kwargs):
@@ -26,30 +55,36 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, CoordinatesMixin, FaultVi
         self.direction = None
 
         if isinstance(storage, str):
-            format = 'file'
+            source = 'file'
         elif isinstance(storage, np.ndarray):
-            format = 'points'
+            source = 'points'
         elif isinstance(storage, dict):
-            format = 'objects'
-        getattr(self, f'from_{format}')(storage, **kwargs)
+            source = 'objects'
+        getattr(self, f'from_{source}')(storage, **kwargs)
 
-        # if self.direction is None:
-        self.set_direction(direction)
+        if self.direction is None:
+            self.set_direction(direction)
         self.create_stats()
 
-    def filter(self):
-        pass
+    def interpolate(self):
+        """ Create points of fault surface from sticks or nodes and simplices. """
+        _ = self.points
 
     def has_component(self, component):
+        """ Check if faults has points, sticks, simplices or nodes. """
         return getattr(self, '_'+component) is not None
 
     def create_stats(self):
+        """ Compute fault stats (bounds, bbox, etc.) """
         if self.has_component('points'):
             data = self.points
         elif self.has_component('nodes'):
             data = self.nodes
         else:
             data = np.concatenate(self.sticks)
+
+        if len(data) == 0: # It can be for empty fault file.
+            data = np.zeros((1, 3))
 
         i_min, x_min, h_min = np.min(data, axis=0)
         i_max, x_max, h_max = np.max(data, axis=0)
@@ -67,18 +102,21 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, CoordinatesMixin, FaultVi
     def set_direction(self, direction):
         """ Find azimuth of the fault. """
         if direction is None:
-            if self._sticks is not None and len(self._sticks) > 0:
-                if len(np.unique(self._sticks[0][:, 0])) == 1:
+            if self.has_component('sticks') and len(self.sticks) > 0:
+                if len(np.unique(self.sticks[0][:, 0])) == 1:
                     self.direction = 0
-                elif len(np.unique(self._sticks[0][:, 1])) == 1:
+                elif len(np.unique(self.sticks[0][:, 1])) == 1:
                     self.direction = 1
-            if self.direction is None and len(self.points) > 0:
-                mean_depth = int(np.median(self.points[:, 2]))
-                depth_slice = self.points[self.points[:, 2] == mean_depth]
+            if self.direction is None:
+                if self.has_component('points') and len(self.points) > 0:
+                    data = self.points
+                else:
+                    data = self.nodes
+                mean_depth = np.argsort(data[:, 2])[len(data[:, 2]) // 2]
+                depth_slice = data[data[:, 2] == data[:, 2][mean_depth]]
                 self.direction = 0 if depth_slice[:, 0].ptp() > depth_slice[:, 1].ptp() else 1
             else:
                 self.direction = 0
-            # TODO: azimuth from charisma
         elif isinstance(direction, int):
             self.direction = direction
         elif isinstance(direction[self.field.short_name], int):
@@ -86,22 +124,16 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, CoordinatesMixin, FaultVi
         else:
             self.direction = direction[self.field.short_name][self.name]
 
-    def points_to_sticks(self, slices=None, sticks_step=10, stick_nodes_step=10):
-        """ Create sticks from fault points. """
-        points = self.points.copy()
-        if slices is not None:
-            for i in range(3):
-                points = points[points[:, i] <= slices[i].stop]
-                points = points[points[:, i] >= slices[i].start]
-        if len(points) <= 3:
-            self._sticks = []
-        else:
-            self._sticks = points_to_sticks(points, sticks_step, stick_nodes_step, self.direction)
+    def reset_storage(self, storage):
+        """ Clear 'points', 'sticks', 'nodes' or 'simplices' storage. """
+        setattr(self, '_' + storage, None)
+
+    def from_points(self, points, **kwargs):
+        """ Initialize points cloud. """
+        self._points = points
 
     def from_file(self, path, **kwargs):
-        """ Init from path to either CHARISMA, REDUCED_CHARISMA or FAULT_STICKS csv-like file
-        or from npy/npz.
-        """
+        """ Init from path to either FAULT_STICKS csv-like file or from npy/npz. """
         path = self.field.make_path(path, makedirs=False)
         self.path = path
 
@@ -129,6 +161,7 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, CoordinatesMixin, FaultVi
 
     @property
     def simplices(self):
+        """ Simplices. """
         if self._simplices is None:
             if self._points is None and self._sticks is None:
                 raise AttributeError("`simplices` can't be created.")
@@ -139,6 +172,7 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, CoordinatesMixin, FaultVi
 
     @property
     def nodes(self):
+        """ Nodes. """
         if self._nodes is None:
             if self._points is None and self._sticks is None:
                 raise AttributeError("`nodes` can't be created.")
@@ -149,6 +183,7 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, CoordinatesMixin, FaultVi
 
     @property
     def points(self):
+        """ Points. """
         if self._points is None:
             if self._simplices is None and self._sticks is None:
                 raise AttributeError("`points` can't be created.")
@@ -163,6 +198,7 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, CoordinatesMixin, FaultVi
 
     @property
     def sticks(self):
+        """ Sticks. """
         if self._sticks is None:
             if self._simplices is None and self._points is None:
                 raise AttributeError("`points` can't be created.")
@@ -192,6 +228,18 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, CoordinatesMixin, FaultVi
             points.append(triangle_rasterization(self.nodes[triangle].astype('float32'), width))
         self._points = np.concatenate(points, axis=0).astype('int32')
 
+    def points_to_sticks(self, slices=None, sticks_step=10, stick_nodes_step=10):
+        """ Create sticks from fault points. """
+        points = self.points.copy()
+        if slices is not None:
+            for i in range(3):
+                points = points[points[:, i] <= slices[i].stop]
+                points = points[points[:, i] >= slices[i].start]
+        if len(points) <= 3:
+            self._sticks = []
+        else:
+            self._sticks = points_to_sticks(points, sticks_step, stick_nodes_step, self.direction)
+
     def add_to_mask(self, mask, locations=None, width=1, **kwargs):
         """ Add fault to background. """
         _ = kwargs
@@ -204,41 +252,9 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, CoordinatesMixin, FaultVi
         if (self.bbox[:, 1] < mask_bbox[:, 0]).any() or (self.bbox[:, 0] >= mask_bbox[:, 1]).any():
             return mask
 
-        insert_fault_into_mask(mask, points, mask_bbox, width=width, axis=1-self.direction)
+        insert_points_into_mask(mask, points, mask_bbox, width=width, axis=1-self.direction)
         return mask
 
     def __len__(self):
-        """ Number of labeled traces. """
-        # TODO
+        """ The size of the fault. """
         return np.prod(self.bbox[:, 1] - self.bbox[:, 0] + 1)
-
-@njit(parallel=True)
-def insert_fault_into_mask(mask, points, mask_bbox, width, axis):
-    """ Add new points into binary mask. """
-    #pylint: disable=not-an-iterable
-
-    for i in prange(len(points)):
-        point = points[i]
-        if (point[0] >= mask_bbox[0][0]) and (point[0] < mask_bbox[0][1]):
-            if (point[1] >= mask_bbox[1][0]) and (point[1] < mask_bbox[1][1]):
-                if (point[2] >= mask_bbox[2][0]) and (point[2] < mask_bbox[2][1]):
-                    slices = [slice(point[j] - mask_bbox[j][0], point[j] - mask_bbox[j][0]+1) for j in range(3)]
-                    if width > 1:
-                        slices[axis] = slice(
-                            max(0, point[axis] - mask_bbox[axis][0] - (width // 2)),
-                            min(point[axis] - mask_bbox[axis][0] + width // 2 + width % 2, mask.shape[axis])
-                        )
-                    mask[slices[0], slices[1], slices[2]] = 1
-
-def get_fake_one_stick_fault(fault):
-    if len(set(fault.sticks[0][:, 0])) > 1 and len(set(fault.sticks[0][:, 1])) > 1:
-        raise ValueError('!!')
-    stick = fault.sticks[0]
-    stick_2 = stick.copy()
-    loc = stick[0, fault.direction]
-    stick_2[:, fault.direction] = loc - 1 if loc >= 1 else loc + 1
-
-    fake_fault = Fault({'sticks': np.array([stick, stick_2])}, direction=fault.direction,
-                       field=fault.field)
-
-    return fake_fault
