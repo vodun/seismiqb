@@ -4,4 +4,3 @@ from .horizon_unstructured import UnstructuredHorizon
 
 from .fault import *
 from .geobody import GeoBody
-

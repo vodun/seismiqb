@@ -501,13 +501,14 @@ def make_ranges(ranges, shape):
     return tuple(ranges)
 
 def make_slices(slices, shape):
+    """ Fill Nones in tuple of slices (analogously to `make_ranges`). """
     if slices is None:
         ranges = None
     else:
         ranges = [slice(None) if item is None else (item.start, item.stop) for item in slices]
 
     ranges = make_ranges(ranges, shape)
-    return tuple([slice(*item) for item in ranges])
+    return tuple(slice(*item) for item in ranges)
 
 def make_interior_points_mask(points, cube_shape):
     """ Create mask for points inside of the cube. """
