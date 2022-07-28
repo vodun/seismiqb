@@ -436,6 +436,8 @@ class VisualizationMixin:
             Number of slides between sticks.
         stick_nodes_step : int
             Distance between stick nodes
+        sticks : bool
+            If True, show fault sticks. If False, show interpolated surface.
         slides : list of tuples
             Each tuple is pair of location and axis to load slide from seismic cube.
         margin : tuple of ints

@@ -116,7 +116,7 @@ class FaultSticksMixin(CharismaMixin):
             sticks = self.remove_broken_sticks(sticks)
 
         # Order sticks with respect of fault direction. Is necessary to perform following triangulation.
-        if len(sticks) > 0:
+        if len(sticks) > 1:
             pca = PCA(1)
             coords = pca.fit_transform(np.array([stick[0][:2] for stick in sticks.values]))
             indices = np.array([i for _, i in sorted(zip(coords, range(len(sticks))))])

@@ -18,8 +18,7 @@ from batchflow import Sampler, ConstantSampler
 from .labels import Horizon, Fault
 from .field import Field, SyntheticField
 from .geometry import SeismicGeometry
-from .utils import filtering_function, AugmentedDict
-from .labels.fault.fault import insert_fault_into_mask
+from .utils import filtering_function, insert_points_into_mask, AugmentedDict
 from .plotters import plot
 
 
@@ -632,7 +631,7 @@ def volumetric_check_sampled(locations, points, crop_shape, crop_shape_t, thresh
             mask_bbox = np.array([[i_start, i_stop], [x_start, x_stop], [h_start, h_stop]], dtype=np.int32)
             mask = np.zeros((shape[0], shape[1], shape[2]), dtype=np.int32)
 
-            insert_fault_into_mask(mask, points, mask_bbox, 1, 0)
+            insert_points_into_mask(mask, points, mask_bbox, 1, 0)
             if mask.sum() < threshold:
                 condition[i] = False
 

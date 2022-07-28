@@ -1,7 +1,6 @@
 """ Utility functions. """
 import os
 from math import atan
-from tkinter.messagebox import NO
 
 import numpy as np
 import torch

@@ -51,6 +51,8 @@ def points_to_sticks(points, sticks_step=10, stick_nodes_step=10, axis=None):
 
 def approximate_points(points, n_points):
     """ Approximate points by stick. """
+    if len(points) < 2:
+        return points
     pca = PCA(1)
     array = pca.fit_transform(points)
     step = n_points
