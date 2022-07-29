@@ -121,7 +121,7 @@ def show_3d(x, y, z, simplices, title, zoom, colors=None, show_axes=True, aspect
                 'yaxis': {
                     'title': axis_labels[1] if show_axes else '',
                     'showticklabels': show_axes,
-                    'range': [zoom[1].start + margin[1], zoom[1].stop - margin[1]]
+                    'range': [zoom[1].start - margin[1], zoom[1].stop + margin[1]]
                 },
                 'zaxis': {
                     'title': axis_labels[2] if show_axes else '',
