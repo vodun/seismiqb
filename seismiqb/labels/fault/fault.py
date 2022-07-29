@@ -6,9 +6,8 @@ import numpy as np
 from .fault_triangulation import sticks_to_simplices, triangle_rasterization
 from .fault_approximation import points_to_sticks
 from .fault_visualization import FaultVisualizationMixin, get_fake_one_stick_fault
-from ...utils import insert_points_into_mask
 from .fault_formats import FaultSticksMixin, FaultSerializationMixin
-
+from ...utils import insert_points_into_mask
 
 class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
     """ Class to represent Fault object. Each fault has 3 representations:
