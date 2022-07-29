@@ -258,4 +258,8 @@ class FaultSerializationMixin:
 
     def labeled_array_to_sticks(self, sticks, labels):
         """ Auxilary method to dump fault into npz with allow_pickle=False. """
-        return np.array(split_array(sticks, labels), dtype=object)
+        sticks = split_array(sticks, labels)
+        array = np.empty(len(sticks), dtype=object)
+        for i, item in enumerate(sticks):
+            array[i] = item
+        return array

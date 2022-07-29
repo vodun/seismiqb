@@ -112,9 +112,9 @@ class FaultVisualizationMixin(VisualizationMixin):
 def get_fake_one_stick_fault(fault):
     """ Create fault with shifted stick to visualize one stick faults. """
     stick = fault.sticks[0]
-    stick_2 = stick.copy() # TODO
-    loc = stick[0, fault.direction]
-    stick_2[:, fault.direction] = loc - 1 if loc >= 1 else loc + 1
+    stick_2 = stick + 1#.copy() # TODO
+    # loc = stick[0, fault.direction]
+    # stick_2[:, fault.direction] = loc - 1 if loc >= 1 else loc + 1
 
     fake_fault = fault.__class__({'sticks': np.array([stick, stick_2])}, direction=fault.direction,
                        field=fault.field)

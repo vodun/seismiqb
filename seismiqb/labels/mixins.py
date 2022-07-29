@@ -6,6 +6,17 @@ from ..plotters import plot
 
 class VisualizationMixin:
     """ Visualization utilities. """
+    def load_slide(self, loc, axis=0, width=3):
+        """ Create a mask at desired location along supplied axis. """
+        axis = self.field.geometry.parse_axis(axis)
+        locations = self.field.geometry.make_slide_locations(loc, axis=axis)
+        shape = np.array([(slc.stop - slc.start) for slc in locations])
+        width = width or max(5, shape[-1] // 100)
+
+        mask = np.zeros(shape, dtype=np.float32)
+        mask = self.add_to_mask(mask, locations=locations, width=width)
+        return np.squeeze(mask)
+
     def show_slide(self, loc, width=None, axis='i', zoom=None, **kwargs):
         """ Show slide with horizon on it.
 

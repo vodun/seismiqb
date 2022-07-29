@@ -101,10 +101,7 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
         """ Find azimuth of the fault. """
         if direction is None:
             if self.has_component('sticks') and len(self.sticks) > 0:
-                if len(np.unique(self.sticks[0][:, 0])) == 1:
-                    self.direction = 0
-                elif len(np.unique(self.sticks[0][:, 1])) == 1:
-                    self.direction = 1
+                self.direction = int(np.argmin(np.abs([item[:, :2].ptp(axis=0) for item in self.sticks]).max(axis=0)))
             if self.direction is None:
                 if self.has_component('points') and len(self.points) > 0:
                     data = self.points
@@ -113,8 +110,6 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
                 mean_depth = np.argsort(data[:, 2])[len(data[:, 2]) // 2]
                 depth_slice = data[data[:, 2] == data[:, 2][mean_depth]]
                 self.direction = 0 if depth_slice[:, 0].ptp() > depth_slice[:, 1].ptp() else 1
-            else:
-                self.direction = 0
         elif isinstance(direction, int):
             self.direction = direction
         elif isinstance(direction[self.field.short_name], int):
@@ -129,6 +124,7 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
     def from_points(self, points, **kwargs):
         """ Initialize points cloud. """
         self._points = points
+        self.short_name = self.name
 
     def from_file(self, path, **kwargs):
         """ Init from path to either FAULT_STICKS csv-like file or from npy/npz. """
@@ -154,6 +150,7 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
         """ Load fault from dict with 'points', 'nodes', 'simplices' and 'sticks'. """
         for key in ['points', 'sticks', 'nodes', 'simplices']:
             setattr(self, '_' + key, storage.get(key))
+        self.short_name = self.name
 
     # Transformation of attributes: sticks -> (nodes, simplices) -> points -> sticks
 
