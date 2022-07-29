@@ -1,20 +1,11 @@
+""" Common labels mixins. """
+
 import numpy as np
 
 from ..plotters import plot
 
-class CoordinatesMixin:
-    def load_slide(self, loc, axis=0, width=3):
-        """ Create a mask at desired location along supplied axis. """
-        axis = self.field.geometry.parse_axis(axis)
-        locations = self.field.geometry.make_slide_locations(loc, axis=axis)
-        shape = np.array([(slc.stop - slc.start) for slc in locations])
-        width = width or max(5, shape[-1] // 100)
-
-        mask = np.zeros(shape, dtype=np.float32)
-        mask = self.add_to_mask(mask, locations=locations, width=width)
-        return np.squeeze(mask)
-
 class VisualizationMixin:
+    """ Visualization utilities. """
     def show_slide(self, loc, width=None, axis='i', zoom=None, **kwargs):
         """ Show slide with horizon on it.
 
@@ -58,7 +49,8 @@ class VisualizationMixin:
             ylabel = self.field.index_headers[1]
             total = self.field.depth
 
-        title = f'{self.__class__.__name__} `{self.name}` on cube `{self.field.displayed_name}`\n {header} {loc} out of {total}'
+        title = f'{self.__class__.__name__} `{self.name}` on cube'\
+                f'`{self.field.displayed_name}`\n {header} {loc} out of {total}'
 
         kwargs = {
             'title_label': title,
