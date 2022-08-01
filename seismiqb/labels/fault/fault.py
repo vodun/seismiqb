@@ -42,7 +42,7 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
     # Columns used from the file
     COLUMNS = ['iline', 'xline', 'height']
 
-    def __init__(self, storage, field, name=None, direction=None, **kwargs):
+    def __init__(self, storage, field, name=None, direction=None, **kwargs): #pylint: disable=super-init-not-called
         self.name = name
         self.field = field
 
@@ -101,7 +101,8 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
         """ Find azimuth of the fault. """
         if direction is None:
             if self.has_component('sticks') and len(self.sticks) > 0:
-                self.direction = int(np.argmin(np.abs([item[:, :2].ptp(axis=0) for item in self.sticks]).max(axis=0)))
+                ptp = np.abs([item[:, :2].ptp(axis=0) for item in self.sticks])
+                direction = int((ptp == 0).sum(axis=0).argmax())
             if self.direction is None:
                 if self.has_component('points') and len(self.points) > 0:
                     data = self.points
