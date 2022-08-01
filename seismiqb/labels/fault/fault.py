@@ -101,7 +101,7 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
         """ Find azimuth of the fault. """
         if direction is None:
             if self.has_component('sticks') and len(self.sticks) > 0:
-                ptp = np.abs([item[:, :2].ptp(axis=0) for item in self.sticks])
+                ptp = np.abs([item[:, :2].ptp(axis=0) for item in self.sticks]) # pylint: disable=invalid-sequence-index
                 direction = int((ptp == 0).sum(axis=0).argmax())
             if self.direction is None:
                 if self.has_component('points') and len(self.points) > 0:
