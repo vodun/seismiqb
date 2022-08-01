@@ -11,14 +11,25 @@ from ...utils import insert_points_into_mask
 
 class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
     """ Class to represent Fault object. Each fault has 3 representations:
+        - points : cloud of surface points. The most accurate way to define surface but
+                   not so handy for manual editing and occupies the most memory. Is needed
+                   to create masks.
         - sticks : polylines that approximate fault surface. Usually are placed on a sequence
-                   of ilines or crosslines.
-        - nodes and simplices : approximation of the surface by triangulation
-        - points : cloud of surface points
+                   of ilines or crosslines. The most common result of the experts labeling but
+                   is not enough flexible.
+        - nodes and simplices : approximation of the surface by triangulation. Is needed to
+                                approximate arbitrary surface.
 
-    All representation can be converted to each other:
-        sticks -> (nodes, simplices) -> points -> sticks
-    Note that convertion from points to sticks leads to loss of information due to the approximation.
+    All representations can be converted to each other:
+        sticks -> (nodes, simplices) -> points
+          ^                                |
+          └--------------------------------┘
+
+    Convertion from sticks to nodes/simplices is extremely obvious.
+    To convert triangulation (nodes and simplices) to points, we rasterize each triangle.
+    Convertion from points to sticks is more difficult and proposes that points represent
+    some surface which is almost a plane. Note that convertion from points to sticks leads
+    to loss of information due to the approximation.
 
     Initialized from `storage` and `field`, where storage can be one of:
         - csv-like file in FAULT_STICKS format.

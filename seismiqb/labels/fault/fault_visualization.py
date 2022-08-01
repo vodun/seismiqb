@@ -17,16 +17,16 @@ class FaultVisualizationMixin(VisualizationMixin):
         width = kwargs.get('width', 5)
 
         kwargs = {**kwargs, 'cmap': cmap, 'width': width}
-        super().show_slide(loc, **kwargs)
+        return super().show_slide(loc, **kwargs)
 
-    def show(self, axis=0, centering=True, zoom=None, **kwargs):
-        """ Show center of fault for different axes. """
-        if centering and zoom is None:
-            zoom = [
-                slice(max(0, self.bbox[i][0]-20), min(self.bbox[i][1]+20, self.field.shape[i]))
+    def compute_auto_zoom(self, loc, axis, zoom_margin):
+        return [
+                slice(max(0, self.bbox[i][0]-zoom_margin), min(self.bbox[i][1]+zoom_margin, self.field.shape[i]))
                 for i in range(3) if i != axis
-            ]
+        ]
 
+    def show(self, axis=0, zoom='auto', **kwargs):
+        """ Show center of fault for different axes. """
         return self.show_slide(loc=int(np.mean(self.bbox[axis])), zoom=zoom, axis=axis, **kwargs)
 
     def show_3d(self, sticks_step=None, stick_nodes_step=None, z_ratio=1., colors='green',

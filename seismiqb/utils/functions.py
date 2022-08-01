@@ -522,7 +522,21 @@ def make_interior_points_mask(points, cube_shape):
 
 @njit(parallel=True)
 def insert_points_into_mask(mask, points, mask_bbox, width, axis):
-    """ Add new points into binary mask. """
+    """ Add new points into binary mask.
+
+    Parameters
+    ----------
+    mask : numpy.ndarray
+        Array to insert values which correponds to some region in 3d cube (see `mask_bbox` parameter)
+    points : numpy.ndarray
+        Array of shape `(n_points, 3)` with cube coordinates of points to insert.
+    mask_bbox : numpy.ndarray
+        Array of shape (3, 2) with postion of the mask in 3d cube
+    width : int
+        Dilation of the mask along some axis.
+    axis : int
+        Direction of dilation.
+    """
     #pylint: disable=not-an-iterable
 
     for i in prange(len(points)):

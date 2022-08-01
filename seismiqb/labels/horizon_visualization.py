@@ -87,6 +87,10 @@ class HorizonVisualizationMixin(VisualizationMixin):
 
         return plotter
 
+    def compute_auto_zoom(self, loc, axis=None, zoom_margin=20):
+        bounds = self.field.geometry.get_slide_bounds(loc, axis)
+        return (slice(*bounds), slice(self.h_min - zoom_margin, self.h_max + zoom_margin))
+
     # 3D
     def show_3d(self, n_points=100, threshold=100., z_ratio=1., zoom=None, show_axes=True,
                 width=1200, height=1200, margin=(0, 0, 100), savepath=None, **kwargs):

@@ -292,6 +292,14 @@ class SeismicGeometry(CacheMixin, ExportMixin):
         locations[axis] = slice(loc, loc + 1)
         return locations
 
+    def get_slide_bounds(self, loc, axis=0):
+        if axis == 0:
+            mask = self.zero_traces[loc]
+        else:
+            mask = self.zero_traces[..., loc]
+        start = np.argmin(mask)
+        end = len(mask) - np.argmin(mask[::-1])
+        return start, end
 
     # Meta information: storing / retrieving attributes
     def store_meta(self, path=None):
