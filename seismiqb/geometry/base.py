@@ -294,10 +294,7 @@ class SeismicGeometry(CacheMixin, ExportMixin):
 
     def get_slide_bounds(self, loc, axis=0):
         """ Get bounds of the non-zero part of the slide. """
-        if axis == 0:
-            mask = self.zero_traces[loc]
-        else:
-            mask = self.zero_traces[..., loc]
+        mask = self.zero_traces.take(loc, axis)
         start = np.argmin(mask)
         end = len(mask) - np.argmin(mask[::-1])
         return start, end
