@@ -104,9 +104,9 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
         self.i_length = (self.i_max - self.i_min) + 1
         self.x_length = (self.x_max - self.x_min) + 1
         self.bbox = np.array([[self.i_min, self.i_max],
-                            [self.x_min, self.x_max],
-                            [self.h_min, self.h_max]],
-                            dtype=np.int32)
+                              [self.x_min, self.x_max],
+                              [self.h_min, self.h_max]],
+                             dtype=np.int32)
 
     def set_direction(self, direction):
         """ Find azimuth of the fault. """
@@ -168,7 +168,7 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
             data = storage.get(key)
             if data is not None and transform:
                 data = self.field.geometry.lines_to_cubic(data)
-            setattr(self, '_'+key, data)
+            setattr(self, '_' + key, data)
 
         sticks = storage.get('sticks')
         if sticks is not None and transform:
@@ -186,7 +186,7 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
         """ Simplices. """
         if self._simplices is None:
             if self._points is None and self._sticks is None:
-                raise AttributeError("`simplices` can't be created.")
+                raise AttributeError("'simplices' can't be created ('points' and 'sticks' don't exist)")
 
             self._simplices, self._nodes = sticks_to_simplices(self.sticks, return_indices=True)
 
@@ -197,7 +197,7 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
         """ Nodes. """
         if self._nodes is None:
             if self._points is None and self._sticks is None:
-                raise AttributeError("`nodes` can't be created.")
+                raise AttributeError("'nodes' can't be created ('points' and 'sticks' don't exist)")
 
             self._simplices, self._nodes = sticks_to_simplices(self.sticks, return_indices=True)
 
@@ -208,7 +208,7 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
         """ Points. """
         if self._points is None:
             if self._simplices is None and self._sticks is None:
-                raise AttributeError("`points` can't be created.")
+                raise AttributeError("'points' can't be created ('nodes'/'simplices' and 'sticks' don't exist)")
             if len(self.simplices) > 1:
                 self.simplices_to_points()
             elif len(self.nodes) > 0:
@@ -223,7 +223,7 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
         """ Sticks. """
         if self._sticks is None:
             if self._simplices is None and self._points is None:
-                raise AttributeError("`points` can't be created.")
+                raise AttributeError("'sticks' can't be created ('nodes'/'simplices' and 'points' don't exist)")
             self.points_to_sticks()
 
         return self._sticks
@@ -266,15 +266,15 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
         """ Add fault to background. """
         _ = kwargs
         mask_bbox = np.array([[locations[0].start, locations[0].stop],
-                            [locations[1].start, locations[1].stop],
-                            [locations[2].start, locations[2].stop]],
-                            dtype=np.int32)
+                              [locations[1].start, locations[1].stop],
+                              [locations[2].start, locations[2].stop]],
+                             dtype=np.int32)
         points = self.points
 
         if (self.bbox[:, 1] < mask_bbox[:, 0]).any() or (self.bbox[:, 0] >= mask_bbox[:, 1]).any():
             return mask
 
-        insert_points_into_mask(mask, points, mask_bbox, width=width, axis=1-self.direction)
+        insert_points_into_mask(mask, points, mask_bbox, width=width, axis=1 - self.direction)
         return mask
 
     def __len__(self):
