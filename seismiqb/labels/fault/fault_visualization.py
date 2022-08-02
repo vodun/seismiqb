@@ -41,10 +41,10 @@ class FaultVisualizationMixin(VisualizationMixin):
 
         Parameters
         ----------
-        sticks_step : int
-            Number of slides between sticks.
-        stick_nodes_step : int
-            Distance between stick nodes
+        sticks_step : int or None
+            Number of slides between sticks. If None, fault triangulation (nodes and simplices) will be used.
+        stick_nodes_step : int or None
+            Distance between stick nodes. If None, fault triangulation (nodes and simplices) will be used.
         z_ratio : int
             Aspect ratio between height axis and spatial ones.
         zoom : tuple of slices or None.
