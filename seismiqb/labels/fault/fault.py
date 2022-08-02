@@ -110,11 +110,13 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
 
     def set_direction(self, direction):
         """ Find azimuth of the fault. """
+        if self.direction is not None:
+            return
         if direction is None:
             if self.has_component('sticks') and len(self.sticks) > 0:
                 ptp = np.abs([item[:, :2].ptp(axis=0) for item in self.sticks]) # pylint: disable=invalid-sequence-index
-                direction = int((ptp == 0).sum(axis=0).argmax())
-            if self.direction is None:
+                self.direction = int((ptp == 0).sum(axis=0).argmax())
+            else:
                 if self.has_component('points') and len(self.points) > 0:
                     data = self.points
                 else:
@@ -133,8 +135,10 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
         """ Clear 'points', 'sticks', 'nodes' or 'simplices' storage. """
         setattr(self, '_' + storage, None)
 
-    def from_points(self, points, **kwargs):
+    def from_points(self, points, transform=False, **kwargs):
         """ Initialize points cloud. """
+        if transform:
+            points = self.field.geometry.lines_to_cubic(points)
         self._points = points
         self.short_name = self.name
 
@@ -149,19 +153,30 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
         ext = os.path.splitext(path)[1][1:]
 
         if ext == 'npz':
-            self.load_npz(path)
+            self.load_npz(path, **kwargs)
             self.format = 'file-npz'
         elif ext == 'npy':
-            self.load_npy(path)
+            self.load_npy(path, **kwargs)
             self.format = 'file-npy'
         else:
             self.load_fault_sticks(path, **kwargs)
             self.format = 'file-sticks'
 
-    def from_objects(self, storage, **kwargs):
+    def from_objects(self, storage, transform=False, **kwargs):
         """ Load fault from dict with 'points', 'nodes', 'simplices' and 'sticks'. """
-        for key in ['points', 'sticks', 'nodes', 'simplices']:
-            setattr(self, '_' + key, storage.get(key))
+        for key in ['points', 'nodes']:
+            data = storage.get(key)
+            if data is not None and transform:
+                data = self.field.geometry.lines_to_cubic(data)
+            setattr(self, '_'+key, data)
+
+        sticks = storage.get('sticks')
+        if sticks is not None and transform:
+            sticks = [self.field.geometry.lines_to_cubic(item) for item in sticks]
+        setattr(self, '_sticks', sticks)
+
+        setattr(self, '_simplices', storage.get('simplices'))
+
         self.short_name = self.name
 
     # Transformation of attributes: sticks -> (nodes, simplices) -> points -> sticks

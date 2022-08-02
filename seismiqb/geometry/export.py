@@ -80,7 +80,7 @@ class ExportMixin:
             shutil.make_archive(os.path.splitext(path_segy)[0], 'zip', dir_name, file_name)
 
 def make_segy_from_array(array, path_segy, zip_segy=True, remove_segy=None, path_spec=None,
-                         origin=(0, 0, 0), pbar=False, **kwargs):
+                         origin=(0, 0, 0), ilines_offset=1, xlines_offset=1, pbar=False, **kwargs):
     """ Make a segy-cube from an array. Zip it if needed. Segy-headers are filled by defaults/arguments from kwargs.
 
     Parameters
@@ -174,16 +174,16 @@ def make_segy_from_array(array, path_segy, zip_segy=True, remove_segy=None, path
             header = dst_file.header[c]
 
             # change inline and xline in trace-header
-            header[segyio.TraceField.INLINE_3D] = i
-            header[segyio.TraceField.CROSSLINE_3D] = x
+            header[segyio.TraceField.INLINE_3D] = i + ilines_offset
+            header[segyio.TraceField.CROSSLINE_3D] = x + xlines_offset
 
             if path_spec:
                 i = geometry.uniques_inversed[0][i]
                 x = geometry.uniques_inversed[1][x]
             i, x = i - origin[0], x - origin[1]
 
-            header[segyio.TraceField.CDP_X] = cdpx[i, x]
-            header[segyio.TraceField.CDP_Y] = cdpy[i, x]
+            header[segyio.TraceField.CDP_X] = cdpx[i, x] + ilines_offset
+            header[segyio.TraceField.CDP_Y] = cdpy[i, x] + xlines_offset
 
             # change depth-related fields in trace-header
             header[segyio.TraceField.TRACE_SAMPLE_COUNT] = array.shape[2]

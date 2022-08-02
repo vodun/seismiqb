@@ -239,7 +239,7 @@ class FaultSticksMixin(CharismaMixin):
 
 class FaultSerializationMixin:
     """ Mixin for npy/npz storage of fault components (points, sticks, nodes, simplices). """
-    def load_npz(self, path):
+    def load_npz(self, path, transform=False):
         """ Load fault points, nodes and sticks from npz file. """
         npzfile = np.load(path, allow_pickle=False)
 
@@ -251,7 +251,7 @@ class FaultSerializationMixin:
             'nodes': npzfile.get('nodes'),
             'simplices': npzfile.get('simplices'),
             'sticks': self._labeled_array_to_sticks(sticks, sticks_labels),
-        })
+        }, transform=transform)
 
         self.direction = npzfile.get('direction')
 

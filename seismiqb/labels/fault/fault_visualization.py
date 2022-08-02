@@ -20,6 +20,8 @@ class FaultVisualizationMixin(VisualizationMixin):
         return super().show_slide(loc, **kwargs)
 
     def compute_auto_zoom(self, loc, axis, zoom_margin):
+        """ Get center slice of the fault. """
+        _ = loc
         return [
                 slice(max(0, self.bbox[i][0]-zoom_margin), min(self.bbox[i][1]+zoom_margin, self.field.shape[i]))
                 for i in range(3) if i != axis
@@ -112,11 +114,8 @@ class FaultVisualizationMixin(VisualizationMixin):
 def get_fake_one_stick_fault(fault):
     """ Create fault with shifted stick to visualize one stick faults. """
     stick = fault.sticks[0]
-    stick_2 = stick + 1#.copy() # TODO
-    # loc = stick[0, fault.direction]
-    # stick_2[:, fault.direction] = loc - 1 if loc >= 1 else loc + 1
 
-    fake_fault = fault.__class__({'sticks': np.array([stick, stick_2])}, direction=fault.direction,
+    fake_fault = fault.__class__({'sticks': np.array([stick, stick + 1])}, direction=fault.direction,
                        field=fault.field)
 
     return fake_fault
