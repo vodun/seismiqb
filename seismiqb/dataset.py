@@ -141,8 +141,9 @@ class SeismicDataset(Dataset):
             Number of slide to load.
         axis : int or str
             Number or name of axis to load slide along.
-        zoom : tuple of slices
-            Tuple of slices to apply directly to 2d images.
+        zoom : tuple of slices, None or 'auto'
+            Tuple of slices to apply directly to 2d images. If None, slicing is not applied.
+            If 'auto', zero traces on bounds will be dropped.
         idx : str, int
             Number of cube in the index to use.
         src_labels : str
@@ -183,6 +184,8 @@ class SeismicDataset(Dataset):
         images = [np.squeeze(getattr(batch, comp)) for comp in components]
         xmin, xmax, ymin, ymax = 0, images[0].shape[0], images[0].shape[1], 0
 
+        if zoom == 'auto':
+            zoom = (slice(*geometry.get_slide_bounds(loc, axis)), slice(None))
         if zoom:
             images = [img[zoom] for img in images]
             xmin = zoom[0].start or xmin

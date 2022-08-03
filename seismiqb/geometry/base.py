@@ -776,8 +776,9 @@ class SeismicGeometry(CacheMixin, ExportMixin):
             Number of slide to load.
         axis : int or str
             Axis to load slide along.
-        zoom : tuple
-            Tuple of slices to apply directly to 2d images.
+        zoom : tuple, None or 'auto'
+            Tuple of slices to apply directly to 2d images. If None, slicing is not applied.
+            If 'auto', zero traces on bounds will be dropped.
         start, end, step : int
             Parameters of slice loading for 1D index.
         stable : bool
@@ -787,6 +788,8 @@ class SeismicGeometry(CacheMixin, ExportMixin):
         slide = self.load_slide(loc=loc, start=start, end=end, step=step, axis=axis, stable=stable)
         xmin, xmax, ymin, ymax = 0, slide.shape[0], slide.shape[1], 0
 
+        if zoom == 'auto':
+            zoom = (slice(*self.get_slide_bounds(loc, axis)), slice(None))
         if zoom:
             slide = slide[zoom]
             xmin = zoom[0].start or xmin
@@ -813,7 +816,7 @@ class SeismicGeometry(CacheMixin, ExportMixin):
             'title': title,
             'xlabel': xlabel,
             'ylabel': ylabel,
-            'cmap': 'gray',
+            'cmap': 'Greys_r',
             'extent': (xmin, xmax, ymin, ymax),
             'labeltop': False,
             'labelright': False,

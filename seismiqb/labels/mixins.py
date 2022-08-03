@@ -28,8 +28,9 @@ class VisualizationMixin:
             Horizon thickness. If None given, set to 1% of seismic slide height.
         axis : int
             Number of axis to load slide along.
-        zoom : tuple
-            Tuple of slices to apply directly to 2d images.
+        zoom : tuple, None or 'auto'
+            Tuple of slices to apply directly to 2d images. If None, slicing is not applied.
+            If 'auto', zero traces on bounds will be dropped and image will be centered on label.
         """
         # Make `locations` for slide loading
         axis = self.field.geometry.parse_axis(axis)

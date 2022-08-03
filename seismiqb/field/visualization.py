@@ -73,8 +73,9 @@ class VisualizationMixin:
             Horizon thickness. If None given, set to 1% of seismic slide height.
         axis : int
             Number of axis to load slide along.
-        zoom : tuple
-            Tuple of slices to apply directly to 2d images.
+        zoom : tuple, None or 'auto'
+            Tuple of slices to apply directly to 2d images. If None, slicing is not applied.
+            If 'auto', zero traces on bounds will be dropped.
         """
         axis = self.geometry.parse_axis(axis)
 
@@ -87,15 +88,11 @@ class VisualizationMixin:
             masks.append(self.make_mask(location=loc, axis=axis, src=src, width=width, indices=indices))
         mask = sum(masks)
 
-        # src_labels = src_labels if isinstance(src_labels, (tuple, list)) else [src_labels]
-        # masks = []
-        # for src in src_labels:
-        #     masks.extend(getattr(self, src).load_slide(loc=loc, axis=axis, width=width))
-        # mask = sum(masks)
-
         seismic_slide, mask = np.squeeze(seismic_slide), np.squeeze(mask)
         xmin, xmax, ymin, ymax = 0, seismic_slide.shape[0], seismic_slide.shape[1], 0
 
+        if zoom == 'auto':
+            zoom = (slice(*self.geometry.get_slide_bounds(loc, axis)), slice(None))
         if zoom:
             seismic_slide = seismic_slide[zoom]
             mask = mask[zoom]
