@@ -132,22 +132,33 @@ class SeismicDataset(Dataset):
         return msg
 
 
-    def show_slide(self, loc, idx=0, axis='iline', zoom=None, src_labels='labels', **kwargs):
+    def show_slide(self, loc, idx=0, axis='iline', zoom=None, src_labels='labels',
+                   indices='all', width=5, plotter=plot, **kwargs):
         """ Show slide of the given cube on the given line.
 
         Parameters
         ----------
         loc : int
             Number of slide to load.
+        idx : str, int
+            Number of cube in the index to use.
         axis : int or str
             Number or name of axis to load slide along.
         zoom : tuple of slices, None or 'auto'
             Tuple of slices to apply directly to 2d images. If None, slicing is not applied.
             If 'auto', zero traces on bounds will be dropped.
-        idx : str, int
-            Number of cube in the index to use.
         src_labels : str
             Dataset components to show as labels.
+        indices : str, int or sequence of ints
+            Which labels to use in mask creation.
+            If 'all', then use all labels.
+            If 'single' or `random`, then use one random label.
+            If int or array-like, then element(s) are interpreted as indices of desired labels.
+        width : int
+            Width of the resulting label.
+        plotter : instance of `plot`
+            Plotter instance to use.
+            Combined with `positions` parameter allows using subplots of already existing plotter.
         """
         components = ('images', 'masks') if getattr(self, src_labels)[idx] else ('images',)
         cube_name = self.indices[idx]
@@ -172,8 +183,6 @@ class SeismicDataset(Dataset):
                     .normalize(src='images'))
 
         if 'masks' in components:
-            indices = kwargs.pop('indices', 'all')
-            width = kwargs.pop('width', crop_shape[-1] // 100)
             labels_pipeline = (Pipeline()
                                .create_masks(src_labels=src_labels, dst='masks', width=width, indices=indices))
 
@@ -181,13 +190,13 @@ class SeismicDataset(Dataset):
 
         batch = (pipeline << self).next_batch()
         # TODO: Make every horizon mask creation individual to allow their distinction while plot.
-        images = [np.squeeze(getattr(batch, comp)) for comp in components]
-        xmin, xmax, ymin, ymax = 0, images[0].shape[0], images[0].shape[1], 0
+        data = [np.squeeze(getattr(batch, comp)) for comp in components]
+        xmin, xmax, ymin, ymax = 0, data[0].shape[0], data[0].shape[1], 0
 
         if zoom == 'auto':
             zoom = (slice(*geometry.get_slide_bounds(loc, axis)), slice(None))
         if zoom:
-            images = [img[zoom] for img in images]
+            data = [image[zoom] for image in data]
             xmin = zoom[0].start or xmin
             xmax = zoom[0].stop or xmax
             ymin = zoom[1].stop or ymin
@@ -205,16 +214,17 @@ class SeismicDataset(Dataset):
             ylabel = geometry.index_headers[1]
 
         kwargs = {
-            'title_label': f'Data slice on cube `{geometry.displayed_name}`\n {header} {loc} out of {total}',
-            'title_y': 1.01,
+            'cmap': ['Greys_r', 'darkorange'],
+            'title': f'Data slice on cube `{geometry.displayed_name}`\n {header} {loc} out of {total}',
             'xlabel': xlabel,
             'ylabel': ylabel,
             'extent': (xmin, xmax, ymin, ymax),
             'legend': src_labels,
+            'augment_mask': True,
             **kwargs
         }
 
-        return plot(images, **kwargs)
+        return plotter(data, **kwargs)
 
     # Facies
     def evaluate_facies(self, src_horizons, src_true=None, src_pred=None, metrics='dice'):

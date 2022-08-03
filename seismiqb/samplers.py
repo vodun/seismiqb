@@ -786,7 +786,7 @@ class SeismicSampler(Sampler):
                 msg += f'\n        {sampler}'
         return msg
 
-    def show_locations(self, savepath=None, **kwargs):
+    def show_locations(self, savepath=None, plotter=plot, **kwargs):
         """ Visualize on field map by using underlying `locations` structure. """
         data = []
         title = []
@@ -804,42 +804,46 @@ class SeismicSampler(Sampler):
             xlabel += [field.index_headers[0]] * len(samplers_list)
             ylabel += [field.index_headers[1]] * len(samplers_list)
 
-        data.append(None) # reserve extra subplot for future legend
-
-        kwargs = {
-            'cmap': [['Sampler', 'black']] * len(data),
-            'alpha': [[1.0, 0.4]] * len(data),
+        plot_config = {
+            'cmap': [['Sampler', 'gray']] * len(data),
             'title': title,
             'vmin': [[1, 0]] * len(data),
             'vmax': [[3, 1]] * len(data),
             'xlabel': xlabel,
             'ylabel': ylabel,
+            'augment_mask': True,
             **kwargs
         }
 
-        plotter = plot(data, **kwargs)
+        data.append(None) # reserve extra subplot for future legend
 
-        legend_params = {
+        plotter = plotter(data, **plot_config)
+
+        legend_config = {
             'mode': 'image',
-            'color': ('purple','blue','red', 'white', 'gray'),
+            'color': ('purple', 'blue', 'red', 'white', 'gray'),
             'label': ('ILINES and CROSSLINES', 'only ILINES', 'only CROSSLINES', 'restricted', 'dead traces'),
             'size': 20,
             'loc': 10,
             'facecolor': 'silver',
         }
 
-        plotter[-1].add_legend(**legend_params)
+        plotter[-1].add_legend(**legend_config)
+
         if savepath is not None:
             plotter.save(savepath=savepath)
+
         return plotter
 
-    def show_sampled(self, n=10000, binary=False, savepath=None, **kwargs):
+    def show_sampled(self, n=10000, binary=False, savepath=None, plotter=plot, **kwargs):
         """ Visualize on field map by sampling `n` crop locations. """
         sampled = self.sample(n)
 
         data = []
         title = []
-        for field_id in np.unique(sampled[:, 0]):
+
+        field_ids = np.unique(sampled[:, 0])
+        for field_id in field_ids:
             field = self.samplers[field_id][0].field
 
             if isinstance(field, SyntheticField):
@@ -861,20 +865,21 @@ class SeismicSampler(Sampler):
 
         data.append(None) # reserve extra subplot for future legend
 
-        kwargs = {
+        plot_config = {
             'matrix_name': 'Sampled slices',
-            'cmap': [['Reds', 'black']] * len(data),
-            'alpha': [[1.0, 0.4]] * len(data),
+            'cmap': [['Reds', 'black']] * len(field_ids),
+            'alpha': [[1.0, 0.4]] * len(field_ids),
             'title': title,
             'interpolation': 'bilinear',
             'xlabel': field.index_headers[0],
             'ylabel': field.index_headers[1],
+            'augment_mask': True,
             **kwargs
         }
 
-        plotter = plot(data, **kwargs)
+        plotter = plotter(data, **plot_config)
 
-        legend_params = {
+        legend_config = {
             'mode': 'image',
             'color': ('beige', 'salmon', 'grey'),
             'label': ('alive traces', 'sampled locations', 'dead traces'),
@@ -883,7 +888,9 @@ class SeismicSampler(Sampler):
             'facecolor': 'silver',
         }
 
-        plotter[-1].add_legend(**legend_params)
+        plotter[-1].add_legend(**legend_config)
+
         if savepath is not None:
             plotter.save(savepath=savepath)
+
         return plotter

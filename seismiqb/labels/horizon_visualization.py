@@ -68,17 +68,18 @@ class HorizonVisualizationMixin(VisualizationMixin):
             attribute['src'] = ('/'.join([prefix, attribute['src']])).replace('//', '/')
         return attribute
 
-    def show(self, attributes='depths', mode='image', return_figure=False, show=True, **kwargs):
+
+    def show(self, attributes='depths', mode='image', show=True, **kwargs):
         """ Field visualization with custom naming scheme. """
         attributes = DelegatingList(attributes)
         attributes = attributes.apply(lambda item: copy(item) if isinstance(item, dict) else item)
         attributes = attributes.apply(self._show_add_prefix, prefix=self.find_self())
 
         kwargs = {
-            'suptitle_label': f'`{self.name}` on field `{self.field.displayed_name}`',
+            'suptitle': f'`{self.name}` on field `{self.field.displayed_name}`',
             **kwargs
         }
-        plotter = self.field.show(attributes=attributes, mode=mode, return_figure=return_figure, show=show, **kwargs)
+        plotter = self.field.show(attributes=attributes, mode=mode, show=show, **kwargs)
 
         # Clean-up
         if self.field.loaded_labels[-1] == '_unknown_label':

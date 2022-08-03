@@ -693,11 +693,10 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
 
     # Alias for horizon comparisons
     def compare(self, *others, clip_value=5, ignore_zeros=True,
-                printer=print, visualize=True, return_figure=False, hist_kwargs=None, **kwargs):
+                printer=print, visualize=True, hist_kwargs=None, **kwargs):
         """ Alias for `HorizonMetrics.compare`. """
         return self.metrics.compare(*others, clip_value=clip_value, ignore_zeros=ignore_zeros,
-                                    printer=printer, visualize=visualize, return_figure=return_figure,
-                                    hist_kwargs=hist_kwargs, **kwargs)
+                                    printer=printer, visualize=visualize, hist_kwargs=hist_kwargs, **kwargs)
 
     def compute_prediction_std(self, others):
         """ Compute std of predicted horizons along depths and restrict it to `self`. """

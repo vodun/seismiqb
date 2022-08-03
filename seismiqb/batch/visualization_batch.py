@@ -28,7 +28,7 @@ class VisualizationMixin:
 
         return data
 
-    def get_plot_config(self, components, idx, zoom, displayed_name, augment_titles, adjust_masks):
+    def get_plot_config(self, components, idx, zoom, displayed_name, augment_title, augment_prediction):
         """ Get batch components data for specified index and make its plot config.
 
         Parameters
@@ -41,25 +41,25 @@ class VisualizationMixin:
             Additional limits to show batch components in.
         displayed_name : str
             Field name to show in suptitle instead of default.
-        augment_titles : bool
+        augment_title : bool
             Whether add data location string representation to titles or not.
+        augment_prediction : bool
+            If True, hide values smaller than 0.5 in 'predictions' batch component.
         """
         #pylint: disable=too-many-nested-blocks
         components = DelegatingList(components)
 
         data = components.apply(self.get_component_data, idx=idx, zoom=zoom)
-        cmap = components.apply(lambda item: 'viridis' if 'mask' in item or 'prediction' in item else 'Greys_r')
+        cmap = components.apply(lambda item: 'darkorange' if 'mask' in item or 'prediction' in item else 'Greys_r')
 
-        # Remove some mask values. TODO: improve via better `binarize_masks` in plotter
-        if adjust_masks:
+        if augment_prediction:
             for i, component in enumerate(components):
-                if isinstance(component, list):
-                    for j, component_ in enumerate(component):
-                        if 'prediction' in component_:
-                            data_ = data[i][j]
-                            if data_.min() >= 0.0 and data_.max() <= 1.0:
-                                data_ = np.ma.array(data_, mask=data_ < 0.5)
-                                data[i][j] = data_
+                for j, component_ in enumerate(component):
+                    if 'prediction' in component_:
+                        data_ = data[i][j]
+                        if data_.min() >= 0.0 and data_.max() <= 1.0:
+                            data_ = np.ma.array(data_, mask=data_ < 0.5)
+                            data[i][j] = data_
 
         # Extract location
         location = self.locations[idx]
@@ -89,9 +89,9 @@ class VisualizationMixin:
         suptitle = f'batch_idx={idx}                  `{displayed_name}`\n{suptitle}'
 
         # Titles for individual axis
-        title = [str(item) for item in components]
+        title = [', '.join(item) for item in components]
         # TODO: Replace with `set_xticklabels` parametrization
-        if augment_titles:
+        if augment_title:
             if len(components) >= 1:
                 title[0] += '\n' + location_description[0]
             if len(components) >= 2:
@@ -113,15 +113,13 @@ class VisualizationMixin:
     @property
     def default_plot_components(self):
         """ Return a list of default components to plot, that are actually present in batch. """
-        components = ['images', 'masks', ['images', 'masks'], 'predictions', ['images', 'predictions']]
+        components = [['images'], ['masks'], ['images', 'masks'], ['predictions'], ['images', 'predictions']]
         components = DelegatingList(components)
-        component_present = lambda item: hasattr(self, item) if isinstance(item, str) \
-                                         else all(hasattr(self, subitem) for subitem in item)
-        components = components.filter(component_present, shallow=True)
+        components = components.filter(lambda item: all(hasattr(self, subitem) for subitem in item), shallow=True)
         return components
 
     def plot(self, components=None, idx=0, zoom=None, displayed_name=None,
-             augment_titles=False, adjust_masks=True, **kwargs):
+             augment_title=False, augment_mask=True, augment_prediction=True, **kwargs):
         """ Plot components of batch for specific index.
 
         Parameters
@@ -134,19 +132,26 @@ class VisualizationMixin:
             Additional limits to show batch components in.
         diplayed_name : str
             Field name to show in suptitle instead of default.
-        augment_titles : bool
-            Whether add data location string representation to titles or not.
+        augment_title : bool
+            If True, add data location string representation to titles.
+        augment_mask: bool
+            If True, hide 0s in binary mask and automatically choose color for 1s.
+        augment_prediction : bool
+            If True, hide values smaller than 0.5 in 'predictions' batch component.
         """
         if components is None:
             components = self.default_plot_components
         elif isinstance(components, str):
-            components = [components]
+            components = [[components]]
+        else:
+            components = [to_list(item) for item in components]
 
         plot_config = self.get_plot_config(components=components, idx=idx, zoom=zoom, displayed_name=displayed_name,
-                                           augment_titles=augment_titles, adjust_masks=adjust_masks)
+                                           augment_title=augment_title, augment_prediction=augment_prediction)
 
         plot_config = {
             'scale': 0.8,
+            'augment_mask': augment_mask,
             **plot_config,
             **kwargs
         }
@@ -156,8 +161,8 @@ class VisualizationMixin:
 
         return plot(**plot_config)
 
-    def plot_roll(self, n=1, components=None, indices=None, zoom=None,
-                  displayed_name=None, augment_titles=True, adjust_masks=True, **kwargs):
+    def plot_roll(self, n=1, components=None, indices=None, zoom=None, displayed_name=None,
+                  augment_title=True, augment_mask=True, augment_prediction=True, **kwargs):
         """ Plot `n` random batch items on one figure.
 
         Parameters
@@ -172,8 +177,12 @@ class VisualizationMixin:
             Additional limits to show batch components in.
         diplayed_name : str
             Field name to show in suptitle instead of default.
-        augment_titles : bool
+        augment_title : bool
             Whether add data location string representation to titles or not.
+        augment_mask: bool
+            If True, hide 0s in binary mask and automatically choose color for 1s.
+        augment_prediction : bool
+            If True, hide values smaller than 0.5 in 'predictions' batch component.
         """
         if indices is None:
             indices = self.random.choice(len(self), size=min(n, len(self)), replace=False)
@@ -183,13 +192,16 @@ class VisualizationMixin:
         if components is None:
             components = self.default_plot_components
         elif isinstance(components, str):
-            components = [components]
+            components = [[components]]
+        else:
+            components = [to_list(item) for item in components]
+
 
         plot_config = defaultdict(list)
         for idx in indices:
             plot_config_idx = self.get_plot_config(components=components, idx=idx, zoom=zoom,
-                                                   displayed_name=displayed_name,
-                                                   augment_titles=augment_titles, adjust_masks=adjust_masks)
+                                                   displayed_name=displayed_name, augment_title=augment_title,
+                                                   augment_prediction=augment_prediction)
             _ = plot_config_idx.pop('suptitle')
 
             for name, value in plot_config_idx.items():
@@ -197,6 +209,7 @@ class VisualizationMixin:
 
         plot_config = {
             'scale': 0.8,
+            'augment_mask': augment_mask,
             **plot_config,
             **kwargs
         }

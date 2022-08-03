@@ -61,8 +61,8 @@ class VisualizationMixin:
         return msg[:-1]
 
     # 2D along axis
-    def show_slide(self, loc, width=None, axis='i', zoom=None,
-                   src_geometry='geometry', src_labels='labels', indices='all', **kwargs):
+    def show_slide(self, loc, width=None, axis='i', zoom=None, src_geometry='geometry', src_labels='labels',
+                   indices='all', augment_mask=True, plotter=plot, **kwargs):
         """ Show slide with horizon on it.
 
         Parameters
@@ -113,11 +113,10 @@ class VisualizationMixin:
             ylabel = self.geometry.index_headers[1]
             total = self.geometry.depth
 
-        title = f'Field `{self.displayed_name}`\n {header} {loc} out of {total}'
-
         kwargs = {
-            'cmap': ['Greys_r', 'firebrick'],
-            'title_label': title,
+            'cmap': ['Greys_r', 'darkorange'],
+            'title': f'{header} {loc} out of {total}',
+            'suptitle':  f'Field `{self.displayed_name}`',
             'xlabel': xlabel,
             'ylabel': ylabel,
             'extent': (xmin, xmax, ymin, ymax),
@@ -127,14 +126,15 @@ class VisualizationMixin:
             'curve_width': width,
             'grid': [None, 'both'],
             'colorbar': [True, None],
+            'augment_mask': augment_mask,
             **kwargs
         }
 
-        return plot(data=[seismic_slide, mask], **kwargs)
+        return plotter(data=[seismic_slide, mask], **kwargs)
 
 
     # 2D depth slice
-    def show_points(self, src='labels', **kwargs):
+    def show_points(self, src='labels', plotter=plot, **kwargs):
         """ Plot 2D map of labels points. Meant to be used with spatially disjoint objects (e.g. faults). """
         map_ = np.zeros(self.spatial_shape)
         denum = np.zeros(self.spatial_shape)
@@ -148,20 +148,20 @@ class VisualizationMixin:
 
         labels_class = type(getattr(self, src)[0]).__name__
         kwargs = {
-            'title_label': f'{labels_class}s on {self.displayed_name}',
+            'title': f'{labels_class}s on `{self.displayed_name}`',
             'xlabel': self.index_headers[0],
             'ylabel': self.index_headers[1],
             'cmap': ['Reds', 'black'],
-            'alpha': [1.0, 0.4],
             'colorbar': True,
+            'augment_mask': True,
             **kwargs
         }
-        return plot([map_, self.zero_traces], **kwargs)
+        return plotter([map_, self.zero_traces], **kwargs)
 
 
     # 2D top-view maps
     def show(self, attributes='snr', mode='image', title_pattern='{attributes} of {label_name}',
-             bbox=False, savepath=None, load_kwargs=None, show=True, **plot_kwargs):
+             bbox=False, savepath=None, load_kwargs=None, show=True, plotter=plot, **kwargs):
         """ Show one or more field attributes on one figure.
 
         Parameters
@@ -190,7 +190,12 @@ class VisualizationMixin:
             Path to save the figure. `**` is changed to a field base directory, `*` is changed to field base name.
         load_kwargs : dict
             Loading parameters common for every requested attribute.
-        plot_kwargs : dict
+        show : bool
+            Whether to show created plot or not.
+        plotter : instance of `plot`
+            Plotter instance to use.
+            Combined with `positions` parameter allows using subplots of already existing plotter.
+        kwargs : dict
             Additional parameters for plot creation.
 
         Examples
@@ -241,7 +246,7 @@ class VisualizationMixin:
                 label_attributes = load_params.apply(substitutor)
 
                 plotter = self.show(attributes=label_attributes, mode=mode, bbox=bbox, title_pattern=title_pattern,
-                                    savepath=savepath, load_kwargs=load_kwargs, show=show, **plot_kwargs)
+                                    savepath=savepath, load_kwargs=load_kwargs, show=show, plotter=plotter, **kwargs)
                 plotters.append(plotter)
 
             return plotters
@@ -249,30 +254,35 @@ class VisualizationMixin:
         data_params = load_params.apply(self._load_data)
 
         # Prepare default plotting parameters
-        plot_params = data_params.apply(self._make_plot_params, mode=mode).to_dict()
-        plot_params = {**plot_params, **plot_kwargs}
-        # plot_params['suptitle'] = f'Field `{self.displayed_name}`' # TODO
+        plot_config = data_params.apply(self._make_plot_config, mode=mode).to_dict()
+        plot_config = {**plot_config, **kwargs}
+
+        plot_config = {
+            'suptitle': f'Field `{self.displayed_name}`',
+            'augment_mask': True,
+            **plot_config
+        }
 
         if mode == 'image':
-            plot_params['colorbar'] = True
-            plot_params['xlabel'] = self.index_headers[0]
-            plot_params['ylabel'] = self.index_headers[1]
+            plot_config['colorbar'] = True
+            plot_config['xlabel'] = self.index_headers[0]
+            plot_config['ylabel'] = self.index_headers[1]
 
-        if title_pattern and 'title' not in plot_params:
-            plot_params['title'] = data_params.apply(self._make_title, shallow=True, title_pattern=title_pattern)
+        if title_pattern and 'title' not in plot_config:
+            plot_config['title'] = data_params.apply(self._make_title, shallow=True, title_pattern=title_pattern)
 
         if bbox:
             bboxes_list = data_params.apply(lambda params: params['bbox'])
             lims_list = [np.stack([bboxes]).transpose(1, 2, 0) for bboxes in bboxes_list]
-            plot_params['xlim'] = [(lims[0, 0].min(), lims[0, 1].max()) for lims in lims_list]
-            plot_params['ylim'] = [(lims[1, 1].max(), lims[1, 0].min()) for lims in lims_list]
+            plot_config['xlim'] = [(lims[0, 0].min(), lims[0, 1].max()) for lims in lims_list]
+            plot_config['ylim'] = [(lims[1, 1].max(), lims[1, 0].min()) for lims in lims_list]
 
         if savepath:
             first_label_name = data_params.reference_object['label_name']
-            plot_params['savepath'] = self.make_path(savepath, name=first_label_name)
+            plot_config['savepath'] = self.make_path(savepath, name=first_label_name)
 
         # Plot image with given params and return resulting figure
-        return plot(mode=mode, show=show, **plot_params)
+        return plotter(mode=mode, show=show, **plot_config)
 
     # Auxilary methods utilized by `show`
     ALIAS_TO_ATTRIBUTE = AttributesMixin.ALIAS_TO_ATTRIBUTE
@@ -340,7 +350,7 @@ class VisualizationMixin:
     ATTRIBUTE_TO_CMAP = {attr: cmap for cmap, attributes in CMAP_TO_ATTRIBUTE.items()
                          for attr in attributes}
 
-    def _make_plot_params(self, data_params, mode):
+    def _make_plot_config(self, data_params, mode):
         params = {'data': data_params['data']}
 
         src_labels = data_params['src_labels']
@@ -491,7 +501,7 @@ class VisualizationMixin:
                 if len(simplices_) == 0:
                     continue
                 if x is not None:
-                    simplices += [simplices_ + sum([len(item) for item in coords])]
+                    simplices += [simplices_ + sum(len(item) for item in coords)]
                     simplices_colors += [[color] * len(simplices_)]
                     coords += [np.stack([x, y, z], axis=1)]
 

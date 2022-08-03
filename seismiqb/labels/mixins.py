@@ -17,7 +17,7 @@ class VisualizationMixin:
         mask = self.add_to_mask(mask, locations=locations, width=width)
         return np.squeeze(mask)
 
-    def show_slide(self, loc, width=None, axis='i', zoom=None, zoom_margin=20, **kwargs):
+    def show_slide(self, loc, width=None, axis='i', zoom=None, zoom_margin=20, plotter=plot, **kwargs):
         """ Show slide with horizon on it.
 
         Parameters
@@ -31,6 +31,9 @@ class VisualizationMixin:
         zoom : tuple, None or 'auto'
             Tuple of slices to apply directly to 2d images. If None, slicing is not applied.
             If 'auto', zero traces on bounds will be dropped and image will be centered on label.
+        plotter : instance of `plot`
+            Plotter instance to use.
+            Combined with `positions` parameter allows using subplots of already existing plotter.
         """
         # Make `locations` for slide loading
         axis = self.field.geometry.parse_axis(axis)
@@ -68,7 +71,7 @@ class VisualizationMixin:
                 f'`{self.field.displayed_name}`\n {header} {loc} out of {total}'
 
         kwargs = {
-            'title_label': title,
+            'title': title,
             'xlabel': xlabel,
             'ylabel': ylabel,
             'extent': (xmin, xmax, ymin, ymax),
@@ -80,4 +83,4 @@ class VisualizationMixin:
             'colorbar': [True, False],
             **kwargs
         }
-        return plot(data=[seismic_slide, mask], **kwargs)
+        return plotter(data=[seismic_slide, mask], **kwargs)
