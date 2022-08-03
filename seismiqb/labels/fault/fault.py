@@ -274,7 +274,7 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
         if (self.bbox[:, 1] < mask_bbox[:, 0]).any() or (self.bbox[:, 0] >= mask_bbox[:, 1]).any():
             return mask
 
-        insert_points_into_mask(mask, points, mask_bbox, width=width, axis=1 - self.direction)
+        insert_points_into_mask(mask, points, mask_bbox, width=width, axis=1-self.direction)
         return mask
 
     def __len__(self):
