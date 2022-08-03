@@ -394,7 +394,7 @@ class GeoBody:
         background[self.i_min:self.i_max+1, self.x_min:self.x_max+1] = matrix
         return background
 
-    def show(self, src='centers', fill_value=None, on_full=True, **kwargs):
+    def show(self, src='centers', fill_value=None, on_full=True, plotter=plot, **kwargs):
         """ Nice visualization of a depth map matrix. """
         matrix = getattr(self, src) if isinstance(src, str) else src
         fill_value = fill_value or self.FILL_VALUE
@@ -414,9 +414,9 @@ class GeoBody:
             **kwargs
             }
         matrix[matrix == fill_value] = np.nan
-        return plot(matrix, **kwargs)
+        return plotter(matrix, **kwargs)
 
-    def show_slide(self, loc, width=3, axis='i', transpose=None, zoom=None, **kwargs):
+    def show_slide(self, loc, width=3, axis='i', transpose=None, zoom=None, plotter=plot, **kwargs):
         """ Show slide with geobody on it.
 
         Parameters
@@ -427,6 +427,9 @@ class GeoBody:
             Number of axis to load slide along.
         stable : bool
             Whether or not to use the same sorting order as in the segyfile.
+        plotter : instance of `plot`
+            Plotter instance to use.
+            Combined with `positions` parameter allows using subplots of already existing plotter.
         """
         # Make `locations` for slide loading
         axis = self.geometry.parse_axis(axis)
@@ -470,8 +473,7 @@ class GeoBody:
             'ylabel': ylabel,
             'xticks': xticks,
             'yticks': yticks,
-            'y': 1.02,
             **kwargs
             }
 
-        return plot([seismic_slide, mask], transpose=transpose, **kwargs)
+        return plotter([seismic_slide, mask], transpose=transpose, **kwargs)

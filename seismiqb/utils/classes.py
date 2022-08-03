@@ -83,7 +83,9 @@ class AugmentedList(list):
         if isinstance(key, slice):
             return type(self)(super().__getitem__(key))
 
-        return type(self)([super().__getitem__(idx) for idx in key])
+        # list comprehensions have their own `locals()` that do not contain `self` and therefore `super` is not able
+        # to resolve zero argument form in the expression below, so we provide `type` and `object` arguments explicitly
+        return type(self)([super(type(self), self).__getitem__(idx) for idx in key]) # pylint: disable=bad-super-call
 
     # Delegating to contained objects
     def __getattr__(self, key):
