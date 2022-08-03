@@ -539,23 +539,29 @@ def insert_points_into_mask(mask, points, mask_bbox, width, axis):
     """
     #pylint: disable=not-an-iterable
 
+    left_margin = [0, 0, 0]
+    right_margin = [1, 1, 1]
+    left_margin[axis] = width // 2
+    right_margin[axis] = width - width // 2
+
     for i in prange(len(points)):
         point = points[i]
-        if (point[0] >= mask_bbox[0][0]) and (point[0] < mask_bbox[0][1]):
-            if (point[1] >= mask_bbox[1][0]) and (point[1] < mask_bbox[1][1]):
-                if (point[2] >= mask_bbox[2][0]) and (point[2] < mask_bbox[2][1]):
-                    point = point - mask_bbox[:, 0]
-                    slc_i, slc_x, slc_d = point[0], point[1], point[2]
+        if ((point[0] >= mask_bbox[0][0]-left_margin[0]) and
+            (point[1] >= mask_bbox[1][0]-left_margin[1]) and
+            (point[2] >= mask_bbox[2][0]-left_margin[2]) and
+            (point[1] < mask_bbox[1][1]+right_margin[1]-1) and
+            (point[0] < mask_bbox[0][1]+right_margin[0]-1) and
+            (point[2] < mask_bbox[2][1]+right_margin[2]-1)):
+                point = point - mask_bbox[:, 0]
+                left_bound = max(0, point[axis] - left_margin[axis])
+                right_bound = min(mask.shape[axis], point[axis] + right_margin[axis])
 
-                    left_offset = min(width // 2, point[axis])
-                    right_offset = min(width - left_offset, mask.shape[axis] - point[axis])
-
-                    if axis == 0:
-                        for width_ in range(-left_offset, right_offset):
-                            mask[slc_i + width_, slc_x, slc_d] = 1
-                    if axis == 1:
-                        for width_ in range(-left_offset, right_offset):
-                            mask[slc_i, slc_x + width_, slc_d] = 1
-                    if axis == 2:
-                        for width_ in range(-left_offset, right_offset):
-                            mask[slc_i, slc_x, slc_d + width_] = 1
+                if axis == 0:
+                    for pos in range(left_bound, right_bound):
+                        mask[pos, point[1], point[2]] = 1
+                elif axis == 1:
+                    for pos in range(left_bound, right_bound):
+                        mask[point[0], pos, point[2]] = 1
+                elif axis == 2:
+                    for pos in range(left_bound, right_bound):
+                        mask[point[0], point[1], pos] = 1
