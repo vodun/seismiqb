@@ -537,7 +537,7 @@ def insert_points_into_mask(mask, points, mask_bbox, width, axis):
     axis : int
         Direction of dilation.
     """
-    #pylint: disable=not-an-iterable
+    #pylint: disable=not-an-iterable, too-many-boolean-expressions
 
     left_margin = [0, 0, 0]
     right_margin = [1, 1, 1]
@@ -552,16 +552,17 @@ def insert_points_into_mask(mask, points, mask_bbox, width, axis):
             (point[0] <  mask_bbox[0][1] + right_margin[0]-1) and
             (point[1] <  mask_bbox[1][1] + right_margin[1]-1) and
             (point[2] <  mask_bbox[2][1] + right_margin[2]-1)):
-                point = point - mask_bbox[:, 0]
-                left_bound = max(0, point[axis] - left_margin[axis])
-                right_bound = min(mask.shape[axis], point[axis] + right_margin[axis])
 
-                if axis == 0:
-                    for pos in range(left_bound, right_bound):
-                        mask[pos, point[1], point[2]] = 1
-                elif axis == 1:
-                    for pos in range(left_bound, right_bound):
-                        mask[point[0], pos, point[2]] = 1
-                elif axis == 2:
-                    for pos in range(left_bound, right_bound):
-                        mask[point[0], point[1], pos] = 1
+            point = point - mask_bbox[:, 0]
+            left_bound = max(0, point[axis] - left_margin[axis])
+            right_bound = min(mask.shape[axis], point[axis] + right_margin[axis])
+
+            if axis == 0:
+                for pos in range(left_bound, right_bound):
+                    mask[pos, point[1], point[2]] = 1
+            elif axis == 1:
+                for pos in range(left_bound, right_bound):
+                    mask[point[0], pos, point[2]] = 1
+            elif axis == 2:
+                for pos in range(left_bound, right_bound):
+                    mask[point[0], point[1], pos] = 1
