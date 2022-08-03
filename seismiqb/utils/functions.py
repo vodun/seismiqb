@@ -544,10 +544,18 @@ def insert_points_into_mask(mask, points, mask_bbox, width, axis):
         if (point[0] >= mask_bbox[0][0]) and (point[0] < mask_bbox[0][1]):
             if (point[1] >= mask_bbox[1][0]) and (point[1] < mask_bbox[1][1]):
                 if (point[2] >= mask_bbox[2][0]) and (point[2] < mask_bbox[2][1]):
-                    slices = [slice(point[j] - mask_bbox[j][0], point[j] - mask_bbox[j][0]+1) for j in range(3)]
-                    if width > 1:
-                        slices[axis] = slice(
-                            max(0, point[axis] - mask_bbox[axis][0] - (width // 2)),
-                            min(point[axis] - mask_bbox[axis][0] + width // 2 + width % 2, mask.shape[axis])
-                        )
-                    mask[slices[0], slices[1], slices[2]] = 1
+                    point = point - mask_bbox[:, 0]
+                    slc_i, slc_x, slc_d = point[0], point[1], point[2]
+
+                    left_offset = min(width // 2, point[axis])
+                    right_offset = min(width - left_offset, mask.shape[axis] - point[axis])
+
+                    if axis == 0:
+                        for width_ in range(-left_offset, right_offset):
+                            mask[slc_i + width_, slc_x, slc_d] = 1
+                    if axis == 1:
+                        for width_ in range(-left_offset, right_offset):
+                            mask[slc_i, slc_x + width_, slc_d] = 1
+                    if axis == 2:
+                        for width_ in range(-left_offset, right_offset):
+                            mask[slc_i, slc_x, slc_d + width_] = 1
