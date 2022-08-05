@@ -211,12 +211,8 @@ class VisualizationMixin:
         # Make titles for individual axis
         title = [', '.join(item) for item in components]
         if 'title' in add_location:
-            if len(components) >= 1:
-                title[0] += '\n' + location_info[0]
-            if len(components) >= 2:
-                title[1] += '\n' + location_info[1]
-            if len(components) >= 3:
-                title[2] += '\n' + location_info[2]
+            for axis_index, axis_info in enumerate(location_info[:len(title)]):
+                title[axis_index] += '\n' + axis_info
         config['title'] = title
 
         return config
