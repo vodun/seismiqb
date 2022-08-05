@@ -319,7 +319,7 @@ class SyntheticField:
         plot_config = {
             'suptitle': f'Roll of `{attribute}`',
             'title': list(range(n)),
-            'cmap': 'Seismic2',
+            'cmap': 'Greys_r',
             'colorbar': True,
             'ncols': 5,
             **kwargs

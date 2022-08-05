@@ -68,17 +68,17 @@ class VisualizationMixin:
         return attribute
 
 
-    def show(self, attributes='depths', mode='image', return_figure=False, show=True, **kwargs):
+    def show(self, attributes='depths', mode='image', show=True, **kwargs):
         """ Field visualization with custom naming scheme. """
         attributes = DelegatingList(attributes)
-        attributes = attributes.apply(lambda item: copy(item) if isinstance(item, dict) else item)
-        attributes = attributes.apply(self._show_add_prefix, prefix=self.find_self())
+        attributes = attributes.map(lambda item: copy(item) if isinstance(item, dict) else item)
+        attributes = attributes.map(self._show_add_prefix, prefix=self.find_self())
 
         kwargs = {
-            'suptitle_label': f'`{self.name}` on field `{self.field.displayed_name}`',
+            'suptitle': f'`{self.name}` on field `{self.field.displayed_name}`',
             **kwargs
         }
-        plotter = self.field.show(attributes=attributes, mode=mode, return_figure=return_figure, show=show, **kwargs)
+        plotter = self.field.show(attributes=attributes, mode=mode, show=show, **kwargs)
 
         # Clean-up
         if self.field.loaded_labels[-1] == '_unknown_label':
@@ -89,7 +89,7 @@ class VisualizationMixin:
 
 
 
-    def show_slide(self, loc, width=None, axis='i', zoom=None, **kwargs):
+    def show_slide(self, loc, width=None, axis='i', zoom=None, plotter=plot, **kwargs):
         """ Show slide with horizon on it.
 
         Parameters
@@ -102,6 +102,9 @@ class VisualizationMixin:
             Number of axis to load slide along.
         zoom : tuple
             Tuple of slices to apply directly to 2d images.
+        plotter : instance of `plot`
+            Plotter instance to use.
+            Combined with `positions` parameter allows using subplots of already existing plotter.
         """
         # Make `locations` for slide loading
         axis = self.field.geometry.parse_axis(axis)
@@ -135,7 +138,8 @@ class VisualizationMixin:
         title = f'Horizon `{self.name}` on cube `{self.field.displayed_name}`\n {header} {loc} out of {total}'
 
         kwargs = {
-            'title_label': title,
+            'cmap': ['Greys_r', 'darkorange'],
+            'title': title,
             'xlabel': xlabel,
             'ylabel': ylabel,
             'extent': (xmin, xmax, ymin, ymax),
@@ -145,9 +149,10 @@ class VisualizationMixin:
             'curve_width': width,
             'grid': [False, True],
             'colorbar': [True, False],
+            'augment_mask': [False, True],
             **kwargs
         }
-        return plot(data=[seismic_slide, mask], **kwargs)
+        return plotter(data=[seismic_slide, mask], **kwargs)
 
     # 3D
     def show_3d(self, n_points=100, threshold=100., z_ratio=1., zoom=None, show_axes=True,
