@@ -248,9 +248,9 @@ class VisualizationMixin:
                 substitutor = lambda params: {**params, 'src': params['src'].replace('*', str(label_num))}
                 label_attributes = load_params.apply(substitutor)
 
-                plotter = self.show(attributes=label_attributes, mode=mode, bbox=bbox, title_pattern=title_pattern,
-                                    savepath=savepath, load_kwargs=load_kwargs, show=show, plotter=plotter, **kwargs)
-                plotters.append(plotter)
+                plotter_ = self.show(attributes=label_attributes, mode=mode, bbox=bbox, title_pattern=title_pattern,
+                                     savepath=savepath, load_kwargs=load_kwargs, show=show, plotter=plotter, **kwargs)
+                plotters.append(plotter_)
 
             return plotters
 
@@ -297,7 +297,7 @@ class VisualizationMixin:
         elif isinstance(attribute, np.ndarray):
             params = {'src': 'user data', 'data': attribute}
         elif isinstance(attribute, dict):
-            params = attribute
+            params = copy(attribute)
         else:
             raise TypeError(f'Attribute should be either str, dict or array! Got {type(attribute)} instead.')
 

@@ -83,7 +83,7 @@ class AugmentedList(list):
         if isinstance(key, slice):
             return type(self)(super().__getitem__(key))
 
-        # list comprehensions have their own `locals()` that do not contain `self` and therefore `super` is not able
+        # list comprehensions have their own `locals()` that do not contain `self` and therefore `super` is unable
         # to resolve zero argument form in the expression below, so we provide `type` and `object` arguments explicitly
         return type(self)([super(type(self), self).__getitem__(idx) for idx in key]) # pylint: disable=bad-super-call
 
@@ -128,18 +128,18 @@ class AugmentedList(list):
 
 
 class DelegatingList(AugmentedList):
-    """ `AugmentedList` that extends that makes delegation its items' attributes
+    """ `AugmentedList` that allows nested mapping and filtering.
 
         Examples
         --------
-        1. Len `lst` be an `AugmentedList` of objects and `f` be a function that accepts such objects.
+        1. Len `lst` be an `DelegatingList` of objects and `f` be a function that accepts such objects.
         Than the following expression:
         >>> lst.apply(f)
         Is equivalent to:
         >>> [f(item) for item in lst]
 
-        2. Let `l` be an `AugmentedList` of dictionaries:
-        >>> l = AugmentedList([{'cmap': 'viridis', 'alpha': 1.0},
+        2. Let `l` be an `DelegatingList` of dictionaries:
+        >>> l = DelegatingList([{'cmap': 'viridis', 'alpha': 1.0},
                                 [{'cmap': 'ocean', 'alpha': 1.0}, {'cmap': 'Reds', 'alpha': 0.7}]])
         That the following expresion:
         >>> l.to_dict()
@@ -151,25 +151,27 @@ class DelegatingList(AugmentedList):
         obj = [] if obj is None else obj if isinstance(obj, list) else [obj]
         super().__init__([type(self)(item) if isinstance(item, list) else item for item in obj])
 
-    def apply(self, func, *args, shallow=False, **kwargs):
+    def map(self, func, *other, shallow=False, **kwargs):
         """ Recursively traverse list items applying given function and return list of results with same nestedness.
 
         Parameters
         ----------
         func : callable
             Function to apply to items.
+        other : iterables of same nestedness as `self`
+            Contain items that are provided to `func` alongside with position-corresponding items from `self`.
         shallow : bool
             If True, apply function directly to outer list items disabling recursive descent.
-        args, kwargs : misc
+        kwargs : misc
             For `func`.
         """
         result = type(self)()
 
-        for item in self:
-            if isinstance(item, type(self)) and not shallow:
-                res = item.apply(func, *args, **kwargs)
+        for main_item, *other_items in zip(self, *other):
+            if isinstance(main_item, type(self)) and not shallow:
+                res = main_item.map(func, *other_items, **kwargs)
             else:
-                res = func(item, *args, **kwargs)
+                res = func(main_item, *other_items, **kwargs)
 
             if isinstance(res, list):
                 res = type(self)(res)
@@ -178,13 +180,15 @@ class DelegatingList(AugmentedList):
 
         return result
 
-    def filter(self, func, *args, shallow=False, **kwargs):
+    def filter(self, func, *other, shallow=False, **kwargs):
         """ Recursively apply given filtering function to list items and return those items for which function is true.
 
         Parameters
         ----------
         func : callable
             Filtering function to apply to items. Should return either False or True.
+        other : iterables of same nestedness as `self`
+            Contain items that are provided to `func` alongside with position-corresponding items from `self`.
         shallow : bool
             If True, apply function directly to outer list items disabling recursive descent.
         args, kwargs : misc
@@ -192,15 +196,15 @@ class DelegatingList(AugmentedList):
         """
         result = type(self)()
 
-        for item in self:
-            if isinstance(item, type(self)) and not shallow:
-                res = item.filter(func, *args, **kwargs)
+        for main_item, *other_items in zip(self, *other):
+            if isinstance(main_item, type(self)) and not shallow:
+                res = main_item.filter(func, *other_items, **kwargs)
                 if len(res) > 0:
                     result.append(res)
             else:
-                res = func(item, *args, **kwargs)
+                res = func(main_item, *other_items, **kwargs)
                 if res:
-                    result.append(item)
+                    result.append(main_item)
 
         return result
 
@@ -214,7 +218,7 @@ class DelegatingList(AugmentedList):
         # pylint: disable=cell-var-from-loop
         for key in self.reference_object:
             try:
-                result[key] = self.apply(lambda dct: dct[key])
+                result[key] = self.map(lambda dct: dct[key])
             except KeyError as e:
                 raise ValueError(f'KeyError occured due to absence of key `{key}` in some of list items.') from e
 

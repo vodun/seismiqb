@@ -217,7 +217,7 @@ class SeismicDataset(Dataset):
             'ylabel': ylabel,
             'extent': (xmin, xmax, ymin, ymax),
             'legend': src_labels,
-            'augment_mask': True,
+            'augment_mask': [False, True],
             **kwargs
         }
 
