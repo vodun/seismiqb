@@ -141,14 +141,14 @@ class DelegatingList(AugmentedList):
         Is evaluated to:
         >>> [1.0, 1.0, [1.0, 0.7]]
 
-        2. Let `attributes` be an `DelegatingList` of string, representing possible `batch` objects attributes:
-        >>> attributes = ['inputs', 'targets', 'predictions', [['inputs', 'targets', 'predictions']]
+        2. Let `attributes` be an `DelegatingList` of strings, representing possible `batch` objects attributes:
+        >>> attributes = ['inputs', 'targets', 'predictions', ['inputs', 'targets', 'predictions']]
         And let `present_in_batch` be a function that return True if attribute with such name is present in `batch`:
         >>> present_in_batch = lambda attribute: hasattr(batch, attribute)
         Than the following expression:
         >>> attributes.filter(present_in_batch)
         Is evaluated to following (if attribute 'predictions' is absent in `batch`):
-        >>> ['inputs', 'targets', [['inputs', 'targets']]
+        >>> ['inputs', 'targets', ['inputs', 'targets']]
 
         3. Let `configs` be an `DelegatingList` of dictionaries:
         >>> configs = [
