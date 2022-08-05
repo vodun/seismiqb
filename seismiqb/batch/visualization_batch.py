@@ -263,9 +263,7 @@ class VisualizationMixin:
         # Iterate over item-indices and traces, gather info about spectrum.
         for idx in indices:
             field = self.get(self.indices[idx], 'fields')
-            if sample_spacing is None:
-                nyquist_frequency = 0.5 / (field.sample_rate * 10e-4)
-                sample_spacing = 1 / nyquist_frequency
+            sample_spacing = sample_spacing or field.sample_rate / 1000  # field.sample_rate is given in ms
 
             # Try to get the name of a field
             if displayed_name is None:
