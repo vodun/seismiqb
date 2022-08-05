@@ -132,17 +132,34 @@ class DelegatingList(AugmentedList):
 
         Examples
         --------
-        1. Len `lst` be an `DelegatingList` of objects and `f` be a function that accepts such objects.
+        1. Let `indices` be an `DelegatingList` of intergers, representing image layers indices:
+        >>> indices = [0, 0, [0, 1]]
+        And let `choose_opacity` be a function that sets different opacity levels, depeneing on layer index:
+        >>> choose_opacity = lambda index: 1.0 if index == 0 else 0.7
         Than the following expression:
-        >>> lst.apply(f)
-        Is equivalent to:
-        >>> [f(item) for item in lst]
+        >>> indices.map(choose_opacity)
+        Is evaluated to:
+        >>> [1.0, 1.0, [1.0, 0.7]]
 
-        2. Let `l` be an `DelegatingList` of dictionaries:
-        >>> l = DelegatingList([{'cmap': 'viridis', 'alpha': 1.0},
-                                [{'cmap': 'ocean', 'alpha': 1.0}, {'cmap': 'Reds', 'alpha': 0.7}]])
+        2. Let `attributes` be an `DelegatingList` of string, representing possible `batch` objects attributes:
+        >>> attributes = ['inputs', 'targets', 'predictions', [['inputs', 'targets', 'predictions']]
+        And let `present_in_batch` be a function that return True if attribute with such name is present in `batch`:
+        >>> present_in_batch = lambda attribute: hasattr(batch, attribute)
+        Than the following expression:
+        >>> attributes.filter(present_in_batch)
+        Is evaluated to following (if attribute 'predictions' is absent in `batch`):
+        >>> ['inputs', 'targets', [['inputs', 'targets']]
+
+        3. Let `configs` be an `DelegatingList` of dictionaries:
+        >>> configs = [
+                {'cmap': 'viridis', 'alpha': 1.0},
+                [
+                    {'cmap': 'ocean', 'alpha': 1.0},
+                    {'cmap': 'Reds', 'alpha': 0.7}
+                ]
+            ]
         That the following expresion:
-        >>> l.to_dict()
+        >>> configs.to_dict()
         Will be evaluated to:
         >>> {'cmap': ['viridis, ['ocean', 'Reds]], 'alpha': [1.0, [1.0, 0.7]]}
     """

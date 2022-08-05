@@ -71,8 +71,8 @@ class VisualizationMixin:
     def show(self, attributes='depths', mode='image', show=True, **kwargs):
         """ Field visualization with custom naming scheme. """
         attributes = DelegatingList(attributes)
-        attributes = attributes.apply(lambda item: copy(item) if isinstance(item, dict) else item)
-        attributes = attributes.apply(self._show_add_prefix, prefix=self.find_self())
+        attributes = attributes.map(lambda item: copy(item) if isinstance(item, dict) else item)
+        attributes = attributes.map(self._show_add_prefix, prefix=self.find_self())
 
         kwargs = {
             'suptitle': f'`{self.name}` on field `{self.field.displayed_name}`',
