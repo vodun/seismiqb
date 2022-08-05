@@ -228,14 +228,14 @@ class VisualizationMixin:
         """
         # Wrap given attributes load parameters in a structure that allows applying functions to its nested items
         load_params = DelegatingList(attributes)
-        load_params = load_params.apply(lambda item: copy(item) if isinstance(item, dict) else item)
+        load_params = load_params.map(lambda item: copy(item) if isinstance(item, dict) else item)
 
         # Prepare data loading params
-        load_params = load_params.apply(self._make_load_params, common_params=load_kwargs)
+        load_params = load_params.map(self._make_load_params, common_params=load_kwargs)
 
         # Extract names of labels sources that require wildcard loading
         detect_wildcard = lambda params: params['src_labels'] if params['label_num'] == '*' else []
-        labels_require_wildcard_loading = load_params.apply(detect_wildcard).flat
+        labels_require_wildcard_loading = load_params.map(detect_wildcard).flat
 
         # If any attributes require wildcard loading, run `show` for every label item
         if any(labels_require_wildcard_loading):
@@ -246,18 +246,18 @@ class VisualizationMixin:
             for label_num in range(n_items):
                 #pylint: disable=cell-var-from-loop
                 substitutor = lambda params: {**params, 'src': params['src'].replace('*', str(label_num))}
-                label_attributes = load_params.apply(substitutor)
+                label_attributes = load_params.map(substitutor)
 
-                plotter = self.show(attributes=label_attributes, mode=mode, bbox=bbox, title_pattern=title_pattern,
-                                    savepath=savepath, load_kwargs=load_kwargs, show=show, plotter=plotter, **kwargs)
-                plotters.append(plotter)
+                plotter_ = self.show(attributes=label_attributes, mode=mode, bbox=bbox, title_pattern=title_pattern,
+                                     savepath=savepath, load_kwargs=load_kwargs, show=show, plotter=plotter, **kwargs)
+                plotters.append(plotter_)
 
             return plotters
 
-        data_params = load_params.apply(self._load_data)
+        data_params = load_params.map(self._load_data)
 
         # Prepare default plotting parameters
-        plot_config = data_params.apply(self._make_plot_config, mode=mode).to_dict()
+        plot_config = data_params.map(self._make_plot_config, mode=mode).to_dict()
         plot_config = {**plot_config, **kwargs}
 
         plot_config = {
@@ -272,10 +272,10 @@ class VisualizationMixin:
             plot_config['ylabel'] = self.index_headers[1]
 
         if title_pattern and 'title' not in plot_config:
-            plot_config['title'] = data_params.apply(self._make_title, shallow=True, title_pattern=title_pattern)
+            plot_config['title'] = data_params.map(self._make_title, shallow=True, title_pattern=title_pattern)
 
         if bbox:
-            bboxes_list = data_params.apply(lambda params: params['bbox'])
+            bboxes_list = data_params.map(lambda params: params['bbox'])
             lims_list = [np.stack([bboxes]).transpose(1, 2, 0) for bboxes in bboxes_list]
             plot_config['xlim'] = [(lims[0, 0].min(), lims[0, 1].max()) for lims in lims_list]
             plot_config['ylim'] = [(lims[1, 1].max(), lims[1, 0].min()) for lims in lims_list]
@@ -297,7 +297,7 @@ class VisualizationMixin:
         elif isinstance(attribute, np.ndarray):
             params = {'src': 'user data', 'data': attribute}
         elif isinstance(attribute, dict):
-            params = attribute
+            params = copy(attribute)
         else:
             raise TypeError(f'Attribute should be either str, dict or array! Got {type(attribute)} instead.')
 
