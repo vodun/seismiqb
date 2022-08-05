@@ -10,7 +10,7 @@ import cv2
 from scipy.interpolate import interp1d
 from scipy.ndimage import gaussian_filter1d
 from scipy.signal import butter, sosfiltfilt, hilbert
-from scipy.fftpack import fft, fftfreq
+from scipy.fft import rfft, rfftfreq
 
 from batchflow import DatasetIndex, Batch, action, inbatch_parallel, SkipBatchException, apply_parallel, plot
 
@@ -1465,33 +1465,39 @@ class SeismicCropBatch(Batch):
         }
         return plot_image(data, **kwargs)
 
-    def show_frequencies(self, indices=(0, ), src='images', trace_indices=((0, 0), (-1, -1)), axis=2, d=None,
-                         displayed_name=None, **kwargs):
+    def show_frequencies(self, indices=(0, ), src='images', trace_indices=((0, 0), (-1, -1)), axis=2,
+                         sample_spacing=None, displayed_name=None, **kwargs):
         """ Show Fourier frequency spectrum of a component. X-axis of the plot corresponds to frequency
         values in Hz while y-axis stands for amplitudes of specific frequencies.
 
-        For the analysis the method selects specific traces and item-indices. Traces are 1d slices taken along an axis.
+        The method selects for the analysis specific traces and batch items. Traces are 1d slices
+        taken along an axis.
 
         Uses units of Nyquist frequency when depicting the spectrum. In this way achieves consistency with
         action `bandpass_filter`.
 
         Parameters
         ----------
-        indices: int or tuple or list
+        indices : int or sequence of int
             Takes items with these indices to demonstrate the spectrum.
-        src: str
+        src : str
             The component, which spectrum is shown.
-        trace_indices: tuple or list of tuples
+        trace_indices : sequence of tuples
             Uses traces with these indices.
-        axis: int
+        axis : int
             Axis along which traces are taken. By default set to 2. This value correpsonds
             to depth, which is the most natural direction to research the spectrum.
-        d: float or None
-            By default, `show_frequencies` uses Nyquist units. Whenever `d` is supplied, uses specified
-            units.
-        displayed_name: str or None
+        sample_spacing : float or None
+            Inverse of the sampling rate. The same argument that `scipy.fftpack.fftfreq` uses under the
+            name of `d`. Specifies units of the x-axis of the spectrum plot. If set to None, `show_frequencies`
+            uses Nyquist units. That is, `sample_spacing` is set to inverse of the nyquist frequency.
+            In this case, x-axis units correspond to units of `lowcut`/ `highcut` agruments of
+            `SeismicCropBatch.bandpass_filter`.
+
+            NOTE: in `Seismiqb` the same thing is called `sample_rate`. Measured not in Hz but in ms.
+        displayed_name : str or None
             Whenever supplied, assumes that traces are taken from field with this name.
-        kwargs: dict
+        kwargs : dict
             Arguments for customizing plot. For instance, removing/changing labels and titles.
         """
         indices = indices if isinstance(indices, (list, tuple)) else (indices, )
@@ -1502,21 +1508,20 @@ class SeismicCropBatch(Batch):
         # Iterate over item-indices and traces, gather info about spectrum.
         for idx in indices:
             field = self.get(self.indices[idx], 'fields')
-            if d is None:
-                nyq = 0.5 / (field.sample_rate * 10e-4)
-                d = 1 / nyq
+            if sample_spacing is None:
+                nyquist_frequency = 0.5 / (field.sample_rate * 10e-4)
+                sample_spacing = 1 / nyquist_frequency
 
             # Try to get the name of a field
             if displayed_name is None:
                 displayed_name = field.displayed_name
 
             data = self.get(self.indices[idx], src)
-            freqs = fftfreq(data.shape[axis], d)
-            frequencies = freqs[1 : data.shape[axis]//2]
+            frequencies = rfftfreq(data.shape[axis], sample_spacing)
 
             for trace_idx in trace_indices:
                 trace_idx_ = tuple(np.insert(np.array(trace_idx, dtype=np.object_), insert_index, slice(0, None)))
-                amplitudes = fft(data[trace_idx_])[1 : data.shape[axis]//2]
+                amplitudes = rfft(data[trace_idx_])
                 plot_data.append((frequencies, np.abs(amplitudes)))
                 plot_label.append(f'FIELD: {displayed_name}   IDX: {idx}   TRACE: {trace_idx}')
 
