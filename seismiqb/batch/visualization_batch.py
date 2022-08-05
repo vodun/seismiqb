@@ -74,7 +74,6 @@ class VisualizationMixin:
             if not augment_mask or layer_index == 0:
                 augment_mask = False
                 cmap = mask_cmap
-                vmin, vmax = 0, 1
             else:
                 cmap = mask_color
         elif 'prediction' in component and (data.min() >= 0.0 and data.max() <= 1.0):
