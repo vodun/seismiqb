@@ -7,7 +7,7 @@ from itertools import product
 import numpy as np
 import pandas as pd
 
-from ..plotters import plot_image
+from ..plotters import plot
 from ..utils import round_to_array
 
 
@@ -243,7 +243,7 @@ class UnstructuredHorizon:
 
 
     # Visualization
-    def show_slide(self, loc, width=3, axis=0, stable=True, **kwargs):
+    def show_slide(self, loc, width=3, axis=0, stable=True, plotter=plot, **kwargs):
         """ Show slide with horizon on it.
 
         Parameters
@@ -254,6 +254,9 @@ class UnstructuredHorizon:
             Number of axis to load slide along.
         stable : bool
             Whether or not to use the same sorting order as in the segyfile.
+        plotter : instance of `plot`
+            Plotter instance to use.
+            Combined with `positions` parameter allows using subplots of already existing plotter.
         """
         # Make `locations` for slide loading
         axis = self.geometry.parse_axis(axis)
@@ -273,10 +276,10 @@ class UnstructuredHorizon:
 
         # set defaults if needed and plot the slide
         kwargs = {
-            'title_label': (f'U-horizon `{self.name}` on `{self.cube_name}`' + '\n ' +
+            'title': (f'U-horizon `{self.name}` on `{self.cube_name}`' + '\n ' +
                       f'{self.geometry.index_headers[axis]} {loc} out of {self.geometry.lens[axis]}'),
             'xlabel': self.geometry.index_headers[1 - axis],
-            'ylabel': 'Depth', 'y': 1.015,
+            'ylabel': 'Depth',
             **kwargs
         }
-        return plot_image([seismic_slide, mask], **kwargs)
+        return plotter([seismic_slide, mask], **kwargs)

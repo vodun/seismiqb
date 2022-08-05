@@ -467,15 +467,18 @@ class SeismicGeometrySEGY(SeismicGeometry):
 
         if mode == 'slide':
             slc = locations[axis]
+            start = slc.start or 0
+            stop = slc.stop or self.shape[axis]
+
             if axis == 0:
                 return np.stack([self.load_slide(loc, axis=axis)[locations[1], locations[2]]
-                                 for loc in range(slc.start, slc.stop)], axis=axis)
+                                 for loc in range(start, stop)], axis=axis)
             if axis == 1:
                 return np.stack([self.load_slide(loc, axis=axis)[locations[0], locations[2]]
-                                 for loc in range(slc.start, slc.stop)], axis=axis)
+                                 for loc in range(start, stop)], axis=axis)
             if axis == 2:
                 return np.stack([self.load_slide(loc, axis=axis)[locations[0], locations[1]]
-                                 for loc in range(slc.start, slc.stop)], axis=axis)
+                                 for loc in range(start, stop)], axis=axis)
         return self._load_crop(locations)
 
 

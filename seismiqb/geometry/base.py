@@ -14,7 +14,7 @@ from .export import ExportMixin
 from ..utils import CacheMixin
 
 from ..utils import file_print, get_environ_flag, lru_cache, transformable
-from ..plotters import plot_image
+from ..plotters import plot
 
 
 
@@ -257,7 +257,6 @@ class SeismicGeometry(CacheMixin, ExportMixin):
 
     def extract_field_name(self):
         """ Try to parse field from geometry name. """
-
         # search for a sequence of uppercase letters between '_' and '.' symbols
         field_search = re.search(r'_([A-Z]+?)\.', self.name)
         if field_search is None:
@@ -376,7 +375,7 @@ class SeismicGeometry(CacheMixin, ExportMixin):
     def normalization_stats(self):
         """ Values for performing normalization of data from the field. """
         if self.quantized:
-            return {
+            normalization_stats = {
                 'mean': self.qnt_mean,
                 'std': self.qnt_std,
                 'min': self.qnt_min,
@@ -386,17 +385,19 @@ class SeismicGeometry(CacheMixin, ExportMixin):
                 'q_95': self.qnt_q95,
                 'q_99': self.qnt_q99,
             }
-        # Not quantized values
-        return {
-            'mean': self.v_mean,
-            'std': self.v_std,
-            'min': self.v_min,
-            'max': self.v_max,
-            'q_01': self.v_q01,
-            'q_05': self.v_q05,
-            'q_95': self.v_q95,
-            'q_99': self.v_q99,
-        }
+        else:
+            normalization_stats = {
+                'mean': self.v_mean,
+                'std': self.v_std,
+                'min': -128,
+                'max': +127,
+                'q_01': self.v_q01,
+                'q_05': self.v_q05,
+                'q_95': self.v_q95,
+                'q_99': self.v_q99,
+            }
+        normalization_stats = {key : float(value) for key, value in normalization_stats.items()}
+        return normalization_stats
 
     # Coordinates transforms
     def lines_to_cubic(self, array):
@@ -728,11 +729,11 @@ class SeismicGeometry(CacheMixin, ExportMixin):
 
 
     # Visual representation
-    def show(self, matrix='snr', **kwargs):
+    def show(self, matrix='snr', plotter=plot, **kwargs):
         """ Show geometry related top-view map. """
         matrix_name = matrix if isinstance(matrix, str) else kwargs.get('matrix_name', 'custom matrix')
         kwargs = {
-            'cmap': 'viridis_r',
+            'cmap': 'magma',
             'title': f'`{matrix_name}` map of cube `{self.displayed_name}`',
             'xlabel': self.index_headers[0],
             'ylabel': self.index_headers[1],
@@ -740,9 +741,9 @@ class SeismicGeometry(CacheMixin, ExportMixin):
             **kwargs
             }
         matrix = getattr(self, matrix) if isinstance(matrix, str) else matrix
-        return plot_image(matrix, **kwargs)
+        return plotter(matrix, **kwargs)
 
-    def show_histogram(self, normalize=None, bins=50, **kwargs):
+    def show_histogram(self, normalize=None, bins=50, plotter=plot, **kwargs):
         """ Show distribution of amplitudes in `trace_container`. Optionally applies chosen normalization. """
         data = np.copy(self.trace_container)
         if normalize:
@@ -750,15 +751,15 @@ class SeismicGeometry(CacheMixin, ExportMixin):
 
         kwargs = {
             'title': (f'Amplitude distribution for {self.short_name}' +
-                      f'\n Mean/std: {np.mean(data):3.3}/{np.std(data):3.3}'),
+                      f'\n Mean/std: {np.mean(data):3.3f}/{np.std(data):3.3f}'),
             'label': 'Amplitudes histogram',
             'xlabel': 'amplitude',
             'ylabel': 'density',
             **kwargs
         }
-        return plot_image(data, backend='matplotlib', bins=bins, mode='hist', **kwargs)
+        return plotter(data, bins=bins, mode='histogram', **kwargs)
 
-    def show_slide(self, loc=None, start=None, end=None, step=1, axis=0, zoom_slice=None, stable=True, **kwargs):
+    def show_slide(self, loc, start=None, end=None, step=1, axis=0, zoom=None, stable=True, plotter=plot, **kwargs):
         """ Show seismic slide in desired place.
         Under the hood relies on :meth:`load_slide`, so works with geometries in any formats.
 
@@ -768,23 +769,26 @@ class SeismicGeometry(CacheMixin, ExportMixin):
             Number of slide to load.
         axis : int or str
             Axis to load slide along.
-        zoom_slice : tuple
+        zoom : tuple
             Tuple of slices to apply directly to 2d images.
         start, end, step : int
             Parameters of slice loading for 1D index.
         stable : bool
             Whether or not to use the same sorting order as in the segyfile.
+        plotter : instance of `plot`
+            Plotter instance to use.
+            Combined with `positions` parameter allows using subplots of already existing plotter.
         """
         axis = self.parse_axis(axis)
         slide = self.load_slide(loc=loc, start=start, end=end, step=step, axis=axis, stable=stable)
         xmin, xmax, ymin, ymax = 0, slide.shape[0], slide.shape[1], 0
 
-        if zoom_slice:
-            slide = slide[zoom_slice]
-            xmin = zoom_slice[0].start or xmin
-            xmax = zoom_slice[0].stop or xmax
-            ymin = zoom_slice[1].stop or ymin
-            ymax = zoom_slice[1].start or ymax
+        if zoom:
+            slide = slide[zoom]
+            xmin = zoom[0].start or xmin
+            xmax = zoom[0].stop or xmax
+            ymin = zoom[1].stop or ymin
+            ymax = zoom[1].start or ymax
 
         # Plot params
         if len(self.index_headers) > 1:
@@ -803,34 +807,36 @@ class SeismicGeometry(CacheMixin, ExportMixin):
 
         kwargs = {
             'title': title,
+            'suptitle':  f'Field `{self.displayed_name}`',
             'xlabel': xlabel,
             'ylabel': ylabel,
-            'cmap': 'gray',
+            'cmap': 'Greys_r',
+            'colorbar': True,
             'extent': (xmin, xmax, ymin, ymax),
             'labeltop': False,
             'labelright': False,
             **kwargs
         }
-        return plot_image(slide, **kwargs)
+        return plotter(slide, **kwargs)
 
     def show_quality_map(self, **kwargs):
         """ Show quality map. """
-        plot_params = {
+        plot_config = {
             'cmap': 'Reds',
             'title': f'Quality map of `{self.displayed_name}`',
             **kwargs
         }
-        self.show(matrix=self.quality_map, **plot_params)
+        self.show(matrix=self.quality_map, **plot_config)
 
     def show_quality_grid(self, **kwargs):
         """ Show quality grid. """
-        plot_params = {
+        plot_config = {
             'cmap': 'Reds',
             'interpolation': 'bilinear',
             'title': f'Quality grid of `{self.displayed_name}`',
             **kwargs
         }
-        self.show(matrix=self.quality_grid, **plot_params)
+        self.show(matrix=self.quality_grid, **plot_config)
 
 
     # Coordinate conversion

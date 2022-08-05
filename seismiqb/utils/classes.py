@@ -83,7 +83,9 @@ class AugmentedList(list):
         if isinstance(key, slice):
             return type(self)(super().__getitem__(key))
 
-        return type(self)([super().__getitem__(idx) for idx in key])
+        # list comprehensions have their own `locals()` that do not contain `self` and therefore `super` is not able
+        # to resolve zero argument form in the expression below, so we provide `type` and `object` arguments explicitly
+        return type(self)([super(type(self), self).__getitem__(idx) for idx in key]) # pylint: disable=bad-super-call
 
     # Delegating to contained objects
     def __getattr__(self, key):
@@ -173,6 +175,32 @@ class DelegatingList(AugmentedList):
                 res = type(self)(res)
 
             result.append(res)
+
+        return result
+
+    def filter(self, func, *args, shallow=False, **kwargs):
+        """ Recursively apply given filtering function to list items and return those items for which function is true.
+
+        Parameters
+        ----------
+        func : callable
+            Filtering function to apply to items. Should return either False or True.
+        shallow : bool
+            If True, apply function directly to outer list items disabling recursive descent.
+        args, kwargs : misc
+            For `func`.
+        """
+        result = type(self)()
+
+        for item in self:
+            if isinstance(item, type(self)) and not shallow:
+                res = item.filter(func, *args, **kwargs)
+                if len(res) > 0:
+                    result.append(res)
+            else:
+                res = func(item, *args, **kwargs)
+                if res:
+                    result.append(item)
 
         return result
 

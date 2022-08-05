@@ -20,7 +20,7 @@ from .field import Field, SyntheticField
 from .geometry import SeismicGeometry
 from .utils import filtering_function, AugmentedDict
 from .labels.fault import insert_fault_into_mask
-from .plotters import MatplotlibPlotter, plot_image
+from .plotters import plot
 
 
 
@@ -724,6 +724,9 @@ class SeismicSampler(Sampler):
 
         # Resulting sampler
         n_present_fields = sum(len(sampler_list) != 0 for sampler_list in samplers.values())
+        if n_present_fields == 0:
+            raise ValueError('Empty sampler!')
+
         proportions = proportions or [1 / n_present_fields for _ in labels]
         final_weights = AugmentedDict({idx: [] for idx in labels.keys()})
 
@@ -772,7 +775,7 @@ class SeismicSampler(Sampler):
                 msg += f'\n        {sampler}'
         return msg
 
-    def show_locations(self, **kwargs):
+    def show_locations(self, savepath=None, plotter=plot, **kwargs):
         """ Visualize on field map by using underlying `locations` structure. """
         data = []
         title = []
@@ -782,88 +785,101 @@ class SeismicSampler(Sampler):
         for samplers_list in self.samplers.values():
             field = samplers_list[0].field
 
-            if not isinstance(field, SyntheticField):
-                data += [[sampler.orientation_matrix, field.zero_traces] for sampler in samplers_list]
-                title += [f'{field.displayed_name}: {sampler.displayed_name}' for sampler in samplers_list]
-                xlabel += [field.index_headers[0]] * len(samplers_list)
-                ylabel += [field.index_headers[1]] * len(samplers_list)
+            if isinstance(field, SyntheticField):
+                continue
 
-        kwargs = {
-            'cmap': [['Sampler', 'black']] * len(data),
-            'alpha': [[1.0, 0.4]] * len(data),
-            # 'ncols': ncols,
-            # 'nrows': nrows,
+            data += [[sampler.orientation_matrix, field.zero_traces] for sampler in samplers_list]
+            title += [f'{field.displayed_name}: {sampler.displayed_name}' for sampler in samplers_list]
+            xlabel += [field.index_headers[0]] * len(samplers_list)
+            ylabel += [field.index_headers[1]] * len(samplers_list)
+
+        plot_config = {
+            'cmap': [['Sampler', 'gray']] * len(data),
             'title': title,
             'vmin': [[1, 0]] * len(data),
             'vmax': [[3, 1]] * len(data),
             'xlabel': xlabel,
             'ylabel': ylabel,
-            'shapes': 1, # this parameter toggles additional subplot axes creation for further legend display
-            'return_figure': True,
+            'augment_mask': True,
             **kwargs
         }
 
-        fig = plot_image(data, **kwargs)
+        data.append(None) # reserve extra subplot for future legend
 
-        legend_params = {
-            'ax': fig.axes[len(data)],
-            'color': ('purple','blue','red', 'white', 'gray'),
+        plotter = plotter(data, **plot_config)
+
+        legend_config = {
+            'mode': 'image',
+            'color': ('purple', 'blue', 'red', 'white', 'gray'),
             'label': ('ILINES and CROSSLINES', 'only ILINES', 'only CROSSLINES', 'restricted', 'dead traces'),
             'size': 20,
             'loc': 10,
             'facecolor': 'silver',
         }
 
-        MatplotlibPlotter.add_legend(**legend_params)
+        plotter[-1].add_legend(**legend_config)
 
-    def show_sampled(self, n=10000, binary=False, **kwargs):
+        if savepath is not None:
+            plotter.save(savepath=savepath)
+
+        return plotter
+
+    def show_sampled(self, n=10000, binary=False, savepath=None, plotter=plot, **kwargs):
         """ Visualize on field map by sampling `n` crop locations. """
         sampled = self.sample(n)
 
         data = []
         title = []
-        for field_id in np.unique(sampled[:, 0]):
+
+        field_ids = np.unique(sampled[:, 0])
+        for field_id in field_ids:
             field = self.samplers[field_id][0].field
 
-            if not isinstance(field, SyntheticField):
-                matrix = np.zeros_like(field.zero_traces, dtype=np.int32)
+            if isinstance(field, SyntheticField):
+                continue
 
-                sampled_ = sampled[sampled[:, 0] == field_id]
-                for (_, _, _, point_i_start, point_x_start, _,
-                            point_i_stop,  point_x_stop,  _) in sampled_:
-                    matrix[point_i_start:point_i_stop, point_x_start:point_x_stop] += 1
-                if binary:
-                    matrix[matrix > 0] = 1
-                    kwargs['bad_values'] = ()
+            matrix = np.zeros_like(field.zero_traces, dtype=np.int32)
 
-                field_data = [matrix, field.zero_traces]
-                data.append(field_data)
+            sampled_ = sampled[sampled[:, 0] == field_id]
+            for (_, _, _, point_i_start, point_x_start, _, point_i_stop,  point_x_stop,  _) in sampled_:
+                matrix[point_i_start : point_i_stop, point_x_start : point_x_stop] += 1
+            if binary:
+                matrix[matrix > 0] = 1
 
-                field_title = f'{field.displayed_name}: {len(sampled_)} points'
-                title.append(field_title)
+            field_data = [matrix, field.zero_traces]
+            data.append(field_data)
 
-        kwargs = {
+            field_title = f'{field.displayed_name}: {len(sampled_)} points'
+            title.append(field_title)
+
+        data.append(None) # reserve extra subplot for future legend
+
+        plot_config = {
             'matrix_name': 'Sampled slices',
-            'cmap': [['Reds', 'black']] * len(data),
-            'alpha': [[1.0, 0.4]] * len(data),
+            'cmap': [['Reds', 'black']] * len(field_ids),
+            'alpha': [[1.0, 0.4]] * len(field_ids),
             'title': title,
             'interpolation': 'bilinear',
             'xlabel': field.index_headers[0],
             'ylabel': field.index_headers[1],
-            'shapes': 1, # this parameter toggles additional subplot axes creation for further legend display
-            'return_figure': True,
+            'augment_mask': True,
             **kwargs
         }
 
-        fig = plot_image(data, **kwargs)
+        plotter = plotter(data, **plot_config)
 
-        legend_params = {
-            'ax': fig.axes[len(data)],
+        legend_config = {
+            'mode': 'image',
             'color': ('beige', 'salmon', 'grey'),
             'label': ('alive traces', 'sampled locations', 'dead traces'),
-            'size': 20,
+            'size': 25,
             'loc': 10,
             'facecolor': 'silver',
         }
 
-        MatplotlibPlotter.add_legend(**legend_params)
+        plotter[-1].add_legend(**legend_config)
+
+        if savepath is not None:
+            plotter.save(savepath=savepath)
+
+        return plotter

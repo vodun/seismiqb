@@ -92,7 +92,7 @@ class Fault(Horizon):
             self.format = 'file-npy'
         else:
             self.load_fault_sticks(path, transform, verify, **kwargs)
-            self.format = 'file-charisma'
+            self.format = 'file-sticks'
 
     def load_fault_sticks(self, path, transform=True, verify=True, fix=False, width=3, **kwargs):
         """ Get point cloud array from file values. """
@@ -205,8 +205,7 @@ class Fault(Horizon):
         points = np.load(path, allow_pickle=False)
         self.from_points(points, verify=False)
 
-    def dump_points(self, path):
-        """ Dump fault to npz. """
+    def _prepare_path(self, path):
         path = self.field.make_path(path, name=self.short_name, makedirs=False)
 
         if os.path.exists(path):
@@ -216,12 +215,43 @@ class Fault(Horizon):
         if not os.path.exists(folder_name):
             os.makedirs(folder_name)
 
+        return path
+
+    def dump_points(self, path):
+        """ Dump fault to npz. """
+        path = self._prepare_path(path)
+
         if self.sticks is not None:
             sticks, sticks_labels = self.sticks_to_labeled_array(self.sticks)
         else:
             sticks, sticks_labels = np.zeros((0, 3)), np.zeros((0, 1))
+
         np.savez(path, points=self.points, nodes=self.nodes, simplices=self.simplices,
                  sticks=sticks, sticks_labels=sticks_labels)
+
+    def dump_sticks(self, path, sticks_step=10, stick_nodes_step=10):
+        """ Dump fault sticks. """
+        path = self._prepare_path(path)
+
+        sticks_df = []
+        if self.sticks is None:
+            self.sticks = self.get_sticks(self.points, sticks_step, stick_nodes_step)
+        for stick_idx, stick in enumerate(self.sticks):
+            stick = self.field.geometry.cubic_to_lines(stick).astype(int)
+            cdp = self.field.geometry.lines_to_cdp(stick[:, :2])
+            df = {
+                'INLINE-': 'INLINE-',
+                'iline': stick[:, 0],
+                'xline': stick[:, 1],
+                'cdp_x': cdp[:, 0],
+                'cdp_y': cdp[:, 1],
+                'height': stick[:, 2],
+                'name': os.path.basename(path),
+                'number': stick_idx
+            }
+            sticks_df.append(pd.DataFrame(df))
+        sticks_df = pd.concat(sticks_df)
+        sticks_df.to_csv(path, header=False, index=False, sep=' ')
 
     def sticks_to_labeled_array(self, sticks):
         """ Auxilary method to dump fault into npz with allow_pickle=False. """
@@ -301,7 +331,7 @@ class Fault(Horizon):
         """ Save the fault to csv. """
         df.to_csv(os.path.join(dst, df.name), sep=' ', header=False, index=False)
 
-    def show_3d(self, sticks_step=10, stick_nodes_step=10, z_ratio=1., zoom_slice=None, show_axes=True,
+    def show_3d(self, sticks_step=10, stick_nodes_step=10, z_ratio=1., zoom=None, show_axes=True,
                 width=1200, height=1200, margin=20, savepath=None, **kwargs):
         """ Interactive 3D plot. Roughly, does the following:
             - select `n` points to represent the horizon surface
@@ -317,7 +347,7 @@ class Fault(Horizon):
             Distance between stick nodes
         z_ratio : int
             Aspect ratio between height axis and spatial ones.
-        zoom_slice : tuple of slices or None.
+        zoom : tuple of slices or None.
             Crop from cube to show. If None, the whole cube volume will be shown.
         show_axes : bool
             Whether to show axes and their labels.
@@ -333,13 +363,13 @@ class Fault(Horizon):
         title = f'Fault `{self.name}` on `{self.field.displayed_name}`'
         aspect_ratio = (self.i_length / self.x_length, 1, z_ratio)
         axis_labels = (self.field.index_headers[0], self.field.index_headers[1], 'DEPTH')
-        if zoom_slice is None:
-            zoom_slice = [slice(0, i) for i in self.field.shape]
-        zoom_slice[-1] = slice(self.h_min, self.h_max)
+        if zoom is None:
+            zoom = [slice(0, i) for i in self.field.shape]
+        zoom[-1] = slice(self.h_min, self.h_max)
         margin = [margin] * 3 if isinstance(margin, int) else margin
-        x, y, z, simplices = self.make_triangulation(zoom_slice, sticks_step, stick_nodes_step)
+        x, y, z, simplices = self.make_triangulation(zoom, sticks_step, stick_nodes_step)
 
-        show_3d(x, y, z, simplices, title, zoom_slice, None, show_axes, aspect_ratio,
+        show_3d(x, y, z, simplices, title, zoom, None, show_axes, aspect_ratio,
                 axis_labels, width, height, margin, savepath, **kwargs)
 
     def make_triangulation(self, slices, sticks_step, stick_nodes_step, *args, **kwargs):

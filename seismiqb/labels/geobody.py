@@ -11,7 +11,7 @@ from skimage.measure import label
 
 
 from batchflow import HistoSampler
-from ..plotters import plot_image
+from ..plotters import plot
 from ..utils import groupby_min, groupby_max
 
 
@@ -394,7 +394,7 @@ class GeoBody:
         background[self.i_min:self.i_max+1, self.x_min:self.x_max+1] = matrix
         return background
 
-    def show(self, src='centers', fill_value=None, on_full=True, **kwargs):
+    def show(self, src='centers', fill_value=None, on_full=True, plotter=plot, **kwargs):
         """ Nice visualization of a depth map matrix. """
         matrix = getattr(self, src) if isinstance(src, str) else src
         fill_value = fill_value or self.FILL_VALUE
@@ -414,9 +414,9 @@ class GeoBody:
             **kwargs
             }
         matrix[matrix == fill_value] = np.nan
-        return plot_image(matrix, **kwargs)
+        return plotter(matrix, **kwargs)
 
-    def show_slide(self, loc, width=3, axis='i', order_axes=None, zoom_slice=None, **kwargs):
+    def show_slide(self, loc, width=3, axis='i', transpose=None, zoom=None, plotter=plot, **kwargs):
         """ Show slide with geobody on it.
 
         Parameters
@@ -427,6 +427,9 @@ class GeoBody:
             Number of axis to load slide along.
         stable : bool
             Whether or not to use the same sorting order as in the segyfile.
+        plotter : instance of `plot`
+            Plotter instance to use.
+            Combined with `positions` parameter allows using subplots of already existing plotter.
         """
         # Make `locations` for slide loading
         axis = self.geometry.parse_axis(axis)
@@ -441,11 +444,11 @@ class GeoBody:
         xticks = list(range(seismic_slide.shape[0]))
         yticks = list(range(seismic_slide.shape[1]))
 
-        if zoom_slice:
-            seismic_slide = seismic_slide[zoom_slice]
-            mask = mask[zoom_slice]
-            xticks = xticks[zoom_slice[0]]
-            yticks = yticks[zoom_slice[1]]
+        if zoom:
+            seismic_slide = seismic_slide[zoom]
+            mask = mask[zoom]
+            xticks = xticks[zoom[0]]
+            yticks = yticks[zoom[1]]
 
         # defaults for plotting if not supplied in kwargs
         if axis in [0, 1]:
@@ -470,8 +473,7 @@ class GeoBody:
             'ylabel': ylabel,
             'xticks': xticks,
             'yticks': yticks,
-            'y': 1.02,
             **kwargs
             }
 
-        return plot_image([seismic_slide, mask], order_axes=order_axes, **kwargs)
+        return plotter([seismic_slide, mask], transpose=transpose, **kwargs)

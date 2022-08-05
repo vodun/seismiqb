@@ -13,7 +13,7 @@ from .horizon_extraction import ExtractionMixin
 from .horizon_processing import ProcessingMixin
 from .horizon_visualization import VisualizationMixin
 from ..utils import CacheMixin, CharismaMixin
-from ..utils import groupby_mean, groupby_min, groupby_max
+from ..utils import groupby_mean, groupby_min, groupby_max, groupby_prob
 from ..utils import MetaDict
 
 
@@ -413,20 +413,24 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
             The upper left coordinate of a `mask` in the cube coordinates.
         threshold : float
             Parameter of mask-thresholding.
-        mode : str
-            Method used for finding the point of a horizon for each iline, xline.
+        mode : str, {'mean', 'min', 'max', 'prob'}
+            Method used for finding the point of a horizon for each trace in each connected component.
+            If `mean/min/max`, then we take mean/min/max value of labeled points on a trace.
+            If `prob`, then we take weighted sum of labeled points on a trace.
         minsize : int
             Minimum length of a horizon to be extracted.
         prefix : str
             Name of horizon to use.
         """
         _ = kwargs
-        if mode in ['mean', 'avg']:
-            group_function = groupby_mean
-        elif mode in ['min']:
-            group_function = groupby_min
-        elif mode in ['max']:
-            group_function = groupby_max
+        if 'mean' in mode:
+            group_function = lambda array, _: groupby_mean(array)
+        elif 'min' in mode:
+            group_function = lambda array, _: groupby_min(array)
+        elif 'max' in mode:
+            group_function = lambda array, _: groupby_max(array)
+        elif 'prob' in mode:
+            group_function = groupby_prob
 
         # Labeled connected regions with an integer
         labeled = label(mask >= threshold, connectivity=connectivity)
@@ -444,8 +448,9 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
 
                 if len(indices[0]) >= minsize:
                     coords = np.vstack([indices[i] + sl[i].start for i in range(3)]).T
+                    values = mask[coords[:, 0], coords[:, 1], coords[:, 2]]
 
-                    points = group_function(coords) + origin
+                    points = group_function(coords, values) + origin
                     horizons.append(Horizon(storage=points, field=field, name=f'{prefix}_{i}'))
 
         horizons.sort(key=len)
@@ -550,6 +555,34 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
 
         return mask
 
+
+    def add_to_regression_mask(self, mask, locations, scale=False):
+        """ Add depth matrix at `locations` to `mask`. """
+        mask_bbox = np.array([[slc.start, slc.stop] for slc in locations], dtype=np.int32)
+
+        # Getting coordinates of overlap in cubic system
+        (mask_i_min, mask_i_max), (mask_x_min, mask_x_max), (mask_h_min, mask_h_max) = mask_bbox
+
+        i_min, i_max = max(self.i_min, mask_i_min), min(self.i_max + 1, mask_i_max)
+        x_min, x_max = max(self.x_min, mask_x_min), min(self.x_max + 1, mask_x_max)
+
+        if i_max > i_min and x_max > x_min:
+            overlap = self.matrix[i_min - self.i_min : i_max - self.i_min,
+                                  x_min - self.x_min : x_max - self.x_min]
+
+            # Coordinates of points to use in overlap local system
+            idx_i, idx_x = np.asarray((overlap != self.FILL_VALUE) &
+                                      (overlap >= mask_h_min) &
+                                      (overlap <= mask_h_max)).nonzero()
+            heights = overlap[idx_i, idx_x].astype(np.float32)
+
+            if scale:
+                heights -= mask_h_min
+                heights /= (mask_h_max - mask_h_min)
+
+            mask[idx_i, idx_x] = heights
+        return mask
+
     def load_slide(self, loc, axis=0, width=3):
         """ Create a mask at desired location along supplied axis. """
         axis = self.field.geometry.parse_axis(axis)
@@ -570,7 +603,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
         from ..metrics import HorizonMetrics
         return HorizonMetrics(self)
 
-    def evaluate(self, compute_metric=True, supports=50, plot=True, savepath=None, printer=print, **kwargs):
+    def evaluate(self, compute_metric=True, supports=50, visualize=True, savepath=None, printer=print, **kwargs):
         """ Compute crucial metrics of a horizon.
 
         Parameters
@@ -597,8 +630,10 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
         # Visual part
         if compute_metric:
             from ..metrics import HorizonMetrics # pylint: disable=import-outside-toplevel
+            if savepath is not None:
+                kwargs['savepath'] = self.field.make_path(savepath, name=self.short_name)
             return HorizonMetrics(self).evaluate('support_corrs', supports=supports, agg='nanmean',
-                                                 plot=plot, savepath=savepath, **kwargs)
+                                                 visualize=visualize, **kwargs)
         return None
 
 
@@ -620,35 +655,48 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
             - `overlap_size` with number of overlapping points
             - `window_rate` for percentage of traces that are in 5ms from one horizon to the other
         """
+        # Compute diffs
         difference = np.where((self.full_matrix != self.FILL_VALUE) & (other.full_matrix != self.FILL_VALUE),
                               self.full_matrix - other.full_matrix, np.nan)
-        abs_difference = np.abs(difference)
 
-        overlap_size = np.nansum(~np.isnan(difference))
-        window_rate = np.nansum(abs_difference < (5 / self.field.sample_rate)) / overlap_size
+        mask = ~np.isnan(difference)
+        overlap_size = np.sum(mask)
+        masked_difference = difference[mask]
+        masked_abs_difference = np.abs(masked_difference)
+        window_rate = np.sum(masked_abs_difference < (5 / self.field.sample_rate)) / overlap_size
 
         present_at_1_absent_at_2 = ((self.full_matrix != self.FILL_VALUE)
                                     & (other.full_matrix == self.FILL_VALUE)).sum()
         present_at_2_absent_at_1 = ((self.full_matrix == self.FILL_VALUE)
                                     & (other.full_matrix != self.FILL_VALUE)).sum()
 
+        if masked_difference.size == 0:
+            masked_difference = masked_abs_difference = np.array([np.nan], dtype=np.float32)
+
         info_dict = {
             'difference_matrix' : difference,
-            'difference_mean' : np.nanmean(difference),
-            'difference_max' : np.nanmax(difference),
-            'difference_min' : np.nanmin(difference),
-            'difference_std' : np.nanstd(difference),
+            'difference_mean' : np.mean(masked_difference),
+            'difference_max' : np.max(masked_difference),
+            'difference_min' : np.min(masked_difference),
+            'difference_std' : np.std(masked_difference),
 
-            'abs_difference_mean' : np.nanmean(abs_difference),
-            'abs_difference_max' : np.nanmax(abs_difference),
-            'abs_difference_std' : np.nanstd(abs_difference),
+            'abs_difference_mean' : np.mean(masked_abs_difference),
+            'abs_difference_max' : np.max(masked_abs_difference),
+            'abs_difference_std' : np.std(masked_abs_difference),
 
-            'overlap_size' : overlap_size,
-            'window_rate' : window_rate,
+            'accuracy@0': np.mean(masked_abs_difference == 0),
+            'accuracy@1': np.mean(masked_abs_difference <= 1),
+            'accuracy@2': np.mean(masked_abs_difference <= 2),
+
+            'overlap_size': overlap_size,
+            'overlap_coverage': overlap_size / self.field.nonzero_traces,
+            'window_rate':  window_rate,
 
             'present_at_1_absent_at_2' : present_at_1_absent_at_2,
             'present_at_2_absent_at_1' : present_at_2_absent_at_1,
         }
+        info_dict = {key : round(value, 4) if isinstance(value, (float, np.floating)) else value
+                     for key, value in info_dict.items()}
         return MetaDict(info_dict)
 
     def find_closest(self, *others):
@@ -661,11 +709,10 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
 
     # Alias for horizon comparisons
     def compare(self, *others, clip_value=5, ignore_zeros=True,
-                printer=print, plot=True, return_figure=False, hist_kwargs=None, **kwargs):
+                printer=print, visualize=True, hist_kwargs=None, **kwargs):
         """ Alias for `HorizonMetrics.compare`. """
         return self.metrics.compare(*others, clip_value=clip_value, ignore_zeros=ignore_zeros,
-                                    printer=printer, plot=plot, return_figure=return_figure,
-                                    hist_kwargs=hist_kwargs, **kwargs)
+                                    printer=printer, visualize=visualize, hist_kwargs=hist_kwargs, **kwargs)
 
     def compute_prediction_std(self, others):
         """ Compute std of predicted horizons along depths and restrict it to `self`. """
