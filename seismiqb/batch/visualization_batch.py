@@ -364,10 +364,9 @@ class VisualizationMixin:
         values in Hz while y-axis stands for amplitudes of specific frequencies.
 
         The method selects for the analysis specific traces and batch items. Traces are 1d slices
-        taken along an axis.
+        taken along the chosen axis.
 
-        Uses units of Nyquist frequency when depicting the spectrum. In this way achieves consistency with
-        action `bandpass_filter`.
+        Uses Hz as x-axis units.
 
         Parameters
         ----------
@@ -381,13 +380,13 @@ class VisualizationMixin:
             Axis along which traces are taken. By default set to 2. This value correpsonds
             to depth, which is the most natural direction to research the spectrum.
         sample_spacing : float or None
-            Inverse of the sampling rate. The same argument that `scipy.fftpack.fftfreq` uses under the
-            name of `d`. Specifies units of the x-axis of the spectrum plot. If set to None, `show_frequencies`
-            uses Nyquist units. That is, `sample_spacing` is set to inverse of the nyquist frequency.
-            In this case, x-axis units correspond to units of `lowcut`/ `highcut` agruments of
-            `SeismicCropBatch.bandpass_filter`.
+            Inverse of the sampling rate. Measured in seconds. The same argument that `scipy.fftpack.fftfreq`
+            uses under the name of `d`. Specifies units of the x-axis of the spectrum plot. If set to
+            None, `show_frequencies` uses Hz (`1000 / (sample rate in ms)`). In this way, x-axis units correspond
+            to units of `lowcut`/ `highcut` arguments of `SeismicCropBatch.bandpass_filter`.
 
-            NOTE: in `Seismiqb` the same thing is called `sample_rate`. Measured not in Hz but in ms.
+            NOTE: in `Seismiqb` (as in seismic interpretation community) the same thing is called `sample_rate`.
+            The only difference is - `sample_rate` is measured in ms rather than is seconds.
         displayed_name : str or None
             Whenever supplied, assumes that traces are taken from field with this name.
         kwargs : dict
@@ -408,7 +407,8 @@ class VisualizationMixin:
                 displayed_name = field.displayed_name
 
             data = self.get(self.indices[idx], src)
-            frequencies = rfftfreq(data.shape[axis], sample_spacing)
+            frequencies = rfftfreq(data.shape[axis], sample_spacing)   # `rfftfreq` is responsible for choosing units
+                                                                 # of x-axis and expects `sample_spacing` in seconds.
 
             for trace_idx in trace_indices:
                 trace_idx_ = tuple(np.insert(np.array(trace_idx, dtype=np.object_), insert_index, slice(0, None)))
@@ -418,7 +418,7 @@ class VisualizationMixin:
 
         plot_params = {'title': f'Spectrum of {src}-component',
                        'label': plot_label,
-                       'xlabel': 'Frequency, HZ',
+                       'xlabel': 'Frequency, Hz',
                        'ylabel': 'Amplitude'}
         kwargs = {
             **plot_params,

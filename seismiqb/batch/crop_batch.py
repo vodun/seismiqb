@@ -1174,7 +1174,11 @@ class SeismicCropBatch(Batch, VisualizationMixin):
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
     def bandpass_filter(self, ix, src, dst, lowcut=None, highcut=None, axis=1, order=4, sign=True):
-        """ Keep only frequencies between `lowcut` and `highcut`.
+        """ Keep only frequencies between `lowcut` and `highcut`. Frequency bounds `lowcut` and `highcut`
+        are measured in Hz.
+
+        NOTE: use action `SeismicCropBatch.plot_frequencies` to look at the component's spectrum. The action
+        shows power spectrum in the same units as required here by parameters `lowcut` and `highcut`.
 
         Parameters
         ----------
@@ -1188,10 +1192,10 @@ class SeismicCropBatch(Batch, VisualizationMixin):
             Whether to keep only signs of resulting image.
         """
         field = self.get(ix, 'fields')
-        nyq = 0.5 / (field.sample_rate * 10e-4)
+        sampling_frequency = 1000 / field.sample_rate  # `field.sample_rate` is in ms, we need frequency in HZ (1/s)
         crop = self.get(ix, src)
 
-        sos = butter(order, [lowcut / nyq, highcut / nyq], btype='band', output='sos')
+        sos = butter(order, [lowcut, highcut], btype='band', output='sos', fs=sampling_frequency)
         filtered = sosfiltfilt(sos, crop, axis=axis)
         if sign:
             filtered = np.sign(filtered)
