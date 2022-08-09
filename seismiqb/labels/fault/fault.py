@@ -257,10 +257,7 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
             for i in range(3):
                 points = points[points[:, i] <= slices[i].stop]
                 points = points[points[:, i] >= slices[i].start]
-        if len(points) <= 3:
-            self._sticks = []
-        else:
-            self._sticks = points_to_sticks(points, sticks_step, stick_nodes_step, self.direction)
+        self._sticks = points_to_sticks(points, sticks_step, stick_nodes_step, self.direction)
 
     def add_to_mask(self, mask, locations=None, width=1, **kwargs):
         """ Add fault to background. """

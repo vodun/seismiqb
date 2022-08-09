@@ -32,7 +32,7 @@ def points_to_sticks(points, sticks_step=10, stick_nodes_step=10, axis=None):
     points = points[np.argsort(points[:, axis])]
     projections = np.split(points, np.unique(points[:, axis], return_index=True)[1][1:])
     projections = [item for item in projections if item[:, 2].max() - item[:, 2].min() > 5]
-    step = min(sticks_step, len(projections) - 1)
+    step = min(sticks_step, len(projections))
     if step == 0:
         return []
     projections = projections[::step]
