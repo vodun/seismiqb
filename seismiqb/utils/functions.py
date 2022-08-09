@@ -549,9 +549,9 @@ def insert_points_into_mask(mask, points, mask_bbox, width, axis):
         if ((point[0] >= mask_bbox[0][0] - left_margin[0]) and
             (point[1] >= mask_bbox[1][0] - left_margin[1]) and
             (point[2] >= mask_bbox[2][0] - left_margin[2]) and
-            (point[0] <  mask_bbox[0][1] + right_margin[0]-1) and
-            (point[1] <  mask_bbox[1][1] + right_margin[1]-1) and
-            (point[2] <  mask_bbox[2][1] + right_margin[2]-1)):
+            (point[0] <  mask_bbox[0][1] + right_margin[0] - 1) and
+            (point[1] <  mask_bbox[1][1] + right_margin[1] - 1) and
+            (point[2] <  mask_bbox[2][1] + right_margin[2] - 1)):
 
             point = point - mask_bbox[:, 0]
             left_bound = max(0, point[axis] - left_margin[axis])
