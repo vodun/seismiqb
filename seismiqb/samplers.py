@@ -229,8 +229,7 @@ class HorizonSampler(BaseSampler):
         Whether apply random shift to height locations of sampled horizon points or not.
     """
     def __init__(self, horizon, crop_shape, threshold=0.05, ranges=None, filtering_matrix=None,
-                 shift_height=True, spatial_shift=False,
-                 field_id=0, label_id=0, **kwargs):
+                 shift_height=True, spatial_shift=False, field_id=0, label_id=0, **kwargs):
         field = horizon.field
         matrix = horizon.full_matrix
 

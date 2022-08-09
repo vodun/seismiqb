@@ -71,6 +71,7 @@ class VisualizationMixin:
                 f'`{self.field.displayed_name}`\n {header} {loc} out of {total}'
 
         kwargs = {
+            'cmap': ['Greys_r', 'darkorange'],
             'title': title,
             'xlabel': xlabel,
             'ylabel': ylabel,
@@ -81,6 +82,7 @@ class VisualizationMixin:
             'curve_width': width,
             'grid': [False, True],
             'colorbar': [True, False],
+            'augment_mask': [False, True],
             **kwargs
         }
         return plotter(data=[seismic_slide, mask], **kwargs)
