@@ -246,7 +246,7 @@ class FaultSerializationMixin:
         sticks = npzfile.get('sticks')
         sticks_labels = npzfile.get('sticks_labels')
 
-        self.from_objects({
+        self.from_dict({
             'points': npzfile['points'],
             'nodes': npzfile.get('nodes'),
             'simplices': npzfile.get('simplices'),

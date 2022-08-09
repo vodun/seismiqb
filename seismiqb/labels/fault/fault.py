@@ -10,7 +10,14 @@ from .fault_formats import FaultSticksMixin, FaultSerializationMixin
 from ...utils import insert_points_into_mask
 
 class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
-    """ Class to represent Fault object. Each fault has 3 representations:
+    """ Class to represent Fault object.
+
+    Initialized from `storage` and `field`, where storage can be one of:
+        - csv-like file in FAULT_STICKS format.
+        - npy file with ndarray of (N, 3) shape or array itself.
+        - npz file with 'points', 'nodes', 'simplices' and 'sticks' or dict with the same keys.
+
+    Each fault has 3 representations:
         - points : cloud of surface points. The most accurate way to define surface but
                    not so handy for manual editing and occupies the most memory. Is needed
                    to create masks.
@@ -21,20 +28,15 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
                                 approximate arbitrary surface.
 
     All representations can be converted to each other:
-        sticks -> (nodes, simplices) -> points
-          ^                                |
-          └--------------------------------┘
+            sticks -------> (nodes, simplices)
+               ^                  |
+               └--- points < -----┘
 
-    Convertion from sticks to nodes/simplices is extremely obvious.
+    Convertion from sticks to nodes/simplices is simply concating and triangles creation.
     To convert triangulation (nodes and simplices) to points, we rasterize each triangle.
-    Convertion from points to sticks is more difficult and proposes that points represent
-    some surface which is almost a plane. Note that convertion from points to sticks leads
-    to loss of information due to the approximation.
-
-    Initialized from `storage` and `field`, where storage can be one of:
-        - csv-like file in FAULT_STICKS format.
-        - npy file with ndarray of (N, 3) shape or array itself.
-        - npz file with 'points', 'nodes', 'simplices' and 'sticks' or dict with the same keys.
+    Convertion from points to sticks is more difficult and assumes that points are on almost
+    flat 3d plane. Note that convertion from points to sticks leads to loss of information
+    due to the approximation.
 
     Parameters
     ----------
@@ -68,7 +70,7 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
         elif isinstance(storage, np.ndarray):
             source = 'points'
         elif isinstance(storage, dict):
-            source = 'objects'
+            source = 'dict'
         getattr(self, f'from_{source}')(storage, **kwargs)
 
         if self.direction is None:
@@ -162,7 +164,7 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
             self.load_fault_sticks(path, **kwargs)
             self.format = 'file-sticks'
 
-    def from_objects(self, storage, transform=False, **kwargs):
+    def from_dict(self, storage, transform=False, **kwargs):
         """ Load fault from dict with 'points', 'nodes', 'simplices' and 'sticks'. """
         for key in ['points', 'nodes']:
             data = storage.get(key)
@@ -183,7 +185,9 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
 
     @property
     def simplices(self):
-        """ Simplices. """
+        """ Approximation of the surface by triangulation. Is needed to approximate arbitrary surface.
+        Exists in pair with nodes.
+        """
         if self._simplices is None:
             if self._points is None and self._sticks is None:
                 raise AttributeError("'simplices' can't be created ('points' and 'sticks' don't exist)")
@@ -194,7 +198,9 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
 
     @property
     def nodes(self):
-        """ Nodes. """
+        """ Approximation of the surface by triangulation. Is needed to approximate arbitrary surface.
+        Exists in pair with simplices.
+        """
         if self._nodes is None:
             if self._points is None and self._sticks is None:
                 raise AttributeError("'nodes' can't be created ('points' and 'sticks' don't exist)")
@@ -205,7 +211,9 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
 
     @property
     def points(self):
-        """ Points. """
+        """ Cloud of surface points. The most accurate way to define surface but not so handy
+        for manual editing and occupies the most memory. Is needed to create masks.
+        """
         if self._points is None:
             if self._simplices is None and self._sticks is None:
                 raise AttributeError("'points' can't be created ('nodes'/'simplices' and 'sticks' don't exist)")
@@ -220,7 +228,9 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
 
     @property
     def sticks(self):
-        """ Sticks. """
+        """ Polylines that approximate fault surface. Usually are placed on a sequence of ilines or crosslines.
+        The most common result of the experts labeling but is not enough flexible.
+        """
         if self._sticks is None:
             if self._simplices is None and self._points is None:
                 raise AttributeError("'sticks' can't be created ('nodes'/'simplices' and 'points' don't exist)")

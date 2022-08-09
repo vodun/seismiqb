@@ -92,7 +92,7 @@ class VisualizationMixin:
         xmin, xmax, ymin, ymax = 0, seismic_slide.shape[0], seismic_slide.shape[1], 0
 
         if zoom == 'auto':
-            zoom = (slice(*self.geometry.get_slide_bounds(loc, axis)), slice(None))
+            zoom = self.geometry.compute_auto_zoom(loc, axis)
         if zoom:
             seismic_slide = seismic_slide[zoom]
             mask = mask[zoom]

@@ -665,8 +665,6 @@ class SeismicSampler(Sampler):
         Map of points to remove from potentially generated locations.
     shift_height : bool
         Whether to apply random shift to height locations of sampled horizon points or not.
-    baseclass : type
-        Class for initializing individual label samplers.
     kwargs : dict
         Other parameters of initializing label samplers.
     """

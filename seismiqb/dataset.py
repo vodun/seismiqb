@@ -194,7 +194,7 @@ class SeismicDataset(Dataset):
         xmin, xmax, ymin, ymax = 0, data[0].shape[0], data[0].shape[1], 0
 
         if zoom == 'auto':
-            zoom = (slice(*geometry.get_slide_bounds(loc, axis)), slice(None))
+            zoom = geometry.compute_auto_zoom(loc, axis)
         if zoom:
             data = [image[zoom] for image in data]
             xmin = zoom[0].start or xmin
