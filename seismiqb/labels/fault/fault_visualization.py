@@ -13,10 +13,8 @@ class FaultVisualizationMixin(VisualizationMixin):
 
     def show_slide(self, loc, **kwargs):
         """ Show slides from seismic with fault. """
-        cmap = kwargs.get('cmap', ['Greys_r', 'red'])
-        width = kwargs.get('width', 5)
-
-        kwargs = {**kwargs, 'cmap': cmap, 'width': width}
+        defaults = {'cmap': ['Greys_r', 'red'], 'width': 5}
+        kwargs = {**defaults, **kwargs}
         return super().show_slide(loc, **kwargs)
 
     def compute_auto_zoom(self, loc, axis, zoom_margin):
