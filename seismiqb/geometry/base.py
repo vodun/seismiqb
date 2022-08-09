@@ -291,6 +291,12 @@ class SeismicGeometry(CacheMixin, ExportMixin):
         locations[axis] = slice(loc, loc + 1)
         return locations
 
+    def compute_auto_zoom(self, loc, axis=0):
+        """ Get bounds of the non-zero part of the slide. """
+        mask = self.zero_traces.take(loc, axis)
+        start = np.argmin(mask)
+        end = len(mask) - np.argmin(mask[::-1])
+        return (slice(start, end), slice(None))
 
     # Meta information: storing / retrieving attributes
     def store_meta(self, path=None):
@@ -769,8 +775,9 @@ class SeismicGeometry(CacheMixin, ExportMixin):
             Number of slide to load.
         axis : int or str
             Axis to load slide along.
-        zoom : tuple
-            Tuple of slices to apply directly to 2d images.
+        zoom : tuple, None or 'auto'
+            Tuple of slices to apply directly to 2d images. If None, slicing is not applied.
+            If 'auto', zero traces on bounds will be dropped.
         start, end, step : int
             Parameters of slice loading for 1D index.
         stable : bool
@@ -783,6 +790,8 @@ class SeismicGeometry(CacheMixin, ExportMixin):
         slide = self.load_slide(loc=loc, start=start, end=end, step=step, axis=axis, stable=stable)
         xmin, xmax, ymin, ymax = 0, slide.shape[0], slide.shape[1], 0
 
+        if zoom == 'auto':
+            zoom = self.compute_auto_zoom(loc, axis)
         if zoom:
             slide = slide[zoom]
             xmin = zoom[0].start or xmin

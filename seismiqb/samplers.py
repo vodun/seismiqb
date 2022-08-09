@@ -18,8 +18,7 @@ from batchflow import Sampler, ConstantSampler
 from .labels import Horizon, Fault
 from .field import Field, SyntheticField
 from .geometry import SeismicGeometry
-from .utils import filtering_function, AugmentedDict
-from .labels.fault import insert_fault_into_mask
+from .utils import filtering_function, insert_points_into_mask, AugmentedDict
 from .plotters import plot
 
 
@@ -385,6 +384,8 @@ class FaultSampler(BaseSampler):
     def interpolated_nodes(self):
         """ Create locations in non-labeled slides between labeled slides. """
         slides = np.unique(self.nodes[:, self.direction])
+        if len(slides) == 1:
+            return self.nodes
         locations = []
         for i, slide in enumerate(slides):
             left = slides[max(i-1, 0)]
@@ -629,7 +630,7 @@ def volumetric_check_sampled(locations, points, crop_shape, crop_shape_t, thresh
             mask_bbox = np.array([[i_start, i_stop], [x_start, x_stop], [h_start, h_stop]], dtype=np.int32)
             mask = np.zeros((shape[0], shape[1], shape[2]), dtype=np.int32)
 
-            insert_fault_into_mask(mask, points, mask_bbox, 1, 0)
+            insert_points_into_mask(mask, points, mask_bbox, 1, 0)
             if mask.sum() < threshold:
                 condition[i] = False
 
@@ -645,12 +646,13 @@ class SeismicSampler(Sampler):
     ----------
     labels : dict
         Dictionary where keys are cube names and values are lists of labels.
-    proportions : sequence, optional
-        Proportion of each cube in the resulting mixture.
-    baseclass : type
-        Class for initializing individual label samplers.
     crop_shape : tuple
         Shape of crop locations to generate.
+    cube_proportions : sequence, optional
+        Proportion of each cube in the resulting mixture.
+    uniform_labels : bool, optional
+        If True, labels will be sampled inside of the cube uniformly.
+        If False, labels will be sampled proportional to the len of it.
     threshold : float
         Minimum proportion of labeled points in each sampled location.
     ranges : sequence, optional
@@ -688,11 +690,13 @@ class SeismicSampler(Sampler):
         raise KeyError(f'Unable to determine the sampler class for `{labelclass}`')
 
 
-    def __init__(self, labels, crop_shape, proportions=None,
+    def __init__(self, labels, crop_shape, cube_proportions=None, uniform_labels=True,
                  threshold=0.05, ranges=None, filtering_matrix=None, shift_height=True, **kwargs):
         # One sampler of each `label` for each `field`
         names, sampler_classes = {}, {}
         samplers = AugmentedDict({field_name: [] for field_name in labels.keys()})
+
+        labels_weights = []
 
         for field_id, (field_name, list_labels) in enumerate(labels.items()):
             list_labels = list_labels if isinstance(list_labels, (tuple, list)) else [list_labels]
@@ -721,21 +725,26 @@ class SeismicSampler(Sampler):
                     samplers[field_name].append(label_sampler)
                     names[(field_id, label_id)] = (field_name, label.short_name)
 
+            if uniform_labels:
+                labels_weights.append([1 / len(list_labels) for _ in list_labels])
+            else:
+                weights = np.array([len(label) for label in list_labels])
+                weights = weights / weights.sum()
+                labels_weights.append(weights)
+
         # Resulting sampler
         n_present_fields = sum(len(sampler_list) != 0 for sampler_list in samplers.values())
         if n_present_fields == 0:
             raise ValueError('Empty sampler!')
 
-        proportions = proportions or [1 / n_present_fields for _ in labels]
+        cube_proportions = cube_proportions or [1 / n_present_fields for _ in labels]
         final_weights = AugmentedDict({idx: [] for idx in labels.keys()})
 
         sampler = 0 & ConstantSampler(np.int32(0), dim=9)
 
-        for (field_name, sampler_list), p in zip(samplers.items(), proportions):
+        for (field_name, sampler_list), p, l in zip(samplers.items(), cube_proportions, labels_weights):
             if len(sampler_list) != 0:
-                label_weight = 1 / len(sampler_list)
-
-                for label_sampler in sampler_list:
+                for label_sampler, label_weight in zip(sampler_list, l):
                     w = p * label_weight
                     final_weights[field_name].append(w)
                     sampler = sampler | (w & label_sampler)
@@ -749,7 +758,7 @@ class SeismicSampler(Sampler):
 
         self.crop_shape = crop_shape
         self.threshold = threshold
-        self.proportions = proportions
+        self.proportions = cube_proportions
 
 
     def sample(self, size):

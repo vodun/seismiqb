@@ -499,3 +499,70 @@ def make_ranges(ranges, shape):
     ranges = [(item[0] or 0, item[1] or c) for item, c in zip(ranges, shape)]
     ranges = [(max(0, item[0]), min(c, item[1])) for item, c in zip(ranges, shape)]
     return tuple(ranges)
+
+def make_slices(slices, shape):
+    """ Fill Nones in tuple of slices (analogously to `make_ranges`). """
+    if slices is None:
+        ranges = None
+    else:
+        ranges = [slice(None) if item is None else (item.start, item.stop) for item in slices]
+
+    ranges = make_ranges(ranges, shape)
+    return tuple(slice(*item) for item in ranges)
+
+def make_interior_points_mask(points, cube_shape):
+    """ Create mask for points inside of the cube. """
+    mask = np.where((points[:, 0] >= 0) &
+                    (points[:, 1] >= 0) &
+                    (points[:, 2] >= 0) &
+                    (points[:, 0] < cube_shape[0]) &
+                    (points[:, 1] < cube_shape[1]) &
+                    (points[:, 2] < cube_shape[2]))[0]
+    return mask
+
+@njit(parallel=True)
+def insert_points_into_mask(mask, points, mask_bbox, width, axis):
+    """ Add new points into binary mask.
+
+    Parameters
+    ----------
+    mask : numpy.ndarray
+        Array to insert values which correponds to some region in 3d cube (see `mask_bbox` parameter)
+    points : numpy.ndarray
+        Array of shape `(n_points, 3)` with cube coordinates of points to insert.
+    mask_bbox : numpy.ndarray
+        Array of shape (3, 2) with postion of the mask in 3d cube
+    width : int
+        Dilation of the mask along some axis.
+    axis : int
+        Direction of dilation.
+    """
+    #pylint: disable=not-an-iterable, too-many-boolean-expressions
+
+    left_margin = [0, 0, 0]
+    right_margin = [1, 1, 1]
+    left_margin[axis] = width // 2
+    right_margin[axis] = width - width // 2
+
+    for i in prange(len(points)):
+        point = points[i]
+        if ((point[0] >= mask_bbox[0][0] - left_margin[0]) and
+            (point[1] >= mask_bbox[1][0] - left_margin[1]) and
+            (point[2] >= mask_bbox[2][0] - left_margin[2]) and
+            (point[0] <  mask_bbox[0][1] + right_margin[0] - 1) and
+            (point[1] <  mask_bbox[1][1] + right_margin[1] - 1) and
+            (point[2] <  mask_bbox[2][1] + right_margin[2] - 1)):
+
+            point = point - mask_bbox[:, 0]
+            left_bound = max(0, point[axis] - left_margin[axis])
+            right_bound = min(mask.shape[axis], point[axis] + right_margin[axis])
+
+            if axis == 0:
+                for pos in range(left_bound, right_bound):
+                    mask[pos, point[1], point[2]] = 1
+            elif axis == 1:
+                for pos in range(left_bound, right_bound):
+                    mask[point[0], pos, point[2]] = 1
+            elif axis == 2:
+                for pos in range(left_bound, right_bound):
+                    mask[point[0], point[1], pos] = 1
