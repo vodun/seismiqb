@@ -70,7 +70,7 @@ class SeismicDataset(Dataset):
     # Inner workings
     def __getitem__(self, key):
         """ Index a field with either its name or ordinal. """
-        if isinstance(key, (np.integer, str)):
+        if isinstance(key, (int, np.integer, str)):
             return self.fields[key]
         raise KeyError(f'Unsupported key for subscripting, {key}')
 
