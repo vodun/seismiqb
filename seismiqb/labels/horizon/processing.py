@@ -8,8 +8,8 @@ from cv2 import inpaint as cv2_inpaint
 from skimage.measure import label
 from scipy.ndimage.morphology import binary_fill_holes, binary_dilation, binary_erosion
 
-from ..functional import make_gaussian_kernel
-from ..utils import make_bezier_figure
+from ...functional import make_gaussian_kernel
+from ...utils import make_bezier_figure
 
 class ProcessingMixin:
     """ Methods for horizon processing.
@@ -369,7 +369,7 @@ class ProcessingMixin:
         carcass.name = carcass.name.replace('copy', 'carcass')
 
         if regular:
-            from ..metrics import GeometryMetrics
+            from ...metrics import GeometryMetrics
             gm = GeometryMetrics(self.field.geometry)
             grid = gm.make_grid(1 - self.field.zero_traces, frequencies=frequencies, margin=margin, **kwargs)
         else:

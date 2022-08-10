@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 from sklearn.decomposition import PCA
 
-from .fault_postprocessing import split_array
+from .postprocessing import split_array
 from ...utils import CharismaMixin, make_interior_points_mask
 
 class FaultSticksMixin(CharismaMixin):

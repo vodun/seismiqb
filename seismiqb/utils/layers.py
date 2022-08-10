@@ -334,3 +334,22 @@ class GaussianLayer(nn.Module):
         n = np.zeros(kernel_size)
         n[tuple(np.array(n.shape) // 2)] = 1
         return scipy.ndimage.gaussian_filter(n, sigma=sigma)
+
+
+def compute_attribute(array, window=None, device='cuda:0', attribute='semblance', fill_value=None, **kwargs):
+    """ Compute semblance for the cube. """
+    if isinstance(window, int):
+        window = np.ones(3, dtype=np.int32) * window
+    window = np.minimum(np.array(window), array.shape[-3:])
+    inputs = torch.Tensor(array).to(device)
+
+    if attribute == 'semblance':
+        layer = SemblanceLayer(inputs, window=window, fill_value=fill_value or 1)
+    elif attribute == 'moving_normalization':
+        layer = MovingNormalizationLayer(inputs, window=window, fill_value=fill_value or 1, **kwargs)
+    elif attribute == 'phase':
+        layer = InstantaneousPhaseLayer(inputs, **kwargs)
+    elif attribute == 'frequencies_filter':
+        layer = FrequenciesFilterLayer(inputs, window=window, **kwargs)
+    result = layer(inputs)
+    return result.cpu().numpy()

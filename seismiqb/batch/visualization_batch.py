@@ -192,7 +192,7 @@ class VisualizationMixin:
         if 'ticks' in add_location:
             config['extent'] = (x_start, x_stop, y_stop, y_start)
 
-        location_info = f"{z_label}={z_start}", f"{x_label} <{x_start}:{x_stop}>'", f"{y_label} <{y_start}:{y_stop}>"
+        location_info = f"{z_label}={z_start}", f"{x_label} <{x_start}:{x_stop}>", f"{y_label} <{y_start}:{y_stop}>"
 
         # Construct suptitle
         if add_suptitle:

@@ -12,7 +12,7 @@ from numba import njit
 from skimage.measure import label
 from scipy.ndimage import find_objects
 
-from ..utils import MetaDict
+from ...utils import MetaDict, groupby_all
 
 class MergeStatus(IntEnum):
     """ Possible outcomes of the `:meth:~ExtractionMixin.verify_merge`.
@@ -973,62 +973,6 @@ class ExtractionMixin:
 
         # Chunks are too small even for the `num_workers=min_workers`
         return False, None
-
-
-
-@njit
-def groupby_all(array):
-    """ For each trace, compute the number of points on it, min, max and mean values.
-    `array` is expected to be of `(N, 3)` shape. Trace is defined by all points with the same first two coordinates.
-    """
-    # iline, crossline, occurency, min_, max_, mean_
-    output = np.zeros((len(array), 6), dtype=np.int32)
-    position = 0
-
-    # Initialize values
-    previous = array[0, :2]
-    min_ = array[0, -1]
-    max_ = array[0, -1]
-    s = array[0, -1]
-    c = 1
-
-    for i in range(1, len(array)):
-        current = array[i]
-
-        if previous[1] == current[1] and previous[0] == current[0]:
-            # Same iline, crossline: update values
-            depth_ = current[-1]
-            min_ = min(depth_, min_)
-            max_ = max(depth_, max_)
-            s += depth_
-            c += 1
-
-        else:
-            # New iline, crossline: store stats, re-initialize values
-            output[position, :2] = previous   # iline, crossline
-            output[position, 2] = c           # occurency
-            output[position, 3] = min_        # min_
-            output[position, 4] = max_        # max_
-            output[position, 5] = s / c       # mean_
-            position += 1
-
-            depth_ = current[-1]
-            previous = current[:2]
-            min_ = depth_
-            max_ = depth_
-            s = depth_
-            c = 1
-
-    # The last point
-    output[position, :2] = previous   # iline, crossline
-    output[position, 2] = c           # occurency
-    output[position, 3] = min_        # min_
-    output[position, 4] = max_        # max_
-    output[position, 5] = s / c       # mean_
-    position += 1
-
-    return output[:position]
-
 
 
 @njit

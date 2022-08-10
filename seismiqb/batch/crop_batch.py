@@ -15,8 +15,7 @@ from batchflow import DatasetIndex, Batch, action, inbatch_parallel, SkipBatchEx
 
 from .visualization_batch import VisualizationMixin
 from ..labels import Horizon
-from ..utils import compute_attribute, to_list, AugmentedDict, adjust_shape_3d
-from ..labels.horizon_extraction import groupby_all
+from ..utils import compute_attribute, to_list, AugmentedDict, adjust_shape_3d, groupby_all
 
 
 
