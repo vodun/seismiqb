@@ -12,7 +12,7 @@ from numba import njit
 from skimage.measure import label
 from scipy.ndimage import find_objects
 
-from ..utils import MetaDict
+from ...utils import MetaDict
 
 class MergeStatus(IntEnum):
     """ Possible outcomes of the `:meth:~ExtractionMixin.verify_merge`.

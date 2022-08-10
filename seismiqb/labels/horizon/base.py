@@ -12,9 +12,9 @@ from .horizon_attributes import AttributesMixin
 from .horizon_extraction import ExtractionMixin
 from .horizon_processing import ProcessingMixin
 from .horizon_visualization import HorizonVisualizationMixin
-from ..utils import CacheMixin, CharismaMixin
-from ..utils import groupby_mean, groupby_min, groupby_max, groupby_prob, make_interior_points_mask
-from ..utils import MetaDict
+from ...utils import CacheMixin, CharismaMixin
+from ...utils import groupby_mean, groupby_min, groupby_max, groupby_prob, make_interior_points_mask
+from ...utils import MetaDict
 
 
 

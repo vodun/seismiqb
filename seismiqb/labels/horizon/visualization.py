@@ -5,9 +5,9 @@ from textwrap import dedent
 import numpy as np
 from scipy.spatial import Delaunay
 
-from .mixins import VisualizationMixin
-from ..plotters import show_3d
-from ..utils import AugmentedList, DelegatingList, filter_simplices
+from ..mixins import VisualizationMixin
+from ...plotters import show_3d
+from ...utils import AugmentedList, DelegatingList, filter_simplices
 
 
 

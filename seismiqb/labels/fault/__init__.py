@@ -1,3 +1,3 @@
 """ Labeled fault structures in a seismic volume. """
-from .fault import Fault
-from .fault_postprocessing import skeletonize
+from .base import Fault
+from .postprocessing import skeletonize

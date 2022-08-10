@@ -3,10 +3,10 @@
 import os
 import numpy as np
 
-from .fault_triangulation import sticks_to_simplices, triangle_rasterization
-from .fault_approximation import points_to_sticks
-from .fault_visualization import FaultVisualizationMixin, get_fake_one_stick_fault
-from .fault_formats import FaultSticksMixin, FaultSerializationMixin
+from .triangulation import sticks_to_simplices, triangle_rasterization
+from .approximation import points_to_sticks
+from .visualization import FaultVisualizationMixin, get_fake_one_stick_fault
+from .formats import FaultSticksMixin, FaultSerializationMixin
 from ...utils import insert_points_into_mask
 
 class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):

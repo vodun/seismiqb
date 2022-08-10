@@ -8,8 +8,8 @@ from cv2 import inpaint as cv2_inpaint
 from skimage.measure import label
 from scipy.ndimage.morphology import binary_fill_holes, binary_dilation, binary_erosion
 
-from ..functional import make_gaussian_kernel
-from ..utils import make_bezier_figure
+from ...functional import make_gaussian_kernel
+from ...utils import make_bezier_figure
 
 class ProcessingMixin:
     """ Methods for horizon processing.
