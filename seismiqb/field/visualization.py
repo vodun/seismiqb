@@ -282,7 +282,9 @@ class VisualizationMixin:
             plot_config['savepath'] = self.make_path(savepath, name=first_label_name)
 
         # Plot image with given params and return resulting figure
-        return plotter(mode=mode, show=show, **plot_config)
+        plotter_ = plotter(mode=mode, show=show, **plot_config)
+        plotter_.force_show()
+        return plotter_
 
     # Auxilary methods utilized by `show`
     ALIAS_TO_ATTRIBUTE = AttributesMixin.ALIAS_TO_ATTRIBUTE
