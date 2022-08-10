@@ -11,7 +11,7 @@ from batchflow.plotter.plot import Subplot
 from .viewer import FieldViewer
 from ..utils import DelegatingList, to_list
 from ..plotters import plot, show_3d
-from ..labels.horizon_attributes import AttributesMixin
+from ..labels.horizon.attributes import AttributesMixin
 
 COLOR_GENERATOR = iter(Subplot.MASK_COLORS)
 NAME_TO_COLOR = {}

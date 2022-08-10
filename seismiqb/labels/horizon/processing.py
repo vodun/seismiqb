@@ -369,7 +369,7 @@ class ProcessingMixin:
         carcass.name = carcass.name.replace('copy', 'carcass')
 
         if regular:
-            from ..metrics import GeometryMetrics
+            from ...metrics import GeometryMetrics
             gm = GeometryMetrics(self.field.geometry)
             grid = gm.make_grid(1 - self.field.zero_traces, frequencies=frequencies, margin=margin, **kwargs)
         else:

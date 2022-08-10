@@ -4,7 +4,7 @@ import numpy as np
 from sklearn.decomposition import PCA
 from sklearn.neighbors import NearestNeighbors
 
-from .fault_postprocessing import thin_line
+from .postprocessing import thin_line
 
 
 def points_to_sticks(points, sticks_step=10, stick_nodes_step=10, axis=None):

@@ -8,10 +8,10 @@ import numpy as np
 from skimage.measure import label
 from scipy.ndimage import find_objects
 
-from .horizon_attributes import AttributesMixin
-from .horizon_extraction import ExtractionMixin
-from .horizon_processing import ProcessingMixin
-from .horizon_visualization import HorizonVisualizationMixin
+from .attributes import AttributesMixin
+from .extraction import ExtractionMixin
+from .processing import ProcessingMixin
+from .visualization import HorizonVisualizationMixin
 from ...utils import CacheMixin, CharismaMixin
 from ...utils import groupby_mean, groupby_min, groupby_max, groupby_prob, make_interior_points_mask
 from ...utils import MetaDict
@@ -584,7 +584,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
     def metrics(self):
         """ Calculate :class:`~HorizonMetrics` on demand. """
         # pylint: disable=import-outside-toplevel
-        from ..metrics import HorizonMetrics
+        from ...metrics import HorizonMetrics
         return HorizonMetrics(self)
 
     def evaluate(self, compute_metric=True, supports=50, visualize=True, savepath=None, printer=print, **kwargs):
@@ -613,7 +613,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
 
         # Visual part
         if compute_metric:
-            from ..metrics import HorizonMetrics # pylint: disable=import-outside-toplevel
+            from ...metrics import HorizonMetrics # pylint: disable=import-outside-toplevel
             if savepath is not None:
                 kwargs['savepath'] = self.field.make_path(savepath, name=self.short_name)
             return HorizonMetrics(self).evaluate('support_corrs', supports=supports, agg='nanmean',
