@@ -1,5 +1,6 @@
 """ Accumulator for 3d volumes. """
 import os
+from xml.dom import ValidationErr
 
 import h5py
 import numpy as np
@@ -326,7 +327,8 @@ class RegressionAccumulator(Accumulator3D):
     supplied crops is different, the result of aggregation might differ as well.
     """
     def __init__(self, shape=None, origin=None, dtype=np.float32, transform=None, path=None,
-                 weights_function=triangular_weights_function_nd, **kwargs):
+                 weights_function=triangular_weights_function_nd, rsquared_lower_bound=.2,
+                 regression_target='assembled', **kwargs):
         super().__init__(shape=shape, origin=origin, dtype=dtype, transform=transform, path=path, **kwargs)
 
         # Fill both placeholders with nans: in order to fit the regression
@@ -336,6 +338,14 @@ class RegressionAccumulator(Accumulator3D):
         self.create_placeholder(name='weights', dtype=np.float32, fill_value=np.nan)
 
         self.weights_function = weights_function
+        self.rsquared_lower_bound = rsquared_lower_bound
+
+        if regression_target in ('assembled', 'accumulated'):
+            self.regression_target = 'assembled'
+        elif regression_target in ('crop', 'incoming'):
+            self.regression_target == 'crop'
+        else:
+            raise ValueError(f'Unknown regression target {regression_target}.')
 
     def _update(self, crop, location):
         # Scale incoming crop to better fit already filled data.
@@ -351,26 +361,40 @@ class RegressionAccumulator(Accumulator3D):
 
         if len(overlap_indices[0]) > 0:
             # Take overlap values from data-placeholder and the crop.
-            xs = overlap_data[overlap_indices]
-            ys = crop[overlap_indices]
+            # Select regression/target according to supplied parameter `regression_target`.
+            if self.regression_target == 'assembled':
+                xs, ys = crop[overlap_indices], overlap_data[overlap_indices]
+            else:
+                xs, ys = overlap_data[overlap_indices], crop[overlap_indices]
 
             # Fit new crop to already existing data and transform the crop.
             model = LinearRegression()
             model.fit(xs.reshape(-1, 1), ys.reshape(-1))
+
+            # Calculating the r-squared of the fitted regression.
             a, b = model.coef_[0], model.intercept_
-            crop = (crop - b) / a
+            xs, ys = xs.reshape(-1), ys.reshape(-1)
+            rsquared = 1 - ((a * xs + b - ys) ** 2).mean() / ((ys - ys.mean()) ** 2).mean()
 
-            # Update location-slice with weighed average.
-            overlap_data[overlap_indices] = ((overlap_weights[overlap_indices] * overlap_data[overlap_indices]
-                                              + crop_weights[overlap_indices] * crop[overlap_indices]) /
-                                             (overlap_weights[overlap_indices] + crop_weights[overlap_indices]))
+            # If the fit is bad (r-squared is too small), ignore the incoming crop.
+            # If it is of acceptable quality, use it to update the assembled-array.
+            if rsquared > self.rsquared_lower_bound:
+                if self.regression_target == 'assembled':
+                    crop = a * crop + b
+                else:
+                    crop = (crop - b) / a
 
-            # Update weights over overlap.
-            overlap_weights[overlap_indices] += crop_weights[overlap_indices]
+                # Update location-slice with weighed average.
+                overlap_data[overlap_indices] = ((overlap_weights[overlap_indices] * overlap_data[overlap_indices]
+                                                + crop_weights[overlap_indices] * crop[overlap_indices]) /
+                                                (overlap_weights[overlap_indices] + crop_weights[overlap_indices]))
 
-            # Use values from crop to update the region covered by the crop and not yet filled.
-            self.data[location][new_indices] = crop[new_indices]
-            self.weights[location][new_indices] = crop_weights[new_indices]
+                # Update weights over overlap.
+                overlap_weights[overlap_indices] += crop_weights[overlap_indices]
+
+                # Use values from crop to update the region covered by the crop and not yet filled.
+                self.data[location][new_indices] = crop[new_indices]
+                self.weights[location][new_indices] = crop_weights[new_indices]
         else:
             self.data[location] = crop
             self.weights[location] = crop_weights
