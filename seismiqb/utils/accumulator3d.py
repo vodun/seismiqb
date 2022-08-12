@@ -1,6 +1,5 @@
 """ Accumulator for 3d volumes. """
 import os
-from xml.dom import ValidationErr
 
 import h5py
 import numpy as np
@@ -371,7 +370,7 @@ class RegressionAccumulator(Accumulator3D):
         if regression_target in ('assembled', 'accumulated'):
             self.regression_target = 'assembled'
         elif regression_target in ('crop', 'incoming'):
-            self.regression_target == 'crop'
+            self.regression_target = 'crop'
         else:
             raise ValueError(f'Unknown regression target {regression_target}.')
 
