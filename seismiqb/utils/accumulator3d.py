@@ -323,6 +323,34 @@ class RegressionAccumulator(Accumulator3D):
     For aggregation uses weighted sum of crops. Weights-making for crops is controlled by
     `weights_function`-parameter.
 
+    Parameters
+    ----------
+    shape : sequence
+        Shape of the placeholder.
+    origin : sequence
+        The upper left point of the volume: used to shift crop's locations.
+    dtype : np.dtype
+        Dtype of storage. Must be either integer or float.
+    transform : callable, optional
+        Additional function to call before storing the crop data.
+    path : str or file-like object, optional
+        If provided, then we use HDF5 datasets instead of regular Numpy arrays, storing the data directly on disk.
+        After the initialization, we keep the file handle in `w-` mode during the update phase.
+        After aggregation, we re-open the file to automatically repack it in `r` mode.
+    weights_function : callable
+        Function that accepts a crop and returns matrix with weights of the same shape. Default scheme
+        involves using larger weights in the crop-centre and lesser weights closer to the crop borders.
+    rsquared_lower_bound : float
+        Can be a number between 0 and 1 or `None`. If set to `None`, we use each incoming crop with
+        predictions to update the assembled array. Otherwise, we use only those crops, that fit already
+        filled data well enough, requiring r-squared of linear regression to be larger than the supplied
+        parameter.
+    regression_target : str
+        Can be either 'assembled' (same as 'accumulated') or 'crop' (same as 'incoming'). If set to
+        'assembled', the regression considers new crop as a regressor and already filled overlap as a target.
+        If set to 'crop', incoming crop is the target in the regression. The choice of 'assembled'
+        should yield more stable results.
+
     NOTE: As of now, relies on the order in which crops with data arrive. When the order of
     supplied crops is different, the result of aggregation might differ as well.
     """
@@ -338,7 +366,7 @@ class RegressionAccumulator(Accumulator3D):
         self.create_placeholder(name='weights', dtype=np.float32, fill_value=np.nan)
 
         self.weights_function = weights_function
-        self.rsquared_lower_bound = rsquared_lower_bound
+        self.rsquared_lower_bound = rsquared_lower_bound or -1
 
         if regression_target in ('assembled', 'accumulated'):
             self.regression_target = 'assembled'
@@ -384,7 +412,7 @@ class RegressionAccumulator(Accumulator3D):
                 else:
                     crop = (crop - b) / a
 
-                # Update location-slice with weighed average.
+                # Update location-slice with weighted average.
                 overlap_data[overlap_indices] = ((overlap_weights[overlap_indices] * overlap_data[overlap_indices]
                                                 + crop_weights[overlap_indices] * crop[overlap_indices]) /
                                                 (overlap_weights[overlap_indices] + crop_weights[overlap_indices]))
