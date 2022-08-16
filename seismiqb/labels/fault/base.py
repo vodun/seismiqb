@@ -269,9 +269,27 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
                 points = points[points[:, i] >= slices[i].start]
         self._sticks = points_to_sticks(points, sticks_step, stick_nodes_step, self.direction)
 
-    def add_to_mask(self, mask, locations=None, width=1, **kwargs):
-        """ Add fault to background. """
-        _ = kwargs
+    def add_to_mask(self, mask, locations=None, width=1, axis=None, sparce=False, **kwargs): # TODO: make sparce
+        """ Add fault to background.
+
+        Parameters
+        ----------
+        mask : ndarray
+            Background to add fault to.
+        locations : ndarray
+            Where the fault is located.
+        width : int
+            Width of an added fault.
+        axis : int or None, optional
+            Orientation of the crop to insert fault, by default None (unknown or crop is 3D)
+        sparce : bool, optional
+            Whether create sparce mask (only on labeled slides) or not, by default False
+        """
+        _ = kwargs, sparce
+
+        if axis is not None and axis not in (2, self.direction):
+            return mask
+
         mask_bbox = np.array([[locations[0].start, locations[0].stop],
                               [locations[1].start, locations[1].stop],
                               [locations[2].start, locations[2].stop]],

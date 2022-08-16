@@ -391,7 +391,8 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         """
         field = self.get(ix, 'fields')
         location = self.get(ix, 'locations')
-        return field.make_mask(location=location, width=width, indices=indices, src=src_labels)
+        orientation = self.get(ix, 'orientations')
+        return field.make_mask(location=location, axis=orientation, width=width, indices=indices, src=src_labels)
 
 
     @action
