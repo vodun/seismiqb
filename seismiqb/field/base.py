@@ -323,7 +323,7 @@ class Field(CharismaMixin, VisualizationMixin):
             np.random.shuffle(labels)
 
         for label in labels:
-            mask = label.add_to_mask(mask, locations=location, width=width, orientation=axis, sparse=sparse)
+            mask = label.add_to_mask(mask, locations=location, width=width, axis=axis, sparse=sparse)
             if indices in ['single', 'random'] and mask.sum() > 0.0:
                 break
         return mask
