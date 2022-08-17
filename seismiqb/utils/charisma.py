@@ -1,7 +1,10 @@
 """ Charisma mixin for saving and loading data in CHARISMA-compatible format. """
 import os
+
 import numpy as np
 import pandas as pd
+
+from .functions import make_interior_points_mask
 
 class CharismaMixin:
     """ Methods for saving and loading data in CHARISMA-compatible format. """
@@ -64,13 +67,8 @@ class CharismaMixin:
             points = self.field_reference.geometry.lines_to_cubic(points)
 
         if verify:
-            idx = np.where((points[:, 0] >= 0) &
-                           (points[:, 1] >= 0) &
-                           (points[:, 2] >= 0) &
-                           (points[:, 0] < self.field_reference.shape[0]) &
-                           (points[:, 1] < self.field_reference.shape[1]) &
-                           (points[:, 2] < self.field_reference.shape[2]))[0]
-            points = points[idx]
+            mask = make_interior_points_mask(points, self.field_reference.shape)
+            points = points[mask]
 
         # Set datatype
         if np.issubdtype(dtype, np.integer):

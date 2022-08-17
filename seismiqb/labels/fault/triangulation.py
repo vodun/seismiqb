@@ -89,31 +89,10 @@ def sticks_to_simplices(sticks, return_indices=False):
         simplices += triangles
     return np.array(simplices), nodes
 
-def simplices_to_points(simplices, nodes, width=1):
-    """ Interpolate triangulation.
-
-    Parameters
-    ----------
-    simplices : numpy.ndarray
-        Array of shape (n_simplices, 3) with indices of nodes to connect into triangle.
-    nodes : numpy.ndarray
-        Array of shape (n_nodes, 3) with coordinates.
-    width : int, optional
-        Thickness of the simplex to draw, by default 1.
-
-    Returns
-    -------
-    numpy.ndarray
-        Array of shape (n_points, 3)
-    """
-    points = []
-    for triangle in simplices:
-        points.append(triangle_rasterization(nodes[triangle].astype('float32'), width))
-    return np.concatenate(points, axis=0).astype('int32')
-
 @njit
 def distance_to_triangle(triangle, node):
-    """ https://gist.github.com/joshuashaffer/99d58e4ccbd37ca5d96e """
+    """ Paper: https://www.geometrictools.com/Documentation/DistancePoint3Triangle3.pdf
+    Realization: https://gist.github.com/joshuashaffer/99d58e4ccbd37ca5d96e """
     # pylint: disable=invalid-name, too-many-nested-blocks, too-many-branches, too-many-statements
     B = triangle[0, :]
     E0 = triangle[1, :] - B

@@ -195,26 +195,26 @@ class Field(CharismaMixin, VisualizationMixin):
         return horizon
 
 
-    def _load_faults(self, paths, max_workers=4, pbar=True, filter=True, fix=True, label_class=Fault, **kwargs):
+    def _load_faults(self, paths, max_workers=4, pbar=True, interpolate=False, label_class=Fault, **kwargs):
         """ Load faults from paths. """
         with ThreadPoolExecutor(max_workers=min(max_workers, len(paths) or 1)) as executor:
-            function = lambda path: self._load_fault(path, filter=filter, fix=fix,
+            function = lambda path: self._load_fault(path, interpolate=interpolate,
                                                      constructor_class=label_class, **kwargs)
             loaded = list(Notifier(pbar, total=len(paths))(executor.map(function, paths)))
 
         faults = [fault for fault in loaded if len(fault) > 0]
         return faults
 
-    def _load_fault(self, path, filter=True, fix=True, constructor_class=Fault, **kwargs):
+    def _load_fault(self, path, interpolate=False, constructor_class=Fault, **kwargs):
         """ Load a single fault from path. """
         if isinstance(path, constructor_class):
             path.field = self
             return path
 
-        fault = constructor_class(path, field=self, fix=fix, **kwargs)
+        fault = constructor_class(path, field=self, **kwargs)
 
-        if filter and fault.format != 'file-npz':
-            fault.filter()
+        if interpolate:
+            fault.interpolate()
         return fault
 
     def _load_geometries(self, paths, label_class=SeismicGeometry, **kwargs):

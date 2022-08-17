@@ -1,1 +1,0 @@
-Notebooks to demonstrate contents of our dataset: cubes, horizons, and their metrics.

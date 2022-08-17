@@ -11,7 +11,7 @@ from batchflow.plotter.plot import Subplot
 from .viewer import FieldViewer
 from ..utils import DelegatingList, to_list
 from ..plotters import plot, show_3d
-from ..labels.horizon_attributes import AttributesMixin
+from ..labels.horizon.attributes import AttributesMixin
 
 COLOR_GENERATOR = iter(Subplot.MASK_COLORS)
 NAME_TO_COLOR = {}
@@ -73,8 +73,9 @@ class VisualizationMixin:
             Horizon thickness. If None given, set to 1% of seismic slide height.
         axis : int
             Number of axis to load slide along.
-        zoom : tuple
-            Tuple of slices to apply directly to 2d images.
+        zoom : tuple, None or 'auto'
+            Tuple of slices to apply directly to 2d images. If None, slicing is not applied.
+            If 'auto', zero traces on bounds will be dropped.
         """
         axis = self.geometry.parse_axis(axis)
 
@@ -87,15 +88,11 @@ class VisualizationMixin:
             masks.append(self.make_mask(location=loc, axis=axis, src=src, width=width, indices=indices))
         mask = sum(masks)
 
-        # src_labels = src_labels if isinstance(src_labels, (tuple, list)) else [src_labels]
-        # masks = []
-        # for src in src_labels:
-        #     masks.extend(getattr(self, src).load_slide(loc=loc, axis=axis, width=width))
-        # mask = sum(masks)
-
         seismic_slide, mask = np.squeeze(seismic_slide), np.squeeze(mask)
         xmin, xmax, ymin, ymax = 0, seismic_slide.shape[0], seismic_slide.shape[1], 0
 
+        if zoom == 'auto':
+            zoom = self.geometry.compute_auto_zoom(loc, axis)
         if zoom:
             seismic_slide = seismic_slide[zoom]
             mask = mask[zoom]
@@ -285,7 +282,9 @@ class VisualizationMixin:
             plot_config['savepath'] = self.make_path(savepath, name=first_label_name)
 
         # Plot image with given params and return resulting figure
-        return plotter(mode=mode, show=show, **plot_config)
+        plotter_ = plotter(mode=mode, show=show, **plot_config)
+        plotter_.force_show()
+        return plotter_
 
     # Auxilary methods utilized by `show`
     ALIAS_TO_ATTRIBUTE = AttributesMixin.ALIAS_TO_ATTRIBUTE
@@ -416,7 +415,7 @@ class VisualizationMixin:
 
     # 3D interactive
     def show_3d(self, src='labels', aspect_ratio=None, zoom=None,
-                n_points=100, threshold=100, sticks_step=10, stick_nodes_step=10,
+                n_points=100, threshold=100, sticks_step=None, stick_nodes_step=None, sticks=False,
                 slides=None, margin=(0, 0, 20), colors=None, **kwargs):
         """ Interactive 3D plot for some elements of a field.
         Roughly, does the following:
@@ -442,10 +441,12 @@ class VisualizationMixin:
             The more, the better the image is and the slower it is displayed.
         threshold : number
             Threshold to remove triangles with bigger height differences in vertices.
-        sticks_step : int
-            Number of slides between sticks.
-        stick_nodes_step : int
-            Distance between stick nodes
+        sticks_step : int or None
+            Number of slides between sticks. If None, fault triangulation (nodes and simplices) will be used.
+        stick_nodes_step : int or None
+            Distance between stick nodes. If None, fault triangulation (nodes and simplices) will be used.
+        sticks : bool
+            If True, show fault sticks. If False, show interpolated surface.
         slides : list of tuples
             Each tuple is pair of location and axis to load slide from seismic cube.
         margin : tuple of ints
@@ -477,12 +478,15 @@ class VisualizationMixin:
             'threshold': threshold,
             'sticks_step': sticks_step,
             'stick_nodes_step': stick_nodes_step,
-            'slices': zoom
+            'slices': zoom,
+            'sticks': sticks
         }
 
         labels = [getattr(self, src_) if isinstance(src_, str) else [src_] for src_ in src]
         labels = sum(labels, [])
 
+        if isinstance(colors, str):
+            colors = [colors]
         if isinstance(colors, list):
             cycled_colors = cycle(colors)
             colors = [next(cycled_colors) for _ in range(len(labels))]

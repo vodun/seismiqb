@@ -3,27 +3,14 @@ import os
 from math import atan
 
 import numpy as np
-import torch
 from numba import njit, prange
-from scipy.ndimage import measurements
 
-from .layers import SemblanceLayer, MovingNormalizationLayer, InstantaneousPhaseLayer, FrequenciesFilterLayer
 
 
 def file_print(msg, path, mode='w'):
     """ Print to file. """
     with open(path, mode, encoding='utf-8') as file:
         print(msg, file=file)
-
-def fill_defaults(value, default):
-    """ #TODO: no longer needed, remove. """
-    if value is None:
-        value = default
-    elif isinstance(value, int):
-        value = tuple([value] * 3)
-    elif isinstance(value, tuple):
-        value = tuple(item if item else default[i] for i, item in enumerate(value))
-    return value
 
 
 def _adjust_shape_for_rotation(shape, angle):
@@ -86,135 +73,6 @@ def adjust_shape_3d(shape, angle, scale=(1, 1, 1)):
     return tuple(shape)
 
 
-@njit
-def groupby_mean(array):
-    """ Faster version of mean-groupby of data along the first two columns.
-    Input array is supposed to have (N, 3) shape.
-    """
-    n = len(array)
-
-    output = np.zeros_like(array)
-    position = 0
-
-    prev = array[0, :2]
-    s, c = array[0, -1], 1
-
-    for i in range(1, n):
-        curr = array[i, :2]
-
-        if prev[0] == curr[0] and prev[1] == curr[1]:
-            s += array[i, -1]
-            c += 1
-        else:
-            output[position, :2] = prev
-            output[position, -1] = round(s / c)
-            position += 1
-
-            prev = curr
-            s, c = array[i, -1], 1
-
-    output[position, :2] = prev
-    output[position, -1] = s / c
-    position += 1
-    return output[:position]
-
-@njit
-def groupby_min(array):
-    """ Faster version of min-groupby of data along the first two columns.
-    Input array is supposed to have (N, 3) shape.
-    """
-    n = len(array)
-
-    output = np.zeros_like(array)
-    position = 0
-
-    prev = array[0, :2]
-    s = array[0, -1]
-
-    for i in range(1, n):
-        curr = array[i, :2]
-
-        if prev[0] == curr[0] and prev[1] == curr[1]:
-            s = min(s, array[i, -1])
-        else:
-            output[position, :2] = prev
-            output[position, -1] = s
-            position += 1
-
-            prev = curr
-            s = array[i, -1]
-
-    output[position, :2] = prev
-    output[position, -1] = s
-    position += 1
-    return output[:position]
-
-@njit
-def groupby_max(array):
-    """ Faster version of max-groupby of data along the first two columns.
-    Input array is supposed to have (N, 3) shape.
-    """
-    n = len(array)
-
-    output = np.zeros_like(array)
-    position = 0
-
-    prev = array[0, :2]
-    s = array[0, -1]
-
-    for i in range(1, n):
-        curr = array[i, :2]
-
-        if prev[0] == curr[0] and prev[1] == curr[1]:
-            s = max(s, array[i, -1])
-        else:
-            output[position, :2] = prev
-            output[position, -1] = s
-            position += 1
-
-            prev = curr
-            s = array[i, -1]
-
-    output[position, :2] = prev
-    output[position, -1] = s
-    position += 1
-    return output[:position]
-
-
-@njit
-def groupby_prob(array, probabilities):
-    """ Faster version of weighted mean groupby of data along the first two columns.
-    Input array is supposed to have (N, 3) shape.
-    """
-    n = len(array)
-
-    output = np.zeros_like(array)
-    position = 0
-
-    prev = array[0, :2]
-    s, c = array[0, -1] * probabilities[-1], probabilities[-1]
-
-    for i in range(1, n):
-        curr = array[i, :2]
-        probability = probabilities[i]
-
-        if prev[0] == curr[0] and prev[1] == curr[1]:
-            s += array[i, -1] * probability
-            c += probability
-        else:
-            output[position, :2] = prev
-            output[position, -1] = round(s / c)
-            position += 1
-
-            prev = curr
-            s, c = array[i, -1] * probability, probability
-
-    output[position, :2] = prev
-    output[position, -1] = round(s / c)
-    position += 1
-    return output[:position]
-
-
 @njit(parallel=True)
 def filtering_function(points, filtering_matrix):
     """ Remove points where `filtering_matrix` is 1. """
@@ -227,36 +85,7 @@ def filtering_function(points, filtering_matrix):
             mask[i] = 0
     return points[mask == 1, :]
 
-@njit
-def round_to_array(values, ticks):
-    """ Jit-accelerated function to round values from one array to the
-    nearest value from the other in a vectorized fashion. Faster than numpy version.
 
-    Parameters
-    ----------
-    values : array-like
-        Array to modify.
-    ticks : array-like
-        Values to cast to. Must be sorted in the ascending order.
-
-    Returns
-    -------
-    array-like
-        Array with values from `values` rounded to the nearest from corresponding entry of `ticks`.
-    """
-    for i, p in enumerate(values):
-        if p <= ticks[0]:
-            values[i] = ticks[0]
-        elif p >= ticks[-1]:
-            values[i] = ticks[-1]
-        else:
-            ix = np.searchsorted(ticks, p)
-
-            if abs(ticks[ix] - p) <= abs(ticks[ix-1] - p):
-                values[i] = ticks[ix]
-            else:
-                values[i] = ticks[ix-1]
-    return values
 
 @njit
 def find_min_max(array):
@@ -288,23 +117,6 @@ def filter_simplices(simplices, points, matrix, threshold=5.):
 
     return simplices[mask == 1]
 
-def compute_attribute(array, window=None, device='cuda:0', attribute='semblance', fill_value=None, **kwargs):
-    """ Compute semblance for the cube. """
-    if isinstance(window, int):
-        window = np.ones(3, dtype=np.int32) * window
-    window = np.minimum(np.array(window), array.shape[-3:])
-    inputs = torch.Tensor(array).to(device)
-
-    if attribute == 'semblance':
-        layer = SemblanceLayer(inputs, window=window, fill_value=fill_value or 1)
-    elif attribute == 'moving_normalization':
-        layer = MovingNormalizationLayer(inputs, window=window, fill_value=fill_value or 1, **kwargs)
-    elif attribute == 'phase':
-        layer = InstantaneousPhaseLayer(inputs, **kwargs)
-    elif attribute == 'frequencies_filter':
-        layer = FrequenciesFilterLayer(inputs, window=window, **kwargs)
-    result = layer(inputs)
-    return result.cpu().numpy()
 
 def make_bezier_figure(n=7, radius=0.2, sharpness=0.05, scale=1.0, shape=(1, 1),
                        resolution=None, distance=.5, seed=None):
@@ -389,6 +201,7 @@ def make_bezier_figure(n=7, radius=0.2, sharpness=0.05, scale=1.0, shape=(1, 1),
     figure_coordinates = np.unique(np.ceil(curve_segments).astype(int), axis=0)
     return figure_coordinates
 
+
 def trinagular_kernel_1d(length, alpha=.1):
     """ Kernel-function that changes linearly from a center point to alpha on borders. """
     result = np.zeros(length)
@@ -406,6 +219,7 @@ def triangular_weights_function_nd(array, alpha=.1):
             multiplier_shape[i] = axis_len
             result = result * trinagular_kernel_1d(axis_len, alpha).reshape(multiplier_shape)
     return result
+
 
 def get_environ_flag(flag_name, defaults=('0', '1'), convert=int):
     """ Retrive environmental variable, check if it matches expected defaults and optionally convert it. """
@@ -436,47 +250,6 @@ def make_savepath(path, name, extension=''):
         os.makedirs(dir_path, exist_ok=True)
     return path
 
-def faults_lengthes(slide, normalize):
-    """ Compute sizes (depth length) for each connected object on 2D slide. """
-    sizes = slide.copy()
-    labels, n_objects = measurements.label(slide > 0, structure=np.ones((3, 3)))
-    for i in range(1, n_objects+1):
-        size = np.where(labels == i)[-1].ptp()
-        if normalize:
-            size /= slide.shape[-1]
-        sizes[labels == i] = size
-    return sizes
-
-@njit
-def concat_sorted(first_array, second_array):
-    """ Merge two sorted arrays into sorted array. """
-    buffer = np.zeros((len(first_array) + len(second_array), 3), dtype=np.int32)
-    c = 0
-    i, j = 0, 0
-
-    # Condition is re-evaluated to swapped arrays
-    while i < len(first_array) and j < len(second_array):
-        first_ = first_array[i]
-        second_ = second_array[j]
-
-        # Need to swap or not
-        if second_[0] == first_[0]:
-            if second_[1] < first_[1]:
-                first_array, second_array = second_array, first_array
-                i, j = j, i
-            elif second_[1] == first_[1]:
-                # Same value: no need to duplicate
-                j += 1
-
-        elif second_[0] < first_[0]:
-            first_array, second_array = second_array, first_array
-            i, j = j, i
-
-        buffer[c] = first_array[i]
-        c += 1
-        i += 1
-
-    return buffer[:c]
 
 def make_ranges(ranges, shape):
     """ Make a `ranges` tuple, valid for indexing 3-dimensional arrays:
@@ -499,3 +272,71 @@ def make_ranges(ranges, shape):
     ranges = [(item[0] or 0, item[1] or c) for item, c in zip(ranges, shape)]
     ranges = [(max(0, item[0]), min(c, item[1])) for item, c in zip(ranges, shape)]
     return tuple(ranges)
+
+def make_slices(slices, shape):
+    """ Fill Nones in tuple of slices (analogously to `make_ranges`). """
+    if slices is None:
+        ranges = None
+    else:
+        ranges = [slice(None) if item is None else (item.start, item.stop) for item in slices]
+
+    ranges = make_ranges(ranges, shape)
+    return tuple(slice(*item) for item in ranges)
+
+def make_interior_points_mask(points, cube_shape):
+    """ Create mask for points inside of the cube. """
+    mask = np.where((points[:, 0] >= 0) &
+                    (points[:, 1] >= 0) &
+                    (points[:, 2] >= 0) &
+                    (points[:, 0] < cube_shape[0]) &
+                    (points[:, 1] < cube_shape[1]) &
+                    (points[:, 2] < cube_shape[2]))[0]
+    return mask
+
+
+@njit(parallel=True)
+def insert_points_into_mask(mask, points, mask_bbox, width, axis):
+    """ Add new points into binary mask.
+
+    Parameters
+    ----------
+    mask : numpy.ndarray
+        Array to insert values which correponds to some region in 3d cube (see `mask_bbox` parameter)
+    points : numpy.ndarray
+        Array of shape `(n_points, 3)` with cube coordinates of points to insert.
+    mask_bbox : numpy.ndarray
+        Array of shape (3, 2) with postion of the mask in 3d cube
+    width : int
+        Dilation of the mask along some axis.
+    axis : int
+        Direction of dilation.
+    """
+    #pylint: disable=not-an-iterable, too-many-boolean-expressions
+
+    left_margin = [0, 0, 0]
+    right_margin = [1, 1, 1]
+    left_margin[axis] = width // 2
+    right_margin[axis] = width - width // 2
+
+    for i in prange(len(points)):
+        point = points[i]
+        if ((point[0] >= mask_bbox[0][0] - left_margin[0]) and
+            (point[1] >= mask_bbox[1][0] - left_margin[1]) and
+            (point[2] >= mask_bbox[2][0] - left_margin[2]) and
+            (point[0] <  mask_bbox[0][1] + right_margin[0] - 1) and
+            (point[1] <  mask_bbox[1][1] + right_margin[1] - 1) and
+            (point[2] <  mask_bbox[2][1] + right_margin[2] - 1)):
+
+            point = point - mask_bbox[:, 0]
+            left_bound = max(0, point[axis] - left_margin[axis])
+            right_bound = min(mask.shape[axis], point[axis] + right_margin[axis])
+
+            if axis == 0:
+                for pos in range(left_bound, right_bound):
+                    mask[pos, point[1], point[2]] = 1
+            elif axis == 1:
+                for pos in range(left_bound, right_bound):
+                    mask[point[0], pos, point[2]] = 1
+            elif axis == 2:
+                for pos in range(left_bound, right_bound):
+                    mask[point[0], point[1], pos] = 1
