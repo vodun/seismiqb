@@ -396,7 +396,8 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
 
     @staticmethod
     def from_mask(mask, field=None, origin=None, connectivity=3,
-                  mode='mean', threshold=0.5, minsize=0, prefix='predict', **kwargs):
+                  mode='mean', threshold=0.5, minsize=0, prefix='predict',
+                  save_mask_map=False, **kwargs):
         """ Convert mask to a list of horizons.
         Returned list is sorted by length of horizons.
 
@@ -416,6 +417,8 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
             Minimum length of a horizon to be extracted.
         prefix : str
             Name of horizon to use.
+        save_mask_map : bool
+            Whether to save map of the mask values on the horizon surface in the `horizon.mask_map` attribute.
         """
         _ = kwargs
         if 'mean' in mode:
@@ -446,7 +449,20 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
                     values = mask[coords[:, 0], coords[:, 1], coords[:, 2]]
 
                     points = group_function(coords, values) + origin
-                    horizons.append(Horizon(storage=points, field=field, name=f'{prefix}_{i}'))
+
+                    horizon = Horizon(storage=points, field=field, verify=True, name=f'{prefix}_{i}')
+
+                    if save_mask_map:
+                        values = mask[horizon.points[:, 0] - origin[0],
+                                      horizon.points[:, 1] - origin[1],
+                                      horizon.points[:, 2] - origin[2]]
+
+                        map = np.zeros(horizon.full_matrix.shape, dtype=np.float32)
+                        map[horizon.points[:, 0], horizon.points[:, 1]] = values
+
+                        horizon.mask_map = map
+
+                    horizons.append(horizon)
 
         horizons.sort(key=len)
         horizons = [horizon for horizon in horizons if len(horizon) != 0]
