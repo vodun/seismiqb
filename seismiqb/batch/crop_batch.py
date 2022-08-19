@@ -364,7 +364,7 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         SeismicCropBatch
             Batch with loaded masks in desired components.
         """
-        from ..utils.layers import compute_attribute #pylint: disable=wrong-import-position
+        from ..utils.layers import compute_attribute #pylint: disable=import-outside-toplevel
         image = self.get(ix, src)
         result = compute_attribute(image, window, device, attribute)
         return result
