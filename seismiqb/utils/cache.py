@@ -69,9 +69,10 @@ class lru_cache:
             self.is_full = defaultdict(lambda: False)
             self.stats = defaultdict(lambda: {'hit': 0, 'miss': 0})
         else:
-            self.cache[instance] = OrderedDict()
-            self.is_full[instance] = False
-            self.stats[instance] = {'hit': 0, 'miss': 0}
+            instance_hash = self.compute_hash(instance)
+            self.cache[instance_hash] = OrderedDict()
+            self.is_full[instance_hash] = False
+            self.stats[instance_hash] = {'hit': 0, 'miss': 0}
 
     def make_key(self, instance, args, kwargs):
         """ Create a key from a combination of method args and instance attributes. """
@@ -86,6 +87,12 @@ class lru_cache:
                 key.append(attr_hash)
         return flatten_nested(key)
 
+    def compute_hash(self, obj):
+        try:
+            result = hash(obj)
+        except:
+            result = id(obj)
+        return result
 
     def __call__(self, func):
         """ Add the cache to the function. """
@@ -106,14 +113,15 @@ class lru_cache:
                 return result
 
             key = self.make_key(instance, args, kwargs)
+            instance_hash = self.compute_hash(instance)
 
             # If result is already in cache, just retrieve it and update its timings
             with self.lock:
-                result = self.cache[instance].get(key, self.default)
+                result = self.cache[instance_hash].get(key, self.default)
                 if result is not self.default:
-                    del self.cache[instance][key]
-                    self.cache[instance][key] = result
-                    self.stats[instance]['hit'] += 1
+                    del self.cache[instance_hash][key]
+                    self.cache[instance_hash][key] = result
+                    self.stats[instance_hash]['hit'] += 1
                     return copy(result) if copy_on_return else result
 
             # The result was not found in cache: evaluate function
@@ -121,15 +129,15 @@ class lru_cache:
 
             # Add the result to cache
             with self.lock:
-                self.stats[instance]['miss'] += 1
-                if key in self.cache[instance]:
+                self.stats[instance_hash]['miss'] += 1
+                if key in self.cache[instance_hash]:
                     pass
-                elif self.is_full[instance]:
-                    self.cache[instance].popitem(last=False)
-                    self.cache[instance][key] = result
+                elif self.is_full[instance_hash]:
+                    self.cache[instance_hash].popitem(last=False)
+                    self.cache[instance_hash][key] = result
                 else:
-                    self.cache[instance][key] = result
-                    self.is_full[instance] = (len(self.cache[instance]) >= self.maxsize)
+                    self.cache[instance_hash][key] = result
+                    self.is_full[instance_hash] = (len(self.cache[instance_hash]) >= self.maxsize)
             return copy(result) if copy_on_return else result
 
         wrapper.__name__ = func.__name__
