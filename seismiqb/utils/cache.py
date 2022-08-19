@@ -88,6 +88,8 @@ class lru_cache:
         return flatten_nested(key)
 
     def compute_hash(self, obj):
+        """ Compute `obj` hash. If not provided by the object, rely on objects identity. """
+        #pylint: disable=bare-except
         try:
             result = hash(obj)
         except:

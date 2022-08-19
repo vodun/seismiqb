@@ -15,7 +15,7 @@ from batchflow import DatasetIndex, Batch, action, inbatch_parallel, SkipBatchEx
 
 from .visualization_batch import VisualizationMixin
 from ..labels import Horizon
-from ..utils import compute_attribute, to_list, AugmentedDict, adjust_shape_3d, groupby_all
+from ..utils import to_list, AugmentedDict, adjust_shape_3d, groupby_all
 
 
 
@@ -364,6 +364,7 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         SeismicCropBatch
             Batch with loaded masks in desired components.
         """
+        from ..utils.layers import compute_attribute #pylint: disable=wrong-import-position
         image = self.get(ix, src)
         result = compute_attribute(image, window, device, attribute)
         return result
