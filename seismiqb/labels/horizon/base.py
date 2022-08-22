@@ -5,7 +5,7 @@ from textwrap import dedent
 
 import numpy as np
 
-from skimage.measure import label
+from cc3d import connected_components
 from scipy.ndimage import find_objects
 
 from .attributes import AttributesMixin
@@ -431,21 +431,21 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
             group_function = groupby_prob
 
         # Labeled connected regions with an integer
-        labeled = label(mask >= threshold, connectivity=connectivity)
+        labeled = connected_components(mask >= threshold, connectivity=connectivity)
         objects = find_objects(labeled)
 
         # Create an instance of Horizon for each separate region
         horizons = []
-        for i, sl in enumerate(objects):
+        for i, bbox in enumerate(objects):
             max_possible_length = 1
-            for j in range(3):
-                max_possible_length *= sl[j].stop - sl[j].start
+            for slc in bbox:
+                max_possible_length *= slc.stop - slc.start
 
             if max_possible_length >= minsize:
-                indices = np.nonzero(labeled[sl] == i + 1)
+                indices = np.nonzero(labeled[bbox] == i + 1)
 
                 if len(indices[0]) >= minsize:
-                    coords = np.vstack([indices[i] + sl[i].start for i in range(3)]).T
+                    coords = np.vstack([indices[i] + bbox[i].start for i in range(3)]).T
                     values = mask[coords[:, 0], coords[:, 1], coords[:, 2]]
 
                     points = group_function(coords, values) + origin
@@ -704,7 +704,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
         proximities = [(other, self.check_proximity(other)) for other in others
                        if other.field.name == self.field.name]
 
-        closest, proximity_info = min(proximities, key=lambda item: item[1].get('difference_mean', np.inf))
+        closest, proximity_info = min(proximities, key=lambda item: item[1].get('abs_difference_mean', np.inf))
         return closest, proximity_info
 
     # Alias for horizon comparisons
