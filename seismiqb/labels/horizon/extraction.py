@@ -9,7 +9,7 @@ import numpy as np
 from cv2 import dilate
 from numba import njit
 
-from skimage.measure import label
+from cc3d import connected_components
 from scipy.ndimage import find_objects
 
 from ...utils import MetaDict, groupby_all
@@ -113,7 +113,7 @@ class ExtractionMixin:
             total_extracted_points = 0
 
             # Label connected entities
-            labeled = label(mask)
+            labeled = connected_components(mask)
             objects = find_objects(labeled)
             stats['measurement_timings'].append(round(perf_counter() - start_timing, 2))
             stats['num_objects'].append(len(objects))
@@ -187,7 +187,7 @@ class ExtractionMixin:
                         background = np.zeros(shape, dtype=np.int8)
                         background[ix_coords[:, 0], ix_coords[:, 1], h_coords] = 1
 
-                        inner_labeled = label(background)
+                        inner_labeled = connected_components(background)
                         inner_objects = find_objects(inner_labeled)
 
                         for inner_i, inner_slices in enumerate(inner_objects):
