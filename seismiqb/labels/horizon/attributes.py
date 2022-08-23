@@ -292,16 +292,14 @@ class AttributesMixin:
     def mask_map(self):
         """ Map of values of mask from which the horizon was extracted (if exists). """
         if hasattr(self, 'mask_values'):
-            map = np.zeros(self.full_matrix.shape, dtype=np.float32)
-            map[self.mask_values[:, 0].astype(np.int32),
-                self.mask_values[:, 1].astype(np.int32)] = self.mask_values[:, 2]
+            _map = np.zeros(self.full_matrix.shape, dtype=np.float32)
+            _map[self.mask_values[:, 0].astype(np.int32),
+                 self.mask_values[:, 1].astype(np.int32)] = self.mask_values[:, 2]
 
-            map[~self.full_binary_matrix] = np.nan
-            return map
-        else:
-            raise AttributeError(f'Horizon `{self.displayed_name}` hasn\'t `mask_map` attribute. '
-                                 'Check whether the horizon was extracted `from_mask` with '
-                                 '`save_mask_values=True` option.')
+            _map[~self.full_binary_matrix] = np.nan
+
+        raise AttributeError(f'Horizon `{self.displayed_name}` hasn\'t `mask_map` attribute. Check, whether'
+                             'the horizon was extracted `from_mask` with  `save_mask_values=True` option.')
 
     # Retrieve data from seismic along horizon
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
