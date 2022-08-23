@@ -397,7 +397,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
     @staticmethod
     def from_mask(mask, field=None, origin=None, connectivity=3,
                   mode='mean', threshold=0.5, minsize=0, prefix='predict',
-                  save_mask_map=False, **kwargs):
+                  save_mask_values=False, **kwargs):
         """ Convert mask to a list of horizons.
         Returned list is sorted by length of horizons.
 
@@ -407,6 +407,8 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
             Horizon parent field.
         origin : sequence
             The upper left coordinate of a `mask` in the cube coordinates.
+        connectivity : int
+            Can be one of: 1 or 6 (voxel faces), 2 or 18 (+ edges), 3 or 26 (+ corners).
         threshold : float
             Parameter of mask-thresholding.
         mode : str, {'mean', 'min', 'max', 'prob'}
@@ -417,10 +419,18 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
             Minimum length of a horizon to be extracted.
         prefix : str
             Name of horizon to use.
-        save_mask_map : bool
-            Whether to save map of the mask values on the horizon surface in the `horizon.mask_map` attribute.
+        save_mask_values : bool
+            Whether to save mask values on the horizon surface in the `horizon.mask_values` attribute.
         """
         _ = kwargs
+
+        if connectivity == 1:
+            connectivity = 6
+        elif connectivity == 2:
+            connectivity = 18
+        elif connectivity == 3:
+            connectivity = 26
+
         if 'mean' in mode:
             group_function = lambda array, _: groupby_mean(array)
         elif 'min' in mode:
@@ -452,15 +462,14 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
 
                     horizon = Horizon(storage=points, field=field, verify=True, name=f'{prefix}_{i}')
 
-                    if save_mask_map:
+                    if save_mask_values:
                         values = mask[horizon.points[:, 0] - origin[0],
                                       horizon.points[:, 1] - origin[1],
                                       horizon.points[:, 2] - origin[2]]
 
-                        map = np.zeros(horizon.full_matrix.shape, dtype=np.float32)
-                        map[horizon.points[:, 0], horizon.points[:, 1]] = values
-
-                        horizon.mask_map = map
+                        horizon.mask_values = np.vstack([horizon.points[:, 0], horizon.points[:, 1], values]).T
+                        # We save coordinates in the `mask_values` because horizon points can be filtered
+                        # and this prevents from inconsistency between points and mask values
 
                     horizons.append(horizon)
 
