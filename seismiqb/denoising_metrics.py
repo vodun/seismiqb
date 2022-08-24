@@ -1,4 +1,4 @@
-"""Maps and metrics for denoising seismic data."""
+""" Metrics for denoising seismic data. """
 import numpy as np
 from scipy import fftpack
 import torch
@@ -6,102 +6,85 @@ import torch
 from torchmetrics.functional import structural_similarity_index_measure, peak_signal_noise_ratio, mean_squared_error,\
                                     error_relative_global_dimensionless_synthesis, universal_image_quality_index
 
+METRICS = {'ssim': structural_similarity_index_measure,
+           'psnr': peak_signal_noise_ratio,
+           'ergas': error_relative_global_dimensionless_synthesis,
+           'uqi': universal_image_quality_index,
+           'mse': mean_squared_error}
+
+
 class DenoisingMetrics:
-    """Class for metrics and color maps assotiated with denoising performance estimation."""
+    """ Metrics assotiated with denoising performance estimation. """
     @classmethod
-    def get_metrics(cls, images, predictions, config=None):
-        """Compute metrics related to denoising performance for a batch of images.
+    def evaluate(cls, images, predictions, objective='metrics', metrics='all'):
+        """ Compute metrics related to denoising performance.
 
         Parameters
         ----------
-        images : sequence
-        predictions: sequence
-        config : dict or None
-            Specifies metrics to compute and their parameters.
-            If None, computes [`structural_similarity_index_measure`, `peak_signal_noise_ratio`, `mean_squared_error`,
-            `error_relative_global_dimensionless_synthesis`, `universal_image_quality_index`]
-            from `torchmetrics.functional` with default arguments.
-            Keys:
-                metric_names : sequence
-                    Sequence of metric names from {'ssim', 'psnr', 'ergas', 'uqi', 'mse'}.
-                `metric_name` : dict, optional
-                    Parameters for the corresponding function from `torchmetrics.functional`.
+        objective : str
+            If 'metrics', then evaluate metrics for a batch of images.
+            If 'maps', then compute maps for a single provided image or first image from the batch.
+        images : np.ndarray or torch.Tensor
+            Source images to evaluate. Should be of shape [B, H, W]. If `objective` is 'maps', also supports [H, W].
+        predictions : np.ndarray or torch.Tensor
+            Predicted images. Should be of the same shape as `images`.
+        metrics : dict, list or str
+            Specifies functions to compute and their parameters. Should correspond to `objective`: 
+            if `objective` is 'metrics', then consists of metric names from {'ssim', 'psnr', 'ergas', 'uqi', 'mse'},
+            elif `objective` is 'maps', then consists of map names from
+            {'local_similarity', 'local_correlation', 'power_spectrum'}.
+
+            If dict, then should contain metric names as keys and their parameters as values.
+            If list, then consists of metric names, and they are evaluated with default parametres.
+            If 'all', then evaluate all metrics for corresponding `objective` with default parameters.
 
         Returns
         -------
         dict
-            Dictionary with `metric_names` as keys and computed metrics as values.
+            Dictionary with metric names as keys and computed metrics as values.
         """
-        metrics = {'ssim': structural_similarity_index_measure,
-                   'psnr': peak_signal_noise_ratio,
-                   'ergas': error_relative_global_dimensionless_synthesis,
-                   'uqi': universal_image_quality_index,
-                   'mse': mean_squared_error}
-
-        metric_names = metrics.keys() if config is None else config['metric_names']
-        if not np.all([metric in metrics for metric in metric_names]):
-            raise ValueError
-
-        config = config if config is not None else {}
-        images = images if isinstance(images, torch.Tensor) else torch.tensor(images)
-        predictions = predictions if isinstance(predictions, torch.Tensor) else torch.tensor(predictions)
-
-        returns = {}
-        for metric in metric_names:
-            config[metric] = {} if metric not in config else config[metric]
-            returns[metric] = metrics[metric](images, predictions, **config[metric]).item()
-        return returns
-
-    @classmethod
-    def get_maps(cls, image, prediction, map_to='pred', config=None):
-        """Compute color maps related to denoising performance for an image sample.
-
-        Parameters
-        ----------
-        image : np.ndarray
-        prediction : np.ndarray
-        map_to : str
-            If 'pred', statistics are computed between estimated noise and predicted image.
-            If 'image', statistics are computed between estimated noise and source image.
-            By default equals to 'pred'.
-        config : dict or None
-            Specifies maps to compute and their parameters.
-            If None, computes [`local_similarity_map`, `local_correlation_map`, `fourier_power_spectrum`]
-            with default arguments.
-            Keys:
-                map_names : sequence
-                    Sequence of map names from {'local_similarity', 'local_correlation', 'power_spectrum'}.
-                `map_name` : dict, optional
-                    Parameters for the corresponding map.
-
-        Returns
-        -------
-        dict
-            Dictionary with `map_names` as keys and computed maps as values.
-        """
-        maps = {'local_similarity': cls.local_similarity_map,
+ 
+        MAPS = {'local_similarity': cls.local_similarity_map,
                 'local_correlation': cls.local_correlation_map,
                 'power_spectrum': cls.fourier_power_spectrum}
 
-        map_names = maps.keys() if config is None else config['map_names']
-        if not np.all([map_name in maps for map_name in map_names]):
-            raise ValueError
+        if objective == 'metrics':
+            evaluate = METRICS
+            images = images if isinstance(images, torch.Tensor) else torch.tensor(images)
+            predictions = predictions if isinstance(predictions, torch.Tensor) else torch.tensor(predictions)
+        elif objective == 'maps':
+            evaluate = MAPS
+            images = images[0] if len(images.squeeze().shape) == 3 else images
+            predictions = predictions[0] if len(predictions.squeeze().shape) == 3 else predictions
+        else:
+            raise ValueError('Incorrect objective')
 
-        config = config if config is not None else {}
+        if isinstance(metrics, dict):
+            metric_names = metrics.keys()
+        elif isinstance(metrics, list):
+            metric_names = metrics
+            metrics = {name: {} for name in metric_names}
+        elif metrics == 'all':
+            metric_names = evaluate.keys()
+            metrics = {name: {} for name in metric_names}
+        else:
+            raise ValueError('Incorrect configuration')
+
+        if not all([metric in evaluate for metric in metric_names]):
+            raise ValueError('Incorrect metric name')
+
         returns = {}
-        for map_name in map_names:
-            config[map_name] = {} if map_name not in config else config[map_name]
-            returns[map_name] = maps[map_name](image, prediction, map_to=map_to, **config[map_name])
+        for metric in metric_names:
+            kwargs = metrics.get(metric, {})
+            res = evaluate[metric](images, predictions, **kwargs)
+            returns[metric] = res.item() if isinstance(res, torch.Tensor) else res
         return returns
 
     @classmethod
-    def local_correlation_map(cls, image, prediction, map_to, window_size=9, n_dims=1):
+    def local_correlation_map(cls, image, prediction, map_to='pred', window_size=9, n_dims=1):
         """Local correlation map between an image and estimated noise.
-
         Parameters
         ----------
-        image : np.ndarray
-        prediction : np.ndarray
         window_size : int
             if `n_dims` is 1, correlation is measured between corresponding parts of traces of `window_size` size.
             if `n_dims` is 2, correlation is measured between flattened windows of size (`window_size`, `window_size`).
@@ -140,28 +123,25 @@ class DenoisingMetrics:
 
     @classmethod
     def _pearson_corr_2d(cls, x, y):
-        """Squared Pearson correlation coeffitient between corresponding rows of 2d input arrays"""
-        x_centered = x - x.mean(axis=1).reshape(-1, 1)
-        y_centered = y - y.mean(axis=1).reshape(-1, 1)
+        """ Squared Pearson correlation coefficient between corresponding rows of 2d input arrays. """
+        x_centered = x - x.mean(axis=1, keepdims=True).reshape(-1, 1)
+        y_centered = y - y.mean(axis=1, keepdims=True).reshape(-1, 1)
         corr = (x_centered * y_centered).sum(axis=1)
         corr /= np.sqrt((x_centered**2).sum(axis=1) * (y_centered**2).sum(axis=1))
         return corr ** 2
 
     @classmethod
-    def local_similarity_map(cls, image, prediction, map_to, lamb=0.5, window_size=9, n_dims=1, **kwargs):
-        """Local Similarity Map between an image and estimated noise.
+    def local_similarity_map(cls, image, prediction, map_to='pred', lamb=0.5, window_size=9, n_dims=1, **kwargs):
+        """ Local Similarity Map between an image and estimated noise.
         Chen, Yangkang, and Sergey Fomel. "`Random noise attenuation using local signal-and-noise orthogonalization
         <https://library.seg.org/doi/10.1190/geo2014-0227.1>`_"
 
         Parameters
         ----------
-        image : np.ndarray
-        prediction : np.ndarray
         lamb : float
             Regularization parameter from 0 to 1.
         window_size : int
-            if `n_dims` is 1, similarity is measured between corresponding parts of traces of `window_size` size.
-            if `n_dims` is 2, similarity is measured between flattened windows of size (`window_size`, `window_size`).
+            Size of the window for a local similarity estimation.
         n_dims : int
             Number of dimensions for `window_size`.
         tol : float, optional
@@ -196,16 +176,17 @@ class DenoisingMetrics:
 
         H = np.eye(window_size**n_dims, dtype=np.float) * lamb
         H = np.lib.stride_tricks.as_strided(H, shape=(image_view.shape[0], window_size**n_dims, window_size**n_dims),
-                                                strides=(0, 8 * window_size**n_dims, 8))
+                                            strides=(0, 8 * window_size**n_dims, 8))
 
-        sim_local = cls._local_similarity(image_view, image_noise_view, H, **kwargs)
+        sim_local = cls._local_similarity(a=image_view, b=image_noise_view, H=H, **kwargs)
         return sim_local.reshape(img_shape)
 
     @classmethod
     def _shaping_conjugate_gradient(cls, L, H, d, tol=1e-5, N=20):
-        """Vectorised Shaping Conjugate gradient Algorithm for a system with smoothing operator.
+        """ Vectorised Shaping Conjugate gradient Algorithm for a system with smoothing operator.
         Fomel, Sergey. "`Shaping regularization in geophysical-estimation problems
-        <https://library.seg.org/doi/10.1190/1.2433716>`_"
+        <https://library.seg.org/doi/10.1190/1.2433716>`_".
+        Variables and parameters are preserved as in the paper.
         """
         p = np.zeros_like(d)
         m = np.zeros_like(d)
@@ -244,22 +225,22 @@ class DenoisingMetrics:
 
     @classmethod
     def _local_similarity(cls, a, b, H, *args, **kwargs):
-        """Local Similarity between an image and estimated noise."""
+        """ Local Similarity between an image and estimated noise. """
         A = np.array([np.diag(a[i]) for i in range(len(a))])
         B = np.array([np.diag(b[i]) for i in range(len(b))])
-        c1 = cls._shaping_conjugate_gradient(A, H, b, *args, **kwargs)
-        c2 = cls._shaping_conjugate_gradient(B, H, a, *args, **kwargs)
+        c1 = cls._shaping_conjugate_gradient(L=A, H=H, d=b, *args, **kwargs)
+        c2 = cls._shaping_conjugate_gradient(L=B, H=H, d=a, *args, **kwargs)
         return np.sum(c1 * c2, axis=1)
 
     @classmethod
     def fourier_power_spectrum(cls, image, prediction, fourier_map='pred', map_to=None, **kwargs):
-        """Fourier Power Spectrum for an image.
+        """ Fourier Power Spectrum for an image.
 
         Parameters
         ----------
-        fourier_map: str
-            If 'image', computes power spectrum for a source image.
-            If 'pred', computes power spectrum for a predicted image.
+        fourier_map : str
+            If 'image', computes power spectrum for `image`.
+            If 'pred', computes power spectrum for `prediction`.
 
         Returns
         -------
