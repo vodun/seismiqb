@@ -29,7 +29,7 @@ class DenoisingMetrics:
         predictions : np.ndarray or torch.Tensor
             Predicted images. Should be of the same shape as `images`.
         metrics : dict, list or str
-            Specifies functions to compute and their parameters. Should correspond to `objective`: 
+            Specifies functions to compute and their parameters. Should correspond to `objective`:
             if `objective` is 'metrics', then consists of metric names from {'ssim', 'psnr', 'ergas', 'uqi', 'mse'},
             elif `objective` is 'maps', then consists of map names from
             {'local_similarity', 'local_correlation', 'power_spectrum'}.
@@ -43,7 +43,7 @@ class DenoisingMetrics:
         dict
             Dictionary with metric names as keys and computed metrics as values.
         """
- 
+
         MAPS = {'local_similarity': cls.local_similarity_map,
                 'local_correlation': cls.local_correlation_map,
                 'power_spectrum': cls.fourier_power_spectrum}
@@ -70,7 +70,7 @@ class DenoisingMetrics:
         else:
             raise ValueError('Incorrect configuration')
 
-        if not all([metric in evaluate for metric in metric_names]):
+        if not all(metric in evaluate for metric in metric_names):
             raise ValueError('Incorrect metric name')
 
         returns = {}
