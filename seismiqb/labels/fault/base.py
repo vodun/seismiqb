@@ -269,7 +269,7 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
                 points = points[points[:, i] >= slices[i].start]
         self._sticks = points_to_sticks(points, sticks_step, stick_nodes_step, self.direction)
 
-    def add_to_mask(self, mask, locations=None, width=1, axis=None, sparce=False, **kwargs): # TODO: make sparce
+    def add_to_mask(self, mask, locations=None, width=1, axis=None, sparse=False, **kwargs):
         """ Add fault to background.
 
         Parameters
@@ -282,10 +282,10 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
             Width of an added fault.
         axis : int or None, optional
             Orientation of the crop to insert fault, by default None (unknown or crop is 3D)
-        sparce : bool, optional
-            Whether create sparce mask (only on labeled slides) or not, by default False
+        sparse : bool, optional
+            Whether create sparse mask (only on labeled slides) or not, by default False
         """
-        _ = kwargs, sparce
+        _ = kwargs
 
         if axis is not None and axis not in (2, self.direction):
             return mask
@@ -298,6 +298,19 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
 
         if (self.bbox[:, 1] < mask_bbox[:, 0]).any() or (self.bbox[:, 0] >= mask_bbox[:, 1]).any():
             return mask
+
+        if sparse and self.has_component('sticks'):
+            loc = np.unique(self.nodes[:, self.direction])
+            loc = loc[np.logical_and(mask_bbox[self.direction, 0] <= loc, loc < mask_bbox[self.direction, 1])]
+
+            points = points[np.isin(points[:, self.direction], loc)]
+
+            unlabeled_slides = np.take(mask, loc - mask_bbox[self.direction, 0], self.direction)
+            unlabeled_slides = loc[unlabeled_slides[:, 0, 0] == -1]
+
+            slices = [slice(None)] * 3
+            slices[self.direction] = unlabeled_slides - mask_bbox[self.direction, 0]
+            mask[slices] = 0
 
         insert_points_into_mask(mask, points, mask_bbox, width=width, axis=1-self.direction)
         return mask
