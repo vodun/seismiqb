@@ -938,9 +938,9 @@ class SeismicGeometry(CacheMixin, ExportMixin):
         wall_end = time.perf_counter()
 
         timings['crop'] = {
-            'user': 1000 * (end[0] - start[0]) / n_slide,
-            'system': 1000 * (end[2] - start[2]) / n_slide,
-            'wall': 1000 * (wall_end - wall_st) / n_slide
+            'user': 1000 * (end[0] - start[0]) / n_crop,
+            'system': 1000 * (end[2] - start[2]) / n_crop,
+            'wall': 1000 * (wall_end - wall_st) / n_crop
         }
 
         self.reset_cache()
