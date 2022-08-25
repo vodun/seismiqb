@@ -373,7 +373,7 @@ class SeismicCropBatch(Batch, VisualizationMixin):
     # Loading of labels
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def create_masks(self, ix, dst, indices='all', width=3, src_labels='labels'):
+    def create_masks(self, ix, dst, indices='all', width=3, src_labels='labels', sparse=False, **kwargs):
         """ Create masks from labels in stored `locations`.
 
         Parameters
@@ -389,10 +389,15 @@ class SeismicCropBatch(Batch, VisualizationMixin):
             Width of the resulting label.
         src_labels : str
             Dataset attribute with labels dict.
+        sparse : bool, optional
+            Whether create sparse mask (only on labeled slides) or not, by default False. Unlabeled
+            slides will be filled with -1.
         """
         field = self.get(ix, 'fields')
         location = self.get(ix, 'locations')
-        return field.make_mask(location=location, width=width, indices=indices, src=src_labels)
+        orientation = self.get(ix, 'orientations')
+        return field.make_mask(location=location, axis=orientation, width=width, indices=indices,
+                               src=src_labels, sparse=sparse)
 
 
     @action
@@ -1306,7 +1311,7 @@ class SeismicCropBatch(Batch, VisualizationMixin):
 
     @action
     def fill_bounds(self, src, dst=None, margin=0.05, fill_value=0):
-        """ Fill bounds of crops with zeros. """
+        """ Fill bounds of crops with `fill_value`. To remove predictions on bounds. """
         if (np.array(margin) == 0).all():
             return self
 

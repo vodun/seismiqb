@@ -247,30 +247,43 @@ class FaultSerializationMixin:
         sticks_labels = npzfile.get('sticks_labels')
 
         self.from_dict({
-            'points': npzfile['points'],
+            'points': npzfile.get('points'),
             'nodes': npzfile.get('nodes'),
             'simplices': npzfile.get('simplices'),
             'sticks': self._labeled_array_to_sticks(sticks, sticks_labels),
         }, transform=transform)
 
-        self.direction = npzfile.get('direction')
+        direction = npzfile.get('direction')
+        if direction is not None:
+            direction = int(direction)
+        self.direction = direction
 
     def load_npy(self, path):
         """ Load fault points from npy file. """
         points = np.load(path, allow_pickle=False)
         self._points = points
 
-    def dump_npz(self, path):
+    def dump_npz(self, path, attributes_to_create=None):
         """ Dump fault to npz. """
         path = self.field.make_path(path, name=self.short_name, makedirs=False)
 
+        if attributes_to_create:
+            if isinstance(attributes_to_create, str):
+                attributes_to_create = [attributes_to_create]
+            for item in attributes_to_create:
+                getattr(self, item)
+
+        kwargs = {'direction': self.direction}
         if self.has_component('sticks'):
             sticks, sticks_labels = self._sticks_to_labeled_array(self.sticks)
-        else:
-            sticks, sticks_labels = np.zeros((0, 3)), np.zeros((0, 1))
+            kwargs['sticks'] = sticks
+            kwargs['sticks_labels'] = sticks_labels
 
-        np.savez(path, points=self._points, nodes=self._nodes, simplices=self._simplices,
-                 sticks=sticks, sticks_labels=sticks_labels, direction=self.direction)
+        for item in ['points', 'nodes', 'simplices']:
+            if self.has_component(item):
+                kwargs[item] = getattr(self, item)
+
+        np.savez(path, **kwargs)
 
 
     def _sticks_to_labeled_array(self, sticks):

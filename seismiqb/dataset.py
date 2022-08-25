@@ -169,6 +169,7 @@ class SeismicDataset(Dataset):
         crop_shape[axis] = 1
 
         location = np.zeros((1, 9), dtype=np.int32)
+        location[0, 2] = axis
         location[0, axis + 3] = loc
         location[0, axis + 6] = loc
         location[0, [6, 7, 8]] += crop_shape

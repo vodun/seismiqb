@@ -363,8 +363,9 @@ class FaultSampler(BaseSampler):
                  field_id=0, label_id=0, **kwargs):
         field = fault.field
 
+        self.fault = fault
         self.points = fault.points
-        self.nodes = fault.nodes if hasattr(fault, 'nodes') else None
+
         self.direction = fault.direction
         self.transpose = transpose
 
@@ -383,14 +384,14 @@ class FaultSampler(BaseSampler):
     @property
     def interpolated_nodes(self):
         """ Create locations in non-labeled slides between labeled slides. """
-        slides = np.unique(self.nodes[:, self.direction])
+        slides = np.unique(self.fault.nodes[:, self.direction])
         if len(slides) == 1:
-            return self.nodes
+            return self.fault.nodes
         locations = []
         for i, slide in enumerate(slides):
             left = slides[max(i-1, 0)]
             right = slides[min(i+1, len(slides)-1)]
-            chunk = self.nodes[self.nodes[:, self.direction] == slide]
+            chunk = self.fault.nodes[self.fault.nodes[:, self.direction] == slide]
             for j in range(left, right):
                 chunk[:, self.direction] = j
                 locations += [chunk.copy()]
@@ -407,10 +408,10 @@ class FaultSampler(BaseSampler):
         crop_shape_t = crop_shape[[1, 0, 2]]
         n_threshold = np.int32(np.prod(crop_shape) * threshold)
 
-        if self.nodes is not None:
-            nodes = self.interpolated_nodes if extend else self.nodes
+        if self.fault.has_component('sticks') or self.fault.has_component('nodes'):
+            nodes = self.interpolated_nodes if extend else self.fault.nodes
         else:
-            nodes = self.points
+            nodes = self.fault.points
 
         # Keep only points, that can be a starting point for a crop of given shape
         i_mask = ((ranges[:2, 0] < nodes[:, :2]).all(axis=1) &

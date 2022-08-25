@@ -87,6 +87,7 @@ notebooks_params = (
     (os.path.join(TESTS_NOTEBOOKS_DIR, 'fault_test_01_preparation.ipynb'), {}),
     (os.path.join(TESTS_NOTEBOOKS_DIR, 'fault_test_02_base.ipynb'), {}),
     (os.path.join(TESTS_NOTEBOOKS_DIR, 'fault_test_03_sticks_processing.ipynb'), {}),
+    (os.path.join(TESTS_NOTEBOOKS_DIR, 'fault_test_04_mask_creation.ipynb'), {}),
 
     # TODO: add tutorials
     # (os.path.join(TUTORIALS_DIR, '01_Geometry_part_1.ipynb'), {})
