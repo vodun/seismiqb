@@ -120,7 +120,13 @@ class ComponentsLabeler:
 class SurfacesExtractor:
     def __init__(self, cube, axis=0, ranges=None):
         """ Extract fault surfaces from array with fault labeles (probabilities or 0-1).
-        Note assumtion that the connected components on each depth slice do not have branches.
+        Note assumption that the connected components on each depth slice do not have branches.
+
+        The algorithm is based on three stages:
+            - create patches (connected sequences of horizontal components (see :class:`.FaultPatch`)).
+              Each patch has child patches and parent patches so all of them can be organized into graph.
+            - merge patches around the holes (find cycles)
+            - merge patches with large intersection of the bound components
 
         Parameters
         ----------
@@ -143,7 +149,17 @@ class SurfacesExtractor:
         return self
 
     def next_candidate(self):
+        """ Next component to be anchor of the new patch (see :class:`.FaultPatch`).
+
+        Returns
+        -------
+        component_index : int
+            The initial component of the new patch.
+        direction : -1, 0 or 1
+            Direction of the patch extension (up or down). 0 means extension in both directions.
+        """
         while True:
+            # TODO: more accurate sampling
             if np.random.random() < 0.9 and (len(self.candidates[1]) > 0 or len(self.candidates[-1]) > 0):
                 direction = np.random.choice([-1, 1])
                 if len(self.candidates[direction]) == 0:
@@ -171,6 +187,9 @@ class SurfacesExtractor:
         return anchor, direction
 
     def create_patches(self, n_patches, bar=True):
+        """ Create fixed number of patches. They are extended from the largest horizontal components or from candidates
+        from exsisted patches. At the end of the creation unit `connectivity_matrix` is created to join patches into
+        large complex struces (trees of patches). """
         self.patches = {}
         self.patches_reverse = {}
 
@@ -193,7 +212,7 @@ class SurfacesExtractor:
                 if patch.direction != self.patches[patch.up]:
                     continue
                 else:
-                    print("STRANGE!!!")
+                    print("STRANGE!!!") # TODO: process
 
             self.patches[patch.up] = patch
             self.patches_reverse[patch.bottom] = patch
@@ -204,27 +223,8 @@ class SurfacesExtractor:
 
         return self
 
-    def make_faults(self, mode='h', depth_step=10, horizontal_step=40, merge_groups=True, threshold=0):
-        faults = []
-        n_groups, groups = connected_components(self.connectivity_matrix)
-        for idx in range(n_groups):
-            group = [self._labels_mapping[item] for item in np.arange(len(self.patches))[groups == idx]]
-            labels = [list(self.patches[patch].all_components) for patch in group]
-            if merge_groups:
-                labels = [sum(labels, [])]
-            for group in labels:
-                points = [self.h_labeler.component_points(i) for i in group]
-                points_ = np.concatenate(points, axis=0)
-                if np.sum(points_.ptp(axis=0)) > threshold:
-                    if mode == 'v':
-                        faults.append({'points': points_})
-                    else:
-                        sticks = sorted(points, key=lambda x: x[0, 2])
-                        sticks = [stick[np.argsort(stick[:, self.axis])][::horizontal_step] for stick in sticks][::depth_step]
-                        faults.append({'sticks': sticks})
-        return faults
-
-    def get_children(self, idx, depth, threshold):
+    def make_children_tree(self, idx, depth, threshold):
+        """ Get tree of children components which starts from one component of the fixed depth. """
         children = [idx]
         tree = {}
         for i in range(depth):
@@ -241,14 +241,16 @@ class SurfacesExtractor:
         return tree
 
     def join_cycles(self, depth, threshold=0.9, bar=True):
+        """ Find patches with two children and find common descendants. Such cycles in patches tree usually
+        are around holes in fault surfaces. """
         cycles = []
         for idx in tqdm.tqdm_notebook(self.patches, disable=(not bar)):
             children = self.patches[idx].children
             for p1, p2 in combinations(children, 2):
                 if p1 not in self.patches or p2 not in self.patches:
                     continue
-                tree1 = self.get_children(p1, depth, threshold)
-                tree2 = self.get_children(p2, depth, threshold)
+                tree1 = self.make_children_tree(p1, depth, threshold)
+                tree2 = self.make_children_tree(p2, depth, threshold)
 
                 for item in set(tree1) & set(tree2):
                     if tree1[item] == tree2[item]:
@@ -279,9 +281,9 @@ class SurfacesExtractor:
         return self
 
     def merge_patches(self, thresholds, bar=True):
-        # Merge similar
+        """ Merge patches with large intersections. see :meth:`.FaultPatch.find_children_to_merge`. """
         for comp, patch in tqdm.tqdm_notebook(self.patches.items(), disable=(not bar)):
-            for i in patch.merge_children(thresholds=thresholds):
+            for i in patch.find_children_to_merge(thresholds=thresholds):
                 if i in self.patches:
                     idx = self._labels_reverse[comp]
                     idx_2 = self._labels_reverse[i]
@@ -289,9 +291,72 @@ class SurfacesExtractor:
                     self.connectivity_matrix[idx_2, idx] = 1
         return self
 
+    def make_faults(self, mode='h', depth_step=10, horizontal_step=40, merge_groups=True, threshold=0):
+        """ Make fault points/sticks from groups of patches. """
+        faults = []
+        n_groups, groups = connected_components(self.connectivity_matrix)
+        for idx in range(n_groups):
+            group = [self._labels_mapping[item] for item in np.arange(len(self.patches))[groups == idx]]
+            labels = [list(self.patches[patch].all_components) for patch in group]
+            if merge_groups:
+                labels = [sum(labels, [])]
+            for group in labels:
+                points = [self.h_labeler.component_points(i) for i in group]
+                points_ = np.concatenate(points, axis=0)
+                if np.sum(points_.ptp(axis=0)) > threshold:
+                    if mode == 'v':
+                        faults.append({'points': points_})
+                    else:
+                        sticks = sorted(points, key=lambda x: x[0, 2])
+                        sticks = [stick[np.argsort(stick[:, self.axis])][::horizontal_step] for stick in sticks][::depth_step]
+                        faults.append({'sticks': sticks})
+        return faults
+
 
 class FaultPatch:
     def __init__(self, anchor, direction, extractor):
+        """ A sequence of horizontal components extended from anchor component.
+        Each patch starts from anchor in one of the direction: up (-1) or bottom (+1).
+        If zero, anchor is extended in both direction and then is merged into one patch.
+        When we say "intersection" of two components on the sequential slides we mean intersection
+        of their 2D masks (the word "contact" is more accurate).
+
+        Anchor extension is iterative and stops in 3 cases:
+            - in the intersection of the currently extended component with the next depth slide
+              there are more then one component
+            - the next slide has only one component in intersection but it has other component
+              in intersection with the current slide
+            - the next slide has only one component but it was already extended in that direction
+
+        Components from intersection on the last step will be added to candidates fot the next fault
+        patch anchors.
+
+        Examples (for direction = 1):
+                    parent                               ---------
+                    anchor/up                        -----------------            |
+                                                   --------------------           |  patch
+                    bottom                        -----------------------         |
+                    candidates/children          ---------         ---------
+                                                ------                --------
+
+                    ===========================================================================
+
+                    anchor/up         |        -----------------
+                                patch |      --------------------
+                    bottom            |    -----------------------     ------------   candidate
+                    candidate/child       ------------------------------------
+
+                    ============================================================================
+
+        Parameters
+        ----------
+        anchor : int
+            Index of the components to extend
+        direction : -1, 0 or 1
+            Direction of the patch extension (up or down). 0 means extension in both directions.
+        extractor : SurfacesExtractor
+
+        """
         self.anchor = anchor
         self.extractor = extractor
         self.h_labeler = extractor.h_labeler
@@ -300,6 +365,7 @@ class FaultPatch:
         self.extend()
 
     def extend(self):
+        """ Extend fault patch from anchor. """
         if self.direction == 0:
             patch_down = FaultPatch(self.anchor, 1, self.extractor)
             patch_up = FaultPatch(self.anchor, -1, self.extractor)
@@ -341,7 +407,22 @@ class FaultPatch:
         self.up = list(self.components.values())[0][0]
         self.bottom = list(self.components.values())[-1][0]
 
-    def merge_children(self, thresholds=(0.5, 0.9)):
+    def find_children_to_merge(self, thresholds=(0.5, 0.9)):
+        """ Find children components that have large intersections with bottom components.
+
+        Parameters
+        ----------
+        thresholds : tuple, optional
+            Thresholds as a ratios of components sizes, by default (0.5, 0.9).
+            For each pair of bottom component and child the first item is the ratio of the components intersection
+            to the size of the smallest item in pair. The second is the ratio of the components intersection
+            to the size of the largest item in pair.
+
+        Returns
+        -------
+        list
+            sorted by size list of children components filtered by thresholds.
+        """
         merge = {}
         for leaf in self.children:
             if leaf in self.extractor.patches:
@@ -349,29 +430,19 @@ class FaultPatch:
                 A, B, intersection = self.extractor.h_labeler.components_stats(leaf, comp)
                 if min(A, B) > 20 and intersection / (max(A, B)) >= thresholds[0] and intersection / (min(A, B)) >= thresholds[1]:
                     merge[leaf] = intersection / (max(A, B))
-        return list(sorted(merge, key=lambda x: merge[x]))#[:1]
+        return list(sorted(merge, key=lambda x: merge[x]))
 
     def to_fault(self):
+        """ Make horizontal fault stciks from patch. """
         labels = np.concatenate(list(self.components.values())).astype(int)
         points = [self.h_labeler.component_points(i) for i in labels]
         sticks = sorted(points, key=lambda x: x[0, 2])
         return {'sticks': [stick[np.argsort(stick[:, 1])][::30] for stick in sticks]}
-
-    def __add__(self, other):
-        if self.direction == 1:
-            patch_down = self
-            patch_up = other
-        else:
-            patch_down = other
-            patch_up = self
-
-        patch_up.components = {**patch_up.components, **patch_down.components}
-        patch_up.children = patch_down.children
-        return patch_up
 
     def __repr__(self):
         return f"{self.parents} ---> {self.up} -> ... -> {self.bottom} ---> {self.children}"
 
     @property
     def all_components(self):
+        """ All components included into patch. """
         return np.concatenate(list(self.components.values())).astype(int)
