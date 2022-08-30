@@ -291,7 +291,7 @@ class SurfacesExtractor:
                     self.connectivity_matrix[idx_2, idx] = 1
         return self
 
-    def make_faults(self, mode='h', depth_step=10, horizontal_step=40, merge_groups=True, threshold=0):
+    def make_faults(self, mode='sticks', depth_step=10, horizontal_step=40, merge_groups=True, sort=True, threshold=0):
         """ Make fault points/sticks from groups of patches. """
         faults = []
         n_groups, groups = connected_components(self.connectivity_matrix)
@@ -304,13 +304,24 @@ class SurfacesExtractor:
                 points = [self.h_labeler.component_points(i) for i in group]
                 points_ = np.concatenate(points, axis=0)
                 if np.sum(points_.ptp(axis=0)) > threshold:
-                    if mode == 'v':
+                    if mode == 'points':
                         faults.append({'points': points_})
                     else:
                         sticks = sorted(points, key=lambda x: x[0, 2])
-                        sticks = [stick[np.argsort(stick[:, self.axis])][::horizontal_step] for stick in sticks][::depth_step]
+                        sticks = [self.create_nodes(stick, horizontal_step) for stick in sticks][::depth_step]
                         faults.append({'sticks': sticks})
+        if sort:
+            faults = sorted(faults, key=lambda x: len(x[mode]), reverse=True)
         return faults
+
+    def create_nodes(self, points, step=10, mode='regular', shift=0):
+        points = points[np.argsort(points[:, self.axis])]
+        coordinates = points[:, self.axis]
+        if mode == 'separate':
+            shift = coordinates.min() % step
+        positions = coordinates % step == shift
+        positions[coordinates == min(coordinates)] = positions[coordinates == max(coordinates)] = True
+        return points[positions]
 
 
 class FaultPatch:
