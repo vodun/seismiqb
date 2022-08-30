@@ -691,8 +691,8 @@ class SeismicSampler(Sampler):
         raise KeyError(f'Unable to determine the sampler class for `{labelclass}`')
 
 
-    def __init__(self, labels, crop_shape, cube_proportions=None, uniform_labels=True,
-                 threshold=0.05, ranges=None, filtering_matrix=None, shift_height=True, **kwargs):
+    def __init__(self, labels, crop_shape, cube_proportions=None, uniform_labels=True, threshold=0.05,
+                 ranges=None, filtering_matrix=None, shift_height=True, seed=None, **kwargs):
         # One sampler of each `label` for each `field`
         names, sampler_classes = {}, {}
         samplers = AugmentedDict({field_name: [] for field_name in labels.keys()})
@@ -720,7 +720,7 @@ class SeismicSampler(Sampler):
                 label_sampler = sampler_class(label, crop_shape=crop_shape_, threshold=threshold_,
                                               ranges=ranges_, filtering_matrix=filtering_matrix_,
                                               field_id=field_id, label_id=label_id, shift_height=shift_height,
-                                              **kwargs)
+                                              seed=seed, **kwargs)
 
                 if label_sampler.n != 0:
                     samplers[field_name].append(label_sampler)
@@ -741,7 +741,7 @@ class SeismicSampler(Sampler):
         cube_proportions = cube_proportions or [1 / n_present_fields for _ in labels]
         final_weights = AugmentedDict({idx: [] for idx in labels.keys()})
 
-        sampler = 0 & ConstantSampler(np.int32(0), dim=9)
+        sampler = 0 & ConstantSampler(np.int32(0), dim=9, seed=seed)
 
         for (field_name, sampler_list), p, l in zip(samplers.items(), cube_proportions, labels_weights):
             if len(sampler_list) != 0:
