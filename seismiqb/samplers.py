@@ -167,10 +167,10 @@ class GeometrySampler(BaseSampler):
 
     def sample(self, size):
         """ Get exactly `size` locations. """
-        idx = np.random.randint(self.n, size=size)
+        idx = self.rng.integers(self.n, size=size)
         sampled = self.locations[idx]
 
-        heights = np.random.randint(low=self.ranges[2, 0],
+        heights = self.rng.integers(low=self.ranges[2, 0],
                                     high=self.ranges[2, 1] - self.crop_height,
                                     size=size, dtype=np.int32)
 
@@ -279,24 +279,24 @@ class HorizonSampler(BaseSampler):
         return buffer
 
     def _sample(self, size):
-        idx = np.random.randint(self.n, size=size)
+        idx = self.rng.integers(self.n, size=size)
         sampled = self.locations[idx] # (orientation, i_start, x_start, h_start, i_stop, x_stop, h_stop)
 
         if self.shift_height:
-            shift = np.random.randint(low=-int(self.crop_height*self.shift_height[0]),
+            shift = self.rng.integers(low=-int(self.crop_height*self.shift_height[0]),
                                       high=-int(self.crop_height*self.shift_height[1]),
                                       size=(size, 1), dtype=np.int32)
             sampled[:, [3, 6]] += shift
 
         if self.spatial_shift:
             shapes_i = sampled[:, 4] - sampled[:, 1]
-            shift_i = np.random.randint(low=-(shapes_i*self.spatial_shift[0][0]).astype(np.int32),
+            shift_i = self.rng.integers(low=-(shapes_i*self.spatial_shift[0][0]).astype(np.int32),
                                         high=-(shapes_i*self.spatial_shift[0][1]).astype(np.int32),
                                         size=(size, 1), dtype=np.int32)
             sampled[:, [1, 4]] += shift_i
 
             shapes_x = sampled[:, 5] - sampled[:, 2]
-            shift_x = np.random.randint(low=-(shapes_x*self.spatial_shift[1][0]).astype(np.int32),
+            shift_x = self.rng.integers(low=-(shapes_x*self.spatial_shift[1][0]).astype(np.int32),
                                         high=-(shapes_x*self.spatial_shift[1][1]).astype(np.int32),
                                         size=(size, 1), dtype=np.int32)
             sampled[:, [2, 5]] += shift_x
@@ -464,7 +464,7 @@ class FaultSampler(BaseSampler):
         return buffer
 
     def _sample(self, size):
-        idx = np.random.randint(self.n, size=size)
+        idx = self.rng.integers(self.n, size=size)
         sampled = self.locations[idx]
         i_mask = sampled[:, 0] == 0
         x_mask = sampled[:, 0] == 1
@@ -475,7 +475,7 @@ class FaultSampler(BaseSampler):
             low[shape == 1] = 0
             high[shape == 1] = 1
 
-            shift = np.random.randint(low=low, high=high, size=(mask.sum(), 3), dtype=np.int32)
+            shift = self.rng.integers(low=low, high=high, size=(mask.sum(), 3), dtype=np.int32)
             sampled[mask, 1:4] += shift
             sampled[mask, 4:] += shift
 
@@ -512,7 +512,7 @@ class SyntheticSampler(Sampler):
         buffer[:, 1] = self.label_id
         buffer[:, 2] = 0
 
-        start_point = np.random.randint(low=(0, 0, 0), high=(self._n, self._n, self._n),
+        start_point = self.rng.integers(low=(0, 0, 0), high=(self._n, self._n, self._n),
                                         size=(size, 3), dtype=np.int32)
         end_point = start_point + self.crop_shape
         buffer[:, [3, 4, 5]] = start_point
