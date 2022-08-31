@@ -4,7 +4,12 @@ import batchflow
 
 
 class plot(batchflow.plot):
-    """ Wrapper over original `plot` with custom defaults. """
+    """ Wrapper over `batchflow.plot` with custom defaults.
+
+    Images are displayed transposed, text labels are bigger, ticks labels are displayed from all four image sides.
+    """
+    __doc__ += '------------------------\n    ' + batchflow.plot.__doc__[1:] # doc inheritance
+
     COMMON_DEFAULTS = {
         **batchflow.plot.COMMON_DEFAULTS,
         'suptitle_size': 30,

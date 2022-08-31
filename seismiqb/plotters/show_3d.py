@@ -13,7 +13,8 @@ from matplotlib.cm import get_cmap
 
 def show_3d(x, y, z, simplices, title, zoom, colors=None, show_axes=True, aspect_ratio=(1, 1, 1),
             axis_labels=None, width=1200, height=1200, margin=(0, 0, 20), savepath=None,
-            images=None, bounds=False, resize_factor=2, colorscale='Greys', show=True, camera=None, **kwargs):
+            images=None, bounds=False, resize_factor=2, colorscale='Greys', show=True, camera=None,
+            visible_axes=True, **kwargs):
     """ Interactive 3D plot for some elements of cube.
 
     Parameters
@@ -116,17 +117,20 @@ def show_3d(x, y, z, simplices, title, zoom, colors=None, show_axes=True, aspect
                 'xaxis': {
                     'title': axis_labels[0] if show_axes else '',
                     'showticklabels': show_axes,
-                    'range': [zoom[0].stop + margin[0], zoom[0].start - margin[0]]
+                    'range': [zoom[0].stop + margin[0], zoom[0].start - margin[0]],
+                    'visible': visible_axes,
                 },
                 'yaxis': {
                     'title': axis_labels[1] if show_axes else '',
                     'showticklabels': show_axes,
-                    'range': [zoom[1].start - margin[1], zoom[1].stop + margin[1]]
+                    'range': [zoom[1].start - margin[1], zoom[1].stop + margin[1]],
+                    'visible': visible_axes,
                 },
                 'zaxis': {
                     'title': axis_labels[2] if show_axes else '',
                     'showticklabels': show_axes,
-                    'range': [zoom[2].stop + margin[2], zoom[2].start - margin[2]]
+                    'range': [zoom[2].stop + margin[2], zoom[2].start - margin[2]],
+                    'visible': visible_axes,
                 },
                 'camera': camera or {'eye': {"x": 1.25, "y": 1.5, "z": 1.5}},
             }
