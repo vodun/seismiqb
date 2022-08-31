@@ -144,7 +144,7 @@ class GeometrySampler(BaseSampler):
         Used as the first two columns of sampled values.
     """
     def __init__(self, field, crop_shape, threshold=0.05, ranges=None, filtering_matrix=None,
-                 field_id=0, label_id=0, **kwargs):
+                 field_id=0, label_id=0, seed=None, **kwargs):
         matrix = (1 - field.zero_traces).astype(np.float32)
         idx = np.nonzero(matrix != 0)
         points = np.hstack([idx[0].reshape(-1, 1),
@@ -163,7 +163,7 @@ class GeometrySampler(BaseSampler):
         self.matrix = matrix
         self.name = field.short_name
         self.displayed_name = field.displayed_name
-        super().__init__()
+        super().__init__(seed=seed)
 
     def sample(self, size):
         """ Get exactly `size` locations. """
@@ -229,7 +229,7 @@ class HorizonSampler(BaseSampler):
         Whether apply random shift to height locations of sampled horizon points or not.
     """
     def __init__(self, horizon, crop_shape, threshold=0.05, ranges=None, filtering_matrix=None,
-                 shift_height=True, spatial_shift=False, field_id=0, label_id=0, **kwargs):
+                 shift_height=True, spatial_shift=False, field_id=0, label_id=0, seed=None, **kwargs):
         field = horizon.field
         matrix = horizon.full_matrix
 
@@ -252,7 +252,7 @@ class HorizonSampler(BaseSampler):
         self.shift_height = shift_height
 
         self.spatial_shift = spatial_shift
-        super().__init__()
+        super().__init__(seed=seed)
 
     def sample(self, size):
         """ Get exactly `size` locations. """
@@ -360,7 +360,7 @@ class FaultSampler(BaseSampler):
         Create transposed crop locations or not.
     """
     def __init__(self, fault, crop_shape, threshold=0, ranges=None, extend=True, transpose=False,
-                 field_id=0, label_id=0, **kwargs):
+                 field_id=0, label_id=0, seed=None, **kwargs):
         field = fault.field
 
         self.fault = fault
@@ -379,7 +379,7 @@ class FaultSampler(BaseSampler):
         self.field = field
         self.name = field.short_name
         self.displayed_name = fault.short_name
-        super().__init__(self)
+        super().__init__(seed=seed)
 
     @property
     def interpolated_nodes(self):
@@ -493,7 +493,7 @@ class SyntheticSampler(Sampler):
     As every synthetically generated crop is completely valid from a sampling point of view,
     we just return placeholder random locations of the desired `crop_shape`.
     """
-    def __init__(self, field, crop_shape, field_id=None, label_id=None, **kwargs):
+    def __init__(self, field, crop_shape, field_id=None, label_id=None, seed=None, **kwargs):
         self.field = field
         self.crop_shape = crop_shape
         self.field_id = field_id
@@ -503,7 +503,7 @@ class SyntheticSampler(Sampler):
         self.n = self._n ** 3
 
         self.name = self.displayed_name = field.name
-        super().__init__()
+        super().__init__(seed=seed)
 
     def sample(self, size):
         """ Get exactly `size` locations. """
