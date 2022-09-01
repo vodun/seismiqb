@@ -397,7 +397,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
     @staticmethod
     def from_mask(mask, field=None, origin=None, connectivity=3,
                   mode='mean', threshold=0.5, minsize=0, prefix='predict',
-                  save_mask_values=False, **kwargs):
+                  save_probabilities=False, **kwargs):
         """ Convert mask to a list of horizons.
         Returned list is sorted by length of horizons.
 
@@ -408,7 +408,8 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
         origin : sequence
             The upper left coordinate of a `mask` in the cube coordinates.
         connectivity : int
-            Can be one of: 1 or 6 (voxel faces), 2 or 18 (+ edges), 3 or 26 (+ corners).
+            Connectivity type, i.e. what neighboring voxels to treat as connected with target one.
+            Can be one of: 1 or 6 (voxels with common faces), 2 or 18 (+ edges), 3 or 26 (+ corners).
         threshold : float
             Parameter of mask-thresholding.
         mode : str, {'mean', 'min', 'max', 'prob'}
@@ -419,8 +420,8 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
             Minimum length of a horizon to be extracted.
         prefix : str
             Name of horizon to use.
-        save_mask_values : bool
-            Whether to save mask values on the horizon surface in the `horizon.mask_values` attribute.
+        save_probabilities : bool
+            Whether to save mask values on the horizon surface in the `horizon.probabilities_` attribute.
         """
         _ = kwargs
 
@@ -462,13 +463,13 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
 
                     horizon = Horizon(storage=points, field=field, verify=True, name=f'{prefix}_{i}')
 
-                    if save_mask_values:
+                    if save_probabilities:
                         values = mask[horizon.points[:, 0] - origin[0],
                                       horizon.points[:, 1] - origin[1],
                                       horizon.points[:, 2] - origin[2]]
 
-                        horizon.mask_values = np.vstack([horizon.points[:, 0], horizon.points[:, 1], values]).T
-                        # We save coordinates in the `mask_values` because horizon points can be filtered
+                        horizon.probabilities_ = np.vstack([horizon.points[:, 0], horizon.points[:, 1], values]).T
+                        # We save coordinates in the `probabilities_` because horizon points can be filtered
                         # and this prevents from inconsistency between points and mask values
 
                     horizons.append(horizon)
@@ -478,12 +479,12 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
         return horizons
 
     def from_subset(self, matrix, name=None):
-        """ Make new label with points matrix filtered by given presense matrix.
+        """ Make new label with points matrix filtered by given presence matrix.
 
         Parameters
         ----------
         matrix : np.array
-            Presense matrix of labels points. Must be in full cubes coordinates.
+            Presence matrix of labels points. Must be in full cubes coordinates.
             If consists of 0 and 1, keep points only where values are 1.
             If consists of values from [0, 1] interval, keep points where values are greater than 0.5.
         name : str or None

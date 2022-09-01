@@ -289,17 +289,19 @@ class AttributesMixin:
         return uniques[counts > 256]
 
     @property
-    def mask_map(self):
-        """ Map of values of mask from which the horizon was extracted (if exists). """
-        if hasattr(self, 'mask_values'):
+    def probabilities(self):
+        """ Map of the horizon presence probabilities. """
+        if hasattr(self, 'probabilities_'):
             _map = np.zeros(self.full_matrix.shape, dtype=np.float32)
-            _map[self.mask_values[:, 0].astype(np.int32),
-                 self.mask_values[:, 1].astype(np.int32)] = self.mask_values[:, 2]
+            _map[self.probabilities_[:, 0].astype(np.int32),
+                 self.probabilities_[:, 1].astype(np.int32)] = self.probabilities_[:, 2]
 
             _map[~self.full_binary_matrix] = np.nan
 
-        raise AttributeError(f'Horizon `{self.displayed_name}` hasn\'t `mask_map` attribute. Check, whether'
-                             'the horizon was extracted `from_mask` with  `save_mask_values=True` option.')
+            return _map
+
+        raise AttributeError(f'Horizon `{self.displayed_name}` hasn\'t `probabilities` attribute. Check, whether'
+                             ' the horizon was initialized `from_mask` with `save_probabilities=True` option.')
 
     # Retrieve data from seismic along horizon
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
@@ -418,7 +420,7 @@ class AttributesMixin:
         # Properties
         'full_matrix': ['full_matrix', 'depths'],
         'full_binary_matrix': ['full_binary_matrix', 'mask'],
-        'mask_map': ['mask_map', 'mask_values', 'probabilities'],
+        'probabilities': ['proba', 'probabilities'],
 
         # Created by `get_*` methods
         'amplitudes': ['amplitudes', 'cube_values'],

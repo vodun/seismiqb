@@ -348,7 +348,7 @@ class VisualizationMixin:
         'Depths': ['full_matrix'],
         'Reds': ['spikes', 'quality_map', 'quality_grid'],
         'Metric': ['metric'],
-        'magma': ['mask_map']
+        'RdYlGn': ['probabilities']
     }
     ATTRIBUTE_TO_CMAP = {attr: cmap for cmap, attributes in CMAP_TO_ATTRIBUTE.items()
                          for attr in attributes}
