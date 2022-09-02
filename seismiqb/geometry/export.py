@@ -150,14 +150,14 @@ def make_segy_from_array(array, path_segy, zip_segy=True, remove_segy=None, path
 
     else:
         # make and fill up segy-spec using kwargs and array-info
-        offset = (1, 1)
+        offset = (origin[0] + 1, origin[1] + 1)
 
         spec = segyio.spec()
         spec.sorting = kwargs.get('sorting', 2)
         spec.format = kwargs.get('format', 5)
         spec.samples = range(array.shape[2])
-        spec.ilines = np.arange(array.shape[0]) + offset[0] + origin[0]
-        spec.xlines = np.arange(array.shape[1]) + offset[1] + origin[1]
+        spec.ilines = np.arange(array.shape[0]) + offset[0]
+        spec.xlines = np.arange(array.shape[1]) + offset[1]
         idx = np.stack(
             np.meshgrid(np.arange(array.shape[1]), np.arange(array.shape[0])), axis=-1
         ).reshape(-1, 2)[:, [1, 0]]
