@@ -98,8 +98,8 @@ def make_segy_from_array(array, path_segy, zip_segy=True, remove_segy=None, path
     path_spec : str or None, optional
         path to segy-cube to get spec of traces.
     origin : tuple, optional
-        position of the array in segy-cube specified in 'path_spec' (if exists) or offset for
-        array without (the second component (delay) is ignored)
+        position of the array in segy-cube specified in 'path_spec' (if exists) or ilines/xlines
+        offset for array without spec (the second component with delay is ignored)
     kwargs : dict
         sorting : int
             2 stands for ilines-sorting while 1 stands for xlines-sorting.
