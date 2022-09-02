@@ -80,7 +80,7 @@ class ExportMixin:
             shutil.make_archive(os.path.splitext(path_segy)[0], 'zip', dir_name, file_name)
 
 def make_segy_from_array(array, path_segy, zip_segy=True, remove_segy=None, path_spec=None,
-                         origin=(0, 0, 0), ilines_offset=1, xlines_offset=1, pbar=False, **kwargs):
+                         origin=(0, 0, 0), pbar=False, **kwargs):
     """ Make a segy-cube from an array. Zip it if needed. Segy-headers are filled by defaults/arguments from kwargs.
 
     Parameters
@@ -115,8 +115,8 @@ def make_segy_from_array(array, path_segy, zip_segy=True, remove_segy=None, path
     if remove_segy is None:
         remove_segy = zip_segy
 
-    cdpx = np.tile(np.arange(array.shape[0])[:, np.newaxis], array.shape[1])
-    cdpy = np.tile(np.arange(array.shape[1])[np.newaxis, :], (array.shape[0], 1))
+    cdpx = np.tile(np.arange(1, array.shape[0] + 1)[:, np.newaxis], array.shape[1])
+    cdpy = np.tile(np.arange(1, array.shape[1] + 1)[np.newaxis, :], (array.shape[0], 1))
 
     if path_spec:
         from .base import SeismicGeometry #pylint: disable=import-outside-toplevel
@@ -128,7 +128,7 @@ def make_segy_from_array(array, path_segy, zip_segy=True, remove_segy=None, path
         idx = np.stack(geometry.dataframe.index)
         mask = np.zeros(len(idx), dtype='bool')
 
-        for c, (i, x) in Notifier(pbar)(enumerate(idx)):
+        for c, (i, x) in enumerate(Notifier(pbar)(idx)):
             i = geometry.uniques_inversed[0][i]
             x = geometry.uniques_inversed[1][x]
             if origin[0] <= i < origin[0] + array.shape[0]:
@@ -143,8 +143,8 @@ def make_segy_from_array(array, path_segy, zip_segy=True, remove_segy=None, path
         spec.sorting = None if segy.sorting is None else int(segy.sorting)
         spec.format = None if segy.format is None else int(segy.format)
         spec.samples = range(array.shape[2])
-        spec.ilines = geometry.uniques[0][origin[0]:origin[0]+array.shape[0]]
-        spec.xlines = geometry.uniques[1][origin[1]:origin[1]+array.shape[1]]
+        spec.ilines = geometry.uniques[0][origin[0]:origin[0] + array.shape[0]]
+        spec.xlines = geometry.uniques[1][origin[1]:origin[1] + array.shape[1]]
 
     else:
         # make and fill up segy-spec using kwargs and array-info
@@ -155,7 +155,7 @@ def make_segy_from_array(array, path_segy, zip_segy=True, remove_segy=None, path
         spec.ilines = np.arange(array.shape[0])
         spec.xlines = np.arange(array.shape[1])
         idx = np.stack(
-            np.meshgrid(np.arange(array.shape[1]), np.arange(array.shape[0])), axis=-1
+            np.meshgrid(np.arange(1, array.shape[1] + 1), np.arange(1, array.shape[0] + 1)), axis=-1
         ).reshape(-1, 2)[:, [1, 0]]
 
         # parse headers' kwargs
@@ -169,21 +169,21 @@ def make_segy_from_array(array, path_segy, zip_segy=True, remove_segy=None, path
             dst_file.text[i] = segyio.tools.create_text_header({1: '...'}) # add header-fetching from kwargs
 
         # Loop over the array and put all the data into new segy-cube
-        for c, (i, x) in Notifier(pbar, desc='array to sgy')(enumerate(idx)):
+        for c, (i, x) in enumerate(Notifier(pbar, desc='array to sgy')(idx)):
             # create header in here
             header = dst_file.header[c]
 
             # change inline and xline in trace-header
-            header[segyio.TraceField.INLINE_3D] = i + ilines_offset
-            header[segyio.TraceField.CROSSLINE_3D] = x + xlines_offset
+            header[segyio.TraceField.INLINE_3D] = i
+            header[segyio.TraceField.CROSSLINE_3D] = x
 
             if path_spec:
                 i = geometry.uniques_inversed[0][i]
                 x = geometry.uniques_inversed[1][x]
             i, x = i - origin[0], x - origin[1]
 
-            header[segyio.TraceField.CDP_X] = cdpx[i, x] + ilines_offset
-            header[segyio.TraceField.CDP_Y] = cdpy[i, x] + xlines_offset
+            header[segyio.TraceField.CDP_X] = cdpx[i, x]
+            header[segyio.TraceField.CDP_Y] = cdpy[i, x]
 
             # change depth-related fields in trace-header
             header[segyio.TraceField.TRACE_SAMPLE_COUNT] = array.shape[2]
