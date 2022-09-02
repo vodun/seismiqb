@@ -156,8 +156,8 @@ def make_segy_from_array(array, path_segy, zip_segy=True, remove_segy=None, path
         spec.sorting = kwargs.get('sorting', 2)
         spec.format = kwargs.get('format', 5)
         spec.samples = range(array.shape[2])
-        spec.ilines = np.arange(array.shape[0]) + offset[0]
-        spec.xlines = np.arange(array.shape[1]) + offset[1]
+        spec.ilines = np.arange(array.shape[0]) + offset[0] + origin[0]
+        spec.xlines = np.arange(array.shape[1]) + offset[1] + origin[1]
         idx = np.stack(
             np.meshgrid(np.arange(array.shape[1]), np.arange(array.shape[0])), axis=-1
         ).reshape(-1, 2)[:, [1, 0]]
@@ -178,8 +178,8 @@ def make_segy_from_array(array, path_segy, zip_segy=True, remove_segy=None, path
             header = dst_file.header[c]
 
             # change inline and xline in trace-header
-            header[segyio.TraceField.INLINE_3D] = i + offset[0]
-            header[segyio.TraceField.CROSSLINE_3D] = x + offset[1]
+            header[segyio.TraceField.INLINE_3D] = i + offset[0] + origin[0]
+            header[segyio.TraceField.CROSSLINE_3D] = x + offset[1] + origin[1]
 
             if path_spec:
                 i = geometry.uniques_inversed[0][i]
