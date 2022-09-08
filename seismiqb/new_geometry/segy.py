@@ -25,7 +25,7 @@ class GeometrySEGY(Geometry):
     Default value of `index_headers` is ['INLINE_3D', 'CROSSLINE_3D'] with additional ['CDP_X', 'CDP_Y'],
     so that post-stack cube can be loaded by providing path only.
 
-    For brevity, we use the 'inline/crossline' words to refer the the first/second indexing header in documentation
+    For brevity, we use the 'inline/crossline' words to refer to the first/second indexing header in documentation
     and developer comments, as that is the most common scenario.
 
     To simplify indexing, we use ordinals of unique values of each indexing header pretty much everywhere after init.
@@ -69,7 +69,7 @@ class GeometrySEGY(Geometry):
         # Store attributes
         self.index_headers = list(index_headers)
         self.additional_headers = list(additional_headers)
-        self.index_length = len(self.index_headers)
+        self.index_length = len(index_headers)
         self.converted = False
 
         # Initialize loader
@@ -103,14 +103,7 @@ class GeometrySEGY(Geometry):
         meta_dump_exists = os.path.exists(self.meta_path)
 
         if meta_dump_exists and not recollect_stats:
-            names = [
-                'min', 'max', 'mean', 'std',
-                'subset_min', 'subset_max', 'subset_mean', 'subset_std',
-
-                'min_vector', 'max_vector', 'mean_vector', 'std_vector',
-                'min_matrix', 'max_matrix', 'mean_matrix', 'std_matrix',
-            ]
-            self.load_meta(names=names)
+            self.load_meta(names=self.PRESERVED + self.PRESERVED_LAZY)
             self.has_stats = True
         elif collect_stats:
             collect_stats_params = collect_stats_params or {}
@@ -195,7 +188,7 @@ class GeometrySEGY(Geometry):
         Implementation detail: we store buffers for stats, e.g. `mean_matrix` in the instance itself.
         Each thread has the access to buffers and modifies them in-place.
         Moreover, even the underlying numba functions are using the same buffers in-place:
-        this way , we avoid unnecessary copies and data conversions.
+        this way we avoid unnecessary copies and data conversions.
 
         Parameters
         ----------
@@ -213,7 +206,7 @@ class GeometrySEGY(Geometry):
             If bool, then whether to display progress bar over the file sweep.
             If str, then type of progress bar to display: `'t'` for textual, `'n'` for widget.
         """
-        # pylint: disable=too-many-statements
+        # pylint: disable=too-many-statements, redefined-argument-from-local
         # Prepare chunks
         n = self.lengths[0]
         n_chunks, last_chunk_size = divmod(n, chunk_size)
@@ -295,6 +288,7 @@ class GeometrySEGY(Geometry):
         self.subset_max = data.max()
         self.subset_mean = data.mean()
         self.subset_std = data.std()
+        self.quantile_precision = quantile_precision
         self.quantile_support, self.quantile_values = quantile_support, quantile_values
 
     def collect_stats_chunk(self, start, end, chunk_i):

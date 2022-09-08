@@ -2,6 +2,7 @@
 import os
 
 import numpy as np
+from scipy.interpolate import interp1d
 
 from .meta_mixin import MetaMixin
 
@@ -12,8 +13,8 @@ class Geometry(MetaMixin):
 
     During the SEG-Y processing, a number of statistics are computed. They are saved next to the cube under the
     `.segy_meta` extension, so that subsequent loads (in, possibly, other formats) don't have to recompute them.
-    Most of them are loaded at initialization.
-    The most memory-intensive ones are loaded on demand.
+    Most of them are loaded at initialization, but the most memory-intensive ones are loaded on demand.
+    For more details about meta, refer to :class:`MetaMixin` documentation.
 
     Based on the extension of the path, a different subclass is used to implement key methods for data indexing.
     Currently supported extensions are SEG-Y and TODO:
@@ -41,7 +42,7 @@ class Geometry(MetaMixin):
     Parameters
     ----------
     path : str
-        Path to seismic cube. Supported formats are `segy`, `hdf5`, `qhdf5`, `blosc` `qblosc`.
+        Path to seismic cube. Supported formats are `segy`, TODO.
     meta_path : str, optional
         Path to pre-computed statistics. If not provided, use the same as `path` with `.meta` extension.
 
@@ -64,12 +65,13 @@ class Geometry(MetaMixin):
         'index_matrix', 'absent_traces_matrix', 'dead_traces_matrix',
 
         # Additional info from SEG-Y
-        'segy_path', 'segy_text', 'rotation_matrix', 'area',
+        'segy_path', 'segy_text',
+        # 'rotation_matrix', 'area',
 
         # Scalar stats for cube values: computed for the entire SEG-Y / its subset
         'min', 'max', 'mean', 'std',
         'subset_min', 'subset_max', 'subset_mean', 'subset_std',
-        'quantile_support', 'quantile_values',
+        'quantile_precision', 'quantile_support', 'quantile_values',
     ]
 
     PRESERVED_LAZY = [ # loaded at the time of the first access
@@ -90,6 +92,9 @@ class Geometry(MetaMixin):
         self._meta_path = meta_path
         self.meta_list_loaded = set()
         self.meta_list_failed_to_dump = set()
+
+        # Lazy properties
+        self._quantile_interpolator = None
 
         # Init from subclasses
         self.init(path, **kwargs)
@@ -143,24 +148,32 @@ class Geometry(MetaMixin):
         return array
 
     # Stats and normalization
+    @property
+    def quantile_interpolator(self):
+        """ Quantile interpolator for arbitrary values. """
+        if self._quantile_interpolator is None:
+            self._quantile_interpolator = interp1d(self.quantile_support, self.quantile_values)
+        return self._quantile_interpolator
+
     def get_quantile(self, q):
         """ Get q-th quantile of the cube data. """
-        return self.quantile_values[q]
+        #pylint: disable=not-callable
+        return self.quantile_interpolator(q).astype(np.float32)
 
     @property
     def normalization_stats(self):
         """ Values for performing normalization of data from the cube. """
+        q_01, q_05, q_95, q_99 = self.get_quantile(q=[0.01, 0.05, 0.95, 0.99])
         normalization_stats = {
             'mean': self.mean,
             'std': self.std,
             'min': self.min,
             'max': self.max,
-            'q_01': self.get_quantile(q=0.01),
-            'q_05': self.get_quantile(q=0.05),
-            'q_95': self.get_quantile(q=0.95),
-            'q_99': self.get_quantile(q=0.99),
+            'q_01': q_01,
+            'q_05': q_05,
+            'q_95': q_95,
+            'q_99': q_99,
         }
-        normalization_stats = {key : float(value) for key, value in normalization_stats.items()}
         return normalization_stats
 
 
