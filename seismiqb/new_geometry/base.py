@@ -25,11 +25,11 @@ class Geometry(MetaMixin):
         as well as exact values of file-wide headers, for example, `depth`, `delay` and `sample_rate`.
 
         - method :meth:`collect_stats` to infer information about the amplitudes distribution:
-          under the hood, we make a full pass through the cube data to collect global, spatial and depth-wise stats.
+        under the hood, we make a full pass through the cube data to collect global, spatial and depth-wise stats.
 
         - :meth:`load_slide` (2D entity) or :meth:`load_crop` (3D entity) methods to load data from the cube:
-            - load slides takes an ordinal index of the slide and its axis;
-            - load crops works off of complete location specification (triplet of slices).
+            - :meth:`load_slide` takes an ordinal index of the slide and its axis;
+            - :meth:`load_crop` works off of complete location specification (triplet of slices).
 
         - textual representation of cube geometry: method `print` shows the summary of an instance with
         information about its location and values; `print_textual` allows to see textual header from a SEG-Y.
@@ -66,7 +66,7 @@ class Geometry(MetaMixin):
         # Additional info from SEG-Y
         'segy_path', 'segy_text', 'rotation_matrix', 'area',
 
-        # Scalar stats for amplitude values: computed for all SEG-Y / its subset
+        # Scalar stats for cube values: computed for the entire SEG-Y / its subset
         'min', 'max', 'mean', 'std',
         'subset_min', 'subset_max', 'subset_mean', 'subset_std',
         'quantile_support', 'quantile_values',
@@ -79,14 +79,12 @@ class Geometry(MetaMixin):
 
 
     def __init__(self, path, meta_path=None, **kwargs):
-        #
+        # Path to the file
         self.path = path
-        self.anonymize = ...
 
         # Names
         self.name = os.path.basename(self.path)
-        self.short_name = os.path.splitext(self.name)[0]
-        self.format = os.path.splitext(self.path)[1][1:]
+        self.short_name, self.format = os.path.splitext(self.name)
 
         # Meta
         self._meta_path = meta_path
@@ -110,13 +108,13 @@ class Geometry(MetaMixin):
         In the case of irregular spacings between values, we have to manually map values to ordinals.
         """
         # Indexing headers
-        for i in range(self.index_length):
-            if self.regular_structure:
+        if self.regular_structure:
+            for i in range(self.index_length):
                 array[:, i] -= self.shifts[i]
                 if self.increments[i] != 1:
                     array[:, i] //= self.increments[i]
-            else:
-                raise NotImplementedError
+        else:
+            raise NotImplementedError
 
         # Depth to units
         if array.shape[1] == self.index_length + 1:
@@ -130,11 +128,13 @@ class Geometry(MetaMixin):
         In the case of irregular spacings between values, we have to manually map ordinals to values.
         """
         # Indexing headers
-        for i in range(self.index_length):
-            if self.regular_structure:
+        if self.regular_structure:
+            for i in range(self.index_length):
                 if self.increments[i] != 1:
                     array[:, i] *= self.increments[i]
                 array[:, i] += self.shifts[i]
+        else:
+            raise NotImplementedError
 
         # Units to depth
         if array.shape[1] == self.index_length + 1:
@@ -191,7 +191,7 @@ class Geometry(MetaMixin):
         raise ValueError(f'Unknown type of index={index}')
 
     def get_slide_bounds(self, index, axis=0):
-        """ Compute bounds of the slide: the number of dead traces on the left/right side of it.
+        """ Compute bounds of the slide: indices of the first/last alive traces of it.
 
         Parameters
         ----------

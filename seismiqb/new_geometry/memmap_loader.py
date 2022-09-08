@@ -35,10 +35,10 @@ class MemmapLoader(SegyioLoader):
         - a sequence of traces, where each trace is a combination of header and its actual data.
             - header is the first 240 bytes and it describes the meta info about that trace:
             its coordinates in different types, the method of acquisition, etc.
-            - data is the array of amplitudes, which can be stored in multiple numerical types.
+            - data is an array of values, usually amplitudes, which can be stored in multiple numerical types.
             As the original SEG-Y is quite old (1975), one of those numerical formats is IBM float,
             which is very different from standard IEEE floats; therefore, a special caution is required to
-            correctly decode amplitudes from such files.
+            correctly decode values from such files.
 
     For the most part, SEG-Y files are written with constant size of each trace, although the standard itself allows
     for variable-sized traces. We do not work with such files.
@@ -51,18 +51,18 @@ class MemmapLoader(SegyioLoader):
     For headers and traces, we use custom methods of reading binary data.
     Main differences to `segyio C++` implementation:
         - we read all of the requested headers in one file-wide sweep, speeding up by an order of magnitude
-        compared to the `segyio` sequential read of every requested headers.
+        compared to the `segyio` sequential read of every requested header.
         Also, we do that in multiple processes across chunks.
 
-        - a memory map over traces data is used for loading amplitude values. Avoiding redundant copies and leveraging
+        - a memory map over traces data is used for loading values. Avoiding redundant copies and leveraging
         `numpy` superiority allows to speed up reading, especially in case of trace slicing along the samples axis.
         This is extra relevant in case of loading horizontal (depth) slices.
     """
-
     def __init__(self, path, endian='big', strict=False, ignore_geometry=True):
+        # Re-use most of the file-wide attributes from the `segyio` loader
         super().__init__(path=path, endian=endian, strict=strict, ignore_geometry=ignore_geometry)
 
-        #
+        # Endian symbol for creating `numpy` dtypes
         self.endian_symbol = self.ENDIANNESS_TO_SYMBOL[endian]
 
         # Prefix attributes with `file`/`mmap` to avoid confusion.
@@ -78,14 +78,14 @@ class MemmapLoader(SegyioLoader):
         self.mmap_trace_data_dtype = mmap_trace_data_dtype
         self.mmap_trace_data_size = self.depth if self.file_format != 1 else (self.depth, 4)
 
-        #
+        # Dtype of each trace
         # TODO: maybe, use `np.uint8` as dtype instead of `np.void` for headers as it has nicer repr
         self.mmap_trace_dtype = np.dtype([('headers', np.void, self.TRACE_HEADER_SIZE),
                                           ('data', self.mmap_trace_data_dtype, self.mmap_trace_data_size)])
         self.data_mmap = self._construct_data_mmap()
 
     def _construct_data_mmap(self):
-        """ !!. """
+        """ Create a memory map with the first 240 bytes (headers) of each trace skipped. """
         return np.memmap(filename=self.path, mode="r", shape=self.n_traces, dtype=self.mmap_trace_dtype,
                          offset=self.file_traces_offset)["data"]
 
@@ -93,7 +93,31 @@ class MemmapLoader(SegyioLoader):
     # Headers
     def load_headers(self, headers, chunk_size=25_000, max_workers=None, pbar=False,
                      reconstruct_tsf=True, **kwargs):
-        """ !!. """
+        """ Load requested trace headers from a SEG-Y file for each trace into a dataframe.
+        If needed, we reconstruct the `'TRACE_SEQUENCE_FILE'` manually be re-indexing traces.
+
+        Under the hood, we create a memory mapping over the SEG-Y file, and view it with a special dtype.
+        That dtype skips all of the trace data bytes and all of the unrequested headers, leaving only passed `headers`
+        as non-void dtype.
+
+        The file is read in chunks in multiple processes.
+
+        Parameters
+        ----------
+        headers : sequence
+            Names of headers to load.
+        chunk_size : int
+            Maximum amount of traces in each chunk.
+        max_workers : int or None
+            Maximum number of parallel processes to spawn. If None, then the number of CPU cores is used.
+        pbar : bool, str
+            If bool, then whether to display progress bar over the file sweep.
+            If str, then type of progress bar to display: `'t'` for textual, `'n'` for widget.
+        reconstruct_tsf : bool
+            Whether to reconstruct `TRACE_SEQUENCE_FILE` manually.
+        """
+        #pylint: disable=redefined-argument-from-local
+        _ = kwargs
         if reconstruct_tsf and 'TRACE_SEQUENCE_FILE' in headers:
             headers = list(headers)
             headers.remove('TRACE_SEQUENCE_FILE')
@@ -140,27 +164,49 @@ class MemmapLoader(SegyioLoader):
             dataframe['TRACE_SEQUENCE_FILE'] = self.make_tsf_header()
         return dataframe
 
+    def load_header(self, header, chunk_size=25_000, max_workers=None, pbar=False, **kwargs):
+        """ Load exactly one header. """
+        return self.load_headers(header=[header], chunk_size=chunk_size, max_workers=max_workers,
+                                 pbar=pbar, reconstruct_tsf=False, **kwargs)
+
     def _make_mmap_headers_dtype(self, headers):
-        """ !!. """
+        """ Create list of `numpy` dtypes to view headers data.
+
+        Defines a dtype for exactly 240 bytes, where each of the requested headers would have its own named subdtype,
+        and the rest of bytes are lumped into `np.void` of certain lengths.
+
+        Only the headers data should be viewed under this dtype: the rest of trace data (values)
+        should be processed (or skipped) separately.
+
+        We do not apply final conversion to `np.dtype` to the resulting list of dtypes so it is easier to append to it.
+
+        Examples
+        --------
+        if `headers` are `INLINE_3D` and `CROSSLINE_3D`, which are 189-192 and 193-196 bytes, the return would be:
+        >>> [('unused_0', numpy.void, 188),
+        >>>  ('INLINE_3D', '>i4'),
+        >>>  ('CROSSLINE_3D', '>i4'),
+        >>>  ('unused_1', numpy.void, 44)]
+        """
         header_to_byte = segyio.tracefield.keys
         byte_to_header = {val: key for key, val in header_to_byte.items()}
         start_bytes = sorted(header_to_byte.values())
         byte_to_len = {start: end - start
                        for start, end in zip(start_bytes, start_bytes[1:] + [self.TRACE_HEADER_SIZE + 1])}
-        headers_bytes = {header_to_byte[header] for header in headers}
+        requested_headers_bytes = {header_to_byte[header] for header in headers}
 
         # Iterate over all headers
         # Unrequested headers are lumped into `np.void` of certain lengths
         # Requested   headers are each its own dtype
         dtype_list = []
-        padding_counter, void_counter = 0, 0
+        unused_counter, void_counter = 0, 0
         for byte, header_len in byte_to_len.items():
-            if byte in headers_bytes:
+            if byte in requested_headers_bytes:
                 if void_counter:
-                    padding_dtype = (f'padding_{padding_counter}', np.void, void_counter)
-                    dtype_list.append(padding_dtype)
+                    unused_dtype = (f'unused_{unused_counter}', np.void, void_counter)
+                    dtype_list.append(unused_dtype)
 
-                    padding_counter += 1
+                    unused_counter += 1
                     void_counter = 0
 
                 header_name = byte_to_header[byte]
@@ -172,13 +218,26 @@ class MemmapLoader(SegyioLoader):
                 void_counter += header_len
 
         if void_counter:
-            padding_dtype = (f'padding_{padding_counter}', np.void, void_counter)
-        dtype_list.append(padding_dtype)
+            unused_dtype = (f'unused_{unused_counter}', np.void, void_counter)
+        dtype_list.append(unused_dtype)
         return dtype_list
 
     # Data loading: traces
     def load_traces(self, indices, limits=None, buffer=None):
-        """ !!. """
+        """ Load traces by their indices.
+        Under the hood, we use a pre-made memory mapping over the file, where trace data is viewed with a special dtype.
+        Regardless of the numerical dtype of SEG-Y file, we output IEEE float32:
+        for IBM floats, that requires an additional conversion.
+
+        Parameters
+        ----------
+        indices : sequence
+            Indices (TRACE_SEQUENCE_FILE) of the traces to read.
+        limits : sequence of ints, slice, optional
+            Slice of the data along the depth axis.
+        buffer : np.ndarray, optional
+            Buffer to read the data into. If possible, avoids copies.
+        """
         limits = self.process_limits(limits)
 
         if self.file_format != 1:
@@ -196,7 +255,16 @@ class MemmapLoader(SegyioLoader):
 
     # Data loading: depth slices
     def load_depth_slices(self, indices, buffer=None):
-        """ !!. """
+        """ Load horizontal (depth) slices of the data.
+        Requires a ~full sweep through SEG-Y, therefore is slow.
+
+        Parameters
+        ----------
+        indices : sequence
+            Indices (ordinals) of the depth slices to read.
+        buffer : np.ndarray, optional
+            Buffer to read the data into. If possible, avoids copies.
+        """
         depth_slices = self.data_mmap[:, indices]
         if self.file_format == 1:
             depth_slices = self._ibm_to_ieee(depth_slices)
@@ -208,7 +276,7 @@ class MemmapLoader(SegyioLoader):
         return buffer
 
     def _ibm_to_ieee(self, array):
-        """ !!. """
+        """ Convert IBM floats to regular IEEE ones. """
         array_bytes = (array[:, :, 0], array[:, :, 1], array[:, :, 2], array[:, :, 3])
         if self.endian in {"little", "lsb"}:
             array_bytes = array_bytes[::-1]
@@ -216,7 +284,9 @@ class MemmapLoader(SegyioLoader):
 
 
 def read_chunk(path, shape, offset, dtype, headers, start, chunk_size):
-    """ !!. """
+    """ Read headers from one chunk.
+    We create memory mapping anew in each worker, as it is easier and creates no significant overhead.
+    """
     # mmap is created over the entire file as
     # creating data over the requested chunk only does not speed up anything
     mmap = np.memmap(filename=path, mode="r", shape=shape, offset=offset, dtype=dtype)
@@ -230,9 +300,10 @@ def read_chunk(path, shape, offset, dtype, headers, start, chunk_size):
 
 @njit(nogil=True, parallel=True)
 def ibm_to_ieee(hh, hl, lh, ll):
-    """Convert 4 arrays representing individual bytes of IBM 4-byte floats into a single array of floats. Input arrays
-    are ordered from most to least significant bytes and have `np.uint8` dtypes. The result is returned as an
-    `np.float32` array."""
+    """ Convert 4 arrays representing individual bytes of IBM 4-byte floats into a single array of floats.
+    Input arrays are ordered from most to least significant bytes and have `np.uint8` dtypes.
+    The result is returned as an `np.float32` array.
+    """
     res = np.empty_like(hh, dtype=np.float32)
     for i in prange(res.shape[0]):  # pylint: disable=not-an-iterable
         for j in prange(res.shape[1]):  # pylint: disable=not-an-iterable

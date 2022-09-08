@@ -93,6 +93,13 @@ class SegyioLoader:
         If needed, we reconstruct the `'TRACE_SEQUENCE_FILE'` manually be re-indexing traces.
 
         Each header is loaded separately, requiring repeated reads from the file.
+
+        Parameters
+        ----------
+        headers : sequence
+            Names of headers to load.
+        reconstruct_tsf : bool
+            Whether to reconstruct `TRACE_SEQUENCE_FILE` manually.
         """
         _ = kwargs
         if reconstruct_tsf and 'TRACE_SEQUENCE_FILE' in headers:
