@@ -4,11 +4,12 @@ import os
 import numpy as np
 from scipy.interpolate import interp1d
 
+from .conversion_mixin import ConversionMixin
 from .meta_mixin import MetaMixin
 
 
 
-class Geometry(MetaMixin):
+class Geometry(ConversionMixin, MetaMixin):
     """ Class to infer information about seismic cube in various formats and provide format agnostic interface to them.
 
     During the SEG-Y processing, a number of statistics are computed. They are saved next to the cube under the
@@ -57,11 +58,11 @@ class Geometry(MetaMixin):
     # Value to use in dead traces
     FILL_VALUE = 0.0
 
-    # Attributes to store in a separate file
+    # Attributes to store in a separate file with meta
     PRESERVED = [ # loaded at instance initialization
         # Crucial geometry properties
         'depth', 'delay', 'sample_rate', 'shape',
-        'shifts', 'lengths', 'ranges', 'increments',
+        'shifts', 'lengths', 'ranges', 'increments', 'regular_structure',
         'index_matrix', 'absent_traces_matrix', 'dead_traces_matrix',
 
         # Additional info from SEG-Y
@@ -89,7 +90,7 @@ class Geometry(MetaMixin):
         self.short_name, self.format = os.path.splitext(self.name)
 
         # Meta
-        self._meta_path = meta_path
+        self.meta_path = meta_path
         self.meta_list_loaded = set()
         self.meta_list_failed_to_dump = set()
 
@@ -102,9 +103,45 @@ class Geometry(MetaMixin):
 
     def __getattr__(self, key):
         """ Load item from stored meta. """
-        if key in self.PRESERVED_LAZY and self.meta_path is not None and key not in self.__dict__:
+        if key in self.PRESERVED_LAZY and self.meta_exists and self.has_meta_item(key) and key not in self.__dict__:
             return self.load_meta_item(key)
         return object.__getattribute__(self, key)
+
+    # Data loading
+    def __getitem__(self, key):
+        """ Slice the cube using the usual `NumPy`-like semantics. """
+        key, axis_to_squeeze = self.process_key(key)
+
+        crop = self.load_crop(key)
+        if axis_to_squeeze:
+            crop = np.squeeze(crop, axis=tuple(axis_to_squeeze))
+        return crop
+
+    def process_key(self, key):
+        """ Convert tuple of slices/ints into locations. """
+        # Convert to list
+        if isinstance(key, (int, slice)):
+            key = [key]
+        elif isinstance(key, tuple):
+            key = list(key)
+
+        # Pad not specified dimensions
+        if len(key) != len(self.shape):
+            key += [slice(None)] * (len(self.shape) - len(key))
+
+        # Parse each subkey. Remember location of integers for later squeeze
+        key_, axis_to_squeeze = [], []
+        for i, (subkey, limit) in enumerate(zip(key, self.shape)):
+            if isinstance(subkey, slice):
+                slc = slice(subkey.start or 0, subkey.stop or limit, subkey.step)
+            elif isinstance(subkey, int):
+                subkey = subkey if subkey >= 0 else limit - subkey
+                slc = slice(subkey, subkey + 1)
+                axis_to_squeeze.append(i)
+
+            key_.append(slc)
+
+        return key_, axis_to_squeeze
 
     # Coordinate system conversions
     def lines_to_ordinals(self, array):
@@ -156,7 +193,7 @@ class Geometry(MetaMixin):
         return self._quantile_interpolator
 
     def get_quantile(self, q):
-        """ Get q-th quantile of the cube data. """
+        """ Get q-th quantile of the cube data. Works with any `q` in [0, 1] range. """
         #pylint: disable=not-callable
         return self.quantile_interpolator(q).astype(np.float32)
 
@@ -217,3 +254,40 @@ class Geometry(MetaMixin):
         left_bound = np.argmax(alive_traces)
         right_bound = len(alive_traces) - np.argmax(alive_traces[::-1]) - 1
         return left_bound, right_bound
+
+    # General utility methods
+    STRING_TO_AXIS = {
+        'i': 0, 'il': 0, 'iline': 0, 'inline': 0,
+        'x': 1, 'xl': 1, 'xline': 1, 'xnline': 1,
+        'd': 2, 'depth': 2,
+    }
+
+    def parse_axis(self, axis):
+        """ Convert string representation of an axis into integer, if needed. """
+        if isinstance(axis, str):
+            if axis in self.index_headers:
+                axis = self.index_headers.index(axis)
+            elif axis in self.STRING_TO_AXIS:
+                axis = self.STRING_TO_AXIS[axis]
+        return axis
+
+    def make_slide_locations(self, index, axis=0):
+        """ Create locations (sequence of slices for each axis) for desired slide along given axis. """
+        locations = [slice(0, item) for item in self.shape]
+
+        axis = self.parse_axis(axis)
+        locations[axis] = slice(index, index + 1)
+        return locations
+
+    def process_limits(self, limits):
+        """ Convert given `limits` to a `slice`. """
+        if limits is None:
+            return slice(0, self.depth, 1)
+        if isinstance(limits, (tuple, list)):
+            limits = slice(*limits)
+        return limits
+
+    @staticmethod
+    def locations_to_shape(locations):
+        """ !!. """
+        return tuple(slc.stop - slc.start for slc in locations)
