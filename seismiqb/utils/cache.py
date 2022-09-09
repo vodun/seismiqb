@@ -76,9 +76,11 @@ class lru_cache:
 
     def make_key(self, instance, args, kwargs):
         """ Create a key from a combination of method args and instance attributes. """
-        key = list(args)
+        key = list(args[1:] if args[0] is instance else args)
         if kwargs:
             for k, v in sorted(kwargs.items()):
+                if isinstance(v, slice):
+                    v = (v.start, v.stop, v.step)
                 key.append((k, v))
 
         if self.attributes:
