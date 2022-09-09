@@ -13,7 +13,7 @@ class MetaMixin:
     """ A mixin to store / load instance attributes.
 
     To be used correctly, the instance should provide following attributes:
-        - `_meta_path` defines the path to dump attributes / load them from.
+        - `meta_path` defines the path to dump attributes / load them from.
         If not provided, but the instance has `path` attribute, we try to infer the meta path from it:
             - if `path` references the `hdf5` file, we use it as meta container.
             - otherwise, we append `_meta` prefix to the `path` and use it as meta path.
@@ -25,29 +25,50 @@ class MetaMixin:
         They are then loaded on demand, at the time of the first access.
     """
     #pylint: disable=redefined-argument-from-local
-    PRESERVED = []
-    PRESERVED_LAZY = []
+    PRESERVED = []              # loaded at instance initialization
+    PRESERVED_LAZY = []         # loaded on demand
 
-    META_OPENER = h5py.File
+    META_OPENER = h5py.File     # constructor for files
 
     @property
-    def meta_path(self):
-        """ Path to the file with stored meta. """
-        if hasattr(self, '_meta_path') and self._meta_path is not None:
-            return self._meta_path
+    def meta_paths(self):
+        """ Paths to the files with stored meta. """
+        paths = []
+        if hasattr(self, 'meta_path') and self.meta_path is not None:
+            paths.append(self.meta_path)
+
         if hasattr(self, 'path'):
             if 'hdf5' in self.path:
-                return self.path
-            return self.path + '_meta'
-        raise ValueError('Undefined meta path!')
+                paths.append(self.path)
+            paths.append(self.path + '_meta')
+        return paths
 
-    def has_meta_item(self, key, src=None):
+    @property
+    def existing_meta_paths(self):
+        """ Existing paths to the files with stored meta. """
+        paths = self.meta_paths
+        paths = [path for path in paths if os.path.exists(path)]
+        return paths
+
+    @property
+    def meta_exists(self):
+        """ Whether at least one meta path exists. """
+        return len(self.existing_meta_paths) > 0
+
+    def has_meta_item(self, key, path=None):
         """ Check whether `key` is present. """
         key = key + '/'
         key = key.replace('//', '/')
 
-        with src or self.META_OPENER(self.meta_path, mode='a') as src:
-            return key in src
+        meta_paths = self.meta_paths
+        if path is not None:
+            meta_paths.insert(0, path)
+
+        for path in meta_paths:
+            with self.META_OPENER(path, mode='a') as src:
+                if key in src:
+                    return True
+        return False
 
 
     # Dump
@@ -57,36 +78,36 @@ class MetaMixin:
         Parameters
         ----------
         path : str or None
-            If provided, then path to the meta file. Otherwise, uses `meta_path` property.
+            If provided, then path to the meta file. Otherwise, uses the first path in `meta_paths` property.
         names : sequence or None
             If provided, then attributes to dump. Otherwise, dumps all `PRESERVED` and `PRESERVED_LAZE` attributes.
         overwrite : bool
             Whether to overwrite the file.
         """
-        meta_path = path or self.meta_path
         names = names or self.PRESERVED + self.PRESERVED_LAZY
 
-        # Remove file, if exists: h5py can't do that
-        if overwrite and os.path.exists(meta_path):
-            os.remove(meta_path)
-
         # Dump each attribute
-        with self.META_OPENER(meta_path, mode='a') as meta_file:
-            for name in names:
-                if hasattr(self, name) and getattr(self, name) is not None:
-                    self.dump_meta_item(key=f'/meta/{name}', value=getattr(self, name), dst=meta_file)
-                else:
-                    if hasattr(self, 'meta_list_failed_to_dump'):
-                        self.meta_list_failed_to_dump.add(name)
+        for name in names:
+            if hasattr(self, name) and getattr(self, name) is not None:
+                self.dump_meta_item(key=f'/meta/{name}', value=getattr(self, name),
+                                    path=path, overwrite=overwrite)
+            else:
+                if hasattr(self, 'meta_list_failed_to_dump'):
+                    self.meta_list_failed_to_dump.add(name)
 
-    def dump_meta_item(self, key, value, dst=None):
+    def dump_meta_item(self, key, value, path=None, overwrite=True):
         """ Save one `value` as `key` into the meta file.
         Unlike native `h5py`, works with sequences, dataframes and arrays with `object` dtype.
         """
         key = key + '/'
         key = key.replace('//', '/')
 
-        with dst or self.META_OPENER(self.meta_path, mode='a') as dst:
+        meta_path = path or self.meta_paths[0]
+
+        with self.META_OPENER(meta_path, mode='a') as dst:
+            if overwrite and key in dst:
+                del dst[key]
+
             if isinstance(value, (tuple, list)) or (isinstance(value, np.ndarray) and value.dtype == object):
                 # Sequence: store its length and type separately, then dump each item to its own group
                 dst[key + 'is_sequence'] = 1
@@ -97,7 +118,7 @@ class MetaMixin:
                 dst[key + 'type'] = type_
 
                 for i, v in enumerate(value):
-                    self.dump_meta_item(dst=dst, key=key+str(i), value=v)
+                    self.dump_meta_item(path=meta_path, key=key+str(i), value=v)
 
             elif isinstance(value, pd.DataFrame):
                 # Dataframe: store column/index names and values separately
@@ -111,10 +132,10 @@ class MetaMixin:
                     values_ = value.reset_index().values
                 else:
                     values_ = value.values
-                self.dump_meta_item(dst=dst, key=key+'values', value=values_)
+                self.dump_meta_item(path=meta_path, key=key+'values', value=values_)
             elif isinstance(value, np.ndarray):
                 dst.create_dataset(key.strip('/'), data=value,
-                                **hdf5plugin.Blosc(cname='lz4hc', clevel=2, shuffle=0))
+                                   **hdf5plugin.Blosc(cname='lz4hc', clevel=6, shuffle=0))
             else:
                 dst[key] = value
 
@@ -129,53 +150,57 @@ class MetaMixin:
         names : sequence or None
             If provided, then attributes to load. Otherwise, loads all `PRESERVED` attributes.
         """
-        meta_path = path or self.meta_path
         names = names or self.PRESERVED
 
-        with self.META_OPENER(meta_path, mode='r') as meta_file:
-            for name in names:
-                value = self.load_meta_item(f'/meta/{name}', src=meta_file)
-                setattr(self, name, value)
-                if hasattr(self, 'meta_list_loaded'):
-                    self.meta_list_loaded.add(name)
+        for name in names:
+            value = self.load_meta_item(f'/meta/{name}', path=path)
+            setattr(self, name, value)
+            if hasattr(self, 'meta_list_loaded'):
+                self.meta_list_loaded.add(name)
 
-    def load_meta_item(self, key, src=None):
+    def load_meta_item(self, key, path=None):
         """ Load one `key` from meta.
         Unlike native `h5py`, works with sequences, dataframes and arrays with `object` dtype.
         """
+        meta_paths = self.existing_meta_paths
+        if path is not None:
+            meta_paths.insert(0, path)
+
         key = key + '/'
         key = key.replace('//', '/')
 
-        with src or self.META_OPENER(self.meta_path, mode='a') as src:
-            if key + 'is_sequence' in src:
-                length = src[key + 'length'][()]
-                type_ = src[key + 'type'][()]
+        for path in meta_paths:
+            with self.META_OPENER(path, mode='a') as src:
+                if key + 'is_sequence' in src:
+                    length = src[key + 'length'][()]
+                    type_ = src[key + 'type'][()]
 
-                value = [self.load_meta_item(key=key + str(i), src=src) for i in range(length)]
+                    value = [self.load_meta_item(key=key + str(i), path=path) for i in range(length)]
 
-                types = {0: tuple, 1: list, 2: np.array}
-                value = types[type_](value)
-            elif key + 'is_dataframe' in src:
-                values = src[key + 'values'][()]
-                columns = src.attrs[key + 'columns']
+                    types = {0: tuple, 1: list, 2: np.array}
+                    value = types[type_](value)
+                elif key + 'is_dataframe' in src:
+                    values = src[key + 'values'][()]
+                    columns = src.attrs[key + 'columns']
 
-                value = pd.DataFrame(data=values, columns=columns)
+                    value = pd.DataFrame(data=values, columns=columns)
 
-                if key + 'index_names' in src:
-                    index_names = src.attrs[key + 'index_names']
-                    value.set_index(index_names, inplace=True)
+                    if key + 'index_names' in src:
+                        index_names = src.attrs[key + 'index_names']
+                        value.set_index(index_names, inplace=True)
 
-            elif key in src:
-                value = src[key][()]
-            else:
-                raise KeyError(f'No key `{key}` in {src}!')
-            return value
+                elif key in src:
+                    value = src[key][()]
+                else:
+                    continue
+                return value
+        raise KeyError(f'No key `{key}` in meta! Meta files: {meta_paths}!')
 
 
     # Reset
     def reset_meta(self, path=None, names=None):
         """ Delete all keys in meta file. """
-        meta_path = path or self.meta_path
+        meta_path = path or self.existing_meta_paths[0]
         names = names or (self.PRESERVED + self.PRESERVED_LAZY)
 
         with self.META_OPENER(meta_path, mode='a') as meta_file:
@@ -187,10 +212,15 @@ class MetaMixin:
                 if name_ in meta_file:
                     del meta_file[name_]
 
+    def remove_meta(self, path=None):
+        """ Remove meta file entirely. """
+        meta_path = path or self.existing_meta_paths[0]
+        os.remove(meta_path)
+
     # Introspection
     def print_meta_tree(self, path=None):
         """ Print textual representation of meta. """
-        meta_path = path or self.meta_path
+        meta_path = path or self.meta_paths[0]
         self.META_OPENER(meta_path, mode='r').visit(self._print_meta_tree)
 
     def _print_meta_tree(self, name):

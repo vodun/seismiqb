@@ -135,8 +135,7 @@ class MemmapLoader(SegyioLoader):
                                      ('data', self.mmap_trace_data_dtype, self.mmap_trace_data_size)])
 
         # Parse `n_workers` and select an appropriate pool executor
-        if max_workers is None:
-            max_workers = os.cpu_count()
+        max_workers = max_workers or os.cpu_count()
         max_workers = min(len(chunk_sizes), max_workers)
         executor_class = ForPoolExecutor if max_workers == 1 else ProcessPoolExecutor
 
