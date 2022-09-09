@@ -100,9 +100,7 @@ class GeometrySEGY(Geometry):
         self.add_index_attributes()
 
         # Collect amplitude stats, either by passing through SEG-Y or from previously stored dump
-        meta_dump_exists = os.path.exists(self.meta_path)
-
-        if meta_dump_exists and not recollect_stats:
+        if self.meta_exists and not recollect_stats:
             self.load_meta(names=self.PRESERVED + self.PRESERVED_LAZY)
             self.has_stats = True
         elif collect_stats:
@@ -121,12 +119,10 @@ class GeometrySEGY(Geometry):
             return SegyioLoader
         return MemmapLoader
 
-    # Headers
     def load_headers(self, headers_to_load, reconstruct_tsf=True, chunk_size=25_000, max_workers=4, pbar=False):
         """ Load all of the requested headers into dataframe. """
         return self.loader.load_headers(headers_to_load, reconstruct_tsf=reconstruct_tsf,
                                         max_workers=max_workers, pbar=pbar)
-
 
     def add_index_attributes(self):
         """ Add attributes, based on the values of indexing headers. """
@@ -142,7 +138,7 @@ class GeometrySEGY(Geometry):
         self.shifts = [np.min(item) for item in self.index_sorted_uniques]
         self.lengths = [len(item) for item in self.index_sorted_uniques]
         self.ranges = [(np.min(item), np.max(item)) for item in self.index_sorted_uniques]
-        self.shape = (*self.lengths, self.depth)
+        self.shape = np.array([*self.lengths, self.depth])
 
         # Check if indexing headers provide regular structure
         self.increments = []
@@ -299,7 +295,7 @@ class GeometrySEGY(Geometry):
         data = self.load_by_indices(indices)
         data = data.reshape(end - start, self.lengths[1], self.depth)
 
-        # Actually compute all of the stats
+        # Actually compute all of the stats. Modifies buffers in-place
         _collect_stats_chunk(data,
                              min_vector=self.min_vector_chunked[chunk_i],
                              max_vector=self.max_vector_chunked[chunk_i],
@@ -327,7 +323,7 @@ class GeometrySEGY(Geometry):
             Buffer to read the data into. If possible, avoids copies.
         """
         if buffer is None:
-            limits = self.loader.process_limits(limits)
+            limits = self.process_limits(limits)
             buffer = np.empty((len(indices), self.depth), dtype=np.float32)[:, limits]
         else:
             buffer = buffer.reshape((len(indices), -1))
@@ -338,6 +334,22 @@ class GeometrySEGY(Geometry):
             self.loader.load_traces(indices=indices[mask], limits=limits, buffer=buffer[mask])
         else:
             self.loader.load_traces(indices=indices, limits=limits, buffer=buffer)
+        return buffer
+
+    def load_depth_slice(self, index, buffer=None):
+        """ !!. """
+        if buffer is None:
+            buffer = np.empty((1, self.n_traces), dtype=np.float32)
+        else:
+            buffer = buffer.reshape((1, self.n_traces))
+
+        buffer = self.loader.load_depth_slices([index], buffer=buffer)[0]
+        if buffer.size == np.prod(self.lengths):
+            buffer = buffer.reshape(self.lengths)
+        else:
+            buffer_ = np.zeros_like(self.dead_traces_matrix, dtype=np.float32)
+            buffer_[~self.zero_traces] = buffer
+            buffer = buffer_
         return buffer
 
     # Data loading: 2D
@@ -357,9 +369,13 @@ class GeometrySEGY(Geometry):
         buffer : np.ndarray, optional
             Buffer to read the data into. If possible, avoids copies.
         """
-        index = self.get_slide_index(index=index, axis=axis)
-        indices = np.take(self.index_matrix, indices=index, axis=axis)
-        return self.load_by_indices(indices=indices, limits=limits, buffer=buffer)
+        if axis in {0, 1}:
+            index = self.get_slide_index(index=index, axis=axis)
+            indices = np.take(self.index_matrix, indices=index, axis=axis)
+            slide = self.load_by_indices(indices=indices, limits=limits, buffer=buffer)
+        else:
+            slide = self.load_depth_slice(index, buffer=buffer)
+        return slide
 
     # Data loading: 3D
     def load_crop(self, locations, buffer=None):
