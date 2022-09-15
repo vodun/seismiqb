@@ -9,11 +9,25 @@ from ..utils import lru_cache
 
 
 class GeometryHDF5(Geometry):
-    """ !!. """
+    """ Class to work with cubes in HDF5 format.
+    We expect a certain structure to the file: mostly, this file should be created by :meth:`ConversionMixin.convert`.
+
+    The file should contain data in one or more projections. When the data is requested, we choose the fastest one
+    to actually perform the data reading step.
+    Some of the projections may be missing — in this case, other (possibly, slower) projections are used to load data.
+
+    Additional meta attributes like coordinates, SEG-Y parameters, etc, can be also in the same file.
+
+    Refer to the documentation of the base class :class:`Geometry` for more information about attributes and parameters.
+    """
     FILE_OPENER = h5py.File
 
     def init(self, path, mode='r+', **kwargs):
-        """ !!. """
+        """ Init for HDF5 geometry. The sequence of actions:
+            - open file handler
+            - check available projections in the file
+            - add attributes from file: meta and info about shapes/dtypes.
+        """
         # Open the file
         self.file = self.FILE_OPENER(path, mode)
 
@@ -35,7 +49,7 @@ class GeometryHDF5(Geometry):
         self.add_attributes(**kwargs)
 
     def add_attributes(self, **kwargs):
-        """ !!. """
+        """ Add attributes from the file. """
         # Innate attributes of converted geometry
         self.index_headers = ('INLINE_3D', 'CROSSLINE_3D')
         self.converted = True
@@ -64,7 +78,7 @@ class GeometryHDF5(Geometry):
         self.quantized = (projection.dtype == np.int8)
 
     def set_default_index_attributes(self, **kwargs):
-        """ !!. """
+        """ Set default values for seismic attributes. """
         self.delay, self.sample_rate = 0.0, 1.0
         for key, value in kwargs.items():
             setattr(self, key, value)
@@ -82,19 +96,53 @@ class GeometryHDF5(Geometry):
 
 
     # Load data: 2D
-    def load_slide(self, index, axis=0, limits=None, buffer=None, safe=True, use_cache=False):
-        """ !!. """
+    def load_slide(self, index, axis=0, limits=None, buffer=None, safe=False, use_line_cache=None):
+        """ Load one slide of data along specified axis.
+        Uses either public or private API of `h5py`: the latter reads data directly into preallocated buffer.
+        Also allows to use line cache to speed up the loading process.
+
+        Parameters
+        ----------
+        index : int, str
+            If int, then interpreted as the ordinal along the specified axis.
+            If `'random'`, then we generate random index along the axis.
+            If string of the `'#XXX'` format, then we interpret it as the exact indexing header value.
+        axis : int
+            Axis of the slide.
+        limits : sequence of ints, slice, optional
+            Slice of the data along the depth (last) axis.
+        buffer : np.ndarray, optional
+            Buffer to read the data into. If possible, avoids copies.
+        safe : bool
+            Whether to force usage of public (safe) or private API of data loading.
+        use_line_cache : bool or None
+            Whether to use cache for lines.
+            If None, then uses instance-wide value (default False).
+            If bool, forces that behavior.
+        """
+        # Parse parameters
+        index = self.get_slide_index(index=index, axis=axis)
         axis = self.parse_axis(axis)
 
         if limits is not None and axis==2:
             raise ValueError('Providing `limits` with `axis=2` is meaningless!')
 
-        if use_cache is False:
+        if use_line_cache is None:
+            use_line_cache = self.use_line_cache
+
+        # Actual data loading
+        if use_line_cache is False:
             return self.load_slide_native(index=index, axis=axis, limits=limits, buffer=buffer, safe=safe)
-        return self.load_slide_cached(index=index, axis=axis, limits=limits, buffer=buffer)
+
+        slide = self.load_slide_cached(index=index, axis=axis, limits=limits)
+        if buffer is not None:
+            buffer[:] = slide
+        else:
+            buffer = slide
+        return slide
 
     def load_slide_native(self, index, axis=0, limits=None, buffer=None, safe=True):
-        """ !!. """
+        """ Load slide with public or private API of `h5py`. """
         if safe or buffer is None or buffer.dtype != self.dtype:
             buffer = self.load_slide_native_safe(index=index, axis=axis, limits=limits, buffer=buffer)
         else:
@@ -102,7 +150,7 @@ class GeometryHDF5(Geometry):
         return buffer
 
     def load_slide_native_safe(self, index, axis=0, limits=None, buffer=None):
-        """ Use public API: can't read directly into buffer, requires a copy. !!. """
+        """ Load slide with public API of `h5py`. Requires an additional copy to put data into buffer. """
         # Prepare locations
         loading_axis = axis if axis in self.available_axis else self.available_axis[0]
         locations = self.make_slide_locations(index=index, axis=axis)
@@ -131,7 +179,7 @@ class GeometryHDF5(Geometry):
         return buffer
 
     def load_slide_native_unsafe(self, index, axis=0, limits=None, buffer=None):
-        """ !!. """
+        """ Load slide with private API of `h5py`. Reads data directly into buffer. """
         # Prepare locations
         loading_axis = axis if axis in self.available_axis else self.available_axis[0]
         locations = self.make_slide_locations(index=index, axis=axis)
@@ -156,24 +204,42 @@ class GeometryHDF5(Geometry):
         return buffer
 
     @lru_cache(128)
-    def load_slide_cached(self, index, axis=0, limits=None, buffer=None):
-        """ !!. """
-        _ = buffer
+    def load_slide_cached(self, index, axis=0, limits=None):
+        """ Cached version of :meth:`load_slide`. """
         return self.load_slide_native_safe(index=index, axis=axis, limits=limits, buffer=None)
 
 
     # Load data: 3D
-    def load_crop(self, locations, buffer=None, use_cache=False, safe=True):
-        """ !!. """
-        if use_cache is False:
+    def load_crop(self, locations, buffer=None, safe=False, use_line_cache=None):
+        """ Load crop (3D subvolume) from the cube.
+        Uses either public or private API of `h5py`: the latter reads data directly into preallocated buffer.
+        Also allows to use line cache to speed up the loading process.
+
+        Parameters
+        ----------
+        locations : sequence
+            A triplet of slices to specify the location of a subvolume.
+        buffer : np.ndarray, optional
+            Buffer to read the data into. If possible, avoids copies.
+        safe : bool
+            Whether to force usage of public (safe) or private API of data loading.
+        use_line_cache : bool or None
+            Whether to use cache for lines.
+            If None, then uses instance-wide value (default False).
+            If bool, forces that behavior.
+        """
+        if use_line_cache is None:
+            use_line_cache = self.use_line_cache
+
+        if use_line_cache is False:
             return self.load_crop_native(locations=locations, buffer=buffer, safe=safe)
         return self.load_crop_cached(locations=locations, buffer=buffer)
 
     def load_crop_native(self, locations, axis=None, buffer=None, safe=True):
-        """ !!. """
+        """ Load crop with public or private API of `h5py`. """
         axis = axis or self.get_optimal_axis(locations=locations)
         if axis not in self.available_axis:
-            raise ValueError('Axis={axis} is not available!')
+            raise ValueError(f'Axis={axis} is not available!')
 
         if safe or axis == 2 or buffer is None or buffer.dtype != self.dtype:
             buffer = self.load_crop_native_safe(locations=locations, axis=axis, buffer=buffer)
@@ -182,7 +248,7 @@ class GeometryHDF5(Geometry):
         return buffer
 
     def load_crop_native_safe(self, locations, axis=None, buffer=None):
-        """ Use public API: can't read directly into buffer, requires a copy. !!. """
+        """ Load slide with public API of `h5py`. Requires an additional copy to put data into buffer. """
         # Prepare locations
         locations = [locations[idx] for idx in self.AXIS_TO_ORDER[axis]]
         locations = tuple(locations)
@@ -205,7 +271,7 @@ class GeometryHDF5(Geometry):
         return buffer
 
     def load_crop_native_unsafe(self, locations, axis=None, buffer=None):
-        """ !!. """
+        """ Load slide with private API of `h5py`. Reads data directly into buffer. """
         # Prepare locations
         locations = [locations[idx] for idx in self.AXIS_TO_ORDER[axis]]
         locations = tuple(locations)
@@ -223,7 +289,7 @@ class GeometryHDF5(Geometry):
         return buffer
 
     def load_crop_cached(self, locations, axis=None, buffer=None):
-        """ !!. """
+        """ Cached version of :meth:`load_crop`. """
         # Parse parameters
         shape = self.locations_to_shape(locations)
         axis = axis or self.get_optimal_axis(shape=shape)

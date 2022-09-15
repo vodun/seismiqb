@@ -81,7 +81,7 @@ class Geometry(ConversionMixin, MetaMixin):
     ]
 
 
-    def __init__(self, path, meta_path=None, **kwargs):
+    def __init__(self, path, meta_path=None, use_line_cache=False, **kwargs):
         # Path to the file
         self.path = path
 
@@ -93,6 +93,9 @@ class Geometry(ConversionMixin, MetaMixin):
         self.meta_path = meta_path
         self.meta_list_loaded = set()
         self.meta_list_failed_to_dump = set()
+
+        # Cache
+        self.use_line_cache = use_line_cache
 
         # Lazy properties
         self._quantile_interpolator = None

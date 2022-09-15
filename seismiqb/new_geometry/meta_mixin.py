@@ -23,6 +23,8 @@ class MetaMixin:
 
         - `PRESERVED_LAZY` with sequence of names of attributes to dump/load.
         They are then loaded on demand, at the time of the first access.
+
+    TODO: maybe, revert the mixin to work with one meta path only?
     """
     #pylint: disable=redefined-argument-from-local
     PRESERVED = []              # loaded at instance initialization
@@ -40,6 +42,7 @@ class MetaMixin:
         if hasattr(self, 'path'):
             if 'hdf5' in self.path:
                 paths.append(self.path)
+                paths.append(self.path.replace(self.format, '.sgy_meta'))
             paths.append(self.path + '_meta')
         return paths
 
