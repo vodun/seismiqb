@@ -1,5 +1,4 @@
 """ Class to work with seismic data in SEG-Y format. """
-import os
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np

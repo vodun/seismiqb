@@ -44,6 +44,7 @@ class Quantizer:
 
 class ConversionMixin:
     """ Methods for converting data to other formats. """
+    #pylint: disable=redefined-builtin
     AXIS_TO_NAME = {0: 'projection_i', 1: 'projection_x', 2: 'projection_d'} # names of projections
     AXIS_TO_ORDER = {0: [0, 1, 2], 1: [1, 0, 2], 2: [2, 0, 1]}               # re-order axis so that `axis` is the first
     AXIS_TO_TRANSPOSE = {0: [0, 1, 2], 1: [1, 0, 2], 2: [1, 2, 0]}           # revert the previous re-ordering

@@ -173,7 +173,7 @@ class MetaMixin:
         key = key.replace('//', '/')
 
         for path in meta_paths:
-            with self.META_OPENER(path, mode='a') as src:
+            with self.META_OPENER(path, mode='r') as src:
                 if key + 'is_sequence' in src:
                     length = src[key + 'length'][()]
                     type_ = src[key + 'type'][()]
