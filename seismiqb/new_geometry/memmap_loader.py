@@ -2,6 +2,7 @@
 import os
 from functools import partial
 from concurrent.futures import ProcessPoolExecutor
+import dill
 
 import numpy as np
 import pandas as pd
@@ -9,7 +10,15 @@ from numba import njit, prange
 
 import segyio
 
-from batchflow import Notifier
+try:
+    from batchflow import Notifier
+except ImportError:
+    from tqdm.auto import tqdm
+    def Notifier(pbar, *args, **kwargs):
+        """ Progress bar. """
+        if pbar:
+            return tqdm(*args, **kwargs)
+        return lambda iterator: iterator
 
 from .segyio_loader import SegyioLoader
 
@@ -76,7 +85,7 @@ class MemmapLoader(SegyioLoader):
         if isinstance(mmap_trace_data_dtype, str):
             mmap_trace_data_dtype = self.endian_symbol + mmap_trace_data_dtype
         self.mmap_trace_data_dtype = mmap_trace_data_dtype
-        self.mmap_trace_data_size = self.depth if self.file_format != 1 else (self.depth, 4)
+        self.mmap_trace_data_size = self.n_samples if self.file_format != 1 else (self.n_samples, 4)
 
         # Dtype of each trace
         # TODO: maybe, use `np.uint8` as dtype instead of `np.void` for headers as it has nicer repr
@@ -122,17 +131,17 @@ class MemmapLoader(SegyioLoader):
             headers = list(headers)
             headers.remove('TRACE_SEQUENCE_FILE')
 
+        # Construct mmap dtype: detailed for headers
+        mmap_trace_headers_dtype = self._make_mmap_headers_dtype(headers)
+        mmap_trace_dtype = np.dtype([*mmap_trace_headers_dtype,
+                                     ('data', self.mmap_trace_data_dtype, self.mmap_trace_data_size)])
+
         # Split the whole file into chunks no larger than `chunk_size`
         n_chunks, last_chunk_size = divmod(self.n_traces, chunk_size)
         chunk_sizes = [chunk_size] * n_chunks
         if last_chunk_size:
             chunk_sizes += [last_chunk_size]
         chunk_starts = np.cumsum([0] + chunk_sizes[:-1])
-
-        # Construct mmap dtype: detailed for headers
-        mmap_trace_headers_dtype = self._make_mmap_headers_dtype(headers)
-        mmap_trace_dtype = np.dtype([*mmap_trace_headers_dtype,
-                                     ('data', self.mmap_trace_data_dtype, self.mmap_trace_data_size)])
 
         # Parse `n_workers` and select an appropriate pool executor
         max_workers = max_workers or os.cpu_count()
@@ -248,7 +257,7 @@ class MemmapLoader(SegyioLoader):
             traces = self._ibm_to_ieee(traces)
 
         if buffer is None:
-            return np.require(traces, dtype=np.float32, requirements='C')
+            return np.require(traces, dtype=self.dtype, requirements='C')
         buffer[:] = traces
         return buffer
 
@@ -282,6 +291,106 @@ class MemmapLoader(SegyioLoader):
         return ibm_to_ieee(*array_bytes)
 
 
+    # Conversion to other SEG-Y formats (data dtype)
+    def convert(self, path=None, format=8, transform=None, chunk_size=25_000, max_workers=None,
+                pbar=False, overwrite=True):
+        """ Convert SEG-Y file to a different `format`: dtype of data values.
+        Keeps the same binary header (except for the 3225 byte, which stores the format).
+        Keeps the same header values for each trace: essentially, only the values of each trace are transformed.
+
+        The most common scenario of this function usage is to convert float32 SEG-Y into int8 one:
+        the latter is a lot faster and takes ~4 times less disk space at the cost of some data loss.
+
+        Parameters
+        ----------
+        path : str, optional
+            Path to save file to. If not provided, we use the path of the current cube with an added postfix.
+        format : int
+            Target SEG-Y format.
+            Refer to :attr:`SEGY_FORMAT_TO_TRACE_DATA_DTYPE` for list of available formats and their data value dtype.
+        transform : callable, optional
+            Callable to transform data from the current file to the ones, saved in `path`.
+            Must return the same dtype, as specified by `format`.
+            If not provided, we just convert the original data to the necessary dtype.
+        chunk_size : int
+            Maximum amount of traces in each chunk.
+        max_workers : int or None
+            Maximum number of parallel processes to spawn. If None, then the number of CPU cores is used.
+        pbar : bool, str
+            If bool, then whether to display progress bar over the file sweep.
+            If str, then type of progress bar to display: `'t'` for textual, `'n'` for widget.
+        overwrite : bool
+            Whether to overwrite existing `path` or raise an exception.
+        """
+        #pylint: disable=redefined-builtin, redefined-argument-from-local
+        # Default path
+        if path is None:
+            dirname = os.path.dirname(self.path)
+            basename = os.path.basename(self.path)
+            path = os.path.join(dirname, basename.replace('.', f'_f{format}.'))
+
+        # Compute target dtype, itemsize, size of the dst file
+        dst_dtype = self.endian_symbol + self.SEGY_FORMAT_TO_TRACE_DATA_DTYPE[format]
+        dst_itemsize = np.dtype(dst_dtype).itemsize
+        dst_size = self.file_traces_offset + self.n_traces * (self.TRACE_HEADER_SIZE + self.n_samples * dst_itemsize)
+
+        # Default transform
+        if transform is None:
+            transform = lambda array: array.astype(dst_dtype)
+
+        # Exceptions
+        traces = self.load_traces([0])
+        if transform(traces).dtype != dst_dtype:
+            raise ValueError('dtype of `dst` is not the same as the one returned by `transform`!.'
+                             f' {dst_dtype}!={transform(traces).dtype}')
+
+        if os.path.exists(path) and not overwrite:
+            raise OSError(f'File {path} already exists! Set `overwrite=True` to ignore this error.')
+
+        # Serialize `transform`
+        transform = dill.dumps(transform)
+
+        # Create new file, copy binary header, replace `format` byte with the new one
+        src_mmap = np.memmap(self.path, mode='r')
+        dst_mmap = np.memmap(path, mode='w+', shape=(dst_size,))
+
+        dst_mmap[:self.file_traces_offset] = src_mmap[:self.file_traces_offset]
+        dst_mmap[3225] = format
+
+        # Prepare dst dtype
+        dst_trace_dtype = np.dtype([('headers', np.void, self.TRACE_HEADER_SIZE),
+                                    ('data', dst_dtype, self.n_samples)])
+
+        # Split the whole file into chunks no larger than `chunk_size`
+        n_chunks, last_chunk_size = divmod(self.n_traces, chunk_size)
+        chunk_sizes = [chunk_size] * n_chunks
+        if last_chunk_size:
+            chunk_sizes += [last_chunk_size]
+        chunk_starts = np.cumsum([0] + chunk_sizes[:-1])
+
+        # Parse `n_workers` and select an appropriate pool executor
+        max_workers = max_workers or os.cpu_count()
+        max_workers = min(len(chunk_sizes), max_workers)
+        executor_class = ForPoolExecutor if max_workers == 1 else ProcessPoolExecutor
+
+        # Iterate over chunks
+        with Notifier(pbar, total=self.n_traces) as pbar:
+            with executor_class(max_workers=max_workers) as executor:
+                def callback(future):
+                    chunk_size = future.result()
+                    pbar.update(chunk_size)
+
+                for start, chunk_size_ in zip(chunk_starts, chunk_sizes):
+                    future = executor.submit(convert_chunk,
+                                             src_path=self.path, dst_path=path,
+                                             shape=self.n_traces, offset=self.file_traces_offset,
+                                             src_dtype=self.mmap_trace_dtype, dst_dtype=dst_trace_dtype,
+                                             transform=transform,
+                                             start=start, chunk_size=chunk_size_)
+                    future.add_done_callback(callback)
+        return type(self)(path)
+
+
 def read_chunk(path, shape, offset, dtype, headers, start, chunk_size):
     """ Read headers from one chunk.
     We create memory mapping anew in each worker, as it is easier and creates no significant overhead.
@@ -295,6 +404,26 @@ def read_chunk(path, shape, offset, dtype, headers, start, chunk_size):
         buffer[:, i] = mmap[header][start : start + chunk_size]
     return buffer
 
+
+def convert_chunk(src_path, dst_path, shape, offset, src_dtype, dst_dtype, transform, start, chunk_size):
+    """ Copy the headers, transform and write data from one chunk.
+    We create all memory mappings anew in each worker, as it is easier and creates no significant overhead.
+    """
+    # Deserialize `transform`
+    transform = dill.loads(transform)
+
+    # Create mmaps: src is read-only, dst is read-write
+    src_mmap = np.memmap(src_path, mode='r', shape=shape, offset=offset, dtype=src_dtype)
+    dst_mmap = np.memmap(dst_path, mode='r+', shape=shape, offset=offset, dtype=dst_dtype)
+
+    # Load all data from chunk
+    src_traces = src_mmap[start : start + chunk_size]
+    dst_traces = dst_mmap[start : start + chunk_size]
+
+    # Copy headers, write transformed data
+    dst_traces['headers'] = src_traces['headers']
+    dst_traces['data'] = transform(src_traces['data'])
+    return chunk_size
 
 
 @njit(nogil=True, parallel=True)

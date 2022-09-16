@@ -19,17 +19,17 @@ class SegyioLoader:
     TRACE_HEADER_SIZE = 240
 
     SEGY_FORMAT_TO_TRACE_DATA_DTYPE = {
-        1:  np.uint8,  # IBM 4-byte float: has to be manually transformed to an IEEE float32
+        1:  "u1",  # IBM 4-byte float: has to be manually transformed to an IEEE float32
         2:  "i4",
         3:  "i2",
         5:  "f4",
         6:  "f8",
-        8:  np.int8,
+        8:  "i1",
         9:  "i8",
         10: "u4",
         11: "u2",
         12: "u8",
-        16: np.uint8,
+        16: "u1",
     }
 
     ENDIANNESS_TO_SYMBOL = {
@@ -55,13 +55,13 @@ class SegyioLoader:
         self.file_handler.mmap()
 
         # Number of traces and depth
-        self.depth = self.file_handler.trace.shape
+        self.n_samples = self.file_handler.trace.shape
         self.n_traces = self.file_handler.trace.length
         self.dtype = self.file_handler.dtype
 
         # Sample rate and delay
         self.sample_rate = self._infer_sample_rate()
-        self.samples = np.arange(self.depth) * self.sample_rate
+        self.samples = np.arange(self.n_samples) * self.sample_rate
         self.delay = self.file_handler.header[0].get(segyio.TraceField.DelayRecordingTime)
 
         # Misc
@@ -153,12 +153,12 @@ class SegyioLoader:
     def process_limits(self, limits):
         """ Convert given `limits` to a `slice`. """
         if limits is None:
-            return slice(0, self.depth, 1)
+            return slice(0, self.n_samples, 1)
         if isinstance(limits, (tuple, list)):
             limits = slice(*limits)
 
         # Use .indices to avoid negative slicing range
-        indices = limits.indices(self.depth)
+        indices = limits.indices(self.n_samples)
         if indices[-1] < 0:
             raise ValueError('Negative step is not allowed.')
         if indices[1] <= indices[0]:

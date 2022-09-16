@@ -76,9 +76,12 @@ class GeometrySEGY(Geometry):
 
         # Retrieve some of the attributes directly from the `loader`
         self.n_traces = self.loader.n_traces
-        self.depth = self.loader.depth
+        self.depth = self.loader.n_samples
         self.delay = self.loader.delay
         self.sample_rate = self.loader.sample_rate
+
+        self.dtype = self.loader.dtype
+        self.quantized = (self.dtype == np.int8)
 
         self.segy_path = self.loader.path
         self.segy_text = self.loader.text
@@ -323,7 +326,7 @@ class GeometrySEGY(Geometry):
         """
         if buffer is None:
             limits = self.process_limits(limits)
-            buffer = np.empty((len(indices), self.depth), dtype=np.float32)[:, limits]
+            buffer = np.empty((len(indices), self.depth), dtype=self.dtype)[:, limits]
         else:
             buffer = buffer.reshape((len(indices), -1))
 
@@ -338,7 +341,7 @@ class GeometrySEGY(Geometry):
     def load_depth_slice(self, index, buffer=None):
         """ !!. """
         if buffer is None:
-            buffer = np.empty((1, self.n_traces), dtype=np.float32)
+            buffer = np.empty((1, self.n_traces), dtype=self.dtype)
         else:
             buffer = buffer.reshape((1, self.n_traces))
 
