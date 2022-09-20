@@ -17,7 +17,7 @@ class VisualizationMixin:
         mask = self.add_to_mask(mask, locations=locations, width=width)
         return np.squeeze(mask)
 
-    def show_slide(self, index, width=None, axis='i', zoom=None, zoom_margin=20, plotter=plot, **kwargs):
+    def show_slide(self, index, width=None, axis='i', zoom=None, plotter=plot, **kwargs):
         """ Show slide with horizon on it.
 
         Parameters
@@ -49,7 +49,7 @@ class VisualizationMixin:
         xmin, xmax, ymin, ymax = 0, seismic_slide.shape[0], seismic_slide.shape[1], 0
 
         if zoom == 'auto':
-            zoom = self.compute_auto_zoom(index, axis, zoom_margin)
+            zoom = self.compute_auto_zoom(index, axis)
 
         if zoom is not None:
             seismic_slide = seismic_slide[zoom]

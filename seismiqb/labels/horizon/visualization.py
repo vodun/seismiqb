@@ -88,9 +88,9 @@ class HorizonVisualizationMixin(VisualizationMixin):
 
         return plotter
 
-    def compute_auto_zoom(self, loc, axis=None, zoom_margin=100):
+    def compute_auto_zoom(self, index, axis=None, zoom_margin=100):
         """ Get slice around the horizon without zero-traces on bounds. """
-        bounds = self.field.geometry.compute_auto_zoom(loc, axis)[0]
+        bounds = self.field.geometry.compute_auto_zoom(index, axis)
         return (bounds, slice(self.d_min - zoom_margin, self.d_max + zoom_margin))
 
     # 3D

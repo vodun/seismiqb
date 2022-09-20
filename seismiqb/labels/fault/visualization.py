@@ -17,7 +17,7 @@ class FaultVisualizationMixin(VisualizationMixin):
         kwargs = {**defaults, **kwargs}
         return super().show_slide(index, **kwargs)
 
-    def compute_auto_zoom(self, index, axis, zoom_margin):
+    def compute_auto_zoom(self, index, axis, zoom_margin=20):
         """ Get center slice of the fault. """
         _ = index
         return [

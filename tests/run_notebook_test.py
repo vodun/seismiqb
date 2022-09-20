@@ -81,7 +81,7 @@ notebooks_params = (
     (os.path.join(TESTS_NOTEBOOKS_DIR, 'horizon_test_02_base.ipynb'), {}),
     (os.path.join(TESTS_NOTEBOOKS_DIR, 'horizon_test_03_attributes.ipynb'), {}),
     (os.path.join(TESTS_NOTEBOOKS_DIR, 'horizon_test_04_processing.ipynb'), {}),
-    (os.path.join(TESTS_NOTEBOOKS_DIR, 'horizon_test_05_extraction.ipynb'), {'outputs': 'message'}),
+    (os.path.join(TESTS_NOTEBOOKS_DIR, 'horizon_test_05_extraction.ipynb'), {}),
 
     # Fault test
     (os.path.join(TESTS_NOTEBOOKS_DIR, 'fault_test_01_preparation.ipynb'), {}),
