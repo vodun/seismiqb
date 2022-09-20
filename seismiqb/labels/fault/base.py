@@ -310,7 +310,7 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
 
             slices = [slice(None)] * 3
             slices[self.direction] = unlabeled_slides - mask_bbox[self.direction, 0]
-            mask[slices] = 0
+            mask[tuple(slices)] = 0
 
         insert_points_into_mask(mask, points, mask_bbox, width=width, axis=1-self.direction)
         return mask

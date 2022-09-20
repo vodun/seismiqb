@@ -69,21 +69,21 @@ notebooks_params = (
     # CharismaMixin test
     (os.path.join(TESTS_NOTEBOOKS_DIR, 'charisma_test.ipynb'), {}),
 
-    # SeismicGeometry test
+    # Geometry tests
     (os.path.join(TESTS_NOTEBOOKS_DIR, 'geometry_test_01_preparation.ipynb'),
      {'inputs': {'FORMATS': geometry_formats}}),
 
     *[(os.path.join(TESTS_NOTEBOOKS_DIR, 'geometry_test_02_data_format.ipynb'),
        {'inputs': {'FORMAT': data_format}, 'outputs': 'timings'}) for data_format in geometry_formats],
 
-    # Horizon test
+    # Horizon tests
     (os.path.join(TESTS_NOTEBOOKS_DIR, 'horizon_test_01_preparation.ipynb'), {}),
     (os.path.join(TESTS_NOTEBOOKS_DIR, 'horizon_test_02_base.ipynb'), {}),
     (os.path.join(TESTS_NOTEBOOKS_DIR, 'horizon_test_03_attributes.ipynb'), {}),
     (os.path.join(TESTS_NOTEBOOKS_DIR, 'horizon_test_04_processing.ipynb'), {}),
     (os.path.join(TESTS_NOTEBOOKS_DIR, 'horizon_test_05_extraction.ipynb'), {}),
 
-    # Fault test
+    # Fault tests
     (os.path.join(TESTS_NOTEBOOKS_DIR, 'fault_test_01_preparation.ipynb'), {}),
     (os.path.join(TESTS_NOTEBOOKS_DIR, 'fault_test_02_base.ipynb'), {}),
     (os.path.join(TESTS_NOTEBOOKS_DIR, 'fault_test_03_sticks_processing.ipynb'), {}),

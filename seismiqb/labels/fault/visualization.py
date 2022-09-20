@@ -20,10 +20,9 @@ class FaultVisualizationMixin(VisualizationMixin):
     def compute_auto_zoom(self, index, axis, zoom_margin=20):
         """ Get center slice of the fault. """
         _ = index
-        return [
-                slice(max(0, self.bbox[i][0]-zoom_margin), min(self.bbox[i][1]+zoom_margin, self.field.shape[i]))
-                for i in range(3) if i != axis
-        ]
+        return tuple(slice(max(self.bbox[i][0]-zoom_margin, 0),
+                           min(self.bbox[i][1]+zoom_margin, self.field.shape[i]))
+                     for i in range(3) if i != axis)
 
     def show(self, axis=0, zoom='auto', **kwargs):
         """ Show center of fault for different axes. """

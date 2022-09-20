@@ -301,7 +301,7 @@ class Field(CharismaMixin, VisualizationMixin):
         """
         # Parse parameters
         if isinstance(location, (int, np.integer)):
-            location = self.geometry.make_slide_locations(loc=location, axis=axis)
+            location = self.geometry.make_slide_locations(index=location, axis=axis)
         shape = tuple(slc.stop - slc.start for slc in location)
         width = width or max(5, shape[-1] // 100)
 
