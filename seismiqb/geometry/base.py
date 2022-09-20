@@ -29,7 +29,7 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMix
     The last two are created by converting the original SEG-Y cube.
     During the conversion, an extra step of `int8` quantization can be performed to reduce the disk usage.
 
-    Independent of the exact format, `SeismicGeometry` provides the following:
+    Independent of the exact format, `Geometry` provides the following:
         - attributes to describe shape and structure of the cube like `shape` and `lengths`,
         as well as exact values of file-wide headers, for example, `depth`, `delay` and `sample_rate`.
 
@@ -88,6 +88,20 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMix
         'min_matrix', 'max_matrix', 'mean_matrix', 'std_matrix',
     ]
 
+    @staticmethod
+    def new(path, *args, **kwargs):
+        """ A convenient selector of appropriate (SEG-Y or HDF5) geometry. """
+        extension = os.path.splitext(path)[1][1:]
+
+        if extension in {'sgy', 'segy', 'seg', 'qsgy'}:
+            from .segy import GeometrySEGY
+            cls = GeometrySEGY
+        elif extension in {'hdf5', 'qhdf5'}:
+            from .converted import GeometryHDF5
+            cls = GeometryHDF5
+        else:
+            raise TypeError(f'Unknown format of the cube: {extension}')
+        return cls(path, *args, **kwargs)
 
     def __init__(self, path, meta_path=None, use_line_cache=False, **kwargs):
         # Path to the file
@@ -192,8 +206,8 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMix
 
         # Depth to units
         if array.shape[1] == self.index_length + 1:
-            array[:, self.index_length + 1] -= self.delay
-            array[:, self.index_length + 1] /= self.sample_rate
+            array[:, self.index_length] -= self.delay
+            array[:, self.index_length] /= self.sample_rate
         return array
 
     def ordinals_to_lines(self, array):
@@ -212,8 +226,8 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMix
 
         # Units to depth
         if array.shape[1] == self.index_length + 1:
-            array[:, self.index_length + 1] *= self.sample_rate
-            array[:, self.index_length + 1] += self.delay
+            array[:, self.index_length] *= self.sample_rate
+            array[:, self.index_length] += self.delay
         return array
 
     def lines_to_cdp(self, points):
@@ -328,6 +342,11 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMix
     def bbox(self):
         """ Bounding box with geometry limits. """
         return np.array([[0, s] for s in self.shape])
+
+    @property
+    def spatial_shape(self):
+        """ Shape of the cube along indexing headers. """
+        return tuple(self.shape[:2])
 
     @property
     def textual(self):

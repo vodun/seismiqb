@@ -8,7 +8,7 @@ import pandas as pd
 from batchflow import DatasetIndex, Dataset, Pipeline
 
 from .field import Field, SyntheticField
-from .geometry import SeismicGeometry
+from .geometry import Geometry
 from .batch import SeismicCropBatch
 from .utils import AugmentedDict
 from .plotters import plot
@@ -37,7 +37,7 @@ class SeismicDataset(Dataset):
             raise TypeError('Positional args are not allowed for `SeismicDataset` initialization!')
 
         # Convert `index` to a dictionary
-        if isinstance(index, (str, SeismicGeometry, Field, SyntheticField)):
+        if isinstance(index, (str, Geometry, Field, SyntheticField)):
             index = [index]
         if isinstance(index, (tuple, list, DatasetIndex)):
             index = {item : None for item in index}
@@ -163,7 +163,7 @@ class SeismicDataset(Dataset):
         components = ('images', 'masks') if getattr(self, src_labels)[idx] else ('images',)
         cube_name = self.indices[idx]
         geometry = self.geometries[cube_name]
-        crop_shape = np.array(geometry.cube_shape)
+        crop_shape = np.array(geometry.shape)
 
         axis = geometry.parse_axis(axis)
         crop_shape[axis] = 1
@@ -205,7 +205,7 @@ class SeismicDataset(Dataset):
 
         # Plotting defaults
         header = geometry.axis_names[axis]
-        total = geometry.cube_shape[axis]
+        total = geometry.shape[axis]
 
         if axis in [0, 1]:
             xlabel = geometry.index_headers[1 - axis]
@@ -216,7 +216,7 @@ class SeismicDataset(Dataset):
 
         kwargs = {
             'cmap': ['Greys_r', 'darkorange'],
-            'title': f'Data slice on cube `{geometry.displayed_name}`\n {header} {loc} out of {total}',
+            'title': f'Data slice on cube `{geometry.short_name}`\n {header} {loc} out of {total}',
             'xlabel': xlabel,
             'ylabel': ylabel,
             'extent': (xmin, xmax, ymin, ymax),

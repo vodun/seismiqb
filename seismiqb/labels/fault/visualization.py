@@ -9,7 +9,7 @@ from ...utils import make_slices
 class FaultVisualizationMixin(VisualizationMixin):
     """ Mixin to visualize fault. """
     def __repr__(self):
-        return f"""<Fault `{self.name}` for `{self.field.displayed_name}` at {hex(id(self))}>"""
+        return f"""<Fault `{self.name}` for `{self.field.short_name}` at {hex(id(self))}>"""
 
     def show_slide(self, loc, **kwargs):
         """ Show slides from seismic with fault. """
@@ -60,7 +60,7 @@ class FaultVisualizationMixin(VisualizationMixin):
         kwargs : dict
             Other arguments of plot creation.
         """
-        title = f'Fault `{self.name}` on `{self.field.displayed_name}`'
+        title = f'Fault `{self.name}` on `{self.field.short_name}`'
         aspect_ratio = (self.i_length / self.x_length, 1, z_ratio)
         axis_labels = (self.field.index_headers[0], self.field.index_headers[1], 'DEPTH')
 

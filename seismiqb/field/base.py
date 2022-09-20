@@ -10,7 +10,7 @@ import numpy as np
 from batchflow.notifier import Notifier
 
 from .visualization import VisualizationMixin
-from ..geometry import SeismicGeometry
+from ..geometry import Geometry
 from ..labels import Horizon, Fault
 from ..metrics import FaciesMetrics
 from ..utils import AugmentedList
@@ -22,7 +22,7 @@ class Field(CharismaMixin, VisualizationMixin):
     """ A common container for all information about the field: cube geometry and various labels.
 
     To initialize, one must provide:
-        - geometry-like entity, which can be a path to a seismic cube or instance of `:class:SeismicGeometry`;
+        - geometry-like entity, which can be a path to a seismic cube or instance of `:class:Geometry`;
         additional parameters of geometry instantiation can be passed via `geometry_kwargs` parameters.
 
         - optionally, `labels` in one of the following formats:
@@ -47,8 +47,8 @@ class Field(CharismaMixin, VisualizationMixin):
     Examples
     --------
     Initialize field with only geometry:
-    >>> Field(geometry='path/to/cube.qblosc')
-    >>> Field(geometry=SeismicGeometry(...))
+    >>> Field(geometry='path/to/cube.sgy')
+    >>> Field(geometry=Geometry(...))
 
     The most complete labels definition:
     >>> Field(geometry=..., labels={'horizons': ['path/to/horizon', Horizon(...)],
@@ -70,7 +70,7 @@ class Field(CharismaMixin, VisualizationMixin):
         # Geometry: description and convenient API to a seismic cube
         if isinstance(geometry, str):
             geometry_kwargs = geometry_kwargs or {}
-            geometry = SeismicGeometry(geometry, **{**kwargs, **geometry_kwargs})
+            geometry = Geometry.new(geometry, **{**kwargs, **geometry_kwargs})
         self.geometry = geometry
 
         # Labels: objects on a field
@@ -83,7 +83,7 @@ class Field(CharismaMixin, VisualizationMixin):
     METHOD_TO_NAMES = {
         '_load_horizons': ['horizon', 'facies', 'fans', 'channels', Horizon],
         '_load_faults': ['fault', Fault],
-        '_load_geometries': ['geometries', 'geometry',  SeismicGeometry],
+        '_load_geometries': ['geometries', 'geometry',  Geometry],
     }
     NAME_TO_METHOD = {name: method for method, names in METHOD_TO_NAMES.items() for name in names}
 
@@ -217,7 +217,7 @@ class Field(CharismaMixin, VisualizationMixin):
             fault.interpolate()
         return fault
 
-    def _load_geometries(self, paths, label_class=SeismicGeometry, **kwargs):
+    def _load_geometries(self, paths, label_class=Geometry.new, **kwargs):
         if isinstance(paths, str):
             path = paths
         if isinstance(paths, (tuple, list)):
@@ -402,8 +402,8 @@ class Field(CharismaMixin, VisualizationMixin):
                         available_attributes = []
                     available_names.extend([f'{name}:{idx}/{attr}' for attr in available_attributes])
             else:
-                if isinstance(labels, SeismicGeometry):
-                    available_attributes = ['mean_matrix', 'std_matrix', 'snr', 'quality_map']
+                if isinstance(labels, Geometry):
+                    available_attributes = ['mean_matrix', 'std_matrix', 'snr']
                 available_names.extend([f'{name}/{attr}' for attr in available_attributes])
         return available_names
 

@@ -227,6 +227,5 @@ class ConversionMixin:
                         self.dump_meta_item(key=f'meta/{key}', value=quantization_parameters[key],
                                             path=path, overwrite=True)
 
-        return path
-        # from .base import SeismicGeometry # TODO: revert
-        # return SeismicGeometry(path)
+        from .converted import GeometryHDF5
+        return GeometryHDF5(path)

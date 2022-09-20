@@ -117,11 +117,11 @@ def filter_simplices(simplices, points, matrix, threshold=5.):
         tri = points[simplices[i]].astype(np.int32)
 
         middle_i, middle_x = np.mean(tri[:, 0]), np.mean(tri[:, 1])
-        heights = np.array([matrix[tri[0, 0], tri[0, 1]],
+        depths = np.array([matrix[tri[0, 0], tri[0, 1]],
                             matrix[tri[1, 0], tri[1, 1]],
                             matrix[tri[2, 0], tri[2, 1]]])
 
-        if matrix[int(middle_i), int(middle_x)] < 0 or np.std(heights) > threshold:
+        if matrix[int(middle_i), int(middle_x)] < 0 or np.std(depths) > threshold:
             mask[i] = 0
 
     return simplices[mask == 1]

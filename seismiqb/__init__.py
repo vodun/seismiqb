@@ -6,7 +6,7 @@ from .batch import SeismicCropBatch
 
 # Data entities
 from .field import Field, SyntheticField
-from .geometry import SeismicGeometry, array_to_sgy
+from .geometry import Geometry, array_to_segy
 from .labels import Horizon, Fault, skeletonize
 from .metrics import HorizonMetrics, GeometryMetrics, FaultsMetrics, FaciesMetrics
 from .samplers import GeometrySampler, HorizonSampler, FaultSampler, ConstantSampler, SeismicSampler

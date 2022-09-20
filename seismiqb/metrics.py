@@ -731,7 +731,7 @@ class HorizonMetrics(BaseMetrics):
 
     def get_plot_defaults(self):
         """ Axis labels and horizon/cube names in the title. """
-        title = f'horizon `{self.name}` on cube `{self.horizon.field.displayed_name}`'
+        title = f'horizon `{self.name}` on cube `{self.horizon.field.short_name}`'
         return title, {
             'xlabel': self.horizon.field.axis_names[0],
             'ylabel': self.horizon.field.axis_names[1],
@@ -758,7 +758,7 @@ class HorizonMetrics(BaseMetrics):
     def bad_traces(self):
         """ Traces to fill with `nan` values. """
         if self._bad_traces is None:
-            self._bad_traces = self.horizon.field.zero_traces.copy()
+            self._bad_traces = self.horizon.field.dead_traces_matrix.copy()
             self._bad_traces[self.horizon.full_matrix == Horizon.FILL_VALUE] = 1
         return self._bad_traces
 
@@ -782,7 +782,7 @@ class HorizonMetrics(BaseMetrics):
         clip : number
             Maximum size of allowed shifts
         window : int or None
-            Size of the data along the height axis to evaluate perturbed horizons.
+            Size of the data along the depth axis to evaluate perturbed horizons.
             Note that due to shifts, it must be smaller than the original data by atleast 2 * `clip` units.
         kernel_size, agg, device
             Parameters of individual metric evaluation
@@ -906,8 +906,8 @@ class HorizonMetrics(BaseMetrics):
 
         msg = f"""
         Comparing horizons:
-        {self.horizon.displayed_name.rjust(45)}
-        {other.displayed_name.rjust(45)}
+        {self.horizon.short_name.rjust(45)}
+        {other.short_name.rjust(45)}
         {'—'*45}
         Rate in 5ms:                         {oinfo['window_rate']:8.3f}
         Mean / std of errors:          {oinfo['difference_mean']:+6.2f} / {oinfo['difference_std']:5.2f}
@@ -920,8 +920,8 @@ class HorizonMetrics(BaseMetrics):
         Lengths of horizons:               {len(self.horizon):10,}
                                            {       len(other):10,}
         {'—'*45}
-        Average heights of horizons:         {self.horizon.h_mean:8.2f}
-                                             {       other.h_mean:8.2f}
+        Average depths of horizons:          {self.horizon.d_mean:8.2f}
+                                             {       other.d_mean:8.2f}
         {'—'*45}
         Coverage of horizons:                {self.horizon.coverage:8.4f}
                                              {       other.coverage:8.4f}
@@ -945,12 +945,12 @@ class HorizonMetrics(BaseMetrics):
                 matrix = self.horizon.matrix_enlarge(matrix, width=width)
 
             # Field boundaries
-            bounds = self.horizon.field.zero_traces
+            bounds = self.horizon.field.dead_traces_matrix
 
             # Main plot: differences matrix
             kwargs = {
                 'title': (f'Depth comparison\n'
-                          f'`self={self.horizon.displayed_name}` and `other={closest.displayed_name}`'),
+                          f'`self={self.horizon.short_name}` and `other={closest.short_name}`'),
                 'suptitle': '',
                 'cmap': ['seismic', 'lightgray'],
                 'mask_color': ['black', (0, 0, 0, 0)],
@@ -1073,7 +1073,7 @@ class GeometryMetrics(BaseMetrics):
 
     def get_plot_defaults(self):
         """ Axis labels and horizon/cube names in the title. """
-        title = f'`{self.name}` on cube `{self.geometry.displayed_name}`'
+        title = f'`{self.name}` on cube `{self.geometry.short_name}`'
         return title, {
             'xlabel': self.geometry.axis_names[0],
             'ylabel': self.geometry.axis_names[1],
@@ -1090,7 +1090,7 @@ class GeometryMetrics(BaseMetrics):
     def bad_traces(self):
         """ Traces to exclude from metric evaluations: bad traces are marked with `1`s. """
         if self._bad_traces is None:
-            self._bad_traces = self.geometry.zero_traces
+            self._bad_traces = self.geometry.dead_traces_matrix
             self._bad_traces[self.data.max(axis=-1) == self.data.sum(axis=-1)] = 1
         return self._bad_traces
 
@@ -1169,7 +1169,7 @@ class GeometryMetrics(BaseMetrics):
         _ = kwargs
 
         if margin:
-            bad_traces = np.copy(self.geometry.zero_traces)
+            bad_traces = np.copy(self.geometry.dead_traces_matrix)
             bad_traces[:, 0] = 1
             bad_traces[:, -1] = 1
             bad_traces[0, :] = 1
@@ -1177,14 +1177,14 @@ class GeometryMetrics(BaseMetrics):
 
             kernel = np.ones((2 + 2*margin, 2 + 2*margin), dtype=np.uint8)
             bad_traces = cv2.dilate(bad_traces.astype(np.uint8), kernel, iterations=1).astype(bad_traces.dtype)
-            quality_map[(bad_traces - self.geometry.zero_traces) == 1] = 0.0
+            quality_map[(bad_traces - self.geometry.dead_traces_matrix) == 1] = 0.0
 
         pre_grid = np.rint(quality_map)
         grid = gridify(matrix=pre_grid, frequencies=frequencies, iline=iline, xline=xline,
                        extension=extension, filter_outliers=filter_outliers)
 
         if margin:
-            grid[(bad_traces - self.geometry.zero_traces) == 1] = 0
+            grid[(bad_traces - self.geometry.dead_traces_matrix) == 1] = 0
         return grid
 
 
@@ -1210,7 +1210,7 @@ class GeometryMetrics(BaseMetrics):
 
         title = f"tracewise {func}"
         plot_config = {
-            'title': f'{title} for `{self.name}` on cube `{self.geometry.displayed_name}`',
+            'title': f'{title} for `{self.name}` on cube `{self.geometry.short_name}`',
             'cmap': 'seismic',
             'vmin': None, 'vmax': None,
             'ignore_value': np.nan,
@@ -1237,7 +1237,7 @@ class GeometryMetrics(BaseMetrics):
 
         title = f"tracewise unsafe {func}"
         plot_config = {
-            'title': f'{title} for {self.name} on cube {self.geometry.displayed_name}',
+            'title': f'{title} for {self.name} on cube {self.geometry.short_name}',
             'cmap': 'seismic',
             'vmin': None, 'vmax': None,
             'ignore_value': np.nan,
@@ -1248,7 +1248,7 @@ class GeometryMetrics(BaseMetrics):
 
 
     def blockwise(self, func, l=3, pbar=True, kernel=(5, 5), block_size=(1000, 1000),
-                  heights=None, prep_func=None, **kwargs):
+                  depths=None, prep_func=None, **kwargs):
         """ Apply function to all traces in lateral window """
 
         window = np.array(kernel)
@@ -1261,16 +1261,16 @@ class GeometryMetrics(BaseMetrics):
         pbar = tqdm if pbar else lambda iterator, *args, **kwargs: iterator
         metric = np.full((*self.geometries[0].lens, l), np.nan)
 
-        heights = slice(0, self.geometries[0].depth) if heights is None else slice(*heights)
+        depths = slice(0, self.geometries[0].depth) if depths is None else slice(*depths)
 
         with pbar(total=total) as prog_bar:
-            for il_block in np.arange(0, self.geometries[0].cube_shape[0], block_size[0]-window[0]):
-                for xl_block in np.arange(0, self.geometries[0].cube_shape[1], block_size[1]-window[1]):
+            for il_block in np.arange(0, self.geometries[0].shape[0], block_size[0]-window[0]):
+                for xl_block in np.arange(0, self.geometries[0].shape[1], block_size[1]-window[1]):
                     block_len = np.min((np.array(self.geometries[0].lens) - (il_block, xl_block),
                                         block_size), axis=0)
                     locations = [slice(il_block, il_block + block_len[0]),
                                  slice(xl_block, xl_block + block_len[1]),
-                                 heights]
+                                 depths]
 
                     blocks = [prep_func(geometry.load_crop(locations)) for geometry in self.geometries]
 
@@ -1286,7 +1286,7 @@ class GeometryMetrics(BaseMetrics):
 
         title = f"Blockwise {func}"
         plot_config = {
-            'title': f'{title} for {self.name} on cube {self.geometry.displayed_name}',
+            'title': f'{title} for {self.name} on cube {self.geometry.short_name}',
             'cmap': 'seismic',
             'vmin': None, 'vmax': None,
             'ignore_value': np.nan,
@@ -1436,7 +1436,7 @@ class FaciesMetrics:
 
             values = [fn(**kwargs) for fn in metrics]
 
-            index = pd.MultiIndex.from_arrays([[horizon.field.displayed_name], [horizon.short_name]],
+            index = pd.MultiIndex.from_arrays([[horizon.field.short_name], [horizon.short_name]],
                                               names=['field_name', 'horizon_name'])
             data = dict(zip(names, values))
             row = pd.DataFrame(index=index, data=data)

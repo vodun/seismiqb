@@ -124,9 +124,9 @@ class Accumulator3D:
         self._aggregate()
 
         # Re-open the HDF5 file to force flush changes and release disk space from deleted datasets
-        # Also add alias to `data` dataset, so the resulting cube can be opened by `SeismicGeometry`
+        # Also add alias to `data` dataset, so the resulting cube can be opened by `Geometry`
         if self.type == 'hdf5':
-            self.file['cube_i'] = self.file['data']
+            self.file['projection_i'] = self.file['data']
             self.file.close()
             self.file = h5py.File(self.path, 'r+')
             self.data = self.file['data']
@@ -441,8 +441,8 @@ class AccumulatorBlosc(Accumulator3D):
     path : str
         Path to save `BLOSC` file to.
     orientation : int
-        If 0, then predictions are stored as `cube_i` dataset inside the file.
-        If 1, then predictions are stored as `cube_x` dataset inside the file and transposed before storing.
+        If 0, then predictions are stored as `projection_i` dataset inside the file.
+        If 1, then predictions are stored as `projection_x` dataset inside the file and transposed before storing.
     aggregation : str
         Type of aggregation for duplicate slides.
         If `max`, then we take element-wise maximum.
@@ -464,9 +464,9 @@ class AccumulatorBlosc(Accumulator3D):
         from .geometry import BloscFile #pylint: disable=import-outside-toplevel
         self.file = BloscFile(path, mode='w')
         if orientation == 0:
-            name = 'cube_i'
+            name = 'projection_i'
         elif orientation == 1:
-            name = 'cube_x'
+            name = 'projection_x'
             shape = np.array(shape)[[1, 0, 2]]
         self.file.create_dataset(name, shape=shape, dtype=dtype)
 

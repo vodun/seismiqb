@@ -53,8 +53,8 @@ class GeometrySEGY(Geometry):
 
 
     def init(self, path, index_headers=INDEX_HEADERS_POSTSTACK, additional_headers=ADDITIONAL_HEADERS_POSTSTACK_FULL,
-             loader_class=MemmapLoader, reload_headers=True, dump_headers=False, load_headers_params=None,
-             collect_stats=True, recollect_stats=True, collect_stats_params=None, dump_meta=True,
+             loader_class=MemmapLoader, reload_headers=False, dump_headers=False, load_headers_params=None,
+             collect_stats=True, recollect_stats=False, collect_stats_params=None, dump_meta=True,
              **kwargs):
         """ Init for SEG-Y geometry. The sequence of actions:
             - initialize loader instance
@@ -64,7 +64,6 @@ class GeometrySEGY(Geometry):
             - collect stats by full SEG-Y sweep or reading from meta
             - dump meta for future inits.
         """
-        # TODO: switch `recollect_stats` to False
         # Store attributes
         self.index_headers = list(index_headers)
         self.additional_headers = list(additional_headers)
@@ -433,7 +432,7 @@ class GeometrySEGY(Geometry):
         else:
             # TODO: add a fallback on `index_matrix` instead
             buffer_ = np.zeros_like(self.dead_traces_matrix, dtype=np.float32)
-            buffer_[~self.zero_traces] = buffer
+            buffer_[~self.dead_traces_matrix] = buffer
             buffer = buffer_
         return buffer
 

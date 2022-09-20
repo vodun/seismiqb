@@ -11,10 +11,10 @@ class CharismaMixin:
     #pylint: disable=redefined-builtin
 
     # CHARISMA: default seismic format of storing surfaces inside the 3D volume
-    CHARISMA_SPEC = ['INLINE', '_', 'iline', 'XLINE', '__', 'xline', 'cdp_x', 'cdp_y', 'height']
+    CHARISMA_SPEC = ['inline_marker', '_', 'INLINE_3D', 'xline_marker', '__', 'CROSSLINE_3D', 'CDP_X', 'CDP_Y', 'DEPTH']
 
     # REDUCED_CHARISMA: CHARISMA without redundant columns
-    REDUCED_CHARISMA_SPEC = ['iline', 'xline', 'height']
+    REDUCED_CHARISMA_SPEC = ['INLINE_3D', 'CROSSLINE_3D', 'DEPTH']
 
     @property
     def field_reference(self):
@@ -64,7 +64,7 @@ class CharismaMixin:
 
         # Transform and verify points
         if transform:
-            points = self.field_reference.geometry.lines_to_cubic(points)
+            points = self.field_reference.geometry.lines_to_ordinals(points)
 
         if verify:
             mask = make_interior_points_mask(points, self.field_reference.shape)
@@ -114,15 +114,15 @@ class CharismaMixin:
                                 idx[1].reshape(-1, 1),
                                 data[idx[0], idx[1]].reshape(-1, 1)])
 
-        points = self.field_reference.geometry.cubic_to_lines(data)
+        points = self.field_reference.geometry.ordinals_to_lines(data)
 
         # Additional transform
         points = points if transform is None else transform(points)
 
         # Dump a charisma file
         df = pd.DataFrame(points, columns=self.REDUCED_CHARISMA_SPEC)
-        df.sort_values(['iline', 'xline'], inplace=True)
-        df = df.astype({'iline': np.int32, 'xline': np.int32, 'height': np.float32})
+        df.sort_values(['INLINE_3D', 'CROSSLINE_3D'], inplace=True)
+        df = df.astype({'INLINE_3D': np.int32, 'CROSSLINE_3D': np.int32, 'DEPTH': np.float32})
         df.to_csv(path, sep=' ', columns=self.REDUCED_CHARISMA_SPEC, index=False, header=False)
 
     @classmethod
@@ -168,15 +168,15 @@ class CharismaMixin:
     def recover_lines_from_cdp(self, df):
         """ Fix broken iline and crossline coordinates.
         If coordinates are out of the cube, 'iline' and 'xline' will be infered from 'cdp_x' and 'cdp_y'. """
-        i_bounds = [self.field.ilines_offset, self.field.ilines_offset + self.field.cube_shape[0]]
-        x_bounds = [self.field.xlines_offset, self.field.xlines_offset + self.field.cube_shape[1]]
+        i_bounds = [self.field.shifts[0], self.field.shifts[0] + self.field.shape[0]]
+        x_bounds = [self.field.shifts[1], self.field.shifts[1] + self.field.shape[1]]
 
         i_mask = np.logical_or(df.iline < i_bounds[0], df.iline >= i_bounds[1])
         x_mask = np.logical_or(df.xline < x_bounds[0], df.xline >= x_bounds[1])
 
         _df = df[np.logical_and(i_mask, x_mask)]
 
-        coords = np.rint(self.field.geometry.cdp_to_lines(_df[['cdp_x', 'cdp_y']].values)).astype(np.int32)
-        df.loc[np.logical_and(i_mask, x_mask), ['iline', 'xline']] = coords
+        coords = np.rint(self.field.geometry.cdp_to_lines(_df[['CDP_X', 'CDP_Y']].values)).astype(np.int32)
+        df.loc[np.logical_and(i_mask, x_mask), ['INLINE_3D', 'CROSSLINE_3D']] = coords
 
         return df

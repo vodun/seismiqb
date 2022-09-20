@@ -13,8 +13,8 @@ from ...utils import CharismaMixin, make_interior_points_mask
 
 class FaultSticksMixin(CharismaMixin):
     """ Mixin to load, process and dump FaultSticks files. """
-    FAULT_STICKS_SPEC = ['INLINE', 'iline', 'xline', 'cdp_x', 'cdp_y', 'height', 'name', 'number']
-    REDUCED_FAULT_STICKS_SPEC = ['iline', 'xline', 'height', 'name', 'number']
+    FAULT_STICKS_SPEC = ['inline_marker', 'INLINE_3D', 'CROSSLINE_3D', 'CDP_X', 'CDP_Y', 'DEPTH', 'name', 'number']
+    REDUCED_FAULT_STICKS_SPEC = ['INLINE_3D', 'CROSSLINE_3D', 'DEPTH', 'name', 'number']
 
     @classmethod
     def read_df(cls, path):
@@ -60,10 +60,10 @@ class FaultSticksMixin(CharismaMixin):
         ilines_diff = sum(df.iline[1:].values - df.iline[:-1].values == 0)
         xlines_diff = sum(df.xline[1:].values - df.xline[:-1].values == 0)
         if ilines_diff > xlines_diff: # Use iline as an index
-            col = 'iline'
+            col = 'INLINE_3D'
             direction = 0
         else: # Use xline as an index
-            col = 'xline'
+            col = 'CROSSLINE_3D'
             direction = 1
 
         if 'number' in df.columns: # Dataframe has stick index
@@ -72,7 +72,7 @@ class FaultSticksMixin(CharismaMixin):
         if col is None:
             raise ValueError('Wrong format of sticks: there is no column to group points into sticks.')
 
-        df = df.sort_values('height')
+        df = df.sort_values('DEPTH')
         sticks = df.groupby(col).apply(lambda x: x[self.COLUMNS].values).reset_index(drop=True)
 
         return (sticks, direction) if return_direction else sticks
@@ -120,7 +120,7 @@ class FaultSticksMixin(CharismaMixin):
             self.direction = 1
             return
 
-        if recover_lines and 'cdp_x' in df.columns:
+        if recover_lines and 'CDP_X' in df.columns:
             df = self.recover_lines_from_cdp(df)
 
         points = df[self.REDUCED_CHARISMA_SPEC].values
@@ -166,12 +166,12 @@ class FaultSticksMixin(CharismaMixin):
             stick = self.field.geometry.cubic_to_lines(stick).astype(int)
             cdp = self.field.geometry.lines_to_cdp(stick[:, :2])
             df = {
-                'INLINE-': 'INLINE-',
-                'iline': stick[:, 0],
-                'xline': stick[:, 1],
-                'cdp_x': cdp[:, 0],
-                'cdp_y': cdp[:, 1],
-                'height': stick[:, 2],
+                'inline_marker': 'INLINE-',
+                'INLINE_3D': stick[:, 0],
+                'CROSSLINE_3D': stick[:, 1],
+                'CDP_X': cdp[:, 0],
+                'CDP_Y': cdp[:, 1],
+                'DEPTH': stick[:, 2],
                 'name': os.path.basename(path),
                 'number': stick_idx
             }

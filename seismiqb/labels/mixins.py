@@ -25,7 +25,7 @@ class VisualizationMixin:
         loc : int
             Number of slide to load.
         width : int
-            Horizon thickness. If None given, set to 1% of seismic slide height.
+            Horizon thickness. If None given, set to 1% of seismic slide depth.
         axis : int
             Number of axis to load slide along.
         zoom : tuple, None or 'auto'
@@ -57,7 +57,7 @@ class VisualizationMixin:
 
         # defaults for plotting if not supplied in kwargs
         header = self.field.axis_names[axis]
-        total = self.field.cube_shape[axis]
+        total = self.field.shape[axis]
 
         if axis in [0, 1]:
             xlabel = self.field.index_headers[1 - axis]
@@ -68,7 +68,7 @@ class VisualizationMixin:
             total = self.field.depth
 
         title = f'{self.__class__.__name__} `{self.name}` on cube'\
-                f'`{self.field.displayed_name}`\n {header} {loc} out of {total}'
+                f'`{self.field.short_name}`\n {header} {loc} out of {total}'
 
         kwargs = {
             'cmap': ['Greys_r', 'darkorange'],

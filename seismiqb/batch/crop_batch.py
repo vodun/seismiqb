@@ -634,7 +634,7 @@ class SeismicCropBatch(Batch, VisualizationMixin):
     @apply_parallel
     def bend_masks(self, crop, angle=10):
         """ Rotate part of the mask on a given angle.
-        Must be used for crops in (xlines, heights, inlines) format.
+        Must be used for crops in (xlines, depths, inlines) format.
 
         Parameters
         ----------
@@ -669,7 +669,7 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         n : int
             Number of points to sample.
         shift : int
-            Maximum amplitude of random shift along the heights axis.
+            Maximum amplitude of random shift along the depths axis.
         kind : {'random', 'linear', 'slinear', 'quadratic', 'cubic', 'previous', 'next'}
             Type of interpolation to use. If 'random', then chosen randomly for each crop.
         width : int
@@ -700,7 +700,7 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         mask_[slc] = crop[slc]
         *nz, y = np.nonzero(mask_)
 
-        # Shift heights randomly
+        # Shift depths randomly
         x = nz[axis]
         y += np.random.randint(-shift, shift + 1, size=y.shape)
 
@@ -713,11 +713,11 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         # Interpolate points; put into mask
         interpolator = interp1d(x, y, kind=kind)
         indices = np.arange(min_, max_, dtype=np.int32)
-        heights = interpolator(indices).astype(np.int32)
+        depths = interpolator(indices).astype(np.int32)
 
         slc = (indices if axis == 0 else indices * 0,
                indices if axis == 1 else indices * 0,
-               np.clip(heights, 0, crop.shape[2]-1))
+               np.clip(depths, 0, crop.shape[2]-1))
         mask_ = np.zeros_like(crop)
         mask_[slc] = 1
 
@@ -909,9 +909,9 @@ class SeismicCropBatch(Batch, VisualizationMixin):
 
         Notes
         -----
-        Actions `make_locations`, `load_cubes`, `create_mask` make data in [iline, xline, height] format.
+        Actions `make_locations`, `load_cubes`, `create_mask` make data in [iline, xline, depth] format.
         Since most of the TensorFlow models percieve ilines as channels, it might be convinient
-        to change format to [xlines, height, ilines] via this action.
+        to change format to [xlines, depth, ilines] via this action.
         """
         crop_ = np.swapaxes(crop, 0, 1)
         crop_ = np.swapaxes(crop_, 1, 2)

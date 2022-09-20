@@ -38,7 +38,7 @@ def apply_dilation(method):
             result = np.nan_to_num(result)
             result = binary_dilation(result, iterations=dilation)
 
-            result[instance.field.zero_traces == 1] = fill_value
+            result[instance.field.dead_traces_matrix == 1] = fill_value
         return result
     return _wrapper
 
@@ -202,7 +202,7 @@ class AttributesMixin:
     @property
     def coverage(self):
         """ Ratio between number of present values and number of good traces in cube. """
-        coverage = len(self) / (np.prod(self.field.spatial_shape) - np.sum(self.field.zero_traces))
+        coverage = len(self) / self.field.n_alive_traces
         return round(coverage, 5)
 
     @property
@@ -225,7 +225,7 @@ class AttributesMixin:
     @property
     def h_ptp(self):
         """ Horizon spread across the depth. """
-        return self.h_max - self.h_min
+        return self.d_max - self.d_min
 
     # Matrices computed from depth map
     @property
@@ -253,20 +253,20 @@ class AttributesMixin:
 
 
     def grad_along_axis(self, axis=0):
-        """ Change of heights along specified direction. """
+        """ Change of depths along specified direction. """
         grad = np.diff(self.matrix, axis=axis, prepend=self.FILL_VALUE)
-        grad[np.abs(grad) > self.h_min] = self.FILL_VALUE
+        grad[np.abs(grad) > self.d_min] = self.FILL_VALUE
         grad[self.matrix == self.FILL_VALUE] = self.FILL_VALUE
         return grad
 
     @property
     def grad_i(self):
-        """ Change of heights along iline direction. """
+        """ Change of depths along iline direction. """
         return self.grad_along_axis(1)
 
     @property
     def grad_x(self):
-        """ Change of heights along xline direction. """
+        """ Change of depths along xline direction. """
         return self.grad_along_axis(0)
 
 
@@ -300,42 +300,42 @@ class AttributesMixin:
         window : int
             Width of data slice along the horizon.
         offset : int
-            Offset of data slice with respect to horizon heights matrix.
+            Offset of data slice with respect to horizon depths matrix.
         chunk_size : int
-            Size of data along height axis processed at a time.
+            Size of data along depth axis processed at a time.
         """
         low = window // 2 - offset
         high = max(window - low, 0)
-        chunk_size = min(chunk_size, self.h_max - self.h_min + window)
-        background = np.zeros((self.field.ilines_len, self.field.xlines_len, window), dtype=np.float32)
+        chunk_size = min(chunk_size, self.d_max - self.d_min + window)
+        background = np.zeros((*self.field.spatial_shape, window), dtype=np.float32)
 
-        for h_start in range(max(low, self.h_min), self.h_max + 1, chunk_size):
-            h_end = min(h_start + chunk_size, self.h_max + 1)
+        for d_start in range(max(low, self.d_min), self.d_max + 1, chunk_size):
+            d_end = min(d_start + chunk_size, self.d_max + 1)
 
             # Get chunk from the cube (depth-wise)
             location = (slice(None), slice(None),
-                        slice(h_start - low, min(h_end + high, self.field.depth)))
+                        slice(d_start - low, min(d_end + high, self.field.depth)))
             data_chunk = self.field.geometry.load_crop(location, use_cache=False)
 
             # Check which points of the horizon are in the current chunk (and present)
             idx_i, idx_x = np.asarray((self.matrix != self.FILL_VALUE) &
-                                      (self.matrix >= h_start) &
-                                      (self.matrix < h_end)).nonzero()
-            heights = self.matrix[idx_i, idx_x]
+                                      (self.matrix >= d_start) &
+                                      (self.matrix < d_end)).nonzero()
+            depths = self.matrix[idx_i, idx_x]
 
-            # Convert spatial coordinates to cubic, convert height to current chunk local system
+            # Convert spatial coordinates to cubic, convert depth to current chunk local system
             idx_i += self.i_min
             idx_x += self.x_min
-            heights -= h_start
+            depths -= d_start
 
             # Subsequently add values from the cube to background, then shift horizon 1 unit lower
             for j in range(window):
-                background[idx_i, idx_x, np.full_like(heights, j)] = data_chunk[idx_i, idx_x, heights]
-                heights += 1
-                mask = heights < data_chunk.shape[2]
+                background[idx_i, idx_x, np.full_like(depths, j)] = data_chunk[idx_i, idx_x, depths]
+                depths += 1
+                mask = depths < data_chunk.shape[2]
                 idx_i = idx_i[mask]
                 idx_x = idx_x[mask]
-                heights = heights[mask]
+                depths = depths[mask]
 
         background[~self.full_binary_matrix] = np.nan
         return background
@@ -378,16 +378,16 @@ class AttributesMixin:
         array_max = np.array(array.shape[:2]) + shifts[:2]
         overlap_shape = np.minimum(horizon_max[:2], array_max[:2]) - np.maximum(horizon_shift[:2], shifts[:2])
         overlap_start = np.maximum(0, horizon_shift[:2] - shifts[:2])
-        heights_start = np.maximum(shifts[:2] - horizon_shift[:2], 0)
+        depths_start = np.maximum(shifts[:2] - horizon_shift[:2], 0)
 
         # recompute horizon-matrix in array-coordinates
         slc_array = [slice(l, h) for l, h in zip(overlap_start, overlap_start + overlap_shape)]
-        slc_horizon = [slice(l, h) for l, h in zip(heights_start, heights_start + overlap_shape)]
+        slc_horizon = [slice(l, h) for l, h in zip(depths_start, depths_start + overlap_shape)]
         overlap_matrix = np.full(array.shape[:2], fill_value=self.FILL_VALUE, dtype=np.float32)
         overlap_matrix[slc_array] = self.matrix[slc_horizon]
         overlap_matrix -= shifts[-1]
 
-        # make the cut-array and fill it with array-data located on needed heights
+        # make the cut-array and fill it with array-data located on needed depths
         result = np.full(array.shape[:2] + (width, ), np.nan, dtype=np.float32)
         iterator = [overlap_matrix + shift for shift in range(-width // 2 + 1, width // 2 + 1)]
 
@@ -726,15 +726,15 @@ class AttributesMixin:
         grad_x[grad_x == self.FILL_VALUE] = np.nan
 
         grad = grad_i + grad_x
-        grad[np.abs(grad) > self.h_min] = np.nan
+        grad[np.abs(grad) > self.d_min] = np.nan
 
-        grad[self.field.zero_traces == 1] = np.nan
+        grad[self.field.dead_traces_matrix == 1] = np.nan
         return grad
 
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     @transformable
     @apply_dilation
-    def get_spikes_mask(self, max_spike_width=7, min_spike_height=5, max_depths_distance=2,
+    def get_spikes_mask(self, max_spike_width=7, min_spike_size=5, max_depths_distance=2,
                         dilation=0):
         """ Get spikes mask for the horizon.
 
@@ -742,7 +742,7 @@ class AttributesMixin:
         ----------
         max_spike_width : int
             Maximum possible spike size along the iline or xline axes.
-        min_spike_height : int
+        min_spike_size : int
             Minimum possible spike size along the depth axis.
         max_depths_distance : int
             Threshold to consider that depths are close.
@@ -764,17 +764,17 @@ class AttributesMixin:
             matrix = np.rot90(matrix)
             rotated_spikes = _get_spikes_along_line(matrix=matrix,
                                                     max_spike_width=max_spike_width,
-                                                    min_spike_height=min_spike_height,
+                                                    min_spike_size=min_spike_size,
                                                     max_depths_distance=max_depths_distance)
             spikes += np.rot90(rotated_spikes, k=4-rotation_num)
 
         spikes[spikes > 0] = 1
-        spikes[self.field.zero_traces == 1] = np.nan
+        spikes[self.field.dead_traces_matrix == 1] = np.nan
         return spikes
 
 # Helper functions
 @njit(parallel=True)
-def _get_spikes_along_line(matrix, max_spike_width=5, min_spike_height=3, max_depths_distance=2):
+def _get_spikes_along_line(matrix, max_spike_width=5, min_spike_size=3, max_depths_distance=2):
     """ Find spikes on a matrix for the fixed search direction: from up to down, from left to right.
 
     Under the hood, the function iterates over matrix lines and find too huge depth differences on neighboring points.
@@ -799,7 +799,7 @@ def _get_spikes_along_line(matrix, max_spike_width=5, min_spike_height=3, max_de
 
             depths_diff = line[current_idx] - line[previous_idx]
 
-            if np.abs(depths_diff) < min_spike_height:
+            if np.abs(depths_diff) < min_spike_size:
                 continue
 
             # Check a range of points indices where the spike can be and
