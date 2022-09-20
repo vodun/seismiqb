@@ -617,5 +617,5 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMix
 
     @staticmethod
     def locations_to_shape(locations):
-        """ !!. """
+        """ Compute shape of a location. """
         return tuple(slc.stop - slc.start for slc in locations)

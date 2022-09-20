@@ -172,7 +172,7 @@ class GeometrySEGY(Geometry):
             self.absent_traces_matrix = (self.index_matrix == -1).astype(np.bool_)
 
     def compute_dead_traces(self, frequency=100):
-        """ !!. """
+        """ Fallback for dead traces matrix computation, if no full stats are collected. """
         slices = self.loader.load_depth_slices(list(range(0, self.depth, frequency)))
 
         if slices.shape[-1] == np.prod(self.lengths):
@@ -417,8 +417,7 @@ class GeometrySEGY(Geometry):
         return buffer
 
     def load_depth_slice(self, index, buffer=None):
-        """ !!. """
-        # TODO: add a fallback on `index_matrix` instead
+        """ Read requested depth slices from SEG-Y file. """
         if buffer is None:
             buffer = np.empty((1, self.n_traces), dtype=self.dtype)
         else:
@@ -428,6 +427,7 @@ class GeometrySEGY(Geometry):
         if buffer.size == np.prod(self.lengths):
             buffer = buffer.reshape(self.lengths)
         else:
+            # TODO: add a fallback on `index_matrix` instead
             buffer_ = np.zeros_like(self.dead_traces_matrix, dtype=np.float32)
             buffer_[~self.zero_traces] = buffer
             buffer = buffer_

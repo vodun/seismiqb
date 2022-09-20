@@ -1,4 +1,4 @@
-""" !!. """
+""" Converted geometry: optimized storage. """
 
 import numpy as np
 import h5py
