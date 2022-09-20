@@ -115,7 +115,10 @@ class GeometrySEGY(Geometry):
             self.has_stats = False
 
         if hasattr(self, 'n_alive_traces') and self.n_alive_traces is not None:
-            self.area = self.compute_area()
+            try:
+                self.area = self.compute_area()
+            except IndexError:
+                self.area = -1.
 
         # Dump inferred attributes to a separate file for later loads
         self.dump_meta()
@@ -131,7 +134,7 @@ class GeometrySEGY(Geometry):
     def load_headers(self, headers_to_load, reconstruct_tsf=True, chunk_size=25_000, max_workers=4, pbar=False):
         """ Load all of the requested headers into dataframe. """
         return self.loader.load_headers(headers_to_load, reconstruct_tsf=reconstruct_tsf,
-                                        max_workers=max_workers, pbar=pbar)
+                                        chunk_size=chunk_size, max_workers=max_workers, pbar=pbar)
 
     def add_index_attributes(self):
         """ Add attributes, based on the values of indexing headers. """
@@ -154,13 +157,13 @@ class GeometrySEGY(Geometry):
         regular_structure = True
         for i, index_header in enumerate(self.index_headers):
             increments = np.diff(self.index_sorted_uniques[i])
-            unique_increments = set(increments)
+            unique_increments = set(increments) or set([1])
 
             if len(unique_increments) > 1:
                 print(f'`{index_header}` has irregular spacing! {unique_increments}')
                 regular_structure = False
             else:
-                self.increments.append(increments[0])
+                self.increments.append(unique_increments.pop())
         self.regular_structure = regular_structure
 
         # Create indexing matrix
@@ -346,7 +349,8 @@ class GeometrySEGY(Geometry):
 
         # Load subset of data to compute quantiles
         alive_traces_indices = self.index_matrix[~self.dead_traces_matrix].ravel()
-        indices = np.random.default_rng(seed=seed).choice(alive_traces_indices, size=n_quantile_traces)
+        indices = np.random.default_rng(seed=seed).choice(alive_traces_indices,
+                                                          size=min(self.n_traces, n_quantile_traces))
         data = self.load_by_indices(indices)
 
         quantile_support = np.round(np.linspace(0, 1, num=10**quantile_precision+1),

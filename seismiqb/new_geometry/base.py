@@ -375,49 +375,49 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMix
         msg = f'geometry for cube `{self.short_name}`'
         if not hasattr(self, 'shape'):
             return f'<Unprocessed {msg}>'
-        return f'<Processed {msg}: {tuple(self.cube_shape)} at {hex(id(self))}>'
+        return f'<Processed {msg}: {tuple(self.shape)} at {hex(id(self))}>'
 
     def __str__(self):
         if not hasattr(self, 'shape'):
             return f'<Unprocessed geometry for cube {self.displayed_path}>'
 
         msg = f"""
-        Processed geometry for cube    {self.path}
-        Index headers:                 {self.index_headers}
-        Traces:                        {self.n_traces:_}
-        Shape:                         {tuple(self.shape)}
-        Time delay:                    {self.delay} ms
-        Sample rate:                   {self.sample_rate} ms
-        Area:                          {self.area:4.1f} km²
+        Processed geometry for cube        {self.path}
+        Index headers:                     {self.index_headers}
+        Traces:                            {self.n_traces:_}
+        Shape:                             {tuple(self.shape)}
+        Time delay:                        {self.delay} ms
+        Sample rate:                       {self.sample_rate} ms
+        Area:                              {self.area:4.1f} km²
 
-        File size:                     {self.file_size:4.3f} GB
-        Instance (memory) size:        {self.ngbytes:4.3f} GB
+        File size:                         {self.file_size:4.3f} GB
+        Instance (memory) size:            {self.ngbytes:4.3f} GB
         """
 
         if self.converted and os.path.exists(self.segy_path):
             segy_size = os.path.getsize(self.segy_path) / (1024 ** 3)
-            msg += f'\nSEG-Y original size:           {segy_size:4.3f} GB'
+            msg += f'\nSEG-Y original size:               {segy_size:4.3f} GB'
 
         if hasattr(self, 'dead_traces_matrix'):
             msg += f"""
-        Number of dead  traces:        {self.n_dead_traces:_}
-        Number of alive traces:        {self.n_alive_traces:_}
-        Fullness:                      {self.n_alive_traces / self.n_traces:2.2f}
+        Number of dead  traces:            {self.n_dead_traces:_}
+        Number of alive traces:            {self.n_alive_traces:_}
+        Fullness:                          {self.n_alive_traces / self.n_traces:2.2f}
         """
 
         if self.has_stats:
             msg += f"""
         Value statistics:
-        mean | std:                    {self.mean:>10.2f} | {self.std:<10.2f}
-        min | max:                     {self.min:>10.2f} | {self.max:<10.2f}
-        q01 | q99:                     {self.get_quantile(0.01):>10.2f} | {self.get_quantile(0.99):<10.2f}
-        Number of unique values:       {self.n_value_uniques:>10}
+        mean | std:                        {self.mean:>10.2f} | {self.std:<10.2f}
+        min | max:                         {self.min:>10.2f} | {self.max:<10.2f}
+        q01 | q99:                         {self.get_quantile(0.01):>10.2f} | {self.get_quantile(0.99):<10.2f}
+        Number of unique values:           {self.n_value_uniques:>10}
         """
 
         if self.quantized:
             msg += f"""
-        Quantization ranges:           {self.ranges[0]:>10.2f} | {self.ranges[1]:<10.2f}
-        Quantization error:            {self.quantization_error:>10.3f}
+        Quantization ranges:               {self.ranges[0]:>10.2f} | {self.ranges[1]:<10.2f}
+        Quantization error:                {self.quantization_error:>10.3f}
         """
         return dedent(msg).strip()
 
@@ -431,10 +431,8 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMix
 
     def print_location(self, printer=print):
         """ Show ranges for each of the headers. """
-        msg = ''
-        for i, name in enumerate(self.index_headers):
-            name += ':'
-            msg += f'\n{name:<30} [{self.uniques[i][0]}, {self.uniques[i][-1]}]'
+        msg = '\n'.join(f'{header+":":<35} [{uniques[0]}, {uniques[-1]}]'
+                        for header, uniques in zip(self.index_headers, self.index_sorted_uniques))
         select_printer(printer)(msg)
 
     def log(self):
@@ -509,7 +507,7 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMix
 
         # Plot params
         if len(self.index_headers) > 1:
-            title = f'{self.axis_names[axis]} {index} out of {self.cube_shape[axis]}'
+            title = f'{self.axis_names[axis]} {index} out of {self.shape[axis]}'
 
             if axis in [0, 1]:
                 xlabel = self.index_headers[1 - axis]
