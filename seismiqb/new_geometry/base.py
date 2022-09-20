@@ -1,5 +1,7 @@
 """ Base class for working with seismic data. """
 import os
+import sys
+from textwrap import dedent
 
 import numpy as np
 from scipy.interpolate import interp1d
@@ -9,9 +11,12 @@ from .conversion_mixin import ConversionMixin
 from .export_mixin import ExportMixin
 from .meta_mixin import MetaMixin
 
+from ..utils import CacheMixin, TransformsMixin, select_printer, transformable
+from ..plotters import plot
 
 
-class Geometry(BenchmarkMixin, ConversionMixin, ExportMixin, MetaMixin):
+
+class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMixin, TransformsMixin):
     """ Class to infer information about seismic cube in various formats and provide format agnostic interface to them.
 
     During the SEG-Y processing, a number of statistics are computed. They are saved next to the cube under the
@@ -73,7 +78,7 @@ class Geometry(BenchmarkMixin, ConversionMixin, ExportMixin, MetaMixin):
         'rotation_matrix', 'area',
 
         # Scalar stats for cube values: computed for the entire SEG-Y / its subset
-        'min', 'max', 'mean', 'std',
+        'min', 'max', 'mean', 'std', 'n_value_uniques',
         'subset_min', 'subset_max', 'subset_mean', 'subset_std',
         'quantile_precision', 'quantile_support', 'quantile_values',
     ]
@@ -169,6 +174,7 @@ class Geometry(BenchmarkMixin, ConversionMixin, ExportMixin, MetaMixin):
 
         return key_, axis_to_squeeze
 
+
     # Coordinate system conversions
     def lines_to_ordinals(self, array):
         """ Convert values from inline-crossline coordinate system to their ordinals.
@@ -210,6 +216,17 @@ class Geometry(BenchmarkMixin, ConversionMixin, ExportMixin, MetaMixin):
             array[:, self.index_length + 1] += self.delay
         return array
 
+    def lines_to_cdp(self, points):
+        """ Convert lines to CDP. """
+        return (self.rotation_matrix[:, :2] @ points.T + self.rotation_matrix[:, 2].reshape(2, -1)).T
+
+    def cdp_to_lines(self, points):
+        """ Convert CDP to lines. """
+        inverse_matrix = np.linalg.inv(self.rotation_matrix[:, :2])
+        lines = (inverse_matrix @ points.T - inverse_matrix @ self.rotation_matrix[:, 2].reshape(2, -1)).T
+        return np.rint(lines)
+
+
     # Stats and normalization
     @property
     def quantile_interpolator(self):
@@ -238,6 +255,257 @@ class Geometry(BenchmarkMixin, ConversionMixin, ExportMixin, MetaMixin):
             'q_99': q_99,
         }
         return normalization_stats
+
+
+    # Spatial matrices
+    @property
+    def snr(self):
+        """ Signal-to-noise ratio. """
+        return np.log(self.mean_matrix**2 / self.std_matrix**2)
+
+    @transformable
+    def get_dead_traces_matrix(self):
+        """ Dead traces matrix.
+        Due to decorator, allows for additional transforms at loading time.
+
+        Parameters
+        ----------
+        dilate : bool
+            Whether to apply dilation to the matrix.
+        dilation_iterations : int
+            Number of dilation iterations to apply.
+        """
+        return self.dead_traces_matrix.copy()
+
+    @transformable
+    def get_alive_traces_matrix(self):
+        """ Alive traces matrix.
+        Due to decorator, allows for additional transforms at loading time.
+
+        Parameters
+        ----------
+        dilate : bool
+            Whether to apply dilation to the matrix.
+        dilation_iterations : int
+            Number of dilation iterations to apply.
+        """
+        return 1 - self.dead_traces_matrix
+
+    def get_grid(self, frequency):
+        """ !!. """
+
+    # Properties
+    @property
+    def axis_names(self):
+        """ Names of the axes: indexing headers and `DEPTH` as the last one. """
+        return self.index_headers + ['DEPTH']
+
+    @property
+    def textual(self):
+        """ Wrapped textual header of SEG-Y file. """
+        text = self.segy_text[0].decode('ascii')
+        lines = [text[start:start + 80] for start in range(0, len(text), 80)]
+        return '\n'.join(lines)
+
+    @property
+    def file_size(self):
+        """ Storage size in GB. """
+        return round(os.path.getsize(self.path) / (1024**3), 3)
+
+    @property
+    def nbytes(self):
+        """ Size of the instance in bytes. """
+        attributes = set(['headers'])
+        attributes.update({attribute for attribute in self.__dict__
+                           if 'matrix' in attribute or '_quality' in attribute})
+
+        return self.cache_size + sum(sys.getsizeof(getattr(self, attribute))
+                                     for attribute in attributes if hasattr(self, attribute))
+
+    @property
+    def ngbytes(self):
+        """ Size of instance in gigabytes. """
+        return self.nbytes / (1024**3)
+
+
+    # Attribute retrieval. Used by `Field` instances
+    def load_attribute(self, src, **kwargs):
+        """ Load instance attribute from a string, e.g. `snr` or `std_matrix`.
+        Used from a field to re-direct calls.
+        """
+        return self.get_property(src=src, **kwargs)
+
+    @transformable
+    def get_property(self, src, **_):
+        """ Load a desired instance attribute. Decorated to allow additional postprocessing steps. """
+        return getattr(self, src)
+
+
+    # Textual representation
+    def __repr__(self):
+        msg = f'geometry for cube `{self.short_name}`'
+        if not hasattr(self, 'shape'):
+            return f'<Unprocessed {msg}>'
+        return f'<Processed {msg}: {tuple(self.cube_shape)} at {hex(id(self))}>'
+
+    def __str__(self):
+        if not hasattr(self, 'shape'):
+            return f'<Unprocessed geometry for cube {self.displayed_path}>'
+
+        msg = f"""
+        Processed geometry for cube    {self.path}
+        Index headers:                 {self.index_headers}
+        Traces:                        {self.n_traces:_}
+        Shape:                         {tuple(self.shape)}
+        Time delay:                    {self.delay} ms
+        Sample rate:                   {self.sample_rate} ms
+        Area:                          {self.area:4.1f} km²
+
+        File size:                     {self.file_size:4.3f} GB
+        Instance (memory) size:        {self.ngbytes:4.3f} GB
+        """
+
+        if self.converted and os.path.exists(self.segy_path):
+            segy_size = os.path.getsize(self.segy_path) / (1024 ** 3)
+            msg += f'\nSEG-Y original size:           {segy_size:4.3f} GB'
+
+        if hasattr(self, 'dead_traces_matrix'):
+            msg += f"""
+        Number of dead  traces:        {self.n_dead_traces:_}
+        Number of alive traces:        {self.n_alive_traces:_}
+        Fullness:                      {self.n_alive_traces / self.n_traces:2.2f}
+        """
+
+        if self.has_stats:
+            msg += f"""
+        Value statistics:
+        mean | std:                    {self.mean:>10.2f} | {self.std:<10.2f}
+        min | max:                     {self.min:>10.2f} | {self.max:<10.2f}
+        q01 | q99:                     {self.get_quantile(0.01):>10.2f} | {self.get_quantile(0.99):<10.2f}
+        Number of unique values:       {self.n_value_uniques:>10}
+        """
+
+        if self.quantized:
+            msg += f"""
+        Quantization ranges:           {self.ranges[0]:>10.2f} | {self.ranges[1]:<10.2f}
+        Quantization error:            {self.quantization_error:>10.3f}
+        """
+        return dedent(msg).strip()
+
+    def print(self, printer=print):
+        """ Show textual representation. """
+        select_printer(printer)(self)
+
+    def print_textual(self, printer=print):
+        """ Show textual header from original SEG-Y. """
+        select_printer(printer)(self.textual)
+
+    def print_location(self, printer=print):
+        """ Show ranges for each of the headers. """
+        msg = ''
+        for i, name in enumerate(self.index_headers):
+            name += ':'
+            msg += f'\n{name:<30} [{self.uniques[i][0]}, {self.uniques[i][-1]}]'
+        select_printer(printer)(msg)
+
+    def log(self):
+        """ Log info about geometry to a file next to the cube. """
+        self.print(printer=os.path.dirname(self.path) + '/CUBE_INFO.log')
+
+
+    # Visual representation
+    def show(self, matrix='snr', plotter=plot, **kwargs):
+        """ Show geometry related top-view map. """
+        matrix_name = matrix if isinstance(matrix, str) else kwargs.get('matrix_name', 'custom matrix')
+        kwargs = {
+            'cmap': 'magma',
+            'title': f'`{matrix_name}` map of cube `{self.short_name}`',
+            'xlabel': self.index_headers[0],
+            'ylabel': self.index_headers[1],
+            'colorbar': True,
+            **kwargs
+            }
+        matrix = getattr(self, matrix) if isinstance(matrix, str) else matrix
+        return plotter(matrix, **kwargs)
+
+    def show_histogram(self, n_quantile_traces=100_000, seed=42, bins=50, plotter=plot, **kwargs):
+        """ Show distribution of amplitudes in a random subset of the cube. """
+        # Load subset of data
+        alive_traces_indices = self.index_matrix[~self.dead_traces_matrix].ravel()
+        indices = np.random.default_rng(seed=seed).choice(alive_traces_indices, size=n_quantile_traces)
+        data = self.load_by_indices(indices)
+
+        kwargs = {
+            'title': (f'Amplitude distribution for {self.short_name}' +
+                      f'\n Mean/std: {np.mean(data):3.3f}/{np.std(data):3.3f}'),
+            'label': 'Amplitudes histogram',
+            'xlabel': 'amplitude',
+            'ylabel': 'density',
+            **kwargs
+        }
+        return plotter(data, bins=bins, mode='histogram', **kwargs)
+
+    def show_slide(self, index, axis=0, zoom=None, plotter=plot, **kwargs):
+        """ Show seismic slide in desired index.
+        Under the hood relies on :meth:`load_slide`, so works with geometries in any formats.
+
+        Parameters
+        ----------
+        index : int, str
+            Index of the slide to show.
+            If int, then interpreted as the ordinal along the specified axis.
+            If `'random'`, then we generate random index along the axis.
+            If string of the `'#XXX'` format, then we interpret it as the exact indexing header value.
+        axis : int
+            Axis of the slide.
+        zoom : tuple, None or 'auto'
+            Tuple of slices to apply directly to 2d images. If None, slicing is not applied.
+            If 'auto', zero traces on bounds will be dropped.
+        plotter : instance of `plot`
+            Plotter instance to use.
+            Combined with `positions` parameter allows using subplots of already existing plotter.
+        """
+        axis = self.parse_axis(axis)
+        slide = self.load_slide(index=index, axis=axis)
+        xmin, xmax, ymin, ymax = 0, slide.shape[0], slide.shape[1], 0
+
+        if zoom == 'auto':
+            zoom = self.compute_auto_zoom(index, axis)
+        if zoom:
+            slide = slide[zoom]
+            xmin = zoom[0].start or xmin
+            xmax = zoom[0].stop or xmax
+            ymin = zoom[1].stop or ymin
+            ymax = zoom[1].start or ymax
+
+        # Plot params
+        if len(self.index_headers) > 1:
+            title = f'{self.axis_names[axis]} {index} out of {self.cube_shape[axis]}'
+
+            if axis in [0, 1]:
+                xlabel = self.index_headers[1 - axis]
+                ylabel = 'DEPTH'
+            else:
+                xlabel = self.index_headers[0]
+                ylabel = self.index_headers[1]
+        else:
+            title = '2D seismic slide'
+            xlabel = self.index_headers[0]
+            ylabel = 'DEPTH'
+
+        kwargs = {
+            'title': title,
+            'suptitle':  f'Field `{self.short_name}`',
+            'xlabel': xlabel,
+            'ylabel': ylabel,
+            'cmap': 'Greys_r',
+            'colorbar': True,
+            'extent': (xmin, xmax, ymin, ymax),
+            'labeltop': False,
+            'labelright': False,
+            **kwargs
+        }
+        return plotter(slide, **kwargs)
 
 
     # Utilities for 2D slides
@@ -284,6 +552,7 @@ class Geometry(BenchmarkMixin, ConversionMixin, ExportMixin, MetaMixin):
     def compute_auto_zoom(self, index, axis=0):
         """ Compute zoom for a given slide. """
         return slice(*self.get_slide_bounds(index=index, axis=axis))
+
 
     # General utility methods
     STRING_TO_AXIS = {

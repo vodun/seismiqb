@@ -359,6 +359,7 @@ class GeometrySEGY(Geometry):
         self.subset_max = data.max()
         self.subset_mean = data.mean()
         self.subset_std = data.std()
+        self.n_value_uniques = len(np.unique(data))
         self.quantile_precision = quantile_precision
         self.quantile_support, self.quantile_values = quantile_support, quantile_values
 

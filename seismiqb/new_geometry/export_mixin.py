@@ -249,6 +249,7 @@ class ExportMixin:
             If bool, then whether to display progress bar over the file sweep.
             If str, then type of progress bar to display: `'t'` for textual, `'n'` for widget.
         """
+        # pylint: disable=redefined-argument-from-local
         # Parse parameters
         n_traces = len(spec.ilines) * len(spec.xlines)
         n_samples = len(spec.samples)

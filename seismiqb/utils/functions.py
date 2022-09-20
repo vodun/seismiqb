@@ -7,10 +7,19 @@ from numba import njit, prange
 
 
 
-def file_print(msg, path, mode='w'):
+def file_print(*msg, path, mode='w', **kwargs):
     """ Print to file. """
     with open(path, mode, encoding='utf-8') as file:
-        print(msg, file=file)
+        print(*msg, file=file, **kwargs)
+
+def select_printer(printer):
+    """ Select printing method. """
+    if isinstance(printer, str):
+        return lambda *msg, **kwargs: file_print(*msg, path=printer, **kwargs)
+    if callable(printer):
+        return printer
+    return print
+
 
 
 def _adjust_shape_for_rotation(shape, angle):
