@@ -10,10 +10,11 @@ from batchflow import Notifier
 
 class Quantizer:
     """ Class to hold parameters oand methods for (de)quantization. """
-    def __init__(self, ranges, clip=True, center=False, mean=None):
+    def __init__(self, ranges, clip=True, center=False, mean=None, dtype=np.int8):
         self.ranges = ranges
         self.clip, self.center = clip, center
         self.mean = mean
+        self.dtype = dtype
 
         self.bins = np.histogram_bin_edges(None, bins=254, range=ranges).astype(np.float32)
 
@@ -26,7 +27,7 @@ class Quantizer:
         if self.clip:
             array = np.clip(array, *self.ranges)
         array = np.digitize(array, self.bins) - 128
-        return array.astype(np.int8)
+        return array.astype(self.dtype)
 
     def dequantize(self, array):
         """ Dequantize data: use each element as the index in the array of pre-computed bins.
@@ -45,13 +46,20 @@ class Quantizer:
 class ConversionMixin:
     """ Methods for converting data to other formats. """
     #pylint: disable=redefined-builtin
-    AXIS_TO_NAME = {0: 'projection_i', 1: 'projection_x', 2: 'projection_d'} # names of projections
-    AXIS_TO_ORDER = {0: [0, 1, 2], 1: [1, 0, 2], 2: [2, 0, 1]}               # re-order axis so that `axis` is the first
-    AXIS_TO_TRANSPOSE = {0: [0, 1, 2], 1: [1, 0, 2], 2: [1, 2, 0]}           # revert the previous re-ordering
+    PROJECTION_NAMES = {0: 'projection_i', 1: 'projection_x', 2: 'projection_d'}    # names of projections
+    TO_PROJECTION_TRANSPOSITION = {0: [0, 1, 2], 1: [1, 0, 2], 2: [2, 0, 1]}        # re-order axis to given projection
+    FROM_PROJECTION_TRANSPOSITION = {0: [0, 1, 2], 1: [1, 0, 2], 2: [1, 2, 0]}      # revert the previous re-ordering
+
+    @staticmethod
+    def compute_axis_transpositions(axis):
+        """ Compute transpositions of original (inline, crossline, depth) axes to a given projection.
+        Returns a transposition to that projection and from it.
+        """
+        return ConversionMixin.TO_PROJECTION_TRANSPOSITION[axis], ConversionMixin.FROM_PROJECTION_TRANSPOSITION[axis]
 
 
     # Quantization
-    def compute_quantization_parameters(self, ranges=0.99, clip=True, center=False,
+    def compute_quantization_parameters(self, ranges=0.99, clip=True, center=False, dtype=np.int8,
                                         n_quantile_traces=100_000, seed=42):
         """ Compute parameters, needed for quantizing data to required range.
         Also evaluates quantization error by comparing subset of data with its dequantized quantized version.
@@ -85,7 +93,7 @@ class ConversionMixin:
 
         if center:
             ranges = tuple(item - self.v_mean for item in ranges)
-        quantizer = Quantizer(ranges=ranges, clip=clip, center=center, mean=self.mean)
+        quantizer = Quantizer(ranges=ranges, clip=clip, center=center, mean=self.mean, dtype=dtype)
 
         # Load subset of data to compute quantiles
         alive_traces_indices = self.index_matrix[~self.dead_traces_matrix].ravel()
@@ -109,7 +117,7 @@ class ConversionMixin:
             'dequantize': quantizer.dequantize,
             'quantization_error': quantization_error,
 
-            'min': -127, 'max': +128,
+            'min': -127, 'max': +127,
             'mean': mean, 'std': std,
             'quantile_values': quantile_values,
         }
@@ -189,9 +197,9 @@ class ConversionMixin:
             for p in projections:
                 # Projection parameters
                 axis = self.parse_axis(p)
-                projection_name = self.AXIS_TO_NAME[axis]
-                order = self.AXIS_TO_ORDER[axis]
-                projection_shape = self.shape[order]
+                projection_name = self.PROJECTION_NAMES[axis]
+                projection_transposition = self.TO_PROJECTION_TRANSPOSITION[axis]
+                projection_shape = self.shape[projection_transposition]
 
                 # Create dataset
                 dataset_kwargs_ = {'chunks': (1, *projection_shape[1:]), **dataset_kwargs}
