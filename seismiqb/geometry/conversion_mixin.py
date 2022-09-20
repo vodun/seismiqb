@@ -218,14 +218,13 @@ class ConversionMixin:
 
         # Save meta to the same file. If quantized, replace stats with the correct ones
         if store_meta:
-            if format == 'hdf5':
-                self.dump_meta(path=path)
+            self.dump_meta(path=path)
 
-                if quantize:
-                    for key in ['ranges', 'center', 'clip', 'quantization_error',
-                                'min', 'max', 'mean', 'std', 'quantile_values']:
-                        self.dump_meta_item(key=f'meta/{key}', value=quantization_parameters[key],
-                                            path=path, overwrite=True)
+            if quantize:
+                for key in ['ranges', 'center', 'clip', 'quantization_error',
+                            'min', 'max', 'mean', 'std', 'quantile_values']:
+                    self.dump_meta_item(key=f'meta/{key}', value=quantization_parameters[key],
+                                        path=path, overwrite=True)
 
-        from .converted import GeometryHDF5
-        return GeometryHDF5(path)
+        from .base import Geometry
+        return Geometry.new(path)

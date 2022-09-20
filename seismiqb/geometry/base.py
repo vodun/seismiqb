@@ -91,6 +91,7 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMix
     @staticmethod
     def new(path, *args, **kwargs):
         """ A convenient selector of appropriate (SEG-Y or HDF5) geometry. """
+        #pylint: disable=import-outside-toplevel
         extension = os.path.splitext(path)[1][1:]
 
         if extension in {'sgy', 'segy', 'seg', 'qsgy'}:

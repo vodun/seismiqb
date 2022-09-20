@@ -280,13 +280,13 @@ class ProcessingMixin:
             Processed horizon instance. A new instance if `inplace` is False, `self` otherwise.
         """
         image = self.matrix.astype(np.uint16) # dtype conversion for compatibility with the OpenCV method
-        zero_traces = self.field.dead_traces_matrix[self.i_min:self.i_max + 1,
-                                                    self.x_min:self.x_max + 1]
+        dead_traces_matrix = self.field.dead_traces_matrix[self.i_min:self.i_max + 1,
+                                                           self.x_min:self.x_max + 1]
 
         # We use all empty traces as inpainting mask because it is important for correct boundary conditions
         # in differential equations, that are used in the inpainting method
         holes_mask = (self.matrix == self.FILL_VALUE).astype(np.uint8)
-        holes_mask[zero_traces == 1] = 1
+        holes_mask[dead_traces_matrix == 1] = 1
 
         result = cv2_inpaint(src=image, inpaintMask=holes_mask, inpaintRadius=neighbors_radius, flags=method)
         result = result.astype(self.dtype)
@@ -297,7 +297,7 @@ class ProcessingMixin:
         # Filter traces with anomalies (can be caused by boundary conditions in equations on horizon borders)
         anomalies_mask = (result > self.d_max + 10) | (result < self.d_min - 10)
 
-        result[(too_far_traces_mask == 1) | (anomalies_mask == 1) | (zero_traces == 1)] = self.FILL_VALUE
+        result[(too_far_traces_mask == 1) | (anomalies_mask == 1) | (dead_traces_matrix == 1)] = self.FILL_VALUE
 
         if inplace:
             self.matrix = result

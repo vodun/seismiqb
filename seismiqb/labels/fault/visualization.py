@@ -11,15 +11,15 @@ class FaultVisualizationMixin(VisualizationMixin):
     def __repr__(self):
         return f"""<Fault `{self.name}` for `{self.field.short_name}` at {hex(id(self))}>"""
 
-    def show_slide(self, loc, **kwargs):
+    def show_slide(self, index, **kwargs):
         """ Show slides from seismic with fault. """
         defaults = {'cmap': ['Greys_r', 'red'], 'width': 5}
         kwargs = {**defaults, **kwargs}
-        return super().show_slide(loc, **kwargs)
+        return super().show_slide(index, **kwargs)
 
-    def compute_auto_zoom(self, loc, axis, zoom_margin):
+    def compute_auto_zoom(self, index, axis, zoom_margin):
         """ Get center slice of the fault. """
-        _ = loc
+        _ = index
         return [
                 slice(max(0, self.bbox[i][0]-zoom_margin), min(self.bbox[i][1]+zoom_margin, self.field.shape[i]))
                 for i in range(3) if i != axis
@@ -27,7 +27,7 @@ class FaultVisualizationMixin(VisualizationMixin):
 
     def show(self, axis=0, zoom='auto', **kwargs):
         """ Show center of fault for different axes. """
-        return self.show_slide(loc=int(np.mean(self.bbox[axis])), zoom=zoom, axis=axis, **kwargs)
+        return self.show_slide(index=int(np.mean(self.bbox[axis])), zoom=zoom, axis=axis, **kwargs)
 
     def show_3d(self, sticks_step=None, stick_nodes_step=None, z_ratio=1., colors='green',
                 zoom=None, margin=20, sticks=False, **kwargs):

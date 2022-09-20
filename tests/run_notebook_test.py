@@ -61,7 +61,7 @@ common_params = {
 TESTS_NOTEBOOKS_DIR = os.path.join(BASE_DIR, 'tests/notebooks/') # path to the directory with tests notebooks
 # TUTORIALS_DIR = os.path.join(BASE_DIR, 'tutorials/')             # path to the directory with tutorials
 
-geometry_formats = ['sgy', 'hdf5', 'qhdf5', 'blosc', 'qblosc']
+geometry_formats = ['sgy', 'hdf5', 'qhdf5']
 notebooks_params = (
     # Tests configurations:
     # (notebook_path, {'inputs': dict (optional), 'outputs': str or list of str (optional)})

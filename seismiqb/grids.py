@@ -164,7 +164,7 @@ class BaseGrid:
             Other parameters to pass to the plotting function.
         """
         n_patches = n_patches or int(np.sqrt(len(self))) // 5
-        plotter = self.field.geometry.show('zero_traces', cmap='Gray', colorbar=False, **kwargs)
+        plotter = self.field.geometry.show('dead_traces_matrix', cmap='Gray', colorbar=False, **kwargs)
         ax = plotter[0].ax
 
         if grid:
@@ -694,7 +694,7 @@ class ExtensionGrid(BaseGrid):
         plotter = self.field.geometry.show(hm, cmap='Depths', colorbar=False, **kwargs)
         ax = plotter[0].ax
 
-        self.field.geometry.show('zero_traces', ax=ax, cmap='Grey', colorbar=False, **kwargs)
+        self.field.geometry.show('dead_traces_matrix', ax=ax, cmap='Grey', colorbar=False, **kwargs)
 
         if markers:
             ax.scatter(self.locations[:, 3], self.locations[:, 4], marker='x', linewidth=0.1, color='r')
