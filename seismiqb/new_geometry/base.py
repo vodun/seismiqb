@@ -301,6 +301,11 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMix
         return self.index_headers + ['DEPTH']
 
     @property
+    def bbox(self):
+        """ Bounding box with geometry limits. """
+        return np.array([[0, s] for s in self.shape])
+
+    @property
     def textual(self):
         """ Wrapped textual header of SEG-Y file. """
         text = self.segy_text[0].decode('ascii')
