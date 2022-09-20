@@ -291,8 +291,32 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMix
         """
         return 1 - self.dead_traces_matrix
 
-    def get_grid(self, frequency):
-        """ !!. """
+    def get_grid(self, frequency=100, iline=True, xline=True, margin=20):
+        """ Compute the grid over alive traces. """
+        #pylint: disable=unexpected-keyword-arg
+        # Parse parameters
+        frequency = frequency if isinstance(frequency, (tuple, list)) else (frequency, frequency)
+
+        # Prepare dilated `dead_traces_matrix`
+        dead_traces_matrix = self.get_dead_traces_matrix(dilate=True, dilation_iterations=margin)
+
+        if margin:
+            dead_traces_matrix[:+margin, :] = 1
+            dead_traces_matrix[-margin:, :] = 1
+            dead_traces_matrix[:, :+margin] = 1
+            dead_traces_matrix[:, -margin:] = 1
+
+        # Select points to keep
+        idx_i, idx_x = np.nonzero(~dead_traces_matrix)
+        grid = np.zeros_like(dead_traces_matrix)
+        if iline:
+            mask = (idx_i % frequency[0] == 0)
+            grid[idx_i[mask], idx_x[mask]] = 1
+        if xline:
+            mask = (idx_x % frequency[1] == 0)
+            grid[idx_i[mask], idx_x[mask]] = 1
+        return grid
+
 
     # Properties
     @property
