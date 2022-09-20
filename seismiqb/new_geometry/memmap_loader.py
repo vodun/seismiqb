@@ -132,7 +132,7 @@ class MemmapLoader(SegyioLoader):
             headers.remove('TRACE_SEQUENCE_FILE')
 
         # Construct mmap dtype: detailed for headers
-        mmap_trace_headers_dtype = self._make_mmap_headers_dtype(headers)
+        mmap_trace_headers_dtype = self._make_mmap_headers_dtype(headers, endian_symbol=self.endian_symbol)
         mmap_trace_dtype = np.dtype([*mmap_trace_headers_dtype,
                                      ('data', self.mmap_trace_data_dtype, self.mmap_trace_data_size)])
 
@@ -177,7 +177,8 @@ class MemmapLoader(SegyioLoader):
         return self.load_headers(header=[header], chunk_size=chunk_size, max_workers=max_workers,
                                  pbar=pbar, reconstruct_tsf=False, **kwargs)
 
-    def _make_mmap_headers_dtype(self, headers):
+    @staticmethod
+    def _make_mmap_headers_dtype(headers, endian_symbol='>'):
         """ Create list of `numpy` dtypes to view headers data.
 
         Defines a dtype for exactly 240 bytes, where each of the requested headers would have its own named subdtype,
@@ -200,7 +201,7 @@ class MemmapLoader(SegyioLoader):
         byte_to_header = {val: key for key, val in header_to_byte.items()}
         start_bytes = sorted(header_to_byte.values())
         byte_to_len = {start: end - start
-                       for start, end in zip(start_bytes, start_bytes[1:] + [self.TRACE_HEADER_SIZE + 1])}
+                       for start, end in zip(start_bytes, start_bytes[1:] + [MemmapLoader.TRACE_HEADER_SIZE + 1])}
         requested_headers_bytes = {header_to_byte[header] for header in headers}
 
         # Iterate over all headers
@@ -219,7 +220,7 @@ class MemmapLoader(SegyioLoader):
 
                 header_name = byte_to_header[byte]
                 value_dtype = 'i2' if header_len == 2 else 'i4'
-                value_dtype = self.endian_symbol + value_dtype
+                value_dtype = endian_symbol + value_dtype
                 header_dtype = (header_name, value_dtype)
                 dtype_list.append(header_dtype)
             else:
@@ -350,12 +351,13 @@ class MemmapLoader(SegyioLoader):
         # Serialize `transform`
         transform = dill.dumps(transform)
 
-        # Create new file, copy binary header, replace `format` byte with the new one
+        # Create new file and copy binary header
         src_mmap = np.memmap(self.path, mode='r')
         dst_mmap = np.memmap(path, mode='w+', shape=(dst_size,))
-
         dst_mmap[:self.file_traces_offset] = src_mmap[:self.file_traces_offset]
-        dst_mmap[3225] = format
+
+        # Replace `format` bytes
+        dst_mmap[3225-1:3225-1+2] = np.array([format], dtype=self.endian_symbol + 'u2').view('u1')
 
         # Prepare dst dtype
         dst_trace_dtype = np.dtype([('headers', np.void, self.TRACE_HEADER_SIZE),

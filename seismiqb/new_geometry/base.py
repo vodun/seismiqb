@@ -4,12 +4,14 @@ import os
 import numpy as np
 from scipy.interpolate import interp1d
 
+from .benchmark_mixin import BenchmarkMixin
 from .conversion_mixin import ConversionMixin
+from .export_mixin import ExportMixin
 from .meta_mixin import MetaMixin
 
 
 
-class Geometry(ConversionMixin, MetaMixin):
+class Geometry(BenchmarkMixin, ConversionMixin, ExportMixin, MetaMixin):
     """ Class to infer information about seismic cube in various formats and provide format agnostic interface to them.
 
     During the SEG-Y processing, a number of statistics are computed. They are saved next to the cube under the
@@ -64,10 +66,11 @@ class Geometry(ConversionMixin, MetaMixin):
         'depth', 'delay', 'sample_rate', 'shape',
         'shifts', 'lengths', 'ranges', 'increments', 'regular_structure',
         'index_matrix', 'absent_traces_matrix', 'dead_traces_matrix',
+        'n_alive_traces', 'n_dead_traces',
 
         # Additional info from SEG-Y
         'segy_path', 'segy_text',
-        # 'rotation_matrix', 'area',
+        'rotation_matrix', 'area',
 
         # Scalar stats for cube values: computed for the entire SEG-Y / its subset
         'min', 'max', 'mean', 'std',
@@ -101,14 +104,34 @@ class Geometry(ConversionMixin, MetaMixin):
         self._quantile_interpolator = None
 
         # Init from subclasses
+        self._init_kwargs = kwargs
         self.init(path, **kwargs)
 
 
+    # Redefined protocols
     def __getattr__(self, key):
         """ Load item from stored meta. """
         if key in self.PRESERVED_LAZY and self.meta_exists and self.has_meta_item(key) and key not in self.__dict__:
             return self.load_meta_item(key)
         return object.__getattribute__(self, key)
+
+    def __getnewargs__(self):
+        return (self.path, )
+
+    def __getstate__(self):
+        self.reset_cache()
+        state = self.__dict__.copy()
+        for name in ['file', 'axis_to_projection']:
+            if name in state:
+                state.pop(name)
+        return state
+
+    def __setstate__(self, state):
+        for key, value in state.items():
+            setattr(self, key, value)
+
+        self.init(self.path, **self._init_kwargs)
+
 
     # Data loading
     def __getitem__(self, key):
@@ -136,7 +159,7 @@ class Geometry(ConversionMixin, MetaMixin):
         key_, axis_to_squeeze = [], []
         for i, (subkey, limit) in enumerate(zip(key, self.shape)):
             if isinstance(subkey, slice):
-                slc = slice(subkey.start or 0, subkey.stop or limit, subkey.step)
+                slc = slice(max(subkey.start or 0, 0), min(subkey.stop or limit, limit), subkey.step)
             elif isinstance(subkey, int):
                 subkey = subkey if subkey >= 0 else limit - subkey
                 slc = slice(subkey, subkey + 1)
@@ -253,10 +276,14 @@ class Geometry(ConversionMixin, MetaMixin):
         axis : int
             Axis of the slide.
         """
-        alive_traces = 1 - np.take(self.dead_traces, indices=index, axis=axis)
-        left_bound = np.argmax(alive_traces)
-        right_bound = len(alive_traces) - np.argmax(alive_traces[::-1]) - 1
+        dead_traces = np.take(self.dead_traces_matrix, indices=index, axis=axis)
+        left_bound = np.argmin(dead_traces)
+        right_bound = len(dead_traces) - np.argmin(dead_traces[::-1]) # the first dead trace
         return left_bound, right_bound
+
+    def compute_auto_zoom(self, index, axis=0):
+        """ Compute zoom for a given slide. """
+        return slice(*self.get_slide_bounds(index=index, axis=axis))
 
     # General utility methods
     STRING_TO_AXIS = {

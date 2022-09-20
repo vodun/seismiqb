@@ -32,18 +32,17 @@ class GeometryHDF5(Geometry):
         self.file = self.FILE_OPENER(path, mode)
 
         # Check available projections
-        self.available_axis = [axis for axis, name in self.AXIS_TO_NAME.items()
+        self.available_axis = [axis for axis, name in self.PROJECTION_NAMES.items()
                                if name in self.file]
-        self.available_names = [self.AXIS_TO_NAME[axis] for axis in self.available_axis]
+        self.available_names = [self.PROJECTION_NAMES[axis] for axis in self.available_axis]
 
         # Save projection handlers to instance
         self.axis_to_projection = {}
         for axis in self.available_axis:
-            name = self.AXIS_TO_NAME[axis]
+            name = self.PROJECTION_NAMES[axis]
             projection = self.file[name]
 
             self.axis_to_projection[axis] = projection
-            setattr(self, name, projection)
 
         # Parse attributes from meta / set defaults
         self.add_attributes(**kwargs)
@@ -66,7 +65,7 @@ class GeometryHDF5(Geometry):
         axis = self.available_axis[0]
         projection = self.axis_to_projection[axis]
 
-        shape = np.array(projection.shape)[self.AXIS_TO_TRANSPOSE[axis]]
+        shape = np.array(projection.shape)[self.FROM_PROJECTION_TRANSPOSITION[axis]]
         if hasattr(self, 'shape'):
             if (getattr(self, 'shape') != shape).any():
                 raise ValueError('Projection shape is not the same as shape, loaded from meta!')
@@ -153,8 +152,10 @@ class GeometryHDF5(Geometry):
         """ Load slide with public API of `h5py`. Requires an additional copy to put data into buffer. """
         # Prepare locations
         loading_axis = axis if axis in self.available_axis else self.available_axis[0]
+        to_projection_transposition, from_projection_transposition = self.compute_axis_transpositions(loading_axis)
+
         locations = self.make_slide_locations(index=index, axis=axis)
-        locations = [locations[idx] for idx in self.AXIS_TO_ORDER[loading_axis]]
+        locations = [locations[idx] for idx in to_projection_transposition]
 
         if limits is not None:
             locations[-1] = self.process_limits(limits)
@@ -167,8 +168,7 @@ class GeometryHDF5(Geometry):
                 slide = slide.astype(np.float32)
 
         # Re-order and squeeze the requested axis
-        transposition = self.AXIS_TO_TRANSPOSE[loading_axis]
-        slide = slide.transpose(transposition)
+        slide = slide.transpose(from_projection_transposition)
         slide = slide.squeeze(axis)
 
         # Write back to buffer
@@ -182,8 +182,10 @@ class GeometryHDF5(Geometry):
         """ Load slide with private API of `h5py`. Reads data directly into buffer. """
         # Prepare locations
         loading_axis = axis if axis in self.available_axis else self.available_axis[0]
+        to_projection_transposition, from_projection_transposition = self.compute_axis_transpositions(loading_axis)
+
         locations = self.make_slide_locations(index=index, axis=axis)
-        locations = [locations[idx] for idx in self.AXIS_TO_ORDER[loading_axis]]
+        locations = [locations[idx] for idx in to_projection_transposition]
 
         if limits is not None:
             locations[-1] = self.process_limits(limits)
@@ -191,15 +193,13 @@ class GeometryHDF5(Geometry):
 
         # View buffer in projections ordering
         buffer = np.expand_dims(buffer, axis)
-        transposition = self.AXIS_TO_ORDER[loading_axis]
-        buffer = buffer.transpose(transposition)
+        buffer = buffer.transpose(to_projection_transposition)
 
         # Load data
         self.axis_to_projection[loading_axis].read_direct(buffer, locations)
 
         # View buffer in original ordering
-        transposition = self.AXIS_TO_TRANSPOSE[loading_axis]
-        buffer = buffer.transpose(transposition)
+        buffer = buffer.transpose(from_projection_transposition)
         buffer = buffer.squeeze(axis)
         return buffer
 
@@ -250,7 +250,9 @@ class GeometryHDF5(Geometry):
     def load_crop_native_safe(self, locations, axis=None, buffer=None):
         """ Load slide with public API of `h5py`. Requires an additional copy to put data into buffer. """
         # Prepare locations
-        locations = [locations[idx] for idx in self.AXIS_TO_ORDER[axis]]
+        to_projection_transposition, from_projection_transposition = self.compute_axis_transpositions(axis)
+
+        locations = [locations[idx] for idx in to_projection_transposition]
         locations = tuple(locations)
 
         # Load data
@@ -259,9 +261,8 @@ class GeometryHDF5(Geometry):
             if buffer is None or buffer.dtype != crop.dtype:
                 crop = crop.astype(np.float32)
 
-        # Re-order and squeeze the requested axis
-        transposition = self.AXIS_TO_TRANSPOSE[axis]
-        crop = crop.transpose(transposition)
+        # Re-order back from projections' ordering
+        crop = crop.transpose(from_projection_transposition)
 
         # Write back to buffer
         if buffer is not None:
@@ -273,19 +274,18 @@ class GeometryHDF5(Geometry):
     def load_crop_native_unsafe(self, locations, axis=None, buffer=None):
         """ Load slide with private API of `h5py`. Reads data directly into buffer. """
         # Prepare locations
-        locations = [locations[idx] for idx in self.AXIS_TO_ORDER[axis]]
+        to_projection_transposition, from_projection_transposition = self.compute_axis_transpositions(axis)
+        locations = [locations[idx] for idx in to_projection_transposition]
         locations = tuple(locations)
 
         # View buffer in projections ordering
-        transposition = self.AXIS_TO_ORDER[axis]
-        buffer = buffer.transpose(transposition)
+        buffer = buffer.transpose(to_projection_transposition)
 
         # Load data
         self.axis_to_projection[axis].read_direct(buffer, locations)
 
         # View buffer in original ordering
-        transposition = self.AXIS_TO_TRANSPOSE[axis]
-        buffer = buffer.transpose(transposition)
+        buffer = buffer.transpose(from_projection_transposition)
         return buffer
 
     def load_crop_cached(self, locations, axis=None, buffer=None):
@@ -293,21 +293,20 @@ class GeometryHDF5(Geometry):
         # Parse parameters
         shape = self.locations_to_shape(locations)
         axis = axis or self.get_optimal_axis(shape=shape)
+        to_projection_transposition, from_projection_transposition = self.compute_axis_transpositions(axis)
 
-        locations = [locations[idx] for idx in self.AXIS_TO_ORDER[axis]]
+        locations = [locations[idx] for idx in to_projection_transposition]
         locations = tuple(locations)
 
         # Prepare buffer
         if buffer is None:
             buffer = np.empty(shape, dtype=np.float32)
-        transposition = self.AXIS_TO_ORDER[axis]
-        buffer = buffer.transpose(transposition)
+        buffer = buffer.transpose(to_projection_transposition)
 
         # Load data
         for i, idx in enumerate(range(locations[0].start, locations[0].stop)):
             buffer[i] = self.load_slide_cached(index=idx, axis=axis)[locations[1], locations[2]]
 
         # View buffer in original ordering
-        transposition = self.AXIS_TO_TRANSPOSE[axis]
-        buffer = buffer.transpose(transposition)
+        buffer = buffer.transpose(from_projection_transposition)
         return buffer

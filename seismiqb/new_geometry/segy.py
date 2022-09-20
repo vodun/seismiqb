@@ -3,6 +3,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 from numba import njit
+import cv2
 
 from batchflow import Notifier
 
@@ -41,18 +42,17 @@ class GeometrySEGY(Geometry):
     Refer to the documentation of the base class :class:`Geometry` for more information about attributes and parameters.
     """
     # Headers to use as unique id of a trace
-    INDEX_HEADERS_PRE = ('FieldRecord', 'TraceNumber')
-    INDEX_HEADERS_POST = ('INLINE_3D', 'CROSSLINE_3D')
+    INDEX_HEADERS_PRESTACK = ('FieldRecord', 'TraceNumber')
+    INDEX_HEADERS_POSTSTACK = ('INLINE_3D', 'CROSSLINE_3D')
     INDEX_HEADERS_CDP = ('CDP_Y', 'CDP_X')
 
     # Headers to load from SEG-Y cube
-    ADDITIONAL_HEADERS_PRE_FULL = ('FieldRecord', 'TraceNumber', 'TRACE_SEQUENCE_FILE',
-                                   'CDP', 'CDP_TRACE', 'offset')
-    ADDITIONAL_HEADERS_POST_FULL = ('INLINE_3D', 'CROSSLINE_3D', 'CDP_X', 'CDP_Y')
-    ADDITIONAL_HEADERS_POST = ('INLINE_3D', 'CROSSLINE_3D')
+    ADDITIONAL_HEADERS_PRESTACK_FULL = ('FieldRecord', 'TraceNumber', 'TRACE_SEQUENCE_FILE',
+                                        'CDP', 'CDP_TRACE', 'offset')
+    ADDITIONAL_HEADERS_POSTSTACK_FULL = ('INLINE_3D', 'CROSSLINE_3D', 'CDP_X', 'CDP_Y')
 
 
-    def init(self, path, index_headers=INDEX_HEADERS_POST, additional_headers=ADDITIONAL_HEADERS_POST_FULL,
+    def init(self, path, index_headers=INDEX_HEADERS_POSTSTACK, additional_headers=ADDITIONAL_HEADERS_POSTSTACK_FULL,
              loader_class=MemmapLoader, reload_headers=True, dump_headers=False, load_headers_params=None,
              collect_stats=True, recollect_stats=True, collect_stats_params=None, dump_meta=True,
              **kwargs):
@@ -100,6 +100,7 @@ class GeometrySEGY(Geometry):
 
         # Infer attributes based on indexing headers: values and coordinates
         self.add_index_attributes()
+        self.rotation_matrix = self.compute_rotation_matrix()
 
         # Collect amplitude stats, either by passing through SEG-Y or from previously stored dump
         if self.meta_exists and not recollect_stats:
@@ -109,6 +110,12 @@ class GeometrySEGY(Geometry):
             collect_stats_params = collect_stats_params or {}
             self.collect_stats(**collect_stats_params)
             self.has_stats = True
+        else:
+            self.compute_dead_traces()
+            self.has_stats = False
+
+        if hasattr(self, 'n_alive_traces') and self.n_alive_traces is not None:
+            self.area = self.compute_area()
 
         # Dump inferred attributes to a separate file for later loads
         self.dump_meta()
@@ -158,15 +165,81 @@ class GeometrySEGY(Geometry):
 
         # Create indexing matrix
         if self.index_length == 2:
-            index_values = self.headers[self.index_headers].values
-            index_ordinals = self.lines_to_ordinals(index_values)
-            idx_0, idx_1 = index_ordinals[:, 0], index_ordinals[:, 1]
-
-            dtype = np.int32 if self.n_traces < np.iinfo(np.int32).max else np.int64
-            self.index_matrix = np.full(self.lengths, -1, dtype=dtype)
-            self.index_matrix[idx_0, idx_1] = self.headers['TRACE_SEQUENCE_FILE'] - 1
+            index_matrix = self.compute_header_values_matrix('TRACE_SEQUENCE_FILE')
+            index_matrix[index_matrix != -1] -= 1
+            self.index_matrix = index_matrix
 
             self.absent_traces_matrix = (self.index_matrix == -1).astype(np.bool_)
+
+    def compute_dead_traces(self, frequency=100):
+        """ !!. """
+        slices = self.loader.load_depth_slices(list(range(0, self.depth, frequency)))
+
+        if slices.shape[-1] == np.prod(self.lengths):
+            slices.reshape(slices.shape[0], *self.lengths)
+            std_matrix = np.std(slices, axis=0)
+
+            self.dead_traces_matrix = (std_matrix == 0).astype(np.bool_)
+            self.n_dead_traces = np.sum(self.dead_traces_matrix)
+            self.n_alive_traces = np.prod(self.lengths) - self.n_dead_traces
+
+
+    def compute_header_values_matrix(self, header):
+        """ Mapping from ordinal inline/crossline coordinate to the value of header. """
+        index_values = self.headers[self.index_headers].values
+        index_ordinals = self.lines_to_ordinals(index_values)
+        idx_0, idx_1 = index_ordinals[:, 0], index_ordinals[:, 1]
+
+        dtype = self.headers[header].dtype
+        matrix = np.full(self.lengths, -1, dtype=dtype)
+        matrix[idx_0, idx_1] = self.headers[header]
+        return matrix
+
+
+    # Compute additional stats from CDP/LINES correspondence
+    def compute_rotation_matrix(self, n_points=10):
+        """ Compute transform from INLINE_3D/CROSSLINE_3D coordinates to CDP_X/CDP_Y system. """
+        ix_points = []
+        cdp_points = []
+
+        for _ in range(n_points):
+            idx = np.random.randint(self.n_traces)
+            row = self.headers.iloc[idx]
+
+            # INLINE_3D -> CDP_X, CROSSLINE_3D -> CDP_Y
+            ix_point = (row['INLINE_3D'], row['CROSSLINE_3D'])
+            cdp_point = (row['CDP_X'], row['CDP_Y'])
+
+            ix_points.append(ix_point)
+            cdp_points.append(cdp_point)
+        rotation_matrix, inliers = cv2.estimateAffine2D(np.float32(ix_points), np.float32(cdp_points))
+
+        if 0 in inliers:
+            return None
+        return rotation_matrix
+
+    def compute_area(self, shift=50):
+        """ Compute approximate area of the cube in square kilometers. """
+        central_i = self.shape[0] // 2
+        central_x = self.shape[1] // 2
+
+        tsf = self.index_matrix[central_i, central_x]
+        tsf_di = self.index_matrix[central_i, central_x + shift]
+        tsf_dx = self.index_matrix[central_i + shift, central_x]
+
+        row = self.headers.iloc[tsf]
+        row_di = self.headers.iloc[tsf_di]
+        row_dx = self.headers.iloc[tsf_dx]
+
+        # CDP_X/CDP_Y coordinate system is rotated on 90 degrees with respect to INLINE_3D/CROSSLINE_3D
+        if row_di['CDP_X'] - row['CDP_X'] == 0 and row_dx['CDP_Y'] - row['CDP_Y'] == 0:
+            row_di, row_dx = row_dx, row_di
+
+        # Size of one "trace bin"
+        cdp_x_delta_km = abs(row_di['CDP_X'] - row['CDP_X']) / shift / 1000
+        cdp_y_delta_km = abs(row_dx['CDP_Y'] - row['CDP_Y']) / shift / 1000
+        area = cdp_x_delta_km * cdp_y_delta_km * self.n_alive_traces
+        return round(area, 2)
 
 
     # Collect stats
@@ -289,6 +362,10 @@ class GeometrySEGY(Geometry):
         self.quantile_precision = quantile_precision
         self.quantile_support, self.quantile_values = quantile_support, quantile_values
 
+        # Store the number of alive/dead traces
+        self.n_alive_traces = n_alive_traces
+        self.n_dead_traces = n_dead_traces
+
     def collect_stats_chunk(self, start, end, chunk_i):
         """ Read requested chunk, compute stats for it. """
         # Retrieve chunk data
@@ -340,6 +417,7 @@ class GeometrySEGY(Geometry):
 
     def load_depth_slice(self, index, buffer=None):
         """ !!. """
+        # TODO: add a fallback on `index_matrix` instead
         if buffer is None:
             buffer = np.empty((1, self.n_traces), dtype=self.dtype)
         else:
