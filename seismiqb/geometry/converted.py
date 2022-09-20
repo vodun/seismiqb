@@ -55,7 +55,7 @@ class GeometryHDF5(Geometry):
 
         # Get from meta / set defaults
         if self.meta_exists:
-            self.load_meta(names=self.PRESERVED + self.PRESERVED_LAZY)
+            self.load_meta(keys=self.PRESERVED + self.PRESERVED_LAZY)
             self.has_stats = True
         else:
             self.set_default_index_attributes(**kwargs)

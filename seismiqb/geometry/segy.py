@@ -102,8 +102,10 @@ class GeometrySEGY(Geometry):
         self.rotation_matrix = self.compute_rotation_matrix()
 
         # Collect amplitude stats, either by passing through SEG-Y or from previously stored dump
-        if self.meta_exists and not recollect_stats:
-            self.load_meta(names=self.PRESERVED + self.PRESERVED_LAZY)
+        required_attributes = self.PRESERVED + self.PRESERVED_LAZY
+
+        if self.meta_exists and self.has_meta_items(required_attributes) and not recollect_stats:
+            self.load_meta(keys=required_attributes)
             self.has_stats = True
         elif collect_stats:
             collect_stats_params = collect_stats_params or {}

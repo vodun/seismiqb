@@ -63,16 +63,23 @@ class MetaMixin:
         key = key + '/'
         key = key.replace('//', '/')
 
-        meta_paths = self.meta_paths
+        meta_paths = self.existing_meta_paths
         if path is not None:
             meta_paths.insert(0, path)
 
         for path in meta_paths:
-            with self.META_OPENER(path, mode='a') as src:
-                if key in src:
+            with self.META_OPENER(path, mode='r') as src:
+                if key in src or f'/meta/{key}' in src:
                     return True
         return False
 
+    def has_meta_items(self, keys, path=None):
+        """ Check whether all `keys` are present. """
+        for key in keys:
+            flag = self.has_meta_item(key=key, path=path)
+            if flag is False:
+                return False
+        return True
 
     # Dump
     def dump_meta(self, path=None, names=None, overwrite=True):
@@ -143,23 +150,23 @@ class MetaMixin:
                 dst[key] = value
 
     # Loading
-    def load_meta(self, path=None, names=None):
+    def load_meta(self, path=None, keys=None):
         """ Load attributes from meta file.
 
         Parameters
         ----------
         path : str or None
             If provided, then path to the meta file. Otherwise, uses `meta_path` property.
-        names : sequence or None
+        keys : sequence or None
             If provided, then attributes to load. Otherwise, loads all `PRESERVED` attributes.
         """
-        names = names or self.PRESERVED
+        keys = keys or self.PRESERVED
 
-        for name in names:
-            value = self.load_meta_item(f'/meta/{name}', path=path)
-            setattr(self, name, value)
+        for key in keys:
+            value = self.load_meta_item(f'/meta/{key}', path=path)
+            setattr(self, key, value)
             if hasattr(self, 'meta_list_loaded'):
-                self.meta_list_loaded.add(name)
+                self.meta_list_loaded.add(key)
 
     def load_meta_item(self, key, path=None):
         """ Load one `key` from meta.

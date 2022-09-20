@@ -315,7 +315,7 @@ class AttributesMixin:
             # Get chunk from the cube (depth-wise)
             location = (slice(None), slice(None),
                         slice(d_start - low, min(d_end + high, self.field.depth)))
-            data_chunk = self.field.geometry.load_crop(location, use_cache=False)
+            data_chunk = self.field.geometry[location]
 
             # Check which points of the horizon are in the current chunk (and present)
             idx_i, idx_x = np.asarray((self.matrix != self.FILL_VALUE) &

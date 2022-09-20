@@ -207,7 +207,7 @@ class ConversionMixin:
                                                  **dataset_kwargs_)
 
                 # Write data on disk
-                progress_bar.set_description(f'Converting to {name}, projection {p}')
+                progress_bar.set_description(f'Converting to {name}:{p}')
                 for idx in range(self.shape[axis]):
                     slide = self.load_slide(idx, axis=axis)
                     slide = transform(slide)

@@ -1,7 +1,7 @@
 """ Generator of predetermined locations based on field or current state of labeled surface. Mainly used for inference.
 
 Locations describe the cube and the exact place to load from in the following format:
-(field_id, label_id, orientation, i_start, x_start, h_start, i_stop, x_stop, h_stop).
+(field_id, label_id, orientation, i_start, x_start, d_start, i_stop, x_stop, d_stop).
 
 Locations are passed to `make_locations` method of `SeismicCropBatch`, which
 transforms them into 3D slices to index the data and other useful info like origin points, shapes and orientation.
@@ -342,7 +342,7 @@ class RegularGrid(BaseGrid):
                     points.append((i, x, h))
         points = np.array(points, dtype=np.int32)
 
-        # Buffer: (cube_id, i_start, x_start, h_start, i_stop, x_stop, h_stop)
+        # Buffer: (cube_id, i_start, x_start, d_start, i_stop, x_stop, d_stop)
         buffer = np.empty((len(points), 9), dtype=np.int32)
         buffer[:, 0] = self.field_id
         buffer[:, 1] = self.label_id
@@ -532,7 +532,7 @@ class ExtensionGrid(BaseGrid):
         border_points += (self.horizon.i_min, self.horizon.x_min)
         depths -= crop_shape[2] // 2
 
-        # Buffer for locations (orientation, i_start, x_start, h_start, i_stop, x_stop, h_stop).
+        # Buffer for locations (orientation, i_start, x_start, d_start, i_stop, x_stop, d_stop).
         buffer = np.empty((len(border_points), 7), dtype=np.int32)
         buffer[:, 0] = 0
         buffer[:, [1, 2]] = border_points

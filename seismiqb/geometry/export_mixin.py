@@ -95,7 +95,8 @@ class ExportMixin:
     # Public APIs
     @staticmethod
     def array_to_segy(array_like, path, spec=None, origin=(0, 0, 0), pbar='t', zip_segy=True, remove_segy=False,
-                      engine='memmap', format=5, transform=None, endian_symbol='>', chunk_size=20, max_workers=4):
+                      engine='memmap', format=5, transform=None, endian_symbol='>', chunk_size=20, max_workers=4,
+                      **kwargs):
         """ Convert an `array_like` object to a SEG-Y file.
         In order to determine values of bin/trace headers, one should provide `spec`:
             - if no spec provided, we use the default one. It fills coordinate values with shifted ranges.
@@ -154,7 +155,7 @@ class ExportMixin:
 
         # Select the spec
         if spec is None:
-            spec = ExportMixin.default_export_spec(array_like=array_like, origin=origin, format=format)
+            spec = ExportMixin.default_export_spec(array_like=array_like, origin=origin, format=format, **kwargs)
         if isinstance(spec, str):
             spec = GeometrySEGY(spec)
         if isinstance(spec, GeometrySEGY):

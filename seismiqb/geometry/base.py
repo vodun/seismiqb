@@ -215,6 +215,8 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMix
         In the simplest case of regular grid `value = value_min + ordinal * value_step`.
         In the case of irregular spacings between values, we have to manually map ordinals to values.
         """
+        array = array.astype(np.float32)
+
         # Indexing headers
         if self.regular_structure:
             for i in range(self.index_length):
@@ -336,7 +338,7 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMix
     @property
     def axis_names(self):
         """ Names of the axes: indexing headers and `DEPTH` as the last one. """
-        return self.index_headers + ['DEPTH']
+        return list(self.index_headers) + ['DEPTH']
 
     @property
     def bbox(self):
@@ -474,12 +476,23 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMix
         matrix = getattr(self, matrix) if isinstance(matrix, str) else matrix
         return plotter(matrix, **kwargs)
 
-    def show_histogram(self, n_quantile_traces=100_000, seed=42, bins=50, plotter=plot, **kwargs):
+    def show_histogram(self, n_traces=100_000, seed=42, bins=50, plotter=plot, **kwargs):
         """ Show distribution of amplitudes in a random subset of the cube. """
         # Load subset of data
-        alive_traces_indices = self.index_matrix[~self.dead_traces_matrix].ravel()
-        indices = np.random.default_rng(seed=seed).choice(alive_traces_indices, size=n_quantile_traces)
-        data = self.load_by_indices(indices)
+        rng = np.random.default_rng(seed=seed)
+        if self.converted is False:
+            alive_traces_indices = self.index_matrix[~self.dead_traces_matrix].ravel()
+            indices = rng.choice(alive_traces_indices, size=n_traces)
+            data = self.load_by_indices(indices)
+        else:
+            indices = rng.choice(self.shape[0], size=n_traces // self.shape[1], replace=False)
+            data = []
+            for index in indices:
+                slide = self.load_slide(index=index, axis=0)
+                slide_bounds = self.compute_auto_zoom(index=index, axis=0)
+                data.append(slide[slide_bounds].ravel())
+            data = np.concatenate(data)
+
 
         kwargs = {
             'title': (f'Amplitude distribution for {self.short_name}' +

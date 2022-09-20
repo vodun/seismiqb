@@ -181,7 +181,7 @@ class Field(CharismaMixin, VisualizationMixin):
         horizons.extend(loaded)
 
         if sort:
-            sort = sort if isinstance(sort, str) else 'h_mean'
+            sort = sort if isinstance(sort, str) else 'd_mean'
             horizons.sort(key=lambda label: getattr(label, sort))
         return horizons
 
@@ -195,7 +195,7 @@ class Field(CharismaMixin, VisualizationMixin):
         return horizon
 
 
-    def _load_faults(self, paths, max_workers=4, pbar=True, interpolate=False, label_class=Fault, **kwargs):
+    def _load_faults(self, paths, max_workers=4, pbar='t', interpolate=False, label_class=Fault, **kwargs):
         """ Load faults from paths. """
         with ThreadPoolExecutor(max_workers=min(max_workers, len(paths) or 1)) as executor:
             function = lambda path: self._load_fault(path, interpolate=interpolate,

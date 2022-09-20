@@ -1,7 +1,7 @@
 """ Generator of (label-dependant) randomized locations, mainly for model training.
 
 Locations describe the cube and the exact place to load from in the following format:
-(field_id, label_id, orientation, i_start, x_start, h_start, i_stop, x_stop, h_stop).
+(field_id, label_id, orientation, i_start, x_start, d_start, i_stop, x_stop, d_stop).
 
 Locations are passed to `make_locations` method of `SeismicCropBatch`, which
 transforms them into 3D slices to index the data and other useful info like origin points, shapes and orientation.
@@ -68,7 +68,7 @@ class BaseSampler(Sampler):
 
             points = _points
 
-        # Transform points to (orientation, i_start, x_start, h_start, i_stop, x_stop, h_stop)
+        # Transform points to (orientation, i_start, x_start, d_start, i_stop, x_stop, d_stop)
         buffer = np.empty((len(points), 7), dtype=np.int32)
         buffer[:, 0] = points[:, 3]
         buffer[:, 1:4] = points[:, 0:3]
@@ -115,7 +115,7 @@ class GeometrySampler(BaseSampler):
         - don't go beyond cube limits
 
     Locations are produced as np.ndarray of (size, 9) shape with following columns:
-        (field_id, field_id, orientation, i_start, x_start, h_start, i_stop, x_stop, h_stop).
+        (field_id, field_id, orientation, i_start, x_start, d_start, i_stop, x_stop, d_stop).
     Depth location is randomized in desired `ranges`.
 
     Under the hood, we prepare `locations` attribute:
@@ -196,7 +196,7 @@ class HorizonSampler(BaseSampler):
         - don't go beyond cube limits
 
     Locations are produced as np.ndarray of (size, 9) shape with following columns:
-        (field_id, label_id, orientation, i_start, x_start, h_start, i_stop, x_stop, h_stop).
+        (field_id, label_id, orientation, i_start, x_start, d_start, i_stop, x_stop, d_stop).
     Depth location is randomized in (0.1*shape, 0.9*shape) range.
 
     Under the hood, we prepare `locations` attribute:
@@ -280,7 +280,7 @@ class HorizonSampler(BaseSampler):
 
     def _sample(self, size):
         idx = np.random.randint(self.n, size=size)
-        sampled = self.locations[idx] # (orientation, i_start, x_start, h_start, i_stop, x_stop, h_stop)
+        sampled = self.locations[idx] # (orientation, i_start, x_start, d_start, i_stop, x_stop, d_stop)
 
         if self.randomize_depth:
             shift = np.random.randint(low=-int(self.crop_depth*self.randomize_depth[0]),
@@ -332,7 +332,7 @@ class FaultSampler(BaseSampler):
         - don't go beyond cube limits
 
     Locations are produced as np.ndarray of (size, 9) shape with following columns:
-        (field_id, label_id, orientation, i_start, x_start, h_start, i_stop, x_stop, h_stop).
+        (field_id, label_id, orientation, i_start, x_start, d_start, i_stop, x_stop, d_stop).
     Location is randomized in (-0.4*shape, 0.4*shape) range.
 
     For sampling, we randomly choose `size` rows from `locations`. If some of the sampled locations does not fit the
@@ -420,7 +420,7 @@ class FaultSampler(BaseSampler):
                   ((nodes[:, :2] + crop_shape_t[:2]) < ranges[:2, 1]).all(axis=1))
         nodes = nodes[i_mask | x_mask]
 
-        # Transform points to (orientation, i_start, x_start, h_start, i_stop, x_stop, h_stop)
+        # Transform points to (orientation, i_start, x_start, d_start, i_stop, x_stop, d_stop)
         directions = [0, 1] if self.transpose else [self.direction]
 
         buffer = np.empty((len(nodes) * len(directions), 7), dtype=np.int32)
@@ -531,7 +531,7 @@ def spatial_check_points(points, matrix, crop_shape, i_mask, x_mask, threshold):
     Parameters
     ----------
     points : np.ndarray
-        Points in (i_start, x_start, h_start) format.
+        Points in (i_start, x_start, d_start) format.
     matrix : np.ndarray
         Depth map in cube coordinates.
     crop_shape : tuple of two ints
@@ -555,8 +555,8 @@ def spatial_check_points(points, matrix, crop_shape, i_mask, x_mask, threshold):
             present_mask = (sliced > 0)
 
             if present_mask.sum() >= threshold:
-                h_mean = np.rint(sliced[present_mask].mean())
-                buffer[counter, :] = point_i, point_x, np.int32(h_mean), np.int32(0)
+                d_mean = np.rint(sliced[present_mask].mean())
+                buffer[counter, :] = point_i, point_x, np.int32(d_mean), np.int32(0)
                 counter += 1
 
         if x_mask_:
@@ -564,8 +564,8 @@ def spatial_check_points(points, matrix, crop_shape, i_mask, x_mask, threshold):
             present_mask = (sliced > 0)
 
             if present_mask.sum() >= threshold:
-                h_mean = np.rint(sliced[present_mask].mean())
-                buffer[counter, :] = point_i, point_x, np.int32(h_mean), np.int32(1)
+                d_mean = np.rint(sliced[present_mask].mean())
+                buffer[counter, :] = point_i, point_x, np.int32(d_mean), np.int32(1)
                 counter += 1
     return buffer[:counter]
 
@@ -578,7 +578,7 @@ def spatial_check_sampled(locations, matrix, threshold):
     Parameters
     ----------
     locations : np.ndarray
-        Locations in (orientation, i_start, x_start, h_start, i_stop, x_stop, h_stop) format.
+        Locations in (orientation, i_start, x_start, d_start, i_stop, x_stop, d_stop) format.
     matrix : np.ndarray
         Depth map in cube coordinates.
     threshold : int
@@ -591,9 +591,9 @@ def spatial_check_sampled(locations, matrix, threshold):
     """
     condition = np.ones(len(locations), dtype=np.bool_)
 
-    for i, (_, i_start, x_start, h_start, i_stop,  x_stop,  h_stop) in enumerate(locations):
+    for i, (_, i_start, x_start, d_start, i_stop,  x_stop,  d_stop) in enumerate(locations):
         sliced = matrix[i_start:i_stop, x_start:x_stop].ravel()
-        present_mask = (h_start < sliced) & (sliced < h_stop)
+        present_mask = (d_start < sliced) & (sliced < d_stop)
 
         if present_mask.sum() < threshold:
             condition[i] = False
@@ -608,7 +608,7 @@ def volumetric_check_sampled(locations, points, crop_shape, crop_shape_t, thresh
     Parameters
     ----------
     locations : np.ndarray
-        Locations in (orientation, i_start, x_start, h_start, i_stop, x_stop, h_stop) format.
+        Locations in (orientation, i_start, x_start, d_start, i_stop, x_stop, d_stop) format.
     points : points
         Fault points.
     crop_shape : np.ndarray
@@ -626,9 +626,9 @@ def volumetric_check_sampled(locations, points, crop_shape, crop_shape_t, thresh
     condition = np.ones(len(locations), dtype=np.bool_)
 
     if threshold > 0:
-        for i, (orientation, i_start, x_start, h_start, i_stop,  x_stop, h_stop) in enumerate(locations):
+        for i, (orientation, i_start, x_start, d_start, i_stop,  x_stop, d_stop) in enumerate(locations):
             shape = crop_shape if orientation == 0 else crop_shape_t
-            mask_bbox = np.array([[i_start, i_stop], [x_start, x_stop], [h_start, h_stop]], dtype=np.int32)
+            mask_bbox = np.array([[i_start, i_stop], [x_start, x_stop], [d_start, d_stop]], dtype=np.int32)
             mask = np.zeros((shape[0], shape[1], shape[2]), dtype=np.int32)
 
             insert_points_into_mask(mask, points, mask_bbox, 1, 0)
@@ -641,7 +641,7 @@ def volumetric_check_sampled(locations, points, crop_shape, crop_shape_t, thresh
 class SeismicSampler(Sampler):
     """ Mixture of samplers for multiple cubes with multiple labels.
     Used to sample crop locations in the format of
-    (field_id, label_id, orientation, i_start, x_start, h_start, i_stop, x_stop, h_stop).
+    (field_id, label_id, orientation, i_start, x_start, d_start, i_stop, x_stop, d_stop).
 
     Parameters
     ----------

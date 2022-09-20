@@ -57,8 +57,8 @@ class FaultSticksMixin(CharismaMixin):
             raise ValueError('Empty DataFrame (possibly wrong coordinates).')
         col, direction = None, None
 
-        ilines_diff = sum(df.iline[1:].values - df.iline[:-1].values == 0)
-        xlines_diff = sum(df.xline[1:].values - df.xline[:-1].values == 0)
+        ilines_diff = sum(df['INLINE_3D'][1:].values - df['INLINE_3D'][:-1].values == 0)
+        xlines_diff = sum(df['CROSSLINE_3D'][1:].values - df['CROSSLINE_3D'][:-1].values == 0)
         if ilines_diff > xlines_diff: # Use iline as an index
             col = 'INLINE_3D'
             direction = 0
@@ -126,7 +126,7 @@ class FaultSticksMixin(CharismaMixin):
         points = df[self.REDUCED_CHARISMA_SPEC].values
 
         if transform:
-            points = self.field_reference.geometry.lines_to_cubic(points)
+            points = self.field_reference.geometry.lines_to_ordinals(points)
         df[self.REDUCED_CHARISMA_SPEC] = np.round(points).astype(np.int32)
 
         if verify:
@@ -163,7 +163,7 @@ class FaultSticksMixin(CharismaMixin):
 
         sticks_df = []
         for stick_idx, stick in enumerate(self.sticks):
-            stick = self.field.geometry.cubic_to_lines(stick).astype(int)
+            stick = self.field.geometry.ordinals_to_lines(stick).astype(int)
             cdp = self.field.geometry.lines_to_cdp(stick[:, :2])
             df = {
                 'inline_marker': 'INLINE-',

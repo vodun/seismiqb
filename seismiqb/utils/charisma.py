@@ -171,8 +171,8 @@ class CharismaMixin:
         i_bounds = [self.field.shifts[0], self.field.shifts[0] + self.field.shape[0]]
         x_bounds = [self.field.shifts[1], self.field.shifts[1] + self.field.shape[1]]
 
-        i_mask = np.logical_or(df.iline < i_bounds[0], df.iline >= i_bounds[1])
-        x_mask = np.logical_or(df.xline < x_bounds[0], df.xline >= x_bounds[1])
+        i_mask = np.logical_or(df['INLINE_3D'] < i_bounds[0], df['INLINE_3D'] >= i_bounds[1])
+        x_mask = np.logical_or(df['CROSSLINE_3D'] < x_bounds[0], df['CROSSLINE_3D'] >= x_bounds[1])
 
         _df = df[np.logical_and(i_mask, x_mask)]
 

@@ -47,7 +47,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
     `Horizon` instances, i.e. when extracting surfaces from predicted masks.
 
     Independently of type of initial storage, Horizon provides following:
-        - Attributes `i_min`, `x_min`, `i_max`, `x_max`, `h_min`, `h_max`, `h_mean`, `h_std`, `bbox`,
+        - Attributes `i_min`, `x_min`, `i_max`, `x_max`, `d_min`, `d_max`, `d_mean`, `d_std`, `bbox`,
           to completely describe location of the horizon in the 3D volume of the seismic cube.
 
         - Convenient methods of changing the horizon, `apply_to_matrix` and `apply_to_points`:
@@ -63,7 +63,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
           for more metrics, check :class:`~.HorizonMetrics`.
 
         - A number of properties that describe geometrical, geological and mathematical characteristics of a horizon.
-          For example, `borders_matrix` and `boundaries_matrix`: the latter containes outer and inner borders;
+          For example, `borders_matrix` and `boundaries_matrix`: the latter contains outer and inner borders;
           `coverage` is the ratio between labeled traces and non-zero traces in the seismic cube;
           `solidity` is the ratio between labeled traces and traces inside the hull of the horizon;
           `perimeter` and `number_of_holes` speak for themselves.
@@ -209,10 +209,10 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
         if storage == 'matrix':
             self._matrix = None
             if len(self.points) > 0:
-                i_min, x_min, h_min = np.min(self.points, axis=0)
-                i_max, x_max, h_max = np.max(self.points, axis=0)
+                i_min, x_min, d_min = np.min(self.points, axis=0)
+                i_max, x_max, d_max = np.max(self.points, axis=0)
 
-                self._d_min, self._d_max = h_min.astype(self.dtype), h_max.astype(self.dtype)
+                self._d_min, self._d_max = d_min.astype(self.dtype), d_max.astype(self.dtype)
                 self.i_min, self.i_max, self.x_min, self.x_max = int(i_min), int(i_max), int(x_min), int(x_max)
 
                 self.i_length = (self.i_max - self.i_min) + 1
@@ -341,7 +341,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
         self.from_points(points, verify=False, **kwargs)
 
 
-    def from_matrix(self, matrix, i_min, x_min, h_min=None, h_max=None, length=None, **kwargs):
+    def from_matrix(self, matrix, i_min, x_min, d_min=None, d_max=None, length=None, **kwargs):
         """ Init from matrix and location of minimum i, x points. """
         _ = kwargs
 
@@ -358,7 +358,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
         self.x_length = (self.x_max - self.x_min) + 1
 
         # Populate lazy properties with supplied values
-        self._d_min, self._d_max, self._len = h_min, h_max, length
+        self._d_min, self._d_max, self._len = d_min, d_max, length
         self.bbox = np.array([[self.i_min, self.i_max],
                               [self.x_min, self.x_max],
                               [self.d_min, self.d_max]],
@@ -666,7 +666,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
             'accuracy@2': np.mean(masked_abs_difference <= 2),
 
             'overlap_size': overlap_size,
-            'overlap_coverage': overlap_size / self.field.nonzero_traces,
+            'overlap_coverage': overlap_size / self.field.n_alive_traces,
             'window_rate':  window_rate,
 
             'present_at_1_absent_at_2' : present_at_1_absent_at_2,

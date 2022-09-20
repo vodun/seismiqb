@@ -166,7 +166,7 @@ class SeismicCropBatch(Batch, VisualizationMixin):
 
         Generator can be either Sampler or Grid to make locations in a random or deterministic fashion.
         `generator` must be a callable and return (batch_size, 9+) array, where the first nine columns should be:
-        (field_id, label_id, orientation, i_start, x_start, h_start, i_stop, x_stop, h_stop).
+        (field_id, label_id, orientation, i_start, x_start, d_start, i_stop, x_stop, d_stop).
         `generator` must have `to_names` method to convert cube and label ids into actual strings.
 
         Field and label ids are transformed into names of actual fields and labels (horizons, faults, facies, etc).
@@ -202,8 +202,8 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         field_names, label_names = generator.to_names(generated[:, [0, 1]]).T
 
         # Locations: 3D slices in the cube coordinates
-        locations = [[slice(i_start, i_stop), slice(x_start, x_stop), slice(h_start, h_stop)]
-                      for i_start, x_start, h_start, i_stop,  x_stop,  h_stop in generated[:, 3:9]]
+        locations = [[slice(i_start, i_stop), slice(x_start, x_stop), slice(d_start, d_stop)]
+                      for i_start, x_start, d_start, i_stop,  x_stop,  d_stop in generated[:, 3:9]]
 
         # Additional info
         orientations = generated[:, 2]

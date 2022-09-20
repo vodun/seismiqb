@@ -97,10 +97,10 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
         if len(data) == 0: # It can be for empty fault file.
             data = np.zeros((1, 3))
 
-        i_min, x_min, h_min = np.min(data, axis=0)
-        i_max, x_max, h_max = np.max(data, axis=0)
+        i_min, x_min, d_min = np.min(data, axis=0)
+        i_max, x_max, d_max = np.max(data, axis=0)
 
-        self.d_min, self.d_max = int(h_min), int(h_max)
+        self.d_min, self.d_max = int(d_min), int(d_max)
         self.i_min, self.i_max, self.x_min, self.x_max = int(i_min), int(i_max), int(x_min), int(x_max)
 
         self.i_length = (self.i_max - self.i_min) + 1

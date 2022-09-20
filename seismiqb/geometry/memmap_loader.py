@@ -22,8 +22,6 @@ except ImportError:
 
 from .segyio_loader import SegyioLoader
 
-ForPoolExecutor = None # TODO
-
 
 
 class MemmapLoader(SegyioLoader):
@@ -100,7 +98,7 @@ class MemmapLoader(SegyioLoader):
 
 
     # Headers
-    def load_headers(self, headers, chunk_size=25_000, max_workers=None, pbar=False,
+    def load_headers(self, headers, chunk_size=25_000, max_workers=4, pbar=False,
                      reconstruct_tsf=True, **kwargs):
         """ Load requested trace headers from a SEG-Y file for each trace into a dataframe.
         If needed, we reconstruct the `'TRACE_SEQUENCE_FILE'` manually be re-indexing traces.
@@ -143,16 +141,11 @@ class MemmapLoader(SegyioLoader):
             chunk_sizes += [last_chunk_size]
         chunk_starts = np.cumsum([0] + chunk_sizes[:-1])
 
-        # Parse `n_workers` and select an appropriate pool executor
-        max_workers = max_workers or os.cpu_count()
-        max_workers = min(len(chunk_sizes), max_workers)
-        executor_class = ForPoolExecutor if max_workers == 1 else ProcessPoolExecutor
-
         # Iterate over chunks
         buffer = np.empty((self.n_traces, len(headers)), dtype=np.int32)
 
         with Notifier(pbar, total=self.n_traces) as pbar:
-            with executor_class(max_workers=max_workers) as executor:
+            with ProcessPoolExecutor(max_workers=max_workers) as executor:
 
                 def callback(future, start):
                     chunk_headers = future.result()
@@ -293,7 +286,7 @@ class MemmapLoader(SegyioLoader):
 
 
     # Conversion to other SEG-Y formats (data dtype)
-    def convert(self, path=None, format=8, transform=None, chunk_size=25_000, max_workers=None,
+    def convert(self, path=None, format=8, transform=None, chunk_size=25_000, max_workers=4,
                 pbar=False, overwrite=True):
         """ Convert SEG-Y file to a different `format`: dtype of data values.
         Keeps the same binary header (except for the 3225 byte, which stores the format).
@@ -370,14 +363,9 @@ class MemmapLoader(SegyioLoader):
             chunk_sizes += [last_chunk_size]
         chunk_starts = np.cumsum([0] + chunk_sizes[:-1])
 
-        # Parse `n_workers` and select an appropriate pool executor
-        max_workers = max_workers or os.cpu_count()
-        max_workers = min(len(chunk_sizes), max_workers)
-        executor_class = ForPoolExecutor if max_workers == 1 else ProcessPoolExecutor
-
         # Iterate over chunks
         with Notifier(pbar, total=self.n_traces) as pbar:
-            with executor_class(max_workers=max_workers) as executor:
+            with ProcessPoolExecutor(max_workers=max_workers) as executor:
                 def callback(future):
                     chunk_size = future.result()
                     pbar.update(chunk_size)

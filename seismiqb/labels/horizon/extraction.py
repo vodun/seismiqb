@@ -396,14 +396,16 @@ class ExtractionMixin:
 
             # Change `self` inplace
             self.from_matrix(background, i_min=shared_i_min, x_min=shared_x_min,
-                             h_min=min(self.d_min, other.d_min), h_max=max(self.d_max, other.d_max), length=length)
+                             d_min=min(self.d_min, other.d_min),
+                             d_max=max(self.d_max, other.d_max), length=length)
             # self.reset_storage('points')
             merged = True
         else:
             # Return a new instance of horizon
             merged = type(self)(storage=background, field=self.field, name=self.name,
                                 i_min=shared_i_min, x_min=shared_x_min,
-                                h_min=min(self.d_min, other.d_min), h_max=max(self.d_max, other.d_max), length=length)
+                                d_min=min(self.d_min, other.d_min),
+                                d_max=max(self.d_max, other.d_max), length=length)
         return merged
 
 
@@ -429,8 +431,8 @@ class ExtractionMixin:
         adjacency_i, adjacency_x = adjacency
 
         # Simplest possible check: horizons are too far away from one another (depth-wise)
-        overlap_h_min, overlap_h_max = max(self.d_min, other.d_min), min(self.d_max, other.d_max)
-        if overlap_h_max - overlap_h_min < 0:
+        overlap_d_min, overlap_d_max = max(self.d_min, other.d_min), min(self.d_max, other.d_max)
+        if overlap_d_max - overlap_d_min < 0:
             return False
 
         # Create shared background for both horizons
@@ -489,14 +491,16 @@ class ExtractionMixin:
 
                 # Change `self` inplace
                 self.from_matrix(background, i_min=shared_i_min, x_min=shared_x_min,
-                                 h_min=min(self.d_min, other.d_min), h_max=max(self.d_max, other.d_max), length=length)
+                                 d_min=min(self.d_min, other.d_min),
+                                 d_max=max(self.d_max, other.d_max), length=length)
                 # self.reset_storage('points')
                 merged = True
             else:
                 # Return a new instance of horizon
                 merged = type(self)(storage=background, field=self.field, name=self.name,
                                     i_min=shared_i_min, x_min=shared_x_min,
-                                    h_min=min(self.d_min, other.d_min), h_max=max(self.d_max, other.d_max),
+                                    d_min=min(self.d_min, other.d_min),
+                                    d_max=max(self.d_max, other.d_max),
                                     length=length)
             return merged
         return False
