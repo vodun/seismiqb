@@ -281,7 +281,7 @@ class GeometrySEGY(Geometry):
             If bool, then whether to display progress bar over the file sweep.
             If str, then type of progress bar to display: `'t'` for textual, `'n'` for widget.
         """
-        # pylint: disable=too-many-statements, redefined-argument-from-local
+        # pylint: disable=too-many-statements
         # Prepare chunks
         n = self.lengths[0]
         n_chunks, last_chunk_size = divmod(n, chunk_size)
@@ -308,11 +308,11 @@ class GeometrySEGY(Geometry):
 
         # Read data in chunks, compute stats for each of them, store into buffer
         description = f'Collecting stats for `{self.name}`'
-        with Notifier(pbar, total=n, desc=description, ncols=110) as pbar:
+        with Notifier(pbar, total=n, desc=description, ncols=110) as progress_bar:
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 def callback(future):
                     chunk_size = future.result()
-                    pbar.update(chunk_size)
+                    progress_bar.update(chunk_size)
 
                 for chunk_i, (start, end) in enumerate(zip(chunk_starts, chunk_ends)):
                     future = executor.submit(self.collect_stats_chunk,
@@ -414,9 +414,13 @@ class GeometrySEGY(Geometry):
             buffer = buffer.reshape((len(indices), -1))
 
         if -1 in indices:
-            mask = indices > 0
+            # Create new buffer to avoid copy on advanced indexing
+            mask = indices >= 0
+            buffer_ = np.empty_like(buffer)[:mask.sum()]
+            self.loader.load_traces(indices=indices[mask], limits=limits, buffer=buffer_)
+
+            buffer[mask] = buffer_
             buffer[~mask] = self.FILL_VALUE
-            self.loader.load_traces(indices=indices[mask], limits=limits, buffer=buffer[mask])
         else:
             self.loader.load_traces(indices=indices, limits=limits, buffer=buffer)
         return buffer

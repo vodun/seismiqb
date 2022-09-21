@@ -250,7 +250,6 @@ class ExportMixin:
             If bool, then whether to display progress bar over the file sweep.
             If str, then type of progress bar to display: `'t'` for textual, `'n'` for widget.
         """
-        # pylint: disable=redefined-argument-from-local
         # Parse parameters
         n_traces = len(spec.ilines) * len(spec.xlines)
         n_samples = len(spec.samples)
@@ -295,11 +294,11 @@ class ExportMixin:
         chunk_starts = np.cumsum([0] + chunk_sizes[:-1])
 
         # Write trace headers and values in chunks in multiple threads
-        with Notifier(pbar, total=len(spec.ilines), desc='Array to SEG-Y') as pbar:
+        with Notifier(pbar, total=len(spec.ilines), desc='Array to SEG-Y') as progress_bar:
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 def callback(future):
                     chunk_size = future.result()
-                    pbar.update(chunk_size)
+                    progress_bar.update(chunk_size)
 
                 for start, chunk_size_ in zip(chunk_starts, chunk_sizes):
                     future = executor.submit(write_chunk, path=path,

@@ -10,13 +10,14 @@ from .benchmark_mixin import BenchmarkMixin
 from .conversion_mixin import ConversionMixin
 from .export_mixin import ExportMixin
 from .meta_mixin import MetaMixin
+from .metric_mixin import MetricMixin
 
 from ..utils import CacheMixin, TransformsMixin, select_printer, transformable
 from ..plotters import plot
 
 
 
-class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMixin, TransformsMixin):
+class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMixin, MetricMixin, TransformsMixin):
     """ Class to infer information about seismic cube in various formats and provide format agnostic interface to them.
 
     During the SEG-Y processing, a number of statistics are computed. They are saved next to the cube under the

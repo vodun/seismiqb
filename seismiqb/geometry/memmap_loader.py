@@ -123,7 +123,6 @@ class MemmapLoader(SegyioLoader):
         reconstruct_tsf : bool
             Whether to reconstruct `TRACE_SEQUENCE_FILE` manually.
         """
-        #pylint: disable=redefined-argument-from-local
         _ = kwargs
         if reconstruct_tsf and 'TRACE_SEQUENCE_FILE' in headers:
             headers = list(headers)
@@ -144,14 +143,14 @@ class MemmapLoader(SegyioLoader):
         # Iterate over chunks
         buffer = np.empty((self.n_traces, len(headers)), dtype=np.int32)
 
-        with Notifier(pbar, total=self.n_traces) as pbar:
+        with Notifier(pbar, total=self.n_traces) as progress_bar:
             with ProcessPoolExecutor(max_workers=max_workers) as executor:
 
                 def callback(future, start):
                     chunk_headers = future.result()
                     chunk_size = len(chunk_headers)
                     buffer[start : start + chunk_size] = chunk_headers
-                    pbar.update(chunk_size)
+                    progress_bar.update(chunk_size)
 
                 for start, chunk_size_ in zip(chunk_starts, chunk_sizes):
                     future = executor.submit(read_chunk, path=self.path,
@@ -316,7 +315,7 @@ class MemmapLoader(SegyioLoader):
         overwrite : bool
             Whether to overwrite existing `path` or raise an exception.
         """
-        #pylint: disable=redefined-builtin, redefined-argument-from-local
+        #pylint: disable=redefined-builtin
         # Default path
         if path is None:
             dirname = os.path.dirname(self.path)
@@ -364,11 +363,11 @@ class MemmapLoader(SegyioLoader):
         chunk_starts = np.cumsum([0] + chunk_sizes[:-1])
 
         # Iterate over chunks
-        with Notifier(pbar, total=self.n_traces) as pbar:
+        with Notifier(pbar, total=self.n_traces) as progress_bar:
             with ProcessPoolExecutor(max_workers=max_workers) as executor:
                 def callback(future):
                     chunk_size = future.result()
-                    pbar.update(chunk_size)
+                    progress_bar.update(chunk_size)
 
                 for start, chunk_size_ in zip(chunk_starts, chunk_sizes):
                     future = executor.submit(convert_chunk,

@@ -5,6 +5,7 @@ import psutil
 import numpy as np
 
 
+
 class BenchmarkMixin:
     """ Methods for testing and benchmarking the geometry. """
     def equal(self, other, return_explanation=False):

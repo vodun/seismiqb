@@ -8,7 +8,7 @@ from .batch import SeismicCropBatch
 from .field import Field, SyntheticField
 from .geometry import Geometry, array_to_segy
 from .labels import Horizon, Fault, skeletonize
-from .metrics import HorizonMetrics, GeometryMetrics, FaultsMetrics, FaciesMetrics
+from .metrics import HorizonMetrics, FaultsMetrics, FaciesMetrics
 from .samplers import GeometrySampler, HorizonSampler, FaultSampler, ConstantSampler, SeismicSampler
 from .grids import  BaseGrid, RegularGrid, ExtensionGrid, LocationsPotentialContainer
 
