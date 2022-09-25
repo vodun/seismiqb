@@ -144,13 +144,14 @@ class ConversionMixin:
         quantization_parameters : dict, optional
             If provided, then used as parameters for quantization.
             Otherwise, parameters from the call to :meth:`compute_quantization_parameters` are used.
-        pbar : bool
-            Whether to show progress bar during conversion.
+        pbar : bool, str
+            If bool, then whether to display progress bar.
+            If str, then type of progress bar to display: `'t'` for textual, `'n'` for widget.
         store_meta : bool
             Whether to store meta in the same file.
         dataset_kwargs : dict, optional
             Parameters, passed directly to the dataset constructor.
-            If not provided, we use the blosc compression with `lz4hc` compressor, clevel 6 with no bit shuffle.
+            If not provided, we use the blosc compression with `lz4hc` compressor, clevel 6 and no bit shuffle.
         kwargs : dict
             Other parameters, passed directly to the file constructor.
         """
@@ -191,7 +192,7 @@ class ConversionMixin:
         with constructor(path, mode=mode, **kwargs) as file:
             total = sum((letter in projections) * self.shape[idx]
                         for idx, letter in enumerate('ixd'))
-            progress_bar = Notifier(pbar, total=total)
+            progress_bar = Notifier(pbar, total=total, ncols=110)
             name = os.path.basename(path)
 
             for p in projections:
@@ -228,3 +229,44 @@ class ConversionMixin:
 
         from .base import Geometry
         return Geometry.new(path)
+
+    def repack_segy(self, path=None, format=8, transform=None, chunk_size=25_000, max_workers=4,
+                     pbar='t', overwrite=True):
+        """ Repack SEG-Y file with a different `format`: dtype of data values.
+        Keeps the same binary header (except for the 3225 byte, which stores the format).
+        Keeps the same header values for each trace: essentially, only the values of each trace are changed.
+
+        The most common scenario of this function usage is to convert float32 SEG-Y into int8 one:
+        the latter is a lot faster and takes ~4x less disk space at the cost of some information loss.
+
+        Parameters
+        ----------
+        path : str, optional
+            Path to save file to. If not provided, we use the path of the current cube with an added postfix.
+        format : int
+            Target SEG-Y format.
+            Refer to :attr:`~.MemmapLoader.SEGY_FORMAT_TO_TRACE_DATA_DTYPE` for
+            list of available formats and their data value dtype.
+        transform : callable, optional
+            Callable to transform data from the current file to the ones, saved in `path`.
+            Must return the same dtype, as specified by `format`.
+        chunk_size : int
+            Maximum amount of traces in each chunk.
+        max_workers : int or None
+            Maximum number of parallel processes to spawn. If None, then the number of CPU cores is used.
+        pbar : bool, str
+            If bool, then whether to display progress bar.
+            If str, then type of progress bar to display: `'t'` for textual, `'n'` for widget.
+        overwrite : bool
+            Whether to overwrite existing `path` or raise an exception.
+        """
+        if format == 8 and transform is None:
+            transform = self.compute_quantization_parameters()['transform']
+
+        path = self.loader.convert(path=path, format=format, transform=transform,
+                                   chunk_size=chunk_size, max_workers=max_workers, pbar=pbar, overwrite=overwrite)
+
+        meta_path = path + '_meta'
+        if overwrite and os.path.exists(meta_path):
+            os.remove(meta_path)
+        return path

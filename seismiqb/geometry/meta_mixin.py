@@ -130,6 +130,15 @@ class MetaMixin:
                 for i, v in enumerate(value):
                     self.dump_meta_item(path=meta_path, key=key+str(i), value=v)
 
+            elif isinstance(value, dict):
+                # Dictionary: store keys / values separately
+                # TODO: works only with numeric keys and values
+                dst[key + 'is_dict'] = 1
+
+                key_, value_ = next(iter(value.items()))
+                dst[key + 'keys'] = np.fromiter(value.keys(), dtype=np.array(key_).dtype)
+                dst[key + 'values'] = np.fromiter(value.keys(), dtype=np.array(value_).dtype)
+
             elif isinstance(value, pd.DataFrame):
                 # Dataframe: store column/index names and values separately
                 # TODO: would not work with arbitrary index. Can be improved by dumping index values directly
@@ -143,9 +152,12 @@ class MetaMixin:
                 else:
                     values_ = value.values
                 self.dump_meta_item(path=meta_path, key=key+'values', value=values_)
+
             elif isinstance(value, np.ndarray):
+                # Numpy array with numerical dtype: compress for efficiency
                 dst.create_dataset(key.strip('/'), data=value,
                                    **hdf5plugin.Blosc(cname='lz4hc', clevel=6, shuffle=0))
+
             else:
                 dst[key] = value
 
@@ -189,6 +201,13 @@ class MetaMixin:
 
                     types = {0: tuple, 1: list, 2: np.array}
                     value = types[type_](value)
+
+                elif key + 'is_dict' in src:
+                    keys = src[key + 'keys'][()]
+                    values = src[key + 'values'][()]
+
+                    value = dict(zip(keys, values))
+
                 elif key + 'is_dataframe' in src:
                     values = src[key + 'values'][()]
                     columns = src.attrs[key + 'columns']
