@@ -8,7 +8,7 @@ import pandas as pd
 from batchflow import DatasetIndex, Dataset, Pipeline
 
 from .field import Field, SyntheticField
-from .geometry import SeismicGeometry
+from .geometry import Geometry
 from .batch import SeismicCropBatch
 from .utils import AugmentedDict
 from .plotters import plot
@@ -37,7 +37,7 @@ class SeismicDataset(Dataset):
             raise TypeError('Positional args are not allowed for `SeismicDataset` initialization!')
 
         # Convert `index` to a dictionary
-        if isinstance(index, (str, SeismicGeometry, Field, SyntheticField)):
+        if isinstance(index, (str, Geometry, Field, SyntheticField)):
             index = [index]
         if isinstance(index, (tuple, list, DatasetIndex)):
             index = {item : None for item in index}
@@ -59,7 +59,7 @@ class SeismicDataset(Dataset):
 
         dataset_index = DatasetIndex(list(self.fields.keys()))
         super().__init__(dataset_index, batch_class=batch_class)
-
+        self._names = None
 
     @classmethod
     def from_horizon(cls, horizon):
@@ -91,23 +91,32 @@ class SeismicDataset(Dataset):
         raise AttributeError(f'Unknown attribute {key}')
 
     @property
-    def geometries(self):
-        """ Back-compatibility and conveniency. """
-        return AugmentedDict({idx : getattr(field, 'geometry') for idx, field in self.fields.items()
-                              if isinstance(field, Field)})
+    def names(self):
+        """ 2D index of available fields and labels. """
+        if self._names is None:
+            names = {}
+            for i, (field_name, field_labels) in enumerate(self.labels.items()):
+                for j, label in enumerate(field_labels):
+                    names[(i, j)] = field_name, label.short_name
+            self._names = names
+        return self._names
+
+    def to_names(self, id_array):
+        """ Convert the first two columns of sampled locations into field and label string names. """
+        return np.array([self.names[tuple(ids)] for ids in id_array])
 
 
     def gen_batch(self, batch_size=None, shuffle=False, n_iters=None, n_epochs=None, drop_last=False, **kwargs):
-        """ Remove `n_epochs`, `shuffle` and `drop_last` from passed arguments.
+        """ Remove `n_epochs`  and `drop_last` from passed arguments.
         Set default value `batch_size` to the size of current dataset, removing the need to
         pass it to `next_batch` and `run` methods.
         """
-        if (n_epochs is not None and n_epochs != 1) or shuffle or drop_last:
+        if (n_epochs is not None and n_epochs != 1) or drop_last:
             raise TypeError(f'`SeismicCubeset` does not work with `n_epochs`, `shuffle` or `drop_last`!'
                             f'`{n_epochs}`, `{shuffle}`, `{drop_last}`')
 
         batch_size = batch_size or len(self)
-        return super().gen_batch(batch_size, n_iters=n_iters, **kwargs)
+        return super().gen_batch(batch_size, n_iters=n_iters, shuffle=shuffle, **kwargs)
 
 
     # Default pipeline and batch for fast testing / introspection
@@ -163,12 +172,13 @@ class SeismicDataset(Dataset):
         components = ('images', 'masks') if getattr(self, src_labels)[idx] else ('images',)
         cube_name = self.indices[idx]
         geometry = self.geometries[cube_name]
-        crop_shape = np.array(geometry.cube_shape)
+        crop_shape = np.array(geometry.shape)
 
         axis = geometry.parse_axis(axis)
         crop_shape[axis] = 1
 
         location = np.zeros((1, 9), dtype=np.int32)
+        location[0, 2] = axis
         location[0, axis + 3] = loc
         location[0, axis + 6] = loc
         location[0, [6, 7, 8]] += crop_shape
@@ -204,7 +214,7 @@ class SeismicDataset(Dataset):
 
         # Plotting defaults
         header = geometry.axis_names[axis]
-        total = geometry.cube_shape[axis]
+        total = geometry.shape[axis]
 
         if axis in [0, 1]:
             xlabel = geometry.index_headers[1 - axis]
@@ -215,7 +225,7 @@ class SeismicDataset(Dataset):
 
         kwargs = {
             'cmap': ['Greys_r', 'darkorange'],
-            'title': f'Data slice on cube `{geometry.displayed_name}`\n {header} {loc} out of {total}',
+            'title': f'Data slice on cube `{geometry.short_name}`\n {header} {loc} out of {total}',
             'xlabel': xlabel,
             'ylabel': ylabel,
             'extent': (xmin, xmax, ymin, ymax),

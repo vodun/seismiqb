@@ -9,25 +9,24 @@ from ...utils import make_slices
 class FaultVisualizationMixin(VisualizationMixin):
     """ Mixin to visualize fault. """
     def __repr__(self):
-        return f"""<Fault `{self.name}` for `{self.field.displayed_name}` at {hex(id(self))}>"""
+        return f"""<Fault `{self.name}` for `{self.field.short_name}` at {hex(id(self))}>"""
 
-    def show_slide(self, loc, **kwargs):
+    def show_slide(self, index, **kwargs):
         """ Show slides from seismic with fault. """
         defaults = {'cmap': ['Greys_r', 'red'], 'width': 5}
         kwargs = {**defaults, **kwargs}
-        return super().show_slide(loc, **kwargs)
+        return super().show_slide(index, **kwargs)
 
-    def compute_auto_zoom(self, loc, axis, zoom_margin):
+    def compute_auto_zoom(self, index, axis, zoom_margin=20):
         """ Get center slice of the fault. """
-        _ = loc
-        return [
-                slice(max(0, self.bbox[i][0]-zoom_margin), min(self.bbox[i][1]+zoom_margin, self.field.shape[i]))
-                for i in range(3) if i != axis
-        ]
+        _ = index
+        return tuple(slice(max(self.bbox[i][0]-zoom_margin, 0),
+                           min(self.bbox[i][1]+zoom_margin, self.field.shape[i]))
+                     for i in range(3) if i != axis)
 
     def show(self, axis=0, zoom='auto', **kwargs):
         """ Show center of fault for different axes. """
-        return self.show_slide(loc=int(np.mean(self.bbox[axis])), zoom=zoom, axis=axis, **kwargs)
+        return self.show_slide(index=int(np.mean(self.bbox[axis])), zoom=zoom, axis=axis, **kwargs)
 
     def show_3d(self, sticks_step=None, stick_nodes_step=None, z_ratio=1., colors='green',
                 zoom=None, margin=20, sticks=False, **kwargs):
@@ -60,7 +59,7 @@ class FaultVisualizationMixin(VisualizationMixin):
         kwargs : dict
             Other arguments of plot creation.
         """
-        title = f'Fault `{self.name}` on `{self.field.displayed_name}`'
+        title = f'Fault `{self.name}` on `{self.field.short_name}`'
         aspect_ratio = (self.i_length / self.x_length, 1, z_ratio)
         axis_labels = (self.field.index_headers[0], self.field.index_headers[1], 'DEPTH')
 
@@ -78,7 +77,7 @@ class FaultVisualizationMixin(VisualizationMixin):
     def make_triangulation(self, slices=None, sticks_step=None, stick_nodes_step=None, sticks=False, **kwargs):
         """ Return triangulation of the fault. It will created if needed. """
         if sticks_step is not None or stick_nodes_step is not None:
-            fake_fault = self._class_({'points': self.points}, field=self.field)
+            fake_fault = type(self)({'points': self.points}, field=self.field)
             fake_fault.points_to_sticks(slices, sticks_step or 10, stick_nodes_step or 10)
             return fake_fault.make_triangulation(slices, sticks=sticks, **kwargs)
 

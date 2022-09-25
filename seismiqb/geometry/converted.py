@@ -1,161 +1,314 @@
-""" HDF5 geometry. """
-import os
-import numpy as np
+""" Converted geometry: optimized storage. """
 
-from .base import SeismicGeometry
+import numpy as np
+import h5py
+
+from .base import Geometry
 from ..utils import lru_cache
 
 
-class SeismicGeometryConverted(SeismicGeometry):
-    """ Contains common methods and logic for converted formats of seismic storages:
-    currently, `HDF5`, `BLOSC` and their quantized versions.
 
-    Underlying data storage must contain cube projections under the `cube_i`, `cube_x` and `cube_h` keys,
-    which allow indexing with square brackets to get actual data: for example, to get the 100-iline slice::
-        slide = hdf5_file['cube_i'][100, :, :]
+class GeometryHDF5(Geometry):
+    """ Class to work with cubes in HDF5 format.
+    We expect a certain structure to the file: mostly, this file should be created by :meth:`ConversionMixin.convert`.
+
+    The file should contain data in one or more projections. When the data is requested, we choose the fastest one
+    to actually perform the data reading step.
     Some of the projections may be missing — in this case, other (possibly, slower) projections are used to load data.
-    Projections must be stored in the `axis_to_cube` attribute
 
-    The storage itself contains only data; attributes, stats and relevant geological info are stored in the `.meta`.
+    Additional meta attributes like coordinates, SEG-Y parameters, etc, can be also in the same file.
 
-    This class provides API for loading data: `load_slide`, `load_crop` and `__getitem__` methods.
+    Refer to the documentation of the base class :class:`Geometry` for more information about attributes and parameters.
     """
-    #pylint: disable=attribute-defined-outside-init
-    AXIS_TO_NAME = {0: 'cube_i', 1: 'cube_x', 2: 'cube_h'}
-    AXIS_TO_ORDER = {0: [0, 1, 2], 1: [1, 2, 0], 2: [2, 0, 1]}
-    AXIS_TO_TRANSPOSE = {0: [0, 1, 2], 1: [2, 0, 1], 2: [1, 2, 0]}
+    FILE_OPENER = h5py.File
 
-    def process(self):
-        """ Create and process file handler. Must be implemented in the child classes. """
+    def init(self, path, mode='r', **kwargs):
+        """ Init for HDF5 geometry. The sequence of actions:
+            - open file handler
+            - check available projections in the file
+            - add attributes from file: meta and info about shapes/dtypes.
+        """
+        # Open the file
+        self.file = self.FILE_OPENER(path, mode)
 
+        # Check available projections
+        self.available_axis = [axis for axis, name in self.PROJECTION_NAMES.items()
+                               if name in self.file]
+        self.available_names = [self.PROJECTION_NAMES[axis] for axis in self.available_axis]
+
+        # Save projection handlers to instance
+        self.axis_to_projection = {}
+        for axis in self.available_axis:
+            name = self.PROJECTION_NAMES[axis]
+            projection = self.file[name]
+
+            self.axis_to_projection[axis] = projection
+
+        # Parse attributes from meta / set defaults
+        self.add_attributes(**kwargs)
 
     def add_attributes(self, **kwargs):
-        """ If meta is available, retrieves values from it. Otherwise, uses defaults.
-        Infers shape and dtype from the data itself.
-        No passing through data whatsoever.
-        """
-        self.structured = True
-        self.index_headers = self.INDEX_POST
+        """ Add attributes from the file. """
+        # Innate attributes of converted geometry
+        self.index_headers = ('INLINE_3D', 'CROSSLINE_3D')
+        self.index_length = 2
+        self.converted = True
 
-        if os.path.exists(self.path_meta):
-            self.load_meta()
+        # Get from meta / set defaults
+        if self.meta_exists:
+            self.load_meta(keys=self.PRESERVED + self.PRESERVED_LAZY)
             self.has_stats = True
         else:
-            self.set_default_attributes(**kwargs)
+            self.set_default_index_attributes(**kwargs)
             self.has_stats = False
 
-        # Parse attributes from file itself
+        # Infer attributes from the available projections; validate others
         axis = self.available_axis[0]
-        cube = self.axis_to_cube[axis]
+        projection = self.axis_to_projection[axis]
 
-        self.cube_shape = np.array(cube.shape)[self.AXIS_TO_TRANSPOSE[axis]]
-        self.lens = self.cube_shape[:2]
-        self.depth = self.cube_shape[-1]
-        self.dtype = cube.dtype
-        self.quantized = cube.dtype == np.int8
+        shape = np.array(projection.shape)[self.FROM_PROJECTION_TRANSPOSITION[axis]]
+        if hasattr(self, 'shape'):
+            if (getattr(self, 'shape') != shape).any():
+                raise ValueError('Projection shape is not the same as shape, loaded from meta!')
+        else:
+            self.shape = shape
+            *self.lengths, self.depth = shape
 
-    def set_default_attributes(self, **kwargs):
-        """ Set values of attributes to defaults. """
+        self.dtype = projection.dtype
+        self.quantized = (projection.dtype == np.int8)
+
+    def set_default_index_attributes(self, **kwargs):
+        """ Set default values for seismic attributes. """
         self.delay, self.sample_rate = 0.0, 1.0
-
         for key, value in kwargs.items():
             setattr(self, key, value)
 
 
-    # Methods to load actual data from underlying storage
-    def get_optimal_axis(self, shape):
+    # General utilities
+    def get_optimal_axis(self, locations=None, shape=None):
         """ Choose the fastest axis from available projections, based on shape. """
+        shape = shape or self.locations_to_shape(locations)
+
         for axis in np.argsort(shape):
             if axis in self.available_axis:
                 return axis
         return None
 
-    def load_crop(self, locations, axis=None, **kwargs):
-        """ Load 3D crop from the cube.
-        Automatically chooses the fastest projection to use.
+
+    # Load data: 2D
+    def load_slide(self, index, axis=0, limits=None, buffer=None, safe=None, use_slide_cache=None):
+        """ Load one slide of data along specified axis.
+        Uses either public or private API of `h5py`: the latter reads data directly into preallocated buffer.
+        Also allows to use slide cache to speed up the loading process.
 
         Parameters
         ----------
-        locations : sequence of slices
-            Location to load: slices along the first index, the second, and depth.
-        axis : str or int
-            Identificator of the axis to use to load data.
-            Can be `iline`, `xline`, `height`, `depth`, `i`, `x`, `h`, 0, 1, 2.
+        index : int, str
+            If int, then interpreted as the ordinal along the specified axis.
+            If `'random'`, then we generate random index along the axis.
+            If string of the `'#XXX'` format, then we interpret it as the exact indexing header value.
+        axis : int
+            Axis of the slide.
+        limits : sequence of ints, slice, optional
+            Slice of the data along the depth (last) axis.
+        buffer : np.ndarray, optional
+            Buffer to read the data into. If possible, avoids copies.
+        safe : bool or None
+            Whether to force usage of public (safe) or private API of data loading.
+            If None, then uses instance-wide value (default False).
+        use_slide_cache : bool or None
+            Whether to use cache for lines.
+            If None, then uses instance-wide value (default False).
+            If bool, forces that behavior.
         """
-        locations, shape, _ = self.process_key(locations)
-
-        # Choose axis
-        if axis is None:
-            axis = self.get_optimal_axis(shape)
-        else:
-            axis = self.parse_axis(axis)
-            if axis not in self.available_axis:
-                raise ValueError(f'Axis {axis} is not available in the {self.displayed_name}!')
-
-        # Retrieve cube handler and ordering for axis
-        cube = self.axis_to_cube[axis]
-        buffer_shape = np.array(shape)[self.AXIS_TO_ORDER[axis]]
-        transpose = self.AXIS_TO_TRANSPOSE[axis]
-
-        # Create memory buffer and load data into it
-        buffer = np.empty(buffer_shape, dtype=self.dtype)
-        method = getattr(self, f'_load_{axis}')
-        crop = method(buffer, cube, *locations, **kwargs)
-
-        # Set correct dtype and axis ordering
-        if self.dtype == np.int8:
-            crop = crop.astype(np.float32)
-        return crop.transpose(transpose)
-
-    def _load_0(self, buffer, cube, ilines, xlines, heights, **kwargs):
-        """ Load data from iline projection. """
-        for i, iline in enumerate(range(ilines.start, ilines.stop)):
-            buffer[i] = self._cached_load(cube, iline, **kwargs)[xlines, :][:, heights]
-        return buffer
-
-    def _load_1(self, buffer, cube, ilines, xlines, heights, **kwargs):
-        """ Load data from xline projection. """
-        for i, xline in enumerate(range(xlines.start, xlines.stop)):
-            buffer[i] = self._cached_load(cube, xline, **kwargs)[heights, :][:, ilines]
-        return buffer
-
-    def _load_2(self, buffer, cube, ilines, xlines, heights, **kwargs):
-        """ Load data from depth projection. """
-        for i, height in enumerate(range(heights.start, heights.stop)):
-            buffer[i] = self._cached_load(cube, height, **kwargs)[ilines, :][:, xlines]
-        return buffer
-
-    @lru_cache(128)
-    def _cached_load(self, cube, loc, **kwargs):
-        """ Load one slide of data from a supplied cube projection. Caches the result in a thread-safe manner. """
-        _ = kwargs
-        return cube[loc, :, :]
-
-    @lru_cache(128)
-    def _cached_construct(self, loc, axis,**kwargs):
-        """ Create one slide of data from other projections. """
-        _ = kwargs
-
-        locations = [slice(None) for _ in range(3)]
-        locations[axis] = slice(loc, loc + 1)
-        return self.load_crop(locations, **kwargs).squeeze()
-
-    def load_slide(self, loc, axis='iline', **kwargs):
-        """ Load desired slide along desired axis.
-        If the `axis` projection is available, loads directly from it.
-        Otherwise, creates the slide based on the fastest of other projections.
-        """
+        # Parse parameters
+        index = self.get_slide_index(index=index, axis=axis)
         axis = self.parse_axis(axis)
 
-        if axis in self.available_axis:
-            cube = self.axis_to_cube[axis]
-            slide = self._cached_load(cube, loc, **kwargs)
+        if limits is not None and axis==2:
+            raise ValueError('Providing `limits` with `axis=2` is meaningless!')
+
+        safe = safe if safe is not None else self.safe
+        use_slide_cache = use_slide_cache if use_slide_cache is not None else self.use_slide_cache
+
+        # Actual data loading
+        if use_slide_cache is False:
+            return self.load_slide_native(index=index, axis=axis, limits=limits, buffer=buffer, safe=safe)
+
+        slide = self.load_slide_cached(index=index, axis=axis, limits=limits)
+        if buffer is not None:
+            buffer[:] = slide
         else:
-            slide = self._cached_construct(loc, axis, **kwargs)
-
-        if axis == 1 and axis in self.available_axis:
-            slide = slide.T
-
-        if self.dtype == np.int8:
-            slide = slide.astype(np.float32)
+            buffer = slide
         return slide
+
+    def load_slide_native(self, index, axis=0, limits=None, buffer=None, safe=False):
+        """ Load slide with public or private API of `h5py`. """
+        if safe or buffer is None or buffer.dtype != self.dtype:
+            buffer = self.load_slide_native_safe(index=index, axis=axis, limits=limits, buffer=buffer)
+        else:
+            self.load_slide_native_unsafe(index=index, axis=axis, limits=limits, buffer=buffer)
+        return buffer
+
+    def load_slide_native_safe(self, index, axis=0, limits=None, buffer=None):
+        """ Load slide with public API of `h5py`. Requires an additional copy to put data into buffer. """
+        # Prepare locations
+        loading_axis = axis if axis in self.available_axis else self.available_axis[0]
+        to_projection_transposition, from_projection_transposition = self.compute_axis_transpositions(loading_axis)
+
+        locations = self.make_slide_locations(index=index, axis=axis)
+        locations = [locations[idx] for idx in to_projection_transposition]
+
+        if limits is not None:
+            locations[-1] = self.process_limits(limits)
+        locations = tuple(locations)
+
+        # Load data
+        slide = self.axis_to_projection[loading_axis][locations]
+        if self.quantized:
+            if buffer is None or buffer.dtype != slide.dtype:
+                slide = slide.astype(np.float32)
+
+        # Re-order and squeeze the requested axis
+        slide = slide.transpose(from_projection_transposition)
+        slide = slide.squeeze(axis)
+
+        # Write back to buffer
+        if buffer is not None:
+            buffer[:] = slide
+        else:
+            buffer = slide
+        return buffer
+
+    def load_slide_native_unsafe(self, index, axis=0, limits=None, buffer=None):
+        """ Load slide with private API of `h5py`. Reads data directly into buffer. """
+        # Prepare locations
+        loading_axis = axis if axis in self.available_axis else self.available_axis[0]
+        to_projection_transposition, from_projection_transposition = self.compute_axis_transpositions(loading_axis)
+
+        locations = self.make_slide_locations(index=index, axis=axis)
+        locations = [locations[idx] for idx in to_projection_transposition]
+
+        if limits is not None:
+            locations[-1] = self.process_limits(limits)
+        locations = tuple(locations)
+
+        # View buffer in projections ordering
+        buffer = np.expand_dims(buffer, axis)
+        buffer = buffer.transpose(to_projection_transposition)
+
+        # Load data
+        self.axis_to_projection[loading_axis].read_direct(buffer, locations)
+
+        # View buffer in original ordering
+        buffer = buffer.transpose(from_projection_transposition)
+        buffer = buffer.squeeze(axis)
+        return buffer
+
+    @lru_cache(128)
+    def load_slide_cached(self, index, axis=0, limits=None):
+        """ Cached version of :meth:`load_slide`. """
+        return self.load_slide_native_safe(index=index, axis=axis, limits=limits, buffer=None)
+
+
+    # Load data: 3D
+    def load_crop(self, locations, buffer=None, safe=None, use_slide_cache=None):
+        """ Load crop (3D subvolume) from the cube.
+        Uses either public or private API of `h5py`: the latter reads data directly into preallocated buffer.
+        Also allows to use slide cache to speed up the loading process.
+
+        Parameters
+        ----------
+        locations : sequence
+            A triplet of slices to specify the location of a subvolume.
+        buffer : np.ndarray, optional
+            Buffer to read the data into. If possible, avoids copies.
+        safe : bool
+            Whether to force usage of public (safe) or private API of data loading.
+        use_slide_cache : bool or None
+            Whether to use cache for lines.
+            If None, then uses instance-wide value (default False).
+            If bool, forces that behavior.
+        """
+        safe = safe if safe is not None else self.safe
+        use_slide_cache = use_slide_cache if use_slide_cache is not None else self.use_slide_cache
+
+        if use_slide_cache is False:
+            return self.load_crop_native(locations=locations, buffer=buffer, safe=safe)
+        return self.load_crop_cached(locations=locations, buffer=buffer)
+
+    def load_crop_native(self, locations, axis=None, buffer=None, safe=False):
+        """ Load crop with public or private API of `h5py`. """
+        axis = axis or self.get_optimal_axis(locations=locations)
+        if axis not in self.available_axis:
+            raise ValueError(f'Axis={axis} is not available!')
+
+        if safe or axis == 2 or buffer is None or buffer.dtype != self.dtype:
+            buffer = self.load_crop_native_safe(locations=locations, axis=axis, buffer=buffer)
+        else:
+            self.load_crop_native_unsafe(locations=locations, axis=axis, buffer=buffer)
+        return buffer
+
+    def load_crop_native_safe(self, locations, axis=None, buffer=None):
+        """ Load slide with public API of `h5py`. Requires an additional copy to put data into buffer. """
+        # Prepare locations
+        to_projection_transposition, from_projection_transposition = self.compute_axis_transpositions(axis)
+
+        locations = [locations[idx] for idx in to_projection_transposition]
+        locations = tuple(locations)
+
+        # Load data
+        crop = self.axis_to_projection[axis][locations]
+        if self.quantized:
+            if buffer is None or buffer.dtype != crop.dtype:
+                crop = crop.astype(np.float32)
+
+        # Re-order back from projections' ordering
+        crop = crop.transpose(from_projection_transposition)
+
+        # Write back to buffer
+        if buffer is not None:
+            buffer[:] = crop
+        else:
+            buffer = crop
+        return buffer
+
+    def load_crop_native_unsafe(self, locations, axis=None, buffer=None):
+        """ Load slide with private API of `h5py`. Reads data directly into buffer. """
+        # Prepare locations
+        to_projection_transposition, from_projection_transposition = self.compute_axis_transpositions(axis)
+        locations = [locations[idx] for idx in to_projection_transposition]
+        locations = tuple(locations)
+
+        # View buffer in projections ordering
+        buffer = buffer.transpose(to_projection_transposition)
+
+        # Load data
+        self.axis_to_projection[axis].read_direct(buffer, locations)
+
+        # View buffer in original ordering
+        buffer = buffer.transpose(from_projection_transposition)
+        return buffer
+
+    def load_crop_cached(self, locations, axis=None, buffer=None):
+        """ Cached version of :meth:`load_crop`. """
+        # Parse parameters
+        shape = self.locations_to_shape(locations)
+        axis = axis or self.get_optimal_axis(shape=shape)
+        to_projection_transposition, from_projection_transposition = self.compute_axis_transpositions(axis)
+
+        locations = [locations[idx] for idx in to_projection_transposition]
+        locations = tuple(locations)
+
+        # Prepare buffer
+        if buffer is None:
+            buffer = np.empty(shape, dtype=np.float32)
+        buffer = buffer.transpose(to_projection_transposition)
+
+        # Load data
+        for i, idx in enumerate(range(locations[0].start, locations[0].stop)):
+            buffer[i] = self.load_slide_cached(index=idx, axis=axis)[locations[1], locations[2]]
+
+        # View buffer in original ordering
+        buffer = buffer.transpose(from_projection_transposition)
+        return buffer

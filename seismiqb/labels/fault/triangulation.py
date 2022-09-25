@@ -70,6 +70,8 @@ def sticks_to_simplices(sticks, return_indices=False):
         numpy.ndarray of length N where N is the number of simplices. Each item is a sequence of coordinates of each
         vertex (if `return_indices=False`) or indices of nodes in initial flatten array.
     """
+    if len(sticks) == 0:
+        return np.zeros((0, 3)), np.zeros((0, 3))
     simplices = []
     nodes = np.concatenate(sticks)
 

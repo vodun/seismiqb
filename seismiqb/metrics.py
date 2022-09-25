@@ -1,9 +1,7 @@
 """ Metrics for seismic objects: cubes and horizons. """
-from copy import copy
 from textwrap import dedent
 from itertools import zip_longest
 
-from tqdm.auto import tqdm
 
 import numpy as np
 try:
@@ -13,7 +11,6 @@ except ImportError:
     cp = np
     CUPY_AVAILABLE = False
 
-import cv2
 import pandas as pd
 
 from batchflow.notifier import Notifier
@@ -21,15 +18,14 @@ from batchflow.notifier import Notifier
 from .labels import Horizon
 from .utils import Accumulator, to_list
 from .functional import to_device, from_device
-from .functional import correlation, crosscorrelation, btch, kl, js, hellinger, tv, hilbert
-from .functional import smooth_out, digitize, gridify, perturb, histo_reduce
+from .functional import correlation, crosscorrelation, hilbert, perturb
 from .plotters import plot
 
 
 
 class BaseMetrics:
     """ Base class for seismic metrics.
-    Child classes have to implement access to `data`, `probs`, `bad_traces` attributes.
+    Child classes have to implement access to `data` and `bad_traces` attributes.
     """
     # pylint: disable=attribute-defined-outside-init, blacklisted-name
     PLOT_DEFAULTS = {
@@ -442,188 +438,6 @@ class BaseMetrics:
         return metric, plot_config
 
 
-    def local_btch(self, kernel_size=3, normalize=False, agg='mean', amortize=False,
-                   device='cpu', pbar=None, **kwargs):
-        """ Compute Bhattacharyya divergence in a local fashion. """
-        metric = self.compute_local(function=btch, data=self.probs, bad_traces=self.bad_traces,
-                                    kernel_size=kernel_size, normalize=normalize, agg=agg, amortize=amortize,
-                                    device=device, pbar=pbar)
-
-        title, plot_defaults = self.get_plot_defaults()
-        title = f'Local Bhattacharyya divergence, k={kernel_size}, with `{agg}` aggregation\nfor {title}'
-        plot_config = {
-            **plot_defaults,
-            'title': title,
-            'vmin': 0.0, 'vmax': 1.0,
-            **kwargs
-        }
-        return metric, plot_config
-
-    def support_btch(self, supports=100, safe_strip=0, carcass_mode=False, normalize=False, agg='mean', amortize=False,
-                     device='cpu', pbar=None, **kwargs):
-        """ Compute Bhattacharyya divergence against reference traces. """
-        metric = self.compute_support(function=btch, data=self.probs, bad_traces=self.bad_traces,
-                                      supports=supports, safe_strip=safe_strip, carcass_mode=carcass_mode,
-                                      normalize=normalize, agg=agg, amortize=amortize, device=device, pbar=pbar)
-
-        title, plot_defaults = self.get_plot_defaults()
-        n_supports = supports if isinstance(supports, int) else len(supports)
-        title = f'Support Bhattacharyya divergence with {n_supports} supports with `{agg}` aggregation\nfor {title}'
-        plot_config = {
-            **plot_defaults,
-            'title': title,
-            'vmin': 0.0, 'vmax': 1.0,
-            **kwargs
-        }
-        return metric, plot_config
-
-
-    def local_kl(self, kernel_size=3, normalize=False, agg='mean', amortize=False,
-                 device='cpu', pbar=None, **kwargs):
-        """ Compute Kullback-Leibler divergence in a local fashion. """
-        metric = self.compute_local(function=kl, data=self.probs, bad_traces=self.bad_traces,
-                                    kernel_size=kernel_size, normalize=normalize, agg=agg, amortize=amortize,
-                                    device=device, pbar=pbar)
-
-        title, plot_defaults = self.get_plot_defaults()
-        title = f'Local KL divergence, k={kernel_size}, with `{agg}` aggregation\nfor {title}'
-        plot_config = {
-            **plot_defaults,
-            'title': title,
-            'vmin': None, 'vmax': None,
-            **kwargs
-        }
-        return metric, plot_config
-
-    def support_kl(self, supports=100, safe_strip=0, carcass_mode=False, normalize=False, agg='mean', amortize=False,
-                   device='cpu', pbar=None, **kwargs):
-        """ Compute Kullback-Leibler divergence against reference traces. """
-        metric = self.compute_support(function=kl, data=self.probs, bad_traces=self.bad_traces,
-                                      supports=supports, safe_strip=safe_strip, carcass_mode=carcass_mode,
-                                      normalize=normalize, agg=agg, amortize=amortize,
-                                      device=device, pbar=pbar)
-
-        title, plot_defaults = self.get_plot_defaults()
-        n_supports = supports if isinstance(supports, int) else len(supports)
-        title = f'Support KL divergence with {n_supports} supports with `{agg}` aggregation\nfor {title}'
-        plot_config = {
-            **plot_defaults,
-            'title': title,
-            'vmin': None, 'vmax': None,
-            **kwargs
-        }
-        return metric, plot_config
-
-
-    def local_js(self, kernel_size=3, normalize=False, agg='mean', amortize=False, device='cpu', pbar=None, **kwargs):
-        """ Compute Jensen-Shannon divergence in a local fashion. """
-        metric = self.compute_local(function=js, data=self.probs, bad_traces=self.bad_traces,
-                                    kernel_size=kernel_size, normalize=normalize, agg=agg, amortize=amortize,
-                                    device=device, pbar=pbar)
-
-        title, plot_defaults = self.get_plot_defaults()
-        title = f'Local JS divergence, k={kernel_size}, with `{agg}` aggregation\nfor {title}'
-        plot_config = {
-            **plot_defaults,
-            'title': title,
-            'vmin': None, 'vmax': None,
-            **kwargs
-        }
-        return metric, plot_config
-
-    def support_js(self, supports=100, safe_strip=0, carcass_mode=False, normalize=False, agg='mean', amortize=False,
-                   device='cpu', pbar=None, **kwargs):
-        """ Compute Jensen-Shannon divergence against reference traces. """
-        metric = self.compute_support(function=js, data=self.probs, bad_traces=self.bad_traces,
-                                      supports=supports, safe_strip=safe_strip, carcass_mode=carcass_mode,
-                                      normalize=normalize, agg=agg, amortize=amortize,
-                                      device=device, pbar=pbar)
-
-        title, plot_defaults = self.get_plot_defaults()
-        n_supports = supports if isinstance(supports, int) else len(supports)
-        title = f'Support JS divergence with {n_supports} supports with `{agg}` aggregation\nfor {title}'
-        plot_config = {
-            **plot_defaults,
-            'title': title,
-            'vmin': None, 'vmax': None,
-            **kwargs
-        }
-        return metric, plot_config
-
-
-    def local_hellinger(self, kernel_size=3, normalize=False, agg='mean', amortize=False,
-                        device='cpu', pbar=None, **kwargs):
-        """ Compute Hellinger distance in a local fashion. """
-        metric = self.compute_local(function=hellinger, data=self.probs, bad_traces=self.bad_traces,
-                                    kernel_size=kernel_size, normalize=normalize, agg=agg, amortize=amortize,
-                                    device=device, pbar=pbar)
-
-        title, plot_defaults = self.get_plot_defaults()
-        title = f'Local Hellinger distance, k={kernel_size}, with `{agg}` aggregation\nfor {title}'
-        plot_config = {
-            **plot_defaults,
-            'title': title,
-            'vmin': None, 'vmax': None,
-            **kwargs
-        }
-        return metric, plot_config
-
-    def support_hellinger(self, supports=100, safe_strip=0, carcass_mode=False, normalize=False,
-                          agg='mean', amortize=False, device='cpu', pbar=None, **kwargs):
-        """ Compute Hellinger distance against reference traces. """
-        metric = self.compute_support(function=hellinger, data=self.probs, bad_traces=self.bad_traces,
-                                      supports=supports, safe_strip=safe_strip, carcass_mode=carcass_mode,
-                                      normalize=normalize, agg=agg, amortize=amortize,
-                                      device=device, pbar=pbar)
-
-        title, plot_defaults = self.get_plot_defaults()
-        n_supports = supports if isinstance(supports, int) else len(supports)
-        title = f'Support Hellinger distance with {n_supports} supports with `{agg}` aggregation\nfor {title}'
-        plot_config = {
-            **plot_defaults,
-            'title': title,
-            'vmin': None, 'vmax': None,
-            **kwargs
-        }
-        return metric, plot_config
-
-
-    def local_tv(self, kernel_size=3, normalize=False, agg='mean', amortize=False, device='cpu', pbar=None, **kwargs):
-        """ Compute total variation in a local fashion. """
-        metric = self.compute_local(function=tv, data=self.probs, bad_traces=self.bad_traces,
-                                    kernel_size=kernel_size, normalize=normalize, agg=agg, amortize=amortize,
-                                    device=device, pbar=pbar)
-
-        title, plot_defaults = self.get_plot_defaults()
-        title = f'Local total variation, k={kernel_size}, with `{agg}` aggregation\nfor {title}'
-        plot_config = {
-            **plot_defaults,
-            'title': title,
-            'vmin': None, 'vmax': None,
-            **kwargs
-        }
-        return metric, plot_config
-
-    def support_tv(self, supports=100, safe_strip=0, carcass_mode=False, normalize=False, agg='mean', amortize=False,
-                   device='cpu', pbar=None, **kwargs):
-        """ Compute total variation against reference traces. """
-        metric = self.compute_support(function=tv, data=self.probs, bad_traces=self.bad_traces,
-                                      supports=supports, safe_strip=safe_strip, carcass_mode=carcass_mode,
-                                      normalize=normalize, agg=agg, amortize=amortize,
-                                      device=device, pbar=pbar)
-
-        title, plot_defaults = self.get_plot_defaults()
-        n_supports = supports if isinstance(supports, int) else len(supports)
-        title = f'Support total variation with {n_supports} supports with `{agg}` aggregation\nfor {title}'
-        plot_config = {
-            **plot_defaults,
-            'title': title,
-            'vmin': None, 'vmax': None,
-            **kwargs
-        }
-        return metric, plot_config
-
-
 
 class HorizonMetrics(BaseMetrics):
     """ Evaluate metric(s) on horizon(s).
@@ -731,7 +545,7 @@ class HorizonMetrics(BaseMetrics):
 
     def get_plot_defaults(self):
         """ Axis labels and horizon/cube names in the title. """
-        title = f'horizon `{self.name}` on cube `{self.horizon.field.displayed_name}`'
+        title = f'horizon `{self.name}` on cube `{self.horizon.field.short_name}`'
         return title, {
             'xlabel': self.horizon.field.axis_names[0],
             'ylabel': self.horizon.field.axis_names[1],
@@ -747,18 +561,10 @@ class HorizonMetrics(BaseMetrics):
         return self._data
 
     @property
-    def probs(self):
-        """ Probabilistic interpretation of `data`. """
-        if self._probs is None:
-            hist_matrix = histo_reduce(self.data, self.horizon.field.bins)
-            self._probs = hist_matrix / np.sum(hist_matrix, axis=-1, keepdims=True) + self.EPS
-        return self._probs
-
-    @property
     def bad_traces(self):
         """ Traces to fill with `nan` values. """
         if self._bad_traces is None:
-            self._bad_traces = self.horizon.field.zero_traces.copy()
+            self._bad_traces = self.horizon.field.dead_traces_matrix.copy()
             self._bad_traces[self.horizon.full_matrix == Horizon.FILL_VALUE] = 1
         return self._bad_traces
 
@@ -782,7 +588,7 @@ class HorizonMetrics(BaseMetrics):
         clip : number
             Maximum size of allowed shifts
         window : int or None
-            Size of the data along the height axis to evaluate perturbed horizons.
+            Size of the data along the depth axis to evaluate perturbed horizons.
             Note that due to shifts, it must be smaller than the original data by atleast 2 * `clip` units.
         kernel_size, agg, device
             Parameters of individual metric evaluation
@@ -906,8 +712,8 @@ class HorizonMetrics(BaseMetrics):
 
         msg = f"""
         Comparing horizons:
-        {self.horizon.displayed_name.rjust(45)}
-        {other.displayed_name.rjust(45)}
+        {self.horizon.short_name.rjust(45)}
+        {other.short_name.rjust(45)}
         {'—'*45}
         Rate in 5ms:                         {oinfo['window_rate']:8.3f}
         Mean / std of errors:          {oinfo['difference_mean']:+6.2f} / {oinfo['difference_std']:5.2f}
@@ -920,8 +726,8 @@ class HorizonMetrics(BaseMetrics):
         Lengths of horizons:               {len(self.horizon):10,}
                                            {       len(other):10,}
         {'—'*45}
-        Average heights of horizons:         {self.horizon.h_mean:8.2f}
-                                             {       other.h_mean:8.2f}
+        Average depths of horizons:          {self.horizon.d_mean:8.2f}
+                                             {       other.d_mean:8.2f}
         {'—'*45}
         Coverage of horizons:                {self.horizon.coverage:8.4f}
                                              {       other.coverage:8.4f}
@@ -945,12 +751,12 @@ class HorizonMetrics(BaseMetrics):
                 matrix = self.horizon.matrix_enlarge(matrix, width=width)
 
             # Field boundaries
-            bounds = self.horizon.field.zero_traces
+            bounds = self.horizon.field.dead_traces_matrix
 
             # Main plot: differences matrix
             kwargs = {
                 'title': (f'Depth comparison\n'
-                          f'`self={self.horizon.displayed_name}` and `other={closest.displayed_name}`'),
+                          f'`self={self.horizon.short_name}` and `other={closest.short_name}`'),
                 'suptitle': '',
                 'cmap': ['seismic', 'lightgray'],
                 'mask_color': ['black', (0, 0, 0, 0)],
@@ -1044,255 +850,6 @@ class HorizonMetrics(BaseMetrics):
 
         return std_matrix
 
-
-class GeometryMetrics(BaseMetrics):
-    """ Metrics to asses cube quality. """
-    AVAILABLE_METRICS = [
-        'local_corrs', 'support_corrs',
-        'local_btch', 'support_btch',
-        'local_kl', 'support_kl',
-        'local_js', 'support_js',
-        'local_hellinger', 'support_hellinger',
-        'local_tv', 'support_tv',
-    ]
-
-
-    def __init__(self, geometries):
-        super().__init__()
-
-        geometries = list(geometries) if isinstance(geometries, tuple) else geometries
-        geometries = geometries if isinstance(geometries, list) else [geometries]
-        self.geometries = geometries
-
-        self.geometry = geometries[0]
-        self._data = None
-        self._probs = None
-        self._bad_traces = None
-
-        self.name = 'hist_matrix'
-
-    def get_plot_defaults(self):
-        """ Axis labels and horizon/cube names in the title. """
-        title = f'`{self.name}` on cube `{self.geometry.displayed_name}`'
-        return title, {
-            'xlabel': self.geometry.axis_names[0],
-            'ylabel': self.geometry.axis_names[1],
-        }
-
-    @property
-    def data(self):
-        """ Histogram of values for every trace in the cube. """
-        if self._data is None:
-            self._data = self.geometry.hist_matrix
-        return self._data
-
-    @property
-    def bad_traces(self):
-        """ Traces to exclude from metric evaluations: bad traces are marked with `1`s. """
-        if self._bad_traces is None:
-            self._bad_traces = self.geometry.zero_traces
-            self._bad_traces[self.data.max(axis=-1) == self.data.sum(axis=-1)] = 1
-        return self._bad_traces
-
-    @property
-    def probs(self):
-        """ Probabilistic interpretation of `data`. """
-        if self._probs is None:
-            self._probs = self.data / np.sum(self.data, axis=-1, keepdims=True) + self.EPS
-        return self._probs
-
-
-    def quality_map(self, quantiles, metric_names=None, computed_metrics=None,
-                    agg='mean', amortize=False, axis=0, apply_smoothing=False,
-                    smoothing_params=None, local_params=None, support_params=None, **kwargs):
-        """ Create a quality map based on number of metrics.
-
-        Parameters
-        ----------
-        quantiles : sequence of floats
-            Quantiles for computing hardness thresholds. Must be in (0, 1) ranges.
-        metric_names : sequence of str
-            Which metrics to use to assess hardness of data.
-        reduce_func : str
-            Function to reduce multiple metrics into one spatial map.
-        smoothing_params, local_params, support_params : dicts
-            Additional parameters for smoothening, local metrics, support metrics.
-        """
-        _ = kwargs
-        computed_metrics = computed_metrics or []
-        smoothing_params = smoothing_params or self.SMOOTHING_DEFAULTS
-        local_params = local_params or self.LOCAL_DEFAULTS
-        support_params = support_params or self.SUPPORT_DEFAULTS
-
-        smoothing_params = {**self.SMOOTHING_DEFAULTS, **smoothing_params, **kwargs}
-        local_params = {**self.LOCAL_DEFAULTS, **local_params, **kwargs}
-        support_params = {**self.SUPPORT_DEFAULTS, **support_params, **kwargs}
-
-        if metric_names:
-            for metric_name in metric_names:
-                if 'local' in metric_name:
-                    kwds = copy(local_params)
-                elif 'support' in metric_name:
-                    kwds = copy(support_params)
-
-                metric = self.evaluate(metric_name, **kwds)
-                computed_metrics.append(metric)
-
-        accumulator = Accumulator(agg=agg, amortize=amortize, axis=axis)
-        for metric_matrix in computed_metrics:
-            if apply_smoothing:
-                metric_matrix = smooth_out(metric_matrix, **smoothing_params)
-            digitized = digitize(metric_matrix, quantiles)
-            accumulator.update(digitized)
-        quality_map = accumulator.get(final=True)
-
-        if apply_smoothing:
-            quality_map = smooth_out(quality_map, **smoothing_params)
-
-        title, plot_defaults = self.get_plot_defaults()
-        plot_config = {
-            **plot_defaults,
-            'title': f'Quality map for {title}',
-            'cmap': 'Reds',
-            'vmin': 0.0, 'vmax': np.nanmax(quality_map),
-            **kwargs
-        }
-
-        return quality_map, plot_config
-
-    def make_grid(self, quality_map, frequencies, iline=True, xline=True, margin=0,
-                  extension='cell', filter_outliers=0, **kwargs):
-        """ Create grid with various frequencies based on quality map. """
-        full_lines = kwargs.pop('full_lines', False) # for old api consistency
-        extension = 'full' if full_lines else extension
-
-        _ = kwargs
-
-        if margin:
-            bad_traces = np.copy(self.geometry.zero_traces)
-            bad_traces[:, 0] = 1
-            bad_traces[:, -1] = 1
-            bad_traces[0, :] = 1
-            bad_traces[-1, :] = 1
-
-            kernel = np.ones((2 + 2*margin, 2 + 2*margin), dtype=np.uint8)
-            bad_traces = cv2.dilate(bad_traces.astype(np.uint8), kernel, iterations=1).astype(bad_traces.dtype)
-            quality_map[(bad_traces - self.geometry.zero_traces) == 1] = 0.0
-
-        pre_grid = np.rint(quality_map)
-        grid = gridify(matrix=pre_grid, frequencies=frequencies, iline=iline, xline=xline,
-                       extension=extension, filter_outliers=filter_outliers)
-
-        if margin:
-            grid[(bad_traces - self.geometry.zero_traces) == 1] = 0
-        return grid
-
-
-    def tracewise(self, func, l=3, pbar=True, **kwargs):
-        """ Apply `func` to compare two cubes tracewise. """
-        pbar = tqdm if pbar else lambda iterator, *args, **kwargs: iterator
-        metric = np.full((*self.geometry.spatial_shape, l), np.nan)
-
-        indices = [geometry.dataframe['trace_index'] for geometry in self.geometries]
-
-        for idx, _ in pbar(indices[0].iteritems(), total=len(indices[0])):
-            trace_indices = [ind[idx] for ind in indices]
-
-            header = self.geometries[0].segyfile.header[trace_indices[0]]
-            keys = [header.get(field) for field in self.geometries[0].byte_no]
-            store_key = [self.geometries[0].uniques_inversed[i][item] for i, item in enumerate(keys)]
-            store_key = tuple(store_key)
-
-            traces = [geometry.load_trace(trace_index) for
-                      geometry, trace_index in zip(self.geometries, trace_indices)]
-
-            metric[store_key] = func(*traces, **kwargs)
-
-        title = f"tracewise {func}"
-        plot_config = {
-            'title': f'{title} for `{self.name}` on cube `{self.geometry.displayed_name}`',
-            'cmap': 'seismic',
-            'vmin': None, 'vmax': None,
-            'ignore_value': np.nan,
-            'xlabel': 'INLINE_3D', 'ylabel': 'CROSSLINE_3D',
-            **kwargs
-        }
-        return metric, plot_config
-
-    def tracewise_unsafe(self, func, l=3, pbar=True, **kwargs):
-        """ Apply `func` to compare two cubes tracewise in an unsafe way:
-        structure of cubes is assumed to be identical.
-        """
-        pbar = tqdm if pbar else lambda iterator, *args, **kwargs: iterator
-        metric = np.full((*self.geometry.spatial_shape, l), np.nan)
-
-        for idx in pbar(range(len(self.geometries[0].dataframe))):
-            header = self.geometries[0].segyfile.header[idx]
-            keys = [header.get(field) for field in self.geometries[0].byte_no]
-            store_key = [self.geometries[0].uniques_inversed[i][item] for i, item in enumerate(keys)]
-            store_key = tuple(store_key)
-
-            traces = [geometry.load_trace(idx) for geometry in self.geometries]
-            metric[store_key] = func(*traces, **kwargs)
-
-        title = f"tracewise unsafe {func}"
-        plot_config = {
-            'title': f'{title} for {self.name} on cube {self.geometry.displayed_name}',
-            'cmap': 'seismic',
-            'vmin': None, 'vmax': None,
-            'ignore_value': np.nan,
-            'xlabel': 'INLINE_3D', 'ylabel': 'CROSSLINE_3D',
-            **kwargs
-        }
-        return metric, plot_config
-
-
-    def blockwise(self, func, l=3, pbar=True, kernel=(5, 5), block_size=(1000, 1000),
-                  heights=None, prep_func=None, **kwargs):
-        """ Apply function to all traces in lateral window """
-
-        window = np.array(kernel)
-        low = window // 2
-        high = window - low
-
-        total = np.product(self.geometries[0].lens - window)
-        prep_func = prep_func if prep_func else lambda x: x
-
-        pbar = tqdm if pbar else lambda iterator, *args, **kwargs: iterator
-        metric = np.full((*self.geometries[0].lens, l), np.nan)
-
-        heights = slice(0, self.geometries[0].depth) if heights is None else slice(*heights)
-
-        with pbar(total=total) as prog_bar:
-            for il_block in np.arange(0, self.geometries[0].cube_shape[0], block_size[0]-window[0]):
-                for xl_block in np.arange(0, self.geometries[0].cube_shape[1], block_size[1]-window[1]):
-                    block_len = np.min((np.array(self.geometries[0].lens) - (il_block, xl_block),
-                                        block_size), axis=0)
-                    locations = [slice(il_block, il_block + block_len[0]),
-                                 slice(xl_block, xl_block + block_len[1]),
-                                 heights]
-
-                    blocks = [prep_func(geometry.load_crop(locations)) for geometry in self.geometries]
-
-                    for il_kernel in range(low[0], blocks[0].shape[0] - high[0]):
-                        for xl_kernel in range(low[1], blocks[0].shape[1] - high[1]):
-
-                            il_from, il_to = il_kernel - low[0], il_kernel + high[0]
-                            xl_from, xl_to = xl_kernel - low[1], xl_kernel + high[1]
-
-                            subsets = [b[il_from:il_to, xl_from:xl_to, :].reshape((-1, b.shape[-1])) for b in blocks]
-                            metric[il_block + il_kernel, xl_block + xl_kernel, :] = func(*subsets, **kwargs)
-                            prog_bar.update(1)
-
-        title = f"Blockwise {func}"
-        plot_config = {
-            'title': f'{title} for {self.name} on cube {self.geometry.displayed_name}',
-            'cmap': 'seismic',
-            'vmin': None, 'vmax': None,
-            'ignore_value': np.nan,
-            **kwargs
-        }
-        return metric, plot_config
 
 
 class FaultsMetrics:
@@ -1436,7 +993,7 @@ class FaciesMetrics:
 
             values = [fn(**kwargs) for fn in metrics]
 
-            index = pd.MultiIndex.from_arrays([[horizon.field.displayed_name], [horizon.short_name]],
+            index = pd.MultiIndex.from_arrays([[horizon.field.short_name], [horizon.short_name]],
                                               names=['field_name', 'horizon_name'])
             data = dict(zip(names, values))
             row = pd.DataFrame(index=index, data=data)

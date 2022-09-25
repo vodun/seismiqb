@@ -1,247 +1,151 @@
-""" Base class for seismic cube geometrical and geological info. """
+""" Base class for working with seismic data. """
 import os
-import re
 import sys
-import time
-
 from textwrap import dedent
 
 import numpy as np
-import psutil
-import h5py
+from scipy.interpolate import interp1d
 
-from .export import ExportMixin
-from ..utils import CacheMixin
+from .benchmark_mixin import BenchmarkMixin
+from .conversion_mixin import ConversionMixin
+from .export_mixin import ExportMixin
+from .meta_mixin import MetaMixin
+from .metric_mixin import MetricMixin
 
-from ..utils import file_print, get_environ_flag, lru_cache, transformable
+from ..utils import CacheMixin, TransformsMixin, select_printer, transformable
 from ..plotters import plot
 
 
 
-class SpatialDescriptor:
-    """ Allows to set names for parts of information about index.
-    ilines_len = SpatialDescriptor('INLINE_3D', 'lens', 'ilines_len')
-    allows to get instance.lens[idx], where `idx` is position of `INLINE_3D` inside instance.index.
-
-    Roughly equivalent to::
-    @property
-    def ilines_len(self):
-        idx = self.index_headers.index('INLINE_3D')
-        return self.lens[idx]
-    """
-    def __set_name__(self, owner, name):
-        self.name = name
-
-    def __init__(self, header=None, attribute=None, name=None):
-        self.header = header
-        self.attribute = attribute
-
-        if name is not None:
-            self.name = name
-
-    def __get__(self, obj, obj_class=None):
-        # If attribute is already stored in object, just return it
-        if self.name in obj.__dict__:
-            return obj.__dict__[self.name]
-
-        # Find index of header, use it to access attr
-        try:
-            idx = obj.index_headers.index(self.header)
-            return getattr(obj, self.attribute)[idx]
-        except ValueError as exc:
-            raise ValueError(f'Current index does not contain {self.header}.') from exc
-
-
-def add_descriptors(cls):
-    """ Add multiple descriptors to the decorated class.
-    Name of each descriptor is `alias + postfix`.
-
-    Roughly equivalent to::
-    ilines = SpatialDescriptor('INLINE_3D', 'uniques', 'ilines')
-    xlines = SpatialDescriptor('CROSSLINE_3D', 'uniques', 'xlines')
-
-    ilines_len = SpatialDescriptor('INLINE_3D', 'lens', 'ilines_len')
-    xlines_len = SpatialDescriptor('CROSSLINE_3D', 'lens', 'xlines_len')
-    etc
-    """
-    attrs = ['uniques', 'offsets', 'lens']  # which attrs hold information
-    postfixes = ['', '_offset', '_len']     # postfix of current attr
-
-    headers = ['INLINE_3D', 'CROSSLINE_3D'] # headers to use
-    aliases = ['ilines', 'xlines']          # alias for header
-
-    for attr, postfix in zip(attrs, postfixes):
-        for alias, header in zip(aliases, headers):
-            name = alias + postfix
-            descriptor = SpatialDescriptor(header=header, attribute=attr, name=name)
-            setattr(cls, name, descriptor)
-    return cls
-
-
-
-@add_descriptors
-class SeismicGeometry(CacheMixin, ExportMixin):
-    """ Class to infer information about seismic cube in various formats, and provide API for data loading.
+class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMixin, MetricMixin, TransformsMixin):
+    """ Class to infer information about seismic cube in various formats and provide format agnostic interface to them.
 
     During the SEG-Y processing, a number of statistics are computed. They are saved next to the cube under the
-    `.meta` extension, so that subsequent loads (in, possibly, other formats) don't have to recompute them.
-    Most of them (`SeismicGeometry.PRESERVED`) are loaded at initialization; yet, the most memory-intensive ones
-    (`SeismicGeometry.PRESERVED_LAZY`) are loaded on demand.
+    `.segy_meta` extension, so that subsequent loads (in, possibly, other formats) don't have to recompute them.
+    Most of them are loaded at initialization, but the most memory-intensive ones are loaded on demand.
+    For more details about meta, refer to :class:`MetaMixin` documentation.
 
     Based on the extension of the path, a different subclass is used to implement key methods for data indexing.
-    Currently supported extensions:
-        - `segy`
-        - `hdf5` and its quantized version `qhdf5`
-        - `blosc` and its quantized version `qblosc`
+    Currently supported extensions are SEG-Y and TODO:
     The last two are created by converting the original SEG-Y cube.
     During the conversion, an extra step of `int8` quantization can be performed to reduce the disk usage.
 
-    Independent of the exact format, `SeismicGeometry` provides the following:
-        - Attributes to describe shape and structure of the cube like `cube_shape` and `lens`,
-        as well as exact values of file-wide headers, for example, `delay` and `sample_rate`.
+    Independent of the exact format, `Geometry` provides the following:
+        - attributes to describe shape and structure of the cube like `shape` and `lengths`,
+        as well as exact values of file-wide headers, for example, `depth`, `delay` and `sample_rate`.
 
-        - Ability to infer information about the cube amplitudes:
-          `trace_container` attribute contains examples of amplitudes inside the cube and allows to compute statistics.
+        - method :meth:`collect_stats` to infer information about the amplitudes distribution:
+        under the hood, we make a full pass through the cube data to collect global, spatial and depth-wise stats.
 
-        - If needed, spatial stats can also be inferred: attributes `min_matrix`, `mean_matrix`, etc
-          allow creating a complete spatial map (that is a view from above) of the desired statistic for the whole cube.
-          `hist_matrix` contains a histogram of values for each trace in the cube, and can be used as
-          a proxy for amplitudes in each trace for evaluating aggregated statistics.
-
-        - :meth:`load_slide` (2D entity) or :meth:`load_crop` (3D entity) methods to load data from the cube.
-          Load slides takes a number of slide and axis to cut along; makes use of `lru_cache` to work
-          faster for subsequent loads. Cache is bound for each instance.
-          Load crops works off of complete location specification (3D slice).
-
-        - `quality_map` attribute is a spatial matrix that estimates cube hardness;
-          `quality_grid` attribute contains a grid of locations to train model on, based on `quality_map`.
+        - :meth:`load_slide` (2D entity) or :meth:`load_crop` (3D entity) methods to load data from the cube:
+            - :meth:`load_slide` takes an ordinal index of the slide and its axis;
+            - :meth:`load_crop` works off of complete location specification (triplet of slices).
 
         - textual representation of cube geometry: method `print` shows the summary of an instance with
         information about its location and values; `print_textual` allows to see textual header from a SEG-Y.
 
-        - visual representation of cube geometry: methods `show` and  `show_quality_map` display top view on
-        cube with computed statistics; `show_slide` can be used for front view on various axis of data.
+        - visual representation of cube geometry:
+            - :meth:`show` to display top view on cube with computed statistics;
+            - :meth:`show_slide` to display front view on various slices of data.
 
     Parameters
     ----------
     path : str
-        Path to seismic cube. Supported formats are `segy`, `hdf5`, `qhdf5`, `blosc` `qblosc`.
-    path_meta : str, optional
+        Path to seismic cube. Supported formats are `segy`, TODO.
+    meta_path : str, optional
         Path to pre-computed statistics. If not provided, use the same as `path` with `.meta` extension.
-    process : bool
-        Whether to process the data: open the file and infer initial stats.
-    collect_stats : bool
-        If cube is in `segy` format, collect more stats about values.
-    spatial : bool
-        If cube is in `segy` format and `collect_stats` is True, collect stats as if the cube is POST-STACK.
-    """
-    #TODO: add separate class for cube-like labels
-    SEGY_ALIASES = ['sgy', 'segy', 'seg']
-    HDF5_ALIASES = ['hdf5', 'qhdf5']
-    BLOSC_ALIASES = ['blosc', 'qblosc']
-    NPZ_ALIASES = ['npz']
-    ARRAY_ALIASES = ['dummyarray']
 
-    # Attributes to store in a separate `.meta` file
+    SEG-Y parameters
+    ----------------
+    TODO
+
+    HDF5 parameters
+    ---------------
+    TODO
+    """
+    # Value to use in dead traces
+    FILL_VALUE = 0.0
+
+    # Attributes to store in a separate file with meta
     PRESERVED = [ # loaded at instance initialization
         # Crucial geometry properties
-        'depth', 'delay', 'sample_rate', 'cube_shape',
-        'byte_no', 'offsets', 'ranges', 'lens', # `uniques` can't be saved due to different lenghts of arrays
-        'bins', 'zero_traces', '_quality_map',
+        'n_traces', 'depth', 'delay', 'sample_rate', 'shape',
+        'shifts', 'lengths', 'ranges', 'increments', 'regular_structure',
+        'index_matrix', 'absent_traces_matrix', 'dead_traces_matrix',
+        'n_alive_traces', 'n_dead_traces',
 
         # Additional info from SEG-Y
-        'segy_path', 'segy_text', 'rotation_matrix', 'area',
+        'segy_path', 'segy_text',
+        'rotation_matrix', 'area',
 
-        # Convenient aliases for post-stack cubes
-        'ilines', 'xlines', 'ilines_offset', 'xlines_offset', 'ilines_len', 'xlines_len',
-
-        # Value-stats
-        'v_uniques', 'v_min', 'v_max', 'v_mean', 'v_std',
-        'v_q001', 'v_q01', 'v_q05', 'v_q95', 'v_q99', 'v_q999',
-
-        # Parameters of quantization and quantized stats
-        'qnt_ranges', 'qnt_bins', 'qnt_clip', 'qnt_center', 'qnt_error',
-        'qnt_min', 'qnt_max', 'qnt_mean', 'qnt_std',
-        'qnt_q001', 'qnt_q01', 'qnt_q05', 'qnt_q95', 'qnt_q99', 'qnt_q999',
+        # Scalar stats for cube values: computed for the entire SEG-Y / its subset
+        'min', 'max', 'mean', 'std', 'n_value_uniques',
+        'subset_min', 'subset_max', 'subset_mean', 'subset_std',
+        'quantile_precision', 'quantile_support', 'quantile_values',
     ]
 
     PRESERVED_LAZY = [ # loaded at the time of the first access
-        'trace_container', 'hist_matrix',
+        'index_unsorted_uniques', 'index_sorted_uniques', 'index_value_to_ordinal',
+        'min_vector', 'max_vector', 'mean_vector', 'std_vector',
         'min_matrix', 'max_matrix', 'mean_matrix', 'std_matrix',
     ]
 
-    # Headers to load from SEG-Y cube
-    HEADERS_PRE_FULL = ['FieldRecord', 'TraceNumber', 'TRACE_SEQUENCE_FILE', 'CDP', 'CDP_TRACE', 'offset', ]
-    HEADERS_POST_FULL = ['INLINE_3D', 'CROSSLINE_3D', 'CDP_X', 'CDP_Y']
-    HEADERS_POST = ['INLINE_3D', 'CROSSLINE_3D']
-
-    # Headers to use as id of a trace
-    INDEX_PRE = ['FieldRecord', 'TraceNumber']
-    INDEX_POST = ['INLINE_3D', 'CROSSLINE_3D']
-    INDEX_CDP = ['CDP_Y', 'CDP_X']
-
-    def __new__(cls, path, *args, **kwargs):
-        """ Select the type of geometry based on file extension.
-        Breaks the autoreload magic (but only for this class).
-        """
+    @staticmethod
+    def new(path, *args, **kwargs):
+        """ A convenient selector of appropriate (SEG-Y or HDF5) geometry. """
         #pylint: disable=import-outside-toplevel
-        _ = args, kwargs
-        fmt = os.path.splitext(path)[1][1:]
+        extension = os.path.splitext(path)[1][1:]
 
-        if fmt in cls.SEGY_ALIASES:
-            from .segy import SeismicGeometrySEGY
-            new_cls = SeismicGeometrySEGY
-        elif fmt in cls.HDF5_ALIASES:
-            from .hdf5 import SeismicGeometryHDF5
-            new_cls = SeismicGeometryHDF5
-        elif fmt in cls.BLOSC_ALIASES:
-            from .blosc import SeismicGeometryBLOSC
-            new_cls = SeismicGeometryBLOSC
-        elif fmt in cls.NPZ_ALIASES:
-            from .npz import SeismicGeometryNPZ
-            new_cls = SeismicGeometryNPZ
-        elif fmt in cls.ARRAY_ALIASES:
-            from .array import SeismicGeometryArray
-            new_cls = SeismicGeometryArray
+        if extension in {'sgy', 'segy', 'seg', 'qsgy'}:
+            from .segy import GeometrySEGY
+            cls = GeometrySEGY
+        elif extension in {'hdf5', 'qhdf5'}:
+            from .converted import GeometryHDF5
+            cls = GeometryHDF5
         else:
-            raise TypeError(f'Unknown format of the cube: {fmt}')
+            raise TypeError(f'Unknown format of the cube: {extension}')
+        return cls(path, *args, **kwargs)
 
-        instance = super().__new__(new_cls)
-        return instance
+    def __init__(self, path, meta_path=None, safe=False, use_slide_cache=False, **kwargs):
+        # Path to the file
+        self.path = path
+
+        # Names
+        self.name = os.path.basename(self.path)
+        self.short_name, self.format = os.path.splitext(self.name)
+
+        # Meta
+        self.meta_path = meta_path
+        self.meta_list_loaded = set()
+        self.meta_list_failed_to_dump = set()
+
+        # Instance flags
+        self.safe = safe
+        self.use_slide_cache = use_slide_cache
+
+        # Lazy properties
+        self._quantile_interpolator = None
+        self._normalization_stats = None
+
+        # Init from subclasses
+        self._init_kwargs = kwargs
+        self.init(path, **kwargs)
+
+
+    # Redefined protocols
+    def __getattr__(self, key):
+        """ Load item from stored meta. """
+        if key in self.PRESERVED_LAZY and self.meta_exists and self.has_meta_item(key) and key not in self.__dict__:
+            return self.load_meta_item(f'meta/{key}')
+        return object.__getattribute__(self, key)
 
     def __getnewargs__(self):
         return (self.path, )
 
-    def __init__(self, path, *args, process=True, path_meta=None, **kwargs):
-        _ = args
-        self.path = path
-        self.anonymize = get_environ_flag('SEISMIQB_ANONYMIZE')
-
-        # Names of different lengths and format: helpful for outside usage
-        self.name = os.path.basename(self.path)
-        self.field_name = self.extract_field_name()
-        self.short_name = os.path.splitext(self.name)[0]
-        self.long_name = ':'.join(self.path.split('/')[-2:])
-        self.format = os.path.splitext(self.path)[1][1:]
-
-        # Property holders
-        self._quality_map = None
-        self._quality_grid = None
-
-        self.path_meta = path_meta or os.path.splitext(self.path)[0] + '.meta'
-        self.loaded = []
-        self.has_stats = False
-
-        self._process = process
-        self._init_kwargs = kwargs
-        if process:
-            self.process(**kwargs)
-
-
     def __getstate__(self):
         self.reset_cache()
         state = self.__dict__.copy()
-        for name in ['file', 'axis_to_cube', 'cube_i', 'cube_x', 'cube_h']:
+        for name in ['loader', 'axis_to_projection']:
             if name in state:
                 state.pop(name)
         return state
@@ -250,182 +154,144 @@ class SeismicGeometry(CacheMixin, ExportMixin):
         for key, value in state.items():
             setattr(self, key, value)
 
-        if self._process:
-            self.process(**self._init_kwargs)
-
-
-
-    def extract_field_name(self):
-        """ Try to parse field from geometry name. """
-        # search for a sequence of uppercase letters between '_' and '.' symbols
-        field_search = re.search(r'_([A-Z]+?)\.', self.name)
-        if field_search is None:
-            if self.anonymize:
-                msg = f"""
-                Cannot anonymize name {self.name}, because field cannot be parsed from it.
-                Expected name in `<attribute>_<NUM>_<FIELD>.<extension>` format.
-                """
-                raise ValueError(msg)
-            return ""
-        return self.name[slice(*field_search.span(1))]
-
-    # Utility functions
-    def parse_axis(self, axis):
-        """ Convert string representation of an axis into integer, if needed. """
-        if isinstance(axis, str):
-            if axis in self.index_headers:
-                axis = self.index_headers.index(axis)
-            elif axis in ['i', 'il', 'iline']:
-                axis = 0
-            elif axis in ['x', 'xl', 'xline']:
-                axis = 1
-            elif axis in ['h', 'height', 'depth']:
-                axis = 2
-        return axis
-
-    def make_slide_locations(self, loc, axis=0):
-        """ Create locations (sequence of slices for each axis) for desired slide along given axis. """
-        locations = [slice(0, item) for item in self.cube_shape]
-
-        axis = self.parse_axis(axis)
-        locations[axis] = slice(loc, loc + 1)
-        return locations
-
-    def compute_auto_zoom(self, loc, axis=0):
-        """ Get bounds of the non-zero part of the slide. """
-        mask = self.zero_traces.take(loc, axis)
-        start = np.argmin(mask)
-        end = len(mask) - np.argmin(mask[::-1])
-        return (slice(start, end), slice(None))
-
-    # Meta information: storing / retrieving attributes
-    def store_meta(self, path=None):
-        """ Store collected stats on disk. Uses either provided `path` or `path_meta` attribute. """
-        path_meta = path or self.path_meta
-
-        # Remove file, if exists: h5py can't do that
-        if os.path.exists(path_meta):
-            os.remove(path_meta)
-
-        # Create file and datasets inside
-        with h5py.File(path_meta, "a") as file_meta:
-            # Save all the necessary attributes to the `info` group
-            for attr in self.PRESERVED + self.PRESERVED_LAZY:
-                try:
-                    if hasattr(self, attr) and getattr(self, attr) is not None:
-                        file_meta['/info/' + attr] = getattr(self, attr)
-                except ValueError:
-                    # Raised when you try to store post-stack descriptors for pre-stack cube
-                    pass
-
-    def load_meta(self):
-        """ Retrieve stored stats from disk. Uses `path_meta` attribute. """
-        for item in self.PRESERVED:
-            value = self.load_meta_item(item)
-            if value is not None:
-                setattr(self, item, value)
-
-        self.has_stats = True
-
-    def load_meta_item(self, item):
-        """ Load individual item. """
-        with h5py.File(self.path_meta, "r") as file_meta:
-            try:
-                value = file_meta['/info/' + item][()]
-                self.loaded.append(item)
-                return value
-            except KeyError:
-                return None
-
-    def __getattr__(self, key):
-        """ Load item from stored meta. """
-        if key in self.PRESERVED_LAZY and self.path_meta is not None and key not in self.__dict__:
-            return self.load_meta_item(key)
-        return object.__getattribute__(self, key)
+        if self.converted:
+            self.init(self.path, **self._init_kwargs)
+        else:
+            self.loader = self._infer_loader_class(self._init_kwargs.get('loader_class', 'memmap'))(self.path)
 
 
     # Data loading
-    def process_key(self, key):
-        """ Convert multiple slices into locations. """
-        key_ = list(key)
-        if len(key_) != len(self.cube_shape):
-            key_ += [slice(None)] * (len(self.cube_shape) - len(key_))
-
-        key, shape, squeeze = [], [], []
-        for i, item in enumerate(key_):
-            max_size = self.cube_shape[i]
-
-            if isinstance(item, slice):
-                slc = slice(item.start or 0, item.stop or max_size)
-            elif isinstance(item, int):
-                item = item if item >= 0 else max_size - item
-                slc = slice(item, item + 1)
-                squeeze.append(i)
-            key.append(slc)
-            shape.append(slc.stop - slc.start)
-
-        return key, shape, squeeze
-
     def __getitem__(self, key):
-        """ Assuming that cube is POST-STACK, get sub-volume using the usual `NumPy`-like semantics.
-        Can be re-implemented in child classes.
-        """
-        key, _, squeeze = self.process_key(key)
+        """ Slice the cube using the usual `NumPy`-like semantics. """
+        key, axis_to_squeeze = self.process_key(key)
 
         crop = self.load_crop(key)
-        if squeeze:
-            crop = np.squeeze(crop, axis=tuple(squeeze))
+        if axis_to_squeeze:
+            crop = np.squeeze(crop, axis=tuple(axis_to_squeeze))
         return crop
+
+    def process_key(self, key):
+        """ Convert tuple of slices/ints into locations. """
+        # Convert to list
+        if isinstance(key, (int, slice)):
+            key = [key]
+        elif isinstance(key, tuple):
+            key = list(key)
+
+        # Pad not specified dimensions
+        if len(key) != len(self.shape):
+            key += [slice(None)] * (len(self.shape) - len(key))
+
+        # Parse each subkey. Remember location of integers for later squeeze
+        key_, axis_to_squeeze = [], []
+        for i, (subkey, limit) in enumerate(zip(key, self.shape)):
+            if isinstance(subkey, slice):
+                slc = slice(max(subkey.start or 0, 0), min(subkey.stop or limit, limit), subkey.step)
+            elif isinstance(subkey, int):
+                subkey = subkey if subkey >= 0 else limit - subkey
+                slc = slice(subkey, subkey + 1)
+                axis_to_squeeze.append(i)
+
+            key_.append(slc)
+
+        return key_, axis_to_squeeze
+
+
+    # Set caching behavior
+    def enable_slide_cache(self):
+        """ !!. """
+        self.use_slide_cache = True
+
+    def disable_slide_cache(self):
+        """ !!. """
+        self.use_slide_cache = False
+        self.reset_cache()
+
+
+    # Coordinate system conversions
+    def lines_to_ordinals(self, array):
+        """ Convert values from inline-crossline coordinate system to their ordinals.
+        In the simplest case of regular grid `ordinal = (value - value_min) // value_step`.
+        In the case of irregular spacings between values, we have to manually map values to ordinals.
+        """
+        # Indexing headers
+        if self.regular_structure:
+            for i in range(self.index_length):
+                array[:, i] -= self.shifts[i]
+                if self.increments[i] != 1:
+                    array[:, i] //= self.increments[i]
+        else:
+            raise NotImplementedError
+
+        # Depth to units
+        if array.shape[1] == self.index_length + 1:
+            array[:, self.index_length] -= self.delay
+            array[:, self.index_length] /= self.sample_rate
+        return array
+
+    def ordinals_to_lines(self, array):
+        """ Convert ordinals to values in inline-crossline coordinate system.
+        In the simplest case of regular grid `value = value_min + ordinal * value_step`.
+        In the case of irregular spacings between values, we have to manually map ordinals to values.
+        """
+        array = array.astype(np.float32)
+
+        # Indexing headers
+        if self.regular_structure:
+            for i in range(self.index_length):
+                if self.increments[i] != 1:
+                    array[:, i] *= self.increments[i]
+                array[:, i] += self.shifts[i]
+        else:
+            raise NotImplementedError
+
+        # Units to depth
+        if array.shape[1] == self.index_length + 1:
+            array[:, self.index_length] *= self.sample_rate
+            array[:, self.index_length] += self.delay
+        return array
+
+    def lines_to_cdp(self, points):
+        """ Convert lines to CDP. """
+        return (self.rotation_matrix[:, :2] @ points.T + self.rotation_matrix[:, 2].reshape(2, -1)).T
+
+    def cdp_to_lines(self, points):
+        """ Convert CDP to lines. """
+        inverse_matrix = np.linalg.inv(self.rotation_matrix[:, :2])
+        lines = (inverse_matrix @ points.T - inverse_matrix @ self.rotation_matrix[:, 2].reshape(2, -1)).T
+        return np.rint(lines)
+
+
+    # Stats and normalization
+    @property
+    def quantile_interpolator(self):
+        """ Quantile interpolator for arbitrary values. """
+        if self._quantile_interpolator is None:
+            self._quantile_interpolator = interp1d(self.quantile_support, self.quantile_values)
+        return self._quantile_interpolator
+
+    def get_quantile(self, q):
+        """ Get q-th quantile of the cube data. Works with any `q` in [0, 1] range. """
+        #pylint: disable=not-callable
+        return self.quantile_interpolator(q).astype(np.float32)
 
     @property
     def normalization_stats(self):
-        """ Values for performing normalization of data from the field. """
-        if self.quantized:
-            normalization_stats = {
-                'mean': self.qnt_mean,
-                'std': self.qnt_std,
-                'min': self.qnt_min,
-                'max': self.qnt_max,
-                'q_01': self.qnt_q01,
-                'q_05': self.qnt_q05,
-                'q_95': self.qnt_q95,
-                'q_99': self.qnt_q99,
+        """ Values for performing normalization of data from the cube. """
+        if self._normalization_stats is None:
+            q_01, q_05, q_95, q_99 = self.get_quantile(q=[0.01, 0.05, 0.95, 0.99])
+            self._normalization_stats = {
+                'mean': self.mean,
+                'std': self.std,
+                'min': self.min,
+                'max': self.max,
+                'q_01': q_01,
+                'q_05': q_05,
+                'q_95': q_95,
+                'q_99': q_99,
             }
-        else:
-            normalization_stats = {
-                'mean': self.v_mean,
-                'std': self.v_std,
-                'min': -128,
-                'max': +127,
-                'q_01': self.v_q01,
-                'q_05': self.v_q05,
-                'q_95': self.v_q95,
-                'q_99': self.v_q99,
-            }
-        normalization_stats = {key : float(value) for key, value in normalization_stats.items()}
-        return normalization_stats
+        return self._normalization_stats
 
-    # Coordinates transforms
-    def lines_to_cubic(self, array):
-        """ Convert ilines-xlines to cubic coordinates system. """
-        array[:, 0] -= self.ilines_offset
-        array[:, 1] -= self.xlines_offset
-        array[:, 2] -= self.delay
-        array[:, 2] /= self.sample_rate
-        return array
-
-    def cubic_to_lines(self, array):
-        """ Convert cubic coordinates to ilines-xlines system. """
-        array = array.astype(np.float32)
-        array[:, 0] += self.ilines_offset
-        array[:, 1] += self.xlines_offset
-        array[:, 2] *= self.sample_rate
-        array[:, 2] += self.delay
-        return array
-
-    def depth_to_time(self, depthes):
-        """ Convert depth to time. """
-        return depthes * self.sample_rate + self.delay
 
     # Spatial matrices
     @property
@@ -433,180 +299,98 @@ class SeismicGeometry(CacheMixin, ExportMixin):
         """ Signal-to-noise ratio. """
         return np.log(self.mean_matrix**2 / self.std_matrix**2)
 
-    @lru_cache(100)
-    def get_quantile_matrix(self, q):
-        """ Restore the quantile matrix for desired `q` from `hist_matrix`.
+    @transformable
+    def get_dead_traces_matrix(self):
+        """ Dead traces matrix.
+        Due to decorator, allows for additional transforms at loading time.
 
         Parameters
         ----------
-        q : number
-            Quantile to compute. Must be in (0, 1) range.
+        dilate : bool
+            Whether to apply dilation to the matrix.
+        dilation_iterations : int
+            Number of dilation iterations to apply.
         """
-        #pylint: disable=line-too-long
-        threshold = self.depth * q
-        cumsums = np.cumsum(self.hist_matrix, axis=-1)
+        return self.dead_traces_matrix.copy()
 
-        positions = np.argmax(cumsums >= threshold, axis=-1)
-        idx_1, idx_2 = np.nonzero(positions)
-        indices = positions[idx_1, idx_2]
-
-        broadcasted_bins = np.broadcast_to(self.bins, (*positions.shape, len(self.bins)))
-
-        q_matrix = np.zeros_like(positions, dtype=np.float)
-        q_matrix[idx_1, idx_2] += broadcasted_bins[idx_1, idx_2, indices]
-        q_matrix[idx_1, idx_2] += (broadcasted_bins[idx_1, idx_2, indices+1] - broadcasted_bins[idx_1, idx_2, indices]) * \
-                                   (threshold - cumsums[idx_1, idx_2, indices-1]) / self.hist_matrix[idx_1, idx_2, indices]
-        q_matrix[q_matrix == 0.0] = np.nan
-        return q_matrix
-
-    @property
-    def quality_map(self):
-        """ Spatial matrix to show harder places in the cube. """
-        if self._quality_map is None:
-            self.make_quality_map([0.1], ['support_js', 'support_hellinger'])
-        return self._quality_map
-
-    def make_quality_map(self, quantiles, metric_names, **kwargs):
-        """ Create `quality_map` matrix that shows harder places in the cube.
+    @transformable
+    def get_alive_traces_matrix(self):
+        """ Alive traces matrix.
+        Due to decorator, allows for additional transforms at loading time.
 
         Parameters
         ----------
-        quantiles : sequence of floats
-            Quantiles for computing hardness thresholds. Must be in (0, 1) ranges.
-        metric_names : sequence or str
-            Metrics to compute to assess hardness of cube.
-        kwargs : dict
-            Other parameters of metric(s) evaluation.
+        dilate : bool
+            Whether to apply dilation to the matrix.
+        dilation_iterations : int
+            Number of dilation iterations to apply.
         """
-        from ..metrics import GeometryMetrics #pylint: disable=import-outside-toplevel
-        quality_map = GeometryMetrics(self).evaluate('quality_map', quantiles=quantiles,
-                                                     metric_names=metric_names, **kwargs)
-        self._quality_map = quality_map
-        return quality_map
+        return 1 - self.dead_traces_matrix
 
-    @property
-    def quality_grid(self):
-        """ Spatial grid based on `quality_map`. """
-        if self._quality_grid is None:
-            self.make_quality_grid()
-        return self._quality_grid
+    def get_grid(self, frequency=100, iline=True, xline=True, margin=20):
+        """ Compute the grid over alive traces. """
+        #pylint: disable=unexpected-keyword-arg
+        # Parse parameters
+        frequency = frequency if isinstance(frequency, (tuple, list)) else (frequency, frequency)
 
-    def make_quality_grid(self, frequencies=(100, 200), iline=True, xline=True, margin=0,
-                          extension='cell', filter_outliers=0, **kwargs):
-        """ Create `quality_grid` based on `quality_map`.
+        # Prepare dilated `dead_traces_matrix`
+        dead_traces_matrix = self.get_dead_traces_matrix(dilate=True, dilation_iterations=margin)
 
-        Parameters
-        ----------
-        frequencies : sequence of numbers
-            Grid frequencies for individual levels of hardness in `quality_map`.
-        iline, xline : bool
-            Whether to make lines in grid to account for `ilines`/`xlines`.
-        margin : int
-            Margin of boundaries to not include in the grid.
-        extension : 'full', 'cell', False or int
-            Number of traces to grid lines extension.
-            If 'full', then extends quality grid base points to field borders.
-            If 'cell', then extends quality grid base points to sparse grid cells borders.
-            If False, then make no extension.
-            If int, then extends quality grid base points to +-extension//2 neighboring points.
-        filter_outliers : int
-            A degree of quality map thinning.
-            `filter_outliers` more than zero cuts areas that contain too small connectivity regions.
-            Notice that the method cut the squared area with these regions. It is made for more thinning.
-        kwargs : dict
-            Other parameters of grid making.
-        """
-        from ..metrics import GeometryMetrics #pylint: disable=import-outside-toplevel
+        if margin:
+            dead_traces_matrix[:+margin, :] = 1
+            dead_traces_matrix[-margin:, :] = 1
+            dead_traces_matrix[:, :+margin] = 1
+            dead_traces_matrix[:, -margin:] = 1
 
-        full_lines = kwargs.pop('full_lines', False) # for old api consistency
-        extension = 'full' if full_lines else extension
-
-        quality_grid = GeometryMetrics(self).make_grid(self.quality_map, frequencies, iline=iline, xline=xline,
-                                                       margin=margin, extension=extension,
-                                                       filter_outliers=filter_outliers, **kwargs)
-        self._quality_grid = quality_grid
-        return quality_grid
+        # Select points to keep
+        idx_i, idx_x = np.nonzero(~dead_traces_matrix)
+        grid = np.zeros_like(dead_traces_matrix)
+        if iline:
+            mask = (idx_i % frequency[0] == 0)
+            grid[idx_i[mask], idx_x[mask]] = 1
+        if xline:
+            mask = (idx_x % frequency[1] == 0)
+            grid[idx_i[mask], idx_x[mask]] = 1
+        return grid
 
 
     # Properties
     @property
     def axis_names(self):
-        """ Names of the axis: multiple headers and `DEPTH` as the last one. """
-        return self.index_headers + ['DEPTH']
+        """ Names of the axes: indexing headers and `DEPTH` as the last one. """
+        return list(self.index_headers) + ['DEPTH']
+
+    @property
+    def bbox(self):
+        """ Bounding box with geometry limits. """
+        return np.array([[0, s] for s in self.shape])
+
+    @property
+    def spatial_shape(self):
+        """ Shape of the cube along indexing headers. """
+        return tuple(self.shape[:2])
 
     @property
     def textual(self):
         """ Wrapped textual header of SEG-Y file. """
-        txt = ''.join([chr(item) for item in self.segy_text[0]])
-        txt = '\n#'.join(txt.split('C'))
-        return txt.strip()
-
-    @property
-    def displayed_name(self):
-        """ Return name with masked field name, if anonymization needed. """
-        return self.short_name.replace(f"_{self.field_name}", "") if self.anonymize else self.short_name
-
-    @property
-    def displayed_path(self):
-        """ Return path with masked field name, if anonymization needed. """
-        return self.path.replace(self.field_name, '*') if self.anonymize else self.path
-
-    @property
-    def nonzero_traces(self):
-        """ Amount of meaningful traces in a cube. """
-        return np.prod(self.zero_traces.shape) - self.zero_traces.sum()
-
-    @property
-    def total_traces(self):
-        """ Total amount of traces in a cube. """
-        if hasattr(self, 'zero_traces'):
-            return np.prod(self.zero_traces.shape)
-        if hasattr(self, 'dataframe'):
-            return len(self.dataframe)
-        return self.cube_shape[0] * self.cube_shape[1]
-
-    def __len__(self):
-        """ Number of meaningful traces. """
-        if hasattr(self, 'zero_traces'):
-            return self.nonzero_traces
-        return self.total_traces
-
-    @property
-    def shape(self):
-        """ Cube 3D shape. Same API, as NumPy. """
-        return tuple(self.cube_shape)
-
-    @property
-    def bbox(self):
-        """ Bounding box that define field limits. """
-        return np.array([[0, max] for max in self.shape])
-
-    @property
-    def spatial_shape(self):
-        """ Shape of indexing axis. """
-        return self.shape[:2]
+        text = self.segy_text[0].decode('ascii')
+        lines = [text[start:start + 80] for start in range(0, len(text), 80)]
+        return '\n'.join(lines)
 
     @property
     def file_size(self):
-        """ Storage size in GB."""
+        """ Storage size in GB. """
         return round(os.path.getsize(self.path) / (1024**3), 3)
 
     @property
     def nbytes(self):
-        """ Size of instance in bytes. """
-        names = set()
-        if self.structured is False:
-            names.add('dataframe')
-            if self.has_stats:
-                names.add('trace_container')
-                names.add('zero_traces')
-        else:
-            for name in ['trace_container', 'zero_traces']:
-                names.add(name)
-        names.update({name for name in self.__dict__
-                      if 'matrix' in name or '_quality' in name})
+        """ Size of the instance in bytes. """
+        attributes = set(['headers'])
+        attributes.update({attribute for attribute in self.__dict__
+                           if 'matrix' in attribute or '_quality' in attribute})
 
-        return sum(sys.getsizeof(getattr(self, name)) for name in names if hasattr(self, name)) + self.cache_size
+        return self.cache_size + sum(sys.getsizeof(getattr(self, attribute))
+                                     for attribute in attributes if hasattr(self, attribute))
 
     @property
     def ngbytes(self):
@@ -614,36 +398,7 @@ class SeismicGeometry(CacheMixin, ExportMixin):
         return self.nbytes / (1024**3)
 
 
-    # Attribute retrieval
-    @staticmethod
-    def matrix_fill_to_num(matrix, value):
-        """ Change the matrix values at points where field is absent to a supplied one. """
-        matrix[np.isnan(matrix)] = value
-        return matrix
-
-    @staticmethod
-    def matrix_normalize(matrix, mode):
-        """ Normalize matrix values.
-
-        Parameters
-        ----------
-        mode : bool, str, optional
-            If `min-max` or True, then use min-max scaling.
-            If `mean-std`, then use mean-std scaling.
-            If False, don't scale matrix.
-        """
-        values = matrix[~np.isnan(matrix)]
-
-        if mode in ['min-max', True]:
-            min_, max_ = np.nanmin(values), np.nanmax(values)
-            matrix = (matrix - min_) / (max_ - min_)
-        elif mode == 'mean-std':
-            mean, std = np.nanmean(values), np.nanstd(values)
-            matrix = (matrix - mean) / std
-        else:
-            raise ValueError(f'Unknown normalization mode `{mode}`.')
-        return matrix
-
+    # Attribute retrieval. Used by `Field` instances
     def load_attribute(self, src, **kwargs):
         """ Load instance attribute from a string, e.g. `snr` or `std_matrix`.
         Used from a field to re-direct calls.
@@ -658,80 +413,72 @@ class SeismicGeometry(CacheMixin, ExportMixin):
 
     # Textual representation
     def __repr__(self):
-        msg = f'geometry for cube `{self.displayed_name}`'
-        if not hasattr(self, 'cube_shape'):
+        msg = f'geometry `{self.short_name}`'
+        if not hasattr(self, 'shape'):
             return f'<Unprocessed {msg}>'
-        return f'<Processed {msg}: {tuple(self.cube_shape)} at {hex(id(self))}>'
+        return f'<Processed {msg}: {tuple(self.shape)} at {hex(id(self))}>'
 
     def __str__(self):
-        if not hasattr(self, 'cube_shape'):
-            return f'<Unprocessed geometry for cube {self.displayed_path}>'
+        if not hasattr(self, 'shape'):
+            return f'<Unprocessed geometry `{self.short_path}`>'
 
         msg = f"""
-        Processed geometry for cube    {self.displayed_path}
-        Current index:                 {self.index_headers}
-        Cube shape:                    {tuple(self.cube_shape)}
-        Time delay:                    {self.delay}
-        Sample rate:                   {self.sample_rate}
-        Area:                          {self.area:4.1f} km²
+        Processed geometry for cube        {self.path}
+        Index headers:                     {self.index_headers}
+        Traces:                            {self.n_traces:_}
+        Shape:                             {tuple(self.shape)}
+        Time delay:                        {self.delay} ms
+        Sample rate:                       {self.sample_rate} ms
+        Area:                              {self.area:4.1f} km²
+
+        File size:                         {self.file_size:4.3f} GB
+        Instance (memory) size:            {self.ngbytes:4.3f} GB
         """
 
-        if os.path.exists(self.segy_path):
+        if self.converted and os.path.exists(self.segy_path):
             segy_size = os.path.getsize(self.segy_path) / (1024 ** 3)
+            msg += f'\nSEG-Y original size:               {segy_size:4.3f} GB'
+
+        if hasattr(self, 'dead_traces_matrix'):
             msg += f"""
-        SEG-Y original size:           {segy_size:4.3f} GB
-        """
-
-        msg += f"""Current cube size:             {self.file_size:4.3f} GB
-        Size of the instance:          {self.ngbytes:4.3f} GB
-
-        Number of traces:              {self.total_traces}
-        """
-
-        if hasattr(self, 'zero_traces'):
-            msg += f"""Number of non-zero traces:     {self.nonzero_traces}
-        Fullness:                      {self.nonzero_traces / self.total_traces:2.2f}
+        Number of dead  traces:            {self.n_dead_traces:_}
+        Number of alive traces:            {self.n_alive_traces:_}
+        Fullness:                          {self.n_alive_traces / self.n_traces:2.2f}
         """
 
         if self.has_stats:
             msg += f"""
-        Original cube values:
-        Number of uniques:             {self.v_uniques:>10}
-        mean | std:                    {self.v_mean:>10.2f} | {self.v_std:<10.2f}
-        min | max:                     {self.v_min:>10.2f} | {self.v_max:<10.2f}
-        q01 | q99:                     {self.v_q01:>10.2f} | {self.v_q99:<10.2f}
+        Value statistics:
+        mean | std:                        {self.mean:>10.2f} | {self.std:<10.2f}
+        min | max:                         {self.min:>10.2f} | {self.max:<10.2f}
+        q01 | q99:                         {self.get_quantile(0.01):>10.2f} | {self.get_quantile(0.99):<10.2f}
+        Number of unique values:           {self.n_value_uniques:>10}
         """
 
-        if self.quantized or hasattr(self, 'qnt_error'):
+        if self.quantized:
             msg += f"""
-        Quantized cube info:
-        Error of quantization:         {self.qnt_error:>10.3f}
-        Ranges:                        {self.qnt_ranges[0]:>10.2f} | {self.qnt_ranges[1]:<10.2f}
+        Quantization ranges:               {self.ranges[0]:>10.2f} | {self.ranges[1]:<10.2f}
+        Quantization error:                {self.quantization_error:>10.3f}
         """
-        return dedent(msg)
+        return dedent(msg).strip()
 
     def print(self, printer=print):
         """ Show textual representation. """
-        printer(self)
+        select_printer(printer)(self)
 
     def print_textual(self, printer=print):
         """ Show textual header from original SEG-Y. """
-        printer(self.textual)
+        select_printer(printer)(self.textual)
 
     def print_location(self, printer=print):
         """ Show ranges for each of the headers. """
-        msg = ''
-        for i, name in enumerate(self.index_headers):
-            name += ':'
-            msg += f'\n{name:<30} [{self.uniques[i][0]}, {self.uniques[i][-1]}]'
-        printer(msg)
+        msg = '\n'.join(f'{header+":":<35} [{uniques[0]}, {uniques[-1]}]'
+                        for header, uniques in zip(self.index_headers, self.index_sorted_uniques))
+        select_printer(printer)(msg)
 
-    def log(self, printer=None):
-        """ Log info about cube into desired stream. By default, creates a file next to the cube. """
-        if not callable(printer):
-            path_log = os.path.dirname(self.path) + '/CUBE_INFO.log'
-            printer = lambda msg: file_print(msg, path_log)
-        printer(str(self))
+    def log(self):
+        """ Log info about geometry to a file next to the cube. """
+        self.print(printer=os.path.dirname(self.path) + '/CUBE_INFO.log')
 
 
     # Visual representation
@@ -740,7 +487,7 @@ class SeismicGeometry(CacheMixin, ExportMixin):
         matrix_name = matrix if isinstance(matrix, str) else kwargs.get('matrix_name', 'custom matrix')
         kwargs = {
             'cmap': 'magma',
-            'title': f'`{matrix_name}` map of cube `{self.displayed_name}`',
+            'title': f'`{matrix_name}` map of cube `{self.short_name}`',
             'xlabel': self.index_headers[0],
             'ylabel': self.index_headers[1],
             'colorbar': True,
@@ -749,11 +496,23 @@ class SeismicGeometry(CacheMixin, ExportMixin):
         matrix = getattr(self, matrix) if isinstance(matrix, str) else matrix
         return plotter(matrix, **kwargs)
 
-    def show_histogram(self, normalize=None, bins=50, plotter=plot, **kwargs):
-        """ Show distribution of amplitudes in `trace_container`. Optionally applies chosen normalization. """
-        data = np.copy(self.trace_container)
-        if normalize:
-            data = self.normalize(data, mode=normalize)
+    def show_histogram(self, n_traces=100_000, seed=42, bins=50, plotter=plot, **kwargs):
+        """ Show distribution of amplitudes in a random subset of the cube. """
+        # Load subset of data
+        rng = np.random.default_rng(seed=seed)
+        if self.converted is False:
+            alive_traces_indices = self.index_matrix[~self.dead_traces_matrix].ravel()
+            indices = rng.choice(alive_traces_indices, size=n_traces)
+            data = self.load_by_indices(indices)
+        else:
+            indices = rng.choice(self.shape[0], size=n_traces // self.shape[1], replace=False)
+            data = []
+            for index in indices:
+                slide = self.load_slide(index=index, axis=0)
+                slide_bounds = self.compute_auto_zoom(index=index, axis=0)
+                data.append(slide[slide_bounds].ravel())
+            data = np.concatenate(data)
+
 
         kwargs = {
             'title': (f'Amplitude distribution for {self.short_name}' +
@@ -765,33 +524,32 @@ class SeismicGeometry(CacheMixin, ExportMixin):
         }
         return plotter(data, bins=bins, mode='histogram', **kwargs)
 
-    def show_slide(self, loc, start=None, end=None, step=1, axis=0, zoom=None, stable=True, plotter=plot, **kwargs):
-        """ Show seismic slide in desired place.
+    def show_slide(self, index, axis=0, zoom=None, plotter=plot, **kwargs):
+        """ Show seismic slide in desired index.
         Under the hood relies on :meth:`load_slide`, so works with geometries in any formats.
 
         Parameters
         ----------
-        loc : int
-            Number of slide to load.
-        axis : int or str
-            Axis to load slide along.
+        index : int, str
+            Index of the slide to show.
+            If int, then interpreted as the ordinal along the specified axis.
+            If `'random'`, then we generate random index along the axis.
+            If string of the `'#XXX'` format, then we interpret it as the exact indexing header value.
+        axis : int
+            Axis of the slide.
         zoom : tuple, None or 'auto'
             Tuple of slices to apply directly to 2d images. If None, slicing is not applied.
             If 'auto', zero traces on bounds will be dropped.
-        start, end, step : int
-            Parameters of slice loading for 1D index.
-        stable : bool
-            Whether or not to use the same sorting order as in the segyfile.
         plotter : instance of `plot`
             Plotter instance to use.
             Combined with `positions` parameter allows using subplots of already existing plotter.
         """
         axis = self.parse_axis(axis)
-        slide = self.load_slide(loc=loc, start=start, end=end, step=step, axis=axis, stable=stable)
+        slide = self.load_slide(index=index, axis=axis)
         xmin, xmax, ymin, ymax = 0, slide.shape[0], slide.shape[1], 0
 
         if zoom == 'auto':
-            zoom = self.compute_auto_zoom(loc, axis)
+            zoom = self.compute_auto_zoom(index, axis)
         if zoom:
             slide = slide[zoom]
             xmin = zoom[0].start or xmin
@@ -801,7 +559,7 @@ class SeismicGeometry(CacheMixin, ExportMixin):
 
         # Plot params
         if len(self.index_headers) > 1:
-            title = f'{self.axis_names[axis]} {loc} out of {self.cube_shape[axis]}'
+            title = f'{self.axis_names[axis]} {index} out of {self.shape[axis]}'
 
             if axis in [0, 1]:
                 xlabel = self.index_headers[1 - axis]
@@ -816,7 +574,7 @@ class SeismicGeometry(CacheMixin, ExportMixin):
 
         kwargs = {
             'title': title,
-            'suptitle':  f'Field `{self.displayed_name}`',
+            'suptitle':  f'Field `{self.short_name}`',
             'xlabel': xlabel,
             'ylabel': ylabel,
             'cmap': 'Greys_r',
@@ -828,120 +586,86 @@ class SeismicGeometry(CacheMixin, ExportMixin):
         }
         return plotter(slide, **kwargs)
 
-    def show_quality_map(self, **kwargs):
-        """ Show quality map. """
-        plot_config = {
-            'cmap': 'Reds',
-            'title': f'Quality map of `{self.displayed_name}`',
-            **kwargs
-        }
-        self.show(matrix=self.quality_map, **plot_config)
 
-    def show_quality_grid(self, **kwargs):
-        """ Show quality grid. """
-        plot_config = {
-            'cmap': 'Reds',
-            'interpolation': 'bilinear',
-            'title': f'Quality grid of `{self.displayed_name}`',
-            **kwargs
-        }
-        self.show(matrix=self.quality_grid, **plot_config)
-
-
-    # Coordinate conversion
-    def lines_to_cdp(self, points):
-        """ Convert lines to CDP. """
-        return (self.rotation_matrix[:, :2] @ points.T + self.rotation_matrix[:, 2].reshape(2, -1)).T
-
-    def cdp_to_lines(self, points):
-        """ Convert CDP to lines. """
-        inverse_matrix = np.linalg.inv(self.rotation_matrix[:, :2])
-        lines = (inverse_matrix @ points.T - inverse_matrix @ self.rotation_matrix[:, 2].reshape(2, -1)).T
-        return np.rint(lines)
-
-    def benchmark(self, n_slide=300, projections='ixh', n_crop=300, crop_shapes_min=5, crop_shapes_max=200,
-                  use_cache=False, seed=42):
-        """ Calculate average data loading timings (in ms) in user, system and wall mode for slides and crops.
-
-        Time measurement idea (sys, user and wall) is from python magic function `time` realization.
+    # Utilities for 2D slides
+    def get_slide_index(self, index, axis=0):
+        """ Get the slide index along specified axis.
+        Integer `12` means 12-th (ordinal) inline.
+        String `#244` means inline 244.
 
         Parameters
         ----------
-        n_slide : int, optional
-            Amount of slides to load in an experiment.
-        projections : str or sequence of int or str, optional
-            Preferable axes to load slide along: `i` or 0 for iline one, `x` or 1 for the crossline, `h` or 2 for depth.
-        n_crop : int, optional
-            Amount of crops to load in an experiment.
-        crop_shapes_min : int or tuple of int, optional
-            A minimum size of crop.
-            If int, then it applied for the first index, the second, and depth.
-            If tuple, then each number correspond to each crop index.
-        crop_shapes_max : int or tuple of int, optional
-            A maximum size of crop.
-            If int, then it applied for the first index, the second, and depth.
-            If tuple, then each number correspond to each crop index.
-        use_cache : bool, optional
-            Whether to use lru_cache for :meth:`load_slide` and :meth:`load_crop`.
-        seed : int, optional
-            Seed the random numbers generator.
+        index : int, str
+            If int, then interpreted as the ordinal along the specified axis.
+            If `'random'`, then we generate random index along the axis.
+            If string of the `'#XXX'` format, then we interpret it as the exact indexing header value.
+        axis : int
+            Axis of the slide.
         """
-        rng = np.random.default_rng(seed)
-        timings = {}
+        if isinstance(index, (int, np.integer)):
+            if index >= self.shape[axis]:
+                raise KeyError(f'Index={index} is out of geometry bounds={self.shape[axis]}!')
+            return index
+        if index == 'random':
+            return np.random.randint(0, self.lengths[axis])
+        if isinstance(index, str) and index.startswith('#'):
+            index = int(index[1:])
+            return self.index_value_to_ordinal[axis][index]
+        raise ValueError(f'Unknown type of index={index}')
 
-        # Parse projections:
-        projections = [self.parse_axis(proj) for proj in projections]
+    def get_slide_bounds(self, index, axis=0):
+        """ Compute bounds of the slide: indices of the first/last alive traces of it.
 
-        # Calculate the average loading slide time by loading random slides `n_slide` times
-        self.reset_cache()
+        Parameters
+        ----------
+        index : int
+            Ordinal index of the slide.
+        axis : int
+            Axis of the slide.
+        """
+        dead_traces = np.take(self.dead_traces_matrix, indices=index, axis=axis)
+        left_bound = np.argmin(dead_traces)
+        right_bound = len(dead_traces) - np.argmin(dead_traces[::-1]) # the first dead trace
+        return left_bound, right_bound
 
-        wall_st = time.perf_counter()
-        start = psutil.cpu_times() # 0 key - user time in seconds,  2 key - system time in seconds
+    def compute_auto_zoom(self, index, axis=0):
+        """ Compute zoom for a given slide. """
+        return slice(*self.get_slide_bounds(index=index, axis=axis))
 
-        for _ in range(n_slide):
-            axis = rng.choice(a=projections)
-            loc = rng.integers(low=0, high=self.cube_shape[axis])
-            _ = self.load_slide(loc=loc, axis=axis, use_cache=use_cache)
 
-        end = psutil.cpu_times()
-        wall_end = time.perf_counter()
+    # General utility methods
+    STRING_TO_AXIS = {
+        'i': 0, 'il': 0, 'iline': 0, 'inline': 0,
+        'x': 1, 'xl': 1, 'xline': 1, 'xnline': 1,
+        'd': 2, 'depth': 2,
+    }
 
-        timings['slide'] = {
-            'user': 1000 * (end[0] - start[0]) / n_slide,
-            'system': 1000 * (end[2] - start[2]) / n_slide,
-            'wall': 1000 * (wall_end - wall_st) / n_slide
-        }
+    def parse_axis(self, axis):
+        """ Convert string representation of an axis into integer, if needed. """
+        if isinstance(axis, str):
+            if axis in self.index_headers:
+                axis = self.index_headers.index(axis)
+            elif axis in self.STRING_TO_AXIS:
+                axis = self.STRING_TO_AXIS[axis]
+        return axis
 
-        # Preparation for timing loading crop calculation
-        self.reset_cache()
+    def make_slide_locations(self, index, axis=0):
+        """ Create locations (sequence of slices for each axis) for desired slide along given axis. """
+        locations = [slice(0, item) for item in self.shape]
 
-        if isinstance(crop_shapes_min, int):
-            crop_shapes_min = (crop_shapes_min, crop_shapes_min, crop_shapes_min)
-        if isinstance(crop_shapes_max, int):
-            crop_shapes_max = (crop_shapes_max, crop_shapes_max, crop_shapes_max)
+        axis = self.parse_axis(axis)
+        locations[axis] = slice(index, index + 1)
+        return locations
 
-        # The `load_crop` method by default doesn't use cache. It uses cache in the `slide` mode.
-        crop_kwargs = {'mode': 'slide'} if use_cache else {}
+    def process_limits(self, limits):
+        """ Convert given `limits` to a `slice`. """
+        if limits is None:
+            return slice(0, self.depth, 1)
+        if isinstance(limits, (tuple, list)):
+            limits = slice(*limits)
+        return limits
 
-        # Calculate the average loading crop time by loading random crops `n_crop` times
-        wall_st = time.perf_counter()
-        start = psutil.cpu_times() # 0 key - user time in seconds,  2 key - system time in seconds
-
-        for _ in range(n_crop):
-            point = rng.integers(low=(0, 0, 0), high=self.cube_shape) // 2
-            shape = rng.integers(low=crop_shapes_min, high=crop_shapes_max)
-            locations = [slice(start_, np.clip(start_+shape_, 0, max_shape))
-                        for start_, shape_, max_shape in zip(point, shape, self.cube_shape)]
-            _ = self.load_crop(locations, **crop_kwargs)
-
-        end = psutil.cpu_times()
-        wall_end = time.perf_counter()
-
-        timings['crop'] = {
-            'user': 1000 * (end[0] - start[0]) / n_slide,
-            'system': 1000 * (end[2] - start[2]) / n_slide,
-            'wall': 1000 * (wall_end - wall_st) / n_slide
-        }
-
-        self.reset_cache()
-        return timings
+    @staticmethod
+    def locations_to_shape(locations):
+        """ Compute shape of a location. """
+        return tuple(slc.stop - slc.start for slc in locations)

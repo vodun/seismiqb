@@ -1,7 +1,7 @@
 """ Generator of (label-dependant) randomized locations, mainly for model training.
 
 Locations describe the cube and the exact place to load from in the following format:
-(field_id, label_id, orientation, i_start, x_start, h_start, i_stop, x_stop, h_stop).
+(field_id, label_id, orientation, i_start, x_start, d_start, i_stop, x_stop, d_stop).
 
 Locations are passed to `make_locations` method of `SeismicCropBatch`, which
 transforms them into 3D slices to index the data and other useful info like origin points, shapes and orientation.
@@ -17,7 +17,7 @@ from numba import njit
 from batchflow import Sampler, ConstantSampler
 from .labels import Horizon, Fault
 from .field import Field, SyntheticField
-from .geometry import SeismicGeometry
+from .geometry import Geometry
 from .utils import filtering_function, insert_points_into_mask, AugmentedDict
 from .plotters import plot
 
@@ -68,7 +68,7 @@ class BaseSampler(Sampler):
 
             points = _points
 
-        # Transform points to (orientation, i_start, x_start, h_start, i_stop, x_stop, h_stop)
+        # Transform points to (orientation, i_start, x_start, d_start, i_stop, x_stop, d_stop)
         buffer = np.empty((len(points), 7), dtype=np.int32)
         buffer[:, 0] = points[:, 3]
         buffer[:, 1:4] = points[:, 0:3]
@@ -79,7 +79,7 @@ class BaseSampler(Sampler):
         self.n = len(buffer)
         self.crop_shape = crop_shape
         self.crop_shape_t = crop_shape_t
-        self.crop_height = crop_shape[2]
+        self.crop_depth = crop_shape[2]
         self.ranges = ranges
         self.threshold = threshold
         self.n_threshold = n_threshold
@@ -115,7 +115,7 @@ class GeometrySampler(BaseSampler):
         - don't go beyond cube limits
 
     Locations are produced as np.ndarray of (size, 9) shape with following columns:
-        (field_id, field_id, orientation, i_start, x_start, h_start, i_stop, x_stop, h_stop).
+        (field_id, field_id, orientation, i_start, x_start, d_start, i_stop, x_stop, d_stop).
     Depth location is randomized in desired `ranges`.
 
     Under the hood, we prepare `locations` attribute:
@@ -124,7 +124,7 @@ class GeometrySampler(BaseSampler):
         - apply `filtering_matrix` to remove more points
         - keep only those points and directions which create crops with more than `threshold` non-dead traces
         - store all possible locations for each of the remaining points
-    For sampling, we randomly choose `size` rows from `locations` and generate height in desired range.
+    For sampling, we randomly choose `size` rows from `locations` and generate depth in desired range.
 
     Parameters
     ----------
@@ -145,7 +145,7 @@ class GeometrySampler(BaseSampler):
     """
     def __init__(self, field, crop_shape, threshold=0.05, ranges=None, filtering_matrix=None,
                  field_id=0, label_id=0, **kwargs):
-        matrix = (1 - field.zero_traces).astype(np.float32)
+        matrix = (1 - field.dead_traces_matrix).astype(np.float32)
         idx = np.nonzero(matrix != 0)
         points = np.hstack([idx[0].reshape(-1, 1),
                             idx[1].reshape(-1, 1),
@@ -162,7 +162,7 @@ class GeometrySampler(BaseSampler):
         self.field = field
         self.matrix = matrix
         self.name = field.short_name
-        self.displayed_name = field.displayed_name
+        self.short_name = field.short_name
         super().__init__()
 
     def sample(self, size):
@@ -170,21 +170,21 @@ class GeometrySampler(BaseSampler):
         idx = np.random.randint(self.n, size=size)
         sampled = self.locations[idx]
 
-        heights = np.random.randint(low=self.ranges[2, 0],
-                                    high=self.ranges[2, 1] - self.crop_height,
-                                    size=size, dtype=np.int32)
+        depths = np.random.randint(low=self.ranges[2, 0],
+                                   high=self.ranges[2, 1] - self.crop_depth,
+                                   size=size, dtype=np.int32)
 
         buffer = np.empty((size, 9), dtype=np.int32)
         buffer[:, 0] = self.field_id
         buffer[:, 1] = self.label_id
 
         buffer[:, [2, 3, 4, 6, 7]] = sampled[:, [0, 1, 2, 4, 5]]
-        buffer[:, 5] = heights
-        buffer[:, 8] = heights + self.crop_height
+        buffer[:, 5] = depths
+        buffer[:, 8] = depths + self.crop_depth
         return buffer
 
     def __repr__(self):
-        return f'<GeometrySampler for {self.displayed_name}: '\
+        return f'<GeometrySampler for {self.short_name}: '\
                f'crop_shape={tuple(self.crop_shape)}, threshold={self.threshold}>'
 
 
@@ -196,7 +196,7 @@ class HorizonSampler(BaseSampler):
         - don't go beyond cube limits
 
     Locations are produced as np.ndarray of (size, 9) shape with following columns:
-        (field_id, label_id, orientation, i_start, x_start, h_start, i_stop, x_stop, h_stop).
+        (field_id, label_id, orientation, i_start, x_start, d_start, i_stop, x_stop, d_stop).
     Depth location is randomized in (0.1*shape, 0.9*shape) range.
 
     Under the hood, we prepare `locations` attribute:
@@ -225,11 +225,11 @@ class HorizonSampler(BaseSampler):
         Map of points to remove from potentially generated locations.
     field_id, label_id : int
         Used as the first two columns of sampled values.
-    shift_height : bool
-        Whether apply random shift to height locations of sampled horizon points or not.
+    randomize_depth : bool
+        Whether apply random shift to depth locations of sampled horizon points or not.
     """
     def __init__(self, horizon, crop_shape, threshold=0.05, ranges=None, filtering_matrix=None,
-                 shift_height=True, spatial_shift=False, field_id=0, label_id=0, **kwargs):
+                 randomize_depth=True, spatial_shift=False, field_id=0, label_id=0, **kwargs):
         field = horizon.field
         matrix = horizon.full_matrix
 
@@ -245,11 +245,11 @@ class HorizonSampler(BaseSampler):
         self.field = field
         self.matrix = matrix
         self.name = field.short_name
-        self.displayed_name = horizon.short_name
+        self.short_name = horizon.short_name
 
-        if shift_height:
-            shift_height = shift_height if isinstance(shift_height, tuple) else (0.9, 0.1)
-        self.shift_height = shift_height
+        if randomize_depth:
+            randomize_depth = randomize_depth if isinstance(randomize_depth, tuple) else (0.9, 0.1)
+        self.randomize_depth = randomize_depth
 
         self.spatial_shift = spatial_shift
         super().__init__()
@@ -280,11 +280,11 @@ class HorizonSampler(BaseSampler):
 
     def _sample(self, size):
         idx = np.random.randint(self.n, size=size)
-        sampled = self.locations[idx] # (orientation, i_start, x_start, h_start, i_stop, x_stop, h_stop)
+        sampled = self.locations[idx] # (orientation, i_start, x_start, d_start, i_stop, x_stop, d_stop)
 
-        if self.shift_height:
-            shift = np.random.randint(low=-int(self.crop_height*self.shift_height[0]),
-                                      high=-int(self.crop_height*self.shift_height[1]),
+        if self.randomize_depth:
+            shift = np.random.randint(low=-int(self.crop_depth*self.randomize_depth[0]),
+                                      high=-int(self.crop_depth*self.randomize_depth[1]),
                                       size=(size, 1), dtype=np.int32)
             sampled[:, [3, 6]] += shift
 
@@ -307,15 +307,15 @@ class HorizonSampler(BaseSampler):
             np.clip(sampled[:, 2], 0, self.field.shape[1] - self.crop_shape[1], out=sampled[:, 2])
             np.clip(sampled[:, 5], 0 + self.crop_shape[1], self.field.shape[1], out=sampled[:, 5])
 
-        np.clip(sampled[:, 3], 0, self.field.depth - self.crop_height, out=sampled[:, 3])
-        np.clip(sampled[:, 6], 0 + self.crop_height, self.field.depth, out=sampled[:, 6])
+        np.clip(sampled[:, 3], 0, self.field.depth - self.crop_depth, out=sampled[:, 3])
+        np.clip(sampled[:, 6], 0 + self.crop_depth, self.field.depth, out=sampled[:, 6])
         return sampled
 
 
     def __repr__(self):
-        return f'<HorizonSampler for {self.displayed_name}: '\
+        return f'<HorizonSampler for {self.short_name}: '\
                f'crop_shape={tuple(self.crop_shape)}, threshold={self.threshold}, '\
-               f'shift_height={self.shift_height}, spatial_shift={self.spatial_shift}>'
+               f'randomize_depth={self.randomize_depth}, spatial_shift={self.spatial_shift}>'
 
     @property
     def orientation_matrix(self):
@@ -332,7 +332,7 @@ class FaultSampler(BaseSampler):
         - don't go beyond cube limits
 
     Locations are produced as np.ndarray of (size, 9) shape with following columns:
-        (field_id, label_id, orientation, i_start, x_start, h_start, i_stop, x_stop, h_stop).
+        (field_id, label_id, orientation, i_start, x_start, d_start, i_stop, x_stop, d_stop).
     Location is randomized in (-0.4*shape, 0.4*shape) range.
 
     For sampling, we randomly choose `size` rows from `locations`. If some of the sampled locations does not fit the
@@ -363,8 +363,9 @@ class FaultSampler(BaseSampler):
                  field_id=0, label_id=0, **kwargs):
         field = fault.field
 
+        self.fault = fault
         self.points = fault.points
-        self.nodes = fault.nodes if hasattr(fault, 'nodes') else None
+
         self.direction = fault.direction
         self.transpose = transpose
 
@@ -377,20 +378,20 @@ class FaultSampler(BaseSampler):
 
         self.field = field
         self.name = field.short_name
-        self.displayed_name = fault.short_name
+        self.short_name = fault.short_name
         super().__init__(self)
 
     @property
     def interpolated_nodes(self):
         """ Create locations in non-labeled slides between labeled slides. """
-        slides = np.unique(self.nodes[:, self.direction])
+        slides = np.unique(self.fault.nodes[:, self.direction])
         if len(slides) == 1:
-            return self.nodes
+            return self.fault.nodes
         locations = []
         for i, slide in enumerate(slides):
             left = slides[max(i-1, 0)]
             right = slides[min(i+1, len(slides)-1)]
-            chunk = self.nodes[self.nodes[:, self.direction] == slide]
+            chunk = self.fault.nodes[self.fault.nodes[:, self.direction] == slide]
             for j in range(left, right):
                 chunk[:, self.direction] = j
                 locations += [chunk.copy()]
@@ -407,10 +408,10 @@ class FaultSampler(BaseSampler):
         crop_shape_t = crop_shape[[1, 0, 2]]
         n_threshold = np.int32(np.prod(crop_shape) * threshold)
 
-        if self.nodes is not None:
-            nodes = self.interpolated_nodes if extend else self.nodes
+        if self.fault.has_component('sticks') or self.fault.has_component('nodes'):
+            nodes = self.interpolated_nodes if extend else self.fault.nodes
         else:
-            nodes = self.points
+            nodes = self.fault.points
 
         # Keep only points, that can be a starting point for a crop of given shape
         i_mask = ((ranges[:2, 0] < nodes[:, :2]).all(axis=1) &
@@ -419,7 +420,7 @@ class FaultSampler(BaseSampler):
                   ((nodes[:, :2] + crop_shape_t[:2]) < ranges[:2, 1]).all(axis=1))
         nodes = nodes[i_mask | x_mask]
 
-        # Transform points to (orientation, i_start, x_start, h_start, i_stop, x_stop, h_stop)
+        # Transform points to (orientation, i_start, x_start, d_start, i_stop, x_stop, d_stop)
         directions = [0, 1] if self.transpose else [self.direction]
 
         buffer = np.empty((len(nodes) * len(directions), 7), dtype=np.int32)
@@ -434,7 +435,7 @@ class FaultSampler(BaseSampler):
         self.n = len(buffer)
         self.crop_shape = crop_shape
         self.crop_shape_t = crop_shape_t
-        self.crop_height = crop_shape[2]
+        self.crop_depth = crop_shape[2]
         self.ranges = ranges
         self.threshold = threshold
         self.n_threshold = n_threshold
@@ -478,12 +479,12 @@ class FaultSampler(BaseSampler):
             sampled[mask, 1:4] += shift
             sampled[mask, 4:] += shift
 
-            sampled[mask, 1:4] = np.clip(sampled[mask, 1:4], 0, self.field.cube_shape - shape)
-            sampled[mask, 4:7] = np.clip(sampled[mask, 4:7], 0 + shape, self.field.cube_shape)
+            sampled[mask, 1:4] = np.clip(sampled[mask, 1:4], 0, self.field.shape - shape)
+            sampled[mask, 4:7] = np.clip(sampled[mask, 4:7], 0 + shape, self.field.shape)
         return sampled
 
     def __repr__(self):
-        return f'<FaultSampler for {self.displayed_name}: '\
+        return f'<FaultSampler for {self.short_name}: '\
                f'crop_shape={tuple(self.crop_shape)}, threshold={self.threshold}>'
 
 
@@ -501,7 +502,7 @@ class SyntheticSampler(Sampler):
         self._n = 10000
         self.n = self._n ** 3
 
-        self.name = self.displayed_name = field.name
+        self.name = self.short_name = field.name
         super().__init__()
 
     def sample(self, size):
@@ -530,7 +531,7 @@ def spatial_check_points(points, matrix, crop_shape, i_mask, x_mask, threshold):
     Parameters
     ----------
     points : np.ndarray
-        Points in (i_start, x_start, h_start) format.
+        Points in (i_start, x_start, d_start) format.
     matrix : np.ndarray
         Depth map in cube coordinates.
     crop_shape : tuple of two ints
@@ -550,22 +551,33 @@ def spatial_check_points(points, matrix, crop_shape, i_mask, x_mask, threshold):
 
     for (point_i, point_x, _), i_mask_, x_mask_ in zip(points, i_mask, x_mask):
         if i_mask_:
-            sliced = matrix[point_i:point_i+shape_i, point_x:point_x+shape_x].ravel()
-            present_mask = (sliced > 0)
+            sliced = matrix[point_i:point_i+shape_i, point_x:point_x+shape_x]
+            present_points, running_sum = np.int32(0), np.int32(0)
 
-            if present_mask.sum() >= threshold:
-                h_mean = np.rint(sliced[present_mask].mean())
-                buffer[counter, :] = point_i, point_x, np.int32(h_mean), np.int32(0)
+            for value in np.nditer(sliced):
+                if value >= 0:
+                    present_points += 1
+                    running_sum += value.item()
+
+            if present_points >= threshold:
+                d_mean = np.rint(running_sum / present_points)
+                buffer[counter, :] = point_i, point_x, np.int32(d_mean), np.int32(0)
                 counter += 1
 
         if x_mask_:
-            sliced = matrix[point_i:point_i+shape_x, point_x:point_x+shape_i].ravel()
-            present_mask = (sliced > 0)
+            sliced = matrix[point_i:point_i+shape_x, point_x:point_x+shape_i]
+            present_points, running_sum = np.int32(0), np.int32(0)
 
-            if present_mask.sum() >= threshold:
-                h_mean = np.rint(sliced[present_mask].mean())
-                buffer[counter, :] = point_i, point_x, np.int32(h_mean), np.int32(1)
+            for value in np.nditer(sliced):
+                if value >= 0:
+                    present_points += 1
+                    running_sum += value.item()
+
+            if present_points >= threshold:
+                d_mean = np.rint(running_sum / present_points)
+                buffer[counter, :] = point_i, point_x, np.int32(d_mean), np.int32(1)
                 counter += 1
+
     return buffer[:counter]
 
 @njit
@@ -577,7 +589,7 @@ def spatial_check_sampled(locations, matrix, threshold):
     Parameters
     ----------
     locations : np.ndarray
-        Locations in (orientation, i_start, x_start, h_start, i_stop, x_stop, h_stop) format.
+        Locations in (orientation, i_start, x_start, d_start, i_stop, x_stop, d_stop) format.
     matrix : np.ndarray
         Depth map in cube coordinates.
     threshold : int
@@ -588,13 +600,19 @@ def spatial_check_sampled(locations, matrix, threshold):
     condition : np.ndarray
         Boolean mask for locations.
     """
+    #pylint: disable=chained-comparison
     condition = np.ones(len(locations), dtype=np.bool_)
 
-    for i, (_, i_start, x_start, h_start, i_stop,  x_stop,  h_stop) in enumerate(locations):
-        sliced = matrix[i_start:i_stop, x_start:x_stop].ravel()
-        present_mask = (h_start < sliced) & (sliced < h_stop)
+    for i, (_, i_start, x_start, d_start, i_stop,  x_stop,  d_stop) in enumerate(locations):
+        sliced = matrix[i_start:i_stop, x_start:x_stop]
+        valid_points = np.int32(0)
 
-        if present_mask.sum() < threshold:
+        for value in np.nditer(sliced):
+            if (d_start < value) and (value < d_stop):
+                valid_points += 1
+            if valid_points >= threshold:
+                break
+        else:
             condition[i] = False
     return condition
 
@@ -607,7 +625,7 @@ def volumetric_check_sampled(locations, points, crop_shape, crop_shape_t, thresh
     Parameters
     ----------
     locations : np.ndarray
-        Locations in (orientation, i_start, x_start, h_start, i_stop, x_stop, h_stop) format.
+        Locations in (orientation, i_start, x_start, d_start, i_stop, x_stop, d_stop) format.
     points : points
         Fault points.
     crop_shape : np.ndarray
@@ -625,9 +643,9 @@ def volumetric_check_sampled(locations, points, crop_shape, crop_shape_t, thresh
     condition = np.ones(len(locations), dtype=np.bool_)
 
     if threshold > 0:
-        for i, (orientation, i_start, x_start, h_start, i_stop,  x_stop, h_stop) in enumerate(locations):
+        for i, (orientation, i_start, x_start, d_start, i_stop,  x_stop, d_stop) in enumerate(locations):
             shape = crop_shape if orientation == 0 else crop_shape_t
-            mask_bbox = np.array([[i_start, i_stop], [x_start, x_stop], [h_start, h_stop]], dtype=np.int32)
+            mask_bbox = np.array([[i_start, i_stop], [x_start, x_stop], [d_start, d_stop]], dtype=np.int32)
             mask = np.zeros((shape[0], shape[1], shape[2]), dtype=np.int32)
 
             insert_points_into_mask(mask, points, mask_bbox, 1, 0)
@@ -640,7 +658,7 @@ def volumetric_check_sampled(locations, points, crop_shape, crop_shape_t, thresh
 class SeismicSampler(Sampler):
     """ Mixture of samplers for multiple cubes with multiple labels.
     Used to sample crop locations in the format of
-    (field_id, label_id, orientation, i_start, x_start, h_start, i_stop, x_stop, h_stop).
+    (field_id, label_id, orientation, i_start, x_start, d_start, i_stop, x_stop, d_stop).
 
     Parameters
     ----------
@@ -662,15 +680,15 @@ class SeismicSampler(Sampler):
         Note that we actually use only the first two elements, corresponding to spatial ranges.
     filtering_matrix : np.ndarray, optional
         Map of points to remove from potentially generated locations.
-    shift_height : bool
-        Whether to apply random shift to height locations of sampled horizon points or not.
+    randomize_depth : bool
+        Whether to apply random shift to depth locations of sampled horizon points or not.
     kwargs : dict
         Other parameters of initializing label samplers.
     """
     LABELCLASS_TO_SAMPLERCLASS = {
         Field: GeometrySampler,
         SyntheticField: SyntheticSampler,
-        SeismicGeometry: GeometrySampler,
+        Geometry: GeometrySampler,
         Horizon: HorizonSampler,
         Fault: FaultSampler,
     }
@@ -691,7 +709,7 @@ class SeismicSampler(Sampler):
 
 
     def __init__(self, labels, crop_shape, cube_proportions=None, uniform_labels=True,
-                 threshold=0.05, ranges=None, filtering_matrix=None, shift_height=True, **kwargs):
+                 threshold=0.05, ranges=None, filtering_matrix=None, randomize_depth=True, **kwargs):
         # One sampler of each `label` for each `field`
         names, sampler_classes = {}, {}
         samplers = AugmentedDict({field_name: [] for field_name in labels.keys()})
@@ -718,7 +736,7 @@ class SeismicSampler(Sampler):
 
                 label_sampler = sampler_class(label, crop_shape=crop_shape_, threshold=threshold_,
                                               ranges=ranges_, filtering_matrix=filtering_matrix_,
-                                              field_id=field_id, label_id=label_id, shift_height=shift_height,
+                                              field_id=field_id, label_id=label_id, randomize_depth=randomize_depth,
                                               **kwargs)
 
                 if label_sampler.n != 0:
@@ -796,8 +814,8 @@ class SeismicSampler(Sampler):
             if isinstance(field, SyntheticField):
                 continue
 
-            data += [[sampler.orientation_matrix, field.zero_traces] for sampler in samplers_list]
-            title += [f'{field.displayed_name}: {sampler.displayed_name}' for sampler in samplers_list]
+            data += [[sampler.orientation_matrix, field.dead_traces_matrix] for sampler in samplers_list]
+            title += [f'{field.short_name}: {sampler.short_name}' for sampler in samplers_list]
             xlabel += [field.index_headers[0]] * len(samplers_list)
             ylabel += [field.index_headers[1]] * len(samplers_list)
 
@@ -846,7 +864,7 @@ class SeismicSampler(Sampler):
             if isinstance(field, SyntheticField):
                 continue
 
-            matrix = np.zeros_like(field.zero_traces, dtype=np.int32)
+            matrix = np.zeros_like(field.dead_traces_matrix, dtype=np.int32)
 
             sampled_ = sampled[sampled[:, 0] == field_id]
             for (_, _, _, point_i_start, point_x_start, _, point_i_stop,  point_x_stop,  _) in sampled_:
@@ -854,10 +872,10 @@ class SeismicSampler(Sampler):
             if binary:
                 matrix[matrix > 0] = 1
 
-            field_data = [matrix, field.zero_traces]
+            field_data = [matrix, field.dead_traces_matrix]
             data.append(field_data)
 
-            field_title = f'{field.displayed_name}: {len(sampled_)} points'
+            field_title = f'{field.short_name}: {len(sampled_)} points'
             title.append(field_title)
 
         data.append(None) # reserve extra subplot for future legend

@@ -1,8 +1,57 @@
 """ Collection of decorators. """
 from functools import wraps
+
+import cv2
 import numpy as np
 
 from . import to_list
+
+class TransformsMixin:
+    """ Methods to transform given array. """
+    @staticmethod
+    def matrix_fill_to_num(matrix, value):
+        """ Change the matrix values at points where field is absent to a supplied one. """
+        matrix[np.isnan(matrix)] = value
+        return matrix
+
+    @staticmethod
+    def matrix_normalize(matrix, mode, subset_values=None):
+        """ Normalize matrix values.
+
+        Parameters
+        ----------
+        mode : bool, str, optional
+            If `min-max` or True, then use min-max scaling.
+            If `mean-std`, then use mean-std scaling.
+            If False, don't scale matrix.
+        """
+        values = subset_values or matrix[~np.isnan(matrix)]
+
+        if mode in ['min-max', True]:
+            min_, max_ = np.nanmin(values), np.nanmax(values)
+            matrix = (matrix - min_) / (max_ - min_)
+        elif mode == 'mean-std':
+            mean, std = np.nanmean(values), np.nanstd(values)
+            matrix = (matrix - mean) / std
+        else:
+            raise ValueError(f'Unknown normalization mode `{mode}`.')
+        return matrix
+
+    @staticmethod
+    def matrix_dilate(matrix, dilation_iterations=3, dilate_boundaries=False):
+        """ Normalize matrix values.
+
+        Parameters
+        ----------
+        mode : bool, str, optional
+            If `min-max` or True, then use min-max scaling.
+            If `mean-std`, then use mean-std scaling.
+            If False, don't scale matrix.
+        """
+        dtype = matrix.dtype
+        kernel = np.ones((3, 3), dtype=np.uint8)
+        dilated = cv2.dilate(matrix.astype(np.float32), kernel, iterations=dilation_iterations)
+        return dilated.astype(dtype)
 
 
 def transformable(method):
@@ -35,26 +84,36 @@ def transformable(method):
     """
     @wraps(method)
     def wrapper(instance, *args, dtype=None, on_full=False, channels=None, normalize=False, fill_value=None,
-                enlarge=False, enlarge_width=10, atleast_3d=False, n_components=None, **kwargs):
+                dilate=False, dilation_iterations=3, enlarge=False, enlarge_width=10,
+                atleast_3d=False, n_components=None, **kwargs):
         result = method(instance, *args, **kwargs)
 
         if dtype and hasattr(instance, 'matrix_set_dtype'):
             result = instance.matrix_set_dtype(result, dtype=dtype)
+
         if on_full and hasattr(instance, 'matrix_put_on_full'):
             result = instance.matrix_put_on_full(result)
+
         if channels is not None:
             if channels == 'middle':
                 channels = result.shape[2] // 2
             channels = to_list(channels)
             result = result[:, :, channels]
+
         if normalize and hasattr(instance, 'matrix_normalize'):
             result = instance.matrix_normalize(result, normalize)
+
         if fill_value is not None and hasattr(instance, 'matrix_fill_to_num'):
             result = instance.matrix_fill_to_num(result, value=fill_value)
+
+        if dilate and hasattr(instance, 'matrix_dilate'):
+            result = instance.matrix_dilate(result, dilation_iterations=dilation_iterations)
         if enlarge and hasattr(instance, 'matrix_enlarge'):
             result = instance.matrix_enlarge(result, width=enlarge_width)
+
         if atleast_3d:
             result = np.atleast_3d(result)
+
         if n_components is not None and hasattr(instance, 'pca_transform'):
             if result.ndim != 3:
                 raise ValueError(f'PCA transformation can be applied only to 3D arrays, got `{result.ndim}`')

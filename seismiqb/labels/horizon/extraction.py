@@ -396,14 +396,16 @@ class ExtractionMixin:
 
             # Change `self` inplace
             self.from_matrix(background, i_min=shared_i_min, x_min=shared_x_min,
-                             h_min=min(self.h_min, other.h_min), h_max=max(self.h_max, other.h_max), length=length)
+                             d_min=min(self.d_min, other.d_min),
+                             d_max=max(self.d_max, other.d_max), length=length)
             # self.reset_storage('points')
             merged = True
         else:
             # Return a new instance of horizon
             merged = type(self)(storage=background, field=self.field, name=self.name,
                                 i_min=shared_i_min, x_min=shared_x_min,
-                                h_min=min(self.h_min, other.h_min), h_max=max(self.h_max, other.h_max), length=length)
+                                d_min=min(self.d_min, other.d_min),
+                                d_max=max(self.d_max, other.d_max), length=length)
         return merged
 
 
@@ -418,7 +420,7 @@ class ExtractionMixin:
         self, other : :class:`.Horizon` instances
             Horizons to merge.
         mean_threshold : number
-            Height threshold for mean distances.
+            depth threshold for mean distances.
         adjacency : int
             Margin to consider horizons close (spatially).
         inplace : bool
@@ -429,8 +431,8 @@ class ExtractionMixin:
         adjacency_i, adjacency_x = adjacency
 
         # Simplest possible check: horizons are too far away from one another (depth-wise)
-        overlap_h_min, overlap_h_max = max(self.h_min, other.h_min), min(self.h_max, other.h_max)
-        if overlap_h_max - overlap_h_min < 0:
+        overlap_d_min, overlap_d_max = max(self.d_min, other.d_min), min(self.d_max, other.d_max)
+        if overlap_d_max - overlap_d_min < 0:
             return False
 
         # Create shared background for both horizons
@@ -457,7 +459,7 @@ class ExtractionMixin:
                shared_self_x_min:shared_self_x_min+self.x_length] += (self.matrix > 0).astype(np.int32)
         counts_idx = counts == 2
 
-        # Determine whether horizon can be merged (adjacent and height-close) or not
+        # Determine whether horizon can be merged (adjacent and depth-close) or not
         mergeable = False
         if counts_idx.any():
             # Put the first horizon on dilated background, compute mean
@@ -489,14 +491,16 @@ class ExtractionMixin:
 
                 # Change `self` inplace
                 self.from_matrix(background, i_min=shared_i_min, x_min=shared_x_min,
-                                 h_min=min(self.h_min, other.h_min), h_max=max(self.h_max, other.h_max), length=length)
+                                 d_min=min(self.d_min, other.d_min),
+                                 d_max=max(self.d_max, other.d_max), length=length)
                 # self.reset_storage('points')
                 merged = True
             else:
                 # Return a new instance of horizon
                 merged = type(self)(storage=background, field=self.field, name=self.name,
                                     i_min=shared_i_min, x_min=shared_x_min,
-                                    h_min=min(self.h_min, other.h_min), h_max=max(self.h_max, other.h_max),
+                                    d_min=min(self.d_min, other.d_min),
+                                    d_max=max(self.d_max, other.d_max),
                                     length=length)
             return merged
         return False
@@ -553,13 +557,13 @@ class ExtractionMixin:
             # Pre-compute all the bounding boxes
             bboxes = [(horizon.i_min, horizon.i_max,
                        horizon.x_min, horizon.x_max,
-                       horizon.h_min, horizon.h_max)
+                       horizon.d_min, horizon.d_max)
                       for horizon in horizons]
             bboxes = np.array(bboxes, dtype=np.int32)
 
             base_bbox = np.array([self.i_min, self.i_max,
                                   self.x_min, self.x_max,
-                                  self.h_min, self.h_max])
+                                  self.d_min, self.d_max])
 
             # Iline-axis
             overlap_min_i = np.maximum(bboxes[:, 0], base_bbox[0])
@@ -577,7 +581,7 @@ class ExtractionMixin:
             indices_x = np.nonzero(mask_x)[0]
             bboxes_x = bboxes_i[indices_x]
 
-            # Height-axis: other threshold
+            # depth-axis: other threshold
             overlap_min_h = np.maximum(bboxes_x[:, 4], base_bbox[4])
             overlap_max_h = np.minimum(bboxes_x[:, 5], base_bbox[5]) + 1
             overlap_size_h = overlap_max_h - overlap_min_h
@@ -710,7 +714,7 @@ class ExtractionMixin:
             # Pre-compute all the bounding boxes
             bboxes = [(horizon.i_min, horizon.i_max,
                        horizon.x_min, horizon.x_max,
-                       horizon.h_min, horizon.h_max)
+                       horizon.d_min, horizon.d_max)
                       for horizon in horizons]
             bboxes = np.array(bboxes, dtype=np.int32)
 
@@ -735,7 +739,7 @@ class ExtractionMixin:
                 # adjacency = +0 -> try to merge horizons with overlap  of 1 pixel
                 # adjacency = +1 -> try to merge horizons with touching boundaries
                 # adjacency = +2 -> try to merge horizons with gap      of 1 pixel between boundaries
-                # TODO: check, if using height as the first mask is faster
+                # TODO: check, if using depth as the first mask is faster
 
                 # Iline-axis
                 overlap_min_i = np.maximum(bboxes[:, 0], current_bbox[0])
@@ -753,7 +757,7 @@ class ExtractionMixin:
                 indices_x = np.nonzero(mask_x)[0]
                 bboxes_x = bboxes_i[indices_x]
 
-                # Height-axis: other threshold
+                # depth-axis: other threshold
                 overlap_min_h = np.maximum(bboxes_x[:, 4], current_bbox[4])
                 overlap_max_h = np.minimum(bboxes_x[:, 5], current_bbox[5]) + 1
                 overlap_size_h = overlap_max_h - overlap_min_h
@@ -827,7 +831,7 @@ class ExtractionMixin:
                 # Update bbox stats
                 bboxes[i] = (current_horizon.i_min, current_horizon.i_max,
                              current_horizon.x_min, current_horizon.x_max,
-                             current_horizon.h_min, current_horizon.h_max)
+                             current_horizon.d_min, current_horizon.d_max)
 
                 # Once in a while, remove merged horizons from `bboxes` and `horizons` arrays
                 if len(indices_merged) > int(delete_threshold * len(horizons)):

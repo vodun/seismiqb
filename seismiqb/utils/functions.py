@@ -7,10 +7,19 @@ from numba import njit, prange
 
 
 
-def file_print(msg, path, mode='w'):
+def file_print(*msg, path, mode='w', **kwargs):
     """ Print to file. """
     with open(path, mode, encoding='utf-8') as file:
-        print(msg, file=file)
+        print(*msg, file=file, **kwargs)
+
+def select_printer(printer):
+    """ Select printing method. """
+    if isinstance(printer, str):
+        return lambda *msg, **kwargs: file_print(*msg, path=printer, **kwargs)
+    if callable(printer):
+        return printer
+    return print
+
 
 
 def _adjust_shape_for_rotation(shape, angle):
@@ -108,11 +117,11 @@ def filter_simplices(simplices, points, matrix, threshold=5.):
         tri = points[simplices[i]].astype(np.int32)
 
         middle_i, middle_x = np.mean(tri[:, 0]), np.mean(tri[:, 1])
-        heights = np.array([matrix[tri[0, 0], tri[0, 1]],
+        depths = np.array([matrix[tri[0, 0], tri[0, 1]],
                             matrix[tri[1, 0], tri[1, 1]],
                             matrix[tri[2, 0], tri[2, 1]]])
 
-        if matrix[int(middle_i), int(middle_x)] < 0 or np.std(heights) > threshold:
+        if matrix[int(middle_i), int(middle_x)] < 0 or np.std(depths) > threshold:
             mask[i] = 0
 
     return simplices[mask == 1]
