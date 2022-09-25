@@ -688,23 +688,24 @@ class SeismicCropBatch(Batch, VisualizationMixin):
 
 
     @apply_parallel_decorator
-    def filter_sides(self, crop, length_ratio, side):
+    def filter_sides(self, crop, ratio, side):
+
         """ Filter out left or right side of a crop.
 
         Parameters:
         ----------
-        length_ratio : float
+        ratio : float
             The ratio of the crop lines to be filtered out.
         side : str
             Which side to filter out. Possible options are 'left' or 'right'.
         """
-        if not 0 <= length_ratio <= 1:
-            raise ValueError(f"Invalid value {length_ratio:.2f} for `length_ratio`. It must be in interval [0, 1].")
+        if not 0 <= ratio <= 1:
+            raise ValueError(f"Invalid value {ratio:.2f} for `ratio`. It must be in interval [0, 1].")
         new_mask = np.copy(crop)
 
         # Get the amount of crop lines and kept them on the chosen crop part
         max_len = new_mask.shape[0]
-        length = round(max_len * (1 - length_ratio))
+        length = round(max_len * (1 - ratio))
 
         if side == 'left':
             new_mask[:-length, :] = 0
