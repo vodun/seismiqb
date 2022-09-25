@@ -1,8 +1,6 @@
 """ Seismic Crop Batch. """
 import os
-import random
 import traceback
-from copy import copy
 from warnings import warn
 
 import numpy as np
@@ -29,7 +27,6 @@ class SeismicCropBatch(Batch, VisualizationMixin):
     individual cubes into crop-based indices. The transformation uses randomly generated postfix (see `:meth:.salt`)
     to obtain unique elements.
     """
-    components = None
     apply_defaults = {
         'target': 'for',
         'post': '_assemble'
@@ -43,6 +40,7 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         Refer to the original documentation for more details.
         TODO: move to `batchflow`.
         """
+        #pylint: disable=keyword-arg-before-vararg
         # Parse parameters: fill with class-wide defaults, calculate probabilities for each item
         init = init or self.apply_defaults.get('init', None)
         post = post or self.apply_defaults.get('post', None)
@@ -305,6 +303,8 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         if orientation == 1:
             buffer = buffer.transpose(1, 0, 2)
         field.load_seismic(locations=locations, src=src_geometry, buffer=buffer, **kwargs)
+
+    load_cubes = load_seismic
 
 
     @action
