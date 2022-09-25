@@ -29,7 +29,8 @@ class SeismicCropBatch(Batch, VisualizationMixin):
     """
     apply_defaults = {
         'target': 'for',
-        'post': '_assemble'
+        'init': 'preallocating_init',
+        'post': 'noop_post'
     }
 
     # Inner workings
