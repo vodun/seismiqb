@@ -157,7 +157,7 @@ class Field(CharismaMixin, VisualizationMixin):
         """ Remove paths for service files. """
         return [path for path in paths
                 if not isinstance(path, str) or \
-                not any(ext in path for ext in ['.dvc', '.gitignore', '.meta'])]
+                not any(ext in path for ext in ['.dvc', '.gitignore', '.meta', '.sgy_meta'])]
 
     def _load_horizons(self, paths, max_workers=4, filter=True, interpolate=False, sort=True,
                        label_class=Horizon, **kwargs):
@@ -217,14 +217,15 @@ class Field(CharismaMixin, VisualizationMixin):
             fault.interpolate()
         return fault
 
-    def _load_geometries(self, paths, label_class=Geometry.new, **kwargs):
+    def _load_geometries(self, paths, constructor_class=Geometry.new, **kwargs):
         if isinstance(paths, str):
             path = paths
         if isinstance(paths, (tuple, list)):
             if len(paths) > 1:
                 raise ValueError(f'Path for Geometry loading is non-unique!, {paths}')
             path = paths[0]
-        return label_class(path, **kwargs)
+        return constructor_class(path, **kwargs)
+
 
     # Other methods of initialization
     @classmethod
@@ -255,29 +256,28 @@ class Field(CharismaMixin, VisualizationMixin):
         return result
 
 
-    # Public methods. Usually, used by Batch class
-    def load_seismic(self, location, native_slicing=False, src='geometry', **kwargs):
+    # Methods to call from Batch
+    def load_seismic(self, locations, src='geometry', buffer=None, **kwargs):
         """ Load data from cube.
 
         Parameters
         ----------
-        location : sequence
-            A triplet of slices to define exact location in the cube.
-        native_slicing : bool
-            if True, crop will be loaded as a slice of geometry. Prefered for 3D crops to speed up loading.
-            If False, use `load_crop` method to load crops.
+        locations : sequence
+            A triplet of slices to specify the location of a subvolume.
         src : str
             Attribute with desired geometry.
         """
+        _ = kwargs
         geometry = getattr(self, src)
+        if buffer is None:
+            shape = geometry.locations_to_shape(locations)
+            buffer = np.empty(shape, dtype=np.float32)
 
-        if native_slicing:
-            seismic_crop = geometry[tuple(location)]
-        else:
-            seismic_crop = geometry.load_crop(location, **kwargs)
-        return seismic_crop
+        geometry.load_crop(locations, buffer=buffer)
+        return buffer
 
-    def make_mask(self, location, axis=None, indices='all', width=3, src='labels', sparse=False, **kwargs):
+    def make_mask(self, locations, orientation=0, buffer=None, indices='all', width=3, src='labels',
+                  sparse=False, **kwargs):
         """ Create masks from labels.
 
         Parameters
@@ -299,34 +299,28 @@ class Field(CharismaMixin, VisualizationMixin):
         sparse : bool
             Create mask only for labeled slices (for Faults). Unlabeled slices will be marked by -1.
         """
-        # Parse parameters
-        if isinstance(location, (int, np.integer)):
-            location = self.geometry.make_slide_locations(index=location, axis=axis)
-        shape = tuple(slc.stop - slc.start for slc in location)
-        width = width or max(5, shape[-1] // 100)
+        # Parse buffer
+        if buffer is None:
+            shape = self.geometry.locations_to_shape(locations)
+            buffer = np.zeros(shape, dtype=np.float32)
 
-        # Placeholder
         if sparse:
-            mask = -np.ones(shape, dtype=np.float32)
-        else:
-            mask = np.zeros(shape, dtype=np.float32)
+            buffer -= 1
 
+        # Parse requested labels
         labels = getattr(self, src)
         labels = [labels] if not isinstance(labels, (tuple, list)) else labels
         if len(labels) == 0:
-            return mask
+            return buffer
 
         indices = [indices] if isinstance(indices, int) else indices
         if isinstance(indices, (tuple, list, np.ndarray)):
             labels = [labels[idx] for idx in indices]
-        elif indices in ['single', 'random']:
-            np.random.shuffle(labels)
 
+        # Add mask of each component to the buffer
         for label in labels:
-            mask = label.add_to_mask(mask, locations=location, width=width, axis=axis, sparse=sparse)
-            if indices in ['single', 'random'] and mask.sum() > 0.0:
-                break
-        return mask
+            label.add_to_mask(buffer, locations=locations, width=width, axis=orientation, sparse=sparse)
+        return buffer
 
 
     def make_regression_mask(self, location, axis=None, indices='all', src='labels', **kwargs):
@@ -342,6 +336,7 @@ class Field(CharismaMixin, VisualizationMixin):
             mask = np.full((*shape, 1), -1, dtype=np.float32)
             labels[0].add_to_regression_mask(mask=mask[..., 0], locations=location, **kwargs)
         return mask
+
 
     # Attribute retrieval
     def load_attribute(self, src, _return_label=False, **kwargs):
