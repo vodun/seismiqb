@@ -61,14 +61,17 @@ class VisualizationMixin:
         return msg[:-1]
 
     # 2D along axis
-    def show_slide(self, loc, width=None, axis='i', zoom=None, src_geometry='geometry', src_labels='labels',
+    def show_slide(self, index, width=None, axis='i', zoom=None, src_geometry='geometry', src_labels='labels',
                    indices='all', augment_mask=True, plotter=plot, **kwargs):
         """ Show slide with horizon on it.
 
         Parameters
         ----------
-        loc : int
-            Number of slide to load.
+        index : int, str
+            Index of the slide to show.
+            If int, then interpreted as the ordinal along the specified axis.
+            If `'random'`, then we generate random index along the axis.
+            If string of the `'#XXX'` format, then we interpret it as the exact indexing header value.
         width : int
             Horizon thickness. If None given, set to 1% of seismic slide depth.
         axis : int
@@ -78,21 +81,22 @@ class VisualizationMixin:
             If 'auto', zero traces on bounds will be dropped.
         """
         axis = self.geometry.parse_axis(axis)
+        index = self.field.geometry.get_slide_index(index, axis=axis)
 
         # Load seismic and mask
-        seismic_slide = getattr(self, src_geometry).load_slide(loc=loc, axis=axis)
+        seismic_slide = getattr(self, src_geometry).load_slide(index=index, axis=axis)
 
         src_labels = src_labels if isinstance(src_labels, (tuple, list)) else [src_labels]
         masks = []
         for src in src_labels:
-            masks.append(self.make_mask(location=loc, axis=axis, src=src, width=width, indices=indices))
+            masks.append(self.make_mask(location=index, axis=axis, src=src, width=width, indices=indices))
         mask = sum(masks)
 
         seismic_slide, mask = np.squeeze(seismic_slide), np.squeeze(mask)
         xmin, xmax, ymin, ymax = 0, seismic_slide.shape[0], seismic_slide.shape[1], 0
 
         if zoom == 'auto':
-            zoom = self.geometry.compute_auto_zoom(loc, axis)
+            zoom = self.geometry.compute_auto_zoom(index, axis)
         if zoom:
             seismic_slide = seismic_slide[zoom]
             mask = mask[zoom]
@@ -115,7 +119,7 @@ class VisualizationMixin:
 
         kwargs = {
             'cmap': ['Greys_r', 'darkorange'],
-            'title': f'{header} {loc} out of {total}',
+            'title': f'{header} {index} out of {total}',
             'suptitle':  f'Field `{self.short_name}`',
             'xlabel': xlabel,
             'ylabel': ylabel,

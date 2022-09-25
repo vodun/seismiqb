@@ -51,6 +51,7 @@ class GeometryHDF5(Geometry):
         """ Add attributes from the file. """
         # Innate attributes of converted geometry
         self.index_headers = ('INLINE_3D', 'CROSSLINE_3D')
+        self.index_length = 2
         self.converted = True
 
         # Get from meta / set defaults
@@ -95,10 +96,10 @@ class GeometryHDF5(Geometry):
 
 
     # Load data: 2D
-    def load_slide(self, index, axis=0, limits=None, buffer=None, safe=False, use_line_cache=None):
+    def load_slide(self, index, axis=0, limits=None, buffer=None, safe=None, use_slide_cache=None):
         """ Load one slide of data along specified axis.
         Uses either public or private API of `h5py`: the latter reads data directly into preallocated buffer.
-        Also allows to use line cache to speed up the loading process.
+        Also allows to use slide cache to speed up the loading process.
 
         Parameters
         ----------
@@ -112,9 +113,10 @@ class GeometryHDF5(Geometry):
             Slice of the data along the depth (last) axis.
         buffer : np.ndarray, optional
             Buffer to read the data into. If possible, avoids copies.
-        safe : bool
+        safe : bool or None
             Whether to force usage of public (safe) or private API of data loading.
-        use_line_cache : bool or None
+            If None, then uses instance-wide value (default False).
+        use_slide_cache : bool or None
             Whether to use cache for lines.
             If None, then uses instance-wide value (default False).
             If bool, forces that behavior.
@@ -126,11 +128,11 @@ class GeometryHDF5(Geometry):
         if limits is not None and axis==2:
             raise ValueError('Providing `limits` with `axis=2` is meaningless!')
 
-        if use_line_cache is None:
-            use_line_cache = self.use_line_cache
+        safe = safe if safe is not None else self.safe
+        use_slide_cache = use_slide_cache if use_slide_cache is not None else self.use_slide_cache
 
         # Actual data loading
-        if use_line_cache is False:
+        if use_slide_cache is False:
             return self.load_slide_native(index=index, axis=axis, limits=limits, buffer=buffer, safe=safe)
 
         slide = self.load_slide_cached(index=index, axis=axis, limits=limits)
@@ -140,7 +142,7 @@ class GeometryHDF5(Geometry):
             buffer = slide
         return slide
 
-    def load_slide_native(self, index, axis=0, limits=None, buffer=None, safe=True):
+    def load_slide_native(self, index, axis=0, limits=None, buffer=None, safe=False):
         """ Load slide with public or private API of `h5py`. """
         if safe or buffer is None or buffer.dtype != self.dtype:
             buffer = self.load_slide_native_safe(index=index, axis=axis, limits=limits, buffer=buffer)
@@ -210,10 +212,10 @@ class GeometryHDF5(Geometry):
 
 
     # Load data: 3D
-    def load_crop(self, locations, buffer=None, safe=False, use_line_cache=None):
+    def load_crop(self, locations, buffer=None, safe=None, use_slide_cache=None):
         """ Load crop (3D subvolume) from the cube.
         Uses either public or private API of `h5py`: the latter reads data directly into preallocated buffer.
-        Also allows to use line cache to speed up the loading process.
+        Also allows to use slide cache to speed up the loading process.
 
         Parameters
         ----------
@@ -223,19 +225,19 @@ class GeometryHDF5(Geometry):
             Buffer to read the data into. If possible, avoids copies.
         safe : bool
             Whether to force usage of public (safe) or private API of data loading.
-        use_line_cache : bool or None
+        use_slide_cache : bool or None
             Whether to use cache for lines.
             If None, then uses instance-wide value (default False).
             If bool, forces that behavior.
         """
-        if use_line_cache is None:
-            use_line_cache = self.use_line_cache
+        safe = safe if safe is not None else self.safe
+        use_slide_cache = use_slide_cache if use_slide_cache is not None else self.use_slide_cache
 
-        if use_line_cache is False:
+        if use_slide_cache is False:
             return self.load_crop_native(locations=locations, buffer=buffer, safe=safe)
         return self.load_crop_cached(locations=locations, buffer=buffer)
 
-    def load_crop_native(self, locations, axis=None, buffer=None, safe=True):
+    def load_crop_native(self, locations, axis=None, buffer=None, safe=False):
         """ Load crop with public or private API of `h5py`. """
         axis = axis or self.get_optimal_axis(locations=locations)
         if axis not in self.available_axis:

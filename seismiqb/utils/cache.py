@@ -89,7 +89,8 @@ class lru_cache:
                 key.append(attr_hash)
         return flatten_nested(key)
 
-    def compute_hash(self, obj):
+    @staticmethod
+    def compute_hash(obj):
         """ Compute `obj` hash. If not provided by the object, rely on objects identity. """
         #pylint: disable=bare-except
         try:
@@ -276,7 +277,7 @@ class CacheMixin:
 
         for method_name in cached_methods:
             method_cache = getattr(self, method_name).cache()
-            cache_length_accumulator += len(method_cache[self])
+            cache_length_accumulator += len(method_cache[lru_cache.compute_hash(self)])
 
         return cache_length_accumulator
 
@@ -307,7 +308,7 @@ class CacheMixin:
 
         for method_name in cached_methods:
             method_cache = getattr(self, method_name).cache()
-            method_values = list(method_cache[self].values())
+            method_values = list(method_cache[lru_cache.compute_hash(self)].values())
 
             for values in method_values:
                 if isinstance(values, np.ndarray):
@@ -337,7 +338,7 @@ class CacheMixin:
             arguments = None
         elif object_type == 'method':
             method_cache = getattr(self, object_name).cache()
-            arguments = list(method_cache[self].keys())[0][1:]
+            arguments = list(method_cache[lru_cache.compute_hash(self)].keys())[0][1:]
             arguments = dict(zip(arguments[::2], arguments[1::2]))
 
         object_cache_repr = {

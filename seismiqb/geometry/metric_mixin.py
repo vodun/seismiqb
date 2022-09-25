@@ -25,7 +25,7 @@ class MetricMixin:
         chunk_size : sequence of two ints
             Size of the data loaded at once.
         pbar : bool, str
-            If bool, then whether to display progress bar over the file sweep.
+            If bool, then whether to display progress bar.
             If str, then type of progress bar to display: `'t'` for textual, `'n'` for widget.
         kwargs : dict
             Passed directly to `function`.

@@ -53,7 +53,7 @@ class GeometrySEGY(Geometry):
 
 
     def init(self, path, index_headers=INDEX_HEADERS_POSTSTACK, additional_headers=ADDITIONAL_HEADERS_POSTSTACK_FULL,
-             loader_class=MemmapLoader, reload_headers=False, dump_headers=False, load_headers_params=None,
+             loader_class=MemmapLoader, reload_headers=False, dump_headers=True, load_headers_params=None,
              collect_stats=True, recollect_stats=False, collect_stats_params=None, dump_meta=True,
              **kwargs):
         """ Init for SEG-Y geometry. The sequence of actions:
@@ -105,7 +105,7 @@ class GeometrySEGY(Geometry):
         required_attributes = self.PRESERVED + self.PRESERVED_LAZY
 
         if self.meta_exists and self.has_meta_items(required_attributes) and not recollect_stats:
-            self.load_meta(keys=required_attributes)
+            self.load_meta(keys=self.PRESERVED)
             self.has_stats = True
         elif collect_stats:
             collect_stats_params = collect_stats_params or {}
@@ -122,7 +122,8 @@ class GeometrySEGY(Geometry):
                 self.area = -1.
 
         # Dump inferred attributes to a separate file for later loads
-        self.dump_meta()
+        if dump_meta and not (self.meta_exists and self.has_meta_items(required_attributes)):
+            self.dump_meta()
 
     def _infer_loader_class(self, loader_class):
         """ Select appropriate loader class. """
@@ -278,7 +279,7 @@ class GeometrySEGY(Geometry):
         seed : int
             Seed for quantile traces subset selection.
         pbar : bool, str
-            If bool, then whether to display progress bar over the file sweep.
+            If bool, then whether to display progress bar.
             If str, then type of progress bar to display: `'t'` for textual, `'n'` for widget.
         """
         # pylint: disable=too-many-statements
@@ -349,7 +350,7 @@ class GeometrySEGY(Geometry):
         self.std = np.sqrt((self.std_matrix[~self.dead_traces_matrix] ** 2).sum() / n_alive_traces)
 
         # Load subset of data to compute quantiles
-        alive_traces_indices = self.index_matrix[~self.dead_traces_matrix].ravel()
+        alive_traces_indices = self.index_matrix[~self.dead_traces_matrix].reshape(-1)
         indices = np.random.default_rng(seed=seed).choice(alive_traces_indices,
                                                           size=min(self.n_traces, n_quantile_traces))
         data = self.load_by_indices(indices)
@@ -375,7 +376,7 @@ class GeometrySEGY(Geometry):
     def collect_stats_chunk(self, start, end, chunk_i):
         """ Read requested chunk, compute stats for it. """
         # Retrieve chunk data
-        indices = self.index_matrix[start:end].ravel()
+        indices = self.index_matrix[start:end].reshape(-1)
 
         data = self.load_by_indices(indices)
         data = data.reshape(end - start, self.lengths[1], self.depth)
@@ -425,21 +426,19 @@ class GeometrySEGY(Geometry):
             self.loader.load_traces(indices=indices, limits=limits, buffer=buffer)
         return buffer
 
-    def load_depth_slice(self, index, buffer=None):
+    def load_depth_slices(self, indices, buffer=None):
         """ Read requested depth slices from SEG-Y file. """
         if buffer is None:
-            buffer = np.empty((1, self.n_traces), dtype=self.dtype)
+            buffer = np.empty((len(indices), self.n_traces), dtype=self.dtype)
         else:
-            buffer = buffer.reshape((1, self.n_traces))
+            buffer = buffer.reshape((len(indices), self.n_traces))
 
-        buffer = self.loader.load_depth_slices([index], buffer=buffer)[0]
-        if buffer.size == np.prod(self.lengths):
-            buffer = buffer.reshape(self.lengths)
+        buffer = self.loader.load_depth_slices(indices, buffer=buffer)
+        if buffer.shape[-1] == np.prod(self.lengths):
+            buffer = buffer.reshape(len(indices), *self.lengths)
         else:
             # TODO: add a fallback on `index_matrix` instead
-            buffer_ = np.zeros_like(self.dead_traces_matrix, dtype=np.float32)
-            buffer_[~self.dead_traces_matrix] = buffer
-            buffer = buffer_
+            raise NotImplementedError
         return buffer
 
     # Data loading: 2D
@@ -464,7 +463,7 @@ class GeometrySEGY(Geometry):
             indices = np.take(self.index_matrix, indices=index, axis=axis)
             slide = self.load_by_indices(indices=indices, limits=limits, buffer=buffer)
         else:
-            slide = self.load_depth_slice(index, buffer=buffer)
+            slide = self.load_depth_slices([index], buffer=buffer).squeeze(0)
         return slide
 
     # Data loading: 3D
@@ -478,11 +477,23 @@ class GeometrySEGY(Geometry):
         buffer : np.ndarray, optional
             Buffer to read the data into. If possible, avoids copies.
         """
-        indices = self.index_matrix[locations[0], locations[1]].ravel()
-        buffer = self.load_by_indices(indices=indices, limits=locations[-1], buffer=buffer)
+        shape = self.locations_to_shape(locations)
+        axis = np.argmin(shape)
 
-        shape = [((slc.stop or stop) - (slc.start or 0)) for slc, stop in zip(locations, self.shape)]
-        buffer = buffer.reshape(shape)
+        if axis in {0, 1}:
+            indices = self.index_matrix[locations[0], locations[1]].reshape(-1)
+            buffer = self.load_by_indices(indices=indices, limits=locations[-1], buffer=buffer)
+
+            shape = [((slc.stop or stop) - (slc.start or 0)) for slc, stop in zip(locations, self.shape)]
+            buffer = buffer.reshape(shape)
+        else:
+            indices = np.arange(locations[-1].start, locations[-1].stop)
+            data = self.load_depth_slices(indices).transpose(1, 2, 0)[locations[0], locations[1]]
+
+            if buffer is None:
+                buffer = data
+            else:
+                buffer[:] = data
         return buffer
 
 

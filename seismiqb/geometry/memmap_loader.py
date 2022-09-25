@@ -93,7 +93,7 @@ class MemmapLoader(SegyioLoader):
 
     def _construct_data_mmap(self):
         """ Create a memory map with the first 240 bytes (headers) of each trace skipped. """
-        return np.memmap(filename=self.path, mode="r", shape=self.n_traces, dtype=self.mmap_trace_dtype,
+        return np.memmap(filename=self.path, mode='r', shape=self.n_traces, dtype=self.mmap_trace_dtype,
                          offset=self.file_traces_offset)["data"]
 
 
@@ -223,7 +223,7 @@ class MemmapLoader(SegyioLoader):
         dtype_list.append(unused_dtype)
         return dtype_list
 
-    # Data loading: traces
+    # Data loading
     def load_traces(self, indices, limits=None, buffer=None):
         """ Load traces by their indices.
         Under the hood, we use a pre-made memory mapping over the file, where trace data is viewed with a special dtype.
@@ -254,7 +254,6 @@ class MemmapLoader(SegyioLoader):
         buffer[:] = traces
         return buffer
 
-    # Data loading: depth slices
     def load_depth_slices(self, indices, buffer=None):
         """ Load horizontal (depth) slices of the data.
         Requires a ~full sweep through SEG-Y, therefore is slow.
@@ -286,7 +285,7 @@ class MemmapLoader(SegyioLoader):
 
     # Conversion to other SEG-Y formats (data dtype)
     def convert(self, path=None, format=8, transform=None, chunk_size=25_000, max_workers=4,
-                pbar=False, overwrite=True):
+                pbar='t', overwrite=True):
         """ Convert SEG-Y file to a different `format`: dtype of data values.
         Keeps the same binary header (except for the 3225 byte, which stores the format).
         Keeps the same header values for each trace: essentially, only the values of each trace are transformed.
@@ -304,13 +303,12 @@ class MemmapLoader(SegyioLoader):
         transform : callable, optional
             Callable to transform data from the current file to the ones, saved in `path`.
             Must return the same dtype, as specified by `format`.
-            If not provided, we just convert the original data to the necessary dtype.
         chunk_size : int
             Maximum amount of traces in each chunk.
         max_workers : int or None
             Maximum number of parallel processes to spawn. If None, then the number of CPU cores is used.
         pbar : bool, str
-            If bool, then whether to display progress bar over the file sweep.
+            If bool, then whether to display progress bar.
             If str, then type of progress bar to display: `'t'` for textual, `'n'` for widget.
         overwrite : bool
             Whether to overwrite existing `path` or raise an exception.
@@ -326,10 +324,6 @@ class MemmapLoader(SegyioLoader):
         dst_dtype = self.endian_symbol + self.SEGY_FORMAT_TO_TRACE_DATA_DTYPE[format]
         dst_itemsize = np.dtype(dst_dtype).itemsize
         dst_size = self.file_traces_offset + self.n_traces * (self.TRACE_HEADER_SIZE + self.n_samples * dst_itemsize)
-
-        # Default transform
-        if transform is None:
-            transform = lambda array: array.astype(dst_dtype)
 
         # Exceptions
         traces = self.load_traces([0])
@@ -377,7 +371,7 @@ class MemmapLoader(SegyioLoader):
                                              transform=transform,
                                              start=start, chunk_size=chunk_size_)
                     future.add_done_callback(callback)
-        return type(self)(path)
+        return path
 
 
 def read_chunk(path, shape, offset, dtype, headers, start, chunk_size):
@@ -386,7 +380,7 @@ def read_chunk(path, shape, offset, dtype, headers, start, chunk_size):
     """
     # mmap is created over the entire file as
     # creating data over the requested chunk only does not speed up anything
-    mmap = np.memmap(filename=path, mode="r", shape=shape, offset=offset, dtype=dtype)
+    mmap = np.memmap(filename=path, mode='r', shape=shape, offset=offset, dtype=dtype)
 
     buffer = np.empty((chunk_size, len(headers)), dtype=np.int32)
     for i, header in enumerate(headers):
@@ -421,9 +415,10 @@ def ibm_to_ieee(hh, hl, lh, ll):
     Input arrays are ordered from most to least significant bytes and have `np.uint8` dtypes.
     The result is returned as an `np.float32` array.
     """
+    # pylint: disable=not-an-iterable
     res = np.empty_like(hh, dtype=np.float32)
-    for i in prange(res.shape[0]):  # pylint: disable=not-an-iterable
-        for j in prange(res.shape[1]):  # pylint: disable=not-an-iterable
+    for i in prange(res.shape[0]):
+        for j in prange(res.shape[1]):
             mant = (((np.int32(hl[i, j]) << 8) | lh[i, j]) << 8) | ll[i, j]
             if hh[i, j] & 0x80:
                 mant = -mant

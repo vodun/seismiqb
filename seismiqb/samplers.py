@@ -551,22 +551,33 @@ def spatial_check_points(points, matrix, crop_shape, i_mask, x_mask, threshold):
 
     for (point_i, point_x, _), i_mask_, x_mask_ in zip(points, i_mask, x_mask):
         if i_mask_:
-            sliced = matrix[point_i:point_i+shape_i, point_x:point_x+shape_x].ravel()
-            present_mask = (sliced > 0)
+            sliced = matrix[point_i:point_i+shape_i, point_x:point_x+shape_x]
+            present_points, running_sum = np.int32(0), np.int32(0)
 
-            if present_mask.sum() >= threshold:
-                d_mean = np.rint(sliced[present_mask].mean())
+            for value in np.nditer(sliced):
+                if value >= 0:
+                    present_points += 1
+                    running_sum += value.item()
+
+            if present_points >= threshold:
+                d_mean = np.rint(running_sum / present_points)
                 buffer[counter, :] = point_i, point_x, np.int32(d_mean), np.int32(0)
                 counter += 1
 
         if x_mask_:
-            sliced = matrix[point_i:point_i+shape_x, point_x:point_x+shape_i].ravel()
-            present_mask = (sliced > 0)
+            sliced = matrix[point_i:point_i+shape_x, point_x:point_x+shape_i]
+            present_points, running_sum = np.int32(0), np.int32(0)
 
-            if present_mask.sum() >= threshold:
-                d_mean = np.rint(sliced[present_mask].mean())
+            for value in np.nditer(sliced):
+                if value >= 0:
+                    present_points += 1
+                    running_sum += value.item()
+
+            if present_points >= threshold:
+                d_mean = np.rint(running_sum / present_points)
                 buffer[counter, :] = point_i, point_x, np.int32(d_mean), np.int32(1)
                 counter += 1
+
     return buffer[:counter]
 
 @njit
@@ -589,13 +600,19 @@ def spatial_check_sampled(locations, matrix, threshold):
     condition : np.ndarray
         Boolean mask for locations.
     """
+    #pylint: disable=chained-comparison
     condition = np.ones(len(locations), dtype=np.bool_)
 
     for i, (_, i_start, x_start, d_start, i_stop,  x_stop,  d_stop) in enumerate(locations):
-        sliced = matrix[i_start:i_stop, x_start:x_stop].ravel()
-        present_mask = (d_start < sliced) & (sliced < d_stop)
+        sliced = matrix[i_start:i_stop, x_start:x_stop]
+        valid_points = np.int32(0)
 
-        if present_mask.sum() < threshold:
+        for value in np.nditer(sliced):
+            if (d_start < value) and (value < d_stop):
+                valid_points += 1
+            if valid_points >= threshold:
+                break
+        else:
             condition[i] = False
     return condition
 

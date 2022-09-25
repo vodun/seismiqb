@@ -528,9 +528,9 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
                                   x_min - self.x_min : x_max - self.x_min]
 
             # Coordinates of points to use in overlap local system
-            idx_i, idx_x = np.asarray((overlap != self.FILL_VALUE) &
+            idx_i, idx_x = np.nonzero((overlap != self.FILL_VALUE) &
                                       (overlap >= mask_d_min + low) &
-                                      (overlap <= mask_d_max - high)).nonzero()
+                                      (overlap <= mask_d_max - high))
             depths = overlap[idx_i, idx_x]
 
             # Convert coordinates to mask local system

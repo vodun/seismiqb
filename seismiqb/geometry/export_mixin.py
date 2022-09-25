@@ -134,7 +134,7 @@ class ExportMixin:
         origin : tuple of three integers
             Coordinates of the upper leftmost point of the `array_like`.
         pbar : bool, str
-            If bool, then whether to display progress bar over the file sweep.
+            If bool, then whether to display progress bar.
             If str, then type of progress bar to display: `'t'` for textual, `'n'` for widget.
         zip_segy : bool
             Whether to compress the created SEG-Y into a zip archive. May take a lot of time with no progress bar.
@@ -247,7 +247,7 @@ class ExportMixin:
         max_workers : int
             Maximum number of threads for parallelization.
         pbar : bool, str
-            If bool, then whether to display progress bar over the file sweep.
+            If bool, then whether to display progress bar.
             If str, then type of progress bar to display: `'t'` for textual, `'n'` for widget.
         """
         # Parse parameters

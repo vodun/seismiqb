@@ -347,7 +347,7 @@ class ProcessingMixin:
         name = 'thinned_' + self.name if self.name is not None else None
         return type(self)(storage=points, field=self.field, name=name)
 
-    def make_carcass(self, frequencies=100, margin=50, interpolate=False, add_prefix=True, **kwargs):
+    def make_carcass(self, frequencies=100, margin=50, interpolate=False, add_prefix=True, inplace=False, **kwargs):
         """ Cut carcass out of a horizon. Returns a new instance.
 
         Parameters
@@ -362,7 +362,7 @@ class ProcessingMixin:
             Other parameters for grid creation, see `:meth:~.Geometry.make_quality_grid`.
         """
         #pylint: disable=import-outside-toplevel
-        carcass = self.copy(add_prefix=add_prefix)
+        carcass = self if inplace else self.copy(add_prefix=add_prefix)
         carcass.name = carcass.name.replace('copy', 'carcass')
 
         grid_matrix = self.field.geometry.get_grid(frequency=frequencies, margin=margin)

@@ -69,7 +69,7 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMix
     # Attributes to store in a separate file with meta
     PRESERVED = [ # loaded at instance initialization
         # Crucial geometry properties
-        'depth', 'delay', 'sample_rate', 'shape',
+        'n_traces', 'depth', 'delay', 'sample_rate', 'shape',
         'shifts', 'lengths', 'ranges', 'increments', 'regular_structure',
         'index_matrix', 'absent_traces_matrix', 'dead_traces_matrix',
         'n_alive_traces', 'n_dead_traces',
@@ -85,6 +85,7 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMix
     ]
 
     PRESERVED_LAZY = [ # loaded at the time of the first access
+        'index_unsorted_uniques', 'index_sorted_uniques', 'index_value_to_ordinal',
         'min_vector', 'max_vector', 'mean_vector', 'std_vector',
         'min_matrix', 'max_matrix', 'mean_matrix', 'std_matrix',
     ]
@@ -105,7 +106,7 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMix
             raise TypeError(f'Unknown format of the cube: {extension}')
         return cls(path, *args, **kwargs)
 
-    def __init__(self, path, meta_path=None, use_line_cache=False, **kwargs):
+    def __init__(self, path, meta_path=None, safe=False, use_slide_cache=False, **kwargs):
         # Path to the file
         self.path = path
 
@@ -118,11 +119,13 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMix
         self.meta_list_loaded = set()
         self.meta_list_failed_to_dump = set()
 
-        # Cache
-        self.use_line_cache = use_line_cache
+        # Instance flags
+        self.safe = safe
+        self.use_slide_cache = use_slide_cache
 
         # Lazy properties
         self._quantile_interpolator = None
+        self._normalization_stats = None
 
         # Init from subclasses
         self._init_kwargs = kwargs
@@ -133,7 +136,7 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMix
     def __getattr__(self, key):
         """ Load item from stored meta. """
         if key in self.PRESERVED_LAZY and self.meta_exists and self.has_meta_item(key) and key not in self.__dict__:
-            return self.load_meta_item(key)
+            return self.load_meta_item(f'meta/{key}')
         return object.__getattribute__(self, key)
 
     def __getnewargs__(self):
@@ -142,7 +145,7 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMix
     def __getstate__(self):
         self.reset_cache()
         state = self.__dict__.copy()
-        for name in ['file', 'axis_to_projection']:
+        for name in ['loader', 'axis_to_projection']:
             if name in state:
                 state.pop(name)
         return state
@@ -151,7 +154,10 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMix
         for key, value in state.items():
             setattr(self, key, value)
 
-        self.init(self.path, **self._init_kwargs)
+        if self.converted:
+            self.init(self.path, **self._init_kwargs)
+        else:
+            self.loader = self._infer_loader_class(self._init_kwargs.get('loader_class', 'memmap'))(self.path)
 
 
     # Data loading
@@ -189,6 +195,17 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMix
             key_.append(slc)
 
         return key_, axis_to_squeeze
+
+
+    # Set caching behavior
+    def enable_slide_cache(self):
+        """ !!. """
+        self.use_slide_cache = True
+
+    def disable_slide_cache(self):
+        """ !!. """
+        self.use_slide_cache = False
+        self.reset_cache()
 
 
     # Coordinate system conversions
@@ -261,18 +278,19 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMix
     @property
     def normalization_stats(self):
         """ Values for performing normalization of data from the cube. """
-        q_01, q_05, q_95, q_99 = self.get_quantile(q=[0.01, 0.05, 0.95, 0.99])
-        normalization_stats = {
-            'mean': self.mean,
-            'std': self.std,
-            'min': self.min,
-            'max': self.max,
-            'q_01': q_01,
-            'q_05': q_05,
-            'q_95': q_95,
-            'q_99': q_99,
-        }
-        return normalization_stats
+        if self._normalization_stats is None:
+            q_01, q_05, q_95, q_99 = self.get_quantile(q=[0.01, 0.05, 0.95, 0.99])
+            self._normalization_stats = {
+                'mean': self.mean,
+                'std': self.std,
+                'min': self.min,
+                'max': self.max,
+                'q_01': q_01,
+                'q_05': q_05,
+                'q_95': q_95,
+                'q_99': q_99,
+            }
+        return self._normalization_stats
 
 
     # Spatial matrices
@@ -395,14 +413,14 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMix
 
     # Textual representation
     def __repr__(self):
-        msg = f'geometry for cube `{self.short_name}`'
+        msg = f'geometry `{self.short_name}`'
         if not hasattr(self, 'shape'):
             return f'<Unprocessed {msg}>'
         return f'<Processed {msg}: {tuple(self.shape)} at {hex(id(self))}>'
 
     def __str__(self):
         if not hasattr(self, 'shape'):
-            return f'<Unprocessed geometry for cube {self.displayed_path}>'
+            return f'<Unprocessed geometry `{self.short_path}`>'
 
         msg = f"""
         Processed geometry for cube        {self.path}
