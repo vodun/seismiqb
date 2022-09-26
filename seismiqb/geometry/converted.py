@@ -54,31 +54,30 @@ class GeometryHDF5(Geometry):
         self.index_length = 2
         self.converted = True
 
+        # Infer attributes from the available projections
+        axis = self.available_axis[0]
+        projection = self.axis_to_projection[axis]
+
+        shape = np.array(projection.shape)[self.FROM_PROJECTION_TRANSPOSITION[axis]]
+        self.shape = shape
+        *self.lengths, self.depth = shape
+
+        self.dtype = projection.dtype
+        self.quantized = (projection.dtype == np.int8)
+
         # Get from meta / set defaults
-        if self.meta_exists:
+        required_attributes = self.PRESERVED + self.PRESERVED_LAZY
+
+        if self.meta_exists and self.has_meta_items(required_attributes):
             self.load_meta(keys=self.PRESERVED + self.PRESERVED_LAZY)
             self.has_stats = True
         else:
             self.set_default_index_attributes(**kwargs)
             self.has_stats = False
 
-        # Infer attributes from the available projections; validate others
-        axis = self.available_axis[0]
-        projection = self.axis_to_projection[axis]
-
-        shape = np.array(projection.shape)[self.FROM_PROJECTION_TRANSPOSITION[axis]]
-        if hasattr(self, 'shape'):
-            if (getattr(self, 'shape') != shape).any():
-                raise ValueError('Projection shape is not the same as shape, loaded from meta!')
-        else:
-            self.shape = shape
-            *self.lengths, self.depth = shape
-
-        self.dtype = projection.dtype
-        self.quantized = (projection.dtype == np.int8)
-
     def set_default_index_attributes(self, **kwargs):
         """ Set default values for seismic attributes. """
+        self.n_traces = np.prod(self.shape[:2])
         self.delay, self.sample_rate = 0.0, 1.0
         for key, value in kwargs.items():
             setattr(self, key, value)

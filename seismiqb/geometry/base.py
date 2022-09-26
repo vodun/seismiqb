@@ -186,12 +186,16 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMix
         key_, axis_to_squeeze = [], []
         for i, (subkey, limit) in enumerate(zip(key, self.shape)):
             if isinstance(subkey, slice):
-                slc = slice(max(subkey.start or 0, 0), min(subkey.stop or limit, limit), subkey.step)
+                slc = slice(max(subkey.start or 0, 0),
+                            min(subkey.stop or limit, limit), subkey.step)
+
             elif isinstance(subkey, int):
                 subkey = subkey if subkey >= 0 else limit - subkey
                 slc = slice(subkey, subkey + 1)
                 axis_to_squeeze.append(i)
 
+            if slc.start < 0 or slc.stop > limit:
+                raise ValueError(f'Slice `{slc}` is outside geometry boundaries!')
             key_.append(slc)
 
         return key_, axis_to_squeeze

@@ -264,7 +264,8 @@ class RegularGrid(BaseGrid):
         Pre-defined locations. If provided, then directly stored and used as the grid coordinates.
     """
     def __init__(self, field, ranges, crop_shape, orientation=0, strides=None, overlap=None, overlap_factor=None,
-                 threshold=0, batch_size=64, field_id=-1, label_id=-1, label_name='unknown', locations=None):
+                 filtering_matrix='dead_traces_matrix', threshold=0, batch_size=64,
+                 field_id=-1, label_id=-1, label_name='unknown', locations=None):
         # Make correct crop shape
         orientation = field.geometry.parse_axis(orientation)
         crop_shape = np.array(crop_shape)
@@ -299,6 +300,10 @@ class RegularGrid(BaseGrid):
         self.strides = np.array(strides)
 
         # Update threshold: minimum amount of non-empty traces
+        if isinstance(filtering_matrix, str):
+            filtering_matrix = getattr(field, filtering_matrix)
+        self.filtering_matrix = filtering_matrix
+
         if 0 < threshold < 1:
             threshold = int(threshold * crop_shape[0] * crop_shape[1])
         self.threshold = threshold
@@ -321,26 +326,27 @@ class RegularGrid(BaseGrid):
 
     def _make_locations(self):
         # Ranges for each axis
-        i_args, x_args, h_args = tuple(zip(self.ranges[:, 0],
+        i_args, x_args, d_args = tuple(zip(self.ranges[:, 0],
                                            self.ranges[:, 1],
                                            self.strides,
                                            self.field.shape - self.crop_shape))
         i_grid = self._arange(*i_args)
         x_grid = self._arange(*x_args)
-        h_grid = self._arange(*h_args)
-        self.unfiltered_length = len(i_grid) * len(x_grid) * len(h_grid)
-        self._i_grid, self._x_grid, self._h_grid = i_grid, x_grid, h_grid
+        d_grid = self._arange(*d_args)
+        self.unfiltered_length = len(i_grid) * len(x_grid) * len(d_grid)
+        self._i_grid, self._x_grid, self._d_grid = i_grid, x_grid, d_grid
 
-        # Create points: origins for each crop
-        points = []
-        for i, x in product(i_grid, x_grid):
-            sliced = self.field.dead_traces_matrix[i:i+self.crop_shape[0],
-                                                   x:x+self.crop_shape[1]]
-            # Number of non-dead traces
-            if (sliced.size - sliced.sum()) > self.threshold:
-                for h in h_grid:
-                    points.append((i, x, h))
-        points = np.array(points, dtype=np.int32)
+        # Create points: origins for each crop. Keep only those that produce crops with more than `threshold` points
+        points = np.array(np.meshgrid(i_grid, x_grid, d_grid)).T.reshape(-1, 3)
+
+        mask = np.ones(len(points), dtype=np.bool_)
+        if self.filtering_matrix is not None:
+            for j, (i, x, _) in enumerate(points):
+                sliced = self.filtering_matrix[i:i+self.crop_shape[0], x:x+self.crop_shape[1]]
+                n_alive_traces = sliced.size - sliced.sum()
+                if n_alive_traces <= self.threshold:
+                    mask[j] = False
+        points = points[mask].astype(np.int32)
 
         # Buffer: (cube_id, i_start, x_start, d_start, i_stop, x_stop, d_stop)
         buffer = np.empty((len(points), 9), dtype=np.int32)
