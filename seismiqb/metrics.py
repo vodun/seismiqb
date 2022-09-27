@@ -1,4 +1,5 @@
 """ Metrics for seismic objects: cubes and horizons. """
+from warnings import warn
 from textwrap import dedent
 from itertools import zip_longest
 
@@ -10,18 +11,78 @@ try:
 except ImportError:
     cp = np
     CUPY_AVAILABLE = False
-
+import bottleneck
+import numexpr
 import pandas as pd
 
 from batchflow.notifier import Notifier
 
 from .labels import Horizon
 from .utils import Accumulator, to_list
-from .functional import to_device, from_device
-from .functional import correlation, crosscorrelation, hilbert, perturb
 from .plotters import plot
 
 
+
+# Device management
+def to_device(array, device='cpu'):
+    """ Transfer array to chosen GPU, if possible.
+    If `cupy` is not installed, does nothing.
+
+    Parameters
+    ----------
+    device : str or int
+        Device specificator. Can be either string (`cpu`, `gpu:4`) or integer (`4`).
+    """
+    if isinstance(device, str) and ':' in device:
+        device = int(device.split(':')[1])
+    if device in ['cuda', 'gpu']:
+        device = 0
+
+    if isinstance(device, int):
+        if CUPY_AVAILABLE:
+            with cp.cuda.Device(device):
+                array = cp.asarray(array)
+        else:
+            warn('Performance Warning: computing metrics on CPU as `cupy` is not available', RuntimeWarning)
+    return array
+
+def from_device(array):
+    """ Move the data from GPU, if needed.
+    If `cupy` is not installed or supplied array already resides on CPU, does nothing.
+    """
+    if CUPY_AVAILABLE and hasattr(array, 'device'):
+        array = cp.asnumpy(array)
+    return array
+
+
+
+# Functions to compute various distances between two atleast 2d arrays
+def correlation(array1, array2, std1, std2, **kwargs):
+    """ Compute correlation. """
+    _ = kwargs
+    xp = cp.get_array_module(array1) if CUPY_AVAILABLE else np
+    if xp is np:
+        covariation = bottleneck.nanmean(numexpr.evaluate('array1 * array2'), axis=-1)
+        result = numexpr.evaluate('covariation / (std1 * std2)')
+    else:
+        covariation = (array1 * array2).mean(axis=-1)
+        result = covariation / (std1 * std2)
+    return result
+
+
+def crosscorrelation(array1, array2, std1, std2, **kwargs):
+    """ Compute crosscorrelation. """
+    _ = std1, std2, kwargs
+    xp = cp.get_array_module(array1) if CUPY_AVAILABLE else np
+    window = array1.shape[-1]
+    pad_width = [(0, 0)] * (array2.ndim - 1) + [(window//2, window - window//2)]
+    padded = xp.pad(array2, pad_width=tuple(pad_width))
+
+    accumulator = Accumulator('argmax')
+    for i in range(window):
+        corrs = (array1 * padded[..., i:i+window]).sum(axis=-1)
+        accumulator.update(corrs)
+    return accumulator.get(final=True).astype(float) - window//2
 
 class BaseMetrics:
     """ Base class for seismic metrics.
@@ -568,117 +629,6 @@ class HorizonMetrics(BaseMetrics):
             self._bad_traces[self.horizon.full_matrix == Horizon.FILL_VALUE] = 1
         return self._bad_traces
 
-
-    def perturbed(self, n=5, scale=2.0, clip=3, window=None, kernel_size=3, agg='nanmean', device='cpu', **kwargs):
-        """ Evaluate horizon by:
-            - compute the `local_corrs` metric
-            - perturb the horizon `n` times by random shifts, generated from normal
-            distribution of `scale` std and clipping of `clip` size
-            - compute the `local_corrs` metric for each of the perturbed horizons
-            - get a mean and max value of those metrics: they correspond to the `averagely shifted` and
-            `best generated shifts` horizons
-            - use difference between horizon metric and mean/max metrics of perturbed as a final assesment maps
-
-        Parameters
-        ----------
-        n : int
-            Number of perturbed horizons to generate.
-        scale : number
-            Standard deviation (spread or “width”) of the distribution. Must be non-negative.
-        clip : number
-            Maximum size of allowed shifts
-        window : int or None
-            Size of the data along the depth axis to evaluate perturbed horizons.
-            Note that due to shifts, it must be smaller than the original data by atleast 2 * `clip` units.
-        kernel_size, agg, device
-            Parameters of individual metric evaluation
-        """
-        w = self.data.shape[2]
-        window = window or w - 2 * clip - 1
-
-        # Compute metrics for multiple perturbed horizons: generate shifts, apply them to data,
-        # evaluate metric on the produced array
-        acc_mean = Accumulator('nanmean')
-        acc_max = Accumulator('nanmax')
-        for _ in range(n):
-            shifts = np.random.normal(scale=2., size=self.data.shape[:2])
-            shifts = np.rint(shifts).astype(np.int32)
-            shifts = np.clip(shifts, -clip, clip)
-
-            shifts[self.horizon.full_matrix == self.horizon.FILL_VALUE] = 0
-            pb = perturb(self.data, shifts, window)
-
-            pb_metric = self.compute_local(function=correlation, data=pb, bad_traces=self.bad_traces,
-                                           kernel_size=kernel_size, normalize=True, agg=agg, device=device)
-            acc_mean.update(pb_metric)
-            acc_max.update(pb_metric)
-
-        pb_mean = acc_mean.get(final=True)
-        pb_max = acc_max.get(final=True)
-
-        # Subtract mean/max maps from the horizon metric
-        horizon_metric = self.compute_local(function=correlation, data=self.data, bad_traces=self.bad_traces,
-                                            kernel_size=kernel_size, normalize=True, agg=agg, device=device)
-        diff_mean = horizon_metric - pb_mean
-        diff_max = horizon_metric - pb_max
-
-        suptitle, plot_defaults = self.get_plot_defaults()
-
-        plot_config = {
-            **plot_defaults,
-            'combine': 'separate',
-            'suptitle': f'Perturbed metrics\nfor {suptitle}',
-            'title': ['mean', 'max'],
-            'cmap': 'Reds_r',
-            'vmin': [0.0, -0.5], 'vmax': 0.5,
-            **kwargs
-        }
-        return [diff_mean, diff_max], plot_config
-
-
-    def instantaneous_phase(self, device='cpu', **kwargs):
-        """ Compute instantaneous phase via Hilbert transform. """
-        #pylint: disable=unexpected-keyword-arg
-        # Transfer to GPU, if needed
-        data = to_device(self.data, device)
-        xp = cp.get_array_module(data) if CUPY_AVAILABLE else np
-
-        # Compute hilbert transform and scale to 2pi range
-        analytic = hilbert(data, axis=2)
-
-        phase = xp.angle(analytic)
-
-        phase_slice = phase[:, :, phase.shape[-1] // 2]
-        phase_slice[np.isnan(xp.std(data, axis=-1))] = xp.nan
-        phase_slice[self.horizon.full_matrix == self.horizon.FILL_VALUE] = xp.nan
-
-        # Evaluate mode value
-        values = phase_slice[~xp.isnan(phase_slice)].round(2)
-        uniques, counts = xp.unique(values, return_counts=True)
-        # 3rd most frequent value is chosen to skip the first two (they are highly likely -pi/2 and pi/2)
-        mode = uniques[xp.argpartition(counts, -3)[-3]]
-
-        shifted_slice = phase_slice - mode
-        shifted_slice[shifted_slice >= xp.pi] -= 2 * xp.pi
-
-        # Re-norm so that mode value is at zero point
-        if xp.nanmin(shifted_slice) < -xp.pi:
-            shifted_slice[shifted_slice < -xp.pi] += 2 * xp.pi
-        if xp.nanmax(shifted_slice) > xp.pi:
-            shifted_slice[shifted_slice > xp.pi] -= 2 * xp.pi
-
-        title, plot_defaults = self.get_plot_defaults()
-        title = f'Instantaneous phase\nfor {title}'
-        plot_config = {
-            **plot_defaults,
-            'title': title,
-            'cmap': 'seismic',
-            'vmin': -np.pi, 'vmax': np.pi,
-            'colorbar': True,
-            'bad_color': 'k',
-            **kwargs
-        }
-        return from_device(shifted_slice), plot_config
 
     def compare(self, *others, clip_value=7, ignore_zeros=False, enlarge=True, width=9, printer=print,
                 visualize=True, hist_kwargs=None, show=True, savepath=None, **kwargs):

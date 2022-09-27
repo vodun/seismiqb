@@ -2,13 +2,14 @@
 import os
 import traceback
 from warnings import warn
+from functools import wraps
 from inspect import signature
 
 import numpy as np
 import cv2
 from scipy.interpolate import interp1d
 from scipy.ndimage import gaussian_filter1d
-from scipy.signal import butter, sosfiltfilt, hilbert
+from scipy.signal import butter, sosfiltfilt
 
 from batchflow import DatasetIndex, Batch, P, R
 from batchflow import action, inbatch_parallel, any_action_failed, SkipBatchException
@@ -16,11 +17,32 @@ from batchflow import apply_parallel as apply_parallel_decorator
 
 from .visualization_batch import VisualizationMixin
 from ..labels import Horizon
-from ..utils import to_list, adjust_shape_3d, groupby_all
+from ..utils import to_list, groupby_all
+from .. import functional
 
 
 
+def add_methods(method_names):
+    """ Add augmentations to batch class. """
+    def _add_methods(cls):
+        def create_batch_method(method_name):
+            method = getattr(functional, method_name)
+            requires_rng = 'rng' in signature(method).parameters
 
+            @wraps(method)
+            def wrapper(self, _, buffer, *args, **kwargs):
+                buffer[:] = method(buffer, *args, **kwargs)
+            wrapper = cls.use_apply_parallel(wrapper, requires_rng=requires_rng)
+            return wrapper
+
+        for method_name in method_names:
+            setattr(cls, method_name, create_batch_method(method_name))
+        return cls
+    return _add_methods
+
+@add_methods(['rotate_2d', 'rotate_3d', 'scale_2d', 'scale_3d',
+              'affine_transform', 'perspective_transform', 'elastic_transform',
+              'compute_instantaneous_amplitude', 'compute_instantaneous_phase', 'compute_instantaneous_frequency'])
 class SeismicCropBatch(Batch, VisualizationMixin):
     """ Batch with ability to generate 3d-crops of various shapes.
 
@@ -935,7 +957,6 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         return self
 
 
-
     @action
     @inbatch_parallel(init='indices', target='for')
     def save_masks(self, ix, src='masks', save_to=None, savemode='numpy',
@@ -971,7 +992,7 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         return self
 
 
-    # Actions
+    # Actions to work with components
     @action
     def concat_components(self, src, dst, axis=-1):
         """ Concatenate a list of components and save results to `dst` component.
@@ -1006,11 +1027,13 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         setattr(self, dst, buffer)
         return self
 
-    # Actions: shapes
     @action
     def transpose(self, src, order, dst=None):
         """ Change order of axis. """
         #pylint: disable=access-member-before-definition
+        if src is None:
+            src = list(self.name_to_order.keys())
+
         dst = dst or src
         src = [src] if isinstance(src, str) else src
         dst = [dst] if isinstance(dst, str) else dst
@@ -1019,16 +1042,17 @@ class SeismicCropBatch(Batch, VisualizationMixin):
             current_order = self.name_to_order[src_]
             data = self.get(component=src_)
 
+            # Select correct order of axis
             if order == 'channels_last':
-                order = np.argsort(data.shape[1:])[::-1]
+                order_ = np.argsort(data.shape[1:])[::-1]
             elif isinstance(order, str):
-                order = [current_order.tolist().index(item) for item in order]
+                order_ = [current_order.tolist().index(item) for item in order]
+            else:
+                order_ = list(order)
 
-            self.name_to_order[src_] = current_order[list(order)]
-
-            # Correct for batch items dimension
-            order = [0, *(i+1 for i in order)]
-            setattr(self, dst_, data.transpose(*order))
+            # Update meta, transpose data with corrected on batch dimension order
+            self.name_to_order[src_] = current_order[list(order_)]
+            setattr(self, dst_, data.transpose(0, *(i+1 for i in order_)))
         return self
 
 
@@ -1138,94 +1162,14 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         buffer[:] = tensor.numpy()
 
 
-    @apply_parallel_decorator
+    @apply_parallel_decorator(init='preallocating_init', post='noop_post', target='for')
     def binarize(self, _, buffer, threshold=0.5):
         """ Binarize image by threshold. """
         buffer[:] = buffer > threshold
 
-    @apply_parallel_decorator(init='preallocating_init', post='noop_post', target='for', requires_rng=True)
-    def cutout_2d(self, _, buffer, patch_shape, n_patches, fill_value=0, rng=None):
-        """ Change patches of data to zeros.
 
-        Parameters
-        ----------
-        patch_shape : int or array-like
-            Shape of patches along each axis. If int, square patches will be generated. If array of length 2,
-            patch will be the same for all channels.
-        n_patches : number
-            Number of patches to cut.
-        fill_value : number
-            Value to fill patches with.
-        """
-        # Parse arguments
-        if isinstance(patch_shape, (int, np.integer)):
-            patch_shape = np.array([patch_shape, patch_shape, buffer.shape[-1]])
-        if len(patch_shape) == 2:
-            patch_shape = np.array([*patch_shape, buffer.shape[-1]])
-
-        patch_shape = np.array(patch_shape).astype(np.int32)
-        upper_bounds = np.clip(np.array(buffer.shape) - np.array(patch_shape), a_min=1, a_max=buffer.shape)
-
-        # Generate locations for erasing
-        for _ in range(int(n_patches)):
-            starts = rng.integers(upper_bounds)
-            # print(upper_bounds, starts, )
-            stops = starts + patch_shape
-
-            slices = [slice(start, stop) for start, stop in zip(starts, stops)]
-            buffer[tuple(slices)] = fill_value
-
-
-    # Augmentations: geometric
-    @apply_parallel_decorator(init='preallocating_init', post='noop_post', target='for')
-    def rotate(self, _, buffer, angle, adjust=False, fill_value=0):
-        """ Rotate crop along the first two axes. Angles are defined as Tait-Bryan angles and the sequence of
-        extrinsic rotations axes is (axis_2, axis_0, axis_1).
-
-        Parameters
-        ----------
-        angle : float or tuple of floats
-            Angles of rotation about each axes (axis_2, axis_0, axis_1). If float, angle of rotation
-            about the last axis.
-        adjust : bool
-            Scale image to avoid padding in rotated image (for 2D crops only).
-        fill_value : number
-            Value to put at empty positions appeared after crop rotation.
-        """
-        # Parse parameters
-        crop = buffer
-        angle = angle if isinstance(angle, (tuple, list)) else (angle, 0, 0)
-        initial_shape = crop.shape
-        if adjust:
-            if angle[1] != 0 or angle[2] != 0:
-                raise ValueError("Shape adjusting doesn't applicable to 3D rotations")
-            new_shape = adjust_shape_3d(shape=initial_shape, angle=angle)
-            crop = cv2.resize(crop, dsize=(new_shape[1], new_shape[0]))
-            if len(crop.shape) == 2:
-                crop = crop[..., np.newaxis]
-
-        # Actual rotation
-        if angle[0] != 0:
-            crop = self._rotate(crop, angle[0], fill_value)
-        if angle[1] != 0:
-            crop = crop.transpose(1, 2, 0)
-            crop = self._rotate(crop, angle[1], fill_value)
-            crop = crop.transpose(2, 0, 1)
-        if angle[2] != 0:
-            crop = crop.transpose(2, 0, 1)
-            crop = self._rotate(crop, angle[2], fill_value)
-            crop = crop.transpose(1, 2, 0)
-
-        if adjust:
-            crop = self._central_crop(crop, initial_shape)
-        buffer[:] = crop
-
-    def _rotate(self, crop, angle, fill_value):
-        shape = crop.shape
-        matrix = cv2.getRotationMatrix2D((shape[1]//2, shape[0]//2), angle, 1)
-        return cv2.warpAffine(crop, matrix, (shape[1], shape[0]), borderValue=fill_value).reshape(shape)
-
-
+    # Augmentations: geometric. `rotate_2d/3d`, `scale_2d/3d`,
+    # 'affine_transform', 'perspective_transform' and 'elastic_transform' are added by decorator
     @apply_parallel_decorator(init='preallocating_init', post='noop_post', target='for')
     def flip(self, _, buffer, axis=0, seed=0.1, threshold=0.5):
         """ Flip crop along the given axis.
@@ -1239,150 +1183,13 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         locations[axis] = slice(None, None, -1)
         buffer[:] = buffer[locations]
 
-
-    @apply_parallel_decorator(init='preallocating_init', post='noop_post', target='for')
-    def scale_2d(self, _, buffer, scale):
-        """ Zoom in or zoom out along the first two axis.
-
-        Parameters
-        ----------
-        scale : tuple or float
-            Zooming factor for the first two axis.
-        """
-        scale = scale if isinstance(scale, (list, tuple)) else [scale] * 2
-        buffer[:] = self._scale(buffer, [scale[0], scale[1]])
-
-    @apply_parallel_decorator(init='preallocating_init', post='noop_post', target='for')
-    def scale(self, _, buffer, scale):
-        """ Zoom in or zoom out along each axis of crop.
-
-        Parameters
-        ----------
-        scale : tuple or float
-            Zooming factor for each axis.
-        """
-        scale = scale if isinstance(scale, (list, tuple)) else [scale] * 3
-        buffer[:] = self._scale(buffer, [scale[0], scale[1]])
-        buffer[:] = self._scale(buffer.transpose(1, 2, 0), [1, scale[-1]]).transpose(2, 0, 1)
-
-    def _scale(self, crop, scale):
-        shape = crop.shape
-        matrix = np.zeros((2, 3))
-        matrix[:, :-1] = np.diag([scale[1], scale[0]])
-        matrix[:, -1] = np.array([shape[1], shape[0]]) * (1 - np.array([scale[1], scale[0]])) / 2
-        return cv2.warpAffine(crop, matrix, (shape[1], shape[0])).reshape(shape)
-
-
     @apply_parallel_decorator(init='data', post='_assemble')
-    def central_crop(self, crop, shape):
+    def center_crop(self, crop, shape):
         """ Central crop of defined shape. """
-        return self._central_crop(crop, shape)
-
-    def _central_crop(self, crop, shape):
-        old_shape = np.array(crop.shape)
-        new_shape = np.array(shape)
-        if (new_shape > old_shape).any():
-            raise ValueError(f"New crop shape ({new_shape}) can't be larger than old crop shape ({old_shape}).")
-        corner = old_shape // 2 - new_shape // 2
-        slices = tuple(slice(start, start + length) for start, length in zip(corner, new_shape))
-        return crop[slices]
+        return functional.center_crop(crop, shape)
 
 
-    @apply_parallel_decorator
-    def affine_transform(self, crop, alpha_affine=10):
-        """ Perspective transform. Moves three points to other locations.
-        Guaranteed not to flip image or scale it more than 2 times.
-
-        Parameters
-        ----------
-        alpha_affine : float
-            Maximum distance along each axis between points before and after transform.
-        """
-        rnd = np.random.RandomState(int(alpha_affine*100)).uniform
-        shape = np.array(crop.shape)[:2]
-        if alpha_affine >= min(shape)//16:
-            alpha_affine = min(shape)//16
-
-        center_ = shape // 2
-        square_size = min(shape) // 3
-
-        pts1 = np.float32([center_ + square_size,
-                           center_ - square_size,
-                           [center_[0] + square_size, center_[1] - square_size]])
-
-        pts2 = pts1 + rnd(-alpha_affine, alpha_affine, size=pts1.shape).astype(np.float32)
-
-
-        matrix = cv2.getAffineTransform(pts1, pts2)
-        return cv2.warpAffine(crop, matrix, (shape[1], shape[0])).reshape(crop.shape)
-
-    @apply_parallel_decorator
-    def perspective_transform(self, crop, alpha_persp):
-        """ Perspective transform. Moves four points to other four.
-        Guaranteed not to flip image or scale it more than 2 times.
-
-        Parameters
-        ----------
-        alpha_persp : float
-            Maximum distance along each axis between points before and after transform.
-        """
-        rnd = np.random.RandomState(int(alpha_persp*100)).uniform
-        shape = np.array(crop.shape)[:2]
-        if alpha_persp >= min(shape) // 16:
-            alpha_persp = min(shape) // 16
-
-        center_ = shape // 2
-        square_size = min(shape) // 3
-
-        pts1 = np.float32([center_ + square_size,
-                           center_ - square_size,
-                           [center_[0] + square_size, center_[1] - square_size],
-                           [center_[0] - square_size, center_[1] + square_size]])
-
-        pts2 = pts1 + rnd(-alpha_persp, alpha_persp, size=pts1.shape).astype(np.float32)
-
-        matrix = cv2.getPerspectiveTransform(pts1, pts2)
-        return cv2.warpPerspective(crop, matrix, (shape[1], shape[0])).reshape(crop.shape)
-
-    @apply_parallel_decorator
-    def elastic_transform(self, crop, alpha=40, sigma=4):
-        """ Transform indexing grid of the first two axes.
-
-        Parameters
-        ----------
-        alpha : float
-            Maximum shift along each axis.
-        sigma : float
-            Smoothening factor.
-        """
-        rng = np.random.default_rng(seed=int(alpha*100))
-        shape_size = crop.shape[:2]
-
-        grid_scale = 4
-        alpha //= grid_scale
-        sigma //= grid_scale
-        grid_shape = (shape_size[0]//grid_scale, shape_size[1]//grid_scale)
-
-        blur_size = int(4 * sigma) | 1
-        rand_x = cv2.GaussianBlur(rng.random(size=grid_shape, dtype=np.float32) * 2 - 1,
-                                  ksize=(blur_size, blur_size), sigmaX=sigma) * alpha
-        rand_y = cv2.GaussianBlur(rng.random(size=grid_shape, dtype=np.float32) * 2 - 1,
-                                  ksize=(blur_size, blur_size), sigmaX=sigma) * alpha
-        if grid_scale > 1:
-            rand_x = cv2.resize(rand_x, shape_size[::-1])
-            rand_y = cv2.resize(rand_y, shape_size[::-1])
-
-        grid_x, grid_y = np.meshgrid(np.arange(shape_size[1]), np.arange(shape_size[0]))
-        grid_x = (grid_x.astype(np.float32) + rand_x)
-        grid_y = (grid_y.astype(np.float32) + rand_y)
-
-        distorted_img = cv2.remap(crop, grid_x, grid_y,
-                                  borderMode=cv2.BORDER_REFLECT_101,
-                                  interpolation=cv2.INTER_LINEAR)
-        return distorted_img.reshape(crop.shape)
-
-
-    # Augmentations: attributes
+    # Augmentations: geologic. `compute_instantaneous_amplitude/phase/frequency` are added by decorator
     @apply_parallel_decorator(init='preallocating_init', post='noop_post', target='for')
     def sign_transform(self, _, buffer):
         """ Element-wise indication of the sign of a number. """
@@ -1415,31 +1222,44 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         return filtered
 
 
-    @apply_parallel_decorator
-    def instant_amplitudes_transform(self, crop, axis=-1):
-        """ Compute instantaneous amplitudes along the depth axis. """
-        analytic = hilbert(crop, axis=axis)
-        return np.abs(analytic).astype(np.float32)
-
-    @apply_parallel_decorator
-    def instant_phases_transform(self, crop, axis=-1):
-        """ Compute instantaneous phases along the depth axis. """
-        analytic = hilbert(crop, axis=axis)
-        return np.angle(analytic).astype(np.float32)
-
-    @apply_parallel_decorator
-    def frequencies_transform(self, crop, axis=-1):
-        """ Compute frequencies along the depth axis. """
-        analytic = hilbert(crop, axis=axis)
-        iphases = np.angle(analytic).astype(np.float32)
-        return np.diff(iphases, axis=-1, prepend=0) / (2 * np.pi)
-
-
     # Augmentations: misc
     @apply_parallel_decorator(init='preallocating_init', post='noop_post', target='for')
     def gaussian_filter(self, _, buffer, axis=1, sigma=2, order=0):
         """ Apply a gaussian filter along specified axis. """
         buffer[:] = gaussian_filter1d(buffer, sigma=sigma, axis=axis, order=order)
+
+
+    @apply_parallel_decorator(init='preallocating_init', post='noop_post', target='for', requires_rng=True)
+    def cutout_2d(self, _, buffer, patch_shape, n_patches, fill_value=0, rng=None):
+        """ Change patches of data to zeros.
+
+        Parameters
+        ----------
+        patch_shape : int or array-like
+            Shape of patches along each axis. If int, square patches will be generated. If array of length 2,
+            patch will be the same for all channels.
+        n_patches : number
+            Number of patches to cut.
+        fill_value : number
+            Value to fill patches with.
+        """
+        # Parse arguments
+        if isinstance(patch_shape, (int, np.integer)):
+            patch_shape = np.array([patch_shape, patch_shape, buffer.shape[-1]])
+        if len(patch_shape) == 2:
+            patch_shape = np.array([*patch_shape, buffer.shape[-1]])
+
+        patch_shape = np.array(patch_shape).astype(np.int32)
+        upper_bounds = np.clip(np.array(buffer.shape) - np.array(patch_shape), a_min=1, a_max=buffer.shape)
+
+        # Generate locations for erasing
+        for _ in range(int(n_patches)):
+            starts = rng.integers(upper_bounds)
+            # print(upper_bounds, starts, )
+            stops = starts + patch_shape
+
+            slices = [slice(start, stop) for start, stop in zip(starts, stops)]
+            buffer[tuple(slices)] = fill_value
 
 
     @action

@@ -1,6 +1,5 @@
 """ Utility functions. """
 import os
-from math import atan
 
 import numpy as np
 from numba import njit, prange
@@ -20,66 +19,6 @@ def select_printer(printer):
         return printer
     return print
 
-
-
-def _adjust_shape_for_rotation(shape, angle):
-    """ Compute adjusted 2D crop shape to rotate it and get central crop without padding.
-
-    Parameters
-    ----------
-    shape : tuple
-        Target сrop shape.
-    angle : float
-
-    Returns
-    -------
-    tuple
-        Adjusted crop shape.
-    """
-    angle = abs(2 * np.pi * angle / 360)
-    limit = atan(shape[1] / shape[0])
-    x_max, y_max = shape
-    if angle != 0:
-        if angle < limit:
-            x_max = shape[0] * np.cos(angle) + shape[1] * np.sin(angle) + 1
-        else:
-            x_max = (shape[0] ** 2 + shape[1] ** 2) ** 0.5 + 1
-
-        if angle < np.pi / 2 - limit:
-            y_max = shape[0] * np.sin(angle) + shape[1] * np.cos(angle) + 1
-        else:
-            y_max = (shape[0] ** 2 + shape[1] ** 2) ** 0.5 + 1
-    return (int(np.ceil(x_max)), int(np.ceil(y_max)))
-
-def adjust_shape_3d(shape, angle, scale=(1, 1, 1)):
-    """ Compute adjusted 3D crop shape to rotate it and get central crop without padding. Adjustments is based on
-    proposition that rotation angles are defined as Tait-Bryan angles and the sequence of extrinsic rotations axes
-    is (axis_2, axis_0, axis_1) and scale performed after rotation.
-
-    Parameters
-    ----------
-    shape : tuple
-        Target сrop shape.
-    angle : float or tuple of floats
-        Rotation angles about each axis.
-    scale : int or tuple, optional
-        Scale for each axis.
-
-    Returns
-    -------
-    tuple
-        Adjusted crop shape.
-    """
-    angle = angle if isinstance(angle, (tuple, list)) else (angle, 0, 0)
-    scale = scale if isinstance(scale, (tuple, list)) else (scale, scale, 1)
-    shape = np.ceil(np.array(shape) / np.array(scale)).astype(int)
-    if angle[2] != 0:
-        shape[2], shape[0] = _adjust_shape_for_rotation((shape[2], shape[0]), angle[2])
-    if angle[1] != 0:
-        shape[2], shape[1] = _adjust_shape_for_rotation((shape[2], shape[1]), angle[1])
-    if angle[0] != 0:
-        shape[0], shape[1] = _adjust_shape_for_rotation((shape[0], shape[1]), angle[0])
-    return tuple(shape)
 
 
 @njit(parallel=True)
