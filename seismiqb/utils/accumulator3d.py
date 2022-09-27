@@ -172,12 +172,12 @@ class Accumulator3D:
         return self.data
 
     def export_to_hdf5(self, path=None, projections=(0,), pbar='t', dtype=None, transform=None, dataset_kwargs=None):
-        """ !!. """
+        """ Export `data` attribute to a file. """
         if self.type != 'numpy' or self.orientation != 0:
             raise NotImplementedError('`export_to_hdf5` works only with `numpy` accumulators with `orientation=0`!')
 
         # Parse parameters
-        from ..geometry.conversion_mixin import ConversionMixin
+        from ..geometry.conversion_mixin import ConversionMixin #pylint: disable=import-outside-toplevel
         if isinstance(path, str) and os.path.exists(path):
             os.remove(path)
 

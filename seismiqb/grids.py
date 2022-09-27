@@ -11,8 +11,6 @@ Each of the classes provides:
     - `to_names` method to convert the first two columns of sampled locations into string names of field and label
     - convenient visualization to explore underlying `locations` structure
 """
-from itertools import product
-
 import numpy as np
 from numba import njit
 
