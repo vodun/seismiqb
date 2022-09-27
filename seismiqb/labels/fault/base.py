@@ -260,14 +260,14 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
             points.append(triangle_rasterization(self.nodes[triangle].astype('float32'), width))
         self._points = np.concatenate(points, axis=0).astype('int32')
 
-    def points_to_sticks(self, slices=None, sticks_step=10, stick_nodes_step=10):
+    def points_to_sticks(self, slices=None, sticks_step=10, stick_nodes_step=10, stick_orientation=2):
         """ Create sticks from fault points. """
         points = self.points.copy()
         if slices is not None:
             for i in range(3):
                 points = points[points[:, i] <= slices[i].stop]
                 points = points[points[:, i] >= slices[i].start]
-        self._sticks = points_to_sticks(points, sticks_step, stick_nodes_step, self.direction)
+        self._sticks = points_to_sticks(points, sticks_step, stick_nodes_step, self.direction, stick_orientation)
 
     def add_to_mask(self, mask, locations=None, width=1, axis=None, sparse=False, **kwargs):
         """ Add fault to background.
@@ -317,4 +317,9 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
 
     def __len__(self):
         """ The size of the fault. """
-        return np.prod(self.bbox[:, 1] - self.bbox[:, 0] + 1)
+        return self.bbox[2].ptp() * self.bbox[self.direction].ptp()
+
+    def __add__(self, other):
+        points = np.concatenate([self.points, other.points])
+        return type(self)({'points': points}, field=self.field, name=f"{self.name}+{other.name}",
+                          direction=self.direction)

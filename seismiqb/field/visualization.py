@@ -415,7 +415,7 @@ class VisualizationMixin:
 
     # 3D interactive
     def show_3d(self, src='labels', aspect_ratio=None, zoom=None,
-                n_points=100, threshold=100, sticks_step=None, stick_nodes_step=None, sticks=False,
+                n_points=100, threshold=100, sticks_step=None, stick_nodes_step=None, sticks=False, stick_orientation=None,
                 slides=None, margin=(0, 0, 20), colors=None, **kwargs):
         """ Interactive 3D plot for some elements of a field.
         Roughly, does the following:
@@ -479,7 +479,8 @@ class VisualizationMixin:
             'sticks_step': sticks_step,
             'stick_nodes_step': stick_nodes_step,
             'slices': zoom,
-            'sticks': sticks
+            'sticks': sticks,
+            'stick_orientation': stick_orientation
         }
 
         labels = [getattr(self, src_) if isinstance(src_, str) else [src_] for src_ in src]
