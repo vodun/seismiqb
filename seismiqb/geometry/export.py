@@ -123,8 +123,8 @@ def make_segy_from_array(array, path_segy, zip_segy=True, remove_segy=None, path
         from .base import SeismicGeometry #pylint: disable=import-outside-toplevel
         geometry = SeismicGeometry(path_spec)
         segy = geometry.segyfile
-        sample_rate = int(geometry.sample_rate)
-        delay = origin[2] * sample_rate + int(geometry.delay)
+        sample_rate = geometry.sample_rate
+        delay = origin[2] * sample_rate + geometry.delay
 
         idx = np.stack(geometry.dataframe.index)
         mask = np.zeros(len(idx), dtype='bool')
@@ -192,8 +192,8 @@ def make_segy_from_array(array, path_segy, zip_segy=True, remove_segy=None, path
 
             # change depth-related fields in trace-header
             header[segyio.TraceField.TRACE_SAMPLE_COUNT] = array.shape[2]
-            header[segyio.TraceField.TRACE_SAMPLE_INTERVAL] = sample_rate * 1000
-            header[segyio.TraceField.DelayRecordingTime] = delay
+            header[segyio.TraceField.TRACE_SAMPLE_INTERVAL] = int(sample_rate * 1000)
+            header[segyio.TraceField.DelayRecordingTime] = int(delay)
 
             # copy the trace from the array
             trace = array[i, x]
@@ -201,7 +201,7 @@ def make_segy_from_array(array, path_segy, zip_segy=True, remove_segy=None, path
 
         dst_file.bin = {segyio.BinField.Traces: len(idx),#array.shape[0] * array.shape[1],
                         segyio.BinField.Samples: array.shape[2],
-                        segyio.BinField.Interval: sample_rate * 1000}
+                        segyio.BinField.Interval: int(sample_rate * 1000)}
 
     if zip_segy:
         dir_name = os.path.dirname(os.path.abspath(path_segy))
