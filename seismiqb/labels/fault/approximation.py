@@ -9,6 +9,24 @@ from .postprocessing import thin_line, split_array
 
 
 def points_to_sticks(points, sticks_step=10, nodes_step=10, fault_orientation=None, stick_orientation=2):
+    """ Get sticks from fault which is represented as a cloud of points.
+
+    Parameters
+    ----------
+    points : np.ndarray
+        Fault points.
+    sticks_step : int
+        Number of slides between sticks.
+    nodes_step : int
+        Maximal distance between stick nodes
+    stick_orientation : int (0, 1 or 2)
+        Direction of each stick
+
+    Returns
+    -------
+    numpy.ndarray
+        Array of sticks. Each item of array is a stick: sequence of 3D points.
+    """
     if fault_orientation is None:
         pca = PCA(1)
         pca.fit(points)
@@ -29,8 +47,8 @@ def points_to_sticks(points, sticks_step=10, nodes_step=10, fault_orientation=No
         slide_points = slide_points[np.argsort(slide_points[:, stick_orientation])]
         slide_points = thin_line(slide_points, stick_orientation)
         if len(slide_points) > 2:
-            nodes = get_stick_nodes(slide_points, fault_orientation, stick_orientation, nodes_step).astype('float32')
-            nodes = add_points_to_stick(nodes, nodes_step, fault_orientation, stick_orientation).astype('int32')
+            nodes = _get_stick_nodes(slide_points, fault_orientation, stick_orientation, nodes_step).astype('float32')
+            nodes = _add_points_to_stick(nodes, nodes_step, fault_orientation, stick_orientation).astype('int32')
         else:
             nodes = slide_points
         if len(nodes) > 0:
@@ -38,7 +56,25 @@ def points_to_sticks(points, sticks_step=10, nodes_step=10, fault_orientation=No
     return sticks
 
 
-def get_stick_nodes(points, fault_orientation, stick_orientation, threshold=5):
+def _get_stick_nodes(points, fault_orientation, stick_orientation, threshold=5):
+    """ Get sticks from the line (with some width) defined by cloud of points
+
+    Parameters
+    ----------
+    points : numpy.ndarray
+        3D points located on one 2D slide
+    fault_orientation : int (0, 1 or 2)
+        Direction of the fault
+    stick_orientation : int (0, 1 or 2)
+        Direction of each stick
+    threshold : int, optional
+        Threshold to remove nodes which are too close, by default 5
+
+    Returns
+    -------
+    numpy.ndarray
+        Stick nodes
+    """
     if len(points) <= 2:
         return points
 
@@ -67,9 +103,11 @@ def get_stick_nodes(points, fault_orientation, stick_orientation, threshold=5):
     return new_points
 
 @njit
-def add_points_to_stick(sticks, step, fault_orientation, stick_orientation=2):
+def _add_points_to_stick(sticks, step, fault_orientation, stick_orientation=2):
+    """ Add points between nodes which are too far. """
     normal = 3 - fault_orientation - stick_orientation
-    new_sticks = np.zeros((int(sticks[-1][stick_orientation]) - int(sticks[0][stick_orientation]) + 1, 3), dtype='float32')
+    ptp = int(sticks[-1][stick_orientation]) - int(sticks[0][stick_orientation]) + 1
+    new_sticks = np.zeros((ptp, 3), dtype='float32')
 
     pos = 0
     for i in range(len(sticks)-1):

@@ -86,22 +86,22 @@ def sticks_to_simplices(sticks, threshold=None, **kwargs):
     return np.zeros((0, 3)), np.zeros((0, 3))
 
 def connect_two_components(nodes1, nodes2, axis=2, orientation=0, shift=20):
+    """ Create triangles for two sequential sticks. """
     ranges1, ranges2 = filter_points(nodes1, nodes2, axis, shift)
 
     p1, p2 = nodes1[slice(*ranges1)], nodes2[slice(*ranges2)]
 
     points = np.concatenate([p1, p2])
-    if len(points) > 3:
-        try:
-            simplices = Delaunay(points[:, [orientation, axis]]).simplices
-        except:
-            return []
-        l1 = (ranges1[1] - ranges1[0])
-        simplices[simplices >= l1] += ranges2[0] + (len(nodes1) - ranges1[1])
-        simplices += ranges1[0]
-        return simplices
-    else:
+    if len(points) <= 3:
         return []
+    try:
+        simplices = Delaunay(points[:, [orientation, axis]]).simplices
+    except: # pylint: disable=bare-except
+        return []
+    l1 = (ranges1[1] - ranges1[0])
+    simplices[simplices >= l1] += ranges2[0] + (len(nodes1) - ranges1[1])
+    simplices += ranges1[0]
+    return simplices
 
 def filter_points(nodes1, nodes2, axis=2, shift=20):
     """ Remove nodes which are too far from each other. """
@@ -140,6 +140,7 @@ def filter_points(nodes1, nodes2, axis=2, shift=20):
     return ranges1, ranges2
 
 def filter_triangles(triangles, points, threshold=10):
+    """ Remove large triangles. """
     mask = np.ones(len(triangles), dtype='bool')
     if threshold is not None:
         for i, tri in enumerate(triangles):

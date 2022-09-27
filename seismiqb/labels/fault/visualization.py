@@ -74,7 +74,8 @@ class FaultVisualizationMixin(VisualizationMixin):
         show_3d(x, y, z, simplices, title=title, zoom=zoom, aspect_ratio=aspect_ratio,
                 axis_labels=axis_labels, margin=margin, colors=colors, **kwargs)
 
-    def make_triangulation(self, slices=None, sticks_step=None, stick_nodes_step=None, stick_orientation=None, sticks=False, **kwargs):
+    def make_triangulation(self, slices=None, sticks_step=None, stick_nodes_step=None,
+                           stick_orientation=None, sticks=False, **kwargs):
         """ Return triangulation of the fault. It will created if needed. """
         if sticks_step is not None or stick_nodes_step is not None or stick_orientation is not None:
             fake_fault = type(self)({'points': self.points}, field=self.field, direction=self.direction)

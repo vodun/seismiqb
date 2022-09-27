@@ -15,14 +15,16 @@ class SurfacesExtractor:
         are in the same direction (`faults_direction`) and do not have branches.
 
         The algorithm is based on three stages:
-            - merge connected components into small patches: sequences of connected components (see :class:`.FaultPatch`)
+            - merge connected components into small patches: sequences of connected components
+              (see :class:`.FaultPatch`)
             - group patches around the holes
             - group patches with large intersection of the bound components
 
         Then all groups of patches form separate fault instances.
 
-        Patches can be organized into directed graph: each patch is connected to the patches which touch its bottom component
-        by its top component. Top patches we will call `parents`, the sequent bottom patches we will call `children`.
+        Patches can be organized into directed graph: each patch is connected to the patches which touch its bottom
+        component by its top component. Top patches we will call `parents`, the sequent bottom patches we will
+        call `children`.
 
         Parameters
         ----------
@@ -67,15 +69,15 @@ class SurfacesExtractor:
 
         labels, n_objects = measurements.label(self.array, structure=structure)
         objects = measurements.find_objects(labels)
-        objects = {i: item for i, item in enumerate(objects, start=1)}
+        objects = dict(enumerate(objects, start=1))
 
         return labels, n_objects, objects
 
     def compute_sizes(self):
         """ Compute sizes of components as a number of points. The zero label (background) is ignored. """
         sizes = {}
-        for idx, object in self.objects.items():
-            mask = (self.labels[object] == idx)
+        for idx, bbox in self.objects.items():
+            mask = (self.labels[bbox] == idx)
             sizes[idx] = mask.sum()
         return sizes
 
@@ -94,23 +96,27 @@ class SurfacesExtractor:
         return self.objects[idx][self.components_axis].start
 
     def get_neighbors(self, idx, direction=1):
-        """ Find components on the next slice in the given direction (1 or -1) which touch component with label `idx`. """
-        object = list(self.objects[idx])
+        """ Find components on the next slice in the given direction (1 or -1) which touch component
+        with label `idx`.
+        """
+        bbox = list(self.objects[idx])
         location = self.idx_to_location(idx)
         if ((direction ==  1 and location == self.array.shape[self.components_axis] - 1) or \
             (direction == -1 and location == 0)):
             return []
 
-        object[self.components_axis] = location
-        mask = (self.labels[object[0], object[1], object[2]] == idx)
-        object[self.components_axis] += direction
-        components = np.unique(self.labels[object[0], object[1], object[2]][mask])
+        bbox[self.components_axis] = location
+        mask = (self.labels[bbox[0], bbox[1], bbox[2]] == idx)
+        bbox[self.components_axis] += direction
+        components = np.unique(self.labels[bbox[0], bbox[1], bbox[2]][mask])
 
         return components[components > 0]
 
     def compute_intersection_size(self, idx_a, idx_b):
         """ Compute the area (the number of pixels) of ​​contact of two components on different slices. """
-        bbox = [slice(min(i.start, j.start), max(i.stop, j.stop)) for i, j in zip(self.objects[idx_a], self.objects[idx_b])]
+        bbox = [
+            slice(min(i.start, j.start), max(i.stop, j.stop)) for i, j in zip(self.objects[idx_a], self.objects[idx_b])
+        ]
 
         bbox[self.components_axis] = self.idx_to_location(idx_a)
         a_mask = (self.labels[bbox[0], bbox[1], bbox[2]] == idx_a)
@@ -139,11 +145,12 @@ class SurfacesExtractor:
         """
 
         # TODO: rewrite progress bar for used components
-        for anchor_idx, extension_direction in tqdm.tqdm_notebook(self._components_to_extend(size_threshold), disable=(not bar)):
-            patch = FaultPatch(anchor_idx, extension_direction, extractor=self)
+        candidates = self._components_to_extend(size_threshold)
+        for anchor_idx, direction in tqdm.tqdm_notebook(candidates, disable=(not bar)):
+            patch = FaultPatch(anchor_idx, direction, extractor=self)
 
             # Check if patch consists of one component which is a part of the already exsisted patch
-            if len(patch.components) == 1 and (extension_direction == 0 or patch.top in self.extended_components[-extension_direction]):
+            if len(patch.components) == 1 and (direction == 0 or patch.top in self.extended_components[-direction]):
                 continue
 
             self.patches[patch.top] = patch
@@ -289,33 +296,6 @@ class SurfacesExtractor:
                     self._connectivity_matrix[b, a] = 1
         return self
 
-    #TODO
-    def glue_small_surfaces(self, bar=True, n_components=4):
-        n_groups, groups = connected_components(self._connectivity_matrix, directed=False)
-        for idx in tqdm.tqdm_notebook(range(n_groups), disable=(not bar), desc='Glue small components'):
-            patches = [self._labels_mapping[item] for item in np.arange(len(self.patches))[groups == idx]]
-            components = [list(self.patches[patch].all_components) for patch in patches]
-            if len(sum(components, [])) < n_components:
-                for patch in patches:
-                    stats = {}
-                    for p in self.patches[patch].top_rejected:
-                        if p in self.patches:
-                            intersection = self.compute_intersection_size(self.patches[p].bottom, self.patches[patch].top)
-                            a, b = self.sizes[self.patches[p].bottom], self.sizes[self.patches[patch].top]
-                            stats[p] = intersection / min(a, b)
-
-                    for c in self.patches[patch].bottom_rejected:
-                        if c in self.patches:
-                            intersection = self.compute_intersection_size(self.patches[c].top, self.patches[patch].bottom)
-                            a, b = self.sizes[self.patches[c].top], self.sizes[self.patches[patch].bottom]
-                            stats[c] = intersection / min(a, b)
-                    if len(stats) > 0:
-                        idx = self._labels_reverse_mapping[max(stats, key=stats.get)]
-                        idx_2 = self._labels_reverse_mapping[patch]
-                        self._connectivity_matrix[idx, idx_2] = 1
-                        self._connectivity_matrix[idx_2, idx] = 1
-        return self
-
     def to_faults(self, field, bar=True):
         """ Make Fault instances from groups of patches.
 
@@ -337,7 +317,9 @@ class SurfacesExtractor:
 
         for idx in tqdm.tqdm_notebook(range(n_groups), disable=(not bar)):
             patches_idx = [self._labels_mapping[item] for item in np.arange(len(self.patches))[groups == idx]]
-            components = [list(self.patches[patch].all_components) + self.patches[patch].bottom_rejected for patch in patches_idx]
+            components = [
+                list(self.patches[patch].all_components) + self.patches[patch].bottom_rejected for patch in patches_idx
+            ]
 
             for patch in components:
                 points = np.concatenate([self.idx_to_points(i) for i in patch], axis=0)
@@ -475,9 +457,9 @@ class FaultPatch:
         ----------
         thresholds : tuple, optional
             Thresholds as a ratios of components sizes, by default (0.5, 0.9).
-            For each pair of bottom component and bottom rejected the first item is the ratio of the components intersection
-            to the size of the smallest item in pair. The second is the ratio of the components intersection to the size of
-            the largest item in pair.
+            For each pair of bottom component and bottom rejected the first item is the ratio of the components
+            intersection to the size of the smallest item in pair. The second is the ratio of the components
+            intersection to the size of the largest item in pair.
 
         Returns
         -------
@@ -493,11 +475,14 @@ class FaultPatch:
                 if len(self.bottom_rejected) == 1 and intersection / (min(A, B)) >= thresholds[1]:
                     merge[leaf] = 0
                 else:
-                    if min(A, B) > 20 and intersection / (max(A, B)) >= thresholds[0] and intersection / (min(A, B)) >= thresholds[1]:
-                        merge[leaf] = intersection / (max(A, B))
+                    min_ = min(A, B)
+                    max_ = max(A, B)
+                    if min_ > 20 and intersection / max_ >= thresholds[0] and intersection / min_ >= thresholds[1]:
+                        merge[leaf] = intersection / max_
         return list(sorted(merge, key=lambda x: merge[x]))
 
     def __repr__(self):
         if self.top == self.bottom:
             return f"{self.top_rejected} ---> {self.bottom} ---> {self.bottom_rejected}"
-        return f"{self.top_rejected} ---> {self.top} -> [{len(self.components)} components] -> {self.bottom} ---> {self.bottom_rejected}"
+        return f"{self.top_rejected} ---> {self.top} -> [{len(self.components)} components] "\
+               f"-> {self.bottom} ---> {self.bottom_rejected}"
