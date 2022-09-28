@@ -471,7 +471,7 @@ class FaultPatch:
             if leaf in self.extractor.patches:
                 comp = self.all_components[-1]
                 intersection = self.extractor.compute_intersection_size(leaf, comp)
-                A, B = self.sizes[leaf], self.sizes[comp]
+                A, B = self.extractor.sizes[leaf], self.extractor.sizes[comp]
                 if len(self.bottom_rejected) == 1 and intersection / (min(A, B)) >= thresholds[1]:
                     merge[leaf] = 0
                 else:
