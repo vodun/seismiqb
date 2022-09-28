@@ -353,7 +353,7 @@ class SeismicCropBatch(Batch, VisualizationMixin):
 
     @action
     @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def normalize(self, ix, src=None, dst=None, mode='meanstd', normalization_stats=None,
+    def normalize_old(self, ix, src=None, dst=None, mode='meanstd', normalization_stats=None,
                   from_field=True, clip_to_quantiles=False, q=(0.01, 0.99)):
         """ Normalize `src` with.
         Depending on the parameters, stats for normalization will be taken from (in order of priority):
@@ -427,12 +427,12 @@ class SeismicCropBatch(Batch, VisualizationMixin):
 
     @action
     @inbatch_parallel(init='preallocating_init', post='noop_post', target='for')
-    def normalize2(self, ix, buffer, src=None, dst=None, mode='meanstd', normalization_stats=None,
-                   from_field=True, clip_to_quantiles=False, q=(0.01, 0.99)):
-        """ Normalize `src` with.
+    def normalize(self, ix, buffer, src=None, dst=None, mode='meanstd', normalization_stats='field',
+                  clip_to_quantiles=False, q=(0.01, 0.99)):
+        """ Normalize `src` with provided stats.
         Depending on the parameters, stats for normalization will be taken from (in order of priority):
             - supplied `normalization_stats`, if provided
-            - the field that created this `src`, if `from_field`
+            - the field that created this `src`, if `normalization_stats=True`
             - computed from `src` data directly
 
         TODO: streamline the entire process of normalization.
@@ -444,8 +444,6 @@ class SeismicCropBatch(Batch, VisualizationMixin):
             If callable, then it will be called on `src` data with additional `normalization_stats` argument.
         normalization_stats : dict, optional
             If provided, then used to get statistics for normalization.
-        from_field : bool
-            If True, then normalization stats are taken from attacked field.
         clip_to_quantiles : bool
             Whether to clip the data to quantiles, specified by `q` parameter.
             Quantile values are taken from `normalization_stats`, provided by either of the ways.
@@ -456,26 +454,26 @@ class SeismicCropBatch(Batch, VisualizationMixin):
 
         # Prepare normalization stats
         if isinstance(normalization_stats, dict):
-            normalization_stats = normalization_stats[field.short_name]
+            if field.short_name in normalization_stats:
+                normalization_stats = normalization_stats[field.short_name]
+        elif normalization_stats in {'field', True}:
+            normalization_stats = field.normalization_stats
         else:
-            if from_field:
-                normalization_stats = field.normalization_stats
-            else:
-                # Crop-wise stats
-                normalization_stats = {}
+            # Crop-wise stats
+            normalization_stats = {}
 
-                if clip_to_quantiles:
-                    buffer = np.clip(buffer, *np.quantile(buffer, q))
-                    clip_to_quantiles = False
+            if clip_to_quantiles:
+                buffer = np.clip(buffer, *np.quantile(buffer, q))
+                clip_to_quantiles = False
 
-                if 'mean' in mode:
-                    normalization_stats['mean'] = np.mean(buffer)
-                if 'std' in mode:
-                    normalization_stats['std'] = np.std(buffer)
-                if 'min' in mode:
-                    normalization_stats['min'] = np.min(buffer)
-                if 'max' in mode:
-                    normalization_stats['max'] = np.max(buffer)
+            if 'mean' in mode:
+                normalization_stats['mean'] = np.mean(buffer)
+            if 'std' in mode:
+                normalization_stats['std'] = np.std(buffer)
+            if 'min' in mode:
+                normalization_stats['min'] = np.min(buffer)
+            if 'max' in mode:
+                normalization_stats['max'] = np.max(buffer)
 
         # Clip
         if clip_to_quantiles:
@@ -728,7 +726,7 @@ class SeismicCropBatch(Batch, VisualizationMixin):
 
 
     # Methods to work with (mostly, horizon) masks
-    @apply_parallel_decorator
+    @apply_parallel_decorator(init='preallocating_init', post='noop_post', target='for')
     def filter_sides(self, _, buffer, ratio, side, axis=0):
         """ Filter out left or right side of a crop.
         Assumes the array in (inline, crossline, depth) orientation. Tested mostly for 2D crops.
@@ -747,12 +745,12 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         max_len = buffer.shape[axis]
         length = round(max_len * (1 - ratio))
 
-        locations = [None] * 3
-        locations[axis] = slice(0, -length) if side == 'left' else slice(length, max_len)
+        locations = [slice(None)] * 3
+        locations[axis] = slice(0, max_len-length) if side == 'left' else slice(length, max_len)
         buffer[tuple(locations)] = 0
 
 
-    @apply_parallel_decorator
+    @apply_parallel_decorator(init='data', post='_assemble', target='for')
     def shift_masks(self, crop, n_segments=3, max_shift=4, min_len=5, max_len=10):
         """ Randomly shift parts of the crop up or down.
 
@@ -785,7 +783,7 @@ class SeismicCropBatch(Batch, VisualizationMixin):
                 crop[:, begin:min(begin + length, crop.shape[1]), :] = shifted_segment
         return crop
 
-    @apply_parallel_decorator
+    @apply_parallel_decorator(init='data', post='_assemble', target='for')
     def bend_masks(self, crop, angle=10):
         """ Rotate part of the mask on a given angle.
         Must be used for crops in (xlines, depths, inlines) format.
@@ -814,7 +812,7 @@ class SeismicCropBatch(Batch, VisualizationMixin):
             combined[:point_x, :, :] = rotated[:point_x, :, :]
         return combined
 
-    @apply_parallel_decorator
+    @apply_parallel_decorator(init='data', post='_assemble', target='for')
     def linearize_masks(self, crop, n=3, shift=0, kind='random', width=None):
         """ Sample `n` points from the original mask and create a new mask by interpolating them.
 
@@ -883,7 +881,7 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         return mask_
 
 
-    @apply_parallel_decorator
+    @apply_parallel_decorator(init='data', post='_assemble', target='for')
     def smooth_labels(self, crop, eps=0.05):
         """ Smooth labeling for segmentation mask:
             - change `1`'s to `1 - eps`
@@ -1095,8 +1093,8 @@ class SeismicCropBatch(Batch, VisualizationMixin):
 
 
     # Augmentations: values
-    @apply_parallel_decorator
-    def additive_noise(self, crop, scale):
+    @apply_parallel_decorator(init='data', post='_assemble', target='for')
+    def additive_noise_old(self, crop, scale):
         """ Add random value to each entry of crop. Added values are centered at 0.
 
         Parameters
@@ -1109,7 +1107,7 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         return crop + noise
 
     @apply_parallel_decorator(init='preallocating_init', post='noop_post', target='for')
-    def additive_noise2(self, _, buffer, scale, **kwargs):
+    def additive_noise(self, _, buffer, scale, **kwargs):
         """ Add random value to each entry of crop. Added values are centered at 0.
 
         Parameters

@@ -420,7 +420,7 @@ class ExtractionMixin:
         self, other : :class:`.Horizon` instances
             Horizons to merge.
         mean_threshold : number
-            depth threshold for mean distances.
+            Depth threshold for mean distances.
         adjacency : int
             Margin to consider horizons close (spatially).
         inplace : bool

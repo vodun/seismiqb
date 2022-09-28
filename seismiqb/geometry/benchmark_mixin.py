@@ -62,7 +62,7 @@ class BenchmarkMixin:
         return locations
 
     def benchmark(array_like, n_slides=300, slide_allowed_axis=(0, 1, 2),
-                  n_crops=300, crop_size_min=(10, 10, 256), crop_size_max=(128, 128, 512), seed=42, pbar='t'):
+                  n_crops=300, crop_size_min=(10, 10, 256), crop_size_max=(128, 128, 512), seed=42, pbar=False):
         """ Calculate average loading timings.
         Output is user, system and wall timings in milliseconds for slides and crops.
         TODO: separate timings for each slide axis
@@ -92,11 +92,6 @@ class BenchmarkMixin:
         #pylint: disable=no-self-argument
         # Parse parameters
         bbox = np.array([[0, s] for s in array_like.shape])
-
-        if isinstance(crop_size_min, int):
-            crop_size_min = (crop_size_min, crop_size_min, crop_size_min)
-        if isinstance(crop_size_max, int):
-            crop_size_max = (crop_size_max, crop_size_max, crop_size_max)
 
         rng = np.random.default_rng(seed)
         timings = {}

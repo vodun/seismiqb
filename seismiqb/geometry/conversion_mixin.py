@@ -9,7 +9,7 @@ from batchflow import Notifier
 
 
 class Quantizer:
-    """ Class to hold parameters oand methods for (de)quantization. """
+    """ Class to hold parameters and methods for (de)quantization. """
     def __init__(self, ranges, clip=True, center=False, mean=None, dtype=np.int8):
         self.ranges = ranges
         self.clip, self.center = clip, center

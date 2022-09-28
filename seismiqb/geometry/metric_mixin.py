@@ -16,8 +16,6 @@ class MetricMixin:
             Geometries to compare.
         function : callable
             Function to compare values in each lateral window. Must take two 2D arrays as inputs.
-        l : int
-            Number of values returned by each call to `function`.
         kernel_size : sequence of two ints
             Shape of the lateral window.
         limits : sequence of ints, slice, optional

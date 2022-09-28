@@ -560,7 +560,7 @@ def spatial_check_points(points, matrix, crop_shape, i_mask, x_mask, threshold):
                     running_sum += value.item()
 
             if present_points >= threshold:
-                d_mean = np.rint(running_sum / present_points)
+                d_mean = round(running_sum / present_points)
                 buffer[counter, :] = point_i, point_x, np.int32(d_mean), np.int32(0)
                 counter += 1
 
@@ -574,7 +574,7 @@ def spatial_check_points(points, matrix, crop_shape, i_mask, x_mask, threshold):
                     running_sum += value.item()
 
             if present_points >= threshold:
-                d_mean = np.rint(running_sum / present_points)
+                d_mean = round(running_sum / present_points)
                 buffer[counter, :] = point_i, point_x, np.int32(d_mean), np.int32(1)
                 counter += 1
 

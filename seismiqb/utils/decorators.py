@@ -38,15 +38,13 @@ class TransformsMixin:
         return matrix
 
     @staticmethod
-    def matrix_dilate(matrix, dilation_iterations=3, dilate_boundaries=False):
-        """ Normalize matrix values.
+    def matrix_dilate(matrix, dilation_iterations=3):
+        """ Dilate matrix to increase area of non-zero objects.
 
         Parameters
         ----------
-        mode : bool, str, optional
-            If `min-max` or True, then use min-max scaling.
-            If `mean-std`, then use mean-std scaling.
-            If False, don't scale matrix.
+        dilation_iterations : int
+            Number of dilation iterations with (3, 3) kernel. Corresponds to added size for each boundary point.
         """
         dtype = matrix.dtype
         kernel = np.ones((3, 3), dtype=np.uint8)

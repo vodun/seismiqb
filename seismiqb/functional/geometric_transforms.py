@@ -4,6 +4,8 @@ from math import ceil, atan, cos, sin
 import numpy as np
 import cv2
 
+
+
 # Rotate
 def rotate_2d(array, angle, adjust=False, fill_value=0):
     """ Rotate an image along the first two axes.
@@ -18,8 +20,6 @@ def rotate_2d(array, angle, adjust=False, fill_value=0):
     fill_value : number
         Padding value.
     """
-    initial_shape = array.shape
-
     if adjust:
         array, initial_shape = adjust_shape(array, angle=angle)
     array = _rotate_2d(array=array, angle=angle, fill_value=fill_value)
