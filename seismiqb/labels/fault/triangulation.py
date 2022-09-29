@@ -68,8 +68,10 @@ def sticks_to_simplices(sticks, threshold=None, **kwargs):
     nodes : numpy.ndarray
         Concatenated array of sticks nodes.
     """
-    if len(sticks) <= 1:
+    if len(sticks) == 0:
         return np.zeros((0, 3)), np.zeros((0, 3))
+    if len(sticks) == 1:
+        return np.zeros((0, 3)), sticks[0]
     all_simplices = []
     nodes = np.concatenate(sticks)
     shift = 0

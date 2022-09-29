@@ -317,7 +317,7 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
 
     def __len__(self):
         """ The size of the fault. """
-        return self.bbox[2].ptp() * self.bbox[self.direction].ptp()
+        return self.bbox[2].ptp() * (self.bbox[self.direction].ptp() + 1)
 
     def __add__(self, other):
         points = np.concatenate([self.points, other.points])

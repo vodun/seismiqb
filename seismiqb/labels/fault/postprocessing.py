@@ -13,7 +13,7 @@ def skeletonize(slide, width=5, rel_height=0.5, prominence=0.05, threshold=0.05,
     slide : numpy.ndarray
 
     width : int, optional
-        width of the resulting skeleton, by default 5
+        width of peaks, by default 5
     rel_height, threshold : float, optional
         parameters of :meth:~.find_peaks`
     prominence : float

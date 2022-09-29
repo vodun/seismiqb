@@ -18,7 +18,7 @@ class FaultSticksMixin(CharismaMixin):
 
     @classmethod
     def read_df(cls, path):
-        """ Automatically detect formar of csv-like file and create pandas.DataFrame from FaultSticks/CHARISMA file. """
+        """ Automatically detect format of csv-like file and create pandas.DataFrame from FaultSticks/CHARISMA file. """
         with open(path, encoding='utf-8') as file:
             line_len = len([item for item in file.readline().split(' ') if len(item) > 0])
 
@@ -191,9 +191,9 @@ class FaultSticksMixin(CharismaMixin):
         Parameters
         ----------
         path : str
-            path to file or glob expression
+            Path to file or glob expression
         verbose : bool
-            response if file is succesfully readed.
+            Response if file is successfully readed.
         """
         for filename in glob.glob(path):
             if os.path.splitext(filename)[1] == '.dvc':
