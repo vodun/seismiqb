@@ -39,7 +39,7 @@ class FaultSticksMixin(CharismaMixin):
         return pd.read_csv(path, sep=r'\s+', names=names)
 
     def split_df_into_sticks(self, df, return_direction=False):
-        """ Group nodes in FaultStciks dataframe into sticks.
+        """ Group nodes in FaultSticks dataframe into sticks.
 
         Parameters
         ----------
@@ -250,7 +250,7 @@ class FaultSerializationMixin:
             'points': npzfile.get('points'),
             'nodes': npzfile.get('nodes'),
             'simplices': npzfile.get('simplices'),
-            'sticks': self._labeled_array_to_sticks(sticks, sticks_labels),
+            'sticks': self._labeled_array_to_sticks(sticks, sticks_labels) if sticks is not None else None,
         }, transform=transform)
 
         direction = npzfile.get('direction')
