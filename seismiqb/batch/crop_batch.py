@@ -160,6 +160,11 @@ class SeismicCropBatch(Batch, VisualizationMixin):
             if item is not None:
                 return data[item]
 
+        elif component in self.__dict__:
+            data = self.__dict__[component]
+            if item is not None:
+                return data[item]
+
         else: # retrieve from `dataset`
             if item is not None:
                 field_name = self.data.data['field_names'][item]

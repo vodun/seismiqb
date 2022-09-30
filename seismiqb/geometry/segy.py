@@ -442,7 +442,7 @@ class GeometrySEGY(Geometry):
         return buffer
 
     # Data loading: 2D
-    def load_slide(self, index, axis=0, limits=None, buffer=None):
+    def load_slide_native(self, index, axis=0, limits=None, buffer=None, safe=False):
         """ Load one slide of data along specified axis.
 
         Parameters
@@ -458,6 +458,7 @@ class GeometrySEGY(Geometry):
         buffer : np.ndarray, optional
             Buffer to read the data into. If possible, avoids copies.
         """
+        _ = safe
         if axis in {0, 1}:
             index = self.get_slide_index(index=index, axis=axis)
             indices = np.take(self.index_matrix, indices=index, axis=axis)
@@ -467,7 +468,7 @@ class GeometrySEGY(Geometry):
         return slide
 
     # Data loading: 3D
-    def load_crop(self, locations, buffer=None):
+    def load_crop_native(self, locations, buffer=None, safe=False):
         """ Load crop (3D subvolume) from the cube.
 
         Parameters
@@ -477,6 +478,7 @@ class GeometrySEGY(Geometry):
         buffer : np.ndarray, optional
             Buffer to read the data into. If possible, avoids copies.
         """
+        _ = safe
         shape = self.locations_to_shape(locations)
         axis = np.argmin(shape)
 
@@ -495,6 +497,11 @@ class GeometrySEGY(Geometry):
             else:
                 buffer[:] = data
         return buffer
+
+    def get_optimal_axis(self, locations=None, shape=None):
+        """ Choose the fastest axis for loading given locations. """
+        shape = shape or self.locations_to_shape(locations)
+        return np.argsort(shape)[0]
 
 
 @njit(nogil=True)

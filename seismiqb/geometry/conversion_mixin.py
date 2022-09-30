@@ -124,7 +124,7 @@ class ConversionMixin:
 
     # Convert SEG-Y
     def convert(self, format='hdf5', path=None, postfix='', projections='ixd',
-                quantize=False, quantization_parameters=None, dataset_kwargs=None,
+                quantize=False, quantization_parameters=None, dataset_kwargs=None, chunk_size_divisor=1,
                 pbar='t', store_meta=True, **kwargs):
         """ Convert SEG-Y file to a more effective storage.
 
@@ -178,6 +178,9 @@ class ConversionMixin:
             if postfix == '' and len(projections) < 3:
                 postfix = '_' + projections
 
+            if postfix == '' and chunk_size_divisor != 1:
+                postfix = '_' + f'c{chunk_size_divisor}'
+
             path = os.path.join(os.path.dirname(self.path), f'{self.short_name}{postfix}.{fmt_prefix}{format}')
 
         # Dataset creation parameters
@@ -203,7 +206,8 @@ class ConversionMixin:
                 projection_shape = self.shape[projection_transposition]
 
                 # Create dataset
-                dataset_kwargs_ = {'chunks': (1, *projection_shape[1:]), **dataset_kwargs}
+                dataset_kwargs_ = {'chunks': (1, *projection_shape[1:] // chunk_size_divisor),
+                                   **dataset_kwargs}
                 projection = file.create_dataset(projection_name, shape=projection_shape, dtype=dtype,
                                                  **dataset_kwargs_)
 

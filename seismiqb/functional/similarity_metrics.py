@@ -33,7 +33,7 @@ def compute_similarity_metric(array1, array2, metrics='all'):
         Available names are {'ssim', 'psnr', 'ergas', 'uqi', 'mse'}.
 
         If dict, then should contain metric names as keys and their parameters as values.
-        If list, then consists of metric names, and they are evaluated with default parametres.
+        If list, then consists of metric names, and they are evaluated with default parameters.
         If 'all', then evaluate all metrics with default parameters.
 
     Returns

@@ -2,6 +2,7 @@
 import os
 import sys
 from textwrap import dedent
+from contextlib import contextmanager
 
 import numpy as np
 from scipy.interpolate import interp1d
@@ -12,7 +13,7 @@ from .export_mixin import ExportMixin
 from .meta_mixin import MetaMixin
 from .metric_mixin import MetricMixin
 
-from ..utils import CacheMixin, TransformsMixin, select_printer, transformable
+from ..utils import lru_cache, CacheMixin, TransformsMixin, select_printer, transformable
 from ..plotters import plot
 
 
@@ -106,7 +107,7 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMix
             raise TypeError(f'Unknown format of the cube: {extension}')
         return cls(path, *args, **kwargs)
 
-    def __init__(self, path, meta_path=None, safe=False, use_slide_cache=False, **kwargs):
+    def __init__(self, path, meta_path=None, safe=False, use_cache=False, **kwargs):
         # Path to the file
         self.path = path
 
@@ -121,7 +122,7 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMix
 
         # Instance flags
         self.safe = safe
-        self.use_slide_cache = use_slide_cache
+        self.use_cache = use_cache
 
         # Lazy properties
         self._quantile_interpolator = None
@@ -201,16 +202,124 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMix
         return key_, axis_to_squeeze
 
 
-    # Set caching behavior
-    def enable_slide_cache(self):
-        """ !!. """
-        self.use_slide_cache = True
+    # Data loading: cache
+    def load_slide(self, index, axis=0, limits=None, buffer=None, safe=None, use_cache=None):
+        """ Load one slide of data along specified axis.
+        Under the hood, relies on :meth`:`load_slide_native`, implemented in subclasses.
+        Also allows to use slide cache to speed up the loading process.
 
-    def disable_slide_cache(self):
+        Parameters
+        ----------
+        index : int, str
+            If int, then interpreted as the ordinal along the specified axis.
+            If `'random'`, then we generate random index along the axis.
+            If string of the `'#XXX'` format, then we interpret it as the exact indexing header value.
+        axis : int
+            Axis of the slide.
+        limits : sequence of ints, slice, optional
+            Slice of the data along the depth (last) axis.
+        buffer : np.ndarray, optional
+            Buffer to read the data into. If possible, avoids copies.
+        safe : bool or None
+            Whether to force usage of public (safe) or private API of data loading.
+            If None, then uses instance-wide value (default False).
+        use_cache : bool or None
+            Whether to use cache for lines.
+            If None, then uses instance-wide value (default False).
+            If bool, forces that behavior.
+        """
+        # Parse parameters
+        index = self.get_slide_index(index=index, axis=axis)
+        axis = self.parse_axis(axis)
+
+        if limits is not None and axis==2:
+            raise ValueError('Providing `limits` with `axis=2` is meaningless!')
+
+        safe = safe if safe is not None else self.safe
+        use_cache = use_cache if use_cache is not None else self.use_cache
+
+        # Actual data loading
+        if use_cache is False:
+            return self.load_slide_native(index=index, axis=axis, limits=limits, buffer=buffer, safe=safe)
+
+        slide = self.load_slide_cached(index=index, axis=axis, limits=limits)
+        if buffer is not None:
+            buffer[:] = slide
+        else:
+            buffer = slide
+        return slide
+
+    @lru_cache(128)
+    def load_slide_cached(self, index, axis=0, limits=None):
+        """ Cached version of :meth:`load_slide_native`. """
+        return self.load_slide_native(index=index, axis=axis, limits=limits, buffer=None, safe=True)
+
+    def load_crop(self, locations, buffer=None, safe=None, use_cache=None):
+        """ Load crop (3D subvolume) from the cube.
+        Uses either public or private API of `h5py`: the latter reads data directly into preallocated buffer.
+        Also allows to use slide cache to speed up the loading process.
+
+        Parameters
+        ----------
+        locations : sequence
+            A triplet of slices to specify the location of a subvolume.
+        buffer : np.ndarray, optional
+            Buffer to read the data into. If possible, avoids copies.
+        safe : bool
+            Whether to force usage of public (safe) or private API of data loading.
+        use_cache : bool or None
+            Whether to use cache for lines.
+            If None, then uses instance-wide value (default False).
+            If bool, forces that behavior.
+        """
+        safe = safe if safe is not None else self.safe
+        use_cache = use_cache if use_cache is not None else self.use_cache
+
+        if use_cache is False:
+            return self.load_crop_native(locations=locations, buffer=buffer, safe=safe)
+        return self.load_crop_cached(locations=locations, buffer=buffer)
+
+    def load_crop_cached(self, locations, axis=None, buffer=None):
+        """ Cached version of :meth:`load_crop`. """
+        # Parse parameters
+        shape = self.locations_to_shape(locations)
+        axis = axis or self.get_optimal_axis(shape=shape)
+        to_projection_transposition, from_projection_transposition = self.compute_axis_transpositions(axis)
+
+        locations = [locations[idx] for idx in to_projection_transposition]
+        locations = tuple(locations)
+
+        # Prepare buffer
+        if buffer is None:
+            buffer = np.empty(shape, dtype=np.float32)
+        buffer = buffer.transpose(to_projection_transposition)
+
+        # Load data
+        for i, idx in enumerate(range(locations[0].start, locations[0].stop)):
+            buffer[i] = self.load_slide_cached(index=idx, axis=axis)[locations[1], locations[2]]
+
+        # View buffer in original ordering
+        buffer = buffer.transpose(from_projection_transposition)
+        return buffer
+
+    def enable_cache(self):
         """ !!. """
-        self.use_slide_cache = False
+        self.use_cache = True
+
+    def disable_cache(self):
+        """ !!. """
+        self.use_cache = False
         self.reset_cache()
 
+    @contextmanager
+    def enabled_cache(self, enable=True):
+        """ !!. """
+        try:
+            if enable:
+                self.enable_cache()
+            yield self
+        finally:
+            self.disable_cache()
 
     # Coordinate system conversions
     def lines_to_ordinals(self, array):

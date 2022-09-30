@@ -220,7 +220,7 @@ class MemmapLoader(SegyioLoader):
 
         if void_counter:
             unused_dtype = (f'unused_{unused_counter}', np.void, void_counter)
-        dtype_list.append(unused_dtype)
+            dtype_list.append(unused_dtype)
         return dtype_list
 
     # Data loading
