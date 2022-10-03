@@ -414,10 +414,10 @@ class FaultSampler(BaseSampler):
             nodes = self.fault.points
 
         # Keep only points, that can be a starting point for a crop of given shape
-        i_mask = ((ranges[:2, 0] < nodes[:, :2]).all(axis=1) &
-                  ((nodes[:, :2] + crop_shape[:2]) < ranges[:2, 1]).all(axis=1))
-        x_mask = ((ranges[:2, 0] < nodes[:, :2]).all(axis=1) &
-                  ((nodes[:, :2] + crop_shape_t[:2]) < ranges[:2, 1]).all(axis=1))
+        i_mask = ((ranges[:2, 0] <= nodes[:, :2]).all(axis=1) &
+                  ((nodes[:, :2] + crop_shape[:2]) <= ranges[:2, 1]).all(axis=1))
+        x_mask = ((ranges[:2, 0] <= nodes[:, :2]).all(axis=1) &
+                  ((nodes[:, :2] + crop_shape_t[:2]) <= ranges[:2, 1]).all(axis=1))
         nodes = nodes[i_mask | x_mask]
 
         # Transform points to (orientation, i_start, x_start, h_start, i_stop, x_stop, h_stop)
@@ -461,6 +461,7 @@ class FaultSampler(BaseSampler):
         buffer[:, 0] = self.field_id
         buffer[:, 1] = self.label_id
         buffer[:, 2:] = sampled
+
         return buffer
 
     def _sample(self, size):
