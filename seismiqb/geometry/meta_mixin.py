@@ -155,7 +155,7 @@ class MetaMixin:
 
             elif isinstance(value, str):
                 dst[key+'is_str'] = 1
-                dst[key+'encoded'] = value.encode('ascii')
+                dst[key+'encoded'] = value.encode('ascii').replace(b'\x00', b' ')
 
             elif isinstance(value, np.ndarray):
                 # Numpy array with numerical dtype: compress for efficiency
