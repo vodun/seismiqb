@@ -486,7 +486,7 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMix
     @property
     def textual(self):
         """ Wrapped textual header of SEG-Y file. """
-        text = self.segy_text[0].decode('ascii')
+        text = self.segy_text[0]
         lines = [text[start:start + 80] for start in range(0, len(text), 80)]
         return '\n'.join(lines)
 

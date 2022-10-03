@@ -153,6 +153,10 @@ class MetaMixin:
                     values_ = value.values
                 self.dump_meta_item(path=meta_path, key=key+'values', value=values_)
 
+            elif isinstance(value, str):
+                dst[key+'is_str'] = 1
+                dst[key+'encoded'] = value.encode('ascii')
+
             elif isinstance(value, np.ndarray):
                 # Numpy array with numerical dtype: compress for efficiency
                 dst.create_dataset(key.strip('/'), data=value,
@@ -217,6 +221,9 @@ class MetaMixin:
                     if key + 'index_names' in src:
                         index_names = src.attrs[key + 'index_names']
                         value.set_index(index_names, inplace=True)
+
+                elif key + 'is_str' in src:
+                    value = src[key+'encoded'][()].decode('ascii')
 
                 elif key in src:
                     value = src[key][()]
