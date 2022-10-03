@@ -336,4 +336,4 @@ def write_chunk(path, shape, offset, dtype, spec, array_like, transform, start, 
     return chunk_size
 
 # Convenient alias for staticmethod
-array_to_segy = ExportMixin.array_to_segy
+array_to_segy = array_to_sgy = ExportMixin.array_to_segy
