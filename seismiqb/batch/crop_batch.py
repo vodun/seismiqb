@@ -11,7 +11,7 @@ from scipy.interpolate import interp1d
 from scipy.ndimage import gaussian_filter1d
 from scipy.signal import butter, sosfiltfilt
 
-from batchflow import DatasetIndex, Batch, P, R
+from batchflow import DatasetIndex, Batch
 from batchflow import action, any_action_failed, SkipBatchException
 from batchflow import apply_parallel as apply_parallel_decorator
 
@@ -373,7 +373,8 @@ class SeismicCropBatch(Batch, VisualizationMixin):
     # Loading of labels
     @action
     @apply_parallel_decorator(init='preallocating_init', post='noop_post', buffer_type='zeros', target='for')
-    def create_masks(self, ix, buffer, dst, src=None, indices='all', width=3, src_labels='labels', sparse=False, **kwargs):
+    def create_masks(self, ix, buffer, dst, src=None, indices='all', width=3, src_labels='labels',
+                     sparse=False, **kwargs):
         """ Create masks from labels in stored `locations`.
 
         Parameters
