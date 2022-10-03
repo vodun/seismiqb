@@ -30,7 +30,8 @@ def add_methods(method_names):
             requires_rng = 'rng' in signature(method).parameters
 
             @wraps(method)
-            def wrapper(self, _, buffer, *args, **kwargs):
+            def wrapper(self, _, buffer, *args, src=None, dst=None, **kwargs):
+                _ = src, dst
                 buffer[:] = method(buffer, *args, **kwargs)
             wrapper = cls.use_apply_parallel(wrapper, requires_rng=requires_rng)
             return wrapper
@@ -57,68 +58,71 @@ class SeismicCropBatch(Batch, VisualizationMixin):
     }
 
     # Inner workings
-    @action
-    def apply_parallel(self, func, init=None, post=None, src=None, dst=None, *args,
-                       p=None, target='for', requires_rng=False, rng_seeds=None, **kwargs):
-        """ Improved version of :meth:`apply_parallel`: allows for `init` functions.
-        Refer to the original documentation for more details.
-        TODO: move to `batchflow`.
-        """
-        #pylint: disable=keyword-arg-before-vararg
-        # Parse parameters: fill with class-wide defaults
-        init = init or self.apply_defaults.get('init', None)
-        post = post or self.apply_defaults.get('post', None)
-        target = target or self.apply_defaults.get('target', None)
+    # @action
+    # def apply_parallel(self, func, init=None, post=None, src=None, dst=None, *args,
+    #                    p=None, target='for', requires_rng=False, rng_seeds=None, **kwargs):
+    #     """ Improved version of :meth:`apply_parallel`: allows for `init` functions.
+    #     Refer to the original documentation for more details.
+    #     TODO: move to `batchflow`.
+    #     """
+    #     #pylint: disable=keyword-arg-before-vararg
+    #     # Parse parameters: fill with class-wide defaults
+    #     init = init or self.apply_defaults.get('init', None)
+    #     post = post or self.apply_defaults.get('post', None)
+    #     target = target or self.apply_defaults.get('target', None)
 
-        # Prepare parameters, individual for each worker: probability of applying, RNG seed, id
-        if isinstance(p, float):
-            p = P(R('binomial', 1, p, seed=self.random)).get(batch=self)
+    #     # Prepare parameters, individual for each worker: probability of applying, RNG seed, id
+    #     if isinstance(p, float):
+    #         p = P(R('binomial', 1, p, seed=self.random)).get(batch=self)
 
-        if requires_rng and rng_seeds is None:
-            rng_seeds = P(R('integers', 0, 9223372036854775807, seed=self.random)).get(batch=self)
+    #     if requires_rng and rng_seeds is None:
+    #         rng_seeds = P(R('integers', 0, 9223372036854775807, seed=self.random)).get(batch=self)
 
-        worker_ids = P(np.arange(len(self), dtype=np.int32))
+    #     worker_ids = P(np.arange(len(self), dtype=np.int32))
 
-        # Case of sequence `src`: recursively call for each pair of src/dst
-        if isinstance(src, list) and not (dst is None or isinstance(dst, list) and len(src) == len(dst)):
-            raise ValueError("src and dst must have equal length")
-        if isinstance(src, list) and (dst is None or isinstance(dst, list) and len(src) == len(dst)):
-            if dst is None:
-                dst = src
+    #     # Case of sequence `src`: recursively call for each pair of src/dst
+    #     if isinstance(src, list) and not (dst is None or isinstance(dst, list) and len(src) == len(dst)):
+    #         raise ValueError("src and dst must have equal length")
+    #     if isinstance(src, list) and (dst is None or isinstance(dst, list) and len(src) == len(dst)):
+    #         if dst is None:
+    #             dst = src
 
-            for src_, dst_ in zip(src, dst):
-                self.apply_parallel(func=func, init=init, post=post, src=src_, dst=dst_,
-                                    *args, p=p, target=target, rng_seeds=rng_seeds, **kwargs)
-            return self
+    #         for src_, dst_ in zip(src, dst):
+    #             self.apply_parallel(func=func, init=init, post=post, src=src_, dst=dst_,
+    #                                 *args, p=p, target=target, rng_seeds=rng_seeds, **kwargs)
+    #         return self
 
-        # Actual computation
-        if init == 'data':
-            if isinstance(src, str):
-                init = self.get(component=src)
-            elif isinstance(src, (tuple, list)):
-                init = list((x,) for x in zip(*[self.get(component=s) for s in src]))
-            else:
-                init = src
-        elif isinstance(init, str) and hasattr(self, init):
-            init = getattr(self, init)(src=src, dst=dst, p=p, target=target, **kwargs)
+    #     # Actual computation
+    #     if init == 'data':
+    #         if isinstance(src, str):
+    #             init = self.get(component=src)
+    #         elif isinstance(src, (tuple, list)):
+    #             init = list((x,) for x in zip(*[self.get(component=s) for s in src]))
+    #         else:
+    #             init = src
+    #     elif isinstance(init, str):
+    #         # No hasattr check: if it is False, then an error would (and should) be raised
+    #         init = getattr(self, init)
+    #         if callable(init):
+    #             init = init(src=src, dst=dst, p=p, target=target, **kwargs)
 
-        # Compute result. Unbind the method to pass self explicitly
-        parallel = inbatch_parallel(init=init, post=post, target=target, src=src, dst=dst)
-        transform = parallel(type(self)._apply_once)
-        result = transform(self, *args, func=func, p=p,
-                           apply_parallel_id=worker_ids, apply_parallel_seeds=rng_seeds, **kwargs)
-        return result
+    #     # Compute result. Unbind the method to pass self explicitly
+    #     parallel = inbatch_parallel(init=init, post=post, target=target, src=src, dst=dst)
+    #     transform = parallel(type(self)._apply_once)
+    #     result = transform(self, *args, func=func, p=p, src=src, dst=dst,
+    #                        apply_parallel_id=worker_ids, apply_parallel_seeds=rng_seeds, **kwargs)
+    #     return result
 
-    def _apply_once(self, item, *args, func=None, p=None, apply_parallel_id=None, apply_parallel_seeds=None, **kwargs):
-        """ !!. """
-        _ = apply_parallel_id
+    # def _apply_once(self, item, *args, func=None, p=None, apply_parallel_id=None, apply_parallel_seeds=None, **kwargs):
+    #     """ !!. """
+    #     _ = apply_parallel_id
 
-        if p is None or p == 1:
-            if apply_parallel_seeds is not None and 'rng' in signature(func).parameters:
-                rng = np.random.default_rng(np.random.SFC64(apply_parallel_seeds))
-                kwargs['rng'] = rng
-            return func(item, *args, **kwargs)
-        return item
+    #     if p is None or p == 1:
+    #         if apply_parallel_seeds is not None:
+    #             rng = np.random.default_rng(np.random.SFC64(apply_parallel_seeds))
+    #             kwargs['rng'] = rng
+    #         return func(item, *args, **kwargs)
+    #     return item
 
 
     @action
@@ -156,7 +160,7 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         """
         if component in self.components:
             # Faster, than `getattr(self, component)`, as we already know that the component exists
-            data = self.data.data[component]
+            data = self._data[component]
             if item is not None:
                 return data[item]
 
@@ -167,12 +171,13 @@ class SeismicCropBatch(Batch, VisualizationMixin):
 
         else: # retrieve from `dataset`
             if item is not None:
-                field_name = self.data.data['field_names'][item]
+                field_name = self._data['field_names'][item]
                 field = self.dataset.fields[field_name]
                 if component == 'fields':
                     return field
                 return getattr(field, component)
 
+            # Not often used, mainly for introspection/debug. Not optimized
             data = getattr(self.dataset, component)
 
         return data
@@ -213,10 +218,6 @@ class SeismicCropBatch(Batch, VisualizationMixin):
             self.add_components(dst, buffer)
 
         return list(zip(self.indices, buffer)) if return_indices else buffer
-
-    def component_init(self, src=None, dst=None, **kwargs):
-        """ !!. """
-        return list(self.get(component=src))
 
     def noop_post(self, all_results, **kwargs):
         """ Check for errors after the action, otherwise does nothing. """
@@ -310,29 +311,12 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         new_batch.pipeline = self.pipeline
         return new_batch
 
-    @action
-    def adaptive_reshape(self, src=None, dst=None):
-        """ Transpose crops with crossline orientation into (x, i, h) order. """
-        src = src if isinstance(src, (tuple, list)) else [src]
-        if dst is None:
-            dst = src
-        dst = dst if isinstance(dst, (tuple, list)) else [dst]
-
-        for src_, dst_ in zip(src, dst):
-            result = []
-            for ix in self.indices:
-                item = self.get(ix, src_)
-                if self.get(ix, 'orientations'):
-                    item = item.transpose(1, 0, 2)
-                result.append(item)
-            setattr(self, dst_, np.stack(result))
-        return self
-
 
     # Loading of cube data and its derivatives
-    @action
-    @inbatch_parallel(init='preallocating_init', post='noop_post', buffer_type='empty', target='for')
-    def load_seismic(self, ix, buffer, dst, src_geometry='geometry', **kwargs):
+    # @action
+    # @inbatch_parallel(init='preallocating_init', post='noop_post', buffer_type='empty', target='for')
+    @apply_parallel_decorator(init='preallocating_init', post='noop_post', buffer_type='empty', target='for')
+    def load_seismic(self, ix, buffer, dst, src=None, src_geometry='geometry', **kwargs):
         """ Load data from cube for stored `locations`.
 
         Parameters
@@ -353,86 +337,11 @@ class SeismicCropBatch(Batch, VisualizationMixin):
             buffer = buffer.transpose(1, 0, 2)
         field.load_seismic(locations=locations, src=src_geometry, buffer=buffer, **kwargs)
 
-    load_cubes = load_seismic
+    load_cubes = load_crops = load_seismic
 
 
-    @action
-    @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def normalize_old(self, ix, src=None, dst=None, mode='meanstd', normalization_stats=None,
-                  from_field=True, clip_to_quantiles=False, q=(0.01, 0.99)):
-        """ Normalize `src` with.
-        Depending on the parameters, stats for normalization will be taken from (in order of priority):
-            - supplied `normalization_stats`, if provided
-            - the field that created this `src`, if `from_field`
-            - computed from `src` data directly
-
-        TODO: streamline the entire process of normalization.
-
-        Parameters
-        ----------
-        mode : {'mean', 'std', 'meanstd', 'minmax'} or callable
-            If str, then normalization description.
-            If callable, then it will be called on `src` data with additional `normalization_stats` argument.
-        normalization_stats : dict, optional
-            If provided, then used to get statistics for normalization.
-        from_field : bool
-            If True, then normalization stats are taken from attacked field.
-        clip_to_quantiles : bool
-            Whether to clip the data to quantiles, specified by `q` parameter.
-            Quantile values are taken from `normalization_stats`, provided by either of the ways.
-        q : tuple of numbers
-            Quantiles for clipping. Used as keys to `normalization_stats`, provided by either of the ways.
-        """
-        data = self.get(ix, src)
-        field = self.get(ix, 'fields')
-
-        # Prepare normalization stats
-        if isinstance(normalization_stats, dict):
-            normalization_stats = normalization_stats[field.short_name]
-        else:
-            if from_field:
-                normalization_stats = field.normalization_stats
-            else:
-                # Crop-wise stats
-                normalization_stats = {}
-
-                if clip_to_quantiles:
-                    data = np.clip(data, *np.quantile(data, q))
-                    clip_to_quantiles = False
-
-                if 'mean' in mode:
-                    normalization_stats['mean'] = np.mean(data)
-                if 'std' in mode:
-                    normalization_stats['std'] = np.std(data)
-                if 'min' in mode:
-                    normalization_stats['min'] = np.min(data)
-                if 'max' in mode:
-                    normalization_stats['max'] = np.max(data)
-
-        # Clip
-        if clip_to_quantiles:
-            data = np.clip(data, normalization_stats['q_01'], normalization_stats['q_99'])
-
-        # Actual normalization
-        result = data.copy() if data.base is not None else data
-
-        if callable(mode):
-            result = mode(result, normalization_stats)
-        if 'mean' in mode:
-            result -= normalization_stats['mean']
-        if 'std' in mode:
-            result /= normalization_stats['std']
-        if 'min' in mode and 'max' in mode:
-            if normalization_stats['max'] != normalization_stats['min']:
-                result = ((result - normalization_stats['min'])
-                        / (normalization_stats['max'] - normalization_stats['min']))
-            else:
-                result = result - normalization_stats['min']
-        return result
-
-    @action
-    @inbatch_parallel(init='preallocating_init', post='noop_post', target='for')
-    def normalize(self, ix, buffer, src=None, dst=None, mode='meanstd', normalization_stats='field',
+    @apply_parallel_decorator(init='preallocating_init', post='noop_post', target='for')
+    def normalize(self, ix, buffer, src, dst=None, mode='meanstd', normalization_stats='field',
                   clip_to_quantiles=False, q=(0.01, 0.99)):
         """ Normalize `src` with provided stats.
         Depending on the parameters, stats for normalization will be taken from (in order of priority):
@@ -500,8 +409,7 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         return buffer
 
 
-    @action
-    @inbatch_parallel(init='indices', post='_assemble', target='for')
+    @apply_parallel_decorator(init='indices', post='_assemble', target='for')
     def compute_attribute(self, ix, dst, src='images', attribute='semblance', window=10, stride=1, device='cpu'):
         """ Compute geological attribute.
 
@@ -533,37 +441,8 @@ class SeismicCropBatch(Batch, VisualizationMixin):
 
     # Loading of labels
     @action
-    @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def create_masks_old(self, ix, dst, indices='all', width=3, src_labels='labels', sparse=False, **kwargs):
-        """ Create masks from labels in stored `locations`.
-
-        Parameters
-        ----------
-        dst : str
-            Component of batch to put loaded masks in.
-        indices : str, int or sequence of ints
-            Which labels to use in mask creation.
-            If 'all', then use all labels.
-            If 'single' or `random`, then use one random label.
-            If int or array-like, then element(s) are interpreted as indices of desired labels.
-        width : int
-            Width of the resulting label.
-        src_labels : str
-            Dataset attribute with labels dict.
-        sparse : bool, optional
-            Whether create sparse mask (only on labeled slides) or not, by default False. Unlabeled
-            slides will be filled with -1.
-        """
-        field = self.get(ix, 'fields')
-        location = self.get(ix, 'locations')
-        orientation = self.get(ix, 'orientations')
-        return field.make_mask(locations=location, axis=orientation, width=width, indices=indices,
-                               src=src_labels, sparse=sparse)
-
-
-    @action
-    @inbatch_parallel(init='preallocating_init', post='noop_post', buffer_type='zeros', target='for')
-    def create_masks(self, ix, buffer, dst, indices='all', width=3, src_labels='labels', sparse=False, **kwargs):
+    @apply_parallel_decorator(init='preallocating_init', post='noop_post', buffer_type='zeros', target='for')
+    def create_masks(self, ix, buffer, dst, src=None, indices='all', width=3, src_labels='labels', sparse=False, **kwargs):
         """ Create masks from labels in stored `locations`.
 
         Parameters
@@ -594,8 +473,8 @@ class SeismicCropBatch(Batch, VisualizationMixin):
 
 
     @action
-    @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def create_regression_masks(self, ix, dst, indices='all', src_labels='labels', scale=False):
+    @apply_parallel_decorator(init='indices', post='_assemble', target='for')
+    def create_regression_masks(self, ix, dst, src=None, indices='all', src_labels='labels', scale=False):
         """ Create masks with relative depth. """
         field = self.get(ix, 'fields')
         location = self.get(ix, 'locations')
@@ -603,7 +482,7 @@ class SeismicCropBatch(Batch, VisualizationMixin):
 
 
     @action
-    @inbatch_parallel(init='indices', post='_assemble', target='for')
+    @apply_parallel_decorator(init='indices', post='_assemble', target='for')
     def compute_label_attribute(self, ix, dst, src='amplitudes', atleast_3d=True, dtype=np.float32, **kwargs):
         """ Compute requested attribute along label surface. Target labels are defined by sampled locations.
 
@@ -641,13 +520,12 @@ class SeismicCropBatch(Batch, VisualizationMixin):
             raise ValueError(msg)
 
         result = field.load_attribute(src=src, location=location, atleast_3d=atleast_3d, dtype=dtype, **kwargs)
-
         return result
 
 
     # Rebatch and its callables
     @action
-    def rebatch(self, src=None, condition='', threshold=None, keep_attributes=None, **kwargs):
+    def rebatch_on_condition(self, src=None, condition='area', threshold=None, keep_attributes=None, **kwargs):
         """ Compute a condition on each item of `src`, keep only elements that returned value bigger than `threshold`.
         Modifies (slices) all of the components in a batch instance, as well as its index.
 
@@ -732,7 +610,7 @@ class SeismicCropBatch(Batch, VisualizationMixin):
 
     # Methods to work with (mostly, horizon) masks
     @apply_parallel_decorator(init='preallocating_init', post='noop_post', target='for')
-    def filter_sides(self, _, buffer, ratio, side, axis=0):
+    def filter_sides(self, _, buffer, ratio, side, axis=0, src=None, dst=None):
         """ Filter out left or right side of a crop.
         Assumes the array in (inline, crossline, depth) orientation. Tested mostly for 2D crops.
 
@@ -756,7 +634,7 @@ class SeismicCropBatch(Batch, VisualizationMixin):
 
 
     @apply_parallel_decorator(init='data', post='_assemble', target='for')
-    def shift_masks(self, crop, n_segments=3, max_shift=4, min_len=5, max_len=10):
+    def shift_masks(self, crop, n_segments=3, max_shift=4, min_len=5, max_len=10, src=None, dst=None):
         """ Randomly shift parts of the crop up or down.
 
         Parameters
@@ -789,7 +667,7 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         return crop
 
     @apply_parallel_decorator(init='data', post='_assemble', target='for')
-    def bend_masks(self, crop, angle=10):
+    def bend_masks(self, crop, angle=10, src=None, dst=None):
         """ Rotate part of the mask on a given angle.
         Must be used for crops in (xlines, depths, inlines) format.
 
@@ -818,7 +696,7 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         return combined
 
     @apply_parallel_decorator(init='data', post='_assemble', target='for')
-    def linearize_masks(self, crop, n=3, shift=0, kind='random', width=None):
+    def linearize_masks(self, crop, n=3, shift=0, kind='random', width=None, src=None, dst=None):
         """ Sample `n` points from the original mask and create a new mask by interpolating them.
 
         Parameters
@@ -887,7 +765,7 @@ class SeismicCropBatch(Batch, VisualizationMixin):
 
 
     @apply_parallel_decorator(init='data', post='_assemble', target='for')
-    def smooth_labels(self, crop, eps=0.05):
+    def smooth_labels(self, crop, eps=0.05, src=None, dst=None):
         """ Smooth labeling for segmentation mask:
             - change `1`'s to `1 - eps`
             - change `0`'s to `eps`
@@ -901,8 +779,8 @@ class SeismicCropBatch(Batch, VisualizationMixin):
 
     # Predictions
     @action
-    @inbatch_parallel(init='indices', post=None, target='for')
-    def update_accumulator(self, ix, src, accumulator):
+    @apply_parallel_decorator(init='indices', post=None, target='for')
+    def update_accumulator(self, ix, src, accumulator, dst=None):
         """ Update accumulator with data from crops.
         Allows to gradually accumulate predictions in a single instance, instead of
         keeping all of them and assembling later.
@@ -922,8 +800,8 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         return self
 
     @action
-    @inbatch_parallel(init='indices', post='_masks_to_horizons_post', target='for')
-    def masks_to_horizons(self, ix, src=None, dst=None, threshold=0.5, mode='mean', minsize=0, prefix='predict'):
+    @apply_parallel_decorator(init='indices', post='_masks_to_horizons_post', target='for')
+    def masks_to_horizons(self, ix, src, dst, threshold=0.5, mode='mean', minsize=0, prefix='predict'):
         """ Convert predicted segmentation mask to a list of Horizon instances.
 
         Parameters
@@ -961,8 +839,8 @@ class SeismicCropBatch(Batch, VisualizationMixin):
 
 
     @action
-    @inbatch_parallel(init='indices', target='for')
-    def save_masks(self, ix, src='masks', save_to=None, savemode='numpy',
+    @apply_parallel_decorator(init='indices', target='for')
+    def save_masks(self, ix, src, dst=None, save_to=None, savemode='numpy',
                    threshold=0.5, mode='mean', minsize=0, prefix='predict'):
         """ Save extracted horizons to disk. """
         os.makedirs(save_to, exist_ok=True)
@@ -1098,19 +976,6 @@ class SeismicCropBatch(Batch, VisualizationMixin):
 
 
     # Augmentations: values
-    @apply_parallel_decorator(init='data', post='_assemble', target='for')
-    def additive_noise_old(self, crop, scale):
-        """ Add random value to each entry of crop. Added values are centered at 0.
-
-        Parameters
-        ----------
-        scale : float
-            Standart deviation of normal distribution.
-        """
-        rng = np.random.default_rng()
-        noise = scale * rng.standard_normal(dtype=np.float32, size=crop.shape)
-        return crop + noise
-
     @apply_parallel_decorator(init='preallocating_init', post='noop_post', target='for')
     def additive_noise(self, _, buffer, scale, **kwargs):
         """ Add random value to each entry of crop. Added values are centered at 0.
@@ -1123,7 +988,7 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         buffer += scale * self.random.standard_normal(dtype=np.float32, size=buffer.shape)
 
     @apply_parallel_decorator(init='preallocating_init', post='noop_post', target='for')
-    def multiplicative_noise(self,  _, buffer, scale):
+    def multiplicative_noise(self,  _, buffer, scale, **kwargs):
         """ Multiply each entry of crop by random value, centered at 1.
 
         Parameters
@@ -1135,7 +1000,7 @@ class SeismicCropBatch(Batch, VisualizationMixin):
 
 
     @apply_parallel_decorator(init='preallocating_init', post='noop_post', target='for')
-    def translate(self, _, buffer, shift=5, scale=0.0):
+    def translate(self, _, buffer, shift=5, scale=0.0, **kwargs):
         """ Add and multiply values by uniformly sampled values. """
         shift = self.random.uniform(-shift, shift).astype(np.float32)
         scale = self.random.uniform(1 - scale, 1 + scale).astype(np.float32)
@@ -1144,12 +1009,12 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         buffer *= scale
 
     @apply_parallel_decorator(init='preallocating_init', post='noop_post', target='for')
-    def invert(self, _, buffer):
+    def invert(self, _, buffer, **kwargs):
         """ Change sign of values. """
         buffer *= -1
 
     @apply_parallel_decorator(init='preallocating_init', post='noop_post', target='for')
-    def equalize(self, _, buffer, mode='default'):
+    def equalize(self, _, buffer, mode='default', **kwargs):
         """ Apply histogram equalization. """
         #pylint: disable=import-outside-toplevel
         import torch
@@ -1166,7 +1031,7 @@ class SeismicCropBatch(Batch, VisualizationMixin):
 
 
     @apply_parallel_decorator(init='preallocating_init', post='noop_post', target='for')
-    def binarize(self, _, buffer, threshold=0.5):
+    def binarize(self, _, buffer, threshold=0.5, **kwargs):
         """ Binarize image by threshold. """
         buffer[:] = buffer > threshold
 
@@ -1174,7 +1039,7 @@ class SeismicCropBatch(Batch, VisualizationMixin):
     # Augmentations: geometric. `rotate_2d/3d`, `scale_2d/3d`,
     # 'affine_transform', 'perspective_transform' and 'elastic_transform' are added by decorator
     @apply_parallel_decorator(init='preallocating_init', post='noop_post', target='for')
-    def flip(self, _, buffer, axis=0, seed=0.1, threshold=0.5):
+    def flip(self, _, buffer, axis=0, **kwargs):
         """ Flip crop along the given axis.
 
         Parameters
@@ -1187,14 +1052,14 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         buffer[:] = buffer[locations]
 
     @apply_parallel_decorator(init='data', post='_assemble')
-    def center_crop(self, crop, shape):
+    def center_crop(self, crop, shape, **kwargs):
         """ Central crop of defined shape. """
         return functional.center_crop(crop, shape)
 
 
     # Augmentations: geologic. `compute_instantaneous_amplitude/phase/frequency` are added by decorator
     @apply_parallel_decorator(init='preallocating_init', post='noop_post', target='for')
-    def sign_transform(self, _, buffer):
+    def sign_transform(self, _, buffer, **kwargs):
         """ Element-wise indication of the sign of a number. """
         buffer[:] = np.sign(buffer)
 
@@ -1227,13 +1092,13 @@ class SeismicCropBatch(Batch, VisualizationMixin):
 
     # Augmentations: misc
     @apply_parallel_decorator(init='preallocating_init', post='noop_post', target='for')
-    def gaussian_filter(self, _, buffer, axis=1, sigma=2, order=0):
+    def gaussian_filter(self, _, buffer, axis=1, sigma=2, order=0, **kwargs):
         """ Apply a gaussian filter along specified axis. """
         buffer[:] = gaussian_filter1d(buffer, sigma=sigma, axis=axis, order=order)
 
 
     @apply_parallel_decorator(init='preallocating_init', post='noop_post', target='for', requires_rng=True)
-    def cutout_2d(self, _, buffer, patch_shape, n_patches, fill_value=0, rng=None):
+    def cutout_2d(self, _, buffer, patch_shape, n_patches, fill_value=0, rng=None, **kwargs):
         """ Change patches of data to zeros.
 
         Parameters

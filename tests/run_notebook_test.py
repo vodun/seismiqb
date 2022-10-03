@@ -157,7 +157,7 @@ def finalize_fixture():
     # Run all tests in the module
     yield
 
-    # Remove TESTS_ROOT_DIR if all tests were successfull
+    # Remove TESTS_ROOT_DIR if all tests were successful
     if REMOVE_ROOT_DIR and not pytest.failed:
         shutil.rmtree(TESTS_ROOT_DIR)
 

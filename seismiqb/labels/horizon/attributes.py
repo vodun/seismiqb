@@ -223,7 +223,7 @@ class AttributesMixin:
         return len(self) / np.sum(self.filled_matrix)
 
     @property
-    def h_ptp(self):
+    def d_ptp(self):
         """ Horizon spread across the depth. """
         return self.d_max - self.d_min
 
@@ -315,7 +315,8 @@ class AttributesMixin:
             # Get chunk from the cube (depth-wise)
             location = (slice(None), slice(None),
                         slice(d_start - low, min(d_end + high, self.field.depth)))
-            data_chunk = self.field.geometry[location]
+            location, _ = self.field.geometry.process_key(location)
+            data_chunk = self.field.geometry.load_crop(location, use_cache=False)
 
             # Check which points of the horizon are in the current chunk (and present)
             idx_i, idx_x = np.asarray((self.matrix != self.FILL_VALUE) &

@@ -225,8 +225,12 @@ class HorizonSampler(BaseSampler):
         Map of points to remove from potentially generated locations.
     field_id, label_id : int
         Used as the first two columns of sampled values.
-    randomize_depth : bool
+    randomize_depth : False or sequence of two floats
         Whether apply random shift to depth locations of sampled horizon points or not.
+        If two floats, then the first one is the max location of the horizon labelling in the crop in [0., 1.] range,
+        and the second is the min location of the horizon labelling.
+    spatial_shift : False or sequence of sequences of two floats
+        Same logic, as with `randomize_depth`, but applied to spatial point location (inline/crossline).
     """
     def __init__(self, horizon, crop_shape, threshold=0.05, ranges=None, filtering_matrix=None,
                  randomize_depth=True, spatial_shift=False, field_id=0, label_id=0, **kwargs):
