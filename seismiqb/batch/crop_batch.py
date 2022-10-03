@@ -12,7 +12,7 @@ from scipy.ndimage import gaussian_filter1d
 from scipy.signal import butter, sosfiltfilt
 
 from batchflow import DatasetIndex, Batch, P, R
-from batchflow import action, inbatch_parallel, any_action_failed, SkipBatchException
+from batchflow import action, any_action_failed, SkipBatchException
 from batchflow import apply_parallel as apply_parallel_decorator
 
 from .visualization_batch import VisualizationMixin
@@ -52,79 +52,12 @@ class SeismicCropBatch(Batch, VisualizationMixin):
     to obtain unique elements.
     """
     apply_defaults = {
-        'target': 'for',
         'init': 'preallocating_init',
-        'post': 'noop_post'
+        'post': 'noop_post',
+        'target': 'for',
     }
 
     # Inner workings
-    # @action
-    # def apply_parallel(self, func, init=None, post=None, src=None, dst=None, *args,
-    #                    p=None, target='for', requires_rng=False, rng_seeds=None, **kwargs):
-    #     """ Improved version of :meth:`apply_parallel`: allows for `init` functions.
-    #     Refer to the original documentation for more details.
-    #     TODO: move to `batchflow`.
-    #     """
-    #     #pylint: disable=keyword-arg-before-vararg
-    #     # Parse parameters: fill with class-wide defaults
-    #     init = init or self.apply_defaults.get('init', None)
-    #     post = post or self.apply_defaults.get('post', None)
-    #     target = target or self.apply_defaults.get('target', None)
-
-    #     # Prepare parameters, individual for each worker: probability of applying, RNG seed, id
-    #     if isinstance(p, float):
-    #         p = P(R('binomial', 1, p, seed=self.random)).get(batch=self)
-
-    #     if requires_rng and rng_seeds is None:
-    #         rng_seeds = P(R('integers', 0, 9223372036854775807, seed=self.random)).get(batch=self)
-
-    #     worker_ids = P(np.arange(len(self), dtype=np.int32))
-
-    #     # Case of sequence `src`: recursively call for each pair of src/dst
-    #     if isinstance(src, list) and not (dst is None or isinstance(dst, list) and len(src) == len(dst)):
-    #         raise ValueError("src and dst must have equal length")
-    #     if isinstance(src, list) and (dst is None or isinstance(dst, list) and len(src) == len(dst)):
-    #         if dst is None:
-    #             dst = src
-
-    #         for src_, dst_ in zip(src, dst):
-    #             self.apply_parallel(func=func, init=init, post=post, src=src_, dst=dst_,
-    #                                 *args, p=p, target=target, rng_seeds=rng_seeds, **kwargs)
-    #         return self
-
-    #     # Actual computation
-    #     if init == 'data':
-    #         if isinstance(src, str):
-    #             init = self.get(component=src)
-    #         elif isinstance(src, (tuple, list)):
-    #             init = list((x,) for x in zip(*[self.get(component=s) for s in src]))
-    #         else:
-    #             init = src
-    #     elif isinstance(init, str):
-    #         # No hasattr check: if it is False, then an error would (and should) be raised
-    #         init = getattr(self, init)
-    #         if callable(init):
-    #             init = init(src=src, dst=dst, p=p, target=target, **kwargs)
-
-    #     # Compute result. Unbind the method to pass self explicitly
-    #     parallel = inbatch_parallel(init=init, post=post, target=target, src=src, dst=dst)
-    #     transform = parallel(type(self)._apply_once)
-    #     result = transform(self, *args, func=func, p=p, src=src, dst=dst,
-    #                        apply_parallel_id=worker_ids, apply_parallel_seeds=rng_seeds, **kwargs)
-    #     return result
-
-    # def _apply_once(self, item, *args, func=None, p=None, apply_parallel_id=None, apply_parallel_seeds=None, **kwargs):
-    #     """ !!. """
-    #     _ = apply_parallel_id
-
-    #     if p is None or p == 1:
-    #         if apply_parallel_seeds is not None:
-    #             rng = np.random.default_rng(np.random.SFC64(apply_parallel_seeds))
-    #             kwargs['rng'] = rng
-    #         return func(item, *args, **kwargs)
-    #     return item
-
-
     @action
     def add_components(self, components, init=None):
         """ Add new components, checking that attributes of the same name are not present in dataset.
@@ -313,8 +246,6 @@ class SeismicCropBatch(Batch, VisualizationMixin):
 
 
     # Loading of cube data and its derivatives
-    # @action
-    # @inbatch_parallel(init='preallocating_init', post='noop_post', buffer_type='empty', target='for')
     @apply_parallel_decorator(init='preallocating_init', post='noop_post', buffer_type='empty', target='for')
     def load_seismic(self, ix, buffer, dst, src=None, src_geometry='geometry', **kwargs):
         """ Load data from cube for stored `locations`.
@@ -1064,7 +995,7 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         buffer[:] = np.sign(buffer)
 
     @action
-    @inbatch_parallel(init='indices', post='_assemble', target='for')
+    @apply_parallel_decorator(init='indices', post='_assemble', target='for')
     def bandpass_filter(self, ix, src, dst, lowcut=None, highcut=None, axis=1, order=4, sign=True):
         """ Keep only frequencies between `lowcut` and `highcut`.
 
