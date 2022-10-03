@@ -83,7 +83,7 @@ class GeometrySEGY(Geometry):
         self.quantized = (self.dtype == np.int8)
 
         self.segy_path = self.loader.path
-        self.segy_text = self.loader.text
+        self.segy_text = [item.decode('ascii') for item in self.loader.text]
 
         # Load all of the requested headers, either from SEG-Y directly or previously stored dump
         headers_to_load = list(set(index_headers) | set(additional_headers))
