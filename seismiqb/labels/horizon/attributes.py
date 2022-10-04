@@ -417,6 +417,7 @@ class AttributesMixin:
         'wavelet_decomposition': ['wavelet', 'wavelet_decomposition'],
         'median_diff': ['median_diff', 'mdiff', 'median_faults'],
         'grad': ['grad', 'gradient', 'gradient_diff', 'gradient_faults'],
+        'max_grad': ['max_grad', 'max_gradient', 'maximum_gradient'],
     }
     ALIAS_TO_ATTRIBUTE = {alias: name for name, aliases in ATTRIBUTE_TO_ALIAS.items() for alias in aliases}
 
@@ -429,6 +430,7 @@ class AttributesMixin:
         'wavelet_decomposition' : 'get_wavelet_decomposition',
         'median_diff': 'get_median_diff_map',
         'grad': 'get_gradient_map',
+        'max_grad': 'get_max_gradient_map',
         'spikes': 'get_spikes_mask'
     }
 
@@ -731,6 +733,18 @@ class AttributesMixin:
 
         grad[self.field.dead_traces_matrix == 1] = np.nan
         return grad
+
+    @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
+    @transformable
+    @apply_dilation
+    def get_max_gradient_map(self, **_):
+        """ Compute maximum of gradients along both directions. """
+        grad_i = self.load_attribute('grad_i', on_full=True, dtype=np.float32, use_cache=False)
+        grad_x = self.load_attribute('grad_x', on_full=True, dtype=np.float32, use_cache=False)
+
+        matrix = np.nanmax([grad_i, grad_x], axis=0)
+        matrix[matrix == self.FILL_VALUE] = np.nan
+        return matrix
 
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     @transformable
