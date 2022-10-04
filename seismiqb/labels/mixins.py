@@ -6,26 +6,29 @@ from ..plotters import plot
 
 class VisualizationMixin:
     """ Visualization utilities. """
-    def load_slide(self, loc, axis=0, width=3):
+    def load_slide(self, index, axis=0, width=3):
         """ Create a mask at desired location along supplied axis. """
         axis = self.field.geometry.parse_axis(axis)
-        locations = self.field.geometry.make_slide_locations(loc, axis=axis)
-        shape = np.array([(slc.stop - slc.start) for slc in locations])
-        width = width or max(5, shape[-1] // 100)
+        locations = self.field.geometry.make_slide_locations(index, axis=axis)
+        shape = self.field.geometry.locations_to_shape(locations)
+        width = width or max(5, min(9, shape[-1] // 100))
 
         mask = np.zeros(shape, dtype=np.float32)
         mask = self.add_to_mask(mask, locations=locations, width=width)
         return np.squeeze(mask)
 
-    def show_slide(self, loc, width=None, axis='i', zoom=None, zoom_margin=20, plotter=plot, **kwargs):
+    def show_slide(self, index, width=None, axis='i', zoom=None, plotter=plot, **kwargs):
         """ Show slide with horizon on it.
 
         Parameters
         ----------
-        loc : int
-            Number of slide to load.
+        index : int, str
+            Index of the slide to show.
+            If int, then interpreted as the ordinal along the specified axis.
+            If `'random'`, then we generate random index along the axis.
+            If string of the `'#XXX'` format, then we interpret it as the exact indexing header value.
         width : int
-            Horizon thickness. If None given, set to 1% of seismic slide height.
+            Horizon thickness. If None given, set to 1% of seismic slide depth.
         axis : int
             Number of axis to load slide along.
         zoom : tuple, None or 'auto'
@@ -37,15 +40,16 @@ class VisualizationMixin:
         """
         # Make `locations` for slide loading
         axis = self.field.geometry.parse_axis(axis)
+        index = self.field.geometry.get_slide_index(index, axis=axis)
 
         # Load seismic and mask
-        seismic_slide = self.field.geometry.load_slide(loc=loc, axis=axis)
-        mask = self.load_slide(loc=loc, axis=axis, width=width)
+        seismic_slide = self.field.geometry.load_slide(index=index, axis=axis)
+        mask = self.load_slide(index=index, axis=axis, width=width)
         seismic_slide, mask = np.squeeze(seismic_slide), np.squeeze(mask)
         xmin, xmax, ymin, ymax = 0, seismic_slide.shape[0], seismic_slide.shape[1], 0
 
         if zoom == 'auto':
-            zoom = self.compute_auto_zoom(loc, axis, zoom_margin)
+            zoom = self.compute_auto_zoom(index, axis)
 
         if zoom is not None:
             seismic_slide = seismic_slide[zoom]
@@ -57,7 +61,7 @@ class VisualizationMixin:
 
         # defaults for plotting if not supplied in kwargs
         header = self.field.axis_names[axis]
-        total = self.field.cube_shape[axis]
+        total = self.field.shape[axis]
 
         if axis in [0, 1]:
             xlabel = self.field.index_headers[1 - axis]
@@ -68,7 +72,7 @@ class VisualizationMixin:
             total = self.field.depth
 
         title = f'{self.__class__.__name__} `{self.name}` on cube'\
-                f'`{self.field.displayed_name}`\n {header} {loc} out of {total}'
+                f'`{self.field.short_name}`\n {header} {index} out of {total}'
 
         kwargs = {
             'cmap': ['Greys_r', 'darkorange'],

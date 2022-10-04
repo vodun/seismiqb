@@ -19,27 +19,27 @@ from ...utils import MetaDict
 
 
 class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, ProcessingMixin, HorizonVisualizationMixin):
-    """ Contains spatially-structured horizon: each point describes a height on a particular (iline, xline).
+    """ Contains spatially-structured horizon: each point describes a depth on a particular (iline, xline) point.
 
     Initialized from `storage` and `field`, where storage can be one of:
         - csv-like file in CHARISMA or REDUCED_CHARISMA format.
         - ndarray of (N, 3) shape.
-        - ndarray of (ilines_len, xlines_len) shape.
-        - dictionary: a mapping from (iline, xline) -> height.
-        - mask: ndarray of (ilines_len, xlines_len, depth) with 1's at places of horizon location.
+        - ndarray of (n_ilines, n_xlines) shape.
+        - dictionary: a mapping from (iline, xline) -> depth.
+        - mask: ndarray of (n_ilines, n_xlines, depth) with 1's at places of horizon location.
 
     Main storages are `matrix` and `points` attributes:
-        - `matrix` is a depth map, ndarray of (ilines_len, xlines_len) shape with each point
-          corresponding to horizon height at this point. Note that shape of the matrix is generally smaller
+        - `matrix` is a depth map, ndarray of (n_ilines, n_xlines) shape with each point
+          corresponding to horizon depth at this point. Note that shape of the matrix is generally smaller
           than cube spatial range: that allows to save space.
           Attributes `i_min` and `x_min` describe position of the matrix in relation to the cube spatial range.
           Each point with absent horizon is filled with `FILL_VALUE`.
           Note that since the dtype of `matrix` is `np.int32`, we can't use `np.nan` as the fill value.
           In order to initialize from this storage, one must supply `matrix`, `i_min`, `x_min`.
 
-        - `points` is a (N, 3) ndarray with every row being (iline, xline, height). Note that (iline, xline) are
-          stored in cube coordinates that range from 0 to `ilines_len` and 0 to `xlines_len` respectively.
-          Stored height is corrected on `time_delay` and `sample_rate` of the cube.
+        - `points` is a (N, 3) ndarray with every row being (iline, xline, depth). Note that (iline, xline) are
+          stored in cube coordinates that range from 0 to `n_ilines` and 0 to `n_xlines` respectively.
+          Stored depth is corrected on `time_delay` and `sample_rate` of the cube.
           In order to initialize from this storage, one must supply (N, 3) ndarray.
 
     Depending on which attribute was created at initialization (`matrix` or `points`), the other is computed lazily
@@ -47,7 +47,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
     `Horizon` instances, i.e. when extracting surfaces from predicted masks.
 
     Independently of type of initial storage, Horizon provides following:
-        - Attributes `i_min`, `x_min`, `i_max`, `x_max`, `h_min`, `h_max`, `h_mean`, `h_std`, `bbox`,
+        - Attributes `i_min`, `x_min`, `i_max`, `x_max`, `d_min`, `d_max`, `d_mean`, `d_std`, `bbox`,
           to completely describe location of the horizon in the 3D volume of the seismic cube.
 
         - Convenient methods of changing the horizon, `apply_to_matrix` and `apply_to_points`:
@@ -63,7 +63,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
           for more metrics, check :class:`~.HorizonMetrics`.
 
         - A number of properties that describe geometrical, geological and mathematical characteristics of a horizon.
-          For example, `borders_matrix` and `boundaries_matrix`: the latter containes outer and inner borders;
+          For example, `borders_matrix` and `boundaries_matrix`: the latter contains outer and inner borders;
           `coverage` is the ratio between labeled traces and non-zero traces in the seismic cube;
           `solidity` is the ratio between labeled traces and traces inside the hull of the horizon;
           `perimeter` and `number_of_holes` speak for themselves.
@@ -77,7 +77,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
     #pylint: disable=too-many-public-methods, import-outside-toplevel, redefined-builtin
 
     # Columns that are used from the file
-    COLUMNS = ['iline', 'xline', 'height']
+    COLUMNS = ['INLINE_3D', 'CROSSLINE_3D', 'DEPTH']
 
     # Value to place into blank spaces
     FILL_VALUE = -999999
@@ -102,9 +102,9 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
         self._points = None
         self._depths = None
 
-        # Heights information
-        self._h_min, self._h_max = None, None
-        self._h_mean, self._h_std = None, None
+        # depths information
+        self._d_min, self._d_max = None, None
+        self._d_mean, self._d_std = None, None
 
         # Field reference
         self.field = field
@@ -118,20 +118,20 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
             self.format = 'file'
 
         elif isinstance(storage, dict):
-            # mapping from (iline, xline) to (height)
+            # mapping from (iline, xline) to (depth)
             self.format = 'dict'
 
         elif isinstance(storage, np.ndarray):
             if storage.ndim == 2 and storage.shape[1] == 3:
-                # array with row in (iline, xline, height) format
+                # array with row in (iline, xline, depth) format
                 self.format = 'points'
 
             elif storage.ndim == 2 and (storage.shape == self.field.spatial_shape):
-                # matrix of (iline, xline) shape with every value being height
+                # matrix of (iline, xline) shape with every value being depth
                 self.format = 'full_matrix'
 
             elif storage.ndim == 2:
-                # matrix of (iline, xline) shape with every value being height
+                # matrix of (iline, xline) shape with every value being depth
                 self.format = 'matrix'
 
         getattr(self, f'from_{self.format}')(storage, **kwargs)
@@ -140,7 +140,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
     # Logic of lazy computation of `points` or `matrix` from the other available storage; cache management
     @property
     def points(self):
-        """ Storage of horizon data as (N, 3) array of (iline, xline, height) in cubic coordinates.
+        """ Storage of horizon data as (N, 3) array of (iline, xline, depth) in cubic coordinates.
         If the horizon is created not from (N, 3) array, evaluated at the time of the first access.
         """
         if self._points is None and self.matrix is not None:
@@ -166,7 +166,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
     @property
     def matrix(self):
         """ Storage of horizon data as depth map: matrix of (ilines_length, xlines_length) with each point
-        corresponding to height. Matrix is shifted to a (i_min, x_min) point so it takes less space.
+        corresponding to depth. Matrix is shifted to a (i_min, x_min) point so it takes less space.
         If the horizon is created not from matrix, evaluated at the time of the first access.
         """
         if self._matrix is None and self.points is not None:
@@ -202,24 +202,24 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
     def reset_storage(self, storage=None):
         """ Reset storage along with depth-wise lazy computed stats. """
         self._depths = None
-        self._h_min, self._h_max = None, None
-        self._h_mean, self._h_std = None, None
+        self._d_min, self._d_max = None, None
+        self._d_mean, self._d_std = None, None
         self._len = None
 
         if storage == 'matrix':
             self._matrix = None
             if len(self.points) > 0:
-                i_min, x_min, h_min = np.min(self.points, axis=0)
-                i_max, x_max, h_max = np.max(self.points, axis=0)
+                i_min, x_min, d_min = np.min(self.points, axis=0)
+                i_max, x_max, d_max = np.max(self.points, axis=0)
 
-                self._h_min, self._h_max = h_min.astype(self.dtype), h_max.astype(self.dtype)
+                self._d_min, self._d_max = d_min.astype(self.dtype), d_max.astype(self.dtype)
                 self.i_min, self.i_max, self.x_min, self.x_max = int(i_min), int(i_max), int(x_min), int(x_max)
 
                 self.i_length = (self.i_max - self.i_min) + 1
                 self.x_length = (self.x_max - self.x_min) + 1
                 self.bbox = np.array([[self.i_min, self.i_max],
                                     [self.x_min, self.x_max],
-                                    [self.h_min, self.h_max]],
+                                    [self.d_min, self.d_max]],
                                     dtype=np.int32)
         elif storage == 'points':
             self._points = None
@@ -258,32 +258,32 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
 
     # Properties, computed from lazy evaluated attributes
     @property
-    def h_min(self):
+    def d_min(self):
         """ Minimum depth value. """
-        if self._h_min is None:
-            self._h_min = np.min(self.depths)
-        return self._h_min
+        if self._d_min is None:
+            self._d_min = np.min(self.depths)
+        return self._d_min
 
     @property
-    def h_max(self):
+    def d_max(self):
         """ Maximum depth value. """
-        if self._h_max is None:
-            self._h_max = np.max(self.depths)
-        return self._h_max
+        if self._d_max is None:
+            self._d_max = np.max(self.depths)
+        return self._d_max
 
     @property
-    def h_mean(self):
+    def d_mean(self):
         """ Average depth value. """
-        if self._h_mean is None:
-            self._h_mean = np.mean(self.depths)
-        return self._h_mean
+        if self._d_mean is None:
+            self._d_mean = np.mean(self.depths)
+        return self._d_mean
 
     @property
-    def h_std(self):
+    def d_std(self):
         """ Std of depths. """
-        if self._h_std is None:
-            self._h_std = np.std(self.depths)
-        return self._h_std
+        if self._d_std is None:
+            self._d_std = np.std(self.depths)
+        return self._d_std
 
     def __len__(self):
         """ Number of labeled traces. """
@@ -341,7 +341,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
         self.from_points(points, verify=False, **kwargs)
 
 
-    def from_matrix(self, matrix, i_min, x_min, h_min=None, h_max=None, length=None, **kwargs):
+    def from_matrix(self, matrix, i_min, x_min, d_min=None, d_max=None, length=None, **kwargs):
         """ Init from matrix and location of minimum i, x points. """
         _ = kwargs
 
@@ -358,10 +358,10 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
         self.x_length = (self.x_max - self.x_min) + 1
 
         # Populate lazy properties with supplied values
-        self._h_min, self._h_max, self._len = h_min, h_max, length
+        self._d_min, self._d_max, self._len = d_min, d_max, length
         self.bbox = np.array([[self.i_min, self.i_max],
                               [self.x_min, self.x_max],
-                              [self.h_min, self.h_max]],
+                              [self.d_min, self.d_max]],
                              dtype=np.int32)
 
 
@@ -494,13 +494,6 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
             return self.name.split('.')[0]
         return None
 
-    @property
-    def displayed_name(self):
-        """ Alias for `short_name`. """
-        if self.name is None:
-            return 'unknown_horizon'
-        return self.short_name
-
     # Horizon usage: mask generation
     def add_to_mask(self, mask, locations=None, width=3, alpha=1, **kwargs):
         """ Add horizon to a background.
@@ -524,7 +517,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
         mask_bbox = np.array([[slc.start, slc.stop] for slc in locations], dtype=np.int32)
 
         # Getting coordinates of overlap in cubic system
-        (mask_i_min, mask_i_max), (mask_x_min, mask_x_max), (mask_h_min, mask_h_max) = mask_bbox
+        (mask_i_min, mask_i_max), (mask_x_min, mask_x_max), (mask_d_min, mask_d_max) = mask_bbox
 
         #TODO: add clear explanation about usage of advanced index in Horizon
         i_min, i_max = max(self.i_min, mask_i_min), min(self.i_max + 1, mask_i_max)
@@ -535,18 +528,18 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
                                   x_min - self.x_min : x_max - self.x_min]
 
             # Coordinates of points to use in overlap local system
-            idx_i, idx_x = np.asarray((overlap != self.FILL_VALUE) &
-                                      (overlap >= mask_h_min + low) &
-                                      (overlap <= mask_h_max - high)).nonzero()
-            heights = overlap[idx_i, idx_x]
+            idx_i, idx_x = np.nonzero((overlap != self.FILL_VALUE) &
+                                      (overlap >= mask_d_min + low) &
+                                      (overlap <= mask_d_max - high))
+            depths = overlap[idx_i, idx_x]
 
             # Convert coordinates to mask local system
             idx_i += i_min - mask_i_min
             idx_x += x_min - mask_x_min
-            heights -= (mask_h_min + low)
+            depths -= (mask_d_min + low)
 
             for shift in range(width):
-                mask[idx_i, idx_x, heights + shift] = alpha
+                mask[idx_i, idx_x, depths + shift] = alpha
 
         return mask
 
@@ -556,7 +549,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
         mask_bbox = np.array([[slc.start, slc.stop] for slc in locations], dtype=np.int32)
 
         # Getting coordinates of overlap in cubic system
-        (mask_i_min, mask_i_max), (mask_x_min, mask_x_max), (mask_h_min, mask_h_max) = mask_bbox
+        (mask_i_min, mask_i_max), (mask_x_min, mask_x_max), (mask_d_min, mask_d_max) = mask_bbox
 
         i_min, i_max = max(self.i_min, mask_i_min), min(self.i_max + 1, mask_i_max)
         x_min, x_max = max(self.x_min, mask_x_min), min(self.x_max + 1, mask_x_max)
@@ -567,15 +560,15 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
 
             # Coordinates of points to use in overlap local system
             idx_i, idx_x = np.asarray((overlap != self.FILL_VALUE) &
-                                      (overlap >= mask_h_min) &
-                                      (overlap <= mask_h_max)).nonzero()
-            heights = overlap[idx_i, idx_x].astype(np.float32)
+                                      (overlap >= mask_d_min) &
+                                      (overlap <= mask_d_max)).nonzero()
+            depths = overlap[idx_i, idx_x].astype(np.float32)
 
             if scale:
-                heights -= mask_h_min
-                heights /= (mask_h_max - mask_h_min)
+                depths -= mask_d_min
+                depths /= (mask_d_max - mask_d_min)
 
-            mask[idx_i, idx_x] = heights
+            mask[idx_i, idx_x] = depths
         return mask
 
 
@@ -673,7 +666,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
             'accuracy@2': np.mean(masked_abs_difference <= 2),
 
             'overlap_size': overlap_size,
-            'overlap_coverage': overlap_size / self.field.nonzero_traces,
+            'overlap_coverage': overlap_size / self.field.n_alive_traces,
             'window_rate':  window_rate,
 
             'present_at_1_absent_at_2' : present_at_1_absent_at_2,

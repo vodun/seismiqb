@@ -49,7 +49,7 @@ class ProcessingMixin:
             Processed horizon instance. A new instance if `inplace` is False, `self` otherwise.
         """
         if filtering_matrix is None:
-            filtering_matrix = self.field.zero_traces
+            filtering_matrix = self.field.dead_traces_matrix
         elif isinstance(filtering_matrix, str):
             filtering_matrix = self.load_attribute(filtering_matrix, **kwargs)
             filtering_matrix[np.abs(filtering_matrix) > 1] = 1
@@ -178,8 +178,8 @@ class ProcessingMixin:
                                           **kwargs)
 
         result[(self.matrix == self.FILL_VALUE) | np.isnan(result)] = self.FILL_VALUE
-        result[self.field.zero_traces[self.i_min:self.i_max + 1,
-                                      self.x_min:self.x_max + 1] == 1] = self.FILL_VALUE
+        result[self.field.dead_traces_matrix[self.i_min:self.i_max + 1,
+                                             self.x_min:self.x_max + 1]] = self.FILL_VALUE
 
         if dtype == np.int32 or (self.dtype == np.int32 and inplace is True):
             result = np.rint(result).astype(np.int32)
@@ -236,8 +236,8 @@ class ProcessingMixin:
                                   max_depth_ptp=max_depth_ptp)
 
         result[np.isnan(result)] = self.FILL_VALUE
-        result[self.field.zero_traces[self.i_min:self.i_max + 1,
-                                      self.x_min:self.x_max + 1] == 1] = self.FILL_VALUE
+        result[self.field.dead_traces_matrix[self.i_min:self.i_max + 1,
+                                             self.x_min:self.x_max + 1]] = self.FILL_VALUE
 
         if self.dtype == np.int32:
             result = np.rint(result).astype(np.int32)
@@ -280,13 +280,13 @@ class ProcessingMixin:
             Processed horizon instance. A new instance if `inplace` is False, `self` otherwise.
         """
         image = self.matrix.astype(np.uint16) # dtype conversion for compatibility with the OpenCV method
-        zero_traces = self.field.zero_traces[self.i_min:self.i_max + 1,
-                                             self.x_min:self.x_max + 1]
+        dead_traces_matrix = self.field.dead_traces_matrix[self.i_min:self.i_max + 1,
+                                                           self.x_min:self.x_max + 1]
 
         # We use all empty traces as inpainting mask because it is important for correct boundary conditions
         # in differential equations, that are used in the inpainting method
         holes_mask = (self.matrix == self.FILL_VALUE).astype(np.uint8)
-        holes_mask[zero_traces == 1] = 1
+        holes_mask[dead_traces_matrix == 1] = 1
 
         result = cv2_inpaint(src=image, inpaintMask=holes_mask, inpaintRadius=neighbors_radius, flags=method)
         result = result.astype(self.dtype)
@@ -295,9 +295,9 @@ class ProcessingMixin:
         too_far_traces_mask = binary_erosion(holes_mask, iterations=inpaint_radius).astype(int)
 
         # Filter traces with anomalies (can be caused by boundary conditions in equations on horizon borders)
-        anomalies_mask = (result > self.h_max + 10) | (result < self.h_min - 10)
+        anomalies_mask = (result > self.d_max + 10) | (result < self.d_min - 10)
 
-        result[(too_far_traces_mask == 1) | (anomalies_mask == 1) | (zero_traces == 1)] = self.FILL_VALUE
+        result[(too_far_traces_mask == 1) | (anomalies_mask == 1) | (dead_traces_matrix == 1)] = self.FILL_VALUE
 
         if inplace:
             self.matrix = result
@@ -347,35 +347,26 @@ class ProcessingMixin:
         name = 'thinned_' + self.name if self.name is not None else None
         return type(self)(storage=points, field=self.field, name=name)
 
-    def make_carcass(self, frequencies=100, regular=True, margin=50, interpolate=False, add_prefix=True, **kwargs):
+    def make_carcass(self, frequencies=100, margin=50, interpolate=False, add_prefix=True, inplace=False, **kwargs):
         """ Cut carcass out of a horizon. Returns a new instance.
 
         Parameters
         ----------
-        frequencies : int or sequence of ints
-            Frequencies of carcass lines.
-        regular : bool
-            Whether to make regular lines or base lines on geometry quality map.
+        frequencies : int or sequence of two ints
+            Frequencies of carcass lines along inline/crossline axis.
         margin : int
             Margin from geometry edges to exclude from carcass.
         interpolate : bool
             Whether to interpolate the result.
         kwargs : dict
-            Other parameters for grid creation, see `:meth:~.SeismicGeometry.make_quality_grid`.
+            Other parameters for grid creation, see `:meth:~.Geometry.make_quality_grid`.
         """
         #pylint: disable=import-outside-toplevel
-        frequencies = frequencies if isinstance(frequencies, (tuple, list)) else [frequencies]
-        carcass = self.copy(add_prefix=add_prefix)
+        carcass = self if inplace else self.copy(add_prefix=add_prefix)
         carcass.name = carcass.name.replace('copy', 'carcass')
 
-        if regular:
-            from ...metrics import GeometryMetrics
-            gm = GeometryMetrics(self.field.geometry)
-            grid = gm.make_grid(1 - self.field.zero_traces, frequencies=frequencies, margin=margin, **kwargs)
-        else:
-            grid = self.field.geometry.make_quality_grid(frequencies, margin=margin, **kwargs)
-
-        carcass.filter(filtering_matrix=1-grid, inplace=True)
+        grid_matrix = self.field.geometry.get_grid(frequency=frequencies, margin=margin)
+        carcass.filter(filtering_matrix=1-grid_matrix, inplace=True)
         if interpolate:
             carcass.interpolate(inplace=True)
         return carcass

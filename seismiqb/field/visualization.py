@@ -9,6 +9,7 @@ import numpy as np
 from batchflow.plotter.plot import Subplot
 
 from .viewer import FieldViewer
+from ..functional import compute_instantaneous_amplitude, compute_instantaneous_phase, compute_instantaneous_frequency
 from ..utils import DelegatingList, to_list
 from ..plotters import plot, show_3d
 from ..labels.horizon.attributes import AttributesMixin
@@ -22,7 +23,7 @@ class VisualizationMixin:
     """ Methods for field visualization: textual, 2d along various axis, 2d interactive, 3d. """
     # Textual representation
     def __repr__(self):
-        return f"""<Field `{self.displayed_name}` at {hex(id(self))}>"""
+        return f"""<Field `{self.short_name}` at {hex(id(self))}>"""
 
     REPR_MAX_LEN = 100
     REPR_MAX_ROWS = 5
@@ -30,7 +31,7 @@ class VisualizationMixin:
     def __str__(self):
         processed_prefix = 'un' if self.geometry.has_stats is False else ''
         labels_prefix = ' and labels:' if self.labels else ''
-        msg = f'Field `{self.displayed_name}` with {processed_prefix}processed geometry{labels_prefix}\n'
+        msg = f'Field `{self.short_name}` with {processed_prefix}processed geometry{labels_prefix}\n'
 
         for label_src in self.loaded_labels:
             labels = getattr(self, label_src)
@@ -61,38 +62,82 @@ class VisualizationMixin:
         return msg[:-1]
 
     # 2D along axis
-    def show_slide(self, loc, width=None, axis='i', zoom=None, src_geometry='geometry', src_labels='labels',
+    TRANSFORM_TO_ALIASES = {
+        compute_instantaneous_amplitude: ['iamplitude', 'instantaneous_amplitude'],
+        compute_instantaneous_phase: ['iphase', 'instantaneous_phase'],
+        compute_instantaneous_frequency: ['ifrequency', 'instantaneous_frequency'],
+    }
+    ALIASES_TO_TRANSFORM = {alias: name for name, aliases in TRANSFORM_TO_ALIASES.items() for alias in aliases}
+
+    def load_slide(self, index, axis=0, transform=None, src_geometry='geometry'):
+        """ Load one slide of data along specified axis and apply `transform`.
+        Refer to the documentation of :meth:`.Geometry.load_slide` for details.
+
+        Parameters
+        ----------
+        index : int, str
+            If int, then interpreted as the ordinal along the specified axis.
+            If `'random'`, then we generate random index along the axis.
+            If string of the `'#XXX'` format, then we interpret it as the exact indexing header value.
+        axis : int
+            Axis of the slide.
+        transform : callable or str
+            If callable, then directly applied to the loaded data.
+            If str, then one of pre-defined aliases for pre-defined geological transforms.
+        """
+        slide = getattr(self, src_geometry).load_slide(index=index, axis=axis)
+
+        if transform:
+            if isinstance(transform, str) and transform in self.ALIASES_TO_TRANSFORM:
+                transform = self.ALIASES_TO_TRANSFORM[transform]
+            if callable(transform):
+                slide = transform(slide)
+            else:
+                raise ValueError(f'Unknown transform={transform}')
+        return slide
+
+
+    def show_slide(self, index, axis='i', transform=None, zoom=None, width=9,
+                   src_geometry='geometry', src_labels='labels',
                    indices='all', augment_mask=True, plotter=plot, **kwargs):
         """ Show slide with horizon on it.
 
         Parameters
         ----------
-        loc : int
-            Number of slide to load.
-        width : int
-            Horizon thickness. If None given, set to 1% of seismic slide height.
+        index : int, str
+            Index of the slide to show.
+            If int, then interpreted as the ordinal along the specified axis.
+            If `'random'`, then we generate random index along the axis.
+            If string of the `'#XXX'` format, then we interpret it as the exact indexing header value.
         axis : int
             Number of axis to load slide along.
+        transform : callable or str
+            If callable, then directly applied to the loaded data.
+            If str, then one of pre-defined aliases for pre-defined geological transforms.
+        width : int
+            Horizon thickness. If None given, set to 1% of seismic slide depth.
         zoom : tuple, None or 'auto'
             Tuple of slices to apply directly to 2d images. If None, slicing is not applied.
             If 'auto', zero traces on bounds will be dropped.
         """
         axis = self.geometry.parse_axis(axis)
+        index = self.geometry.get_slide_index(index, axis=axis)
+        locations = self.geometry.make_slide_locations(index, axis=axis)
 
         # Load seismic and mask
-        seismic_slide = getattr(self, src_geometry).load_slide(loc=loc, axis=axis)
+        seismic_slide = self.load_slide(index=index, axis=axis, transform=transform, src_geometry=src_geometry)
 
         src_labels = src_labels if isinstance(src_labels, (tuple, list)) else [src_labels]
         masks = []
         for src in src_labels:
-            masks.append(self.make_mask(location=loc, axis=axis, src=src, width=width, indices=indices))
+            masks.append(self.make_mask(locations=locations, src=src, width=width, indices=indices))
         mask = sum(masks)
 
         seismic_slide, mask = np.squeeze(seismic_slide), np.squeeze(mask)
         xmin, xmax, ymin, ymax = 0, seismic_slide.shape[0], seismic_slide.shape[1], 0
 
         if zoom == 'auto':
-            zoom = self.geometry.compute_auto_zoom(loc, axis)
+            zoom = (self.geometry.compute_auto_zoom(index, axis), slice(None))
         if zoom:
             seismic_slide = seismic_slide[zoom]
             mask = mask[zoom]
@@ -103,7 +148,7 @@ class VisualizationMixin:
 
         # defaults for plotting if not supplied in kwargs
         header = self.geometry.axis_names[axis]
-        total = self.geometry.cube_shape[axis]
+        total = self.geometry.shape[axis]
 
         if axis in [0, 1]:
             xlabel = self.geometry.index_headers[1 - axis]
@@ -115,8 +160,8 @@ class VisualizationMixin:
 
         kwargs = {
             'cmap': ['Greys_r', 'darkorange'],
-            'title': f'{header} {loc} out of {total}',
-            'suptitle':  f'Field `{self.displayed_name}`',
+            'title': f'{header} {index} out of {total}',
+            'suptitle':  f'Field `{self.short_name}`',
             'xlabel': xlabel,
             'ylabel': ylabel,
             'extent': (xmin, xmax, ymin, ymax),
@@ -148,7 +193,7 @@ class VisualizationMixin:
 
         labels_class = type(getattr(self, src)[0]).__name__
         kwargs = {
-            'title': f'{labels_class}s on `{self.displayed_name}`',
+            'title': f'{labels_class}s on `{self.short_name}`',
             'xlabel': self.index_headers[0],
             'ylabel': self.index_headers[1],
             'cmap': ['Reds', 'black'],
@@ -156,7 +201,7 @@ class VisualizationMixin:
             'augment_mask': True,
             **kwargs
         }
-        return plotter([map_, self.zero_traces], **kwargs)
+        return plotter([map_, self.dead_traces_matrix], **kwargs)
 
 
     # 2D top-view maps
@@ -258,7 +303,7 @@ class VisualizationMixin:
         plot_config = {**plot_config, **kwargs}
 
         plot_config = {
-            'suptitle': f'Field `{self.displayed_name}`',
+            'suptitle': f'Field `{self.short_name}`',
             'augment_mask': True,
             **plot_config
         }
@@ -333,11 +378,11 @@ class VisualizationMixin:
 
         if 'data' not in load_params:
             data, label = self.load_attribute(_return_label=True, **load_params)
-            params['label_name'] = label.displayed_name
+            params['label_name'] = label.short_name
             params['bbox'] = label.bbox[:2]
         else:
             data = load_params['data']
-            params['label_name'] = self.displayed_name
+            params['label_name'] = self.short_name
             params['bbox'] = np.array([[0, max] for max in data.shape])
 
         params['data'] = postprocess(data.squeeze())
@@ -433,14 +478,14 @@ class VisualizationMixin:
             that dataset attribute will be drawn.
         aspect_ratio : None, tuple of floats or Nones
             Aspect ratio for each axis. Each None in the resulting tuple will be replaced by item from
-            `(geometry.cube_shape[0] / geometry.cube_shape[1], 1, 1)`.
+            `(geometry.shape[0] / geometry.shape[1], 1, 1)`.
         zoom : tuple of slices or None
             Crop from cube to show. By default, the whole cube volume will be shown.
         n_points : int
             Number of points for horizon surface creation.
             The more, the better the image is and the slower it is displayed.
         threshold : number
-            Threshold to remove triangles with bigger height differences in vertices.
+            Threshold to remove triangles with bigger depth differences in vertices.
         sticks_step : int or None
             Number of slides between sticks. If None, fault triangulation (nodes and simplices) will be used.
         stick_nodes_step : int or None
@@ -515,7 +560,7 @@ class VisualizationMixin:
             simplices = None
             coords = np.zeros((0, 3))
             simplices_colors = None
-        title = self.displayed_name
+        title = self.short_name
 
         default_aspect_ratio = (self.shape[0] / self.shape[1], 1, 1)
         aspect_ratio = [None] * 3 if aspect_ratio is None else aspect_ratio
