@@ -319,17 +319,17 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMix
         return buffer
 
     def enable_cache(self):
-        """ !!. """
+        """ Enable cache for loaded slides. """
         self.use_cache = True
 
     def disable_cache(self):
-        """ !!. """
+        """ Disable cache for loaded slides, and clear existing cache. """
         self.use_cache = False
         self.reset_cache()
 
     @contextmanager
     def enabled_cache(self, enable=True):
-        """ !!. """
+        """ Context manager for enabling cache. """
         try:
             if enable:
                 self.enable_cache()

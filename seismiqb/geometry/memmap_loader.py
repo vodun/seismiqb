@@ -369,7 +369,7 @@ class MemmapLoader(SegyioLoader):
                                              src_path=self.path, dst_path=path,
                                              shape=self.n_traces, offset=self.file_traces_offset,
                                              src_dtype=self.mmap_trace_dtype, dst_dtype=dst_trace_dtype,
-                                             transform=transform,
+                                             endian=self.endian, transform=transform,
                                              start=start, chunk_size=chunk_size_)
                     future.add_done_callback(callback)
         return path
@@ -389,7 +389,7 @@ def read_chunk(path, shape, offset, dtype, headers, start, chunk_size):
     return buffer
 
 
-def convert_chunk(src_path, dst_path, shape, offset, src_dtype, dst_dtype, transform, start, chunk_size):
+def convert_chunk(src_path, dst_path, shape, offset, src_dtype, dst_dtype, endian, transform, start, chunk_size):
     """ Copy the headers, transform and write data from one chunk.
     We create all memory mappings anew in each worker, as it is easier and creates no significant overhead.
     """
@@ -404,9 +404,18 @@ def convert_chunk(src_path, dst_path, shape, offset, src_dtype, dst_dtype, trans
     src_traces = src_mmap[start : start + chunk_size]
     dst_traces = dst_mmap[start : start + chunk_size]
 
+    # If `src_traces_data` is in IBM float, convert to float32
+    src_traces_data = src_traces['data']
+    if len(src_traces_data.shape) == 3:
+        array_bytes = (src_traces_data[:, :, 0],src_traces_data[:, :, 1],
+                       src_traces_data[:, :, 2], src_traces_data[:, :, 3])
+        if endian in {"little", "lsb"}:
+            array_bytes = array_bytes[::-1]
+        src_traces_data = ibm_to_ieee(*array_bytes)
+
     # Copy headers, write transformed data
     dst_traces['headers'] = src_traces['headers']
-    dst_traces['data'] = transform(src_traces['data'])
+    dst_traces['data'] = transform(src_traces_data)
     return chunk_size
 
 

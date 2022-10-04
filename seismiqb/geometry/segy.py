@@ -101,7 +101,9 @@ class GeometrySEGY(Geometry):
 
         # Infer attributes based on indexing headers: values and coordinates
         self.add_index_attributes()
-        self.rotation_matrix = self.compute_rotation_matrix()
+
+        if 'INLINE_3D' in self.index_headers and 'CROSSLINE_3D' in self.index_headers:
+            self.rotation_matrix = self.compute_rotation_matrix()
 
         # Collect amplitude stats, either by passing through SEG-Y or from previously stored dump
         required_attributes = self.PRESERVED + self.PRESERVED_LAZY
