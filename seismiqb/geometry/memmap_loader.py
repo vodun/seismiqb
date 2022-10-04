@@ -357,7 +357,8 @@ class MemmapLoader(SegyioLoader):
         chunk_starts = np.cumsum([0] + chunk_sizes[:-1])
 
         # Iterate over chunks
-        with Notifier(pbar, total=self.n_traces) as progress_bar:
+        name = os.path.basename(path)
+        with Notifier(pbar, total=self.n_traces, desc=f'Convert to `{name}`', ncols=110) as progress_bar:
             with ProcessPoolExecutor(max_workers=max_workers) as executor:
                 def callback(future):
                     chunk_size = future.result()

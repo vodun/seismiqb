@@ -45,7 +45,7 @@ class Quantizer:
 
 class ConversionMixin:
     """ Methods for converting data to other formats. """
-    #pylint: disable=redefined-builtin
+    #pylint: disable=redefined-builtin, import-outside-toplevel
     PROJECTION_NAMES = {0: 'projection_i', 1: 'projection_x', 2: 'projection_d'}    # names of projections
     TO_PROJECTION_TRANSPOSITION = {0: [0, 1, 2], 1: [1, 0, 2], 2: [2, 0, 1]}        # re-order axis to given projection
     FROM_PROJECTION_TRANSPOSITION = {0: [0, 1, 2], 1: [1, 0, 2], 2: [1, 2, 0]}      # revert the previous re-ordering
@@ -123,15 +123,13 @@ class ConversionMixin:
         }
 
     # Convert SEG-Y
-    def convert(self, format='hdf5', path=None, postfix='', projections='ixd',
-                quantize=False, quantization_parameters=None, dataset_kwargs=None, chunk_size_divisor=1,
-                pbar='t', store_meta=True, **kwargs):
+    def convert_to_hdf5(self, path=None, overwrite=True, postfix='', projections='ixd',
+                        quantize=False, quantization_parameters=None, dataset_kwargs=None, chunk_size_divisor=1,
+                        pbar='t', store_meta=True, **kwargs):
         """ Convert SEG-Y file to a more effective storage.
 
         Parameters
         ----------
-        format : {'hdf5', 'qhdf5'}
-            Format of storage to convert to. Prefix `q` sets the `quantize` parameter to True.
         path : str
             If provided, then path to save file to.
             Otherwise, file is saved under the same name with different extension.
@@ -155,14 +153,6 @@ class ConversionMixin:
         kwargs : dict
             Other parameters, passed directly to the file constructor.
         """
-        #pylint: disable=import-outside-toplevel
-        # Select format
-        if format.startswith('q'):
-            quantize = True
-            format = format[1:]
-        if format == 'hdf5':
-            constructor, mode = h5py.File, 'w-'
-
         # Quantization
         if quantize:
             if quantization_parameters is None:
@@ -173,26 +163,19 @@ class ConversionMixin:
 
         # Default path: right next to the original file with new extension
         if path is None:
-            fmt_prefix = 'q' if quantize else ''
-
-            if postfix == '' and len(projections) < 3:
-                postfix = '_' + projections
-
-            if postfix == '' and chunk_size_divisor != 1:
-                postfix = '_' + f'c{chunk_size_divisor}'
-
-            path = os.path.join(os.path.dirname(self.path), f'{self.short_name}{postfix}.{fmt_prefix}{format}')
+            path = self.make_output_path(format='hdf5', quantize=quantize, postfix=postfix, projections=projections,
+                                         chunk_size_divisor=chunk_size_divisor)
 
         # Dataset creation parameters
         if dataset_kwargs is None:
             dataset_kwargs = dict(hdf5plugin.Blosc(cname='lz4hc', clevel=6, shuffle=0))
 
         # Remove file, if exists
-        if os.path.exists(path):
+        if os.path.exists(path) and overwrite:
             os.remove(path)
 
         # Create file and datasets inside
-        with constructor(path, mode=mode, **kwargs) as file:
+        with h5py.File(path, mode='w-', **kwargs) as file:
             total = sum((letter in projections) * self.shape[idx]
                         for idx, letter in enumerate('ixd'))
             progress_bar = Notifier(pbar, total=total, ncols=110)
@@ -226,7 +209,8 @@ class ConversionMixin:
             self.dump_meta(path=path)
 
             if quantize:
-                for key in ['ranges', 'center', 'clip', 'quantization_error',
+                quantization_parameters['quantization_ranges'] = quantization_parameters['ranges']
+                for key in ['quantization_ranges', 'center', 'clip', 'quantization_error',
                             'min', 'max', 'mean', 'std', 'quantile_values']:
                     self.dump_meta_item(key=f'meta/{key}', value=quantization_parameters[key],
                                         path=path, overwrite=True)
@@ -235,7 +219,7 @@ class ConversionMixin:
         return Geometry.new(path)
 
     def repack_segy(self, path=None, format=8, transform=None, chunk_size=25_000, max_workers=4,
-                     pbar='t', overwrite=True):
+                     pbar='t', store_meta=True, overwrite=True):
         """ Repack SEG-Y file with a different `format`: dtype of data values.
         Keeps the same binary header (except for the 3225 byte, which stores the format).
         Keeps the same header values for each trace: essentially, only the values of each trace are changed.
@@ -265,7 +249,8 @@ class ConversionMixin:
             Whether to overwrite existing `path` or raise an exception.
         """
         if format == 8 and transform is None:
-            transform = self.compute_quantization_parameters()['transform']
+            quantization_parameters = self.compute_quantization_parameters()
+            transform = quantization_parameters['transform']
 
         path = self.loader.convert(path=path, format=format, transform=transform,
                                    chunk_size=chunk_size, max_workers=max_workers, pbar=pbar, overwrite=overwrite)
@@ -273,4 +258,77 @@ class ConversionMixin:
         meta_path = path + '_meta'
         if overwrite and os.path.exists(meta_path):
             os.remove(meta_path)
+
+        # Re-open geometry, store values that were used for quantization
+        from .base import Geometry
+        geometry = Geometry.new(path, collect_stats=True)
+
+        quantization_parameters['quantization_ranges'] = quantization_parameters['ranges']
+        for key in ['quantization_ranges', 'center', 'clip', 'quantization_error']:
+            geometry.dump_meta_item(key=f'meta/{key}', value=quantization_parameters[key],
+                                    overwrite=True)
+        return geometry
+
+
+    def make_output_path(self, format='hdf5', quantize=False, postfix='', projections='ixd',
+                         chunk_size_divisor=1, sgy_format=8):
+        """ Compute output path for converted file, based on conversion parameters. """
+        format = format.lower()
+
+        if format.startswith('q'):
+            quantize = True
+            format = format[1:]
+
+        fmt_prefix = 'q' if quantize else ''
+
+        if postfix == '':
+            if format == 'hdf5':
+                if len(projections) < 3:
+                    postfix = postfix + '_' + projections
+                if chunk_size_divisor != 1:
+                    postfix = postfix + '_' + f'c{chunk_size_divisor}'
+
+            if format == 'sgy':
+                if quantize:
+                    postfix = postfix + '_' + f'f{sgy_format}'
+
+        dirname = os.path.dirname(self.path)
+        basename = os.path.basename(self.path)
+        shortname = os.path.splitext(basename)[0]
+        path = os.path.join(dirname, shortname + postfix + '.' + fmt_prefix + format)
         return path
+
+
+    def convert(self, format='qsgy', path=None, postfix='', projections='ixd', overwrite=True,
+                quantize=False, quantization_parameters=None, dataset_kwargs=None, chunk_size_divisor=1,
+                pbar='t', store_meta=True, sgy_format=8, transform=None, chunk_size=25_000, max_workers=4, **kwargs):
+        """ Convert SEG-Y file to a more effective storage.
+        Automatically select the conversion format, based on `format` parameter.
+        Available formats are {'hdf5', 'qhdf5', 'qsgy}.
+
+        Parameters are passed to either :meth:`.convert_to_hdf5` or :meth:`.repack_sgy`:
+        refer to their documentation for parameters description.
+        """
+        format = format.lower()
+
+        if format.startswith('q'):
+            quantize = True
+            format = format[1:]
+
+        if path is None:
+            path = self.make_output_path(format=format, postfix=postfix, quantize=quantize, projections=projections,
+                                         chunk_size_divisor=chunk_size_divisor, sgy_format=sgy_format)
+
+        # Actual conversion
+        if 'hdf5' in format:
+            geometry = self.convert_to_hdf5(path=path, overwrite=overwrite, projections=projections,
+                                            quantize=quantize, quantization_parameters=quantization_parameters,
+                                            dataset_kwargs=dataset_kwargs, chunk_size_divisor=chunk_size_divisor,
+                                            pbar=pbar, store_meta=store_meta)
+        elif 'sgy' in format and quantize:
+            geometry = self.repack_segy(path=path, overwrite=overwrite, format=sgy_format, transform=None,
+                                        chunk_size=chunk_size, max_workers=max_workers, pbar=pbar)
+        else:
+            raise ValueError(f'Unknown/unsupported combination of format={format} and quantize={quantize}!')
+
+        return geometry

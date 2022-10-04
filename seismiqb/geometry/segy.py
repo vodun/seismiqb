@@ -41,7 +41,7 @@ class GeometrySEGY(Geometry):
 
     Refer to the documentation of the base class :class:`Geometry` for more information about attributes and parameters.
     """
-    # Headers to use as unique id of a trace
+    # Headers to use as a unique id of a trace
     INDEX_HEADERS_PRESTACK = ('FieldRecord', 'TraceNumber')
     INDEX_HEADERS_POSTSTACK = ('INLINE_3D', 'CROSSLINE_3D')
     INDEX_HEADERS_CDP = ('CDP_Y', 'CDP_X')
@@ -50,7 +50,6 @@ class GeometrySEGY(Geometry):
     ADDITIONAL_HEADERS_PRESTACK_FULL = ('FieldRecord', 'TraceNumber', 'TRACE_SEQUENCE_FILE',
                                         'CDP', 'CDP_TRACE', 'offset')
     ADDITIONAL_HEADERS_POSTSTACK_FULL = ('INLINE_3D', 'CROSSLINE_3D', 'CDP_X', 'CDP_Y')
-
 
     def init(self, path, index_headers=INDEX_HEADERS_POSTSTACK, additional_headers=ADDITIONAL_HEADERS_POSTSTACK_FULL,
              loader_class=MemmapLoader, reload_headers=False, dump_headers=True, load_headers_params=None,
@@ -83,7 +82,10 @@ class GeometrySEGY(Geometry):
         self.quantized = (self.dtype == np.int8)
 
         self.segy_path = self.loader.path
-        self.segy_text = [item.decode('ascii') for item in self.loader.text]
+        try:
+            self.segy_text = [item.decode('ascii') for item in self.loader.text]
+        except: #pylint: disable=bare-except
+            self.segy_text = ['*'*3200]
 
         # Load all of the requested headers, either from SEG-Y directly or previously stored dump
         headers_to_load = list(set(index_headers) | set(additional_headers))

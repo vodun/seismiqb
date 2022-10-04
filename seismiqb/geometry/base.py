@@ -64,6 +64,16 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMix
     ---------------
     TODO
     """
+    # Headers to use as a unique id of a trace
+    INDEX_HEADERS_PRESTACK = ('FieldRecord', 'TraceNumber')
+    INDEX_HEADERS_POSTSTACK = ('INLINE_3D', 'CROSSLINE_3D')
+    INDEX_HEADERS_CDP = ('CDP_Y', 'CDP_X')
+
+    # Headers to load from SEG-Y cube
+    ADDITIONAL_HEADERS_PRESTACK_FULL = ('FieldRecord', 'TraceNumber', 'TRACE_SEQUENCE_FILE',
+                                        'CDP', 'CDP_TRACE', 'offset')
+    ADDITIONAL_HEADERS_POSTSTACK_FULL = ('INLINE_3D', 'CROSSLINE_3D', 'CDP_X', 'CDP_Y')
+
     # Value to use in dead traces
     FILL_VALUE = 0.0
 
@@ -91,6 +101,10 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMix
         'min_matrix', 'max_matrix', 'mean_matrix', 'std_matrix',
     ]
 
+    PRESERVED_MISC = [ # additional stats that may be absent. loaded at the time of the first access
+        'quantization_ranges', 'quantization_error'
+    ]
+
     @staticmethod
     def new(path, *args, **kwargs):
         """ A convenient selector of appropriate (SEG-Y or HDF5) geometry. """
@@ -107,7 +121,7 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMix
             raise TypeError(f'Unknown format of the cube: {extension}')
         return cls(path, *args, **kwargs)
 
-    def __init__(self, path, meta_path=None, safe=False, use_cache=False, **kwargs):
+    def __init__(self, path, meta_path=None, safe=False, use_cache=False, init=True, **kwargs):
         # Path to the file
         self.path = path
 
@@ -129,14 +143,16 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMix
         self._normalization_stats = None
 
         # Init from subclasses
-        self._init_kwargs = kwargs
-        self.init(path, **kwargs)
+        if init:
+            self._init_kwargs = kwargs
+            self.init(path, **kwargs)
 
 
     # Redefined protocols
     def __getattr__(self, key):
         """ Load item from stored meta. """
-        if key in self.PRESERVED_LAZY and self.meta_exists and self.has_meta_item(key) and key not in self.__dict__:
+        if key not in self.__dict__ and (key in self.PRESERVED_LAZY or key in self.PRESERVED_MISC) \
+            and self.meta_exists and self.has_meta_item(key):
             return self.load_meta_item(f'meta/{key}')
         return object.__getattribute__(self, key)
 
@@ -538,24 +554,24 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMix
         msg = f"""
         Processed geometry for cube        {self.path}
         Index headers:                     {self.index_headers}
-        Traces:                            {self.n_traces:_}
+        Traces:                            {self.n_traces:,}
         Shape:                             {tuple(self.shape)}
         Time delay:                        {self.delay} ms
         Sample rate:                       {self.sample_rate} ms
         Area:                              {self.area:4.1f} km²
 
         File size:                         {self.file_size:4.3f} GB
-        Instance (memory) size:            {self.ngbytes:4.3f} GB
+        Instance (in-memory) size:         {self.ngbytes:4.3f} GB
         """
 
         if self.converted and os.path.exists(self.segy_path):
             segy_size = os.path.getsize(self.segy_path) / (1024 ** 3)
-            msg += f'\nSEG-Y original size:               {segy_size:4.3f} GB'
+            msg += f'SEG-Y original size:               {segy_size:4.3f} GB\n'
 
         if hasattr(self, 'dead_traces_matrix'):
             msg += f"""
-        Number of dead  traces:            {self.n_dead_traces:_}
-        Number of alive traces:            {self.n_alive_traces:_}
+        Number of dead  traces:            {self.n_dead_traces:,}
+        Number of alive traces:            {self.n_alive_traces:,}
         Fullness:                          {self.n_alive_traces / self.n_traces:2.2f}
         """
 
@@ -570,7 +586,7 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMix
 
         if self.quantized:
             msg += f"""
-        Quantization ranges:               {self.ranges[0]:>10.2f} | {self.ranges[1]:<10.2f}
+        Quantization ranges:               {self.quantization_ranges[0]:>10.2f} | {self.quantization_ranges[1]:<10.2f}
         Quantization error:                {self.quantization_error:>10.3f}
         """
         return dedent(msg).strip()
