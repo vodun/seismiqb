@@ -53,7 +53,7 @@ def triangle_volume(points, width):
     p_ = p * r_ / r
     return (p_ * r_) * (width + 1)
 
-def sticks_to_simplices(sticks, threshold=None, **kwargs):
+def sticks_to_simplices(sticks, orientation, threshold=None):
     """ Compute triangulation of the fault.
 
     Parameters
@@ -76,7 +76,7 @@ def sticks_to_simplices(sticks, threshold=None, **kwargs):
     nodes = np.concatenate(sticks)
     shift = 0
     for s1, s2 in zip(sticks[:-1], sticks[1:]):
-        simplices = connect_two_components(s1, s2, orientation=0) #TODO: orientation
+        simplices = connect_two_components(s1, s2, orientation=orientation)
         if len(simplices) > 0:
             simplices += shift
             all_simplices.append(simplices)

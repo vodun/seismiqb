@@ -192,7 +192,7 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
             if self._points is None and self._sticks is None:
                 raise AttributeError("'simplices' can't be created ('points' and 'sticks' don't exist)")
 
-            self._simplices, self._nodes = sticks_to_simplices(self.sticks, return_indices=True)
+            self._simplices, self._nodes = sticks_to_simplices(self.sticks, self.direction)
 
         return self._simplices
 
@@ -205,7 +205,7 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
             if self._points is None and self._sticks is None:
                 raise AttributeError("'nodes' can't be created ('points' and 'sticks' don't exist)")
 
-            self._simplices, self._nodes = sticks_to_simplices(self.sticks, return_indices=True)
+            self._simplices, self._nodes = sticks_to_simplices(self.sticks, self.direction)
 
         return self._nodes
 
