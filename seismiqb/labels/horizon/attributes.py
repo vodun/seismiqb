@@ -291,16 +291,15 @@ class AttributesMixin:
     @property
     def probabilities(self):
         """ Map of the horizon presence probabilities. """
-        if hasattr(self, 'probabilities_'):
+        if hasattr(self, 'proba_points'):
             _map = np.zeros(self.full_matrix.shape, dtype=np.float32)
-            _map[self.probabilities_[:, 0].astype(np.int32),
-                 self.probabilities_[:, 1].astype(np.int32)] = self.probabilities_[:, 2]
+            _map[self.proba_points[:, 0].astype(np.int32),
+                 self.proba_points[:, 1].astype(np.int32)] = self.proba_points[:, 2]
 
             _map[~self.full_binary_matrix] = np.nan
-
             return _map
 
-        raise AttributeError(f'Horizon `{self.displayed_name}` hasn\'t `probabilities` attribute. Check, whether'
+        raise AttributeError(f'Horizon `{self.displayed_name}` hasn\'t `proba_points` attribute. Check, whether'
                              ' the horizon was initialized `from_mask` with `save_probabilities=True` option.')
 
     # Retrieve data from seismic along horizon

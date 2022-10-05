@@ -421,7 +421,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
         prefix : str
             Name of horizon to use.
         save_probabilities : bool
-            Whether to save mask values on the horizon surface in the `horizon.probabilities_` attribute.
+            Whether to save mask values on the horizon surface in the `horizon.proba_points` attribute.
         """
         _ = kwargs
 
@@ -468,8 +468,8 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
                                       horizon.points[:, 1] - origin[1],
                                       horizon.points[:, 2] - origin[2]]
 
-                        horizon.probabilities_ = np.vstack([horizon.points[:, 0], horizon.points[:, 1], values]).T
-                        # We save coordinates in the `probabilities_` because horizon points can be filtered
+                        horizon.proba_points = np.vstack([horizon.points[:, 0], horizon.points[:, 1], values]).T
+                        # We save coordinates in the `proba_points` because horizon points can be filtered
                         # and this prevents from inconsistency between points and mask values
 
                     horizons.append(horizon)
