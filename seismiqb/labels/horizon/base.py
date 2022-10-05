@@ -199,7 +199,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
         return self._depths
 
 
-    def reset_storage(self, storage=None):
+    def reset_storage(self, storage=None, reset_cache=True):
         """ Reset storage along with depth-wise lazy computed stats. """
         self._depths = None
         self._d_min, self._d_max = None, None
@@ -208,23 +208,27 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
 
         if storage == 'matrix':
             self._matrix = None
-            if len(self.points) > 0:
+            length = len(self.points)
+
+            if length > 0:
                 i_min, x_min, d_min = np.min(self.points, axis=0)
                 i_max, x_max, d_max = np.max(self.points, axis=0)
 
                 self._d_min, self._d_max = d_min.astype(self.dtype), d_max.astype(self.dtype)
                 self.i_min, self.i_max, self.x_min, self.x_max = int(i_min), int(i_max), int(x_min), int(x_max)
+                self._len = length
 
                 self.i_length = (self.i_max - self.i_min) + 1
                 self.x_length = (self.x_max - self.x_min) + 1
-                self.bbox = np.array([[self.i_min, self.i_max],
-                                    [self.x_min, self.x_max],
-                                    [self.d_min, self.d_max]],
-                                    dtype=np.int32)
+                self.bbox = np.array([self.i_min, self.i_max,
+                                      self.x_min, self.x_max,
+                                      self.d_min, self.d_max],
+                                     dtype=np.int32)
         elif storage == 'points':
             self._points = None
 
-        self.reset_cache()
+        if reset_cache:
+            self.reset_cache()
 
     def copy(self, add_prefix=True):
         """ Create a new horizon with the same data.
@@ -324,7 +328,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
 
         # Collect stats on separate axes. Note that depth stats are properties
         if reset:
-            self.reset_storage(reset)
+            self.reset_storage(storage=reset, reset_cache=False)
 
 
     def from_file(self, path, transform=True, **kwargs):
@@ -359,9 +363,9 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
 
         # Populate lazy properties with supplied values
         self._d_min, self._d_max, self._len = d_min, d_max, length
-        self.bbox = np.array([[self.i_min, self.i_max],
-                              [self.x_min, self.x_max],
-                              [self.d_min, self.d_max]],
+        self.bbox = np.array([self.i_min, self.i_max,
+                              self.x_min, self.x_max,
+                              self.d_min, self.d_max],
                              dtype=np.int32)
 
 
@@ -463,19 +467,19 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
 
                     horizon = Horizon(storage=points, field=field, verify=True, name=f'{prefix}_{i}')
 
-                    if save_probabilities:
-                        values = mask[horizon.points[:, 0] - origin[0],
-                                      horizon.points[:, 1] - origin[1],
-                                      horizon.points[:, 2] - origin[2]]
+                    if len(horizon) > 0:
+                        if save_probabilities:
+                            values = mask[horizon.points[:, 0] - origin[0],
+                                        horizon.points[:, 1] - origin[1],
+                                        horizon.points[:, 2] - origin[2]]
 
-                        horizon.proba_points = np.vstack([horizon.points[:, 0], horizon.points[:, 1], values]).T
-                        # We save coordinates in the `proba_points` because horizon points can be filtered
-                        # and this prevents from inconsistency between points and mask values
+                            horizon.proba_points = np.vstack([horizon.points[:, 0], horizon.points[:, 1], values]).T
+                            # We save coordinates in the `proba_points` because horizon points can be filtered
+                            # and this prevents from inconsistency between points and mask values
 
-                    horizons.append(horizon)
+                        horizons.append(horizon)
 
         horizons.sort(key=len)
-        horizons = [horizon for horizon in horizons if len(horizon) != 0]
         return horizons
 
     def from_subset(self, matrix, name=None):

@@ -380,7 +380,7 @@ class AttributesMixin:
             shifts = [grid_info['range'][i][0] for i in range(3)]
 
         shifts = np.array(shifts)
-        horizon_shift = np.array((self.bbox[0, 0], self.bbox[1, 0]))
+        horizon_shift = np.array((self.i_min, self.x_min))
 
         if axes is not None:
             array = np.transpose(array, axes=axes)
