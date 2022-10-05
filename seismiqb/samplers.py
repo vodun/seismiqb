@@ -702,6 +702,8 @@ class SeismicSampler(Sampler):
 
         for field_id, (field_name, list_labels) in enumerate(labels.items()):
             list_labels = list_labels if isinstance(list_labels, (tuple, list)) else [list_labels]
+            if len(list_labels) == 0:
+                continue
 
             # Unpack parameters
             crop_shape_ = crop_shape[field_name] if isinstance(crop_shape, dict) else crop_shape
