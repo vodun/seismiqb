@@ -1,4 +1,4 @@
-""" Extractor of fault surfaces from point of clouds. """
+""" Extractor of fault surfaces from cloud of points. """
 from collections import defaultdict
 from itertools import combinations
 
@@ -7,36 +7,38 @@ import numpy as np
 from scipy.ndimage import measurements
 from scipy.sparse.csgraph import connected_components
 
+from batchflow import Notifier
+
 from .base import Fault
 
 class SurfacesExtractor:
     """ Extract separate fault surfaces from array with fault labels (probabilities or 0-1 values).
-        It uses assumption that the connected components on each slice in `components_axis` direction
-        are in the same direction (`faults_direction`) and do not have branches.
+    It uses assumption that the connected components on each slice in `components_axis` direction
+    are in the same direction (`faults_direction`) and do not have branches.
 
-        The algorithm is based on three stages:
-            - merge connected components into small patches: sequences of connected components
-              (see :class:`.FaultPatch`)
-            - group patches around the holes
-            - group patches with large intersection of the bound components
+    The algorithm is based on three stages:
+        - merge connected components into small patches: sequences of connected components
+            (see :class:`.FaultPatch`)
+        - group patches around the holes
+        - group patches with large intersection of the bound components
 
-        Then all groups of patches form separate fault instances.
+    Then all groups of patches form separate fault instances.
 
-        Patches can be organized into directed graph: each patch is connected to the patches which touch its bottom
-        component by its top component. Top patches we will call `parents`, the sequent bottom patches we will
-        call `children`.
+    Patches can be organized into directed graph: each patch is connected to the patches which touch its bottom
+    component by its top component. Top patches we will call `parents`, the sequent bottom patches we will
+    call `children`.
 
-        Parameters
-        ----------
-        array : str, numpy.ndarray or an object with the same slicing
-            Array with fault probabilities
-        origin : tuple of int, optional
-            Origin (offset) of the cube, is needed to make fault instances with right coordinates, by default (0, 0, 0)
-        faults_direction : 0 or 1, optional
-            Direction of faults: across ilines or xlines
-        components_axis : int, optional
-            Axis of cube slices where connected components will be searched
-        """
+    Parameters
+    ----------
+    array : str, numpy.ndarray or an object with the same slicing
+        Array with fault probabilities
+    origin : tuple of int, optional
+        Origin (offset) of the cube, is needed to make fault instances with right coordinates, by default (0, 0, 0)
+    faults_direction : 0 or 1, optional
+        Direction of faults: across ilines or xlines
+    components_axis : int, optional
+        Axis of cube slices where connected components will be searched
+    """
     def __init__(self, array, origin=(0, 0, 0), faults_direction=0, components_axis=2):
         if faults_direction not in (0, 1):
             raise ValueError(f'`faults_direction` must be 0 or 1 but {faults_direction} was given.')
@@ -51,13 +53,13 @@ class SurfacesExtractor:
 
         self.sorted_labels = sorted(self.sizes, key=self.sizes.get, reverse=True)
 
-        self.patches = {} # key - top patch component, value - FaultPatch instance
-        self.patches_reverse = {} # key - bottom patch component, value - FaultPatch instance
+        self.patchtop_to_patch = {} # key - top patch component, value - FaultPatch instance
+        self.patchbottom_to_patch = {} # key - bottom patch component, value - FaultPatch instance
 
         self.extended_components = {1: set(), -1: set()} # assemble components extended in a given direction
 
         self._candidates = {1: set(), -1: set()} # components indices to extend
-        self._connectivity_matrix = None # binary matrix of (len(self.patches), len(self.patches)).
+        self._connectivity_matrix = None # binary matrix of (len(self.patchtop_to_patch), len(self.patchtop_to_patch)).
                                          # 1 on (i, j) position means that i-th and j-th patches must be merged.
 
     def create_labels(self):
@@ -127,7 +129,7 @@ class SurfacesExtractor:
         intersection = np.logical_and(a_mask, b_mask)
         return intersection.sum()
 
-    def create_patches(self, size_threshold=100, bar=True):
+    def create_patches(self, size_threshold=100, bar='t'):
         """ Create small patches. There are two sources of component indices to initialize patches:
             - list of all connected components sorted by size
             - candidates: components that stopped the extension of previous patches
@@ -146,20 +148,20 @@ class SurfacesExtractor:
 
         # TODO: rewrite progress bar for used components
         candidates = self._components_to_extend(size_threshold)
-        for anchor_idx, direction in tqdm.tqdm_notebook(candidates, disable=(not bar)):
+        for anchor_idx, direction in Notifier(bar)(candidates):
             patch = FaultPatch(anchor_idx, direction, extractor=self)
 
-            # Check if patch consists of one component which is a part of the already exsisted patch
+            # Check if patch consists of one component which is a part of the already existed patch
             if len(patch.components) == 1 and (direction == 0 or patch.top in self.extended_components[-direction]):
                 continue
 
-            self.patches[patch.top] = patch
-            self.patches_reverse[patch.bottom] = patch
+            self.patchtop_to_patch[patch.top] = patch
+            self.patchbottom_to_patch[patch.bottom] = patch
 
         # Get mapping of patches to natural enumeration and its reverse version
-        self._labels_mapping = dict(enumerate(self.patches.keys()))
+        self._labels_mapping = dict(enumerate(self.patchtop_to_patch.keys()))
         self._labels_reverse_mapping = {v: k for k, v in self._labels_mapping.items()}
-        self._connectivity_matrix = np.eye(len(self.patches))
+        self._connectivity_matrix = np.eye(len(self.patchtop_to_patch))
 
         return self
 
@@ -202,10 +204,10 @@ class SurfacesExtractor:
 
     def add_candidates(self, candidates_bottom, candidates_top):
         """ Update candidates sets. """
-        self._candidates[1] |= set(candidates_bottom)
-        self._candidates[-1] |= set(candidates_top)
+        self._candidates[1].update(candidates_bottom)
+        self._candidates[-1].update(candidates_top)
 
-    def find_holes(self, depth=10, threshold=0.9, bar=True):
+    def find_holes(self, depth=10, threshold=0.9, bar='t'):
         """ Find holes of fault surfaces and merge patches around them into groups.
 
         To find holes, we search for a patches which touch more then one other patches (has several components
@@ -224,10 +226,10 @@ class SurfacesExtractor:
             Progress bar, by default True
         """
         groups = []
-        for idx in tqdm.tqdm_notebook(self.patches, disable=(not bar), desc='Find holes'):
-            bottom_rejected = self.patches[idx].bottom_rejected
+        for idx in Notifier(bar, desc='Find holes')(self.patchtop_to_patch):
+            bottom_rejected = self.patchtop_to_patch[idx].bottom_rejected
             for a, b in combinations(bottom_rejected, 2):
-                if a not in self.patches or b not in self.patches:
+                if a not in self.patchtop_to_patch or b not in self.patchtop_to_patch:
                     continue
                 tree_a = self._get_inheritors_tree(a, depth, threshold)
                 tree_b = self._get_inheritors_tree(b, depth, threshold)
@@ -273,9 +275,9 @@ class SurfacesExtractor:
         for _ in range(depth):
             bottom_rejected = set()
             for comp in components:
-                for bottom in self.patches[comp].bottom_rejected:
-                    if bottom in self.patches:
-                        leaf = list(self.patches[comp].components.values())[-1][0]
+                for bottom in self.patchtop_to_patch[comp].bottom_rejected:
+                    if bottom in self.patchtop_to_patch:
+                        leaf = list(self.patchtop_to_patch[comp].components.values())[-1][0]
                         intersection = self.compute_intersection_size(bottom, leaf)
                         a, b = self.sizes[bottom], self.sizes[leaf]
                         if intersection / min(a, b) >= threshold:
@@ -285,18 +287,18 @@ class SurfacesExtractor:
         return tree
 
 
-    def merge_patches(self, thresholds, bar=True):
+    def merge_patches(self, thresholds, bar='t'):
         """ Merge patches with large intersections. see :meth:`.FaultPatch.find_largest_intersections`. """
-        for idx, patch in tqdm.tqdm_notebook(self.patches.items(), disable=(not bar), desc='Merge patches'):
+        for idx, patch in Notifier(bar, desc='Merge patches')(self.patchtop_to_patch.items()):
             for bottom_idx in patch.find_largest_intersections(thresholds=thresholds):
-                if bottom_idx in self.patches:
+                if bottom_idx in self.patchtop_to_patch:
                     a = self._labels_reverse_mapping[idx]
                     b = self._labels_reverse_mapping[bottom_idx]
                     self._connectivity_matrix[a, b] = 1
                     self._connectivity_matrix[b, a] = 1
         return self
 
-    def to_faults(self, field, bar=True):
+    def to_faults(self, field, bar='t'):
         """ Make Fault instances from groups of patches.
 
         Parameters
@@ -315,10 +317,10 @@ class SurfacesExtractor:
         faults = []
         group_sizes = defaultdict(int)
 
-        for idx in tqdm.tqdm_notebook(range(n_groups), disable=(not bar)):
-            patches_idx = [self._labels_mapping[item] for item in np.arange(len(self.patches))[groups == idx]]
+        for idx in Notifier(bar)(range(n_groups)):
+            patches_idx = [self._labels_mapping[item] for item in np.arange(len(self.patchtop_to_patch))[groups == idx]]
             components = [
-                list(self.patches[patch].all_components) + self.patches[patch].bottom_rejected for patch in patches_idx
+                list(self.patchtop_to_patch[patch].all_components) + self.patchtop_to_patch[patch].bottom_rejected for patch in patches_idx
             ]
 
             for patch in components:
@@ -408,7 +410,7 @@ class FaultPatch:
         else:
             idx = self.anchor_idx
             components_by_depth = {self.extractor.idx_to_location(idx): np.array([idx])}
-            self.extractor.extended_components[self.extension_direction] |= {idx}
+            self.extractor.extended_components[self.extension_direction].add(idx)
 
             while True:
                 # Find components on the next slide in the defined direction
@@ -427,9 +429,8 @@ class FaultPatch:
                     break
 
                 components_by_depth[self.extractor.idx_to_location(neighbors[0])] = neighbors
-                self.extractor.extended_components[self.extension_direction] |= {idx}
-                self.extractor.extended_components[-self.extension_direction] |= {idx, neighbors[0]}
-
+                self.extractor.extended_components[self.extension_direction].add(idx)
+                self.extractor.extended_components[-self.extension_direction].update([idx, neighbors[0]])
                 idx = neighbors[0]
 
             self.components = dict(sorted(components_by_depth.items(), key=lambda x: x[0]))
@@ -468,7 +469,7 @@ class FaultPatch:
         """
         merge = {}
         for leaf in self.bottom_rejected:
-            if leaf in self.extractor.patches:
+            if leaf in self.extractor.patchtop_to_patch:
                 comp = self.all_components[-1]
                 intersection = self.extractor.compute_intersection_size(leaf, comp)
                 A, B = self.extractor.sizes[leaf], self.extractor.sizes[comp]

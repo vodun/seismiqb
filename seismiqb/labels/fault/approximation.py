@@ -18,7 +18,7 @@ def points_to_sticks(points, sticks_step=10, nodes_step=10, fault_orientation=No
     sticks_step : int
         Number of slides between sticks.
     nodes_step : int
-        Maximal distance between stick nodes
+        Maximum distance between stick nodes
     stick_orientation : int (0, 1 or 2)
         Direction of each stick
 
