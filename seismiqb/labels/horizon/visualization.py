@@ -15,16 +15,16 @@ class HorizonVisualizationMixin(VisualizationMixin):
     """ Methods for textual and visual representation of a horizon. """
     #pylint: disable=protected-access
     def __repr__(self):
-        return f"""<Horizon `{self.name}` for `{self.field.displayed_name}` at {hex(id(self))}>"""
+        return f"""<Horizon `{self.name}` for `{self.field.short_name}` at {hex(id(self))}>"""
 
     def __str__(self):
         msg = f"""
-        Horizon {self.name} for {self.field.displayed_name} loaded from {self.format}
+        Horizon {self.name} for {self.field.short_name} loaded from {self.format}
         Ilines range:      {self.i_min} to {self.i_max}
         Xlines range:      {self.x_min} to {self.x_max}
-        Depth range:       {self.h_min} to {self.h_max}
-        Depth mean:        {self.h_mean:.6}
-        Depth std:         {self.h_std:.6}
+        Depth range:       {self.d_min} to {self.d_max}
+        Depth mean:        {self.d_mean:.6}
+        Depth std:         {self.d_std:.6}
 
         Length:            {len(self)}
         Perimeter:         {self.perimeter}
@@ -76,7 +76,7 @@ class HorizonVisualizationMixin(VisualizationMixin):
         attributes = attributes.map(self._show_add_prefix, prefix=self.find_self())
 
         kwargs = {
-            'suptitle': f'`{self.name}` on field `{self.field.displayed_name}`',
+            'suptitle': f'`{self.name}` on field `{self.field.short_name}`',
             **kwargs
         }
         plotter = self.field.show(attributes=attributes, mode=mode, show=show, **kwargs)
@@ -88,10 +88,10 @@ class HorizonVisualizationMixin(VisualizationMixin):
 
         return plotter
 
-    def compute_auto_zoom(self, loc, axis=None, zoom_margin=100):
+    def compute_auto_zoom(self, index, axis=None, zoom_margin=100):
         """ Get slice around the horizon without zero-traces on bounds. """
-        bounds = self.field.geometry.compute_auto_zoom(loc, axis)[0]
-        return (bounds, slice(self.h_min - zoom_margin, self.h_max + zoom_margin))
+        bounds = self.field.geometry.compute_auto_zoom(index, axis)
+        return (bounds, slice(self.d_min - zoom_margin, self.d_max + zoom_margin))
 
     # 3D
     def show_3d(self, n_points=100, threshold=100., z_ratio=1., zoom=None, show_axes=True,
@@ -108,7 +108,7 @@ class HorizonVisualizationMixin(VisualizationMixin):
             Number of points for horizon surface creation.
             The more, the better the image is and the slower it is displayed.
         threshold : int
-            Threshold to remove triangles with bigger height differences in vertices.
+            Threshold to remove triangles with bigger depth differences in vertices.
         z_ratio : int
             Aspect ratio between height axis and spatial ones.
         zoom : tuple of slices
@@ -118,18 +118,18 @@ class HorizonVisualizationMixin(VisualizationMixin):
         width, height : int
             Size of the image.
         margin : int
-            Added margin from below and above along height axis.
+            Added margin from below and above along depth axis.
         savepath : str
             Path to save interactive html to.
         kwargs : dict
             Other arguments of plot creation.
         """
-        title = f'Horizon `{self.short_name}` on `{self.field.displayed_name}`'
+        title = f'Horizon `{self.short_name}` on `{self.field.short_name}`'
         aspect_ratio = (self.i_length / self.x_length, 1, z_ratio)
         axis_labels = (self.field.index_headers[0], self.field.index_headers[1], 'DEPTH')
         if zoom is None:
             zoom = [slice(0, i) for i in self.field.shape]
-        zoom[-1] = slice(self.h_min, self.h_max)
+        zoom[-1] = slice(self.d_min, self.d_max)
 
         x, y, z, simplices = self.make_triangulation(n_points, threshold, zoom)
 
@@ -179,11 +179,11 @@ class HorizonVisualizationMixin(VisualizationMixin):
         xlines = xlines.flatten()
 
         # Remove from grid points with no horizon in it
-        heights = self.full_matrix[ilines, xlines]
-        mask = (heights != self.FILL_VALUE)
+        depths = self.full_matrix[ilines, xlines]
+        mask = (depths != self.FILL_VALUE)
         x = ilines[mask]
         y = xlines[mask]
-        z = heights[mask]
+        z = depths[mask]
 
         # Triangulate points and remove some of the triangles
         tri = Delaunay(np.vstack([x, y]).T)

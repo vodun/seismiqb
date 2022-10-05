@@ -53,7 +53,7 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
     """
 
     # Columns used from the file
-    COLUMNS = ['iline', 'xline', 'height']
+    COLUMNS = ['INLINE_3D', 'CROSSLINE_3D', 'DEPTH']
 
     def __init__(self, storage, field, name=None, direction=None, **kwargs): #pylint: disable=super-init-not-called
         self.name = name
@@ -97,17 +97,17 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
         if len(data) == 0: # It can be for empty fault file.
             data = np.zeros((1, 3))
 
-        i_min, x_min, h_min = np.min(data, axis=0)
-        i_max, x_max, h_max = np.max(data, axis=0)
+        i_min, x_min, d_min = np.min(data, axis=0)
+        i_max, x_max, d_max = np.max(data, axis=0)
 
-        self.h_min, self.h_max = int(h_min), int(h_max)
+        self.d_min, self.d_max = int(d_min), int(d_max)
         self.i_min, self.i_max, self.x_min, self.x_max = int(i_min), int(i_max), int(x_min), int(x_max)
 
         self.i_length = (self.i_max - self.i_min) + 1
         self.x_length = (self.x_max - self.x_min) + 1
         self.bbox = np.array([[self.i_min, self.i_max],
                               [self.x_min, self.x_max],
-                              [self.h_min, self.h_max]],
+                              [self.d_min, self.d_max]],
                              dtype=np.int32)
 
     def set_direction(self, direction):
@@ -269,9 +269,27 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
                 points = points[points[:, i] >= slices[i].start]
         self._sticks = points_to_sticks(points, sticks_step, stick_nodes_step, self.direction)
 
-    def add_to_mask(self, mask, locations=None, width=1, **kwargs):
-        """ Add fault to background. """
+    def add_to_mask(self, mask, locations=None, width=1, axis=None, sparse=False, **kwargs):
+        """ Add fault to background.
+
+        Parameters
+        ----------
+        mask : ndarray
+            Background to add fault to.
+        locations : ndarray
+            Where the fault is located.
+        width : int
+            Width of an added fault.
+        axis : int or None, optional
+            Orientation of the crop to insert fault, by default None (unknown or crop is 3D)
+        sparse : bool, optional
+            Whether create sparse mask (only on labeled slides) or not, by default False
+        """
         _ = kwargs
+
+        if axis is not None and axis not in (2, self.direction):
+            return mask
+
         mask_bbox = np.array([[locations[0].start, locations[0].stop],
                               [locations[1].start, locations[1].stop],
                               [locations[2].start, locations[2].stop]],
@@ -280,6 +298,19 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
 
         if (self.bbox[:, 1] < mask_bbox[:, 0]).any() or (self.bbox[:, 0] >= mask_bbox[:, 1]).any():
             return mask
+
+        if sparse and self.has_component('sticks'):
+            loc = np.unique(self.nodes[:, self.direction])
+            loc = loc[np.logical_and(mask_bbox[self.direction, 0] <= loc, loc < mask_bbox[self.direction, 1])]
+
+            points = points[np.isin(points[:, self.direction], loc)]
+
+            unlabeled_slides = np.take(mask, loc - mask_bbox[self.direction, 0], self.direction)
+            unlabeled_slides = loc[unlabeled_slides[:, 0, 0] == -1]
+
+            slices = [slice(None)] * 3
+            slices[self.direction] = unlabeled_slides - mask_bbox[self.direction, 0]
+            mask[tuple(slices)] = 0
 
         insert_points_into_mask(mask, points, mask_bbox, width=width, axis=1-self.direction)
         return mask

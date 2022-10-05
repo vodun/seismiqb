@@ -13,8 +13,8 @@ from ...utils import CharismaMixin, make_interior_points_mask
 
 class FaultSticksMixin(CharismaMixin):
     """ Mixin to load, process and dump FaultSticks files. """
-    FAULT_STICKS_SPEC = ['INLINE', 'iline', 'xline', 'cdp_x', 'cdp_y', 'height', 'name', 'number']
-    REDUCED_FAULT_STICKS_SPEC = ['iline', 'xline', 'height', 'name', 'number']
+    FAULT_STICKS_SPEC = ['inline_marker', 'INLINE_3D', 'CROSSLINE_3D', 'CDP_X', 'CDP_Y', 'DEPTH', 'name', 'number']
+    REDUCED_FAULT_STICKS_SPEC = ['INLINE_3D', 'CROSSLINE_3D', 'DEPTH', 'name', 'number']
 
     @classmethod
     def read_df(cls, path):
@@ -57,13 +57,13 @@ class FaultSticksMixin(CharismaMixin):
             raise ValueError('Empty DataFrame (possibly wrong coordinates).')
         col, direction = None, None
 
-        ilines_diff = sum(df.iline[1:].values - df.iline[:-1].values == 0)
-        xlines_diff = sum(df.xline[1:].values - df.xline[:-1].values == 0)
+        ilines_diff = sum(df['INLINE_3D'][1:].values - df['INLINE_3D'][:-1].values == 0)
+        xlines_diff = sum(df['CROSSLINE_3D'][1:].values - df['CROSSLINE_3D'][:-1].values == 0)
         if ilines_diff > xlines_diff: # Use iline as an index
-            col = 'iline'
+            col = 'INLINE_3D'
             direction = 0
         else: # Use xline as an index
-            col = 'xline'
+            col = 'CROSSLINE_3D'
             direction = 1
 
         if 'number' in df.columns: # Dataframe has stick index
@@ -72,7 +72,7 @@ class FaultSticksMixin(CharismaMixin):
         if col is None:
             raise ValueError('Wrong format of sticks: there is no column to group points into sticks.')
 
-        df = df.sort_values('height')
+        df = df.sort_values('DEPTH')
         sticks = df.groupby(col).apply(lambda x: x[self.COLUMNS].values).reset_index(drop=True)
 
         return (sticks, direction) if return_direction else sticks
@@ -120,13 +120,13 @@ class FaultSticksMixin(CharismaMixin):
             self.direction = 1
             return
 
-        if recover_lines and 'cdp_x' in df.columns:
+        if recover_lines and 'CDP_X' in df.columns:
             df = self.recover_lines_from_cdp(df)
 
         points = df[self.REDUCED_CHARISMA_SPEC].values
 
         if transform:
-            points = self.field_reference.geometry.lines_to_cubic(points)
+            points = self.field_reference.geometry.lines_to_ordinals(points)
         df[self.REDUCED_CHARISMA_SPEC] = np.round(points).astype(np.int32)
 
         if verify:
@@ -163,15 +163,15 @@ class FaultSticksMixin(CharismaMixin):
 
         sticks_df = []
         for stick_idx, stick in enumerate(self.sticks):
-            stick = self.field.geometry.cubic_to_lines(stick).astype(int)
+            stick = self.field.geometry.ordinals_to_lines(stick).astype(int)
             cdp = self.field.geometry.lines_to_cdp(stick[:, :2])
             df = {
-                'INLINE-': 'INLINE-',
-                'iline': stick[:, 0],
-                'xline': stick[:, 1],
-                'cdp_x': cdp[:, 0],
-                'cdp_y': cdp[:, 1],
-                'height': stick[:, 2],
+                'inline_marker': 'INLINE-',
+                'INLINE_3D': stick[:, 0],
+                'CROSSLINE_3D': stick[:, 1],
+                'CDP_X': cdp[:, 0],
+                'CDP_Y': cdp[:, 1],
+                'DEPTH': stick[:, 2],
                 'name': os.path.basename(path),
                 'number': stick_idx
             }
@@ -247,30 +247,43 @@ class FaultSerializationMixin:
         sticks_labels = npzfile.get('sticks_labels')
 
         self.from_dict({
-            'points': npzfile['points'],
+            'points': npzfile.get('points'),
             'nodes': npzfile.get('nodes'),
             'simplices': npzfile.get('simplices'),
             'sticks': self._labeled_array_to_sticks(sticks, sticks_labels),
         }, transform=transform)
 
-        self.direction = npzfile.get('direction')
+        direction = npzfile.get('direction')
+        if direction is not None:
+            direction = int(direction)
+        self.direction = direction
 
     def load_npy(self, path):
         """ Load fault points from npy file. """
         points = np.load(path, allow_pickle=False)
         self._points = points
 
-    def dump_npz(self, path):
+    def dump_npz(self, path, attributes_to_create=None):
         """ Dump fault to npz. """
         path = self.field.make_path(path, name=self.short_name, makedirs=False)
 
+        if attributes_to_create:
+            if isinstance(attributes_to_create, str):
+                attributes_to_create = [attributes_to_create]
+            for item in attributes_to_create:
+                getattr(self, item)
+
+        kwargs = {'direction': self.direction}
         if self.has_component('sticks'):
             sticks, sticks_labels = self._sticks_to_labeled_array(self.sticks)
-        else:
-            sticks, sticks_labels = np.zeros((0, 3)), np.zeros((0, 1))
+            kwargs['sticks'] = sticks
+            kwargs['sticks_labels'] = sticks_labels
 
-        np.savez(path, points=self._points, nodes=self._nodes, simplices=self._simplices,
-                 sticks=sticks, sticks_labels=sticks_labels, direction=self.direction)
+        for item in ['points', 'nodes', 'simplices']:
+            if self.has_component(item):
+                kwargs[item] = getattr(self, item)
+
+        np.savez(path, **kwargs)
 
 
     def _sticks_to_labeled_array(self, sticks):

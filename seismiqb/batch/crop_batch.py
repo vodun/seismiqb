@@ -1,30 +1,49 @@
 """ Seismic Crop Batch. """
-from copy import copy
 import os
-import random
-import string
+import traceback
 from warnings import warn
+from functools import wraps
+from inspect import signature
 
 import numpy as np
 import cv2
 from scipy.interpolate import interp1d
 from scipy.ndimage import gaussian_filter1d
-from scipy.signal import butter, sosfiltfilt, hilbert
+from scipy.signal import butter, sosfiltfilt
 
-from batchflow import DatasetIndex, Batch, action, inbatch_parallel, SkipBatchException, apply_parallel
+from batchflow import DatasetIndex, Batch
+from batchflow import action, any_action_failed, SkipBatchException
+from batchflow import apply_parallel as apply_parallel_decorator
 
 from .visualization_batch import VisualizationMixin
 from ..labels import Horizon
-from ..utils import to_list, AugmentedDict, adjust_shape_3d, groupby_all
+from ..utils import to_list, groupby_all
+from .. import functional
 
 
 
-AFFIX = '___'
-SIZE_POSTFIX = 12
-SIZE_SALT = len(AFFIX) + SIZE_POSTFIX
-CHARS = string.ascii_uppercase + string.digits
+def add_methods(method_names):
+    """ Add augmentations to batch class. """
+    def _add_methods(cls):
+        def create_batch_method(method_name):
+            method = getattr(functional, method_name)
+            requires_rng = 'rng' in signature(method).parameters
 
+            @wraps(method)
+            def wrapper(self, _, buffer, *args, src=None, dst=None, **kwargs):
+                _ = src, dst
+                buffer[:] = method(buffer, *args, **kwargs)
+            wrapper = cls.use_apply_parallel(wrapper, requires_rng=requires_rng)
+            return wrapper
 
+        for method_name in method_names:
+            setattr(cls, method_name, create_batch_method(method_name))
+        return cls
+    return _add_methods
+
+@add_methods(['rotate_2d', 'rotate_3d', 'scale_2d', 'scale_3d',
+              'affine_transform', 'perspective_transform', 'elastic_transform',
+              'compute_instantaneous_amplitude', 'compute_instantaneous_phase', 'compute_instantaneous_frequency'])
 class SeismicCropBatch(Batch, VisualizationMixin):
     """ Batch with ability to generate 3d-crops of various shapes.
 
@@ -32,28 +51,13 @@ class SeismicCropBatch(Batch, VisualizationMixin):
     individual cubes into crop-based indices. The transformation uses randomly generated postfix (see `:meth:.salt`)
     to obtain unique elements.
     """
-    components = None
     apply_defaults = {
+        'init': 'preallocating_init',
+        'post': 'noop_post',
         'target': 'for',
-        'post': '_assemble'
     }
 
-
-    def _init_component(self, *args, **kwargs):
-        """ Create and preallocate a new attribute with the name ``dst`` if it
-        does not exist and return batch indices.
-        """
-        _ = args
-        dst = kwargs.get("dst")
-        if dst is None:
-            raise KeyError("dst argument must be specified")
-        if isinstance(dst, str):
-            dst = (dst,)
-        for comp in dst:
-            if not hasattr(self, comp):
-                self.add_components(comp, np.array([np.nan] * len(self.index)))
-        return self.indices
-
+    # Inner workings
     @action
     def add_components(self, components, init=None):
         """ Add new components, checking that attributes of the same name are not present in dataset.
@@ -77,76 +81,39 @@ class SeismicCropBatch(Batch, VisualizationMixin):
                 raise ValueError(msg)
         super().add_components(components=components, init=init)
 
-    # Inner workings
-    @staticmethod
-    def salt(path):
-        """ Adds random postfix of predefined length to string.
-
-        Parameters
-        ----------
-        path : str
-            supplied string.
-
-        Returns
-        -------
-        path : str
-            supplied string with random postfix.
-
-        Notes
-        -----
-        Action `make_locations` makes a new instance of SeismicCropBatch with different (enlarged) index.
-        Items in that index should point to cube location to cut crops from.
-        Since we can't store multiple copies of the same string in one index (due to internal usage of dictionary),
-        we need to augment those strings with random postfix, which can be removed later.
-        """
-        return path + AFFIX + ''.join(random.choice(CHARS) for _ in range(SIZE_POSTFIX))
-
-    @staticmethod
-    def has_salt(path):
-        """ Check whether path is salted. """
-        return path[::-1].find(AFFIX) == SIZE_POSTFIX
-
-    @staticmethod
-    def unsalt(path):
-        """ Removes postfix that was made by `salt` method.
-
-        Parameters
-        ----------
-        path : str
-            supplied string.
-
-        Returns
-        -------
-        str
-            string without postfix.
-        """
-        if AFFIX in path:
-            return path[:-SIZE_SALT]
-        return path
-
+    def __setattr__(self, name, value):
+        super().__setattr__(name, value)
+        if isinstance(value, np.ndarray) and value.ndim == 4 and name not in self.name_to_order:
+            self.name_to_order[name] = np.array(['i', 'x', 'd'])
 
     def get(self, item=None, component=None):
         """ Custom access for batch attributes.
-        If `component` is present in dataset and is an instance of `AugmentedDict`,
-        then index it with item and return it.
-        Otherwise retrieve `component` from batch itself and optionally index it with `item` position in `self.indices`.
+        If `component` is one of the registered components, get it, optionally indexed with `item`.
+        Otherwise, try to get `component` as the attribute of a field, corresponding to `item`.
         """
-        if hasattr(self, 'dataset'):
-            data = getattr(self.dataset, component, None)
-            if isinstance(data, AugmentedDict):
-                if isinstance(item, str) and self.has_salt(item):
-                    item = self.unsalt(item)
+        if component in self.components:
+            # Faster, than `getattr(self, component)`, as we already know that the component exists
+            data = self._data[component]
+            if item is not None:
                 return data[item]
 
-        data = getattr(self, component) if isinstance(component, str) else component
-        if item is not None:
-            if isinstance(data, (np.ndarray, list)) and len(data) == len(self):
-                pos = np.where(self.indices == item)[0][0]
-                return data[pos]
-            return super().get(item, component)
+        elif component in self.__dict__:
+            data = self.__dict__[component]
+            if item is not None:
+                return data[item]
+
+        else: # retrieve from `dataset`
+            if item is not None:
+                field_name = self._data['field_names'][item]
+                field = self.dataset.fields[field_name]
+                if component == 'fields':
+                    return field
+                return getattr(field, component)
+
+            # Not often used, mainly for introspection/debug. Not optimized
+            data = getattr(self.dataset, component)
 
         return data
-
 
     def deepcopy(self, preserve=False):
         """ Create a copy of a batch with the same `dataset` and `pipeline` references. """
@@ -158,95 +125,129 @@ class SeismicCropBatch(Batch, VisualizationMixin):
             new.pipeline = self.pipeline
         return new
 
+
+    # Batch action parallelization
+    def preallocating_init(self, src=None, dst=None, buffer_type=None, return_indices=True, **kwargs):
+        """ Preallocate a buffer. """
+        if src is None and dst is None:
+            raise ValueError('Specify either `src` or `dst`!.')
+        dst = dst if dst is not None else src
+
+        # Check if the operation can be done in-place
+        inplace = False
+        if src is None:
+            inplace = False
+        if dst == src:
+            inplace = True
+
+        if inplace:
+            buffer = self.get(component=src)
+        else:
+            if src is None or buffer_type is not None:
+                dtype = np.float32 # TODO: determine based on geometries
+                buffer = (getattr(np, buffer_type))((len(self), *self.crop_shape), dtype=dtype)
+            else:
+                buffer = self.get(component=src).copy()
+            self.add_components(dst, buffer)
+
+        return list(zip(self.indices, buffer)) if return_indices else buffer
+
+    def noop_post(self, all_results, **kwargs):
+        """ Check for errors after the action, otherwise does nothing. """
+        _ = kwargs
+
+        if any_action_failed(all_results):
+            all_errors = self.get_errors(all_results)
+            print(all_errors)
+            traceback.print_tb(all_errors[0].__traceback__)
+            raise RuntimeError("Could not assemble the batch!") from all_errors[0]
+        return self
+
+
     # Core actions
     @action
-    def make_locations(self, generator, batch_size=None, passdown=None):
+    def make_locations(self, generator, batch_size=None, keep_attributes=None):
         """ Use `generator` to create `batch_size` locations.
         Each location defines position in a cube and can be used to retrieve data/create masks at this place.
 
         Generator can be either Sampler or Grid to make locations in a random or deterministic fashion.
         `generator` must be a callable and return (batch_size, 9+) array, where the first nine columns should be:
-        (field_id, label_id, orientation, i_start, x_start, h_start, i_stop, x_stop, h_stop).
+        (field_id, label_id, orientation, i_start, x_start, d_start, i_stop, x_stop, d_stop).
         `generator` must have `to_names` method to convert cube and label ids into actual strings.
 
-        Field and label ids are transformed into names of actual fields and labels (horizons, faults, facies, etc).
-        Then we create a completely new instance of `SeismicCropBatch`, where the new index is set to
-        cube names with additional postfixes (see `:meth:.salt`), which is returned as the result of this action.
+        Alternatively, `generator` may be a ready-to-use ndarray with the same structure. In this case, `to_names`
+        is called directly from dataset. Should be used with caution and mainly for debugging purposes.
 
-        After parsing contents of generated (batch_size, 9+) array we add following attributes:
+        Field and label ids are transformed into names of actual fields and labels (horizons, faults, facies, etc).
+        Then we create a new instance of `SeismicCropBatch`, where the index is set to a enumeration of locations.
+
+        After parsing contents of generated (batch_size, 9+)-shaped array we add following attributes:
             - `locations` with triplets of slices
             - `orientations` with crop orientation: 0 for iline direction, 1 for crossline direction
             - `shapes`
+            - `crop_shape`, computed from `shapes`
+            - `field_names`
             - `label_names`
             - `generated` with originally generated data
-        If `generator` creates more than 9 columns, they are not used, but stored in the  `generated` attribute.
+        If `generator` creates more than 9 columns, they are not used, but still stored in the  `generated` attribute.
 
         Parameters
         ----------
-        generator : callable
-            Sampler or Grid to retrieve locations. Must be a callable from positive integer.
+        generator : callable or np.ndarray
+            Sampler or Grid to retrieve locations. Must be a callable that works off of a positive integer.
         batch_size : int
             Number of locations to generate.
-        passdown : str or sequence of str
-            Components to pass down to a newly created batch.
+        keep_attributes : str or sequence of str
+            Components to keep in a newly created batch.
 
         Returns
         -------
         SeismicCropBatch
-            A completely new instance of Batch.
+            A new instance of Batch.
         """
-        # pylint: disable=protected-access
-        generated = generator(batch_size)
-
-        # Convert IDs to names, that are used in dataset
-        field_names, label_names = generator.to_names(generated[:, [0, 1]]).T
+        # Get ndarray with `locations` and `orientations`, convert IDs to names, that are used in dataset
+        if callable(generator):
+            generated = generator(batch_size)
+            field_names, label_names = generator.to_names(generated[:, [0, 1]]).T
+        elif isinstance(generator, np.ndarray):
+            generated = generator
+            field_names, label_names = self.dataset.to_names(generated[:, [0, 1]]).T
+        else:
+            raise ValueError(f'`generator` should either be callable or ndarray, got {type(generator)} instead!')
 
         # Locations: 3D slices in the cube coordinates
-        locations = [[slice(i_start, i_stop), slice(x_start, x_stop), slice(h_start, h_stop)]
-                      for i_start, x_start, h_start, i_stop,  x_stop,  h_stop in generated[:, 3:9]]
+        locations = [[slice(i_start, i_stop), slice(x_start, x_stop), slice(d_start, d_stop)]
+                      for i_start, x_start, d_start, i_stop,  x_stop,  d_stop in generated[:, 3:9]]
 
         # Additional info
         orientations = generated[:, 2]
         shapes = generated[:, [6, 7, 8]] - generated[:, [3, 4, 5]]
+        crop_shape = shapes[0] if orientations[0] == 0 else shapes[0][[1, 0, 2]]
 
         # Create a new SeismicCropBatch instance
-        new_index = [self.salt(ix) for ix in field_names]
+        new_index = np.arange(len(locations), dtype=np.int32)
         new_batch = type(self)(DatasetIndex.from_index(index=new_index))
 
         # Keep chosen components in the new batch
-        if passdown:
-            passdown = [passdown] if isinstance(passdown, str) else passdown
-            for component in passdown:
+        if keep_attributes:
+            keep_attributes = [keep_attributes] if isinstance(keep_attributes, str) else keep_attributes
+            for component in keep_attributes:
                 if hasattr(self, component):
-                    new_batch.add_components(component, getattr(self, component))
+                    new_batch.add_components(component, self.get(component=component))
 
-        new_batch.add_components(('locations', 'generated', 'shapes', 'orientations', 'label_names'),
-                                 (locations, generated, shapes, orientations, label_names))
+        # Set all freshly computed attributes. Manually keep the reference to the `pipeline`
+        # Note: `pipeline` would be set by :meth:`~.Pipeline._exec_one_action` anyway, so this is not necessary.
+        new_batch.add_components(('locations', 'generated', 'shapes', 'orientations', 'field_names', 'label_names'),
+                                 (locations, generated, shapes, orientations, field_names, label_names))
+        new_batch.crop_shape = crop_shape
+        new_batch.name_to_order = {}
+        new_batch.pipeline = self.pipeline
         return new_batch
-
-    @action
-    def adaptive_reshape(self, src=None, dst=None):
-        """ Transpose crops with crossline orientation into (x, i, h) order. """
-        src = src if isinstance(src, (tuple, list)) else [src]
-        if dst is None:
-            dst = src
-        dst = dst if isinstance(dst, (tuple, list)) else [dst]
-
-        for src_, dst_ in zip(src, dst):
-            result = []
-            for ix in self.indices:
-                item = self.get(ix, src_)
-                if self.get(ix, 'orientations'):
-                    item = item.transpose(1, 0, 2)
-                result.append(item)
-            setattr(self, dst_, np.stack(result))
-        return self
 
 
     # Loading of cube data and its derivatives
-    @action
-    @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def load_cubes(self, ix, dst, native_slicing=False, src_geometry='geometry', **kwargs):
+    @apply_parallel_decorator(init='preallocating_init', post='noop_post', buffer_type='empty', target='for')
+    def load_seismic(self, ix, buffer, dst, src=None, src_geometry='geometry', **kwargs):
         """ Load data from cube for stored `locations`.
 
         Parameters
@@ -260,18 +261,23 @@ class SeismicCropBatch(Batch, VisualizationMixin):
             Field attribute with desired geometry.
         """
         field = self.get(ix, 'fields')
-        location = self.get(ix, 'locations')
-        return field.load_seismic(location=location, native_slicing=native_slicing, src=src_geometry, **kwargs)
+        locations = self.get(ix, 'locations')
+        orientation = self.get(ix, 'orientations')
+
+        if orientation == 1:
+            buffer = buffer.transpose(1, 0, 2)
+        field.load_seismic(locations=locations, src=src_geometry, buffer=buffer, **kwargs)
+
+    load_cubes = load_crops = load_seismic
 
 
-    @action
-    @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def normalize(self, ix, src=None, dst=None, mode='meanstd', normalization_stats=None,
-                  from_field=True, clip_to_quantiles=False, q=(0.01, 0.99)):
-        """ Normalize `src` with.
+    @apply_parallel_decorator(init='preallocating_init', post='noop_post', target='for')
+    def normalize(self, ix, buffer, src, dst=None, mode='meanstd', normalization_stats='field',
+                  clip_to_quantiles=False, q=(0.01, 0.99)):
+        """ Normalize `src` with provided stats.
         Depending on the parameters, stats for normalization will be taken from (in order of priority):
             - supplied `normalization_stats`, if provided
-            - the field that created this `src`, if `from_field`
+            - the field that created this `src`, if `normalization_stats=True`
             - computed from `src` data directly
 
         TODO: streamline the entire process of normalization.
@@ -283,64 +289,58 @@ class SeismicCropBatch(Batch, VisualizationMixin):
             If callable, then it will be called on `src` data with additional `normalization_stats` argument.
         normalization_stats : dict, optional
             If provided, then used to get statistics for normalization.
-        from_field : bool
-            If True, then normalization stats are taken from attacked field.
         clip_to_quantiles : bool
             Whether to clip the data to quantiles, specified by `q` parameter.
             Quantile values are taken from `normalization_stats`, provided by either of the ways.
         q : tuple of numbers
             Quantiles for clipping. Used as keys to `normalization_stats`, provided by either of the ways.
         """
-        data = self.get(ix, src)
         field = self.get(ix, 'fields')
 
         # Prepare normalization stats
         if isinstance(normalization_stats, dict):
-            normalization_stats = normalization_stats[field.short_name]
+            if field.short_name in normalization_stats:
+                normalization_stats = normalization_stats[field.short_name]
+        elif normalization_stats in {'field', True}:
+            normalization_stats = field.normalization_stats
         else:
-            if from_field:
-                normalization_stats = field.normalization_stats
-            else:
-                # Crop-wise stats
-                normalization_stats = {}
+            # Crop-wise stats
+            normalization_stats = {}
 
-                if clip_to_quantiles:
-                    data = np.clip(data, *np.quantile(data, q))
-                    clip_to_quantiles = False
+            if clip_to_quantiles:
+                buffer = np.clip(buffer, *np.quantile(buffer, q))
+                clip_to_quantiles = False
 
-                if 'mean' in mode:
-                    normalization_stats['mean'] = np.mean(data)
-                if 'std' in mode:
-                    normalization_stats['std'] = np.std(data)
-                if 'min' in mode:
-                    normalization_stats['min'] = np.min(data)
-                if 'max' in mode:
-                    normalization_stats['max'] = np.max(data)
+            if 'mean' in mode:
+                normalization_stats['mean'] = np.mean(buffer)
+            if 'std' in mode:
+                normalization_stats['std'] = np.std(buffer)
+            if 'min' in mode:
+                normalization_stats['min'] = np.min(buffer)
+            if 'max' in mode:
+                normalization_stats['max'] = np.max(buffer)
 
         # Clip
         if clip_to_quantiles:
-            data = np.clip(data, normalization_stats['q_01'], normalization_stats['q_99'])
+            buffer = np.clip(buffer, normalization_stats['q_01'], normalization_stats['q_99'])
 
         # Actual normalization
-        result = data.copy() if data.base is not None else data
-
         if callable(mode):
-            result = mode(result, normalization_stats)
+            buffer[:] = mode(buffer, normalization_stats)
         if 'mean' in mode:
-            result -= normalization_stats['mean']
+            buffer -= normalization_stats['mean']
         if 'std' in mode:
-            result /= normalization_stats['std']
+            buffer /= normalization_stats['std']
         if 'min' in mode and 'max' in mode:
             if normalization_stats['max'] != normalization_stats['min']:
-                result = ((result - normalization_stats['min'])
-                        / (normalization_stats['max'] - normalization_stats['min']))
+                buffer -= normalization_stats['min']
+                buffer /= normalization_stats['max'] - normalization_stats['min']
             else:
-                result = result - normalization_stats['min']
-        return result
+                buffer -= normalization_stats['min']
+        return buffer
 
 
-    @action
-    @inbatch_parallel(init='indices', post='_assemble', target='for')
+    @apply_parallel_decorator(init='indices', post='_assemble', target='for')
     def compute_attribute(self, ix, dst, src='images', attribute='semblance', window=10, stride=1, device='cpu'):
         """ Compute geological attribute.
 
@@ -372,8 +372,9 @@ class SeismicCropBatch(Batch, VisualizationMixin):
 
     # Loading of labels
     @action
-    @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def create_masks(self, ix, dst, indices='all', width=3, src_labels='labels'):
+    @apply_parallel_decorator(init='preallocating_init', post='noop_post', buffer_type='zeros', target='for')
+    def create_masks(self, ix, buffer, dst, src=None, indices='all', width=3, src_labels='labels',
+                     sparse=False, **kwargs):
         """ Create masks from labels in stored `locations`.
 
         Parameters
@@ -389,15 +390,23 @@ class SeismicCropBatch(Batch, VisualizationMixin):
             Width of the resulting label.
         src_labels : str
             Dataset attribute with labels dict.
+        sparse : bool, optional
+            Whether create sparse mask (only on labeled slides) or not, by default False. Unlabeled
+            slides will be filled with -1.
         """
         field = self.get(ix, 'fields')
-        location = self.get(ix, 'locations')
-        return field.make_mask(location=location, width=width, indices=indices, src=src_labels)
+        locations = self.get(ix, 'locations')
+        orientation = self.get(ix, 'orientations')
+
+        if orientation == 1:
+            buffer = buffer.transpose(1, 0, 2)
+        field.make_mask(locations=locations, orientation=orientation, buffer=buffer,
+                        width=width, indices=indices, src=src_labels, sparse=sparse)
 
 
     @action
-    @inbatch_parallel(init='indices', post='_assemble', target='for')
-    def create_regression_masks(self, ix, dst, indices='all', src_labels='labels', scale=False):
+    @apply_parallel_decorator(init='indices', post='_assemble', target='for')
+    def create_regression_masks(self, ix, dst, src=None, indices='all', src_labels='labels', scale=False):
         """ Create masks with relative depth. """
         field = self.get(ix, 'fields')
         location = self.get(ix, 'locations')
@@ -405,7 +414,7 @@ class SeismicCropBatch(Batch, VisualizationMixin):
 
 
     @action
-    @inbatch_parallel(init='indices', post='_assemble', target='for')
+    @apply_parallel_decorator(init='indices', post='_assemble', target='for')
     def compute_label_attribute(self, ix, dst, src='amplitudes', atleast_3d=True, dtype=np.float32, **kwargs):
         """ Compute requested attribute along label surface. Target labels are defined by sampled locations.
 
@@ -424,6 +433,8 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         -----
         Correspondence between the attribute and the method that computes it
         is defined by :attr:`~Horizon.ATTRIBUTE_TO_METHOD`.
+
+        TODO: can be improved with `preallocating_init`
         """
         field = self.get(ix, 'fields')
         location = self.get(ix, 'locations')
@@ -441,160 +452,121 @@ class SeismicCropBatch(Batch, VisualizationMixin):
             raise ValueError(msg)
 
         result = field.load_attribute(src=src, location=location, atleast_3d=atleast_3d, dtype=dtype, **kwargs)
-
         return result
 
 
-    # More methods to work with labels
+    # Rebatch and its callables
     @action
-    @inbatch_parallel(init='indices', post='_post_mask_rebatch', target='for',
-                      src='masks', threshold=0.8, passdown=None, axis=-1)
-    def mask_rebatch(self, ix, src='masks', threshold=0.8, passdown=None, axis=-1):
-        """ Remove elements with masks area lesser than a threshold.
-
-        Parameters
-        ----------
-        threshold : float
-            Minimum percentage of covered area for a mask to be kept in the batch.
-        passdown : sequence of str
-            Components to filter in the batch.
-        axis : int
-            Axis to project masks to before computing mask area.
-        """
-        _ = threshold, passdown
-        mask = self.get(ix, src)
-
-        reduced = np.max(mask, axis=axis) > 0.0
-        return np.sum(reduced) / np.prod(reduced.shape)
-
-    def _post_mask_rebatch(self, areas, *args, src=None, passdown=None, threshold=None, **kwargs):
-        #pylint: disable=protected-access, access-member-before-definition, attribute-defined-outside-init
-        _ = args, kwargs
-        new_index = [self.indices[i] for i, area in enumerate(areas) if area > threshold]
-        if len(new_index) > 0:
-            self.index = DatasetIndex.from_index(index=new_index)
-        else:
-            raise SkipBatchException
-
-        passdown = passdown or []
-        passdown.extend([src, 'locations', 'shapes', 'generated', 'orientations', 'label_names'])
-        passdown = list(set(passdown))
-
-        for compo in passdown:
-            new_data = [getattr(self, compo)[i] for i, area in enumerate(areas) if area > threshold]
-            setattr(self, compo, np.array(new_data))
-        return self
-
-
-    @action
-    @inbatch_parallel(init='_init_component', post='_assemble', target='for')
-    def filter_out(self, ix, src=None, dst=None, expr=None, low=None, high=None, length=None, p=1.0):
-        """ Zero out mask for horizon extension task.
+    def rebatch_on_condition(self, src=None, condition='area', threshold=None, keep_attributes=None, **kwargs):
+        """ Compute a condition on each item of `src`, keep only elements that returned value bigger than `threshold`.
+        Modifies (slices) all of the components in a batch instance, as well as its index.
 
         Parameters
         ----------
         src : str
-            Component of batch with mask.
-        dst : str
-            Component of batch to put cut mask in.
-        expr : callable, optional.
-            Some vectorized function. Accepts points in cube, returns either float.
-            If not None, low or high/length should also be supplied.
-        p : float
-            Probability of applying the transform. Default is 1.
+            Name of the component to use as input for `condition`.
+        condition : callable, {'area', 'discontinuity_size'}
+            If callable, then applied to each item of `src`.
+            If 'area', then labeled area of a mask is computed, using the specified axis for projection.
+            If 'discontinuity_size', then we compute the biggest discontinuity size.
+        threshold : number
+            A value to compare computed conditions against.
+        keep_attributes : sequence, optional
+            Additional batch attributes to slice with the new index.
+        kwargs : dict
+            Passed directly to `condition` function.
         """
-        if not (src and dst):
-            raise ValueError('Src and dst must be provided')
+        # Select correct function to compute
+        if callable(condition):
+            pass
+        elif condition == 'area':
+            condition = self._compute_mask_area
+        elif condition == 'discontinuity_size':
+            condition = self._compute_discontinuity_size
 
-        mask = self.get(ix, src)
-        coords = np.where(mask > 0)
+        # Compute indices to keep
+        data = self.get(component=src)
+        indices = np.array([i for i, item in enumerate(data)
+                            if condition(item, **kwargs) > threshold])
 
-        if np.random.binomial(1, 1 - p) or len(coords[0]) == 0 or expr is None:
-            new_mask = mask
+        if len(indices) > 0:
+            self.index = DatasetIndex.from_index(index=indices)
         else:
-            new_mask = np.zeros_like(mask)
-            coords = np.array(coords).astype(np.float).T
-            cond = np.ones(shape=coords.shape[0]).astype(bool)
-            coords /= np.reshape(mask.shape, newshape=(1, 3))
+            raise SkipBatchException
 
-            if low is not None:
-                cond &= np.greater_equal(expr(coords), low)
-            if high is not None:
-                cond &= np.less_equal(expr(coords), high)
-            if length is not None:
-                low = 0 if not low else low
-                cond &= np.less_equal(expr(coords), low + length)
+        # Re-index components and additional attributes passed
+        keep_attributes = keep_attributes = keep_attributes or []
+        keep_attributes += list(self.components or [])
+        keep_attributes = list(set(keep_attributes))
 
-            coords *= np.reshape(mask.shape, newshape=(1, 3))
-            coords = np.round(coords).astype(np.int32)[cond]
+        for component in keep_attributes:
+            component_data = self.get(component=component)
+            if isinstance(component_data, np.ndarray):
+                component_data = component_data[indices]
+            else:
+                component_data = [component_data[i] for i in indices]
+            setattr(self, component, component_data)
+        return self
 
-            new_mask[coords[:, 0], coords[:, 1], coords[:, 2]] = mask[coords[:, 0],
-                                                                      coords[:, 1],
-                                                                      coords[:, 2]]
-        return new_mask
+    @staticmethod
+    def _compute_mask_area(array, axis=-1, **kwargs):
+        """ Compute the area of a projection (along the `axis`, by default depth), of a horizon mask. """
+        _ = kwargs
+        labeled_traces = array.max(axis=axis)
+        area = labeled_traces.sum() / labeled_traces.size
+        return area
+
+    @staticmethod
+    def _compute_discontinuity_size(array, **kwargs):
+        """ Compute the size of the biggest discontinuity (allegedly, fault) in the horizon mask.
+        Assumes the array in (inline, crossline, depth) orientation. Tested mostly for 2D crops.
+        """
+        _ = kwargs
+
+        # Get point cloud of labeled points. For each trace (for each (i, x) pixel) compute depth stats
+        points = np.array(np.nonzero(array)).T                        # (iline, xline, depth) point cloud
+        points = groupby_all(points)                                  # (iline, xline, _, min_depth, max_depth, _)
+        condition = points[:-1, 1] == points[1:, 1] - 1               # get only sequential traces
+
+        # Upper/lower bounds
+        mins = points[:-1, 3][condition]
+        mins_next = points[1:, 3][condition]
+        upper = np.max(np.array([mins, mins_next]), axis=0)           # maximum values of `min_depth` for each pixel
+
+        maxs = points[:-1, 4][condition]
+        maxs_next = points[1:, 4][condition]
+        lower = np.min(np.array([maxs, maxs_next]), axis=0)           # minimum values of `max_depth` for each pixel
+
+        return (upper - lower).max()
 
 
-    @apply_parallel
-    def filter_sides(self, crop, length_ratio, side):
+    # Methods to work with (mostly, horizon) masks
+    @apply_parallel_decorator(init='preallocating_init', post='noop_post', target='for')
+    def filter_sides(self, _, buffer, ratio, side, axis=0, src=None, dst=None):
         """ Filter out left or right side of a crop.
+        Assumes the array in (inline, crossline, depth) orientation. Tested mostly for 2D crops.
 
-        Parameters:
+        Parameters
         ----------
-        length_ratio : float
+        ratio : float
             The ratio of the crop lines to be filtered out.
         side : str
             Which side to filter out. Possible options are 'left' or 'right'.
         """
-        if not 0 <= length_ratio <= 1:
-            raise ValueError(f"Invalid value {length_ratio:.2f} for `length_ratio`. It must be in interval [0, 1].")
-        new_mask = np.copy(crop)
+        if not 0 <= ratio <= 1:
+            raise ValueError(f"Invalid value ratio={ratio}: must be a float in [0, 1] interval.")
 
         # Get the amount of crop lines and kept them on the chosen crop part
-        max_len = new_mask.shape[0]
-        length = round(max_len * (1 - length_ratio))
+        max_len = buffer.shape[axis]
+        length = round(max_len * (1 - ratio))
 
-        if side == 'left':
-            new_mask[:-length, :] = 0
-        else:
-            new_mask[length:, :] = 0
-
-        return new_mask
-
-    @action
-    @inbatch_parallel(init='indices', post='_post_mask_rebatch', target='for',
-                      src='masks', depths_threshold=2, threshold=0)
-    def remove_discontinuities(self, ix, src='masks', depths_threshold=2):
-        """ Remove horizon masks with depth-wise discontinuities on neighboring traces.
-
-        Parameters
-        ----------
-        depths_threshold : int
-            Maximum depth difference on neighboring traces for horizons masks to be kept in the batch.
-        """
-        mask = self.get(ix, src)
-
-        # Get horizon coordinates an depths aggregations by i_line and x_line
-        horizon_coords = np.array(np.nonzero(mask)).T
-        groupby_all_depths = groupby_all(horizon_coords) # i_line, x_line, occurency, min_depth, max_depth, mean_depth
-        cond = groupby_all_depths[:-1, 1] == groupby_all_depths[1:, 1] - 1 # get only sequential traces
-
-        # Get horizon depths stats
-        mins = groupby_all_depths[:-1, 3][cond]
-        mins_next = groupby_all_depths[1:, 3][cond]
-        upper_ = np.max(np.array([mins, mins_next]), axis=0)
-
-        maxs = groupby_all_depths[:-1, 4][cond]
-        maxs_next = groupby_all_depths[1:, 4][cond]
-        lower_ = np.min(np.array([maxs, maxs_next]), axis=0)
-
-        if max(upper_ - lower_) > depths_threshold:
-            return 0
-
-        return round(mask.sum())
+        locations = [slice(None)] * 3
+        locations[axis] = slice(0, max_len-length) if side == 'left' else slice(length, max_len)
+        buffer[tuple(locations)] = 0
 
 
-    @apply_parallel
-    def shift_masks(self, crop, n_segments=3, max_shift=4, min_len=5, max_len=10):
+    @apply_parallel_decorator(init='data', post='_assemble', target='for')
+    def shift_masks(self, crop, n_segments=3, max_shift=4, min_len=5, max_len=10, src=None, dst=None):
         """ Randomly shift parts of the crop up or down.
 
         Parameters
@@ -626,10 +598,10 @@ class SeismicCropBatch(Batch, VisualizationMixin):
                 crop[:, begin:min(begin + length, crop.shape[1]), :] = shifted_segment
         return crop
 
-    @apply_parallel
-    def bend_masks(self, crop, angle=10):
+    @apply_parallel_decorator(init='data', post='_assemble', target='for')
+    def bend_masks(self, crop, angle=10, src=None, dst=None):
         """ Rotate part of the mask on a given angle.
-        Must be used for crops in (xlines, heights, inlines) format.
+        Must be used for crops in (xlines, depths, inlines) format.
 
         Parameters
         ----------
@@ -655,8 +627,8 @@ class SeismicCropBatch(Batch, VisualizationMixin):
             combined[:point_x, :, :] = rotated[:point_x, :, :]
         return combined
 
-    @apply_parallel
-    def linearize_masks(self, crop, n=3, shift=0, kind='random', width=None):
+    @apply_parallel_decorator(init='data', post='_assemble', target='for')
+    def linearize_masks(self, crop, n=3, shift=0, kind='random', width=None, src=None, dst=None):
         """ Sample `n` points from the original mask and create a new mask by interpolating them.
 
         Parameters
@@ -664,7 +636,7 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         n : int
             Number of points to sample.
         shift : int
-            Maximum amplitude of random shift along the heights axis.
+            Maximum amplitude of random shift along the depths axis.
         kind : {'random', 'linear', 'slinear', 'quadratic', 'cubic', 'previous', 'next'}
             Type of interpolation to use. If 'random', then chosen randomly for each crop.
         width : int
@@ -695,7 +667,7 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         mask_[slc] = crop[slc]
         *nz, y = np.nonzero(mask_)
 
-        # Shift heights randomly
+        # Shift depths randomly
         x = nz[axis]
         y += np.random.randint(-shift, shift + 1, size=y.shape)
 
@@ -708,11 +680,11 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         # Interpolate points; put into mask
         interpolator = interp1d(x, y, kind=kind)
         indices = np.arange(min_, max_, dtype=np.int32)
-        heights = interpolator(indices).astype(np.int32)
+        depths = interpolator(indices).astype(np.int32)
 
         slc = (indices if axis == 0 else indices * 0,
                indices if axis == 1 else indices * 0,
-               np.clip(heights, 0, crop.shape[2]-1))
+               np.clip(depths, 0, crop.shape[2]-1))
         mask_ = np.zeros_like(crop)
         mask_[slc] = 1
 
@@ -724,8 +696,8 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         return mask_
 
 
-    @apply_parallel
-    def smooth_labels(self, crop, eps=0.05):
+    @apply_parallel_decorator(init='data', post='_assemble', target='for')
+    def smooth_labels(self, crop, eps=0.05, src=None, dst=None):
         """ Smooth labeling for segmentation mask:
             - change `1`'s to `1 - eps`
             - change `0`'s to `eps`
@@ -736,12 +708,13 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         crop[~label_mask] = eps
         return crop
 
+
     # Predictions
     @action
-    @inbatch_parallel(init='indices', post=None, target='for')
-    def update_accumulator(self, ix, src, accumulator):
+    @apply_parallel_decorator(init='indices', post=None, target='for')
+    def update_accumulator(self, ix, src, accumulator, dst=None):
         """ Update accumulator with data from crops.
-        Allows to gradually accumulate predicitons in a single instance, instead of
+        Allows to gradually accumulate predictions in a single instance, instead of
         keeping all of them and assembling later.
 
         Parameters
@@ -749,7 +722,7 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         src : str
             Component with crops.
         accumulator : Accumulator3D
-            Container for cube aggregation.
+            Container for aggregation.
         """
         crop = self.get(ix, src)
         location = self.get(ix, 'locations')
@@ -759,10 +732,8 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         return self
 
     @action
-    @inbatch_parallel(init='indices', target='for', post='_masks_to_horizons_post')
-    def masks_to_horizons(self, ix, src_masks='masks', dst='predicted_labels',
-                          threshold=0.5, mode='mean', minsize=0, mean_threshold=2.0,
-                          adjacency=1, skip_merge=False, prefix='predict'):
+    @apply_parallel_decorator(init='indices', post='_masks_to_horizons_post', target='for')
+    def masks_to_horizons(self, ix, src, dst, threshold=0.5, mode='mean', minsize=0, prefix='predict'):
         """ Convert predicted segmentation mask to a list of Horizon instances.
 
         Parameters
@@ -774,12 +745,12 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         threshold, mode, minsize, mean_threshold, adjacency, prefix
             Passed directly to :meth:`Horizon.from_mask`.
         """
-        _ = dst, mean_threshold, adjacency, skip_merge
+        _ = dst
 
         # Threshold the mask, transpose and rotate the mask if needed
-        mask = self.get(ix, src_masks)
+        mask = self.get(ix, src)
         if self.get(ix, 'orientations'):
-            mask = np.transpose(mask, (1, 0, 2))
+            mask = mask.transpose(1, 0, 2)
 
         field = self.get(ix, 'fields')
         origin = [self.get(ix, 'locations')[k].start for k in range(3)]
@@ -787,41 +758,21 @@ class SeismicCropBatch(Batch, VisualizationMixin):
                                      mode=mode, minsize=minsize, prefix=prefix)
         return horizons
 
-    def _masks_to_horizons_post(self, horizons_lists, *args, dst=None, skip_merge=False,
-                                mean_threshold=2.0, adjacency=1, **kwargs):
-        """ Flatten list of lists of horizons, attempting to merge what can be merged. """
-        _, _ = args, kwargs
+    def _masks_to_horizons_post(self, horizons_lists, dst=None, **kwargs):
+        """ Flatten list of lists of horizons, recieved from each worker. """
+        _ = kwargs
         if dst is None:
-            raise ValueError("dst should be initialized with empty list.")
+            raise ValueError('Specify `dst`!')
 
-        if skip_merge:
-            setattr(self, dst, [hor for hor_list in horizons_lists for hor in hor_list])
-            return self
-
-        for horizons in horizons_lists:
-            for horizon_candidate in horizons:
-                for horizon_target in dst:
-                    merge_code, _ = Horizon.verify_merge(horizon_target, horizon_candidate,
-                                                         mean_threshold=mean_threshold,
-                                                         adjacency=adjacency)
-                    if merge_code == 3:
-                        merged = Horizon.overlap_merge(horizon_target, horizon_candidate, inplace=True)
-                    elif merge_code == 2:
-                        merged = Horizon.adjacent_merge(horizon_target, horizon_candidate, inplace=True,
-                                                        adjacency=adjacency, mean_threshold=mean_threshold)
-                    else:
-                        merged = False
-                    if merged:
-                        break
-                else:
-                    # If a horizon can't be merged to any of the previous ones, we append it as it is
-                    dst.append(horizon_candidate)
+        # Check for errors, flatten lists
+        self.noop_post(horizons_lists, **kwargs)
+        setattr(self, dst, [horizon for horizon_list in horizons_lists for horizon in horizon_list])
         return self
 
 
     @action
-    @inbatch_parallel(init='indices', target='for')
-    def save_masks(self, ix, src='masks', save_to=None, savemode='numpy',
+    @apply_parallel_decorator(init='indices', target='for')
+    def save_masks(self, ix, src, dst=None, save_to=None, savemode='numpy',
                    threshold=0.5, mode='mean', minsize=0, prefix='predict'):
         """ Save extracted horizons to disk. """
         os.makedirs(save_to, exist_ok=True)
@@ -853,7 +804,8 @@ class SeismicCropBatch(Batch, VisualizationMixin):
 
         return self
 
-    # More component actions
+
+    # Actions to work with components
     @action
     def concat_components(self, src, dst, axis=-1):
         """ Concatenate a list of components and save results to `dst` component.
@@ -872,164 +824,154 @@ class SeismicCropBatch(Batch, VisualizationMixin):
 
         items = [self.get(None, attr) for attr in src]
 
-        concat_axis_length = sum(item.shape[axis] for item in items)
-        final_shape = [*items[0].shape]
-        final_shape[axis] = concat_axis_length
-        if axis < 0:
-            axis = len(final_shape) + axis
-        prealloc = np.empty(final_shape, dtype=np.float32)
+        concat_axis_size = sum(item.shape[axis] for item in items)
+        shape = list(items[0].shape)
+        shape[axis] = concat_axis_size
 
-        length_counter = 0
+        buffer = np.empty(shape, dtype=np.float32)
+
+        size_counter = 0
         slicing = [slice(None) for _ in range(axis + 1)]
         for item in items:
-            length_shift = item.shape[axis]
-            slicing[-1] = slice(length_counter, length_counter + length_shift)
-            prealloc[slicing] = item
-            length_counter += length_shift
-        setattr(self, dst, prealloc)
+            item_size = item.shape[axis]
+            slicing[-1] = slice(size_counter, size_counter + item_size)
+            buffer[tuple(slicing)] = item
+            size_counter += item_size
+        setattr(self, dst, buffer)
         return self
 
     @action
-    def transpose(self, src, order):
+    def transpose(self, src, order, dst=None):
         """ Change order of axis. """
+        #pylint: disable=access-member-before-definition
+        if src is None:
+            src = list(self.name_to_order.keys())
+
+        dst = dst or src
         src = [src] if isinstance(src, str) else src
-        order = [i+1 for i in order] # Correct for batch items dimension
-        for attr in src:
-            setattr(self, attr, np.transpose(self.get(component=attr), (0, *order)))
+        dst = [dst] if isinstance(dst, str) else dst
+
+        for src_, dst_ in zip(src, dst):
+            current_order = self.name_to_order[src_]
+            data = self.get(component=src_)
+
+            # Select correct order of axis
+            if order == 'channels_last':
+                order_ = np.argsort(data.shape[1:])[::-1]
+            elif isinstance(order, str):
+                order_ = [current_order.tolist().index(item) for item in order]
+            else:
+                order_ = list(order)
+
+            # Update meta, transpose data with corrected on batch dimension order
+            self.name_to_order[src_] = current_order[list(order_)]
+            setattr(self, dst_, data.transpose(0, *(i+1 for i in order_)))
         return self
 
-    @apply_parallel
-    def rotate_axes(self, crop):
-        """ The last shall be the first and the first last.
 
-        Notes
-        -----
-        Actions `make_locations`, `load_cubes`, `create_mask` make data in [iline, xline, height] format.
-        Since most of the TensorFlow models percieve ilines as channels, it might be convinient
-        to change format to [xlines, height, ilines] via this action.
+    @action
+    def adaptive_expand(self, src, dst=None, axis=1, symbol='c'):
+        """ Add channels dimension to 4D components if needed.
+        If component data has shape `(batch_size, 1, n_x, n_d)`, the same shape is kept
+        If component data has shape `(batch_size, n_i, n_x, n_d)` and `n_i > 1`, an axis at `axis` position is created.
         """
-        crop_ = np.swapaxes(crop, 0, 1)
-        crop_ = np.swapaxes(crop_, 1, 2)
-        return crop_
+        dst = dst or src
+        src = [src] if isinstance(src, str) else src
+        dst = [dst] if isinstance(dst, str) else dst
 
+        for src_, dst_ in zip(src, dst):
+            data = self.get(component=src_)
+            if data.ndim == 4 and data.shape[1] != 1:
+                data = np.expand_dims(data, axis=axis)
+                self.name_to_order[src_] = np.insert(self.name_to_order[src_], axis-1, symbol)
+            setattr(self, dst_, data)
+        return self
 
-    # Augmentations
-    @apply_parallel
-    def add_axis(self, crop):
-        """ Add new axis.
-
-        Notes
-        -----
-        Used in combination with `dice` and `ce` losses to tell model that input is
-        3D entity, but 2D convolutions are used.
+    @action
+    def adaptive_squeeze(self, src, dst=None, axis=1):
+        """ Remove channels dimension from 5D components if needed.
+        If component data has shape `(batch_size, n_c, n_i, n_x, n_d)` and `axis=1
+                           or shape `(batch_size, n_i, n_x, n_d, n_c)` and `axis=-1`
+        and `n_c == 1` , axis at position `axis` will be squeezed.
         """
-        return crop[..., np.newaxis]
+        dst = dst or src
+        src = [src] if isinstance(src, str) else src
+        dst = [dst] if isinstance(dst, str) else dst
 
-    @apply_parallel
-    def additive_noise(self, crop, scale):
+        for src_, dst_ in zip(src, dst):
+            data = data = self.get(component=src_)
+            if data.ndim == 5 and data.shape[axis] == 1:
+                data = np.squeeze(data, axis=axis)
+                self.name_to_order[src_] = np.delete(self.name_to_order[src_], axis-1)
+            setattr(self, dst_, data)
+        return self
+
+
+    # Augmentations: values
+    @apply_parallel_decorator(init='preallocating_init', post='noop_post', target='for')
+    def additive_noise(self, _, buffer, scale, **kwargs):
         """ Add random value to each entry of crop. Added values are centered at 0.
 
         Parameters
         ----------
         scale : float
-            Standart deviation of normal distribution.
+            Standard deviation of normal distribution.
         """
-        rng = np.random.default_rng()
-        noise = scale * rng.standard_normal(dtype=np.float32, size=crop.shape)
-        return crop + noise
+        buffer += scale * self.random.standard_normal(dtype=np.float32, size=buffer.shape)
 
-    @apply_parallel
-    def multiplicative_noise(self, crop, scale):
+    @apply_parallel_decorator(init='preallocating_init', post='noop_post', target='for')
+    def multiplicative_noise(self,  _, buffer, scale, **kwargs):
         """ Multiply each entry of crop by random value, centered at 1.
 
         Parameters
         ----------
         scale : float
-            Standart deviation of normal distribution.
+            Standard deviation of normal distribution.
         """
-        rng = np.random.default_rng()
-        noise = 1 + scale * rng.standard_normal(dtype=np.float32, size=crop.shape)
-        return crop * noise
+        buffer *= 1 + scale * self.random.standard_normal(dtype=np.float32, size=buffer.shape)
 
-    @apply_parallel
-    def cutout_2d(self, crop, patch_shape, n_patches, fill_value=0):
-        """ Change patches of data to zeros.
 
-        Parameters
-        ----------
-        patch_shape : int or array-like
-            Shape or patches along each axis. If int, square patches will be generated. If array of length 2,
-            patch will be the same for all channels.
-        n_patches : number
-            Number of patches to cut.
-        fill_value : number
-            Value to fill patches with.
-        """
-        rnd = np.random.RandomState(int(n_patches * 100)).uniform
-        if isinstance(patch_shape, (int, float)):
-            patch_shape = np.array([patch_shape, patch_shape, crop.shape[-1]])
-        if len(patch_shape) == 2:
-            patch_shape = np.array([*patch_shape, crop.shape[-1]])
-        patch_shape = patch_shape.astype(int)
+    @apply_parallel_decorator(init='preallocating_init', post='noop_post', target='for')
+    def translate(self, _, buffer, shift=5, scale=0.0, **kwargs):
+        """ Add and multiply values by uniformly sampled values. """
+        shift = self.random.uniform(-shift, shift).astype(np.float32)
+        scale = self.random.uniform(1 - scale, 1 + scale).astype(np.float32)
 
-        copy_ = copy(crop)
-        for _ in range(int(n_patches)):
-            starts = [int(rnd(crop.shape[ax] - patch_shape[ax])) for ax in range(3)]
-            stops = [starts[ax] + patch_shape[ax] for ax in range(3)]
-            slices = [slice(start, stop) for start, stop in zip(starts, stops)]
-            copy_[tuple(slices)] = fill_value
-        return copy_
+        buffer += shift
+        buffer *= scale
 
-    @apply_parallel
-    def rotate(self, crop, angle, adjust=False, fill_value=0):
-        """ Rotate crop along the first two axes. Angles are defined as Tait-Bryan angles and the sequence of
-        extrinsic rotations axes is (axis_2, axis_0, axis_1).
+    @apply_parallel_decorator(init='preallocating_init', post='noop_post', target='for')
+    def invert(self, _, buffer, **kwargs):
+        """ Change sign of values. """
+        buffer *= -1
 
-        Parameters
-        ----------
-        angle : float or tuple of floats
-            Angles of rotation about each axes (axis_2, axis_0, axis_1). If float, angle of rotation
-            about the last axis.
-        adjust : bool
-            Scale image to avoid padding in rotated image (for 2D crops only).
-        fill_value : number
-            Value to put at empty positions appeared after crop roration.
-        """
-        angle = angle if isinstance(angle, (tuple, list)) else (angle, 0, 0)
-        initial_shape = crop.shape
-        if adjust:
-            if angle[1] != 0 or angle[2] != 0:
-                raise ValueError("Shape adjusting doesn't applicable to 3D rotations")
-            new_shape = adjust_shape_3d(shape=initial_shape, angle=angle)
-            crop = cv2.resize(crop, dsize=(new_shape[1], new_shape[0]))
-            if len(crop.shape) == 2:
-                crop = crop[..., np.newaxis]
-        if angle[0] != 0:
-            crop = self._rotate(crop, angle[0], fill_value)
-        if angle[1] != 0:
-            crop = crop.transpose(1, 2, 0)
-            crop = self._rotate(crop, angle[1], fill_value)
-            crop = crop.transpose(2, 0, 1)
-        if angle[2] != 0:
-            crop = crop.transpose(2, 0, 1)
-            crop = self._rotate(crop, angle[2], fill_value)
-            crop = crop.transpose(1, 2, 0)
-        if adjust:
-            crop = self._central_crop(crop, initial_shape)
-        return crop
+    @apply_parallel_decorator(init='preallocating_init', post='noop_post', target='for')
+    def equalize(self, _, buffer, mode='default', **kwargs):
+        """ Apply histogram equalization. """
+        #pylint: disable=import-outside-toplevel
+        import torch
+        import kornia
 
-    @apply_parallel
-    def binarize(self, crop, threshold=0.5, dtype=np.float32):
+        tensor = torch.from_numpy(buffer)
+
+        if mode == 'default':
+            tensor = kornia.enhance.equalize(tensor)
+        else:
+            tensor = kornia.enhance.equalize_clahe(tensor)
+
+        buffer[:] = tensor.numpy()
+
+
+    @apply_parallel_decorator(init='preallocating_init', post='noop_post', target='for')
+    def binarize(self, _, buffer, threshold=0.5, **kwargs):
         """ Binarize image by threshold. """
-        return (crop > threshold).astype(dtype)
+        buffer[:] = buffer > threshold
 
-    def _rotate(self, crop, angle, fill_value):
-        shape = crop.shape
-        matrix = cv2.getRotationMatrix2D((shape[1]//2, shape[0]//2), angle, 1)
-        return cv2.warpAffine(crop, matrix, (shape[1], shape[0]), borderValue=fill_value).reshape(shape)
 
-    @apply_parallel
-    def flip(self, crop, axis=0, seed=0.1, threshold=0.5):
+    # Augmentations: geometric. `rotate_2d/3d`, `scale_2d/3d`,
+    # 'affine_transform', 'perspective_transform' and 'elastic_transform' are added by decorator
+    @apply_parallel_decorator(init='preallocating_init', post='noop_post', target='for')
+    def flip(self, _, buffer, axis=0, **kwargs):
         """ Flip crop along the given axis.
 
         Parameters
@@ -1037,142 +979,24 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         axis : int
             Axis to flip along
         """
-        rnd = np.random.RandomState(int(seed*100)).uniform
-        if rnd() >= threshold:
-            return cv2.flip(crop, axis).reshape(crop.shape)
-        return crop
+        locations = [None] * buffer.ndim
+        locations[axis] = slice(None, None, -1)
+        buffer[:] = buffer[locations]
 
-    @apply_parallel
-    def scale_2d(self, crop, scale):
-        """ Zoom in or zoom out along the first two axis.
-
-        Parameters
-        ----------
-        scale : tuple or float
-            Zooming factor for the first two axis.
-        """
-        scale = scale if isinstance(scale, (list, tuple)) else [scale] * 2
-        crop = self._scale(crop, [scale[0], scale[1]])
-        return crop
-
-    @apply_parallel
-    def scale(self, crop, scale):
-        """ Zoom in or zoom out along each axis of crop.
-
-        Parameters
-        ----------
-        scale : tuple or float
-            Zooming factor for each axis.
-        """
-        scale = scale if isinstance(scale, (list, tuple)) else [scale] * 3
-        crop = self._scale(crop, [scale[0], scale[1]])
-
-        crop = crop.transpose(1, 2, 0)
-        crop = self._scale(crop, [1, scale[-1]]).transpose(2, 0, 1)
-        return crop
-
-    def _scale(self, crop, scale):
-        shape = crop.shape
-        matrix = np.zeros((2, 3))
-        matrix[:, :-1] = np.diag([scale[1], scale[0]])
-        matrix[:, -1] = np.array([shape[1], shape[0]]) * (1 - np.array([scale[1], scale[0]])) / 2
-        return cv2.warpAffine(crop, matrix, (shape[1], shape[0])).reshape(shape)
-
-    @apply_parallel
-    def affine_transform(self, crop, alpha_affine=10):
-        """ Perspective transform. Moves three points to other locations.
-        Guaranteed not to flip image or scale it more than 2 times.
-
-        Parameters
-        ----------
-        alpha_affine : float
-            Maximum distance along each axis between points before and after transform.
-        """
-        rnd = np.random.RandomState(int(alpha_affine*100)).uniform
-        shape = np.array(crop.shape)[:2]
-        if alpha_affine >= min(shape)//16:
-            alpha_affine = min(shape)//16
-
-        center_ = shape // 2
-        square_size = min(shape) // 3
-
-        pts1 = np.float32([center_ + square_size,
-                           center_ - square_size,
-                           [center_[0] + square_size, center_[1] - square_size]])
-
-        pts2 = pts1 + rnd(-alpha_affine, alpha_affine, size=pts1.shape).astype(np.float32)
+    @apply_parallel_decorator(init='data', post='_assemble')
+    def center_crop(self, crop, shape, **kwargs):
+        """ Central crop of defined shape. """
+        return functional.center_crop(crop, shape)
 
 
-        matrix = cv2.getAffineTransform(pts1, pts2)
-        return cv2.warpAffine(crop, matrix, (shape[1], shape[0])).reshape(crop.shape)
-
-    @apply_parallel
-    def perspective_transform(self, crop, alpha_persp):
-        """ Perspective transform. Moves four points to other four.
-        Guaranteed not to flip image or scale it more than 2 times.
-
-        Parameters
-        ----------
-        alpha_persp : float
-            Maximum distance along each axis between points before and after transform.
-        """
-        rnd = np.random.RandomState(int(alpha_persp*100)).uniform
-        shape = np.array(crop.shape)[:2]
-        if alpha_persp >= min(shape) // 16:
-            alpha_persp = min(shape) // 16
-
-        center_ = shape // 2
-        square_size = min(shape) // 3
-
-        pts1 = np.float32([center_ + square_size,
-                           center_ - square_size,
-                           [center_[0] + square_size, center_[1] - square_size],
-                           [center_[0] - square_size, center_[1] + square_size]])
-
-        pts2 = pts1 + rnd(-alpha_persp, alpha_persp, size=pts1.shape).astype(np.float32)
-
-        matrix = cv2.getPerspectiveTransform(pts1, pts2)
-        return cv2.warpPerspective(crop, matrix, (shape[1], shape[0])).reshape(crop.shape)
-
-    @apply_parallel
-    def elastic_transform(self, crop, alpha=40, sigma=4):
-        """ Transform indexing grid of the first two axes.
-
-        Parameters
-        ----------
-        alpha : float
-            Maximum shift along each axis.
-        sigma : float
-            Smoothening factor.
-        """
-        rng = np.random.default_rng(seed=int(alpha*100))
-        shape_size = crop.shape[:2]
-
-        grid_scale = 4
-        alpha //= grid_scale
-        sigma //= grid_scale
-        grid_shape = (shape_size[0]//grid_scale, shape_size[1]//grid_scale)
-
-        blur_size = int(4 * sigma) | 1
-        rand_x = cv2.GaussianBlur(rng.random(size=grid_shape, dtype=np.float32) * 2 - 1,
-                                  ksize=(blur_size, blur_size), sigmaX=sigma) * alpha
-        rand_y = cv2.GaussianBlur(rng.random(size=grid_shape, dtype=np.float32) * 2 - 1,
-                                  ksize=(blur_size, blur_size), sigmaX=sigma) * alpha
-        if grid_scale > 1:
-            rand_x = cv2.resize(rand_x, shape_size[::-1])
-            rand_y = cv2.resize(rand_y, shape_size[::-1])
-
-        grid_x, grid_y = np.meshgrid(np.arange(shape_size[1]), np.arange(shape_size[0]))
-        grid_x = (grid_x.astype(np.float32) + rand_x)
-        grid_y = (grid_y.astype(np.float32) + rand_y)
-
-        distorted_img = cv2.remap(crop, grid_x, grid_y,
-                                  borderMode=cv2.BORDER_REFLECT_101,
-                                  interpolation=cv2.INTER_LINEAR)
-        return distorted_img.reshape(crop.shape)
+    # Augmentations: geologic. `compute_instantaneous_amplitude/phase/frequency` are added by decorator
+    @apply_parallel_decorator(init='preallocating_init', post='noop_post', target='for')
+    def sign_transform(self, _, buffer, **kwargs):
+        """ Element-wise indication of the sign of a number. """
+        buffer[:] = np.sign(buffer)
 
     @action
-    @inbatch_parallel(init='indices', post='_assemble', target='for')
+    @apply_parallel_decorator(init='indices', post='_assemble', target='for')
     def bandpass_filter(self, ix, src, dst, lowcut=None, highcut=None, axis=1, order=4, sign=True):
         """ Keep only frequencies between `lowcut` and `highcut`.
 
@@ -1197,116 +1021,50 @@ class SeismicCropBatch(Batch, VisualizationMixin):
             filtered = np.sign(filtered)
         return filtered
 
-    @apply_parallel
-    def sign_transform(self, crop):
-        """ Element-wise indication of the sign of a number. """
-        return np.sign(crop)
 
-    @apply_parallel
-    def instant_amplitudes_transform(self, crop, axis=-1):
-        """ Compute instantaneous amplitudes along the depth axis. """
-        analytic = hilbert(crop, axis=axis)
-        return np.abs(analytic).astype(np.float32)
-
-
-    @apply_parallel
-    def equalize(self, crop, mode='default'):
-        """ Apply histogram equalization. """
-        #pylint: disable=import-outside-toplevel
-        import torch
-        import kornia
-
-        crop_ = torch.from_numpy(crop)
-        if mode == 'default':
-            crop_ = kornia.enhance.equalize(crop_)
-        else:
-            crop_ = kornia.enhance.equalize_clahe(crop_)
-        return crop_.numpy()
-
-
-    @apply_parallel
-    def instant_phases_transform(self, crop, axis=-1):
-        """ Compute instantaneous phases along the depth axis. """
-        analytic = hilbert(crop, axis=axis)
-        return np.angle(analytic).astype(np.float32)
-
-    @apply_parallel
-    def frequencies_transform(self, crop, axis=-1):
-        """ Compute frequencies along the depth axis. """
-        analytic = hilbert(crop, axis=axis)
-        iphases = np.angle(analytic).astype(np.float32)
-        return np.diff(iphases, axis=-1, prepend=0) / (2 * np.pi)
-
-
-    @apply_parallel
-    def gaussian_filter(self, crop, axis=1, sigma=2, order=0):
+    # Augmentations: misc
+    @apply_parallel_decorator(init='preallocating_init', post='noop_post', target='for')
+    def gaussian_filter(self, _, buffer, axis=1, sigma=2, order=0, **kwargs):
         """ Apply a gaussian filter along specified axis. """
-        return gaussian_filter1d(crop, sigma=sigma, axis=axis, order=order)
+        buffer[:] = gaussian_filter1d(buffer, sigma=sigma, axis=axis, order=order)
 
-    @apply_parallel
-    def central_crop(self, crop, shape):
-        """ Central crop of defined shape. """
-        return self._central_crop(crop, shape)
 
-    def _central_crop(self, crop, shape):
-        old_shape = np.array(crop.shape)
-        new_shape = np.array(shape)
-        if (new_shape > old_shape).any():
-            raise ValueError(f"New crop shape ({new_shape}) can't be larger than old crop shape ({old_shape}).")
-        corner = old_shape // 2 - new_shape // 2
-        slices = tuple(slice(start, start + length) for start, length in zip(corner, new_shape))
-        return crop[slices]
+    @apply_parallel_decorator(init='preallocating_init', post='noop_post', target='for', requires_rng=True)
+    def cutout_2d(self, _, buffer, patch_shape, n_patches, fill_value=0, rng=None, **kwargs):
+        """ Change patches of data to zeros.
 
-    @apply_parallel
-    def translate(self, crop, shift=5, scale=0.0):
-        """ Add and multiply values by uniformly sampled values. """
-        shift = self.random.uniform(-shift, shift)
-        scale = self.random.uniform(1 - scale, 1 + scale)
-        return (crop + shift) * scale
-
-    @apply_parallel
-    def invert(self, crop):
-        """ Change sign. """
-        return -crop
-
-    @action
-    def adaptive_expand(self, src, dst=None, channels='first'):
-        """ Add channels dimension to 4D components if needed. If component data has shape `(batch_size, 1, n_x, n_d)`,
-        it will be keeped. If shape is `(batch_size, n_i, n_x, n_d)` and `n_i > 1`, channels axis
-        at position `axis` will be created.
+        Parameters
+        ----------
+        patch_shape : int or array-like
+            Shape of patches along each axis. If int, square patches will be generated. If array of length 2,
+            patch will be the same for all channels.
+        n_patches : number
+            Number of patches to cut.
+        fill_value : number
+            Value to fill patches with.
         """
-        dst = dst or src
-        src = [src] if isinstance(src, str) else src
-        dst = [dst] if isinstance(dst, str) else dst
-        axis = 1 if channels in [0, 'first'] else -1
-        for _src, _dst in zip(src, dst):
-            crop = getattr(self, _src)
-            if crop.ndim == 4 and crop.shape[1] != 1:
-                crop = np.expand_dims(crop, axis=axis)
-            setattr(self, _dst, crop)
-        return self
+        # Parse arguments
+        if isinstance(patch_shape, (int, np.integer)):
+            patch_shape = np.array([patch_shape, patch_shape, buffer.shape[-1]])
+        if len(patch_shape) == 2:
+            patch_shape = np.array([*patch_shape, buffer.shape[-1]])
 
-    @action
-    def adaptive_squeeze(self, src, dst=None, channels='first'):
-        """ Remove channels dimension from 5D components if needed. If component data has shape
-        `(batch_size, n_c, n_i, n_x, n_d)` for `channels='first'` or `(batch_size, n_i, n_x, n_d, n_c)`
-        for `channels='last'` and `n_c > 1`, shape will be keeped. If `n_c == 1` , channels axis at position `axis`
-        will be squeezed.
-        """
-        dst = dst or src
-        src = [src] if isinstance(src, str) else src
-        dst = [dst] if isinstance(dst, str) else dst
-        axis = 1 if channels in [0, 'first'] else -1
-        for _src, _dst in zip(src, dst):
-            crop = getattr(self, _src)
-            if crop.ndim == 5 and crop.shape[axis] == 1:
-                crop = np.squeeze(crop, axis=axis)
-            setattr(self, _dst, crop)
-        return self
+        patch_shape = np.array(patch_shape).astype(np.int32)
+        upper_bounds = np.clip(np.array(buffer.shape) - np.array(patch_shape), a_min=1, a_max=buffer.shape)
+
+        # Generate locations for erasing
+        for _ in range(int(n_patches)):
+            starts = rng.integers(upper_bounds)
+            # print(upper_bounds, starts, )
+            stops = starts + patch_shape
+
+            slices = [slice(start, stop) for start, stop in zip(starts, stops)]
+            buffer[tuple(slices)] = fill_value
+
 
     @action
     def fill_bounds(self, src, dst=None, margin=0.05, fill_value=0):
-        """ Fill bounds of crops with zeros. """
+        """ Fill bounds of crops with `fill_value`. To remove predictions on bounds. """
         if (np.array(margin) == 0).all():
             return self
 
@@ -1317,8 +1075,8 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         if isinstance(margin, (int, float)):
             margin = (margin, margin, margin)
 
-        for _src, _dst in zip(src, dst):
-            crop = getattr(self, _src).copy()
+        for src_, dst_ in zip(src, dst):
+            crop = self.get(component=src_).copy()
             pad = [int(np.floor(s) * m) if isinstance(m, float) else m for m, s in zip(margin, crop.shape[1:])]
             pad = [m if s > 1 else 0 for m, s in zip(pad, crop.shape[1:])]
             pad = [(item // 2, item - item // 2) for item in pad]
@@ -1329,5 +1087,5 @@ class SeismicCropBatch(Batch, VisualizationMixin):
 
                 slices[i+1] = slice(crop.shape[i+1] - pad[i][1], None)
                 crop[slices] = fill_value
-            setattr(self, _dst, crop)
+            setattr(self, dst_, crop)
         return self

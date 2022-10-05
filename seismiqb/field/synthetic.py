@@ -6,7 +6,7 @@ from ..utils import lru_cache
 from ..plotters import plot
 
 class GeometryMock:
-    """ Mock for SeismicGeometry. """
+    """ Mock for Geometry. """
     def __getattr__(self, _):
         return None
 
@@ -76,15 +76,15 @@ class SyntheticField:
 
         # String info
         self.path = self.short_path = f'{name}_path'
-        self.name = self.short_name = self.displayed_name = name
+        self.name = self.short_name = self.short_name = name
         self.index_headers = self.axis_names = ['INLINE_3D', 'CROSSLINE_3D']
 
         # Attributes to comply with `:class:.Field` API
         self.geometry = GeometryMock()
         self.spatial_shape = (-1, -1)
-        self.shape = self.cube_shape = (-1, -1, -1)
-        self.ilines_len = self.xlines_len = self.depth = -1
-        self.zero_traces = self.mean_matrix = self.std_matrix = None
+        self.shape = (-1, -1, -1)
+        self.depth = -1
+        self.dead_traces_matrix = self.mean_matrix = self.std_matrix = None
 
         # Properties
         self._normalization_stats = None
@@ -294,10 +294,10 @@ class SyntheticField:
 
     # Visualization
     def __repr__(self):
-        return f"""<SyntheticField `{self.displayed_name}` at {hex(id(self))}>"""
+        return f"""<SyntheticField `{self.short_name}` at {hex(id(self))}>"""
 
     def __str__(self):
-        msg = f"SyntheticField `{self.displayed_name}`"
+        msg = f"SyntheticField `{self.short_name}`"
 
         if self.param_generator is not None:
             attribute = self.param_generator.get('attribute')

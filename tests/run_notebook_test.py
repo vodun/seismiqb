@@ -38,6 +38,7 @@ import os
 import json
 import re
 import shutil
+import subprocess
 import tempfile
 import pytest
 from nbtools import run_notebook
@@ -48,7 +49,8 @@ pytest.failed = False
 pytest.out_files_info = {}
 BASE_DIR =  os.path.normpath(os.getenv('BASE_DIR', os.path.join(os.path.dirname(os.path.realpath(__file__)), '../../seismiqb')))
 TESTS_DIR = os.path.join(BASE_DIR, 'tests')
-TESTS_ROOT_DIR = os.getenv('SEISMIQB_TESTS_ROOT_DIR', tempfile.mkdtemp(prefix='tests_root_dir_', dir=TESTS_DIR))
+git_hash = subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD']).decode('ascii').strip()
+pytest.TESTS_ROOT_DIR = os.getenv('SEISMIQB_TESTS_ROOT_DIR', None)
 REMOVE_ROOT_DIR = bool(int(os.getenv('SEISMIQB_TESTS_REMOVE_ROOT_DIR', '1')))
 
 # Parameters for each test notebooks
@@ -61,7 +63,7 @@ common_params = {
 TESTS_NOTEBOOKS_DIR = os.path.join(BASE_DIR, 'tests/notebooks/') # path to the directory with tests notebooks
 # TUTORIALS_DIR = os.path.join(BASE_DIR, 'tutorials/')             # path to the directory with tutorials
 
-geometry_formats = ['sgy', 'hdf5', 'qhdf5', 'blosc', 'qblosc']
+geometry_formats = ['sgy', 'hdf5', 'qhdf5']
 notebooks_params = (
     # Tests configurations:
     # (notebook_path, {'inputs': dict (optional), 'outputs': str or list of str (optional)})
@@ -69,24 +71,25 @@ notebooks_params = (
     # CharismaMixin test
     (os.path.join(TESTS_NOTEBOOKS_DIR, 'charisma_test.ipynb'), {}),
 
-    # SeismicGeometry test
+    # Geometry tests
     (os.path.join(TESTS_NOTEBOOKS_DIR, 'geometry_test_01_preparation.ipynb'),
      {'inputs': {'FORMATS': geometry_formats}}),
 
     *[(os.path.join(TESTS_NOTEBOOKS_DIR, 'geometry_test_02_data_format.ipynb'),
        {'inputs': {'FORMAT': data_format}, 'outputs': 'timings'}) for data_format in geometry_formats],
 
-    # Horizon test
+    # Horizon tests
     (os.path.join(TESTS_NOTEBOOKS_DIR, 'horizon_test_01_preparation.ipynb'), {}),
     (os.path.join(TESTS_NOTEBOOKS_DIR, 'horizon_test_02_base.ipynb'), {}),
     (os.path.join(TESTS_NOTEBOOKS_DIR, 'horizon_test_03_attributes.ipynb'), {}),
     (os.path.join(TESTS_NOTEBOOKS_DIR, 'horizon_test_04_processing.ipynb'), {}),
-    (os.path.join(TESTS_NOTEBOOKS_DIR, 'horizon_test_05_extraction.ipynb'), {'outputs': 'message'}),
+    (os.path.join(TESTS_NOTEBOOKS_DIR, 'horizon_test_05_extraction.ipynb'), {}),
 
-    # Fault test
+    # Fault tests
     (os.path.join(TESTS_NOTEBOOKS_DIR, 'fault_test_01_preparation.ipynb'), {}),
     (os.path.join(TESTS_NOTEBOOKS_DIR, 'fault_test_02_base.ipynb'), {}),
     (os.path.join(TESTS_NOTEBOOKS_DIR, 'fault_test_03_sticks_processing.ipynb'), {}),
+    # (os.path.join(TESTS_NOTEBOOKS_DIR, 'fault_test_04_mask_creation.ipynb'), {}), # TODO: re-enable after updating BF
 
     # TODO: add tutorials
     # (os.path.join(TUTORIALS_DIR, '01_Geometry_part_1.ipynb'), {})
@@ -97,6 +100,8 @@ notebooks_params = (
 def test_run_notebook(notebook_kwargs, capsys, finalize_fixture):
     """ Run tests notebooks using kwargs and print outputs in the terminal. """
     # Parse kwargs
+    pytest.TESTS_ROOT_DIR = pytest.TESTS_ROOT_DIR or tempfile.mkdtemp(prefix=f'tests_root_dir_{git_hash}_', dir=TESTS_DIR)
+
     path_ipynb, params = notebook_kwargs
     filename = os.path.basename(path_ipynb)
 
@@ -109,9 +114,9 @@ def test_run_notebook(notebook_kwargs, capsys, finalize_fixture):
     inputs.update(common_params)
 
     # Run test notebook
-    out_path_ipynb = os.path.join(TESTS_ROOT_DIR, out_filename)
+    out_path_ipynb = os.path.join(pytest.TESTS_ROOT_DIR, out_filename)
     exec_res = run_notebook(path=path_ipynb, inputs=inputs, outputs=outputs,
-                            inputs_pos=2, working_dir=TESTS_ROOT_DIR,
+                            inputs_pos=2, working_dir=pytest.TESTS_ROOT_DIR,
                             out_path_ipynb=out_path_ipynb, display_links=False)
 
     if not exec_res['failed'] and common_params['REMOVE_EXTRA_FILES']:
@@ -150,19 +155,19 @@ def finalize_fixture():
     When the last test is completed, this fixture:
         - Dump information about correspondence between saved out files and test configuration
         (the executed notebook file name and its inputs).
-        - Removes `TESTS_ROOT_DIR` in case of all tests completion without failures (if needed).
-    Note, if `TESTS_ROOT_DIR` is removed, then there is no need in dumping information about deleted files.
+        - Removes `pytest.TESTS_ROOT_DIR` in case of all tests completion without failures (if needed).
+    Note, if `pytest.TESTS_ROOT_DIR` is removed, then there is no need in dumping information about deleted files.
     """
     # Run all tests in the module
     yield
 
-    # Remove TESTS_ROOT_DIR if all tests were successfull
+    # Remove pytest.TESTS_ROOT_DIR if all tests were successful
     if REMOVE_ROOT_DIR and not pytest.failed:
-        shutil.rmtree(TESTS_ROOT_DIR)
+        shutil.rmtree(pytest.TESTS_ROOT_DIR)
 
-    # If TESTS_ROOT_DIR exists, then dump information about out files
+    # If pytest.TESTS_ROOT_DIR exists, then dump information about out files
     else:
-        dump_path = os.path.join(TESTS_ROOT_DIR, 'out_files_info.json')
+        dump_path = os.path.join(pytest.TESTS_ROOT_DIR, 'out_files_info.json')
 
         with open(dump_path, 'w') as dump_file:
             json.dump(pytest.out_files_info, dump_file, indent=4)

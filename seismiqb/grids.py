@@ -1,7 +1,7 @@
 """ Generator of predetermined locations based on field or current state of labeled surface. Mainly used for inference.
 
 Locations describe the cube and the exact place to load from in the following format:
-(field_id, label_id, orientation, i_start, x_start, h_start, i_stop, x_stop, h_stop).
+(field_id, label_id, orientation, i_start, x_start, d_start, i_stop, x_stop, d_stop).
 
 Locations are passed to `make_locations` method of `SeismicCropBatch`, which
 transforms them into 3D slices to index the data and other useful info like origin points, shapes and orientation.
@@ -11,8 +11,6 @@ Each of the classes provides:
     - `to_names` method to convert the first two columns of sampled locations into string names of field and label
     - convenient visualization to explore underlying `locations` structure
 """
-from itertools import product
-
 import numpy as np
 from numba import njit
 
@@ -164,7 +162,7 @@ class BaseGrid:
             Other parameters to pass to the plotting function.
         """
         n_patches = n_patches or int(np.sqrt(len(self))) // 5
-        plotter = self.field.geometry.show('zero_traces', cmap='Gray', colorbar=False, **kwargs)
+        plotter = self.field.geometry.show('dead_traces_matrix', cmap='Gray', colorbar=False, **kwargs)
         ax = plotter[0].ax
 
         if grid:
@@ -181,7 +179,7 @@ class BaseGrid:
         if markers:
             ax.scatter(self.locations[:, 3], self.locations[:, 3], marker='x', linewidth=0.1, color='r')
 
-        overlay = np.zeros_like(self.field.zero_traces)
+        overlay = np.zeros_like(self.field.dead_traces_matrix)
         for n in range(0, len(self), len(self)//n_patches - 1):
             slc = tuple(slice(o, e) for o, e in zip(self.locations[n, [3, 4]], self.locations[n, [6, 7]]))
             overlay[slc] = 1
@@ -239,7 +237,7 @@ class RegularGrid(BaseGrid):
         Field to create grid for.
     ranges : sequence
         Nested sequence, where each element is either None or sequence of two ints.
-        Defines ranges to create grid for: iline, crossline, heights.
+        Defines ranges to create grid for inline, crossline and depths.
     crop_shape : sequence
         Shape of crop locations to generate.
     orientation : int
@@ -264,7 +262,8 @@ class RegularGrid(BaseGrid):
         Pre-defined locations. If provided, then directly stored and used as the grid coordinates.
     """
     def __init__(self, field, ranges, crop_shape, orientation=0, strides=None, overlap=None, overlap_factor=None,
-                 threshold=0, batch_size=64, field_id=-1, label_id=-1, label_name='unknown', locations=None):
+                 filtering_matrix='dead_traces_matrix', threshold=0, batch_size=64,
+                 field_id=-1, label_id=-1, label_name='unknown', locations=None):
         # Make correct crop shape
         orientation = field.geometry.parse_axis(orientation)
         crop_shape = np.array(crop_shape)
@@ -299,6 +298,10 @@ class RegularGrid(BaseGrid):
         self.strides = np.array(strides)
 
         # Update threshold: minimum amount of non-empty traces
+        if isinstance(filtering_matrix, str):
+            filtering_matrix = getattr(field, filtering_matrix)
+        self.filtering_matrix = filtering_matrix
+
         if 0 < threshold < 1:
             threshold = int(threshold * crop_shape[0] * crop_shape[1])
         self.threshold = threshold
@@ -321,28 +324,29 @@ class RegularGrid(BaseGrid):
 
     def _make_locations(self):
         # Ranges for each axis
-        i_args, x_args, h_args = tuple(zip(self.ranges[:, 0],
+        i_args, x_args, d_args = tuple(zip(self.ranges[:, 0],
                                            self.ranges[:, 1],
                                            self.strides,
-                                           self.field.cube_shape - self.crop_shape))
+                                           self.field.shape - self.crop_shape))
         i_grid = self._arange(*i_args)
         x_grid = self._arange(*x_args)
-        h_grid = self._arange(*h_args)
-        self.unfiltered_length = len(i_grid) * len(x_grid) * len(h_grid)
-        self._i_grid, self._x_grid, self._h_grid = i_grid, x_grid, h_grid
+        d_grid = self._arange(*d_args)
+        self.unfiltered_length = len(i_grid) * len(x_grid) * len(d_grid)
+        self._i_grid, self._x_grid, self._d_grid = i_grid, x_grid, d_grid
 
-        # Create points: origins for each crop
-        points = []
-        for i, x in product(i_grid, x_grid):
-            sliced = self.field.zero_traces[i:i+self.crop_shape[0],
-                                            x:x+self.crop_shape[1]]
-            # Number of non-dead traces
-            if (sliced.size - sliced.sum()) > self.threshold:
-                for h in h_grid:
-                    points.append((i, x, h))
-        points = np.array(points, dtype=np.int32)
+        # Create points: origins for each crop. Keep only those that produce crops with more than `threshold` points
+        points = np.array(np.meshgrid(i_grid, x_grid, d_grid)).T.reshape(-1, 3)
 
-        # Buffer: (cube_id, i_start, x_start, h_start, i_stop, x_stop, h_stop)
+        mask = np.ones(len(points), dtype=np.bool_)
+        if self.filtering_matrix is not None:
+            for j, (i, x, _) in enumerate(points):
+                sliced = self.filtering_matrix[i:i+self.crop_shape[0], x:x+self.crop_shape[1]]
+                n_alive_traces = sliced.size - sliced.sum()
+                if n_alive_traces <= self.threshold:
+                    mask[j] = False
+        points = points[mask].astype(np.int32)
+
+        # Buffer: (cube_id, i_start, x_start, d_start, i_stop, x_stop, d_stop)
         buffer = np.empty((len(points), 9), dtype=np.int32)
         buffer[:, 0] = self.field_id
         buffer[:, 1] = self.label_id
@@ -520,25 +524,25 @@ class ExtensionGrid(BaseGrid):
         crop_shape_t = crop_shape[[1, 0, 2]]
 
         # True where dead trace / already covered
-        coverage_matrix = self.field.zero_traces.copy().astype(np.bool_)
+        coverage_matrix = self.field.dead_traces_matrix.copy().astype(np.bool_)
         coverage_matrix[self.horizon.full_matrix > 0] = True
         self.uncovered_before = coverage_matrix.size - coverage_matrix.sum()
 
         # Compute boundary points of horizon: both inner and outer borders
         border_points = np.stack(np.where(self.horizon.boundaries_matrix), axis=-1)
-        heights = self.horizon.matrix[border_points[:, 0], border_points[:, 1]]
+        depths = self.horizon.matrix[border_points[:, 0], border_points[:, 1]]
 
-        # Shift heights up
+        # Shift depths up
         border_points += (self.horizon.i_min, self.horizon.x_min)
-        heights -= crop_shape[2] // 2
+        depths -= crop_shape[2] // 2
 
-        # Buffer for locations (orientation, i_start, x_start, h_start, i_stop, x_stop, h_stop).
+        # Buffer for locations (orientation, i_start, x_start, d_start, i_stop, x_stop, d_stop).
         buffer = np.empty((len(border_points), 7), dtype=np.int32)
         buffer[:, 0] = 0
         buffer[:, [1, 2]] = border_points
-        buffer[:, 3] = heights
+        buffer[:, 3] = depths
         buffer[:, [4, 5]] = border_points
-        buffer[:, 6] = heights
+        buffer[:, 6] = depths
 
         # Repeat the same data along new 0-th axis: shift origins/endpoints
         n_directions = len(self.directions)
@@ -646,7 +650,7 @@ class ExtensionGrid(BaseGrid):
         potential = potential[mask]
         self.locations_stats['selected'] = buffer.shape[0]
 
-        # Correct the height
+        # Correct the depth
         np.clip(buffer[:, 3], 0, self.field.depth - crop_shape[2], out=buffer[:, 3])
         np.clip(buffer[:, 6], 0 + crop_shape[2], self.field.depth, out=buffer[:, 6])
 
@@ -668,7 +672,7 @@ class ExtensionGrid(BaseGrid):
         """ Number of points not covered in the horizon, if all of the locations would
         add their maximum potential amount of pixels to the labeling.
         """
-        coverage_matrix = self.field.zero_traces.copy().astype(np.bool_)
+        coverage_matrix = self.field.dead_traces_matrix.copy().astype(np.bool_)
         coverage_matrix[self.horizon.full_matrix > 0] = True
 
         for (i_start, x_start, _, i_stop, x_stop, _) in self.locations[:, 3:]:
@@ -694,13 +698,13 @@ class ExtensionGrid(BaseGrid):
         plotter = self.field.geometry.show(hm, cmap='Depths', colorbar=False, **kwargs)
         ax = plotter[0].ax
 
-        self.field.geometry.show('zero_traces', ax=ax, cmap='Grey', colorbar=False, **kwargs)
+        self.field.geometry.show('dead_traces_matrix', ax=ax, cmap='Grey', colorbar=False, **kwargs)
 
         if markers:
             ax.scatter(self.locations[:, 3], self.locations[:, 4], marker='x', linewidth=0.1, color='r')
 
         if overlay:
-            overlay = np.zeros_like(self.field.zero_traces)
+            overlay = np.zeros_like(self.field.dead_traces_matrix)
             for n in range(0, len(self), frequency):
                 slc = tuple(slice(o, e) for o, e in zip(self.locations[n, [3, 4]], self.locations[n, [6, 7]]))
                 overlay[slc] = 1

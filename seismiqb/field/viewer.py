@@ -25,7 +25,7 @@ class FieldViewer:
         self.field = field
 
         # Initial state
-        location = self.field.ilines_len // 2
+        location = self.field.shape[0] // 2
         self.state_base = {'attribute': 'geometry/snr'}
         self._state_base = {} # previous `state_base`
 
@@ -39,7 +39,7 @@ class FieldViewer:
                                                    layout=widgets.Layout(max_width='350px'))
         self.location_text = widgets.IntText(value=location, description='INLINE',
                                              layout=widgets.Layout(max_width='150px'))
-        self.location_slider = widgets.IntSlider(value=location, max=self.field.ilines_len - 1, description='INLINE',
+        self.location_slider = widgets.IntSlider(value=location, max=self.field.shape[0] - 1, description='INLINE',
                                                  continuous_update=False, layout=widgets.Layout(min_width='500px'))
         self.axis_button = widgets.Button(description='swap axis', layout=widgets.Layout(min_width='200px'))
 
@@ -105,9 +105,9 @@ class FieldViewer:
 
         # Add a line; mark it with attribute
         if axis == 0:
-            line = self.base_ax.vlines(location, 0, self.field.xlines_len, color='r', linewidth=3)
+            line = self.base_ax.vlines(location, 0, self.field.shape[1], color='r', linewidth=3)
         elif axis == 1:
-            line = self.base_ax.hlines(location, 0, self.field.ilines_len, color='r', linewidth=3)
+            line = self.base_ax.hlines(location, 0, self.field.shape[0], color='r', linewidth=3)
         line.created_by_draw = True
 
         # Remove previous image, draw new one. TODO: change to `set_data`
@@ -129,11 +129,11 @@ class FieldViewer:
         location, axis = self.state_slice['location'], self.state_slice['axis']
         if axis == 0:
             start = max(point - 100, 0)
-            stop  = min(point + 100, self.field.xlines_len - 1)
+            stop  = min(point + 100, self.field.shape[1] - 1)
             line = self.base_ax.vlines(location, start, stop, color='w', linewidth=5)
         elif axis == 1:
             start = max(point - 100, 0)
-            stop  = min(point + 100, self.field.ilines_len - 1)
+            stop  = min(point + 100, self.field.shape[0] - 1)
             line = self.base_ax.hlines(location, start, stop, color='w', linewidth=5)
         line.created_by_zoom = True
 
@@ -160,13 +160,13 @@ class FieldViewer:
         if self.state_slice['axis'] == 0:
             self.location_text.description = 'INLINE'
             self.location_slider.description = 'INLINE'
-            self.location_slider.max = self.field.ilines_len - 1
+            self.location_slider.max = self.field.shape[0] - 1
             self.axis_button.description = 'change axis to crossline'
 
         elif self.state_slice['axis'] == 1:
             self.location_text.description = 'CROSSLINE'
             self.location_slider.description = 'CROSSLINE'
-            self.location_slider.max = self.field.xlines_len - 1
+            self.location_slider.max = self.field.shape[1] - 1
             self.axis_button.description = 'change axis to inline'
 
 
