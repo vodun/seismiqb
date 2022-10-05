@@ -441,8 +441,10 @@ class GeometrySEGY(Geometry):
         if buffer.shape[-1] == np.prod(self.lengths):
             buffer = buffer.reshape(len(indices), *self.lengths)
         else:
-            # TODO: add a fallback on `index_matrix` instead
-            raise NotImplementedError
+            idx = np.nonzero(self.index_matrix >= 0)
+            matrix = np.zeros(shape=(*self.spatial_shape, len(indices)), dtype=self.dtype)
+            matrix[idx] = buffer.T
+            buffer = matrix.transpose(2, 0, 1)
         return buffer
 
     # Data loading: 2D

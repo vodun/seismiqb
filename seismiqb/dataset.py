@@ -171,7 +171,7 @@ class SeismicDataset(Dataset):
         """
         components = ('images', 'masks') if getattr(self, src_labels)[idx] else ('images',)
         cube_name = self.indices[idx]
-        geometry = self.geometries[cube_name]
+        geometry = self.fields[cube_name].geometry
         crop_shape = np.array(geometry.shape)
 
         axis = geometry.parse_axis(axis)
