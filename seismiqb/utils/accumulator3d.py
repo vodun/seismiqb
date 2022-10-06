@@ -2,8 +2,11 @@
 import os
 
 import h5py
+import hdf5plugin
 import numpy as np
 from sklearn.linear_model import LinearRegression
+
+from batchflow import Notifier
 
 from .functions import triangular_weights_function_nd
 
@@ -49,11 +52,14 @@ class Accumulator3D:
     kwargs : dict
         Other parameters are passed to HDF5 dataset creation.
     """
-    def __init__(self, shape=None, origin=None, dtype=np.float32, transform=None, path=None, **kwargs):
-        # Dimensionality and location
-        self.shape = shape
-        self.origin = origin
-        self.location = [slice(start, start + shape) for start, shape in zip(self.origin, self.shape)]
+    def __init__(self, shape=None, origin=None, orientation=0, dtype=np.float32, transform=None, path=None,
+                 dataset_kwargs=None, **kwargs):
+        # Dimensionality and location, corrected on `orientation`
+        self.orientation = orientation
+        self.shape = self.reorder(shape)
+        self.origin = self.reorder(origin)
+        self.location = self.reorder([slice(start, start + shape)
+                                      for start, shape in zip(self.origin, self.shape)])
 
         # Properties of storages
         self.dtype = dtype
@@ -66,16 +72,25 @@ class Accumulator3D:
             self.path = path
 
             self.file = h5py.File(path, mode='w-')
+            self.dataset_kwargs = dataset_kwargs or {}
+
         self.type = os.path.splitext(path)[1][1:] if path is not None else 'numpy'
 
         self.aggregated = False
         self.kwargs = kwargs
 
+    def reorder(self, sequence):
+        """ Reorder `sequence` with the `orientation` of accumulator. """
+        if self.orientation == 1:
+            sequence = np.array([sequence[1], sequence[0], sequence[2]])
+        return sequence
+
     # Placeholder management
     def create_placeholder(self, name=None, dtype=None, fill_value=None):
         """ Create named storage as a dataset of HDF5 or plain array. """
-        if self.type in ('hdf5', 'blosc'):
-            placeholder = self.file.create_dataset(name, shape=self.shape, dtype=dtype, fillvalue=fill_value)
+        if self.type in ['hdf5', 'qhdf5']:
+            placeholder = self.file.create_dataset(name, shape=self.shape, dtype=dtype,
+                                                   fillvalue=fill_value, **self.dataset_kwargs)
         elif self.type == 'numpy':
             placeholder = np.full(shape=self.shape, fill_value=fill_value, dtype=dtype)
 
@@ -83,7 +98,7 @@ class Accumulator3D:
 
     def remove_placeholder(self, name=None):
         """ Remove created placeholder. """
-        if self.type in ['hdf5', 'blosc']:
+        if self.type in ['hdf5', 'qhdf5']:
             del self.file[name]
         setattr(self, name, None)
 
@@ -100,6 +115,11 @@ class Accumulator3D:
 
             if s < slc.stop - slc.start:
                 raise ValueError(f"Inconsistent crop_shape {crop.shape} and location {location}")
+
+        # Correct orientation
+        location = self.reorder(location)
+        if self.orientation == 1:
+            crop = crop.transpose(1, 0, 2)
 
         # Compute correct shapes
         loc, loc_crop = [], []
@@ -124,9 +144,10 @@ class Accumulator3D:
         self._aggregate()
 
         # Re-open the HDF5 file to force flush changes and release disk space from deleted datasets
-        # Also add alias to `data` dataset, so the resulting cube can be opened by `SeismicGeometry`
-        if self.type == 'hdf5':
-            self.file['cube_i'] = self.file['data']
+        # Also add alias to `data` dataset, so the resulting cube can be opened by `Geometry`
+        if self.type in ['hdf5', 'qhdf5']:
+            projection_name = 'projection_i' if self.orientation == 0 else 'projection_x'
+            self.file[projection_name] = self.file['data']
             self.file.close()
             self.file = h5py.File(self.path, 'r+')
             self.data = self.file['data']
@@ -140,7 +161,7 @@ class Accumulator3D:
 
     def clear(self):
         """ Remove placeholders from memory and disk. """
-        if self.type in ['hdf5', 'blosc']:
+        if self.type in ['hdf5', 'qhdf5']:
             os.remove(self.path)
 
     @property
@@ -150,9 +171,58 @@ class Accumulator3D:
             self.aggregate()
         return self.data
 
+    def export_to_hdf5(self, path=None, projections=(0,), pbar='t', dtype=None, transform=None, dataset_kwargs=None):
+        """ Export `data` attribute to a file. """
+        if self.type != 'numpy' or self.orientation != 0:
+            raise NotImplementedError('`export_to_hdf5` works only with `numpy` accumulators with `orientation=0`!')
+
+        # Parse parameters
+        from ..geometry.conversion_mixin import ConversionMixin #pylint: disable=import-outside-toplevel
+        if isinstance(path, str) and os.path.exists(path):
+            os.remove(path)
+
+        dtype = dtype or self.dtype
+        transform = transform or (lambda array: array)
+        dataset_kwargs = dataset_kwargs or dict(hdf5plugin.Blosc(cname='lz4hc', clevel=6, shuffle=0))
+
+        data = self.data
+
+        with h5py.File(path, mode='w-') as file:
+            with Notifier(pbar, total=sum(data.shape[axis] for axis in projections)) as progress_bar:
+                for axis in projections:
+                    projection_name = ConversionMixin.PROJECTION_NAMES[axis]
+                    projection_transposition = ConversionMixin.TO_PROJECTION_TRANSPOSITION[axis]
+                    projection_shape = np.array(data.shape)[projection_transposition]
+
+                    dataset_kwargs_ = {'chunks': (1, *projection_shape[1:]), **dataset_kwargs}
+                    projection = file.create_dataset(projection_name, shape=projection_shape, dtype=self.dtype,
+                                                    **dataset_kwargs_)
+
+                    for i in range(data.shape[axis]):
+                        projection[i] = transform(np.take(data, i, axis=axis))
+                        progress_bar.update()
+        return h5py.File(path, mode='r')
+
+    # Pre-defined transforms
+    @staticmethod
+    def prediction_to_int8(array):
+        """ Convert a float array with values in [0.0, 1.0] to an int8 array with values in [-128, +127]. """
+        array *= 255
+        array -= 128
+        return array.astype(np.int8)
+
+    @staticmethod
+    def int8_to_prediction(array):
+        """ Convert an int8 array with values in [-128, +127] to a float array with values in [0.0, 1.0]. """
+        array = array.astype(np.float32)
+        array += 128
+        array /= 255
+        return array
+
+    # Alternative constructors
     @classmethod
     def from_aggregation(cls, aggregation='max', shape=None, origin=None, dtype=np.float32, fill_value=None,
-                         transform=None, path=None, **kwargs):
+                         transform=None, path=None, dataset_kwargs=None, **kwargs):
         """ Initialize chosen type of accumulator aggregation. """
         class_to_aggregation = {
             MaxAccumulator3D: ['max', 'maximum'],
@@ -165,14 +235,16 @@ class Accumulator3D:
                                 for alias in lst}
 
         return aggregation_to_class[aggregation](shape=shape, origin=origin, dtype=dtype, fill_value=fill_value,
-                                                 transform=transform, path=path, **kwargs)
+                                                 transform=transform, path=path,
+                                                 dataset_kwargs=dataset_kwargs, **kwargs)
 
     @classmethod
-    def from_grid(cls, grid, aggregation='max', dtype=np.float32, fill_value=None, transform=None, path=None, **kwargs):
+    def from_grid(cls, grid, aggregation='max', dtype=np.float32, fill_value=None, transform=None, path=None,
+                  dataset_kwargs=None, **kwargs):
         """ Infer necessary parameters for accumulator creation from a passed grid. """
         return cls.from_aggregation(aggregation=aggregation, dtype=dtype, fill_value=fill_value,
                                     shape=grid.shape, origin=grid.origin, orientation=grid.orientation,
-                                    transform=transform, path=path, **kwargs)
+                                    transform=transform, path=path, dataset_kwargs=dataset_kwargs, **kwargs)
 
 
 class MaxAccumulator3D(Accumulator3D):
@@ -194,6 +266,8 @@ class MaxAccumulator3D(Accumulator3D):
 class MeanAccumulator3D(Accumulator3D):
     """ Accumulator that takes mean value of overlapping crops. """
     def __init__(self, shape=None, origin=None, dtype=np.float32, transform=None, path=None, **kwargs):
+        if dtype == np.int8:
+            raise NotImplementedError('`mean` accumulation is unavailable for `dtype=in8`. Use `weighted` aggregation.')
         super().__init__(shape=shape, origin=origin, dtype=dtype, transform=transform, path=path, **kwargs)
 
         self.create_placeholder(name='data', dtype=self.dtype, fill_value=0)
@@ -294,8 +368,7 @@ class WeightedSumAccumulator3D(Accumulator3D):
     """ Accumulator that takes weighted sum of overlapping crops. Accepts `weights_function`
     for making weights for each crop into the initialization.
 
-    NOTE: add later support of
-    (i) weights incoming along with a data-crop.
+    NOTE: add support of weights incoming along with a data-crop.
     """
     def __init__(self, shape=None, origin=None, dtype=np.float32, transform=None, path=None,
                  weights_function=triangular_weights_function_nd, **kwargs):
@@ -429,65 +502,3 @@ class RegressionAccumulator(Accumulator3D):
     def _aggregate(self):
         # Clean-up
         self.remove_placeholder('weights')
-
-
-class AccumulatorBlosc(Accumulator3D):
-    """ Accumulate predictions into `BLOSC` file.
-    Each of the saved slides supposed to be finalized, e.g. coming from another accumulator.
-    During the aggregation, we repack the file to remove duplicates.
-
-    Parameters
-    ----------
-    path : str
-        Path to save `BLOSC` file to.
-    orientation : int
-        If 0, then predictions are stored as `cube_i` dataset inside the file.
-        If 1, then predictions are stored as `cube_x` dataset inside the file and transposed before storing.
-    aggregation : str
-        Type of aggregation for duplicate slides.
-        If `max`, then we take element-wise maximum.
-        If `mean`, then take mean value.
-        If None, then we take random slide.
-    """
-    def __init__(self, path, orientation=0, aggregation='max',
-                 shape=None, origin=None, dtype=np.float32, transform=None, **kwargs):
-        super().__init__(shape=shape, origin=origin, dtype=dtype, transform=transform, path=None)
-        if orientation == 2:
-            raise ValueError("Can't use BLOSC accumulator for a joined grid with mixed orientations!")
-
-        self.type = 'blosc'
-        self.path = path
-        self.orientation = orientation
-        self.aggregation = aggregation
-
-        # Manage the `BLOSC` file
-        from .geometry import BloscFile #pylint: disable=import-outside-toplevel
-        self.file = BloscFile(path, mode='w')
-        if orientation == 0:
-            name = 'cube_i'
-        elif orientation == 1:
-            name = 'cube_x'
-            shape = np.array(shape)[[1, 0, 2]]
-        self.file.create_dataset(name, shape=shape, dtype=dtype)
-
-
-    def _update(self, crop, location):
-        crop = crop.astype(self.dtype)
-        iterator = range(location[self.orientation].start, location[self.orientation].stop)
-
-        # `i` is `loc_idx` shifted by `origin`
-        for i, loc_idx in enumerate(iterator):
-            slc = [slice(None), slice(None), slice(None)]
-            slc[self.orientation] = i
-            slide = crop[tuple(slc)]
-            self.data[loc_idx, :, :] = slide.T if self.orientation == 1 else slide
-
-    def _aggregate(self):
-        self.file = self.file.repack(aggregation=self.aggregation)
-
-
-    @classmethod
-    def from_grid(cls, grid, aggregation='max', dtype=np.float32, transform=None, path=None, **kwargs):
-        """ Infer necessary parameters for accumulator creation from a passed grid. """
-        return cls(path=path, aggregation=aggregation, dtype=dtype, transform=transform,
-                   shape=grid.shape, origin=grid.origin, orientation=grid.orientation, **kwargs)

@@ -200,8 +200,8 @@ class VisualizationMixin:
 
             batch_index = self.indices[item_index]
             field = self.get(batch_index, 'fields')
-            if hasattr(field, 'displayed_name'):
-                suptitle += f' | field `{field.displayed_name}`'
+            if hasattr(field, 'short_name'):
+                suptitle += f' | field `{field.short_name}`'
 
             if 'suptitle' in add_location:
                 suptitle += '\n' + '   '.join(location_info)

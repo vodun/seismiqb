@@ -19,7 +19,7 @@ def skeletonize(slide, width=5, rel_height=0.5, prominence=0.05, threshold=0.05,
     prominence : float
         prominence threshold value
     threshold : float
-        nullify values ​​below the threshold
+        nullify values below the threshold
     mode : int (from 0 to 4)
         which value to place in the output
         0: ones

@@ -53,7 +53,7 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
     """
 
     # Columns used from the file
-    COLUMNS = ['iline', 'xline', 'height']
+    COLUMNS = ['INLINE_3D', 'CROSSLINE_3D', 'DEPTH']
 
     def __init__(self, storage, field, name=None, direction=None, **kwargs): #pylint: disable=super-init-not-called
         self.name = name
@@ -97,17 +97,17 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
         if len(data) == 0: # It can be for empty fault file.
             data = np.zeros((1, 3))
 
-        i_min, x_min, h_min = np.min(data, axis=0)
-        i_max, x_max, h_max = np.max(data, axis=0)
+        i_min, x_min, d_min = np.min(data, axis=0)
+        i_max, x_max, d_max = np.max(data, axis=0)
 
-        self.h_min, self.h_max = int(h_min), int(h_max)
+        self.d_min, self.d_max = int(d_min), int(d_max)
         self.i_min, self.i_max, self.x_min, self.x_max = int(i_min), int(i_max), int(x_min), int(x_max)
 
         self.i_length = (self.i_max - self.i_min) + 1
         self.x_length = (self.x_max - self.x_min) + 1
         self.bbox = np.array([[self.i_min, self.i_max],
                               [self.x_min, self.x_max],
-                              [self.h_min, self.h_max]],
+                              [self.d_min, self.d_max]],
                              dtype=np.int32)
 
     def set_direction(self, direction):
@@ -310,7 +310,7 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
 
             slices = [slice(None)] * 3
             slices[self.direction] = unlabeled_slides - mask_bbox[self.direction, 0]
-            mask[slices] = 0
+            mask[tuple(slices)] = 0
 
         insert_points_into_mask(mask, points, mask_bbox, width=width, axis=1-self.direction)
         return mask
