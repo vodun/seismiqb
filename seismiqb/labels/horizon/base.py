@@ -470,8 +470,8 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
                     if len(horizon) > 0:
                         if save_probabilities:
                             values = mask[horizon.points[:, 0] - origin[0],
-                                        horizon.points[:, 1] - origin[1],
-                                        horizon.points[:, 2] - origin[2]]
+                                          horizon.points[:, 1] - origin[1],
+                                          horizon.points[:, 2] - origin[2]]
 
                             horizon.proba_points = np.vstack([horizon.points[:, 0], horizon.points[:, 1], values]).T
                             # We save coordinates in the `proba_points` because horizon points can be filtered

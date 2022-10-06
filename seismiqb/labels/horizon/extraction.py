@@ -537,7 +537,7 @@ class ExtractionMixin:
             - remaining horizons
             - dictionary with timings and statistics
         """
-        horizons = np.array(horizons)
+        horizons = np.array(horizons) if not isinstance(horizons, np.ndarray) else horizons
 
         # Adjacency parsing
         adjacency = adjacency if isinstance(adjacency, tuple) else (adjacency, adjacency)
@@ -552,7 +552,7 @@ class ExtractionMixin:
         for _ in range(max_iters):
             start_timing = perf_counter()
             num_merged = 0
-            indices_merged = set()
+            indices_merged = []
 
             # Pre-compute all the bounding boxes
             bboxes = np.array([horizon.bbox for horizon in horizons], dtype=np.int32)
@@ -616,16 +616,14 @@ class ExtractionMixin:
 
                 # Keep values for clean-up
                 if merged:
-                    indices_merged.add(idx)
+                    indices_merged.append(idx)
                     num_merged += 1
 
             # Once in a while, remove merged horizons from `bboxes` and `horizons` arrays
             if indices_merged:
-                indices_merged = list(indices_merged)
                 horizons = np.delete(horizons, indices_merged, axis=0)
                 bboxes = np.delete(bboxes, indices_merged, axis=0)
 
-                indices_merged = set()
                 merge_stats['num_deletes'] += 1
 
             # Global iteration info
@@ -637,8 +635,6 @@ class ExtractionMixin:
             if num_merged < num_merged_threshold or len(horizons) == 0:
                 break
 
-        horizons = [horizon for horizon in horizons
-                    if (horizon._points is not None or horizon._matrix is not None) and len(horizon) > 0]
         return self, horizons, MetaDict(merge_stats)
 
     @staticmethod
