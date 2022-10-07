@@ -538,6 +538,8 @@ class ExtractionMixin:
             - dictionary with timings and statistics
         """
         horizons = np.array(horizons) if not isinstance(horizons, np.ndarray) else horizons
+        # Pre-compute all the bounding boxes
+        bboxes = np.array([horizon.bbox for horizon in horizons], dtype=np.int32)
 
         # Adjacency parsing
         adjacency = adjacency if isinstance(adjacency, tuple) else (adjacency, adjacency)
@@ -552,10 +554,7 @@ class ExtractionMixin:
         for _ in range(max_iters):
             start_timing = perf_counter()
             num_merged = 0
-            indices_merged = []
-
-            # Pre-compute all the bounding boxes
-            bboxes = np.array([horizon.bbox for horizon in horizons], dtype=np.int32)
+            indices_merged = set()
 
             # Iline-axis
             overlap_min_i = np.maximum(bboxes[:, 0], self.bbox[0])
@@ -616,11 +615,12 @@ class ExtractionMixin:
 
                 # Keep values for clean-up
                 if merged:
-                    indices_merged.append(idx)
+                    indices_merged.add(idx)
                     num_merged += 1
 
             # Once in a while, remove merged horizons from `bboxes` and `horizons` arrays
             if indices_merged:
+                indices_merged = list(indices_merged)
                 horizons = np.delete(horizons, indices_merged, axis=0)
                 bboxes = np.delete(bboxes, indices_merged, axis=0)
 
