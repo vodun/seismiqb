@@ -193,7 +193,7 @@ class FaultSticksMixin(CharismaMixin):
         path : str
             Path to file or glob expression
         verbose : bool
-            Response if file is successfully readed.
+            Response if file is successfully read.
         """
         for filename in glob.glob(path):
             if os.path.splitext(filename)[1] == '.dvc':
