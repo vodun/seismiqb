@@ -753,7 +753,7 @@ class SeismicSampler(Sampler):
             if uniform_labels:
                 labels_weights.append([1 / len(list_labels) for _ in list_labels])
             else:
-                weights = np.array([len(label) for label in list_labels])
+                weights = np.array([len(label) if hasattr(label, '__len__') else 1 for label in list_labels])
                 weights = weights / weights.sum()
                 labels_weights.append(weights)
 
