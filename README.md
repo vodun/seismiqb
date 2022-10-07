@@ -19,13 +19,13 @@
 
 **seismiQB** is a framework for research and deployment of deep learning models on post-stack seismic data. It covers all the main stages of model development and its production usage, and the main features are:
 
-* Convert `SEG-Y` to a compressed and quantized data formats, that take 5x less disk space and load slices up to 40 times faster
+* Convert `SEG-Y` to a compressed and quantized data formats, that take 4x less disk space and load slices up to 40 times faster
 * Work (e.g. load, make segmentation masks, QC) with a number of labels: horizons, faults, facies (both 2d and 3d)
 * Prepare data for the model inputs, e.g. patches (2d or 3d) of seismic data and corresponding segmentation masks
 * Augment model data with a number of geological and geometrical transforms, as well as traditional ML augmentations
-* Even the most complex neural networks are defined with a few lines of code, and we also support pre-existing `PyTorch` models
-* Train and inference stages are heavily optimized to meet the demands of acceleration in modern fields and projects
-* Predicted entities (horizon, faults, facies, arrays) are easy to export to a convenient formats like CHARISMA and FAULT_STICKS for seamless validation by geophysicists
+* Define even the most complex neural networks with just a few lines of code, or re-use existing `PyTorch` models
+* Optimize train/inference stages with ready-to-use primitives to meet the demands of modern field development 
+* Export predicted entities (horizon, faults, facies, arrays) to convenient formats (CHARISMA, FAULT_STICKS) for validation by geophysicists
 
 
 ## Installation
@@ -45,15 +45,12 @@ Installation of **seismiQB** as a Python package should be as easy as running on
 
 ## Getting started
 
-After installation just import `seismiqb`:
+After installation just import **seismiQB** into your code. A quick demo of our primitives and methods:
 ```python
 import seismiqb
-```
 
-A quick demo of our primitives and methods:
-```python
 field = Field('/path/to/cube.sgy')                                    # Initialize field with SEG-Y
-field.add_labels('path/to/horizons/*.char', labels_class='horizon')   # Add labeling
+field.load_labels('path/to/horizons/*.char', labels_class='horizon')  # Add labeling
 
 # Labels
 field.horizons.interpolate()                                          # Fill in small holes
@@ -73,7 +70,7 @@ Be sure to check out our [tutorials](tutorials) to get more info about the **sei
 
 ## Citing
 
-Please cite `seismiqb` in your publications if it helps your research.
+Please cite **seismiQB** in your publications if it helps your research.
 
     Khudorozhkov R., Koryagin A., Tsimfer S., Mylzenova D. SeismiQB library for seismic interpretation with deep learning. 2019.
 
