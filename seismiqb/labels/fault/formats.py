@@ -153,7 +153,7 @@ class FaultSticksMixin(CharismaMixin):
         if direction is not None:
             ptp = np.array([np.ptp(stick[:, direction]) for stick in self.sticks])
             if (ptp > 2).any():
-                warnings.warn("there sticks on several slides in both directions")
+                warnings.warn(f"{self.name}: there sticks on several slides in both directions")
 
             for stick in self.sticks[np.logical_and(ptp > 0, ptp <= 2)]:
                 stick[:, direction] = stick[0, direction]
@@ -227,10 +227,12 @@ class FaultSticksMixin(CharismaMixin):
                     print(filename, ': OK')
 
     @classmethod
-    def split_file(cls, path):
+    def split_charisma(cls, path):
         """ Split file with multiple faults (indexed by 'name' column) into separate dataframes. """
-        df = pd.read_csv(path, sep=r'\s+', names=cls.FAULT_STICKS_SPEC)
-        return [item[1] for item in df.groupby('name')]
+        df = cls.read_df(path, sep=r'\s+', names=cls.FAULT_STICKS_SPEC)
+        if 'name' in df.columns:
+            return dict(df.groupby('name'))
+        return {path: df}
 
     @classmethod
     def _fault_to_csv(cls, df, dst):

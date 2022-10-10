@@ -211,19 +211,8 @@ class Field(CharismaMixin, VisualizationMixin):
             path.field = self
             return [path]
 
-        if isinstance(path, str):
-            faults = []
-            for df in constructor_class.split_file(path):
-                fault = constructor_class(df, field=self, **kwargs)
-                if interpolate:
-                    fault.interpolate()
-                faults.append(fault)
-            return faults
-
-        fault = constructor_class(df, field=self, **kwargs)
-        if interpolate:
-            fault.interpolate()
-        return [fault]
+        faults = constructor_class.load(path, interpolate, *kwargs)
+        return faults
 
     def _load_geometries(self, paths, constructor_class=Geometry.new, **kwargs):
         if isinstance(paths, str):

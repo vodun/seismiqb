@@ -60,6 +60,7 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
         self.name = name
         self.field = field
 
+        self.short_name = name
         self._points = None
         self._sticks = None
         self._nodes = None
@@ -140,6 +141,19 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
         """ Clear 'points', 'sticks', 'nodes' or 'simplices' storage. """
         setattr(self, '_' + storage, None)
 
+    @classmethod
+    def load(cls, path, field, name=None, interpolate=False, **kwargs):
+        if not isinstance(path, str) or os.path.splitext(path)[1][1:] not in ['char', '']:
+            faults = [cls(path, field=field, name=name, **kwargs)]
+        else:
+            faults = [cls(df, field=field, name=name, **kwargs) for name, df in cls.split_charisma(path)]
+
+        if interpolate:
+            for fault in faults:
+                fault.interpolate()
+
+        return faults
+
     def from_points(self, points, transform=False, **kwargs):
         """ Initialize points cloud. """
         if transform:
@@ -152,8 +166,8 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
         path = self.field.make_path(path, makedirs=False)
         self.path = path
 
-        self.name = os.path.basename(path)
-        self.short_name = os.path.splitext(self.name)[0]
+        self.name = self.name or os.path.basename(path)
+        self.short_name = self.short_name or os.path.splitext(path)[0]
 
         ext = os.path.splitext(path)[1][1:]
 
@@ -182,9 +196,7 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
 
         setattr(self, '_simplices', storage.get('simplices'))
 
-        self.short_name = self.name
-
-    def from_df(self, storage, path=None, **kwargs):
+    def from_df(self, storage, **kwargs):
         self.load_fault_sticks(storage, **kwargs)
 
     # Transformation of attributes: sticks -> (nodes, simplices) -> points -> sticks
