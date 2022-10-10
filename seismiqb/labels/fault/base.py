@@ -146,7 +146,7 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
         if not isinstance(path, str) or os.path.splitext(path)[1][1:] not in ['char', '']:
             faults = [cls(path, field=field, name=name, **kwargs)]
         else:
-            faults = [cls(df, field=field, name=name, **kwargs) for name, df in cls.split_charisma(path)]
+            faults = [cls(df, field=field, name=name, **kwargs) for name, df in cls.split_charisma(path).items()]
 
         if interpolate:
             for fault in faults:

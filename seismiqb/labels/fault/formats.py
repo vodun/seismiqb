@@ -229,9 +229,9 @@ class FaultSticksMixin(CharismaMixin):
     @classmethod
     def split_charisma(cls, path):
         """ Split file with multiple faults (indexed by 'name' column) into separate dataframes. """
-        df = cls.read_df(path, sep=r'\s+', names=cls.FAULT_STICKS_SPEC)
+        df = cls.read_df(path)
         if 'name' in df.columns:
-            return dict(df.groupby('name'))
+            return dict(list(df.groupby('name')))
         return {path: df}
 
     @classmethod
