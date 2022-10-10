@@ -113,7 +113,10 @@ class FaultSticksMixin(CharismaMixin):
             Whether remove sticks with one node and remove sticks from fault with one stick,
             by default False
         """
-        df = self.read_df(path)
+        if isinstance(path, str):
+            df = self.read_df(path)
+        else:
+            df = path
 
         if len(df) == 0:
             self._sticks = [[]]
@@ -150,7 +153,7 @@ class FaultSticksMixin(CharismaMixin):
         if direction is not None:
             ptp = np.array([np.ptp(stick[:, direction]) for stick in self.sticks])
             if (ptp > 2).any():
-                warnings.warn(f"{self.path}: there sticks on several slides in both directions")
+                warnings.warn("there sticks on several slides in both directions")
 
             for stick in self.sticks[np.logical_and(ptp > 0, ptp <= 2)]:
                 stick[:, direction] = stick[0, direction]
@@ -224,12 +227,10 @@ class FaultSticksMixin(CharismaMixin):
                     print(filename, ': OK')
 
     @classmethod
-    def split_file(cls, path, dst):
-        """ Split file with multiple faults (indexed by 'name' column) into separate files. """
-        if dst and not os.path.isdir(dst):
-            os.makedirs(dst)
-        df = pd.read_csv(path, sep=r'\s+', names=cls.FAULT_STICKS)
-        df.groupby('name').apply(cls._fault_to_csv, dst=dst)
+    def split_file(cls, path):
+        """ Split file with multiple faults (indexed by 'name' column) into separate dataframes. """
+        df = pd.read_csv(path, sep=r'\s+', names=cls.FAULT_STICKS_SPEC)
+        return [item[1] for item in df.groupby('name')]
 
     @classmethod
     def _fault_to_csv(cls, df, dst):

@@ -2,6 +2,7 @@
 
 import os
 import numpy as np
+import pandas as pd
 
 from .triangulation import sticks_to_simplices, triangle_rasterization
 from .approximation import points_to_sticks
@@ -71,6 +72,8 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
             source = 'points'
         elif isinstance(storage, dict):
             source = 'dict'
+        elif isinstance(storage, pd.DataFrame):
+            source = 'df'
         getattr(self, f'from_{source}')(storage, **kwargs)
 
         if self.direction is None:
@@ -180,6 +183,9 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
         setattr(self, '_simplices', storage.get('simplices'))
 
         self.short_name = self.name
+
+    def from_df(self, storage, path=None, **kwargs):
+        self.load_fault_sticks(storage, **kwargs)
 
     # Transformation of attributes: sticks -> (nodes, simplices) -> points -> sticks
 

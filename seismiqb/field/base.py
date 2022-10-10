@@ -202,20 +202,28 @@ class Field(CharismaMixin, VisualizationMixin):
                                                      constructor_class=label_class, **kwargs)
             loaded = list(Notifier(pbar, total=len(paths))(executor.map(function, paths)))
 
-        faults = [fault for fault in loaded if len(fault) > 0]
+        faults = [fault for fault in sum(loaded, []) if len(fault) > 0]
         return faults
 
     def _load_fault(self, path, interpolate=False, constructor_class=Fault, **kwargs):
         """ Load a single fault from path. """
         if isinstance(path, constructor_class):
             path.field = self
-            return path
+            return [path]
 
-        fault = constructor_class(path, field=self, **kwargs)
+        if isinstance(path, str):
+            faults = []
+            for df in constructor_class.split_file(path):
+                fault = constructor_class(df, field=self, **kwargs)
+                if interpolate:
+                    fault.interpolate()
+                faults.append(fault)
+            return faults
 
+        fault = constructor_class(df, field=self, **kwargs)
         if interpolate:
             fault.interpolate()
-        return fault
+        return [fault]
 
     def _load_geometries(self, paths, constructor_class=Geometry.new, **kwargs):
         if isinstance(paths, str):
