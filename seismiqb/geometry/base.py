@@ -484,6 +484,12 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMix
 
 
     # Properties
+    def __len__(self):
+        """ Number of meaningful traces in a Geometry. """
+        if hasattr(self, 'n_alive_traces'):
+            return self.n_alive_traces
+        return self.n_traces
+
     @property
     def axis_names(self):
         """ Names of the axes: indexing headers and `DEPTH` as the last one. """
@@ -759,7 +765,7 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMix
 
     def compute_auto_zoom(self, index, axis=0):
         """ Compute zoom for a given slide. """
-        return slice(*self.get_slide_bounds(index=index, axis=axis))
+        return slice(*self.get_slide_bounds(index=index, axis=axis)), slice(None)
 
 
     # General utility methods

@@ -253,6 +253,7 @@ class ExportMixin:
         # Parse parameters
         n_traces = len(spec.ilines) * len(spec.xlines)
         n_samples = len(spec.samples)
+        spec.format = format
 
         # Compute target dtype, itemsize, size of the dst file
         dst_dtype = endian_symbol + MemmapLoader.SEGY_FORMAT_TO_TRACE_DATA_DTYPE[spec.format]
@@ -335,5 +336,5 @@ def write_chunk(path, shape, offset, dtype, spec, array_like, transform, start, 
     dst_traces['data'] = data.reshape(-1, len(spec.samples))
     return chunk_size
 
-# Convenient alias for staticmethod
+# Convenient aliases for staticmethod
 array_to_segy = array_to_sgy = ExportMixin.array_to_segy
