@@ -379,7 +379,7 @@ class VisualizationMixin:
         if 'data' not in load_params:
             data, label = self.load_attribute(_return_label=True, **load_params)
             params['label_name'] = label.short_name
-            params['bbox'] = label.bbox.reshape(-1, 2)[:2]
+            params['bbox'] = label.bbox[:2]
         else:
             data = load_params['data']
             params['label_name'] = self.short_name

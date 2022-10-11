@@ -539,7 +539,7 @@ class ExtractionMixin:
         """
         horizons = np.array(horizons) if not isinstance(horizons, np.ndarray) else horizons
         # Pre-compute all the bounding boxes
-        bboxes = np.array([horizon.bbox for horizon in horizons], dtype=np.int32)
+        bboxes = np.array([horizon.raveled_bbox for horizon in horizons], dtype=np.int32)
 
         # Adjacency parsing
         adjacency = adjacency if isinstance(adjacency, tuple) else (adjacency, adjacency)
@@ -557,24 +557,24 @@ class ExtractionMixin:
             indices_merged = set()
 
             # Iline-axis
-            overlap_min_i = np.maximum(bboxes[:, 0], self.bbox[0])
-            overlap_max_i = np.minimum(bboxes[:, 1], self.bbox[1]) + 1
+            overlap_min_i = np.maximum(bboxes[:, 0], self.raveled_bbox[0])
+            overlap_max_i = np.minimum(bboxes[:, 1], self.raveled_bbox[1]) + 1
             overlap_size_i = overlap_max_i - overlap_min_i
             mask_i = (overlap_size_i >= 1 - adjacency_i)
             indices_i = np.nonzero(mask_i)[0]
             bboxes_i = bboxes[indices_i]
 
             # Crossline-axis
-            overlap_min_x = np.maximum(bboxes_i[:, 2], self.bbox[2])
-            overlap_max_x = np.minimum(bboxes_i[:, 3], self.bbox[3]) + 1
+            overlap_min_x = np.maximum(bboxes_i[:, 2], self.raveled_bbox[2])
+            overlap_max_x = np.minimum(bboxes_i[:, 3], self.raveled_bbox[3]) + 1
             overlap_size_x = overlap_max_x - overlap_min_x
             mask_x = (overlap_size_x >= 1 - adjacency_x)
             indices_x = np.nonzero(mask_x)[0]
             bboxes_x = bboxes_i[indices_x]
 
             # depth-axis: other threshold
-            overlap_min_h = np.maximum(bboxes_x[:, 4], self.bbox[4])
-            overlap_max_h = np.minimum(bboxes_x[:, 5], self.bbox[5]) + 1
+            overlap_min_h = np.maximum(bboxes_x[:, 4], self.raveled_bbox[4])
+            overlap_max_h = np.minimum(bboxes_x[:, 5], self.raveled_bbox[5]) + 1
             overlap_size_h = overlap_max_h - overlap_min_h
             mask_h = (overlap_size_h >= 1)
             indices_h = np.nonzero(mask_h)[0]
@@ -700,7 +700,7 @@ class ExtractionMixin:
             indices_merged = set() # used to periodically clean-up arrays
 
             # Pre-compute all the bounding boxes
-            bboxes = np.array([horizon.bbox for horizon in horizons], dtype=np.int32)
+            bboxes = np.array([horizon.raveled_bbox for horizon in horizons], dtype=np.int32)
 
             # Cycle for the base horizons. As we are removing merged horizons from the list, we iterate with `while`
             i = 0
