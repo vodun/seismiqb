@@ -387,17 +387,11 @@ class ExtractionMixin:
 
         # Create new instance or change `self`
         if inplace:
-            # # Clean-up data storages, just in case
-            # for instance in [self, other]:
-            #     for attribute in ['_matrix', '_points', '_depths']:
-            #         if hasattr(instance, attribute):
-            #             delattr(instance, attribute)
-            #             setattr(instance, attribute, None)
-
             # Change `self` inplace, mark `other` as merged into `self`
             self.from_matrix(background, i_min=shared_i_min, x_min=shared_x_min,
                              d_min=min(self.d_min, other.d_min),
                              d_max=max(self.d_max, other.d_max), length=length)
+            self.reset_storage('points', reset_cache=False)
             other.already_merged = id(self)
             merged = True
         else:
@@ -482,17 +476,11 @@ class ExtractionMixin:
 
             # Create new instance or change `self`
             if inplace:
-                # # Clean-up data storages
-                # for instance in [self, other]:
-                #     for attribute in ['_matrix', '_points', '_depths']:
-                #         if hasattr(instance, attribute):
-                #             delattr(instance, attribute)
-                #             setattr(instance, attribute, None)
-
                 # Change `self` inplace, mark `other` as merged into `self`
                 self.from_matrix(background, i_min=shared_i_min, x_min=shared_x_min,
                                  d_min=min(self.d_min, other.d_min),
                                  d_max=max(self.d_max, other.d_max), length=length)
+                self.reset_storage('points', reset_cache=False)
                 other.already_merged = id(self)
                 merged = True
             else:

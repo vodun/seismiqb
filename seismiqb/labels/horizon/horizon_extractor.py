@@ -25,7 +25,7 @@ class HorizonExtractor:
 
         - repeat the last three to get more prototypes.
 
-    After prototype extraction, it can be converted to a Horizon instance.
+    After prototype extraction, they can be converted to a Horizon instances.
     We do so by iteratively merging its lines with additional thresholds.
     """
     def __init__(self, array, step=10):

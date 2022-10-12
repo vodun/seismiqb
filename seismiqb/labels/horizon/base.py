@@ -220,6 +220,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
         self._len = None
 
         if storage == 'matrix':
+            self._depth = None
             self._matrix = None
 
             if len(self.points) > 0:
