@@ -418,6 +418,7 @@ class AttributesMixin:
         'median_diff': ['median_diff', 'mdiff', 'median_faults'],
         'grad': ['grad', 'gradient', 'gradient_diff', 'gradient_faults'],
         'max_grad': ['max_grad', 'max_gradient', 'maximum_gradient'],
+        'max_abs_grad': ['max_abs_grad', 'max_abs_gradient', 'maximum_abs_gradient'],
     }
     ALIAS_TO_ATTRIBUTE = {alias: name for name, aliases in ATTRIBUTE_TO_ALIAS.items() for alias in aliases}
 
@@ -431,6 +432,7 @@ class AttributesMixin:
         'median_diff': 'get_median_diff_map',
         'grad': 'get_gradient_map',
         'max_grad': 'get_max_gradient_map',
+        'max_abs_grad': 'get_max_abs_gradient_map',
         'spikes': 'get_spikes_mask'
     }
 
@@ -744,6 +746,21 @@ class AttributesMixin:
 
         matrix = np.nanmax([grad_i, grad_x], axis=0)
         matrix[matrix == self.FILL_VALUE] = np.nan
+        return matrix
+
+    @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
+    @transformable
+    @apply_dilation
+    def get_max_abs_gradient_map(self, **_):
+        """ Compute maximum of abs gradients along both directions. """
+        grad_i = self.load_attribute('grad_i', on_full=True, dtype=np.float32, use_cache=False)
+        grad_x = self.load_attribute('grad_x', on_full=True, dtype=np.float32, use_cache=False)
+        grad_i[grad_i == self.FILL_VALUE] = np.nan
+        grad_x[grad_x == self.FILL_VALUE] = np.nan
+
+        matrix = np.nanmax([np.abs(grad_i), np.abs(grad_x)], axis=0)
+        matrix[matrix == self.FILL_VALUE] = np.nan
+        matrix[matrix == -self.FILL_VALUE] = np.nan
         return matrix
 
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
