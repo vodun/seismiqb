@@ -387,18 +387,18 @@ class ExtractionMixin:
 
         # Create new instance or change `self`
         if inplace:
-            # Clean-up data storages, just in case
-            for instance in [self, other]:
-                for attribute in ['_matrix', '_points', '_depths']:
-                    if hasattr(instance, attribute):
-                        delattr(instance, attribute)
-                        setattr(instance, attribute, None)
+            # # Clean-up data storages, just in case
+            # for instance in [self, other]:
+            #     for attribute in ['_matrix', '_points', '_depths']:
+            #         if hasattr(instance, attribute):
+            #             delattr(instance, attribute)
+            #             setattr(instance, attribute, None)
 
-            # Change `self` inplace
+            # Change `self` inplace, mark `other` as merged into `self`
             self.from_matrix(background, i_min=shared_i_min, x_min=shared_x_min,
                              d_min=min(self.d_min, other.d_min),
                              d_max=max(self.d_max, other.d_max), length=length)
-            # self.reset_storage('points')
+            other.already_merged = id(self)
             merged = True
         else:
             # Return a new instance of horizon
@@ -482,18 +482,18 @@ class ExtractionMixin:
 
             # Create new instance or change `self`
             if inplace:
-                # Clean-up data storages
-                for instance in [self, other]:
-                    for attribute in ['_matrix', '_points', '_depths']:
-                        if hasattr(instance, attribute):
-                            delattr(instance, attribute)
-                            setattr(instance, attribute, None)
+                # # Clean-up data storages
+                # for instance in [self, other]:
+                #     for attribute in ['_matrix', '_points', '_depths']:
+                #         if hasattr(instance, attribute):
+                #             delattr(instance, attribute)
+                #             setattr(instance, attribute, None)
 
-                # Change `self` inplace
+                # Change `self` inplace, mark `other` as merged into `self`
                 self.from_matrix(background, i_min=shared_i_min, x_min=shared_x_min,
                                  d_min=min(self.d_min, other.d_min),
                                  d_max=max(self.d_max, other.d_max), length=length)
-                # self.reset_storage('points')
+                other.already_merged = id(self)
                 merged = True
             else:
                 # Return a new instance of horizon
@@ -537,7 +537,9 @@ class ExtractionMixin:
             - remaining horizons
             - dictionary with timings and statistics
         """
-        horizons = np.array(horizons) if not isinstance(horizons, np.ndarray) else horizons
+        if isinstance(horizons, (tuple, list)):
+            horizons = np.array([horizon for horizon in horizons if not horizon.already_merged])
+
         # Pre-compute all the bounding boxes
         bboxes = np.array([horizon.raveled_bbox for horizon in horizons], dtype=np.int32)
 
@@ -871,8 +873,7 @@ class ExtractionMixin:
             delattr(horizon, 'merge_count')
             delattr(horizon, 'id_separated')
 
-        horizons = [horizon for horizon in horizons
-                    if (horizon._points is not None or horizon._matrix is not None) and len(horizon) > 0]
+        horizons = [horizon for horizon in horizons if not horizon.already_merged]
         return sorted(horizons, key=len), MetaDict(merge_stats)
 
 

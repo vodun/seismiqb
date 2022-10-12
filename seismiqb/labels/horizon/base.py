@@ -89,6 +89,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
         self.name = name
         self.dtype = dtype
         self.format = None
+        self.already_merged = None
 
         # Location of the horizon inside cube spatial range
         self.i_min, self.i_max = None, None
@@ -102,7 +103,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
         self._points = None
         self._depths = None
 
-        # depths information
+        # Depths information
         self._d_min, self._d_max = None, None
         self._d_mean, self._d_std = None, None
 
