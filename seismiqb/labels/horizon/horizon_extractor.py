@@ -1,5 +1,6 @@
 """ Extractor of horizon surfaces from a probability array. """
 from collections import Counter, defaultdict
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 
@@ -80,6 +81,7 @@ class HorizonExtractor:
                     'labeled_slide': labeled_slide,
                     'bboxes': bboxes,                          # `item_idx` -> bbox
                     'lengths': lengths,                        # `item_idx` -> length
+                    'already_used': defaultdict(bool),         # `item_idx` -> already merged or not
                 }
 
     def get_points(self, orientation, slide_idx, item_idx):
@@ -107,28 +109,37 @@ class HorizonExtractor:
         item_iterator = sorted(item_lengths.items(), key=lambda item: item[1], reverse=True)
 
         prototypes = []
-        for item_idx, item_length in Notifier(pbar)(list(item_iterator)[:n]):
-            if item_length < line_length_threshold:
-                break
+        with Notifier(pbar, total=n) as progress_bar:
+            for item_idx, item_length in item_iterator:
+                # Check if the line was already used / is big enough
+                if slide_dict['already_used'][item_idx] is True:
+                    continue
+                if item_length < line_length_threshold:
+                    break
 
-            # Make prototype instance, add all intersecting lines to it
-            prototype = self.make_prototype(orientation=orientation, slide_idx=slide_idx, item_idx=item_idx)
-            prototype = self.extend_prototype(prototype=prototype,
-                                              orientation=1-orientation,
-                                              max_iters=max_iters)
-            prototypes.append(prototype)
+                # Make prototype instance, add all intersecting lines to it
+                prototype = self.init_prototype(orientation=orientation, slide_idx=slide_idx, item_idx=item_idx)
+                prototype = self.extend_prototype(prototype=prototype, orientation=1-orientation, max_iters=max_iters)
+                prototypes.append(prototype)
+
+                progress_bar.update()
+                if len(prototypes) == n:
+                    break
+
         return prototypes
 
 
-    def make_prototype(self, orientation, slide_idx, item_idx):
-        """ Given orientation, slide index and item index, extract line points and make a prototype out of it. """
+    def init_prototype(self, orientation, slide_idx, item_idx):
+        """ Given orientation, slide and item index, extract line points and create a prototype instance out of it. """
         prototype = HorizonPrototype()
         points = self.get_points(orientation=orientation, slide_idx=slide_idx, item_idx=item_idx)
         prototype.add_points(points=points, orientation=orientation, slide_idx=slide_idx)
         return prototype
 
     def extend_prototype(self, prototype, orientation, max_iters=100):
-        """ Extend given prototype. """
+        """ Extend given prototype.
+        TODO: we don't really need `orientation`
+        """
         for outer_iter in range(max_iters):
             prev_len = prototype.n_points
 
@@ -153,10 +164,15 @@ class HorizonExtractor:
                 for item_idx, item_occurencies in item_indices.items():
                     if item_idx == 0:
                         continue
+                    if slide_dict['already_used'][item_idx] is True:
+                        continue
                     if outer_iter > 0 and item_occurencies < 2:
                         continue
+
+                    # Get line points, merge them into prototype, mark as merged
                     points = self.get_points(orientation=orientation, slide_idx=slide_idx, item_idx=item_idx)
                     prototype.add_points(points=points, orientation=orientation, slide_idx=slide_idx)
+                    slide_dict['already_used'][item_idx] = True
 
             # If no points added, break. Otherwise, change the orientation and repeat
             if prototype.n_points == prev_len:
@@ -164,17 +180,27 @@ class HorizonExtractor:
             orientation = 1 - orientation
         return prototype
 
+
     @staticmethod
-    def to_horizons(prototypes, field, reduction=7, d_ptp_threshold=20, size_threshold=40, max_iters=100, n=3):
-        """ Convert prototypes instances to horizon instances.
+    def to_horizons(prototypes, field, reduction=7, d_ptp_threshold=20, size_threshold=40, max_iters=100,
+                    n=3, pbar=False, max_workers=4):
+        """ Convert prototype instances to horizon instances.
         Refer to :meth:`HorizonPrototype.to_horizons` to more details on parameters.
         """
         horizons = []
-        for prototype in prototypes:
-            horizons.extend(prototype.to_horizons(field=field, reduction=reduction, d_ptp_threshold=d_ptp_threshold,
-                                                  size_threshold=size_threshold, max_iters=max_iters, n=n))
-        return horizons
+        with Notifier(pbar, total=len(prototypes)) as progress_bar:
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                def callback(future):
+                    horizons.extend(future.result())
+                    progress_bar.update()
 
+                for prototype in prototypes:
+                    future = executor.submit(prototype.to_horizons, field=field,
+                                             reduction=reduction, d_ptp_threshold=d_ptp_threshold,
+                                             size_threshold=size_threshold, max_iters=max_iters, n=n, pbar=False)
+                    future.add_done_callback(callback)
+        horizons.sort(key=len, reverse=True)
+        return horizons
 
 
 class HorizonPrototype:
@@ -292,7 +318,7 @@ class HorizonPrototype:
                                                        min_size_threshold=size_threshold_,
                                                        max_size_threshold=size_threshold_)
 
-                # Remove already merged horizons. Break, if no progress in horizon size
+                # Remove already merged line horizons. Break, if no progress in horizon size
                 line_horizons = [line_horizon for line_horizon in line_horizons
                                 if not line_horizon.already_merged]
                 if len(horizon) == prev_length:

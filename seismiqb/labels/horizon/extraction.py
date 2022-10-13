@@ -529,7 +529,7 @@ class ExtractionMixin:
             horizons = np.array([horizon for horizon in horizons if not horizon.already_merged])
 
         # Pre-compute all the bounding boxes
-        bboxes = np.array([horizon.raveled_bbox for horizon in horizons], dtype=np.int32)
+        bboxes = np.array([horizon.raveled_bbox for horizon in horizons], dtype=np.int32).reshape(-1, 6)
 
         # Adjacency parsing
         adjacency = adjacency if isinstance(adjacency, tuple) else (adjacency, adjacency)
