@@ -756,8 +756,9 @@ class AttributesMixin:
         grad_i = self.load_attribute('grad_i', on_full=True, dtype=np.float32, use_cache=False)
         grad_x = self.load_attribute('grad_x', on_full=True, dtype=np.float32, use_cache=False)
 
-        matrix = np.abs(np.nanmax([grad_i, grad_x], axis=0))
+        matrix = np.nanmax([grad_i, grad_x], axis=0)
         matrix[matrix == self.FILL_VALUE] = np.nan
+        matrix = np.abs(matrix)
         return matrix
 
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)

@@ -95,27 +95,55 @@ class HorizonExtractor:
                                  for j in range(3)]).T
         return item_points
 
+    def reset_already_used(self):
+        """ Reset `already_used` flag for all lines. """
+        for orientation_dict in self.container.values():
+            for slide_dict in orientation_dict.values():
+                slide_dict['already_used'] = defaultdict(bool)
 
-    # Prototype extraction
-    def make_prototypes(self, orientation=0, slide_idx=None, n=10, line_length_threshold=0, max_iters=100, pbar='t'):
-        """ Make prototypes, starting from lines on a given orientation/slide.
-        Lines are sorted in descending order by their length, so we start from bigger lines.
+    # Line sequences: iterator over lines for prototype creation
+    def make_line_sequence(self, line_length_threshold=50):
+        """ Iterator over lines from entire array, sorted by length in descending order.
+        Each element is contains full information about line: ((orientation, slide_index, item_index), line_length).
+        """
+        iterator = {}
+        for orientation, orientation_dict in self.container.items():
+            for slide_idx, slide_dict in orientation_dict.items():
+                for item_idx, item_length in slide_dict['lengths'].items():
+                    if item_length > line_length_threshold and slide_dict['already_used'][item_idx] is False:
+                        iterator[(orientation, slide_idx, item_idx)] = item_length
+
+        return sorted(iterator.items(), key=lambda item:item[1], reverse=True)
+
+    def make_slide_line_sequence(self, orientation=0, slide_idx=None, line_length_threshold=50):
+        """ Iterator over lines on a given slide, sorted by length in descending order.
+        Each element is contains full information about line: ((orientation, slide_index, item_index), line_length).
         """
         slide_idx = slide_idx or (self.array.shape[orientation] // 2)
         slide_idx = slide_idx // self.step * self.step
 
-        slide_dict = self.container[orientation][slide_idx]
-        item_lengths = slide_dict['lengths']
-        item_iterator = sorted(item_lengths.items(), key=lambda item: item[1], reverse=True)
+        iterator = {}
+        for item_idx, item_length in self.container[orientation][slide_idx]['lengths'].items():
+            if item_length > line_length_threshold:
+                iterator[(orientation, slide_idx, item_idx)] = item_length
+        return sorted(iterator.items(), key=lambda item:item[1], reverse=True)
+
+
+    # Prototype extraction
+    def make_prototypes(self, sequence=None, n=None, line_length_threshold=50, max_iters=100, pbar='t'):
+        """ Make prototypes, starting from lines on a given orientation/slide.
+        Lines are sorted in descending order by their length, so we start from bigger lines.
+        """
+        sequence = sequence or self.make_line_sequence(line_length_threshold=line_length_threshold)
+        n = n or len(sequence)
 
         prototypes = []
         with Notifier(pbar, total=n) as progress_bar:
-            for item_idx, item_length in item_iterator:
-                # Check if the line was already used / is big enough
-                if slide_dict['already_used'][item_idx] is True:
+            for (orientation, slide_idx, item_idx), _ in sequence:
+                # Check if the line is already used in other prototype
+                if self.container[orientation][slide_idx]['already_used'][item_idx] is True:
+                    progress_bar.update()
                     continue
-                if item_length < line_length_threshold:
-                    break
 
                 # Make prototype instance, add all intersecting lines to it
                 prototype = self.init_prototype(orientation=orientation, slide_idx=slide_idx, item_idx=item_idx)
@@ -124,8 +152,10 @@ class HorizonExtractor:
 
                 progress_bar.update()
                 if len(prototypes) == n:
+                    progress_bar.close()
                     break
 
+        prototypes.sort(key=len, reverse=True)
         return prototypes
 
 
@@ -137,9 +167,7 @@ class HorizonExtractor:
         return prototype
 
     def extend_prototype(self, prototype, orientation, max_iters=100):
-        """ Extend given prototype.
-        TODO: we don't really need `orientation`
-        """
+        """ Extend given prototype, alternating between directions. """
         for outer_iter in range(max_iters):
             prev_len = prototype.n_points
 
@@ -276,6 +304,8 @@ class HorizonPrototype:
         """ Number of unique points in a prototype. """
         return len(self.unique_flat_points)
 
+    def __len__(self):
+        return self.n_points
 
     def naive_to_horizon(self, field, name='naive_prototype'):
         """ Naive conversion of prototype to horizon instance: no correction on overlapping lines.
@@ -300,6 +330,8 @@ class HorizonPrototype:
 
         horizons = []
         for _ in range(n):
+            if len(line_horizons) == 0:
+                break
             horizon = line_horizons.pop(0)
             horizons.append(horizon)
 
@@ -321,9 +353,8 @@ class HorizonPrototype:
                 # Remove already merged line horizons. Break, if no progress in horizon size
                 line_horizons = [line_horizon for line_horizon in line_horizons
                                 if not line_horizon.already_merged]
-                if len(horizon) == prev_length:
+                if len(horizon) == prev_length or len(line_horizons) < 3:
                     break
-
         return horizons
 
     def to_horizon(self, field, reduction=7, d_ptp_threshold=20, size_threshold=40, max_iters=100, pbar=False):

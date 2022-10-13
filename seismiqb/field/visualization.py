@@ -99,7 +99,7 @@ class VisualizationMixin:
 
     def show_slide(self, index, axis='i', transform=None, zoom=None, width=9,
                    src_geometry='geometry', src_labels='labels',
-                   indices='all', augment_mask=True, plotter=plot, **kwargs):
+                   enumerate_labels=False, indices='all', augment_mask=True, plotter=plot, **kwargs):
         """ Show slide with horizon on it.
 
         Parameters
@@ -130,7 +130,8 @@ class VisualizationMixin:
         src_labels = src_labels if isinstance(src_labels, (tuple, list)) else [src_labels]
         masks = []
         for src in src_labels:
-            masks.append(self.make_mask(locations=locations, src=src, width=width, indices=indices))
+            masks.append(self.make_mask(locations=locations, src=src, width=width,
+                                        indices=indices, enumerate_labels=enumerate_labels))
         mask = sum(masks)
 
         seismic_slide, mask = np.squeeze(seismic_slide), np.squeeze(mask)
