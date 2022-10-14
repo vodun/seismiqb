@@ -1,7 +1,8 @@
 """ Thread-safe lru cache class and cache mixin. """
 import os
 from copy import copy
-from functools import wraps, cached_property
+from functools import wraps
+from functools import cached_property as functools_cached_property
 from hashlib import blake2b
 from inspect import ismethod
 from threading import RLock
@@ -10,6 +11,14 @@ from collections import OrderedDict, defaultdict
 import numpy as np
 import pandas as pd
 
+
+def cached_property(func):
+    """ Decorator for creating cached properties which allows to apply CacheMixin methods.
+
+    For more, read the :class:`functools.cached_property` docstring.
+    """
+    CacheMixin._global_cache_container['properties'].add(func.__name__)
+    return functools_cached_property(func)
 
 
 class lru_cache:
@@ -101,6 +110,7 @@ class lru_cache:
 
     def __call__(self, func):
         """ Add the cache to the function. """
+        CacheMixin._global_cache_container['methods'].add(func.__name__)
         @wraps(func)
         def wrapper(*args, **kwargs):
             # if a bound method, get class instance from function else from arguments
@@ -185,65 +195,57 @@ class CacheMixin:
     You can use this mixin for cache introspection and clearing cached data.
     """
     #pylint: disable=redefined-builtin
-    def get_cached_objects(self, objects='all'):
-        """ Get names of properties and methods that use caching.
+    _global_cache_container = {'properties': set(), 'methods': set()}
 
-        Parameters:
+    @property
+    def cached_objects(self):
+        """ All properties and methods names that use caching. """
+        if getattr(self, '_cached_objects', None) is None:
+            cached_properties = [obj for obj in self._global_cache_container['properties'] if obj in dir(self)]
+            cached_methods = [obj for obj in self._global_cache_container['methods'] if obj in dir(self)]
+
+            self._cached_objects = {'properties': set(cached_properties),
+                                    'methods': set(cached_methods)}
+        return self._cached_objects
+
+    def get_cached_objects(self, objects='all'):
+        """ Get specified names of properties and methods that use caching.
+
+        Parameters
         ----------
-        objects: 'all', 'properties', 'methods' or list of names
+        objects: 'all', 'properties', 'methods', str or sequence of names
             If 'all', get names of all class properties and methods that use caching.
             If 'properties', get only names of class properties that use caching.
             If 'methods', get only names of class methods that use caching.
-            If a list of class attribute names, separate it into list of cached properties and a list of cached objects.
+            If a str or a sequence of class attribute names, separate it into set of cached properties
+            and a set of cached objects.
             By default, return names of all cached properties and methods of the class.
         """
-        get_properties = False
-        get_methods = False
-        names = dir(self)
-
         if objects == 'all':
-            get_properties = True
-            get_methods = True
-        elif objects == 'properties':
-            get_properties = True
-        elif objects == 'methods':
-            get_methods = True
-        elif isinstance(objects, list):
-            get_properties = True
-            get_methods = True
-            names = objects
+            return self.cached_objects['properties'], self.cached_objects['methods']
+        if objects == 'properties':
+            return self.cached_objects['properties'], set()
+        if objects == 'methods':
+            return set(), self.cached_objects['methods']
 
-        properties = []
-        methods = []
-        class_ = self.__class__
-        for name in names:
-            if name.startswith("__"):
-                continue
+        if not isinstance(objects, set):
+            objects = {objects}
 
-            class_obj = getattr(class_, name, None)
-            if isinstance(class_obj, property):
-                continue
-
-            if get_properties and isinstance(class_obj, cached_property):
-                properties.append(name)
-                continue
-
-            instance_obj = getattr(self, name)
-            if get_methods and callable(instance_obj) and hasattr(instance_obj, 'cache'):
-                methods.append(name)
-
+        properties = objects & self.cached_objects['properties']
+        methods = objects & self.cached_objects['methods']
         return properties, methods
+
 
     def reset_cache(self, objects='all'):
         """ Clear cached data.
 
-        Parameters:
+        Parameters
         ----------
-        objects: 'all', 'properties', 'methods' or list of names
+        objects: 'all', 'properties', 'methods', str or sequence of names
             If 'all', reset cache of all class properties and methods.
             If 'properties', reset cache of class properties only.
             If 'methods', reset cache of class methods only.
-            If a list of class attribute names, reset cache of corresponding attributes.
+            If a str or a sequence of class attribute names, reset cache of corresponding attributes.
             By default reset cache of class properties and methods.
         """
         reset_properties, reset_methods = self.get_cached_objects(objects)
@@ -260,11 +262,11 @@ class CacheMixin:
 
         Parameters:
         ----------
-        objects: 'all', 'properties', 'methods' or list of names
+        objects: 'all', 'properties', 'methods', str or sequence of names
             If 'all', get cache length for all class properties and methods.
             If 'properties', get cache length for properties only.
             If 'methods', get cache length for class methods only.
-            If a list of class attribute names, get cache length for corresponding attributes.
+            If a str or a sequence of class attribute names, get cache length for corresponding attributes.
             By default get cache length for all class properties and methods.
         """
         cached_properties, cached_methods = self.get_cached_objects(objects)
@@ -286,11 +288,11 @@ class CacheMixin:
 
         Parameters:
         ----------
-        objects: 'all', 'properties', 'methods' or list of names
+        objects: 'all', 'properties', 'methods', str or sequence of names
             If 'all', get cache size for all class properties and methods.
             If 'properties', get cache size for properties only.
             If 'methods', get cache size for class methods only.
-            If a list of class attribute names, get cache size for corresponding attributes.
+            If a str or a sequence of class attribute names, get cache size for corresponding attributes.
             By default get cache size for all class properties and methods.
         """
         cached_properties, cached_methods = self.get_cached_objects(objects)
@@ -328,11 +330,11 @@ class CacheMixin:
 
     def make_object_cache_repr(self, object_name, object_type):
         """ Make repr of object's cache if its length is nonzero else return None. """
-        object_cache_length = self.get_cache_length(objects=[object_name])
+        object_cache_length = self.get_cache_length(objects=object_name)
         if object_cache_length == 0:
             return None
 
-        object_cache_size = self.get_cache_size(objects=[object_name])
+        object_cache_size = self.get_cache_size(objects=object_name)
 
         if object_type == 'property':
             arguments = None
@@ -345,7 +347,7 @@ class CacheMixin:
             'cache_length': object_cache_length,
             'cache_size': object_cache_size,
             'arguments': arguments
-            }
+        }
 
         return object_cache_repr
 

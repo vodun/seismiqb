@@ -1,7 +1,7 @@
 """ Mixin with computed along horizon geological attributes. """
 # pylint: disable=too-many-statements
 from copy import copy
-from functools import cached_property, wraps
+from functools import wraps
 
 from math import isnan
 import numpy as np
@@ -16,6 +16,7 @@ from sklearn.decomposition import PCA
 
 from ...functional import hilbert
 from ...utils import transformable, lru_cache
+from ...utils.cache import cached_property
 
 
 
