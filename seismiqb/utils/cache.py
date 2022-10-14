@@ -17,6 +17,7 @@ def cached_property(func):
 
     For more, read the :class:`functools.cached_property` docstring.
     """
+    # pylint: disable=protected-access 
     CacheMixin._global_cache_container['properties'].add(func.__name__)
     return functools_cached_property(func)
 
@@ -201,8 +202,8 @@ class CacheMixin:
     def cached_objects(self):
         """ All properties and methods names that use caching. """
         if getattr(self, '_cached_objects', None) is None:
-            cached_properties = [obj for obj in self._global_cache_container['properties'] if obj in dir(self)]
-            cached_methods = [obj for obj in self._global_cache_container['methods'] if obj in dir(self)]
+            cached_properties = [obj for obj in self._global_cache_container['properties'] if hasattr(self, obj)]
+            cached_methods = [obj for obj in self._global_cache_container['methods'] if hasattr(self, obj)]
 
             self._cached_objects = {'properties': set(cached_properties),
                                     'methods': set(cached_methods)}
