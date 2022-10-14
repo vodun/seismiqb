@@ -17,7 +17,7 @@ def cached_property(func):
 
     For more, read the :class:`functools.cached_property` docstring.
     """
-    # pylint: disable=protected-access 
+    # pylint: disable=protected-access
     CacheMixin._global_cache_container['properties'].add(func.__name__)
     return functools_cached_property(func)
 
@@ -201,76 +201,51 @@ class CacheMixin:
     @property
     def cached_objects(self):
         """ All properties and methods names that use caching. """
-        if getattr(self, '_cached_objects', None) is None:
+        if getattr(self.__class__, '_cached_objects', None) is None:
             cached_properties = [obj for obj in self._global_cache_container['properties'] if hasattr(self, obj)]
             cached_methods = [obj for obj in self._global_cache_container['methods'] if hasattr(self, obj)]
 
-            self._cached_objects = {'properties': set(cached_properties),
-                                    'methods': set(cached_methods)}
-        return self._cached_objects
+            self.__class__._cached_objects = {'properties': cached_properties,
+                                              'methods': cached_methods}
+        return self.__class__._cached_objects
 
-    def get_cached_objects(self, objects='all'):
-        """ Get specified names of properties and methods that use caching.
-
-        Parameters
-        ----------
-        objects: 'all', 'properties', 'methods', str or sequence of names
-            If 'all', get names of all class properties and methods that use caching.
-            If 'properties', get only names of class properties that use caching.
-            If 'methods', get only names of class methods that use caching.
-            If a str or a sequence of class attribute names, separate it into set of cached properties
-            and a set of cached objects.
-            By default, return names of all cached properties and methods of the class.
-        """
-        if objects == 'all':
-            return self.cached_objects['properties'], self.cached_objects['methods']
-        if objects == 'properties':
-            return self.cached_objects['properties'], set()
-        if objects == 'methods':
-            return set(), self.cached_objects['methods']
-
-        if not isinstance(objects, set):
-            objects = {objects}
-
-        properties = objects & self.cached_objects['properties']
-        methods = objects & self.cached_objects['methods']
+    def _parse_name(self, name=None):
+        """ Map attribute name to its type (property or method). """
+        if name is not None:
+            properties = (name,) if name in self.cached_objects['properties'] else ()
+            methods = (name,) if name in self.cached_objects['methods'] else ()
+        else:
+            properties = self.cached_objects['properties']
+            methods = self.cached_objects['methods']
         return properties, methods
 
-
-    def reset_cache(self, objects='all'):
+    def reset_cache(self, name=None):
         """ Clear cached data.
 
         Parameters
         ----------
-        objects: 'all', 'properties', 'methods', str or sequence of names
-            If 'all', reset cache of all class properties and methods.
-            If 'properties', reset cache of class properties only.
-            If 'methods', reset cache of class methods only.
-            If a str or a sequence of class attribute names, reset cache of corresponding attributes.
-            By default reset cache of class properties and methods.
+        name: str, optional
+            Attribute name. If None, then reset cache of all cached objects.
         """
-        reset_properties, reset_methods = self.get_cached_objects(objects)
+        reset_properties, reset_methods = self._parse_name(name)
 
         for property_name in reset_properties:
             if property_name in self.__dict__:
                 delattr(self, property_name)
 
+
         for method_name in reset_methods:
             getattr(self, method_name).reset(instance=self)
 
-    def get_cache_length(self, objects='all'):
+    def get_cache_length(self, name=None):
         """ Get total amount of cached objects for specified properties and methods.
 
         Parameters:
         ----------
-        objects: 'all', 'properties', 'methods', str or sequence of names
-            If 'all', get cache length for all class properties and methods.
-            If 'properties', get cache length for properties only.
-            If 'methods', get cache length for class methods only.
-            If a str or a sequence of class attribute names, get cache length for corresponding attributes.
-            By default get cache length for all class properties and methods.
+        name: str, optional
+            Attribute name. If None, then get total cache length.
         """
-        cached_properties, cached_methods = self.get_cached_objects(objects)
+        cached_properties, cached_methods = self._parse_name(name)
 
         cache_length_accumulator = 0
 
@@ -284,19 +259,15 @@ class CacheMixin:
 
         return cache_length_accumulator
 
-    def get_cache_size(self, objects='all'):
+    def get_cache_size(self, name=None):
         """ Get total size of cached objects for specified properties and methods.
 
         Parameters:
         ----------
-        objects: 'all', 'properties', 'methods', str or sequence of names
-            If 'all', get cache size for all class properties and methods.
-            If 'properties', get cache size for properties only.
-            If 'methods', get cache size for class methods only.
-            If a str or a sequence of class attribute names, get cache size for corresponding attributes.
-            By default get cache size for all class properties and methods.
+        name: str, optional
+            Attribute name. If None, then get total cache size.
         """
-        cached_properties, cached_methods = self.get_cached_objects(objects)
+        cached_properties, cached_methods = self._parse_name(name)
 
         cache_size_accumulator = 0
 
@@ -329,13 +300,13 @@ class CacheMixin:
         """ Total size of cached objects. """
         return self.get_cache_size()
 
-    def make_object_cache_repr(self, object_name, object_type):
+    def _make_object_cache_repr(self, object_name, object_type):
         """ Make repr of object's cache if its length is nonzero else return None. """
-        object_cache_length = self.get_cache_length(objects=object_name)
+        object_cache_length = self.get_cache_length(name=object_name)
         if object_cache_length == 0:
             return None
 
-        object_cache_size = self.get_cache_size(objects=object_name)
+        object_cache_size = self.get_cache_size(name=object_name)
 
         if object_type == 'property':
             arguments = None
@@ -361,23 +332,21 @@ class CacheMixin:
         format : str
             Return value format. Can be 'dict' or 'df'. 'df' means pandas DataFrame.
         """
-        cached_properties, cached_methods = self.get_cached_objects(objects='all')
-
         cache_repr_ = {}
 
         # Creation of a dictionary of cache representation for each method and property
         # with cache_length, cache_size and arguments
-        for property_name in cached_properties:
-            property_cache_repr = self.make_object_cache_repr(object_name=property_name, object_type='property')
+        for property_name in self.cached_objects['properties']:
+            property_cache_repr = self._make_object_cache_repr(object_name=property_name, object_type='property')
             if property_cache_repr is not None:
                 cache_repr_[property_name] = property_cache_repr
 
-        for method_name in cached_methods:
-            method_cache_repr = self.make_object_cache_repr(object_name=method_name, object_type='method')
+        for method_name in self.cached_objects['methods']:
+            method_cache_repr = self._make_object_cache_repr(object_name=method_name, object_type='method')
             if method_cache_repr is not None:
                 cache_repr_[method_name] = method_cache_repr
 
-        # Convertation to pandas dataframe
+        # Conversion to pandas dataframe
         if format == 'df':
             cache_repr_ = pd.DataFrame.from_dict(cache_repr_, orient='index')
 
