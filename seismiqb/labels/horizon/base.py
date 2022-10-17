@@ -5,7 +5,7 @@ from textwrap import dedent
 
 import numpy as np
 
-from skimage.measure import label
+from cc3d import connected_components
 from scipy.ndimage import find_objects
 
 from .attributes import AttributesMixin
@@ -89,12 +89,13 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
         self.name = name
         self.dtype = dtype
         self.format = None
+        self.already_merged = None
 
         # Location of the horizon inside cube spatial range
         self.i_min, self.i_max = None, None
         self.x_min, self.x_max = None, None
         self.i_length, self.x_length = None, None
-        self.bbox = None
+        self._bbox, self.raveled_bbox = None, None
         self._len = None
 
         # Underlying data storages
@@ -102,7 +103,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
         self._points = None
         self._depths = None
 
-        # depths information
+        # Depths information
         self._d_min, self._d_max = None, None
         self._d_mean, self._d_std = None, None
 
@@ -198,8 +199,20 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
                 self._depths = self.matrix[self.matrix != self.FILL_VALUE]
         return self._depths
 
+    @property
+    def bbox(self):
+        """ Horizon bbox in 2d-array format. """
+        if self._bbox is None and self.raveled_bbox is not None:
+            self._bbox = self.raveled_bbox.reshape(-1, 2)
+        elif self._bbox is None:
+            self._bbox = np.array([[self.i_min, self.i_max],
+                                   [self.x_min, self.x_max],
+                                   [self.d_min, self.d_max]],
+                                  dtype=np.int32)
+        return self._bbox
 
-    def reset_storage(self, storage=None):
+
+    def reset_storage(self, storage=None, reset_cache=True):
         """ Reset storage along with depth-wise lazy computed stats. """
         self._depths = None
         self._d_min, self._d_max = None, None
@@ -207,7 +220,9 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
         self._len = None
 
         if storage == 'matrix':
+            self._depth = None
             self._matrix = None
+
             if len(self.points) > 0:
                 i_min, x_min, d_min = np.min(self.points, axis=0)
                 i_max, x_max, d_max = np.max(self.points, axis=0)
@@ -217,14 +232,15 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
 
                 self.i_length = (self.i_max - self.i_min) + 1
                 self.x_length = (self.x_max - self.x_min) + 1
-                self.bbox = np.array([[self.i_min, self.i_max],
-                                    [self.x_min, self.x_max],
-                                    [self.d_min, self.d_max]],
-                                    dtype=np.int32)
+                self.raveled_bbox = np.array([self.i_min, self.i_max,
+                                              self.x_min, self.x_max,
+                                              self.d_min, self.d_max],
+                                             dtype=np.int32)
         elif storage == 'points':
             self._points = None
 
-        self.reset_cache()
+        if reset_cache:
+            self.reset_cache()
 
     def copy(self, add_prefix=True):
         """ Create a new horizon with the same data.
@@ -324,7 +340,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
 
         # Collect stats on separate axes. Note that depth stats are properties
         if reset:
-            self.reset_storage(reset)
+            self.reset_storage(storage=reset, reset_cache=False)
 
 
     def from_file(self, path, transform=True, **kwargs):
@@ -359,10 +375,10 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
 
         # Populate lazy properties with supplied values
         self._d_min, self._d_max, self._len = d_min, d_max, length
-        self.bbox = np.array([[self.i_min, self.i_max],
-                              [self.x_min, self.x_max],
-                              [self.d_min, self.d_max]],
-                             dtype=np.int32)
+        self.raveled_bbox = np.array([self.i_min, self.i_max,
+                                      self.x_min, self.x_max,
+                                      self.d_min, self.d_max],
+                                     dtype=np.int32)
 
 
     def from_full_matrix(self, matrix, **kwargs):
@@ -395,8 +411,9 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
 
 
     @staticmethod
-    def from_mask(mask, field=None, origin=None, connectivity=3,
-                  mode='mean', threshold=0.5, minsize=0, prefix='predict', **kwargs):
+    def from_mask(mask, field=None, origin=None, connectivity=26,
+                  mode='mean', threshold=0.5, minsize=0, prefix='predict',
+                  save_probabilities=False, **kwargs):
         """ Convert mask to a list of horizons.
         Returned list is sorted by length of horizons.
 
@@ -406,6 +423,9 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
             Horizon parent field.
         origin : sequence
             The upper left coordinate of a `mask` in the cube coordinates.
+        connectivity : {6, 18, 26}
+            Connectivity type, i.e. what neighboring voxels to treat as connected with target one.
+            Can be one of: 6 (voxels with common faces), 18 (+ edges), 26 (+ corners).
         threshold : float
             Parameter of mask-thresholding.
         mode : str, {'mean', 'min', 'max', 'prob'}
@@ -416,8 +436,11 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
             Minimum length of a horizon to be extracted.
         prefix : str
             Name of horizon to use.
+        save_probabilities : bool
+            Whether to save mask values on the horizon surface in the `horizon.proba_points` attribute.
         """
         _ = kwargs
+
         if 'mean' in mode:
             group_function = lambda array, _: groupby_mean(array)
         elif 'min' in mode:
@@ -428,37 +451,49 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
             group_function = groupby_prob
 
         # Labeled connected regions with an integer
-        labeled = label(mask >= threshold, connectivity=connectivity)
+        labeled = connected_components(mask >= threshold, connectivity=connectivity)
         objects = find_objects(labeled)
 
         # Create an instance of Horizon for each separate region
         horizons = []
-        for i, sl in enumerate(objects):
+        for i, bbox in enumerate(objects):
             max_possible_length = 1
-            for j in range(3):
-                max_possible_length *= sl[j].stop - sl[j].start
+            for slc in bbox:
+                max_possible_length *= slc.stop - slc.start
 
             if max_possible_length >= minsize:
-                indices = np.nonzero(labeled[sl] == i + 1)
+                indices = np.nonzero(labeled[bbox] == i + 1)
 
                 if len(indices[0]) >= minsize:
-                    coords = np.vstack([indices[i] + sl[i].start for i in range(3)]).T
+                    coords = np.vstack([indices[i] + bbox[i].start for i in range(3)]).T
                     values = mask[coords[:, 0], coords[:, 1], coords[:, 2]]
 
                     points = group_function(coords, values) + origin
-                    horizons.append(Horizon(storage=points, field=field, name=f'{prefix}_{i}'))
+
+                    horizon = Horizon(storage=points, field=field, verify=True, name=f'{prefix}_{i}')
+
+                    if len(horizon) > 0:
+                        horizons.append(horizon)
+
+                        if save_probabilities:
+                            values = mask[horizon.points[:, 0] - origin[0],
+                                          horizon.points[:, 1] - origin[1],
+                                          horizon.points[:, 2] - origin[2]]
+
+                            horizon.proba_points = np.vstack([horizon.points[:, 0], horizon.points[:, 1], values]).T
+                            # We save coordinates in the `proba_points` because horizon points can be filtered
+                            # and this prevents from inconsistency between points and mask values
 
         horizons.sort(key=len)
-        horizons = [horizon for horizon in horizons if len(horizon) != 0]
         return horizons
 
     def from_subset(self, matrix, name=None):
-        """ Make new label with points matrix filtered by given presense matrix.
+        """ Make new label with points matrix filtered by given presence matrix.
 
         Parameters
         ----------
         matrix : np.array
-            Presense matrix of labels points. Must be in full cubes coordinates.
+            Presence matrix of labels points. Must be in full cubes coordinates.
             If consists of 0 and 1, keep points only where values are 1.
             If consists of values from [0, 1] interval, keep points where values are greater than 0.5.
         name : str or None
@@ -681,7 +716,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
         proximities = [(other, self.check_proximity(other)) for other in others
                        if other.field.name == self.field.name]
 
-        closest, proximity_info = min(proximities, key=lambda item: item[1].get('difference_mean', np.inf))
+        closest, proximity_info = min(proximities, key=lambda item: item[1].get('abs_difference_mean', np.inf))
         return closest, proximity_info
 
     # Alias for horizon comparisons

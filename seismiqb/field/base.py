@@ -277,7 +277,7 @@ class Field(CharismaMixin, VisualizationMixin):
         return buffer
 
     def make_mask(self, locations, orientation=0, buffer=None, indices='all', width=3, src='labels',
-                  sparse=False, **kwargs):
+                  sparse=False, enumerate_labels=False, **kwargs):
         """ Create masks from labels.
 
         Parameters
@@ -298,6 +298,8 @@ class Field(CharismaMixin, VisualizationMixin):
             Attribute with desired labels.
         sparse : bool
             Create mask only for labeled slices (for Faults). Unlabeled slices will be marked by -1.
+        enumerate_labels : bool
+            Whether to use enumeration as mask values for successive labels.
         """
         # Parse buffer
         if buffer is None:
@@ -318,8 +320,9 @@ class Field(CharismaMixin, VisualizationMixin):
             labels = [labels[idx] for idx in indices]
 
         # Add mask of each component to the buffer
-        for label in labels:
-            label.add_to_mask(buffer, locations=locations, width=width, axis=orientation, sparse=sparse)
+        for i, label in enumerate(labels):
+            alpha = 1 if enumerate_labels is False else i
+            label.add_to_mask(buffer, locations=locations, width=width, axis=orientation, sparse=sparse, alpha=alpha)
         return buffer
 
 

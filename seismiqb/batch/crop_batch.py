@@ -610,12 +610,12 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         """
         shape = crop.shape
         point_x = np.random.randint(0, shape[0])
-        point_h = np.argmax(crop[point_x, :, :])
+        point_d = int(np.argmax(crop[point_x, :, :]))
 
-        if np.sum(crop[point_x, point_h, :]) == 0.0:
+        if np.sum(crop[point_x, point_d, :]) == 0.0:
             return crop
 
-        matrix = cv2.getRotationMatrix2D((point_h, point_x), angle, 1)
+        matrix = cv2.getRotationMatrix2D((point_d, point_x), angle, 1)
         rotated = cv2.warpAffine(crop, matrix, (shape[1], shape[0])).reshape(shape)
 
         combined = np.zeros_like(crop)

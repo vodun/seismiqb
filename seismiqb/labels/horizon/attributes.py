@@ -288,6 +288,19 @@ class AttributesMixin:
         uniques, counts = np.unique(self.points[:, 1], return_counts=True)
         return uniques[counts > 256]
 
+    @property
+    def probabilities(self):
+        """ Map of the horizon presence probabilities. """
+        if hasattr(self, 'proba_points'):
+            _map = np.zeros(self.full_matrix.shape, dtype=np.float32)
+            _map[self.proba_points[:, 0].astype(np.int32),
+                 self.proba_points[:, 1].astype(np.int32)] = self.proba_points[:, 2]
+
+            _map[~self.full_binary_matrix] = np.nan
+            return _map
+
+        raise AttributeError(f'Horizon `{self.displayed_name}` hasn\'t `proba_points` attribute. Check, whether'
+                             ' the horizon was initialized `from_mask` with `save_probabilities=True` option.')
 
     # Retrieve data from seismic along horizon
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
@@ -367,7 +380,7 @@ class AttributesMixin:
             shifts = [grid_info['range'][i][0] for i in range(3)]
 
         shifts = np.array(shifts)
-        horizon_shift = np.array((self.bbox[0, 0], self.bbox[1, 0]))
+        horizon_shift = np.array((self.i_min, self.x_min))
 
         if axes is not None:
             array = np.transpose(array, axes=axes)
@@ -407,6 +420,7 @@ class AttributesMixin:
         # Properties
         'full_matrix': ['full_matrix', 'depths'],
         'full_binary_matrix': ['full_binary_matrix', 'mask'],
+        'probabilities': ['proba', 'probabilities'],
 
         # Created by `get_*` methods
         'amplitudes': ['amplitudes', 'cube_values'],
@@ -746,6 +760,7 @@ class AttributesMixin:
 
         matrix = np.nanmax([grad_i, grad_x], axis=0)
         matrix[matrix == self.FILL_VALUE] = np.nan
+        matrix = np.abs(matrix)
         return matrix
 
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
