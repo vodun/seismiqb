@@ -12,14 +12,112 @@ import numpy as np
 import pandas as pd
 
 
-def cached_property(func):
-    """ Decorator for creating cached properties which allows to apply CacheMixin methods.
+class _GlobalCacheClass:
+    """ Global cache representation and introspection.
 
-    For more, read the :class:`functools.cached_property` docstring.
+    Note, the container saves only info for objects which use :class:`~.lru_cache` and :class:`~.cached_property`.
+
+    TODO: proper removal instances control
     """
-    # pylint: disable=protected-access
-    CacheMixin._global_cache_container['properties'].add(func.__name__)
-    return functools_cached_property(func)
+    def __init__(self):
+        self.cached_objects = {'properties': set(), 'methods': set()} # Evaluated on the modules init
+        self.instances = set()
+
+    @property
+    def length(self):
+        """ Total cache length. """
+        cache_length = 0
+        for instance in self.instances:
+            cache_length += instance.cache_length
+        return cache_length
+
+    @property
+    def size(self):
+        """ Total cache size. """
+        cache_size = 0
+        for instance in self.instances:
+            cache_size += instance.cache_size
+        return cache_size
+
+    def get_cache_repr(self, format='dict'):
+        """ .. !! ..
+
+        If format is dict:
+
+        cache_repr = {
+            instance_class : {
+                instance_memory_address: {
+                    cached_object_name: {
+                        'cache_length': value, 'cache_size': value, 'arguments': value
+                    },
+                    ...
+                }
+            },
+            ...
+        }
+
+        If format is 'df':
+            - MultiIndex = (instance_class, instance_memory_address, cached_object_name)
+            - Columns = ('cache_length', 'cache_size', 'arguments')
+        """
+        cache_repr_ = {}
+        for instance in self.instances:
+            class_, memory_address = instance.__class__, hex(id(instance))
+            instance_cache_repr_ = instance.make_cache_repr(format='dict')
+
+            if class_ not in cache_repr_.keys():
+                cache_repr_[class_] = {memory_address: instance_cache_repr_}
+            else:
+                cache_repr_[class_].update({memory_address: instance_cache_repr_})
+
+        # Conversion to pandas dataframe
+        if format == 'df':
+            cache_repr_ = pd.DataFrame.from_dict({
+                    (class_, address, cached_object): cache_repr_[class_][address][cached_object]
+                        for class_ in cache_repr_.keys()
+                        for address in cache_repr_[class_].keys()
+                        for cached_object in cache_repr_[class_][address].keys()
+                },
+                orient='index'
+            )
+
+            # Columns sort
+            if len(cache_repr_) > 0:
+                cache_repr_ = cache_repr_.loc[:, ['cache_length', 'cache_size', 'arguments']]
+        return cache_repr_
+
+    @property
+    def repr(self):
+        """ .. !!.."""
+        df = self.get_cache_repr(format='df')
+
+        if len(df) > 0:
+            return df.loc[:, ['cache_length', 'cache_size']]
+        return None
+
+    def reset(self):
+        """ .. !!.."""
+        for instance in self.instances:
+            instance.reset_cache()
+
+GlobalCache = _GlobalCacheClass() # No sense in multiple instances, use this for cache introspection and reset
+
+
+class cached_property:
+    """ ..  modification of functools.cached_property for GlobalCache """
+    def __init__(self, func):
+        """ .. save and decorate """
+        GlobalCache.cached_objects['properties'].add(func.__name__)
+        self.functools_func = functools_cached_property(func)
+
+    def __set_name__(self, owner, name):
+        """ .. __set_name__ call for correct implementation"""
+        self.functools_func.__set_name__(owner, name)
+
+    def __get__(self, instance, owner=None):
+        """ .. save and get value"""
+        GlobalCache.instances.add(instance)
+        return self.functools_func.__get__(instance, owner)
 
 
 class lru_cache:
@@ -111,7 +209,7 @@ class lru_cache:
 
     def __call__(self, func):
         """ Add the cache to the function. """
-        CacheMixin._global_cache_container['methods'].add(func.__name__)
+        GlobalCache.cached_objects['methods'].add(func.__name__)
         @wraps(func)
         def wrapper(*args, **kwargs):
             # if a bound method, get class instance from function else from arguments
@@ -128,8 +226,11 @@ class lru_cache:
                 result = func(*args, **kwargs)
                 return result
 
+
             key = self.make_key(instance, args, kwargs)
             instance_hash = self.compute_hash(instance)
+
+            GlobalCache.instances.add(instance)
 
             # If result is already in cache, just retrieve it and update its timings
             with self.lock:
@@ -192,18 +293,15 @@ def flatten_nested(iterable):
 
 class CacheMixin:
     """ Methods for cache management.
-
     You can use this mixin for cache introspection and clearing cached data.
     """
     #pylint: disable=redefined-builtin
-    _global_cache_container = {'properties': set(), 'methods': set()}
-
     @property
     def cached_objects(self):
         """ All properties and methods names that use caching. """
         if getattr(self.__class__, '_cached_objects', None) is None:
-            cached_properties = [obj for obj in self._global_cache_container['properties'] if hasattr(self, obj)]
-            cached_methods = [obj for obj in self._global_cache_container['methods'] if hasattr(self, obj)]
+            cached_properties = [obj for obj in GlobalCache.cached_objects['properties'] if hasattr(self, obj)]
+            cached_methods = [obj for obj in GlobalCache.cached_objects['methods'] if hasattr(self, obj)]
 
             self.__class__._cached_objects = {'properties': cached_properties,
                                               'methods': cached_methods}
@@ -221,7 +319,6 @@ class CacheMixin:
 
     def reset_cache(self, name=None):
         """ Clear cached data.
-
         Parameters
         ----------
         name: str, optional
@@ -239,7 +336,6 @@ class CacheMixin:
 
     def get_cache_length(self, name=None):
         """ Get total amount of cached objects for specified properties and methods.
-
         Parameters:
         ----------
         name: str, optional
@@ -261,7 +357,6 @@ class CacheMixin:
 
     def get_cache_size(self, name=None):
         """ Get total size of cached objects for specified properties and methods.
-
         Parameters:
         ----------
         name: str, optional
@@ -326,7 +421,6 @@ class CacheMixin:
     def make_cache_repr(self, format='dict'):
         """ Cache representation that consists of names of methods that cache data,
         information about cache length, size, and arguments for each method.
-
         Parameters:
         ----------
         format : str
