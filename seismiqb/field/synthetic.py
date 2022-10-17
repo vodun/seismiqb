@@ -199,6 +199,10 @@ class SyntheticField:
 
         # Labels: horizons and faults
         elif 'horizon' in attribute:
+            # Remove extra kwargs
+            _ = kwargs.pop('orientation', None)
+            _ = kwargs.pop('sparse', None)
+
             kwargs = {
                 'indices': 'all',
                 'width': 3,
