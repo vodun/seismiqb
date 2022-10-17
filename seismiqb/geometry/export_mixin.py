@@ -201,7 +201,8 @@ class ExportMixin:
             })
 
             # Iterate over traces, writing headers/data to the dst
-            notifier = Notifier(pbar, total=len(spec.ilines), desc='Array to SEG-Y')
+            basename = os.path.basename(path)
+            notifier = Notifier(pbar, total=len(spec.ilines), desc=f'Writing `{basename}`')
 
             c = 0
             for i, il in notifier(enumerate(spec.ilines)):
@@ -295,7 +296,8 @@ class ExportMixin:
         chunk_starts = np.cumsum([0] + chunk_sizes[:-1])
 
         # Write trace headers and values in chunks in multiple threads
-        with Notifier(pbar, total=len(spec.ilines), desc='Array to SEG-Y') as progress_bar:
+        basename = os.path.basename(path)
+        with Notifier(pbar, total=len(spec.ilines), desc=f'Writing `{basename}`') as progress_bar:
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 def callback(future):
                     chunk_size = future.result()

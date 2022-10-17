@@ -591,10 +591,13 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMix
         """
 
         if self.quantized:
-            msg += f"""
+            try:
+                msg += f"""
         Quantization ranges:               {self.quantization_ranges[0]:>10.2f} | {self.quantization_ranges[1]:<10.2f}
         Quantization error:                {self.quantization_error:>10.3f}
-        """
+            """
+            except AttributeError:
+                pass
         return dedent(msg).strip()
 
     def print(self, printer=print):

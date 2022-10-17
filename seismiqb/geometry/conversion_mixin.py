@@ -44,6 +44,17 @@ class Quantizer:
         return self.quantize(array)
 
 
+def resize_3D(array, factor):
+    """ Resize 3D array along the last axis. """
+    resampled_depth = int(array.shape[2] * factor)
+    buffer = np.empty(shape=(*array.shape[:2], resampled_depth), dtype=array.dtype)
+
+    for i, item in enumerate(array):
+        cv2.resize(item, dsize=(resampled_depth, array.shape[1]), dst=buffer[i])
+    return buffer
+
+
+
 class ConversionMixin:
     """ Methods for converting data to other formats. """
     #pylint: disable=redefined-builtin, import-outside-toplevel
@@ -239,6 +250,9 @@ class ConversionMixin:
         transform : callable, optional
             Callable to transform data from the current file to the ones, saved in `path`.
             Must return the same dtype, as specified by `format`.
+        quantization_parameters : dict, optional
+            If provided, then used as parameters for quantization.
+            Otherwise, parameters from the call to :meth:`compute_quantization_parameters` are used.
         chunk_size : int
             Maximum amount of traces in each chunk.
         max_workers : int or None
@@ -247,7 +261,7 @@ class ConversionMixin:
             If bool, then whether to display progress bar.
             If str, then type of progress bar to display: `'t'` for textual, `'n'` for widget.
         overwrite : bool
-            Whether to overwrite existing `path` or raise an exception.
+            Whether to overwrite existing `path` or raise an exception. Also remove `meta` files.
         """
         if format == 8 and transform is None:
             quantization_parameters = quantization_parameters or self.compute_quantization_parameters()
@@ -337,8 +351,28 @@ class ConversionMixin:
 
 
     # Resample SEG-Y
-    def resample(self, path=None, factor=2, quantize=True, quantization_parameters=None, pbar='t', **kwargs):
-        """ !!. """
+    def resample(self, path=None, factor=2, quantize=True, quantization_parameters=None, pbar='t',
+                 overwrite=True, **kwargs):
+        """ Resample SEG-Y file along the depth dimension with optional quantization.
+
+        Parameters
+        ----------
+        path : str, optional
+            Path to save file to. If not provided, we use the path of the current cube with an added postfix.
+        factor : number
+            Scale factor along the depth axis.
+        quantize : bool
+            Whether to quantize SEG-Y data.
+            If the geometry is already using quantized values, no quantization is applied.
+        quantization_parameters : dict, optional
+            If provided, then used as parameters for quantization.
+            Otherwise, parameters from the call to :meth:`compute_quantization_parameters` are used.
+        pbar : bool, str
+            If bool, then whether to display progress bar.
+            If str, then type of progress bar to display: `'t'` for textual, `'n'` for widget.
+        overwrite : bool
+            Whether to overwrite existing `path` or raise an exception. Also removes `meta` files.
+        """
         # Path
         path = path or self.make_output_path('sgy', quantize=quantize, postfix=f'_r{factor}')
 
@@ -361,11 +395,17 @@ class ConversionMixin:
         self.array_to_segy(self, path=path, spec=spec, transform=transform, format=spec.format,
                         pbar=pbar, zip_segy=False, **kwargs)
 
-def resize_3D(array, factor):
-    """ Resize 3D array along the last axis. """
-    resampled_depth = int(array.shape[2] * factor)
-    buffer = np.empty(shape=(*array.shape[:2], resampled_depth), dtype=array.dtype)
+        # Re-open geometry, store values that were used for quantization
+        meta_path = path + '_meta'
+        if overwrite and os.path.exists(meta_path):
+            os.remove(meta_path)
 
-    for i, item in enumerate(array):
-        cv2.resize(item, dsize=(resampled_depth, array.shape[1]), dst=buffer[i])
-    return buffer
+        from .base import Geometry
+        geometry = Geometry.new(path, collect_stats=True)
+
+        if quantize and not self.quantized:
+            quantization_parameters['quantization_ranges'] = quantization_parameters['ranges']
+            for key in ['quantization_ranges', 'center', 'clip', 'quantization_error']:
+                geometry.dump_meta_item(key=f'meta/{key}', value=quantization_parameters[key],
+                                        overwrite=True)
+        return geometry
