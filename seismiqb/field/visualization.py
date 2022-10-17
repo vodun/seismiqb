@@ -130,7 +130,7 @@ class VisualizationMixin:
         src_labels = src_labels if isinstance(src_labels, (tuple, list)) else [src_labels]
         masks = []
         for src in src_labels:
-            masks.append(self.make_mask(locations=locations, src=src, width=width, indices=indices))
+            masks.append(self.make_mask(locations=locations, orientation=axis, src=src, width=width, indices=indices))
         mask = sum(masks)
 
         seismic_slide, mask = np.squeeze(seismic_slide), np.squeeze(mask)
