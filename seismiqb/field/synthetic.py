@@ -164,7 +164,7 @@ class SyntheticField:
 
 
     # Getting data
-    def get_attribute(self, location=None, shape=None, attribute='synthetic', **kwargs):
+    def get_attribute(self, location=None, shape=None, attribute='synthetic', buffer=None, **kwargs):
         """ Output requested `attribute`.
         If `location` is not provided, uses `shape` to create a random one.
         For the same `location` values, uses the same generator instance (with the same velocity model):
@@ -214,17 +214,22 @@ class SyntheticField:
         # Fallback
         else:
             result = generator.get_attribute(attribute=attribute)
+        result = result.reshape(shape)
 
-        return result.reshape(shape)
+        if buffer is not None:
+            buffer[:] = result
+        else:
+            buffer = result
+        return buffer
 
 
-    def load_seismic(self, location=None, shape=None, src='synthetic', **kwargs):
+    def load_seismic(self, location=None, shape=None, src='synthetic', buffer=None, **kwargs):
         """ Wrapper around `:meth:.get_attribute` to comply with `:class:.Field` API. """
-        return self.get_attribute(location=location, shape=shape, attribute=src, **kwargs)
+        return self.get_attribute(location=location, shape=shape, attribute=src, buffer=buffer, **kwargs)
 
-    def make_mask(self, location=None, shape=None, src='labels', **kwargs):
+    def make_mask(self, location=None, shape=None, src='labels', buffer=None, **kwargs):
         """ Wrapper around `:meth:.get_attribute` to comply with `:class:.Field` API. """
-        return self.get_attribute(location=location, shape=shape, attribute=src, **kwargs)
+        return self.get_attribute(location=location, shape=shape, attribute=src, buffer=buffer, **kwargs)
 
 
     # Utilities

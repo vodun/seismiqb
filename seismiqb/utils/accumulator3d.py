@@ -145,14 +145,17 @@ class Accumulator3D:
 
         # Re-open the HDF5 file to force flush changes and release disk space from deleted datasets
         # Also add alias to `data` dataset, so the resulting cube can be opened by `Geometry`
+        # TODO: open resulting HDF5 file with `Geometry` and return it instead?
+        self.aggregated = True
         if self.type in ['hdf5', 'qhdf5']:
             projection_name = 'projection_i' if self.orientation == 0 else 'projection_x'
             self.file[projection_name] = self.file['data']
             self.file.close()
             self.file = h5py.File(self.path, 'r+')
             self.data = self.file['data']
-
-        self.aggregated = True
+        else:
+            if self.orientation == 1:
+                self.data = self.data.transpose(1, 0, 2)
         return self.data
 
     def _aggregate(self):
