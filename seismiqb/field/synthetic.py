@@ -19,10 +19,10 @@ class SyntheticField:
         The parameters may be randomized, so the generated data is different each time.
         - initialize an instance of this class.
         - use `get_attribute` method to get synthetic images, horizon/fault masks, velocity models.
-        In order to ensure that they match one another, supply the same `location` (triplet of slices), for example:
-        >>> location = (slice(10, 11), slice(100, 200), slice(1000, 1500))
-        >>> synthetic = synthetic_field.get_attribute(location=location, attribute='synthetic')
-        >>> velocity = synthetic_field.get_attribute(location=location, attribute='velocity')
+        In order to ensure that they match one another, supply the same `locations` (triplet of slices), for example:
+        >>> locations = (slice(10, 11), slice(100, 200), slice(1000, 1500))
+        >>> synthetic = synthetic_field.get_attribute(locations=locations, attribute='synthetic')
+        >>> velocity = synthetic_field.get_attribute(locations=locations, attribute='velocity')
         would make synthetic and velocity images for the same underlying synthetic model.
 
     Using the same generator for multiple calls with different requested attributes relies on LRU caching of
@@ -33,9 +33,9 @@ class SyntheticField:
     Methods `load_seismic` and `make_masks` are thin wrappers around `get_attribute` to make API of this class
     identical to that of `:class:.Field`.
 
-    Under the hood, we keep track of internal cache (with `location` as key) to use the same instance of generator
+    Under the hood, we keep track of internal cache (with `locations` as key) to use the same instance of generator
     multiple times. The size of cache is parametrized at initialization and should be bigger than the batch size.
-    Other than that, the `location` is also used to infer shape of requested synthetic data,
+    Other than that, the `locations` is also used to infer shape of requested synthetic data,
     if it is not provided at initialization / from `param_generator`.
 
     Parameters
@@ -47,13 +47,13 @@ class SyntheticField:
     data_generator : callable, optional
         If provided, then a callable to populate an instance of `SyntheticGenerator` with data.
         Should take `generator` as the only required argument. Disables the `param_generator` option.
-        Note that the logic of keeping the same instance of `generator` for multiple calls with the same `location`
+        Note that the logic of keeping the same instance of `generator` for multiple calls with the same `locations`
         is performed by class internals and still available in that case.
     attribute : str
         Attribute to get from the generator if `labels` are requested.
     crop_shape : tuple of int
         Default shape of the generated synthetic images.
-        If not provided, we use the shape from `param_generator` or `location`.
+        If not provided, we use the shape from `param_generator` or `locations`.
     name : str
         Name of the the field. Used to comply with `:class:.Field` API.
     cache_maxsize : int
@@ -95,21 +95,21 @@ class SyntheticField:
         return self
 
     # Generator creation
-    def get_generator(self, location=None, shape=None):
+    def get_generator(self, locations=None, shape=None):
         """ Get a generator with data of a given `shape`.
-        If called with the same parameters twice, returns the same instance: `location` is used as a hash value.
+        If called with the same parameters twice, returns the same instance: `locations` is used as a hash value.
         """
-        if location is None:
+        if locations is None:
             shape = shape if shape is not None else self.default_shape
 
             if shape is None:
                 raise ValueError('Shape is undefined: pass it directly or supply a `default_shape` at initialization!')
-            location = self.shape_to_location(shape)
+            locations = self.shape_to_locations(shape)
 
-        hash_value = self.location_to_hash(location)
+        hash_value = self.locations_to_hash(locations)
 
         generator = self._make_generator(hash_value)
-        self._populate_generator(generator=generator, location=location) # Works in-place!
+        self._populate_generator(generator=generator, locations=locations) # Works in-place!
         return generator
 
     # @lru_cache
@@ -117,7 +117,7 @@ class SyntheticField:
         """ Create a generator instance. During initialization, wrapped in `lru_cache`. """
         return self.GENERATOR_CONSTRUCTOR(seed=abs(hash_value))
 
-    def _populate_generator(self, generator, location=None):
+    def _populate_generator(self, generator, locations=None):
         """ Call `generator` methods to populate it with data: impedance model, horizon surfaces, faults, etc. """
         if hasattr(generator, '_populated'):
             return None
@@ -127,7 +127,7 @@ class SyntheticField:
 
         else:
             # Generate parameters, use them to populate `generator` in-place
-            shape = self.location_to_shape(location)
+            shape = self.locations_to_shape(locations)
             params = self.param_generator(shape=shape, rng=generator.rng)
             params = Config(params)
 
@@ -164,17 +164,17 @@ class SyntheticField:
 
 
     # Getting data
-    def get_attribute(self, location=None, shape=None, attribute='synthetic', buffer=None, **kwargs):
+    def get_attribute(self, locations=None, shape=None, attribute='synthetic', buffer=None, **kwargs):
         """ Output requested `attribute`.
-        If `location` is not provided, uses `shape` to create a random one.
-        For the same `location` values, uses the same generator instance (with the same velocity model):
-        >>> location = (slice(10, 11), slice(100, 200), slice(1000, 1500))
-        >>> synthetic = synthetic_field.get_attribute(location=location, attribute='synthetic')
-        >>> impedance = synthetic_field.get_attribute(location=location, attribute='impedance')
+        If `locations` is not provided, uses `shape` to create a random one.
+        For the same `locations` values, uses the same generator instance (with the same velocity model):
+        >>> locations = (slice(10, 11), slice(100, 200), slice(1000, 1500))
+        >>> synthetic = synthetic_field.get_attribute(locations=locations, attribute='synthetic')
+        >>> impedance = synthetic_field.get_attribute(locations=locations, attribute='impedance')
         """
         _ = kwargs
 
-        generator = self.get_generator(location=location, shape=shape)
+        generator = self.get_generator(locations=locations, shape=shape)
 
         # Select what is `labels`
         if attribute == 'labels':
@@ -214,6 +214,7 @@ class SyntheticField:
         # Fallback
         else:
             result = generator.get_attribute(attribute=attribute)
+
         result = result.reshape(shape)
 
         if buffer is not None:
@@ -223,29 +224,29 @@ class SyntheticField:
         return buffer
 
 
-    def load_seismic(self, location=None, shape=None, src='synthetic', buffer=None, **kwargs):
+    def load_seismic(self, locations=None, shape=None, src='synthetic', buffer=None, **kwargs):
         """ Wrapper around `:meth:.get_attribute` to comply with `:class:.Field` API. """
-        return self.get_attribute(location=location, shape=shape, attribute=src, buffer=buffer, **kwargs)
+        return self.get_attribute(locations=locations, shape=shape, attribute=src, buffer=buffer, **kwargs)
 
-    def make_mask(self, location=None, shape=None, src='labels', buffer=None, **kwargs):
+    def make_mask(self, locations=None, shape=None, src='labels', buffer=None, **kwargs):
         """ Wrapper around `:meth:.get_attribute` to comply with `:class:.Field` API. """
-        return self.get_attribute(location=location, shape=shape, attribute=src, buffer=buffer, **kwargs)
+        return self.get_attribute(locations=locations, shape=shape, attribute=src, buffer=buffer, **kwargs)
 
 
     # Utilities
-    def shape_to_location(self, shape):
-        """ Make a randomized location with desired shape. """
+    def shape_to_locations(self, shape):
+        """ Make a randomized locations with desired shape. """
         starts = np.random.randint((0, 0, 0), (10000, 10000, 10000))
         return tuple(slice(start, start + s)
                      for start, s in zip(starts, shape))
 
-    def location_to_shape(self, location):
-        """ Compute shape of a given location. """
-        return tuple(slc.stop - slc.start for slc in location)
+    def locations_to_shape(self, locations):
+        """ Compute shape of a given locations. """
+        return tuple(slc.stop - slc.start for slc in locations)
 
-    def location_to_hash(self, location):
-        """ Compute hash value of a given location. """
-        return hash(tuple((slc.start, slc.stop, slc.step) for slc in location))
+    def locations_to_hash(self, locations):
+        """ Compute hash value of a given locations. """
+        return hash(tuple((slc.start, slc.stop, slc.step) for slc in locations))
 
 
     @classmethod
@@ -310,9 +311,9 @@ class SyntheticField:
                 msg += f':\n    - labels: attribute `{attribute}`'
         return msg
 
-    def show_slide(self, location=None, shape=None, **kwargs):
+    def show_slide(self, locations=None, shape=None, **kwargs):
         """ Create one generator and show underlying models, synthetic and masks. """
-        generator = self.get_generator(location=location, shape=shape)
+        generator = self.get_generator(locations=locations, shape=shape)
         self._last_generator = generator
         return generator.show_slide(**kwargs)
 
