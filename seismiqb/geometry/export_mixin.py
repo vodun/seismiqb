@@ -266,7 +266,7 @@ class ExportMixin:
 
         # Write file-wide 'Interval', 'Samples' and 'Format' headers
         # TODO: can be changed to a custom 400-bytes long np.dtype
-        dst_mmap[3217-1:3217-1+2] = np.array([2000], dtype=endian_symbol + 'u2').view('u1')
+        dst_mmap[3217-1:3217-1+2] = np.array([int(spec.sample_rate * 1000)], dtype=endian_symbol + 'u2').view('u1')
         dst_mmap[3221-1:3221-1+2] = np.array([n_samples], dtype=endian_symbol + 'u2').view('u1')
         dst_mmap[3225-1:3225-1+2] = np.array([spec.format], dtype=endian_symbol + 'u2').view('u1')
 

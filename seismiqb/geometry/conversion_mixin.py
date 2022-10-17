@@ -1,6 +1,7 @@
 """ Mixin for geometry conversions. """
 import os
 
+import cv2
 import numpy as np
 import h5pickle as h5py
 import hdf5plugin
@@ -218,8 +219,8 @@ class ConversionMixin:
         from .base import Geometry
         return Geometry.new(path)
 
-    def repack_segy(self, path=None, format=8, transform=None, chunk_size=25_000, max_workers=4,
-                     pbar='t', store_meta=True, overwrite=True):
+    def repack_segy(self, path=None, format=8, transform=None, quantization_parameters=None,
+                    chunk_size=25_000, max_workers=4, pbar='t', store_meta=True, overwrite=True):
         """ Repack SEG-Y file with a different `format`: dtype of data values.
         Keeps the same binary header (except for the 3225 byte, which stores the format).
         Keeps the same header values for each trace: essentially, only the values of each trace are changed.
@@ -249,7 +250,7 @@ class ConversionMixin:
             Whether to overwrite existing `path` or raise an exception.
         """
         if format == 8 and transform is None:
-            quantization_parameters = self.compute_quantization_parameters()
+            quantization_parameters = quantization_parameters or self.compute_quantization_parameters()
             transform = quantization_parameters['transform']
 
         path = self.loader.convert(path=path, format=format, transform=transform,
@@ -326,9 +327,45 @@ class ConversionMixin:
                                             dataset_kwargs=dataset_kwargs, chunk_size_divisor=chunk_size_divisor,
                                             pbar=pbar, store_meta=store_meta)
         elif 'sgy' in format and quantize:
-            geometry = self.repack_segy(path=path, overwrite=overwrite, format=sgy_format, transform=None,
+            geometry = self.repack_segy(path=path, overwrite=overwrite, format=sgy_format,
+                                        transform=transform, quantization_parameters=quantization_parameters,
                                         chunk_size=chunk_size, max_workers=max_workers, pbar=pbar)
         else:
             raise ValueError(f'Unknown/unsupported combination of format={format} and quantize={quantize}!')
 
         return geometry
+
+
+    # Resample SEG-Y
+    def resample(self, path=None, factor=2, quantize=True, quantization_parameters=None, pbar='t', **kwargs):
+        """ !!. """
+        # Path
+        path = path or self.make_output_path('sgy', quantize=quantize, postfix=f'_r{factor}')
+
+        # Quantization parameters
+        if quantize and not self.quantized:
+            quantization_parameters = quantization_parameters or self.compute_quantization_parameters()
+            quantization_transform = quantization_parameters['transform']
+        else:
+            quantization_transform = lambda array: array
+
+        # Spec: use `self` as `array_like` to infer shapes
+        spec = self.make_export_spec(self)
+        spec.sample_rate /= factor
+        spec.samples = np.arange(self.depth * factor, dtype=np.int32)
+        spec.format = 8 if quantize else 5
+
+        # Final data transform: resample and optional quantization
+        transform = lambda array: quantization_transform(resize_3D(array, factor=factor))
+
+        self.array_to_segy(self, path=path, spec=spec, transform=transform, format=spec.format,
+                        pbar=pbar, zip_segy=False, **kwargs)
+
+def resize_3D(array, factor):
+    """ Resize 3D array along the last axis. """
+    resampled_depth = int(array.shape[2] * factor)
+    buffer = np.empty(shape=(*array.shape[:2], resampled_depth), dtype=array.dtype)
+
+    for i, item in enumerate(array):
+        cv2.resize(item, dsize=(resampled_depth, array.shape[1]), dst=buffer[i])
+    return buffer
