@@ -15,19 +15,20 @@ from .base import Horizon
 
 class HorizonExtractor:
     """ Extractor of horizon surfaces from a probability array.
+
     The main idea of implementation is:
         - extract connected components on each n-th slice, store them (with their indices) in a container
         Do that for slices along the first and the second axis: usually, these are INLINE_3D and CROSSLINE_3D dims.
 
-        - sample one line as a starter along desired axis. Make a `HorizonPrototype` instance out of it.
+        - sample one line as a starter. Usually, we do that by sorting all extracted connected components by length.
+        Make a `HorizonPrototype` instance out of it.
         - for that line, find intersections with orthogonal slices.
         On these slices, find exact lines that are intersecting with the current one.
-        - Add lines to the prototype instance: basically, collection of lines with known intersections.
+        - Add lines to the prototype instance, until no more lines can be merged in either direction.
+        At the end, prototype is basically a collection of lines with known intersections.
 
-        - repeat the last three to get more prototypes.
-
-    After prototype extraction, they can be converted to a Horizon instances.
-    We do so by iteratively merging its lines with additional thresholds.
+        - repeat the last three steps to get more prototypes.
+        Optionally, convert prototypes to Horizon instances by iteratively merging lines with additional thresholds.
     """
     def __init__(self, array, step=10):
         self.array = array
@@ -100,6 +101,7 @@ class HorizonExtractor:
         for orientation_dict in self.container.values():
             for slide_dict in orientation_dict.values():
                 slide_dict['already_used'] = defaultdict(bool)
+
 
     # Line sequences: iterator over lines for prototype creation
     def make_line_sequence(self, line_length_threshold=50):
@@ -271,6 +273,7 @@ class HorizonPrototype:
                     break
         return np.array(intersections)
 
+    # Introspection
     @property
     def n_points(self):
         """ Total number of points in a prototype. """
@@ -307,6 +310,7 @@ class HorizonPrototype:
     def __len__(self):
         return self.n_points
 
+    # Convert to Horizon instance
     def naive_to_horizon(self, field, name='naive_prototype'):
         """ Naive conversion of prototype to horizon instance: no correction on overlapping lines.
         Should not be used other for debugging/introspection purposes.
