@@ -395,10 +395,13 @@ class HorizonPrototype:
                                 if not line_horizon.already_merged]
                 if len(horizon) == prev_length or len(line_horizons) < 3:
                     break
+        horizons.sort(key=len, reverse=True)
         return horizons
 
-    def to_horizon(self, field, reduction=7, d_ptp_threshold=20, size_threshold=40, max_iters=100, pbar=False):
-        """ Alias for extracting one horizon. Refer to :meth:`.to_horizons` for more details on parameters. """
+    def to_horizon(self, field, reduction=7, d_ptp_threshold=20, size_threshold=40, max_iters=100, n=3, pbar=False):
+        """ Alias for extracting one horizon with the biggest size.
+        Refer to :meth:`.to_horizons` for more details on parameters.
+        """
         return self.to_horizons(field=field, reduction=reduction,
                                 d_ptp_threshold=d_ptp_threshold, size_threshold=size_threshold,
-                                max_iters=max_iters, n=1, pbar=pbar)[0]
+                                max_iters=max_iters, n=n, pbar=pbar)[0]
