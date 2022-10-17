@@ -201,7 +201,8 @@ class ExportMixin:
             })
 
             # Iterate over traces, writing headers/data to the dst
-            notifier = Notifier(pbar, total=len(spec.ilines), desc='Array to SEG-Y')
+            basename = os.path.basename(path)
+            notifier = Notifier(pbar, total=len(spec.ilines), desc=f'Writing `{basename}`')
 
             c = 0
             for i, il in notifier(enumerate(spec.ilines)):
@@ -266,7 +267,7 @@ class ExportMixin:
 
         # Write file-wide 'Interval', 'Samples' and 'Format' headers
         # TODO: can be changed to a custom 400-bytes long np.dtype
-        dst_mmap[3217-1:3217-1+2] = np.array([2000], dtype=endian_symbol + 'u2').view('u1')
+        dst_mmap[3217-1:3217-1+2] = np.array([int(spec.sample_rate * 1000)], dtype=endian_symbol + 'u2').view('u1')
         dst_mmap[3221-1:3221-1+2] = np.array([n_samples], dtype=endian_symbol + 'u2').view('u1')
         dst_mmap[3225-1:3225-1+2] = np.array([spec.format], dtype=endian_symbol + 'u2').view('u1')
 
@@ -295,7 +296,8 @@ class ExportMixin:
         chunk_starts = np.cumsum([0] + chunk_sizes[:-1])
 
         # Write trace headers and values in chunks in multiple threads
-        with Notifier(pbar, total=len(spec.ilines), desc='Array to SEG-Y') as progress_bar:
+        basename = os.path.basename(path)
+        with Notifier(pbar, total=len(spec.ilines), desc=f'Writing `{basename}`') as progress_bar:
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 def callback(future):
                     chunk_size = future.result()
