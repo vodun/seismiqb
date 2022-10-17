@@ -96,6 +96,15 @@ class HorizonExtractor:
                                  for j in range(3)]).T
         return item_points
 
+    def point_to_item_idx(self, orientation, point):
+        """ Get `item_idx` given point in 3D array and its orientation. """
+        point = np.array(point)
+        slide_idx = point[orientation]
+        point[orientation] = 0
+
+        item_idx = self.container[orientation][slide_idx]['labeled_slide'][point[0], point[1], point[2]]
+        return item_idx
+
     def reset_already_used(self):
         """ Reset `already_used` flag for all lines. """
         for orientation_dict in self.container.values():
@@ -317,8 +326,36 @@ class HorizonPrototype:
         """
         return Horizon(self.unique_flat_points, field=field, name=name)
 
-    def to_horizons(self, field, reduction=7, d_ptp_threshold=20, size_threshold=40, max_iters=100, n=3, pbar=False):
-        """ !!. """
+    def to_horizons(self, field, reduction=3, d_ptp_threshold=20, size_threshold=40, max_iters=100, n=3, pbar=False):
+        """ Convert Prototype instance to one or more Horizon instances.
+
+        As Prototype is a collection of lines with intersections, we want to avoid depth-wise overlaps.
+        To do that, we sequentially merge lines with tight thresholds:
+            - at first, we merge lines with less depth variation (low `d_ptp`).
+            The threshold is gradually increased from 1 to `d_ptp_threshold`, so that we allow more and more variation.
+            - then, we merge lines with high overlap to already merged (big `overlap_size`)
+            The threshold is gradually decreased from `size_threshold` to 3, so that we allow less overlaps.
+            - repeat the first two steps multiple times, until the horizon size is no longer increasing.
+
+        As some of the lines may overlap depth-wise even where it is not desirable, we use `reduction` to remove
+        a few points of either side of the line and produce better extracted horizons with negligible area reduction.
+
+        Parameters
+        ----------
+        reduction : int
+            Number of points on the left/right side of a line to remove.
+        d_ptp_threshold : int
+            Maximum allowed `d_ptp` of a line to merge during the first step.
+        size_threshold : int
+            Maxumum minimum overlap size threshold of a line to merge during the second step.
+        max_iters : int
+            Number of alternating iterations to perform.
+        n : int
+            Maximum number of horizons to extract.
+        pbar : bool, str
+            If bool, then whether to display progress bar.
+            If str, then type of progress bar to display: `'t'` for textual, `'n'` for widget.
+        """
         # Strip the first and the last points of each line in a prototype, convert to Horizon instances
         line_horizons = []
         for orientation, orientation_dict in self.container.items():
@@ -351,8 +388,7 @@ class HorizonPrototype:
                 # Merge with bigger overlaps
                 for size_threshold_ in range(size_threshold, 3, -1):
                     horizon, _, _ = horizon.merge_into(line_horizons, mean_threshold=0.01, max_threshold=0, adjacency=0,
-                                                       min_size_threshold=size_threshold_,
-                                                       max_size_threshold=size_threshold_)
+                                                       min_size_threshold=size_threshold_)
 
                 # Remove already merged line horizons. Break, if no progress in horizon size
                 line_horizons = [line_horizon for line_horizon in line_horizons
