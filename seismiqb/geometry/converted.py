@@ -78,8 +78,28 @@ class GeometryHDF5(Geometry):
         """ Set default values for seismic attributes. """
         self.n_traces = np.prod(self.shape[:2])
         self.delay, self.sample_rate = 0.0, 1.0
+        self.compute_dead_traces()
         for key, value in kwargs.items():
             setattr(self, key, value)
+
+    def compute_dead_traces(self, frequency=100):
+        """ Fallback for dead traces matrix computation, if no full stats are collected. """
+        crop = None
+        self.dead_traces_matrix = np.zeros(shape=self.spatial_shape, dtype=np.bool_)
+
+        for idx in range(0, self.depth, frequency):
+            if idx + frequency > self.depth:
+                crop = None # buffer shape can be invalid for the last data chunk
+
+            locations = (slice(0, self.lengths[0]), slice(0, self.lengths[1]), slice(idx, idx+frequency))
+            crop = self.load_crop_native(locations=locations, axis=0, buffer=crop)
+
+            std_matrix = np.std(crop, axis=-1)
+
+            self.dead_traces_matrix |= (std_matrix == 0).astype(np.bool_)
+
+        self.n_dead_traces = np.sum(self.dead_traces_matrix)
+        self.n_alive_traces = np.prod(self.lengths) - self.n_dead_traces
 
 
     # General utilities

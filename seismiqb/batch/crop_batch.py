@@ -988,6 +988,10 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         """ Central crop of defined shape. """
         return functional.center_crop(crop, shape)
 
+    @apply_parallel_decorator(init='data', post='_assemble', target='for')
+    def resize(self, crop, size, interpolation=1, **kwargs):
+        """ Resize image. By default uses a bilinear interpolation."""
+        return functional.resize(array=crop, size=size, interpolation=interpolation)
 
     # Augmentations: geologic. `compute_instantaneous_amplitude/phase/frequency` are added by decorator
     @apply_parallel_decorator(init='preallocating_init', post='noop_post', target='for')
