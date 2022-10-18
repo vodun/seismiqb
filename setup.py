@@ -54,6 +54,7 @@ setup(
         'torch>=1.7.0',
         'ipywidgets>=7.0',
         'torchvision>=0.1.3',
+        'connected-components-3d>=3.10.2',
     ],
     extras_require={
         'cupy': ['cupy>=8.1.0'],
