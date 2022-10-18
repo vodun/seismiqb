@@ -115,7 +115,7 @@ class MovingNormalizationLayer(nn.Module):
             x = x[:, :, pad[4]:x.shape[2]-pad[5], pad[2]:x.shape[3]-pad[3], pad[0]:x.shape[4]-pad[1]]
         result = (x - mean) / std
         result = torch.nan_to_num(result, nan=self.fill_value)
-        return squueze(result, self.ndim)
+        return squeeze(result, self.ndim)
 
 
 class SemblanceLayer(nn.Module):
@@ -166,7 +166,7 @@ class SemblanceLayer(nn.Module):
         denum *= normilizing.view(*normilizing.shape, 1)
         result = torch.nan_to_num(num / denum, nan=self.fill_value)
 
-        return squueze(result, self.ndim)
+        return squeeze(result, self.ndim)
 
 
 class FrequenciesFilterLayer(nn.Module):
@@ -292,7 +292,7 @@ class GaussianLayer(nn.Module):
         x = expand_dims(x)
         if self.padding is not None:
             x = F.pad(x, (*self.padding[2], *self.padding[1], *self.padding[0], 0, 0, 0, 0))
-        return squueze(F.conv3d(x, self.kernel), self.ndim)
+        return squeeze(F.conv3d(x, self.kernel), self.ndim)
 
     def gaussian_kernel(self, kernel_size, sigma=None):
         """ Create gaussian kernel of the specified size. """
@@ -311,7 +311,7 @@ def expand_dims(x):
         x = x.view(1, 1, 1, *x.shape)
     return x
 
-def squueze(x, ndim):
+def squeeze(x, ndim):
     """ Squeeze axes after :func:`~expand_dims`. """
     if ndim == 4:
         return x[:, 0]
