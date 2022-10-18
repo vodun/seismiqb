@@ -1,7 +1,12 @@
 """ Metrics for denoising seismic data. """
 import numpy as np
 from scipy import fftpack
-import torch
+
+try:
+    import torch
+    TORCH_AVAILABLE = True
+except ImportError:
+    TORCH_AVAILABLE = False
 
 try:
     from torchmetrics.functional import structural_similarity_index_measure,\
@@ -42,6 +47,8 @@ def compute_similarity_metric(array1, array2, metrics='all'):
         Dictionary with metric names as keys and computed metrics as values.
     """
     #pylint: disable=not-a-mapping
+    if not TORCH_AVAILABLE:
+        raise ImportError('Install `torch` library!')
     if not METRICS:
         raise ImportError('Install `torchmetrics` library!')
 
