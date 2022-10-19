@@ -10,20 +10,21 @@ from skimage.measure import label
 from batchflow import Pipeline, B
 from batchflow.models.torch import TorchModel
 
-from seismiqb import SeismicDataset, RegularGrid, Accumulator3D
+from .. import SeismicDataset, RegularGrid
+from ..utils import Accumulator3D
 
 
-def show_slide_inference(model_path, field, loc, axis=0, zoom='auto',
+def show_slide_inference(model_or_path, field, loc, axis=0, zoom='auto',
                          batch_size=64, crop_shape=(1, 256, 512),
                          inference_3d=True, inference_width=10,
                          minsize=5, dilation_iterations=1,
-                         savepath=None, **kwargs):
+                         plot=False, savepath=None, **kwargs):
     """ Show model inference on a field slide.
 
     Parameters
     ----------
-    model_path : str
-        Path to a model.
+    model_or_path : str or instance of :class:`batchflow.TorchModel`
+        Model to use or path to file from which initialize a model.
     field : instance of :class:`seismiqb.Field`
         Field from which to get a slide.
     loc : int
@@ -75,18 +76,20 @@ def show_slide_inference(model_path, field, loc, axis=0, zoom='auto',
     accumulator = Accumulator3D.from_grid(grid=grid, aggregation='weighted', fill_value=0)
 
     # Inference
+    model = TorchModel(model_or_path) if isinstance(model_or_path, str) else model_or_path
+
     inference_pipeline = (
         Pipeline()
         .make_locations(generator=grid, batch_size=batch_size)
         .load_cubes(dst='images')
         .normalize(src='images')
 
-        .load_model(name='model', model_class=TorchModel, mode='dynamic', path=model_path)
+        .import_model(name='model', source=model)
         .predict_model('model', inputs=B('images'), outputs='sigmoid', save_to=B('predictions'))
         .update_accumulator(src='predictions', accumulator=accumulator)
     ) << SeismicDataset(field)
 
-    inference_pipeline.run(n_iters=grid.n_iters, notifier='t')
+    inference_pipeline.run(n_iters=grid.n_iters, notifier='t', pbar=False)
     prediction = accumulator.aggregate()
 
     # Smoothing
@@ -120,24 +123,25 @@ def show_slide_inference(model_path, field, loc, axis=0, zoom='auto',
     prediction[prediction < 0.1] = np.nan
 
     # Plotting
-    if zoom is None:
-        zoom = (slice(None), slice(None))
+    if plot:
+        if zoom is None:
+            zoom = (slice(None), slice(None))
 
-    if os.path.isdir(savepath):
-        name = (f'{field.short_name}_axis_{axis}_loc_{loc}_inference_width_{inference_width}'
-                f'_inference_3d_{inference_3d}_zoom_{zoom}.png')
-        savepath = os.path.join(savepath, name)
-    if savepath is not None:
-        kwargs['savepath'] = savepath
+        if os.path.isdir(savepath):
+            name = (f'{field.short_name}_axis_{axis}_loc_{loc}_inference_width_{inference_width}'
+                    f'_inference_3d_{inference_3d}_zoom_{zoom}.png')
+            savepath = os.path.join(savepath, name)
+        if savepath is not None:
+            kwargs['savepath'] = savepath
 
-    plotter = field.show_slide(loc, axis=axis, show=False, zoom=zoom,
-                               suptitle_size=4, suptitle_y=0.88,
-                               title=None, suptitle=None,
-                               **kwargs)
-    plotter.plot(prediction.T)
-    plotter.redraw()
+        plotter = field.show_slide(loc, axis=axis, show=False, zoom=zoom,
+                                suptitle_size=4, suptitle_y=0.88,
+                                title=None, suptitle=None,
+                                **kwargs)
+        plotter.plot(prediction.T)
+        plotter.redraw()
 
-    if savepath is not None:
-        plotter.config.update(plotter[0][0].config)
-        plotter.save()
-    return plotter
+        if savepath is not None:
+            plotter.config.update(plotter[0][0].config)
+            plotter.save()
+    return prediction
