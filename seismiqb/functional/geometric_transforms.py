@@ -3,7 +3,6 @@ from math import ceil, atan, cos, sin
 
 import numpy as np
 import cv2
-from batchflow.decorators import apply_parallel
 
 
 
