@@ -82,21 +82,14 @@ class GeometryHDF5(Geometry):
         for key, value in kwargs.items():
             setattr(self, key, value)
 
-    def compute_dead_traces(self, frequency=100):
+    def compute_dead_traces(self):
         """ Fallback for dead traces matrix computation, if no full stats are collected. """
-        crop = None
+        slide = None
         self.dead_traces_matrix = np.zeros(shape=self.spatial_shape, dtype=np.bool_)
 
-        for idx in range(0, self.depth, frequency):
-            if idx + frequency > self.depth:
-                crop = None # buffer shape can be invalid for the last data chunk
-
-            locations = (slice(0, self.lengths[0]), slice(0, self.lengths[1]), slice(idx, idx+frequency))
-            crop = self.load_crop_native(locations=locations, axis=0, buffer=crop)
-
-            std_matrix = np.std(crop, axis=-1)
-
-            self.dead_traces_matrix |= (std_matrix == 0).astype(np.bool_)
+        for idx in range(self.shape[0]):
+            slide = self.load_slide_native(index=idx, axis=0, buffer=slide)
+            self.dead_traces_matrix[idx, :] = (np.std(slide, axis=-1) == 0).astype(np.bool_)
 
         self.n_dead_traces = np.sum(self.dead_traces_matrix)
         self.n_alive_traces = np.prod(self.lengths) - self.n_dead_traces
