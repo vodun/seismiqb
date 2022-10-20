@@ -14,46 +14,39 @@ from .. import SeismicDataset, RegularGrid
 from ..utils import Accumulator3D
 
 
-def show_slide_inference(model_or_path, field, loc, axis=0, zoom='auto',
-                         batch_size=64, crop_shape=(1, 256, 512),
-                         inference_3d=True, inference_width=10,
-                         minsize=5, dilation_iterations=1,
-                         plot=False, savepath=None, **kwargs):
-    """ Show model inference on a field slide.
+def make_slide_prediction(field, loc, model_or_path, axis=0,
+                          batch_size=64, crop_shape=(1, 256, 512),
+                          inference_3d=True, inference_width=10,
+                          minsize=5, threshold=0.1, dilation_iterations=1):
+    """ Make model inference on a field slide.
 
     Parameters
     ----------
-    model_or_path : str or instance of :class:`batchflow.TorchModel`
-        Model to use or path to file from which initialize a model.
     field : instance of :class:`seismiqb.Field`
         Field from which to get a slide.
     loc : int
         Number of slide.
     axis : int
         Number of axis to load slide along.
-    zoom : tuple of slices, None or 'auto'
-        Tuple of slices to apply directly to 2d images.
-        If None, slicing is not applied.
-        If 'auto', zero traces on bounds will be dropped.
+    model_or_path : str or instance of :class:`batchflow.TorchModel`
+        Model to use or path to a file from which initialize a model.
     batch_size : int
-        Number of batches to generate for a slide.
-        Affects inference speed and memory used.
+        Number of batches to generate for a slide. Affects inference speed and memory used.
     crop_shape : tuple of ints
         Shape of crop locations to generate for a slide.
-        Affects inference speed and memory used.
+        Recommended to use the same `crop_shape` as for model training. Otherwise, can affect the prediction quality.
     inference_3d : bool
         Whether to apply inference on orthogonal projection.
-        If True, then result is smoothed depend on both projections inference.
+        If True, then prediction is smoothed depend on both projections inference.
     inference_width : int
-        Amount of neighboring slides to infer. Affects result smoothing.
+        Amount of neighboring slides to infer. Affects prediction smoothing.
     minsize : int
-        Objects with size less than minsize will be removed from prediction.
+        Objects with size less then minsize will be removed from prediction.
+    threshold : float or None
+        Values threshold to binarize prediction. If None, then no binarization applied.
     dilation_iterations : int
         Number of dilation iterations to apply. Makes predictions more visible.
-    savepath : str or None
-        Path to a file or directory to save inferred slide (if provided).
-    kwargs : dict
-        Other parameters to pass to the plotting function.
+        Note, that it is applied only to binary predictions.
     """
     # Prepare inference parameters
     ranges = [None, None, None]
@@ -118,30 +111,60 @@ def show_slide_inference(model_or_path, field, loc, axis=0, zoom='auto',
             prediction[coords] = 0
 
     # Modify slice
-    prediction = (prediction > 0.1).astype(np.int32)
+    prediction = (prediction > threshold).astype(np.int32)
     prediction = binary_dilation(prediction, iterations=dilation_iterations).astype(np.float32)
-    prediction[prediction < 0.1] = np.nan
+    return prediction
+
+def plot_slide_prediction(field, loc, axis, prediction, zoom='auto', show=True, savepath=None, **kwargs):
+    """ Plot prediction on a field slide.
+
+    Parameters
+    ----------
+    field : instance of :class:`seismiqb.Field`
+        Field from which to get a slide.
+    loc : int
+        Number of slide.
+    axis : int
+        Number of axis to load slide along.
+    prediction : np.ndarray
+        Prediction slide to plot on the field slide.
+    zoom : tuple of slices, None or 'auto'
+        Tuple of slices to apply directly to 2d images.
+        If None, slicing is not applied.
+        If 'auto', zero traces on bounds will be dropped.
+    show : bool
+        Whether to show plot.
+    savepath : str or None
+        Path to a file or directory to save plot (if provided).
+    kwargs : dict
+        Other parameters to pass to the plotting function.
+    """
+    prediction[prediction == 0] = np.nan # For correct visualization
+
+    # Parse parameters
+    if zoom is None:
+        zoom = (slice(None), slice(None))
+
+    if (savepath is not None) and os.path.isdir(savepath):
+        filename = f'{field.short_name}_axis_{axis}_loc_{loc}_zoom_{zoom}.png'
+        savepath = os.path.join(savepath, filename)
+
+    if savepath is not None:
+        kwargs['savepath'] = savepath
+
+    if kwargs.get('indices', None) is None:
+        # disable labels drawing on the slide by default
+        kwargs['indices'] = ()
 
     # Plotting
-    if plot:
-        if zoom is None:
-            zoom = (slice(None), slice(None))
-
-        if os.path.isdir(savepath):
-            name = (f'{field.short_name}_axis_{axis}_loc_{loc}_inference_width_{inference_width}'
-                    f'_inference_3d_{inference_3d}_zoom_{zoom}.png')
-            savepath = os.path.join(savepath, name)
-        if savepath is not None:
-            kwargs['savepath'] = savepath
-
-        plotter = field.show_slide(loc, axis=axis, show=False, zoom=zoom,
-                                suptitle_size=4, suptitle_y=0.88,
-                                title=None, suptitle=None,
-                                **kwargs)
-        plotter.plot(prediction.T)
+    plotter = field.show_slide(loc, axis=axis, show=False, zoom=zoom,
+                               suptitle_size=4, suptitle_y=0.88,
+                               title=None, suptitle=None,
+                               **kwargs)
+    plotter.plot(prediction.T, cmap='darkorange')
+    if show:
         plotter.redraw()
 
-        if savepath is not None:
-            plotter.config.update(plotter[0][0].config)
-            plotter.save()
-    return prediction
+    if savepath is not None:
+        plotter.config.update(plotter[0][0].config)
+        plotter.save()
