@@ -82,18 +82,20 @@ class GeometryHDF5(Geometry):
         for key, value in kwargs.items():
             setattr(self, key, value)
 
-    def compute_dead_traces(self):
+    def compute_dead_traces(self, frequency=100):
         """ Fallback for dead traces matrix computation, if no full stats are collected. """
-        slide = None
-        self.dead_traces_matrix = np.zeros(shape=self.spatial_shape, dtype=np.bool_)
+        n_slides = self.depth // frequency + 1
+        buffer = np.empty((n_slides, *self.spatial_shape), dtype=self.dtype)
 
-        for idx in range(self.shape[0]):
-            slide = self.load_slide_native(index=idx, axis=0, buffer=slide)
-            self.dead_traces_matrix[idx, :] = (np.std(slide, axis=-1) == 0).astype(np.bool_)
+        for idx in range(0, self.depth, frequency):
+            buffer[idx//frequency, :, :] = self.load_slide_native(index=idx, axis=2,
+                                                                  buffer=buffer[idx//frequency, :, :])
 
+        std_matrix = np.std(buffer, axis=0)
+
+        self.dead_traces_matrix = (std_matrix == 0).astype(np.bool_)
         self.n_dead_traces = np.sum(self.dead_traces_matrix)
         self.n_alive_traces = np.prod(self.lengths) - self.n_dead_traces
-
 
     # General utilities
     def get_optimal_axis(self, locations=None, shape=None):
