@@ -9,7 +9,7 @@ import numpy as np
 from cv2 import dilate
 from numba import njit
 
-from skimage.measure import label
+from cc3d import connected_components
 from scipy.ndimage import find_objects
 
 from ...utils import MetaDict, groupby_all
@@ -113,7 +113,7 @@ class ExtractionMixin:
             total_extracted_points = 0
 
             # Label connected entities
-            labeled = label(mask)
+            labeled = connected_components(mask)
             objects = find_objects(labeled)
             stats['measurement_timings'].append(round(perf_counter() - start_timing, 2))
             stats['num_objects'].append(len(objects))
@@ -187,7 +187,7 @@ class ExtractionMixin:
                         background = np.zeros(shape, dtype=np.int8)
                         background[ix_coords[:, 0], ix_coords[:, 1], h_coords] = 1
 
-                        inner_labeled = label(background)
+                        inner_labeled = connected_components(background)
                         inner_objects = find_objects(inner_labeled)
 
                         for inner_i, inner_slices in enumerate(inner_objects):
@@ -387,18 +387,12 @@ class ExtractionMixin:
 
         # Create new instance or change `self`
         if inplace:
-            # Clean-up data storages, just in case
-            for instance in [self, other]:
-                for attribute in ['_matrix', '_points', '_depths']:
-                    if hasattr(instance, attribute):
-                        delattr(instance, attribute)
-                        setattr(instance, attribute, None)
-
-            # Change `self` inplace
+            # Change `self` inplace, mark `other` as merged into `self`
             self.from_matrix(background, i_min=shared_i_min, x_min=shared_x_min,
                              d_min=min(self.d_min, other.d_min),
                              d_max=max(self.d_max, other.d_max), length=length)
-            # self.reset_storage('points')
+            self.reset_storage('points', reset_cache=False)
+            other.already_merged = id(self)
             merged = True
         else:
             # Return a new instance of horizon
@@ -482,18 +476,12 @@ class ExtractionMixin:
 
             # Create new instance or change `self`
             if inplace:
-                # Clean-up data storages
-                for instance in [self, other]:
-                    for attribute in ['_matrix', '_points', '_depths']:
-                        if hasattr(instance, attribute):
-                            delattr(instance, attribute)
-                            setattr(instance, attribute, None)
-
-                # Change `self` inplace
+                # Change `self` inplace, mark `other` as merged into `self`
                 self.from_matrix(background, i_min=shared_i_min, x_min=shared_x_min,
                                  d_min=min(self.d_min, other.d_min),
                                  d_max=max(self.d_max, other.d_max), length=length)
-                # self.reset_storage('points')
+                self.reset_storage('points', reset_cache=False)
+                other.already_merged = id(self)
                 merged = True
             else:
                 # Return a new instance of horizon
@@ -537,7 +525,11 @@ class ExtractionMixin:
             - remaining horizons
             - dictionary with timings and statistics
         """
-        horizons = np.array(horizons)
+        if isinstance(horizons, (tuple, list)):
+            horizons = np.array([horizon for horizon in horizons if not horizon.already_merged])
+
+        # Pre-compute all the bounding boxes
+        bboxes = np.array([horizon.raveled_bbox for horizon in horizons], dtype=np.int32).reshape(-1, 6)
 
         # Adjacency parsing
         adjacency = adjacency if isinstance(adjacency, tuple) else (adjacency, adjacency)
@@ -554,36 +546,25 @@ class ExtractionMixin:
             num_merged = 0
             indices_merged = set()
 
-            # Pre-compute all the bounding boxes
-            bboxes = [(horizon.i_min, horizon.i_max,
-                       horizon.x_min, horizon.x_max,
-                       horizon.d_min, horizon.d_max)
-                      for horizon in horizons]
-            bboxes = np.array(bboxes, dtype=np.int32)
-
-            base_bbox = np.array([self.i_min, self.i_max,
-                                  self.x_min, self.x_max,
-                                  self.d_min, self.d_max])
-
             # Iline-axis
-            overlap_min_i = np.maximum(bboxes[:, 0], base_bbox[0])
-            overlap_max_i = np.minimum(bboxes[:, 1], base_bbox[1]) + 1
+            overlap_min_i = np.maximum(bboxes[:, 0], self.raveled_bbox[0])
+            overlap_max_i = np.minimum(bboxes[:, 1], self.raveled_bbox[1]) + 1
             overlap_size_i = overlap_max_i - overlap_min_i
             mask_i = (overlap_size_i >= 1 - adjacency_i)
             indices_i = np.nonzero(mask_i)[0]
             bboxes_i = bboxes[indices_i]
 
             # Crossline-axis
-            overlap_min_x = np.maximum(bboxes_i[:, 2], base_bbox[2])
-            overlap_max_x = np.minimum(bboxes_i[:, 3], base_bbox[3]) + 1
+            overlap_min_x = np.maximum(bboxes_i[:, 2], self.raveled_bbox[2])
+            overlap_max_x = np.minimum(bboxes_i[:, 3], self.raveled_bbox[3]) + 1
             overlap_size_x = overlap_max_x - overlap_min_x
             mask_x = (overlap_size_x >= 1 - adjacency_x)
             indices_x = np.nonzero(mask_x)[0]
             bboxes_x = bboxes_i[indices_x]
 
             # depth-axis: other threshold
-            overlap_min_h = np.maximum(bboxes_x[:, 4], base_bbox[4])
-            overlap_max_h = np.minimum(bboxes_x[:, 5], base_bbox[5]) + 1
+            overlap_min_h = np.maximum(bboxes_x[:, 4], self.raveled_bbox[4])
+            overlap_max_h = np.minimum(bboxes_x[:, 5], self.raveled_bbox[5]) + 1
             overlap_size_h = overlap_max_h - overlap_min_h
             mask_h = (overlap_size_h >= 1)
             indices_h = np.nonzero(mask_h)[0]
@@ -633,7 +614,6 @@ class ExtractionMixin:
                 horizons = np.delete(horizons, indices_merged, axis=0)
                 bboxes = np.delete(bboxes, indices_merged, axis=0)
 
-                indices_merged = set()
                 merge_stats['num_deletes'] += 1
 
             # Global iteration info
@@ -645,8 +625,6 @@ class ExtractionMixin:
             if num_merged < num_merged_threshold or len(horizons) == 0:
                 break
 
-        horizons = [horizon for horizon in horizons
-                    if (horizon._points is not None or horizon._matrix is not None) and len(horizon) > 0]
         return self, horizons, MetaDict(merge_stats)
 
     @staticmethod
@@ -712,11 +690,7 @@ class ExtractionMixin:
             indices_merged = set() # used to periodically clean-up arrays
 
             # Pre-compute all the bounding boxes
-            bboxes = [(horizon.i_min, horizon.i_max,
-                       horizon.x_min, horizon.x_max,
-                       horizon.d_min, horizon.d_max)
-                      for horizon in horizons]
-            bboxes = np.array(bboxes, dtype=np.int32)
+            bboxes = np.array([horizon.raveled_bbox for horizon in horizons], dtype=np.int32)
 
             # Cycle for the base horizons. As we are removing merged horizons from the list, we iterate with `while`
             i = 0
@@ -887,8 +861,7 @@ class ExtractionMixin:
             delattr(horizon, 'merge_count')
             delattr(horizon, 'id_separated')
 
-        horizons = [horizon for horizon in horizons
-                    if (horizon._points is not None or horizon._matrix is not None) and len(horizon) > 0]
+        horizons = [horizon for horizon in horizons if not horizon.already_merged]
         return sorted(horizons, key=len), MetaDict(merge_stats)
 
 

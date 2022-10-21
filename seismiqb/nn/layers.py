@@ -1,4 +1,4 @@
-""" Special layers to incapsulate attribute computation into neural network. """
+""" Special layers for geological tasks. """
 import torch
 import numpy as np
 from torch import nn
@@ -60,6 +60,7 @@ class InstantaneousPhaseLayer(nn.Module):
         x = self._angle(x)
         return x
 
+
 class MovingNormalizationLayer(nn.Module):
     """ Normalize tensor by mean/std in moving window.
 
@@ -114,7 +115,8 @@ class MovingNormalizationLayer(nn.Module):
             x = x[:, :, pad[4]:x.shape[2]-pad[5], pad[2]:x.shape[3]-pad[3], pad[0]:x.shape[4]-pad[1]]
         result = (x - mean) / std
         result = torch.nan_to_num(result, nan=self.fill_value)
-        return squueze(result, self.ndim)
+        return squeeze(result, self.ndim)
+
 
 class SemblanceLayer(nn.Module):
     """ Semblance attribute.
@@ -164,7 +166,8 @@ class SemblanceLayer(nn.Module):
         denum *= normilizing.view(*normilizing.shape, 1)
         result = torch.nan_to_num(num / denum, nan=self.fill_value)
 
-        return squueze(result, self.ndim)
+        return squeeze(result, self.ndim)
+
 
 class FrequenciesFilterLayer(nn.Module):
     """ Frequencies filter.
@@ -192,6 +195,7 @@ class FrequenciesFilterLayer(nn.Module):
         sfft[:, :q_] = 0
         sfft[:, -q_:] = 0
         return torch.istft(sfft, self.window).view(*inputs.shape)
+
 
 class InputLayer(nn.Module):
     """ Input layer with possibility of instantaneous phase concatenation.
@@ -243,45 +247,6 @@ class InputLayer(nn.Module):
         x = self.base_block(x)
         return x
 
-def expand_dims(x):
-    """ Make tensor 5D. """
-    if x.ndim == 4:
-        x = x.view(x.shape[0], 1, *x.shape[-3:])
-    elif x.ndim == 3:
-        x = x.view(1, 1, *x.shape)
-    elif x.ndim == 2:
-        x = x.view(1, 1, 1, *x.shape)
-    return x
-
-def squueze(x, ndim):
-    """ Squeeze axes after :func:`~expand_dims`. """
-    if ndim == 4:
-        return x[:, 0]
-    if ndim == 3:
-        return x[0, 0]
-    if ndim == 2:
-        return x[0, 0, 0]
-    return x
-
-class DepthSoftmax(nn.Module):
-    """ Softmax activation for depth dimension.
-
-    Parameters
-    ----------
-    width : int
-        The predicted horizon width. Default is 3.
-    """
-    def __init__(self, width=3):
-        super().__init__()
-        self.width_weights = torch.ones((1, 1, 1, width))
-
-    @torch.cuda.amp.autocast(enabled=False)
-    def forward(self, x):
-        """ Forward pass. """
-        x = torch.nn.functional.softmax(x, dim=-1)
-        width_weights = self.width_weights.to(device=x.device, dtype=x.dtype)
-        x = F.conv2d(x, width_weights, padding=(0, 1))
-        return x.float()
 
 class GaussianLayer(nn.Module):
     """ Layer for gaussian smoothing.
@@ -327,13 +292,35 @@ class GaussianLayer(nn.Module):
         x = expand_dims(x)
         if self.padding is not None:
             x = F.pad(x, (*self.padding[2], *self.padding[1], *self.padding[0], 0, 0, 0, 0))
-        return squueze(F.conv3d(x, self.kernel), self.ndim)
+        return squeeze(F.conv3d(x, self.kernel), self.ndim)
 
     def gaussian_kernel(self, kernel_size, sigma=None):
         """ Create gaussian kernel of the specified size. """
         n = np.zeros(kernel_size)
         n[tuple(np.array(n.shape) // 2)] = 1
         return scipy.ndimage.gaussian_filter(n, sigma=sigma)
+
+
+def expand_dims(x):
+    """ Make tensor 5D. """
+    if x.ndim == 4:
+        x = x.view(x.shape[0], 1, *x.shape[-3:])
+    elif x.ndim == 3:
+        x = x.view(1, 1, *x.shape)
+    elif x.ndim == 2:
+        x = x.view(1, 1, 1, *x.shape)
+    return x
+
+def squeeze(x, ndim):
+    """ Squeeze axes after :func:`~expand_dims`. """
+    if ndim == 4:
+        return x[:, 0]
+    if ndim == 3:
+        return x[0, 0]
+    if ndim == 2:
+        return x[0, 0, 0]
+    return x
+
 
 
 def compute_attribute(array, window=None, device='cuda:0', attribute='semblance', fill_value=None, **kwargs):
