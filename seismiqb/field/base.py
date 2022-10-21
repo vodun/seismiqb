@@ -320,7 +320,7 @@ class Field(CharismaMixin, VisualizationMixin):
             labels = [labels[idx] for idx in indices]
 
         # Add mask of each component to the buffer
-        for i, label in enumerate(labels):
+        for i, label in enumerate(labels, start=1):
             alpha = 1 if enumerate_labels is False else i
             label.add_to_mask(buffer, locations=locations, width=width, axis=orientation, sparse=sparse, alpha=alpha)
         return buffer
