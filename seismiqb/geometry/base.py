@@ -426,7 +426,10 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMix
     @property
     def snr(self):
         """ Signal-to-noise ratio. """
-        return np.log(self.mean_matrix**2 / self.std_matrix**2 + 0.001)
+        eps = 1
+        snr = np.log((self.mean_matrix**2 + eps) / (self.std_matrix**2 + eps))
+        snr[self.std_matrix == 0] = np.nan
+        return snr
 
     @transformable
     def get_dead_traces_matrix(self):
