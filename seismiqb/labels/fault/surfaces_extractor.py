@@ -5,24 +5,23 @@ from itertools import combinations
 import tqdm
 import numpy as np
 from scipy.ndimage import measurements
-from scipy.sparse.csgraph import connected_components
+from scipy.sparse.csgraph import connected_components as connected_components_graph 
 
 from batchflow import Notifier
 
 from .base import Fault
 
-class SurfacesExtractor:
-    """ Extract separate fault surfaces from array with fault labels (probabilities or 0-1 values).
+class FaultExtractor:
+    """ Extract separate fault surfaces from array with fault labels (probabilities or binary values).
     It uses assumption that the connected components on each slice in `components_axis` direction
     are in the same direction (`faults_direction`) and do not have branches.
 
-    The algorithm is based on three stages:
+    The algorithm is based on four stages:
         - merge connected components into small patches: sequences of connected components
             (see :class:`.FaultPatch`)
         - group patches around the holes
         - group patches with large intersection of the bound components
-
-    Then all groups of patches form separate fault instances.
+        - form separate fault instances from all groups of patches.
 
     Patches can be organized into directed graph: each patch is connected to the patches which touch its bottom
     component by its top component. Top patches we will call `parents`, the sequent bottom patches we will
@@ -129,7 +128,7 @@ class SurfacesExtractor:
         intersection = np.logical_and(a_mask, b_mask)
         return intersection.sum()
 
-    def create_patches(self, size_threshold=100, bar='t'):
+    def create_patches(self, size_threshold=100, pbar='t'):
         """ Create small patches. There are two sources of component indices to initialize patches:
             - list of all connected components sorted by size
             - candidates: components that stopped the extension of previous patches
@@ -148,7 +147,7 @@ class SurfacesExtractor:
 
         # TODO: rewrite progress bar for used components
         candidates = self._components_to_extend(size_threshold)
-        for anchor_idx, direction in Notifier(bar)(candidates):
+        for anchor_idx, direction in Notifier(pbar)(candidates):
             patch = FaultPatch(anchor_idx, direction, extractor=self)
 
             # Check if patch consists of one component which is a part of the already existed patch
@@ -207,7 +206,7 @@ class SurfacesExtractor:
         self._candidates[1].update(candidates_bottom)
         self._candidates[-1].update(candidates_top)
 
-    def find_holes(self, depth=10, threshold=0.9, bar='t'):
+    def find_holes(self, depth=10, threshold=0.9, pbar='t'):
         """ Find holes of fault surfaces and merge patches around them into groups.
 
         To find holes, we search for a patches which touch more then one other patches (has several components
@@ -222,11 +221,11 @@ class SurfacesExtractor:
         threshold : float, optional
             Two patches can be parent and child if they touch and ratio of intersection of touched components
             to the minimal of them is larger then `threshold`, by default 0.9
-        bar : bool, optional
+        pbar : bool, optional
             Progress bar, by default True
         """
         groups = []
-        for idx in Notifier(bar, desc='Find holes')(self.patchtop_to_patch):
+        for idx in Notifier(pbar, desc='Find holes')(self.patchtop_to_patch):
             bottom_rejected = self.patchtop_to_patch[idx].bottom_rejected
             for a, b in combinations(bottom_rejected, 2):
                 if a not in self.patchtop_to_patch or b not in self.patchtop_to_patch:
@@ -287,9 +286,9 @@ class SurfacesExtractor:
         return tree
 
 
-    def merge_patches(self, thresholds, bar='t'):
+    def merge_patches(self, thresholds, pbar='t'):
         """ Merge patches with large intersections. see :meth:`.FaultPatch.find_largest_intersections`. """
-        for idx, patch in Notifier(bar, desc='Merge patches')(self.patchtop_to_patch.items()):
+        for idx, patch in Notifier(pbar, desc='Merge patches')(self.patchtop_to_patch.items()):
             for bottom_idx in patch.find_largest_intersections(thresholds=thresholds):
                 if bottom_idx in self.patchtop_to_patch:
                     a = self._labels_reverse_mapping[idx]
@@ -298,14 +297,14 @@ class SurfacesExtractor:
                     self._connectivity_matrix[b, a] = 1
         return self
 
-    def to_faults(self, field, bar='t'):
+    def to_faults(self, field, pbar='t'):
         """ Make Fault instances from groups of patches.
 
         Parameters
         ----------
         field : Field
             Field instance
-        bar : bool, optional
+        pbar : bool, optional
             Progress bar, by default True
 
         Returns
@@ -313,11 +312,11 @@ class SurfacesExtractor:
         list
             Fault instances linked with the field
         """
-        n_groups, groups = connected_components(self._connectivity_matrix)
+        n_groups, groups = connected_components_graph(self._connectivity_matrix)
         faults = []
         group_sizes = defaultdict(int)
 
-        for idx in Notifier(bar)(range(n_groups)):
+        for idx in Notifier(pbar)(range(n_groups)):
             patches_idx = [self._labels_mapping[item] for item in np.arange(len(self.patchtop_to_patch))[groups == idx]]
             components = [
                 list(self.patchtop_to_patch[patch].all_components) + self.patchtop_to_patch[patch].bottom_rejected for patch in patches_idx
@@ -387,7 +386,7 @@ class FaultPatch:
     extension_direction : -1, 0 or 1
         Direction of the patch extension (increase or decrease location of slice in corresponding axis).
         0 means extension in both directions.
-    extractor : SurfacesExtractor
+    extractor : FaultExtractor
     """
     def __init__(self, anchor_idx, extension_direction, extractor):
         self.anchor_idx = anchor_idx

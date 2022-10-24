@@ -1,6 +1,7 @@
 """ A container for all information about the field: geometry and labels, as well as convenient API. """
 import os
 import re
+import itertools
 from glob import glob
 from difflib import get_close_matches
 from concurrent.futures import ThreadPoolExecutor
@@ -202,7 +203,7 @@ class Field(CharismaMixin, VisualizationMixin):
                                                      constructor_class=label_class, **kwargs)
             loaded = list(Notifier(pbar, total=len(paths))(executor.map(function, paths)))
 
-        faults = [fault for fault in sum(loaded, []) if len(fault) > 0]
+        faults = [fault for fault in itertools.chain(*loaded) if len(fault) > 0]
         return faults
 
     def _load_fault(self, path, interpolate=False, constructor_class=Fault, **kwargs):
