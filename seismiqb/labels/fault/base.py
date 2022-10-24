@@ -2,6 +2,7 @@
 
 import os
 import numpy as np
+import pandas as pd
 
 from .triangulation import sticks_to_simplices, triangle_rasterization
 from .approximation import points_to_sticks
@@ -59,6 +60,7 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
         self.name = name
         self.field = field
 
+        self.short_name = name
         self._points = None
         self._sticks = None
         self._nodes = None
@@ -71,6 +73,8 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
             source = 'points'
         elif isinstance(storage, dict):
             source = 'dict'
+        elif isinstance(storage, pd.DataFrame):
+            source = 'df'
         getattr(self, f'from_{source}')(storage, **kwargs)
 
         if self.direction is None:
@@ -137,6 +141,20 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
         """ Clear 'points', 'sticks', 'nodes' or 'simplices' storage. """
         setattr(self, '_' + storage, None)
 
+    @classmethod
+    def load(cls, path, field, name=None, interpolate=False, **kwargs):
+        """ Load faults. """
+        if not isinstance(path, str) or os.path.splitext(path)[1][1:] not in ['char', '']:
+            faults = [cls(path, field=field, name=name, **kwargs)]
+        else:
+            faults = [cls(df, field=field, name=name, **kwargs) for name, df in cls.split_charisma(path).items()]
+
+        if interpolate:
+            for fault in faults:
+                fault.interpolate()
+
+        return faults
+
     def from_points(self, points, transform=False, **kwargs):
         """ Initialize points cloud. """
         if transform:
@@ -149,8 +167,8 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
         path = self.field.make_path(path, makedirs=False)
         self.path = path
 
-        self.name = os.path.basename(path)
-        self.short_name = os.path.splitext(self.name)[0]
+        self.name = self.name or os.path.basename(path)
+        self.short_name = self.short_name or os.path.splitext(path)[0]
 
         ext = os.path.splitext(path)[1][1:]
 
@@ -179,7 +197,9 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
 
         setattr(self, '_simplices', storage.get('simplices'))
 
-        self.short_name = self.name
+    def from_df(self, storage, **kwargs):
+        """ Load fault sticks. """
+        self.load_fault_sticks(storage, **kwargs)
 
     # Transformation of attributes: sticks -> (nodes, simplices) -> points -> sticks
 
@@ -192,7 +212,7 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
             if self._points is None and self._sticks is None:
                 raise AttributeError("'simplices' can't be created ('points' and 'sticks' don't exist)")
 
-            self._simplices, self._nodes = sticks_to_simplices(self.sticks, return_indices=True)
+            self._simplices, self._nodes = sticks_to_simplices(self.sticks, self.direction)
 
         return self._simplices
 
@@ -205,7 +225,7 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
             if self._points is None and self._sticks is None:
                 raise AttributeError("'nodes' can't be created ('points' and 'sticks' don't exist)")
 
-            self._simplices, self._nodes = sticks_to_simplices(self.sticks, return_indices=True)
+            self._simplices, self._nodes = sticks_to_simplices(self.sticks, self.direction)
 
         return self._nodes
 
@@ -260,14 +280,14 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
             points.append(triangle_rasterization(self.nodes[triangle].astype('float32'), width))
         self._points = np.concatenate(points, axis=0).astype('int32')
 
-    def points_to_sticks(self, slices=None, sticks_step=10, stick_nodes_step=10):
+    def points_to_sticks(self, slices=None, sticks_step=10, stick_nodes_step=10, stick_orientation=2):
         """ Create sticks from fault points. """
         points = self.points.copy()
         if slices is not None:
             for i in range(3):
                 points = points[points[:, i] <= slices[i].stop]
                 points = points[points[:, i] >= slices[i].start]
-        self._sticks = points_to_sticks(points, sticks_step, stick_nodes_step, self.direction)
+        self._sticks = points_to_sticks(points, sticks_step, stick_nodes_step, self.direction, stick_orientation)
 
     def add_to_mask(self, mask, locations=None, width=1, axis=None, sparse=False, **kwargs):
         """ Add fault to background.
@@ -317,4 +337,9 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
 
     def __len__(self):
         """ The size of the fault. """
-        return np.prod(self.bbox[:, 1] - self.bbox[:, 0] + 1)
+        return self.bbox[2].ptp() * (self.bbox[self.direction].ptp() + 1)
+
+    def __add__(self, other):
+        points = np.concatenate([self.points, other.points])
+        return type(self)({'points': points}, field=self.field, name=f"{self.name}+{other.name}",
+                          direction=self.direction)

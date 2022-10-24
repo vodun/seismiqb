@@ -418,10 +418,10 @@ class FaultSampler(BaseSampler):
             nodes = self.fault.points
 
         # Keep only points, that can be a starting point for a crop of given shape
-        i_mask = ((ranges[:2, 0] < nodes[:, :2]).all(axis=1) &
-                  ((nodes[:, :2] + crop_shape[:2]) < ranges[:2, 1]).all(axis=1))
-        x_mask = ((ranges[:2, 0] < nodes[:, :2]).all(axis=1) &
-                  ((nodes[:, :2] + crop_shape_t[:2]) < ranges[:2, 1]).all(axis=1))
+        i_mask = ((ranges[:2, 0] <= nodes[:, :2]).all(axis=1) &
+                  ((nodes[:, :2] + crop_shape[:2]) <= ranges[:2, 1]).all(axis=1))
+        x_mask = ((ranges[:2, 0] <= nodes[:, :2]).all(axis=1) &
+                  ((nodes[:, :2] + crop_shape_t[:2]) <= ranges[:2, 1]).all(axis=1))
         nodes = nodes[i_mask | x_mask]
 
         # Transform points to (orientation, i_start, x_start, d_start, i_stop, x_stop, d_stop)
@@ -465,6 +465,7 @@ class FaultSampler(BaseSampler):
         buffer[:, 0] = self.field_id
         buffer[:, 1] = self.label_id
         buffer[:, 2:] = sampled
+
         return buffer
 
     def _sample(self, size):
@@ -722,6 +723,8 @@ class SeismicSampler(Sampler):
 
         for field_id, (field_name, list_labels) in enumerate(labels.items()):
             list_labels = list_labels if isinstance(list_labels, (tuple, list)) else [list_labels]
+            if len(list_labels) == 0:
+                continue
 
             # Unpack parameters
             crop_shape_ = crop_shape[field_name] if isinstance(crop_shape, dict) else crop_shape
@@ -750,7 +753,7 @@ class SeismicSampler(Sampler):
             if uniform_labels:
                 labels_weights.append([1 / len(list_labels) for _ in list_labels])
             else:
-                weights = np.array([len(label) for label in list_labels])
+                weights = np.array([len(label) if hasattr(label, '__len__') else 1 for label in list_labels])
                 weights = weights / weights.sum()
                 labels_weights.append(weights)
 

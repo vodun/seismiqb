@@ -66,26 +66,28 @@ class FaultVisualizationMixin(VisualizationMixin):
         zoom = make_slices(zoom, self.field.shape)
 
         margin = [margin] * 3 if isinstance(margin, int) else margin
-        x, y, z, simplices = self.make_triangulation(zoom, sticks_step, stick_nodes_step, sticks)
+        x, y, z, simplices = self.make_triangulation(zoom, sticks_step, stick_nodes_step, sticks=sticks)
         if isinstance(colors, str):
             colors = [colors for _ in simplices]
 
         show_3d(x, y, z, simplices, title=title, zoom=zoom, aspect_ratio=aspect_ratio,
                 axis_labels=axis_labels, margin=margin, colors=colors, **kwargs)
 
-    # TODO: cache?
-    def make_triangulation(self, slices=None, sticks_step=None, stick_nodes_step=None, sticks=False, **kwargs):
+    def make_triangulation(self, slices=None, sticks_step=None, stick_nodes_step=None,
+                           stick_orientation=None, sticks=False, **kwargs):
         """ Return triangulation of the fault. It will created if needed. """
-        if sticks_step is not None or stick_nodes_step is not None:
-            fake_fault = type(self)({'points': self.points}, field=self.field)
-            fake_fault.points_to_sticks(slices, sticks_step or 10, stick_nodes_step or 10)
+        if sticks_step is not None or stick_nodes_step is not None or stick_orientation is not None:
+            fake_fault = type(self)({'points': self.points}, field=self.field, direction=self.direction)
+            stick_orientation = stick_orientation if stick_orientation is not None else 2
+            fake_fault.points_to_sticks(slices, sticks_step or 10, stick_nodes_step or 10,
+                                        stick_orientation=stick_orientation)
             return fake_fault.make_triangulation(slices, sticks=sticks, **kwargs)
 
         if sticks:
             sticks = self.sticks
             faults = [
-                self.__class__({'sticks': [stick]}, direction=self.direction,
-                               field=self.field, name=self.short_name + '_' + str(i))
+                type(self)({'sticks': [stick]}, direction=self.direction,
+                           field=self.field, name=(self.short_name or "") + '_' + str(i))
                 for i, stick in enumerate(sticks)
             ]
             x, y, z, simplices = [], [], [], []
@@ -109,10 +111,10 @@ class FaultVisualizationMixin(VisualizationMixin):
         return [], [], [], []
 
 def get_fake_one_stick_fault(fault):
-    """ Create fault with shifted stick to visualize one stick faults. """
+    """ Create fault with additional shifted stick to visualize one stick faults. """
     stick = fault.sticks[0]
 
-    fake_fault = fault.__class__({'sticks': np.array([stick, stick + 1])}, direction=fault.direction,
-                       field=fault.field)
+    fake_fault = type(fault)({'sticks': np.array([stick, stick + 1])}, direction=fault.direction,
+                             field=fault.field)
 
     return fake_fault
