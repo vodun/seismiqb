@@ -2,7 +2,6 @@
 from collections import defaultdict
 from itertools import combinations
 
-import tqdm
 import numpy as np
 from scipy.ndimage import measurements
 from scipy.sparse.csgraph import connected_components as connected_components_graph 
@@ -319,7 +318,8 @@ class FaultExtractor:
         for idx in Notifier(pbar)(range(n_groups)):
             patches_idx = [self._labels_mapping[item] for item in np.arange(len(self.patchtop_to_patch))[groups == idx]]
             components = [
-                list(self.patchtop_to_patch[patch].all_components) + self.patchtop_to_patch[patch].bottom_rejected for patch in patches_idx
+                list(self.patchtop_to_patch[patch].all_components) + self.patchtop_to_patch[patch].bottom_rejected
+                for patch in patches_idx
             ]
 
             for patch in components:

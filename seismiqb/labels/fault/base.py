@@ -143,6 +143,7 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
 
     @classmethod
     def load(cls, path, field, name=None, interpolate=False, **kwargs):
+        """ Load faults. """
         if not isinstance(path, str) or os.path.splitext(path)[1][1:] not in ['char', '']:
             faults = [cls(path, field=field, name=name, **kwargs)]
         else:
@@ -197,6 +198,7 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
         setattr(self, '_simplices', storage.get('simplices'))
 
     def from_df(self, storage, **kwargs):
+        """ Load fault sticks. """
         self.load_fault_sticks(storage, **kwargs)
 
     # Transformation of attributes: sticks -> (nodes, simplices) -> points -> sticks
