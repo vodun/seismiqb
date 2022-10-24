@@ -4,7 +4,7 @@ from itertools import combinations
 
 import numpy as np
 from scipy.ndimage import measurements
-from scipy.sparse.csgraph import connected_components as connected_components_graph 
+from scipy.sparse.csgraph import connected_components as connected_components_graph
 
 from batchflow import Notifier
 
