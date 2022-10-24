@@ -66,7 +66,7 @@ class FaultVisualizationMixin(VisualizationMixin):
         zoom = make_slices(zoom, self.field.shape)
 
         margin = [margin] * 3 if isinstance(margin, int) else margin
-        x, y, z, simplices = self.make_triangulation(zoom, sticks_step, stick_nodes_step, sticks)
+        x, y, z, simplices = self.make_triangulation(zoom, sticks_step, stick_nodes_step, sticks=sticks)
         if isinstance(colors, str):
             colors = [colors for _ in simplices]
 
@@ -78,8 +78,9 @@ class FaultVisualizationMixin(VisualizationMixin):
         """ Return triangulation of the fault. It will created if needed. """
         if sticks_step is not None or stick_nodes_step is not None or stick_orientation is not None:
             fake_fault = type(self)({'points': self.points}, field=self.field, direction=self.direction)
+            stick_orientation = stick_orientation if stick_orientation is not None else 2
             fake_fault.points_to_sticks(slices, sticks_step or 10, stick_nodes_step or 10,
-                                        stick_orientation=stick_orientation or 2)
+                                        stick_orientation=stick_orientation)
             return fake_fault.make_triangulation(slices, sticks=sticks, **kwargs)
 
         if sticks:
