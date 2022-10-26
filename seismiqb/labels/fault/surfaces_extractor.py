@@ -296,6 +296,36 @@ class FaultExtractor:
                     self._connectivity_matrix[b, a] = 1
         return self
 
+    def extend_patches(self, size_threshold, intersection_threshold, pbar='t'):
+        sorted_patches = sorted(self.patchtop_to_patch.values(), key=lambda x: x.size(), reverse=True)
+        extended_patches = []#{-1: [], 1: []}
+        for patch in Notifier(pbar, desc='Extend patches')(sorted_patches):
+            for direction in [-1, 1]:
+                mapping = self.patchtop_to_patch if direction == 1 else self.patchbottom_to_patch
+                idx_attr = 'top' if direction == 1 else 'bottom'
+                current_patch_idx = getattr(patch, idx_attr)
+                top_idx = mapping[current_patch_idx].top
+                while True:
+                    if top_idx in extended_patches:
+                        break
+                    extended_patches.append(top_idx)
+
+                    patch = mapping[current_patch_idx]
+                    next_patch_idx = patch.find_largest_neighbor(size_threshold, intersection_threshold, direction=direction)
+                    if next_patch_idx is None:
+                        break
+
+                    a = self._labels_reverse_mapping[top_idx]
+                    if next_patch_idx not in mapping:
+                        break
+                    b = self._labels_reverse_mapping[mapping[next_patch_idx].top]
+
+                    self._connectivity_matrix[a, b] = 1
+                    self._connectivity_matrix[b, a] = 1
+
+                    current_patch_idx = next_patch_idx
+        return self
+
     def to_faults(self, field, pbar='t'):
         """ Make Fault instances from groups of patches.
 
@@ -480,6 +510,29 @@ class FaultPatch:
                     if min_ > 20 and intersection / max_ >= thresholds[0] and intersection / min_ >= thresholds[1]:
                         merge[leaf] = intersection / max_
         return list(sorted(merge, key=lambda x: merge[x]))
+
+    def find_largest_neighbor(self, size_threshold=20, intersection_threshold=0.7,  direction=1):
+        neighbors_list = self.bottom_rejected if direction == 1 else self.top_rejected
+        comp = self.all_components[-1 if direction == 1 else 0]
+        candidates = {}
+        for leaf in neighbors_list:
+            leaf_size = self.extractor.sizes[leaf]
+            comp_size = self.extractor.sizes[comp]
+            if leaf_size < size_threshold:
+                continue
+            intersection = self.extractor.compute_intersection_size(leaf, comp)
+            # print(comp, leaf, intersection/leaf_size, intersection/comp_size, intersection / min(leaf_size, comp_size), intersection / min(leaf_size, comp_size) > intersection_threshold)
+            if intersection / min(leaf_size, comp_size) > intersection_threshold:
+                # print(f'{leaf} to {comp}')
+                candidates[leaf] = leaf_size
+        if len(candidates) == 0:
+            return None
+        return sorted(candidates, key=lambda x: candidates[x], reverse=True)[0] # TODO: remove sorted
+
+
+
+    def size(self):
+        return sum([self.extractor.sizes[item[0]] for item in self.components.values()])
 
     def __repr__(self):
         if self.top == self.bottom:
