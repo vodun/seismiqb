@@ -63,9 +63,9 @@ class VisualizationMixin:
 
     # 2D along axis
     TRANSFORM_TO_ALIASES = {
-        compute_instantaneous_amplitude: ['iamplitude', 'instantaneous_amplitude'],
-        compute_instantaneous_phase: ['iphase', 'instantaneous_phase'],
-        compute_instantaneous_frequency: ['ifrequency', 'instantaneous_frequency'],
+        compute_instantaneous_amplitude: ['iamplitudes', 'instantaneous_amplitudes'],
+        compute_instantaneous_phase: ['iphases', 'instantaneous_phases'],
+        compute_instantaneous_frequency: ['ifrequencies', 'instantaneous_frequencies'],
     }
     ALIASES_TO_TRANSFORM = {alias: name for name, aliases in TRANSFORM_TO_ALIASES.items() for alias in aliases}
 
