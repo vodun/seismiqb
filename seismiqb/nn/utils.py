@@ -14,7 +14,7 @@ from .. import SeismicDataset, RegularGrid
 from ..utils import Accumulator3D
 
 
-def make_slide_prediction(field, loc, model_or_path, axis=0,
+def make_slide_prediction(field, model_or_path, index, axis=0,
                           batch_size=64, crop_shape=(1, 256, 512),
                           inference_3d=True, inference_width=10,
                           minsize=5, threshold=0.1, dilation_iterations=1):
@@ -24,12 +24,12 @@ def make_slide_prediction(field, loc, model_or_path, axis=0,
     ----------
     field : instance of :class:`seismiqb.Field`
         Field from which to get a slide.
-    loc : int
+    model_or_path : str or instance of :class:`batchflow.TorchModel`
+        Model to use or path to a file from which initialize a model.
+    index : int
         Number of slide.
     axis : int
         Number of axis to load slide along.
-    model_or_path : str or instance of :class:`batchflow.TorchModel`
-        Model to use or path to a file from which initialize a model.
     batch_size : int
         Number of batches to generate for a slide. Affects inference speed and memory used.
     crop_shape : tuple of ints
@@ -50,7 +50,7 @@ def make_slide_prediction(field, loc, model_or_path, axis=0,
     """
     # Prepare inference parameters
     ranges = [None, None, None]
-    ranges[axis] = [loc-inference_width, loc+1+inference_width]
+    ranges[axis] = [index - inference_width, index + inference_width + 1]
 
     grid = RegularGrid(field=field,
                        threshold=0, orientation=axis,
@@ -115,14 +115,15 @@ def make_slide_prediction(field, loc, model_or_path, axis=0,
     prediction = binary_dilation(prediction, iterations=dilation_iterations).astype(np.float32)
     return prediction
 
-def plot_slide_prediction(field, loc, axis, prediction, zoom='auto', show=True, savepath=None, **kwargs):
+
+def plot_slide_prediction(field, index, axis, prediction, zoom='auto', show=True, savepath=None, **kwargs):
     """ Plot prediction on a field slide.
 
     Parameters
     ----------
     field : instance of :class:`seismiqb.Field`
         Field from which to get a slide.
-    loc : int
+    index : int
         Number of slide.
     axis : int
         Number of axis to load slide along.
@@ -146,7 +147,7 @@ def plot_slide_prediction(field, loc, axis, prediction, zoom='auto', show=True, 
         zoom = (slice(None), slice(None))
 
     if (savepath is not None) and os.path.isdir(savepath):
-        filename = f'{field.short_name}_axis_{axis}_loc_{loc}_zoom_{zoom}.png'
+        filename = f'{field.short_name}_axis_{axis}_index_{index}_zoom_{zoom}.png'
         savepath = os.path.join(savepath, filename)
 
     if savepath is not None:
@@ -157,7 +158,7 @@ def plot_slide_prediction(field, loc, axis, prediction, zoom='auto', show=True, 
         kwargs['indices'] = ()
 
     # Plotting
-    plotter = field.show_slide(loc, axis=axis, show=False, zoom=zoom,
+    plotter = field.show_slide(index=index, axis=axis, show=False, zoom=zoom,
                                suptitle_size=4, suptitle_y=0.88,
                                title=None, suptitle=None,
                                **kwargs)

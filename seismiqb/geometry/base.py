@@ -337,6 +337,24 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMix
         finally:
             self.disable_cache()
 
+    def load_subset(self, n_traces=100_000, seed=42):
+        """ Load a subset of data. Returns an array of (n_traces, depth) shape. """
+        rng = np.random.default_rng(seed=seed)
+        if self.converted is False:
+            alive_traces_indices = self.index_matrix[~self.dead_traces_matrix].ravel()
+            indices = rng.choice(alive_traces_indices, size=n_traces)
+            data = self.load_by_indices(indices)
+        else:
+            indices = rng.choice(self.shape[0], size=n_traces // self.shape[1], replace=False)
+            data = []
+            for index in indices:
+                slide = self.load_slide(index=index, axis=0)
+                slide_bounds = self.compute_auto_zoom(index=index, axis=0)[0]
+                data.append(slide[slide_bounds].ravel())
+            data = np.concatenate(data)
+        return data
+
+
     # Coordinate system conversions
     def lines_to_ordinals(self, array):
         """ Convert values from inline-crossline coordinate system to their ordinals.
@@ -420,6 +438,21 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMix
                 'q_99': q_99,
             }
         return self._normalization_stats
+
+    def estimate_impulse(self, wavelet_length=40, n_traces=10_000, seed=42):
+        """ Estimate impulse on a random subset of data.
+        The idea is to average traces in the frequency domain to get the frequencies of an impulse, produced them.
+        """
+        data = self.load_subset(n_traces=n_traces, seed=seed)
+
+        # FFT domain
+        data_fft = np.fft.rfft(data, axis=-1)
+        wavelet_fft = np.mean(np.abs(data_fft), axis=0)
+
+        # Depth domain
+        wavelet_estimation = np.real(np.fft.irfft(wavelet_fft)[:wavelet_length//2])
+        wavelet_estimation = np.concatenate((wavelet_estimation[1:][::-1], wavelet_estimation), axis=0)
+        return wavelet_estimation
 
 
     # Spatial matrices
@@ -636,21 +669,7 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMix
 
     def show_histogram(self, n_traces=100_000, seed=42, bins=50, plotter=plot, **kwargs):
         """ Show distribution of amplitudes in a random subset of the cube. """
-        # Load subset of data
-        rng = np.random.default_rng(seed=seed)
-        if self.converted is False:
-            alive_traces_indices = self.index_matrix[~self.dead_traces_matrix].ravel()
-            indices = rng.choice(alive_traces_indices, size=n_traces)
-            data = self.load_by_indices(indices)
-        else:
-            indices = rng.choice(self.shape[0], size=n_traces // self.shape[1], replace=False)
-            data = []
-            for index in indices:
-                slide = self.load_slide(index=index, axis=0)
-                slide_bounds = self.compute_auto_zoom(index=index, axis=0)
-                data.append(slide[slide_bounds].ravel())
-            data = np.concatenate(data)
-
+        data = self.load_subset(n_traces=n_traces, seed=seed)
 
         kwargs = {
             'title': (f'Amplitude distribution for {self.short_name}' +

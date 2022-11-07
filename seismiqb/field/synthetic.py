@@ -190,8 +190,10 @@ class SyntheticField:
         # Main: velocity, reflectivity, synthetic
         if attribute in ['synthetic', 'geometry', 'image']:
             result = generator.get_attribute(attribute='synthetic')
-        elif 'impedance' in attribute:
+        elif 'velocity' in attribute:
             result = generator.get_attribute(attribute='velocity_model')
+        elif 'impedance' in attribute:
+            result = generator.get_attribute(attribute='impedance_model')
         elif 'reflect' in attribute:
             result = generator.get_attribute(attribute='reflectivity_model')
         elif 'upward' in attribute:
