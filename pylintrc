@@ -5,6 +5,7 @@ init-hook='import sys; sys.path.append(".")'
 
 [FORMAT]
 max-line-length=120
+max-parents=20
 max-attributes=100
 max-args=25
 max-locals=25
