@@ -62,14 +62,14 @@ class VisualizationMixin:
         return msg[:-1]
 
     # 2D along axis
-    TRANSFORM_TO_ALIASES = {
+    ATTRIBUTE_TO_ALIASES = {
         compute_instantaneous_amplitude: ['iamplitudes', 'instantaneous_amplitudes'],
         compute_instantaneous_phase: ['iphases', 'instantaneous_phases'],
         compute_instantaneous_frequency: ['ifrequencies', 'instantaneous_frequencies'],
     }
-    ALIASES_TO_TRANSFORM = {alias: name for name, aliases in TRANSFORM_TO_ALIASES.items() for alias in aliases}
+    ALIASES_TO_ATTRIBUTE = {alias: name for name, aliases in ATTRIBUTE_TO_ALIASES.items() for alias in aliases}
 
-    def load_slide(self, index, axis=0, transform=None, src_geometry='geometry'):
+    def load_slide(self, index, axis=0, attribute=None, src_geometry='geometry'):
         """ Load one slide of data along specified axis and apply `transform`.
         Refer to the documentation of :meth:`.Geometry.load_slide` for details.
 
@@ -81,17 +81,17 @@ class VisualizationMixin:
             If string of the `'#XXX'` format, then we interpret it as the exact indexing header value.
         axis : int
             Axis of the slide.
-        transform : callable or str
+        attribute : callable or str
             If callable, then directly applied to the loaded data.
             If str, then one of pre-defined aliases for pre-defined geological transforms.
         """
         slide = getattr(self, src_geometry).load_slide(index=index, axis=axis)
 
-        if transform:
-            if isinstance(transform, str) and transform in self.ALIASES_TO_TRANSFORM:
-                transform = self.ALIASES_TO_TRANSFORM[transform]
-            if callable(transform):
-                slide = transform(slide)
+        if attribute:
+            if isinstance(attribute, str) and attribute in self.ALIASES_TO_ATTRIBUTE:
+                attribute = self.ALIASES_TO_ATTRIBUTE[transform]
+            if callable(attribute):
+                slide = attribute(slide)
             else:
                 raise ValueError(f'Unknown transform={transform}')
         return slide
