@@ -6,6 +6,7 @@ from hashlib import blake2b
 from inspect import ismethod
 from threading import RLock
 from collections import OrderedDict, defaultdict
+from weakref import WeakSet
 
 import numpy as np
 import pandas as pd
@@ -17,40 +18,19 @@ class _GlobalCacheClass:
     Note, it controls only objects which use :class:`~.lru_cache` and :class:`~.cached_property`.
     """
     def __init__(self):
-        """ Initialize container with objects and their cache references.
+        """ Initialize containers with cache references and instances with cached objects.
 
-        Note, the container is filled on the modules import stage."""
+        Note, the `cache_references` container is filled on the modules import stage."""
         self.cache_references = {}
-
-    @staticmethod
-    def _get_cache_length(cache_instance):
-        """ Evaluate cache length for the specific object. """
-        cache_length = 0
-
-        for cache in cache_instance.cache.values():
-            cache_length += len(cache)
-
-        return cache_length
-
-    @staticmethod
-    def _get_cache_size(cache_instance):
-        """ Evaluate cache size for the specific object. """
-        cache_size = 0
-
-        for cache in cache_instance.cache.values():
-            for value in cache.values():
-                if isinstance(value, np.ndarray):
-                    cache_size += value.nbytes / (1024 ** 3)
-
-        return cache_size
+        self.instances_with_cache = WeakSet()
 
     @property
     def length(self):
         """ Total cache length. """
         cache_length = 0
 
-        for cache_instance in self.cache_references.values():
-            cache_length += self._get_cache_length(cache_instance=cache_instance)
+        for instance in self.instances_with_cache:
+            cache_length += instance.cache_length
 
         return cache_length
 
@@ -59,21 +39,10 @@ class _GlobalCacheClass:
         """ Total cache size. """
         cache_size = 0
 
-        for cache_instance in self.cache_references.values():
-            cache_size += self._get_cache_size(cache_instance=cache_instance)
+        for instance in self.instances_with_cache:
+            cache_size += instance.cache_size
 
         return cache_size
-
-    def get_object_cache_repr(self, object_name):
-        """ Create cache representation for the specific object. """
-        cache_instance = self.cache_references[object_name]
-
-        length = self._get_cache_length(cache_instance=cache_instance)
-        if length > 0:
-            size = self._get_cache_size(cache_instance=cache_instance)
-
-        cache_repr_ = {'length': length, 'size': size} if length > 0 else None
-        return cache_repr_
 
     def get_cache_repr(self, format='dict'):
         """ Create global cache representation.
@@ -88,14 +57,25 @@ class _GlobalCacheClass:
         """
         cache_repr_ = {}
 
-        for method_name in self.cache_references.keys():
-            object_cache_repr = self.get_object_cache_repr(object_name=method_name)
-            if object_cache_repr is not None:
-                cache_repr_[method_name] = object_cache_repr
+        for instance in self.instances_with_cache:
+            instance_cache_repr = instance.get_cache_repr()
+
+            if instance_cache_repr is not None:
+                if instance.__class__ not in cache_repr_:
+                    cache_repr_[instance.__class__.__name__] = {}
+
+                cache_repr_[instance.__class__.__name__][id(instance)] = instance_cache_repr
 
         # Conversion to pandas dataframe
         if format == 'df' and len(cache_repr_) > 0:
-            cache_repr_ = pd.DataFrame.from_dict(cache_repr_, orient='index')
+            # Dataframe index columns are (class_name, instance_id, method_name), expand values for them:
+            cache_repr_ = pd.DataFrame.from_dict({
+                (class_name, instance_id, method_name): cache_repr_[class_name][instance_id][method_name]
+                    for class_name in cache_repr_.keys() 
+                    for instance_id in cache_repr_[class_name].keys()
+                    for method_name in cache_repr_[class_name][instance_id].keys()},
+            orient='index')
+
             cache_repr_ = cache_repr_.loc[:, ['length', 'size']] # Columns sort
         return cache_repr_ if len(cache_repr_) > 0 else None
 
@@ -106,8 +86,8 @@ class _GlobalCacheClass:
 
     def reset(self):
         """ Clear all cache. """
-        for cache_instance in self.cache_references.values():
-            cache_instance.reset()
+        for instance in self.instances_with_cache:
+            instance.reset_cache()
 
 GlobalCache = _GlobalCacheClass() # No sense in multiple instances, use this for cache control
 
@@ -164,13 +144,12 @@ class lru_cache:
     def reset(self, instance=None):
         """ Clear cache and stats. """
         if instance is None:
-            self.cache = defaultdict(OrderedDict)
-            self.is_full = defaultdict(lambda: False)
             self.stats = defaultdict(lambda: {'hit': 0, 'miss': 0})
         else:
+            if hasattr(instance, self.attrname):
+                delattr(instance, self.attrname)
+
             instance_hash = self.compute_hash(instance)
-            self.cache[instance_hash] = OrderedDict()
-            self.is_full[instance_hash] = False
             self.stats[instance_hash] = {'hit': 0, 'miss': 0}
 
     def make_key(self, instance, args, kwargs):
@@ -216,15 +195,23 @@ class lru_cache:
                 result = func(*args, **kwargs)
                 return result
 
+            # Init cache and reference on it in the GlobalCache controller
+            if self.attrname not in instance.__dict__:
+                instance.__setattr__(self.attrname, OrderedDict())
+
+            GlobalCache.instances_with_cache.add(instance)
+
             key = self.make_key(instance, args, kwargs)
             instance_hash = getattr(instance, '_hash', self.compute_hash(instance))
 
             # If result is already in cache, just retrieve it and update its timings
             with self.lock:
-                result = self.cache[instance_hash].get(key, self.default)
+                cache = instance.__dict__[self.attrname]
+                result = cache.get(key, self.default)
+
                 if result is not self.default:
-                    del self.cache[instance_hash][key]
-                    self.cache[instance_hash][key] = result
+                    del cache[key]
+                    cache[key] = result
                     self.stats[instance_hash]['hit'] += 1
                     return copy(result) if copy_on_return else result
 
@@ -234,22 +221,23 @@ class lru_cache:
             # Add the result to cache
             with self.lock:
                 self.stats[instance_hash]['miss'] += 1
-                if key in self.cache[instance_hash]:
+
+                if key in cache:
                     pass
-                elif self.is_full[instance_hash]:
-                    self.cache[instance_hash].popitem(last=False)
-                    self.cache[instance_hash][key] = result
+                elif len(cache) >= self.maxsize:
+                    cache.popitem(last=False)
+                    cache[key] = result
                 else:
-                    self.cache[instance_hash][key] = result
-                    self.is_full[instance_hash] = (len(self.cache[instance_hash]) >= self.maxsize)
+                    cache[key] = result
+
             return copy(result) if copy_on_return else result
 
+        self.attrname = '_cache_' + func.__name__ # name of the attribute, which store the cache
+
         wrapper.__name__ = func.__name__
-        wrapper.cache = lambda: self.cache
         wrapper.stats = lambda: self.stats
         wrapper.reset = self.reset
         wrapper.reset_instance = lambda instance: self.reset(instance=instance)
-        wrapper.cache_instance = self
 
         GlobalCache.cache_references[func.__qualname__] = self
         return wrapper
@@ -257,7 +245,7 @@ class lru_cache:
 class cached_property:
     """ Mock for using :class:`~.lru_cache` for properties. """
     def __init__(self, func):
-        self.cached_func = lru_cache()(func)
+        self.cached_func = lru_cache(maxsize=1)(func)
 
     def __get__(self, instance, owner=None):
         _ = owner
@@ -296,20 +284,13 @@ class CacheMixin:
 
     You can use this mixin for cache introspection and cached data cleaning on instance level.
     """
-    #pylint: disable=redefined-builtin
-    @property
-    def _hash(self):
-        """ Object hash value which is used for cache control. """
-        if not hasattr(self, '_hash_value'):
-            setattr(self, '_hash_value', lru_cache.compute_hash(self))
-        return self._hash_value
-
     @property
     def cached_objects(self):
         """ All object names that use caching. """
         if not hasattr(self.__class__, '_cached_objects'):
+            class_dir = dir(self.__class__)
             cached_objects = [obj_qualname for obj_qualname in GlobalCache.cache_references.keys()
-                              if obj_qualname.split('.')[-1] in dir(self.__class__)]
+                              if obj_qualname.split('.')[-1] in class_dir]
 
             setattr(self.__class__, '_cached_objects', tuple(cached_objects))
         return self.__class__._cached_objects
@@ -326,7 +307,9 @@ class CacheMixin:
         cache_length_accumulator = 0
 
         for name in names:
-            cache = GlobalCache.cache_references[name].cache.get(self._hash, ())
+            cache_attrname = '_cache_' + name.split('.')[-1]
+            cache = self.__dict__.get(cache_attrname, ())
+
             cache_length_accumulator += len(cache)
 
         return cache_length_accumulator
@@ -344,7 +327,8 @@ class CacheMixin:
 
         # Accumulate cache size over all cached objects: each term is a size of cached numpy array
         for name in names:
-            cache = GlobalCache.cache_references[name].cache.get(self._hash, {})
+            cache_attrname = '_cache_' + name.split('.')[-1]
+            cache = self.__dict__.get(cache_attrname, {})
             values = list(cache.values())
 
             for value in values:
@@ -371,10 +355,19 @@ class CacheMixin:
 
         object_cache_size = self.get_cache_size(name=name)
 
-        cache = GlobalCache.cache_references[name].cache.get(self._hash, None)
+        cache_attrname = '_cache_' + name.split('.')[-1]
+        cache = self.__dict__.get(cache_attrname, {})
 
-        arguments = list(cache.keys())[0][1:]
-        arguments = dict(zip(arguments[::2], arguments[1::2]))
+        # The class saves cache for the same method with different arguments values
+        # Get them all in a desired format: list of dicts
+        all_arguments = []
+        for arguments in cache.keys():
+            arguments = dict(zip(arguments[::2], arguments[1::2])) # tuple ('name', value, ...) to dict
+            all_arguments.append(arguments)
+
+        # Expand extra scopes
+        if len(all_arguments) == 1:
+            all_arguments = all_arguments[0]
 
         object_cache_repr = {
             'length': object_cache_length,
@@ -431,6 +424,6 @@ class CacheMixin:
         """
         names = (name,) if name is not None else self.cached_objects
         for name in names:
-            cache_reference = GlobalCache.cache_references[name]
-            if self._hash in cache_reference.cache:
-                cache_reference.reset()
+            cache_attrname = '_cache_' + name.split('.')[-1]
+            if hasattr(self, cache_attrname):
+                delattr(self, cache_attrname)
