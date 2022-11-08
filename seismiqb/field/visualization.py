@@ -89,11 +89,11 @@ class VisualizationMixin:
 
         if attribute:
             if isinstance(attribute, str) and attribute in self.ALIASES_TO_ATTRIBUTE:
-                attribute = self.ALIASES_TO_ATTRIBUTE[transform]
+                attribute = self.ALIASES_TO_ATTRIBUTE[attribute]
             if callable(attribute):
                 slide = attribute(slide)
             else:
-                raise ValueError(f'Unknown transform={transform}')
+                raise ValueError(f'Unknown transform={attribute}')
         return slide
 
 
