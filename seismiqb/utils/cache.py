@@ -291,6 +291,7 @@ class CacheMixin:
     @property
     def cached_objects(self):
         """ All object names that use caching. """
+        # pylint: disable=protected-access
         if not hasattr(self.__class__, '_cached_objects'):
             class_dir = dir(self.__class__)
             cached_objects = [obj_qualname for obj_qualname in GlobalCache.cache_references.keys()
