@@ -16,7 +16,6 @@ from sklearn.decomposition import PCA
 
 from ...functional import hilbert
 from ...utils import transformable, lru_cache
-from ...utils.cache import cached_property
 
 
 
@@ -183,12 +182,14 @@ class AttributesMixin:
         """ A method for getting matrix in cubic coordinates. Allows for introspectable cache. """
         return self.matrix_put_on_full(self.matrix)
 
-    @cached_property
+    @property
+    @lru_cache(maxsize=1, apply_by_default=True, copy_on_return=True)
     def binary_matrix(self):
         """ Boolean matrix with `True` values at places where horizon is present and `False` everywhere else. """
         return (self.matrix != self.FILL_VALUE).astype(np.bool)
 
-    @cached_property
+    @property
+    @lru_cache(maxsize=1, apply_by_default=True, copy_on_return=True)
     def full_binary_matrix(self):
         """ A method for getting binary matrix in cubic coordinates. Allows for introspectable cache. """
         return self.matrix_put_on_full(self.binary_matrix)

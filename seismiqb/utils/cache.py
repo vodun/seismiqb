@@ -15,7 +15,8 @@ import pandas as pd
 class _GlobalCacheClass:
     """ Methods for global cache management.
 
-    Note, it controls only objects which use :class:`~.lru_cache` and :class:`~.cached_property`.
+    Note, this class controls only objects which use :class:`~.lru_cache`.
+    So, for properties you need to use both `property` and `lru_cache` decorators for proper cache introspection.
     """
     def __init__(self):
         """ Initialize containers with cache references and instances with cached objects.
@@ -47,54 +48,66 @@ class _GlobalCacheClass:
     def get_cache_repr(self, format='dict'):
         """ Create global cache representation.
 
-        Cache representation consists of names of objects that use data caching,
+        Cache representation consists of names of objects, that use data caching,
         information about cache length, size, and arguments for each method.
+
+        Keys (for 'dict') or index columns (for 'df') are: class name, instance id, method or property name.
+        Values are: length, size and arguments.
 
         Parameters
         ----------
         format : {'dict', 'df'}
             Return value format. 'df' means pandas DataFrame.
         """
+        #pylint: disable=redefined-builtin
         cache_repr_ = {}
 
+        # Extract cache repr for each cached object
         for instance in self.instances_with_cache:
             instance_cache_repr = instance.get_cache_repr()
 
             if instance_cache_repr is not None:
-                if instance.__class__ not in cache_repr_:
-                    cache_repr_[instance.__class__.__name__] = {}
+                class_name = instance.__class__.__name__
+                if class_name not in cache_repr_:
+                    cache_repr_[class_name] = {}
 
-                cache_repr_[instance.__class__.__name__][id(instance)] = instance_cache_repr
+                cache_repr_[class_name][id(instance)] = instance_cache_repr
 
-        # Conversion to pandas dataframe
+        # Convert to pandas dataframe
         if format == 'df' and len(cache_repr_) > 0:
             # Dataframe index columns are (class_name, instance_id, method_name), expand values for them:
             cache_repr_ = pd.DataFrame.from_dict({
-                (class_name, instance_id, method_name): cache_repr_[class_name][instance_id][method_name]
-                    for class_name in cache_repr_.keys() 
-                    for instance_id in cache_repr_[class_name].keys()
-                    for method_name in cache_repr_[class_name][instance_id].keys()},
+                (class_name, instance_id, method_name): method_data
+                    for class_name, class_data in cache_repr_.items()
+                    for instance_id, instance_data in class_data.items()
+                    for method_name, method_data in instance_data.items()},
             orient='index')
 
-            cache_repr_ = cache_repr_.loc[:, ['length', 'size']] # Columns sort
+            cache_repr_ = cache_repr_.loc[:, ['length', 'size', 'arguments']] # Columns sort
+
         return cache_repr_ if len(cache_repr_) > 0 else None
 
     @property
     def repr(self):
         """ Global cache representation"""
-        return self.get_cache_repr(format='df')
+        df = self.get_cache_repr(format='df')
+        if df is not None:
+            df = df.loc[:, ['length', 'size']]
+        return df
 
     def reset(self):
         """ Clear all cache. """
         for instance in self.instances_with_cache:
             instance.reset_cache()
 
-GlobalCache = _GlobalCacheClass() # No sense in multiple instances, use this for cache control
+GlobalCache = _GlobalCacheClass() # Global cache controller, must be the only one instance
 
 class lru_cache:
     """ Thread-safe least recent used cache. Must be applied to a class methods.
     Adds the `use_cache` argument to the decorated method to control whether the caching logic is applied.
-    Stored values are individual for each instance of a class.
+
+    Under the hood, the decorator creates and uses cache attribute in an instance for each object with cache.
+    The name of the cache attribute is the same as the name of the cached object with the '_cache_' prefix.
 
     Parameters
     ----------
@@ -242,15 +255,6 @@ class lru_cache:
         GlobalCache.cache_references[func.__qualname__] = self
         return wrapper
 
-class cached_property:
-    """ Mock for using :class:`~.lru_cache` for properties. """
-    def __init__(self, func):
-        self.cached_func = lru_cache(maxsize=1)(func)
-
-    def __get__(self, instance, owner=None):
-        _ = owner
-        return self.cached_func(instance)
-
 
 class SingletonClass:
     """ There must be only one! """
@@ -306,11 +310,11 @@ class CacheMixin:
         names = (name,) if name is not None else self.cached_objects
         cache_length_accumulator = 0
 
-        for name in names:
-            cache_attrname = '_cache_' + name.split('.')[-1]
-            cache = self.__dict__.get(cache_attrname, ())
+        for attrname in names:
+            cache_attrname = '_cache_' + attrname.split('.')[-1]
+            cached_values = self.__dict__.get(cache_attrname, {}).values()
 
-            cache_length_accumulator += len(cache)
+            cache_length_accumulator += len(cached_values)
 
         return cache_length_accumulator
 
@@ -326,12 +330,11 @@ class CacheMixin:
         cache_size_accumulator = 0
 
         # Accumulate cache size over all cached objects: each term is a size of cached numpy array
-        for name in names:
-            cache_attrname = '_cache_' + name.split('.')[-1]
-            cache = self.__dict__.get(cache_attrname, {})
-            values = list(cache.values())
+        for attrname in names:
+            cache_attrname = '_cache_' + attrname.split('.')[-1]
+            cached_values = self.__dict__.get(cache_attrname, {}).values()
 
-            for value in values:
+            for value in cached_values:
                 if isinstance(value, np.ndarray):
                     cache_size_accumulator += value.nbytes / (1024 ** 3)
 
@@ -348,20 +351,21 @@ class CacheMixin:
         return self.get_cache_size()
 
     def _get_object_cache_repr(self, name):
-        """ Make repr of object's cache if its length is nonzero else return None. """
+        """ Make object's cache repr. """
         object_cache_length = self.get_cache_length(name=name)
+
         if object_cache_length == 0:
             return None
 
         object_cache_size = self.get_cache_size(name=name)
 
         cache_attrname = '_cache_' + name.split('.')[-1]
-        cache = self.__dict__.get(cache_attrname, {})
+        cached_data = self.__dict__.get(cache_attrname, {})
 
         # The class saves cache for the same method with different arguments values
         # Get them all in a desired format: list of dicts
         all_arguments = []
-        for arguments in cache.keys():
+        for arguments in cached_data.keys():
             arguments = dict(zip(arguments[::2], arguments[1::2])) # tuple ('name', value, ...) to dict
             all_arguments.append(arguments)
 
@@ -372,7 +376,7 @@ class CacheMixin:
         object_cache_repr = {
             'length': object_cache_length,
             'size': object_cache_size,
-            'arguments': arguments
+            'arguments': all_arguments
         }
 
         return object_cache_repr
@@ -388,16 +392,17 @@ class CacheMixin:
         format : {'dict', 'df'}
             Return value format. 'df' means pandas DataFrame.
         """
+        #pylint: disable=redefined-builtin
         cache_repr_ = {}
 
-        # Creation dictionary of cache representation for each object
-        # with cache_length, cache_size and arguments
+        # Create cache representation for each object
         for name in self.cached_objects:
             object_cache_repr = self._get_object_cache_repr(name=name)
+
             if object_cache_repr is not None:
                 cache_repr_[name] = object_cache_repr
 
-        # Conversion to pandas dataframe
+        # Convert to pandas dataframe
         if format == 'df' and len(cache_repr_) > 0:
             cache_repr_ = pd.DataFrame.from_dict(cache_repr_, orient='index')
             cache_repr_ = cache_repr_.loc[:, ['length', 'size', 'arguments']] # Columns sort
@@ -423,7 +428,8 @@ class CacheMixin:
             Attribute name. If None, then clean cache of all cached objects.
         """
         names = (name,) if name is not None else self.cached_objects
-        for name in names:
-            cache_attrname = '_cache_' + name.split('.')[-1]
+        for attrname in names:
+            cache_attrname = '_cache_' + attrname.split('.')[-1]
+
             if hasattr(self, cache_attrname):
                 delattr(self, cache_attrname)
