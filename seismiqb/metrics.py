@@ -752,18 +752,24 @@ class HorizonMetrics(BaseMetrics):
 
             matrix = proximity_info['difference_matrix'].copy()
             hist_data = np.clip(matrix, -clip_value, clip_value)
+
             if ignore_zeros:
                 zero_mask = hist_data == 0.0
                 hist_data = hist_data[~zero_mask]
                 graph_msg += f'\nNumber of zeros in histogram: {zero_mask.sum()}'
 
-            hist_plotter = plot(hist_data, mode='histogram', show=show, **hist_kwargs)
-            hist_plotter[1].add_text(graph_msg, size=15)
+            if len(hist_data) - np.isnan(hist_data).sum() > 0: # Data can be empty in case of two identical horizons
+                hist_plotter = plot(hist_data, mode='histogram', show=show, **hist_kwargs)
+                hist_plotter[1].add_text(graph_msg, size=15)
+            else:
+                hist_plotter = None
 
             if savepath is not None:
                 savepath = self.horizon.field.make_path(savepath, name=self.name)
                 plotter.save(savepath=savepath)
-                hist_plotter.save(savepath=savepath.replace('.', '_histogram.'))
+
+                if hist_plotter is not None:
+                    hist_plotter.save(savepath=savepath.replace('.', '_histogram.'))
 
             returns['plotter'] = plotter
 
