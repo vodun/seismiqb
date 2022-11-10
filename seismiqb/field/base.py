@@ -12,6 +12,7 @@ from batchflow.notifier import Notifier
 
 from .visualization import VisualizationMixin
 from ..geometry import Geometry
+from ..grids import RegularGrid
 from ..labels import Horizon, Fault
 from ..metrics import FaciesMetrics
 from ..utils import AugmentedList
@@ -429,6 +430,51 @@ class Field(CharismaMixin, VisualizationMixin):
         if makedirs and os.path.dirname(path):
             os.makedirs(os.path.dirname(path), exist_ok=True)
         return path
+
+    def make_grid(self, orientations, crop_shape, joined=True, **kwargs):
+        """ Create regular grid/grids for the field.
+
+        Parameters
+        ----------
+        orientations : int, str or sequence of ints
+            Orientations of resulting grid/grids.
+        crop_shape : sequence of three ints
+            Shape of crop locations to generate from grid.
+        joined : bool
+            Whether to join multiple grids in one.
+            Note, this parameter is used for the case when two orientations provided.
+        kwargs : dict
+            Keyword arguments passed directly to the :meth:`~.RegularGrid.__init__`.
+        """
+        # Parse arguments
+        kwargs = {
+            # Additional defaults
+            'threshold': 0,
+            'ranges': (None, None, None),
+            'overlap_factor': 2,
+
+            # Other parameters
+            'crop_shape': crop_shape,
+            **kwargs
+        }
+
+        if isinstance(orientations, int):
+            orientations = [orientations]
+
+        # Create all necessary grids
+        grids = []
+        for orientation in orientations:
+            grid = RegularGrid(field=self, orientation=orientation, **kwargs)
+            grids.append(grid)
+
+        # Return resulting grid/grids
+        if len(grids) == 1:
+            return grids[0]
+
+        # We have two grids: with iline and crossline orientations, we can use them together or consequently:
+        if joined:
+            return grids[0] + grids[1]
+        return grids
 
 
     # Cache: introspection and reset
