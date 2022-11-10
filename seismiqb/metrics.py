@@ -755,10 +755,9 @@ class HorizonMetrics(BaseMetrics):
 
             if ignore_zeros:
                 zero_mask = hist_data == 0.0
-                hist_data_ = hist_data[~zero_mask]
-
-                if len(hist_data_) - np.isnan(hist_data_).sum() > 0: # Data can be empty in case of two identical horizons
-                    hist_data = hist_data_
+                # Data can be empty in case of two identical horizons
+                if zero_mask.sum() != hist_data.size - np.isnan(hist_data).sum():
+                    hist_data = hist_data[~zero_mask]
 
                 graph_msg += f'\nNumber of zeros in histogram: {zero_mask.sum()}'
 
@@ -768,9 +767,7 @@ class HorizonMetrics(BaseMetrics):
             if savepath is not None:
                 savepath = self.horizon.field.make_path(savepath, name=self.name)
                 plotter.save(savepath=savepath)
-
-                if hist_plotter is not None:
-                    hist_plotter.save(savepath=savepath.replace('.', '_histogram.'))
+                hist_plotter.save(savepath=savepath.replace('.', '_histogram.'))
 
             returns['plotter'] = plotter
 
