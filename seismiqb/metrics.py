@@ -757,6 +757,7 @@ class HorizonMetrics(BaseMetrics):
                 zero_mask = hist_data == 0.0
                 # Data can be empty in case of two identical horizons
                 if zero_mask.sum() != hist_data.size - np.isnan(hist_data).sum():
+                    # pylint: disable=invalid-unary-operand-type
                     hist_data = hist_data[~zero_mask]
 
                 graph_msg += f'\nNumber of zeros in histogram: {zero_mask.sum()}'
