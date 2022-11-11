@@ -71,7 +71,7 @@ class _GlobalCacheClass:
                 if class_name not in cache_repr_:
                     cache_repr_[class_name] = {}
 
-                cache_repr_[class_name][id(instance)] = instance_cache_repr
+                cache_repr_[class_name][f'id_{id(instance)}'] = instance_cache_repr
 
         # Convert to pandas dataframe
         if format == 'df' and len(cache_repr_) > 0:
@@ -106,8 +106,8 @@ class lru_cache:
     """ Thread-safe least recent used cache. Must be applied to a class methods.
     Adds the `use_cache` argument to the decorated method to control whether the caching logic is applied.
 
-    Under the hood, the decorator creates and uses cache attribute in an instance for each object with cache.
-    The name of the cache attribute is the same as the name of the cached object with the '_cache_' prefix.
+    Under the hood, the decorator creates `_cache` attribute with dict of all cached elements.
+    The `_cache` keys are cached objects names and values are OrderedDict with all saved elements.
 
     Parameters
     ----------
@@ -159,8 +159,8 @@ class lru_cache:
         if instance is None:
             self.stats = defaultdict(lambda: {'hit': 0, 'miss': 0})
         else:
-            if hasattr(instance, self.attrname):
-                delattr(instance, self.attrname)
+            if hasattr(self, '_cache') and (self.attrname in self._cache):
+                del self._cache[self.attrname]
 
             instance_hash = self.compute_hash(instance)
             self.stats[instance_hash] = {'hit': 0, 'miss': 0}
@@ -209,8 +209,13 @@ class lru_cache:
                 return result
 
             # Init cache and reference on it in the GlobalCache controller
-            if self.attrname not in instance.__dict__:
-                instance.__setattr__(self.attrname, OrderedDict())
+            if not hasattr(instance, '_cache'):
+                # Init cache container in the instance
+                instance.__setattr__('_cache', {})
+
+            if self.attrname not in instance._cache:
+                # Init property/method cache in the cache container
+                instance._cache[self.attrname] = OrderedDict()
 
             GlobalCache.instances_with_cache.add(instance)
 
@@ -219,7 +224,7 @@ class lru_cache:
 
             # If result is already in cache, just retrieve it and update its timings
             with self.lock:
-                cache = instance.__dict__[self.attrname]
+                cache = instance._cache[self.attrname]
                 result = cache.get(key, self.default)
 
                 if result is not self.default:
@@ -245,7 +250,7 @@ class lru_cache:
 
             return copy(result) if copy_on_return else result
 
-        self.attrname = '_cache_' + func.__name__ # name of the attribute, which store the cache
+        self.attrname = func.__name__ # used as a cache key in instances
 
         wrapper.__name__ = func.__name__
         wrapper.stats = lambda: self.stats
@@ -311,11 +316,12 @@ class CacheMixin:
         names = (name,) if name is not None else self.cached_objects
         cache_length_accumulator = 0
 
-        for attrname in names:
-            cache_attrname = '_cache_' + attrname.split('.')[-1]
-            cached_values = self.__dict__.get(cache_attrname, {}).values()
+        if getattr(self, '_cache', False):
+            for attrname in names:
+                cache_attrname = attrname.split('.')[-1]
+                cached_values = self._cache.get(cache_attrname, {}).values()
 
-            cache_length_accumulator += len(cached_values)
+                cache_length_accumulator += len(cached_values)
 
         return cache_length_accumulator
 
@@ -331,13 +337,14 @@ class CacheMixin:
         cache_size_accumulator = 0
 
         # Accumulate cache size over all cached objects: each term is a size of cached numpy array
-        for attrname in names:
-            cache_attrname = '_cache_' + attrname.split('.')[-1]
-            cached_values = self.__dict__.get(cache_attrname, {}).values()
+        if getattr(self, '_cache', False):
+            for attrname in names:
+                cache_attrname = attrname.split('.')[-1]
+                cached_values = self._cache.get(cache_attrname, {}).values()
 
-            for value in cached_values:
-                if isinstance(value, np.ndarray):
-                    cache_size_accumulator += value.nbytes / (1024 ** 3)
+                for value in cached_values:
+                    if isinstance(value, np.ndarray):
+                        cache_size_accumulator += value.nbytes / (1024 ** 3)
 
         return cache_size_accumulator
 
@@ -360,8 +367,8 @@ class CacheMixin:
 
         object_cache_size = self.get_cache_size(name=name)
 
-        cache_attrname = '_cache_' + name.split('.')[-1]
-        cached_data = self.__dict__.get(cache_attrname, {})
+        cache_attrname = name.split('.')[-1]
+        cached_data = getattr(self, '_cache', {}).get(cache_attrname, {})
 
         # The class saves cache for the same method with different arguments values
         # Get them all in a desired format: list of dicts
@@ -430,7 +437,7 @@ class CacheMixin:
         """
         names = (name,) if name is not None else self.cached_objects
         for attrname in names:
-            cache_attrname = '_cache_' + attrname.split('.')[-1]
+            cache_attrname = attrname.split('.')[-1]
 
-            if hasattr(self, cache_attrname):
-                delattr(self, cache_attrname)
+            if hasattr(self, '_cache') and (cache_attrname in self._cache):
+                del self._cache[cache_attrname]
