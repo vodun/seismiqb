@@ -75,12 +75,12 @@ class _GlobalCacheClass:
 
         # Convert to pandas dataframe
         if format == 'df' and len(cache_repr_) > 0:
-            # Dataframe index columns are (class_name, instance_id, method_name), expand values for them:
+            # Dataframe index columns are (class_name, instance_id, object_name), expand values for them:
             cache_repr_ = pd.DataFrame.from_dict({
-                (class_name, instance_id, method_name): method_data
+                (class_name, instance_id, object_name): object_data
                     for class_name, class_data in cache_repr_.items()
                     for instance_id, instance_data in class_data.items()
-                    for method_name, method_data in instance_data.items()},
+                    for object_name, object_data in instance_data.items()},
             orient='index')
 
             cache_repr_ = cache_repr_.loc[:, ['length', 'size', 'arguments']] # Columns sort
@@ -220,7 +220,7 @@ class lru_cache:
             GlobalCache.instances_with_cache.add(instance)
 
             key = self.make_key(instance, args, kwargs)
-            instance_hash = getattr(instance, '_hash', self.compute_hash(instance))
+            instance_hash = self.compute_hash(instance)
 
             # If result is already in cache, just retrieve it and update its timings
             with self.lock:
@@ -313,10 +313,11 @@ class CacheMixin:
         name: str, optional
             Attribute name. If None, then get total cache length.
         """
-        names = (name,) if name is not None else self.cached_objects
         cache_length_accumulator = 0
 
         if getattr(self, '_cache', False):
+            names = (name,) if name is not None else self.cached_objects
+
             for attrname in names:
                 cache_attrname = attrname.split('.')[-1]
                 cached_values = self._cache.get(cache_attrname, {}).values()
@@ -333,11 +334,12 @@ class CacheMixin:
         name: str, optional
             Attribute name. If None, then get total cache size.
         """
-        names = (name,) if name is not None else self.cached_objects
         cache_size_accumulator = 0
 
         # Accumulate cache size over all cached objects: each term is a size of cached numpy array
         if getattr(self, '_cache', False):
+            names = (name,) if name is not None else self.cached_objects
+
             for attrname in names:
                 cache_attrname = attrname.split('.')[-1]
                 cached_values = self._cache.get(cache_attrname, {}).values()
@@ -435,9 +437,11 @@ class CacheMixin:
         name: str, optional
             Attribute name. If None, then clean cache of all cached objects.
         """
-        names = (name,) if name is not None else self.cached_objects
-        for attrname in names:
-            cache_attrname = attrname.split('.')[-1]
+        if hasattr(self, '_cache'):
+            names = (name,) if name is not None else self.cached_objects
 
-            if hasattr(self, '_cache') and (cache_attrname in self._cache):
-                del self._cache[cache_attrname]
+            for attrname in names:
+                cache_attrname = attrname.split('.')[-1]
+
+                if cache_attrname in self._cache:
+                    del self._cache[cache_attrname]
