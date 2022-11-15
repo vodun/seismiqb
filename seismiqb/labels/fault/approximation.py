@@ -40,9 +40,10 @@ def points_to_sticks(points, sticks_step=10, nodes_step=10, fault_orientation=No
 
     sticks = []
 
-    indices = np.arange(0, len(slides), sticks_step)
-    if len(slides) - 1 not in indices:
-        indices = list(indices) + [len(slides)-1]
+    indices = [i for i, slide_points in enumerate(slides) if slide_points[0, fault_orientation] % sticks_step == 0]
+    indices = [0] + indices + [len(slides) - 1]
+    indices = sorted(list(set(indices)))
+
     for slide_points in np.array(slides)[indices]:
         slide_points = slide_points[np.argsort(slide_points[:, stick_orientation])]
         slide_points = thin_line(slide_points, stick_orientation)
@@ -51,8 +52,9 @@ def points_to_sticks(points, sticks_step=10, nodes_step=10, fault_orientation=No
             nodes = _add_points_to_stick(nodes, nodes_step, fault_orientation, stick_orientation).astype('int32')
         else:
             nodes = slide_points
-        if len(nodes) > 0:
+        if len(nodes) > 1:
             sticks.append(nodes)
+
     return sticks
 
 
