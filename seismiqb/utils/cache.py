@@ -211,11 +211,7 @@ class lru_cache:
             # Init cache and reference on it in the GlobalCache controller
             if not hasattr(instance, 'cache'):
                 # Init cache container in the instance
-                instance.__setattr__('cache', {})
-
-            if self.attrname not in instance.cache:
-                # Init property/method cache in the cache container
-                instance.cache[self.attrname] = OrderedDict()
+                instance.__setattr__('cache', defaultdict(OrderedDict))
 
             GlobalCache.instances_with_cache.add(instance)
 
@@ -307,7 +303,7 @@ class CacheMixin:
             names = (name,) if name is not None else self.cache.keys()
 
             for attrname in names:
-                cached_values = self.cache.get(attrname, {}).values()
+                cached_values = self.cache[attrname].values()
 
                 cache_length_accumulator += len(cached_values)
 
@@ -328,7 +324,7 @@ class CacheMixin:
             names = (name,) if name is not None else self.cache.keys()
 
             for attrname in names:
-                cached_values = self.cache.get(attrname, {}).values()
+                cached_values = self.cache[attrname].values()
 
                 for value in cached_values:
                     if isinstance(value, np.ndarray):
