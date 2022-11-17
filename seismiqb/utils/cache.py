@@ -22,7 +22,7 @@ class _GlobalCacheClass:
         """ Initialize containers with cache references and instances with cached objects.
 
         Note, the `cache_references` container is filled on the modules import stage."""
-        self.cache_references = {}
+        self.cache_references = {} # for tests and debugging, helps to get cache info such as maxsize or stats
         self.instances_with_cache = WeakSet()
 
     @property
@@ -106,8 +106,8 @@ class lru_cache:
     """ Thread-safe least recent used cache. Must be applied to a class methods.
     Adds the `use_cache` argument to the decorated method to control whether the caching logic is applied.
 
-    Under the hood, the decorator creates `_cache` attribute with dict of all cached elements.
-    The `_cache` keys are cached objects names and values are OrderedDict with all saved elements.
+    Under the hood, the decorator creates `cache` attribute with dict of all cached elements.
+    The `cache` keys are cached objects names and values are OrderedDict with all saved items.
 
     Parameters
     ----------
@@ -159,8 +159,8 @@ class lru_cache:
         if instance is None:
             self.stats = defaultdict(lambda: {'hit': 0, 'miss': 0})
         else:
-            if hasattr(self, '_cache') and (self.attrname in self._cache):
-                del self._cache[self.attrname]
+            if hasattr(self, 'cache') and (self.attrname in self.cache):
+                del self.cache[self.attrname]
 
             instance_hash = self.compute_hash(instance)
             self.stats[instance_hash] = {'hit': 0, 'miss': 0}
@@ -209,13 +209,13 @@ class lru_cache:
                 return result
 
             # Init cache and reference on it in the GlobalCache controller
-            if not hasattr(instance, '_cache'):
+            if not hasattr(instance, 'cache'):
                 # Init cache container in the instance
-                instance.__setattr__('_cache', {})
+                instance.__setattr__('cache', {})
 
-            if self.attrname not in instance._cache:
+            if self.attrname not in instance.cache:
                 # Init property/method cache in the cache container
-                instance._cache[self.attrname] = OrderedDict()
+                instance.cache[self.attrname] = OrderedDict()
 
             GlobalCache.instances_with_cache.add(instance)
 
@@ -224,7 +224,7 @@ class lru_cache:
 
             # If result is already in cache, just retrieve it and update its timings
             with self.lock:
-                cache = instance._cache[self.attrname]
+                cache = instance.cache[self.attrname]
                 result = cache.get(key, self.default)
 
                 if result is not self.default:
@@ -293,18 +293,6 @@ class CacheMixin:
 
     You can use this mixin for cache introspection and cached data cleaning on instance level.
     """
-    @property
-    def cached_objects(self):
-        """ All object names that use caching. """
-        # pylint: disable=protected-access
-        if not hasattr(self.__class__, '_cached_objects'):
-            class_dir = dir(self.__class__)
-            cached_objects = [obj_qualname for obj_qualname in GlobalCache.cache_references.keys()
-                              if obj_qualname.split('.')[-1] in class_dir]
-
-            setattr(self.__class__, '_cached_objects', tuple(cached_objects))
-        return self.__class__._cached_objects
-
     def get_cache_length(self, name=None):
         """ Get cache length for specified objects.
 
@@ -315,12 +303,11 @@ class CacheMixin:
         """
         cache_length_accumulator = 0
 
-        if getattr(self, '_cache', False):
-            names = (name,) if name is not None else self.cached_objects
+        if getattr(self, 'cache', False):
+            names = (name,) if name is not None else self.cache.keys()
 
             for attrname in names:
-                cache_attrname = attrname.split('.')[-1]
-                cached_values = self._cache.get(cache_attrname, {}).values()
+                cached_values = self.cache.get(attrname, {}).values()
 
                 cache_length_accumulator += len(cached_values)
 
@@ -337,12 +324,11 @@ class CacheMixin:
         cache_size_accumulator = 0
 
         # Accumulate cache size over all cached objects: each term is a size of cached numpy array
-        if getattr(self, '_cache', False):
-            names = (name,) if name is not None else self.cached_objects
+        if getattr(self, 'cache', False):
+            names = (name,) if name is not None else self.cache.keys()
 
             for attrname in names:
-                cache_attrname = attrname.split('.')[-1]
-                cached_values = self._cache.get(cache_attrname, {}).values()
+                cached_values = self.cache.get(attrname, {}).values()
 
                 for value in cached_values:
                     if isinstance(value, np.ndarray):
@@ -369,8 +355,7 @@ class CacheMixin:
 
         object_cache_size = self.get_cache_size(name=name)
 
-        cache_attrname = name.split('.')[-1]
-        cached_data = getattr(self, '_cache', {}).get(cache_attrname, {})
+        cached_data = getattr(self, 'cache', {}).get(name, {})
 
         # The class saves cache for the same method with different arguments values
         # Get them all in a desired format: list of dicts
@@ -406,7 +391,7 @@ class CacheMixin:
         cache_repr_ = {}
 
         # Create cache representation for each object
-        for name in self.cached_objects:
+        for name in self.cache.keys():
             object_cache_repr = self._get_object_cache_repr(name=name)
 
             if object_cache_repr is not None:
@@ -437,11 +422,8 @@ class CacheMixin:
         name: str, optional
             Attribute name. If None, then clean cache of all cached objects.
         """
-        if hasattr(self, '_cache'):
-            names = (name,) if name is not None else self.cached_objects
-
-            for attrname in names:
-                cache_attrname = attrname.split('.')[-1]
-
-                if cache_attrname in self._cache:
-                    del self._cache[cache_attrname]
+        if hasattr(self, 'cache'):
+            if name is not None:
+                del self.cache[name]
+            else:
+                self.cache.clear()
