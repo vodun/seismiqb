@@ -3,7 +3,7 @@ import os
 from copy import copy
 from functools import wraps
 from hashlib import blake2b
-from inspect import ismethod
+from inspect import ismethod, signature
 from threading import RLock
 from collections import OrderedDict, defaultdict
 from weakref import WeakSet
@@ -89,7 +89,7 @@ class _GlobalCacheClass:
 
     @property
     def repr(self):
-        """ Global cache representation"""
+        """ Global cache representation. """
         df = self.get_cache_repr(format='df')
         if df is not None:
             df = df.loc[:, ['length', 'size']]
@@ -165,15 +165,34 @@ class lru_cache:
             instance_hash = self.compute_hash(instance)
             self.stats[instance_hash] = {'hit': 0, 'miss': 0}
 
-    def make_key(self, instance, args, kwargs):
+    def make_key(self, instance, func, args, kwargs):
         """ Create a key from a combination of method args and instance attributes. """
-        key = list(args[1:] if args[0] is instance else args)
+        # We get names and values for args and defaults from the func signature
+        func_signature = signature(func).parameters
+
+        # Process args
+        args = list(args) if not isinstance(args, list) else args
+        args_and_defaults = [name for name in func_signature.keys() if (name not in kwargs.keys()) and (name != 'self')]
+
+        if 'self' in func_signature:
+            args = args[1:]
+
+        # Process default values
+        for default_param in args_and_defaults[len(args):]:
+            default_value = func_signature.get(default_param).default
+            args.append(default_value)
+
+        # Create key from args and defaults
+        key = list(zip(args_and_defaults, args))
+
+        # Process kwargs
         if kwargs:
             for k, v in sorted(kwargs.items()):
                 if isinstance(v, slice):
                     v = (v.start, v.stop, v.step)
                 key.append((k, v))
 
+        # Process attributes
         if self.attributes:
             for attr in self.attributes:
                 attr_hash = stable_hash(getattr(instance, attr))
@@ -215,7 +234,7 @@ class lru_cache:
 
             GlobalCache.instances_with_cache.add(instance)
 
-            key = self.make_key(instance, args, kwargs)
+            key = self.make_key(instance, func, args, kwargs)
             instance_hash = self.compute_hash(instance)
 
             # If result is already in cache, just retrieve it and update its timings
@@ -238,7 +257,7 @@ class lru_cache:
 
                 if key in cache:
                     pass
-                elif len(cache) >= self.maxsize:
+                elif len(cache) == self.maxsize:
                     cache.popitem(last=False)
                     cache[key] = result
                 else:
@@ -299,7 +318,7 @@ class CacheMixin:
         """
         cache_length_accumulator = 0
 
-        if getattr(self, 'cache', False):
+        if hasattr(self, 'cache'):
             names = (name,) if name is not None else self.cache.keys()
 
             for attrname in names:
@@ -320,7 +339,7 @@ class CacheMixin:
         cache_size_accumulator = 0
 
         # Accumulate cache size over all cached objects: each term is a size of cached numpy array
-        if getattr(self, 'cache', False):
+        if hasattr(self, 'cache'):
             names = (name,) if name is not None else self.cache.keys()
 
             for attrname in names:
