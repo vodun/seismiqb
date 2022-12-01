@@ -74,11 +74,10 @@ class FaultVisualizationMixin(VisualizationMixin):
                 axis_labels=axis_labels, margin=margin, colors=colors, **kwargs)
 
     def make_triangulation(self, slices=None, sticks_step=None, stick_nodes_step=None,
-                           stick_orientation=None, sticks=False, **kwargs):
+                           stick_orientation=2, sticks=False, **kwargs):
         """ Return triangulation of the fault. It will created if needed. """
         if sticks_step is not None or stick_nodes_step is not None or stick_orientation is not None:
             fake_fault = type(self)({'points': self.points}, field=self.field, direction=self.direction)
-            stick_orientation = stick_orientation if stick_orientation is not None else 2
             fake_fault.points_to_sticks(slices, sticks_step or 10, stick_nodes_step or 10,
                                         stick_orientation=stick_orientation)
             return fake_fault.make_triangulation(slices, sticks=sticks, **kwargs)

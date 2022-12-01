@@ -107,6 +107,9 @@ def connect_two_components(nodes1, nodes2, axis=2, orientation=0, shift=20):
 
 def filter_points(nodes1, nodes2, axis=2, shift=20):
     """ Remove nodes which are too far from each other. """
+    if shift is None:
+        return (0, len(nodes1)), (0, len(nodes2))
+
     swap = False
     if nodes2[0, axis] < nodes1[0, axis]:
         swap = True

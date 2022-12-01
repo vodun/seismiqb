@@ -462,7 +462,7 @@ class VisualizationMixin:
 
     # 3D interactive
     def show_3d(self, src='labels', aspect_ratio=None, zoom=None, n_points=100, threshold=100,
-                sticks_step=None, stick_nodes_step=None, sticks=False, stick_orientation=None,
+                sticks_step=None, stick_nodes_step=None, sticks=False, stick_orientation=2,
                 slides=None, margin=(0, 0, 20), colors=None, **kwargs):
         """ Interactive 3D plot for some elements of a field.
         Roughly, does the following:
@@ -494,12 +494,15 @@ class VisualizationMixin:
             Distance between stick nodes. If None, fault triangulation (nodes and simplices) will be used.
         sticks : bool
             If True, show fault sticks. If False, show interpolated surface.
+        stick_orientation : 0, 1 or 2
+            Axis which defines stick_orientation
         slides : list of tuples
             Each tuple is pair of location and axis to load slide from seismic cube.
         margin : tuple of ints
             Added margin for each axis, by default, (0, 0, 20).
-        colors : dict or list
+        colors : dict, list or str.
             Mapping of label class name to color defined as str, by default, all labels will be shown in green.
+            Also can be 'random' to set all label items colors randomly.
         show_axes : bool
             Whether to show axes and their labels.
         width, height : number
@@ -533,6 +536,8 @@ class VisualizationMixin:
         labels = [getattr(self, src_) if isinstance(src_, str) else [src_] for src_ in src]
         labels = sum(labels, [])
 
+        if colors == 'random':
+            colors = ['rgb(' + ', '.join([str(c) for c in np.random.randint(0, 255, size=3)]) + ')' for i in range(100)]
         if isinstance(colors, str):
             colors = [colors]
         if isinstance(colors, list):

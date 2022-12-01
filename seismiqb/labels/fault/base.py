@@ -280,14 +280,17 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
             points.append(triangle_rasterization(self.nodes[triangle].astype('float32'), width))
         self._points = np.concatenate(points, axis=0).astype('int32')
 
-    def points_to_sticks(self, slices=None, sticks_step=10, stick_nodes_step=10, stick_orientation=2):
+    def points_to_sticks(self, slices=None, sticks_step=10, stick_nodes_step=10, stick_orientation=2,
+                         nodes_threshold=5, move_bounds=False):
         """ Create sticks from fault points. """
         points = self.points.copy()
         if slices is not None:
             for i in range(3):
                 points = points[points[:, i] <= slices[i].stop]
                 points = points[points[:, i] >= slices[i].start]
-        self._sticks = points_to_sticks(points, sticks_step, stick_nodes_step, self.direction, stick_orientation)
+        self._sticks = points_to_sticks(points=points, sticks_step=sticks_step, nodes_step=stick_nodes_step,
+                                        fault_orientation=self.direction, stick_orientation=stick_orientation,
+                                        threshold=nodes_threshold, move_bounds=move_bounds)
 
     def add_to_mask(self, mask, locations=None, width=1, axis=None, sparse=False, **kwargs):
         """ Add fault to background.

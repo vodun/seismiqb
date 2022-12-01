@@ -298,17 +298,18 @@ class FaultExtractor:
 
     def extend_patches(self, size_threshold, intersection_threshold, pbar='t'):
         sorted_patches = sorted(self.patchtop_to_patch.values(), key=lambda x: x.size(), reverse=True)
-        extended_patches = []#{-1: [], 1: []}
+        extended_patches = {-1: [], 1: []}
         for patch in Notifier(pbar, desc='Extend patches')(sorted_patches):
             for direction in [-1, 1]:
                 mapping = self.patchtop_to_patch if direction == 1 else self.patchbottom_to_patch
                 idx_attr = 'top' if direction == 1 else 'bottom'
                 current_patch_idx = getattr(patch, idx_attr)
                 top_idx = mapping[current_patch_idx].top
+
                 while True:
-                    if top_idx in extended_patches:
+                    if top_idx in extended_patches[direction]:
                         break
-                    extended_patches.append(top_idx)
+                    extended_patches[direction].append(top_idx)
 
                     patch = mapping[current_patch_idx]
                     next_patch_idx = patch.find_largest_neighbor(size_threshold, intersection_threshold, direction=direction)
@@ -318,10 +319,15 @@ class FaultExtractor:
                     a = self._labels_reverse_mapping[top_idx]
                     if next_patch_idx not in mapping:
                         break
+
+                    if mapping[next_patch_idx].top in extended_patches[-direction]:
+                        break
                     b = self._labels_reverse_mapping[mapping[next_patch_idx].top]
 
                     self._connectivity_matrix[a, b] = 1
                     self._connectivity_matrix[b, a] = 1
+
+                    extended_patches[-direction].append(mapping[next_patch_idx].top)
 
                     current_patch_idx = next_patch_idx
         return self
@@ -521,9 +527,7 @@ class FaultPatch:
             if leaf_size < size_threshold:
                 continue
             intersection = self.extractor.compute_intersection_size(leaf, comp)
-            # print(comp, leaf, intersection/leaf_size, intersection/comp_size, intersection / min(leaf_size, comp_size), intersection / min(leaf_size, comp_size) > intersection_threshold)
             if intersection / min(leaf_size, comp_size) > intersection_threshold:
-                # print(f'{leaf} to {comp}')
                 candidates[leaf] = leaf_size
         if len(candidates) == 0:
             return None
