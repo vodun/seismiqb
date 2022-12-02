@@ -297,6 +297,8 @@ class FaultExtractor:
         return self
 
     def extend_patches(self, size_threshold, intersection_threshold, pbar='t'):
+        """ Iterative merging of patches. Starts with the largest patch, to which tightly fitting patches are merged
+        in succession on both sides. """
         sorted_patches = sorted(self.patchtop_to_patch.values(), key=lambda x: x.size(), reverse=True)
         extended_patches = {-1: [], 1: []}
         for patch in Notifier(pbar, desc='Extend patches')(sorted_patches):
@@ -312,7 +314,9 @@ class FaultExtractor:
                     extended_patches[direction].append(top_idx)
 
                     patch = mapping[current_patch_idx]
-                    next_patch_idx = patch.find_largest_neighbor(size_threshold, intersection_threshold, direction=direction)
+                    next_patch_idx = patch.find_largest_neighbor(
+                        size_threshold, intersection_threshold, direction=direction
+                    )
                     if next_patch_idx is None:
                         break
 
@@ -518,6 +522,7 @@ class FaultPatch:
         return list(sorted(merge, key=lambda x: merge[x]))
 
     def find_largest_neighbor(self, size_threshold=20, intersection_threshold=0.7,  direction=1):
+        """ Find the largest components in the defined direction. """
         neighbors_list = self.bottom_rejected if direction == 1 else self.top_rejected
         comp = self.all_components[-1 if direction == 1 else 0]
         candidates = {}
@@ -533,9 +538,8 @@ class FaultPatch:
             return None
         return sorted(candidates, key=lambda x: candidates[x], reverse=True)[0] # TODO: remove sorted
 
-
-
     def size(self):
+        """ Size of the patch as the number of points. """
         return sum([self.extractor.sizes[item[0]] for item in self.components.values()])
 
     def __repr__(self):
