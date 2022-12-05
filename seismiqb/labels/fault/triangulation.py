@@ -76,7 +76,7 @@ def sticks_to_simplices(sticks, orientation, threshold=None):
     nodes = np.concatenate(sticks)
     shift = 0
     for s1, s2 in zip(sticks[:-1], sticks[1:]):
-        simplices = connect_two_components(s1, s2, orientation=orientation)
+        simplices = connect_two_sticks(s1, s2, orientation=orientation, shift=40)
         if len(simplices) > 0:
             simplices += shift
             all_simplices.append(simplices)
@@ -87,7 +87,7 @@ def sticks_to_simplices(sticks, orientation, threshold=None):
         return all_simplices[mask], nodes
     return np.zeros((0, 3)), np.zeros((0, 3))
 
-def connect_two_components(nodes1, nodes2, axis=2, orientation=0, shift=20):
+def connect_two_sticks(nodes1, nodes2, axis=2, orientation=0, shift=20):
     """ Create triangles for two sequential sticks. """
     ranges1, ranges2 = filter_points(nodes1, nodes2, axis, shift)
 

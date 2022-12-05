@@ -159,6 +159,7 @@ class FaultSticksMixin(CharismaMixin):
                 stick[:, direction] = stick[0, direction]
 
         self.direction = direction
+        self.stick_orientation = 2
 
     def dump_fault_sticks(self, path):
         """ Dump fault sticks into FaultSticks format. """

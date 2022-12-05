@@ -79,16 +79,17 @@ class FaultVisualizationMixin(VisualizationMixin):
         if ((sticks_step is not None and sticks_step != self.sticks_step) or
             (stick_nodes_step is not None and stick_nodes_step != self.stick_nodes_step) or
             (stick_orientation is not None and stick_orientation != self.stick_orientation)):
+            # sticks must be recreated with new parameters from points
 
-            fake_fault = type(self)({'points': self.points}, field=self.field, direction=self.direction)
-            fake_fault.points_to_sticks(slices, sticks_step or 10, stick_nodes_step or 10,
-                                        stick_orientation=stick_orientation)
-            return fake_fault.make_triangulation(slices, sticks=sticks, **kwargs)
+            temporary_fault = type(self)({'points': self.points}, field=self.field, direction=self.direction)
+            temporary_fault.points_to_sticks(slices, sticks_step or 10, stick_nodes_step or 10,
+                                             stick_orientation=stick_orientation)
+            return temporary_fault.make_triangulation(slices, sticks=sticks, **kwargs)
 
         if sticks:
             sticks = self.sticks
             faults = [
-                type(self)({'sticks': [stick]}, direction=self.direction,
+                type(self)({'sticks': [stick]}, direction=self.direction, stick_orientation=self.stick_orientation,
                            field=self.field, name=(self.short_name or "") + '_' + str(i))
                 for i, stick in enumerate(sticks)
             ]
