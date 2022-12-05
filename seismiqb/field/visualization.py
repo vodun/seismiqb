@@ -537,7 +537,7 @@ class VisualizationMixin:
         labels = sum(labels, [])
 
         if colors == 'random':
-            colors = ['rgb(' + ', '.join([str(c) for c in np.random.randint(0, 255, size=3)]) + ')' for i in range(100)]
+            colors = ['rgb(' + ', '.join([str(c) for c in np.random.randint(0, 255, size=3)]) + ')' for _ in labels]
         if isinstance(colors, str):
             colors = [colors]
         if isinstance(colors, list):
