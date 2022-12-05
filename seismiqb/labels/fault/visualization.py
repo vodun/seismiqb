@@ -76,7 +76,10 @@ class FaultVisualizationMixin(VisualizationMixin):
     def make_triangulation(self, slices=None, sticks_step=None, stick_nodes_step=None,
                            stick_orientation=2, sticks=False, **kwargs):
         """ Return triangulation of the fault. It will created if needed. """
-        if sticks_step is not None or stick_nodes_step is not None or stick_orientation is not None:
+        if ((sticks_step is not None and sticks_step != self.sticks_step) or
+            (stick_nodes_step is not None and stick_nodes_step != self.stick_nodes_step) or
+            (stick_orientation is not None and stick_orientation != self.stick_orientation)):
+
             fake_fault = type(self)({'points': self.points}, field=self.field, direction=self.direction)
             fake_fault.points_to_sticks(slices, sticks_step or 10, stick_nodes_step or 10,
                                         stick_orientation=stick_orientation)
@@ -113,7 +116,7 @@ def get_fake_one_stick_fault(fault):
     """ Create fault with additional shifted stick to visualize one stick faults. """
     stick = fault.sticks[0]
 
-    fake_fault = type(fault)({'sticks': np.array([stick, stick + 1])}, direction=fault.direction,
-                             field=fault.field)
+    fake_fault = type(fault)({'sticks': np.array([stick, stick + 1])}, stick_orientation=fault.stick_orientation,
+                             direction=fault.direction, field=fault.field)
 
     return fake_fault

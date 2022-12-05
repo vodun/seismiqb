@@ -56,7 +56,7 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
     # Columns used from the file
     COLUMNS = ['INLINE_3D', 'CROSSLINE_3D', 'DEPTH']
 
-    def __init__(self, storage, field, name=None, direction=None, **kwargs): #pylint: disable=super-init-not-called
+    def __init__(self, storage, field, name=None, direction=None, stick_orientation=None, **kwargs): #pylint: disable=super-init-not-called
         self.name = name
         self.field = field
 
@@ -66,6 +66,9 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
         self._nodes = None
         self._simplices = None
         self.direction = None
+        self.stick_orientation = stick_orientation
+        self.sticks_step = None
+        self.stick_nodes_step = None
 
         if isinstance(storage, str):
             source = 'file'
@@ -291,6 +294,9 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
         self._sticks = points_to_sticks(points=points, sticks_step=sticks_step, nodes_step=stick_nodes_step,
                                         fault_orientation=self.direction, stick_orientation=stick_orientation,
                                         threshold=nodes_threshold, move_bounds=move_bounds)
+        self.stick_orientation = stick_orientation
+        self.sticks_step = sticks_step
+        self.stick_nodes_step = stick_nodes_step
 
     def add_to_mask(self, mask, locations=None, width=1, axis=None, sparse=False, **kwargs):
         """ Add fault to background.
