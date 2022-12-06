@@ -263,7 +263,7 @@ def bilateral_filter(data, kernel_size=3, kernel=None, padding='same', sigma_spa
     result = _bilateral_filter(src=data, kernel=kernel, sigma_range=sigma_range)
 
     if padding is not None:
-        slices = tuple(slice(pad[0], -pad[1]) for pad in padding)
+        slices = tuple(slice(pad[0], -pad[1]) if pad[1] != 0 else slice(pad[0], None) for pad in padding)
         result = result[slices]
     return result
 
