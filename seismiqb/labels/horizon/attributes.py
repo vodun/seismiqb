@@ -305,7 +305,7 @@ class AttributesMixin:
     # Retrieve data from seismic along horizon
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     @transformable
-    def get_cube_values(self, window=1, offset=0, chunk_size=256, **_):
+    def get_cube_values(self, window=1, offset=0, chunk_size=256, src_geometry=None, **_):
         """ Get values from the cube along the horizon.
 
         Parameters
@@ -317,6 +317,8 @@ class AttributesMixin:
         chunk_size : int
             Size of data along depth axis processed at a time.
         """
+        geometry = getattr(self.field, src_geometry) if src_geometry is not None else self.field.geometry
+
         low = window // 2 - offset
         high = max(window - low, 0)
         chunk_size = min(chunk_size, self.d_max - self.d_min + window)
@@ -328,8 +330,8 @@ class AttributesMixin:
             # Get chunk from the cube (depth-wise)
             location = (slice(None), slice(None),
                         slice(d_start - low, min(d_end + high, self.field.depth)))
-            location, _ = self.field.geometry.process_key(location)
-            data_chunk = self.field.geometry.load_crop(location, use_cache=False)
+            location, _ = geometry.process_key(location)
+            data_chunk = geometry.load_crop(location, use_cache=False)
 
             # Check which points of the horizon are in the current chunk (and present)
             idx_i, idx_x = np.asarray((self.matrix != self.FILL_VALUE) &

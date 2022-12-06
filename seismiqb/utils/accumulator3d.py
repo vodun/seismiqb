@@ -222,6 +222,19 @@ class Accumulator3D:
         array /= 255
         return array
 
+    @staticmethod
+    def prediction_to_uint8(array):
+        """ Convert a float array with values in [0.0, 1.0] to an int8 array with values in [0, 255]. """
+        array *= 255
+        return array.astype(np.uint8)
+
+    @staticmethod
+    def uint8_to_prediction(array):
+        """ Convert an int8 array with values in [0, 255] to a float array with values in [0.0, 1.0]. """
+        array = array.astype(np.float32)
+        array /= 255
+        return array
+
     # Alternative constructors
     @classmethod
     def from_aggregation(cls, aggregation='max', shape=None, origin=None, dtype=np.float32, fill_value=None,

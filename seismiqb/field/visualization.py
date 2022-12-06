@@ -62,14 +62,14 @@ class VisualizationMixin:
         return msg[:-1]
 
     # 2D along axis
-    TRANSFORM_TO_ALIASES = {
-        compute_instantaneous_amplitude: ['iamplitude', 'instantaneous_amplitude'],
-        compute_instantaneous_phase: ['iphase', 'instantaneous_phase'],
-        compute_instantaneous_frequency: ['ifrequency', 'instantaneous_frequency'],
+    ATTRIBUTE_TO_ALIASES = {
+        compute_instantaneous_amplitude: ['iamplitudes', 'instantaneous_amplitudes'],
+        compute_instantaneous_phase: ['iphases', 'instantaneous_phases'],
+        compute_instantaneous_frequency: ['ifrequencies', 'instantaneous_frequencies'],
     }
-    ALIASES_TO_TRANSFORM = {alias: name for name, aliases in TRANSFORM_TO_ALIASES.items() for alias in aliases}
+    ALIASES_TO_ATTRIBUTE = {alias: name for name, aliases in ATTRIBUTE_TO_ALIASES.items() for alias in aliases}
 
-    def load_slide(self, index, axis=0, transform=None, src_geometry='geometry'):
+    def load_slide(self, index, axis=0, attribute=None, src_geometry='geometry'):
         """ Load one slide of data along specified axis and apply `transform`.
         Refer to the documentation of :meth:`.Geometry.load_slide` for details.
 
@@ -81,23 +81,23 @@ class VisualizationMixin:
             If string of the `'#XXX'` format, then we interpret it as the exact indexing header value.
         axis : int
             Axis of the slide.
-        transform : callable or str
+        attribute : callable or str
             If callable, then directly applied to the loaded data.
             If str, then one of pre-defined aliases for pre-defined geological transforms.
         """
         slide = getattr(self, src_geometry).load_slide(index=index, axis=axis)
 
-        if transform:
-            if isinstance(transform, str) and transform in self.ALIASES_TO_TRANSFORM:
-                transform = self.ALIASES_TO_TRANSFORM[transform]
-            if callable(transform):
-                slide = transform(slide)
+        if attribute:
+            if isinstance(attribute, str) and attribute in self.ALIASES_TO_ATTRIBUTE:
+                attribute = self.ALIASES_TO_ATTRIBUTE[attribute]
+            if callable(attribute):
+                slide = attribute(slide)
             else:
-                raise ValueError(f'Unknown transform={transform}')
+                raise ValueError(f'Unknown transform={attribute}')
         return slide
 
 
-    def show_slide(self, index, axis='i', transform=None, zoom=None, width=9,
+    def show_slide(self, index, axis='i', attribute=None, zoom=None, width=9,
                    src_geometry='geometry', src_labels='labels',
                    enumerate_labels=False, indices='all', augment_mask=True, plotter=plot, **kwargs):
         """ Show slide with horizon on it.
@@ -111,7 +111,7 @@ class VisualizationMixin:
             If string of the `'#XXX'` format, then we interpret it as the exact indexing header value.
         axis : int
             Number of axis to load slide along.
-        transform : callable or str
+        attribute : callable or str
             If callable, then directly applied to the loaded data.
             If str, then one of pre-defined aliases for pre-defined geological transforms.
         width : int
@@ -125,7 +125,7 @@ class VisualizationMixin:
         locations = self.geometry.make_slide_locations(index, axis=axis)
 
         # Load seismic and mask
-        seismic_slide = self.load_slide(index=index, axis=axis, transform=transform, src_geometry=src_geometry)
+        seismic_slide = self.load_slide(index=index, axis=axis, attribute=attribute, src_geometry=src_geometry)
 
         src_labels = src_labels if isinstance(src_labels, (tuple, list)) else [src_labels]
         masks = []

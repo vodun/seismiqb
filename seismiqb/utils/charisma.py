@@ -48,7 +48,7 @@ class CharismaMixin:
 
         # Load data as a points array from a file
         with open(path, encoding='utf-8') as file:
-            line_len = len(file.readline().split(' '))
+            line_len = len(file.readline().split())
         if line_len == len(self.REDUCED_CHARISMA_SPEC):
             names = self.REDUCED_CHARISMA_SPEC
         elif line_len >= len(self.CHARISMA_SPEC):

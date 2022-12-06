@@ -304,21 +304,27 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         elif normalization_stats in {'field', True}:
             normalization_stats = field.normalization_stats
         else:
-            # Crop-wise stats
-            normalization_stats = {}
-
             if clip_to_quantiles:
                 buffer = np.clip(buffer, *np.quantile(buffer, q))
                 clip_to_quantiles = False
 
-            if 'mean' in mode:
-                normalization_stats['mean'] = np.mean(buffer)
-            if 'std' in mode:
-                normalization_stats['std'] = np.std(buffer)
-            if 'min' in mode:
-                normalization_stats['min'] = np.min(buffer)
-            if 'max' in mode:
-                normalization_stats['max'] = np.max(buffer)
+            if callable(mode):
+                normalization_stats = {
+                    'mean': np.mean(buffer),
+                    'std': np.std(buffer),
+                    'min': np.min(buffer),
+                    'max': np.max(buffer),
+                }
+            else:
+                normalization_stats = {}
+                if 'mean' in mode:
+                    normalization_stats['mean'] = np.mean(buffer)
+                if 'std' in mode:
+                    normalization_stats['std'] = np.std(buffer)
+                if 'min' in mode:
+                    normalization_stats['min'] = np.min(buffer)
+                if 'max' in mode:
+                    normalization_stats['max'] = np.max(buffer)
 
         # Clip
         if clip_to_quantiles:
@@ -327,16 +333,17 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         # Actual normalization
         if callable(mode):
             buffer[:] = mode(buffer, normalization_stats)
-        if 'mean' in mode:
-            buffer -= normalization_stats['mean']
-        if 'std' in mode:
-            buffer /= normalization_stats['std']
-        if 'min' in mode and 'max' in mode:
-            if normalization_stats['max'] != normalization_stats['min']:
-                buffer -= normalization_stats['min']
-                buffer /= normalization_stats['max'] - normalization_stats['min']
-            else:
-                buffer -= normalization_stats['min']
+        else:
+            if 'mean' in mode:
+                buffer -= normalization_stats['mean']
+            if 'std' in mode:
+                buffer /= normalization_stats['std']
+            if 'min' in mode and 'max' in mode:
+                if normalization_stats['max'] != normalization_stats['min']:
+                    buffer -= normalization_stats['min']
+                    buffer /= normalization_stats['max'] - normalization_stats['min']
+                else:
+                    buffer -= normalization_stats['min']
         return buffer
 
 
@@ -988,6 +995,10 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         """ Central crop of defined shape. """
         return functional.center_crop(crop, shape)
 
+    @apply_parallel_decorator(init='data', post='_assemble', target='for')
+    def resize(self, crop, size, interpolation=1, **kwargs):
+        """ Resize image. By default uses a bilinear interpolation."""
+        return functional.resize(array=crop, size=size, interpolation=interpolation)
 
     # Augmentations: geologic. `compute_instantaneous_amplitude/phase/frequency` are added by decorator
     @apply_parallel_decorator(init='preallocating_init', post='noop_post', target='for')
