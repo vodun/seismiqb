@@ -80,9 +80,10 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
             source = 'df'
         getattr(self, f'from_{source}')(storage, **kwargs)
 
-        if self.direction is None:
-            self.set_direction(direction)
         self.create_stats()
+
+        if len(self) > 0 and self.direction is None:
+            self.set_direction(direction)
 
     def interpolate(self):
         """ Create points of fault surface from sticks or nodes and simplices. """
@@ -98,8 +99,11 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
             data = self.points
         elif self.has_component('nodes'):
             data = self.nodes
-        else:
+        elif self.has_component('sticks'):
             data = np.concatenate(self.sticks)
+        else:
+            self.bbox = None
+            return
 
         if len(data) == 0: # It can be for empty fault file.
             data = np.zeros((1, 3))
@@ -346,6 +350,8 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
 
     def __len__(self):
         """ The size of the fault. """
+        if self.bbox is None:
+            return 0
         return self.bbox[2].ptp() * (self.bbox[self.direction].ptp() + 1)
 
     def __add__(self, other):
