@@ -87,9 +87,9 @@ def sticks_to_simplices(sticks, orientation, max_simplices_depth=None, max_nodes
         return all_simplices[mask], nodes
     return np.zeros((0, 3)), np.zeros((0, 3))
 
-def connect_two_sticks(nodes1, nodes2, axis=2, orientation=0, shift=20):
+def connect_two_sticks(nodes1, nodes2, axis=2, orientation=0, max_nodes_distance=20):
     """ Create triangles for two sequential sticks. """
-    ranges1, ranges2 = filter_points(nodes1, nodes2, axis, shift)
+    ranges1, ranges2 = filter_points(nodes1, nodes2, axis, max_nodes_distance)
 
     p1, p2 = nodes1[slice(*ranges1)], nodes2[slice(*ranges2)]
 

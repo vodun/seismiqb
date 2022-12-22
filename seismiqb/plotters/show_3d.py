@@ -87,7 +87,7 @@ def show_3d(x, y, z, simplices, title, zoom, colors=None, show_axes=True, aspect
         for image, loc, axis in images:
             shape = image.shape
             if resize_factor != 1:
-                image = cv2.resize(image, tuple(np.array(shape)[::-1] // resize_factor))
+                image = cv2.resize(image.astype('float32'), tuple(np.array(shape)[::-1] // resize_factor))
             image = image[::-1]
             if bounds:
                 bounds = int(bounds)

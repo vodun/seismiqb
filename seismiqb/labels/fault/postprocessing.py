@@ -5,14 +5,14 @@ from numba import njit, prange
 from numba.types import bool_
 
 @njit(parallel=True)
-def skeletonize(slide, width=5, rel_height=0.5, prominence=0.05, threshold=0.05, distance=None, mode=0):
+def skeletonize(slide, peaks_width=5, rel_height=0.5, prominence=0.05, threshold=0.05, distance=None, mode=0):
     """ Perform skeletonize of faults on 2D slide
 
     Parameters
     ----------
     slide : numpy.ndarray
 
-    width : int, optional
+    peaks_width : int, optional
         width of peaks, by default 5
     rel_height, threshold : float, optional
         parameters of :meth:~.find_peaks`
@@ -35,7 +35,7 @@ def skeletonize(slide, width=5, rel_height=0.5, prominence=0.05, threshold=0.05,
     skeletonized_slide = np.zeros_like(slide)
     for i in prange(slide.shape[1]): #pylint: disable=not-an-iterable
         x = slide[:, i]
-        peaks, prominences = find_peaks(x, width=width, prominence=prominence,
+        peaks, prominences = find_peaks(x, width=peaks_width, prominence=prominence,
                                         rel_height=rel_height, threshold=threshold, distance=distance)
         if mode == 0:
             skeletonized_slide[peaks, i] = 1

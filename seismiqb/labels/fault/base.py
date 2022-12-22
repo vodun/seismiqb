@@ -219,7 +219,7 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
             if self._points is None and self._sticks is None:
                 raise AttributeError("'simplices' can't be created ('points' and 'sticks' don't exist)")
 
-            self._simplices, self._nodes = sticks_to_simplices(self.sticks, self.direction)
+            self.sticks_to_simplices()
 
         return self._simplices
 
@@ -232,7 +232,7 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
             if self._points is None and self._sticks is None:
                 raise AttributeError("'nodes' can't be created ('points' and 'sticks' don't exist)")
 
-            self._simplices, self._nodes = sticks_to_simplices(self.sticks, self.direction)
+            self.sticks_to_simplices()
 
         return self._nodes
 
@@ -301,6 +301,12 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
         self.stick_orientation = stick_orientation
         self.sticks_step = sticks_step
         self.stick_nodes_step = stick_nodes_step
+
+    def sticks_to_simplices(self, max_simplices_depth=None, max_nodes_distance=None):
+        self._simplices, self._nodes = sticks_to_simplices(
+            self.sticks, self.direction, max_simplices_depth, max_nodes_distance
+        )
+
 
     def add_to_mask(self, mask, locations=None, width=1, axis=None, sparse=False, **kwargs):
         """ Add fault to background.
