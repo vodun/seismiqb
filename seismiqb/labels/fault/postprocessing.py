@@ -207,9 +207,10 @@ def thin_line(points, axis=0):
         if points[i, axis] == points[i-1, axis]:
             p += points[i]
             n += 1
-        if (i == len(points) - 1) or (points[i, axis] != points[i-1, axis]):
+        else:
             line[pos] = p / n
             n = 1
             pos += 1
             p = points[i].copy()
-    return line[:pos]
+    line[pos] = p / n
+    return line[:pos+1]

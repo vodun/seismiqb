@@ -303,6 +303,7 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
         self.stick_nodes_step = stick_nodes_step
 
     def sticks_to_simplices(self, max_simplices_depth=None, max_nodes_distance=None):
+        """ Create nodes/simplices from fault sticks. """
         self._simplices, self._nodes = sticks_to_simplices(
             self.sticks, self.direction, max_simplices_depth, max_nodes_distance
         )
