@@ -7,7 +7,7 @@ from scipy.ndimage import find_objects
 
 from batchflow import Notifier
 
-# from .base import Fault TODO: add prototypes_to_faults method
+from .base import Fault
 from .utils import dilate_coords, thin_coords, bboxes_intersected, bboxes_adjoin, depthwise_distances, find_border
 
 class FaultExtractor:
@@ -32,6 +32,8 @@ class FaultExtractor:
         self.container = {}
         self.components_queue = []
         self.n_not_merged = 0 # TODO: add proper update on extension stage
+
+        self.prototypes = []
 
         for slide_idx in Notifier('t')(range(self.shape[self.orientation])):
             mask = skeletonized_array[slide_idx, :, :]
@@ -94,8 +96,6 @@ class FaultExtractor:
 
     def extract_prototypes(self):
         """ ..!!.. """
-        prototypes = []
-
         while self.n_not_merged > 0:
             component_coords, merged, new_items, to_break = self.component_extraction()
 
@@ -132,9 +132,7 @@ class FaultExtractor:
                     self.container[slide_idx]['mergeable'] = np.append(self.container[slide_idx]['mergeable'],
                                                                        mergeable)
 
-            prototypes.append(component_coords)
-
-        return prototypes
+            self.prototypes.append(component_coords)
 
     def find_not_merged_component(self):
         """ Find the longest not merged item on the minimal slide. """
@@ -340,7 +338,7 @@ class FaultExtractor:
 
         return closest_component_coords, merged_idx, item_split_indices, component_split_indices
 
-    def find_connected_prototypes(self, prototypes, intersection_ratio=None, contour_threshold=10, axis=2):
+    def find_connected_prototypes(self, intersection_ratio=None, contour_threshold=10, axis=2):
         """ Find prototypes which can be connected as puzzles.
 
         ..!!..
@@ -359,12 +357,12 @@ class FaultExtractor:
         to_concat = defaultdict(list) # owner -> items
         concated_with = {} # item -> owner
 
-        bboxes = [np.column_stack([np.min(coords, axis=0), np.max(coords, axis=0)]) for coords in prototypes]
+        bboxes = [np.column_stack([np.min(coords, axis=0), np.max(coords, axis=0)]) for coords in self.prototypes]
 
-        for j, coords_1 in enumerate(prototypes):
+        for j, coords_1 in enumerate(self.prototypes):
             bbox_1 = bboxes[j]
 
-            for k, coords_2 in enumerate(prototypes[j+1:]):
+            for k, coords_2 in enumerate(self.prototypes[j+1:]):
                 bbox_2 = bboxes[k + j + 1]
 
                 low_intersection_border, high_intersection_border = bboxes_adjoin(bbox_1, bbox_2, axis=axis)
@@ -490,58 +488,58 @@ class FaultExtractor:
 
         return to_concat
 
-    def concat_connected_prototypes(self, prototypes, axis=None):
+    def concat_connected_prototypes(self, axis=None):
         """ Find and concat prototypes connected by the `axis`.
 
         ..!!..
         """
         # Concat coords and remove concated parts
-        to_concat = self.find_connected_prototypes(prototypes=prototypes, axis=axis)
+        to_concat = self.find_connected_prototypes(axis=axis)
 
         remove_elements = []
 
         for where_to_concat_idx, what_to_concat_idxs in to_concat.items():
-            coords = [prototypes[where_to_concat_idx]]
+            coords = [self.prototypes[where_to_concat_idx]]
 
             for idx in what_to_concat_idxs:
-                coords.append(prototypes[idx])
+                coords.append(self.prototypes[idx])
 
-            prototypes[where_to_concat_idx] = np.vstack(coords)
+            self.prototypes[where_to_concat_idx] = np.vstack(coords)
             remove_elements.extend(what_to_concat_idxs)
 
         remove_elements.sort()
         remove_elements = remove_elements[::-1]
 
         for idx in remove_elements:
-            _ = prototypes.pop(idx)
+            _ = self.prototypes.pop(idx)
 
-        return prototypes
-
-    def run_concat(self, prototypes, iters=5):
+    def run_concat(self, iters=5):
         """ Only for tests. Will be removed. """
-        previous_prototypes_amount = len(prototypes) + 100 # to avoid stopping after first concat
-        print("Start amount: ", len(prototypes))
+        previous_prototypes_amount = len(self.prototypes) + 100 # to avoid stopping after first concat
+        print("Start amount: ", len(self.prototypes))
 
         for _ in range(iters):
-            prototypes = self.concat_connected_prototypes(prototypes=prototypes, axis=self.orientation)
+            self.concat_connected_prototypes(axis=self.orientation)
 
-            print("After ilines concat: ", len(prototypes))
+            print("After ilines concat: ", len(self.prototypes))
 
-            if len(prototypes) < previous_prototypes_amount:
-                previous_prototypes_amount = len(prototypes)
+            if len(self.prototypes) < previous_prototypes_amount:
+                previous_prototypes_amount = len(self.prototypes)
             else:
                 break
 
-            prototypes = self.concat_connected_prototypes(prototypes=prototypes, axis=-1)
+            self.concat_connected_prototypes(axis=-1)
 
-            print("After depths concat: ",len(prototypes))
+            print("After depths concat: ", len(self.prototypes))
 
-            if len(prototypes) < previous_prototypes_amount:
-                previous_prototypes_amount = len(prototypes)
+            if len(self.prototypes) < previous_prototypes_amount:
+                previous_prototypes_amount = len(self.prototypes)
             else:
                 break
 
-        return prototypes
+    def prototypes_to_faults(self, field):
+        faults = [Fault(prototype, field=field) for prototype in prototypes]
+        return faults
 
 # Helpers
 # Component dependencies
