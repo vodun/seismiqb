@@ -117,8 +117,10 @@ def n_differences_for_coords(coords_1, coords_2, max_threshold=None):
         previous_point_2 = point_2
 
         if (point_1 == point_2).all():
-            point_1, counter_1 = _iter_next(point=point_1, previous_point=previous_point_1, coords=coords_1, counter=counter_1)
-            point_2, counter_2 = _iter_next(point=point_2, previous_point=previous_point_2, coords=coords_2, counter=counter_2)
+            point_1, counter_1 = _iter_next(point=point_1, previous_point=previous_point_1,
+                                            coords=coords_1, counter=counter_1)
+            point_2, counter_2 = _iter_next(point=point_2, previous_point=previous_point_2,
+                                            coords=coords_2, counter=counter_2)
         else:
             diff = point_1 - point_2
 
@@ -128,9 +130,9 @@ def n_differences_for_coords(coords_1, coords_2, max_threshold=None):
                                                     coords=coords_2, counter=counter_2)
                     break
 
-                elif elem < 0:
+                if elem < 0:
                     n_presented_only_in_coords_1 += 1
-                    
+
                     if (max_threshold is not None) and (n_presented_only_in_coords_1 >= max_threshold):
                         return n_presented_only_in_coords_1
 
@@ -222,7 +224,7 @@ def find_border(coords, find_lower_border, projection_axis):
     transposed_projection[:, [-1, ankhor_axis]] = transposed_projection[:, [ankhor_axis, -1]]
     transposed_projection = transposed_projection[transposed_projection[:, 0].argsort()]
 
-    # Get min and max values (left and right borders)    
+    # Get min and max values (left and right borders)
     orientation_wise_group = groupby_all(transposed_projection)
 
     depths = orientation_wise_group[:, ankhor_axis]

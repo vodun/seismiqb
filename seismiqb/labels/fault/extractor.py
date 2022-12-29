@@ -8,7 +8,7 @@ from scipy.ndimage import find_objects
 from batchflow import Notifier
 
 # from .base import Fault TODO: add prototypes_to_faults method
-from .utils import *
+from .utils import dilate_coords, thin_coords, bboxes_intersected, bboxes_adjoin, depthwise_distances, find_border
 
 class FaultExtractor:
     """ ..!!..
@@ -85,7 +85,7 @@ class FaultExtractor:
                 'objects_coords': objects_coords,
                 'objects_bboxes': objects_bboxes,
 
-                'lengths': lengths, 
+                'lengths': lengths,
 
                 'mergeable': mergeable
             }
@@ -93,6 +93,7 @@ class FaultExtractor:
             self.n_not_merged += np.sum(mergeable)
 
     def extract_prototypes(self):
+        """ ..!!.. """
         prototypes = []
 
         while self.n_not_merged > 0:
@@ -128,7 +129,8 @@ class FaultExtractor:
 
                     # Merge state
                     mergeable = False if length <= self.component_length_threshold else True
-                    self.container[slide_idx]['mergeable'] = np.append(self.container[slide_idx]['mergeable'], mergeable)     
+                    self.container[slide_idx]['mergeable'] = np.append(self.container[slide_idx]['mergeable'],
+                                                                       mergeable)
 
             prototypes.append(component_coords)
 
@@ -141,7 +143,8 @@ class FaultExtractor:
         for slide_idx in range(self.shape[self.orientation]):
             if self.container[slide_idx]['mergeable'].any():
                 max_len = np.max(self.container[slide_idx]['lengths'][self.container[slide_idx]['mergeable']])
-                idx = np.argwhere((self.container[slide_idx]['lengths'] == max_len) & (self.container[slide_idx]['mergeable']))[0][0]
+                idx = np.argwhere((self.container[slide_idx]['lengths'] == max_len) & \
+                                  (self.container[slide_idx]['mergeable']))[0][0]
                 break
 
         return slide_idx, idx
@@ -159,14 +162,14 @@ class FaultExtractor:
             merged = [(start_slide_idx, idx)]
             component_coords = self.container[start_slide_idx]['objects_coords'][idx]
 
-            # Extract more close object skeleton 
+            # Extract more close object skeleton
             dilated_component_coords = dilate_coords(component_coords, axis=self.orthogonal_orientation,
                                                      max_value=self.shape[self.orthogonal_orientation]-1)
             component_coords = self.extract_component_from_proba(slide_idx=start_slide_idx,
                                                                  coords=dilated_component_coords)
 
             current_slide_component_coords = component_coords
-        else:        
+        else:
             merged = []
             component_coords = self.components_queue.pop()
 
@@ -289,14 +292,14 @@ class FaultExtractor:
                                                        max_threshold=min_distance)
 
                 if borders_distance < min_distance: # min_distance initialization value is a threshold
-                    min_distance = borders_distance 
+                    min_distance = borders_distance
                     best_intersection_depths = intersection_depths
 
                     closest_component_coords = current_component_coords
                     merged_idx = idx
 
                     if borders_distance == 0:
-                        break               
+                        break
 
         if closest_component_coords is not None:
             closest_component_coords = dilate_coords(closest_component_coords, axis=self.orthogonal_orientation,
@@ -315,8 +318,10 @@ class FaultExtractor:
                 new_component_borders = np.min(closest_component_coords[:, -1]), np.max(closest_component_coords[:, -1])
 
                 # Find differences between borders and intersected part
-                borders_diffs_for_new = intersection_borders[0] - new_component_borders[0], new_component_borders[1] - intersection_borders[1]
-                borders_diffs_for_main = intersection_borders[0] - component_borders[0], component_borders[1] - intersection_borders[1]
+                borders_diffs_for_new = (intersection_borders[0] - new_component_borders[0],
+                                         new_component_borders[1] - intersection_borders[1])
+                borders_diffs_for_main = (intersection_borders[0] - component_borders[0],
+                                          component_borders[1] - intersection_borders[1])
 
                 # Split or not
                 # Get split for the new part
@@ -392,7 +397,8 @@ class FaultExtractor:
                 contour_2_coords = find_border(coords=intersection_coords_2, find_lower_border=~is_first_upper,
                                                projection_axis=self.orthogonal_orientation)
 
-                # Simple check: if one data contour is much longer than other, then we can't connect them as puzzle details
+                # Simple check: if one data contour is much longer than other,
+                # then we can't connect them as puzzle details
                 length_ratio = min(len(contour_1_coords), len(contour_2_coords)) / \
                                max(len(contour_1_coords), len(contour_2_coords))
 
@@ -457,15 +463,15 @@ class FaultExtractor:
     #             #### Variant 2 - TODO fix and check timings
     #             ind = np.lexsort((contour_1_coords[:, 2], contour_1_coords[:, 1], contour_1_coords[:, 0]))
     #             contour_1_coords = contour_1_coords[ind, :]
-                
+
     #             ind = np.lexsort((contour_2_coords[:, 2], contour_2_coords[:, 1], contour_2_coords[:, 0]))
     #             contour_2_coords = contour_2_coords[ind, :]
-                
+
     #             contour_1_coords_dilated = dilate_coords(coords=contour_1_coords, dilate=self.dilation_width,
     #                                                      axis=self.orthogonal_orientation)
     #             contour_2_coords_dilated = dilate_coords(coords=contour_2_coords, dilate=self.dilation_width,
     #                                                      axis=self.orthogonal_orientation)
-                
+
     #             second_is_subset_of_first_ = n_differences_for_coords(contour_2_coords, contour_1_coords_dilated,
     #                                                                   max_threshold=corrected_contour_threshold)
     #             first_is_subset_of_second_ = n_differences_for_coords(contour_1_coords, contour_2_coords_dilated,
@@ -514,7 +520,7 @@ class FaultExtractor:
     def run_concat(self, prototypes, iters=5):
         """ Only for tests. Will be removed. """
         previous_prototypes_amount = len(prototypes) + 100 # to avoid stopping after first concat
-        print(f"Start amount: ", len(prototypes))
+        print("Start amount: ", len(prototypes))
 
         for _ in range(iters):
             prototypes = self.concat_connected_prototypes(prototypes=prototypes, axis=self.orientation)
@@ -542,8 +548,10 @@ class FaultExtractor:
 def _add_link(item_i, item_j, to_concat, concated_with):
     """ Add item_i and item_j to dependencies graph of elements to concat.
 
-    `to_concat` is the dict in the format {'owner_idx': [items_indices]} and contains which components to concat into owner.
-    `concated_with` is the dict in the format {'item_idx': owner_idx} and contains to which component (owner) merge item.
+    `to_concat` is the dict in the format {'owner_idx': [items_indices]} and contains
+    which components to concat into owner-component.
+    `concated_with` is the dict in the format {'item_idx': owner_idx} and contains
+    to which component (owner) merge item.
 
     ..!!..
     """

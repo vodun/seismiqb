@@ -36,7 +36,7 @@ def validate_fault(coords=None, fault=None, depth_step=1, length_threshold=5, de
 
     kwargs = {
         'depth_break_off_threshold': depth_break_off_threshold,
-        'length_threshold': length_threshold, 
+        'length_threshold': length_threshold,
         'distances_threshold': distances_threshold,
         'components_distances_threshold': components_distances_threshold,
         'projection_axis': projection_axis
@@ -54,7 +54,8 @@ def validate_fault(coords=None, fault=None, depth_step=1, length_threshold=5, de
         anchor_line = anchor_line_init
         for depth in range(anchor_depth_init+order*depth_step, depths_ranges[0]+1*order, order*depth_step):
             is_valid, anchor_line = _is_valid_depth_slides(coords=coords, bbox=bbox, anchor_line=anchor_line,
-                                                           order=order, depth=depth, end_depth=depths_ranges[0]-1, **kwargs)
+                                                           order=order, depth=depth, end_depth=depths_ranges[0]-1,
+                                                           **kwargs)
             if not is_valid:
                 return False
 
@@ -63,16 +64,18 @@ def validate_fault(coords=None, fault=None, depth_step=1, length_threshold=5, de
         anchor_line = anchor_line_init
         for depth in range(anchor_depth_init+order*depth_step, depths_ranges[1]+1*order, order*depth_step):
             is_valid, anchor_line = _is_valid_depth_slides(coords=coords, bbox=bbox, anchor_line=anchor_line,
-                                                           order=order, depth=depth, end_depth=depths_ranges[1]+1, **kwargs)
+                                                           order=order, depth=depth, end_depth=depths_ranges[1]+1,
+                                                           **kwargs)
             if not is_valid:
                 return False
     return True
 
-def _init_anchor_line(coords, bbox): 
+def _init_anchor_line(coords, bbox):
     """ Find initial anchor line. """
     # Find initial anchor line as a longest line on a depth-slide in the object
 
-    # For this we iter over depths in the some range and try to find longest depthwise line which consists the smallest components amount
+    # For this we iter over depths in the some range and try to find longest depthwise line
+    # which consists the smallest components amount
     # Sort depths by object points amount
     coords_ = np.zeros_like(coords)
     coords_[:, 0] = np.sort(coords[:, -1])
@@ -115,14 +118,14 @@ def _init_anchor_line(coords, bbox):
 
     return selected_anchor_line, selected_anchor_depth
 
-def _is_valid_depth_slides(coords, bbox, anchor_line,
-                           order, depth, depth_break_off_threshold, 
-                           length_threshold, distances_threshold, components_distances_threshold, 
+def _is_valid_depth_slides(coords, bbox, anchor_line, order, depth, depth_break_off_threshold,
+                           length_threshold, distances_threshold, components_distances_threshold,
                            end_depth, projection_axis):
     """ Validate the slide or update the anchor.
 
     ..!!.."""
-    # Validate depth slide by anchor_line contour: if new mask has componets separated by ankhor line -> then it is invalid
+    # Validate depth slide by anchor_line contour:
+    # if new mask has componets separated by ankhor line -> then it is invalid
     if (order > 0) and (depth + depth_break_off_threshold > end_depth): # TODO properly before the function call
         return True, anchor_line
     if (order < 0) and (depth - depth_break_off_threshold < end_depth):
@@ -158,14 +161,14 @@ def _is_valid_depth_slides(coords, bbox, anchor_line,
             background[:labeled_mask_dilated.shape[0], :labeled_mask_dilated.shape[1]] = labeled_mask_dilated
 
             if (ankhor_mask - background > 0).sum() < 3:
-                anchor_line = labeled 
+                anchor_line = labeled
                 return True, anchor_line
 
-        if len(objects) > 1:      
+        if len(objects) > 1:
             # Check objects distances (between objects)
             distances = []
 
-            for i in range(len(objects)-1):                        
+            for i in range(len(objects)-1):
                 distances_i = []
 
                 coords_i = np.nonzero(labeled == i + 1)
@@ -204,8 +207,10 @@ def _is_valid_depth_slides(coords, bbox, anchor_line,
             dilated_ankhor_coords = np.zeros((len(anchor_line_coords)*3, 2), int)
 
             for idx, i in enumerate(range(-1, 2)):
-                dilated_ankhor_coords[len(anchor_line_coords)*idx:len(anchor_line_coords)*(idx+1), 0] = anchor_line_coords[:, 0]
-                dilated_ankhor_coords[len(anchor_line_coords)*idx:len(anchor_line_coords)*(idx+1), 1] = anchor_line_coords[:, 1] + i
+                dilated_ankhor_coords[len(anchor_line_coords)*idx:len(anchor_line_coords)*(idx+1),
+                                      0] = anchor_line_coords[:, 0]
+                dilated_ankhor_coords[len(anchor_line_coords)*idx:len(anchor_line_coords)*(idx+1),
+                                      1] = anchor_line_coords[:, 1] + i
 
             ankhor_tree = KDTree(dilated_ankhor_coords)
             anchor_line_coords = dilated_ankhor_coords
@@ -213,7 +218,7 @@ def _is_valid_depth_slides(coords, bbox, anchor_line,
             # Check objects distances (between object and ankhor)
             distances = []
 
-            for i in range(len(objects)):                        
+            for i in range(len(objects)):
                 coords_i = np.nonzero(labeled == i + 1)
                 length = len(coords_i[0])
 
@@ -232,7 +237,7 @@ def _is_valid_depth_slides(coords, bbox, anchor_line,
             # Find objects signs
             signs = set()
 
-            for idx, obj in enumerate(objects):
+            for idx, _ in enumerate(objects):
                 label = labeled == idx + 1
 
                 coords_ = np.nonzero(label)
@@ -275,7 +280,7 @@ def _distance_sign(ankhor_coords, ankhor_tree, points, projection_axis):
     distances[distances <= 0.5] = 0 # close to zero
 
     # Early exit if lines are close enough
-    if ((distances == 0).sum() >= (distances > 0).sum()):
+    if (distances == 0).sum() >= (distances > 0).sum():
         return 0
 
     # Find signed distances, as orientation-wise distances between closest points
@@ -293,6 +298,6 @@ def _distance_sign(ankhor_coords, ankhor_tree, points, projection_axis):
 
     if (zero_amount >= plus_amount) and (zero_amount >= minus_amount):
         return 0
-    if (plus_amount >= minus_amount):
+    if plus_amount >= minus_amount:
         return +1
-    return -1    
+    return -1
