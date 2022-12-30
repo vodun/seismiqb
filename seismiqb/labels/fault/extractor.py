@@ -41,7 +41,6 @@ class FaultExtractor:
         component_len_threshold : int
             Threshold to filter out too small connected components on data slides.
         """
-        # TODO: move _extract_component_from_proba to __init__ stage
         self.shape = skeletonized_array.shape
 
         self.orientation = orientation
@@ -89,7 +88,16 @@ class FaultExtractor:
                 coords[:, self.orthogonal_orientation] = coords_2d[0] + object_bbox[0].start
                 coords[:, 2] = coords_2d[1] + object_bbox[1].start
 
-                objects_coords.append(coords)
+                # Refine coords: we change skeletonize appliance area
+                dilated_coords = dilate_coords(coords, axis=self.orthogonal_orientation,
+                                               max_value=self.shape[self.orthogonal_orientation]-1)
+
+                smoothed_values = smoothed[dilated_coords[:, self.orthogonal_orientation], dilated_coords[:, -1]]
+
+                refined_coords = thin_coords(coords=dilated_coords, values=smoothed_values)
+                refined_coords[:, self.orientation] = slide_idx
+
+                objects_coords.append(refined_coords)
 
                 # Length
                 lengths.append(len(coords))
@@ -103,8 +111,6 @@ class FaultExtractor:
             mergeable[is_too_small] = False
 
             self.container[slide_idx] = {
-                'smoothed': smoothed,
-
                 'objects_coords': objects_coords,
                 'objects_bboxes': objects_bboxes,
 
@@ -169,13 +175,8 @@ class FaultExtractor:
                 return None
 
             self.container[start_slide_idx]['mergeable'][idx] = False
+
             component = self.container[start_slide_idx]['objects_coords'][idx]
-
-            # Extract more close object skeleton
-            dilated_component = dilate_coords(component, axis=self.orthogonal_orientation,
-                                              max_value=self.shape[self.orthogonal_orientation]-1)
-            component = self._extract_component_from_proba(slide_idx=start_slide_idx, coords=dilated_component)
-
             prototype = component
         else:
             prototype = self.prototypes_queue.popleft()
@@ -216,15 +217,6 @@ class FaultExtractor:
                 break
 
         return prototype
-
-    def _extract_component_from_proba(self, slide_idx, coords):
-        """ Extract component coordinates from the area defined by `coords` argument. """
-        # Get probabilities in the dilated area and extract thin component
-        smoothed_proba = self.container[slide_idx]['smoothed'][coords[:, self.orthogonal_orientation], coords[:, -1]]
-
-        component = thin_coords(coords=coords, values=smoothed_proba)
-        component[:, self.orientation] = slide_idx
-        return component
 
     def _find_closest_component(self, component, slide_idx, distances_threshold=10,
                                 depth_iteration_step=10, depths_threshold=10):
@@ -273,25 +265,17 @@ class FaultExtractor:
                         break
 
         if closest_component is not None:
-            closest_component = dilate_coords(closest_component, axis=self.orthogonal_orientation,
-                                                     max_value=self.shape[self.orthogonal_orientation]-1)
-
             intersection_height = intersection_borders[1] - intersection_borders[0]
 
             if (intersection_height < 0.2*len(component)/self.dilation) or \
-               (intersection_height < 0.2*len(closest_component)/self.dilation):
+               (intersection_height < 0.2*len(closest_component)):
                 # Coords overlap too small -> different components
                 closest_component = None
             else:
                 # Merge finded component and split its extra parts
                 self.container[slide_idx]['mergeable'][merged_idx] = False
 
-                # Extract component from the closest mask
-                closest_component = self._extract_component_from_proba(slide_idx=slide_idx,
-                                                                              coords=closest_component)
-
                 # Find prototype and new component splitting depths
-
                 # Split prototype: check that the new component is smaller than the previous one (for each border)
                 if intersection_borders[0] - component_bbox[-1, 0] > depths_threshold:
                     prototype_split_indices[0] = intersection_borders[0]
