@@ -4,6 +4,7 @@ import numpy as np
 
 from cc3d import connected_components
 from scipy.ndimage import find_objects
+from scipy.ndimage.morphology import binary_dilation
 
 from batchflow import Notifier
 
@@ -11,6 +12,7 @@ from .base import Fault
 from .utils import dilate_coords, thin_coords, bboxes_intersected, bboxes_adjoin, max_depthwise_distance, find_border
 
 # TODO: add class FaultPrototype with coords and bbox, and concat operation
+# TODO: add info about connected prototypes (maybe into FaultPrototype)
 
 class FaultExtractor:
     """ ..!!..
@@ -70,37 +72,42 @@ class FaultExtractor:
             objects_bboxes = []
 
             for idx, object_bbox in enumerate(objects):
-                # Bbox
-                bbox = np.empty((3, 2), int)
+                # Refined coords: we refine skeletonize effects by applying it on limited area
+                dilation_axis = self.orthogonal_orientation
+                dilation_ranges = (np.clip(object_bbox[0].start - self.dilation // 2, 0, None),
+                                   np.clip(object_bbox[0].stop + self.dilation // 2, 0, self.shape[dilation_axis]))
 
-                bbox[self.orientation, :] = slide_idx
-                bbox[self.orthogonal_orientation, :] = object_bbox[0].start, object_bbox[0].stop-1
-                bbox[-1, :] = object_bbox[1].start, object_bbox[1].stop-1
+                object_mask = labeled[dilation_ranges[0]:dilation_ranges[1], object_bbox[-1]] == idx + 1
+                object_mask = binary_dilation(object_mask, structure=np.ones((1, self.dilation), bool))
 
-                objects_bboxes.append(bbox)
+                dilated_coords_2d = np.nonzero(object_mask)
 
-                # Coords
-                coords_2d = np.nonzero(labeled[object_bbox] == idx + 1)
+                dilated_coords = np.zeros((len(dilated_coords_2d[0]), 3), dtype=int)
 
-                coords = np.zeros((len(coords_2d[0]), 3), dtype=int)
+                dilated_coords[:, self.orientation] = slide_idx
+                dilated_coords[:, dilation_axis] = dilated_coords_2d[0] + dilation_ranges[0]
+                dilated_coords[:, 2] = dilated_coords_2d[1] + object_bbox[1].start
 
-                coords[:, self.orientation] = slide_idx
-                coords[:, self.orthogonal_orientation] = coords_2d[0] + object_bbox[0].start
-                coords[:, 2] = coords_2d[1] + object_bbox[1].start
-
-                # Refine coords: we change skeletonize appliance area
-                dilated_coords = dilate_coords(coords, axis=self.orthogonal_orientation,
-                                               max_value=self.shape[self.orthogonal_orientation]-1)
-
-                smoothed_values = smoothed[dilated_coords[:, self.orthogonal_orientation], dilated_coords[:, -1]]
+                smoothed_values = smoothed[dilated_coords[:, dilation_axis], dilated_coords[:, -1]]
 
                 refined_coords = thin_coords(coords=dilated_coords, values=smoothed_values)
                 refined_coords[:, self.orientation] = slide_idx
 
                 objects_coords.append(refined_coords)
 
+                # Bbox
+                bbox = np.empty((3, 2), int)
+
+                bbox[self.orientation, :] = slide_idx
+                bbox[self.orthogonal_orientation, :] = (np.min(refined_coords[:, self.orthogonal_orientation]),
+                                                        np.max(refined_coords[:, self.orthogonal_orientation]))
+                                                        # TODO: fix bboxes everywhere: must be range, not max coord
+                bbox[-1, :] = (np.min(refined_coords[:, -1]), np.max(refined_coords[:, -1]))
+
+                objects_bboxes.append(bbox)
+
                 # Length
-                lengths.append(len(coords))
+                lengths.append(len(refined_coords))
 
             # Init merging state
             mergeable = np.array([True] * len(lengths))
@@ -151,7 +158,7 @@ class FaultExtractor:
 
     def _find_not_merged_component(self):
         """ Find the longest not merged item on the minimal slide. """
-        # TODO: add info about slides with mergeable cmponents and reduce cycle iterations amount
+        # TODO: add info about slides with mergeable components and reduce cycle iterations amount
         idx = None
 
         for slide_idx in range(self.shape[self.orientation]):
@@ -200,17 +207,15 @@ class FaultExtractor:
                     # Cut upper part of the component
                     new_prototype = prototype[prototype[:, -1] < prototype_split_indices[0]]
 
-                    if len(new_prototype) > 0: # TODO: check that it is an extra condition
-                        self.prototypes_queue.append(new_prototype)
-                        prototype = prototype[prototype[:, -1] >= prototype_split_indices[0]]
+                    self.prototypes_queue.append(new_prototype)
+                    prototype = prototype[prototype[:, -1] >= prototype_split_indices[0]]
 
                 if prototype_split_indices[1] is not None:
                     # Cut lower part of the component
                     new_prototype = prototype[prototype[:, -1] > prototype_split_indices[1]]
 
-                    if len(new_prototype) > 0: # TODO: check that it is an extra condition
-                        self.prototypes_queue.append(new_prototype)
-                        prototype = prototype[prototype[:, -1] <= prototype_split_indices[1]]
+                    self.prototypes_queue.append(new_prototype)
+                    prototype = prototype[prototype[:, -1] <= prototype_split_indices[1]]
 
                 prototype = np.vstack([prototype, component])
             else:
