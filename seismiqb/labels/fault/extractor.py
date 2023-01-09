@@ -317,7 +317,7 @@ class FaultExtractor:
         intersection_ratio_threshold : float
             Prototypes contours intersection ratio to decide that prototypes are not close.
         contour_threshold : int
-            Amount of points in contour to decide that prototypes are not close.
+            Amount of different contour points to decide that prototypes are not close.
         """
         margin = 1 # local constant for code prettifying
 
@@ -331,6 +331,7 @@ class FaultExtractor:
 
         for j, prototype_1 in enumerate(self.prototypes):
             bbox_1 = bboxes[j]
+            # TODO: Find contour and get it only in the intersection area?
 
             for k, prototype_2 in enumerate(self.prototypes[j+1:]):
                 bbox_2 = bboxes[k + j + 1]
@@ -347,9 +348,8 @@ class FaultExtractor:
                 intersection_coords_2 = prototype_2[(prototype_2[:, axis] >= intersection_borders[0] - margin) & \
                                                     (prototype_2[:, axis] <= intersection_borders[1] + margin)]
 
-                is_first_upper = (bbox_1[axis, 0] < bbox_2[axis, 0]) or (bbox_1[axis, 1] < bbox_2[axis, 1])
-
                 # Prepare data for contouring
+                # TODO: reduce this clause, sorting can be worthy
                 if axis not in (-1, 2):
                     # For contour finding we apply groupby which works only for the last axis, so we swap axes coords
                     intersection_coords_1[:, [-1, axis]] = intersection_coords_1[:, [axis, -1]]
@@ -359,11 +359,14 @@ class FaultExtractor:
                     intersection_coords_1 = intersection_coords_1[intersection_coords_1[:, 0].argsort()]
                     intersection_coords_2 = intersection_coords_2[intersection_coords_2[:, 0].argsort()]
 
+                is_first_upper = (bbox_1[axis, 0] < bbox_2[axis, 0]) or (bbox_1[axis, 1] < bbox_2[axis, 1])
+
                 # Find object contours in the area of interest
                 contour_1 = find_border(coords=intersection_coords_1, find_lower_border=is_first_upper,
                                         projection_axis=self.orthogonal_orientation)
                 contour_2 = find_border(coords=intersection_coords_2, find_lower_border=~is_first_upper,
                                         projection_axis=self.orthogonal_orientation)
+                # TODO: rethink borders intersection, maybe images operations will be helpful
 
                 # Simple check: if one data contour is much longer than other,
                 # then we can't connect them as puzzle details
@@ -372,21 +375,22 @@ class FaultExtractor:
                 if length_ratio < intersection_ratio_threshold:
                     continue
 
-                # Shift one of the objects, making their borders intersected
+                # Shift one of the objects, making their contours intersected
                 shift = 1 if is_first_upper else - 1
                 contour_1[:, -1] += shift
 
                 # Evaluate objects heights for threshold
+                # TODO: rethink this part, it seems extra
                 height_1 = contour_1[:, -1].max() - contour_1[:, -1].min() + 1
                 height_2 = contour_2[:, -1].max() - contour_2[:, -1].min() + 1
 
                 corrected_contour_threshold = contour_threshold
 
+                # TODO: reduce next condition, maybe make more strict threshold
+
                 # Flatten line-likable borders and objects with small borders and tighten threshold restrictions
-                if (len(contour_1) <= contour_threshold + 2*margin) or \
-                   (len(contour_2) <= contour_threshold + 2*margin) or \
-                   (height_1 < 3) or (height_2 < 3):
-                    # Get the most sufficient depth for each object
+                if (height_1 <= 1 + margin) or (height_2 <= 1 + margin): # one of them is a flatten line with borders on margin
+                    # Get the most sufficient depth for objects
                     depths, frequencies = np.unique(np.hstack([contour_1[:, -1],
                                                                contour_2[:, -1]]), return_counts=True)
 
@@ -397,76 +401,47 @@ class FaultExtractor:
 
                     if (len(contour_1) == 0) or (len(contour_2) == 0):
                         # Contours are intersected on another depth, with less amount of points
-                        break
+                        continue
 
                     length_ratio = min(len(contour_2), len(contour_1)) / max(len(contour_2), len(contour_1))
 
                     if length_ratio < intersection_ratio_threshold:
                         continue
 
-                    if len(contour_1) < 3 or len(contour_2) < 3: # TODO: think about threshold values
-                        corrected_contour_threshold = 0
-                    else:
-                        corrected_contour_threshold = 1
+                    corrected_contour_threshold = 1
 
-                # Check that one component projection is inside another (for both)
+                # Check that one component contour is inside another (for both)
                 # Objects can be shifted on orthogonal_orientation axis, so apply dilation for coords
-                ### Variant 1
-                contour_1_set = set(tuple(x) for x in contour_1)
-                contour_2_set = set(tuple(x) for x in contour_2)
+                # TODO: try to reduce amount of checks with constraints
+                # TODO: check reordering efficiency on huge data array
+                # TODO: check images intersection efficiency
+                if len(contour_1) > len(contour_2):
+                    comparison_order = (contour_1, contour_2)
+                else:
+                    comparison_order = (contour_2, contour_1)
 
-                length_ratio = min(len(contour_2_set), len(contour_1_set)) /  max(len(contour_2_set), len(contour_1_set))
+                for i in range(2):
+                    contour_1_i = comparison_order[i]
+                    contour_2_i = comparison_order[i != 1]
 
-                if length_ratio < intersection_ratio_threshold: # previous coordinates can contain non-unique elements
-                    continue
-
-                # Check that second object contour coordinates are inside the first
-                contour_1_dilated = dilate_coords(coords=contour_1, dilate=self.dilation,
-                                                  axis=self.orthogonal_orientation)
-                contour_1_dilated = set(tuple(x) for x in contour_1_dilated)
-
-                second_is_subset_of_first = len(contour_2_set - contour_1_dilated) < corrected_contour_threshold
-
-                if second_is_subset_of_first:
-                    to_concat, concated_with = _add_link(item_i=j, item_j=k+j+1,
-                                                         to_concat=to_concat, concated_with=concated_with)
-                    continue
-
-                # Check that first object contour coordinates are inside the second
-                contour_2_dilated = dilate_coords(coords=contour_2, dilate=self.dilation,
-                                                  axis=self.orthogonal_orientation)
-                contour_2_dilated = set(tuple(x) for x in contour_2_dilated)
-
-                first_is_subset_of_second = len(contour_1_set - contour_2_dilated) < corrected_contour_threshold
-
-                if first_is_subset_of_second:
-                    to_concat, concated_with = _add_link(item_i=j, item_j=k+j+1,
-                                                         to_concat=to_concat, concated_with=concated_with)
-
-                # #### Variant 2 - TODO fix and check timings
-                # ind = np.lexsort((contour_1[:, 2], contour_1[:, 1], contour_1[:, 0]))
-                # contour_1 = contour_1[ind, :]
-
-                # ind = np.lexsort((contour_2[:, 2], contour_2[:, 1], contour_2[:, 0]))
-                # contour_2 = contour_2[ind, :]
-
-                # contour_1_dilated = dilate_coords(coords=contour_1, dilate=self.dilation,
-                #                                          axis=self.orthogonal_orientation)
-                # contour_2_dilated = dilate_coords(coords=contour_2, dilate=self.dilation,
-                #                                          axis=self.orthogonal_orientation)
-
-                # second_is_subset_of_first_ = n_differences_for_coords(contour_2, contour_1_dilated,
-                #                                                       max_threshold=corrected_contour_threshold)
-                # first_is_subset_of_second_ = n_differences_for_coords(contour_1, contour_2_dilated,
-                #                                                       max_threshold=corrected_contour_threshold)
-                # second_is_subset_of_first = second_is_subset_of_first < corrected_contour_threshold
-                # first_is_subset_of_second = first_is_subset_of_second < corrected_contour_threshold
-
-                # if second_is_subset_of_first or first_is_subset_of_second:
-                #     to_concat, concated_with = _add_link(item_i=j, item_j=k+j+1,
-                #                                          to_concat=to_concat, concated_with=concated_with)
-                # ####
+                    if self._is_contour_inside(contour_1_i, contour_2_i, contour_threshold=corrected_contour_threshold):
+                        to_concat, concated_with = _add_link(item_i=j, item_j=k+j+1,
+                                                            to_concat=to_concat, concated_with=concated_with)
+                        break
         return to_concat
+
+    def _is_contour_inside(self, contour_1, contour_2, contour_threshold):
+        """ Check that `contour_1` is almost inside dilated `contour_2`. """
+        contour_1_set = set(tuple(x) for x in contour_1)
+
+        # Objects can be shifted on `self.orthogonal_orientation`
+        contour_2_dilated = dilate_coords(coords=contour_2, dilate=self.dilation,
+                                          axis=self.orthogonal_orientation,
+                                          max_value=self.shape[self.orthogonal_orientation]-1)
+
+        contour_2_dilated = set(tuple(x) for x in contour_2_dilated)
+
+        return len(contour_1_set - contour_2_dilated) < contour_threshold
 
     def concat_connected_prototypes(self, axis=None):
         """ Find and concat prototypes connected by the `axis`.
@@ -499,18 +474,18 @@ class FaultExtractor:
         print("Start amount: ", len(self.prototypes))
 
         for _ in range(iters):
-            self.concat_connected_prototypes(axis=self.orientation)
+            self.concat_connected_prototypes(axis=-1)
 
-            print("After ilines concat: ", len(self.prototypes))
+            print("After depths concat: ", len(self.prototypes))
 
             if len(self.prototypes) < previous_prototypes_amount:
                 previous_prototypes_amount = len(self.prototypes)
             else:
                 break
 
-            self.concat_connected_prototypes(axis=-1)
+            self.concat_connected_prototypes(axis=self.orientation)
 
-            print("After depths concat: ", len(self.prototypes))
+            print("After ilines concat: ", len(self.prototypes))
 
             if len(self.prototypes) < previous_prototypes_amount:
                 previous_prototypes_amount = len(self.prototypes)

@@ -2,6 +2,7 @@
 import numpy as np
 from numba import njit
 
+from scipy.ndimage.morphology import binary_erosion
 from ...utils import groupby_min, groupby_max, groupby_all
 
 # Coordinates operations
@@ -63,93 +64,6 @@ def thin_coords(coords, values):
 
     return output[:position, :]
 
-# Set operations
-@njit
-def n_differences_for_coords(coords_1, coords_2, max_threshold=None):
-    """ Calculate amount of values which are presented in coords_1 and NOT in coords_2.
-
-    Note, that coords must be sorted by all columns.
-    # `max_threshold` for early exit
-    ..!!..
-    """
-    # Initial values
-    n_presented_only_in_coords_1 = 0
-
-    point_1 = coords_1[0, :]
-    point_2 = coords_2[0, :]
-
-    counter_1 = 1
-    counter_2 = 1
-
-    # Iter over coordinates arrays
-    while (counter_1 < len(coords_1)) and (counter_2 < len(coords_2)):
-        previous_point_1 = point_1
-
-        if (point_1 == point_2).all():
-            point_1, counter_1 = _iter_next(point=point_1, coords=coords_1, counter=counter_1)
-            point_2, counter_2 = _iter_next(point=point_2, coords=coords_2, counter=counter_2)
-        else:
-            diff = point_1 - point_2
-
-            for elem in diff:
-                if elem > 0:
-                    point_2, counter_2 = _iter_next(point=point_2, coords=coords_2, counter=counter_2)
-                    break
-
-                if elem < 0:
-                    n_presented_only_in_coords_1 += 1
-
-                    if (max_threshold is not None) and (n_presented_only_in_coords_1 >= max_threshold):
-                        return n_presented_only_in_coords_1
-
-                    point_1, counter_1 = _iter_next(point=point_1, coords=coords_1, counter=counter_1)
-                    break
-
-    # Encounter last element in coords_1
-    if counter_1 < len(coords_1):
-        # We iter over the coords_2 array, but some points in coords_1 weren't encountered
-        n_presented_only_in_coords_1 += n_unique(coords_1[counter_1-1:])
-    else:
-        # We iter over the coords_1 array, but the last point in coords_1 wasn't encountered
-        if (point_1 != previous_point_1).any():
-            n_presented_only_in_coords_1 += 1
-
-    return n_presented_only_in_coords_1
-
-@njit
-def _iter_next(point, coords, counter):
-    """ Iterating for non-unique elements.
-
-    Note, that this function needs sorted data.
-    """
-    previous_point = point
-
-    while (counter < len(coords)) and (point == previous_point).all():
-        point = coords[counter, :]
-        counter += 1
-
-    return point, counter
-
-@njit
-def n_unique(array):
-    """ Number of unique rows in array.
-
-    Roughly similar to len(np.unique(array, axis=0)), we need this implementation because
-    numba doesn't support `axis` parameter for `np.unique`.
-
-    Note, that this function needs sorted data.
-    """
-    previous_row = array[0, :]
-    n_unique_rows = 1
-
-    for i in range(1, len(array)):
-        if (array[i] != previous_row).any():
-            previous_row = array[i]
-            n_unique_rows += 1
-
-    return n_unique_rows
-
-
 # Distance evaluation
 def bboxes_intersected(bbox_1, bbox_2, axes=(0, 1, 2)):
     """ Check bboxes intersections on axes. """
@@ -198,7 +112,7 @@ def max_depthwise_distance(coords_1, coords_2, depths_ranges, step, axis, max_th
     return max_distance
 
 
-# Object oriented operations
+# Object-oriented operations
 def find_border(coords, find_lower_border, projection_axis):
     """ Find non-closed border part of the 3d object (upper or lower border).
 
@@ -213,38 +127,30 @@ def find_border(coords, find_lower_border, projection_axis):
     anchor_axis = 1 if projection_axis == 0 else 0
 
     # Make 2d projection on projection_axis
-    points_projection = coords.copy()
-    points_projection[:, projection_axis] = 0
+    bbox = np.column_stack([np.min(coords, axis=0), np.max(coords, axis=0)])
+    bbox = np.delete(bbox, projection_axis, 0)
 
-    # Find depth-wise contour
-    depthwise_contour = groupby_max(points_projection) if find_lower_border else groupby_min(points_projection)
+    origin = bbox[:, 0]
+    image_shape = bbox[:, 1] - bbox[:, 0] + 1
 
-    # Find non-projection axis-wise contour
-    # We swap anchor and depths axes for correct groupby appliance (groupby is applied only for the last axis)
-    transposed_projection = points_projection
-    transposed_projection[:, [-1, anchor_axis]] = transposed_projection[:, [anchor_axis, -1]]
-    transposed_projection = transposed_projection[transposed_projection[:, 0].argsort()] # groupby needs sorted data
+    mask = np.zeros(image_shape, bool)
+    mask[coords[:, anchor_axis] - origin[0], coords[:, 2] - origin[1]] = 1
 
-    # Get min and max values (left and right borders)
-    anchor_wise_group = groupby_all(transposed_projection)
+    contour = mask ^ binary_erosion(mask)
 
-    depths = anchor_wise_group[:, anchor_axis]
-    anchor_axis_mins = anchor_wise_group[:, 3]
-    anchor_axis_maxs = anchor_wise_group[:, 4]
+    coords_2d = np.nonzero(contour)
 
-    anchor_axis_contour = np.zeros((len(depths)*2, 3), int)
+    contour_coords = np.zeros((len(coords_2d[0]), 3), dtype=int)
 
-    anchor_axis_contour[:len(depths), anchor_axis] = anchor_axis_mins
-    anchor_axis_contour[:len(depths), -1] = depths
+    contour_coords[:, anchor_axis] = coords_2d[0] + origin[0]
+    contour_coords[:, 2] = coords_2d[1] + origin[1]
 
-    anchor_axis_contour[len(depths):, anchor_axis] = anchor_axis_maxs
-    anchor_axis_contour[len(depths):, -1] = depths
-
-    contour_points = np.concatenate([anchor_axis_contour, depthwise_contour], axis=0)
+    # Delete extra border from contour
+    contour_coords = groupby_max(contour_coords) if find_lower_border else groupby_min(contour_coords)
 
     # Restore 3d coordinates
-    contour_points = restore_coords_from_projection(coords=coords, buffer=contour_points, axis=projection_axis)
-    return contour_points
+    contour_coords = restore_coords_from_projection(coords=coords, buffer=contour_coords, axis=projection_axis)
+    return contour_coords
 
 @njit
 def restore_coords_from_projection(coords, buffer, axis):
