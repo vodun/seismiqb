@@ -32,7 +32,7 @@ class FaultExtractor:
     - Component is a 2d connected component on some slide.
     - Prototype is a 3d points body of merged components.
     """
-    def __init__(self, skeletonized_array, smoothed_array, orientation=0, component_len_threshold=0):
+    def __init__(self, skeletonized_array, smoothed_array, direction=0, component_len_threshold=0):
         """ Init data container with components info for each slide.
         # TODO: add skeletonized_array=None option
 
@@ -40,15 +40,15 @@ class FaultExtractor:
 
         Parameters
         ----------
-        orientation : {0, 1}
-            Prediction orientation corresponding ilines (0) or xlines (1).
+        direction : {0, 1}
+            Prediction direction corresponding ilines (0) or xlines (1).
         component_len_threshold : int
             Threshold to filter out too small connected components on data slides.
         """
         self.shape = skeletonized_array.shape
 
-        self.orientation = orientation
-        self.orthogonal_orientation = 1 if orientation == 0 else 0
+        self.direction = direction
+        self.orthogonal_direction = 1 if direction == 0 else 0
 
         self.component_len_threshold = component_len_threshold # TODO: temporally unused, change value
         # self.height_threshold = None # TODO: temporally unused, add later
@@ -60,7 +60,7 @@ class FaultExtractor:
         self.prototypes_queue = deque() # prototypes for extension
         self.prototypes = []
 
-        for slide_idx in Notifier('t')(range(self.shape[self.orientation])):
+        for slide_idx in Notifier('t')(range(self.shape[self.direction])):
             mask = skeletonized_array[slide_idx, :, :]
             smoothed = smoothed_array[slide_idx, :, :]
 
@@ -76,7 +76,7 @@ class FaultExtractor:
             for idx, object_bbox in enumerate(objects):
                 # Refined coords: we refine skeletonize effects by applying it on limited area
                 # TODO: improve skeletonize and reduce these steps
-                dilation_axis = self.orthogonal_orientation
+                dilation_axis = self.orthogonal_direction
                 dilation_ranges = (np.clip(object_bbox[0].start - self.dilation // 2, 0, None),
                                    np.clip(object_bbox[0].stop + self.dilation // 2, 0, self.shape[dilation_axis]))
 
@@ -87,7 +87,7 @@ class FaultExtractor:
 
                 dilated_coords = np.zeros((len(dilated_coords_2d[0]), 3), dtype=int)
 
-                dilated_coords[:, self.orientation] = slide_idx
+                dilated_coords[:, self.direction] = slide_idx
                 dilated_coords[:, dilation_axis] = dilated_coords_2d[0] + dilation_ranges[0]
                 dilated_coords[:, 2] = dilated_coords_2d[1] + object_bbox[1].start
 
@@ -100,9 +100,9 @@ class FaultExtractor:
                 # Bbox
                 bbox = np.empty((3, 2), int)
 
-                bbox[self.orientation, :] = slide_idx
-                bbox[self.orthogonal_orientation, :] = (np.min(refined_coords[:, self.orthogonal_orientation]),
-                                                        np.max(refined_coords[:, self.orthogonal_orientation]))
+                bbox[self.direction, :] = slide_idx
+                bbox[self.orthogonal_direction, :] = (np.min(refined_coords[:, self.orthogonal_direction]),
+                                                        np.max(refined_coords[:, self.orthogonal_direction]))
                                                         # TODO: fix bboxes everywhere: must be range, not max coord
                 bbox[-1, :] = (np.min(refined_coords[:, -1]), np.max(refined_coords[:, -1]))
 
@@ -111,21 +111,16 @@ class FaultExtractor:
                 # Length
                 lengths.append(len(refined_coords))
 
-            # Init merging state
-            mergeable = np.array([True] * len(lengths))
-
             # Filter components by length
             lengths = np.array(lengths)
             is_too_small = lengths <= component_len_threshold
-            mergeable[is_too_small] = False
+            lengths[is_too_small] = -1 # -1 is a flag for unmergeable components
 
             self.container[slide_idx] = {
                 'objects_coords': objects_coords,
                 'objects_bboxes': objects_bboxes,
 
                 'lengths': lengths,
-
-                'mergeable': mergeable
             }
 
         self._first_slide_with_mergeable = 0
@@ -153,23 +148,18 @@ class FaultExtractor:
         self.container[slide_idx]['objects_coords'].append(coords)
 
         # Length
-        length = len(coords)
+        length = len(coords) if len(coords) > self.component_len_threshold else -1
         self.container[slide_idx]['lengths'] = np.append(self.container[slide_idx]['lengths'], length)
-
-        # Merge state
-        mergeable = length > self.component_len_threshold
-        self.container[slide_idx]['mergeable'] = np.append(self.container[slide_idx]['mergeable'], mergeable)
 
     def _find_not_merged_component(self):
         """ Find the longest not merged item on the minimal slide. """
         idx = None
 
-        for slide_idx in range(self._first_slide_with_mergeable, self.shape[self.orientation]):
+        for slide_idx in range(self._first_slide_with_mergeable, self.shape[self.direction]):
             slide_info = self.container[slide_idx]
 
-            if slide_info['mergeable'].any():
-                max_len = np.max(slide_info['lengths'][slide_info['mergeable']])
-                idx = np.argwhere((slide_info['lengths'] == max_len) & (slide_info['mergeable']))[0][0]
+            if (slide_info['lengths'] != -1).any():
+                idx = np.argmax(slide_info['lengths'])
                 self._first_slide_with_mergeable = slide_idx
                 break
 
@@ -187,18 +177,18 @@ class FaultExtractor:
 
             component = self.container[start_slide_idx]['objects_coords'][idx]
 
-            self.container[start_slide_idx]['mergeable'][idx] = False
+            self.container[start_slide_idx]['lengths'][idx] = -1
             prototype = component
         else:
             prototype = self.prototypes_queue.popleft()
 
-            start_slide_idx = np.max(prototype[:, self.orientation])
-            component = prototype[prototype[:, self.orientation] == start_slide_idx]
+            start_slide_idx = np.max(prototype[:, self.direction])
+            component = prototype[prototype[:, self.direction] == start_slide_idx]
 
         # Find closest components on next slides and split them if needed
-        for slide_idx_ in range(start_slide_idx+1, self.shape[self.orientation]):
-            component = dilate_coords(component, axis=self.orthogonal_orientation,
-                                      max_value=self.shape[self.orthogonal_orientation]-1)
+        for slide_idx_ in range(start_slide_idx+1, self.shape[self.direction]):
+            component = dilate_coords(component, axis=self.orthogonal_direction,
+                                      max_value=self.shape[self.orthogonal_direction]-1)
 
             # Find the closest component on the slide_idx_ to the current
             component, prototype_split_indices = self._find_closest_component(component=component,
@@ -242,12 +232,12 @@ class FaultExtractor:
         component_bbox = np.column_stack([mins_, maxs_])
 
         for idx, current_bbox in enumerate(self.container[slide_idx]['objects_bboxes']):
-            if self.container[slide_idx]['mergeable'][idx]:
+            if self.container[slide_idx]['lengths'][idx] != -1:
                 # Check bbox intersection
-                current_bbox[self.orthogonal_orientation, 0] -= self.dilation // 2 # dilate current_bbox
-                current_bbox[self.orthogonal_orientation, 1] += self.dilation // 2
+                current_bbox[self.orthogonal_direction, 0] -= self.dilation // 2 # dilate current_bbox
+                current_bbox[self.orthogonal_direction, 1] += self.dilation // 2
 
-                if not bboxes_intersected(component_bbox, current_bbox, axes=(self.orthogonal_orientation, -1)):
+                if not bboxes_intersected(component_bbox, current_bbox, axes=(self.orthogonal_direction, -1)):
                     continue
 
                 # Check closeness of some points (iter over intersection depths with some step)
@@ -260,7 +250,7 @@ class FaultExtractor:
 
                 distance = max_depthwise_distance(component, current_component,
                                                   depths_ranges=intersection_depths, step=step,
-                                                  axis=self.orthogonal_orientation, max_threshold=min_distance)
+                                                  axis=self.orthogonal_direction, max_threshold=min_distance)
 
                 if distance < min_distance:
                     merged_idx = idx
@@ -274,7 +264,7 @@ class FaultExtractor:
 
         if closest_component is not None:
             # Merge founded component and split its extra parts
-            self.container[slide_idx]['mergeable'][merged_idx] = False
+            self.container[slide_idx]['lengths'][merged_idx] = -1
 
             # Find prototype and new component splitting depths
             # Split prototype: check that the new component is smaller than the previous one (for each border)
@@ -364,9 +354,9 @@ class FaultExtractor:
 
                 # Find object contours in the area of interest
                 contour_1 = find_border(coords=intersection_coords_1, find_lower_border=is_first_upper,
-                                        projection_axis=self.orthogonal_orientation)
+                                        projection_axis=self.orthogonal_direction)
                 contour_2 = find_border(coords=intersection_coords_2, find_lower_border=~is_first_upper,
-                                        projection_axis=self.orthogonal_orientation)
+                                        projection_axis=self.orthogonal_direction)
                 # TODO: rethink borders intersection, maybe images operations will be helpful
 
                 # Simple check: if one data contour is much longer than other,
@@ -390,6 +380,7 @@ class FaultExtractor:
                 # TODO: reduce next condition, maybe make more strict threshold
 
                 # Flatten line-likable borders and objects with small borders and tighten threshold restrictions
+                # TODO: another check as more than 90% of points are on one depth
                 if (height_1 <= 1 + margin) or (height_2 <= 1 + margin): # one of them is a flatten line with borders on margin
                     # Get the most sufficient depth for objects
                     depths, frequencies = np.unique(np.hstack([contour_1[:, -1],
@@ -412,7 +403,7 @@ class FaultExtractor:
                     corrected_contour_threshold = 1
 
                 # Check that one component contour is inside another (for both)
-                # Objects can be shifted on orthogonal_orientation axis, so apply dilation for coords
+                # Objects can be shifted on orthogonal_direction axis, so apply dilation for coords
                 # TODO: try to reduce amount of checks with constraints
                 # TODO: check reordering efficiency on huge data array
                 # TODO: check images intersection efficiency
@@ -435,10 +426,10 @@ class FaultExtractor:
         """ Check that `contour_1` is almost inside dilated `contour_2`. """
         contour_1_set = set(tuple(x) for x in contour_1)
 
-        # Objects can be shifted on `self.orthogonal_orientation`
+        # Objects can be shifted on `self.orthogonal_direction`
         contour_2_dilated = dilate_coords(coords=contour_2, dilate=self.dilation,
-                                          axis=self.orthogonal_orientation,
-                                          max_value=self.shape[self.orthogonal_orientation]-1)
+                                          axis=self.orthogonal_direction,
+                                          max_value=self.shape[self.orthogonal_direction]-1)
 
         contour_2_dilated = set(tuple(x) for x in contour_2_dilated)
 
@@ -484,7 +475,7 @@ class FaultExtractor:
             else:
                 break
 
-            self.concat_connected_prototypes(axis=self.orientation)
+            self.concat_connected_prototypes(axis=self.direction)
 
             print("After ilines concat: ", len(self.prototypes))
 
