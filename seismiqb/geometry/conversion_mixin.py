@@ -135,7 +135,7 @@ class ConversionMixin:
         }
 
     # Convert SEG-Y
-    def convert_to_hdf5(self, path=None, overwrite=True, postfix='', projections='ixd',
+    def convert_to_hdf5(self, path=None, overwrite=True, postfix=False, projections='ixd',
                         quantize=False, quantization_parameters=None, dataset_kwargs=None, chunk_size_divisor=1,
                         pbar='t', store_meta=True, **kwargs):
         """ Convert SEG-Y file to a more effective storage.
@@ -145,8 +145,9 @@ class ConversionMixin:
         path : str
             If provided, then path to save file to.
             Otherwise, file is saved under the same name with different extension.
-        postfix : str
-            Optional string to add before extension. Used only if the `path` is not provided.
+        postfix : bool or str
+            Whether to add before extension. Used only if the `path` is not provided. If True, it will be
+            created automatically depending on conversion parameters.
         projections : str
             Which projections of data to store: `i` for the inline one, `x` for the crossline, `d` for depth.
         quantize : bool
@@ -317,7 +318,7 @@ class ConversionMixin:
         return path
 
 
-    def convert(self, format='qsgy', path=None, postfix='', projections='ixd', overwrite=True,
+    def convert(self, format='qsgy', path=None, postfix=False, projections='ixd', overwrite=True,
                 quantize=False, quantization_parameters=None, dataset_kwargs=None, chunk_size_divisor=1,
                 pbar='t', store_meta=True, sgy_format=8, transform=None, chunk_size=25_000, max_workers=4, **kwargs):
         """ Convert SEG-Y file to a more effective storage.
