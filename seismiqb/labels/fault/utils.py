@@ -3,7 +3,7 @@ import numpy as np
 from numba import njit
 
 from scipy.ndimage.morphology import binary_erosion
-from ...utils import groupby_min, groupby_max, groupby_all
+from ...utils import groupby_min, groupby_max
 
 # Coordinates operations
 def dilate_coords(coords, dilate=3, axis=0, max_value=None):
@@ -111,19 +111,10 @@ def max_depthwise_distance(coords_1, coords_2, depths_ranges, step, axis, max_th
 
     return max_distance
 
+def find_contour(coords, projection_axis):
+    """ Find closed contour of 2d projection.
 
-# Object-oriented operations
-def find_border(coords, find_lower_border, projection_axis):
-    """ Find non-closed border part of the 3d object (upper or lower border).
-
-    Under the hood, we find border of a 2d projection on `projection_axis` and restore 3d coordinates.
-    ..!!..
-
-    Parameters
-    ----------
-    find_lower_border : bool
-        Find lower or upper border for object.
-    """
+    Note, returned contour coordinates are equal to 0 for the projection axis. """
     anchor_axis = 1 if projection_axis == 0 else 0
 
     # Make 2d projection on projection_axis
@@ -144,6 +135,22 @@ def find_border(coords, find_lower_border, projection_axis):
 
     contour_coords[:, anchor_axis] = coords_2d[0] + origin[0]
     contour_coords[:, 2] = coords_2d[1] + origin[1]
+    return contour_coords
+
+# Object-oriented operations
+def find_border(coords, find_lower_border, projection_axis):
+    """ Find non-closed border part of the 3d object (upper or lower border).
+
+    Under the hood, we find border of a 2d projection on `projection_axis` and restore 3d coordinates.
+    ..!!..
+
+    Parameters
+    ----------
+    find_lower_border : bool
+        Find lower or upper border for object.
+    """
+    # Find closed contour of 2d projection
+    contour_coords = find_contour(coords=coords, projection_axis=projection_axis)
 
     # Delete extra border from contour
     contour_coords = groupby_max(contour_coords) if find_lower_border else groupby_min(contour_coords)

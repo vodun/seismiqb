@@ -13,6 +13,7 @@ from .utils import dilate_coords, thin_coords, bboxes_intersected, bboxes_adjoin
 
 # TODO: add class FaultPrototype with coords and bbox, and concat operation
 # TODO: add info about connected prototypes (maybe into FaultPrototype)
+# TODO: add prototype contour into instance
 
 class FaultExtractor:
     """ ..!!..
