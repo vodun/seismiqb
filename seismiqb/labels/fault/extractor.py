@@ -33,6 +33,7 @@ class FaultExtractor:
     """
     def __init__(self, skeletonized_array, smoothed_array, orientation=0, component_len_threshold=0):
         """ Init data container with components info for each slide.
+        # TODO: add skeletonized_array=None option
 
         ..!!..
 
@@ -73,6 +74,7 @@ class FaultExtractor:
 
             for idx, object_bbox in enumerate(objects):
                 # Refined coords: we refine skeletonize effects by applying it on limited area
+                # TODO: improve skeletonize and reduce these steps
                 dilation_axis = self.orthogonal_orientation
                 dilation_ranges = (np.clip(object_bbox[0].start - self.dilation // 2, 0, None),
                                    np.clip(object_bbox[0].stop + self.dilation // 2, 0, self.shape[dilation_axis]))
@@ -91,7 +93,6 @@ class FaultExtractor:
                 smoothed_values = smoothed[dilated_coords[:, dilation_axis], dilated_coords[:, -1]]
 
                 refined_coords = thin_coords(coords=dilated_coords, values=smoothed_values)
-                refined_coords[:, self.orientation] = slide_idx
 
                 objects_coords.append(refined_coords)
 
@@ -126,6 +127,8 @@ class FaultExtractor:
                 'mergeable': mergeable
             }
 
+        self._first_slide_with_mergeable = 0
+
     def extract_prototypes(self):
         """ Extract all fault prototypes from the point cloud. """
         prototype = True # init value for starting cycle
@@ -158,15 +161,15 @@ class FaultExtractor:
 
     def _find_not_merged_component(self):
         """ Find the longest not merged item on the minimal slide. """
-        # TODO: add info about slides with mergeable components and reduce cycle iterations amount
         idx = None
 
-        for slide_idx in range(self.shape[self.orientation]):
+        for slide_idx in range(self._first_slide_with_mergeable, self.shape[self.orientation]):
             slide_info = self.container[slide_idx]
 
             if slide_info['mergeable'].any():
                 max_len = np.max(slide_info['lengths'][slide_info['mergeable']])
                 idx = np.argwhere((slide_info['lengths'] == max_len) & (slide_info['mergeable']))[0][0]
+                self._first_slide_with_mergeable = slide_idx
                 break
 
         return slide_idx, idx
@@ -178,19 +181,18 @@ class FaultExtractor:
         if len(self.prototypes_queue) == 0:
             start_slide_idx, idx = self._find_not_merged_component()
 
-            if idx is None: # TODO: reduce this condition by counter of not merged components
+            if idx is None: # No components to concat
                 return None
 
-            self.container[start_slide_idx]['mergeable'][idx] = False
-
             component = self.container[start_slide_idx]['objects_coords'][idx]
+
+            self.container[start_slide_idx]['mergeable'][idx] = False
             prototype = component
         else:
             prototype = self.prototypes_queue.popleft()
 
             start_slide_idx = np.max(prototype[:, self.orientation])
             component = prototype[prototype[:, self.orientation] == start_slide_idx]
-
 
         # Find closest components on next slides and split them if needed
         for slide_idx_ in range(start_slide_idx+1, self.shape[self.orientation]):
@@ -200,18 +202,18 @@ class FaultExtractor:
             # Find the closest component on the slide_idx_ to the current
             component, prototype_split_indices = self._find_closest_component(component=component,
                                                                               slide_idx=slide_idx_)
-            # Process founded component part
+            # Postprocess prototype
             if component is not None:
-                # Split current component and add new to queue
+                # Split current prototype and add new to queue
                 if prototype_split_indices[0] is not None:
-                    # Cut upper part of the component
+                    # Cut upper part of the prototype
                     new_prototype = prototype[prototype[:, -1] < prototype_split_indices[0]]
 
                     self.prototypes_queue.append(new_prototype)
                     prototype = prototype[prototype[:, -1] >= prototype_split_indices[0]]
 
                 if prototype_split_indices[1] is not None:
-                    # Cut lower part of the component
+                    # Cut lower part of the prototype
                     new_prototype = prototype[prototype[:, -1] > prototype_split_indices[1]]
 
                     self.prototypes_queue.append(new_prototype)
@@ -223,8 +225,8 @@ class FaultExtractor:
 
         return prototype
 
-    def _find_closest_component(self, component, slide_idx, distances_threshold=10,
-                                depth_iteration_step=10, depths_threshold=10):
+    def _find_closest_component(self, component, slide_idx, distances_threshold=5,
+                                depth_iteration_step=10, depths_threshold=5):
         """ Find the closest component to component on the slide, get splitting depths for them if needed.
 
         ..!!..
@@ -253,7 +255,7 @@ class FaultExtractor:
                 intersection_depths = (max(component_bbox[-1, 0], current_bbox[-1, 0]),
                                        min(component_bbox[-1, 1], current_bbox[-1, 1]))
 
-                step = np.clip(intersection_depths[1]-intersection_depths[0], 1, depth_iteration_step)
+                step = np.clip((intersection_depths[1]-intersection_depths[0])//3, 1, depth_iteration_step)
 
                 distance = max_depthwise_distance(component, current_component,
                                                   depths_ranges=intersection_depths, step=step,
@@ -270,45 +272,38 @@ class FaultExtractor:
                         break
 
         if closest_component is not None:
-            intersection_height = intersection_borders[1] - intersection_borders[0]
+            # Merge founded component and split its extra parts
+            self.container[slide_idx]['mergeable'][merged_idx] = False
 
-            if (intersection_height < 0.2*len(component)/self.dilation) or \
-               (intersection_height < 0.2*len(closest_component)):
-                # Coords overlap too small -> different components
-                closest_component = None
-            else:
-                # Merge finded component and split its extra parts
-                self.container[slide_idx]['mergeable'][merged_idx] = False
+            # Find prototype and new component splitting depths
+            # Split prototype: check that the new component is smaller than the previous one (for each border)
+            if intersection_borders[0] - component_bbox[-1, 0] > depths_threshold:
+                prototype_split_indices[0] = intersection_borders[0]
 
-                # Find prototype and new component splitting depths
-                # Split prototype: check that the new component is smaller than the previous one (for each border)
-                if intersection_borders[0] - component_bbox[-1, 0] > depths_threshold:
-                    prototype_split_indices[0] = intersection_borders[0]
+            if component_bbox[-1, 1] - intersection_borders[1] > depths_threshold:
+                prototype_split_indices[1] = intersection_borders[1]
 
-                if component_bbox[-1, 1] - intersection_borders[1] > depths_threshold:
-                    prototype_split_indices[1] = intersection_borders[1]
+            # Split new component: check that the new component is bigger than the previous one (for each border)
+            # Create splitted items and save them as new elements for merge
+            if intersection_borders[0] - closest_component_bbox[-1, 0] > depths_threshold:
+                item_split_idx = intersection_borders[0]
 
-                # Split new component: check that the new component is bigger than the previous one (for each border)
-                # Create splitted items and save them as new elements for merge
-                if intersection_borders[0] - closest_component_bbox[-1, 0] > depths_threshold:
-                    item_split_idx = intersection_borders[0]
+                # Cut upper part of component on next slide and save extra data as another item
+                new_component = closest_component[closest_component[:, -1] < item_split_idx]
+                self._add_new_component(slide_idx=slide_idx, coords=new_component)
 
-                    # Cut upper part of component on next slide and save extra data as another item
-                    new_component = closest_component[closest_component[:, -1] < item_split_idx]
-                    self._add_new_component(slide_idx=slide_idx, coords=new_component)
+                # Extract suitable part
+                closest_component = closest_component[closest_component[:, -1] >= item_split_idx]
 
-                    # Extract suitable part
-                    closest_component = closest_component[closest_component[:, -1] >= item_split_idx]
+            if closest_component_bbox[-1, 1] - intersection_borders[1] > depths_threshold:
+                item_split_idx = intersection_borders[1]
 
-                if closest_component_bbox[-1, 1] - intersection_borders[1] > depths_threshold:
-                    item_split_idx = intersection_borders[1]
+                # Cut lower part of component on next slide and save extra data as another item
+                new_component = closest_component[closest_component[:, -1] > item_split_idx]
+                self._add_new_component(slide_idx=slide_idx, coords=new_component)
 
-                    # Cut lower part of component on next slide and save extra data as another item
-                    new_component = closest_component[closest_component[:, -1] > item_split_idx]
-                    self._add_new_component(slide_idx=slide_idx, coords=new_component)
-
-                    # Extract suitable part
-                    closest_component = closest_component[closest_component[:, -1] <= item_split_idx]
+                # Extract suitable part
+                closest_component = closest_component[closest_component[:, -1] <= item_split_idx]
 
         return closest_component, prototype_split_indices
 
