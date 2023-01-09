@@ -285,7 +285,7 @@ class ConversionMixin:
         return geometry
 
 
-    def make_output_path(self, format='hdf5', quantize=False, postfix='', projections='ixd',
+    def make_output_path(self, format='hdf5', quantize=False, postfix=False, projections='ixd',
                          chunk_size_divisor=1, sgy_format=8):
         """ Compute output path for converted file, based on conversion parameters. """
         format = format.lower()
@@ -296,16 +296,19 @@ class ConversionMixin:
 
         fmt_prefix = 'q' if quantize else ''
 
-        if postfix == '':
-            if format == 'hdf5':
-                if len(projections) < 3:
-                    postfix = postfix + '_' + projections
-                if chunk_size_divisor != 1:
-                    postfix = postfix + '_' + f'c{chunk_size_divisor}'
+        if not isinstance(postfix, str):
+            if not postfix:
+                postfix = ''
+            else:
+                if format == 'hdf5':
+                    if len(projections) < 3:
+                        postfix = '_' + projections
+                    if chunk_size_divisor != 1:
+                        postfix = '_' + f'c{chunk_size_divisor}'
 
-            if format == 'sgy':
-                if quantize:
-                    postfix = postfix + '_' + f'f{sgy_format}'
+                if format == 'sgy':
+                    if quantize:
+                        postfix = '_' + f'f{sgy_format}'
 
         dirname = os.path.dirname(self.path)
         basename = os.path.basename(self.path)
