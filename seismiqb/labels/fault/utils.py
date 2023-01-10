@@ -115,7 +115,7 @@ def find_contour(coords, projection_axis):
     """ Find closed contour of 2d projection.
 
     Note, returned contour coordinates are equal to 0 for the projection axis. """
-    anchor_axis = 1 if projection_axis == 0 else 0
+    anchor_axis = int(not projection_axis)
 
     # Make 2d projection on projection_axis
     bbox = np.column_stack([np.min(coords, axis=0), np.max(coords, axis=0)])
@@ -135,28 +135,6 @@ def find_contour(coords, projection_axis):
 
     contour_coords[:, anchor_axis] = coords_2d[0] + origin[0]
     contour_coords[:, 2] = coords_2d[1] + origin[1]
-    return contour_coords
-
-# Object-oriented operations
-def find_border(coords, find_lower_border, projection_axis):
-    """ Find non-closed border part of the 3d object (upper or lower border).
-
-    Under the hood, we find border of a 2d projection on `projection_axis` and restore 3d coordinates.
-    ..!!..
-
-    Parameters
-    ----------
-    find_lower_border : bool
-        Find lower or upper border for object.
-    """
-    # Find closed contour of 2d projection
-    contour_coords = find_contour(coords=coords, projection_axis=projection_axis)
-
-    # Delete extra border from contour
-    contour_coords = groupby_max(contour_coords) if find_lower_border else groupby_min(contour_coords)
-
-    # Restore 3d coordinates
-    contour_coords = restore_coords_from_projection(coords=coords, buffer=contour_coords, axis=projection_axis)
     return contour_coords
 
 @njit

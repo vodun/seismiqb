@@ -9,120 +9,10 @@ from scipy.ndimage.morphology import binary_dilation
 from batchflow import Notifier
 
 from .base import Fault
-from .utils import restore_coords_from_projection, dilate_coords, thin_coords, bboxes_intersected, bboxes_adjoin, max_depthwise_distance, find_border, find_contour
+from .utils import (bboxes_adjoin, bboxes_intersected, dilate_coords, find_contour,
+                    thin_coords, max_depthwise_distance, restore_coords_from_projection)
 from ...utils import groupby_min, groupby_max
 
-
-class FaultPrototype:
-    """ ..!!.. """
-    def __init__(self, coords, direction, last_slide_idx=None, last_component=None):
-        """..!!.."""
-        self.coords = coords # TODO: think about coordinates list
-        self.direction = direction
-
-        self._bbox = None
-        self._last_slide_idx = last_slide_idx
-        self._last_component = last_component
-
-        self._contour = None
-        # add info about connected prototypes
-
-    @property
-    def bbox(self):
-        """..!!.."""
-        if self._bbox is None:
-            self._bbox = np.column_stack([np.min(self.coords, axis=0), np.max(self.coords, axis=0)])
-        return self._bbox
-
-    @property
-    def last_slide_idx(self):
-        if self._last_slide_idx is None:
-            self._last_slide_idx = self.coordinates[:, self.direction].max()
-        return self._last_slide_idx
-
-    @property
-    def last_component(self):
-        if self._last_component is None:
-            self._last_component = self.coordinates[self.coordinates[:, self.direction] == self.last_slide_idx]
-        return self._last_component
-
-    @property
-    def contour(self):
-        if self._contour is None:
-            projection_axis = int(not self.direction)
-            self._contour = find_contour(coords=self.coords, projection_axis=projection_axis)
-        return self._contour
-
-    def get_borders(self, removed_border, axis):
-        """..!!..
-        
-        Parameters
-        ----------
-        removed_border : {'up', 'down', 'left', 'right'}
-        """
-        # Delete extra border from contour
-        if removed_border in ('left', 'right'):
-            border_coords = self.contour.copy() # TODO: check is it necessary
-
-            # For border removing we apply groupby which works only for the last axis, so we swap axes coords
-            border_coords[:, [-1, axis]] = border_coords[:, [axis, -1]]
-
-            # Groupby implementation needs sorted data
-            border_coords = border_coords[border_coords[:, axis].argsort()]
-        else:
-            border_coords = self.contour.copy()
-
-        if removed_border in ('up', 'left'):
-            border_coords = groupby_max(border_coords)
-        else:
-            border_coords = groupby_min(border_coords)
-
-        # Restore 3d coordinates
-        projection_axis = int(not self.direction)
-        border_coords = restore_coords_from_projection(coords=self.coords, buffer=border_coords, axis=projection_axis)
-        return border_coords
-
-    def append(self, coords, slide_idx=None):
-        """..!!.."""
-        self.coords = np.vstack([self.coords, coords])
-
-        self._bbox = None
-        self._contour = None
-        self._last_slide_idx = slide_idx
-        self._last_component = coords
-
-    def split(self, split_depth, cut_upper_part):
-        """..!!.."""
-        if cut_upper_part:
-            new_coords = self.coords[self.coords[:, -1] < split_depth]
-
-            self.coords = self.coords[self.coords[:, -1] >= split_depth]
-            self._last_component = self.last_component[self.last_component[:, -1] >= split_depth]
-        else:
-            new_coords = self.coords[self.coords[:, -1] > split_depth]
-
-            self.coords = self.coords[self.coords[:, -1] <= split_depth]
-            self._last_component = self.last_component[self.last_component[:, -1] <= split_depth]
-
-        self._bbox = None
-        self._contour = None
-
-        new_last_slide = np.max(new_coords[:, self.direction])
-        new_last_component = new_coords[new_coords[:, self.direction] == new_last_slide]
-
-        new_prototype = FaultPrototype(coords=new_coords, direction=self.direction,
-                                       last_slide_idx=new_last_slide, last_component=new_last_component)
-        return new_prototype
-
-    def concat(self, other):
-        self.coords = np.vstack([self.coords, other.coords])
-
-        self._bbox = None
-        self._contour = None
-        self._last_slide_idx = None
-        self._last_component = None
-
-# ===
 
 class FaultExtractor:
     """ ..!!..
@@ -434,41 +324,23 @@ class FaultExtractor:
                 # Get area of interest
                 intersection_range = (intersection_range[0] - margin, intersection_range[1] + margin)
 
-                intersection_1 = prototype_1.coords[(prototype_1.coords[:, axis] >= intersection_range[0]) & \
-                                                    (prototype_1.coords[:, axis] <= intersection_range[1])]
-
-                intersection_2 = prototype_2.coords[(prototype_2.coords[:, axis] >= intersection_range[0]) & \
-                                                    (prototype_2.coords[:, axis] <= intersection_range[1])]
-
-                # Prepare data for contouring
-                # TODO: reduce this clause, sorting can be worthy
-                if axis not in (-1, 2):
-                    # For contour finding we apply groupby which works only for the last axis, so we swap axes coords
-                    intersection_1[:, [-1, axis]] = intersection_1[:, [axis, -1]]
-                    intersection_2[:, [-1, axis]] = intersection_2[:, [axis, -1]]
-
-                    # Groupby implementation needs sorted data
-                    intersection_1 = intersection_1[intersection_1[:, axis].argsort()]
-                    intersection_2 = intersection_2[intersection_2[:, axis].argsort()]
-
                 # TODO: change next check
                 is_first_upper = (prototype_1.bbox[axis, 0] < prototype_2.bbox[axis, 0]) or \
                                  (prototype_1.bbox[axis, 1] < prototype_2.bbox[axis, 1])
 
-                # # Find object contours in the area of interest
-                # contour_1 = prototype_1.get_borders(removed_border=removed_borders[~is_first_upper], axis=axis)
-                # contour_2 = prototype_2.get_borders(removed_border=removed_borders[is_first_upper], axis=axis)
+                # Find object contours on close borders
+                contour_1 = prototype_1.get_borders(removed_border=removed_borders[int(~is_first_upper)], axis=axis)
+                contour_2 = prototype_2.get_borders(removed_border=removed_borders[int(is_first_upper)], axis=axis)
 
-                # contour_1 = contour_1[(contour_1[:, -1] >= intersection_range[0]) & \
-                #                       (contour_1[:, -1] <= intersection_range[1])]
-                # contour_2 = contour_2[(contour_2[:, -1] >= intersection_range[0]) & \
-                #                       (contour_2[:, -1] <= intersection_range[1])]
+                # Get border contours in the area of interest
+                contour_1 = contour_1[(contour_1[:, axis] >= intersection_range[0]) & \
+                                      (contour_1[:, axis] <= intersection_range[1])]
+                contour_2 = contour_2[(contour_2[:, axis] >= intersection_range[0]) & \
+                                      (contour_2[:, axis] <= intersection_range[1])]
 
-                # Find object contours in the area of interest
-                contour_1 = find_border(coords=intersection_1, find_lower_border=is_first_upper,
-                                        projection_axis=self.orthogonal_direction)
-                contour_2 = find_border(coords=intersection_2, find_lower_border=~is_first_upper,
-                                        projection_axis=self.orthogonal_direction)
+                if len(contour_1) == 0 or len(contour_2) == 0:
+                    continue
+
                 # TODO: rethink borders intersection, maybe images operations will be helpful
 
                 # Simple check: if one data contour is much longer than other,
@@ -599,6 +471,129 @@ class FaultExtractor:
         """ Convert all prototypes to faults. """
         faults = [Fault(prototype.coords, field=field) for prototype in self.prototypes]
         return faults
+
+
+class FaultPrototype:
+    """ ..!!.. """
+    def __init__(self, coords, direction, last_slide_idx=None, last_component=None):
+        """..!!.."""
+        self.coords = coords # TODO: think about coordinates list
+        self.direction = direction
+
+        self._bbox = None
+        self._last_slide_idx = last_slide_idx
+        self._last_component = last_component
+
+        self._contour = None
+        self._borders = {}
+        # add info about connected prototypes
+
+    @property
+    def bbox(self):
+        """..!!.."""
+        if self._bbox is None:
+            self._bbox = np.column_stack([np.min(self.coords, axis=0), np.max(self.coords, axis=0)])
+        return self._bbox
+
+    @property
+    def last_slide_idx(self):
+        if self._last_slide_idx is None:
+            self._last_slide_idx = self.coordinates[:, self.direction].max()
+        return self._last_slide_idx
+
+    @property
+    def last_component(self):
+        if self._last_component is None:
+            self._last_component = self.coordinates[self.coordinates[:, self.direction] == self.last_slide_idx]
+        return self._last_component
+
+    @property
+    def contour(self):
+        if self._contour is None:
+            projection_axis = int(not self.direction)
+            self._contour = find_contour(coords=self.coords, projection_axis=projection_axis)
+        return self._contour
+
+    def get_borders(self, removed_border, axis):
+        """..!!..
+
+        Parameters
+        ----------
+        removed_border : {'up', 'down', 'left', 'right'}
+        """
+        # Delete extra border from contour
+        if removed_border not in self._borders.keys():
+            if removed_border in ('left', 'right'):
+                border_coords = self.contour.copy() # TODO: check is it necessary
+
+                # For border removing we apply groupby which works only for the last axis, so we swap axes coords
+                border_coords[:, [-1, axis]] = border_coords[:, [axis, -1]]
+
+                # Groupby implementation needs sorted data
+                border_coords = border_coords[border_coords[:, axis].argsort()]
+            else:
+                border_coords = self.contour.copy()
+
+            if removed_border in ('up', 'left'):
+                border_coords = groupby_max(border_coords)
+            else:
+                border_coords = groupby_min(border_coords)
+
+            # Restore 3d coordinates
+            projection_axis = int(not self.direction)
+
+            if removed_border in ('left', 'right'):
+                border_coords[:, [-1, axis]] = border_coords[:, [axis, -1]]
+                border_coords = border_coords[border_coords[:, axis].argsort()] # ?
+
+            border_coords = restore_coords_from_projection(coords=self.coords, buffer=border_coords, axis=projection_axis)
+            self._borders[removed_border] = border_coords
+        return self._borders[removed_border]
+
+    def append(self, coords, slide_idx=None):
+        """..!!.."""
+        self.coords = np.vstack([self.coords, coords])
+
+        self.reset_borders()
+        self._last_slide_idx = slide_idx
+        self._last_component = coords
+
+    def split(self, split_depth, cut_upper_part):
+        """..!!.."""
+        if cut_upper_part:
+            new_coords = self.coords[self.coords[:, -1] < split_depth]
+
+            self.coords = self.coords[self.coords[:, -1] >= split_depth]
+            self._last_component = self.last_component[self.last_component[:, -1] >= split_depth]
+        else:
+            new_coords = self.coords[self.coords[:, -1] > split_depth]
+
+            self.coords = self.coords[self.coords[:, -1] <= split_depth]
+            self._last_component = self.last_component[self.last_component[:, -1] <= split_depth]
+
+        self.reset_borders()
+
+        new_last_slide = np.max(new_coords[:, self.direction])
+        new_last_component = new_coords[new_coords[:, self.direction] == new_last_slide]
+
+        new_prototype = FaultPrototype(coords=new_coords, direction=self.direction,
+                                       last_slide_idx=new_last_slide, last_component=new_last_component)
+        return new_prototype
+
+    def concat(self, other):
+        """..!!.."""
+        self.coords = np.vstack([self.coords, other.coords])
+
+        self.reset_borders()
+        self._last_slide_idx = None
+        self._last_component = None
+
+    def reset_borders(self):
+        """..!!.."""
+        self._bbox = None
+        self._contour = None
+        self._borders = {}
+
 
 # Helpers
 # Component dependencies
