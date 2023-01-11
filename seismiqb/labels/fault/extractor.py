@@ -74,7 +74,6 @@ class FaultExtractor:
 
             for idx, object_bbox in enumerate(objects):
                 # Refined coords: we refine skeletonize effects by applying it on limited area
-                # TODO: improve skeletonize and reduce these steps
                 dilation_axis = self.orthogonal_direction
                 dilation_ranges = (np.clip(object_bbox[0].start - self.dilation // 2, 0, None),
                                    np.clip(object_bbox[0].stop + self.dilation // 2, 0, self.shape[dilation_axis]))
@@ -103,7 +102,6 @@ class FaultExtractor:
                 bbox[self.orthogonal_direction, :] = (np.min(refined_coords[:, self.orthogonal_direction]),
                                                       np.max(refined_coords[:, self.orthogonal_direction]))
                 bbox[-1, :] = (np.min(refined_coords[:, -1]), np.max(refined_coords[:, -1]))
-                # TODO: fix bboxes everywhere: must be range, not max coord
 
                 bboxes.append(bbox)
 
@@ -376,29 +374,6 @@ class FaultExtractor:
 
     def _is_contour_inside(self, contour_1, contour_2, contour_threshold):
         """ Check that `contour_1` is almost inside dilated `contour_2`. """
-        # TODO: check timings v1 vs v2
-        # Variant 1: a little bit faster, check on huge data volume
-        # origin = np.min([np.min(contour_1, axis=0), np.min(contour_2, axis=0)], axis=0)
-        # contour_1 -= origin
-        # contour_2 -= origin
-
-        # shape = np.max([np.max(contour_1, axis=0), np.max(contour_2, axis=0)], axis=0) + 1
-
-        # background = np.zeros(shape, bool)
-        # background[contour_2[:, 0], contour_2[:, 1], contour_2[:, 2]] = 1
-
-        # structure_shape = [1, 1, 1]
-        # structure_shape[self.orthogonal_direction] = self.dilation
-        # background = binary_dilation(background, structure=np.ones(structure_shape, bool))
-
-        # length_dilated = np.count_nonzero(background)
-
-        # background[contour_1[:, 0], contour_1[:, 1], contour_1[:, 2]] = 1
-
-        # both_components_length = np.count_nonzero(background)
-        # return both_components_length - length_dilated < contour_threshold
-
-        # Variant 2:
         contour_1_set = set(tuple(x) for x in contour_1)
 
         # Objects can be shifted on `self.orthogonal_direction`, so apply dilation for coords
