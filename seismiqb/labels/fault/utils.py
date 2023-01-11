@@ -3,7 +3,6 @@ import numpy as np
 from numba import njit
 
 from scipy.ndimage.morphology import binary_erosion
-from ...utils import groupby_min, groupby_max
 
 # Coordinates operations
 def dilate_coords(coords, dilate=3, axis=0, max_value=None):
@@ -75,21 +74,21 @@ def bboxes_intersected(bbox_1, bbox_2, axes=(0, 1, 2)):
     return True
 
 @njit
-def bboxes_adjoin(bbox_1, bbox_2, axis=2):
-    """ Check that bboxes are adjoint on axis and return intersection/adjoint indices. """
+def bboxes_adjoining(bbox_1, bbox_2, axis=2):
+    """ Bboxes intersection or adjoining ranges if bboxes are adjoint. """
     axis = 2 if axis == -1 else axis
+    adjoinance_borders = []
 
     for i in range(3):
-        min_ = min(bbox_1[i, 1], bbox_2[i, 1])
-        max_ = max(bbox_1[i, 0], bbox_2[i, 0])
+        min_max = min(bbox_1[i, 1], bbox_2[i, 1])
+        max_min = max(bbox_1[i, 0], bbox_2[i, 0])
 
-        if min_ - max_ < -1: # distant bboxes
-            return None, None
+        if min_max - max_min < -1:
+            return None
 
-        if i == axis:
-            intersection_borders = (min_, max_)
+        adjoinance_borders.append((min_max, max_min))
 
-    return min(intersection_borders), max(intersection_borders) # intersection / adjoint indices for the axis
+    return adjoinance_borders
 
 @njit
 def max_depthwise_distance(coords_1, coords_2, depths_ranges, step, axis, max_threshold=None):

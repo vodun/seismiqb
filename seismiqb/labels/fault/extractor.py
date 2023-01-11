@@ -9,7 +9,7 @@ from scipy.ndimage.morphology import binary_dilation
 from batchflow import Notifier
 
 from .base import Fault
-from .utils import (bboxes_adjoin, bboxes_intersected, dilate_coords, find_contour,
+from .utils import (bboxes_adjoining, bboxes_intersected, dilate_coords, find_contour,
                     thin_coords, max_depthwise_distance, restore_coords_from_projection)
 from ...utils import groupby_min, groupby_max
 
@@ -309,6 +309,8 @@ class FaultExtractor:
         to_concat = defaultdict(list) # owner -> items
         concated_with = {} # item -> owner
 
+        overlapping_axis = self.direction if axis in (-1, 2) else 2
+
         if axis in (-1, 2): # not necessary object borders for contour finding
             removed_borders = ('up', 'down')
         else:
@@ -316,35 +318,35 @@ class FaultExtractor:
 
         for j, prototype_1 in enumerate(self.prototypes):
             for k, prototype_2 in enumerate(self.prototypes[j+1:]):
-                intersection_range = bboxes_adjoin(prototype_1.bbox, prototype_2.bbox, axis=axis)
+                adjoining_borders = bboxes_adjoining(prototype_1.bbox, prototype_2.bbox, axis=axis)
 
-                if intersection_range[0] is None:
+                if adjoining_borders is None:
                     continue
 
-                # Get area of interest
-                intersection_range = (intersection_range[0] - margin, intersection_range[1] + margin)
+                # Check that bboxes overlap is enough
+                intersection_threshold = min(prototype_1.bbox[overlapping_axis, 1]-prototype_1.bbox[overlapping_axis, 0],
+                                             prototype_2.bbox[overlapping_axis, 1]-prototype_2.bbox[overlapping_axis, 0])
+                intersection_threshold *= intersection_ratio_threshold
+                intersection_length = adjoining_borders[overlapping_axis][0] - adjoining_borders[overlapping_axis][1]
 
-                # TODO: change next check
-                is_first_upper = (prototype_1.bbox[axis, 0] < prototype_2.bbox[axis, 0]) or \
-                                 (prototype_1.bbox[axis, 1] < prototype_2.bbox[axis, 1])
+                if intersection_length < intersection_threshold:
+                    continue
 
                 # Find object contours on close borders
-                contour_1 = prototype_1.get_borders(removed_border=removed_borders[int(~is_first_upper)], axis=axis)
-                contour_2 = prototype_2.get_borders(removed_border=removed_borders[int(is_first_upper)], axis=axis)
+                is_first_upper = prototype_1.bbox[axis, 0] < prototype_2.bbox[axis, 0]
+
+                contour_1 = prototype_1.get_borders(removed_border=removed_borders[~is_first_upper], axis=axis)
+                contour_2 = prototype_2.get_borders(removed_border=removed_borders[is_first_upper], axis=axis)
 
                 # Get border contours in the area of interest
+                intersection_range = (min(adjoining_borders[axis]) - margin, max(adjoining_borders[axis]) + margin)
+
                 contour_1 = contour_1[(contour_1[:, axis] >= intersection_range[0]) & \
                                       (contour_1[:, axis] <= intersection_range[1])]
                 contour_2 = contour_2[(contour_2[:, axis] >= intersection_range[0]) & \
                                       (contour_2[:, axis] <= intersection_range[1])]
 
-                if len(contour_1) == 0 or len(contour_2) == 0:
-                    continue
-
-                # TODO: rethink borders intersection, maybe images operations will be helpful
-
-                # Simple check: if one data contour is much longer than other,
-                # then we can't connect them as puzzle details
+                # If one data contour is much longer than other, then we can't connect them as puzzle details
                 length_ratio = min(len(contour_1), len(contour_2)) / max(len(contour_1), len(contour_2))
 
                 if length_ratio < intersection_ratio_threshold:
@@ -354,41 +356,13 @@ class FaultExtractor:
                 shift = 1 if is_first_upper else -1
                 contour_1[:, -1] += shift
 
-                # Evaluate objects heights for threshold
-                # TODO: rethink this part, it seems extra
-                height_1 = contour_1[:, -1].max() - contour_1[:, -1].min() + 1
-                height_2 = contour_2[:, -1].max() - contour_2[:, -1].min() + 1
-
-                corrected_contour_threshold = contour_threshold
-
-                # TODO: reduce next condition, maybe make more strict threshold
-
-                # Flatten line-likable borders and objects with small borders and tighten threshold restrictions
-                # TODO: another check as more than 90% of points are on one depth
-                if (height_1 <= 1 + margin) or (height_2 <= 1 + margin): # one of them is a flatten line with borders on margin
-                    # Get the most sufficient depth for objects
-                    depths, frequencies = np.unique(np.hstack([contour_1[:, -1],
-                                                               contour_2[:, -1]]), return_counts=True)
-
-                    sufficient_depth = depths[np.argmax(frequencies)]
-
-                    contour_1 = contour_1[contour_1[:, -1] == sufficient_depth]
-                    contour_2 = contour_2[contour_2[:, -1] == sufficient_depth]
-
-                    if (len(contour_1) == 0) or (len(contour_2) == 0):
-                        # Contours are intersected on another depth, with less amount of points
-                        continue
-
-                    length_ratio = min(len(contour_2), len(contour_1)) / max(len(contour_2), len(contour_1))
-
-                    if length_ratio < intersection_ratio_threshold:
-                        continue
-
+                # Process objects with too small border contours
+                if (len(contour_1) < 4*contour_threshold) or (len(contour_2) < 4*contour_threshold):
                     corrected_contour_threshold = 1
+                else:
+                    corrected_contour_threshold = contour_threshold
 
                 # Check that one component contour is inside another (for both)
-                # Objects can be shifted on orthogonal_direction axis, so apply dilation for coords
-                # TODO: try to reduce amount of checks with constraints
                 # TODO: check reordering efficiency on huge data array
                 # TODO: check images intersection efficiency
                 if len(contour_1) > len(contour_2):
@@ -410,7 +384,7 @@ class FaultExtractor:
         """ Check that `contour_1` is almost inside dilated `contour_2`. """
         contour_1_set = set(tuple(x) for x in contour_1)
 
-        # Objects can be shifted on `self.orthogonal_direction`
+        # Objects can be shifted on `self.orthogonal_direction`, so apply dilation for coords
         contour_2_dilated = dilate_coords(coords=contour_2, dilate=self.dilation,
                                           axis=self.orthogonal_direction,
                                           max_value=self.shape[self.orthogonal_direction]-1)
