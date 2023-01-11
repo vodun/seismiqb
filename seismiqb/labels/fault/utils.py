@@ -9,15 +9,18 @@ def dilate_coords(coords, dilate=3, axis=0, max_value=None):
     """ Dilate coordinates with (dilate, 1) structure. """
     dilated_coords = np.tile(coords, (dilate, 1))
 
+    # Create dilated coordinates
     for counter, i in enumerate(range(-(dilate//2), dilate//2 + 1)):
         start_idx, end_idx = counter*len(coords), (counter + 1)*len(coords)
         dilated_coords[start_idx:end_idx, axis] += i
 
+    # Clip to the valid values
     if max_value is not None:
         dilated_coords = dilated_coords[(dilated_coords[:, axis] >= 0) & (dilated_coords[:, axis] <= max_value)]
     else:
         dilated_coords = dilated_coords[dilated_coords[:, axis] >= 0]
 
+    # Get sorted unique values
     dilated_coords = np.unique(dilated_coords, axis=0) # TODO: think about np.unique replacement
     return dilated_coords
 
@@ -65,7 +68,7 @@ def thin_coords(coords, values):
 
 # Distance evaluation
 def bboxes_intersected(bbox_1, bbox_2, axes=(0, 1, 2)):
-    """ Check bboxes intersections on axes. """
+    """ Check bboxes intersection on axes. """
     for axis in axes:
         borders_delta = min(bbox_1[axis, 1], bbox_2[axis, 1]) - max(bbox_1[axis, 0], bbox_2[axis, 0])
 
@@ -74,9 +77,8 @@ def bboxes_intersected(bbox_1, bbox_2, axes=(0, 1, 2)):
     return True
 
 @njit
-def bboxes_adjoining(bbox_1, bbox_2, axis=2):
+def bboxes_adjoining(bbox_1, bbox_2):
     """ Bboxes intersection or adjoining ranges if bboxes are adjoint. """
-    axis = 2 if axis == -1 else axis
     adjoinance_borders = []
 
     for i in range(3):
@@ -92,7 +94,12 @@ def bboxes_adjoining(bbox_1, bbox_2, axis=2):
 
 @njit
 def max_depthwise_distance(coords_1, coords_2, depths_ranges, step, axis, max_threshold=None):
-    """ Find maximal depth-wise central distance between coordinates."""
+    """ Find maximal depth-wise central distance between coordinates.
+    
+    ..!!..
+    max_threshold : int or float
+        Early stopping: threshold for max distance value.
+    """
     max_distance = 0
 
     for depth in range(depths_ranges[0], depths_ranges[1]+1, step):
@@ -113,21 +120,25 @@ def max_depthwise_distance(coords_1, coords_2, depths_ranges, step, axis, max_th
 def find_contour(coords, projection_axis):
     """ Find closed contour of 2d projection.
 
-    Note, returned contour coordinates are equal to 0 for the projection axis. """
+    Note, returned contour coordinates are equal to 0 for the projection axis.
+    """
     anchor_axis = int(not projection_axis)
 
     # Make 2d projection on projection_axis
     bbox = np.column_stack([np.min(coords, axis=0), np.max(coords, axis=0)])
     bbox = np.delete(bbox, projection_axis, 0)
 
+    # Create object mask
     origin = bbox[:, 0]
     image_shape = bbox[:, 1] - bbox[:, 0] + 1
 
     mask = np.zeros(image_shape, bool)
     mask[coords[:, anchor_axis] - origin[0], coords[:, 2] - origin[1]] = 1
 
+    # Get object contour
     contour = mask ^ binary_erosion(mask)
 
+    # Extract coordinates from contour mask
     coords_2d = np.nonzero(contour)
 
     contour_coords = np.zeros((len(coords_2d[0]), 3), dtype=int)
@@ -141,6 +152,8 @@ def restore_coords_from_projection(coords, buffer, axis):
     """ Find `axis` coordinates from coordinates and their projection.
 
     ..!!..
+    buffer : np.ndarray
+        Buffer with projection coordinates.
     """
     known_axes = [i for i in range(3) if i != axis]
 

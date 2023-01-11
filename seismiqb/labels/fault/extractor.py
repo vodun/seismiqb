@@ -68,9 +68,7 @@ class FaultExtractor:
             objects = find_objects(labeled)
 
             # Get components info
-            coords = []
-            bboxes = []
-            lengths = []
+            coords, bboxes, lengths = [], [], []
 
             for idx, object_bbox in enumerate(objects):
                 # Refined coords: we refine skeletonize effects by applying it on limited area
@@ -121,6 +119,7 @@ class FaultExtractor:
 
         self._first_slide_with_mergeable = 0
 
+    # Prototypes extraction
     def extract_prototypes(self):
         """ Extract all fault prototypes from the point cloud. """
         prototype = self.extract_prototype()
@@ -128,36 +127,6 @@ class FaultExtractor:
         while prototype is not None:
             self.prototypes.append(prototype)
             prototype = self.extract_prototype()
-
-    def _add_new_component(self, slide_idx, coords):
-        """ Add new items into the container. """
-        # Object bbox
-        mins_ = np.min(coords, axis=0)
-        maxs_ = np.max(coords, axis=0)
-        bbox = np.column_stack([mins_, maxs_])
-
-        self.container[slide_idx]['bboxes'].append(bbox)
-
-        # Object coords
-        self.container[slide_idx]['coords'].append(coords)
-
-        # Length
-        length = len(coords) if len(coords) > self.component_len_threshold else -1
-        self.container[slide_idx]['lengths'] = np.append(self.container[slide_idx]['lengths'], length)
-
-    def _find_not_merged_component(self):
-        """ Find the longest not merged item on the minimal slide. """
-        idx = None
-
-        for slide_idx in range(self._first_slide_with_mergeable, self.shape[self.direction]):
-            slide_info = self.container[slide_idx]
-
-            if (slide_info['lengths'] != -1).any():
-                idx = np.argmax(slide_info['lengths'])
-                self._first_slide_with_mergeable = slide_idx
-                break
-
-        return slide_idx, idx
 
     def extract_prototype(self):
         """ Extract one fault prototype from the point cloud. """
@@ -202,24 +171,39 @@ class FaultExtractor:
 
         return prototype
 
+    def _find_not_merged_component(self):
+        """ Find the longest not merged item on the minimal slide. """
+        idx = None
+
+        for slide_idx in range(self._first_slide_with_mergeable, self.shape[self.direction]):
+            slide_info = self.container[slide_idx]
+
+            if (slide_info['lengths'] != -1).any():
+                idx = np.argmax(slide_info['lengths'])
+                self._first_slide_with_mergeable = slide_idx
+                break
+
+        return slide_idx, idx
+
     def _find_closest_component(self, component, slide_idx, distances_threshold=5,
                                 depth_iteration_step=10, depths_threshold=5):
         """ Find the closest component to component on the slide, get splitting depths for them if needed.
 
         ..!!..
         """
+        # Process inputs
         component = dilate_coords(component, axis=self.orthogonal_direction,
                                   max_value=self.shape[self.orthogonal_direction]-1)
 
+        component_bbox = np.column_stack([np.min(component, axis=0), np.max(component, axis=0)])
+
         min_distance = distances_threshold
 
+        # Init returned values
         closest_component = None
         prototype_split_indices = [None, None]
 
-        mins_ = np.min(component, axis=0)
-        maxs_ = np.max(component, axis=0)
-        component_bbox = np.column_stack([mins_, maxs_])
-
+        # Iter over components and find the closest one
         for idx, current_bbox in enumerate(self.container[slide_idx]['bboxes']):
             if self.container[slide_idx]['lengths'][idx] != -1:
                 # Check bbox intersection
@@ -230,6 +214,8 @@ class FaultExtractor:
                     continue
 
                 # Check closeness of some points (iter over intersection depths with some step)
+                # Faster then component intersection, but not so accurate
+                # TODO: check intersection again; compare results
                 current_component = self.container[slide_idx]['coords'][idx]
 
                 intersection_depths = (max(component_bbox[-1, 0], current_bbox[-1, 0]),
@@ -252,10 +238,9 @@ class FaultExtractor:
                         break
 
         if closest_component is not None:
-            # Merge founded component and split its extra parts
+            # Merge founded component and split prototype and new component extra parts
             self.container[slide_idx]['lengths'][merged_idx] = -1
 
-            # Find prototype and new component splitting depths
             # Split prototype: check that the new component is smaller than the previous one (for each border)
             if intersection_borders[0] - component_bbox[-1, 0] > depths_threshold:
                 prototype_split_indices[0] = intersection_borders[0]
@@ -287,8 +272,46 @@ class FaultExtractor:
 
         return closest_component, prototype_split_indices
 
+    def _add_new_component(self, slide_idx, coords):
+        """ Add new items into the container. """
+        # Object bbox
+        bbox = np.column_stack([np.min(coords, axis=0), np.max(coords, axis=0)])
+        self.container[slide_idx]['bboxes'].append(bbox)
+
+        # Object coords
+        self.container[slide_idx]['coords'].append(coords)
+
+        # Length
+        length = len(coords) if len(coords) > self.component_len_threshold else -1
+        self.container[slide_idx]['lengths'] = np.append(self.container[slide_idx]['lengths'], length)
+
+    # Prototypes concatenation
+    def concat_connected_prototypes(self, axis=None):
+        """ Find and concat prototypes connected on the `axis`.
+
+        ..!!..
+        """
+        # Concat coords and remove concated parts
+        to_concat = self.find_connected_prototypes(axis=axis)
+
+        remove_elements = []
+
+        for where_to_concat_idx, what_to_concat_indices in to_concat.items():
+            main_prototype = self.prototypes[where_to_concat_idx]
+
+            for idx in what_to_concat_indices:
+                main_prototype.concat(self.prototypes[idx])
+
+            remove_elements.extend(what_to_concat_indices)
+
+        remove_elements.sort()
+        remove_elements = remove_elements[::-1]
+
+        for idx in remove_elements:
+            _ = self.prototypes.pop(idx)
+
     def find_connected_prototypes(self, intersection_ratio_threshold=None, contour_threshold=10, axis=2):
-        """ Find prototypes which can be connected as puzzles.
+        """ Find prototypes which are connected as puzzles.
 
         ..!!..
 
@@ -316,7 +339,7 @@ class FaultExtractor:
 
         for j, prototype_1 in enumerate(self.prototypes):
             for k, prototype_2 in enumerate(self.prototypes[j+1:]):
-                adjoining_borders = bboxes_adjoining(prototype_1.bbox, prototype_2.bbox, axis=axis)
+                adjoining_borders = bboxes_adjoining(prototype_1.bbox, prototype_2.bbox)
 
                 if adjoining_borders is None:
                     continue
@@ -325,6 +348,7 @@ class FaultExtractor:
                 intersection_threshold = min(prototype_1.bbox[overlapping_axis, 1]-prototype_1.bbox[overlapping_axis, 0],
                                              prototype_2.bbox[overlapping_axis, 1]-prototype_2.bbox[overlapping_axis, 0])
                 intersection_threshold *= intersection_ratio_threshold
+
                 intersection_length = adjoining_borders[overlapping_axis][0] - adjoining_borders[overlapping_axis][1]
 
                 if intersection_length < intersection_threshold:
@@ -343,6 +367,7 @@ class FaultExtractor:
                                       (contour_1[:, axis] <= intersection_range[1])]
                 contour_2 = contour_2[(contour_2[:, axis] >= intersection_range[0]) & \
                                       (contour_2[:, axis] <= intersection_range[1])]
+                
 
                 # If one data contour is much longer than other, then we can't connect them as puzzle details
                 length_ratio = min(len(contour_1), len(contour_2)) / max(len(contour_1), len(contour_2))
@@ -385,31 +410,8 @@ class FaultExtractor:
 
         return len(contour_1_set - contour_2_dilated) < contour_threshold
 
-    def concat_connected_prototypes(self, axis=None):
-        """ Find and concat prototypes connected by the `axis`.
-
-        ..!!..
-        """
-        # Concat coords and remove concated parts
-        to_concat = self.find_connected_prototypes(axis=axis)
-
-        remove_elements = []
-
-        for where_to_concat_idx, what_to_concat_indices in to_concat.items():
-            main_prototype = self.prototypes[where_to_concat_idx]
-
-            for idx in what_to_concat_indices:
-                main_prototype.concat(self.prototypes[idx])
-
-            remove_elements.extend(what_to_concat_indices)
-
-        remove_elements.sort()
-        remove_elements = remove_elements[::-1]
-
-        for idx in remove_elements:
-            _ = self.prototypes.pop(idx)
-
-    def run_concat(self, iters=5):
+    # Addons
+    def run_prototypes_concat(self, iters=5):
         """ Only for tests. Will be removed. """
         previous_prototypes_amount = len(self.prototypes) + 100 # to avoid stopping after first concat
         print("Start amount: ", len(self.prototypes))
@@ -474,56 +476,30 @@ class FaultPrototype:
 
     @property
     def contour(self):
+        """ Contour of 2d projection on axis, orthogonal to self.direction."""
         if self._contour is None:
             projection_axis = int(not self.direction)
             self._contour = find_contour(coords=self.coords, projection_axis=projection_axis)
         return self._contour
 
-    def get_borders(self, removed_border, axis):
-        """..!!..
-
-        Parameters
-        ----------
-        removed_border : {'up', 'down', 'left', 'right'}
-        """
-        # Delete extra border from contour
-        if removed_border not in self._borders.keys():
-            if removed_border in ('left', 'right'):
-                border_coords = self.contour.copy()
-
-                # For border removing we apply groupby which works only for the last axis, so we swap axes coords
-                border_coords[:, [-1, axis]] = border_coords[:, [axis, -1]]
-
-                # Groupby implementation needs sorted data
-                border_coords = border_coords[border_coords[:, axis].argsort()]
-            else:
-                border_coords = self.contour
-
-            if removed_border in ('up', 'left'):
-                border_coords = groupby_max(border_coords)
-            else:
-                border_coords = groupby_min(border_coords)
-
-            # Restore 3d coordinates
-            projection_axis = int(not self.direction)
-
-            if removed_border in ('left', 'right'):
-                border_coords[:, [-1, axis]] = border_coords[:, [axis, -1]]
-
-            border_coords = restore_coords_from_projection(coords=self.coords, buffer=border_coords, axis=projection_axis)
-            self._borders[removed_border] = border_coords
-        return self._borders[removed_border]
-
     def append(self, coords, slide_idx=None):
-        """..!!.."""
+        """ Append new coords into prototype. """
         self.coords = np.vstack([self.coords, coords])
 
         self.reset_borders()
         self._last_slide_idx = slide_idx
         self._last_component = coords
 
+    def concat(self, other):
+        """ Concatenate two prototypes. """
+        self.coords = np.vstack([self.coords, other.coords])
+
+        self.reset_borders()
+        self._last_slide_idx = None
+        self._last_component = None
+
     def split(self, split_depth, cut_upper_part):
-        """..!!.."""
+        """ Split prototype into two parts by `split_depth`. """
         if cut_upper_part:
             new_coords = self.coords[self.coords[:, -1] < split_depth]
 
@@ -544,13 +520,39 @@ class FaultPrototype:
                                        last_slide_idx=new_last_slide, last_component=new_last_component)
         return new_prototype
 
-    def concat(self, other):
-        """..!!.."""
-        self.coords = np.vstack([self.coords, other.coords])
+    def get_borders(self, removed_border, axis):
+        """ Get contour borders except the one.
 
-        self.reset_borders()
-        self._last_slide_idx = None
-        self._last_component = None
+        Parameters
+        ----------
+        removed_border : {'up', 'down', 'left', 'right'}
+        """
+        if removed_border not in self._borders.keys():
+            # Delete extra border from contour
+            # For border removing we apply groupby which works only for the last axis, so we swap axes coords
+            if removed_border in ('left', 'right'):
+                border_coords = self.contour.copy()
+                border_coords[:, [-1, axis]] = border_coords[:, [axis, -1]]
+                border_coords = border_coords[border_coords[:, axis].argsort()] # Groupby needs sorted data
+            else:
+                border_coords = self.contour
+
+            # Delete border by applying groupby
+            if removed_border in ('up', 'left'):
+                border_coords = groupby_max(border_coords)
+            else:
+                border_coords = groupby_min(border_coords)
+
+            # Restore 3d coordinates
+            projection_axis = int(not self.direction)
+
+            if removed_border in ('left', 'right'):
+                border_coords[:, [-1, axis]] = border_coords[:, [axis, -1]]
+
+            border_coords = restore_coords_from_projection(coords=self.coords, buffer=border_coords, axis=projection_axis)
+            self._borders[removed_border] = border_coords
+
+        return self._borders[removed_border]
 
     def reset_borders(self):
         """..!!.."""
