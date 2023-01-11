@@ -595,13 +595,9 @@ class SeismicCropBatch(Batch, VisualizationMixin):
             shift = np.random.randint(-max_shift, max_shift)
 
             # Apply shift
-            segment = crop[:, begin:min(begin + length, crop.shape[1]), :]
-            shifted_segment = np.zeros_like(segment)
-            if shift > 0:
-                shifted_segment[:, :, shift:] = segment[:, :, :-shift]
-            elif shift < 0:
-                shifted_segment[:, :, :shift] = segment[:, :, -shift:]
             if shift != 0:
+                segment_to_shift = crop[:, begin:min(begin + length, crop.shape[1]), :]
+                shifted_segment = np.roll(segment_to_shift, shift=shift, axis=-1)
                 crop[:, begin:min(begin + length, crop.shape[1]), :] = shifted_segment
         return crop
 
