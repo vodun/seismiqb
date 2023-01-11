@@ -1,4 +1,4 @@
-""" !!. """
+""" Well class to describe core logs. """
 import os
 
 import numpy as np
@@ -9,13 +9,15 @@ from lasio import LASFile
 
 from ...plotters import plot
 
-# from scipy.interpolate import interp1d
-
 
 
 class Well:
-    """ !!. """
+    """ A class to hold information about core logs and perform simple processing operations.
+    Main idea is to initialize the well instance from either LAS file or checkshot, and then combine multiple instances
+    into one with all (possibly, interpolated) available logs.
 
+    TODO: write more docs
+    """
     def __init__(self, storage, field=None, name=None, **kwargs):
         self.path = None
         self.name = name
@@ -35,7 +37,7 @@ class Well:
             self.path = path
             self.name = os.path.basename(path).split('.')[0]
 
-            with open(path, mode='r') as file:
+            with open(path, mode='r', encoding='utf-8') as file:
                 line = file.readline()
 
             if 'LAS' in line:
@@ -60,22 +62,23 @@ class Well:
 
     @property
     def keys(self):
-        """ !!. """
+        """ Available logs. """
         return list(self.data.columns)
 
     @property
     def n_logs(self):
-        """ !!. """
+        """ Number of available logs. """
         return len(self.keys)
 
-    #
+
+    # Initialization from different containers
     def from_las(self, path, **kwargs):
-        """ !!. """
+        """ Initialize instance from LAS file. """
         self.lasfile = LASFile(path)
         self.data = self.lasfile.df().rename_axis('DEPTH')
 
     def from_petrel_checkshot(self, path, **kwargs):
-        """ !!. """
+        """ Initialize instance from a checkshot, saved by Petrel software. """
         #pylint: disable='anomalous-backslash-in-string
         self.data = pd.read_csv(path, skiprows=14, header=None, sep='\s+',
                                 names=['X', 'Y', 'Z', 'TWT', 'MD', 'Well', 'AvgV', 'IV'],
@@ -85,7 +88,7 @@ class Well:
         self.data['Z'] = -self.data['Z']
 
     def from_field(self, field, location=None, column_name='DATA', **kwargs):
-        """ !!. """
+        """ Initialize instance from a known field geometry: available pseudo-logs are `TIME` and `SAMPLES`. """
         samples = np.arange(0, field.depth, 1, dtype=np.int32)
         seismic_time = samples * field.sample_rate
         data = {'SAMPLES': samples, 'TIME': seismic_time}
@@ -96,7 +99,7 @@ class Well:
         self.data = pd.DataFrame(data).set_index('SAMPLES')
 
 
-    #
+    # Redefined protocols
     def __getitem__(self, key):
         return self.data[key]
 
@@ -110,7 +113,7 @@ class Well:
         raise AttributeError
 
 
-    #
+    # Methods to combine multiple wells into one
     def merge_data(self, other, key_self='index', key_other='index', inplace=True, kind='linear', prefix=''):
         """ Merge data from other well instance or dataframe.
         Resamples the data of `other` to match points in `self` in one of the columns.
@@ -138,7 +141,7 @@ class Well:
 
 
     def match_to_seismic(self, columns=('X', 'Y', 'TWT'), field=None, well=None):
-        """ !!. """
+        """ Match `self` to a provided `well` or to default seismic pseudo-well. """
         field = field or self.field
         assert field is not None, 'Making points requires field reference in either `Well` instance or method call!'
 
@@ -173,24 +176,15 @@ class Well:
         return matched_well
 
 
-    #
-    def filter(self, exclude=('INLINE_3D', 'CROSSLINE_3D', 'TWT', 'DEPTH', 'TIME')):
-        """ !!. """
-        for column in set(self.keys) - set(exclude):
-            d_min, d_max = self.get_bounds(self.data[column])
-            self.data[column][:d_min] = np.nan
-            self.data[column][d_max:] = np.nan
-
-
     # Work with present logs
     def add_seismic_trace(self, field, name):
-        """ !!. """
+        """ Add seismic trace as a pseudo-log. """
         seismic_trace = field.mmap[self.points[:, 0], self.points[:, 1], self.points[:, 2]]
         seismic_trace = seismic_trace.astype(np.float32)
         self.data[name] = seismic_trace
 
     def compute_reflectivity(self, impedance_log='AI', name='R'):
-        """ !!. """
+        """ Compute reflectivity from available impedance log. """
         impedance = self.data[impedance_log].values
         reflectivity = ((impedance[1:] - impedance[:-1]) /
                         (impedance[1:] + impedance[:-1]))
@@ -198,14 +192,14 @@ class Well:
         self.data[name] = reflectivity
 
     def compute_synthetic(self, impulse, reflectivity_log='R', name='SYNTHETIC'):
-        """ !!. """
+        """ Compute synthetic trace from available reflectivity log and provided impulse. """
         reflectivity = self.data[reflectivity_log].values
         reflectivity = np.nan_to_num(reflectivity, nan=0.0)
         synthetic = np.convolve(reflectivity, impulse, mode='same')
         self.data[name] = synthetic
 
     def compute_filtered_log(self, log, order=5, frequency=60, btype='lowpass', name=None):
-        """ !!. """
+        """ Apply filtration to a given log. """
         array = self.data[log].values
 
         sosfilt = scipy.signal.butter(order, frequency, btype=btype, fs=1/(1e-3 * self.field.sample_rate), output='sos')
@@ -221,9 +215,9 @@ class Well:
         self.bboxes[name] = bbox
 
 
-    #
+    # Methods for Batch loads
     def compute_overlap_mask(self, mask_bbox, log='AI'):
-        """ !!. """
+        """ Compute a depth-wise mask of overlap between well log and a given mask bbox. """
         log_bbox = self.bboxes[log]
         overlap_min = np.maximum(mask_bbox[:, 0], log_bbox[:, 0])
         overlap_max = np.minimum(mask_bbox[:, 1], log_bbox[:, 1] + 1)
@@ -238,12 +232,12 @@ class Well:
         return mask
 
     def compute_overlap_size(self, mask_bbox, log='AI'):
-        """ !!. """
+        """ Compute the number of pixels in a well within a given mask bbox. """
         overlap_mask = self.compute_overlap_mask(mask_bbox=mask_bbox, log=log)
         return 0 if overlap_mask is None else overlap_mask.sum()
 
     def add_to_mask(self, mask, locations, log='AI', **kwargs):
-        """ !!. """
+        """ Add values from log to a mask in a given location. """
         mask_bbox = np.array([[slc.start, slc.stop] for slc in locations], dtype=np.int32)
         overlap_mask = self.compute_overlap_mask(mask_bbox=mask_bbox, log=log)
 
@@ -252,7 +246,8 @@ class Well:
             mask[points[:, 0], points[:, 1], points[:, 2]] = self.data[log].values[overlap_mask]
         return mask
 
-    #
+
+    # Depth-wise filtration of logs
     @staticmethod
     def get_bounds(array):
         """ Return the index of the first and the last meaningful elements in array.
@@ -263,8 +258,15 @@ class Well:
         mask = diff != 0
         return np.argmax(mask), len(array) - np.argmax(mask[::-1])
 
+    def filter(self, exclude=('INLINE_3D', 'CROSSLINE_3D', 'TWT', 'DEPTH', 'TIME')):
+        """ Fill insignificant values on left/right bounds of each log with nans. """
+        for column in set(self.keys) - set(exclude):
+            d_min, d_max = self.get_bounds(self.data[column])
+            self.data[column][:d_min] = np.nan
+            self.data[column][d_max:] = np.nan
 
-    #
+
+    # Visualization
     @property
     def short_name(self):
         """ Name without extension. """
@@ -276,7 +278,7 @@ class Well:
         return f"""<Well `{self.name}` for `{self.field.short_name}` at {hex(id(self))}>"""
 
     def plot(self, logs='all', layout='horizontal', dropkeys=None, zoom=None, combine='separate', **kwargs):
-        """ !!. """
+        """ Show log curves. """
         horizontal_layout = layout.startswith('h')
 
         # Parse logs to use
@@ -353,8 +355,9 @@ class Well:
 
 
 class MatchedWell(Well):
-    """ !!. """
-
+    """ Automatic combination of multiple data sources.
+    TODO: extend the documentation
+    """
     def __init__(self, storage, additional_paths, field=None, name=None, data_name='DATA', **kwargs):
         super().__init__(storage=field, field=field, name=name, **kwargs)
 
