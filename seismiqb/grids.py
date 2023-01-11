@@ -335,7 +335,8 @@ class RegularGrid(BaseGrid):
         self._i_grid, self._x_grid, self._d_grid = i_grid, x_grid, d_grid
 
         # Create points: origins for each crop. Keep only those that produce crops with more than `threshold` points
-        points = np.array(np.meshgrid(i_grid, x_grid, d_grid)).T.reshape(-1, 3)
+        order = (1, 2, 3, 0) if self.orientation == 0 else (2, 1, 3, 0)
+        points = np.array(np.meshgrid(i_grid, x_grid, d_grid, indexing='ij')).transpose(order).reshape(-1, 3)
 
         mask = np.ones(len(points), dtype=np.bool_)
         if self.filtering_matrix is not None:
