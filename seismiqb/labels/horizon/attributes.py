@@ -870,8 +870,6 @@ def _get_spikes_along_line(matrix, max_spike_width=5, min_spike_size=3, max_dept
                     if depths_diff <= max_depths_distance:
                         spikes_mask[line_idx, slice(spike_start_idx, spike_potential_point_idx)] = 1
                         break
-                else:
-                    spikes_mask[line_idx, slice(spike_start_idx, spike_potential_point_idx)] = 1
 
     return spikes_mask
 
