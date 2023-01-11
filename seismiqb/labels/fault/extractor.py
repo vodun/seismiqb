@@ -57,11 +57,11 @@ class FaultExtractor:
         self.container = {}
 
         self.prototypes_queue = deque() # prototypes for extension
-        self.prototypes = []
+        self.prototypes = [] # extracted prototypes
 
         for slide_idx in Notifier('t')(range(self.shape[self.direction])):
-            mask = skeletonized_array[slide_idx, :, :]
-            smoothed = smoothed_array[slide_idx, :, :]
+            mask = np.take(skeletonized_array, slide_idx, axis=self.direction)
+            smoothed = np.take(smoothed_array, slide_idx, axis=self.direction)
 
             # Extract connected components from the slide
             labeled = connected_components(mask > 0)
@@ -363,25 +363,42 @@ class FaultExtractor:
                     corrected_contour_threshold = contour_threshold
 
                 # Check that one component contour is inside another (for both)
-                # TODO: check reordering efficiency on huge data array
-                # TODO: check images intersection efficiency
-                if len(contour_1) > len(contour_2):
-                    comparison_order = (contour_1, contour_2)
-                else:
-                    comparison_order = (contour_2, contour_1)
+                if self._is_contour_inside(contour_1, contour_2, contour_threshold=corrected_contour_threshold):
+                    to_concat, concated_with = _add_link(item_i=j, item_j=k+j+1,
+                                                         to_concat=to_concat, concated_with=concated_with)
+                    continue
 
-                for i in range(2):
-                    contour_1_i = comparison_order[i]
-                    contour_2_i = comparison_order[i != 1]
+                if self._is_contour_inside(contour_2, contour_1, contour_threshold=corrected_contour_threshold):
+                    to_concat, concated_with = _add_link(item_i=j, item_j=k+j+1,
+                                                         to_concat=to_concat, concated_with=concated_with)
 
-                    if self._is_contour_inside(contour_1_i, contour_2_i, contour_threshold=corrected_contour_threshold):
-                        to_concat, concated_with = _add_link(item_i=j, item_j=k+j+1,
-                                                             to_concat=to_concat, concated_with=concated_with)
-                        break
         return to_concat
 
     def _is_contour_inside(self, contour_1, contour_2, contour_threshold):
         """ Check that `contour_1` is almost inside dilated `contour_2`. """
+        # TODO: check timings v1 vs v2
+        # Variant 1: a little bit faster, check on huge data volume
+        # origin = np.min([np.min(contour_1, axis=0), np.min(contour_2, axis=0)], axis=0)
+        # contour_1 -= origin
+        # contour_2 -= origin
+
+        # shape = np.max([np.max(contour_1, axis=0), np.max(contour_2, axis=0)], axis=0) + 1
+
+        # background = np.zeros(shape, bool)
+        # background[contour_2[:, 0], contour_2[:, 1], contour_2[:, 2]] = 1
+
+        # structure_shape = [1, 1, 1]
+        # structure_shape[self.orthogonal_direction] = self.dilation
+        # background = binary_dilation(background, structure=np.ones(structure_shape, bool))
+
+        # length_dilated = np.count_nonzero(background)
+
+        # background[contour_1[:, 0], contour_1[:, 1], contour_1[:, 2]] = 1
+
+        # both_components_length = np.count_nonzero(background)
+        # return both_components_length - length_dilated < contour_threshold
+
+        # Variant 2:
         contour_1_set = set(tuple(x) for x in contour_1)
 
         # Objects can be shifted on `self.orthogonal_direction`, so apply dilation for coords
@@ -451,7 +468,7 @@ class FaultPrototype:
     """ ..!!.. """
     def __init__(self, coords, direction, last_slide_idx=None, last_component=None):
         """..!!.."""
-        self.coords = coords # TODO: think about coordinates list
+        self.coords = coords
         self.direction = direction
 
         self._bbox = None
@@ -460,7 +477,6 @@ class FaultPrototype:
 
         self._contour = None
         self._borders = {}
-        # add info about connected prototypes
 
     @property
     def bbox(self):
@@ -498,7 +514,7 @@ class FaultPrototype:
         # Delete extra border from contour
         if removed_border not in self._borders.keys():
             if removed_border in ('left', 'right'):
-                border_coords = self.contour.copy() # TODO: check is it necessary
+                border_coords = self.contour.copy()
 
                 # For border removing we apply groupby which works only for the last axis, so we swap axes coords
                 border_coords[:, [-1, axis]] = border_coords[:, [axis, -1]]
@@ -506,7 +522,7 @@ class FaultPrototype:
                 # Groupby implementation needs sorted data
                 border_coords = border_coords[border_coords[:, axis].argsort()]
             else:
-                border_coords = self.contour.copy()
+                border_coords = self.contour
 
             if removed_border in ('up', 'left'):
                 border_coords = groupby_max(border_coords)
@@ -518,7 +534,6 @@ class FaultPrototype:
 
             if removed_border in ('left', 'right'):
                 border_coords[:, [-1, axis]] = border_coords[:, [axis, -1]]
-                border_coords = border_coords[border_coords[:, axis].argsort()] # ?
 
             border_coords = restore_coords_from_projection(coords=self.coords, buffer=border_coords, axis=projection_axis)
             self._borders[removed_border] = border_coords
