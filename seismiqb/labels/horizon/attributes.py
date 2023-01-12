@@ -206,8 +206,8 @@ class AttributesMixin:
         return round(coverage, 5)
 
     @property
-    def contour_coverage(self):
-        """ Ratio between number of points inside horizon contour and number of good traces in cube. """
+    def filled_contour_coverage(self):
+        """ Ratio between number of points inside horizon filled contour and number of good traces in cube. """
         filled_matrix = binary_fill_holes(self.binary_matrix)
         return np.count_nonzero(filled_matrix)/self.field.n_alive_traces
 
