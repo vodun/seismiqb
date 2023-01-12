@@ -208,7 +208,8 @@ class AttributesMixin:
     @property
     def filled_coverage(self):
         """ Ratio between number of points inside horizon filled contour and number of good traces in cube. """
-        return np.count_nonzero(self.filled_matrix)/self.field.n_alive_traces
+        coverage = np.count_nonzero(self.filled_matrix) / self.field.n_alive_traces
+        return round(coverage, 5)
 
     @property
     def number_of_holes(self):
@@ -251,11 +252,17 @@ class AttributesMixin:
 
     @property
     def filled_matrix(self):
-        """ Binary matrix with filled holes. """
-        structure = np.ones((3, 3))
-        filled_matrix = binary_fill_holes(self.binary_matrix, structure)
-        return filled_matrix
+        """ Binary matrix with filled holes (except dead traces). """
+        return self.filled_full_matrix[self.points[:, 0], self.points[:, 1]]
 
+    @property
+    def filled_full_matrix(self):
+        """ Full binary matrix with filled holes (except dead traces). """
+        structure = np.ones((3, 3))
+        filled_matrix = binary_fill_holes(self.full_binary_matrix, structure)
+
+        filled_matrix[self.field.dead_traces_matrix] = 0
+        return filled_matrix
 
     def grad_along_axis(self, axis=0):
         """ Change of depths along specified direction. """
@@ -314,7 +321,7 @@ class AttributesMixin:
         """
         grid = self.field.get_grid(margin=margin, frequency=frequency)
         horizon_on_grid = self.full_binary_matrix & grid
-        return np.count_nonzero(horizon_on_grid)/np.count_nonzero(grid)
+        return np.count_nonzero(horizon_on_grid) / np.count_nonzero(grid)
 
 
     # Retrieve data from seismic along horizon
