@@ -168,6 +168,7 @@ class lru_cache:
 
     def make_key(self, instance, func, args, kwargs):
         """ Create a key from a combination of method args and instance attributes. """
+        # pylint: disable=unsupported-membership-test
         # We get names and values for args and defaults from the func signature
         if self.func_signature is None:
             self.func_signature = signature(func).parameters
