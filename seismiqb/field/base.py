@@ -212,7 +212,7 @@ class Field(CharismaMixin, VisualizationMixin):
             path.field = self
             return [path]
 
-        faults = constructor_class.load(path, self, interpolate, **kwargs)
+        faults = constructor_class.load(path, self, interpolate=interpolate, **kwargs)
         return faults
 
     def _load_geometries(self, paths, constructor_class=Geometry.new, **kwargs):
