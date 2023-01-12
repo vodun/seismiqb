@@ -452,11 +452,11 @@ class Field(CharismaMixin, VisualizationMixin):
         self.attached_instances.reset_cache()
 
     @property
-    def cache_size(self):
-        """ Total size of cached data. """
-        size = self.geometry.cache_size
-        size += sum(self.attached_instances.cache_size)
-        return size
+    def cache_nbytes(self):
+        """ Total nbytes of cached data. """
+        nbytes = self.geometry.cache_nbytes
+        nbytes += sum(self.attached_instances.cache_nbytes)
+        return nbytes
 
     # Facies
     def evaluate_facies(self, src_horizons, src_true=None, src_pred=None, metrics='dice'):

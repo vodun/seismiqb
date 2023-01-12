@@ -26,16 +26,6 @@ class _GlobalCacheClass:
         self.instances_with_cache = WeakSet()
 
     @property
-    def length(self):
-        """ Total cache length. """
-        cache_length = 0
-
-        for instance in self.instances_with_cache:
-            cache_length += instance.cache_length
-
-        return cache_length
-
-    @property
     def size(self):
         """ Total cache size. """
         cache_size = 0
@@ -45,14 +35,24 @@ class _GlobalCacheClass:
 
         return cache_size
 
+    @property
+    def nbytes(self):
+        """ Total cache nbytes. """
+        cache_nbytes = 0
+
+        for instance in self.instances_with_cache:
+            cache_nbytes += instance.cache_nbytes
+
+        return cache_nbytes
+
     def get_cache_repr(self, format='dict'):
         """ Create global cache representation.
 
         Cache representation consists of names of objects, that use data caching,
-        information about cache length, size, and arguments for each method.
+        information about cache size, nbytes, and arguments for each method.
 
         Keys (for 'dict') or index columns (for 'df') are: class name, instance id, method or property name.
-        Values are: length, size and arguments.
+        Values are: size, nbytes and arguments.
 
         Parameters
         ----------
@@ -83,7 +83,7 @@ class _GlobalCacheClass:
                     for object_name, object_data in instance_data.items()},
             orient='index')
 
-            cache_repr_ = cache_repr_.loc[:, ['length', 'size', 'arguments']] # Columns sort
+            cache_repr_ = cache_repr_.loc[:, ['size', 'nbytes', 'arguments']] # Columns sort
 
         return cache_repr_ if len(cache_repr_) > 0 else None
 
@@ -92,7 +92,7 @@ class _GlobalCacheClass:
         """ Global cache representation. """
         df = self.get_cache_repr(format='df')
         if df is not None:
-            df = df.loc[:, ['length', 'size']]
+            df = df.loc[:, ['size', 'nbytes']]
         return df
 
     def reset(self):
@@ -141,6 +141,7 @@ class lru_cache:
         self.maxsize = maxsize
         self.apply_by_default = apply_by_default
         self.copy_on_return = copy_on_return
+        self.func_signature = None
 
         # Parse `attributes`
         if isinstance(attributes, str):
@@ -159,8 +160,8 @@ class lru_cache:
         if instance is None:
             self.stats = defaultdict(lambda: {'hit': 0, 'miss': 0})
         else:
-            if hasattr(self, 'cache') and (self.attrname in self.cache):
-                del self.cache[self.attrname]
+            if hasattr(self, 'cache') and (self.cached_attr in self.cache):
+                del self.cache[self.cached_attr]
 
             instance_hash = self.compute_hash(instance)
             self.stats[instance_hash] = {'hit': 0, 'miss': 0}
@@ -168,18 +169,21 @@ class lru_cache:
     def make_key(self, instance, func, args, kwargs):
         """ Create a key from a combination of method args and instance attributes. """
         # We get names and values for args and defaults from the func signature
-        func_signature = signature(func).parameters
+        if self.func_signature is None:
+            self.func_signature = signature(func).parameters
 
         # Process args
         args = list(args) if not isinstance(args, list) else args
-        args_and_defaults = [name for name in func_signature.keys() if (name not in kwargs.keys()) and (name != 'self')]
 
-        if 'self' in func_signature:
+        if 'self' in self.func_signature:
             args = args[1:]
+
+        args_and_defaults = [name for name in self.func_signature.keys()
+                             if (name not in kwargs.keys()) and (name != 'self')]
 
         # Process default values
         for default_param in args_and_defaults[len(args):]:
-            default_value = func_signature.get(default_param).default
+            default_value = self.func_signature.get(default_param).default
             args.append(default_value)
 
         # Create key from args and defaults
@@ -238,13 +242,12 @@ class lru_cache:
             instance_hash = self.compute_hash(instance)
 
             # If result is already in cache, just retrieve it and update its timings
-            with self.lock:
-                cache = instance.cache[self.attrname]
-                result = cache.get(key, self.default)
+            cache = instance.cache[self.cached_attr]
+            result = cache.get(key, self.default)
 
-                if result is not self.default:
-                    del cache[key]
-                    cache[key] = result
+            if result is not self.default:
+                with self.lock:
+                    cache.move_to_end(key)
                     self.stats[instance_hash]['hit'] += 1
                     return copy(result) if copy_on_return else result
 
@@ -265,7 +268,7 @@ class lru_cache:
 
             return copy(result) if copy_on_return else result
 
-        self.attrname = func.__name__ # used as a cache key in instances
+        self.cached_attr = func.__qualname__ # used as a cache key in instances
 
         wrapper.__name__ = func.__name__
         wrapper.stats = lambda: self.stats
@@ -308,26 +311,6 @@ class CacheMixin:
 
     You can use this mixin for cache introspection and cached data cleaning on instance level.
     """
-    def get_cache_length(self, name=None):
-        """ Get cache length for specified objects.
-
-        Parameters
-        ----------
-        name: str, optional
-            Attribute name. If None, then get total cache length.
-        """
-        cache_length_accumulator = 0
-
-        if hasattr(self, 'cache'):
-            names = (name,) if name is not None else self.cache.keys()
-
-            for attrname in names:
-                cached_values = self.cache[attrname].values()
-
-                cache_length_accumulator += len(cached_values)
-
-        return cache_length_accumulator
-
     def get_cache_size(self, name=None):
         """ Get cache size for specified objects.
 
@@ -336,39 +319,55 @@ class CacheMixin:
         name: str, optional
             Attribute name. If None, then get total cache size.
         """
-        cache_size_accumulator = 0
+        cached_values = self.get_cached_values(name)
+        return len(cached_values)
 
-        # Accumulate cache size over all cached objects: each term is a size of cached numpy array
+    def get_cache_nbytes(self, name=None):
+        """ Get cache nbytes for specified objects.
+
+        Parameters
+        ----------
+        name: str, optional
+            Attribute name. If None, then get total cache nbytes.
+        """
+        cache_nbytes_accumulator = 0
+        cached_values = self.get_cached_values(name)
+
+        # Accumulate nbytes over all cached objects: each term is a nbytes of cached numpy array
+        for value in cached_values:
+            if isinstance(value, np.ndarray):
+                cache_nbytes_accumulator += value.nbytes #/ (1024 ** 3)
+
+        return cache_nbytes_accumulator
+
+    def get_cached_values(self, name=None):
+        """  Get cache values for specified objects. """
+        cached_values = []
         if hasattr(self, 'cache'):
             names = (name,) if name is not None else self.cache.keys()
 
-            for attrname in names:
-                cached_values = self.cache[attrname].values()
-
-                for value in cached_values:
-                    if isinstance(value, np.ndarray):
-                        cache_size_accumulator += value.nbytes / (1024 ** 3)
-
-        return cache_size_accumulator
-
-    @property
-    def cache_length(self):
-        """ Total amount of cached objects. """
-        return self.get_cache_length()
+            for cached_attr in names:
+                cached_values.extend(self.cache[cached_attr].values())
+        return cached_values
 
     @property
     def cache_size(self):
-        """ Total size of cached objects. """
+        """ Total amount of cached objects. """
         return self.get_cache_size()
+
+    @property
+    def cache_nbytes(self):
+        """ Total nbytes of cached objects. """
+        return self.get_cache_nbytes()
 
     def _get_object_cache_repr(self, name):
         """ Make object's cache repr. """
-        object_cache_length = self.get_cache_length(name=name)
+        object_cache_size = self.get_cache_size(name=name)
 
-        if object_cache_length == 0:
+        if object_cache_size == 0:
             return None
 
-        object_cache_size = self.get_cache_size(name=name)
+        object_cache_nbytes = self.get_cache_nbytes(name=name)
 
         cached_data = getattr(self, 'cache', {}).get(name, {})
 
@@ -384,8 +383,8 @@ class CacheMixin:
             all_arguments = all_arguments[0]
 
         object_cache_repr = {
-            'length': object_cache_length,
             'size': object_cache_size,
+            'nbytes': object_cache_nbytes,
             'arguments': all_arguments
         }
 
@@ -395,7 +394,7 @@ class CacheMixin:
         """  Create instance cache representation.
 
         Cache representation consists of names of objects that use data caching,
-        information about cache length, size, and arguments for each method.
+        information about cache size, nbytes, and arguments for each method.
 
         Parameters
         ----------
@@ -415,18 +414,18 @@ class CacheMixin:
         # Convert to pandas dataframe
         if format == 'df' and len(cache_repr_) > 0:
             cache_repr_ = pd.DataFrame.from_dict(cache_repr_, orient='index')
-            cache_repr_ = cache_repr_.loc[:, ['length', 'size', 'arguments']] # Columns sort
+            cache_repr_ = cache_repr_.loc[:, ['size', 'nbytes', 'arguments']] # Columns sort
 
         return cache_repr_ if len(cache_repr_) > 0 else None
 
     @property
     def cache_repr(self):
-        """ DataFrame with cache representation that contains names, cache_length
-        and cache_size for each cached object.
+        """ DataFrame with cache representation that contains names, cache_size
+        and cache_nbytes for each cached object.
         """
         df = self.get_cache_repr(format='df')
         if df is not None:
-            df = df.loc[:, ['length', 'size']]
+            df = df.loc[:, ['size', 'nbytes']]
         return df
 
     def reset_cache(self, name=None):
