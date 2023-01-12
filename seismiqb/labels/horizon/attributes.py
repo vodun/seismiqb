@@ -253,7 +253,7 @@ class AttributesMixin:
     @property
     def filled_matrix(self):
         """ Binary matrix with filled holes (except dead traces). """
-        return self.filled_full_matrix[self.points[:, 0], self.points[:, 1]]
+        return self.filled_full_matrix[self.bbox[0, 0]:self.bbox[0, 1]+1, self.bbox[1, 0]:self.bbox[1, 1]+1]
 
     @property
     def filled_full_matrix(self):
