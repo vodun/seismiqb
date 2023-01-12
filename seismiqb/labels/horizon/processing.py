@@ -107,7 +107,7 @@ class ProcessingMixin:
 
     # Horizon surface transformations
     def smooth_out(self, mode='convolve', iters=1,
-                   kernel_size=3, sigma_spatial=0.8, kernel=None, sigma_range=2.0,
+                   kernel_size=(3, 3), sigma_spatial=0.8, kernel=None, sigma_range=2.0,
                    max_depth_difference=5, inplace=False, dtype=None):
         """ Smooth out the horizon surface.
 
@@ -134,7 +134,7 @@ class ProcessingMixin:
             If 'bilateral', then the method applies a bilateral filtering with a given kernel.
         iters : int
             Number of times to apply smoothing.
-        kernel_size : int
+        kernel_size : int or sequence of ints
             Size of a created gaussian filter if `kernel` is None.
         sigma_spatial : number
             Standard deviation (spread or “width”) for gaussian kernel.
@@ -164,6 +164,9 @@ class ProcessingMixin:
         else:
             smoothening_function, kwargs = _bilateral_filter, {'sigma_range': sigma_range}
 
+        if isinstance(kernel_size, int):
+            kernel_size = (kernel_size, kernel_size)
+
         kernel = kernel if kernel is not None else make_gaussian_kernel(kernel_size=kernel_size, sigma=sigma_spatial)
         dtype = dtype if dtype is not None else self.dtype
 
@@ -192,7 +195,7 @@ class ProcessingMixin:
         name = 'smoothed_' + self.name if self.name is not None else None
         return type(self)(storage=result, i_min=self.i_min, x_min=self.x_min, field=self.field, name=name, dtype=dtype)
 
-    def interpolate(self, iters=1, kernel_size=3, sigma=0.8, kernel=None,
+    def interpolate(self, iters=1, kernel_size=(3, 3), sigma=0.8, kernel=None,
                     min_present_neighbors=0, max_depth_ptp=None, inplace=False):
         """ Interpolate horizon surface on the regions with missing traces.
 
@@ -205,7 +208,7 @@ class ProcessingMixin:
         ----------
         iters : int
             Number of interpolation iterations to perform.
-        kernel_size : int
+        kernel_size : int or sequence of ints
             If the kernel is not provided, shape of the square gaussian kernel.
         sigma : number
             Standard deviation (spread or “width”) for gaussian kernel.
@@ -224,6 +227,9 @@ class ProcessingMixin:
         :class:`~.Horizon`
             Processed horizon instance. A new instance if `inplace` is False, `self` otherwise.
         """
+        if isinstance(kernel_size, int):
+            kernel_size = (kernel_size, kernel_size)
+
         kernel = kernel if kernel is not None else make_gaussian_kernel(kernel_size=kernel_size, sigma=sigma)
 
         result = self.matrix.astype(np.float32)

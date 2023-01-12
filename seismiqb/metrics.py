@@ -752,11 +752,12 @@ class HorizonMetrics(BaseMetrics):
 
             matrix = proximity_info['difference_matrix'].copy()
             hist_data = np.clip(matrix, -clip_value, clip_value)
+            hist_data = hist_data[~np.isnan(hist_data)]
 
             if ignore_zeros:
                 zero_mask = hist_data == 0.0
                 # Data can be empty in case of two identical horizons
-                if zero_mask.sum() != hist_data.size - np.isnan(hist_data).sum():
+                if zero_mask.sum() != hist_data.size:
                     # pylint: disable=invalid-unary-operand-type
                     hist_data = hist_data[~zero_mask]
 

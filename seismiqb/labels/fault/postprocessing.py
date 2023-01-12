@@ -1,8 +1,10 @@
 """ Utils for faults postprocessing. """
-
 import numpy as np
 from numba import njit, prange
 from numba.types import bool_
+
+from ...functional import make_gaussian_kernel
+
 
 @njit(parallel=True)
 def skeletonize(slide, peaks_width=5, rel_height=0.5, prominence=0.05, threshold=0.05, distance=None, mode=0):
