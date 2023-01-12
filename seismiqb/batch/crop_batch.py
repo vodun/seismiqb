@@ -408,7 +408,7 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         if orientation == 1:
             buffer = buffer.transpose(1, 0, 2)
         field.make_mask(locations=locations, orientation=orientation, buffer=buffer,
-                        width=width, indices=indices, src=src_labels, sparse=sparse)
+                        width=width, indices=indices, src=src_labels, sparse=sparse, **kwargs)
 
 
     @action
