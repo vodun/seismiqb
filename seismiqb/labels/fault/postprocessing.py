@@ -3,16 +3,18 @@ import numpy as np
 from numba import njit, prange
 from numba.types import bool_
 
+from ...functional import make_gaussian_kernel
+
 
 @njit(parallel=True)
-def skeletonize(slide, peaks_width=5, rel_height=0.5, prominence=0.05, threshold=0.05, distance=None, mode=0):
+def skeletonize(slide, width=5, rel_height=0.5, prominence=0.05, threshold=0.05, distance=None, mode=0):
     """ Perform skeletonize of faults on 2D slide
 
     Parameters
     ----------
     slide : numpy.ndarray
 
-    peaks_width : int, optional
+    width : int, optional
         width of peaks, by default 5
     rel_height, threshold : float, optional
         parameters of :meth:~.find_peaks`
@@ -35,7 +37,7 @@ def skeletonize(slide, peaks_width=5, rel_height=0.5, prominence=0.05, threshold
     skeletonized_slide = np.zeros_like(slide)
     for i in prange(slide.shape[1]): #pylint: disable=not-an-iterable
         x = slide[:, i]
-        peaks, prominences = find_peaks(x, width=peaks_width, prominence=prominence,
+        peaks, prominences = find_peaks(x, width=width, prominence=prominence,
                                         rel_height=rel_height, threshold=threshold, distance=distance)
         if mode == 0:
             skeletonized_slide[peaks, i] = 1
@@ -207,10 +209,99 @@ def thin_line(points, axis=0):
         if points[i, axis] == points[i-1, axis]:
             p += points[i]
             n += 1
-        else:
+        if (i == len(points) - 1) or (points[i, axis] != points[i-1, axis]):
             line[pos] = p / n
             n = 1
             pos += 1
             p = points[i].copy()
     line[pos] = p / n
     return line[:pos+1]
+
+# Bilateral filtering
+def bilateral_filter(data, kernel_size=3, kernel=None, padding='same', sigma_spatial=None, sigma_range=0.15):
+    """ Apply bilateral filtering for data 3d volume.
+
+    Bilateral filtering is an edge-preserving smoothening, which takes special care for areas on faults edges.
+    Be careful with `sigma_range` value:
+        - The higher the `sigma_range` value, the more 'bilateral' result looks like a 'convolve' result.
+        - If the `sigma_range` too low, then no smoothening applied.
+
+    Parameters
+    ----------
+    data : np.ndarray
+
+    kernel_size : int or sequence of ints
+        Size of a created gaussian filter if `kernel` is None.
+    kernel : ndarray or None
+        If passed, then ready-to-use kernel. Otherwise, gaussian kernel will be created.
+    padding : {'valid', 'same'} or sequence of tuples of ints, optional
+        Number of values padded to the edges of each axis.
+    sigma_spatial : number
+        Standard deviation (spread or “width”) for gaussian kernel.
+        The lower, the more weight is put into the point itself.
+    sigma_range : number
+        Standard deviation for additional weight which smooth differences in depth values.
+        The lower, the more weight is put into the depths differences between point in a window.
+        Note, if it is too low, then no smoothening is applied.
+    """
+    if kernel is None:
+        if isinstance(kernel_size, int):
+            kernel_size = (kernel_size, kernel_size, kernel_size)
+
+        if sigma_spatial is None:
+            sigma_spatial = [size//3 for size in kernel_size]
+
+        kernel = make_gaussian_kernel(kernel_size=kernel_size, sigma=sigma_spatial)
+
+    if padding == 'same':
+        padding = [(size//2, size - size//2 - 1) for size in kernel_size]
+    elif padding == 'valid':
+        padding = None
+
+    if padding is not None:
+        data = np.pad(data, padding)
+
+    result = _bilateral_filter(src=data, kernel=kernel, sigma_range=sigma_range)
+
+    if padding is not None:
+        slices = tuple(slice(size//2, -(size - size//2 - 1)) for size in kernel_size)
+        result = result[slices]
+    return result
+
+
+@njit(parallel=True)
+def _bilateral_filter(src, kernel, sigma_range=0.15):
+    """ Jit-accelerated function to apply 3d bilateral filtering.
+
+    The difference between gaussian smoothing and bilateral filtering is in additional weight multiplier,
+    which is a gaussian of difference of convolved elements.
+    """
+    #pylint: disable=too-many-nested-blocks, consider-using-enumerate, not-an-iterable
+    k = [shape//2 for shape in kernel.shape]
+    raveled_kernel = kernel.ravel() / np.sum(kernel)
+    sigma_squared = sigma_range**2
+
+    i_range, x_range, z_range = src.shape
+    dst = src.copy()
+
+    for iline in prange(0, i_range):
+        for xline in range(0, x_range):
+            for zline in range(0, z_range):
+                central = src[iline, xline, zline]
+
+                # Get values in the squared window and apply kernel to them
+                element = src[max(0, iline-k[0]):min(iline+k[0]+1, i_range),
+                              max(0, xline-k[1]):min(xline+k[1]+1, x_range),
+                              max(0, zline-k[2]):min(zline+k[2]+1, z_range)].ravel()
+
+                s, sum_weights = np.float32(0), np.float32(0)
+                for item, weight in zip(element, raveled_kernel):
+                    # Apply additional weight for values differences (ranges)
+                    weight *= np.exp(-0.5*((item - central)**2)/sigma_squared)
+
+                    s += item * weight
+                    sum_weights += weight
+
+                if sum_weights != 0.0:
+                    dst[iline, xline, zline] = s / sum_weights
+    return dst
