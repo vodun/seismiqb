@@ -206,6 +206,12 @@ class AttributesMixin:
         return round(coverage, 5)
 
     @property
+    def contour_coverage(self):
+        """ Ratio between number of points inside horizon contour and number of good traces in cube. """
+        filled_matrix = binary_fill_holes(self.binary_matrix)
+        return np.count_nonzero(filled_matrix)/self.field.n_alive_traces
+
+    @property
     def number_of_holes(self):
         """ Number of holes inside horizon borders. """
         holes_array = self.filled_matrix != self.binary_matrix
@@ -301,6 +307,16 @@ class AttributesMixin:
 
         raise AttributeError(f'Horizon `{self.displayed_name}` hasn\'t `proba_points` attribute. Check, whether'
                              ' the horizon was initialized `from_mask` with `save_probabilities=True` option.')
+
+    def get_grid_coverage(self, frequency, margin=1):
+        """ Ratio between number of present values on grid and number of traces on grid.
+
+        Helpful for evaluating carcass-likable horizon coverage relationally to carcass.
+        """
+        grid = self.field.get_grid(margin=margin, frequency=frequency)
+        horizon_on_grid = self.full_binary_matrix & grid
+        return np.count_nonzero(horizon_on_grid)/np.count_nonzero(grid)
+
 
     # Retrieve data from seismic along horizon
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
