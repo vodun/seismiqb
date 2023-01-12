@@ -28,22 +28,54 @@ class _GlobalCacheClass:
     @property
     def size(self):
         """ Total cache size. """
-        cache_size = 0
-
-        for instance in self.instances_with_cache:
-            cache_size += instance.cache_size
-
-        return cache_size
+        return self.get_stats(stat='size', level='total')
 
     @property
     def nbytes(self):
         """ Total cache nbytes. """
-        cache_nbytes = 0
+        return self.get_stats(stat='nbytes', level='total')
 
+    def get_size(self, level='total'):
+        """ Get cache size grouped by level. For more read the doc for :meth:`~.get_attr`"""
+        return self.get_stats(stat='size', level=level)
+
+    def get_nbytes(self, level='total'):
+        """ Get cache nbytes grouped by level. For more read the doc for :meth:`~.get_attr`"""
+        return self.get_stats(stat='nbytes', level=level)
+
+    def get_stats(self, stat='size', level='total'):
+        """ Get cache statistics grouped by level.
+
+        Parameters
+        ----------
+        stat : {'size', 'nbytes'}
+            Statistic to get values.
+        level : {'total', 'class', 'instance'}
+            Result groupby level.
+            If 'total', then return a total stat value for all instances.
+            If 'class', then return a dict with stat value for each class.
+            If 'instance', then return a nested dict with stat value for each instance.
+        """
+        # Init result accumulator/container
+        if level == 'total':
+            result = 0
+        elif level == 'class':
+            result = defaultdict(int)
+        else:
+            result = defaultdict(lambda: defaultdict(int))
+
+        # Fill accumulator/container with attribute values from instances with cache
         for instance in self.instances_with_cache:
-            cache_nbytes += instance.cache_nbytes
+            value = getattr(instance, f'cache_{stat}')
 
-        return cache_nbytes
+            if level == 'total':
+                result += value
+            elif level == 'class':
+                result[instance.__class__.__name__] += value
+            else:
+                result[instance.__class__.__name__][f'id_{id(instance)}'] += value
+
+        return result
 
     def get_cache_repr(self, format='dict'):
         """ Create global cache representation.
