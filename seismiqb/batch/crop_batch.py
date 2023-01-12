@@ -1066,7 +1066,6 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         # Generate locations for erasing
         for _ in range(int(n_patches)):
             starts = rng.integers(upper_bounds)
-            # print(upper_bounds, starts, )
             stops = starts + patch_shape
 
             slices = [slice(start, stop) for start, stop in zip(starts, stops)]

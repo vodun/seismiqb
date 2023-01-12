@@ -5,6 +5,7 @@ import h5py
 import hdf5plugin
 import numpy as np
 from sklearn.linear_model import LinearRegression
+from multiprocessing import Process
 
 from batchflow import Notifier
 
@@ -396,10 +397,14 @@ class WeightedSumAccumulator3D(Accumulator3D):
 
     def _update(self, crop, location):
         # Weights matrix for the incoming crop
+        if hasattr(self, 'file'):
+            print('Before', location, self.data, self.data[location].sum())
         crop_weights = self.weights_function(crop)
         self.data[location] = ((crop_weights * crop + self.data[location] * self.weights[location]) /
                                (crop_weights + self.weights[location]))
         self.weights[location] += crop_weights
+        if hasattr(self, 'file'):
+            print('After', self.data[location].sum(), self.data[:].sum())
 
     def _aggregate(self):
         # Cleanup
@@ -518,3 +523,64 @@ class RegressionAccumulator(Accumulator3D):
     def _aggregate(self):
         # Clean-up
         self.remove_placeholder('weights')
+
+
+class SlidesAccumulator:
+    def __init__(self, *args, shape=None, n_slides=40, n_sources=1, detach=False, orientation=0, **kwargs):
+        self.args, self.kwargs = args, kwargs
+        self.orientation = orientation
+        self.n_slides = n_slides
+        self.n_sources = n_sources
+        self.shape = shape
+        self.detach = detach
+        self._processes = []
+
+        self.accumulator = Accumulator3D.from_aggregation(*args, shape=shape, orientation=self.orientation, **kwargs)
+        self.chunks = [{} for _ in range(n_sources)]
+
+    def update(self, crop, location, source_idx=0):
+        origin = location[self.orientation].start - location[self.orientation].start % self.n_slides
+        if origin not in self.chunks[source_idx]:
+            self.aggregate_last(source_idx)
+            self.create_chunk(origin, source_idx)
+        self.chunks[source_idx][origin].update(crop, location)
+
+    def create_chunk(self, origin, source_idx):
+        shape = np.array(self.shape)
+        shape[self.orientation] = self.n_slides
+        shape = tuple(shape)
+
+        origin_ = [0, 0, 0]
+        origin_[self.orientation] = origin
+        origin_ = tuple(origin_)
+
+        kwargs = {**self.kwargs, 'shape': shape, 'origin': origin_, 'path': None}
+
+        self.chunks[source_idx][origin] = Accumulator3D.from_aggregation(*self.args, **kwargs)
+
+    def aggregate_last(self, source_idx):
+        if len(self.chunks[source_idx]) > 0:
+            origin = list(self.chunks[source_idx].keys())[-1]
+            chunk = self.chunks[source_idx].pop(origin)
+
+            if self.detach:
+                process = Process(target=_process_slide, args=(chunk, origin, self.shape, self.orientation, self.accumulator))
+                process.start()
+                self._processes.append(process)
+                process.join()
+            else:
+                _process_slide(chunk, origin, self.shape, self.orientation, self.accumulator)
+
+    def aggregate(self):
+        for source_idx in range(self.n_sources):
+            self.aggregate_last(source_idx)
+        # for p in self._processes:
+        #     p.join()
+        data = self.accumulator.aggregate()
+        return data
+
+def _process_slide(chunk, origin, full_shape, orientation, accumulator):
+    data = chunk.aggregate()
+    location = [slice(0, item) for item in full_shape]
+    location[orientation] = slice(origin, origin+data.shape[orientation])
+    accumulator.update(data, location)
