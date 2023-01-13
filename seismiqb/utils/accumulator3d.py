@@ -535,15 +535,14 @@ class SlidesAccumulator:
         self.accumulator_process = Process(target=self.collect_slides, args=(self.slides_queue, ))
         self.accumulator_process.start()
 
-        # self.accumulator = Accumulator3D.from_aggregation(*args, shape=shape, orientation=self.orientation, **kwargs)
-        self.chunks = [{} for _ in range(n_sources)]
+        self.chunk_accumulators = [{} for _ in range(n_sources)]
 
     def update(self, crop, location, source_idx=0):
         origin = location[self.orientation].start - location[self.orientation].start % self.n_slides
-        if origin not in self.chunks[source_idx]:
+        if origin not in self.chunk_accumulators[source_idx]:
             self.aggregate_last(source_idx)
             self.create_chunk(origin, source_idx)
-        self.chunks[source_idx][origin].update(crop, location)
+        self.chunk_accumulators[source_idx][origin].update(crop, location)
 
     def create_chunk(self, origin, source_idx):
         shape = np.array(self.shape)
@@ -556,29 +555,18 @@ class SlidesAccumulator:
 
         kwargs = {**self.kwargs, 'shape': shape, 'origin': origin_, 'path': None}
 
-        self.chunks[source_idx][origin] = Accumulator3D.from_aggregation(*self.args, **kwargs)
+        self.chunk_accumulators[source_idx][origin] = Accumulator3D.from_aggregation(*self.args, **kwargs)
 
     def aggregate_last(self, source_idx):
-        if len(self.chunks[source_idx]) > 0:
-            origin = list(self.chunks[source_idx].keys())[-1]
-            chunk = self.chunks[source_idx].pop(origin)
+        if len(self.chunk_accumulators[source_idx]) > 0:
+            origin = list(self.chunk_accumulators[source_idx].keys())[-1]
+            chunk = self.chunk_accumulators[source_idx].pop(origin)
             self.slides_queue.put((origin, chunk))
-
-            # if self.detach:
-            #     process = Process(target=_process_slide, args=(chunk, origin, self.shape, self.orientation, self.accumulator))
-            #     process.start()
-            #     self._processes.append(process)
-            #     process.join()
-            # else:
-            #     _process_slide(chunk, origin, self.shape, self.orientation, self.accumulator)
 
     def aggregate(self):
         for source_idx in range(self.n_sources):
             self.aggregate_last(source_idx)
-        # # for p in self._processes:
-        # #     p.join()
-        # data = self.accumulator.aggregate()
-        # return data
+
         self.slides_queue.put((None, None))
         self.accumulator_process.join()
         self.file = h5py.File(self.kwargs['path'], 'r+')
