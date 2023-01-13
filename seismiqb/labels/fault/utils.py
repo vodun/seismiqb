@@ -77,17 +77,15 @@ def bboxes_intersected(bbox_1, bbox_2, axes=(0, 1, 2)):
 
 @njit
 def bboxes_adjacent(bbox_1, bbox_2):
-    """ Bboxes intersection or adjacent ranges if bboxes are adjoint. """
-    borders = []
+    """ Bboxes intersection or adjacent ranges if bboxes are intersected/adjacent. """
+    borders = np.empty((3, 2), dtype=np.int16)
 
     for i in range(3):
-        left_overlap_border = min(bbox_1[i, 1], bbox_2[i, 1])
-        right_overlap_border = max(bbox_1[i, 0], bbox_2[i, 0])
+        borders[i, 0] = max(bbox_1[i, 0], bbox_2[i, 0])
+        borders[i, 1] = min(bbox_1[i, 1], bbox_2[i, 1])
 
-        if left_overlap_border - right_overlap_border < -1:
+        if borders[i, 1] - borders[i, 0] < -1:
             return None
-
-        borders.append((left_overlap_border, right_overlap_border))
 
     return borders
 

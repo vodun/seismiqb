@@ -346,7 +346,7 @@ class FaultExtractor:
                                              prototype_2.bbox[overlapping_axis, 1]-prototype_2.bbox[overlapping_axis, 0])
                 intersection_threshold *= intersection_ratio_threshold
 
-                intersection_length = adjacent_borders[overlapping_axis][0] - adjacent_borders[overlapping_axis][1]
+                intersection_length = adjacent_borders[overlapping_axis][1] - adjacent_borders[overlapping_axis][0]
 
                 if intersection_length < intersection_threshold:
                     continue
