@@ -19,6 +19,7 @@ class _GlobalCacheClass:
     Note, this class controls only objects which use :class:`~.lru_cache`.
     So, for properties you need to use both `property` and `lru_cache` decorators for proper cache introspection.
     """
+    #pylint: disable=redefined-builtin
     def __init__(self):
         """ Initialize containers with cache references and instances with cached objects.
 
@@ -115,7 +116,6 @@ class _GlobalCacheClass:
         format : {'dict', 'df'}
             Return value format. 'df' means pandas DataFrame.
         """
-        #pylint: disable=redefined-builtin
         cache_repr_ = {}
 
         # Extract cache repr for each cached object
