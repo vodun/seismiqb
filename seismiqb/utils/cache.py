@@ -4,8 +4,9 @@ from copy import copy
 from functools import wraps
 from hashlib import blake2b
 from inspect import ismethod, signature
+import json
 from threading import RLock
-from collections import OrderedDict, defaultdict
+from collections import Counter, defaultdict, OrderedDict
 from weakref import WeakSet
 
 import numpy as np
@@ -28,52 +29,75 @@ class _GlobalCacheClass:
     @property
     def size(self):
         """ Total cache size. """
-        return self.get_stats(stat='size', level='total')
+        return self.get_stats(stats='size', level='total')['size']
 
     @property
     def nbytes(self):
         """ Total cache nbytes. """
-        return self.get_stats(stat='nbytes', level='total')
+        return self.get_stats(stats='nbytes', level='total')['nbytes']
 
-    def get_size(self, level='total'):
+    def get_size(self, level='total', format='dict'):
         """ Get cache size grouped by level. For more read the doc for :meth:`~.get_attr`"""
-        return self.get_stats(stat='size', level=level)
+        result = self.get_stats(stats='size', level=level, format=format)
+        result = result['size'] if (level == 'total' and format == 'default') else result
+        return result
 
-    def get_nbytes(self, level='total'):
+    def get_nbytes(self, level='total', format='dict'):
         """ Get cache nbytes grouped by level. For more read the doc for :meth:`~.get_attr`"""
-        return self.get_stats(stat='nbytes', level=level)
+        result = self.get_stats(stats='nbytes', level=level, format=format)
+        result = result['nbytes'] if (level == 'total' and format == 'default') else result
+        return result
 
-    def get_stats(self, stat='size', level='total'):
+    def get_stats(self, stats='size', level='total', format='default'):
         """ Get cache statistics grouped by level.
 
         Parameters
         ----------
-        stat : {'size', 'nbytes'}
-            Statistic to get values.
+        stat : str or list of str
+            Statistic to get values. Possible options are: 'size', 'nbytes' or both.
         level : {'total', 'class', 'instance'}
             Result groupby level.
             If 'total', then return a total stat value for all instances.
             If 'class', then return a dict with stat value for each class.
             If 'instance', then return a nested dict with stat value for each instance.
+        format : {'default', 'dict', 'df'}
+            Returned data format.
+            If 'default', then return data as it is.
+            If 'dict', then convert data to the dictionary.
+            If 'df', then convert data to the pandas DataFrame.
         """
+        stats = (stats, ) if isinstance(stats, str) else stats
+
         # Init result accumulator/container
         if level == 'total':
-            result = 0
+            result = Counter({})
         elif level == 'class':
-            result = defaultdict(int)
+            result = defaultdict(Counter)
         else:
-            result = defaultdict(lambda: defaultdict(int))
+            result = defaultdict(lambda: defaultdict(Counter))
 
         # Fill accumulator/container with attribute values from instances with cache
         for instance in self.instances_with_cache:
-            value = getattr(instance, f'cache_{stat}')
+            instance_stats = {stat: getattr(instance, f'cache_{stat}')  for stat in stats}
 
             if level == 'total':
-                result += value
+                result += instance_stats
             elif level == 'class':
-                result[instance.__class__.__name__] += value
+                result[instance.__class__.__name__] += instance_stats
             else:
-                result[instance.__class__.__name__][f'id_{id(instance)}'] += value
+                result[instance.__class__.__name__][f'id_{id(instance)}'] += instance_stats
+
+        # Prepare output
+        if format == 'dict':
+            result = json.loads(json.dumps(result, default=lambda x: x.__dict__))
+
+        elif format == 'df':
+            if level == 'total':
+                result = pd.DataFrame(result, index=['total'])
+            elif level == 'class':
+                result = pd.DataFrame(result).T
+            elif level == 'instance':
+                result = pd.concat({k: pd.DataFrame(v).T for k, v in result.items()}, axis=0)
 
         return result
 
