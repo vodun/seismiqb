@@ -10,9 +10,9 @@ def dilate_coords(coords, dilate=3, axis=0, max_value=None):
     dilated_coords = np.tile(coords, (dilate, 1))
 
     # Create dilated coordinates
-    for counter, i in enumerate(range(-(dilate//2), dilate//2 + 1)):
-        start_idx, end_idx = counter*len(coords), (counter + 1)*len(coords)
-        dilated_coords[start_idx:end_idx, axis] += i
+    for i in range(dilate):
+        start_idx, end_idx = i*len(coords), (i + 1)*len(coords)
+        dilated_coords[start_idx:end_idx, axis] += i - dilate//2
 
     # Clip to the valid values
     if max_value is not None:
@@ -36,32 +36,31 @@ def thin_coords(coords, values):
 
     idx = order[0]
 
-    point_to_save = coords[idx, :]
-    previous_depth = point_to_save[-1]
+    argmax_coord = coords[idx, :]
+    previous_depth = argmax_coord[-1]
     previous_value = values[idx]
 
-    for i in range(1, len(coords)):
-        idx = order[i]
+    for idx in order[1:]:
         current_depth = coords[idx, -1]
         current_value = values[idx]
 
         if previous_depth == current_depth:
             if previous_value < current_value:
-                point_to_save = coords[idx, :]
+                argmax_coord = coords[idx, :]
 
                 previous_value = current_value
 
         else:
-            output[position, :] = point_to_save
+            output[position, :] = argmax_coord
 
             position += 1
 
-            point_to_save = coords[idx, :]
+            argmax_coord = coords[idx, :]
             previous_depth = current_depth
             previous_value = current_value
 
     # last depth update
-    output[position, :] = point_to_save
+    output[position, :] = argmax_coord
     position += 1
 
     return output[:position, :]
@@ -70,27 +69,27 @@ def thin_coords(coords, values):
 def bboxes_intersected(bbox_1, bbox_2, axes=(0, 1, 2)):
     """ Check bboxes intersection on axes. """
     for axis in axes:
-        borders_delta = min(bbox_1[axis, 1], bbox_2[axis, 1]) - max(bbox_1[axis, 0], bbox_2[axis, 0])
+        overlap_size = min(bbox_1[axis, 1], bbox_2[axis, 1]) - max(bbox_1[axis, 0], bbox_2[axis, 0])
 
-        if borders_delta < 0:
+        if overlap_size < 0:
             return False
     return True
 
 @njit
-def bboxes_adjoining(bbox_1, bbox_2):
-    """ Bboxes intersection or adjoining ranges if bboxes are adjoint. """
-    adjoinance_borders = []
+def bboxes_adjacent(bbox_1, bbox_2):
+    """ Bboxes intersection or adjacent ranges if bboxes are adjoint. """
+    borders = []
 
     for i in range(3):
-        min_max = min(bbox_1[i, 1], bbox_2[i, 1])
-        max_min = max(bbox_1[i, 0], bbox_2[i, 0])
+        left_overlap_border = min(bbox_1[i, 1], bbox_2[i, 1])
+        right_overlap_border = max(bbox_1[i, 0], bbox_2[i, 0])
 
-        if min_max - max_min < -1:
+        if left_overlap_border - right_overlap_border < -1:
             return None
 
-        adjoinance_borders.append((min_max, max_min))
+        borders.append((left_overlap_border, right_overlap_border))
 
-    return adjoinance_borders
+    return borders
 
 @njit
 def max_depthwise_distance(coords_1, coords_2, depths_ranges, step, axis, max_threshold=None):
@@ -122,7 +121,7 @@ def find_contour(coords, projection_axis):
 
     Note, returned contour coordinates are equal to 0 for the projection axis.
     """
-    anchor_axis = int(not projection_axis)
+    anchor_axis = 1 - projection_axis
 
     # Make 2d projection on projection_axis
     bbox = np.column_stack([np.min(coords, axis=0), np.max(coords, axis=0)])
@@ -141,7 +140,7 @@ def find_contour(coords, projection_axis):
     # Extract coordinates from contour mask
     coords_2d = np.nonzero(contour)
 
-    contour_coords = np.zeros((len(coords_2d[0]), 3), dtype=int)
+    contour_coords = np.zeros((len(coords_2d[0]), 3), dtype=np.int16)
 
     contour_coords[:, anchor_axis] = coords_2d[0] + origin[0]
     contour_coords[:, 2] = coords_2d[1] + origin[1]

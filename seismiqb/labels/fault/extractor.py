@@ -9,7 +9,7 @@ from scipy.ndimage.morphology import binary_dilation
 from batchflow import Notifier
 
 from .base import Fault
-from .utils import (bboxes_adjoining, bboxes_intersected, dilate_coords, find_contour,
+from .utils import (bboxes_adjacent, bboxes_intersected, dilate_coords, find_contour,
                     thin_coords, max_depthwise_distance, restore_coords_from_projection)
 from ...utils import groupby_min, groupby_max
 
@@ -47,7 +47,7 @@ class FaultExtractor:
         self.shape = skeletonized_array.shape
 
         self.direction = direction
-        self.orthogonal_direction = int(not self.direction)
+        self.orthogonal_direction = 1 - self.direction
 
         self.component_len_threshold = component_len_threshold # TODO: temporally unused, change value
         # self.height_threshold = None # TODO: temporally unused, add later
@@ -70,18 +70,18 @@ class FaultExtractor:
             # Get components info
             coords, bboxes, lengths = [], [], []
 
-            for idx, object_bbox in enumerate(objects):
+            for idx, object_bbox in enumerate(objects, start=1):
                 # Refined coords: we refine skeletonize effects by applying it on limited area
                 dilation_axis = self.orthogonal_direction
-                dilation_ranges = (np.clip(object_bbox[0].start - self.dilation // 2, 0, None),
-                                   np.clip(object_bbox[0].stop + self.dilation // 2, 0, self.shape[dilation_axis]))
+                dilation_ranges = (max(object_bbox[0].start - self.dilation // 2, 0),
+                                   min(object_bbox[0].stop + self.dilation // 2, self.shape[dilation_axis]))
 
-                object_mask = labeled[dilation_ranges[0]:dilation_ranges[1], object_bbox[-1]] == idx + 1
+                object_mask = labeled[dilation_ranges[0]:dilation_ranges[1], object_bbox[-1]] == idx
                 object_mask = binary_dilation(object_mask, structure=np.ones((1, self.dilation), bool))
 
                 dilated_coords_2d = np.nonzero(object_mask)
 
-                dilated_coords = np.zeros((len(dilated_coords_2d[0]), 3), dtype=int)
+                dilated_coords = np.zeros((len(dilated_coords_2d[0]), 3), dtype=np.int16)
 
                 dilated_coords[:, self.direction] = slide_idx
                 dilated_coords[:, dilation_axis] = dilated_coords_2d[0] + dilation_ranges[0]
@@ -204,23 +204,23 @@ class FaultExtractor:
         prototype_split_indices = [None, None]
 
         # Iter over components and find the closest one
-        for idx, current_bbox in enumerate(self.container[slide_idx]['bboxes']):
+        for idx, other_bbox in enumerate(self.container[slide_idx]['bboxes']):
             if self.container[slide_idx]['lengths'][idx] != -1:
                 # Check bboxes intersection
-                if not bboxes_intersected(component_bbox, current_bbox, axes=(self.orthogonal_direction, -1)):
+                if not bboxes_intersected(component_bbox, other_bbox, axes=(self.orthogonal_direction, -1)):
                     continue
 
                 # Check closeness of some points (iter over intersection depths with some step)
                 # Faster then component intersection, but not so accurate
                 # TODO: check intersection again; compare results
-                current_component = self.container[slide_idx]['coords'][idx]
+                other_component = self.container[slide_idx]['coords'][idx]
 
-                intersection_depths = (max(component_bbox[-1, 0], current_bbox[-1, 0]),
-                                       min(component_bbox[-1, 1], current_bbox[-1, 1]))
+                intersection_depths = (max(component_bbox[-1, 0], other_bbox[-1, 0]),
+                                       min(component_bbox[-1, 1], other_bbox[-1, 1]))
 
                 step = np.clip((intersection_depths[1]-intersection_depths[0])//3, 1, depth_iteration_step)
 
-                distance = max_depthwise_distance(component, current_component,
+                distance = max_depthwise_distance(component, other_component,
                                                   depths_ranges=intersection_depths, step=step,
                                                   axis=self.orthogonal_direction, max_threshold=min_distance)
 
@@ -228,8 +228,8 @@ class FaultExtractor:
                     merged_idx = idx
                     min_distance = distance
                     intersection_borders = intersection_depths
-                    closest_component = current_component
-                    closest_component_bbox = current_bbox
+                    closest_component = other_component
+                    closest_component_bbox = other_bbox
 
                     if min_distance == 0:
                         break
@@ -336,9 +336,9 @@ class FaultExtractor:
 
         for j, prototype_1 in enumerate(self.prototypes):
             for k, prototype_2 in enumerate(self.prototypes[j+1:]):
-                adjoining_borders = bboxes_adjoining(prototype_1.bbox, prototype_2.bbox)
+                adjacent_borders = bboxes_adjacent(prototype_1.bbox, prototype_2.bbox)
 
-                if adjoining_borders is None:
+                if adjacent_borders is None:
                     continue
 
                 # Check that bboxes overlap is enough
@@ -346,7 +346,7 @@ class FaultExtractor:
                                              prototype_2.bbox[overlapping_axis, 1]-prototype_2.bbox[overlapping_axis, 0])
                 intersection_threshold *= intersection_ratio_threshold
 
-                intersection_length = adjoining_borders[overlapping_axis][0] - adjoining_borders[overlapping_axis][1]
+                intersection_length = adjacent_borders[overlapping_axis][0] - adjacent_borders[overlapping_axis][1]
 
                 if intersection_length < intersection_threshold:
                     continue
@@ -358,7 +358,7 @@ class FaultExtractor:
                 contour_2 = prototype_2.get_borders(removed_border=removed_borders[is_first_upper], axis=axis)
 
                 # Get border contours in the area of interest
-                intersection_range = (min(adjoining_borders[axis]) - margin, max(adjoining_borders[axis]) + margin)
+                intersection_range = (min(adjacent_borders[axis]) - margin, max(adjacent_borders[axis]) + margin)
 
                 contour_1 = contour_1[(contour_1[:, axis] >= intersection_range[0]) & \
                                       (contour_1[:, axis] <= intersection_range[1])]
@@ -401,8 +401,7 @@ class FaultExtractor:
         # Objects can be shifted on `self.orthogonal_direction`, so apply dilation for coords
         contour_2_dilated = dilate_coords(coords=contour_2, dilate=self.dilation,
                                           axis=self.orthogonal_direction,
-                                          max_value=self.shape[self.orthogonal_direction]-1,
-                                          unique=False)
+                                          max_value=self.shape[self.orthogonal_direction]-1)
 
         contour_2_dilated = set(tuple(x) for x in contour_2_dilated)
 
@@ -476,7 +475,7 @@ class FaultPrototype:
     def contour(self):
         """ Contour of 2d projection on axis, orthogonal to self.direction."""
         if self._contour is None:
-            projection_axis = int(not self.direction)
+            projection_axis = 1 - self.direction
             self._contour = find_contour(coords=self.coords, projection_axis=projection_axis)
         return self._contour
 
@@ -542,7 +541,7 @@ class FaultPrototype:
                 border_coords = groupby_min(border_coords)
 
             # Restore 3d coordinates
-            projection_axis = int(not self.direction)
+            projection_axis = 1 - self.direction
 
             if removed_border in ('left', 'right'):
                 border_coords[:, [-1, axis]] = border_coords[:, [axis, -1]]
