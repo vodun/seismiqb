@@ -192,10 +192,10 @@ class FaultExtractor:
         ..!!..
         """
         # Process inputs
-        component = dilate_coords(component, axis=self.orthogonal_direction,
-                                  max_value=self.shape[self.orthogonal_direction]-1)
-
+        # Dilate component bbox for detecting close components: component on next slide can be shifted
         component_bbox = np.column_stack([np.min(component, axis=0), np.max(component, axis=0)])
+        component_bbox[self.orthogonal_direction, 0] -= self.dilation // 2 # dilate bbox
+        component_bbox[self.orthogonal_direction, 1] += self.dilation // 2
 
         min_distance = distances_threshold
 
@@ -206,10 +206,7 @@ class FaultExtractor:
         # Iter over components and find the closest one
         for idx, current_bbox in enumerate(self.container[slide_idx]['bboxes']):
             if self.container[slide_idx]['lengths'][idx] != -1:
-                # Check bbox intersection
-                current_bbox[self.orthogonal_direction, 0] -= self.dilation // 2 # dilate current_bbox
-                current_bbox[self.orthogonal_direction, 1] += self.dilation // 2
-
+                # Check bboxes intersection
                 if not bboxes_intersected(component_bbox, current_bbox, axes=(self.orthogonal_direction, -1)):
                     continue
 
