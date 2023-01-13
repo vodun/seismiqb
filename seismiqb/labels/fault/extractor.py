@@ -401,7 +401,8 @@ class FaultExtractor:
         # Objects can be shifted on `self.orthogonal_direction`, so apply dilation for coords
         contour_2_dilated = dilate_coords(coords=contour_2, dilate=self.dilation,
                                           axis=self.orthogonal_direction,
-                                          max_value=self.shape[self.orthogonal_direction]-1)
+                                          max_value=self.shape[self.orthogonal_direction]-1,
+                                          unique=False)
 
         contour_2_dilated = set(tuple(x) for x in contour_2_dilated)
 
