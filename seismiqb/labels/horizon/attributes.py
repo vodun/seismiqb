@@ -2,6 +2,7 @@
 # pylint: disable=too-many-statements
 from copy import copy
 from functools import cached_property, wraps
+from ast import literal_eval
 
 from math import isnan
 import numpy as np
@@ -189,7 +190,7 @@ class AttributesMixin:
 
     @cached_property
     def full_binary_matrix(self):
-        """ A method for getting binary matrix in cubic coordinates. Allows for introspectable cache. """
+        """ A method for getting binary matrix in cubic (ordinal) coordinates. Allows for introspectable cache. """
         return self.matrix_put_on_full(self.binary_matrix)
 
     @property
@@ -197,6 +198,14 @@ class AttributesMixin:
         """ An alias. """
         return self.full_binary_matrix
 
+    @cached_property
+    def float_matrix(self):
+        """ Matrix with smoothed float values in cubic (ordinal) coordinates. """
+        if self.dtype == np.float32:
+            return self.full_matrix
+        smoothed = self.smooth_out(mode='convolve', kernel_size=5, sigma_spatial=3, max_depth_difference=5,
+                                    inplace=False, dtype=np.float32)
+        return smoothed.full_matrix
 
     # Scalars computed from depth map
     @property
@@ -302,10 +311,11 @@ class AttributesMixin:
         raise AttributeError(f'Horizon `{self.displayed_name}` hasn\'t `proba_points` attribute. Check, whether'
                              ' the horizon was initialized `from_mask` with `save_probabilities=True` option.')
 
-    # Retrieve data from seismic along horizon
+
+    # Retrieve data from seismic along horizon(s)
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     @transformable
-    def get_cube_values(self, window=1, offset=0, chunk_size=256, src_geometry=None, **_):
+    def get_cube_values(self, window=1, offset=0, chunk_size=256, src_geometry=None, apply_float_correction=False, **_):
         """ Get values from the cube along the horizon.
 
         Parameters
@@ -316,13 +326,18 @@ class AttributesMixin:
             Offset of data slice with respect to horizon depths matrix.
         chunk_size : int
             Size of data along depth axis processed at a time.
+        apply_float_correction : bool
+            Whether to apply float correction to fix step-like artifacts.
         """
-        geometry = getattr(self.field, src_geometry) if src_geometry is not None else self.field.geometry
+        geometry = self.field.geometry if src_geometry is None else getattr(self.field, src_geometry)
+
+        if apply_float_correction:
+            window += 2
 
         low = window // 2 - offset
         high = max(window - low, 0)
         chunk_size = min(chunk_size, self.d_max - self.d_min + window)
-        background = np.zeros((*self.field.spatial_shape, window), dtype=np.float32)
+        result = np.full((*self.field.spatial_shape, window), fill_value=np.nan, dtype=np.float32)
 
         for d_start in range(max(low, self.d_min), self.d_max + 1, chunk_size):
             d_end = min(d_start + chunk_size, self.d_max + 1)
@@ -344,77 +359,101 @@ class AttributesMixin:
             idx_x += self.x_min
             depths -= d_start
 
-            # Subsequently add values from the cube to background, then shift horizon 1 unit lower
+            # Subsequently add values from the cube to result, then shift horizon 1 unit lower
             for j in range(window):
-                background[idx_i, idx_x, np.full_like(depths, j)] = data_chunk[idx_i, idx_x, depths]
+                result[idx_i, idx_x, j] = data_chunk[idx_i, idx_x, depths]
                 depths += 1
                 mask = depths < data_chunk.shape[2]
                 idx_i = idx_i[mask]
                 idx_x = idx_x[mask]
                 depths = depths[mask]
 
-        background[~self.full_binary_matrix] = np.nan
-        return background
+        result[~self.full_binary_matrix] = np.nan
 
+        if apply_float_correction:
+            result = self._apply_float_correction(result)
+        return result
 
-    def get_array_values(self, array, shifts=None, grid_info=None, width=5, axes=(2, 1, 0)):
-        """ Get values from an external array along the horizon.
+    def get_layer_values(self, other, window=0, offset=0, src_geometry=None):
+        """ Get values from the cube between `self` and `other` horizons.
 
         Parameters
         ----------
-        array : np.ndarray
-            A data-array to make a cut from.
-        shifts : tuple or None
-            an offset defining the location of given array with respect to the horizon.
-            If None, `grid_info` with key `range` must be supplied.
-        grid_info : dict
-            Whenever passed, must contain key `range`.
-            Used for infering shifts of the array with respect to horizon.
-        width : int
-            required width of the resulting cut.
-        axes : tuple
-            if not None, axes-transposition with the required axes-order is used.
+        window : int or sequence of two ints
+            Additional samples to get along depth axis.
+            If two ints, then number of samples above `self` and below `other` horizon.
+        offset : int
+            Offset of data slice with respect to extraction window.
+
+        TODO: implement chunking
         """
-        if shifts is None and grid_info is None:
-            raise ValueError('Either shifts or dataset with filled grid_info must be supplied!')
+        # Parse parameters
+        if self.d_mean > other.d_mean:
+            self, other = other, self
+        geometry = self.field.geometry if src_geometry is None else getattr(self.field, src_geometry)
 
-        if shifts is None:
-            shifts = [grid_info['range'][i][0] for i in range(3)]
+        window = window if isinstance(window, (tuple, list)) else (window, window)
+        d_start = max( self.d_min - window[0] - offset, 0)
+        d_stop  = min(other.d_max + window[1] - offset, geometry.depth)
 
-        shifts = np.array(shifts)
-        horizon_shift = np.array((self.i_min, self.x_min))
+        # Prepare depth bounds between `self` and `other`
+        presence_matrix = self.full_binary_matrix & other.full_binary_matrix
+        idx_i, idx_x = np.nonzero(presence_matrix)
+        self_depths = self.full_matrix[idx_i, idx_x]
+        other_depths = other.full_matrix[idx_i, idx_x]
 
-        if axes is not None:
-            array = np.transpose(array, axes=axes)
+        self_depths  -= d_start + window[1]
+        other_depths -= d_start - window[0]
 
-        # compute start and end-points of the ilines-xlines overlap between
-        # array and matrix in horizon and array-coordinates
-        horizon_shift, shifts = np.array(horizon_shift), np.array(shifts)
-        horizon_max = horizon_shift[:2] + np.array(self.matrix.shape)
-        array_max = np.array(array.shape[:2]) + shifts[:2]
-        overlap_shape = np.minimum(horizon_max[:2], array_max[:2]) - np.maximum(horizon_shift[:2], shifts[:2])
-        overlap_start = np.maximum(0, horizon_shift[:2] - shifts[:2])
-        depths_start = np.maximum(shifts[:2] - horizon_shift[:2], 0)
+        # Load data chunk, prepare output array
+        data = geometry[:, :, d_start:d_stop]
+        n = d_stop - d_start
+        result = np.full((*presence_matrix.shape, n), fill_value=np.nan, dtype=np.float32)
 
-        # recompute horizon-matrix in array-coordinates
-        slc_array = [slice(l, h) for l, h in zip(overlap_start, overlap_start + overlap_shape)]
-        slc_horizon = [slice(l, h) for l, h in zip(depths_start, depths_start + overlap_shape)]
-        overlap_matrix = np.full(array.shape[:2], fill_value=self.FILL_VALUE, dtype=np.float32)
-        overlap_matrix[slc_array] = self.matrix[slc_horizon]
-        overlap_matrix -= shifts[-1]
+        # Filter unnecessary points, copy amplitudes from `data`, shift `self_depth` indices
+        for i in range(n):
+            mask = self_depths < other_depths
+            idx_i = idx_i[mask]
+            idx_x = idx_x[mask]
+            self_depths = self_depths[mask]
+            other_depths = other_depths[mask]
 
-        # make the cut-array and fill it with array-data located on needed depths
-        result = np.full(array.shape[:2] + (width, ), np.nan, dtype=np.float32)
-        iterator = [overlap_matrix + shift for shift in range(-width // 2 + 1, width // 2 + 1)]
+            result[idx_i, idx_x, i] = data[idx_i, idx_x, self_depths]
+            self_depths += 1
 
-        for i, surface_level in enumerate(np.array(iterator)):
-            mask = (surface_level >= 0) & (surface_level < array.shape[-1]) & (surface_level !=
-                                                                               self.FILL_VALUE - shifts[-1])
-            mask_where = np.where(mask)
-            result[mask_where[0], mask_where[1], i] = array[mask_where[0], mask_where[1],
-                                                            surface_level[mask_where].astype(np.int)]
-
+        result[~presence_matrix] = np.nan
         return result
+
+    def _apply_float_correction(self, array):
+        """ Compute a three-point correction from int to float.
+        As most of the loaded horizons are loaded in int32 values and only integer samples can be retrieved from
+        the cube, extracted values (amplitudes) and their derivatives may have step-like artifacts.
+        To eliminate them, we interpolate between depth-wise channels, using the size of difference between
+        int32 and float32 horizons as the weight for interpolation.
+
+        Parameters
+        ----------
+        array : array-like
+            Array of (I, X, C) shape.
+
+        Returns
+        -------
+        Array of (I, X, C-2) shape.
+        """
+        shifts_matrix = self.float_matrix - self.full_matrix
+        middle = array[:, :, 1:-1]
+        output = middle.copy()
+
+        mask = shifts_matrix > 0
+        output[mask] = (1 - shifts_matrix[mask]).reshape(-1, 1) * middle[mask] + \
+                        +(shifts_matrix[mask]).reshape(-1, 1) * array[:, :, 2:][mask]
+
+        mask = shifts_matrix < 0
+        output[mask] = (1 + shifts_matrix[mask]).reshape(-1, 1) * middle[mask] + \
+                        +(-shifts_matrix[mask]).reshape(-1, 1) * array[:, :, :-2][mask]
+
+        output[np.isnan(shifts_matrix)] = np.nan
+        return output
 
 
     # Generic attributes loading
@@ -501,6 +540,13 @@ class AttributesMixin:
             src_name = src.pop('src')
             kwargs.update(src)
 
+        if '[' in src_name:
+            pos_, _pos = src_name.find('['), src_name.find(']')
+            channels = literal_eval(src_name[1+pos_:_pos])
+            src_name = src_name[:pos_]
+        else:
+            channels = None
+
         src_name = self.ALIAS_TO_ATTRIBUTE.get(src_name, src_name)
         enlarge = enlarge and self.is_carcass
 
@@ -515,6 +561,11 @@ class AttributesMixin:
         if location is not None:
             i_slice, x_slice, _ = location
             data = data[i_slice, x_slice]
+
+        if channels == 'middle':
+            channels = data.shape[-1] // 2
+        if channels is not None:
+            data = data[..., channels]
         return data
 
 
