@@ -214,7 +214,8 @@ def thin_line(points, axis=0):
             n = 1
             pos += 1
             p = points[i].copy()
-    return line[:pos]
+    line[pos] = p / n
+    return line[:pos+1]
 
 # Bilateral filtering
 def bilateral_filter(data, kernel_size=3, kernel=None, padding='same', sigma_spatial=None, sigma_range=0.15):

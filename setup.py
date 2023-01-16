@@ -41,6 +41,7 @@ setup(
         'feather_format>=0.4.0',
         'blosc>=1.8.1',
         'segyio>=1.8.3',
+        'lasio>=0.29',
         'h5py>=2.10.0',
         'h5pickle>=0.2.0',
         'hdf5plugin>=3.3.0',

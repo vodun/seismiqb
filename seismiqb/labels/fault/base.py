@@ -56,7 +56,7 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
     # Columns used from the file
     COLUMNS = ['INLINE_3D', 'CROSSLINE_3D', 'DEPTH']
 
-    def __init__(self, storage, field, name=None, direction=None, **kwargs): #pylint: disable=super-init-not-called
+    def __init__(self, storage, field, name=None, direction=None, stick_orientation=None, **kwargs): #pylint: disable=super-init-not-called
         self.name = name
         self.field = field
 
@@ -66,6 +66,9 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
         self._nodes = None
         self._simplices = None
         self.direction = None
+        self.stick_orientation = stick_orientation
+        self.sticks_step = None
+        self.stick_nodes_step = None
 
         if isinstance(storage, str):
             source = 'file'
@@ -77,9 +80,10 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
             source = 'df'
         getattr(self, f'from_{source}')(storage, **kwargs)
 
-        if self.direction is None:
-            self.set_direction(direction)
         self.create_stats()
+
+        if len(self) > 0 and self.direction is None:
+            self.set_direction(direction)
 
     def interpolate(self):
         """ Create points of fault surface from sticks or nodes and simplices. """
@@ -95,8 +99,11 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
             data = self.points
         elif self.has_component('nodes'):
             data = self.nodes
-        else:
+        elif self.has_component('sticks'):
             data = np.concatenate(self.sticks)
+        else:
+            self.bbox = None
+            return
 
         if len(data) == 0: # It can be for empty fault file.
             data = np.zeros((1, 3))
@@ -212,7 +219,7 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
             if self._points is None and self._sticks is None:
                 raise AttributeError("'simplices' can't be created ('points' and 'sticks' don't exist)")
 
-            self._simplices, self._nodes = sticks_to_simplices(self.sticks, self.direction)
+            self.sticks_to_simplices()
 
         return self._simplices
 
@@ -225,7 +232,7 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
             if self._points is None and self._sticks is None:
                 raise AttributeError("'nodes' can't be created ('points' and 'sticks' don't exist)")
 
-            self._simplices, self._nodes = sticks_to_simplices(self.sticks, self.direction)
+            self.sticks_to_simplices()
 
         return self._nodes
 
@@ -280,14 +287,27 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
             points.append(triangle_rasterization(self.nodes[triangle].astype('float32'), width))
         self._points = np.concatenate(points, axis=0).astype('int32')
 
-    def points_to_sticks(self, slices=None, sticks_step=10, stick_nodes_step=10, stick_orientation=2):
+    def points_to_sticks(self, slices=None, sticks_step=10, stick_nodes_step=10, stick_orientation=2,
+                         nodes_threshold=5, move_bounds=False):
         """ Create sticks from fault points. """
         points = self.points.copy()
         if slices is not None:
             for i in range(3):
                 points = points[points[:, i] <= slices[i].stop]
                 points = points[points[:, i] >= slices[i].start]
-        self._sticks = points_to_sticks(points, sticks_step, stick_nodes_step, self.direction, stick_orientation)
+        self._sticks = points_to_sticks(points=points, sticks_step=sticks_step, nodes_step=stick_nodes_step,
+                                        fault_orientation=self.direction, stick_orientation=stick_orientation,
+                                        threshold=nodes_threshold, move_bounds=move_bounds)
+        self.stick_orientation = stick_orientation
+        self.sticks_step = sticks_step
+        self.stick_nodes_step = stick_nodes_step
+
+    def sticks_to_simplices(self, max_simplices_depth=None, max_nodes_distance=None):
+        """ Create nodes/simplices from fault sticks. """
+        self._simplices, self._nodes = sticks_to_simplices(
+            self.sticks, self.direction, max_simplices_depth, max_nodes_distance
+        )
+
 
     def add_to_mask(self, mask, locations=None, width=1, axis=None, sparse=False, **kwargs):
         """ Add fault to background.
@@ -337,6 +357,8 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
 
     def __len__(self):
         """ The size of the fault. """
+        if self.bbox is None:
+            return 0
         return self.bbox[2].ptp() * (self.bbox[self.direction].ptp() + 1)
 
     def __add__(self, other):

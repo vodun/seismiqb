@@ -94,7 +94,7 @@ class ExportMixin:
 
     # Public APIs
     @staticmethod
-    def array_to_segy(array_like, path, spec=None, origin=(0, 0, 0), pbar='t', zip_segy=True, remove_segy=False,
+    def array_to_segy(array_like, path, spec=None, origin=(0, 0, 0), pbar='t', zip_segy=False, remove_segy=False,
                       engine='memmap', format=5, transform=None, endian_symbol='>', chunk_size=20, max_workers=4,
                       **kwargs):
         """ Convert an `array_like` object to a SEG-Y file.
@@ -177,7 +177,7 @@ class ExportMixin:
         if remove_segy:
             os.remove(path)
 
-    def export_array(self, array_like, path, origin=(0, 0, 0), pbar='t', zip_segy=True, remove_segy=False,
+    def export_array(self, array_like, path, origin=(0, 0, 0), pbar='t', zip_segy=False, remove_segy=False,
                      engine='memmap', format=5, transform=None, endian_symbol='>', chunk_size=20, max_workers=4):
         """ An alias to :meth:`array_to_segy` which uses `self` as spec. """
         spec = self.make_export_spec(array_like=array_like, origin=origin)

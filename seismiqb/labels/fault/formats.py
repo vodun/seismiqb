@@ -53,8 +53,6 @@ class FaultSticksMixin(CharismaMixin):
         pandas.Series or (pandas.Series, int)
             Sequence of stick nodes and (optionally) direction of the fault.
         """
-        if len(df) == 0:
-            raise ValueError('Empty DataFrame (possibly wrong coordinates).')
         col, direction = None, None
 
         ilines_diff = sum(df['INLINE_3D'][1:].values - df['INLINE_3D'][:-1].values == 0)
@@ -136,6 +134,10 @@ class FaultSticksMixin(CharismaMixin):
             mask = make_interior_points_mask(points, self.field_reference.shape)
             df = df.iloc[mask]
 
+        if len(df) == 0:
+            self._sticks = None
+            return
+
         sticks, direction = self.split_df_into_sticks(df, return_direction=True)
         if remove_broken_sticks:
             sticks = self.remove_broken_sticks(sticks)
@@ -159,6 +161,7 @@ class FaultSticksMixin(CharismaMixin):
                 stick[:, direction] = stick[0, direction]
 
         self.direction = direction
+        self.stick_orientation = 2
 
     def dump_fault_sticks(self, path):
         """ Dump fault sticks into FaultSticks format. """

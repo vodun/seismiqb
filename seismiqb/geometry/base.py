@@ -206,7 +206,7 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMix
                 slc = slice(max(subkey.start or 0, 0),
                             min(subkey.stop or limit, limit), subkey.step)
 
-            elif isinstance(subkey, int):
+            elif isinstance(subkey, (int, np.integer)):
                 subkey = subkey if subkey >= 0 else limit - subkey
                 slc = slice(subkey, subkey + 1)
                 axis_to_squeeze.append(i)
