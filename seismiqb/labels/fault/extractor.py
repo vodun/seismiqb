@@ -3,8 +3,8 @@ from collections import defaultdict, deque
 import numpy as np
 
 from cc3d import connected_components
+from cv2 import dilate
 from scipy.ndimage import find_objects
-from scipy.ndimage.morphology import binary_dilation
 
 from batchflow import Notifier
 
@@ -53,6 +53,7 @@ class FaultExtractor:
         # self.height_threshold = None # TODO: temporally unused, add later
 
         self.dilation = 3 # constant for internal operations
+        dilation_structure = np.ones((1, self.dilation), np.uint8)
 
         self.container = {}
 
@@ -73,11 +74,18 @@ class FaultExtractor:
             for idx, object_bbox in enumerate(objects, start=1):
                 # Refined coords: we refine skeletonize effects by applying it on limited area
                 dilation_axis = self.orthogonal_direction
-                dilation_ranges = (max(object_bbox[0].start - self.dilation // 2, 0),
+                dilation_ranges = (max(0, object_bbox[0].start - self.dilation // 2),
                                    min(object_bbox[0].stop + self.dilation // 2, self.shape[dilation_axis]))
 
                 object_mask = labeled[dilation_ranges[0]:dilation_ranges[1], object_bbox[-1]] == idx
-                object_mask = binary_dilation(object_mask, structure=np.ones((1, self.dilation), bool))
+
+                # Filter out too little components
+                length = np.count_nonzero(object_mask)
+
+                if length <= component_len_threshold:
+                    continue
+
+                object_mask = dilate(object_mask.astype(np.uint8), dilation_structure)
 
                 dilated_coords_2d = np.nonzero(object_mask)
 
@@ -91,25 +99,28 @@ class FaultExtractor:
 
                 refined_coords = thin_coords(coords=dilated_coords, values=smoothed_values)
 
+                # Filter out too little components
+                # Previous length and len(refined_coords) are different
+                # because original coords have more than one coord per depth when refined are not
+                length = len(refined_coords)
+
+                if length <= component_len_threshold:
+                    continue
+
+                lengths.append(length)
                 coords.append(refined_coords)
 
                 # Bbox
                 bbox = np.empty((3, 2), int)
 
                 bbox[self.direction, :] = slide_idx
-                bbox[self.orthogonal_direction, :] = (np.min(refined_coords[:, self.orthogonal_direction]),
-                                                      np.max(refined_coords[:, self.orthogonal_direction]))
-                bbox[-1, :] = (np.min(refined_coords[:, -1]), np.max(refined_coords[:, -1]))
+                bbox[self.orthogonal_direction, :] = dilation_ranges
+                bbox[-1, :] = object_bbox[-1].start, object_bbox[-1].stop - 1
 
                 bboxes.append(bbox)
 
-                # Length
-                lengths.append(len(refined_coords))
-
             # Filter components by length
             lengths = np.array(lengths)
-            is_too_small = lengths <= component_len_threshold
-            lengths[is_too_small] = -1 # -1 is a flag for unmergeable components
 
             self.container[slide_idx] = {
                 'coords': coords,
@@ -139,6 +150,7 @@ class FaultExtractor:
                 return None
 
             component = self.container[start_slide_idx]['coords'][idx]
+            # component_bbox = self.container[start_slide_idx]['bboxes'][idx] # TODO: use it
 
             self.container[start_slide_idx]['lengths'][idx] = -1 # Mark this component as unmergeable
             prototype = FaultPrototype(coords=component, direction=self.direction,
@@ -152,17 +164,17 @@ class FaultExtractor:
         # Find closest components on next slides and split them if needed
         for slide_idx_ in range(start_slide_idx+1, self.shape[self.direction]):
             # Find the closest component on the slide_idx_ to the current
-            component, prototype_split_indices = self._find_closest_component(component=component,
-                                                                              slide_idx=slide_idx_)
+            component, split_indices = self._find_closest_component(component=component, slide_idx=slide_idx_)
+
             # Postprocess prototype
             if component is not None:
                 # Split current prototype and add new to queue
-                if prototype_split_indices[0] is not None:
-                    new_prototype = prototype.split(split_depth=prototype_split_indices[0], cut_upper_part=True)
+                if split_indices[0] is not None:
+                    new_prototype = prototype.split(split_depth=split_indices[0], cut_upper_part=True)
                     self.prototypes_queue.append(new_prototype)
 
-                if prototype_split_indices[1] is not None:
-                    new_prototype = prototype.split(split_depth=prototype_split_indices[1], cut_upper_part=False)
+                if split_indices[1] is not None:
+                    new_prototype = prototype.split(split_depth=split_indices[1], cut_upper_part=False)
                     self.prototypes_queue.append(new_prototype)
 
                 prototype.append(component, slide_idx=slide_idx_)
@@ -194,6 +206,7 @@ class FaultExtractor:
         # Process inputs
         # Dilate component bbox for detecting close components: component on next slide can be shifted
         component_bbox = np.column_stack([np.min(component, axis=0), np.max(component, axis=0)])
+        # TODO: think about more accurate bboxes
         component_bbox[self.orthogonal_direction, 0] -= self.dilation // 2 # dilate bbox
         component_bbox[self.orthogonal_direction, 1] += self.dilation // 2
 
@@ -273,6 +286,8 @@ class FaultExtractor:
         """ Add new items into the container. """
         # Object bbox
         bbox = np.column_stack([np.min(coords, axis=0), np.max(coords, axis=0)])
+        bbox[self.orthogonal_direction, 0] = max(0, bbox[self.orthogonal_direction, 0])
+        bbox[self.orthogonal_direction, 1] = min(bbox[self.orthogonal_direction, 1], self.shape[self.orthogonal_direction])
         self.container[slide_idx]['bboxes'].append(bbox)
 
         # Object coords
@@ -480,7 +495,7 @@ class FaultPrototype:
         return self._contour
 
     def append(self, coords, slide_idx=None):
-        """ Append new coords into prototype. """
+        """ Append new component (coords) into prototype. """
         self.coords = np.vstack([self.coords, coords])
 
         self.reset_borders()
@@ -491,7 +506,13 @@ class FaultPrototype:
         """ Concatenate two prototypes. """
         self.coords = np.vstack([self.coords, other.coords])
 
-        self.reset_borders()
+        new_bbox = np.empty((3, 2), np.int16)
+        new_bbox[:, 0] = np.min((self.bbox[:, 0], other.bbox[:, 0]), axis=0)
+        new_bbox[:, 1] = np.max((self.bbox[:, 1], other.bbox[:, 1]), axis=0)
+
+        self._bbox = new_bbox
+        self._contour = None
+        self._borders = {}
         self._last_slide_idx = None
         self._last_component = None
 

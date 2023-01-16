@@ -66,6 +66,7 @@ def thin_coords(coords, values):
     return output[:position, :]
 
 # Distance evaluation
+@njit
 def bboxes_intersected(bbox_1, bbox_2, axes=(0, 1, 2)):
     """ Check bboxes intersection on axes. """
     for axis in axes:
@@ -152,7 +153,7 @@ def restore_coords_from_projection(coords, buffer, axis):
     buffer : np.ndarray
         Buffer with projection coordinates.
     """
-    known_axes = [i for i in range(3) if i != axis]
+    known_axes = np.array([i for i in range(3) if i != axis])
 
     for i, buffer_line in enumerate(buffer):
         buffer[i, axis] = min(coords[(coords[:, known_axes[0]] == buffer_line[known_axes[0]]) & \
