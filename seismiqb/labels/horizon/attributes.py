@@ -15,7 +15,8 @@ from scipy.ndimage.morphology import binary_dilation, binary_fill_holes, binary_
 from skimage.measure import label
 from sklearn.decomposition import PCA
 
-from ...functional import hilbert
+from ...functional import hilbert, compute_spectral_decomposition, \
+                          compute_instantaneous_amplitude, compute_instantaneous_frequency, compute_instantaneous_phase
 from ...utils import transformable, lru_cache
 
 
@@ -204,7 +205,7 @@ class AttributesMixin:
         if self.dtype == np.float32:
             return self.full_matrix
         smoothed = self.smooth_out(mode='convolve', kernel_size=5, sigma_spatial=3, max_depth_difference=5,
-                                    inplace=False, dtype=np.float32)
+                                   inplace=False, dtype=np.float32)
         return smoothed.full_matrix
 
     # Scalars computed from depth map
@@ -410,7 +411,7 @@ class AttributesMixin:
         n = d_stop - d_start
         result = np.full((*presence_matrix.shape, n), fill_value=np.nan, dtype=np.float32)
 
-        # Filter unnecessary points, copy amplitudes from `data`, shift `self_depth` indices
+        # Subsequently add values from the cube to result, then shift indices 1 unit lower
         for i in range(n):
             mask = self_depths < other_depths
             idx_i = idx_i[mask]
@@ -426,7 +427,8 @@ class AttributesMixin:
 
     def _apply_float_correction(self, array):
         """ Compute a three-point correction from int to float.
-        As most of the loaded horizons are loaded in int32 values and only integer samples can be retrieved from
+
+        As most of the loaded horizons are stored as int32 depths and only integer samples can be retrieved from
         the cube, extracted values (amplitudes) and their derivatives may have step-like artifacts.
         To eliminate them, we interpolate between depth-wise channels, using the size of difference between
         int32 and float32 horizons as the weight for interpolation.
@@ -434,11 +436,11 @@ class AttributesMixin:
         Parameters
         ----------
         array : array-like
-            Array of (I, X, C) shape.
+            Array of (I, X, D) shape.
 
         Returns
         -------
-        Array of (I, X, C-2) shape.
+        Array of (I, X, D-2) shape.
         """
         shifts_matrix = self.float_matrix - self.full_matrix
         middle = array[:, :, 1:-1]
@@ -446,11 +448,11 @@ class AttributesMixin:
 
         mask = shifts_matrix > 0
         output[mask] = (1 - shifts_matrix[mask]).reshape(-1, 1) * middle[mask] + \
-                        +(shifts_matrix[mask]).reshape(-1, 1) * array[:, :, 2:][mask]
+                          +(shifts_matrix[mask]).reshape(-1, 1) * array[:, :, 2:][mask]
 
         mask = shifts_matrix < 0
         output[mask] = (1 + shifts_matrix[mask]).reshape(-1, 1) * middle[mask] + \
-                        +(-shifts_matrix[mask]).reshape(-1, 1) * array[:, :, :-2][mask]
+                         +(-shifts_matrix[mask]).reshape(-1, 1) * array[:, :, :-2][mask]
 
         output[np.isnan(shifts_matrix)] = np.nan
         return output
@@ -468,8 +470,11 @@ class AttributesMixin:
         'metric': ['metric', 'metrics'],
         'instantaneous_phases': ['instant_phases', 'iphases'],
         'instantaneous_amplitudes': ['instant_amplitudes', 'iamplitudes'],
+
         'fourier_decomposition': ['fourier', 'fourier_decomposition'],
         'wavelet_decomposition': ['wavelet', 'wavelet_decomposition'],
+        'spectral_decomposition': ['spectral', ],
+
         'median_diff': ['median_diff', 'mdiff', 'median_faults'],
         'grad': ['grad', 'gradient', 'gradient_diff', 'gradient_faults'],
         'max_grad': ['max_grad', 'max_gradient', 'maximum_gradient'],
@@ -484,6 +489,8 @@ class AttributesMixin:
         'instantaneous_amplitudes' : 'get_instantaneous_amplitudes',
         'fourier_decomposition' : 'get_fourier_decomposition',
         'wavelet_decomposition' : 'get_wavelet_decomposition',
+        'spectral_decomposition' : 'get_spectral_decomposition',
+
         'median_diff': 'get_median_diff_map',
         'grad': 'get_gradient_map',
         'max_grad': 'get_max_gradient_map',
@@ -493,10 +500,10 @@ class AttributesMixin:
 
     def load_attribute(self, src, location=None, use_cache=True, enlarge=False, **kwargs):
         """ Load horizon attribute values at requested location.
-        This is the intended interface of loading matrices along the horizon, and should be preffered in all scenarios.
+        This is the intended interface of loading matrices along the horizon, and should be preferred in all scenarios.
 
         To retrieve the attribute, we either use `:meth:~.get_property` or `:meth:~.get_*` methods: as all of them are
-        wrapped with `:func:~.transformable` decorator, you can use its arguments to modify the behaviour.
+        wrapped with `:func:~.transformable` decorator, you can use its arguments to modify the behavior.
 
         Parameters
         ----------
@@ -600,8 +607,7 @@ class AttributesMixin:
         of the resulting array, the `window` parameter value should better be somewhat bigger than the value of `n`.
         """
         amplitudes = self.get_cube_values(window=window, offset=offset, use_cache=False, **kwargs)
-        result = np.abs(hilbert(amplitudes)).astype(np.float32)
-        return result
+        return compute_instantaneous_amplitude(amplitudes)
 
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     @transformable
@@ -614,18 +620,11 @@ class AttributesMixin:
             Width of cube values cutout along horizon to use for attribute calculation.
         offset : int
             Constant shift of cube values cutout up or down from the horizon surface.
-        kwargs :
+        kwargs : dict
             Passed directly to :meth:`.get_cube_values`.
-
-
-        Notes
-        -----
-        Since Hilbert transform produces artifacts at signal start and end, if one's intenston is to use `n` channels
-        of the resulting array, the `window` parameter value should better be somewhat bigger than the value of `n`.
         """
         amplitudes = self.get_cube_values(window=window, offset=offset, use_cache=False, **kwargs)
-        result = np.angle(hilbert(amplitudes)).astype(np.float32)
-        return result
+        return compute_instantaneous_phase(amplitudes)
 
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     @transformable
@@ -678,6 +677,36 @@ class AttributesMixin:
             result[:, :, idx] = convolve(amplitudes, wavelet, mode='constant')[:, :, window // 2]
 
         return result
+
+    @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
+    @transformable
+    def get_spectral_decomposition(self, frequencies=(15, 25, 35), wavelet='mexh', method='fft',
+                                   normalize=True, window=33, offset=0, **kwargs):
+        """ Compute spectral decomposition by convolving data with wavelets at different scales.
+        Scales are computed from frequencies to roughly match them.
+
+        Parameters
+        ----------
+        frequencies : sequence
+            Frequencies to compute wavelets scales.
+        normalize : bool
+            Whether to normalize each frequency-channel by removing outliers and scaling values to [0, 1] range.
+        window : int
+            Width of amplitudes slice to calculate wavelet transform on.
+        """
+        amplitudes = self.get_cube_values(window=window, offset=offset, use_cache=False, **kwargs)
+
+        sample_rate = 1 / (1e-3 * self.field.sample_rate)
+        spectral =  compute_spectral_decomposition(amplitudes, frequencies=frequencies, wavelet=wavelet,
+                                                   sample_rate=sample_rate, method=method)
+        spectral = spectral[..., window // 2].transpose(1, 2, 0)
+
+        if normalize:
+            q = np.nanquantile(spectral, (0.01, 0.99), axis=(0, 1)).reshape(2, 1, 1, -1)
+            spectral = np.clip(spectral, a_min=q[0], a_max=q[1])
+            spectral -= q[0]
+            spectral /= (q[1] - q[0])
+        return spectral
 
 
     def get_zerocrossings(self, side, window=15):
