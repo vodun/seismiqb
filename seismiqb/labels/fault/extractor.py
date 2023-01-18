@@ -9,6 +9,7 @@ from scipy.ndimage import find_objects
 from batchflow import Notifier
 
 from .base import Fault
+from .postprocessing import skeletonize
 from .utils import (bboxes_adjacent, bboxes_intersected, dilate_coords, find_contour,
                     thin_coords, min_max_depthwise_distances, restore_coords_from_projection)
 from ...utils import groupby_min, groupby_max
@@ -31,9 +32,8 @@ class FaultExtractor:
     - Component is a 2d connected component on some slide.
     - Prototype is a 3d points body of merged components.
     """
-    def __init__(self, skeletonized_array, smoothed_array, direction=0, component_len_threshold=0):
+    def __init__(self, smoothed_array, skeletonized_array=None, direction=0, component_len_threshold=0):
         """ Init data container with components info for each slide.
-        # TODO: add skeletonized_array=None option
 
         ..!!..
 
@@ -44,7 +44,7 @@ class FaultExtractor:
         component_len_threshold : int
             Threshold to filter out too small connected components on data slides.
         """
-        self.shape = skeletonized_array.shape
+        self.shape = smoothed_array.shape
 
         self.direction = direction
         self.orthogonal_direction = 1 - self.direction
@@ -61,8 +61,14 @@ class FaultExtractor:
         self.prototypes = [] # extracted prototypes
 
         for slide_idx in Notifier('t')(range(self.shape[self.direction])):
-            mask = np.take(skeletonized_array, slide_idx, axis=self.direction)
+            # Process data
             smoothed = np.take(smoothed_array, slide_idx, axis=self.direction)
+
+            if skeletonized_array is not None:
+                mask = np.take(skeletonized_array, slide_idx, axis=self.direction)
+            else:
+                mask = skeletonize(smoothed, width=3)
+                mask = dilate(mask, (1, 3))
 
             # Extract connected components from the slide
             labeled = connected_components(mask > 0)
