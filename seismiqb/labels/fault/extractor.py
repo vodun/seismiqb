@@ -396,15 +396,15 @@ class FaultExtractor:
                 if length_ratio < intersection_ratio_threshold:
                     continue
 
-                # Shift one of the objects, making their contours intersected
-                shift = 1 if is_first_upper else -1
-                contour_1[:, -1] += shift
-
                 # Process objects with too small border contours
                 if (len(contour_1) < 4*contour_threshold) or (len(contour_2) < 4*contour_threshold):
                     corrected_contour_threshold = 1
                 else:
                     corrected_contour_threshold = contour_threshold
+
+                # Shift one of the objects, making their contours intersected
+                shift = 1 if is_first_upper else -1
+                contour_1[:, -1] += shift
 
                 # Check that one component contour is inside another (for both)
                 if self._is_contour_inside(contour_1, contour_2, contour_threshold=corrected_contour_threshold):
