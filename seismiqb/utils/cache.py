@@ -13,7 +13,7 @@ import numpy as np
 import pandas as pd
 
 
-class _GlobalCacheClass:
+class _GlobalCache:
     """ Methods for global cache management.
 
     Note, this class controls only objects which use :class:`~.lru_cache`.
@@ -156,7 +156,7 @@ class _GlobalCacheClass:
         for instance in self.instances_with_cache:
             instance.reset_cache()
 
-GlobalCache = _GlobalCacheClass() # Global cache controller, must be the only one instance
+GlobalCache = _GlobalCache() # Global cache controller, must be the only one instance
 
 class lru_cache:
     """ Thread-safe least recent used cache. Must be applied to a class methods.
@@ -225,10 +225,6 @@ class lru_cache:
     def make_key(self, instance, func, args, kwargs):
         """ Create a key from a combination of method args and instance attributes. """
         # pylint: disable=unsupported-membership-test
-        # We get names and values for args and defaults from the func signature
-        if self.func_signature is None:
-            self.func_signature = signature(func).parameters
-
         # Process args
         args = list(args) if not isinstance(args, list) else args
 
@@ -256,7 +252,7 @@ class lru_cache:
         # Process attributes
         if self.attributes:
             for attr in self.attributes:
-                attr_hash = stable_hash(getattr(instance, attr))
+                attr_hash = getattr(instance, attr).__hash__()
                 key.append(attr_hash)
         return flatten_nested(key)
 
@@ -275,7 +271,7 @@ class lru_cache:
         @wraps(func)
         def wrapper(*args, **kwargs):
             # if a bound method, get class instance from function else from arguments
-            instance = func.__self__ if ismethod(func) else args[0]
+            instance = func.__self__ if self.is_method else args[0]
 
             use_cache = kwargs.pop('use_cache', self.apply_by_default)
             copy_on_return = kwargs.pop('copy_on_return', self.copy_on_return)
@@ -291,7 +287,7 @@ class lru_cache:
             # Init cache and reference on it in the GlobalCache controller
             if not hasattr(instance, 'cache'):
                 # Init cache container in the instance
-                instance.__setattr__('cache', defaultdict(OrderedDict))
+                setattr(instance, 'cache', defaultdict(OrderedDict))
 
             GlobalCache.instances_with_cache.add(instance)
 
@@ -299,12 +295,12 @@ class lru_cache:
             instance_hash = self.compute_hash(instance)
 
             # If result is already in cache, just retrieve it and update its timings
-            cache = instance.cache[self.cached_attr]
-            result = cache.get(key, self.default)
+            instance_cache = instance.cache[self.cached_attr]
+            result = instance_cache.get(key, self.default)
 
             if result is not self.default:
                 with self.lock:
-                    cache.move_to_end(key)
+                    instance_cache.move_to_end(key)
                     self.stats[instance_hash]['hit'] += 1
                     return copy(result) if copy_on_return else result
 
@@ -315,17 +311,19 @@ class lru_cache:
             with self.lock:
                 self.stats[instance_hash]['miss'] += 1
 
-                if key in cache:
+                if key in instance_cache:
                     pass
-                elif len(cache) == self.maxsize:
-                    cache.popitem(last=False)
-                    cache[key] = result
+                elif len(instance_cache) >= self.maxsize:
+                    instance_cache.popitem(last=False)
+                    instance_cache[key] = result
                 else:
-                    cache[key] = result
+                    instance_cache[key] = result
 
             return copy(result) if copy_on_return else result
 
+        self.is_method = ismethod(func)
         self.cached_attr = func.__qualname__ # used as a cache key in instances
+        self.func_signature = signature(func).parameters
 
         wrapper.__name__ = func.__name__
         wrapper.stats = lambda: self.stats
@@ -339,15 +337,6 @@ class lru_cache:
 class SingletonClass:
     """ There must be only one! """
 Singleton = SingletonClass()
-
-
-def stable_hash(key):
-    """ Hash that stays the same between different runs of Python interpreter. """
-    if not isinstance(key, (str, bytes)):
-        key = ''.join(sorted(str(key)))
-    if not isinstance(key, bytes):
-        key = key.encode('ascii')
-    return str(blake2b(key).hexdigest())
 
 def flatten_nested(iterable):
     """ Recursively flatten nested structure of tuples, list and dicts. """
