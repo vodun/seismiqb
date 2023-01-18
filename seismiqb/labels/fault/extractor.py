@@ -150,7 +150,7 @@ class FaultExtractor:
                 return None
 
             component = self.container[start_slide_idx]['coords'][idx]
-            # component_bbox = self.container[start_slide_idx]['bboxes'][idx] # TODO: use it
+            component_bbox = self.container[start_slide_idx]['bboxes'][idx]
 
             self.container[start_slide_idx]['lengths'][idx] = -1 # Mark this component as unmergeable
             prototype = FaultPrototype(coords=component, direction=self.direction,
@@ -160,11 +160,14 @@ class FaultExtractor:
 
             start_slide_idx = prototype.last_slide_idx
             component = prototype.last_component
+            component_bbox = None
 
         # Find closest components on next slides and split them if needed
         for slide_idx_ in range(start_slide_idx+1, self.shape[self.direction]):
             # Find the closest component on the slide_idx_ to the current
-            component, split_indices = self._find_closest_component(component=component, slide_idx=slide_idx_)
+            component, component_bbox, split_indices = self._find_closest_component(component=component,
+                                                                                    component_bbox=component_bbox,
+                                                                                    slide_idx=slide_idx_)
 
             # Postprocess prototype
             if component is not None:
@@ -197,7 +200,7 @@ class FaultExtractor:
 
         return slide_idx, idx
 
-    def _find_closest_component(self, component, slide_idx, distances_threshold=5,
+    def _find_closest_component(self, component, component_bbox, slide_idx, distances_threshold=5,
                                 depth_iteration_step=10, depths_threshold=5):
         """ Find the closest component to component on the slide, get splitting depths for them if needed.
 
@@ -205,7 +208,8 @@ class FaultExtractor:
         """
         # Process inputs
         # Dilate component bbox for detecting close components: component on next slide can be shifted
-        component_bbox = np.column_stack([np.min(component, axis=0), np.max(component, axis=0)])
+        if component_bbox is None:
+            component_bbox = np.column_stack([np.min(component, axis=0), np.max(component, axis=0)])
         # TODO: think about more accurate bboxes
         component_bbox[self.orthogonal_direction, 0] -= self.dilation // 2 # dilate bbox
         component_bbox[self.orthogonal_direction, 1] += self.dilation // 2
@@ -214,6 +218,7 @@ class FaultExtractor:
 
         # Init returned values
         closest_component = None
+        closest_component_bbox = None
         prototype_split_indices = [None, None]
 
         # Iter over components and find the closest one
@@ -275,6 +280,7 @@ class FaultExtractor:
 
                 # Extract suitable part
                 closest_component = closest_component[closest_component[:, -1] >= item_split_idx]
+                closest_component_bbox[-1, 0] = item_split_idx
 
             if closest_component_bbox[-1, 1] - intersection_borders[1] > depths_threshold:
                 item_split_idx = intersection_borders[1]
@@ -285,8 +291,9 @@ class FaultExtractor:
 
                 # Extract suitable part
                 closest_component = closest_component[closest_component[:, -1] <= item_split_idx]
+                closest_component_bbox[-1, 1] = item_split_idx
 
-        return closest_component, prototype_split_indices
+        return closest_component, closest_component_bbox, prototype_split_indices
 
     def _add_new_component(self, slide_idx, coords):
         """ Add new items into the container. """
