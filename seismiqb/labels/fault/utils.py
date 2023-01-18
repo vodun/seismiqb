@@ -1,8 +1,7 @@
 """ Helpers for coordinates processing. """
 import numpy as np
 from numba import njit
-
-from scipy.ndimage.morphology import binary_erosion
+import cv2 as cv
 
 # Coordinates operations
 def dilate_coords(coords, dilate=3, axis=0, max_value=None):
@@ -91,13 +90,14 @@ def bboxes_adjacent(bbox_1, bbox_2):
     return borders
 
 @njit
-def max_depthwise_distance(coords_1, coords_2, depths_ranges, step, axis, max_threshold=None):
-    """ Find maximal depth-wise central distance between coordinates.
+def min_max_depthwise_distances(coords_1, coords_2, depths_ranges, step, axis, max_threshold=None):
+    """ Find minimal and maximal depth-wise central distance between coordinates.
     
     ..!!..
     max_threshold : int or float
         Early stopping: threshold for max distance value.
     """
+    min_distance = max_threshold or 100
     max_distance = 0
 
     for depth in range(depths_ranges[0], depths_ranges[1]+1, step):
@@ -108,12 +108,15 @@ def max_depthwise_distance(coords_1, coords_2, depths_ranges, step, axis, max_th
                           coords_2_depth_slice[len(coords_2_depth_slice)//2])
 
         if (max_threshold is not None) and (distance >= max_threshold):
-            return distance
+            return None, distance
 
         if distance > max_distance:
             max_distance = distance
 
-    return max_distance
+        if distance < min_distance:
+            min_distance = distance
+
+    return min_distance, max_distance
 
 def find_contour(coords, projection_axis):
     """ Find closed contour of 2d projection.
@@ -130,19 +133,19 @@ def find_contour(coords, projection_axis):
     origin = bbox[:, 0]
     image_shape = bbox[:, 1] - bbox[:, 0] + 1
 
-    mask = np.zeros(image_shape, bool)
+    mask = np.zeros(image_shape, np.uint8)
     mask[coords[:, anchor_axis] - origin[0], coords[:, 2] - origin[1]] = 1
 
-    # Get object contour
-    contour = mask ^ binary_erosion(mask)
+    # Get only the main contour: object can contain holes with their own contours
+    contours, _ = cv.findContours(mask, cv.RETR_TREE, cv.CHAIN_APPROX_NONE)
 
-    # Extract coordinates from contour mask
-    coords_2d = np.nonzero(contour)
+    # Extract unique and sorted coords
+    contour = contours[0].reshape(len(contours[0]), 2) # Can be non-unique
 
-    contour_coords = np.zeros((len(coords_2d[0]), 3), dtype=np.int16)
-
-    contour_coords[:, anchor_axis] = coords_2d[0] + origin[0]
-    contour_coords[:, 2] = coords_2d[1] + origin[1]
+    contour_coords = np.zeros((len(contour), 3), np.int16)
+    contour_coords[:, anchor_axis] = contour[:, 1] + origin[0]
+    contour_coords[:, 2] = contour[:, 0] + origin[1]
+    contour_coords = np.unique(contour_coords, axis=0) # np.unique is here for sorting and unification
     return contour_coords
 
 @njit

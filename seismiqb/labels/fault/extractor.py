@@ -10,7 +10,7 @@ from batchflow import Notifier
 
 from .base import Fault
 from .utils import (bboxes_adjacent, bboxes_intersected, dilate_coords, find_contour,
-                    thin_coords, max_depthwise_distance, restore_coords_from_projection)
+                    thin_coords, min_max_depthwise_distances, restore_coords_from_projection)
 from ...utils import groupby_min, groupby_max
 
 
@@ -170,12 +170,12 @@ class FaultExtractor:
             if component is not None:
                 # Split current prototype and add new to queue
                 if split_indices[0] is not None:
-                    new_prototype = prototype.split(split_depth=split_indices[0], cut_upper_part=True)
-                    self.prototypes_queue.append(new_prototype)
+                    new_prototypes = prototype.split(split_depth=split_indices[0], cut_upper_part=True)
+                    self.prototypes_queue.extend(new_prototypes)
 
                 if split_indices[1] is not None:
-                    new_prototype = prototype.split(split_depth=split_indices[1], cut_upper_part=False)
-                    self.prototypes_queue.append(new_prototype)
+                    new_prototypes = prototype.split(split_depth=split_indices[1], cut_upper_part=False)
+                    self.prototypes_queue.extend(new_prototypes)
 
                 prototype.append(component, slide_idx=slide_idx_)
             else:
@@ -225,7 +225,6 @@ class FaultExtractor:
 
                 # Check closeness of some points (iter over intersection depths with some step)
                 # Faster then component intersection, but not so accurate
-                # TODO: check intersection again; compare results
                 other_component = self.container[slide_idx]['coords'][idx]
 
                 intersection_depths = (max(component_bbox[-1, 0], other_bbox[-1, 0]),
@@ -233,18 +232,25 @@ class FaultExtractor:
 
                 step = np.clip((intersection_depths[1]-intersection_depths[0])//3, 1, depth_iteration_step)
 
-                distance = max_depthwise_distance(component, other_component,
-                                                  depths_ranges=intersection_depths, step=step,
-                                                  axis=self.orthogonal_direction, max_threshold=min_distance)
+                components_distances = min_max_depthwise_distances(component, other_component,
+                                                                   depths_ranges=intersection_depths, step=step,
+                                                                   axis=self.orthogonal_direction,
+                                                                   max_threshold=min_distance)
 
-                if distance < min_distance:
+                if (components_distances[0] is None) or (components_distances[0] > 1):
+                    # Components are not close
+                    continue
+
+                if components_distances[1] < min_distance:
+                    # The most depthwise distant points in components are close enough -> we can combine components
                     merged_idx = idx
-                    min_distance = distance
+                    min_distance = components_distances[1]
                     intersection_borders = intersection_depths
                     closest_component = other_component
                     closest_component_bbox = other_bbox
 
                     if min_distance == 0:
+                        # The closest component is founded
                         break
 
         if closest_component is not None:
@@ -382,6 +388,9 @@ class FaultExtractor:
                 
 
                 # If one data contour is much longer than other, then we can't connect them as puzzle details
+                if len(contour_1) == 0 or len(contour_2) == 0:
+                    continue
+
                 length_ratio = min(len(contour_1), len(contour_2)) / max(len(contour_1), len(contour_2))
 
                 if length_ratio < intersection_ratio_threshold:
@@ -477,13 +486,13 @@ class FaultPrototype:
     @property
     def last_slide_idx(self):
         if self._last_slide_idx is None:
-            self._last_slide_idx = self.coordinates[:, self.direction].max()
+            self._last_slide_idx = self.coords[:, self.direction].max()
         return self._last_slide_idx
 
     @property
     def last_component(self):
         if self._last_component is None:
-            self._last_component = self.coordinates[self.coordinates[:, self.direction] == self.last_slide_idx]
+            self._last_component = self.coords[self.coords[:, self.direction] == self.last_slide_idx]
         return self._last_component
 
     @property
@@ -516,27 +525,51 @@ class FaultPrototype:
         self._last_slide_idx = None
         self._last_component = None
 
+    def _split_by_direction(self, coords):
+        """ Direction-wise prototypes split.
+
+        After depth-wise split we can have the situation when splitted part has more than one connected component.
+        This method split disconnected parts into different prototypes.
+        """
+        unique_direction_coords = np.unique(coords[:, self.direction])
+        # Slides distance more than 1 -> different objects
+        split_indices = np.nonzero(unique_direction_coords[1:] - unique_direction_coords[:-1] > 1)[0]
+
+        if len(split_indices) == 0:
+            return [FaultPrototype(coords=coords, direction=self.direction)]
+
+        start_indices = unique_direction_coords[split_indices + 1]
+        start_indices = np.insert(start_indices, 0, 0)
+
+        end_indices = unique_direction_coords[split_indices]
+        end_indices = np.append(end_indices, unique_direction_coords[-1])
+
+        prototypes = []
+
+        for start_idx, end_idx in zip(start_indices, end_indices):
+            coords_ = coords[(start_idx <= coords[:, self.direction]) & (coords[:, self.direction] <= end_idx)]
+            prototype = FaultPrototype(coords=coords_, direction=self.direction, last_slide_idx=end_idx)
+            prototypes.append(prototype)
+
+        return prototypes
+
+
     def split(self, split_depth, cut_upper_part):
-        """ Split prototype into two parts by `split_depth`. """
+        """ Depth-wise prototypes split. """
         if cut_upper_part:
-            new_coords = self.coords[self.coords[:, -1] < split_depth]
-
-            self.coords = self.coords[self.coords[:, -1] >= split_depth]
-            self._last_component = self.last_component[self.last_component[:, -1] >= split_depth]
+            coords_outer = self.coords[self.coords[:, -1] < split_depth]
+            coords_main = self.coords[self.coords[:, -1] >= split_depth]
         else:
-            new_coords = self.coords[self.coords[:, -1] > split_depth]
+            coords_outer = self.coords[self.coords[:, -1] > split_depth]
+            coords_main = self.coords[self.coords[:, -1] <= split_depth]
 
-            self.coords = self.coords[self.coords[:, -1] <= split_depth]
-            self._last_component = self.last_component[self.last_component[:, -1] <= split_depth]
+        new_prototypes = self._split_by_direction(coords_outer)
+        new_prototypes.extend(self._split_by_direction(coords_main))
 
+        self = new_prototypes[-1]
         self.reset_borders()
 
-        new_last_slide = np.max(new_coords[:, self.direction])
-        new_last_component = new_coords[new_coords[:, self.direction] == new_last_slide]
-
-        new_prototype = FaultPrototype(coords=new_coords, direction=self.direction,
-                                       last_slide_idx=new_last_slide, last_component=new_last_component)
-        return new_prototype
+        return new_prototypes[:-1]
 
     def get_borders(self, removed_border, axis):
         """ Get contour borders except the one.
