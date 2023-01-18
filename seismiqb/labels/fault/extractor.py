@@ -507,7 +507,9 @@ class FaultPrototype:
         """ Append new component (coords) into prototype. """
         self.coords = np.vstack([self.coords, coords])
 
-        self.reset_borders()
+        self._bbox = None
+        self._contour = None
+        self._borders = {}
         self._last_slide_idx = slide_idx
         self._last_component = coords
 
@@ -553,7 +555,6 @@ class FaultPrototype:
 
         return prototypes
 
-
     def split(self, split_depth, cut_upper_part):
         """ Depth-wise prototypes split. """
         if cut_upper_part:
@@ -567,8 +568,6 @@ class FaultPrototype:
         new_prototypes.extend(self._split_by_direction(coords_main))
 
         self = new_prototypes[-1]
-        self.reset_borders()
-
         return new_prototypes[:-1]
 
     def get_borders(self, removed_border, axis):
@@ -604,12 +603,6 @@ class FaultPrototype:
             self._borders[removed_border] = border_coords
 
         return self._borders[removed_border]
-
-    def reset_borders(self):
-        """..!!.."""
-        self._bbox = None
-        self._contour = None
-        self._borders = {}
 
 
 # Helpers
