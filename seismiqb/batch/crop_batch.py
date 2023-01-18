@@ -1023,7 +1023,7 @@ class SeismicCropBatch(Batch, VisualizationMixin):
             Whether to keep only signs of resulting image.
         """
         field = self.get(ix, 'fields')
-        sampling_frequency = 1000 / field.sample_rate  # `field.sample_rate` is in ms, we need frequency in HZ (1/s)
+        sampling_frequency = field.sample_rate
         crop = self.get(ix, src)
 
         sos = butter(order, [lowcut, highcut], btype='band', output='sos', fs=sampling_frequency)

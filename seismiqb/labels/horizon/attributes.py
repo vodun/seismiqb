@@ -692,7 +692,7 @@ class AttributesMixin:
         """
         amplitudes = self.get_cube_values(window=window, offset=offset, use_cache=False, **kwargs)
 
-        sample_rate = 1 / (1e-3 * self.field.sample_rate)
+        sample_rate = self.field.sample_rate
         spectral =  compute_spectral_decomposition(amplitudes, frequencies=frequencies, wavelet=wavelet,
                                                    sample_rate=sample_rate, method=method)
         spectral = spectral[..., window // 2].transpose(1, 2, 0)

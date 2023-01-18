@@ -39,7 +39,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
 
         - `points` is a (N, 3) ndarray with every row being (iline, xline, depth). Note that (iline, xline) are
           stored in cube coordinates that range from 0 to `n_ilines` and 0 to `n_xlines` respectively.
-          Stored depth is corrected on `time_delay` and `sample_rate` of the cube.
+          Stored depth is corrected on `time_delay` and `sample_interval` of the cube.
           In order to initialize from this storage, one must supply (N, 3) ndarray.
 
     Depending on which attribute was created at initialization (`matrix` or `points`), the other is computed lazily
@@ -691,7 +691,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
         overlap_size = np.sum(mask)
         masked_difference = difference[mask]
         masked_abs_difference = np.abs(masked_difference)
-        window_rate = np.sum(masked_abs_difference < (5 / self.field.sample_rate)) / overlap_size
+        window_rate = np.sum(masked_abs_difference < (5 / self.field.sample_interval)) / overlap_size
 
         present_at_1_absent_at_2 = ((self.full_matrix != self.FILL_VALUE)
                                     & (other.full_matrix == self.FILL_VALUE)).sum()

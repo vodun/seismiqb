@@ -183,7 +183,7 @@ class MemmapLoader(SegyioLoader):
 
         Examples
         --------
-        if `headers` are `INLINE_3D` and `CROSSLINE_3D`, which are 189-192 and 193-196 bytes, the return would be:
+        if `headers` are `INLINE_3D` and `CROSSLINE_3D`, which are 189-192 and 193-196 bytes, the output would be:
         >>> [('unused_0', numpy.void, 188),
         >>>  ('INLINE_3D', '>i4'),
         >>>  ('CROSSLINE_3D', '>i4'),
