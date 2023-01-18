@@ -15,8 +15,7 @@ from scipy.ndimage.morphology import binary_dilation, binary_fill_holes, binary_
 from skimage.measure import label
 from sklearn.decomposition import PCA
 
-from ...functional import hilbert, compute_spectral_decomposition, \
-                          compute_instantaneous_amplitude, compute_instantaneous_frequency, compute_instantaneous_phase
+from ...functional import compute_spectral_decomposition, compute_instantaneous_amplitude, compute_instantaneous_phase
 from ...utils import transformable, lru_cache
 
 
@@ -52,9 +51,6 @@ class AttributesMixin:
     - properties of a carcass
     - methods to cut data from the cube along horizon
     - matrices derived from amplitudes along horizon: instant amplitudes/phases, decompositions, etc.
-
-    Also changes the `__getattr__` of a horizon by allowing the `full_` prefix to apply `:meth:~.put_on_full`.
-    For example, `full_binary_matrix` would return the result of `binary_matrix`, wrapped with `:meth:~.put_on_full`.
 
     Method for getting desired attributes is `load_attribute`. It works with nested keys, i.e. one can get attributes
     of horizon subsets. Address method documentation for further details.

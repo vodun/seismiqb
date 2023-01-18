@@ -83,10 +83,10 @@ def compute_instantaneous_phase(array, continuous=False, axis=-1, analytic=None)
         phase = xp.abs(phase)
     return phase.astype(np.float32)
 
-def compute_instantaneous_frequency(array, axis=-1, analytic=None):
+def compute_instantaneous_frequency(array, axis=-1, sample_rate=1.0, analytic=None):
     """ Compute instantaneous frequency. """
     iphases = compute_instantaneous_phase(array, axis=axis, analytic=analytic)
-    frequency = np.diff(iphases, axis=axis, prepend=0) / (2 * np.pi)
+    frequency = np.diff(iphases, axis=axis, prepend=0) / (2 * np.pi) * sample_rate
     return frequency.astype(np.float32)
 
 def compute_spectral_decomposition(array, frequencies, wavelet='mexh', sample_rate=1.0, method='fft', axis=-1):
