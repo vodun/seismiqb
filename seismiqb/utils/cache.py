@@ -2,7 +2,6 @@
 import os
 from copy import copy
 from functools import wraps
-from hashlib import blake2b
 from inspect import ismethod, signature
 import json
 from threading import RLock
