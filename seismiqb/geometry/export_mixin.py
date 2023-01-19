@@ -18,7 +18,7 @@ class ExportMixin:
     # Specs for export
     def make_export_spec(self, array_like, origin=(0, 0, 0)):
         """ Create a description of the current geometry.
-        Includes file-wide attributes: `sample_rate`, `delay`, `format` and `sorting`,
+        Includes file-wide attributes: `sample_interval`, `delay`, `format` and `sorting`,
         coordinate descriptions: `ilines`, `xlines` and `samples`, and matrices for other headers.
         Can be used directly to create SEG-Y file by `segyio`.
 
@@ -36,8 +36,8 @@ class ExportMixin:
         spec = segyio.spec()
 
         # File-wide values
-        spec.sample_rate = self.sample_rate
-        spec.delay = int(self.delay) + int(self.sample_rate * origin[-1])
+        spec.sample_interval = self.sample_interval
+        spec.delay = int(self.delay) + int(self.sample_interval * origin[-1])
         spec.format = 5 if file_handler.format is None else int(file_handler.format)
         spec.sorting = 2 if file_handler.sorting is None else int(file_handler.sorting)
 
@@ -52,11 +52,11 @@ class ExportMixin:
         return spec
 
     @staticmethod
-    def default_export_spec(array_like, origin=(0, 0, 0), sample_rate=2.0, delay=0, sorting=2, format=5,
+    def default_export_spec(array_like, origin=(0, 0, 0), sample_interval=2.0, delay=0, sorting=2, format=5,
                             iline_shift=1, iline_step=1, xline_shift=1, xline_step=1,
                             cdp_x_shift=100_000, cdp_x_step=25, cdp_y_shift=300_000, cdp_y_step=25):
         """ Create default description of SEG-Y file.
-        Includes file-wide attributes: `sample_rate`, `delay`, `format` and `sorting`,
+        Includes file-wide attributes: `sample_interval`, `delay`, `format` and `sorting`,
         coordinate descriptions: `ilines`, `xlines` and `samples`, and matrices for other headers.
         Can be used directly to create SEG-Y file by `segyio`.
 
@@ -66,7 +66,7 @@ class ExportMixin:
             An object with numpy-like getitem semantics.
         origin : tuple of three integers
             Coordinates of the upper leftmost point of the `array_like`.
-        sample_rate, delay, sorting, format : numbers
+        sample_interval, delay, sorting, format : numbers
             Directly used in SEG-Y creation, according to SEG-Y standard.
         *_shift : int
             Starting (minimum) value of corresponding header.
@@ -76,8 +76,8 @@ class ExportMixin:
         spec = segyio.spec()
 
         # File-wide values
-        spec.sample_rate = sample_rate
-        spec.delay = int(delay) + int(sample_rate * origin[-1])
+        spec.sample_interval = sample_interval
+        spec.delay = int(delay) + int(sample_interval * origin[-1])
         spec.sorting = sorting
         spec.format = format
 
@@ -127,7 +127,7 @@ class ExportMixin:
             Path to save the SEG-Y to.
         spec : object
             Object with the following mandatory attributes:
-            - file-wide parameters `sample_rate`, `delay`, `format` and `sorting`
+            - file-wide parameters `sample_interval`, `delay`, `format` and `sorting`
             - coordinate grid along each axis `ilines`, `xlines` and `samples`
             - mapping from ordinal spatial coordinates to header values: `cdp_x_matrix` and `cdp_y_matrix`.
             Refer to :meth:`make_export_spec` and :meth:`default_export_spec` for details.
@@ -197,7 +197,7 @@ class ExportMixin:
             # Write binary header
             dst_file.bin.update({
                 segyio.BinField.Samples: len(spec.samples),
-                segyio.BinField.Interval: int(spec.sample_rate * 1000),
+                segyio.BinField.Interval: int(spec.sample_interval * 1000),
             })
 
             # Iterate over traces, writing headers/data to the dst
@@ -218,7 +218,7 @@ class ExportMixin:
                         segyio.TraceField.CDP_Y: spec.cdp_y_matrix[i, x],
 
                         segyio.TraceField.TRACE_SAMPLE_COUNT: len(spec.samples),
-                        segyio.TraceField.TRACE_SAMPLE_INTERVAL: int(spec.sample_rate * 1000),
+                        segyio.TraceField.TRACE_SAMPLE_INTERVAL: int(spec.sample_interval * 1000),
                         segyio.TraceField.DelayRecordingTime: spec.delay
                     })
 
@@ -267,7 +267,7 @@ class ExportMixin:
 
         # Write file-wide 'Interval', 'Samples' and 'Format' headers
         # TODO: can be changed to a custom 400-bytes long np.dtype
-        dst_mmap[3217-1:3217-1+2] = np.array([int(spec.sample_rate * 1000)], dtype=endian_symbol + 'u2').view('u1')
+        dst_mmap[3217-1:3217-1+2] = np.array([int(spec.sample_interval * 1000)], dtype=endian_symbol + 'u2').view('u1')
         dst_mmap[3221-1:3221-1+2] = np.array([n_samples], dtype=endian_symbol + 'u2').view('u1')
         dst_mmap[3225-1:3225-1+2] = np.array([spec.format], dtype=endian_symbol + 'u2').view('u1')
 
@@ -328,7 +328,7 @@ def write_chunk(path, shape, offset, dtype, spec, array_like, transform, start, 
     dst_traces['CDP_Y'] = spec.cdp_y_matrix[start:start+chunk_size].ravel()
 
     dst_traces['TRACE_SAMPLE_COUNT'] = len(spec.samples)
-    dst_traces['TRACE_SAMPLE_INTERVAL'] = int(spec.sample_rate * 1000)
+    dst_traces['TRACE_SAMPLE_INTERVAL'] = int(spec.sample_interval * 1000)
     dst_traces['DelayRecordingTime'] = spec.delay
 
     # Write trace data

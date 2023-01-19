@@ -76,6 +76,7 @@ class GeometrySEGY(Geometry):
         self.n_traces = self.loader.n_traces
         self.depth = self.loader.n_samples
         self.delay = self.loader.delay
+        self.sample_interval = self.loader.sample_interval
         self.sample_rate = self.loader.sample_rate
 
         self.dtype = self.loader.dtype

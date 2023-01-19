@@ -77,7 +77,7 @@ class GeometryHDF5(Geometry):
     def set_default_index_attributes(self, **kwargs):
         """ Set default values for seismic attributes. """
         self.n_traces = np.prod(self.shape[:2])
-        self.delay, self.sample_rate = 0.0, 1.0
+        self.delay, self.sample_interval, self.sample_rate = 0.0, 1.0, 1000
         self.compute_dead_traces()
         for key, value in kwargs.items():
             setattr(self, key, value)

@@ -33,7 +33,8 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMix
 
     Independent of the exact format, `Geometry` provides the following:
         - attributes to describe shape and structure of the cube like `shape` and `lengths`,
-        as well as exact values of file-wide headers, for example, `depth`, `delay` and `sample_rate`.
+        as well as exact values of file-wide headers, for example, `depth`, `delay`,
+        `sample_rate` and `sample_interval`.
 
         - method :meth:`collect_stats` to infer information about the amplitudes distribution:
         under the hood, we make a full pass through the cube data to collect global, spatial and depth-wise stats.
@@ -80,7 +81,7 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMix
     # Attributes to store in a separate file with meta
     PRESERVED = [ # loaded at instance initialization
         # Crucial geometry properties
-        'n_traces', 'depth', 'delay', 'sample_rate', 'shape',
+        'n_traces', 'depth', 'delay', 'sample_interval', 'sample_rate', 'shape',
         'shifts', 'lengths', 'ranges', 'increments', 'regular_structure',
         'index_matrix', 'absent_traces_matrix', 'dead_traces_matrix',
         'n_alive_traces', 'n_dead_traces',
@@ -373,7 +374,7 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMix
         # Depth to units
         if array.shape[1] == self.index_length + 1:
             array[:, self.index_length] -= self.delay
-            array[:, self.index_length] /= self.sample_rate
+            array[:, self.index_length] /= self.sample_interval
         return array
 
     def ordinals_to_lines(self, array):
@@ -394,7 +395,7 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMix
 
         # Units to depth
         if array.shape[1] == self.index_length + 1:
-            array[:, self.index_length] *= self.sample_rate
+            array[:, self.index_length] *= self.sample_interval
             array[:, self.index_length] += self.delay
         return array
 
@@ -599,7 +600,8 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMix
         Traces:                            {self.n_traces:,}
         Shape:                             {tuple(self.shape)}
         Time delay:                        {self.delay} ms
-        Sample rate:                       {self.sample_rate} ms
+        Sample interval:                   {self.sample_interval} ms
+        Sample rate:                       {self.sample_rate} Hz
         Area:                              {self.area:4.1f} km²
 
         File size:                         {self.file_size:4.3f} GB
