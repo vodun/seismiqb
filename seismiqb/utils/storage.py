@@ -113,7 +113,7 @@ class SQBStorage:
             elif isinstance(value, np.ndarray):
                 dst.create_dataset(key.strip('/'), data=value, **self.dataset_parameters)
 
-            # Fallback for native dtypes: int, float, etc
+            # Fallback for native types: int, float, etc
             else:
                 dst[key] = value
 
@@ -172,12 +172,9 @@ class SQBStorage:
             elif key + 'is_none' in src:
                 value = None
 
-            # Fallback for native types
+            # Fallback for Numpy arrays and native types
             elif key in src:
                 value = src[key][()]
-
-            else:
-                raise AttributeError(f'Key `{key}` is not in the storage!')
 
         self.loaded_items.append(key)
         return value

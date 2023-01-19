@@ -127,6 +127,9 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
                 # path to csv-like file
                 self.format = 'charisma'
 
+            else:
+                raise ValueError(f'Path {path} does not exist!')
+
         elif isinstance(storage, np.ndarray):
             if storage.ndim == 2 and storage.shape[1] == 3:
                 # array with row in (iline, xline, depth) format
@@ -829,11 +832,11 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
         """
         # Add extension to `path`, if missing
         format = format.lower()
-        _, extension = os.path.splitext(path)
-        if extension:
-            path = path.replace(extension, '.' + format)
-        else:
-            path = path + '.' + format
+        # _, extension = os.path.splitext(path)
+        # if extension:
+        #     path = path.replace(extension, '.' + format)
+        # else:
+        #     path = path + '.' + format
 
         # Apply smoothing
         if smooth_out:
