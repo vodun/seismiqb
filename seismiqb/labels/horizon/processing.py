@@ -23,7 +23,7 @@ class ProcessingMixin:
     In either case they return a filtered horizon instance.
     """
     # Filtering methods
-    def filter(self, filtering_matrix=None, margin=0, inplace=False, **kwargs):
+    def filter(self, filtering_matrix=None, margin=0, inplace=False, add_prefix=True, **kwargs):
         """ Remove points that correspond to 1's in `filtering_matrix` from the horizon surface.
 
         Note, this method may change horizon inplace or create a new instance. By default creates a new instance.
@@ -40,6 +40,8 @@ class ProcessingMixin:
             Amount of traces to cut out near to boundaries considering `filtering_matrix` appliance.
         inplace : bool
             Whether to apply operation inplace or return a new Horizon object.
+        add_prefix : bool
+            If True and not inplace, adds prefix to the horizon name.
         kwargs : dict
             Arguments to be passed in the loading attribute method in case when filtering_matrix is a str.
 
@@ -70,7 +72,10 @@ class ProcessingMixin:
             self.reset_storage('matrix')
             return self
 
-        name = 'filtered_' + self.name if self.name is not None else None
+        if self.name is not None:
+            name = 'filtered_' + self.name if add_prefix else self.name
+        else:
+            name = None
         return type(self)(storage=points, field=self.field, name=name)
 
     despike = partialmethod(filter, filtering_matrix='spikes')
@@ -108,7 +113,7 @@ class ProcessingMixin:
     # Horizon surface transformations
     def smooth_out(self, mode='convolve', iters=1,
                    kernel_size=(3, 3), sigma_spatial=0.8, kernel=None, sigma_range=2.0,
-                   max_depth_difference=5, inplace=False, dtype=None):
+                   max_depth_difference=5, inplace=False, add_prefix=True, dtype=None):
         """ Smooth out the horizon surface.
 
         Smoothening is applied without absent points changing.
@@ -151,6 +156,8 @@ class ProcessingMixin:
             Can be used for separate smoothening on sides of discontinuity.
         inplace : bool
             Whether to apply operation inplace or return a new Horizon object.
+        add_prefix : bool
+            If True and not inplace, adds prefix to the horizon name.
         dtype : type
             Output horizon dtype. Supported only if `inplace` is False.
 
@@ -192,11 +199,14 @@ class ProcessingMixin:
             self.reset_storage('points')
             return self
 
-        name = 'smoothed_' + self.name if self.name is not None else None
+        if self.name is not None:
+            name = 'smoothed_' + self.name if add_prefix else self.name
+        else:
+            name = None
         return type(self)(storage=result, i_min=self.i_min, x_min=self.x_min, field=self.field, name=name, dtype=dtype)
 
     def interpolate(self, iters=1, kernel_size=(3, 3), sigma=0.8, kernel=None,
-                    min_present_neighbors=0, max_depth_ptp=None, inplace=False):
+                    min_present_neighbors=0, max_depth_ptp=None, inplace=False, add_prefix=True):
         """ Interpolate horizon surface on the regions with missing traces.
 
         Under the hood, we fill missing traces with weighted neighbor values.
@@ -221,6 +231,8 @@ class ProcessingMixin:
             A maximum distance between values in a squared window for which we apply interpolation.
         inplace : bool
             Whether to apply operation inplace or return a new Horizon object.
+        add_prefix : bool
+            If True and not inplace, adds prefix to the horizon name.
 
         Returns
         -------
@@ -253,10 +265,13 @@ class ProcessingMixin:
             self.reset_storage('points')
             return self
 
-        name = 'interpolated_' + self.name if self.name is not None else None
+        if self.name is not None:
+            name = 'interpolated_' + self.name if add_prefix else self.name
+        else:
+            name = None
         return type(self)(storage=result, i_min=self.i_min, x_min=self.x_min, field=self.field, name=name)
 
-    def inpaint(self, inpaint_radius=1, neighbors_radius=1, method=0, inplace=False):
+    def inpaint(self, inpaint_radius=1, neighbors_radius=1, method=0, inplace=False, add_prefix=True):
         """ Inpaint horizon surface on the regions with missing traces.
 
         Under the hood, the method uses the inpainting method from OpenCV.
@@ -279,6 +294,8 @@ class ProcessingMixin:
             If 1, then Telea algorithm is used.
         inplace : bool
             Whether to apply operation inplace or return a new Horizon object.
+        add_prefix : bool
+            If True and not inplace, adds prefix to the horizon name.
 
         Returns
         -------
@@ -310,11 +327,14 @@ class ProcessingMixin:
             self.reset_storage('points')
             return self
 
-        name = 'inpainted_' + self.name if self.name is not None else None
+        if self.name is not None:
+            name = 'inpainted_' + self.name if add_prefix else self.name
+        else:
+            name = None
         return type(self)(storage=result, i_min=self.i_min, x_min=self.x_min, field=self.field, name=name)
 
     # Horizon distortions
-    def thin_out(self, factor=1, threshold=256, inplace=False):
+    def thin_out(self, factor=1, threshold=256, inplace=False, add_prefix=True):
         """ Thin out the horizon by keeping only each `factor`-th line.
 
         Note, this method may change horizon inplace or create a new instance. By default creates a new instance.
@@ -328,6 +348,8 @@ class ProcessingMixin:
             Minimal amount of points in a line to keep.
         inplace : bool
             Whether to apply operation inplace or return a new Horizon object.
+        add_prefix : bool
+            If True and not inplace, adds prefix to the horizon name.
 
         Returns
         -------
@@ -350,7 +372,10 @@ class ProcessingMixin:
             self.reset_storage('matrix')
             return self
 
-        name = 'thinned_' + self.name if self.name is not None else None
+        if self.name is not None:
+            name = 'thinned_' + self.name if add_prefix else self.name
+        else:
+            name = None
         return type(self)(storage=points, field=self.field, name=name)
 
     def make_carcass(self, frequencies=100, margin=50, interpolate=False, add_prefix=True, inplace=False, **kwargs):
