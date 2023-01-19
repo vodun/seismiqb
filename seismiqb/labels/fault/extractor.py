@@ -368,8 +368,21 @@ class FaultExtractor:
         else:
             removed_borders = ('left', 'right')
 
-        for j, prototype_1 in enumerate(self.prototypes):
-            for k, prototype_2 in enumerate(self.prototypes[j+1:]):
+        # Presort objects by other valuable axis for early stopping
+        sort_axis = 2 if axis == self.direction else self.direction
+        prototypes_starts = np.array([prototype.bbox[sort_axis, 0] for prototype in self.prototypes])
+        prototypes_order = np.argsort(prototypes_starts)
+
+        for i, prototype_1_idx in enumerate(prototypes_order):
+            prototype_1 = self.prototypes[prototype_1_idx]
+
+            for prototype_2_idx in prototypes_order[i+1:]:
+                prototype_2 = self.prototypes[prototype_2_idx]
+
+                # Exit if we out of sort_axis ranges for prototype_1
+                if (prototype_1.bbox[sort_axis, 1] < prototype_2.bbox[sort_axis, 0]):
+                    break
+
                 adjacent_borders = bboxes_adjacent(prototype_1.bbox, prototype_2.bbox)
 
                 if adjacent_borders is None:
@@ -421,12 +434,12 @@ class FaultExtractor:
 
                 # Check that one component contour is inside another (for both)
                 if self._is_contour_inside(contour_1, contour_2, contour_threshold=corrected_contour_threshold):
-                    to_concat, concated_with = _add_link(item_i=j, item_j=k+j+1,
+                    to_concat, concated_with = _add_link(item_i=prototype_1_idx, item_j=prototype_2_idx,
                                                          to_concat=to_concat, concated_with=concated_with)
                     continue
 
                 if self._is_contour_inside(contour_2, contour_1, contour_threshold=corrected_contour_threshold):
-                    to_concat, concated_with = _add_link(item_i=j, item_j=k+j+1,
+                    to_concat, concated_with = _add_link(item_i=prototype_1_idx, item_j=prototype_2_idx,
                                                          to_concat=to_concat, concated_with=concated_with)
 
         return to_concat
