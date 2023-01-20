@@ -29,6 +29,13 @@ class SQBStorage:
                         src[item] = src[f'meta/{item}']
                         del src[f'meta/{item}']
 
+        # Scan all available keys and store them in the instance for faster check
+        self.keys = set()
+        if self.exists:
+            with h5py.File(self.path, mode='r+', swmr=True) as src:
+                for key in src:
+                    self.keys.add(key)
+
     @property
     def exists(self):
         """ True, if the storage exists on disk and it is HDF5 file. """
@@ -117,6 +124,8 @@ class SQBStorage:
             else:
                 dst[key] = value
 
+            self.keys.add(key)
+
     def __setitem__(self, key, value):
         self.store_item(key=key, value=value, overwrite=True)
 
@@ -176,6 +185,9 @@ class SQBStorage:
             elif key in src:
                 value = src[key][()]
 
+            else:
+                raise KeyError(f'Key `{key}` is not in storage!')
+
         self.loaded_items.append(key)
         return value
 
@@ -200,9 +212,10 @@ class SQBStorage:
         """ Check if `key` is in storage. """
         if self.exists is False:
             return False
-        with h5py.File(self.path, mode='r', swmr=True) as src:
-            return key in src
+        return key in self.keys
 
+    def __contains__(self, key):
+        return self.has_item(key=key)
 
     # Reset
     def reset(self, keys):
