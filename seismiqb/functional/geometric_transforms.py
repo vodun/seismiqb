@@ -55,6 +55,12 @@ def _rotate_2d(array, angle, fill_value=0):
     matrix = cv2.getRotationMatrix2D((shape[1]//2, shape[0]//2), angle, 1)
     return cv2.warpAffine(array, matrix, (shape[1], shape[0]), borderValue=fill_value).reshape(shape)
 
+# Resize
+def resize(array, size, interpolation=1):
+    """ Resize image. """
+    # interpolation=1 means bilinear
+    resized = cv2.resize(src=array.squeeze(), dsize=(size[1], size[0]), interpolation=interpolation)
+    return resized.reshape(1, *resized.shape)
 
 # Scale
 def scale_2d(array, scale, adjust=False):
@@ -76,7 +82,7 @@ def scale_2d(array, scale, adjust=False):
         array = center_crop(array, shape=initial_shape)
     return array
 
-def scale_3d(self, array, scale, adjust=False):
+def scale_3d(array, scale, adjust=False):
     """ Zoom in/out of the image in 3D.
 
     Parameters

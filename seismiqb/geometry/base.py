@@ -33,7 +33,8 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMix
 
     Independent of the exact format, `Geometry` provides the following:
         - attributes to describe shape and structure of the cube like `shape` and `lengths`,
-        as well as exact values of file-wide headers, for example, `depth`, `delay` and `sample_rate`.
+        as well as exact values of file-wide headers, for example, `depth`, `delay`,
+        `sample_rate` and `sample_interval`.
 
         - method :meth:`collect_stats` to infer information about the amplitudes distribution:
         under the hood, we make a full pass through the cube data to collect global, spatial and depth-wise stats.
@@ -80,7 +81,7 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMix
     # Attributes to store in a separate file with meta
     PRESERVED = [ # loaded at instance initialization
         # Crucial geometry properties
-        'n_traces', 'depth', 'delay', 'sample_rate', 'shape',
+        'n_traces', 'depth', 'delay', 'sample_interval', 'sample_rate', 'shape',
         'shifts', 'lengths', 'ranges', 'increments', 'regular_structure',
         'index_matrix', 'absent_traces_matrix', 'dead_traces_matrix',
         'n_alive_traces', 'n_dead_traces',
@@ -206,7 +207,7 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMix
                 slc = slice(max(subkey.start or 0, 0),
                             min(subkey.stop or limit, limit), subkey.step)
 
-            elif isinstance(subkey, int):
+            elif isinstance(subkey, (int, np.integer)):
                 subkey = subkey if subkey >= 0 else limit - subkey
                 slc = slice(subkey, subkey + 1)
                 axis_to_squeeze.append(i)
@@ -337,6 +338,24 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMix
         finally:
             self.disable_cache()
 
+    def load_subset(self, n_traces=100_000, seed=42):
+        """ Load a subset of data. Returns an array of (n_traces, depth) shape. """
+        rng = np.random.default_rng(seed=seed)
+        if self.converted is False:
+            alive_traces_indices = self.index_matrix[~self.dead_traces_matrix].ravel()
+            indices = rng.choice(alive_traces_indices, size=n_traces)
+            data = self.load_by_indices(indices)
+        else:
+            indices = rng.choice(self.shape[0], size=n_traces // self.shape[1], replace=False)
+            data = []
+            for index in indices:
+                slide = self.load_slide(index=index, axis=0)
+                slide_bounds = self.compute_auto_zoom(index=index, axis=0)[0]
+                data.append(slide[slide_bounds].ravel())
+            data = np.concatenate(data)
+        return data
+
+
     # Coordinate system conversions
     def lines_to_ordinals(self, array):
         """ Convert values from inline-crossline coordinate system to their ordinals.
@@ -355,7 +374,7 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMix
         # Depth to units
         if array.shape[1] == self.index_length + 1:
             array[:, self.index_length] -= self.delay
-            array[:, self.index_length] /= self.sample_rate
+            array[:, self.index_length] /= self.sample_interval
         return array
 
     def ordinals_to_lines(self, array):
@@ -376,7 +395,7 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMix
 
         # Units to depth
         if array.shape[1] == self.index_length + 1:
-            array[:, self.index_length] *= self.sample_rate
+            array[:, self.index_length] *= self.sample_interval
             array[:, self.index_length] += self.delay
         return array
 
@@ -420,6 +439,21 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMix
                 'q_99': q_99,
             }
         return self._normalization_stats
+
+    def estimate_impulse(self, wavelet_length=40, n_traces=10_000, seed=42):
+        """ Estimate impulse on a random subset of data.
+        The idea is to average traces in the frequency domain to get the frequencies of an impulse, produced them.
+        """
+        data = self.load_subset(n_traces=n_traces, seed=seed)
+
+        # FFT domain
+        data_fft = np.fft.rfft(data, axis=-1)
+        wavelet_fft = np.mean(np.abs(data_fft), axis=0)
+
+        # Depth domain
+        wavelet_estimation = np.real(np.fft.irfft(wavelet_fft)[:wavelet_length//2])
+        wavelet_estimation = np.concatenate((wavelet_estimation[1:][::-1], wavelet_estimation), axis=0)
+        return wavelet_estimation
 
 
     # Spatial matrices
@@ -566,7 +600,8 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMix
         Traces:                            {self.n_traces:,}
         Shape:                             {tuple(self.shape)}
         Time delay:                        {self.delay} ms
-        Sample rate:                       {self.sample_rate} ms
+        Sample interval:                   {self.sample_interval} ms
+        Sample rate:                       {self.sample_rate} Hz
         Area:                              {self.area:4.1f} km²
 
         File size:                         {self.file_size:4.3f} GB
@@ -639,21 +674,7 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMix
 
     def show_histogram(self, n_traces=100_000, seed=42, bins=50, plotter=plot, **kwargs):
         """ Show distribution of amplitudes in a random subset of the cube. """
-        # Load subset of data
-        rng = np.random.default_rng(seed=seed)
-        if self.converted is False:
-            alive_traces_indices = self.index_matrix[~self.dead_traces_matrix].ravel()
-            indices = rng.choice(alive_traces_indices, size=n_traces)
-            data = self.load_by_indices(indices)
-        else:
-            indices = rng.choice(self.shape[0], size=n_traces // self.shape[1], replace=False)
-            data = []
-            for index in indices:
-                slide = self.load_slide(index=index, axis=0)
-                slide_bounds = self.compute_auto_zoom(index=index, axis=0)
-                data.append(slide[slide_bounds].ravel())
-            data = np.concatenate(data)
-
+        data = self.load_subset(n_traces=n_traces, seed=seed)
 
         kwargs = {
             'title': (f'Amplitude distribution for {self.short_name}' +

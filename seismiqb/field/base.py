@@ -1,6 +1,7 @@
 """ A container for all information about the field: geometry and labels, as well as convenient API. """
 import os
 import re
+import itertools
 from glob import glob
 from difflib import get_close_matches
 from concurrent.futures import ThreadPoolExecutor
@@ -202,20 +203,17 @@ class Field(CharismaMixin, VisualizationMixin):
                                                      constructor_class=label_class, **kwargs)
             loaded = list(Notifier(pbar, total=len(paths))(executor.map(function, paths)))
 
-        faults = [fault for fault in loaded if len(fault) > 0]
+        faults = [fault for fault in itertools.chain(*loaded) if len(fault) > 0]
         return faults
 
     def _load_fault(self, path, interpolate=False, constructor_class=Fault, **kwargs):
         """ Load a single fault from path. """
         if isinstance(path, constructor_class):
             path.field = self
-            return path
+            return [path]
 
-        fault = constructor_class(path, field=self, **kwargs)
-
-        if interpolate:
-            fault.interpolate()
-        return fault
+        faults = constructor_class.load(path, self, interpolate=interpolate, **kwargs)
+        return faults
 
     def _load_geometries(self, paths, constructor_class=Geometry.new, **kwargs):
         if isinstance(paths, str):
@@ -322,7 +320,8 @@ class Field(CharismaMixin, VisualizationMixin):
         # Add mask of each component to the buffer
         for i, label in enumerate(labels, start=1):
             alpha = 1 if enumerate_labels is False else i
-            label.add_to_mask(buffer, locations=locations, width=width, axis=orientation, sparse=sparse, alpha=alpha)
+            label.add_to_mask(buffer, locations=locations, width=width, axis=orientation,
+                              sparse=sparse, alpha=alpha, **kwargs)
         return buffer
 
 

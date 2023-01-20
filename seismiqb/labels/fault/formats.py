@@ -18,7 +18,7 @@ class FaultSticksMixin(CharismaMixin):
 
     @classmethod
     def read_df(cls, path):
-        """ Automatically detect formar of csv-like file and create pandas.DataFrame from FaultSticks/CHARISMA file. """
+        """ Automatically detect format of csv-like file and create pandas.DataFrame from FaultSticks/CHARISMA file. """
         with open(path, encoding='utf-8') as file:
             line_len = len([item for item in file.readline().split(' ') if len(item) > 0])
 
@@ -39,7 +39,7 @@ class FaultSticksMixin(CharismaMixin):
         return pd.read_csv(path, sep=r'\s+', names=names)
 
     def split_df_into_sticks(self, df, return_direction=False):
-        """ Group nodes in FaultStciks dataframe into sticks.
+        """ Group nodes in FaultSticks dataframe into sticks.
 
         Parameters
         ----------
@@ -53,8 +53,6 @@ class FaultSticksMixin(CharismaMixin):
         pandas.Series or (pandas.Series, int)
             Sequence of stick nodes and (optionally) direction of the fault.
         """
-        if len(df) == 0:
-            raise ValueError('Empty DataFrame (possibly wrong coordinates).')
         col, direction = None, None
 
         ilines_diff = sum(df['INLINE_3D'][1:].values - df['INLINE_3D'][:-1].values == 0)
@@ -113,7 +111,10 @@ class FaultSticksMixin(CharismaMixin):
             Whether remove sticks with one node and remove sticks from fault with one stick,
             by default False
         """
-        df = self.read_df(path)
+        if isinstance(path, str):
+            df = self.read_df(path)
+        else:
+            df = path
 
         if len(df) == 0:
             self._sticks = [[]]
@@ -133,6 +134,10 @@ class FaultSticksMixin(CharismaMixin):
             mask = make_interior_points_mask(points, self.field_reference.shape)
             df = df.iloc[mask]
 
+        if len(df) == 0:
+            self._sticks = None
+            return
+
         sticks, direction = self.split_df_into_sticks(df, return_direction=True)
         if remove_broken_sticks:
             sticks = self.remove_broken_sticks(sticks)
@@ -150,12 +155,13 @@ class FaultSticksMixin(CharismaMixin):
         if direction is not None:
             ptp = np.array([np.ptp(stick[:, direction]) for stick in self.sticks])
             if (ptp > 2).any():
-                warnings.warn(f"{self.path}: there sticks on several slides in both directions")
+                warnings.warn(f"{self.name}: there sticks on several slides in both directions")
 
             for stick in self.sticks[np.logical_and(ptp > 0, ptp <= 2)]:
                 stick[:, direction] = stick[0, direction]
 
         self.direction = direction
+        self.stick_orientation = 2
 
     def dump_fault_sticks(self, path):
         """ Dump fault sticks into FaultSticks format. """
@@ -191,9 +197,9 @@ class FaultSticksMixin(CharismaMixin):
         Parameters
         ----------
         path : str
-            path to file or glob expression
+            Path to file or glob expression
         verbose : bool
-            response if file is succesfully readed.
+            Response if file is successfully read.
         """
         for filename in glob.glob(path):
             if os.path.splitext(filename)[1] == '.dvc':
@@ -224,12 +230,12 @@ class FaultSticksMixin(CharismaMixin):
                     print(filename, ': OK')
 
     @classmethod
-    def split_file(cls, path, dst):
-        """ Split file with multiple faults (indexed by 'name' column) into separate files. """
-        if dst and not os.path.isdir(dst):
-            os.makedirs(dst)
-        df = pd.read_csv(path, sep=r'\s+', names=cls.FAULT_STICKS)
-        df.groupby('name').apply(cls._fault_to_csv, dst=dst)
+    def split_charisma(cls, path):
+        """ Split file with multiple faults (indexed by 'name' column) into separate dataframes. """
+        df = cls.read_df(path)
+        if 'name' in df.columns:
+            return dict(list(df.groupby('name')))
+        return {path: df}
 
     @classmethod
     def _fault_to_csv(cls, df, dst):
@@ -250,7 +256,7 @@ class FaultSerializationMixin:
             'points': npzfile.get('points'),
             'nodes': npzfile.get('nodes'),
             'simplices': npzfile.get('simplices'),
-            'sticks': self._labeled_array_to_sticks(sticks, sticks_labels),
+            'sticks': self._labeled_array_to_sticks(sticks, sticks_labels) if sticks is not None else None,
         }, transform=transform)
 
         direction = npzfile.get('direction')

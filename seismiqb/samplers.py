@@ -15,7 +15,7 @@ import numpy as np
 from numba import njit
 
 from batchflow import Sampler, ConstantSampler
-from .labels import Horizon, Fault
+from .labels import Horizon, Fault, Well, MatchedWell
 from .field import Field, SyntheticField
 from .geometry import Geometry
 from .utils import filtering_function, insert_points_into_mask, AugmentedDict
@@ -418,10 +418,10 @@ class FaultSampler(BaseSampler):
             nodes = self.fault.points
 
         # Keep only points, that can be a starting point for a crop of given shape
-        i_mask = ((ranges[:2, 0] < nodes[:, :2]).all(axis=1) &
-                  ((nodes[:, :2] + crop_shape[:2]) < ranges[:2, 1]).all(axis=1))
-        x_mask = ((ranges[:2, 0] < nodes[:, :2]).all(axis=1) &
-                  ((nodes[:, :2] + crop_shape_t[:2]) < ranges[:2, 1]).all(axis=1))
+        i_mask = ((ranges[:2, 0] <= nodes[:, :2]).all(axis=1) &
+                  ((nodes[:, :2] + crop_shape[:2]) <= ranges[:2, 1]).all(axis=1))
+        x_mask = ((ranges[:2, 0] <= nodes[:, :2]).all(axis=1) &
+                  ((nodes[:, :2] + crop_shape_t[:2]) <= ranges[:2, 1]).all(axis=1))
         nodes = nodes[i_mask | x_mask]
 
         # Transform points to (orientation, i_start, x_start, d_start, i_stop, x_stop, d_stop)
@@ -465,6 +465,7 @@ class FaultSampler(BaseSampler):
         buffer[:, 0] = self.field_id
         buffer[:, 1] = self.label_id
         buffer[:, 2:] = sampled
+
         return buffer
 
     def _sample(self, size):
@@ -522,6 +523,114 @@ class SyntheticSampler(Sampler):
         buffer[:, [3, 4, 5]] = start_point
         buffer[:, [6, 7, 8]] = end_point
         return buffer
+
+
+class WellSampler(Sampler):
+    """ !!. """
+    def __init__(self, well, crop_shape, log='AI', field_id=None, label_id=None, threshold=0.0,
+                 spatial_randomization=(0.0, 1.0), depth_randomization=(0.0, 0.0), **kwargs):
+        self.well = well
+        self.crop_shape = crop_shape
+        self.log = log
+        self.field_id = field_id
+        self.label_id = label_id
+        self.kwargs = kwargs
+
+        self.name = self.short_name = well.name
+        self.field = well.field
+        super().__init__()
+        self.locations = self._make_locations(well, crop_shape=crop_shape, log=log,
+                                              spatial_randomization=spatial_randomization,
+                                              depth_randomization=depth_randomization)
+        self.threshold = self.crop_shape[-1] * threshold
+
+
+    def _make_locations(self, well, crop_shape, log, spatial_randomization, depth_randomization):
+        location = well.location
+        crop_shape = np.array(crop_shape)
+        crop_shape_t = crop_shape[[1, 0, 2]]
+
+        bbox = well.bboxes[log]
+        mean_depth = bbox[-1].mean().astype(np.int32)
+        depth_ranges = [max(bbox[-1][0] - crop_shape[-1] * depth_randomization[0], 0),
+                        min(bbox[-1][1] + crop_shape[-1] * depth_randomization[1], well.field.depth - crop_shape[-1])]
+
+        if depth_ranges[1] <= depth_ranges[0]:
+            depth_ranges[0] = max(depth_ranges[1] - 1, 0)
+
+        # inline-oriented
+        arange_i = np.arange(max(location[0] - crop_shape[0]*spatial_randomization[1] + 1, 0),
+                             location[0] - crop_shape[0]*spatial_randomization[0] + 1)
+        arange_x = np.arange(max(location[1] - crop_shape[1]*spatial_randomization[1] + 1, 0),
+                             location[1] - crop_shape[1]*spatial_randomization[0] + 1)
+
+        m_i, m_x = np.meshgrid(arange_i, arange_x, indexing='ij')
+        points_i = np.stack([m_i.reshape(-1), m_x.reshape(-1)]).T
+
+        # crossline-oriented
+        arange_i = np.arange(max(location[0] - crop_shape_t[0]*spatial_randomization[1] + 1, 0),
+                             location[0] - crop_shape_t[0]*spatial_randomization[0] + 1)
+        arange_x = np.arange(max(location[1] - crop_shape_t[1]*spatial_randomization[1] + 1, 0),
+                             location[1] - crop_shape_t[1]*spatial_randomization[0] + 1)
+
+        m_i, m_x = np.meshgrid(arange_i, arange_x, indexing='ij')
+        points_x = np.stack([m_i.reshape(-1), m_x.reshape(-1)]).T
+
+        # (orientation, i_start, x_start, d_start, i_stop, x_stop, d_stop)
+        buffer = np.empty((len(points_i) + len(points_x), 7), dtype=np.int32)
+
+        buffer[:len(points_i), 0] = 0
+        buffer[:len(points_i), 1:3] = points_i
+        buffer[:len(points_i), 3] = mean_depth
+        buffer[:len(points_i), 4:7] = buffer[:len(points_i), 1:4] + crop_shape
+
+        buffer[len(points_i):, 0] = 1
+        buffer[len(points_i):, 1:3] = points_x
+        buffer[len(points_i):, 3] = mean_depth
+        buffer[len(points_i):, 4:7] = buffer[len(points_i):, 1:4] + crop_shape_t
+
+        self.n = len(buffer)
+        self.crop_shape = crop_shape
+        self.crop_shape_t = crop_shape_t
+        self.crop_depth = crop_shape[2]
+        self.ranges = [None, None, depth_ranges]
+        return buffer
+
+    def sample(self, size):
+        """ Get exactly `size` locations. """
+        if size == 0:
+            return np.zeros((0, 9), np.int32)
+        sampled = self._sample(size)
+        if self.threshold == 0.0 or self.well.vertical:
+            sampled = self._sample(size)
+        else:
+            accumulated = 0
+            sampled_list = []
+
+            while accumulated < size:
+                sampled = self._sample(size*2)
+                condition = np.array([self.well.compute_overlap_size(mask_bbox=location[1:].reshape(2, 3).T,
+                                                                     log=self.log) >= self.threshold
+                                      for location in sampled], dtype=np.bool)
+
+                sampled_list.append(sampled[condition])
+                accumulated += condition.sum()
+            sampled = np.concatenate(sampled_list)[:size]
+
+        buffer = np.empty((size, 9), dtype=np.int32)
+        buffer[:, 0] = self.field_id
+        buffer[:, 1] = self.label_id
+        buffer[:, 2:] = sampled
+        return buffer
+
+    def _sample(self, size):
+        idx = np.random.randint(self.n, size=size)
+        sampled = self.locations[idx] # (orientation, i_start, x_start, d_start, i_stop, x_stop, d_stop)
+
+        depths = np.random.randint(*self.ranges[-1], size=size, dtype=np.int32)
+        sampled[:, 3] = depths
+        sampled[:, 6] = depths + self.crop_shape[-1]
+        return sampled
 
 
 @njit
@@ -695,6 +804,7 @@ class SeismicSampler(Sampler):
         Geometry: GeometrySampler,
         Horizon: HorizonSampler,
         Fault: FaultSampler,
+        Well: WellSampler, MatchedWell: WellSampler
     }
 
     @classmethod
@@ -722,6 +832,8 @@ class SeismicSampler(Sampler):
 
         for field_id, (field_name, list_labels) in enumerate(labels.items()):
             list_labels = list_labels if isinstance(list_labels, (tuple, list)) else [list_labels]
+            if len(list_labels) == 0:
+                continue
 
             # Unpack parameters
             crop_shape_ = crop_shape[field_name] if isinstance(crop_shape, dict) else crop_shape
@@ -750,7 +862,7 @@ class SeismicSampler(Sampler):
             if uniform_labels:
                 labels_weights.append([1 / len(list_labels) for _ in list_labels])
             else:
-                weights = np.array([len(label) for label in list_labels])
+                weights = np.array([len(label) if hasattr(label, '__len__') else 1 for label in list_labels])
                 weights = weights / weights.sum()
                 labels_weights.append(weights)
 

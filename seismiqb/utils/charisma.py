@@ -48,7 +48,7 @@ class CharismaMixin:
 
         # Load data as a points array from a file
         with open(path, encoding='utf-8') as file:
-            line_len = len(file.readline().split(' '))
+            line_len = len(file.readline().split())
         if line_len == len(self.REDUCED_CHARISMA_SPEC):
             names = self.REDUCED_CHARISMA_SPEC
         elif line_len >= len(self.CHARISMA_SPEC):
@@ -103,7 +103,7 @@ class CharismaMixin:
         transform : None or callable
             If callable, then applied to points after converting to ilines/xlines coordinate system.
         """
-        path = self.field_reference.make_path(path, name=name)
+        path = self.field_reference.make_path(path, name=name or self.name)
         os.makedirs(os.path.dirname(path), exist_ok=True)
 
         if format != 'points':

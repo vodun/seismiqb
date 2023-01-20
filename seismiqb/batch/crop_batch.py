@@ -304,21 +304,27 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         elif normalization_stats in {'field', True}:
             normalization_stats = field.normalization_stats
         else:
-            # Crop-wise stats
-            normalization_stats = {}
-
             if clip_to_quantiles:
                 buffer = np.clip(buffer, *np.quantile(buffer, q))
                 clip_to_quantiles = False
 
-            if 'mean' in mode:
-                normalization_stats['mean'] = np.mean(buffer)
-            if 'std' in mode:
-                normalization_stats['std'] = np.std(buffer)
-            if 'min' in mode:
-                normalization_stats['min'] = np.min(buffer)
-            if 'max' in mode:
-                normalization_stats['max'] = np.max(buffer)
+            if callable(mode):
+                normalization_stats = {
+                    'mean': np.mean(buffer),
+                    'std': np.std(buffer),
+                    'min': np.min(buffer),
+                    'max': np.max(buffer),
+                }
+            else:
+                normalization_stats = {}
+                if 'mean' in mode:
+                    normalization_stats['mean'] = np.mean(buffer)
+                if 'std' in mode:
+                    normalization_stats['std'] = np.std(buffer)
+                if 'min' in mode:
+                    normalization_stats['min'] = np.min(buffer)
+                if 'max' in mode:
+                    normalization_stats['max'] = np.max(buffer)
 
         # Clip
         if clip_to_quantiles:
@@ -327,16 +333,17 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         # Actual normalization
         if callable(mode):
             buffer[:] = mode(buffer, normalization_stats)
-        if 'mean' in mode:
-            buffer -= normalization_stats['mean']
-        if 'std' in mode:
-            buffer /= normalization_stats['std']
-        if 'min' in mode and 'max' in mode:
-            if normalization_stats['max'] != normalization_stats['min']:
-                buffer -= normalization_stats['min']
-                buffer /= normalization_stats['max'] - normalization_stats['min']
-            else:
-                buffer -= normalization_stats['min']
+        else:
+            if 'mean' in mode:
+                buffer -= normalization_stats['mean']
+            if 'std' in mode:
+                buffer /= normalization_stats['std']
+            if 'min' in mode and 'max' in mode:
+                if normalization_stats['max'] != normalization_stats['min']:
+                    buffer -= normalization_stats['min']
+                    buffer /= normalization_stats['max'] - normalization_stats['min']
+                else:
+                    buffer -= normalization_stats['min']
         return buffer
 
 
@@ -401,7 +408,7 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         if orientation == 1:
             buffer = buffer.transpose(1, 0, 2)
         field.make_mask(locations=locations, orientation=orientation, buffer=buffer,
-                        width=width, indices=indices, src=src_labels, sparse=sparse)
+                        width=width, indices=indices, src=src_labels, sparse=sparse, **kwargs)
 
 
     @action
@@ -588,13 +595,9 @@ class SeismicCropBatch(Batch, VisualizationMixin):
             shift = np.random.randint(-max_shift, max_shift)
 
             # Apply shift
-            segment = crop[:, begin:min(begin + length, crop.shape[1]), :]
-            shifted_segment = np.zeros_like(segment)
-            if shift > 0:
-                shifted_segment[:, :, shift:] = segment[:, :, :-shift]
-            elif shift < 0:
-                shifted_segment[:, :, :shift] = segment[:, :, -shift:]
             if shift != 0:
+                segment_to_shift = crop[:, begin:min(begin + length, crop.shape[1]), :]
+                shifted_segment = np.roll(segment_to_shift, shift=shift, axis=-1)
                 crop[:, begin:min(begin + length, crop.shape[1]), :] = shifted_segment
         return crop
 
@@ -988,6 +991,10 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         """ Central crop of defined shape. """
         return functional.center_crop(crop, shape)
 
+    @apply_parallel_decorator(init='data', post='_assemble', target='for')
+    def resize(self, crop, size, interpolation=1, **kwargs):
+        """ Resize image. By default uses a bilinear interpolation."""
+        return functional.resize(array=crop, size=size, interpolation=interpolation)
 
     # Augmentations: geologic. `compute_instantaneous_amplitude/phase/frequency` are added by decorator
     @apply_parallel_decorator(init='preallocating_init', post='noop_post', target='for')
@@ -998,7 +1005,11 @@ class SeismicCropBatch(Batch, VisualizationMixin):
     @action
     @apply_parallel_decorator(init='indices', post='_assemble', target='for')
     def bandpass_filter(self, ix, src, dst, lowcut=None, highcut=None, axis=1, order=4, sign=True):
-        """ Keep only frequencies between `lowcut` and `highcut`.
+        """ Keep only frequencies between `lowcut` and `highcut`. Frequency bounds `lowcut` and `highcut`
+        are measured in Hz.
+
+        NOTE: use action `SeismicCropBatch.plot_frequencies` to look at the component's spectrum. The action
+        shows power spectrum in the same units as required here by parameters `lowcut` and `highcut`.
 
         Parameters
         ----------
@@ -1012,10 +1023,10 @@ class SeismicCropBatch(Batch, VisualizationMixin):
             Whether to keep only signs of resulting image.
         """
         field = self.get(ix, 'fields')
-        nyq = 0.5 / (field.sample_rate * 10e-4)
+        sampling_frequency = field.sample_rate
         crop = self.get(ix, src)
 
-        sos = butter(order, [lowcut / nyq, highcut / nyq], btype='band', output='sos')
+        sos = butter(order, [lowcut, highcut], btype='band', output='sos', fs=sampling_frequency)
         filtered = sosfiltfilt(sos, crop, axis=axis)
         if sign:
             filtered = np.sign(filtered)

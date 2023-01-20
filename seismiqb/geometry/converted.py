@@ -77,10 +77,23 @@ class GeometryHDF5(Geometry):
     def set_default_index_attributes(self, **kwargs):
         """ Set default values for seismic attributes. """
         self.n_traces = np.prod(self.shape[:2])
-        self.delay, self.sample_rate = 0.0, 1.0
+        self.delay, self.sample_interval, self.sample_rate = 0.0, 1.0, 1000
+        self.compute_dead_traces()
         for key, value in kwargs.items():
             setattr(self, key, value)
 
+    def compute_dead_traces(self, frequency=100):
+        """ Fallback for dead traces matrix computation, if no full stats are collected. """
+        slides = []
+
+        for idx in range(0, self.depth, frequency):
+            slides.append(self.load_slide_native(index=idx, axis=2))
+
+        std_matrix = np.std(slides, axis=0)
+
+        self.dead_traces_matrix = (std_matrix == 0).astype(np.bool_)
+        self.n_dead_traces = np.sum(self.dead_traces_matrix)
+        self.n_alive_traces = np.prod(self.lengths) - self.n_dead_traces
 
     # General utilities
     def get_optimal_axis(self, locations=None, shape=None):

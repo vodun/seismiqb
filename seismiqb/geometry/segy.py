@@ -76,6 +76,7 @@ class GeometrySEGY(Geometry):
         self.n_traces = self.loader.n_traces
         self.depth = self.loader.n_samples
         self.delay = self.loader.delay
+        self.sample_interval = self.loader.sample_interval
         self.sample_rate = self.loader.sample_rate
 
         self.dtype = self.loader.dtype
@@ -447,6 +448,11 @@ class GeometrySEGY(Geometry):
             buffer = matrix.transpose(2, 0, 1)
         return buffer
 
+    @property
+    def mmap(self):
+        """ 3D memory map, that views the entire SEG-Y as one 3D array. """
+        return self.loader.data_mmap.reshape(self.shape)
+
     # Data loading: 2D
     def load_slide_native(self, index, axis=0, limits=None, buffer=None, safe=False):
         """ Load one slide of data along specified axis.
@@ -488,7 +494,7 @@ class GeometrySEGY(Geometry):
         shape = self.locations_to_shape(locations)
         axis = np.argmin(shape)
 
-        if axis in {0, 1}:
+        if axis in {0, 1} or shape[-1] > 50: #TODO: explain this constant
             indices = self.index_matrix[locations[0], locations[1]].reshape(-1)
             buffer = self.load_by_indices(indices=indices, limits=locations[-1], buffer=buffer)
 

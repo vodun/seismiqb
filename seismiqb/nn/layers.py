@@ -117,7 +117,6 @@ class MovingNormalizationLayer(nn.Module):
         result = torch.nan_to_num(result, nan=self.fill_value)
         return squeeze(result, self.ndim)
 
-
 class SemblanceLayer(nn.Module):
     """ Semblance attribute.
 
@@ -167,7 +166,6 @@ class SemblanceLayer(nn.Module):
         result = torch.nan_to_num(num / denum, nan=self.fill_value)
 
         return squeeze(result, self.ndim)
-
 
 class FrequenciesFilterLayer(nn.Module):
     """ Frequencies filter.

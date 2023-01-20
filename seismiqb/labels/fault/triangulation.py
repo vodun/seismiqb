@@ -1,7 +1,7 @@
 """ Triangulation functions. """
 import numpy as np
 from numba import njit
-
+from scipy.spatial import Delaunay
 
 
 @njit
@@ -53,43 +53,105 @@ def triangle_volume(points, width):
     p_ = p * r_ / r
     return (p_ * r_) * (width + 1)
 
-
-def sticks_to_simplices(sticks, return_indices=False):
+def sticks_to_simplices(sticks, orientation, max_simplices_depth=None, max_nodes_distance=None):
     """ Compute triangulation of the fault.
 
     Parameters
     ----------
     sticks : numpy.ndarray
         Array of sticks. Each item of array is a stick: sequence of 3D points.
-    return_indices : bool
-        If True, function will return indices of stick nodes in flatten array.
 
     Return
     ------
-    numpy.ndarray
-        numpy.ndarray of length N where N is the number of simplices. Each item is a sequence of coordinates of each
-        vertex (if `return_indices=False`) or indices of nodes in initial flatten array.
+    simplices : numpy.ndarray
+        Array of simplices where each item is a sequence of 3 nodes indices in initial flatten array.
+    nodes : numpy.ndarray
+        Concatenated array of sticks nodes.
     """
     if len(sticks) == 0:
         return np.zeros((0, 3)), np.zeros((0, 3))
-    simplices = []
+    if len(sticks) == 1:
+        return np.zeros((0, 3)), sticks[0]
+    all_simplices = []
     nodes = np.concatenate(sticks)
-
-    if return_indices:
-        n_nodes = np.cumsum([0, *[len(item) for item in sticks]])
-        sticks = np.array([np.arange(len(sticks[i])) + n_nodes[i] for i in range(len(sticks))], dtype=object)
+    shift = 0
     for s1, s2 in zip(sticks[:-1], sticks[1:]):
-        if len(s1) > len(s2):
-            s1, s2 = s2, s1
-        n = len(s1)
-        nodes_to_connect = [item for sublist in zip(s1, s2[:n]) for item in sublist]
-        if len(nodes_to_connect) > 2:
-            triangles = [nodes_to_connect[i:i+3] for i in range(len(nodes_to_connect[:-2]))]
-        else:
-            triangles = []
-        triangles += [[s1[-1], s2[i], s2[i+1]] for i in range(n-1, len(s2)-1)]
-        simplices += triangles
-    return np.array(simplices), nodes
+        simplices = connect_two_sticks(s1, s2, orientation=orientation, max_nodes_distance=max_nodes_distance)
+        if len(simplices) > 0:
+            simplices += shift
+            all_simplices.append(simplices)
+        shift += len(s1)
+    if len(all_simplices) > 0:
+        all_simplices = np.concatenate(all_simplices)
+        mask = filter_triangles(all_simplices, nodes, max_simplices_depth)
+        return all_simplices[mask], nodes
+    return np.zeros((0, 3)), np.zeros((0, 3))
+
+def connect_two_sticks(nodes1, nodes2, axis=2, orientation=0, max_nodes_distance=20):
+    """ Create triangles for two sequential sticks. """
+    ranges1, ranges2 = filter_points(nodes1, nodes2, axis, max_nodes_distance)
+
+    p1, p2 = nodes1[slice(*ranges1)], nodes2[slice(*ranges2)]
+
+    points = np.concatenate([p1, p2])
+    if len(points) <= 3:
+        return []
+    try:
+        simplices = Delaunay(points[:, [orientation, axis]]).simplices
+    except: # pylint: disable=bare-except
+        return []
+    l1 = (ranges1[1] - ranges1[0])
+    simplices[simplices >= l1] += ranges2[0] + (len(nodes1) - ranges1[1])
+    simplices += ranges1[0]
+    return simplices
+
+def filter_points(nodes1, nodes2, axis=2, max_nodes_distance=20):
+    """ Remove nodes which are too far from each other. """
+    if max_nodes_distance is None:
+        return (0, len(nodes1)), (0, len(nodes2))
+
+    swap = False
+    if nodes2[0, axis] < nodes1[0, axis]:
+        swap = True
+        nodes1, nodes2 = nodes2, nodes1
+
+    for start in range(len(nodes1)):
+        if (nodes1[start, axis] - nodes2[0, axis]) > -max_nodes_distance:
+            break
+
+    ranges1 = start, len(nodes1)
+    ranges2 = 0, len(nodes2)
+
+    if swap:
+        nodes1, nodes2 = nodes2, nodes1
+        ranges1, ranges2 = ranges2, ranges1
+
+    swap = False
+    if nodes2[-1, axis] < nodes1[-1, axis]:
+        swap = True
+        nodes1, nodes2 = nodes2, nodes1
+        ranges1, ranges2 = ranges2, ranges1
+
+    for end in range(len(nodes2)-1, -1, -1):
+        if (nodes2[end, axis] - nodes1[-1, axis]) < max_nodes_distance:
+            break
+
+        ranges2 = ranges2[0], end
+
+    if swap:
+        nodes1, nodes2 = nodes2, nodes1
+        ranges1, ranges2 = ranges2, ranges1
+
+    return ranges1, ranges2
+
+def filter_triangles(triangles, points, max_simplices_depth=10):
+    """ Remove large triangles. """
+    mask = np.ones(len(triangles), dtype='bool')
+    if max_simplices_depth is not None:
+        for i, tri in enumerate(triangles):
+            if points[tri].ptp(axis=0).max() > max_simplices_depth:
+                mask[i] = 0
+    return mask
 
 @njit
 def distance_to_triangle(triangle, node):

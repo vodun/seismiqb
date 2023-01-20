@@ -66,23 +66,33 @@ def hilbert(array, axis=-1):
     result = xp.fft.ifft(fft * h, axis=axis)
     return result
 
-def compute_instantaneous_amplitude(array, axis=-1):
+def compute_instantaneous_amplitude(array, axis=-1, analytic=None):
     """ Compute instantaneous amplitude. """
     xp = cp.get_array_module(array) if CUPY_AVAILABLE else np
-    array = hilbert(array, axis=axis)
-    amplitude = xp.abs(array)
-    return amplitude
+    analytic = analytic if analytic is not None else hilbert(array, axis=axis)
+    amplitude = xp.abs(analytic)
+    return amplitude.astype(np.float32)
 
-def compute_instantaneous_phase(array, continuous=False, axis=-1):
+def compute_instantaneous_phase(array, continuous=False, axis=-1, analytic=None):
     """ Compute instantaneous phase. """
     xp = cp.get_array_module(array) if CUPY_AVAILABLE else np
-    array = hilbert(array, axis=axis)
-    phase = xp.angle(array) % (2 * xp.pi) - xp.pi
+    analytic = analytic if analytic is not None else hilbert(array, axis=axis)
+
+    phase = xp.angle(analytic) % (2 * xp.pi) - xp.pi
     if continuous:
         phase = xp.abs(phase)
-    return phase
+    return phase.astype(np.float32)
 
-def compute_instantaneous_frequency(array, axis=-1):
+def compute_instantaneous_frequency(array, axis=-1, sample_rate=1.0, analytic=None):
     """ Compute instantaneous frequency. """
-    iphases = compute_instantaneous_phase(array, axis=axis)
-    return np.diff(iphases, axis=axis, prepend=0) / (2 * np.pi)
+    iphases = compute_instantaneous_phase(array, axis=axis, analytic=analytic)
+    frequency = np.diff(iphases, axis=axis, prepend=0) / (2 * np.pi) * sample_rate
+    return frequency.astype(np.float32)
+
+def compute_spectral_decomposition(array, frequencies, wavelet='mexh', sample_rate=1.0, method='fft', axis=-1):
+    """ Compute spectral decomposition by convolving data with wavelets at different scales. """
+    import pywt #pylint: disable=import-outside-toplevel
+    frequencies = np.array(frequencies)
+    scales = sample_rate / (frequencies * np.sqrt(2) * np.pi)
+    spectral =  pywt.cwt(array, scales=scales, wavelet=wavelet, axis=axis, method=method)[0]
+    return spectral

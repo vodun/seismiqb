@@ -166,7 +166,7 @@ class MemmapLoader(SegyioLoader):
 
     def load_header(self, header, chunk_size=25_000, max_workers=None, pbar=False, **kwargs):
         """ Load exactly one header. """
-        return self.load_headers(header=[header], chunk_size=chunk_size, max_workers=max_workers,
+        return self.load_headers(headers=[header], chunk_size=chunk_size, max_workers=max_workers,
                                  pbar=pbar, reconstruct_tsf=False, **kwargs)
 
     @staticmethod
@@ -183,7 +183,7 @@ class MemmapLoader(SegyioLoader):
 
         Examples
         --------
-        if `headers` are `INLINE_3D` and `CROSSLINE_3D`, which are 189-192 and 193-196 bytes, the return would be:
+        if `headers` are `INLINE_3D` and `CROSSLINE_3D`, which are 189-192 and 193-196 bytes, the output would be:
         >>> [('unused_0', numpy.void, 188),
         >>>  ('INLINE_3D', '>i4'),
         >>>  ('CROSSLINE_3D', '>i4'),
