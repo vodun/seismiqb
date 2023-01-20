@@ -180,11 +180,13 @@ class FaultExtractor:
                 # Split current prototype and add new to queue
                 if split_indices[0] is not None:
                     new_prototypes = prototype.split(split_depth=split_indices[0], cut_upper_part=True)
-                    self.prototypes_queue.extend(new_prototypes)
+                    prototype = new_prototypes[-1]
+                    self.prototypes_queue.extend(new_prototypes[:-1])
 
                 if split_indices[1] is not None:
                     new_prototypes = prototype.split(split_depth=split_indices[1], cut_upper_part=False)
-                    self.prototypes_queue.extend(new_prototypes)
+                    prototype = new_prototypes[-1]
+                    self.prototypes_queue.extend(new_prototypes[:-1])
 
                 prototype.append(component, slide_idx=slide_idx_)
             else:
@@ -242,6 +244,7 @@ class FaultExtractor:
                                        min(component_bbox[-1, 1], other_bbox[-1, 1]))
 
                 step = np.clip((intersection_depths[1]-intersection_depths[0])//3, 1, depth_iteration_step)
+                # step = 1 TODO: check accuracy
 
                 components_distances = min_max_depthwise_distances(component, other_component,
                                                                    depths_ranges=intersection_depths, step=step,
@@ -324,7 +327,6 @@ class FaultExtractor:
         """
         # Concat coords and remove concated parts
         to_concat = self.find_connected_prototypes(axis=axis)
-
         remove_elements = []
 
         for where_to_concat_idx, what_to_concat_indices in to_concat.items():
@@ -356,7 +358,7 @@ class FaultExtractor:
         margin = 1 # local constant for code prettifying
 
         if intersection_ratio_threshold is None:
-            intersection_ratio_threshold = 0.5 if axis in (2, -1) else 0.95
+            intersection_ratio_threshold = 0.5 if axis in (2, -1) else 0.9
 
         to_concat = defaultdict(list) # owner -> items
         concated_with = {} # item -> owner
@@ -411,7 +413,6 @@ class FaultExtractor:
                                       (contour_1[:, axis] <= intersection_range[1])]
                 contour_2 = contour_2[(contour_2[:, axis] >= intersection_range[0]) & \
                                       (contour_2[:, axis] <= intersection_range[1])]
-                
 
                 # If one data contour is much longer than other, then we can't connect them as puzzle details
                 if len(contour_1) == 0 or len(contour_2) == 0:
@@ -592,9 +593,7 @@ class FaultPrototype:
 
         new_prototypes = self._split_by_direction(coords_outer)
         new_prototypes.extend(self._split_by_direction(coords_main))
-
-        self = new_prototypes[-1]
-        return new_prototypes[:-1]
+        return new_prototypes
 
     def get_borders(self, removed_border, axis):
         """ Get contour borders except the one.
