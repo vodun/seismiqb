@@ -197,7 +197,8 @@ class AttributesMixin:
         """ An alias. """
         return self.full_binary_matrix
 
-    @cached_property
+    @property
+    @lru_cache(maxsize=1, apply_by_default=True, copy_on_return=True)
     def float_matrix(self):
         """ Matrix with smoothed float values in cubic (ordinal) coordinates. """
         if self.dtype == np.float32:
