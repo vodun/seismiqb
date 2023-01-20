@@ -37,8 +37,6 @@ setup(
 
         # Data manipulation
         'pandas>=1.0.0',
-        'dask[dataframe]>=2.8.1',
-        'feather_format>=0.4.0',
         'blosc>=1.8.1',
         'segyio>=1.8.3',
         'lasio>=0.29',
@@ -50,19 +48,15 @@ setup(
         'opencv_python>=4.1.2.30',
         'matplotlib>=3.0.2',
         'plotly>=4.3.0',
-        'seaborn>=0.9.0',
-        'Pillow>=8.0.1',
 
         # Jupyter and introspection
         'tqdm>=4.50.0',
         'nbconvert>=5.6.1',
         'ipython>=7.10.0',
         'ipywidgets>=7.0',
-        'nvidia_smi>=0.1.3',
-        'nvidia-ml-py3>=7.3',
 
         # Our libraries
-        'batchflow==0.7.5',
+        'batchflow>=0.8.0',
         'py-nbtools>=0.9.5',
     ],
     extras_require={
