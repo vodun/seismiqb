@@ -7,11 +7,12 @@ import scipy
 
 from lasio import LASFile
 
+from .well_seismic_tie import OptimizationMixin
 from ...plotters import plot
 
 
 
-class Well:
+class Well(OptimizationMixin):
     """ A class to hold information about core logs and perform simple processing operations.
     Main idea is to initialize the well instance from either LAS file or checkshot, and then combine multiple instances
     into one with all (possibly, interpolated) available logs.
@@ -214,6 +215,31 @@ class Well:
         self.data[name] = filtered_array
         self.bboxes[name] = bbox
 
+    # Units recalculation for logs; impedance calculation from dt and rhob
+    def microseconds_foot_to_seconds_meter(self, dt_log='DT', name='DT_SEC_M'):
+        """
+        """
+        dt = self.data[dt_log].values
+        self.data[name] = dt * 1e-6 * 1 / 0.3048
+
+    def g_cm3_to_kg_m3(self, rhob_log='RHOB', name='RHOB_KG_M3'):
+        """
+        """
+        rhob = self.data[rhob_log].values
+        self.data[name] = rhob * 1e6 / 1e3
+
+    def compute_impedance_log_in_pascal_meter(self, dt_log='DT_SEC_M', rhob_log='RHOB_KG_M3', name='AI_PA_M'):
+        """
+        """
+        rhob = self.data[rhob_log].values
+        dt = self.data[dt_log].values
+        self.data[name] = 1 / dt * rhob
+
+    def pascal_meter_to_kilopascal_meter(self, impedance_log='AI_PA_M', name='AI_'):
+        """
+        """
+        impedance = self.data[impedance_log].values
+        self.data[name] = impedance * 1e-3
 
     # Methods for Batch loads
     def compute_overlap_mask(self, mask_bbox, log='AI'):
@@ -352,6 +378,7 @@ class Well:
                 getattr(ax, line_method)(d_min, linestyle='--', color='red')
                 getattr(ax, line_method)(d_max, linestyle='--', color='red')
         return plotter
+
 
 
 class MatchedWell(Well):
