@@ -367,7 +367,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
         """ Init from path to SQB storage file. """
         _ = kwargs
         storage = SQBStorage(path)
-        if not storage.get('is_horizon'):
+        if storage.get('type') != 'horizon':
             raise TypeError('SQB storage is not marked as horizon!')
 
         points = storage['points']
@@ -786,7 +786,10 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
 
     # Save horizon to disk
     def dump_sqb(self, data, path, format='points', transform=None, name=None, attributes=None):
-        """ !!. """
+        """ Dump horizon points to SQB storage.
+        If `attributes` are provided, then saves additional instance attributes in the storage,
+        which will be re-loaded at opening.
+        """
         _ = format
         attributes = attributes or []
         path = self.field.make_path(path, name=name or self.name)
@@ -797,7 +800,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
 
         storage = SQBStorage(path)
         storage.update({
-            'is_horizon': True,
+            'type': 'horizon',
             'points': points,
             'original_path': self.path,
             'field_path': self.field.path,

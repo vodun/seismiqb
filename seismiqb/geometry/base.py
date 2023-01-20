@@ -186,6 +186,7 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetricM
         storage = self.meta_storage if path is None else SQBStorage(path)
         items = {key : getattr(self, key) for key in self.PRESERVED + self.PRESERVED_LAZY
                  if getattr(self, key, None) is not None}
+        items['type'] = 'geometry-meta'
         storage.store(items)
 
 

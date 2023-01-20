@@ -295,7 +295,7 @@ class FaultSerializationMixin:
     def load_sqb(self, path):
         """ Load fault from SQB file. """
         storage = SQBStorage(path)
-        if not storage.get('is_fault'):
+        if storage.get('type') != 'fault':
             raise TypeError('SQB storage is not marked as fault!')
 
         self.from_dict({key : storage[key] for key in ['points', 'nodes', 'simplices', 'sticks']})
@@ -305,7 +305,7 @@ class FaultSerializationMixin:
         """ Dump fault to SQB file. """
         storage = SQBStorage(path)
         storage.update({
-            'is_fault': True,
+            'type': 'fault',
             'points': self.points,
             'nodes': self.nodes,
             'simplices': self.simplices,

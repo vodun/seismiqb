@@ -11,7 +11,7 @@ import hdf5plugin
 
 class SQBStorage:
     """ Dict-like disk storage, based on HDF5 with compression.
-    Unlike native HDF5, works with sequences, dataframes and arrays with objects.
+    Unlike native HDF5, works with sequences, dataframes and np.arrays with dtype object.
 
     Under the hood, we don't store an open file descriptor and re-open the file in read/write mode at each operation.
     """
@@ -91,7 +91,7 @@ class SQBStorage:
 
                 key_, value_ = next(iter(value.items()))
                 dst[key + 'keys'] = np.fromiter(value.keys(), dtype=np.array(key_).dtype)
-                dst[key + 'values'] = np.fromiter(value.keys(), dtype=np.array(value_).dtype)
+                dst[key + 'values'] = np.fromiter(value.values(), dtype=np.array(value_).dtype)
 
             # Dataframe: store column/index names and values separately
             # TODO: would not work correctly with arbitrary index. Can be improved by dumping index values directly
@@ -112,7 +112,7 @@ class SQBStorage:
                 dst[key+'is_str'] = 1
                 dst[key+'encoded'] = value.encode('ascii').replace(b'\x00', b' ')
 
-            # None:
+            # None: store as flag
             elif value is None:
                 dst[key+'is_none'] = 1
 
