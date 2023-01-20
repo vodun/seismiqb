@@ -5,6 +5,7 @@ import torch
 
 from scipy.signal import butter, sosfilt, sosfiltfilt
 from torch.nn import functional as F
+from numba import njit
 
 from xitorch.interpolate import Interp1D    # Implementation from here: seems to be working fine
                                             # https://github.com/xitorch/xitorch
@@ -194,7 +195,7 @@ class OptimizationMixin:
             if optimized.grad is not None:
                 optimized.grad.zero_()
 
-            # Note: only well_time needs to be recalculated - these are the time ticks where impedance-values are known
+            # NOTE: only well_time needs to be recalculated - these are the time ticks where impedance-values are known
             # Impedance values and seismic time ticks do not change
             current_well_time = torch.cumsum(optimized, dim=0)
             loss = -cls.torch_measure_seismic_tie_quality(seismic_time, current_well_time, seismic_curve,
@@ -203,7 +204,8 @@ class OptimizationMixin:
             loss.backward()
             loss_history.append(-loss.detach().cpu().numpy())
 
-            # Update grads
+            # Update variables
+            # NOTE: instead of manual update, use torch optimizers
             with torch.no_grad():
                 optimized.sub_(optimized.grad, alpha=learning_rate)
 
@@ -231,3 +233,78 @@ def symmetric_wavelet_estimation(seismic_trace, half_length=31, norm=True):
         wavelet = wavelet / np.max(wavelet)
 
     return wavelet
+
+@njit
+def compute_cross_correlation_1d(signal, lag_size=31):
+    """ Get cross-correlation vector of a 1d-trace. The resulting length of the vector is
+    2 * lag_size + 1.
+    """
+    cross = np.zeros(2 * lag_size + 1, dtype=np.float32)
+    for i in range(-lag_size, lag_size + 1):
+        ctr = i + lag_size
+        i = abs(i)
+        v1 = signal[i:]
+        v2 = signal[:len(v1)]
+
+        cross[ctr] = np.corrcoef(v1, v2)[0, 1]
+    return cross
+
+@njit
+def compute_cross_correlation_3d(data, lag_size=31):
+    """ Vectorized cross correlation of 3d-array along the last axis.
+    """
+    cross = np.zeros(data.shape[:2] + (2*lag_size + 1, ), dtype=np.float32)
+    for i in range(cross.shape[0]):
+        for j in range(cross.shape[1]):
+            cross[i, j] = compute_cross_correlation_1d(data[i, j], lag_size=lag_size)
+
+    return cross
+
+def compute_frequency_amplitides(data):
+    """ Calculate Fourier-frequencies of real data in the last dimension. If the data
+    is not 1d, take average over the signals.
+    """
+    fourier = np.fft.rfft  # We work with purely real signals; use real fourier transform.
+    amplitudes = np.absolute(fourier(data))
+    if amplitudes.ndim > 1:
+        amplitudes = np.mean(amplitudes, axis=tuple(range(amplitudes.ndim - 1)))
+
+    return amplitudes
+
+def compute_frequency_phases(data):
+    """ Calculate Fourier-phases of real data in the last dimension. If the data is not 1d,
+    take average over the signals.
+    """
+    fourier = np.fft.rfft  # We work with purely real signals; use real fourier transform.
+    phases = np.angle(fourier(data))
+    if phases.ndim > 1:
+        phases = np.mean(phases, axis=tuple(range(phases.ndim-1)))
+
+    return phases
+
+
+def estimate_wavelet_from_crosscor(seismic_data=None, amplitudes=None, phases=None, lag_size=61, norm=True, t_shift=None,
+                                   wavelet_length=121):
+    """ Estimate wavelet of length=2 * lag_size [or len(amplitudes)] from either raw seismic data or precomputed amplitudes.
+    """
+    inverse_fourier = np.fft.irfft
+
+    if amplitudes is None:
+        # the size of wavelet will be equal to 2 * lag_size
+        # get amplitudes spectrum estimation neglecting the phase
+        crosscorr_function = compute_cross_correlation_3d if seismic_data.ndim > 1 else compute_cross_correlation_1d
+        cross = crosscorr_function(seismic_data, lag_size=lag_size)
+
+        # Under the assumptions of reflectivity being white noise, the spectrum-power of cross-correlation
+        # is the squared spectrum power of the wavelet.
+        amplitudes = np.sqrt(compute_frequency_amplitides(cross))
+
+    # Construct the phases of the wavelet if not given.
+    if phases is None:
+        phases = np.zeros_like(amplitudes) if t_shift is None else t_shift * np.arange(0, len(amplitudes))
+
+    wavelet = inverse_fourier(amplitudes * np.exp(1j * phases), n=wavelet_length)
+    if norm:
+        wavelet = wavelet / np.max(wavelet)
+
+    return np.real(wavelet)
