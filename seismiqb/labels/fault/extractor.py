@@ -217,9 +217,8 @@ class FaultExtractor:
         # Dilate component bbox for detecting close components: component on next slide can be shifted
         if component_bbox is None:
             component_bbox = np.column_stack([np.min(component, axis=0), np.max(component, axis=0)])
-        # TODO: think about more accurate bboxes
-        component_bbox[self.orthogonal_direction, 0] -= self.dilation // 2 # dilate bbox
-        component_bbox[self.orthogonal_direction, 1] += self.dilation // 2
+
+        component_bbox[self.orthogonal_direction] += (-self.dilation // 2, self.dilation // 2)
 
         min_distance = distances_threshold
 
@@ -341,8 +340,7 @@ class FaultExtractor:
 
             remove_elements.extend(what_to_concat_indices)
 
-        remove_elements.sort()
-        remove_elements = remove_elements[::-1]
+        remove_elements.sort(reverse=True)
 
         for idx in remove_elements:
             _ = self.prototypes.pop(idx)
@@ -671,7 +669,7 @@ class FaultPrototype:
         ----------
         removed_border : {'up', 'down', 'left', 'right'}
         """
-        if removed_border not in self._borders.keys():
+        if removed_border not in self._borders:
             # Delete extra border from contour
             # For border removing we apply groupby which works only for the last axis, so we swap axes coords
             if removed_border in ('left', 'right'):
@@ -711,8 +709,8 @@ def _add_link(item_i, item_j, to_concat, concated_with):
 
     ..!!..
     """
-    if item_i not in concated_with.keys():
-        if item_j not in concated_with.keys():
+    if item_i not in concated_with:
+        if item_j not in concated_with:
             # Add both
             owner, item = item_i, item_j
 
@@ -729,7 +727,7 @@ def _add_link(item_i, item_j, to_concat, concated_with):
     else:
         owner = concated_with[item_i]
 
-        if item_j not in concated_with.keys():
+        if item_j not in concated_with:
             # Add item_j to item_i owner
             item = item_j
 
