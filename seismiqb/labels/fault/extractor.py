@@ -96,7 +96,7 @@ class FaultExtractor:
 
                 dilated_coords_2d = np.nonzero(object_mask)
 
-                dilated_coords = np.zeros((len(dilated_coords_2d[0]), 3), dtype=np.int16)
+                dilated_coords = np.zeros((len(dilated_coords_2d[0]), 3), dtype=np.int32)
 
                 dilated_coords[:, self.direction] = slide_idx
                 dilated_coords[:, dilation_axis] = dilated_coords_2d[0] + dilation_ranges[0]
@@ -118,7 +118,7 @@ class FaultExtractor:
                 coords.append(refined_coords)
 
                 # Bbox
-                bbox = np.empty((3, 2), int)
+                bbox = np.empty((3, 2), np.int32)
 
                 bbox[self.direction, :] = slide_idx
                 bbox[self.orthogonal_direction, :] = dilation_ranges
@@ -197,17 +197,15 @@ class FaultExtractor:
 
     def _find_not_merged_component(self):
         """ Find the longest not merged item on the minimal slide. """
-        idx = None
-
         for slide_idx in range(self._first_slide_with_mergeable, self.shape[self.direction]):
             slide_info = self.container[slide_idx]
 
             if (slide_info['lengths'] != -1).any():
                 idx = np.argmax(slide_info['lengths'])
                 self._first_slide_with_mergeable = slide_idx
-                break
+                return slide_idx, idx
 
-        return slide_idx, idx
+        return None, None
 
     def _find_closest_component(self, component, component_bbox, slide_idx, distances_threshold=5,
                                 depth_iteration_step=10, depths_threshold=5):
@@ -615,7 +613,7 @@ class FaultPrototype:
         """ Concatenate two prototypes. """
         self.coords = np.vstack([self.coords, other.coords])
 
-        new_bbox = np.empty((3, 2), np.int16)
+        new_bbox = np.empty((3, 2), np.int32)
         new_bbox[:, 0] = np.min((self.bbox[:, 0], other.bbox[:, 0]), axis=0)
         new_bbox[:, 1] = np.max((self.bbox[:, 1], other.bbox[:, 1]), axis=0)
 

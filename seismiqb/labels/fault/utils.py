@@ -78,7 +78,7 @@ def bboxes_intersected(bbox_1, bbox_2, axes=(0, 1, 2)):
 @njit
 def bboxes_adjacent(bbox_1, bbox_2):
     """ Bboxes intersection or adjacent ranges if bboxes are intersected/adjacent. """
-    borders = np.empty((3, 2), dtype=np.int16)
+    borders = np.empty((3, 2), dtype=np.int32)
 
     for i in range(3):
         borders[i, 0] = max(bbox_1[i, 0], bbox_2[i, 0])
@@ -88,6 +88,19 @@ def bboxes_adjacent(bbox_1, bbox_2):
             return None
 
     return borders
+
+def bboxes_embedded(bbox_1, bbox_2, margin=3):
+    """ Check that one bbox is embedded in another. """
+    is_second_inside_first = np.count_nonzero(bbox_1[:, 1] >= bbox_2[:, 1]) > 1
+
+    if not is_second_inside_first:
+        bbox_1, bbox_2 = bbox_2, bbox_1
+
+    bbox_1[:, 0] -= margin
+    bbox_1[:, 1] += margin
+
+    is_embedded = (bbox_2[:, 0] >= bbox_1[:, 0]).all() and (bbox_2[:, 1] <= bbox_1[:, 1]).all()
+    return is_embedded, is_second_inside_first
 
 @njit
 def min_max_depthwise_distances(coords_1, coords_2, depths_ranges, step, axis, max_threshold=None):
@@ -142,7 +155,7 @@ def find_contour(coords, projection_axis):
     # Extract unique and sorted coords
     contour = contours[0].reshape(len(contours[0]), 2) # Can be non-unique
 
-    contour_coords = np.zeros((len(contour), 3), np.int16)
+    contour_coords = np.zeros((len(contour), 3), np.int32)
     contour_coords[:, anchor_axis] = contour[:, 1] + origin[0]
     contour_coords[:, 2] = contour[:, 0] + origin[1]
     contour_coords = np.unique(contour_coords, axis=0) # np.unique is here for sorting and unification
