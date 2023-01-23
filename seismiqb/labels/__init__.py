@@ -1,4 +1,4 @@
 """ Labeled structures in a seismic volume. """
 from .horizon import Horizon, HorizonExtractor
 from .fault import Fault, FaultExtractor, skeletonize
-from .well import Well, MatchedWell, OptimizationMixin, symmetric_wavelet_estimation
+from .well import Well, MatchedWell, OptimizationMixin, symmetric_wavelet_estimation, estimate_wavelet_from_crosscor

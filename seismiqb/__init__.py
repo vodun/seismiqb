@@ -8,7 +8,7 @@ from .batch import SeismicCropBatch
 from .field import Field, SyntheticField
 from .geometry import Geometry, array_to_segy, array_to_sgy
 from .labels import Horizon, HorizonExtractor, Fault, FaultExtractor, skeletonize, Well, MatchedWell
-from .labels import OptimizationMixin, symmetric_wavelet_estimation
+from .labels import OptimizationMixin, symmetric_wavelet_estimation, estimate_wavelet_from_crosscor
 from .metrics import HorizonMetrics, FaultsMetrics, FaciesMetrics
 from .samplers import GeometrySampler, HorizonSampler, FaultSampler, ConstantSampler, SeismicSampler
 from .grids import  BaseGrid, RegularGrid, ExtensionGrid, LocationsPotentialContainer
