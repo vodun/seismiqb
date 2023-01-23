@@ -5,12 +5,13 @@ import numpy as np
 from cc3d import connected_components
 from cv2 import dilate
 from scipy.ndimage import find_objects
+from sklearn.neighbors import KDTree
 
 from batchflow import Notifier
 
 from .base import Fault
 from .postprocessing import skeletonize
-from .utils import (bboxes_adjacent, bboxes_intersected, dilate_coords, find_contour,
+from .utils import (bboxes_adjacent, bboxes_embedded, bboxes_intersected, dilate_coords, find_contour,
                     thin_coords, min_max_depthwise_distances, restore_coords_from_projection)
 from ...utils import groupby_min, groupby_max
 
@@ -320,13 +321,18 @@ class FaultExtractor:
         self.container[slide_idx]['lengths'] = np.append(self.container[slide_idx]['lengths'], length)
 
     # Prototypes concatenation
-    def concat_connected_prototypes(self, axis=None):
+    def concat_prototypes(self, type='connected', **kwargs):
+        # TODO: make to_concat argument, and call find_*_prototypes methods outside (later)
         """ Find and concat prototypes connected on the `axis`.
 
         ..!!..
         """
         # Concat coords and remove concated parts
-        to_concat = self.find_connected_prototypes(axis=axis)
+        if type == 'connected':
+            to_concat = self.find_connected_prototypes(**kwargs)
+        else:
+            to_concat = self.find_embedded_prototypes()
+
         remove_elements = []
 
         for where_to_concat_idx, what_to_concat_indices in to_concat.items():
@@ -403,8 +409,10 @@ class FaultExtractor:
                 # Find object contours on close borders
                 is_first_upper = prototype_1.bbox[axis, 0] < prototype_2.bbox[axis, 0]
 
-                contour_1 = prototype_1.get_borders(removed_border=removed_borders[~is_first_upper], axis=axis)
-                contour_2 = prototype_2.get_borders(removed_border=removed_borders[is_first_upper], axis=axis)
+                contour_1 = prototype_1.get_borders(removed_border=removed_borders[~is_first_upper],
+                                                    projection_axis=self.orthogonal_direction)
+                contour_2 = prototype_2.get_borders(removed_border=removed_borders[is_first_upper],
+                                                    projection_axis=self.orthogonal_direction)
 
                 # Get border contours in the area of interest
                 intersection_range = (min(adjacent_borders[axis]) - margin, max(adjacent_borders[axis]) + margin)
@@ -458,6 +466,69 @@ class FaultExtractor:
 
         return len(contour_1_set - contour_2_dilated) < contour_threshold
 
+    def find_embedded_prototypes(self, distances_threshold=2):
+        """ Find embedded prototypes (with 2 or more closed borders.
+
+        Examples
+        --------
+
+        ||||||
+        ...|||
+        ||||||
+
+        ||||||
+        ...|||
+
+        ||||||
+        ...|||
+           |||
+        ||||||
+
+        where | means one prototype points, and . - other prototype points
+        """
+        to_concat = defaultdict(list) # owner -> items
+        concated_with = {} # item -> owner
+
+        # Presort objects by other valuable axis for early stopping
+        sort_axis = self.direction
+        prototypes_starts = np.array([prototype.bbox[sort_axis, 0] for prototype in self.prototypes])
+        prototypes_order = np.argsort(prototypes_starts)
+
+        for i, prototype_1_idx in enumerate(prototypes_order):
+            prototype_1 = self.prototypes[prototype_1_idx]
+
+            for prototype_2_idx in prototypes_order[i+1:]:
+                prototype_2 = self.prototypes[prototype_2_idx]
+
+                if (prototype_1.bbox[sort_axis, 1] < prototype_2.bbox[sort_axis, 0]):
+                    break
+
+                is_embedded, is_second_inside_first = bboxes_embedded(prototype_1.bbox, prototype_2.bbox)
+
+                if not is_embedded:
+                    continue
+
+                tree = KDTree(prototype_1.coords) if is_second_inside_first else KDTree(prototype_2.coords)
+                prototype_to_check = prototype_2 if is_second_inside_first else prototype_1
+
+                close_borders_counter = 0
+
+                for removed_border in {'up', 'down', 'left', 'right'}:
+                    contour_ = prototype_to_check.get_borders(removed_border=removed_border,
+                                                              projection_axis=self.orthogonal_direction)
+                    distances, _ = tree.query(contour_)
+
+                    if np.percentile(distances, 90) < distances_threshold:
+                        close_borders_counter += 1
+
+                    if close_borders_counter >= 2:
+                        break
+
+                if close_borders_counter >= 2:
+                    to_concat, concated_with = _add_link(item_i=prototype_1_idx, item_j=prototype_2_idx,
+                                                         to_concat=to_concat, concated_with=concated_with)
+        return to_concat
+
     # Addons
     def run_prototypes_concat(self, iters=5):
         """ Only for tests. Will be removed. """
@@ -465,7 +536,7 @@ class FaultExtractor:
         print("Start amount: ", len(self.prototypes))
 
         for _ in range(iters):
-            self.concat_connected_prototypes(axis=-1)
+            self.concat_prototypes(type='connected', axis=-1)
 
             print("After depths concat: ", len(self.prototypes))
 
@@ -474,7 +545,7 @@ class FaultExtractor:
             else:
                 break
 
-            self.concat_connected_prototypes(axis=self.direction)
+            self.concat_prototypes(type='connected', axis=self.direction)
 
             print("After ilines concat: ", len(self.prototypes))
 
@@ -595,7 +666,7 @@ class FaultPrototype:
         new_prototypes.extend(self._split_by_direction(coords_main))
         return new_prototypes
 
-    def get_borders(self, removed_border, axis):
+    def get_borders(self, removed_border, projection_axis):
         """ Get contour borders except the one.
 
         Parameters
@@ -607,8 +678,8 @@ class FaultPrototype:
             # For border removing we apply groupby which works only for the last axis, so we swap axes coords
             if removed_border in ('left', 'right'):
                 border_coords = self.contour.copy()
-                border_coords[:, [-1, axis]] = border_coords[:, [axis, -1]]
-                border_coords = border_coords[border_coords[:, axis].argsort()] # Groupby needs sorted data
+                border_coords[:, [-1, 1-projection_axis]] = border_coords[:, [1-projection_axis, -1]]
+                border_coords = border_coords[border_coords[:, 1-projection_axis].argsort()] # Groupby needs sorted data
             else:
                 border_coords = self.contour
 
@@ -622,7 +693,7 @@ class FaultPrototype:
             projection_axis = 1 - self.direction
 
             if removed_border in ('left', 'right'):
-                border_coords[:, [-1, axis]] = border_coords[:, [axis, -1]]
+                border_coords[:, [-1, 1-projection_axis]] = border_coords[:, [1-projection_axis, -1]]
 
             border_coords = restore_coords_from_projection(coords=self.coords, buffer=border_coords, axis=projection_axis)
             self._borders[removed_border] = border_coords
