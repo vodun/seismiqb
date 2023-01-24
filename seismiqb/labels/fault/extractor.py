@@ -158,7 +158,8 @@ class FaultExtractor:
 
             self.container[start_slide_idx]['lengths'][idx] = -1 # Mark this component as unmergeable
             prototype = FaultPrototype(coords=component, direction=self.direction,
-                                       last_slide_idx=start_slide_idx, last_component=component)
+                                       last_slide_idx=start_slide_idx, last_component=component,
+                                       last_component_bbox=component_bbox)
         else:
             prototype = self.prototypes_queue.popleft()
 
@@ -179,7 +180,7 @@ class FaultExtractor:
                 prototype, new_prototypes = prototype.split(split_indices=split_indices)
                 self.prototypes_queue.extend(new_prototypes)
 
-                prototype.append(component, bbox=component_bbox, slide_idx=slide_idx_)
+                prototype.append(component, coords_bbox=component_bbox, slide_idx=slide_idx_)
             else:
                 break
 
@@ -547,6 +548,7 @@ class FaultPrototype:
         self.direction = direction
 
         self._bbox = None
+
         self._last_slide_idx = last_slide_idx
         self._last_component = last_component
         self._last_component_bbox = last_component_bbox
@@ -588,31 +590,38 @@ class FaultPrototype:
             self._contour = find_contour(coords=self.coords, projection_axis=projection_axis)
         return self._contour
 
-    def append(self, coords, bbox=None, slide_idx=None):
+    def append(self, coords, coords_bbox, slide_idx=None):
         """ Append new component (coords) into prototype. """
         self.coords = np.vstack([self.coords, coords])
 
-        self._bbox = None
         self._contour = None
         self._borders = {}
+
         self._last_slide_idx = slide_idx
         self._last_component = coords
-        self._last_component_bbox = bbox
+        self._last_component_bbox = coords_bbox
+
+        self._bbox = self._concat_bbox(self._last_component_bbox)
 
     def concat(self, other):
         """ Concatenate two prototypes. """
         self.coords = np.vstack([self.coords, other.coords])
 
-        new_bbox = np.empty((3, 2), np.int32)
-        new_bbox[:, 0] = np.min((self.bbox[:, 0], other.bbox[:, 0]), axis=0)
-        new_bbox[:, 1] = np.max((self.bbox[:, 1], other.bbox[:, 1]), axis=0)
+        self._bbox = self._concat_bbox(other.bbox)
 
-        self._bbox = new_bbox
         self._contour = None
         self._borders = {}
+
         self._last_slide_idx = None
         self._last_component = None
         self._last_component_bbox = None
+
+    def _concat_bbox(self, other_bbox):
+        """..!!.."""
+        bbox = np.empty((3, 2), np.int32)
+        bbox[:, 0] = np.min((self.bbox[:, 0], other_bbox[:, 0]), axis=0)
+        bbox[:, 1] = np.max((self.bbox[:, 1], other_bbox[:, 1]), axis=0)
+        return bbox
 
     def _split_by_direction(self, coords):
         """ Direction-wise prototypes split.
