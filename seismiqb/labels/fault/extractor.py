@@ -126,9 +126,6 @@ class FaultExtractor:
 
                 bboxes.append(bbox)
 
-            # Filter components by length
-            lengths = np.array(lengths)
-
             self.container[slide_idx] = {
                 'coords': coords,
                 'bboxes': bboxes,
@@ -192,11 +189,11 @@ class FaultExtractor:
         """ Find the longest not merged item on the minimal slide. """
         for slide_idx in range(self._first_slide_with_mergeable, self.shape[self.direction]):
             slide_info = self.container[slide_idx]
+            argmax = np.argmax(slide_info['lengths'])
 
-            if (slide_info['lengths'] != -1).any():
-                idx = np.argmax(slide_info['lengths'])
+            if slide_info['lengths'][argmax] != -1:
                 self._first_slide_with_mergeable = slide_idx
-                return slide_idx, idx
+                return slide_idx, argmax
 
         return None, None
 
@@ -297,18 +294,15 @@ class FaultExtractor:
 
     def _add_new_component(self, slide_idx, coords):
         """ Add new items into the container. """
-        # Object bbox
-        bbox = np.column_stack([np.min(coords, axis=0), np.max(coords, axis=0)])
-        bbox[self.orthogonal_direction, 0] = max(0, bbox[self.orthogonal_direction, 0])
-        bbox[self.orthogonal_direction, 1] = min(bbox[self.orthogonal_direction, 1], self.shape[self.orthogonal_direction])
-        self.container[slide_idx]['bboxes'].append(bbox)
+        if len(coords) > self.component_len_threshold:
+            # Object bbox
+            bbox = np.column_stack([np.min(coords, axis=0), np.max(coords, axis=0)])
+            bbox[self.orthogonal_direction, 0] = max(0, bbox[self.orthogonal_direction, 0])
+            bbox[self.orthogonal_direction, 1] = min(bbox[self.orthogonal_direction, 1], self.shape[self.orthogonal_direction])
 
-        # Object coords
-        self.container[slide_idx]['coords'].append(coords)
-
-        # Length
-        length = len(coords) if len(coords) > self.component_len_threshold else -1
-        self.container[slide_idx]['lengths'] = np.append(self.container[slide_idx]['lengths'], length)
+            self.container[slide_idx]['bboxes'].append(bbox)
+            self.container[slide_idx]['coords'].append(coords)
+            self.container[slide_idx]['lengths'].append(len(coords))
 
     # Prototypes concatenation
     def concat_prototypes(self, type='connected', **kwargs):
