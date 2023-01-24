@@ -179,15 +179,8 @@ class FaultExtractor:
             # Postprocess prototype
             if component is not None:
                 # Split current prototype and add new to queue
-                if split_indices[0] is not None:
-                    new_prototypes = prototype.split(split_depth=split_indices[0], cut_upper_part=True)
-                    prototype = new_prototypes[-1]
-                    self.prototypes_queue.extend(new_prototypes[:-1])
-
-                if split_indices[1] is not None:
-                    new_prototypes = prototype.split(split_depth=split_indices[1], cut_upper_part=False)
-                    prototype = new_prototypes[-1]
-                    self.prototypes_queue.extend(new_prototypes[:-1])
+                prototype, new_prototypes = prototype.split(split_indices=split_indices)
+                self.prototypes_queue.extend(new_prototypes)
 
                 prototype.append(component, slide_idx=slide_idx_)
             else:
@@ -649,18 +642,29 @@ class FaultPrototype:
 
         return prototypes
 
-    def split(self, split_depth, cut_upper_part):
+    def split(self, split_indices):
         """ Depth-wise prototypes split. """
-        if cut_upper_part:
-            coords_outer = self.coords[self.coords[:, -1] < split_depth]
-            coords_main = self.coords[self.coords[:, -1] >= split_depth]
-        else:
-            coords_outer = self.coords[self.coords[:, -1] > split_depth]
-            coords_main = self.coords[self.coords[:, -1] <= split_depth]
+        new_prototypes = []
 
-        new_prototypes = self._split_by_direction(coords_outer)
-        new_prototypes.extend(self._split_by_direction(coords_main))
-        return new_prototypes
+        if (split_indices[0] is None) and (split_indices[1] is None):
+            return self, new_prototypes
+
+        # Cut upper part
+        if split_indices[0] is not None:
+            coords_outer = self.coords[self.coords[:, -1] < split_indices[0]]
+            self.coords = self.coords[self.coords[:, -1] >= split_indices[0]]
+
+            new_prototypes.extend(self._split_by_direction(coords_outer))
+
+        # Cut lower part
+        if split_indices[1] is not None:
+            coords_outer = self.coords[self.coords[:, -1] > split_indices[1]]
+            self.coords = self.coords[self.coords[:, -1] <= split_indices[1]]
+
+            new_prototypes.extend(self._split_by_direction(coords_outer))
+
+        new_prototypes.extend(self._split_by_direction(self.coords))
+        return new_prototypes[-1], new_prototypes[:-1]
 
     def get_borders(self, removed_border, projection_axis):
         """ Get contour borders except the one.
