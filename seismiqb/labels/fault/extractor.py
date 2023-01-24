@@ -273,7 +273,11 @@ class FaultExtractor:
 
                 # Cut upper part of component on next slide and save extra data as another item
                 new_component = closest_component[closest_component[:, -1] < item_split_idx]
-                self._add_new_component(slide_idx=slide_idx, coords=new_component)
+
+                new_component_bbox = closest_component_bbox.copy()
+                new_component_bbox[-1, 1] = item_split_idx - 1
+
+                self._add_new_component(slide_idx=slide_idx, coords=new_component, bbox=new_component_bbox)
 
                 # Extract suitable part
                 closest_component = closest_component[closest_component[:, -1] >= item_split_idx]
@@ -284,7 +288,11 @@ class FaultExtractor:
 
                 # Cut lower part of component on next slide and save extra data as another item
                 new_component = closest_component[closest_component[:, -1] > item_split_idx]
-                self._add_new_component(slide_idx=slide_idx, coords=new_component)
+
+                new_component_bbox = closest_component_bbox.copy()
+                new_component_bbox[-1, 0] = item_split_idx + 1
+
+                self._add_new_component(slide_idx=slide_idx, coords=new_component, bbox=new_component_bbox)
 
                 # Extract suitable part
                 closest_component = closest_component[closest_component[:, -1] <= item_split_idx]
@@ -292,14 +300,9 @@ class FaultExtractor:
 
         return closest_component, closest_component_bbox, prototype_split_indices
 
-    def _add_new_component(self, slide_idx, coords):
+    def _add_new_component(self, slide_idx, coords, bbox):
         """ Add new items into the container. """
         if len(coords) > self.component_len_threshold:
-            # Object bbox
-            bbox = np.column_stack([np.min(coords, axis=0), np.max(coords, axis=0)])
-            bbox[self.orthogonal_direction, 0] = max(0, bbox[self.orthogonal_direction, 0])
-            bbox[self.orthogonal_direction, 1] = min(bbox[self.orthogonal_direction, 1], self.shape[self.orthogonal_direction])
-
             self.container[slide_idx]['bboxes'].append(bbox)
             self.container[slide_idx]['coords'].append(coords)
             self.container[slide_idx]['lengths'].append(len(coords))
@@ -315,6 +318,7 @@ class FaultExtractor:
         if type == 'connected':
             to_concat = self.find_connected_prototypes(**kwargs)
         else:
+            # TODO: improve timings for `self.find_embedded_prototypes``
             to_concat = self.find_embedded_prototypes()
 
         remove_elements = []
