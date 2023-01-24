@@ -354,10 +354,8 @@ class FaultExtractor:
 
         overlapping_axis = self.direction if axis in (-1, 2) else 2
 
-        if axis in (-1, 2): # not necessary object borders for contour finding
-            removed_borders = ('up', 'down')
-        else:
-            removed_borders = ('left', 'right')
+        # Under the hood, we check borders connectivity (as puzzles)
+        borders_to_check = ('up', 'down') if axis in (-1, 2) else ('left', 'right')
 
         # Presort objects by other valuable axis for early stopping
         sort_axis = 2 if axis == self.direction else self.direction
@@ -392,9 +390,9 @@ class FaultExtractor:
                 # Find object contours on close borders
                 is_first_upper = prototype_1.bbox[axis, 0] < prototype_2.bbox[axis, 0]
 
-                contour_1 = prototype_1.get_borders(removed_border=removed_borders[~is_first_upper],
+                contour_1 = prototype_1.get_borders(border=borders_to_check[is_first_upper],
                                                     projection_axis=self.orthogonal_direction)
-                contour_2 = prototype_2.get_borders(removed_border=removed_borders[is_first_upper],
+                contour_2 = prototype_2.get_borders(border=borders_to_check[~is_first_upper],
                                                     projection_axis=self.orthogonal_direction)
 
                 # Get border contours in the area of interest
@@ -496,9 +494,8 @@ class FaultExtractor:
 
                 close_borders_counter = 0
 
-                for removed_border in {'up', 'down', 'left', 'right'}:
-                    contour_ = prototype_to_check.get_borders(removed_border=removed_border,
-                                                              projection_axis=self.orthogonal_direction)
+                for border in ('up', 'down', 'left', 'right'):
+                    contour_ = prototype_to_check.get_borders(border=border, projection_axis=self.orthogonal_direction)
                     distances, _ = tree.query(contour_)
 
                     if np.percentile(distances, 90) < distances_threshold:
@@ -660,17 +657,17 @@ class FaultPrototype:
         new_prototypes.extend(self._split_by_direction(self.coords))
         return new_prototypes[-1], new_prototypes[:-1]
 
-    def get_borders(self, removed_border, projection_axis):
-        """ Get contour borders except the one.
+    def get_borders(self, border, projection_axis):
+        """ Get contour border.
 
         Parameters
         ----------
-        removed_border : {'up', 'down', 'left', 'right'}
+        border : {'up', 'down', 'left', 'right'}
         """
-        if removed_border not in self._borders:
+        if border not in self._borders:
             # Delete extra border from contour
             # For border removing we apply groupby which works only for the last axis, so we swap axes coords
-            if removed_border in ('left', 'right'):
+            if border in ('left', 'right'):
                 border_coords = self.contour.copy()
                 border_coords[:, [-1, 1-projection_axis]] = border_coords[:, [1-projection_axis, -1]]
                 border_coords = border_coords[border_coords[:, 1-projection_axis].argsort()] # Groupby needs sorted data
@@ -678,7 +675,7 @@ class FaultPrototype:
                 border_coords = self.contour
 
             # Delete border by applying groupby
-            if removed_border in ('up', 'left'):
+            if border not in ('up', 'left'):
                 border_coords = groupby_max(border_coords)
             else:
                 border_coords = groupby_min(border_coords)
@@ -686,13 +683,13 @@ class FaultPrototype:
             # Restore 3d coordinates
             projection_axis = 1 - self.direction
 
-            if removed_border in ('left', 'right'):
+            if border in ('left', 'right'):
                 border_coords[:, [-1, 1-projection_axis]] = border_coords[:, [1-projection_axis, -1]]
 
             border_coords = restore_coords_from_projection(coords=self.coords, buffer=border_coords, axis=projection_axis)
-            self._borders[removed_border] = border_coords
+            self._borders[border] = border_coords
 
-        return self._borders[removed_border]
+        return self._borders[border]
 
 
 # Helpers
