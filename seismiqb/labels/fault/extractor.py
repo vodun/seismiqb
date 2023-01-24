@@ -563,6 +563,20 @@ class FaultPrototype:
             self._bbox = np.column_stack([np.min(self.coords, axis=0), np.max(self.coords, axis=0)])
         return self._bbox
 
+    # Stats for filtering
+    @property
+    def height(self):
+        return self.bbox[-1, 1] - self.bbox[-1, 0]
+
+    @property
+    def width(self):
+        return self.bbox[self.direction, 1] - self.bbox[self.direction, 0]
+
+    @property
+    def n_points(self):
+        return len(self.coords)
+
+    # For internal needs
     @property
     def last_slide_idx(self):
         if self._last_slide_idx is None:
