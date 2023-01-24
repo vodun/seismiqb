@@ -164,7 +164,7 @@ class FaultExtractor:
 
             start_slide_idx = prototype.last_slide_idx
             component = prototype.last_component
-            component_bbox = None
+            component_bbox = prototype.last_component_bbox
 
         # Find closest components on next slides and split them if needed
         for slide_idx_ in range(start_slide_idx+1, self.shape[self.direction]):
@@ -179,7 +179,7 @@ class FaultExtractor:
                 prototype, new_prototypes = prototype.split(split_indices=split_indices)
                 self.prototypes_queue.extend(new_prototypes)
 
-                prototype.append(component, slide_idx=slide_idx_)
+                prototype.append(component, bbox=component_bbox, slide_idx=slide_idx_)
             else:
                 break
 
@@ -203,13 +203,8 @@ class FaultExtractor:
 
         ..!!..
         """
-        # Process inputs
         # Dilate component bbox for detecting close components: component on next slide can be shifted
-        if component_bbox is None:
-            component_bbox = np.column_stack([np.min(component, axis=0), np.max(component, axis=0)])
-
         component_bbox[self.orthogonal_direction] += (-self.dilation // 2, self.dilation // 2)
-
         min_distance = distances_threshold
 
         # Init returned values
@@ -546,7 +541,7 @@ class FaultExtractor:
 
 class FaultPrototype:
     """ ..!!.. """
-    def __init__(self, coords, direction, last_slide_idx=None, last_component=None):
+    def __init__(self, coords, direction, last_slide_idx=None, last_component=None, last_component_bbox=None):
         """..!!.."""
         self.coords = coords
         self.direction = direction
@@ -554,6 +549,7 @@ class FaultPrototype:
         self._bbox = None
         self._last_slide_idx = last_slide_idx
         self._last_component = last_component
+        self._last_component_bbox = last_component_bbox
 
         self._contour = None
         self._borders = {}
@@ -578,6 +574,13 @@ class FaultPrototype:
         return self._last_component
 
     @property
+    def last_component_bbox(self):
+        if self._last_component_bbox is None:
+            self._last_component_bbox = np.column_stack([np.min(self.last_component, axis=0),
+                                                         np.max(self.last_component, axis=0)])
+        return self._last_component_bbox
+
+    @property
     def contour(self):
         """ Contour of 2d projection on axis, orthogonal to self.direction."""
         if self._contour is None:
@@ -585,7 +588,7 @@ class FaultPrototype:
             self._contour = find_contour(coords=self.coords, projection_axis=projection_axis)
         return self._contour
 
-    def append(self, coords, slide_idx=None):
+    def append(self, coords, bbox=None, slide_idx=None):
         """ Append new component (coords) into prototype. """
         self.coords = np.vstack([self.coords, coords])
 
@@ -594,6 +597,7 @@ class FaultPrototype:
         self._borders = {}
         self._last_slide_idx = slide_idx
         self._last_component = coords
+        self._last_component_bbox = bbox
 
     def concat(self, other):
         """ Concatenate two prototypes. """
@@ -608,6 +612,7 @@ class FaultPrototype:
         self._borders = {}
         self._last_slide_idx = None
         self._last_component = None
+        self._last_component_bbox = None
 
     def _split_by_direction(self, coords):
         """ Direction-wise prototypes split.
