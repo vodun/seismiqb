@@ -389,7 +389,7 @@ class ConversionMixin:
 
         # Spec: use `self` as `array_like` to infer shapes
         spec = self.make_export_spec(self)
-        spec.sample_rate /= factor
+        spec.sample_interval /= factor
         spec.samples = np.arange(self.depth * factor, dtype=np.int32)
         spec.format = 8 if quantize else 5
 

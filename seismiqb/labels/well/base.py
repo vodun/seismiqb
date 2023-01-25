@@ -91,7 +91,7 @@ class Well(OptimizationMixin):
     def from_field(self, field, location=None, column_name='DATA', **kwargs):
         """ Initialize instance from a known field geometry: available pseudo-logs are `TIME` and `SAMPLES`. """
         samples = np.arange(0, field.depth, 1, dtype=np.int32)
-        seismic_time = samples * field.sample_rate
+        seismic_time = samples * field.sample_interval
         data = {'SAMPLES': samples, 'TIME': seismic_time}
 
         if location is not None:
@@ -203,7 +203,7 @@ class Well(OptimizationMixin):
         """ Apply filtration to a given log. """
         array = self.data[log].values
 
-        sosfilt = scipy.signal.butter(order, frequency, btype=btype, fs=1/(1e-3 * self.field.sample_rate), output='sos')
+        sosfilt = scipy.signal.butter(order, frequency, btype=btype, fs=self.field.sample_rate, output='sos')
         filtered_array = scipy.signal.sosfiltfilt(sosfilt, np.nan_to_num(array))
         filtered_array[filtered_array <= np.nanmin(array)] = np.nan
 

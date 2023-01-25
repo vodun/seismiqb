@@ -59,9 +59,10 @@ class SegyioLoader:
         self.n_traces = self.file_handler.trace.length
         self.dtype = self.file_handler.dtype
 
-        # Sample rate and delay
-        self.sample_rate = self._infer_sample_rate()
-        self.samples = np.arange(self.n_samples) * self.sample_rate
+        # Sample interval, rate and delay
+        self.sample_interval = self._infer_sample_interval() # ms
+        self.sample_rate = 1000 / self.sample_interval       # Hz
+        self.samples = np.arange(self.n_samples) * self.sample_interval
         self.delay = self.file_handler.header[0].get(segyio.TraceField.DelayRecordingTime)
 
         # Misc
@@ -69,18 +70,19 @@ class SegyioLoader:
         self.text = [self.file_handler.text[i] for i in range(1 + self.file_handler.ext_headers)]
 
 
-    def _infer_sample_rate(self):
-        """ Get sample rate from file headers. """
-        bin_sample_rate = self.file_handler.bin[segyio.BinField.Interval]
-        trace_sample_rate = self.file_handler.header[0][segyio.TraceField.TRACE_SAMPLE_INTERVAL]
-        # 0 means undefined sample rate, so it is removed from the set of sample rate values.
-        union_sample_rate = {bin_sample_rate, trace_sample_rate} - {0}
+    def _infer_sample_interval(self):
+        """ Get sample interval from file headers. """
+        bin_sample_interval = self.file_handler.bin[segyio.BinField.Interval]
+        trace_sample_interval = self.file_handler.header[0][segyio.TraceField.TRACE_SAMPLE_INTERVAL]
+        # 0 means undefined sample interval, so it is removed from the set
+        union_sample_interval = {bin_sample_interval, trace_sample_interval} - {0}
 
-        if len(union_sample_rate) != 1:
-            raise ValueError("Cannot infer sample rate from file headers: either both `Interval` (bytes 3217-3218 in "
-                             "the binary header) and `TRACE_SAMPLE_INTERVAL` (bytes 117-118 in the header of the "
-                             "first trace are undefined or they have different values.")
-        return union_sample_rate.pop() / 1000  # Convert sample rate from microseconds to milliseconds
+        if len(union_sample_interval) != 1:
+            raise ValueError("Cannot infer sample interval from file headers: "
+                             "either both `Interval` (bytes 3217-3218 in the binary header) "
+                             "and `TRACE_SAMPLE_INTERVAL` (bytes 117-118 in the header of the first trace) "
+                             "are undefined or they have different values.")
+        return union_sample_interval.pop() / 1000  # convert from seconds to milliseconds
 
 
     # Headers

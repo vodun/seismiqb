@@ -39,7 +39,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
 
         - `points` is a (N, 3) ndarray with every row being (iline, xline, depth). Note that (iline, xline) are
           stored in cube coordinates that range from 0 to `n_ilines` and 0 to `n_xlines` respectively.
-          Stored depth is corrected on `time_delay` and `sample_rate` of the cube.
+          Stored depth is corrected on `time_delay` and `sample_interval` of the cube.
           In order to initialize from this storage, one must supply (N, 3) ndarray.
 
     Depending on which attribute was created at initialization (`matrix` or `points`), the other is computed lazily
@@ -511,6 +511,22 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
 
         return result
 
+
+    def make_proportional_horizon(self, other, p, name=None):
+        """ Make a proportional conforming horizon between `self` and `other` in `p` proportion. """
+        # pylint: disable=protected-access
+        if self.d_mean > other.d_mean:
+            self, other = other, self
+        name = name or f'{self.name}_{other.name}__{int(p * 100)}^100'
+
+        matrix = self.full_matrix + p * (self.full_matrix - other.full_matrix)
+        matrix = np.ceil(matrix)
+        matrix[matrix < 0] = self.FILL_VALUE
+
+        horizon = Horizon(matrix, field=self.field, name=name)
+        horizon._proportional = {'p': p, 'name_1': self.name, 'name_2': other.name}
+        return horizon
+
     # Basic properties
     @property
     def shape(self):
@@ -675,7 +691,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
         overlap_size = np.sum(mask)
         masked_difference = difference[mask]
         masked_abs_difference = np.abs(masked_difference)
-        window_rate = np.sum(masked_abs_difference < (5 / self.field.sample_rate)) / overlap_size
+        window_rate = np.sum(masked_abs_difference < (5 / self.field.sample_interval)) / overlap_size
 
         present_at_1_absent_at_2 = ((self.full_matrix != self.FILL_VALUE)
                                     & (other.full_matrix == self.FILL_VALUE)).sum()
