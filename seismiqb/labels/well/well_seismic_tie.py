@@ -202,7 +202,7 @@ class OptimizationMixin:
                                                     impedance_log, impulse, metric='corr', backend='torch')
 
             loss.backward()
-            loss_history.append(loss.detach().cpu().numpy())
+            loss_history.append(float(loss.detach().cpu().numpy()))
 
             # Update variables.
             # NOTE: instead of manual update, use torch optimizers.
