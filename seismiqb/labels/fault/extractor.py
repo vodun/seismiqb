@@ -177,7 +177,7 @@ class FaultExtractor:
             # Postprocess prototype
             if component is not None:
                 # Split current prototype and add new to queue
-                prototype, new_prototypes = prototype.split(split_indices=split_indices)
+                prototype, new_prototypes = prototype.split(split_indices=split_indices, axis=2)
                 self.prototypes_queue.extend(new_prototypes)
 
                 prototype.append(component, coords_bbox=component_bbox, slide_idx=slide_idx_)
@@ -344,6 +344,8 @@ class FaultExtractor:
         contour_threshold : int
             Amount of different contour points to decide that prototypes are not close.
         """
+        # TODO: split by direction indices for depth-wise concat for avoiding C-likable prototypes and embedded ones
+        # Split lower parts. Split upper parts?
         margin = 1 # local constant for code prettifying
 
         if intersection_ratio_threshold is None:
@@ -423,12 +425,8 @@ class FaultExtractor:
                 contour_1[:, -1] += shift
 
                 # Check that one component contour is inside another (for both)
-                if self._is_contour_inside(contour_1, contour_2, contour_threshold=corrected_contour_threshold):
-                    to_concat, concated_with = _add_link(item_i=prototype_1_idx, item_j=prototype_2_idx,
-                                                         to_concat=to_concat, concated_with=concated_with)
-                    continue
-
-                if self._is_contour_inside(contour_2, contour_1, contour_threshold=corrected_contour_threshold):
+                if self._is_contour_inside(contour_1, contour_2, contour_threshold=corrected_contour_threshold) \
+                   or self._is_contour_inside(contour_2, contour_1, contour_threshold=corrected_contour_threshold):
                     to_concat, concated_with = _add_link(item_i=prototype_1_idx, item_j=prototype_2_idx,
                                                          to_concat=to_concat, concated_with=concated_with)
 
@@ -665,8 +663,8 @@ class FaultPrototype:
 
         return prototypes
 
-    def split(self, split_indices):
-        """ Depth-wise prototypes split. """
+    def split(self, split_indices, axis=-1):
+        """ Axis-wise prototypes split by threshold. """
         new_prototypes = []
 
         if (split_indices[0] is None) and (split_indices[1] is None):
@@ -674,15 +672,15 @@ class FaultPrototype:
 
         # Cut upper part
         if split_indices[0] is not None:
-            coords_outer = self.coords[self.coords[:, -1] < split_indices[0]]
-            self.coords = self.coords[self.coords[:, -1] >= split_indices[0]]
+            coords_outer = self.coords[self.coords[:, axis] < split_indices[0]]
+            self.coords = self.coords[self.coords[:, axis] >= split_indices[0]]
 
             new_prototypes.extend(self._split_by_direction(coords_outer))
 
         # Cut lower part
         if split_indices[1] is not None:
-            coords_outer = self.coords[self.coords[:, -1] > split_indices[1]]
-            self.coords = self.coords[self.coords[:, -1] <= split_indices[1]]
+            coords_outer = self.coords[self.coords[:, axis] > split_indices[1]]
+            self.coords = self.coords[self.coords[:, axis] <= split_indices[1]]
 
             new_prototypes.extend(self._split_by_direction(coords_outer))
 
