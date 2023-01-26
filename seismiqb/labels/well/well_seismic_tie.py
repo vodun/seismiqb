@@ -215,8 +215,7 @@ class OptimizationMixin:
 
         # Fetch resulting well_time and loss_history.
         final_well_time = np.cumsum(cls.move_to_device(optimized, device='numpy'))
-        result = (final_well_time, loss_history)
-        return result
+        return final_well_time, loss_history
 
 
 # Utilities for impulse estimation.
