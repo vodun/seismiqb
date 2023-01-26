@@ -228,7 +228,6 @@ class FaultExtractor:
                                        min(component_bbox[-1, 1], other_bbox[-1, 1]))
 
                 step = np.clip((intersection_depths[1]-intersection_depths[0])//3, 1, depth_iteration_step)
-                # step = 1 TODO: check accuracy
 
                 components_distances = min_max_depthwise_distances(component, other_component,
                                                                    depths_ranges=intersection_depths, step=step,
@@ -303,37 +302,9 @@ class FaultExtractor:
             self.container[slide_idx]['coords'].append(coords)
             self.container[slide_idx]['lengths'].append(len(coords))
 
-    # Prototypes concatenation
-    def concat_prototypes(self, type='connected', **kwargs):
-        # TODO: make to_concat argument, and call find_*_prototypes methods outside (later)
-        """ Find and concat prototypes connected on the `axis`.
 
-        ..!!..
-        """
-        # Concat coords and remove concated parts
-        if type == 'connected':
-            to_concat = self.find_connected_prototypes(**kwargs)
-        else:
-            # TODO: improve timings for `self.find_embedded_prototypes``
-            to_concat = self.find_embedded_prototypes()
-
-        remove_elements = []
-
-        for where_to_concat_idx, what_to_concat_indices in to_concat.items():
-            main_prototype = self.prototypes[where_to_concat_idx]
-
-            for idx in what_to_concat_indices:
-                main_prototype.concat(self.prototypes[idx])
-
-            remove_elements.extend(what_to_concat_indices)
-
-        remove_elements.sort(reverse=True)
-
-        for idx in remove_elements:
-            _ = self.prototypes.pop(idx)
-
-    def find_connected_prototypes(self, intersection_ratio_threshold=None, contour_threshold=10, axis=2):
-        """ Find prototypes which are connected as puzzles.
+    def concat_connected_prototypes(self, intersection_ratio_threshold=None, contour_threshold=10, axis=2):
+        """ Concat prototypes which are connected as puzzles.
 
         ..!!..
 
@@ -344,15 +315,11 @@ class FaultExtractor:
         contour_threshold : int
             Amount of different contour points to decide that prototypes are not close.
         """
-        # TODO: split by direction indices for depth-wise concat for avoiding C-likable prototypes and embedded ones
         # Split lower parts. Split upper parts?
         margin = 1 # local constant for code prettifying
 
         if intersection_ratio_threshold is None:
             intersection_ratio_threshold = 0.5 if axis in (2, -1) else 0.9
-
-        to_concat = defaultdict(list) # owner -> items
-        concated_with = {} # item -> owner
 
         overlapping_axis = self.direction if axis in (-1, 2) else 2
 
@@ -360,9 +327,11 @@ class FaultExtractor:
         borders_to_check = ('up', 'down') if axis in (-1, 2) else ('left', 'right')
 
         # Presort objects by other valuable axis for early stopping
-        sort_axis = 2 if axis == self.direction else self.direction
+        sort_axis = overlapping_axis
         prototypes_starts = np.array([prototype.bbox[sort_axis, 0] for prototype in self.prototypes])
         prototypes_order = np.argsort(prototypes_starts)
+
+        new_prototypes = []
 
         for i, prototype_1_idx in enumerate(prototypes_order):
             prototype_1 = self.prototypes[prototype_1_idx]
@@ -425,12 +394,34 @@ class FaultExtractor:
                 contour_1[:, -1] += shift
 
                 # Check that one component contour is inside another (for both)
-                if self._is_contour_inside(contour_1, contour_2, contour_threshold=corrected_contour_threshold) \
-                   or self._is_contour_inside(contour_2, contour_1, contour_threshold=corrected_contour_threshold):
-                    to_concat, concated_with = _add_link(item_i=prototype_1_idx, item_j=prototype_2_idx,
-                                                         to_concat=to_concat, concated_with=concated_with)
+                if self._is_contour_inside(contour_1, contour_2, contour_threshold=corrected_contour_threshold) or \
+                   self._is_contour_inside(contour_2, contour_1, contour_threshold=corrected_contour_threshold):
+                    # Split by direction if axis == 2 for avoiding wrong prototypes shapes (like C or T-likable, etc.).
+                    if axis in (-1, 2):
+                        if np.abs(prototype_1.width - prototype_2.width) > 10:
+                            split_indices = (max(prototype_1.bbox[self.direction, 0], prototype_2.bbox[self.direction, 0]),
+                                            min(prototype_1.bbox[self.direction, 1], prototype_2.bbox[self.direction, 1]))
 
-        return to_concat
+                            prototype_1, new_prototypes_ = prototype_1.split(split_indices, axis=self.direction)
+                            new_prototypes.extend(new_prototypes_)
+
+                            if len(new_prototypes_) > 0:
+                                prototype_1 = FaultPrototype(prototype_1.coords, direction=self.direction)
+
+                            prototype_2, new_prototypes_ = prototype_2.split(split_indices, axis=self.direction)
+                            new_prototypes.extend(new_prototypes_)
+
+                            if len(new_prototypes_) > 0:
+                                prototype_2 = FaultPrototype(prototype_2.coords, direction=self.direction)
+
+                    prototype_2.concat(prototype_1)
+                    self.prototypes[prototype_2_idx] = prototype_2
+                    self.prototypes[prototype_1_idx] = None
+                    break
+
+        self.prototypes = [prototype for prototype in self.prototypes if prototype is not None]
+        self.prototypes.extend(new_prototypes)
+        return self.prototypes
 
     def _is_contour_inside(self, contour_1, contour_2, contour_threshold):
         """ Check that `contour_1` is almost inside dilated `contour_2`. """
@@ -445,8 +436,8 @@ class FaultExtractor:
 
         return len(contour_1_set - contour_2_dilated) < contour_threshold
 
-    def find_embedded_prototypes(self, distances_threshold=2):
-        """ Find embedded prototypes (with 2 or more closed borders.
+    def concat_embedded_prototypes(self, distances_threshold=2):
+        """ Concat embedded prototypes (with 2 or more closed borders.
 
         Examples
         --------
@@ -465,9 +456,6 @@ class FaultExtractor:
 
         where | means one prototype points, and . - other prototype points
         """
-        to_concat = defaultdict(list) # owner -> items
-        concated_with = {} # item -> owner
-
         # Presort objects by other valuable axis for early stopping
         sort_axis = self.direction
         prototypes_starts = np.array([prototype.bbox[sort_axis, 0] for prototype in self.prototypes])
@@ -502,10 +490,9 @@ class FaultExtractor:
                     if close_borders_counter >= 2:
                         break
 
-                if close_borders_counter >= 2:
-                    to_concat, concated_with = _add_link(item_i=prototype_1_idx, item_j=prototype_2_idx,
-                                                         to_concat=to_concat, concated_with=concated_with)
-        return to_concat
+                # if close_borders_counter >= 2: # TODO: add concat or remove this method
+
+        return self.prototypes
 
     # Addons
     def run_prototypes_concat(self, iters=5):
@@ -514,23 +501,18 @@ class FaultExtractor:
         print("Start amount: ", len(self.prototypes))
 
         for _ in range(iters):
-            self.concat_prototypes(type='connected', axis=-1)
+            _ = self.concat_connected_prototypes(axis=-1)
 
             print("After depths concat: ", len(self.prototypes))
 
-            if len(self.prototypes) < previous_prototypes_amount:
+            if len(self.prototypes) != previous_prototypes_amount:
                 previous_prototypes_amount = len(self.prototypes)
             else:
                 break
 
-            self.concat_prototypes(type='connected', axis=self.direction)
+            _ = self.concat_connected_prototypes(axis=self.direction)
 
             print("After ilines concat: ", len(self.prototypes))
-
-            if len(self.prototypes) < previous_prototypes_amount:
-                previous_prototypes_amount = len(self.prototypes)
-            else:
-                break
 
     def prototypes_to_faults(self, field):
         """ Convert all prototypes to faults. """
@@ -635,13 +617,13 @@ class FaultPrototype:
         bbox[:, 1] = np.max((self.bbox[:, 1], other_bbox[:, 1]), axis=0)
         return bbox
 
-    def _split_by_direction(self, coords):
-        """ Direction-wise prototypes split.
+    def _separate_objects(self, coords, axis):
+        """ Separate coords into different object coords depend on their connectedness by axis.
 
-        After depth-wise split we can have the situation when splitted part has more than one connected component.
+        After axis-wise split we can have the situation when splitted part has more than one connected component.
         This method split disconnected parts into different prototypes.
         """
-        unique_direction_coords = np.unique(coords[:, self.direction])
+        unique_direction_coords = np.unique(coords[:, axis])
         # Slides distance more than 1 -> different objects
         split_indices = np.nonzero(unique_direction_coords[1:] - unique_direction_coords[:-1] > 1)[0]
 
@@ -657,7 +639,7 @@ class FaultPrototype:
         prototypes = []
 
         for start_idx, end_idx in zip(start_indices, end_indices):
-            coords_ = coords[(start_idx <= coords[:, self.direction]) & (coords[:, self.direction] <= end_idx)]
+            coords_ = coords[(start_idx <= coords[:, axis]) & (coords[:, axis] <= end_idx)]
             prototype = FaultPrototype(coords=coords_, direction=self.direction, last_slide_idx=end_idx)
             prototypes.append(prototype)
 
@@ -665,26 +647,29 @@ class FaultPrototype:
 
     def split(self, split_indices, axis=-1):
         """ Axis-wise prototypes split by threshold. """
+        axis_for_objects_separating = self.direction if axis in (-1, 2) else 2
         new_prototypes = []
 
         if (split_indices[0] is None) and (split_indices[1] is None):
             return self, new_prototypes
 
         # Cut upper part
-        if split_indices[0] is not None:
+        if (split_indices[0] is not None) and (np.min(self.coords[:, axis]) < split_indices[0] < np.max(self.coords[:, axis])):
             coords_outer = self.coords[self.coords[:, axis] < split_indices[0]]
             self.coords = self.coords[self.coords[:, axis] >= split_indices[0]]
 
-            new_prototypes.extend(self._split_by_direction(coords_outer))
+            if len(coords_outer) > 0:
+                new_prototypes.extend(self._separate_objects(coords_outer, axis=axis_for_objects_separating))
 
         # Cut lower part
-        if split_indices[1] is not None:
+        if (split_indices[1] is not None) and (np.min(self.coords[:, axis]) < split_indices[1] < np.max(self.coords[:, axis])):
             coords_outer = self.coords[self.coords[:, axis] > split_indices[1]]
             self.coords = self.coords[self.coords[:, axis] <= split_indices[1]]
 
-            new_prototypes.extend(self._split_by_direction(coords_outer))
+            if len(coords_outer) > 0:
+                new_prototypes.extend(self._separate_objects(coords_outer, axis=axis_for_objects_separating))
 
-        new_prototypes.extend(self._split_by_direction(self.coords))
+        new_prototypes.extend(self._separate_objects(self.coords, axis=axis_for_objects_separating))
         return new_prototypes[-1], new_prototypes[:-1]
 
     def get_borders(self, border, projection_axis):
@@ -720,54 +705,3 @@ class FaultPrototype:
             self._borders[border] = border_coords
 
         return self._borders[border]
-
-
-# Helpers
-# Component dependencies
-def _add_link(item_i, item_j, to_concat, concated_with):
-    """ Add item_i and item_j to dependencies graph of elements to concat.
-
-    `to_concat` is the dict in the format {'owner_idx': [items_indices]} and contains
-    which components to concat into owner-component.
-    `concated_with` is the dict in the format {'item_idx': owner_idx} and contains
-    to which component (owner) merge item.
-
-    ..!!..
-    """
-    if item_i not in concated_with:
-        if item_j not in concated_with:
-            # Add both
-            owner, item = item_i, item_j
-
-            to_concat[owner].append(item)
-
-            concated_with[owner] = owner
-            concated_with[item] = owner
-        else:
-            # Add item_i to item_j owner
-            owner, item = concated_with[item_j], item_i
-
-            to_concat[owner].append(item)
-            concated_with[item] = owner
-    else:
-        owner = concated_with[item_i]
-
-        if item_j not in concated_with:
-            # Add item_j to item_i owner
-            item = item_j
-
-            to_concat[owner].append(item)
-            concated_with[item] = owner
-        else:
-            # Merge items from item_j owner with item_i owner items
-            other_owner = concated_with[item_j]
-
-            # Merge item lists
-            new_components = to_concat[other_owner] + [other_owner]
-            to_concat[owner] += new_components
-            del to_concat[other_owner]
-
-            # Update owner links
-            for item in new_components:
-                concated_with[item] = owner
-    return to_concat, concated_with
