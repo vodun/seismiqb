@@ -172,7 +172,11 @@ def restore_coords_from_projection(coords, buffer, axis):
     known_axes = np.array([i for i in range(3) if i != axis])
 
     for i, buffer_line in enumerate(buffer):
-        buffer[i, axis] = min(coords[(coords[:, known_axes[0]] == buffer_line[known_axes[0]]) & \
-                                     (coords[:, known_axes[1]] == buffer_line[known_axes[1]]),
-                                     axis])
+        values =  coords[(coords[:, known_axes[0]] == buffer_line[known_axes[0]]) & \
+                         (coords[:, known_axes[1]] == buffer_line[known_axes[1]]),
+                         axis]
+
+        buffer[i, axis] = min(values) if len(values) > 0 else -1
+
+    buffer = buffer[buffer[:, axis] != -1]
     return buffer

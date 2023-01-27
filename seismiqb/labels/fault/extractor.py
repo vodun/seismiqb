@@ -143,6 +143,8 @@ class FaultExtractor:
             self.prototypes.append(prototype)
             prototype = self.extract_prototype()
 
+        return self.prototypes
+
     def extract_prototype(self):
         """ Extract one fault prototype from the point cloud. """
         idx = -1
@@ -198,8 +200,8 @@ class FaultExtractor:
 
         return None, None
 
-    def _find_closest_component(self, component, component_bbox, slide_idx, distances_threshold=5,
-                                depth_iteration_step=10, depths_threshold=5):
+    def _find_closest_component(self, component, component_bbox, slide_idx, distances_threshold=10,
+                                depth_iteration_step=10, depths_threshold=10):
         """ Find the closest component to component on the slide, get splitting depths for them if needed.
 
         ..!!..
@@ -303,7 +305,8 @@ class FaultExtractor:
             self.container[slide_idx]['lengths'].append(len(coords))
 
 
-    def concat_connected_prototypes(self, intersection_ratio_threshold=None, contour_threshold=10, axis=2):
+    def concat_connected_prototypes(self, intersection_ratio_threshold=None, axis=2,
+                                    contour_threshold=10, width_split_threshold=100):
         """ Concat prototypes which are connected as puzzles.
 
         ..!!..
@@ -314,6 +317,8 @@ class FaultExtractor:
             Prototypes contours intersection ratio to decide that prototypes are not close.
         contour_threshold : int
             Amount of different contour points to decide that prototypes are not close.
+        length_threshold : int
+            Contours length difference threshold to decide that prototypes needn't to be splitted on concat.
         """
         # Split lower parts. Split upper parts?
         margin = 1 # local constant for code prettifying
@@ -322,6 +327,7 @@ class FaultExtractor:
             intersection_ratio_threshold = 0.5 if axis in (2, -1) else 0.9
 
         overlapping_axis = self.direction if axis in (-1, 2) else 2
+        split_axis = overlapping_axis
 
         # Under the hood, we check borders connectivity (as puzzles)
         borders_to_check = ('up', 'down') if axis in (-1, 2) else ('left', 'right')
@@ -396,23 +402,24 @@ class FaultExtractor:
                 # Check that one component contour is inside another (for both)
                 if self._is_contour_inside(contour_1, contour_2, contour_threshold=corrected_contour_threshold) or \
                    self._is_contour_inside(contour_2, contour_1, contour_threshold=corrected_contour_threshold):
-                    # Split by direction if axis == 2 for avoiding wrong prototypes shapes (like C or T-likable, etc.).
-                    if axis in (-1, 2):
-                        if np.abs(prototype_1.width - prototype_2.width) > 10:
-                            split_indices = (max(prototype_1.bbox[self.direction, 0], prototype_2.bbox[self.direction, 0]),
-                                            min(prototype_1.bbox[self.direction, 1], prototype_2.bbox[self.direction, 1]))
+                    # Split by split_axis for avoiding wrong prototypes shapes (like C or T-likable, etc.)
+                    # width_diff = np.abs(prototype_1.width - prototype_2.width)
 
-                            prototype_1, new_prototypes_ = prototype_1.split(split_indices, axis=self.direction)
-                            new_prototypes.extend(new_prototypes_)
+                    # if width_diff > width_split_threshold:
+                    #     split_indices = (max(prototype_1.bbox[split_axis, 0], prototype_2.bbox[split_axis, 0]),
+                    #                      min(prototype_1.bbox[split_axis, 1], prototype_2.bbox[split_axis, 1]))
 
-                            if len(new_prototypes_) > 0:
-                                prototype_1 = FaultPrototype(prototype_1.coords, direction=self.direction)
+                    #     prototype_1, new_prototypes_ = prototype_1.split(split_indices, axis=split_axis)
+                    #     new_prototypes.extend(new_prototypes_)
 
-                            prototype_2, new_prototypes_ = prototype_2.split(split_indices, axis=self.direction)
-                            new_prototypes.extend(new_prototypes_)
+                    #     if len(new_prototypes_) > 0:
+                    #         prototype_1 = FaultPrototype(prototype_1.coords, direction=split_axis)
 
-                            if len(new_prototypes_) > 0:
-                                prototype_2 = FaultPrototype(prototype_2.coords, direction=self.direction)
+                    #     prototype_2, new_prototypes_ = prototype_2.split(split_indices, axis=split_axis)
+                    #     new_prototypes.extend(new_prototypes_)
+
+                    #     if len(new_prototypes_) > 0:
+                    #         prototype_2 = FaultPrototype(prototype_2.coords, direction=split_axis)
 
                     prototype_2.concat(prototype_1)
                     self.prototypes[prototype_2_idx] = prototype_2
@@ -437,7 +444,7 @@ class FaultExtractor:
         return len(contour_1_set - contour_2_dilated) < contour_threshold
 
     def concat_embedded_prototypes(self, distances_threshold=2):
-        """ Concat embedded prototypes (with 2 or more closed borders.
+        """ Concat embedded prototypes with 2 or more closed borders.
 
         Examples
         --------
@@ -456,6 +463,7 @@ class FaultExtractor:
 
         where | means one prototype points, and . - other prototype points
         """
+        # TODO: improve or remove
         # Presort objects by other valuable axis for early stopping
         sort_axis = self.direction
         prototypes_starts = np.array([prototype.bbox[sort_axis, 0] for prototype in self.prototypes])
@@ -490,29 +498,80 @@ class FaultExtractor:
                     if close_borders_counter >= 2:
                         break
 
-                # if close_borders_counter >= 2: # TODO: add concat or remove this method
+                if close_borders_counter >= 2:
+                    prototype_2.concat(prototype_1)
+                    self.prototypes[prototype_2_idx] = prototype_2
+                    self.prototypes[prototype_1_idx] = None
+                    break
 
+        self.prototypes = [prototype for prototype in self.prototypes if prototype is not None]
         return self.prototypes
 
     # Addons
-    def run_prototypes_concat(self, iters=5):
-        """ Only for tests. Will be removed. """
-        previous_prototypes_amount = len(self.prototypes) + 100 # to avoid stopping after first concat
-        print("Start amount: ", len(self.prototypes))
+    def run(self, concat_iters=20,
+            intersection_ratio_threshold=0.5, min_intersection_ratio_threshold=0.2,
+            **filtering_kwargs):
+        """ Full extracting procedure.
 
-        for _ in range(iters):
-            _ = self.concat_connected_prototypes(axis=-1)
+        Parameters
+        ----------
+        intersection_ratio_threshold : float
+            Prototypes neighboring borders intersection ratio to decide that prototypes can be connected.
+            Note, that it is changed decrementally.
+        min_intersection_ratio_threshold : float
+            Minimal value of `intersection_ratio_threshold`.
+        """
+        stats = {}
+        # Extract prototypes from data
+        _ = self.extract_prototypes()
+        stats['extracted'] = len(self.prototypes)
 
-            print("After depths concat: ", len(self.prototypes))
+        # Concat connected (as puzzles) prototypes
+        previous_iter_prototypes_amount = stats['extracted'] + 100 # to avoid stopping after first concat
 
-            if len(self.prototypes) != previous_prototypes_amount:
-                previous_prototypes_amount = len(self.prototypes)
-            else:
+        stats['after_connected_concat'] = []
+
+        for i in range(concat_iters):
+            # Concat by depth axis
+            _ = self.concat_connected_prototypes(intersection_ratio_threshold=intersection_ratio_threshold,
+                                                 axis=-1)
+            stats['after_connected_concat'].append(len(self.prototypes))
+
+            # Early stopping
+            if (intersection_ratio_threshold == min_intersection_ratio_threshold) and \
+               (stats['after_connected_concat'][-1] == previous_iter_prototypes_amount):
                 break
 
-            _ = self.concat_connected_prototypes(axis=self.direction)
+            previous_iter_prototypes_amount = stats['after_connected_concat'][-1]
 
-            print("After ilines concat: ", len(self.prototypes))
+            # Concat by direction axis
+            _ = self.concat_connected_prototypes(intersection_ratio_threshold=0.8,
+                                                 axis=self.direction)
+
+            stats['after_connected_concat'].append(len(self.prototypes))
+
+            intersection_ratio_threshold = max(intersection_ratio_threshold - 0.05*(i//2),
+                                               min_intersection_ratio_threshold)
+
+        # Concat embedded
+        _ = self.concat_embedded_prototypes()
+        stats['after_embedded_concat'] = len(self.prototypes)
+
+        # Filter too small prototypes
+        filtered_prototypes = self.filter_prototypes(**filtering_kwargs)
+        stats['after_filtering'] = len(filtered_prototypes)
+        return filtered_prototypes, stats
+
+    def filter_prototypes(self, min_height=40, min_width=20, min_n_points=100):
+        filtered_prototypes = []
+
+        for prototype in self.prototypes:
+            if (prototype.height >= min_height) and (prototype.width >= min_width) and \
+               (prototype.n_points >= min_n_points):
+
+               filtered_prototypes.append(prototype)
+
+        return filtered_prototypes
 
     def prototypes_to_faults(self, field):
         """ Convert all prototypes to faults. """
