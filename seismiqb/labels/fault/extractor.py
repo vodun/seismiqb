@@ -1,5 +1,5 @@
 """ [Draft] Extractor of fault surfaces from cloud of points. """
-from collections import defaultdict, deque
+from collections import deque
 import numpy as np
 
 from cc3d import connected_components
@@ -200,15 +200,15 @@ class FaultExtractor:
 
         return None, None
 
-    def _find_closest_component(self, component, component_bbox, slide_idx, distances_threshold=10,
-                                depth_iteration_step=10, depths_threshold=10):
+    def _find_closest_component(self, component, component_bbox, slide_idx, distances_threshold=None,
+                                depth_iteration_step=10, depths_threshold=20):
         """ Find the closest component to component on the slide, get splitting depths for them if needed.
 
         ..!!..
         """
         # Dilate component bbox for detecting close components: component on next slide can be shifted
         component_bbox[self.orthogonal_direction] += (-self.dilation // 2, self.dilation // 2)
-        min_distance = distances_threshold
+        min_distance = distances_threshold if distances_threshold is not None else 100
 
         # Init returned values
         closest_component = None
@@ -403,23 +403,22 @@ class FaultExtractor:
                 if self._is_contour_inside(contour_1, contour_2, contour_threshold=corrected_contour_threshold) or \
                    self._is_contour_inside(contour_2, contour_1, contour_threshold=corrected_contour_threshold):
                     # Split by split_axis for avoiding wrong prototypes shapes (like C or T-likable, etc.)
-                    # width_diff = np.abs(prototype_1.width - prototype_2.width)
+                    if (width_split_threshold is not None) and \
+                       (np.abs(prototype_1.width - prototype_2.width) > width_split_threshold):
+                        split_indices = (max(prototype_1.bbox[split_axis, 0], prototype_2.bbox[split_axis, 0]),
+                                         min(prototype_1.bbox[split_axis, 1], prototype_2.bbox[split_axis, 1]))
 
-                    # if width_diff > width_split_threshold:
-                    #     split_indices = (max(prototype_1.bbox[split_axis, 0], prototype_2.bbox[split_axis, 0]),
-                    #                      min(prototype_1.bbox[split_axis, 1], prototype_2.bbox[split_axis, 1]))
+                        prototype_1, new_prototypes_ = prototype_1.split(split_indices, axis=split_axis)
+                        new_prototypes.extend(new_prototypes_)
 
-                    #     prototype_1, new_prototypes_ = prototype_1.split(split_indices, axis=split_axis)
-                    #     new_prototypes.extend(new_prototypes_)
+                        if len(new_prototypes_) > 0:
+                            prototype_1 = FaultPrototype(prototype_1.coords, direction=split_axis)
 
-                    #     if len(new_prototypes_) > 0:
-                    #         prototype_1 = FaultPrototype(prototype_1.coords, direction=split_axis)
+                        prototype_2, new_prototypes_ = prototype_2.split(split_indices, axis=split_axis)
+                        new_prototypes.extend(new_prototypes_)
 
-                    #     prototype_2, new_prototypes_ = prototype_2.split(split_indices, axis=split_axis)
-                    #     new_prototypes.extend(new_prototypes_)
-
-                    #     if len(new_prototypes_) > 0:
-                    #         prototype_2 = FaultPrototype(prototype_2.coords, direction=split_axis)
+                        if len(new_prototypes_) > 0:
+                            prototype_2 = FaultPrototype(prototype_2.coords, direction=split_axis)
 
                     prototype_2.concat(prototype_1)
                     self.prototypes[prototype_2_idx] = prototype_2
