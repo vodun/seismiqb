@@ -192,11 +192,13 @@ class FaultExtractor:
         """ Find the longest not merged item on the minimal slide. """
         for slide_idx in range(self._first_slide_with_mergeable, self.shape[self.direction]):
             slide_info = self.container[slide_idx]
-            argmax = np.argmax(slide_info['lengths'])
 
-            if slide_info['lengths'][argmax] != -1:
-                self._first_slide_with_mergeable = slide_idx
-                return slide_idx, argmax
+            if len(slide_info['lengths']) > 0:
+                argmax = np.argmax(slide_info['lengths'])
+
+                if slide_info['lengths'][argmax] != -1:
+                    self._first_slide_with_mergeable = slide_idx
+                    return slide_idx, argmax
 
         return None, None
 
@@ -554,8 +556,8 @@ class FaultExtractor:
                                                min_intersection_ratio_threshold)
 
         # Concat embedded
-        _ = self.concat_embedded_prototypes()
-        stats['after_embedded_concat'] = len(self.prototypes)
+        # _ = self.concat_embedded_prototypes()
+        # stats['after_embedded_concat'] = len(self.prototypes)
 
         # Filter too small prototypes
         filtered_prototypes = self.filter_prototypes(**filtering_kwargs)
