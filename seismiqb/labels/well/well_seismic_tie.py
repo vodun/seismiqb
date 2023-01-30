@@ -52,21 +52,17 @@ class OptimizationMixin:
     def nancorrelation(x, y):
         """ Compute correlation and ignore nan in both x and y.
         """
-        x_, y_ = [np.nanmean(v) for v in (x, y)]
+        x_, y_ = np.nanmean(x), np.nanmean(y)
         cov = np.nansum((x - x_) * (y - y_))
         var_x, var_y = np.nansum((x - x_)**2), np.nansum((y - y_)**2)
         return cov / (np.sqrt(var_x) * np.sqrt(var_y))
 
     @staticmethod
-    def compute_reflectivity_(impedance, backend='numpy'):
+    def compute_reflectivity_(impedance):
         """ Compute and fetch reflectivity coefficients out of a vector/array/tensor of impedance.
         """
-        if backend in ('numpy', 'np'):
-            reflectivity = np.zeros_like(impedance)
-        elif backend == 'torch':
-            reflectivity = torch.zeros_like(impedance)
-        else:
-            raise ValueError(f'Use either `torch` or `numpy` for backend!')
+        module = torch if isinstance(impedance, torch.Tensor) else np
+        reflectivity = getattr(module, 'zeros_like')(impedance)
 
         reflectivity[..., 1:] = ((impedance[..., 1:] - impedance[..., :-1]) /
                                  (impedance[..., 1:] + impedance[..., :-1]))
@@ -74,22 +70,21 @@ class OptimizationMixin:
         return reflectivity
 
     @staticmethod
-    def compute_synthetic_(reflectivity, impulse, backend='numpy'):
+    def compute_synthetic_(reflectivity, impulse):
         """ Compute and fetch synthetic seismic out of a vector of reflectivity, given impulse.
         """
-        if backend in ('numpy', 'np'):
-            return np.convolve(reflectivity, impulse, mode='same')
-        elif backend == 'torch':
+        if isinstance(reflectivity, torch.Tensor):
+            # Case of incoming torch-tensors.
             if isinstance(impulse, (list, np.ndarray)):
                 impulse = torch.tensor(impulse, device=reflectivity.get_device())
 
             reflectivity = reflectivity.reshape(1, 1, -1)
             impulse = impulse.reshape(1, 1, -1)
 
-            result = F.conv1d(reflectivity, impulse, padding='same')
-            return torch.squeeze(result)
-        else:
-            raise ValueError(f'Use either `torch` or `numpy` for backend!')
+            return torch.squeeze(F.conv1d(reflectivity, impulse, padding='same'))
+
+        # Case of numpy-arrays.
+        return np.convolve(reflectivity, impulse, mode='same')
 
     @staticmethod
     def move_to_device(array, device='cuda:0'):
@@ -108,7 +103,7 @@ class OptimizationMixin:
     def torch_correlation(x, y):
         """
         """
-        x_, y_ = [torch.mean(v) for v in (x, y)]
+        x_, y_ = torch.mean(x), torch.mean(y)
         cov = torch.sum((x - x_) * (y - y_))
         var_x, var_y = torch.sum((x - x_)**2), torch.sum((y - y_)**2)
         return cov / (torch.sqrt(var_x) * torch.sqrt(var_y))
@@ -116,7 +111,7 @@ class OptimizationMixin:
 
     @classmethod   # This one can actually be a method. It would take column names of `self.data` as arguments.
     def measure_seismic_tie_quality(cls, seismic_time, well_time, seismic_curve, impedance_log,
-                                    impulse, metric='corr', backend='numpy'):
+                                    impulse, metric='corr'):
         """ Measure the quality of well-seismic tie. Recalculates the synthetic seismic in seismic
         time ticks and compares the synthetic with the original using one of the supported metrics.
         Most commonly used metric is correlation.
@@ -125,7 +120,19 @@ class OptimizationMixin:
         (`scipy.optimize`/`torch`-optimization) one of the given arrays, e.g. `well_time`-ticks or
         `impulse`.
         """
-        if backend in ('numpy', 'np'):
+        if isinstance(seismic_time, torch.Tensor):
+            # Resample impedance.
+            # Torch implementation of interpolation. Has semantics similar to that of `np.interp`.
+            # Supports `backward` and corectly computes gradients.
+            interpolator = Interp1D(well_time, impedance_log, method='linear')
+            log_in_seismic_time = interpolator(seismic_time)
+
+            # Select quality function: the larger the value, the better.
+            if metric in ('corr', 'correlation', 'corrcoeff'):
+                match_function = cls.torch_correlation
+            else:
+                raise ValueError(f'Unknown metric {metric} for `numpy`-version!')
+        else:
             # Resample impedance.
             log_in_seismic_time = np.interp(x=seismic_time, xp=well_time, fp=impedance_log)
 
@@ -137,26 +144,10 @@ class OptimizationMixin:
             elif metric in ('corr', 'correlation', 'corrcoeff'):
                 match_function = cls.nancorrelation
             else:
-                raise ValueError(f'Unknown metric {metric} for backend {backend}!')
+                raise ValueError(f'Unknown metric {metric} for `torch`-version of the function!')
 
-        elif backend == 'torch':
-            # Resample impedance.
-            # Torch implementation of interpolation. Has semantics similar to that of `np.interp`.
-            # Supports `backward` and corectly computes gradients.
-            interpolator = Interp1D(well_time, impedance_log, method='linear')
-            log_in_seismic_time = interpolator(seismic_time)
-
-            # Select quality function: the larger the value, the better.
-            if metric in ('corr', 'correlation', 'corrcoeff'):
-                match_function = cls.torch_correlation
-            else:
-                raise ValueError(f'Unknown metric {metric} for backend {backend}!')
-
-        else:
-            raise ValueError(f'Use either `torch` or `numpy` for backend!')
-
-        reflectivity = cls.compute_reflectivity_(log_in_seismic_time, backend=backend)
-        synthetic = cls.compute_synthetic_(reflectivity, impulse, backend=backend)
+        reflectivity = cls.compute_reflectivity_(log_in_seismic_time)
+        synthetic = cls.compute_synthetic_(reflectivity, impulse)
 
         result = match_function(synthetic, seismic_curve)
         return result
@@ -199,7 +190,7 @@ class OptimizationMixin:
             # NOTE: implement topK later.
             current_well_time = torch.cumsum(optimized, dim=0)
             loss = -cls.measure_seismic_tie_quality(seismic_time, current_well_time, seismic_curve,
-                                                    impedance_log, impulse, metric='corr', backend='torch')
+                                                    impedance_log, impulse, metric='corr')
 
             loss.backward()
             loss_history.append(float(loss.detach().cpu().numpy()))
@@ -264,7 +255,7 @@ def compute_frequency_amplitides(data):
     is not 1d, take average over the signals.
     """
     fourier = np.fft.rfft  # We work with purely real signals; use real fourier transform.
-    amplitudes = np.absolute(fourier(data))
+    amplitudes = np.abs(fourier(data))
     if amplitudes.ndim > 1:
         amplitudes = np.mean(amplitudes, axis=tuple(range(amplitudes.ndim - 1)))
 
