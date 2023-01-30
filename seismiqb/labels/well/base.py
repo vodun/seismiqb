@@ -216,30 +216,25 @@ class Well(OptimizationMixin):
         self.bboxes[name] = bbox
 
     # Units recalculation for logs; impedance calculation from dt and rhob
-    def microseconds_foot_to_seconds_meter(self, dt_log='DT', name='DT_SEC_M'):
+    def microseconds_foot_to_seconds_meter(self, sonic_log='DT', name='DT_SEC_M'):
         """
         """
-        dt = self.data[dt_log].values
-        self.data[name] = dt * 1e-6 * 1 / 0.3048
+        self.data[name] = self.data[sonic_log] * 1e-6 * 1 / 0.3048
 
-    def g_cm3_to_kg_m3(self, rhob_log='RHOB', name='RHOB_KG_M3'):
+    def gramm_centimeter3_to_kilogramm_meter3(self, density_log='RHOB', name='RHOB_KG_M3'):
         """
         """
-        rhob = self.data[rhob_log].values
-        self.data[name] = rhob * 1e6 / 1e3
+        self.data[name] = self.data[density_log] * 1e6 / 1e3
 
-    def compute_impedance_log_in_pascal_meter(self, dt_log='DT_SEC_M', rhob_log='RHOB_KG_M3', name='AI_PA_M'):
+    def compute_impedance_log_in_pascal_meter(self, sonic_log='DT_SEC_M', density_log='RHOB_KG_M3', name='AI_PA_M'):
         """
         """
-        rhob = self.data[rhob_log].values
-        dt = self.data[dt_log].values
-        self.data[name] = 1 / dt * rhob
+        self.data[name] = self.data[density_log] / self.data[sonic_log]
 
     def pascal_meter_to_kilopascal_meter(self, impedance_log='AI_PA_M', name='AI_'):
         """
         """
-        impedance = self.data[impedance_log].values
-        self.data[name] = impedance * 1e-3
+        self.data[name] = self.data[impedance_log] * 1e-3
 
     # Methods for Batch loads
     def compute_overlap_mask(self, mask_bbox, log='AI'):
