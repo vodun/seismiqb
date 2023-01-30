@@ -21,14 +21,6 @@ class SQBStorage:
 
         self.dataset_parameters = hdf5plugin.Blosc(cname=cname, clevel=clevel, shuffle=shuffle)
 
-        # Backwards compatibility: remove 'meta' prefixing group from items. TODO: remove after some time
-        if self.exists:
-            with h5py.File(self.path, mode='r+', swmr=True) as src:
-                if 'meta' in src:
-                    for item in src['meta']:
-                        src[item] = src[f'meta/{item}']
-                        del src[f'meta/{item}']
-
         # Scan all available keys and store them in the instance for faster check
         self.keys = set()
         if self.exists:

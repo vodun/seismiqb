@@ -6,9 +6,26 @@ import re
 with open('__init__.py', 'r') as f:
     version = re.search(r'^__version__\s*=\s*[\'"]([^\'"]*)[\'"]', f.read(), re.MULTILINE).group(1)
 
+
+extras_nn = [
+    'torch>=1.7.0',
+    'torchvision>=0.1.3',
+    'cupy>=8.1.0',
+]
+
+extras_cupy = [
+    'cupy>=8.1.0',
+]
+
+extras_test = [
+    'py-nbtools>=0.9.5',
+    'pytest>=5.3.1',
+]
+
+
 setup(
     name='seismiQB',
-    packages=find_packages(exclude=['tutorials', 'datasets', 'models']),
+    packages=find_packages(exclude=['tutorials']),
     version=version,
     url='https://github.com/gazprom-neft/seismiqb',
     license='Apache 2.0',
@@ -22,8 +39,7 @@ setup(
         # General Python libraries
         'dill>=0.3.1.1',
         'psutil>=5.6.7',
-        'requests>=2.22.0',
-        'pytest>=5.3.1',
+        'tqdm>=4.50.0',
 
         # Numerical
         'numpy>=1.16.0',
@@ -37,7 +53,6 @@ setup(
 
         # Data manipulation
         'pandas>=1.0.0',
-        'blosc>=1.8.1',
         'segyio>=1.8.3',
         'lasio>=0.29',
         'h5py>=2.10.0',
@@ -49,25 +64,14 @@ setup(
         'matplotlib>=3.0.2',
         'plotly>=4.3.0',
 
-        # Jupyter and introspection
-        'tqdm>=4.50.0',
-        'nbconvert>=5.6.1',
-        'ipython>=7.10.0',
-        'ipywidgets>=7.0',
-
         # Our libraries
         'batchflow>=0.8.0',
-        'py-nbtools>=0.9.5',
     ],
     extras_require={
-        'nn': [
-            'torch>=1.7.0',
-            'torchvision>=0.1.3',
-            'cupy>=8.1.0',
-        ],
-        'cupy': [
-            'cupy>=8.1.0'
-        ],
+        'nn': extras_nn,
+        'cupy': extras_cupy,
+        'test': extras_test,
+        'dev': extras_nn + extras_test,
     },
     classifiers=[
         'Development Status :: 4 - Beta',
