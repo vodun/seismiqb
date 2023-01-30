@@ -217,7 +217,7 @@ class SQBStorage:
                 if key in dst:
                     del dst[key]
 
-    def remove_meta(self, path=None):
+    def remove_meta(self):
         """ Remove storage file entirely. """
         os.remove(self.path)
 
