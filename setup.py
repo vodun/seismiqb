@@ -65,6 +65,7 @@ setup(
         'plotly>=4.3.0',
         'ipython>=7.10.0',
         'ipywidgets>=7.0',
+        'nbconvert>=5.6.1',
 
         # Our libraries
         'batchflow>=0.8.0',
