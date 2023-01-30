@@ -47,7 +47,7 @@ jobs:
       run: |
         pip install --user -U pip
         pip install wheel
-        pip install git+https://github.com/gazprom-neft/seismiqb.git@${{ github.sha }}[dev]
+        pip install git+https://github.com/gazprom-neft/seismiqb.git@${{ github.sha }}#egg=seismiqb[dev]
 
     - name: Run 'import' in installed environment
       run: python -c 'import seismiqb'
