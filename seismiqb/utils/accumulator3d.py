@@ -522,29 +522,48 @@ class RegressionAccumulator(Accumulator3D):
 
 
 class SlidesAccumulator:
-    def __init__(self, *args, shape=None, n_slides=40, n_sources=1, detach=False, orientation=0, **kwargs):
+    def __init__(self, *args, shape=None, n_slides=40, n_sources=1, orientation=0, postprocessing=None, **kwargs):
+        """ Accumulator which aggregates whole slices in memory and then write it into file. Can aggregate
+        data from several sources (e.g., predictions from different models).
+
+        Parameters
+        ----------
+        args : sequence
+            Args for Accumulator3D.from_aggregation.
+        shape : sequence
+            Shape of the placeholder.
+        n_slides : int
+            The number of slides to aggregate in memory.
+        n_sorces : int
+            The number of sources of data.
+        orientation : 0 or 1
+            Orientation of predictions.
+        kwargs : dict
+            Kwargs for  Accumulator3D.from_aggregation.
+        """
         self.args, self.kwargs = args, kwargs
         self.orientation = orientation
         self.n_slides = n_slides
         self.n_sources = n_sources
         self.shape = shape
-        self.detach = detach
         self._processes = []
 
-        self.slides_queue = JoinableQueue()
-        self.accumulator_process = Process(target=self.collect_slides, args=(self.slides_queue, ))
+        self.chunks_queue = JoinableQueue()
+        self.accumulator_process = Process(target=self.collect_chunks, args=(self.chunks_queue, ))
         self.accumulator_process.start()
+        self.postprocessing = postprocessing or []
 
         self.chunk_accumulators = [{} for _ in range(n_sources)]
 
     def update(self, crop, location, source_idx=0):
         origin = location[self.orientation].start - location[self.orientation].start % self.n_slides
         if origin not in self.chunk_accumulators[source_idx]:
-            self.aggregate_last(source_idx)
+            self.aggregate_last(source_idx) # TODO: fix for prefetch
             self.create_chunk(origin, source_idx)
         self.chunk_accumulators[source_idx][origin].update(crop, location)
 
     def create_chunk(self, origin, source_idx):
+        """ Create accumulator for chunk in memory. """
         shape = np.array(self.shape)
         shape[self.orientation] = self.n_slides
         shape = tuple(shape)
@@ -573,16 +592,18 @@ class SlidesAccumulator:
         self.data = self.file['data']
         return self.data
 
-    def collect_slides(self, slides_queue):
+    def collect_chunks(self, chunks_queue):
         accumulator = Accumulator3D.from_aggregation(*self.args, shape=self.shape, orientation=self.orientation,
                                                      **self.kwargs)
-        origin, slide = slides_queue.get()
-        while slide is not None:
-            slide = slide.aggregate()
+        origin, chunk = chunks_queue.get()
+        while chunk is not None:
+            chunk = chunk.aggregate()
+            for item in self.postprocessing:
+                chunk = item(chunk)
             location = [slice(0, item) for item in self.shape]
-            location[self.orientation] = slice(origin, origin+slide.shape[self.orientation])
-            accumulator.update(slide, location)
-            origin, slide = slides_queue.get()
+            location[self.orientation] = slice(origin, origin+chunk.shape[self.orientation])
+            accumulator.update(chunk, location)
+            origin, chunk = chunks_queue.get()
         accumulator.aggregate()
 
 
