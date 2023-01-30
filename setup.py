@@ -63,6 +63,8 @@ setup(
         'opencv_python>=4.1.2.30',
         'matplotlib>=3.0.2',
         'plotly>=4.3.0',
+        'ipython>=7.10.0',
+        'ipywidgets>=7.0',
 
         # Our libraries
         'batchflow>=0.8.0',
