@@ -185,6 +185,9 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
         elif ext == 'npy':
             self.load_npy(path, **kwargs)
             self.format = 'file-npy'
+        elif ext == 'sqb':
+            self.load_sqb(path, **kwargs)
+            self.format = 'file-sqb'
         else:
             self.load_fault_sticks(path, **kwargs)
             self.format = 'file-sticks'
