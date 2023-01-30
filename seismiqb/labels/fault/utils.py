@@ -97,7 +97,9 @@ def bboxes_embedded(bbox_1, bbox_2, margin=3):
     is_second_inside_first = np.count_nonzero(bbox_1[:, 1] >= bbox_2[:, 1]) > 1
 
     if not is_second_inside_first:
-        bbox_1, bbox_2 = bbox_2, bbox_1
+        bbox_1, bbox_2 = bbox_2.copy(), bbox_1.copy()
+    else:
+        bbox_1, bbox_2 = bbox_1.copy(), bbox_2.copy()
 
     bbox_1[:, 0] -= margin
     bbox_1[:, 1] += margin
