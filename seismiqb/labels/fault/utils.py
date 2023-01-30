@@ -81,11 +81,14 @@ def bboxes_adjacent(bbox_1, bbox_2):
     borders = np.empty((3, 2), dtype=np.int32)
 
     for i in range(3):
-        borders[i, 0] = max(bbox_1[i, 0], bbox_2[i, 0])
-        borders[i, 1] = min(bbox_1[i, 1], bbox_2[i, 1])
+        borders_i_0 = max(bbox_1[i, 0], bbox_2[i, 0])
+        borders_i_1 = min(bbox_1[i, 1], bbox_2[i, 1])
 
-        if borders[i, 1] - borders[i, 0] < -1:
+        if borders_i_1 - borders_i_0 < -1:
             return None
+
+        borders[i, 0] = min(borders_i_0, borders_i_1)
+        borders[i, 1] = max(borders_i_0, borders_i_1)
 
     return borders
 

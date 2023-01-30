@@ -207,7 +207,10 @@ class FaultExtractor:
         ..!!..
         """
         # Dilate component bbox for detecting close components: component on next slide can be shifted
-        component_bbox[self.orthogonal_direction] += (-self.dilation // 2, self.dilation // 2)
+        component_bbox[self.orthogonal_direction, 0] = max(0, component_bbox[self.orthogonal_direction, 0] - self.dilation // 2)
+        component_bbox[self.orthogonal_direction, 1] = min(component_bbox[self.orthogonal_direction, 1] + self.dilation // 2,
+                                                           self.shape[self.orthogonal_direction])
+
         min_distance = distances_threshold if distances_threshold is not None else 100
 
         # Init returned values
@@ -272,7 +275,7 @@ class FaultExtractor:
                 new_component = closest_component[closest_component[:, -1] < item_split_idx]
 
                 new_component_bbox = closest_component_bbox.copy()
-                new_component_bbox[-1, 1] = item_split_idx - 1
+                new_component_bbox[-1, 1] = max(0, item_split_idx - 1)
 
                 self._add_new_component(slide_idx=slide_idx, coords=new_component, bbox=new_component_bbox)
 
@@ -287,7 +290,7 @@ class FaultExtractor:
                 new_component = closest_component[closest_component[:, -1] > item_split_idx]
 
                 new_component_bbox = closest_component_bbox.copy()
-                new_component_bbox[-1, 0] = item_split_idx + 1
+                new_component_bbox[-1, 0] = min(item_split_idx + 1, self.shape[-1])
 
                 self._add_new_component(slide_idx=slide_idx, coords=new_component, bbox=new_component_bbox)
 
@@ -389,11 +392,9 @@ class FaultExtractor:
                 if length_ratio < intersection_ratio_threshold:
                     continue
 
-                # Process objects with too small border contours
-                if (len(contour_1) < 4*contour_threshold) or (len(contour_2) < 4*contour_threshold):
-                    corrected_contour_threshold = 1
-                else:
-                    corrected_contour_threshold = contour_threshold
+                # Correct contour_threshold for too short borders
+                max_n_points_out_intersection = (1 - intersection_ratio_threshold) * min(len(contour_1), len(contour_2))
+                corrected_contour_threshold = min(contour_threshold, max_n_points_out_intersection)
 
                 # Shift one of the objects, making their contours intersected
                 shift = 1 if is_first_upper else -1
@@ -508,7 +509,7 @@ class FaultExtractor:
 
     # Addons
     def run(self, concat_iters=20,
-            intersection_ratio_threshold=0.5, min_intersection_ratio_threshold=0.2,
+            intersection_ratio_threshold=0.9, min_intersection_ratio_threshold=0.5,
             **filtering_kwargs):
         """ Full extracting procedure.
 
@@ -518,7 +519,7 @@ class FaultExtractor:
             Prototypes neighboring borders intersection ratio to decide that prototypes can be connected.
             Note, that it is changed decrementally.
         min_intersection_ratio_threshold : float
-            Minimal value of `intersection_ratio_threshold`.
+            Minimal preferred value of `intersection_ratio_threshold`.
         """
         stats = {}
         # Extract prototypes from data
@@ -537,7 +538,7 @@ class FaultExtractor:
             stats['after_connected_concat'].append(len(self.prototypes))
 
             # Early stopping
-            if (intersection_ratio_threshold == min_intersection_ratio_threshold) and \
+            if (intersection_ratio_threshold <= min_intersection_ratio_threshold) and \
                (stats['after_connected_concat'][-1] == previous_iter_prototypes_amount):
                 break
 
@@ -549,7 +550,7 @@ class FaultExtractor:
 
             stats['after_connected_concat'].append(len(self.prototypes))
 
-            intersection_ratio_threshold = max(intersection_ratio_threshold - 0.05*(i//2),
+            intersection_ratio_threshold = max(round(intersection_ratio_threshold - 0.05, 2),
                                                min_intersection_ratio_threshold)
 
         # Concat embedded
