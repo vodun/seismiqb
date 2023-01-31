@@ -5,7 +5,6 @@ import numpy as np
 from cc3d import connected_components
 from cv2 import dilate
 from scipy.ndimage import find_objects
-from sklearn.neighbors import KDTree
 
 from batchflow import Notifier
 
@@ -33,7 +32,7 @@ class FaultExtractor:
     - Component is a 2d connected component on some slide.
     - Prototype is a 3d points body of merged components.
     """
-    def __init__(self, smoothed_array, skeletonized_array=None, direction=0, component_len_threshold=0):
+    def __init__(self, smoothed_array, direction, skeletonized_array=None, component_len_threshold=0):
         """ Init data container with components info for each slide.
 
         ..!!..
@@ -50,8 +49,7 @@ class FaultExtractor:
         self.direction = direction
         self.orthogonal_direction = 1 - self.direction
 
-        self.component_len_threshold = component_len_threshold # TODO: temporally unused, change value
-        # self.height_threshold = None # TODO: temporally unused, add later
+        self.component_len_threshold = component_len_threshold
 
         self.dilation = 3 # constant for internal operations
         dilation_structure = np.ones((1, self.dilation), np.uint8)
@@ -445,31 +443,24 @@ class FaultExtractor:
 
         return len(contour_1_set - contour_2_dilated) < contour_threshold
 
-    def concat_embedded_prototypes(self, distances_threshold=2):
+    def concat_embedded_prototypes(self, contour_threshold=10):
         """ Concat embedded prototypes with 2 or more closed borders.
 
-        Examples
-        --------
+        Embedded prototypes examples:
 
-        ||||||
-        ...|||
-        ||||||
-
-        ||||||
-        ...|||
-
-        ||||||
-        ...|||
-           |||
+        ||||||  or  |||||||  or  ||||||  etc.
+        ...|||      |...|||      |||...
+           |||      ||||||
         ||||||
 
-        where | means one prototype points, and . - other prototype points
+         - where | means one prototype points, and . - other prototype points.
         """
-        # TODO: improve or remove
         # Presort objects by other valuable axis for early stopping
         sort_axis = self.direction
         prototypes_starts = np.array([prototype.bbox[sort_axis, 0] for prototype in self.prototypes])
         prototypes_order = np.argsort(prototypes_starts)
+
+        margin = 3 # local constant
 
         for i, prototype_1_idx in enumerate(prototypes_order):
             prototype_1 = self.prototypes[prototype_1_idx]
@@ -480,26 +471,49 @@ class FaultExtractor:
                 if (prototype_1.bbox[sort_axis, 1] < prototype_2.bbox[sort_axis, 0]):
                     break
 
-                is_embedded, is_second_inside_first = bboxes_embedded(prototype_1.bbox, prototype_2.bbox)
+                is_embedded, is_second_inside_first = bboxes_embedded(prototype_1.bbox, prototype_2.bbox, margin=margin)
 
                 if not is_embedded:
                     continue
 
-                tree = KDTree(prototype_1.coords) if is_second_inside_first else KDTree(prototype_2.coords)
+                main_object_coords = prototype_1.coords if is_second_inside_first else prototype_2.coords
                 prototype_to_check = prototype_2 if is_second_inside_first else prototype_1
 
                 close_borders_counter = 0
 
-                for border in ('up', 'down', 'left', 'right'):
-                    contour_ = prototype_to_check.get_borders(border=border, projection_axis=self.orthogonal_direction)
-                    distances, _ = tree.query(contour_)
+                for border in ('up', 'down', 'left', 'right'): # TODO: get more optimal order depend on bboxes
+                    # Check that border is close to the main object
+                    contour = prototype_to_check.get_borders(border=border, projection_axis=self.orthogonal_direction)
 
-                    if np.percentile(distances, 90) < distances_threshold:
+                    # Shift contour to make it intersected with another object
+                    shift = -1 if border in ('up', 'left') else 1
+                    shift_axis = self.direction if border in ('left', 'right') else 2
+                    contour[:, shift_axis] += shift
+
+                    # Check that borders are connected
+                    slices = prototype_to_check.bbox.copy()
+                    slices[:, 0] -= margin
+                    slices[:, 1] += margin
+
+                    # Get cords in the area of the interest for speeding up evaluations
+                    main_object_coords_sliced = main_object_coords[(main_object_coords[:, 0] >= slices[0, 0]) & \
+                                                                   (main_object_coords[:, 0] <= slices[0, 1]) & \
+                                                                   (main_object_coords[:, 1] >= slices[1, 0]) & \
+                                                                   (main_object_coords[:, 1] <= slices[1, 1]) & \
+                                                                   (main_object_coords[:, 2] >= slices[2, 0]) & \
+                                                                   (main_object_coords[:, 2] <= slices[2, 1])]
+
+                    # Check that the shifted border is inside the main_object area
+                    corrected_contour_threshold = min(contour_threshold, len(contour)//2)
+
+                    if self._is_contour_inside(contour, main_object_coords_sliced,
+                                               contour_threshold=corrected_contour_threshold):
                         close_borders_counter += 1
 
                     if close_borders_counter >= 2:
                         break
 
+                # If objects have more than 2 closed borders then they are parts of the same prototype
                 if close_borders_counter >= 2:
                     prototype_2.concat(prototype_1)
                     self.prototypes[prototype_2_idx] = prototype_2
