@@ -32,18 +32,16 @@ class FaultExtractor:
     - Component is a 2d connected component on some slide.
     - Prototype is a 3d points body of merged components.
     """
-    def __init__(self, smoothed_array, direction, skeletonized_array=None, component_len_threshold=3):
+    def __init__(self, smoothed_data, direction, skeletonized_data=None, component_len_threshold=3):
         """ Init data container with components info for each slide.
-
-        ..!!..
 
         Parameters
         ----------
-        smoothed_array : np.ndarray 
+        smoothed_data : np.ndarray or :class:`~.Geometry` instance
             A 3d array with smoothed predictions with shape corresponds to the field shape.
         direction : {0, 1}
             Prediction direction, can be 0 (ilines) or 1 (xlines).
-        skeletonized_array : np.ndarray, optional
+        skeletonized_data : np.ndarray or :class:`~.Geometry` instance, optional
             A 3d array with skeletonized predictions with shape corresponds to the field shape.
             If None is provided, then it will be evaluated.
         component_len_threshold : int
@@ -51,7 +49,10 @@ class FaultExtractor:
             If 0, then no filter applied (recommended for higher accuracy).
             If more than 0, then extraction will be faster.
         """
-        self.shape = smoothed_array.shape
+        self.shape = smoothed_data.shape
+
+        is_smoothed_is_np = isinstance(smoothed_data, np.ndarray)
+        is_skeletonized_is_np = isinstance(skeletonized_data, np.ndarray)
 
         self.direction = direction
         self.orthogonal_direction = 1 - self.direction
@@ -69,11 +70,17 @@ class FaultExtractor:
         # Process data slides: extract connected components and their info
         for slide_idx in Notifier('t')(range(self.shape[self.direction])):
             # Get smoothed data slide
-            smoothed = np.take(smoothed_array, slide_idx, axis=self.direction)
+            if is_smoothed_is_np:
+                smoothed = np.take(smoothed_data, slide_idx, axis=self.direction)
+            else:
+                smoothed = smoothed_data.load_slide(slide_idx, axis=self.direction)
 
             # Get skeletonized slide
-            if skeletonized_array is not None:
-                mask = np.take(skeletonized_array, slide_idx, axis=self.direction)
+            if skeletonized_data is not None:
+                if is_skeletonized_is_np:
+                    mask = np.take(skeletonized_data, slide_idx, axis=self.direction)
+                else:
+                    mask = skeletonized_data.load_slide(slide_idx, axis=self.direction)
             else:
                 mask = skeletonize(smoothed, width=3)
                 mask = dilate(mask, (1, 3))
