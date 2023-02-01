@@ -1,4 +1,4 @@
-""" [Draft] Extractor of fault surfaces from cloud of points. """
+""" Faults extractor from point cloud. """
 from collections import deque
 import numpy as np
 
@@ -39,10 +39,17 @@ class FaultExtractor:
 
         Parameters
         ----------
+        smoothed_array : np.ndarray 
+            A 3d array with smoothed predictions with shape corresponds to the field shape.
         direction : {0, 1}
-            Prediction direction corresponding ilines (0) or xlines (1).
+            Prediction direction, can be 0 (ilines) or 1 (xlines).
+        skeletonized_array : np.ndarray, optional
+            A 3d array with skeletonized predictions with shape corresponds to the field shape.
+            If None is provided, then it will be evaluated.
         component_len_threshold : int
             Threshold to filter out too small connected components on data slides.
+            If 0, then no filter applied (recommended for higher accuracy).
+            If more than 0, then extraction will be faster.
         """
         self.shape = smoothed_array.shape
 
@@ -59,10 +66,12 @@ class FaultExtractor:
         self.prototypes_queue = deque() # prototypes for extension
         self.prototypes = [] # extracted prototypes
 
+        # Process data slides: extract connected components and their info
         for slide_idx in Notifier('t')(range(self.shape[self.direction])):
-            # Process data
+            # Get smoothed data slide
             smoothed = np.take(smoothed_array, slide_idx, axis=self.direction)
 
+            # Get skeletonized slide
             if skeletonized_array is not None:
                 mask = np.take(skeletonized_array, slide_idx, axis=self.direction)
             else:
@@ -90,6 +99,8 @@ class FaultExtractor:
                 if length <= component_len_threshold:
                     continue
 
+                # Extract refined component coordinates
+                # skeletonize on the full slide is not so accurate than for limited area
                 object_mask = dilate(object_mask.astype(np.uint8), dilation_structure)
 
                 dilated_coords_2d = np.nonzero(object_mask)
@@ -130,7 +141,7 @@ class FaultExtractor:
                 'lengths': lengths
             }
 
-        self._first_slide_with_mergeable = 0
+        self._first_slide_with_mergeable = 0 # variable for internal operations speed up
 
     # Prototypes extraction
     def extract_prototypes(self):
@@ -145,8 +156,6 @@ class FaultExtractor:
 
     def extract_prototype(self):
         """ Extract one fault prototype from the point cloud. """
-        idx = -1
-
         if len(self.prototypes_queue) == 0:
             start_slide_idx, idx = self._find_not_merged_component()
 
@@ -167,20 +176,19 @@ class FaultExtractor:
             component = prototype.last_component
             component_bbox = prototype.last_component_bbox
 
-        # Find closest components on next slides and split them if needed
+        # Find closest components on next slides
         for slide_idx_ in range(start_slide_idx+1, self.shape[self.direction]):
             # Find the closest component on the slide_idx_ to the current
             component, component_bbox, split_indices = self._find_closest_component(component=component,
                                                                                     component_bbox=component_bbox,
                                                                                     slide_idx=slide_idx_)
 
-            # Postprocess prototype
+            # Postprocess prototype - it need to be splitted if it is out of component ranges
             if component is not None:
-                # Split current prototype and add new to queue
                 prototype, new_prototypes = prototype.split(split_indices=split_indices, axis=2)
                 self.prototypes_queue.extend(new_prototypes)
 
-                prototype.append(component, coords_bbox=component_bbox, slide_idx=slide_idx_)
+                prototype.append(component, bbox=component_bbox, slide_idx=slide_idx_)
             else:
                 break
 
@@ -202,9 +210,28 @@ class FaultExtractor:
 
     def _find_closest_component(self, component, component_bbox, slide_idx, distances_threshold=None,
                                 depth_iteration_step=10, depths_threshold=20):
-        """ Find the closest component to component on the slide, get splitting depths for them if needed.
+        """ Find the closest component to the provided one, get splitting indices for prototype if needed.
 
-        ..!!..
+        Parameters
+        ----------
+        component : np.ndarray of (N, 3) shape
+            Component coordinates for which to find the closest from the slide.
+        component_bbox : np.ndarray of (3, 2) shape
+            Component bounding box.
+        slide_idx : int
+            Index of the slide on which to find the closest component.
+        distances_threshold : int, optional
+            Threshold for the max possible axis-wise distance between components.
+        depth_iteration_step : int
+            The depth iteration step to find distances between components.
+            Value 1 is recommended for higher accuracy.
+            Value more than 1 can speed up the finding process.
+        depths_threshold : int
+            Depth-length threshold to decide to split closest component or prototype.
+            If one component is longer than another more than on depths_threshold,
+            then we need to split the longest one into parts:
+             - one part corresponds to the closest component;
+             - another correspond to the different component, which is not allowed for merge to the current prototype.
         """
         # Dilate component bbox for detecting close components: component on next slide can be shifted
         component_bbox[self.orthogonal_direction, 0] = max(0, component_bbox[self.orthogonal_direction, 0] - self.dilation // 2)
@@ -301,7 +328,19 @@ class FaultExtractor:
         return closest_component, closest_component_bbox, prototype_split_indices
 
     def _add_new_component(self, slide_idx, coords, bbox):
-        """ Add new items into the container. """
+        """ Add new item into the container.
+
+        New items are creating after components splitting.
+
+        Parameters
+        ----------
+        slide_idx : int
+            Number of the slide on which we need to add new component.
+        coords : np.ndarray of (N, 3) shape
+            Component coordinates.
+        bbox: np.ndarray of (3, 2) shape
+            Component bounding box.
+        """
         if len(coords) > self.component_len_threshold:
             self.container[slide_idx]['bboxes'].append(bbox)
             self.container[slide_idx]['coords'].append(coords)
@@ -309,21 +348,34 @@ class FaultExtractor:
 
 
     def concat_connected_prototypes(self, intersection_ratio_threshold=None, axis=2,
-                                    contour_threshold=10, width_split_threshold=100):
-        """ Concat prototypes which are connected as puzzles.
+                                    border_threshold=10, width_split_threshold=100):
+        """ Concat prototypes which are connected.
 
-        ..!!..
+        Under the hood we compare prototypes with each other and find which are connected as puzzles.
+        For this we get neighboring borders and compare them.
+        If borders are similar enough then we merge prototypes into one.
 
         Parameters
         ----------
-        intersection_ratio_threshold : float
+        intersection_ratio_threshold : float or None
             Prototypes contours intersection ratio to decide that prototypes are not close.
-        contour_threshold : int
-            Amount of different contour points to decide that prototypes are not close.
-        length_threshold : int
-            Contours length difference threshold to decide that prototypes needn't to be splitted on concat.
+            Possible values are float numbers in the (0, 1] interval or None.
+            If None, then default values are used: 0.5 for the depth axis and 0.9 for others.
+        axis : {0, 1, 2}
+            Axis along which to find prototypes connections.
+            Recommended values are 2 (for depths) or self.direction.
+        border_threshold : int
+            Minimal amount of different border contour points to decide that prototypes are not close.
+        width_split_threshold : int or None
+            Contour widths (along self.direction axis) difference threshold to decide that prototypes needn't
+            to be splitted by self.direction axis.
+            If value is None, then no splitting applied. But there are the risk of interpenetration of
+            triangulated surfaces in this case.
+            With lower value more splitting applied and smaller prototypes are extracted.
+            With higher value there are less prototypes with higher areas extracted.
+            So, if you want more detailing, then provide smaller width_split_threshold (near to 10).
+            If you want to extract bigger surfaces, then provide higher width_split_threshold (near to 100 or None).
         """
-        # Split lower parts. Split upper parts?
         margin = 1 # local constant for code prettifying
 
         if intersection_ratio_threshold is None:
@@ -370,9 +422,9 @@ class FaultExtractor:
                 # Find object contours on close borders
                 is_first_upper = prototype_1.bbox[axis, 0] < prototype_2.bbox[axis, 0]
 
-                contour_1 = prototype_1.get_borders(border=borders_to_check[is_first_upper],
+                contour_1 = prototype_1.get_border(border=borders_to_check[is_first_upper],
                                                     projection_axis=self.orthogonal_direction)
-                contour_2 = prototype_2.get_borders(border=borders_to_check[~is_first_upper],
+                contour_2 = prototype_2.get_border(border=borders_to_check[~is_first_upper],
                                                     projection_axis=self.orthogonal_direction)
 
                 # Get border contours in the area of interest
@@ -392,17 +444,17 @@ class FaultExtractor:
                 if length_ratio < intersection_ratio_threshold:
                     continue
 
-                # Correct contour_threshold for too short borders
+                # Correct border_threshold for too short borders
                 max_n_points_out_intersection = (1 - intersection_ratio_threshold) * min(len(contour_1), len(contour_2))
-                corrected_contour_threshold = min(contour_threshold, max_n_points_out_intersection)
+                corrected_border_threshold = min(border_threshold, max_n_points_out_intersection)
 
                 # Shift one of the objects, making their contours intersected
                 shift = 1 if is_first_upper else -1
                 contour_1[:, -1] += shift
 
                 # Check that one component contour is inside another (for both)
-                if self._is_contour_inside(contour_1, contour_2, contour_threshold=corrected_contour_threshold) or \
-                   self._is_contour_inside(contour_2, contour_1, contour_threshold=corrected_contour_threshold):
+                if self._is_contour_inside(contour_1, contour_2, border_threshold=corrected_border_threshold) or \
+                   self._is_contour_inside(contour_2, contour_1, border_threshold=corrected_border_threshold):
                     # Split by split_axis for avoiding wrong prototypes shapes (like C or T-likable, etc.)
                     if (width_split_threshold is not None) and \
                        (np.abs(prototype_1.width - prototype_2.width) > width_split_threshold):
@@ -430,8 +482,18 @@ class FaultExtractor:
         self.prototypes.extend(new_prototypes)
         return self.prototypes
 
-    def _is_contour_inside(self, contour_1, contour_2, contour_threshold):
-        """ Check that `contour_1` is almost inside dilated `contour_2`. """
+    def _is_contour_inside(self, contour_1, contour_2, border_threshold):
+        """ Check that `contour_1` is almost inside dilated `contour_2`.
+
+        We apply dilation for contour_2 because the fault can be a little shifted on other depths.
+
+        Parameters
+        ----------
+        contour_1, contour_2 : np.ndarrays of (N, 3) shape
+            Contours for check.
+        border_threshold : int
+            Minimal amount of different points to decide that contours are not close.
+        """
         contour_1_set = set(tuple(x) for x in contour_1)
 
         # Objects can be shifted on `self.orthogonal_direction`, so apply dilation for coords
@@ -441,10 +503,18 @@ class FaultExtractor:
 
         contour_2_dilated = set(tuple(x) for x in contour_2_dilated)
 
-        return len(contour_1_set - contour_2_dilated) < contour_threshold
+        return len(contour_1_set - contour_2_dilated) < border_threshold
 
-    def concat_embedded_prototypes(self, contour_threshold=10):
+    def concat_embedded_prototypes(self, border_threshold=10):
         """ Concat embedded prototypes with 2 or more closed borders.
+
+        Under the hood, we compare different prototypes to find pairs in which one prototype is inside
+        another prototype area.
+        If more than two borders of internal prototype is connected with other prototype,
+        then we merge these prototypes into one.
+
+        Internal logic looks similar to `.concat_connected_prototypes`,
+        but now we find embedded bboxes and need two borders coincidence.
 
         Embedded prototypes examples:
 
@@ -454,6 +524,11 @@ class FaultExtractor:
         ||||||
 
          - where | means one prototype points, and . - other prototype points.
+
+        Parameters
+        ----------
+        border_threshold : int
+            Minimal amount of different points to decide that contours are not close.
         """
         # Presort objects by other valuable axis for early stopping
         sort_axis = self.direction
@@ -467,7 +542,7 @@ class FaultExtractor:
 
             for prototype_2_idx in prototypes_order[i+1:]:
                 prototype_2 = self.prototypes[prototype_2_idx]
-
+                # Check that prototypes are embedded
                 if (prototype_1.bbox[sort_axis, 1] < prototype_2.bbox[sort_axis, 0]):
                     break
 
@@ -476,26 +551,27 @@ class FaultExtractor:
                 if not is_embedded:
                     continue
 
+                # Find the main object and internal one (prototype_to_check)
                 main_object_coords = prototype_1.coords if is_second_inside_first else prototype_2.coords
                 prototype_to_check = prototype_2 if is_second_inside_first else prototype_1
 
+                # Check borders connections
                 close_borders_counter = 0
 
                 for border in ('up', 'down', 'left', 'right'): # TODO: get more optimal order depend on bboxes
-                    # Check that border is close to the main object
-                    contour = prototype_to_check.get_borders(border=border, projection_axis=self.orthogonal_direction)
+                    # Find internal object border contour
+                    contour = prototype_to_check.get_border(border=border, projection_axis=self.orthogonal_direction)
 
                     # Shift contour to make it intersected with another object
                     shift = -1 if border in ('up', 'left') else 1
                     shift_axis = self.direction if border in ('left', 'right') else 2
                     contour[:, shift_axis] += shift
 
-                    # Check that borders are connected
+                    # Get main object coords in the area of the interest for speeding up evaluations
                     slices = prototype_to_check.bbox.copy()
                     slices[:, 0] -= margin
                     slices[:, 1] += margin
 
-                    # Get cords in the area of the interest for speeding up evaluations
                     main_object_coords_sliced = main_object_coords[(main_object_coords[:, 0] >= slices[0, 0]) & \
                                                                    (main_object_coords[:, 0] <= slices[0, 1]) & \
                                                                    (main_object_coords[:, 1] >= slices[1, 0]) & \
@@ -504,16 +580,16 @@ class FaultExtractor:
                                                                    (main_object_coords[:, 2] <= slices[2, 1])]
 
                     # Check that the shifted border is inside the main_object area
-                    corrected_contour_threshold = min(contour_threshold, len(contour)//2)
+                    corrected_border_threshold = min(border_threshold, len(contour)//2)
 
                     if self._is_contour_inside(contour, main_object_coords_sliced,
-                                               contour_threshold=corrected_contour_threshold):
+                                               border_threshold=corrected_border_threshold):
                         close_borders_counter += 1
 
                     if close_borders_counter >= 2:
                         break
 
-                # If objects have more than 2 closed borders then they are parts of the same prototype
+                # If objects have more than 2 closed borders then they are parts of the same prototype -> merge them
                 if close_borders_counter >= 2:
                     prototype_2.concat(prototype_1)
                     self.prototypes[prototype_2_idx] = prototype_2
@@ -529,13 +605,35 @@ class FaultExtractor:
             **filtering_kwargs):
         """ Recommended full extracting procedure.
 
+        The procedure scheme is:
+            - extract prototypes from point cloud;
+            - filter too small prototypes (for speed up);
+            - concat connected prototypes (concat by depth axis, concat by self.direction axis) concat_iters times
+            with changed `intersection_ratio_threshold`;
+            - filter too small prototypes (for speed up);
+            - concat embedded prototypes;
+            - filter all unsuitable prototypes
+
         Parameters
         ----------
+        concat_iters : int
+            Maximal amount of connected component concatenation operations which are include concat along
+            the depth and `self.direction` axes. 
         intersection_ratio_threshold : float
-            Prototypes neighboring borders intersection ratio to decide that prototypes can be connected.
-            Note, that it is changed decrementally.
+            Prototype borders intersection ratio to decide that prototypes can be connected.
+            Note, it is decrementally changed.
         min_intersection_ratio_threshold : float
             Minimal preferred value of `intersection_ratio_threshold`.
+        filtering_kwargs
+            kwargs for the `.filter_prototypes` method.
+            This kwargs are applied for filtration after full extraction procedure.
+
+        Returns
+        -------
+        prototypes: list of the FaultPrototype instances
+            Resulting prototypes.
+        stats : dict
+            Amount of prototypes after each proceeding. Helpful for debug.
         """
         stats = {}
         # Extract prototypes from data
@@ -587,6 +685,15 @@ class FaultExtractor:
         return self.prototypes, stats
 
     def filter_prototypes(self, min_height=40, min_width=20, min_n_points=100):
+        """ Filer out unsuitable prototypes.
+        
+        min_height : int
+            Minimal preferred prototype height (length along the depth axis).
+        min_width : int
+            Minimal preferred prototype width (length along the `self.direction` axis).
+        min_n_points : int
+            Minimal preferred points amount.
+        """
         filtered_prototypes = []
 
         for prototype in self.prototypes:
@@ -604,9 +711,26 @@ class FaultExtractor:
 
 
 class FaultPrototype:
-    """ ..!!.. """
+    """ Class for faults prototypes. Provides a necessary API for convenient prototype extraction process. """
     def __init__(self, coords, direction, last_slide_idx=None, last_component=None, last_component_bbox=None):
-        """..!!.."""
+        """ Fault prototype initialization.
+
+        Note, last_* parameters are preferred for prototype extraction and are optional:
+        they are used for finding closest components on next slides.
+        
+        Parameters
+        ----------
+        coords : np.ndarray of (N, 3) shape
+            Prototype coordinates.
+        direction : {0, 1}
+            Direction along which the prototype is extracted (the same as prediction direction).
+        last_slide_idx : int, optional
+            Index of the slide from which the last added component was extracted.
+        last_component : np.ndarray of (N, 3) shape
+            Coordinates of the last added component.
+        last_component_bbox : np.ndarray of (3, 2) shape
+            Bounding box of the `last_component`.
+        """
         self.coords = coords
         self.direction = direction
 
@@ -621,7 +745,7 @@ class FaultPrototype:
 
     @property
     def bbox(self):
-        """..!!.."""
+        """ Bounding box. """
         if self._bbox is None:
             self._bbox = np.column_stack([np.min(self.coords, axis=0), np.max(self.coords, axis=0)])
         return self._bbox
@@ -629,31 +753,37 @@ class FaultPrototype:
     # Stats for filtering
     @property
     def height(self):
+        """ Height (length along the depth axis). """
         return self.bbox[-1, 1] - self.bbox[-1, 0]
 
     @property
     def width(self):
+        """ Width (length along the `self.direction` axis). """
         return self.bbox[self.direction, 1] - self.bbox[self.direction, 0]
 
     @property
     def n_points(self):
+        """ Amount of the surface points. """
         return len(self.coords)
 
     # For internal needs
     @property
     def last_slide_idx(self):
+        """ Index of the slide from which the last added component was extracted. """
         if self._last_slide_idx is None:
             self._last_slide_idx = self.coords[:, self.direction].max()
         return self._last_slide_idx
 
     @property
     def last_component(self):
+        """ Coordinates (N, 3) of the last added component. """
         if self._last_component is None:
             self._last_component = self.coords[self.coords[:, self.direction] == self.last_slide_idx]
         return self._last_component
 
     @property
     def last_component_bbox(self):
+        """ Bounding box of the `self.last_component`. """
         if self._last_component_bbox is None:
             self._last_component_bbox = np.column_stack([np.min(self.last_component, axis=0),
                                                          np.max(self.last_component, axis=0)])
@@ -661,14 +791,27 @@ class FaultPrototype:
 
     @property
     def contour(self):
-        """ Contour of 2d projection on axis, orthogonal to self.direction."""
+        """ Contour of 2d projection on axis, orthogonal to self.direction.
+
+        Note, output coordinates, which corresponding to the projection axis are zeros.
+        """
         if self._contour is None:
             projection_axis = 1 - self.direction
             self._contour = find_contour(coords=self.coords, projection_axis=projection_axis)
         return self._contour
 
-    def append(self, coords, coords_bbox, slide_idx=None):
-        """ Append new component (coords) into prototype. """
+    def append(self, coords, bbox, slide_idx=None):
+        """ Append new component into prototype.
+        
+        Parameters
+        ----------
+        coords : np.ndarray of (N, 3) shape
+            Coordinates of the component to add into the prototype.
+        bbox : np.ndarray of (3, 2) shape
+            Bounding box of the added component.
+        slide_idx : int or None
+            The added component slide index.
+        """
         self.coords = np.vstack([self.coords, coords])
 
         self._contour = None
@@ -676,7 +819,7 @@ class FaultPrototype:
 
         self._last_slide_idx = slide_idx
         self._last_component = coords
-        self._last_component_bbox = coords_bbox
+        self._last_component_bbox = bbox
 
         self._bbox = self._concat_bbox(self._last_component_bbox)
 
@@ -694,7 +837,7 @@ class FaultPrototype:
         self._last_component_bbox = None
 
     def _concat_bbox(self, other_bbox):
-        """..!!.."""
+        """ Concat bboxes of two objects into one. """
         bbox = np.empty((3, 2), np.int32)
         bbox[:, 0] = np.min((self.bbox[:, 0], other_bbox[:, 0]), axis=0)
         bbox[:, 1] = np.max((self.bbox[:, 1], other_bbox[:, 1]), axis=0)
@@ -703,16 +846,19 @@ class FaultPrototype:
     def _separate_objects(self, coords, axis):
         """ Separate coords into different object coords depend on their connectedness by axis.
 
-        After axis-wise split we can have the situation when splitted part has more than one connected component.
-        This method split disconnected parts into different prototypes.
+        After split we can have the situation when splitted part has more than one connected component.
+        This method separate disconnected parts into different prototypes.
         """
+        # Get coordinates along the axis
         unique_direction_coords = np.unique(coords[:, axis])
+
         # Slides distance more than 1 -> different objects
         split_indices = np.nonzero(unique_direction_coords[1:] - unique_direction_coords[:-1] > 1)[0]
 
         if len(split_indices) == 0:
             return [FaultPrototype(coords=coords, direction=self.direction)]
 
+        # Separate disconnected objects and create new prototypes instances
         start_indices = unique_direction_coords[split_indices + 1]
         start_indices = np.insert(start_indices, 0, 0)
 
@@ -729,14 +875,24 @@ class FaultPrototype:
         return prototypes
 
     def split(self, split_indices, axis=-1):
-        """ Axis-wise prototypes split by threshold. """
-        axis_for_objects_separating = self.direction if axis in (-1, 2) else 2
+        """ Axis-wise prototypes split by indices.
+        
+        Returns
+        -------
+        prototype : `~.FaultPrototype` instance
+            The most closest prototype to the splitted.
+        new_prototypes : list of `~.FaultPrototype` instances
+            Prototypes created from disconnected objects.
+        """
         new_prototypes = []
 
+        # No splitting applied
         if (split_indices[0] is None) and (split_indices[1] is None):
             return self, new_prototypes
 
-        # Cut upper part
+        axis_for_objects_separating = self.direction if axis in (-1, 2) else 2
+
+        # Cut upper part and separate disconnected objects
         if (split_indices[0] is not None) and (np.min(self.coords[:, axis]) < split_indices[0] < np.max(self.coords[:, axis])):
             coords_outer = self.coords[self.coords[:, axis] < split_indices[0]]
             self.coords = self.coords[self.coords[:, axis] >= split_indices[0]]
@@ -744,7 +900,7 @@ class FaultPrototype:
             if len(coords_outer) > 0:
                 new_prototypes.extend(self._separate_objects(coords_outer, axis=axis_for_objects_separating))
 
-        # Cut lower part
+        # Cut lower part and separate disconnected objects
         if (split_indices[1] is not None) and (np.min(self.coords[:, axis]) < split_indices[1] < np.max(self.coords[:, axis])):
             coords_outer = self.coords[self.coords[:, axis] > split_indices[1]]
             self.coords = self.coords[self.coords[:, axis] <= split_indices[1]]
@@ -755,12 +911,20 @@ class FaultPrototype:
         new_prototypes.extend(self._separate_objects(self.coords, axis=axis_for_objects_separating))
         return new_prototypes[-1], new_prototypes[:-1]
 
-    def get_borders(self, border, projection_axis):
+    def get_border(self, border, projection_axis):
         """ Get contour border.
 
         Parameters
         ----------
         border : {'up', 'down', 'left', 'right'}
+            Which object border to get.
+        projection_axis : {0, 1}
+            Which projection is used to get the 2d contour coordinates.
+
+        Returns
+        -------
+        border : np.ndarray of (N, 3) shape
+            Coordinates of the requested border.
         """
         if border not in self._borders:
             # Delete extra border from contour
