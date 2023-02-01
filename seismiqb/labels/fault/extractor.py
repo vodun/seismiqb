@@ -241,9 +241,9 @@ class FaultExtractor:
              - another correspond to the different component, which is not allowed for merge to the current prototype.
         """
         # Dilate component bbox for detecting close components: component on next slide can be shifted
-        component_bbox[self.orthogonal_direction, 0] = max(0, component_bbox[self.orthogonal_direction, 0] - self.dilation // 2)
-        component_bbox[self.orthogonal_direction, 1] = min(component_bbox[self.orthogonal_direction, 1] + self.dilation // 2,
-                                                           self.shape[self.orthogonal_direction])
+        dilated_bbox = component_bbox[self.orthogonal_direction, :] + (-self.dilation // 2, self.dilation // 2)
+        component_bbox[self.orthogonal_direction, 0] = max(0, dilated_bbox[0])
+        component_bbox[self.orthogonal_direction, 1] = min(dilated_bbox[1], self.shape[self.orthogonal_direction])
 
         min_distance = distances_threshold if distances_threshold is not None else 100
 
@@ -388,14 +388,14 @@ class FaultExtractor:
         if intersection_ratio_threshold is None:
             intersection_ratio_threshold = 0.5 if axis in (2, -1) else 0.9
 
-        overlapping_axis = self.direction if axis in (-1, 2) else 2
-        split_axis = overlapping_axis
+        overlap_axis = self.direction if axis in (-1, 2) else 2
+        split_axis = overlap_axis
 
         # Under the hood, we check borders connectivity (as puzzles)
         borders_to_check = ('up', 'down') if axis in (-1, 2) else ('left', 'right')
 
         # Presort objects by other valuable axis for early stopping
-        sort_axis = overlapping_axis
+        sort_axis = overlap_axis
         prototypes_starts = np.array([prototype.bbox[sort_axis, 0] for prototype in self.prototypes])
         prototypes_order = np.argsort(prototypes_starts)
 
@@ -417,11 +417,11 @@ class FaultExtractor:
                     continue
 
                 # Check that bboxes overlap is enough
-                intersection_threshold = min(prototype_1.bbox[overlapping_axis, 1]-prototype_1.bbox[overlapping_axis, 0],
-                                             prototype_2.bbox[overlapping_axis, 1]-prototype_2.bbox[overlapping_axis, 0])
+                intersection_threshold = min(prototype_1.bbox[overlap_axis, 1]-prototype_1.bbox[overlap_axis, 0],
+                                             prototype_2.bbox[overlap_axis, 1]-prototype_2.bbox[overlap_axis, 0])
                 intersection_threshold *= intersection_ratio_threshold
 
-                intersection_length = adjacent_borders[overlapping_axis][1] - adjacent_borders[overlapping_axis][0]
+                intersection_length = adjacent_borders[overlap_axis][1] - adjacent_borders[overlap_axis][0]
 
                 if intersection_length < intersection_threshold:
                     continue
@@ -625,7 +625,7 @@ class FaultExtractor:
         ----------
         concat_iters : int
             Maximal amount of connected component concatenation operations which are include concat along
-            the depth and `self.direction` axes. 
+            the depth and `self.direction` axes.
         intersection_ratio_threshold : float
             Prototype borders intersection ratio to decide that prototypes can be connected.
             Note, it is decrementally changed.
@@ -693,7 +693,7 @@ class FaultExtractor:
 
     def filter_prototypes(self, min_height=40, min_width=20, min_n_points=100):
         """ Filer out unsuitable prototypes.
-        
+
         min_height : int
             Minimal preferred prototype height (length along the depth axis).
         min_width : int
@@ -707,7 +707,7 @@ class FaultExtractor:
             if (prototype.height >= min_height) and (prototype.width >= min_width) and \
                (prototype.n_points >= min_n_points):
 
-               filtered_prototypes.append(prototype)
+                filtered_prototypes.append(prototype)
 
         return filtered_prototypes
 
@@ -724,7 +724,7 @@ class FaultPrototype:
 
         Note, last_* parameters are preferred for prototype extraction and are optional:
         they are used for finding closest components on next slides.
-        
+
         Parameters
         ----------
         coords : np.ndarray of (N, 3) shape
@@ -809,7 +809,7 @@ class FaultPrototype:
 
     def append(self, coords, bbox, slide_idx=None):
         """ Append new component into prototype.
-        
+
         Parameters
         ----------
         coords : np.ndarray of (N, 3) shape
@@ -883,7 +883,7 @@ class FaultPrototype:
 
     def split(self, split_indices, axis=-1):
         """ Axis-wise prototypes split by indices.
-        
+
         Returns
         -------
         prototype : `~.FaultPrototype` instance
@@ -900,7 +900,9 @@ class FaultPrototype:
         axis_for_objects_separating = self.direction if axis in (-1, 2) else 2
 
         # Cut upper part and separate disconnected objects
-        if (split_indices[0] is not None) and (np.min(self.coords[:, axis]) < split_indices[0] < np.max(self.coords[:, axis])):
+        if (split_indices[0] is not None) and \
+           (np.min(self.coords[:, axis]) < split_indices[0] < np.max(self.coords[:, axis])):
+
             coords_outer = self.coords[self.coords[:, axis] < split_indices[0]]
             self.coords = self.coords[self.coords[:, axis] >= split_indices[0]]
 
@@ -908,7 +910,9 @@ class FaultPrototype:
                 new_prototypes.extend(self._separate_objects(coords_outer, axis=axis_for_objects_separating))
 
         # Cut lower part and separate disconnected objects
-        if (split_indices[1] is not None) and (np.min(self.coords[:, axis]) < split_indices[1] < np.max(self.coords[:, axis])):
+        if (split_indices[1] is not None) and \
+           (np.min(self.coords[:, axis]) < split_indices[1] < np.max(self.coords[:, axis])):
+
             coords_outer = self.coords[self.coords[:, axis] > split_indices[1]]
             self.coords = self.coords[self.coords[:, axis] <= split_indices[1]]
 
@@ -955,7 +959,8 @@ class FaultPrototype:
             if border in ('left', 'right'):
                 border_coords[:, [-1, 1-projection_axis]] = border_coords[:, [1-projection_axis, -1]]
 
-            border_coords = restore_coords_from_projection(coords=self.coords, buffer=border_coords, axis=projection_axis)
+            border_coords = restore_coords_from_projection(coords=self.coords, buffer=border_coords,
+                                                           axis=projection_axis)
             self._borders[border] = border_coords
 
         return self._borders[border]

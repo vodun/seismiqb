@@ -6,9 +6,9 @@ import cv2 as cv
 # Coordinates operations
 def dilate_coords(coords, dilate=3, axis=0, max_value=None):
     """ Dilate coordinates with (dilate, 1) structure along the given axis.
-    
+
     Note, the function returns unique and sorted coords.
-    
+
     Parameters
     ----------
     coords : np.ndarray of (N, 3) shape
@@ -39,6 +39,8 @@ def dilate_coords(coords, dilate=3, axis=0, max_value=None):
 def thin_coords(coords, values):
     """ Thin coordinates depend on values - choose coords corresponding to max values for each coordinate along
     the last axis (depth). Rough approximation of `find_peaks`.
+
+    Under the hood, this function is a groupby max along the depth axis.
 
     Parameters
     ----------
@@ -88,6 +90,8 @@ def thin_coords(coords, values):
 def bboxes_intersected(bbox_1, bbox_2, axes=(0, 1, 2)):
     """ Check bboxes intersection on preferred axes.
 
+    Bboxes are intersected if they have at least 1 overlapping point.
+
     Parameters
     ----------
     bbox_1, bbox_2 : np.ndarrays of (3, 2) shape.
@@ -96,15 +100,17 @@ def bboxes_intersected(bbox_1, bbox_2, axes=(0, 1, 2)):
         Axes to check bboxes intersection.
     """
     for axis in axes:
-        overlap_size = min(bbox_1[axis, 1], bbox_2[axis, 1]) - max(bbox_1[axis, 0], bbox_2[axis, 0])
+        overlap_size = min(bbox_1[axis, 1], bbox_2[axis, 1]) - max(bbox_1[axis, 0], bbox_2[axis, 0]) + 1
 
-        if overlap_size < 0:
+        if overlap_size < 1:
             return False
     return True
 
 @njit
 def bboxes_adjacent(bbox_1, bbox_2):
     """ Bboxes intersection or adjacency ranges if bboxes are intersected/adjacent.
+
+    Bboxes are adjacent if they are distant not more than on 1 point.
 
     Parameters
     ----------
@@ -126,7 +132,7 @@ def bboxes_adjacent(bbox_1, bbox_2):
 
 def bboxes_embedded(bbox_1, bbox_2, margin=3):
     """ Check that one bbox is embedded in another.
-    
+
     Parameters
     ----------
     bbox_1, bbox_2 : np.ndarrays of (3, 2) shape.
@@ -150,7 +156,7 @@ def bboxes_embedded(bbox_1, bbox_2, margin=3):
 @njit
 def min_max_depthwise_distances(coords_1, coords_2, depths_ranges, step, axis, max_threshold=None):
     """ Find approximate minimal and maximal axis-wise central distances between coordinates.
-    
+
     Parameters
     ----------
     coords_1, coords_2 : np.ndarrays of (N, 3) shape
