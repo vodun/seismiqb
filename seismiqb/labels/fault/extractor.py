@@ -656,7 +656,7 @@ class FaultExtractor:
 
         stats['after_connected_concat'] = []
 
-        for _ in range(concat_iters):
+        for _ in Notifier('t')(concat_iters):
             # Concat by depth axis
             _ = self.concat_connected_prototypes(intersection_ratio_threshold=intersection_ratio_threshold,
                                                  axis=-1)
