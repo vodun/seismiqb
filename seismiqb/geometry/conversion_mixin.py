@@ -218,6 +218,9 @@ class ConversionMixin:
             progress_bar.close()
 
         # Save meta to the same file. If quantized, replace stats with the correct ones
+        from .base import Geometry
+        geometry = Geometry.new(path)
+
         if store_meta:
             self.dump_meta(path=path)
 
@@ -225,11 +228,8 @@ class ConversionMixin:
                 quantization_parameters['quantization_ranges'] = quantization_parameters['ranges']
                 for key in ['quantization_ranges', 'center', 'clip', 'quantization_error',
                             'min', 'max', 'mean', 'std', 'quantile_values']:
-                    self.dump_meta_item(key=f'meta/{key}', value=quantization_parameters[key],
-                                        path=path, overwrite=True)
-
-        from .base import Geometry
-        return Geometry.new(path)
+                    geometry.meta_storage.store_item(key=key, value=quantization_parameters[key], overwrite=True)
+        return geometry
 
     def repack_segy(self, path=None, format=8, transform=None, quantization_parameters=None,
                     chunk_size=25_000, max_workers=4, pbar='t', store_meta=True, overwrite=True):
@@ -262,7 +262,7 @@ class ConversionMixin:
             If bool, then whether to display progress bar.
             If str, then type of progress bar to display: `'t'` for textual, `'n'` for widget.
         overwrite : bool
-            Whether to overwrite existing `path` or raise an exception. Also remove `meta` files.
+            Whether to overwrite existing `path` or raise an exception. Also removes `meta` files.
         """
         if format == 8 and transform is None:
             quantization_parameters = quantization_parameters or self.compute_quantization_parameters()
@@ -281,8 +281,7 @@ class ConversionMixin:
 
         quantization_parameters['quantization_ranges'] = quantization_parameters['ranges']
         for key in ['quantization_ranges', 'center', 'clip', 'quantization_error']:
-            geometry.dump_meta_item(key=f'meta/{key}', value=quantization_parameters[key],
-                                    overwrite=True)
+            geometry.meta_storage.store_item(key=key, value=quantization_parameters[key], overwrite=True)
         return geometry
 
 
@@ -389,7 +388,7 @@ class ConversionMixin:
 
         # Spec: use `self` as `array_like` to infer shapes
         spec = self.make_export_spec(self)
-        spec.sample_rate /= factor
+        spec.sample_interval /= factor
         spec.samples = np.arange(self.depth * factor, dtype=np.int32)
         spec.format = 8 if quantize else 5
 
@@ -410,6 +409,5 @@ class ConversionMixin:
         if quantize and not self.quantized:
             quantization_parameters['quantization_ranges'] = quantization_parameters['ranges']
             for key in ['quantization_ranges', 'center', 'clip', 'quantization_error']:
-                geometry.dump_meta_item(key=f'meta/{key}', value=quantization_parameters[key],
-                                        overwrite=True)
+                geometry.meta_storage.store_item(key=key, value=quantization_parameters[key], overwrite=True)
         return geometry

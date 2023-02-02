@@ -21,14 +21,16 @@ class GeometryHDF5(Geometry):
     """
     FILE_OPENER = h5py.File
 
-    def init(self, path, mode='r', **kwargs):
+    def init(self, path, mode='r+', **kwargs):
         """ Init for HDF5 geometry. The sequence of actions:
             - open file handler
             - check available projections in the file
             - add attributes from file: meta and info about shapes/dtypes.
+
+        Default mode is r+ to allow other file opens for both read/write.
         """
         # Open the file
-        self.file = self.FILE_OPENER(path, mode)
+        self.file = self.FILE_OPENER(path, mode, swmr=True)
 
         # Check available projections
         self.available_axis = [axis for axis, name in self.PROJECTION_NAMES.items()
@@ -65,10 +67,11 @@ class GeometryHDF5(Geometry):
         self.quantized = (projection.dtype == np.int8)
 
         # Get from meta / set defaults
-        required_attributes = self.PRESERVED + self.PRESERVED_LAZY
+        required_attributes = self.PRESERVED + self.PRESERVED_LAZY + self.PRESERVED_LAZY_CACHED
+        meta_exists_and_has_attributes = self.meta_storage.exists and self.meta_storage.has_items(required_attributes)
 
-        if self.meta_exists and self.has_meta_items(required_attributes):
-            self.load_meta(keys=self.PRESERVED + self.PRESERVED_LAZY)
+        if meta_exists_and_has_attributes:
+            self.load_meta(keys=self.PRESERVED)
             self.has_stats = True
         else:
             self.set_default_index_attributes(**kwargs)
@@ -77,7 +80,7 @@ class GeometryHDF5(Geometry):
     def set_default_index_attributes(self, **kwargs):
         """ Set default values for seismic attributes. """
         self.n_traces = np.prod(self.shape[:2])
-        self.delay, self.sample_rate = 0.0, 1.0
+        self.delay, self.sample_interval, self.sample_rate = 0.0, 1.0, 1000
         self.compute_dead_traces()
         for key, value in kwargs.items():
             setattr(self, key, value)

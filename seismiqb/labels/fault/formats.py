@@ -9,7 +9,7 @@ import pandas as pd
 from sklearn.decomposition import PCA
 
 from .postprocessing import split_array
-from ...utils import CharismaMixin, make_interior_points_mask
+from ...utils import CharismaMixin, SQBStorage, make_interior_points_mask
 
 class FaultSticksMixin(CharismaMixin):
     """ Mixin to load, process and dump FaultSticks files. """
@@ -53,8 +53,6 @@ class FaultSticksMixin(CharismaMixin):
         pandas.Series or (pandas.Series, int)
             Sequence of stick nodes and (optionally) direction of the fault.
         """
-        if len(df) == 0:
-            raise ValueError('Empty DataFrame (possibly wrong coordinates).')
         col, direction = None, None
 
         ilines_diff = sum(df['INLINE_3D'][1:].values - df['INLINE_3D'][:-1].values == 0)
@@ -136,6 +134,10 @@ class FaultSticksMixin(CharismaMixin):
             mask = make_interior_points_mask(points, self.field_reference.shape)
             df = df.iloc[mask]
 
+        if len(df) == 0:
+            self._sticks = None
+            return
+
         sticks, direction = self.split_df_into_sticks(df, return_direction=True)
         if remove_broken_sticks:
             sticks = self.remove_broken_sticks(sticks)
@@ -159,6 +161,7 @@ class FaultSticksMixin(CharismaMixin):
                 stick[:, direction] = stick[0, direction]
 
         self.direction = direction
+        self.stick_orientation = 2
 
     def dump_fault_sticks(self, path):
         """ Dump fault sticks into FaultSticks format. """
@@ -287,6 +290,28 @@ class FaultSerializationMixin:
                 kwargs[item] = getattr(self, item)
 
         np.savez(path, **kwargs)
+
+
+    def load_sqb(self, path):
+        """ Load fault from SQB file. """
+        storage = SQBStorage(path)
+        if storage.get('type') != 'fault':
+            raise TypeError('SQB storage is not marked as fault!')
+
+        self.from_dict({key : storage[key] for key in ['points', 'nodes', 'simplices', 'sticks']})
+        self.direction = storage['direction']
+
+    def dump_sqb(self, path):
+        """ Dump fault to SQB file. """
+        storage = SQBStorage(path)
+        storage.update({
+            'type': 'fault',
+            'points': self.points,
+            'nodes': self.nodes,
+            'simplices': self.simplices,
+            'sticks': self.sticks,
+            'direction': self.direction
+        })
 
 
     def _sticks_to_labeled_array(self, sticks):

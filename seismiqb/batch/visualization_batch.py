@@ -1,5 +1,7 @@
 """ A mixin with batch visualizations. """
 from collections import defaultdict
+import numpy as np
+from scipy.fft import rfftfreq, rfft
 
 from ..plotters import plot
 from ..utils import DelegatingList, to_list
@@ -355,3 +357,68 @@ class VisualizationMixin:
             config['ncols'] = len(components)
 
         return plot(**config)
+
+    def plot_frequencies(self, indices=(0, ), src='images', trace_indices=((0, 0), (-1, -1)), axis=2,
+                         sample_interval=None, displayed_name=None, **kwargs):
+        """ Show Fourier frequency spectrum of a component. X-axis of the plot corresponds to frequency
+        values in Hz while y-axis stands for amplitudes of specific frequencies.
+
+        The method selects for the analysis specific traces and batch items. Traces are 1d slices
+        taken along the chosen axis.
+
+        Uses Hz as x-axis units.
+
+        Parameters
+        ----------
+        indices : int or sequence of int
+            Takes items with these indices to demonstrate the spectrum.
+        src : str
+            The component, which spectrum is shown.
+        trace_indices : sequence of tuples
+            Uses traces with these indices.
+        axis : int
+            Axis along which traces are taken. By default set to 2. This value correpsonds
+            to depth, which is the most natural direction to research the spectrum.
+        sample_interval : float or None
+            Inverse of the sampling rate. Measured in seconds. The same argument that `scipy.fftpack.fftfreq`
+            uses under the name of `d`. Specifies units of the x-axis of the spectrum plot. If set to
+            None, `show_frequencies` uses Hz (`1000 / (sample rate in ms)`). In this way, x-axis units correspond
+            to units of `lowcut`/ `highcut` arguments of `SeismicCropBatch.bandpass_filter`.
+        displayed_name : str or None
+            Whenever supplied, assumes that traces are taken from field with this name.
+        kwargs : dict
+            Arguments for customizing plot. For instance, removing/changing labels and titles.
+        """
+        indices = indices if isinstance(indices, (list, tuple)) else (indices, )
+        insert_index = len(trace_indices[0]) if axis == -1 else axis
+        plot_data = []
+        plot_label = []
+
+        # Iterate over item-indices and traces, gather info about spectrum.
+        for idx in indices:
+            field = self.get(self.indices[idx], 'fields')
+            sample_interval = sample_interval or field.sample_interval
+
+            # Try to get the name of a field
+            if displayed_name is None:
+                displayed_name = field.displayed_name
+
+            data = self.get(self.indices[idx], src)
+            frequencies = rfftfreq(data.shape[axis], sample_interval)   # `rfftfreq` is responsible for choosing units
+                                                                   # of x-axis and expects `sample_spacing` in seconds
+
+            for trace_idx in trace_indices:
+                trace_idx_ = tuple(np.insert(np.array(trace_idx, dtype=np.object_), insert_index, slice(0, None)))
+                amplitudes = rfft(data[trace_idx_])
+                plot_data.append((frequencies, np.abs(amplitudes)))
+                plot_label.append(f'FIELD: {displayed_name}   IDX: {idx}   TRACE: {trace_idx}')
+
+        plot_params = {'title': f'Spectrum of {src}-component',
+                       'label': plot_label,
+                       'xlabel': 'Frequency, Hz',
+                       'ylabel': 'Amplitude'}
+        kwargs = {
+            **plot_params,
+            **kwargs
+        }
+        return plot(plot_data, mode='curve', **kwargs)

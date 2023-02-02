@@ -212,7 +212,7 @@ class Field(CharismaMixin, VisualizationMixin):
             path.field = self
             return [path]
 
-        faults = constructor_class.load(path, self, interpolate, **kwargs)
+        faults = constructor_class.load(path, self, interpolate=interpolate, **kwargs)
         return faults
 
     def _load_geometries(self, paths, constructor_class=Geometry.new, **kwargs):
@@ -320,7 +320,8 @@ class Field(CharismaMixin, VisualizationMixin):
         # Add mask of each component to the buffer
         for i, label in enumerate(labels, start=1):
             alpha = 1 if enumerate_labels is False else i
-            label.add_to_mask(buffer, locations=locations, width=width, axis=orientation, sparse=sparse, alpha=alpha)
+            label.add_to_mask(buffer, locations=locations, width=width, axis=orientation,
+                              sparse=sparse, alpha=alpha, **kwargs)
         return buffer
 
 
@@ -450,11 +451,11 @@ class Field(CharismaMixin, VisualizationMixin):
         self.attached_instances.reset_cache()
 
     @property
-    def cache_size(self):
-        """ Total size of cached data. """
-        size = self.geometry.cache_size
-        size += sum(self.attached_instances.cache_size)
-        return size
+    def cache_nbytes(self):
+        """ Total nbytes of cached data. """
+        nbytes = self.geometry.cache_nbytes
+        nbytes += sum(self.attached_instances.cache_nbytes)
+        return nbytes
 
     # Facies
     def evaluate_facies(self, src_horizons, src_true=None, src_pred=None, metrics='dice'):
