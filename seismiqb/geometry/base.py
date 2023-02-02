@@ -265,6 +265,8 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMix
             buffer = slide
         return slide
 
+    take = load_slide # for compatibility with numpy API
+
     @lru_cache(128)
     def load_slide_cached(self, index, axis=0, limits=None):
         """ Cached version of :meth:`load_slide_native`. """
