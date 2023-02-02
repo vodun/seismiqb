@@ -560,7 +560,7 @@ class AttributesMixin:
             method = self.ATTRIBUTE_TO_METHOD[src_name]
             data = getattr(self, method)(use_cache=use_cache, enlarge=enlarge, **kwargs)
         else:
-            data = self.get_property(src_name, enlarge=enlarge, **kwargs)
+            data = self.get_property(src_name, use_cache=use_cache, enlarge=enlarge, **kwargs)
 
         # TODO: Someday, we would need to re-write attribute loading methods
         # so they use locations not to crop the loaded result, but to load attribute only at location.
@@ -576,11 +576,11 @@ class AttributesMixin:
 
 
     # Specific attributes loading
-    @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
+    @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=False)
     @transformable
     def get_property(self, src, **_):
         """ Load a desired instance attribute. Decorated to allow additional postprocessing steps. """
-        data = copy(getattr(self, src, None))
+        data = getattr(self, src, None)
         if data is None:
             aliases = list(self.ALIAS_TO_ATTRIBUTE.keys())
             raise ValueError(f'Unknown `src` {src}. Expected a matrix-property or one of {aliases}.')

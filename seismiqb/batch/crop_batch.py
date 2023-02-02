@@ -448,16 +448,6 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         label_index = self.get(ix, 'generated')[1]
         src = src.replace('*', str(label_index))
 
-        src_labels = src[:src.find(':')]
-        label = getattr(field, src_labels)[label_index]
-        label_name = self.get(ix, 'label_names')
-        if label.short_name != label_name:
-            msg = f"Name `{label.short_name}` of the label loaded by index {label_index} "\
-                  f"from {src_labels} does not match label name {label_name} from batch."\
-                  f"This might have happened due to items order change in {src_labels} "\
-                  f"in between sampler creation and `make_locations` call."
-            raise ValueError(msg)
-
         result = field.load_attribute(src=src, location=location, atleast_3d=atleast_3d, dtype=dtype, **kwargs)
         return result
 

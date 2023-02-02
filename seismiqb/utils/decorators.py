@@ -86,7 +86,7 @@ def transformable(method):
                 atleast_3d=False, n_components=None, **kwargs):
         result = method(instance, *args, **kwargs)
 
-        if dtype and hasattr(instance, 'matrix_set_dtype'):
+        if dtype and result.dtype != dtype and hasattr(instance, 'matrix_set_dtype'):
             result = instance.matrix_set_dtype(result, dtype=dtype)
 
         if on_full and hasattr(instance, 'matrix_put_on_full'):
