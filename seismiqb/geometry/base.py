@@ -506,9 +506,7 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetricM
 
         Parameters
         ----------
-        dilate : bool
-            Whether to apply dilation to the matrix.
-        dilation_iterations : int
+        dilation_iterations : int, optional
             Number of dilation iterations to apply.
         """
         return self.dead_traces_matrix.copy()
@@ -520,9 +518,7 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetricM
 
         Parameters
         ----------
-        dilate : bool
-            Whether to apply dilation to the matrix.
-        dilation_iterations : int
+        dilation_iterations : int, optional
             Number of dilation iterations to apply.
         """
         return 1 - self.dead_traces_matrix
@@ -534,7 +530,7 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetricM
         frequency = frequency if isinstance(frequency, (tuple, list)) else (frequency, frequency)
 
         # Prepare dilated `dead_traces_matrix`
-        dead_traces_matrix = self.get_dead_traces_matrix(dilate=True, dilation_iterations=margin)
+        dead_traces_matrix = self.get_dead_traces_matrix(dilation_iterations=margin)
 
         if margin:
             dead_traces_matrix[:+margin, :] = 1
