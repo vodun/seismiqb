@@ -1,7 +1,6 @@
 """ Mixin with computed along horizon geological attributes. """
 # pylint: disable=too-many-statements
 from copy import copy
-from functools import wraps
 from ast import literal_eval
 
 from math import isnan
