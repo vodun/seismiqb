@@ -63,7 +63,7 @@ common_params = {
 TESTS_NOTEBOOKS_DIR = os.path.join(BASE_DIR, 'tests/notebooks/') # path to the directory with tests notebooks
 # TUTORIALS_DIR = os.path.join(BASE_DIR, 'tutorials/')             # path to the directory with tutorials
 
-geometry_formats = ['sgy', 'hdf5', 'qhdf5']
+geometry_formats = ['sgy', 'qsgy', 'hdf5', 'qhdf5']
 notebooks_params = (
     # Tests configurations:
     # (notebook_path, {'inputs': dict (optional), 'outputs': str or list of str (optional)})
@@ -90,6 +90,9 @@ notebooks_params = (
     (os.path.join(TESTS_NOTEBOOKS_DIR, 'fault_test_02_base.ipynb'), {}),
     (os.path.join(TESTS_NOTEBOOKS_DIR, 'fault_test_03_sticks_processing.ipynb'), {}),
     # (os.path.join(TESTS_NOTEBOOKS_DIR, 'fault_test_04_mask_creation.ipynb'), {}), # TODO: re-enable after updating BF
+
+    # Cache test
+    (os.path.join(TESTS_NOTEBOOKS_DIR, 'cache_test.ipynb'), {}),
 
     # TODO: add tutorials
     # (os.path.join(TUTORIALS_DIR, '01_Geometry_part_1.ipynb'), {})
