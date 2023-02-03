@@ -81,13 +81,13 @@ class OptimizationMixin:
             reflectivity = reflectivity.reshape(1, 1, -1)
             impulse = impulse.reshape(1, 1, -1)
 
-            return torch.squeeze(F.conv1d(reflectivity, impulse, padding='same'))
+            return F.conv1d(reflectivity, impulse, padding='same').reshape(-1)
 
         # Case of numpy-arrays.
         return np.convolve(reflectivity, impulse, mode='same')
 
     @staticmethod
-    def move_to_device(array, device='cuda:0'):
+    def to_device(array, device='cuda:0'):
         """ Move array/torch tensor to CPU/GPU.
         """
         device = device.lower()
@@ -154,8 +154,8 @@ class OptimizationMixin:
 
     @classmethod   # This one can also be a method.
     def optimize_well_time(cls, start_well_time, seismic_time, seismic_curve, impedance_log, impulse,
-                           dt_bounds_multipliers=(.95, 1.05), t0_bounds_addition=(-1e-4, 1e-4),
-                           learning_rate=5e-9, n_iters=5000, device='cuda:0'):
+                           dt_bounds_multipliers=(.95, 1.05), t0_bounds_addition=(-1e-4, 1e-4), n_iters=5000,
+                           device='cuda:0', optimizer='Adam', optimizer_kwargs=None):
         """ Improve seismic tie by optimising well-time ticks. For the procedure consider the impulse fixed.
         """
         # Make start point of dt's.
@@ -165,30 +165,34 @@ class OptimizationMixin:
         bounds_numpy = [start_x0_dt * dt_bounds_multipliers[0], start_x0_dt * dt_bounds_multipliers[1]]
         bounds_numpy[0][0] = start_x0_dt[0] + t0_bounds_addition[0]
         bounds_numpy[1][0] = start_x0_dt[0] + t0_bounds_addition[1]
-        bounds = [cls.move_to_device(data, device) for data in bounds_numpy]
+        bounds = [cls.to_device(data, device) for data in bounds_numpy]
 
         # Move arrays to needed device.
-        impulse, seismic_curve, impedance_log, seismic_time = [cls.move_to_device(array, device=device)
+        impulse, seismic_curve, impedance_log, seismic_time = [cls.to_device(array, device=device)
                                                                for array in (impulse, seismic_curve,
                                                                              impedance_log, seismic_time)]
 
         # Init variables of the model using chosen start point.
-        optimized = torch.tensor(start_x0_dt, device=device, dtype=torch.float32, requires_grad=True)
+        variables = torch.tensor(start_x0_dt, device=device, dtype=torch.float32, requires_grad=True)
 
-        # Zeros-vector for applying constraint.
-        zeros = torch.zeros_like(optimized)
+        # Select and set up the optimizer.
+        optimizer = optimizer or 'Adam'
+        if isinstance(optimizer, str):
+            optimizer = getattr(torch.optim, optimizer)
+
+        optimizer_kwargs = optimizer_kwargs or {}
+        optimizer = optimizer((variables, ), **optimizer_kwargs)
 
         # Run train loop.
         loss_history = []
         for _ in range(n_iters):
             # Reset grads.
-            if optimized.grad is not None:
-                optimized.grad.zero_()
+            optimizer.zero_grad()
 
-            # NOTE: only well_time needs to be recalculated - these are the time ticks where impedance-values are known.
-            # Impedance values and seismic time ticks do not change.
+            # NOTE: only well_time needs to be recalculated - these are the time ticks where impedance-values
+            # are known. Impedance values and seismic time ticks do not change.
             # NOTE: implement topK later.
-            current_well_time = torch.cumsum(optimized, dim=0)
+            current_well_time = torch.cumsum(variables, dim=0)
             loss = -cls.measure_seismic_tie_quality(seismic_time, current_well_time, seismic_curve,
                                                     impedance_log, impulse, metric='corr')
 
@@ -196,16 +200,14 @@ class OptimizationMixin:
             loss_history.append(float(loss.detach().cpu().numpy()))
 
             # Update variables.
-            # NOTE: instead of manual update, use torch optimizers.
-            with torch.no_grad():
-                optimized.sub_(optimized.grad, alpha=learning_rate)
+            optimizer.step()
 
-                # Apply constraints.
-                optimized.sub_(torch.maximum(optimized - bounds[1], zeros))
-                optimized.add_(torch.maximum(bounds[0] - optimized, zeros))
+            # Apply constraints.
+            with torch.no_grad():
+                variables.clamp_(bounds[0], bounds[1])
 
         # Fetch resulting well_time and loss_history.
-        final_well_time = np.cumsum(cls.move_to_device(optimized, device='numpy'))
+        final_well_time = np.cumsum(cls.to_device(variables, device='numpy'))
         return final_well_time, loss_history
 
 
@@ -214,10 +216,10 @@ def symmetric_wavelet_estimation(seismic_trace, half_length=31, normalize=True):
     """ Commonly used procedure for wavelet-estimation. Resulting wavelet has length of
     2 * half_length - 1 and has its peak in the center of the range.
     """
-    power_spectrum = np.abs(np.fft.fft(seismic_trace))
+    power_spectrum = np.abs(np.fft.rfft(seismic_trace))
 
     # Create symmetric wavelet in time.
-    wavelet = np.real(np.fft.ifft(power_spectrum)[:half_length])
+    wavelet = np.real(np.fft.irfft(power_spectrum)[:half_length])
     wavelet = np.concatenate((np.flipud(wavelet[1:]), wavelet), axis=0)
     if normalize:
         wavelet = wavelet / np.max(wavelet)
@@ -241,7 +243,7 @@ def compute_cross_correlation_1d(signal, lag_size=31):
 
 @njit
 def compute_cross_correlation_3d(data, lag_size=31):
-    """ Vectorized cross correlation of 3d-array along the last axis.
+    """ Vross correlation of 3d-array along the last axis.
     """
     cross = np.zeros(data.shape[:2] + (2*lag_size + 1, ), dtype=np.float32)
     for i in range(cross.shape[0]):
@@ -254,8 +256,7 @@ def compute_frequency_amplitides(data):
     """ Calculate Fourier-amplitudes of real data in the last dimension. If the data
     is not 1d, take average over the signals.
     """
-    fourier = np.fft.rfft  # We work with purely real signals; use real fourier transform.
-    amplitudes = np.abs(fourier(data))
+    amplitudes = np.abs(np.fft.rfft(data))
     if amplitudes.ndim > 1:
         amplitudes = np.mean(amplitudes, axis=tuple(range(amplitudes.ndim - 1)))
 
@@ -265,8 +266,7 @@ def compute_frequency_phases(data):
     """ Calculate Fourier-phases of real data in the last dimension. If the data is not 1d,
     take average over the signals.
     """
-    fourier = np.fft.rfft  # We work with purely real signals; use real fourier transform.
-    phases = np.angle(fourier(data))
+    phases = np.angle(np.fft.rfft(data))
     if phases.ndim > 1:
         phases = np.mean(phases, axis=tuple(range(phases.ndim-1)))
 
@@ -278,8 +278,6 @@ def estimate_wavelet_from_crosscor(seismic_data=None, amplitudes=None, phases=No
     """ Estimate wavelet of length=2 * lag_size [or len(amplitudes)] (+1) from either raw seismic data or precomputed
     amplitudes.
     """
-    inverse_fourier = np.fft.irfft
-
     if amplitudes is None:
         # Get amplitudes spectrum estimation neglecting the phase.
         crosscorr_function = compute_cross_correlation_3d if seismic_data.ndim > 1 else compute_cross_correlation_1d
@@ -295,7 +293,7 @@ def estimate_wavelet_from_crosscor(seismic_data=None, amplitudes=None, phases=No
         phases = np.zeros_like(amplitudes) if t_shift is None else t_shift * np.arange(0, len(amplitudes))
 
     # Assemble the wavelet using the power spectrum and constructed phases.
-    wavelet = inverse_fourier(amplitudes * np.exp(1j * phases), n=wavelet_length)
+    wavelet = np.fft.irfft(amplitudes * np.exp(1j * phases), n=wavelet_length)
     if normalize:
         wavelet = wavelet / np.max(wavelet)
 
