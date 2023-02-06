@@ -87,19 +87,6 @@ class OptimizationMixin:
         return np.convolve(reflectivity, impulse, mode='same')
 
     @staticmethod
-    def to_device(array, device='cuda:0'):
-        """ Move array/torch tensor to CPU/GPU.
-        """
-        device = device.lower()
-        if 'cpu' in device:
-            result = array.detach().cpu()
-        elif 'np' in device or 'numpy' in device:
-            result = array.detach().cpu().numpy()
-        else:
-            result = torch.tensor(array, device=device, dtype=torch.float32)
-        return result
-
-    @staticmethod
     def torch_correlation(x, y):
         """
         """
@@ -165,10 +152,11 @@ class OptimizationMixin:
         bounds_numpy = [start_x0_dt * dt_bounds_multipliers[0], start_x0_dt * dt_bounds_multipliers[1]]
         bounds_numpy[0][0] = start_x0_dt[0] + t0_bounds_addition[0]
         bounds_numpy[1][0] = start_x0_dt[0] + t0_bounds_addition[1]
-        bounds = [cls.to_device(data, device) for data in bounds_numpy]
+        bounds = [torch.from_numpy(data).to(device, dtype=torch.float32) for data in bounds_numpy]
 
         # Move arrays to needed device.
-        impulse, seismic_curve, impedance_log, seismic_time = [cls.to_device(array, device=device)
+        impulse, seismic_curve, impedance_log, seismic_time = [torch.from_numpy(array).to(device=device,
+                                                                                          dtype=torch.float32)
                                                                for array in (impulse, seismic_curve,
                                                                              impedance_log, seismic_time)]
 
@@ -207,7 +195,7 @@ class OptimizationMixin:
                 variables.clamp_(bounds[0], bounds[1])
 
         # Fetch resulting well_time and loss_history.
-        final_well_time = np.cumsum(cls.to_device(variables, device='numpy'))
+        final_well_time = np.cumsum(variables.detach().cpu().numpy())
         return final_well_time, loss_history
 
 
