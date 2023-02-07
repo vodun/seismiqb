@@ -16,8 +16,9 @@ class OptimizationMixin:
     """ Utilities for optimization of match between seismic data and well logs. """
     @staticmethod
     def get_relevant_seismic_slice(seismic_time, log_time, log_values):
-        """ Get slice of seismic time-ticks, where we can interpolate values
-        of given log.
+        """ Get slice of seismic time-ticks, where we can linearly interpolate values of a given log.
+        That is, all ticks from the resulting slice are bound from left and right with non-nan values of
+        a given log.
         """
         nonnan_indices = np.where(np.isfinite(log_values))[0]
         first, last = nonnan_indices[0], nonnan_indices[-1]
@@ -49,15 +50,6 @@ class OptimizationMixin:
             return sosfiltfilt(sos, curve)[cut_slice]
 
     @staticmethod
-    def nancorrelation(x, y):
-        """ Compute correlation and ignore nan in both x and y.
-        """
-        x_, y_ = np.nanmean(x), np.nanmean(y)
-        cov = np.nansum((x - x_) * (y - y_))
-        var_x, var_y = np.nansum((x - x_)**2), np.nansum((y - y_)**2)
-        return cov / (np.sqrt(var_x) * np.sqrt(var_y))
-
-    @staticmethod
     def compute_reflectivity_(impedance):
         """ Compute and fetch reflectivity coefficients out of a vector/array/tensor of impedance.
         """
@@ -70,9 +62,26 @@ class OptimizationMixin:
         return reflectivity
 
     @staticmethod
-    def compute_synthetic_(reflectivity, impulse):
+    def resample_log(seismic_time, log_time, log_values):
+        """ Take log given in log time and resample it (using linear interpolation) in seismic time.
+        """
+        if isinstance(seismic_time, torch.Tensor):
+            # Resample impedance.
+            # Torch implementation of interpolation. Has semantics similar to that of `np.interp`.
+            # Supports `backward` and corectly computes gradients.
+            log_in_seismic_time = Interp1D(log_time, log_values, method='linear')(seismic_time)
+        else:
+            log_in_seismic_time = np.interp(x=seismic_time, xp=log_time, fp=log_values)
+
+        return log_in_seismic_time
+
+    @classmethod
+    def compute_synthetic_(cls, impedance=None, reflectivity=None, impulse=None):
         """ Compute and fetch synthetic seismic out of a vector of reflectivity, given impulse.
         """
+        if impedance is not None:
+            reflectivity = cls.compute_reflectivity_(impedance)
+
         if isinstance(reflectivity, torch.Tensor):
             # Case of incoming torch-tensors.
             if isinstance(impulse, (list, np.ndarray)):
@@ -87,13 +96,22 @@ class OptimizationMixin:
         return np.convolve(reflectivity, impulse, mode='same')
 
     @staticmethod
-    def torch_correlation(x, y):
+    def nancorrelation(array1, array2):
+        """ Compute correlation and ignore nan in both `array1` and `array2`.
+        """
+        array1, array2 = array1 - np.nanmean(array1), array2 - np.nanmean(array2)
+        covariation = np.nanmean(array1 * array2)
+        std1, std2 = np.sqrt(np.nanmean(array1**2)), np.sqrt(np.nanmean(array2**2))
+        return covariation / (std1 * std2)
+
+    @staticmethod
+    def torch_correlation(array1, array2):
         """
         """
-        x_, y_ = torch.mean(x), torch.mean(y)
-        cov = torch.sum((x - x_) * (y - y_))
-        var_x, var_y = torch.sum((x - x_)**2), torch.sum((y - y_)**2)
-        return cov / (torch.sqrt(var_x) * torch.sqrt(var_y))
+        array1, array2 = array1 - torch.mean(array1), array2 - torch.mean(array2)
+        covariation = torch.mean(array1 * array2)
+        std1, std2 = torch.sqrt(torch.mean(array1**2)), torch.sqrt(torch.mean(array2**2))
+        return covariation / (std1 * std2)
 
 
     @classmethod   # This one can actually be a method. It would take column names of `self.data` as arguments.
@@ -108,21 +126,12 @@ class OptimizationMixin:
         `impulse`.
         """
         if isinstance(seismic_time, torch.Tensor):
-            # Resample impedance.
-            # Torch implementation of interpolation. Has semantics similar to that of `np.interp`.
-            # Supports `backward` and corectly computes gradients.
-            interpolator = Interp1D(well_time, impedance_log, method='linear')
-            log_in_seismic_time = interpolator(seismic_time)
-
             # Select quality function: the larger the value, the better.
             if metric in ('corr', 'correlation', 'corrcoeff'):
                 match_function = cls.torch_correlation
             else:
                 raise ValueError(f'Unknown metric {metric} for `numpy`-version!')
         else:
-            # Resample impedance.
-            log_in_seismic_time = np.interp(x=seismic_time, xp=well_time, fp=impedance_log)
-
             # Select quality function: the larger the value, the better.
             if metric in ('L2', 'l2'):
                 match_function = lambda x, y: -np.nansum(np.square(x - y))
@@ -133,8 +142,8 @@ class OptimizationMixin:
             else:
                 raise ValueError(f'Unknown metric {metric} for `torch`-version of the function!')
 
-        reflectivity = cls.compute_reflectivity_(log_in_seismic_time)
-        synthetic = cls.compute_synthetic_(reflectivity, impulse)
+        log_in_seismic_time = cls.resample_log(seismic_time, well_time, impedance_log)
+        synthetic = cls.compute_synthetic_(impedance=log_in_seismic_time, impulse=impulse)
 
         result = match_function(synthetic, seismic_curve)
         return result
@@ -155,10 +164,10 @@ class OptimizationMixin:
         bounds = [torch.from_numpy(data).to(device, dtype=torch.float32) for data in bounds_numpy]
 
         # Move arrays to needed device.
-        impulse, seismic_curve, impedance_log, seismic_time = [torch.from_numpy(array).to(device=device,
-                                                                                          dtype=torch.float32)
-                                                               for array in (impulse, seismic_curve,
-                                                                             impedance_log, seismic_time)]
+        impulse, seismic_curve, impedance_log, seismic_time = [
+            torch.from_numpy(array).to(device=device, dtype=torch.float32)
+            for array in (impulse, seismic_curve, impedance_log, seismic_time)
+            ]
 
         # Init variables of the model using chosen start point.
         variables = torch.tensor(start_x0_dt, device=device, dtype=torch.float32, requires_grad=True)
@@ -179,7 +188,7 @@ class OptimizationMixin:
 
             # NOTE: only well_time needs to be recalculated - these are the time ticks where impedance-values
             # are known. Impedance values and seismic time ticks do not change.
-            # NOTE: implement topK later.
+            # NOTE: perhaps implement topK later.
             current_well_time = torch.cumsum(variables, dim=0)
             loss = -cls.measure_seismic_tie_quality(seismic_time, current_well_time, seismic_curve,
                                                     impedance_log, impulse, metric='corr')
@@ -200,20 +209,19 @@ class OptimizationMixin:
 
 
 # Utilities for impulse estimation.
-def symmetric_wavelet_estimation(seismic_trace, half_length=31, normalize=True):
+def symmetric_wavelet_estimation(seismic_trace, wavelet_length=60, normalize=True):
     """ Commonly used procedure for wavelet-estimation. Resulting wavelet has length of
-    2 * half_length - 1 and has its peak in the center of the range.
+    2 * (wavelet_length // 2) and has its peak in the center of the range.
     """
     power_spectrum = np.abs(np.fft.rfft(seismic_trace))
 
     # Create symmetric wavelet in time.
-    wavelet = np.real(np.fft.irfft(power_spectrum)[:half_length])
-    wavelet = np.concatenate((np.flipud(wavelet[1:]), wavelet), axis=0)
+    wavelet = np.real(np.fft.irfft(power_spectrum)[:wavelet_length // 2])
+    wavelet = np.concatenate((np.flipud(wavelet), wavelet), axis=0)
     if normalize:
         wavelet = wavelet / np.max(wavelet)
 
     return wavelet
-
 @njit
 def compute_cross_correlation_1d(signal, lag_size=31):
     """ Get cross-correlation vector of a 1d-trace. The resulting length of the vector is
@@ -260,6 +268,11 @@ def compute_frequency_phases(data):
 
     return phases
 
+def construct_wavelet(amplitudes, phases, wavelet_length=None):
+    """ Construct a wavelet from vectors of amplitudes and phases given in frequency-space.
+    """
+    wavelet = np.fft.irfft(amplitudes * np.exp(1j * phases), n=wavelet_length)
+    return np.real(wavelet)
 
 def estimate_wavelet_from_crosscor(seismic_data=None, amplitudes=None, phases=None, lag_size=61, normalize=True,
                                    t_shift=None, wavelet_length=121):
