@@ -10,6 +10,7 @@ max-attributes=100
 max-args=25
 max-locals=25
 max-branches=20
+max-statements=100
 variable-rgx=(.*[a-z][a-z0-9_]{1,30}|[a-z_])$ # snake_case + single letters
 argument-rgx=(.*[a-z][a-z0-9_]{1,30}|[a-z_])$ # snake_case + single letters
 

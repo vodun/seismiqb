@@ -10,21 +10,19 @@ from scipy.interpolate import interp1d
 from .benchmark_mixin import BenchmarkMixin
 from .conversion_mixin import ConversionMixin
 from .export_mixin import ExportMixin
-from .meta_mixin import MetaMixin
 from .metric_mixin import MetricMixin
 
-from ..utils import lru_cache, CacheMixin, TransformsMixin, select_printer, transformable
+from ..utils import SQBStorage, lru_cache, CacheMixin, TransformsMixin, select_printer, transformable
 from ..plotters import plot
 
 
 
-class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMixin, MetricMixin, TransformsMixin):
+class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetricMixin, TransformsMixin):
     """ Class to infer information about seismic cube in various formats and provide format agnostic interface to them.
 
     During the SEG-Y processing, a number of statistics are computed. They are saved next to the cube under the
     `.segy_meta` extension, so that subsequent loads (in, possibly, other formats) don't have to recompute them.
     Most of them are loaded at initialization, but the most memory-intensive ones are loaded on demand.
-    For more details about meta, refer to :class:`MetaMixin` documentation.
 
     Based on the extension of the path, a different subclass is used to implement key methods for data indexing.
     Currently supported extensions are SEG-Y and TODO:
@@ -33,7 +31,8 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMix
 
     Independent of the exact format, `Geometry` provides the following:
         - attributes to describe shape and structure of the cube like `shape` and `lengths`,
-        as well as exact values of file-wide headers, for example, `depth`, `delay` and `sample_rate`.
+        as well as exact values of file-wide headers, for example, `depth`, `delay`,
+        `sample_rate` and `sample_interval`.
 
         - method :meth:`collect_stats` to infer information about the amplitudes distribution:
         under the hood, we make a full pass through the cube data to collect global, spatial and depth-wise stats.
@@ -54,7 +53,7 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMix
     path : str
         Path to seismic cube. Supported formats are `segy`, TODO.
     meta_path : str, optional
-        Path to pre-computed statistics. If not provided, use the same as `path` with `.meta` extension.
+        Path to pre-computed statistics. If not provided, use the same as `path` with `_meta` postfix.
 
     SEG-Y parameters
     ----------------
@@ -80,7 +79,7 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMix
     # Attributes to store in a separate file with meta
     PRESERVED = [ # loaded at instance initialization
         # Crucial geometry properties
-        'n_traces', 'depth', 'delay', 'sample_rate', 'shape',
+        'n_traces', 'depth', 'delay', 'sample_interval', 'sample_rate', 'shape',
         'shifts', 'lengths', 'ranges', 'increments', 'regular_structure',
         'index_matrix', 'absent_traces_matrix', 'dead_traces_matrix',
         'n_alive_traces', 'n_dead_traces',
@@ -101,9 +100,15 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMix
         'min_matrix', 'max_matrix', 'mean_matrix', 'std_matrix',
     ]
 
-    PRESERVED_MISC = [ # additional stats that may be absent. loaded at the time of the first access
+    PRESERVED_LAZY_CACHED = [ # loaded at the time of the first access, stored in the instance
+        'headers',
+    ]
+
+    PRESERVED_LAZY_MISC = [ # additional stats that may be absent. loaded at the time of the first access
         'quantization_ranges', 'quantization_error'
     ]
+
+    PRESERVED_LAZY_ALL = PRESERVED_LAZY + PRESERVED_LAZY_CACHED + PRESERVED_LAZY_MISC
 
     @staticmethod
     def new(path, *args, **kwargs):
@@ -130,9 +135,8 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMix
         self.short_name, self.format = os.path.splitext(self.name)
 
         # Meta
-        self.meta_path = meta_path
-        self.meta_list_loaded = set()
-        self.meta_list_failed_to_dump = set()
+        self._meta_path = meta_path
+        self.meta_storage = SQBStorage(self.meta_path)
 
         # Instance flags
         self.safe = safe
@@ -147,15 +151,46 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMix
             self._init_kwargs = kwargs
             self.init(path, **kwargs)
 
-
-    # Redefined protocols
+    # Meta: store/load pre-computed statistics and attributes from disk
     def __getattr__(self, key):
         """ Load item from stored meta. """
-        if key not in self.__dict__ and (key in self.PRESERVED_LAZY or key in self.PRESERVED_MISC) \
-            and self.meta_exists and self.has_meta_item(key):
-            return self.load_meta_item(f'meta/{key}')
+        if key not in self.__dict__ and (key in self.PRESERVED_LAZY_ALL) \
+            and self.meta_storage.exists and self.meta_storage.has_item(key):
+            value =  self.meta_storage.read_item(key)
+            if key in self.PRESERVED_LAZY_CACHED:
+                setattr(self, key, value)
+            return value
         return object.__getattribute__(self, key)
 
+    @property
+    def meta_path(self):
+        """ Paths to the file with stored meta. """
+        if self._meta_path is not None:
+            return self._meta_path
+
+        if hasattr(self, 'path'):
+            if 'hdf5' in self.path:
+                return self.path
+            return self.path + '_meta'
+        raise ValueError('No `meta_path` exists!')
+
+    def load_meta(self, keys):
+        """ Load `keys` from meta storage and setattr them to `self`. """
+        items = self.meta_storage.read(keys)
+        for key, value in items.items():
+            setattr(self, key, value)
+
+    def dump_meta(self, path=None):
+        """ Dump all attributes, referenced in  `PRESERVED_*` lists, to a storage.
+        If no `path` is provided, uses `meta_storage` of the `self`. """
+        storage = self.meta_storage if path is None else SQBStorage(path)
+        items = {key : getattr(self, key) for key in self.PRESERVED + self.PRESERVED_LAZY
+                 if getattr(self, key, None) is not None}
+        items['type'] = 'geometry-meta'
+        storage.store(items)
+
+
+    # Redefined protocols
     def __getnewargs__(self):
         return (self.path, )
 
@@ -373,7 +408,7 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMix
         # Depth to units
         if array.shape[1] == self.index_length + 1:
             array[:, self.index_length] -= self.delay
-            array[:, self.index_length] /= self.sample_rate
+            array[:, self.index_length] /= self.sample_interval
         return array
 
     def ordinals_to_lines(self, array):
@@ -394,7 +429,7 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMix
 
         # Units to depth
         if array.shape[1] == self.index_length + 1:
-            array[:, self.index_length] *= self.sample_rate
+            array[:, self.index_length] *= self.sample_interval
             array[:, self.index_length] += self.delay
         return array
 
@@ -599,7 +634,8 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetaMix
         Traces:                            {self.n_traces:,}
         Shape:                             {tuple(self.shape)}
         Time delay:                        {self.delay} ms
-        Sample rate:                       {self.sample_rate} ms
+        Sample interval:                   {self.sample_interval} ms
+        Sample rate:                       {self.sample_rate} Hz
         Area:                              {self.area:4.1f} km²
 
         File size:                         {self.file_size:4.3f} GB

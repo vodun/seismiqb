@@ -76,6 +76,7 @@ class GeometrySEGY(Geometry):
         self.n_traces = self.loader.n_traces
         self.depth = self.loader.n_samples
         self.delay = self.loader.delay
+        self.sample_interval = self.loader.sample_interval
         self.sample_rate = self.loader.sample_rate
 
         self.dtype = self.loader.dtype
@@ -87,16 +88,25 @@ class GeometrySEGY(Geometry):
         except: #pylint: disable=bare-except
             self.segy_text = ['*'*3200]
 
+        # If all stats are already available in meta, use them
+        required_attributes = self.PRESERVED + self.PRESERVED_LAZY + self.PRESERVED_LAZY_CACHED
+        meta_exists_and_has_attributes = self.meta_storage.exists and self.meta_storage.has_items(required_attributes)
+
+        if meta_exists_and_has_attributes and not (reload_headers or recollect_stats):
+            self.load_meta(keys=self.PRESERVED)
+            self.has_stats = True
+            return
+
         # Load all of the requested headers, either from SEG-Y directly or previously stored dump
         headers_to_load = list(set(index_headers) | set(additional_headers))
 
-        if self.has_meta_item(key='headers') and not reload_headers:
-            headers = self.load_meta_item(key='headers')
+        if self.meta_storage.has_item(key='headers') and not reload_headers:
+            headers = self.meta_storage.read_item(key='headers')
         else:
             load_headers_params = load_headers_params or {}
             headers = self.load_headers(headers_to_load, **load_headers_params)
             if dump_headers:
-                self.dump_meta_item(key='headers', value=headers)
+                self.meta_storage.store_item(key='headers', value=headers)
         self.headers = headers
 
         # Infer attributes based on indexing headers: values and coordinates
@@ -107,8 +117,9 @@ class GeometrySEGY(Geometry):
 
         # Collect amplitude stats, either by passing through SEG-Y or from previously stored dump
         required_attributes = self.PRESERVED + self.PRESERVED_LAZY
+        meta_exists_and_has_attributes = self.meta_storage.exists and self.meta_storage.has_items(required_attributes)
 
-        if self.meta_exists and self.has_meta_items(required_attributes) and not recollect_stats:
+        if meta_exists_and_has_attributes and not recollect_stats:
             self.load_meta(keys=self.PRESERVED)
             self.has_stats = True
         elif collect_stats:
@@ -126,7 +137,7 @@ class GeometrySEGY(Geometry):
                 self.area = -1.
 
         # Dump inferred attributes to a separate file for later loads
-        if dump_meta and not (self.meta_exists and self.has_meta_items(required_attributes)):
+        if dump_meta and not meta_exists_and_has_attributes:
             self.dump_meta()
 
     def _infer_loader_class(self, loader_class):

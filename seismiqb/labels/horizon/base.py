@@ -12,7 +12,7 @@ from .attributes import AttributesMixin
 from .extraction import ExtractionMixin
 from .processing import ProcessingMixin
 from .visualization import HorizonVisualizationMixin
-from ...utils import CacheMixin, CharismaMixin
+from ...utils import CacheMixin, CharismaMixin, SQBStorage
 from ...utils import groupby_mean, groupby_min, groupby_max, groupby_prob, make_interior_points_mask
 from ...utils import MetaDict
 
@@ -39,7 +39,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
 
         - `points` is a (N, 3) ndarray with every row being (iline, xline, depth). Note that (iline, xline) are
           stored in cube coordinates that range from 0 to `n_ilines` and 0 to `n_xlines` respectively.
-          Stored depth is corrected on `time_delay` and `sample_rate` of the cube.
+          Stored depth is corrected on `time_delay` and `sample_interval` of the cube.
           In order to initialize from this storage, one must supply (N, 3) ndarray.
 
     Depending on which attribute was created at initialization (`matrix` or `points`), the other is computed lazily
@@ -83,7 +83,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
     FILL_VALUE = -999999
 
 
-    def __init__(self, storage, field, name=None, dtype=np.int32, force_format=None, **kwargs):
+    def __init__(self, storage, field, name=None, format=None, dtype=np.int32, **kwargs):
         # Meta information
         self.path = None
         self.name = name
@@ -111,16 +111,24 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
         self.field = field
 
         # Check format of storage, then use it to populate attributes
-        if force_format is not None:
-            self.format = force_format
+        if format is not None:
+            self.format = format
 
         elif isinstance(storage, str):
-            # path to csv-like file
-            self.format = 'file'
+            path = self.field.make_path(storage, makedirs=False)
+            self.path = path
+            self.name = os.path.basename(path) if self.name is None else self.name
 
-        elif isinstance(storage, dict):
-            # mapping from (iline, xline) to (depth)
-            self.format = 'dict'
+            if SQBStorage.is_storage(path):
+                # path to SQB storage
+                self.format = 'sqb'
+
+            elif os.path.exists(path):
+                # path to csv-like file
+                self.format = 'charisma'
+
+            else:
+                raise ValueError(f'Path {path} does not exist!')
 
         elif isinstance(storage, np.ndarray):
             if storage.ndim == 2 and storage.shape[1] == 3:
@@ -134,6 +142,10 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
             elif storage.ndim == 2:
                 # matrix of (iline, xline) shape with every value being depth
                 self.format = 'matrix'
+
+        elif isinstance(storage, dict):
+            # mapping from (iline, xline) to (depth)
+            self.format = 'dict'
 
         getattr(self, f'from_{self.format}')(storage, **kwargs)
 
@@ -343,18 +355,27 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
             self.reset_storage(storage=reset, reset_cache=False)
 
 
-    def from_file(self, path, transform=True, **kwargs):
+    def from_charisma(self, path, transform=True, **kwargs):
         """ Init from path to either CHARISMA or REDUCED_CHARISMA csv-like file. """
-        path = self.field.make_path(path, makedirs=False)
-        self.path = path
-
-        self.name = os.path.basename(path) if self.name is None else self.name
-
         points = self.load_charisma(path=path, dtype=self.dtype, format='points',
                                     fill_value=Horizon.FILL_VALUE, transform=transform,
                                     verify=True)
 
         self.from_points(points, verify=False, **kwargs)
+
+    def from_sqb(self, path, **kwargs):
+        """ Init from path to SQB storage file. """
+        _ = kwargs
+        storage = SQBStorage(path)
+        if storage.get('type') != 'horizon':
+            raise TypeError('SQB storage is not marked as horizon!')
+
+        points = storage['points']
+        self.from_points(points, verify=False, **kwargs)
+
+        for key in storage['attributes']:
+            setattr(self, key, storage[key])
+        self.storage = storage
 
 
     def from_matrix(self, matrix, i_min, x_min, d_min=None, d_max=None, length=None, **kwargs):
@@ -510,6 +531,22 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
         result.filter(filtering_matrix, inplace=True)
 
         return result
+
+
+    def make_proportional_horizon(self, other, p, name=None):
+        """ Make a proportional conforming horizon between `self` and `other` in `p` proportion. """
+        # pylint: disable=protected-access
+        if self.d_mean > other.d_mean:
+            self, other = other, self
+        name = name or f'{self.name}_{other.name}__{int(p * 100)}^100'
+
+        matrix = self.full_matrix + p * (self.full_matrix - other.full_matrix)
+        matrix = np.ceil(matrix)
+        matrix[matrix < 0] = self.FILL_VALUE
+
+        horizon = Horizon(matrix, field=self.field, name=name)
+        horizon._proportional = {'p': p, 'name_1': self.name, 'name_2': other.name}
+        return horizon
 
     # Basic properties
     @property
@@ -675,7 +712,7 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
         overlap_size = np.sum(mask)
         masked_difference = difference[mask]
         masked_abs_difference = np.abs(masked_difference)
-        window_rate = np.sum(masked_abs_difference < (5 / self.field.sample_rate)) / overlap_size
+        window_rate = np.sum(masked_abs_difference < (5 / self.field.sample_interval)) / overlap_size
 
         present_at_1_absent_at_2 = ((self.full_matrix != self.FILL_VALUE)
                                     & (other.full_matrix == self.FILL_VALUE)).sum()
@@ -748,28 +785,45 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
 
 
     # Save horizon to disk
-    def dump(self, path, transform=None):
+    def dump_sqb(self, data, path, format='points', transform=None, name=None, attributes=None):
+        """ Dump horizon points to SQB storage.
+        If `attributes` are provided, then saves additional instance attributes in the storage,
+        which will be re-loaded at opening.
+        """
+        _ = format
+        attributes = attributes or []
+        path = self.field.make_path(path, name=name or self.name)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+
+        # Additional transform
+        points = data if transform is None else transform(data)
+
+        storage = SQBStorage(path)
+        storage.update({
+            'type': 'horizon',
+            'points': points,
+            'original_path': self.path,
+            'field_path': self.field.path,
+            'attributes': attributes,
+            **{key : getattr(self, key) for key in attributes},
+        })
+
+    def dump(self, path, format='char', transform=None, attributes=None, smooth_out=False,
+             kernel_size=7, sigma=2., max_depth_difference=5):
         """ Save horizon points on disk.
 
         Parameters
         ----------
         path : str
             Path to a file to save horizon to.
+        format : {'char', 'sqb'}
+            Format of storage, either CHARISMA or SQB.
         transform : None or callable
             If callable, then applied to points after converting to ilines/xlines coordinate system.
-        """
-        self.dump_charisma(data=copy(self.points), path=path, format='points',
-                           name=self.name, transform=transform)
-
-    def dump_float(self, path, transform=None, kernel_size=7, sigma=2., max_depth_difference=5):
-        """ Smooth out the horizon values, producing floating-point numbers, and dump to the disk.
-
-        Parameters
-        ----------
-        path : str
-            Path to a file to save horizon to.
-        transform : None or callable
-            If callable, then applied to points after converting to ilines/xlines coordinate system.
+        attributes : sequence of str, optional
+            Additional attributes to dump into file. Used only if format is SQB.
+        smooth_out : bool
+            Whether to apply smoothening to the horizon surface, producing float-point numbers instead of ints.
         kernel_size : int
             Size of the filtering kernel.
         sigma : number
@@ -779,7 +833,31 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
             then the point is ignored in smoothening.
             Can be used for separate smoothening on sides of discontinuity.
         """
-        smoothed = self.smooth_out(mode='convolve', kernel_size=kernel_size, sigma_spatial=sigma,
-                                   max_depth_difference=max_depth_difference, inplace=False, dtype=np.float32)
+        # Add extension to `path`, if missing
+        format = format.lower()
+        # _, extension = os.path.splitext(path)
+        # if extension:
+        #     path = path.replace(extension, '.' + format)
+        # else:
+        #     path = path + '.' + format
 
-        self.dump_charisma(data=smoothed.points, path=path, format='points', name=self.name, transform=transform)
+        # Apply smoothing
+        if smooth_out:
+            horizon = self.smooth_out(mode='convolve', kernel_size=kernel_size, sigma_spatial=sigma,
+                                      max_depth_difference=max_depth_difference, inplace=False, dtype=np.float32)
+        else:
+            horizon = self
+
+        # Dump
+        if format.startswith('c'):
+            horizon.dump_charisma(data=horizon.points.copy(), path=path, name=self.name,
+                                  format='points', transform=transform)
+        else:
+            horizon.dump_sqb(data=horizon.points.copy(), path=path, name=self.name,
+                             format='points', transform=transform, attributes=attributes)
+
+    def dump_float(self, path, format='char', transform=None, attributes=None,
+                   kernel_size=7, sigma=2., max_depth_difference=5):
+        """ An alias to :meth:`.dump` with turned on smoothing by default. """
+        self.dump(path=path, format=format, transform=transform, smooth_out=True, attributes=attributes,
+                  kernel_size=kernel_size, sigma=sigma, max_depth_difference=max_depth_difference)

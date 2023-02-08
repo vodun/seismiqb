@@ -359,7 +359,7 @@ class VisualizationMixin:
         return plot(**config)
 
     def plot_frequencies(self, indices=(0, ), src='images', trace_indices=((0, 0), (-1, -1)), axis=2,
-                         sample_spacing=None, displayed_name=None, **kwargs):
+                         sample_interval=None, displayed_name=None, **kwargs):
         """ Show Fourier frequency spectrum of a component. X-axis of the plot corresponds to frequency
         values in Hz while y-axis stands for amplitudes of specific frequencies.
 
@@ -379,14 +379,11 @@ class VisualizationMixin:
         axis : int
             Axis along which traces are taken. By default set to 2. This value correpsonds
             to depth, which is the most natural direction to research the spectrum.
-        sample_spacing : float or None
+        sample_interval : float or None
             Inverse of the sampling rate. Measured in seconds. The same argument that `scipy.fftpack.fftfreq`
             uses under the name of `d`. Specifies units of the x-axis of the spectrum plot. If set to
             None, `show_frequencies` uses Hz (`1000 / (sample rate in ms)`). In this way, x-axis units correspond
             to units of `lowcut`/ `highcut` arguments of `SeismicCropBatch.bandpass_filter`.
-
-            NOTE: in `Seismiqb` (as in seismic interpretation community) the same thing is called `sample_rate`.
-            The only difference is - `sample_rate` is measured in ms rather than is seconds.
         displayed_name : str or None
             Whenever supplied, assumes that traces are taken from field with this name.
         kwargs : dict
@@ -400,15 +397,15 @@ class VisualizationMixin:
         # Iterate over item-indices and traces, gather info about spectrum.
         for idx in indices:
             field = self.get(self.indices[idx], 'fields')
-            sample_spacing = sample_spacing or field.sample_rate / 1000  # field.sample_rate is given in ms
+            sample_interval = sample_interval or field.sample_interval
 
             # Try to get the name of a field
             if displayed_name is None:
                 displayed_name = field.displayed_name
 
             data = self.get(self.indices[idx], src)
-            frequencies = rfftfreq(data.shape[axis], sample_spacing)   # `rfftfreq` is responsible for choosing units
-                                                                 # of x-axis and expects `sample_spacing` in seconds.
+            frequencies = rfftfreq(data.shape[axis], sample_interval)   # `rfftfreq` is responsible for choosing units
+                                                                   # of x-axis and expects `sample_spacing` in seconds
 
             for trace_idx in trace_indices:
                 trace_idx_ = tuple(np.insert(np.array(trace_idx, dtype=np.object_), insert_index, slice(0, None)))

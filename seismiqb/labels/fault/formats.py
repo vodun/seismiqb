@@ -9,7 +9,7 @@ import pandas as pd
 from sklearn.decomposition import PCA
 
 from .postprocessing import split_array
-from ...utils import CharismaMixin, make_interior_points_mask
+from ...utils import CharismaMixin, SQBStorage, make_interior_points_mask
 
 class FaultSticksMixin(CharismaMixin):
     """ Mixin to load, process and dump FaultSticks files. """
@@ -290,6 +290,28 @@ class FaultSerializationMixin:
                 kwargs[item] = getattr(self, item)
 
         np.savez(path, **kwargs)
+
+
+    def load_sqb(self, path):
+        """ Load fault from SQB file. """
+        storage = SQBStorage(path)
+        if storage.get('type') != 'fault':
+            raise TypeError('SQB storage is not marked as fault!')
+
+        self.from_dict({key : storage[key] for key in ['points', 'nodes', 'simplices', 'sticks']})
+        self.direction = storage['direction']
+
+    def dump_sqb(self, path):
+        """ Dump fault to SQB file. """
+        storage = SQBStorage(path)
+        storage.update({
+            'type': 'fault',
+            'points': self.points,
+            'nodes': self.nodes,
+            'simplices': self.simplices,
+            'sticks': self.sticks,
+            'direction': self.direction
+        })
 
 
     def _sticks_to_labeled_array(self, sticks):
