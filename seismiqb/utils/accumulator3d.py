@@ -1,6 +1,7 @@
 """ Accumulator for 3d volumes. """
 import os
 
+import time
 import h5py
 import hdf5plugin
 import numpy as np
@@ -522,7 +523,8 @@ class RegressionAccumulator(Accumulator3D):
 
 
 class SlidesAccumulator:
-    def __init__(self, *args, shape=None, n_slides=40, n_sources=1, orientation=0, postprocessing=None, **kwargs):
+    def __init__(self, *args, shape=None, n_slides=40, n_sources=1, orientation=0, postprocessing=None, padding=0,
+                 origin=(0, 0, 0), **kwargs):
         """ Accumulator which aggregates whole slices in memory and then write it into file. Can aggregate
         data from several sources (e.g., predictions from different models).
 
@@ -542,16 +544,19 @@ class SlidesAccumulator:
             Kwargs for  Accumulator3D.from_aggregation.
         """
         self.args, self.kwargs = args, kwargs
+        self.origin = tuple(origin)
         self.orientation = orientation
         self.n_slides = n_slides
         self.n_sources = n_sources
         self.shape = shape
         self._processes = []
 
-        self.chunks_queue = JoinableQueue()
+        self.chunks_queue = JoinableQueue(maxsize=3)
+        self.postprocessing = postprocessing
+        self.padding = padding
+
         self.accumulator_process = Process(target=self.collect_chunks, args=(self.chunks_queue, ))
         self.accumulator_process.start()
-        self.postprocessing = postprocessing or []
 
         self.chunk_accumulators = [{} for _ in range(n_sources)]
 
@@ -567,8 +572,9 @@ class SlidesAccumulator:
         shape = np.array(self.shape)
         shape[self.orientation] = self.n_slides
         shape = tuple(shape)
+        print(f"Create chunk at origin {origin} with shape {shape}")
 
-        origin_ = [0, 0, 0]
+        origin_ = list(self.origin)
         origin_[self.orientation] = origin
         origin_ = tuple(origin_)
 
@@ -580,35 +586,34 @@ class SlidesAccumulator:
         if len(self.chunk_accumulators[source_idx]) > 0:
             origin = list(self.chunk_accumulators[source_idx].keys())[-1]
             chunk = self.chunk_accumulators[source_idx].pop(origin)
-            self.slides_queue.put((origin, chunk))
+            self.chunks_queue.put((origin, chunk))
 
     def aggregate(self):
         for source_idx in range(self.n_sources):
             self.aggregate_last(source_idx)
 
-        self.slides_queue.put((None, None))
+        self.chunks_queue.put((None, None))
         self.accumulator_process.join()
         self.file = h5py.File(self.kwargs['path'], 'r+')
         self.data = self.file['data']
         return self.data
 
     def collect_chunks(self, chunks_queue):
+        # TODO: last lines when range is not None
         accumulator = Accumulator3D.from_aggregation(*self.args, shape=self.shape, orientation=self.orientation,
-                                                     **self.kwargs)
+                                                     origin=self.origin, **self.kwargs)
+        global_origin = self.origin
+        origin_ = list(global_origin)
+
         origin, chunk = chunks_queue.get()
+        prev_chunk = None
         while chunk is not None:
             chunk = chunk.aggregate()
-            for item in self.postprocessing:
-                chunk = item(chunk)
-            location = [slice(0, item) for item in self.shape]
+            if self.postprocessing:
+                origin_[self.orientation] = origin
+                chunk, origin, prev_chunk = (*self.postprocessing(chunk, origin_, self.shape, prev_chunk, global_origin), chunk)
+            location = [slice(loc, loc+length) for loc, length in zip(global_origin, self.shape)]
             location[self.orientation] = slice(origin, origin+chunk.shape[self.orientation])
             accumulator.update(chunk, location)
             origin, chunk = chunks_queue.get()
         accumulator.aggregate()
-
-
-def _process_slide(chunk, origin, full_shape, orientation, accumulator):
-    data = chunk.aggregate()
-    location = [slice(0, item) for item in full_shape]
-    location[orientation] = slice(origin, origin+data.shape[orientation])
-    accumulator.update(data, location)

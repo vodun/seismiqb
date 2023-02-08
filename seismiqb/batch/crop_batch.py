@@ -713,7 +713,6 @@ class SeismicCropBatch(Batch, VisualizationMixin):
 
 
     # Predictions
-    @action
     @apply_parallel_decorator(init='indices', post=None, target='for')
     def update_accumulator(self, ix, src, accumulator, dst=None):
         """ Update accumulator with data from crops.
