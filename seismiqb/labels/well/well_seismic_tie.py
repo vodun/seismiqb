@@ -3,13 +3,13 @@
 import numpy as np
 import torch
 
-from scipy.signal import butter, sosfilt, sosfiltfilt
+from scipy.signal import butter, sosfilt, sosfiltfilt, find_peaks
 from torch.nn import functional as F
-from numba import njit
 
 from xitorch.interpolate import Interp1D    # Implementation from here: seems to be working fine
                                             # https://github.com/xitorch/xitorch
 
+from ...plotters import plot
 
 # Mixin class for `Well` to simplify dt-ticks optimization for well-seismic tie
 class OptimizationMixin:
@@ -46,8 +46,8 @@ class OptimizationMixin:
 
         if not forward_backward:
             return sosfilt(sos, curve)[cut_slice]
-        else:
-            return sosfiltfilt(sos, curve)[cut_slice]
+
+        return sosfiltfilt(sos, curve)[cut_slice]
 
     @staticmethod
     def compute_reflectivity_(impedance):
@@ -207,6 +207,64 @@ class OptimizationMixin:
         final_well_time = np.cumsum(variables.detach().cpu().numpy())
         return final_well_time, loss_history
 
+    # Visualization
+    @classmethod
+    def show_tie_crocccorrelation(cls, seismic_time, well_time, seismic_curve, impedance_log, impulse,
+                                  n_samples=10000, limits=(-.5, 1.5), n_peaks=3, **kwargs):
+        """ Compute and show crosscorrelation function of recorded seismic and the synthetic one, generated from logs.
+        Allows to see whether we need to apply a shift to well_time.
+        """
+        shifts = np.linspace(*limits, n_samples)
+        values = [cls.measure_seismic_tie_quality(seismic_time, well_time + shift, seismic_curve, impedance_log,
+                                                  impulse, metric='corr') for shift in shifts]
+
+        # Default plot parameters
+        defaults = {'xlabel': 'SHIFT, SECONDS', 'ylabel': 'MATCH QUALITY',
+                    'xlabel_fontsize': 22, 'ylabel_fontsize': 22, 'figsize': (14, 4),
+                    'title': 'CROSS-CORRELATION RECREATED VS RECORDED SEISMIC'}
+
+        # Update defaults and plot
+        kwargs = {'mode': 'curve', **defaults, **kwargs}
+        plotter = plot((shifts, values), **kwargs)
+
+        # Show peaks if needed
+        if n_peaks is not None:
+            peak_indices = find_peaks(values, distance=10)[0]
+            axis = plotter.subplots[0].ax
+
+            # Sort the array of peak indices to start with those indices that have
+            # the largest corresponding value of match.
+            peak_indices = peak_indices[np.argsort([values[index] for index in peak_indices])[::-1]]
+
+            # Add requested number of vertical lines.
+            for index in peak_indices[:n_peaks]:
+                axis.axvline(shifts[index], linestyle='dashed', color='orange', alpha=.6,
+                             label=f'SHIFT: {shifts[index]:.2f}\nCORR: {values[index]:.2f}')
+
+            axis.legend()
+
+        return plotter
+
+    @classmethod
+    def show_ranges(cls, well_time, seismic_time, **kwargs):
+        """ Show ranges of seismic time and well time on one plot. Needed to select limits for computing
+        crosscorrelation and selecting the global shift.
+        """
+        seismic_range = np.nanmin(seismic_time), np.nanmax(seismic_time)
+        well_range = np.nanmin(well_time), np.nanmax(well_time)
+
+        data = [(seismic_range, (1, 1)), ((well_range), (2, 2))]
+
+        # Default plot parameters
+        defaults = {'label': ['SEISMIC TIME RANGE', f'WELL TIME RANGE'], 'curve_linewidth': [4, 4],
+                    'curve_marker': 'o', 'curve_markersize': 12, 'xlabel': 'TIME, SECONDS', 'ylabel': 'SEISMIC/WELL',
+                    'xlabel_fontsize': 22, 'ylabel_fontsize': 22, 'title': 'WELL TIME RANGE WITH BEST SHIFT VS SEISMIC TIME RANGE'}
+
+        # Update defaults and plot
+        kwargs = {'mode': 'curve', **defaults, **kwargs}
+        plotter = plot(data, **kwargs)
+
+        return plotter
 
 # Utilities for impulse estimation.
 def symmetric_wavelet_estimation(seismic_trace, wavelet_length=60, normalize=True):
@@ -222,31 +280,6 @@ def symmetric_wavelet_estimation(seismic_trace, wavelet_length=60, normalize=Tru
         wavelet = wavelet / np.max(wavelet)
 
     return wavelet
-@njit
-def compute_cross_correlation_1d(signal, lag_size=31):
-    """ Get cross-correlation vector of a 1d-trace. The resulting length of the vector is
-    2 * lag_size + 1.
-    """
-    cross = np.zeros(2 * lag_size + 1, dtype=np.float32)
-    for i in range(-lag_size, lag_size + 1):
-        ctr = i + lag_size
-        i = abs(i)
-        v1 = signal[i:]
-        v2 = signal[:len(v1)]
-
-        cross[ctr] = np.corrcoef(v1, v2)[0, 1]
-    return cross
-
-@njit
-def compute_cross_correlation_3d(data, lag_size=31):
-    """ Vross correlation of 3d-array along the last axis.
-    """
-    cross = np.zeros(data.shape[:2] + (2*lag_size + 1, ), dtype=np.float32)
-    for i in range(cross.shape[0]):
-        for j in range(cross.shape[1]):
-            cross[i, j] = compute_cross_correlation_1d(data[i, j], lag_size=lag_size)
-
-    return cross
 
 def compute_frequency_amplitides(data):
     """ Calculate Fourier-amplitudes of real data in the last dimension. If the data
@@ -268,34 +301,74 @@ def compute_frequency_phases(data):
 
     return phases
 
-def construct_wavelet(amplitudes, phases, wavelet_length=None):
+def construct_impulse(amplitudes, phases, wavelet_length=None):
     """ Construct a wavelet from vectors of amplitudes and phases given in frequency-space.
     """
     wavelet = np.fft.irfft(amplitudes * np.exp(1j * phases), n=wavelet_length)
     return np.real(wavelet)
 
-def estimate_wavelet_from_crosscor(seismic_data=None, amplitudes=None, phases=None, lag_size=61, normalize=True,
-                                   t_shift=None, wavelet_length=121):
-    """ Estimate wavelet of length=2 * lag_size [or len(amplitudes)] (+1) from either raw seismic data or precomputed
-    amplitudes.
+
+class ImpulseOptimizationFactory:
+    """ One can use the instances of this class to optimize impulse. The default version
+    fixes amplitudes and allows to optimize phases, starting from given position.
     """
-    if amplitudes is None:
-        # Get amplitudes spectrum estimation neglecting the phase.
-        crosscorr_function = compute_cross_correlation_3d if seismic_data.ndim > 1 else compute_cross_correlation_1d
-        cross = crosscorr_function(seismic_data, lag_size=lag_size)
+    def __init__(self, start_impulse, seismic_time, well_time, seismic_curve, impedance_log,
+                 cut_frequency=8, delta=.9):
+        """ Store variables that we'll need to run the functional.
+        """
+        self.length = len(start_impulse)
+        self.amplitudes = compute_frequency_amplitides(start_impulse)
+        self.phases = compute_frequency_phases(start_impulse)
+        self.cut_frequency = cut_frequency
+        self.seismic_curve = seismic_curve
+        self.delta = delta
 
-        # Under the assumptions of reflectivity being white noise, the spectrum-power of cross-correlation
-        # is the squared spectrum power of the wavelet.
-        amplitudes = np.sqrt(compute_frequency_amplitides(cross))
+        impedance = OptimizationMixin.resample_log(seismic_time, well_time, impedance_log)
+        self.reflectivity = OptimizationMixin.compute_reflectivity_(impedance)
 
-    # Construct the phases of the wavelet if not given.
-    # Use `t_shift` to "np.roll" the wavelet and move its center to a needed location.
-    if phases is None:
-        phases = np.zeros_like(amplitudes) if t_shift is None else t_shift * np.arange(0, len(amplitudes))
+    def compute_impulse(self, x):
+        phases = np.copy(self.phases)
+        phases[:self.cut_frequency] = x
 
-    # Assemble the wavelet using the power spectrum and constructed phases.
-    wavelet = np.fft.irfft(amplitudes * np.exp(1j * phases), n=wavelet_length)
-    if normalize:
-        wavelet = wavelet / np.max(wavelet)
+        impulse = construct_impulse(self.amplitudes, phases, wavelet_length=self.length)
+        return impulse
 
-    return np.real(wavelet)
+    def __call__(self, x):
+        impulse = self.compute_impulse(x)
+        synthetic = OptimizationMixin.compute_synthetic_(reflectivity=self.reflectivity, impulse=impulse)
+
+        return -OptimizationMixin.nancorrelation(self.seismic_curve, synthetic)
+
+    def get_x0(self):
+        return self.phases[:self.cut_frequency]
+
+    def get_bounds(self):
+        return [(self.phases[i] - self.delta, self.phases[i] + self.delta) for i in range(self.cut_frequency)]
+
+
+def show_wavelet(wavelet, cut_frequency=8, **kwargs):
+    """ Show wavelet along with its mose important properties.
+    """
+    amplitudes, phases = compute_frequency_amplitides(wavelet), compute_frequency_phases(wavelet)
+    cut_frequency = 8
+
+    # Construct wavelet from the start of its spectrum.
+    amplitudes_ = amplitudes.copy()
+    amplitudes_[cut_frequency:] = 0
+    restored = construct_impulse(amplitudes_, phases, wavelet_length=len(wavelet))
+    data = [wavelet, amplitudes, phases, [wavelet, restored]]
+
+    defaults = {'label': ['', '', '', [f'RESTORED FROM {cut_frequency} FREQUENCIES', 'FULL']],
+                'xlabel': ['', 'FREQUENCY', 'FREQUENCY', 'TIME'],
+                'ylabel': ['', 'AMPLITUDE', 'PHASE', ''],
+                'title': ['IMPULSE/TIME', 'AMPLITUDES/FREQUENCIES', 'PHASES/FREQUENCIES',
+                          'RESTORED IMPULSE FROM FULL/CUT SPECTRUM'],
+                'curve_alpha': [1, 1, 1, [1, 1]], 'curve_linewidth': [2, 2, 2, [3, 2]], 'nrows': 2, 'ncols': 2,
+                'xlabel_fontsize': 18, 'ylabel_fontsize': 18,
+                'curve_linestyle': ['-', '-', '-', ['-', '--']]}
+
+    kwargs = {'mode': 'curve', **defaults, **kwargs}
+
+    plotter = plot(data, **kwargs)
+
+    return plotter
