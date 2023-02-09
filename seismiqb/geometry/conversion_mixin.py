@@ -135,7 +135,7 @@ class ConversionMixin:
         }
 
     # Convert SEG-Y
-    def convert_to_hdf5(self, path=None, overwrite=True, postfix='', projections='ixd',
+    def convert_to_hdf5(self, path=None, overwrite=True, postfix=False, projections='ixd',
                         quantize=False, quantization_parameters=None, dataset_kwargs=None, chunk_size_divisor=1,
                         pbar='t', store_meta=True, **kwargs):
         """ Convert SEG-Y file to a more effective storage.
@@ -145,8 +145,9 @@ class ConversionMixin:
         path : str
             If provided, then path to save file to.
             Otherwise, file is saved under the same name with different extension.
-        postfix : str
-            Optional string to add before extension. Used only if the `path` is not provided.
+        postfix : bool or str
+            Whether to add before extension. Used only if the `path` is not provided. If True, it will be
+            created automatically depending on conversion parameters.
         projections : str
             Which projections of data to store: `i` for the inline one, `x` for the crossline, `d` for depth.
         quantize : bool
@@ -217,6 +218,9 @@ class ConversionMixin:
             progress_bar.close()
 
         # Save meta to the same file. If quantized, replace stats with the correct ones
+        from .base import Geometry
+        geometry = Geometry.new(path)
+
         if store_meta:
             self.dump_meta(path=path)
 
@@ -224,11 +228,8 @@ class ConversionMixin:
                 quantization_parameters['quantization_ranges'] = quantization_parameters['ranges']
                 for key in ['quantization_ranges', 'center', 'clip', 'quantization_error',
                             'min', 'max', 'mean', 'std', 'quantile_values']:
-                    self.dump_meta_item(key=f'meta/{key}', value=quantization_parameters[key],
-                                        path=path, overwrite=True)
-
-        from .base import Geometry
-        return Geometry.new(path)
+                    geometry.meta_storage.store_item(key=key, value=quantization_parameters[key], overwrite=True)
+        return geometry
 
     def repack_segy(self, path=None, format=8, transform=None, quantization_parameters=None,
                     chunk_size=25_000, max_workers=4, pbar='t', store_meta=True, overwrite=True):
@@ -261,7 +262,7 @@ class ConversionMixin:
             If bool, then whether to display progress bar.
             If str, then type of progress bar to display: `'t'` for textual, `'n'` for widget.
         overwrite : bool
-            Whether to overwrite existing `path` or raise an exception. Also remove `meta` files.
+            Whether to overwrite existing `path` or raise an exception. Also removes `meta` files.
         """
         if format == 8 and transform is None:
             quantization_parameters = quantization_parameters or self.compute_quantization_parameters()
@@ -280,12 +281,11 @@ class ConversionMixin:
 
         quantization_parameters['quantization_ranges'] = quantization_parameters['ranges']
         for key in ['quantization_ranges', 'center', 'clip', 'quantization_error']:
-            geometry.dump_meta_item(key=f'meta/{key}', value=quantization_parameters[key],
-                                    overwrite=True)
+            geometry.meta_storage.store_item(key=key, value=quantization_parameters[key], overwrite=True)
         return geometry
 
 
-    def make_output_path(self, format='hdf5', quantize=False, postfix='', projections='ixd',
+    def make_output_path(self, format='hdf5', quantize=False, postfix=False, projections='ixd',
                          chunk_size_divisor=1, sgy_format=8):
         """ Compute output path for converted file, based on conversion parameters. """
         format = format.lower()
@@ -296,16 +296,19 @@ class ConversionMixin:
 
         fmt_prefix = 'q' if quantize else ''
 
-        if postfix == '':
-            if format == 'hdf5':
-                if len(projections) < 3:
-                    postfix = postfix + '_' + projections
-                if chunk_size_divisor != 1:
-                    postfix = postfix + '_' + f'c{chunk_size_divisor}'
+        if not isinstance(postfix, str):
+            if not postfix:
+                postfix = ''
+            else:
+                if format == 'hdf5':
+                    if len(projections) < 3:
+                        postfix = '_' + projections
+                    if chunk_size_divisor != 1:
+                        postfix = '_' + f'c{chunk_size_divisor}'
 
-            if format == 'sgy':
-                if quantize:
-                    postfix = postfix + '_' + f'f{sgy_format}'
+                if format == 'sgy':
+                    if quantize:
+                        postfix = '_' + f'f{sgy_format}'
 
         dirname = os.path.dirname(self.path)
         basename = os.path.basename(self.path)
@@ -314,7 +317,7 @@ class ConversionMixin:
         return path
 
 
-    def convert(self, format='qsgy', path=None, postfix='', projections='ixd', overwrite=True,
+    def convert(self, format='qsgy', path=None, postfix=False, projections='ixd', overwrite=True,
                 quantize=False, quantization_parameters=None, dataset_kwargs=None, chunk_size_divisor=1,
                 pbar='t', store_meta=True, sgy_format=8, transform=None, chunk_size=25_000, max_workers=4, **kwargs):
         """ Convert SEG-Y file to a more effective storage.
@@ -385,7 +388,7 @@ class ConversionMixin:
 
         # Spec: use `self` as `array_like` to infer shapes
         spec = self.make_export_spec(self)
-        spec.sample_rate /= factor
+        spec.sample_interval /= factor
         spec.samples = np.arange(self.depth * factor, dtype=np.int32)
         spec.format = 8 if quantize else 5
 
@@ -406,6 +409,5 @@ class ConversionMixin:
         if quantize and not self.quantized:
             quantization_parameters['quantization_ranges'] = quantization_parameters['ranges']
             for key in ['quantization_ranges', 'center', 'clip', 'quantization_error']:
-                geometry.dump_meta_item(key=f'meta/{key}', value=quantization_parameters[key],
-                                        overwrite=True)
+                geometry.meta_storage.store_item(key=key, value=quantization_parameters[key], overwrite=True)
         return geometry
