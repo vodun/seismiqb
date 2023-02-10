@@ -370,7 +370,7 @@ class FaultExtractor:
 
 
     def concat_connected_prototypes(self, intersection_ratio_threshold=None, axis=2,
-                                    border_threshold=10, width_split_threshold=100):
+                                    border_threshold=50, width_split_threshold=100):
         """ Concat prototypes which are connected.
 
         Under the hood we compare prototypes with each other and find which are connected as puzzles.
@@ -478,7 +478,7 @@ class FaultExtractor:
                 if self._is_contour_inside(contour_1, contour_2, border_threshold=corrected_border_threshold) or \
                    self._is_contour_inside(contour_2, contour_1, border_threshold=corrected_border_threshold):
                     # Split by split_axis for avoiding wrong prototypes shapes (like C or T-likable, etc.)
-                    if (width_split_threshold is not None) and \
+                    if (axis in (-1, 2)) and (width_split_threshold is not None) and \
                        (np.abs(prototype_1.width - prototype_2.width) > width_split_threshold):
                         split_indices = (max(prototype_1.bbox[split_axis, 0], prototype_2.bbox[split_axis, 0]),
                                          min(prototype_1.bbox[split_axis, 1], prototype_2.bbox[split_axis, 1]))
@@ -677,18 +677,18 @@ class FaultExtractor:
                                                  axis=-1)
             stats['after_connected_concat'].append(len(self.prototypes))
 
+            # Concat by direction axis
+            _ = self.concat_connected_prototypes(intersection_ratio_threshold=0.8,
+                                                 axis=self.direction)
+
+            stats['after_connected_concat'].append(len(self.prototypes))
+
             # Early stopping
             if (intersection_ratio_threshold <= min_intersection_ratio_threshold) and \
                (stats['after_connected_concat'][-1] == previous_iter_prototypes_amount):
                 break
 
             previous_iter_prototypes_amount = stats['after_connected_concat'][-1]
-
-            # Concat by direction axis
-            _ = self.concat_connected_prototypes(intersection_ratio_threshold=0.8,
-                                                 axis=self.direction)
-
-            stats['after_connected_concat'].append(len(self.prototypes))
 
             intersection_ratio_threshold = max(round(intersection_ratio_threshold - 0.05, 2),
                                                min_intersection_ratio_threshold)
