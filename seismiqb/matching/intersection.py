@@ -30,7 +30,7 @@ class Intersection2d2d:
     """ Intersection between two 2D fields. """
     @classmethod
     def new(cls, field_0, field_1, limits=slice(None), pad_width=20, threshold=10, unwrap=True):
-        """ Create one or more instances of intersection classes.
+        """ Create one or more instances of intersection.
         Preferred over directly instantiating objects.
         """
         values_0 = field_0.geometry.headers[['CDP_X', 'CDP_Y']].values
@@ -66,10 +66,7 @@ class Intersection2d2d:
                            trace_idx_0=trace_idx_0, trace_idx_1=trace_idx_1,
                            limits=limits, pad_width=pad_width)
 
-            for other in result:
-                if instance.is_similar(other, threshold=threshold):
-                    break
-            else:
+            if not any(other.is_similar(instance, threshold=threshold) for other in result):
                 result.append(instance)
 
         if not result:
@@ -120,7 +117,7 @@ class Intersection2d2d:
     def prepare_traces(self, limits=None, index_shifts=(0, 0), pad_width=0, n=1):
         """ Prepare traces from both intersecting fields.
         Under the hood, we load traces, pad to max depth, slice with `limits` and add additional `pad_width`.
-        Also, we can average over multiple (`n`) traces at loading to reduce noise.
+        Also, we average over `n` traces at loading to reduce noise.
         """
         limits = limits or self.limits
         pad_width = pad_width or self.pad_width
@@ -132,14 +129,14 @@ class Intersection2d2d:
         return trace_0, trace_1
 
     def _prepare_trace(self, field, index, limits=None, pad_width=0, n=1):
-        # Load traces
+        # Load data
         nhalf = (n - 1) // 2
         indices = list(range(index - nhalf, index + nhalf + 1))
         traces = field.geometry.load_by_indices(indices)
         trace = np.mean(traces, axis=0)
 
-        # Paddings and slicings
-        if self.max_depth - trace.size > 0:
+        # Pad/slice
+        if trace.size < self.max_depth:
             trace = np.pad(trace, (0, self.max_depth - trace.size))
         trace = trace[limits]
         if pad_width > 0:
@@ -230,20 +227,20 @@ class Intersection2d2d:
         # Load data
         trace_0, trace_1 = self.prepare_traces(limits=limits, index_shifts=index_shifts, pad_width=pad_width, n=n)
 
-        if twostep: # TODO: fix indexing bug
+        # Prepare array of tested shifts
+        if twostep:
+            # Compute approximate `shift` to narrow the interval
             shifts = np.linspace(-max_shift, max_shift, 2*max_shift + 1, dtype=np.float32)
-            matching_results = self._match_traces_analytic(trace_0=trace_0, trace_1=trace_1, shifts=shifts,
-                                                           metric=metric, apply_correction=apply_correction,
-                                                           correction_step=correction_step,
-                                                           return_intermediate=False)
-
-            shift = matching_results['shift']
+            shift = self._match_traces_analytic(trace_0=trace_0, trace_1=trace_1, shifts=shifts,
+                                                metric=metric, apply_correction=apply_correction,
+                                                correction_step=correction_step,
+                                                return_intermediate=False)['shift']
             shifts = np.linspace(shift - twostep_margin, shift + twostep_margin,
                                  2*twostep_margin*resample_factor + 1, dtype=np.float32)
         else:
             shifts = np.linspace(-max_shift, max_shift, 2*max_shift*resample_factor + 1, dtype=np.float32)
 
-        #
+        # Compute `shift` with required precision
         matching_results = self._match_traces_analytic(trace_0=trace_0, trace_1=trace_1, shifts=shifts,
                                                        metric=metric, apply_correction=apply_correction,
                                                        correction_step=correction_step,
@@ -257,7 +254,8 @@ class Intersection2d2d:
 
     def _match_traces_analytic(self, trace_0, trace_1, shifts, metric='correlation',
                                apply_correction=False, correction_step=3, return_intermediate=False):
-        # Compute metrics for each shift on a resampled grid. TODO: can be significantly sped up
+        # Compute metrics for each shift on a resampled grid
+        # TODO: can be significantly sped up by hard-coding correlation here
         metric_function = compute_correlation if metric == 'correlation' else compute_r2
         metrics = [metric_function(trace_0, modify_trace(trace_1, shift=shift)) for shift in shifts]
         metrics = np.array(metrics)
@@ -271,7 +269,7 @@ class Intersection2d2d:
         # Find the best shift and compute its relative quality
         idx = np.argmax(envelope)
 
-        # Correction: parabolic interpolation in the neighbourhood of a maxima
+        # Optional correction: parabolic interpolation in the neighborhood of a maxima
         if apply_correction is False:
             best_shift = shifts[idx]
             best_angle = instantaneous_phase[idx]
@@ -446,8 +444,8 @@ class Intersection2d2d:
         fig.show()
 
 
-    def show_neighbourhood(self, max_index_shift=7, limits=None, pad_width=0, n=1, max_shift=10, resample_factor=10):
-        """ Compute matching on all neighbouring traces. """
+    def show_neighborhood(self, max_index_shift=7, limits=None, pad_width=0, n=1, max_shift=10, resample_factor=10):
+        """ Compute matching on all neighboring traces. """
         # Prepare data
         k = max_index_shift * 2 + 1
         matrix = np.empty((k, k), dtype=np.float32)
