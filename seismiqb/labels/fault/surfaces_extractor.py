@@ -4,6 +4,7 @@ from itertools import combinations
 
 import numpy as np
 from scipy.ndimage import measurements
+from scipy.sparse import lil_matrix
 from scipy.sparse.csgraph import connected_components as connected_components_graph
 
 from batchflow import Notifier
@@ -159,7 +160,9 @@ class FaultExtractor:
         # Get mapping of patches to natural enumeration and its reverse version
         self._labels_mapping = dict(enumerate(self.patchtop_to_patch.keys()))
         self._labels_reverse_mapping = {v: k for k, v in self._labels_mapping.items()}
-        self._connectivity_matrix = np.eye(len(self.patchtop_to_patch))
+        self._connectivity_matrix = lil_matrix(
+            (len(self.patchtop_to_patch), len(self.patchtop_to_patch)), dtype='uint8'
+        )
 
         return self
 
