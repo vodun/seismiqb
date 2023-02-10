@@ -82,7 +82,7 @@ def transformable(method):
     """
     @wraps(method)
     def wrapper(instance, *args, dtype=None, on_full=False, channels=None, normalize=False, fill_value=None,
-                dilate=False, dilation_iterations=3, enlarge=False, enlarge_width=10,
+                dilation_iterations=0, enlarge=False, enlarge_width=10,
                 atleast_3d=False, n_components=None, **kwargs):
         result = method(instance, *args, **kwargs)
 
@@ -104,8 +104,9 @@ def transformable(method):
         if fill_value is not None and hasattr(instance, 'matrix_fill_to_num'):
             result = instance.matrix_fill_to_num(result, value=fill_value)
 
-        if dilate and hasattr(instance, 'matrix_dilate'):
+        if (dilation_iterations > 0) and hasattr(instance, 'matrix_dilate'):
             result = instance.matrix_dilate(result, dilation_iterations=dilation_iterations)
+
         if enlarge and hasattr(instance, 'matrix_enlarge'):
             result = instance.matrix_enlarge(result, width=enlarge_width)
 
