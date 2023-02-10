@@ -257,8 +257,10 @@ class OptimizationMixin:
 
         # Default plot parameters
         defaults = {'label': ['SEISMIC TIME RANGE', f'WELL TIME RANGE'], 'curve_linewidth': [4, 4],
-                    'curve_marker': 'o', 'curve_markersize': 12, 'xlabel': 'TIME, SECONDS', 'ylabel': 'SEISMIC/WELL',
-                    'xlabel_fontsize': 22, 'ylabel_fontsize': 22, 'title': 'WELL TIME RANGE WITH BEST SHIFT VS SEISMIC TIME RANGE'}
+                    'curve_marker': 'o', 'curve_markersize': 12,
+                    'xlabel': 'TIME, SECONDS', 'ylabel': 'SEISMIC/WELL',
+                    'xlabel_fontsize': 22, 'ylabel_fontsize': 22,
+                    'title': 'WELL TIME RANGE WITH BEST SHIFT VS SEISMIC TIME RANGE'}
 
         # Update defaults and plot
         kwargs = {'mode': 'curve', **defaults, **kwargs}
@@ -310,7 +312,12 @@ def construct_impulse(amplitudes, phases, wavelet_length=None):
 
 class ImpulseOptimizationFactory:
     """ One can use the instances of this class to optimize impulse. The default version
-    fixes amplitudes and allows to optimize phases, starting from given position.
+    fixes amplitudes and allows to optimize phases for most important frequencies, starting
+    from given position.
+
+    NOTE: one can apply the same factory for searching the impulse in the space of impulses,
+    that can be obtained by a constant (among frequencies) phase-shift, applied to the initial
+    state of the impulse.
     """
     def __init__(self, start_impulse, seismic_time, well_time, seismic_curve, impedance_log,
                  cut_frequency=8, delta=.9):
@@ -339,10 +346,18 @@ class ImpulseOptimizationFactory:
 
         return -OptimizationMixin.nancorrelation(self.seismic_curve, synthetic)
 
+    @property
     def get_x0(self):
+        """ Get phases for the most important frequencies. That is, starting point for phases
+        optimization.
+        """
         return self.phases[:self.cut_frequency]
 
+    @property
     def get_bounds(self):
+        """ Get phases for the most important frequencies. That is, starting point for phases
+        optimization.
+        """
         return [(self.phases[i] - self.delta, self.phases[i] + self.delta) for i in range(self.cut_frequency)]
 
 
