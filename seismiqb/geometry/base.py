@@ -183,7 +183,7 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetricM
         """ Dump all attributes, referenced in  `PRESERVED_*` lists, to a storage.
         If no `path` is provided, uses `meta_storage` of the `self`. """
         storage = self.meta_storage if path is None else SQBStorage(path)
-        items = {key : getattr(self, key) for key in self.PRESERVED + self.PRESERVED_LAZY
+        items = {key : getattr(self, key) for key in self.PRESERVED + self.PRESERVED_LAZY + self.PRESERVED_LAZY_MISC
                  if getattr(self, key, None) is not None}
         items['type'] = 'geometry-meta'
         storage.store(items)
