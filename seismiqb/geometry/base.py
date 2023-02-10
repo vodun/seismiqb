@@ -86,7 +86,6 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetricM
 
         # Additional info from SEG-Y
         'segy_path', 'segy_text',
-        'rotation_matrix', 'area',
 
         # Scalar stats for cube values: computed for the entire SEG-Y / its subset
         'min', 'max', 'mean', 'std', 'n_value_uniques',
@@ -105,7 +104,7 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetricM
     ]
 
     PRESERVED_LAZY_MISC = [ # additional stats that may be absent. loaded at the time of the first access
-        'quantization_ranges', 'quantization_error'
+        'quantization_ranges', 'quantization_error', 'rotation_matrix', 'area',
     ]
 
     PRESERVED_LAZY_ALL = PRESERVED_LAZY + PRESERVED_LAZY_CACHED + PRESERVED_LAZY_MISC
