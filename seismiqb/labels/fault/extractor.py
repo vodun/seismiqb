@@ -43,7 +43,7 @@ class FaultExtractor:
         If 0, then no filter applied (recommended for higher accuracy).
         If more than 0, then extraction will be faster.
     """
-    def __init__(self, data, direction, component_len_threshold=3):
+    def __init__(self, data, direction, component_len_threshold=0):
         """ Init data container with components info for each slide. """
         self.shape = data.shape
 
@@ -472,7 +472,7 @@ class FaultExtractor:
 
                 # Shift one of the objects, making their contours intersected
                 shift = 1 if is_first_upper else -1
-                contour_1[:, -1] += shift
+                contour_1[:, axis] += shift
 
                 # Check that one component contour is inside another (for both)
                 if self._is_contour_inside(contour_1, contour_2, border_threshold=corrected_border_threshold) or \
@@ -662,9 +662,9 @@ class FaultExtractor:
         _ = self.extract_prototypes()
         stats['extracted'] = len(self.prototypes)
 
-        # Filter for speed up
-        self.prototypes = self.filter_prototypes(min_height=3, min_width=3, min_n_points=10)
-        stats['filtered_extracted'] = len(self.prototypes)
+        # # Filter for speed up
+        # self.prototypes = self.filter_prototypes(min_height=3, min_width=3, min_n_points=10)
+        # stats['filtered_extracted'] = len(self.prototypes)
 
         # Concat connected (as puzzles) prototypes
         previous_iter_prototypes_amount = stats['extracted'] + 100 # to avoid stopping after first concat
@@ -693,17 +693,17 @@ class FaultExtractor:
             intersection_ratio_threshold = max(round(intersection_ratio_threshold - 0.05, 2),
                                                min_intersection_ratio_threshold)
 
-        # Filter for speed up
-        self.prototypes = self.filter_prototypes(min_height=3, min_width=3, min_n_points=10)
-        stats['filtered_connected_concat'] = len(self.prototypes)
+        # # Filter for speed up
+        # self.prototypes = self.filter_prototypes(min_height=3, min_width=3, min_n_points=10)
+        # stats['filtered_connected_concat'] = len(self.prototypes)
 
         # Concat embedded
         _ = self.concat_embedded_prototypes()
         stats['after_embedded_concat'] = len(self.prototypes)
 
-        # Filter too small prototypes
-        self.prototypes = self.filter_prototypes(**filtering_kwargs)
-        stats['after_last_filtering'] = len(self.prototypes)
+        # # Filter too small prototypes
+        # self.prototypes = self.filter_prototypes(**filtering_kwargs)
+        # stats['after_last_filtering'] = len(self.prototypes)
         return self.prototypes, stats
 
     def filter_prototypes(self, min_height=40, min_width=20, min_n_points=100):
