@@ -3,6 +3,7 @@
 import numpy as np
 import torch
 
+from scipy.optimize import minimize
 from scipy.signal import butter, sosfilt, sosfiltfilt, find_peaks
 from torch.nn import functional as F
 
@@ -14,6 +15,17 @@ from ...plotters import plot
 # Mixin class for `Well` to simplify dt-ticks optimization for well-seismic tie
 class OptimizationMixin:
     """ Utilities for optimization of match between seismic data and well logs. """
+    def __init__(self, seismic_time, well_time, seismic_curve, impedance_log):
+        """ Store the state of the matcher.
+        """
+        self.seismic_time = seismic_time
+        self.well_time = well_time
+        self.seismic_curve = seismic_curve
+        self.impedance_log = impedance_log
+
+        self.tie_crosscorrelation = None
+
+
     @staticmethod
     def get_relevant_seismic_slice(seismic_time, log_time, log_values):
         """ Get slice of seismic time-ticks, where we can linearly interpolate values of a given log.
@@ -95,6 +107,13 @@ class OptimizationMixin:
         # Case of numpy-arrays.
         return np.convolve(reflectivity, impulse, mode='same')
 
+    @classmethod
+    def resample_and_compute_synthetic(cls, seismic_time, well_time, impedance_log, impulse):
+        """ """
+        resampled_impedance = cls.resample_log(seismic_time, well_time, impedance_log)
+        recreated = cls.compute_synthetic_(impedance=resampled_impedance, impulse=impulse)
+        return recreated
+
     @staticmethod
     def nancorrelation(array1, array2):
         """ Compute correlation and ignore nan in both `array1` and `array2`.
@@ -114,7 +133,7 @@ class OptimizationMixin:
         return covariation / (std1 * std2)
 
 
-    @classmethod   # This one can actually be a method. It would take column names of `self.data` as arguments.
+    @classmethod
     def measure_seismic_tie_quality(cls, seismic_time, well_time, seismic_curve, impedance_log,
                                     impulse, metric='corr'):
         """ Measure the quality of well-seismic tie. Recalculates the synthetic seismic in seismic
@@ -148,12 +167,31 @@ class OptimizationMixin:
         result = match_function(synthetic, seismic_curve)
         return result
 
-    @classmethod   # This one can also be a method.
-    def optimize_well_time(cls, start_well_time, seismic_time, seismic_curve, impedance_log, impulse,
+    def apply(self, src, dst, transform):
+        """
+        """
+        setattr(self, dst, transform(getattr(self, src)))
+
+    def optimize_well_time(self, src='well_time', dst='well_time', dst_history=None, seismic_time_slice=None,
                            dt_bounds_multipliers=(.95, 1.05), t0_bounds_addition=(-1e-4, 1e-4), n_iters=5000,
-                           device='cuda:0', optimizer='Adam', optimizer_kwargs=None):
+                           device='cuda:0', optimizer='Adam', optimizer_kwargs=None, inplace=True,
+                           flip_impulse=True):
         """ Improve seismic tie by optimising well-time ticks. For the procedure consider the impulse fixed.
         """
+        start_well_time, seismic_time, seismic_curve, impedance_log, impulse = [
+            getattr(self, name) for name in (src, 'seismic_time', 'seismic_curve', 'impedance_log', 'impulse')
+            ]
+
+        if dst_history is not None:
+            setattr(self, dst_history, start_well_time)
+
+        if flip_impulse:
+            impulse = impulse[::-1].copy()
+
+        # Cut needed time slice if requested
+        seismic_time_slice = seismic_time_slice or slice(None, None)
+        seismic_time, seismic_curve = seismic_time[seismic_time_slice], seismic_curve[seismic_time_slice]
+
         # Make start point of dt's.
         start_x0_dt = np.diff(start_well_time, prepend=0)
 
@@ -190,8 +228,8 @@ class OptimizationMixin:
             # are known. Impedance values and seismic time ticks do not change.
             # NOTE: perhaps implement topK later.
             current_well_time = torch.cumsum(variables, dim=0)
-            loss = -cls.measure_seismic_tie_quality(seismic_time, current_well_time, seismic_curve,
-                                                    impedance_log, impulse, metric='corr')
+            loss = -self.measure_seismic_tie_quality(seismic_time, current_well_time, seismic_curve,
+                                                     impedance_log, impulse, metric='corr')
 
             loss.backward()
             loss_history.append(float(loss.detach().cpu().numpy()))
@@ -205,18 +243,70 @@ class OptimizationMixin:
 
         # Fetch resulting well_time and loss_history.
         final_well_time = np.cumsum(variables.detach().cpu().numpy())
+
+        setattr(self, dst, final_well_time)
+
         return final_well_time, loss_history
 
+    def optimize_impulse(self, src='impulse', dst='impulse', dst_history=None, cut_frequency=8, delta=.9, **kwargs):
+        """
+        """
+        # Compute reflectivity given current well time
+        impedance = self.resample_log(self.seismic_time, self.well_time, self.impedance_log)
+        reflectivity = self.compute_reflectivity_(impedance)
+
+        # Functional for impulse optimization
+        start_impulse = getattr(self, src)
+        if dst_history is not None:
+            setattr(self, dst_history, start_impulse)
+
+        functional = ImpulseOptimizationFactory(start_impulse, reflectivity, self.seismic_curve, cut_frequency, delta)
+
+        # Perform minimization
+        optimization_results = minimize(functional, functional.get_x0, bounds=functional.get_bounds, **kwargs)
+        impulse = functional.compute_impulse(optimization_results['x'])
+
+        setattr(self, dst, impulse)
+
+        return impulse
+
+    def compute_tie_crosscorrelation(self, n_samples=10000, limits=(-.5, 1.5), compute_peaks=True, dinstance_peaks=10):
+        """ Compute tie crosscorrelation function of comparing recorded seismic and the synthetic seismic,
+        generated from logs. Allows to determine the shift to apply to `well_time`.
+        """
+        seismic_time, well_time, seismic_curve, impedance_log, impulse = [
+            getattr(self, src) for src in ('seismic_time', 'well_time', 'seismic_curve', 'impedance_log', 'impulse')
+            ]
+
+        # Compute crosscorrelation-values on a grid of points.
+        shifts = np.linspace(*limits, n_samples)
+        values = [self.measure_seismic_tie_quality(seismic_time, well_time + shift, seismic_curve, impedance_log,
+                                                   impulse, metric='corr') for shift in shifts]
+
+        # Determine peaks if needed.
+        if compute_peaks:
+            peak_indices = find_peaks(values, distance=dinstance_peaks)[0]
+
+            # Sort the array of peak indices to start with those indices that have
+            # the largest corresponding value of match.
+            peak_indices = peak_indices[np.argsort([values[index] for index in peak_indices])[::-1]]
+        else:
+            peak_indices = []
+
+        # Store the computed results.
+        self.tie_crosscorrelation = {'shifts': shifts, 'values': values, 'peak_indices': peak_indices,
+                                     'peak_shifts': [shifts[ix] for ix in peak_indices],
+                                     'peak_values': [values[ix] for ix in peak_indices]}
+
     # Visualization
-    @classmethod
-    def show_tie_crocccorrelation(cls, seismic_time, well_time, seismic_curve, impedance_log, impulse,
-                                  n_samples=10000, limits=(-.5, 1.5), n_peaks=3, **kwargs):
+    def show_tie_crocccorrelation(self, n_samples=10000, limits=(-.5, 1.5), n_peaks=3, **kwargs):
         """ Compute and show crosscorrelation function of recorded seismic and the synthetic one, generated from logs.
         Allows to see whether we need to apply a shift to well_time.
         """
-        shifts = np.linspace(*limits, n_samples)
-        values = [cls.measure_seismic_tie_quality(seismic_time, well_time + shift, seismic_curve, impedance_log,
-                                                  impulse, metric='corr') for shift in shifts]
+        if self.tie_crosscorrelation is None:
+            self.compute_tie_crosscorrelation(n_samples=n_samples, limits=limits, compute_peaks=n_peaks > 0)
+
+        shifts, values, peak_indices = [self.tie_crosscorrelation[key] for key in ('shifts', 'values', 'peak_indices')]
 
         # Default plot parameters
         defaults = {'xlabel': 'SHIFT, SECONDS', 'ylabel': 'MATCH QUALITY',
@@ -228,15 +318,10 @@ class OptimizationMixin:
         plotter = plot((shifts, values), **kwargs)
 
         # Show peaks if needed
-        if n_peaks is not None:
-            peak_indices = find_peaks(values, distance=10)[0]
+        if n_peaks > 0:
             axis = plotter.subplots[0].ax
 
-            # Sort the array of peak indices to start with those indices that have
-            # the largest corresponding value of match.
-            peak_indices = peak_indices[np.argsort([values[index] for index in peak_indices])[::-1]]
-
-            # Add requested number of vertical lines.
+            # Add vertical lines in locations of peaks.
             for index in peak_indices[:n_peaks]:
                 axis.axvline(shifts[index], linestyle='dashed', color='orange', alpha=.6,
                              label=f'SHIFT: {shifts[index]:.2f}\nCORR: {values[index]:.2f}')
@@ -245,13 +330,12 @@ class OptimizationMixin:
 
         return plotter
 
-    @classmethod
-    def show_ranges(cls, well_time, seismic_time, **kwargs):
+    def show_ranges(self, **kwargs):
         """ Show ranges of seismic time and well time on one plot. Needed to select limits for computing
         crosscorrelation and selecting the global shift.
         """
-        seismic_range = np.nanmin(seismic_time), np.nanmax(seismic_time)
-        well_range = np.nanmin(well_time), np.nanmax(well_time)
+        seismic_range = np.nanmin(self.seismic_time), np.nanmax(self.seismic_time)
+        well_range = np.nanmin(self.well_time), np.nanmax(self.well_time)
 
         data = [(seismic_range, (1, 1)), ((well_range), (2, 2))]
 
@@ -261,6 +345,39 @@ class OptimizationMixin:
                     'xlabel': 'TIME, SECONDS', 'ylabel': 'SEISMIC/WELL',
                     'xlabel_fontsize': 22, 'ylabel_fontsize': 22,
                     'title': 'WELL TIME RANGE WITH BEST SHIFT VS SEISMIC TIME RANGE'}
+
+        # Update defaults and plot
+        kwargs = {'mode': 'curve', **defaults, **kwargs}
+        plotter = plot(data, **kwargs)
+
+        return plotter
+
+    def show_tie_comparison(self, src_well_time, src_impulse=('impulse', 'impulse'), seismic_time_slice=None,
+                            **kwargs):
+        """
+        """
+        seismic_time_slice = seismic_time_slice or slice(None, None)
+        seismic_time = self.seismic_time[seismic_time_slice]
+        seismic_curve = self.seismic_curve[seismic_time_slice]
+
+        recreated = [
+            self.resample_and_compute_synthetic(seismic_time, getattr(self, src_well_time_),
+                                                self.impedance_log, getattr(self, src_impulse_))
+                                                for src_well_time_, src_impulse_ in zip(src_well_time, src_impulse)
+            ]
+
+        correlation = [self.nancorrelation(recreated_, seismic_curve) for recreated_ in recreated]
+
+        data = [seismic_curve] + recreated
+
+        # Default plot parameters
+        defaults = {'title': f'SYNTHETIC VS RECREATED SEISMIC',
+                    'label': ['SEISMIC'] + [f'SYNTHETIC {postfix}, CORR: {correlation_: .3f}'
+                                            for correlation_, postfix in
+                                            zip(correlation, ['BEFORE', 'AFTER'])],
+                    'figsize': (23, 5), 'curve_alpha': [1, .8, 1],
+                    'curve_linestyle': ['solid', 'dashed', 'solid'],
+                    'curve_linewidth': [2, 2.5, 2]}
 
         # Update defaults and plot
         kwargs = {'mode': 'curve', **defaults, **kwargs}
@@ -319,8 +436,7 @@ class ImpulseOptimizationFactory:
     that can be obtained by a constant (among frequencies) phase-shift, applied to the initial
     state of the impulse.
     """
-    def __init__(self, start_impulse, seismic_time, well_time, seismic_curve, impedance_log,
-                 cut_frequency=8, delta=.9):
+    def __init__(self, start_impulse, reflectivity, seismic_curve, cut_frequency=8, delta=.9):
         """ Store variables that we'll need to run the functional.
         """
         self.length = len(start_impulse)
@@ -329,9 +445,7 @@ class ImpulseOptimizationFactory:
         self.cut_frequency = cut_frequency
         self.seismic_curve = seismic_curve
         self.delta = delta
-
-        impedance = OptimizationMixin.resample_log(seismic_time, well_time, impedance_log)
-        self.reflectivity = OptimizationMixin.compute_reflectivity_(impedance)
+        self.reflectivity = reflectivity
 
     def compute_impulse(self, x):
         phases = np.copy(self.phases)
