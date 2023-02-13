@@ -86,7 +86,6 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetricM
 
         # Additional info from SEG-Y
         'segy_path', 'segy_text',
-        'rotation_matrix', 'area',
 
         # Scalar stats for cube values: computed for the entire SEG-Y / its subset
         'min', 'max', 'mean', 'std', 'n_value_uniques',
@@ -105,7 +104,7 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetricM
     ]
 
     PRESERVED_LAZY_MISC = [ # additional stats that may be absent. loaded at the time of the first access
-        'quantization_ranges', 'quantization_error'
+        'quantization_ranges', 'quantization_error', 'rotation_matrix', 'area',
     ]
 
     PRESERVED_LAZY_ALL = PRESERVED_LAZY + PRESERVED_LAZY_CACHED + PRESERVED_LAZY_MISC
@@ -184,7 +183,7 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetricM
         """ Dump all attributes, referenced in  `PRESERVED_*` lists, to a storage.
         If no `path` is provided, uses `meta_storage` of the `self`. """
         storage = self.meta_storage if path is None else SQBStorage(path)
-        items = {key : getattr(self, key) for key in self.PRESERVED + self.PRESERVED_LAZY
+        items = {key : getattr(self, key) for key in self.PRESERVED + self.PRESERVED_LAZY + self.PRESERVED_LAZY_MISC
                  if getattr(self, key, None) is not None}
         items['type'] = 'geometry-meta'
         storage.store(items)
@@ -506,9 +505,7 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetricM
 
         Parameters
         ----------
-        dilate : bool
-            Whether to apply dilation to the matrix.
-        dilation_iterations : int
+        dilation_iterations : int, optional
             Number of dilation iterations to apply.
         """
         return self.dead_traces_matrix.copy()
@@ -520,9 +517,7 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetricM
 
         Parameters
         ----------
-        dilate : bool
-            Whether to apply dilation to the matrix.
-        dilation_iterations : int
+        dilation_iterations : int, optional
             Number of dilation iterations to apply.
         """
         return 1 - self.dead_traces_matrix
@@ -534,7 +529,7 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetricM
         frequency = frequency if isinstance(frequency, (tuple, list)) else (frequency, frequency)
 
         # Prepare dilated `dead_traces_matrix`
-        dead_traces_matrix = self.get_dead_traces_matrix(dilate=True, dilation_iterations=margin)
+        dead_traces_matrix = self.get_dead_traces_matrix(dilation_iterations=margin)
 
         if margin:
             dead_traces_matrix[:+margin, :] = 1

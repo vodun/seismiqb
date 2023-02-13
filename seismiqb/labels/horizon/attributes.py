@@ -1,7 +1,6 @@
 """ Mixin with computed along horizon geological attributes. """
 # pylint: disable=too-many-statements
 from copy import copy
-from functools import wraps
 from ast import literal_eval
 
 from math import isnan
@@ -11,37 +10,13 @@ from numba import njit, prange
 from cv2 import dilate
 from scipy.signal import ricker
 from scipy.ndimage import convolve
-from scipy.ndimage.morphology import binary_dilation, binary_fill_holes, binary_erosion
+from scipy.ndimage.morphology import binary_fill_holes, binary_erosion
 from skimage.measure import label
 from sklearn.decomposition import PCA
 
 from ...functional import compute_spectral_decomposition, compute_instantaneous_amplitude, compute_instantaneous_phase
 from ...utils import transformable, lru_cache
 
-
-
-def apply_dilation(method):
-    """ Decorator to apply binary dilation to the method result matrix with zero traces preserving.
-
-    Parameters
-    ----------
-    dilation : int
-        Number of iterations for binary dilation algorithm.
-        If None, False or 0, then don't apply binary dilation.
-    """
-    @wraps(method)
-    def _wrapper(instance, *args, dilation=None, **kwargs):
-        result = method(instance, *args, **kwargs)
-
-        if dilation:
-            fill_value = np.nan if isinstance(result, np.float32) else instance.FILL_VALUE
-
-            result = np.nan_to_num(result)
-            result = binary_dilation(result, iterations=dilation)
-
-            result[instance.field.dead_traces_matrix == 1] = fill_value
-        return result
-    return _wrapper
 
 
 class AttributesMixin:
@@ -130,6 +105,18 @@ class AttributesMixin:
             matrix = (matrix - mean) / std
         else:
             raise ValueError(f'Unknown normalization mode `{mode}`.')
+        return matrix
+
+    def matrix_dilate(self, matrix, dilation_iterations=1):
+        """ Dilate matrix with (3, 3) kernel with special care for filling values. """
+        fill_value = np.nan if issubclass(matrix.dtype.type, np.floating) else self.FILL_VALUE
+
+        matrix = np.nan_to_num(matrix)
+        matrix[matrix == self.FILL_VALUE] = 0
+
+        matrix = dilate(matrix, kernel=np.ones((3, 3), np.uint8), iterations=dilation_iterations)
+
+        matrix[self.field.dead_traces_matrix == 1] = fill_value
         return matrix
 
     def matrix_enlarge(self, matrix, width=3):
@@ -581,7 +568,7 @@ class AttributesMixin:
             method = self.ATTRIBUTE_TO_METHOD[src_name]
             data = getattr(self, method)(use_cache=use_cache, enlarge=enlarge, **kwargs)
         else:
-            data = self.get_property(src_name, enlarge=enlarge, **kwargs)
+            data = self.get_property(src_name, use_cache=use_cache, enlarge=enlarge, **kwargs)
 
         # TODO: Someday, we would need to re-write attribute loading methods
         # so they use locations not to crop the loaded result, but to load attribute only at location.
@@ -597,11 +584,11 @@ class AttributesMixin:
 
 
     # Specific attributes loading
-    @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
+    @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=False)
     @transformable
     def get_property(self, src, **_):
         """ Load a desired instance attribute. Decorated to allow additional postprocessing steps. """
-        data = copy(getattr(self, src, None))
+        data = getattr(self, src, None)
         if data is None:
             aliases = list(self.ALIAS_TO_ATTRIBUTE.keys())
             raise ValueError(f'Unknown `src` {src}. Expected a matrix-property or one of {aliases}.')
@@ -782,9 +769,8 @@ class AttributesMixin:
     # Maps with faults and spikes
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     @transformable
-    @apply_dilation
     def get_median_diff_map(self, iters=2, window_size=11, max_depth_difference=0,
-                            threshold=2, dilation=0, **_):
+                            threshold=2, dilation_iterations=0, **_):
         """ Compute difference between depth map and its median filtered counterpart.
 
         Parameters
@@ -798,11 +784,11 @@ class AttributesMixin:
             then the point is ignored in filter.
         threshold : number
             Threshold to consider a difference between matrix and median value is insignificant.
-        dilation : int
+        dilation_iterations : int
             Number of iterations for binary dilation algorithm to increase areas with significant
             differences between matrix and median filter.
         """
-        _ = dilation # This value is passed only to the decorator
+        _ = dilation_iterations # transformable decorator argument
 
         medfilt = self.full_matrix.astype(np.float32)
         medfilt[self.full_matrix == self.FILL_VALUE] = np.nan
@@ -823,18 +809,17 @@ class AttributesMixin:
 
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     @transformable
-    @apply_dilation
-    def get_gradient_map(self, threshold=1, dilation=2, **_):
+    def get_gradient_map(self, threshold=1, dilation_iterations=2, **_):
         """ Compute combined gradient map along both directions.
 
         Parameters
         ----------
         threshold : number
             Threshold to consider a gradient value is insignificant.
-        dilation : int
+        dilation_iterations : int
             Number of iterations for binary dilation algorithm to increase areas with significant gradients values.
         """
-        _ = dilation # This value is passed only to the decorator
+        _ = dilation_iterations # transformable decorator argument
 
         grad_i = self.load_attribute('grad_i', on_full=True, dtype=np.float32, use_cache=False)
         grad_x = self.load_attribute('grad_x', on_full=True, dtype=np.float32, use_cache=False)
@@ -854,7 +839,6 @@ class AttributesMixin:
 
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     @transformable
-    @apply_dilation
     def get_max_gradient_map(self, **_):
         """ Compute maximum of gradients along both directions. """
         grad_i = self.load_attribute('grad_i', on_full=True, dtype=np.float32, use_cache=False)
@@ -867,7 +851,6 @@ class AttributesMixin:
 
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     @transformable
-    @apply_dilation
     def get_max_abs_gradient_map(self, **_):
         """ Compute maximum of abs gradients along both directions. """
         grad_i = self.load_attribute('grad_i', on_full=True, dtype=np.float32, use_cache=False)
@@ -882,9 +865,8 @@ class AttributesMixin:
 
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     @transformable
-    @apply_dilation
     def get_spikes_mask(self, max_spike_width=7, min_spike_size=5, max_depths_distance=2,
-                        dilation=0):
+                        dilation_iterations=0):
         """ Get spikes mask for the horizon.
 
         Parameters
@@ -897,10 +879,10 @@ class AttributesMixin:
             Threshold to consider that depths are close.
             If points has difference in depth not more than this threshold, then we
             assume that depths are almost the same.
-        dilation : int
+        dilation_iterations : int
             Number of iterations for binary dilation algorithm to increase the spikes.
         """
-        _ = dilation # This value is passed only to the decorator
+        _ = dilation_iterations # transformable decorator argument
 
         matrix = self.full_matrix.astype(np.float32)
         matrix[matrix == self.FILL_VALUE] = np.nan
