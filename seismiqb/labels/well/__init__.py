@@ -1,3 +1,3 @@
 """ !!. """
 from .base import Well, MatchedWell
-from .well_seismic_tie import OptimizationMixin, symmetric_wavelet_estimation, ImpulseOptimizationFactory, show_wavelet
+from .well_seismic_tie import WellMatcher, symmetric_wavelet_estimation, WaveletOptimizationFactory, show_wavelet

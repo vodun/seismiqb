@@ -13,7 +13,7 @@ from xitorch.interpolate import Interp1D    # Implementation from here: seems to
 from ...plotters import plot
 
 # Mixin class for `Well` to simplify dt-ticks optimization for well-seismic tie
-class OptimizationMixin:
+class WellMatcher:
     """ Utilities for optimization of match between seismic data and well logs. """
     def __init__(self, seismic_time, well_time, seismic_curve, impedance_log):
         """ Store the state of the matcher.
@@ -88,30 +88,30 @@ class OptimizationMixin:
         return log_in_seismic_time
 
     @classmethod
-    def compute_synthetic_(cls, impedance=None, reflectivity=None, impulse=None):
-        """ Compute and fetch synthetic seismic out of a vector of reflectivity, given impulse.
+    def compute_synthetic_(cls, impedance=None, reflectivity=None, wavelet=None):
+        """ Compute and fetch synthetic seismic out of a vector of reflectivity, given wavelet.
         """
         if impedance is not None:
             reflectivity = cls.compute_reflectivity_(impedance)
 
         if isinstance(reflectivity, torch.Tensor):
             # Case of incoming torch-tensors.
-            if isinstance(impulse, (list, np.ndarray)):
-                impulse = torch.tensor(impulse, device=reflectivity.get_device())
+            if isinstance(wavelet, (list, np.ndarray)):
+                wavelet = torch.tensor(wavelet, device=reflectivity.get_device())
 
             reflectivity = reflectivity.reshape(1, 1, -1)
-            impulse = impulse.reshape(1, 1, -1)
+            wavelet = wavelet.reshape(1, 1, -1)
 
-            return F.conv1d(reflectivity, impulse, padding='same').reshape(-1)
+            return F.conv1d(reflectivity, wavelet, padding='same').reshape(-1)
 
         # Case of numpy-arrays.
-        return np.convolve(reflectivity, impulse, mode='same')
+        return np.convolve(reflectivity, wavelet, mode='same')
 
     @classmethod
-    def resample_and_compute_synthetic(cls, seismic_time, well_time, impedance_log, impulse):
+    def resample_and_compute_synthetic(cls, seismic_time, well_time, impedance_log, wavelet):
         """ """
         resampled_impedance = cls.resample_log(seismic_time, well_time, impedance_log)
-        recreated = cls.compute_synthetic_(impedance=resampled_impedance, impulse=impulse)
+        recreated = cls.compute_synthetic_(impedance=resampled_impedance, wavelet=wavelet)
         return recreated
 
     @staticmethod
@@ -135,14 +135,14 @@ class OptimizationMixin:
 
     @classmethod
     def measure_seismic_tie_quality(cls, seismic_time, well_time, seismic_curve, impedance_log,
-                                    impulse, metric='corr'):
+                                    wavelet, metric='corr'):
         """ Measure the quality of well-seismic tie. Recalculates the synthetic seismic in seismic
         time ticks and compares the synthetic with the original using one of the supported metrics.
         Most commonly used metric is correlation.
 
         NOTE: convenience function; used for improving the well-seismic tie by optimizing
         (`scipy.optimize`/`torch`-optimization) one of the given arrays, e.g. `well_time`-ticks or
-        `impulse`.
+        `wavelet`.
         """
         if isinstance(seismic_time, torch.Tensor):
             # Select quality function: the larger the value, the better.
@@ -162,7 +162,7 @@ class OptimizationMixin:
                 raise ValueError(f'Unknown metric {metric} for `torch`-version of the function!')
 
         log_in_seismic_time = cls.resample_log(seismic_time, well_time, impedance_log)
-        synthetic = cls.compute_synthetic_(impedance=log_in_seismic_time, impulse=impulse)
+        synthetic = cls.compute_synthetic_(impedance=log_in_seismic_time, wavelet=wavelet)
 
         result = match_function(synthetic, seismic_curve)
         return result
@@ -174,19 +174,18 @@ class OptimizationMixin:
 
     def optimize_well_time(self, src='well_time', dst='well_time', dst_history=None, seismic_time_slice=None,
                            dt_bounds_multipliers=(.95, 1.05), t0_bounds_addition=(-1e-4, 1e-4), n_iters=5000,
-                           device='cuda:0', optimizer='Adam', optimizer_kwargs=None, inplace=True,
-                           flip_impulse=True):
-        """ Improve seismic tie by optimising well-time ticks. For the procedure consider the impulse fixed.
+                           device='cuda:0', optimizer='Adam', optimizer_kwargs=None, flip_wavelet=True):
+        """ Improve seismic tie by optimising well-time ticks. For the procedure consider the wavelet fixed.
         """
-        start_well_time, seismic_time, seismic_curve, impedance_log, impulse = [
-            getattr(self, name) for name in (src, 'seismic_time', 'seismic_curve', 'impedance_log', 'impulse')
+        start_well_time, seismic_time, seismic_curve, impedance_log, wavelet = [
+            getattr(self, name) for name in (src, 'seismic_time', 'seismic_curve', 'impedance_log', 'wavelet')
             ]
 
         if dst_history is not None:
             setattr(self, dst_history, start_well_time)
 
-        if flip_impulse:
-            impulse = impulse[::-1].copy()
+        if flip_wavelet:
+            wavelet = wavelet[::-1].copy()
 
         # Cut needed time slice if requested
         seismic_time_slice = seismic_time_slice or slice(None, None)
@@ -202,9 +201,9 @@ class OptimizationMixin:
         bounds = [torch.from_numpy(data).to(device, dtype=torch.float32) for data in bounds_numpy]
 
         # Move arrays to needed device.
-        impulse, seismic_curve, impedance_log, seismic_time = [
+        wavelet, seismic_curve, impedance_log, seismic_time = [
             torch.from_numpy(array).to(device=device, dtype=torch.float32)
-            for array in (impulse, seismic_curve, impedance_log, seismic_time)
+            for array in (wavelet, seismic_curve, impedance_log, seismic_time)
             ]
 
         # Init variables of the model using chosen start point.
@@ -229,7 +228,7 @@ class OptimizationMixin:
             # NOTE: perhaps implement topK later.
             current_well_time = torch.cumsum(variables, dim=0)
             loss = -self.measure_seismic_tie_quality(seismic_time, current_well_time, seismic_curve,
-                                                     impedance_log, impulse, metric='corr')
+                                                     impedance_log, wavelet, metric='corr')
 
             loss.backward()
             loss_history.append(float(loss.detach().cpu().numpy()))
@@ -248,40 +247,40 @@ class OptimizationMixin:
 
         return final_well_time, loss_history
 
-    def optimize_impulse(self, src='impulse', dst='impulse', dst_history=None, cut_frequency=8, delta=.9, **kwargs):
+    def optimize_wavelet(self, src='wavelet', dst='wavelet', dst_history=None, cut_frequency=8, delta=.9, **kwargs):
         """
         """
         # Compute reflectivity given current well time
         impedance = self.resample_log(self.seismic_time, self.well_time, self.impedance_log)
         reflectivity = self.compute_reflectivity_(impedance)
 
-        # Functional for impulse optimization
-        start_impulse = getattr(self, src)
+        # Functional for wavelet optimization
+        start_wavelet = getattr(self, src)
         if dst_history is not None:
-            setattr(self, dst_history, start_impulse)
+            setattr(self, dst_history, start_wavelet)
 
-        functional = ImpulseOptimizationFactory(start_impulse, reflectivity, self.seismic_curve, cut_frequency, delta)
+        functional = WaveletOptimizationFactory(start_wavelet, reflectivity, self.seismic_curve, cut_frequency, delta)
 
         # Perform minimization
         optimization_results = minimize(functional, functional.get_x0, bounds=functional.get_bounds, **kwargs)
-        impulse = functional.compute_impulse(optimization_results['x'])
+        wavelet = functional.compute_wavelet(optimization_results['x'])
 
-        setattr(self, dst, impulse)
+        setattr(self, dst, wavelet)
 
-        return impulse
+        return wavelet
 
     def compute_tie_crosscorrelation(self, n_samples=10000, limits=(-.5, 1.5), compute_peaks=True, dinstance_peaks=10):
         """ Compute tie crosscorrelation function of comparing recorded seismic and the synthetic seismic,
         generated from logs. Allows to determine the shift to apply to `well_time`.
         """
-        seismic_time, well_time, seismic_curve, impedance_log, impulse = [
-            getattr(self, src) for src in ('seismic_time', 'well_time', 'seismic_curve', 'impedance_log', 'impulse')
+        seismic_time, well_time, seismic_curve, impedance_log, wavelet = [
+            getattr(self, src) for src in ('seismic_time', 'well_time', 'seismic_curve', 'impedance_log', 'wavelet')
             ]
 
         # Compute crosscorrelation-values on a grid of points.
         shifts = np.linspace(*limits, n_samples)
         values = [self.measure_seismic_tie_quality(seismic_time, well_time + shift, seismic_curve, impedance_log,
-                                                   impulse, metric='corr') for shift in shifts]
+                                                   wavelet, metric='corr') for shift in shifts]
 
         # Determine peaks if needed.
         if compute_peaks:
@@ -352,40 +351,49 @@ class OptimizationMixin:
 
         return plotter
 
-    def show_tie_comparison(self, src_well_time, src_impulse=('impulse', 'impulse'), seismic_time_slice=None,
-                            **kwargs):
+    def show_tie_comparison(self, src_well_time=('well_time_initial', 'well_time'), src_wavelet=('wavelet', 'wavelet'),
+                            seismic_time_slice=None, synthetic_postfix=('BEFORE TIE', 'AFTER TIE'),  **kwargs):
+        """ Visually compare several (1 or 2 usually) ties: show recorded seismic along with recreated synthetics
+        corresponding to the ties. Include computed correlation; use chosen slice of seismic time for demonstration
+        and computation of correlation.
         """
-        """
+        if isinstance(src_well_time, str):
+            src_well_time = (src_well_time, )
+        if isinstance(src_wavelet, str):
+            src_wavelet = (src_wavelet, )
+        if isinstance(synthetic_postfix, str):
+            synthetic_postfix = (synthetic_postfix, )
+
+        # Take cut out of seismic curves if needed
         seismic_time_slice = seismic_time_slice or slice(None, None)
         seismic_time = self.seismic_time[seismic_time_slice]
         seismic_curve = self.seismic_curve[seismic_time_slice]
 
+        # Recreate synthetics and compute correlation for each one of them
         recreated = [
             self.resample_and_compute_synthetic(seismic_time, getattr(self, src_well_time_),
-                                                self.impedance_log, getattr(self, src_impulse_))
-                                                for src_well_time_, src_impulse_ in zip(src_well_time, src_impulse)
+                                                self.impedance_log, getattr(self, src_wavelet_))
+                                                for src_well_time_, src_wavelet_ in zip(src_well_time, src_wavelet)
             ]
-
         correlation = [self.nancorrelation(recreated_, seismic_curve) for recreated_ in recreated]
-
-        data = [seismic_curve] + recreated
 
         # Default plot parameters
         defaults = {'title': f'SYNTHETIC VS RECREATED SEISMIC',
                     'label': ['SEISMIC'] + [f'SYNTHETIC {postfix}, CORR: {correlation_: .3f}'
                                             for correlation_, postfix in
-                                            zip(correlation, ['BEFORE', 'AFTER'])],
-                    'figsize': (23, 5), 'curve_alpha': [1, .8, 1],
+                                            zip(correlation, synthetic_postfix)],
+                    'figsize': (23, 5), 'curve_alpha': [.8, 1, 1],
                     'curve_linestyle': ['solid', 'dashed', 'solid'],
-                    'curve_linewidth': [2, 2.5, 2]}
+                    'curve_linewidth': [2.5, 2, 2],
+                    'curve_color': ['sandybrown', 'lightpink', 'cornflowerblue']}
 
         # Update defaults and plot
         kwargs = {'mode': 'curve', **defaults, **kwargs}
-        plotter = plot(data, **kwargs)
+        plotter = plot([seismic_curve] + recreated, **kwargs)
 
         return plotter
 
-# Utilities for impulse estimation.
+# Utilities for wavelet estimation.
 def symmetric_wavelet_estimation(seismic_trace, wavelet_length=60, normalize=True):
     """ Commonly used procedure for wavelet-estimation. Resulting wavelet has length of
     2 * (wavelet_length // 2) and has its peak in the center of the range.
@@ -420,43 +428,39 @@ def compute_frequency_phases(data):
 
     return phases
 
-def construct_impulse(amplitudes, phases, wavelet_length=None):
+def construct_wavelet(amplitudes, phases, wavelet_length=None):
     """ Construct a wavelet from vectors of amplitudes and phases given in frequency-space.
     """
     wavelet = np.fft.irfft(amplitudes * np.exp(1j * phases), n=wavelet_length)
     return np.real(wavelet)
 
 
-class ImpulseOptimizationFactory:
-    """ One can use the instances of this class to optimize impulse. The default version
+class WaveletOptimizationFactory:
+    """ One can use the instances of this class to optimize wavelet. The default version
     fixes amplitudes and allows to optimize phases for most important frequencies, starting
     from given position.
-
-    NOTE: one can apply the same factory for searching the impulse in the space of impulses,
-    that can be obtained by a constant (among frequencies) phase-shift, applied to the initial
-    state of the impulse.
     """
-    def __init__(self, start_impulse, reflectivity, seismic_curve, cut_frequency=8, delta=.9):
+    def __init__(self, start_wavelet, reflectivity, seismic_curve, cut_frequency=8, delta=.9):
         """ Store variables that we'll need to run the functional.
         """
-        self.length = len(start_impulse)
-        self.amplitudes = compute_frequency_amplitides(start_impulse)
-        self.phases = compute_frequency_phases(start_impulse)
+        self.length = len(start_wavelet)
+        self.amplitudes = compute_frequency_amplitides(start_wavelet)
+        self.phases = compute_frequency_phases(start_wavelet)
         self.cut_frequency = cut_frequency
         self.seismic_curve = seismic_curve
         self.delta = delta
         self.reflectivity = reflectivity
 
-    def compute_impulse(self, x):
+    def compute_wavelet(self, x):
         phases = np.copy(self.phases)
         phases[:self.cut_frequency] = x
 
-        impulse = construct_impulse(self.amplitudes, phases, wavelet_length=self.length)
-        return impulse
+        wavelet = construct_wavelet(self.amplitudes, phases, wavelet_length=self.length)
+        return wavelet
 
     def __call__(self, x):
-        impulse = self.compute_impulse(x)
-        synthetic = OptimizationMixin.compute_synthetic_(reflectivity=self.reflectivity, impulse=impulse)
+        wavelet = self.compute_wavelet(x)
+        synthetic = OptimizationMixin.compute_synthetic_(reflectivity=self.reflectivity, wavelet=wavelet)
 
         return -OptimizationMixin.nancorrelation(self.seismic_curve, synthetic)
 
@@ -476,7 +480,9 @@ class ImpulseOptimizationFactory:
 
 
 def show_wavelet(wavelet, cut_frequency=8, **kwargs):
-    """ Show wavelet along with its mose important properties.
+    """ Show wavelet along with its most important properties. Demonstrates 4 subplots in total:
+    1) the wavelet itself 2) its amplitudes 3) its phases 4) recreated wavelet from `cut_frequency`
+    amplitudes.
     """
     amplitudes, phases = compute_frequency_amplitides(wavelet), compute_frequency_phases(wavelet)
     cut_frequency = 8
@@ -484,14 +490,14 @@ def show_wavelet(wavelet, cut_frequency=8, **kwargs):
     # Construct wavelet from the start of its spectrum.
     amplitudes_ = amplitudes.copy()
     amplitudes_[cut_frequency:] = 0
-    restored = construct_impulse(amplitudes_, phases, wavelet_length=len(wavelet))
+    restored = construct_wavelet(amplitudes_, phases, wavelet_length=len(wavelet))
     data = [wavelet, amplitudes, phases, [wavelet, restored]]
 
     defaults = {'label': ['', '', '', [f'RESTORED FROM {cut_frequency} FREQUENCIES', 'FULL']],
                 'xlabel': ['', 'FREQUENCY', 'FREQUENCY', 'TIME'],
                 'ylabel': ['', 'AMPLITUDE', 'PHASE', ''],
-                'title': ['IMPULSE/TIME', 'AMPLITUDES/FREQUENCIES', 'PHASES/FREQUENCIES',
-                          'RESTORED IMPULSE FROM FULL/CUT SPECTRUM'],
+                'title': ['WAVELET/TIME', 'AMPLITUDES/FREQUENCIES', 'PHASES/FREQUENCIES',
+                          'RESTORED WAVELET FROM FULL/CUT SPECTRUM'],
                 'curve_alpha': [1, 1, 1, [1, 1]], 'curve_linewidth': [2, 2, 2, [3, 2]], 'nrows': 2, 'ncols': 2,
                 'xlabel_fontsize': 18, 'ylabel_fontsize': 18,
                 'curve_linestyle': ['-', '-', '-', ['-', '--']]}

@@ -7,12 +7,11 @@ import scipy
 
 from lasio import LASFile
 
-from .well_seismic_tie import OptimizationMixin
 from ...plotters import plot
 
 
 
-class Well(OptimizationMixin):
+class Well:
     """ A class to hold information about core logs and perform simple processing operations.
     Main idea is to initialize the well instance from either LAS file or checkshot, and then combine
     multiple instances into one with all (possibly, interpolated) available logs.
