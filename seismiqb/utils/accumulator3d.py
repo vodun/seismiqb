@@ -572,7 +572,6 @@ class SlidesAccumulator:
         shape = np.array(self.shape)
         shape[self.orientation] = self.n_slides
         shape = tuple(shape)
-        print(f"Create chunk at origin {origin} with shape {shape}")
 
         origin_ = list(self.origin)
         origin_[self.orientation] = origin

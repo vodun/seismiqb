@@ -454,7 +454,8 @@ class Field(CharismaMixin, VisualizationMixin):
     def cache_nbytes(self):
         """ Total nbytes of cached data. """
         nbytes = self.geometry.cache_nbytes
-        nbytes += sum(self.attached_instances.cache_nbytes)
+        for item in self.attached_instances:
+            nbytes += item.cache_nbytes
         return nbytes
 
     # Facies
