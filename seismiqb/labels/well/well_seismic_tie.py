@@ -7,7 +7,7 @@ import pandas as pd
 import torch
 
 from scipy.optimize import minimize
-from scipy.signal import butter, sosfilt, sosfiltfilt, find_peaks
+from scipy.signal import butter, sosfiltfilt, find_peaks
 from torch.nn import functional as F
 
 from xitorch.interpolate import Interp1D    # Implementation from here: seems to be working fine
@@ -55,22 +55,24 @@ class WellSeismicMatcher:
         self.seismic_time = np.arange(0.0, geometry.depth * geometry.sample_interval * 1e-3,
                                       geometry.sample_interval * 1e-3)
 
-    def process_logs(self):
+    def process_logs(self, filter_kwargs=None):
         """
         """
+        filter_kwargs = filter_kwargs or {}
+
         # Remember mask of nans - where either RHOB or DT is nan.
         nan_mask = np.isnan(self.well.DT) | np.isnan(self.well.RHOB)
 
         # Fill nans in RHOB and DT with nearest non-nan values from either after or before
-        self.well.RHOB = self.well.RHOB.fillna(method='bfill').fillna(method='ffill')
-        self.well.DT = self.well.DT.fillna(method='bfill').fillna(method='ffill')
+        rhob_log = self.well.RHOB.fillna(method='bfill').fillna(method='ffill')
+        dt_log = self.well.DT.fillna(method='bfill').fillna(method='ffill')
 
         # Converting units and filtering sonic log
-        self.well['DT_FILTERED'] = self.lowpass_filter(self.well.DT, pad_width=None, forward_backward=True)
+        self.well['DT_FILTERED'] = self.lowpass_filter(dt_log, **filter_kwargs)
         self.well.microseconds_foot_to_seconds_meter(sonic_log='DT_FILTERED', name='DT_SECONDS_METER')
 
         # Converting units and filtering for density log
-        self.well['RHOB_FILTERED'] = self.lowpass_filter(self.well.RHOB, pad_width=None, forward_backward=True)
+        self.well['RHOB_FILTERED'] = self.lowpass_filter(rhob_log, **filter_kwargs)
         self.well.gramm_centimeter3_to_kilogramm_meter3(density_log='RHOB_FILTERED', name='RHOB_FILTERED')
 
         # Compute and convert impedance
@@ -98,26 +100,12 @@ class WellSeismicMatcher:
         return slice(start, stop)
 
     @staticmethod
-    def lowpass_filter(curve, order=4, highcut=30, fs=3000, forward_backward=False, pad_width=None):
+    def lowpass_filter(curve, order=4, highcut=30, fs=3000):
         """ Lowpass filter of curve. Used to filter out spikey frequencies in well-logs.
         NOTE: fix bugs in `Well.compute_filtered_log` and merge two methods into one.
         """
         sos = butter(order, highcut, btype='lowpass', fs=fs, output='sos')
-
-        # Add pre-padding to remove edge-effect
-        if pad_width is not None:
-            if isinstance(pad_width, int):
-                pad_width = (pad_width, 0)
-
-            curve = np.pad(curve, pad_width, mode='edge')
-        else:
-            pad_width = (0, 0)
-        cut_slice = slice(pad_width[0], len(curve) - pad_width[1])
-
-        if not forward_backward:
-            return sosfilt(sos, curve)[cut_slice]
-
-        return sosfiltfilt(sos, curve)[cut_slice]
+        return sosfiltfilt(sos, curve)
 
     @staticmethod
     def compute_reflectivity_(impedance):
@@ -334,16 +322,16 @@ class WellSeismicMatcher:
         if dst_history is not None:
             setattr(self, dst_history, start_wavelet)
 
+        phases_ = np.copy(phases)
         def compute_wavelet(x):
             """
             """
-            phases_ = np.copy(phases)
             phases_[:cut_frequency] = x
 
             wavelet = construct_wavelet(amplitudes, phases_, wavelet_length=len(start_wavelet))
             return wavelet
 
-        def function(x):
+        def minimization_proxy(x):
             wavelet = compute_wavelet(x)
             synthetic = self.compute_synthetic_(reflectivity=reflectivity, wavelet=wavelet)
 
@@ -354,7 +342,7 @@ class WellSeismicMatcher:
         bounds = [(phases[i] - delta, phases[i] + delta) for i in range(cut_frequency)]
 
         # Perform minimization
-        optimization_results = minimize(function, x0, bounds=bounds, **kwargs)
+        optimization_results = minimize(minimization_proxy, x0, bounds=bounds, **kwargs)
 
         # Make, save and fetch the resulting wavelet
         wavelet = compute_wavelet(optimization_results['x'])
@@ -389,6 +377,17 @@ class WellSeismicMatcher:
         self.tie_crosscorrelation = {'shifts': shifts, 'values': values, 'peak_indices': peak_indices,
                                      'peak_shifts': [shifts[ix] for ix in peak_indices],
                                      'peak_values': [values[ix] for ix in peak_indices]}
+
+
+    def optimize_shift(self, start_shift, **kwargs):
+        """
+        """
+        def minimization_proxy(shift):
+            return -self._measure_tie_quality(self.seismic_time, self.well_time + shift,
+                                              self.seismic_curve, self.impedance_log, wavelet=self.wavelet)
+
+        optimization_results = minimize(minimization_proxy, start_shift, **kwargs)
+        return optimization_results['x']
 
     # Visualization
     def show_tie_crocccorrelation(self, n_samples=10000, limits=(-.5, 1.5), n_peaks=3, **kwargs):
@@ -488,6 +487,44 @@ class WellSeismicMatcher:
         plotter = plot([seismic_curve] + recreated, **kwargs)
 
         return plotter
+
+    def show_dt(self, src_well_time=('well_time_initial', 'well_time'), bounds_multipliers=(.8, 1.2), **kwargs):
+        """
+        """
+        dt_start, dt_final = [np.diff(getattr(self, src)) for src in src_well_time]
+        data = [dt_final, dt_start, dt_start * bounds_multipliers[0], dt_start * bounds_multipliers[1]]
+
+        defaults = {'figsize': (23, 7),
+                    'label': ['OPTIMIZED DT', 'INITIAL DT', 'LOWER BOUND DT', 'UPPER BOUND DT'],
+                    'curve_alpha': [1, 1, .35, .35], 'title': 'DT OPTIMIZED/INITIAL',
+                    'curve_linestyle': ['solid', 'dashed', 'solid', 'solid']}
+
+        # Update defaults and plot
+        kwargs = {'mode': 'curve', **defaults, **kwargs}
+        plotter = plot(data, **kwargs)
+
+        return plotter
+
+    def show_relative_velocities(self, src_well_time=('well_time_initial', 'well_time'), **kwargs):
+        """
+        """
+        dt_start, dt_final = [np.diff(getattr(self, src)) for src in src_well_time]
+
+        # Compute relative velocity: shows how far the optimized velocities deviate from the original ones
+        relative_velocity = dt_start / dt_final
+
+        defaults = {'figsize': (30, 7), 'label': ['OPTIMIZED VELOCITY/INITIAL VELOCITY'],
+                    'title': 'RELATIVE VELOCITY'}
+
+        kwargs = {'mode': 'curve', **defaults, **kwargs}
+        plotter = plot(relative_velocity, **kwargs)
+
+        return plotter
+
+    def plot_well(self, *args, **kwargs):
+        """
+        """
+        return self.well.plot(*args, **kwargs)
 
 # Utilities for wavelet estimation.
 def symmetric_wavelet_estimation(seismic_trace, wavelet_length=60, normalize=True):
