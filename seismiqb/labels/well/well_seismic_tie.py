@@ -1,6 +1,9 @@
 """ Mixins and utilities for well-seismic tie.  """
 
+import os
+
 import numpy as np
+import pandas as pd
 import torch
 
 from scipy.optimize import minimize
@@ -10,12 +13,14 @@ from torch.nn import functional as F
 from xitorch.interpolate import Interp1D    # Implementation from here: seems to be working fine
                                             # https://github.com/xitorch/xitorch
 
+from .base import Well
 from ...plotters import plot
+from ...geometry import GeometrySEGY
 
 # Mixin class for `Well` to simplify dt-ticks optimization for well-seismic tie
 class WellSeismicMatcher:
     """ Utilities for optimization of match between seismic data and well logs. """
-    def __init__(self, seismic_time, well_time, seismic_curve, impedance_log, wavelet):
+    def __init__(self, seismic_time=None, well_time=None, seismic_curve=None, impedance_log=None, wavelet=None):
         """ Store the state of the matcher.
         """
         self.seismic_time = seismic_time
@@ -25,7 +30,59 @@ class WellSeismicMatcher:
         self.wavelet = wavelet
 
         self.tie_crosscorrelation = None
+        self.well = None
 
+    def from_paths(self, cube_path, coordinates_path, well_path):
+        """
+        """
+        #
+        geometry = GeometrySEGY(cube_path)
+        self.well = Well(storage=well_path)
+
+        #
+        coordinates_df = pd.read_csv(coordinates_path, sep='\s+', encoding='1251')
+        coordinates = coordinates_df[['X_utm42', 'Y_utm42']].values
+        ordinal_coordinates = geometry.cdp_to_lines(coordinates).astype(np.int32) - geometry.shifts
+        name_to_coordinate = dict(zip(coordinates_df['N_skv'], ordinal_coordinates))
+
+        #
+        well_name = os.path.basename(well_path)
+        well_coordinates = name_to_coordinate[well_name].tolist()
+        well_slice = (*well_coordinates, slice(0, geometry.shape[-1]))
+
+        #
+        self.seismic_curve = geometry[well_slice]
+        self.seismic_time = np.arange(0.0, geometry.depth * geometry.sample_interval * 1e-3,
+                                      geometry.sample_interval * 1e-3)
+
+    def process_logs(self):
+        """
+        """
+        # Remember mask of nans - where either RHOB or DT is nan.
+        nan_mask = np.isnan(self.well.DT) | np.isnan(self.well.RHOB)
+
+        # Fill nans in RHOB and DT with nearest non-nan values from either after or before
+        self.well.RHOB = self.well.RHOB.fillna(method='bfill').fillna(method='ffill')
+        self.well.DT = self.well.DT.fillna(method='bfill').fillna(method='ffill')
+
+        # Converting units and filtering sonic log
+        self.well['DT_FILTERED'] = self.lowpass_filter(self.well.DT, pad_width=None, forward_backward=True)
+        self.well.microseconds_foot_to_seconds_meter(sonic_log='DT_FILTERED', name='DT_SECONDS_METER')
+
+        # Converting units and filtering for density log
+        self.well['RHOB_FILTERED'] = self.lowpass_filter(self.well.RHOB, pad_width=None, forward_backward=True)
+        self.well.gramm_centimeter3_to_kilogramm_meter3(density_log='RHOB_FILTERED', name='RHOB_FILTERED')
+
+        # Compute and convert impedance
+        self.well.compute_impedance_log_in_pascal_meter(sonic_log='DT_SECONDS_METER', density_log='RHOB_FILTERED')
+        self.well.pascal_meter_to_kilopascal_meter(name='AI_FILTERED')
+
+        # Apply nans to the computed impedance
+        self.well.AI_FILTERED[nan_mask] = np.nan
+
+        # Store well-time and impedance-log
+        self.well_time = np.cumsum(self.well.DT_FILTERED.values * 1e-6)
+        self.impedance_log = self.well['AI_FILTERED'].values
 
     @staticmethod
     def get_relevant_seismic_slice(seismic_time, log_time, log_values):
@@ -440,8 +497,8 @@ def symmetric_wavelet_estimation(seismic_trace, wavelet_length=60, normalize=Tru
     power_spectrum = np.abs(np.fft.rfft(seismic_trace))
 
     # Create symmetric wavelet in time.
-    wavelet = np.real(np.fft.irfft(power_spectrum)[:wavelet_length // 2])
-    wavelet = np.concatenate((np.flipud(wavelet), wavelet), axis=0)
+    wavelet = np.real(np.fft.irfft(power_spectrum)[:(wavelet_length + wavelet_length % 2) // 2])
+    wavelet = np.concatenate((np.flipud(wavelet), wavelet[wavelet_length % 2 : ]), axis=0)
     if normalize:
         wavelet = wavelet / np.max(wavelet)
 
