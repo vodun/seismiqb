@@ -31,6 +31,9 @@ class FaultExtractor:
     Main naming rules:
     - Component is a 2d connected component on some slide.
     - Prototype is a 3d points body of merged components.
+    - `coords` are spatial coordinates in format (iline, xline, depth) with (N, 3) shape.
+    - `points` are spatial coordinates and probabilities values in format (iline, xline, depth, proba) with (N, 4) shape.
+      Note, that probabilities are converted into (0, 255) values for applying integer storage for points.
 
     Parameters
     ----------
@@ -78,7 +81,7 @@ class FaultExtractor:
             objects = find_objects(labeled)
 
             # Get components info
-            coords, bboxes, lengths = [], [], []
+            all_points, bboxes, lengths = [], [], []
 
             for idx, object_bbox in enumerate(objects, start=1):
                 # Refined coords: we refine skeletonize effects by applying it on limited area
@@ -108,7 +111,7 @@ class FaultExtractor:
 
                 smoothed_values = smoothed[dilated_coords[:, dilation_axis], dilated_coords[:, -1]]
 
-                refined_coords = thin_coords(coords=dilated_coords, values=smoothed_values)
+                refined_coords, probas = thin_coords(coords=dilated_coords, values=smoothed_values)
 
                 # Filter out too little components
                 # Previous length and len(refined_coords) are different
@@ -119,7 +122,10 @@ class FaultExtractor:
                     continue
 
                 lengths.append(length)
-                coords.append(refined_coords)
+
+                probas = np.round(probas * 255).astype(refined_coords.dtype)
+                points = np.hstack((refined_coords, probas.reshape(-1, 1)))
+                all_points.append(points)
 
                 # Bbox
                 bbox = np.empty((3, 2), np.int32)
@@ -131,7 +137,7 @@ class FaultExtractor:
                 bboxes.append(bbox)
 
             container[slide_idx] = {
-                'coords': coords,
+                'points': all_points,
                 'bboxes': bboxes,
                 'lengths': lengths
             }
@@ -158,11 +164,11 @@ class FaultExtractor:
             if idx is None: # No components to concat
                 return None
 
-            component = self.container[start_slide_idx]['coords'][idx]
+            component = self.container[start_slide_idx]['points'][idx]
             component_bbox = self.container[start_slide_idx]['bboxes'][idx]
 
             self.container[start_slide_idx]['lengths'][idx] = -1 # Mark this component as unmergeable
-            prototype = FaultPrototype(coords=component, direction=self.direction,
+            prototype = FaultPrototype(points=component, direction=self.direction,
                                        last_slide_idx=start_slide_idx, last_component=component,
                                        last_component_bbox=component_bbox)
         else:
@@ -247,20 +253,20 @@ class FaultExtractor:
         for idx, other_bbox in enumerate(self.container[slide_idx]['bboxes']):
             if self.container[slide_idx]['lengths'][idx] != -1:
                 # Check bboxes intersection
-                if not bboxes_intersected(component_bbox, other_bbox, axes=(self.orthogonal_direction, -1)):
+                if not bboxes_intersected(component_bbox, other_bbox, axes=(self.orthogonal_direction, 2)):
                     continue
 
                 # Check closeness of some points (iter over intersection depths with some step)
                 # Faster then component intersection, but not so accurate
-                other_component = self.container[slide_idx]['coords'][idx]
+                other_component = self.container[slide_idx]['points'][idx]
 
-                intersection_depths = (max(component_bbox[-1, 0], other_bbox[-1, 0]),
-                                       min(component_bbox[-1, 1], other_bbox[-1, 1]))
+                intersection_depths = (max(component_bbox[2, 0], other_bbox[2, 0]),
+                                       min(component_bbox[2, 1], other_bbox[2, 1]))
 
                 step = min(depth_iteration_step, (intersection_depths[1]-intersection_depths[0])//3)
                 step = max(step, 1)
 
-                components_distances = min_max_depthwise_distances(component, other_component,
+                components_distances = min_max_depthwise_distances(component[:, :-1], other_component[:, :-1],
                                                                    depths_ranges=intersection_depths, step=step,
                                                                    axis=self.orthogonal_direction,
                                                                    max_threshold=min_distance)
@@ -286,18 +292,18 @@ class FaultExtractor:
             self.container[slide_idx]['lengths'][merged_idx] = -1 # mark component as unmergeable
 
             # Get prototype split indices: check that the new component is smaller than the previous one (for each border)
-            if intersection_borders[0] - component_bbox[-1, 0] > depths_threshold:
+            if intersection_borders[0] - component_bbox[2, 0] > depths_threshold:
                 prototype_split_indices[0] = intersection_borders[0]
 
-            if component_bbox[-1, 1] - intersection_borders[1] > depths_threshold:
+            if component_bbox[2, 1] - intersection_borders[1] > depths_threshold:
                 prototype_split_indices[1] = intersection_borders[1]
 
             # Split new component: check that the new component is bigger than the previous one (for each border)
             # Create splitted items and save them as new elements for merge
-            if intersection_borders[0] - closest_component_bbox[-1, 0] > depths_threshold:
+            if intersection_borders[0] - closest_component_bbox[2, 0] > depths_threshold:
                 component_split_indices[0] = intersection_borders[0]
 
-            if closest_component_bbox[-1, 1] - intersection_borders[1] > depths_threshold:
+            if closest_component_bbox[2, 1] - intersection_borders[1] > depths_threshold:
                 component_split_indices[1] = intersection_borders[1]
 
             closest_component, closest_component_bbox = self._split_component(component=closest_component,
@@ -323,33 +329,33 @@ class FaultExtractor:
         """
         # Cut upper part of the component and save it as another item
         if split_indices[0] is not None:
-            splitted_component = component[component[:, -1] < split_indices[0]]
+            splitted_component = component[component[:, 2] < split_indices[0]]
 
             splitted_component_bbox = bbox.copy()
-            splitted_component_bbox[-1, 1] = max(0, split_indices[0] - 1)
+            splitted_component_bbox[2, 1] = max(0, split_indices[0] - 1)
 
-            self._add_new_component(slide_idx=slide_idx, coords=splitted_component, bbox=splitted_component_bbox)
+            self._add_new_component(slide_idx=slide_idx, points=splitted_component, bbox=splitted_component_bbox)
 
             # Extract suitable part
-            component = component[component[:, -1] >= split_indices[0]]
-            bbox[-1, 0] = split_indices[0]
+            component = component[component[:, 2] >= split_indices[0]]
+            bbox[2, 0] = split_indices[0]
 
         # Cut lower part of the component and save it as another item
         if split_indices[1] is not None:
-            splitted_component = component[component[:, -1] > split_indices[1]]
+            splitted_component = component[component[:, 2] > split_indices[1]]
 
             splitted_component_bbox = bbox.copy()
-            splitted_component_bbox[-1, 0] = min(split_indices[1] + 1, self.shape[-1])
+            splitted_component_bbox[2, 0] = min(split_indices[1] + 1, self.shape[2])
 
-            self._add_new_component(slide_idx=slide_idx, coords=splitted_component, bbox=splitted_component_bbox)
+            self._add_new_component(slide_idx=slide_idx, points=splitted_component, bbox=splitted_component_bbox)
 
             # Extract suitable part
-            component = component[component[:, -1] <= split_indices[1]]
-            bbox[-1, 1] = split_indices[1]
+            component = component[component[:, 2] <= split_indices[1]]
+            bbox[2, 1] = split_indices[1]
 
         return component, bbox
 
-    def _add_new_component(self, slide_idx, coords, bbox):
+    def _add_new_component(self, slide_idx, points, bbox):
         """ Add new item into the container.
 
         New items are creating after components splitting.
@@ -358,15 +364,15 @@ class FaultExtractor:
         ----------
         slide_idx : int
             Number of the slide on which we need to add new component.
-        coords : np.ndarray of (N, 3) shape
-            Component coordinates.
+        points : np.ndarray of (N, 4) shape
+            Component coordinates and probabilities.
         bbox: np.ndarray of (3, 2) shape
             Component bounding box.
         """
-        if len(coords) > self.component_len_threshold:
+        if len(points) > self.component_len_threshold:
             self.container[slide_idx]['bboxes'].append(bbox)
-            self.container[slide_idx]['coords'].append(coords)
-            self.container[slide_idx]['lengths'].append(len(coords))
+            self.container[slide_idx]['points'].append(points)
+            self.container[slide_idx]['lengths'].append(len(points))
 
 
     def concat_connected_prototypes(self, intersection_ratio_threshold=None, axis=2,
@@ -401,7 +407,7 @@ class FaultExtractor:
         margin = 1 # local constant for code prettifying
 
         if intersection_ratio_threshold is None:
-            intersection_ratio_threshold = 0.5 if axis in (2, -1) else 0.9
+            intersection_ratio_threshold = 0.5 if axis in (-1, 2) else 0.9
 
         overlap_axis = self.direction if axis in (-1, 2) else 2
 
@@ -444,9 +450,9 @@ class FaultExtractor:
                 is_first_upper = prototype_1.bbox[axis, 0] < prototype_2.bbox[axis, 0]
 
                 contour_1 = prototype_1.get_border(border=borders_to_check[is_first_upper],
-                                                    projection_axis=self.orthogonal_direction)
+                                                   projection_axis=self.orthogonal_direction)
                 contour_2 = prototype_2.get_border(border=borders_to_check[~is_first_upper],
-                                                    projection_axis=self.orthogonal_direction)
+                                                   projection_axis=self.orthogonal_direction)
 
                 # Get border contours in the area of interest
                 intersection_range = (min(adjacent_borders[axis]) - margin, max(adjacent_borders[axis]) + margin)
@@ -492,13 +498,13 @@ class FaultExtractor:
                             new_prototypes.extend(new_prototypes_)
 
                             if len(new_prototypes_) > 0:
-                                prototype_1 = FaultPrototype(prototype_1.coords, direction=self.direction)
+                                prototype_1 = FaultPrototype(prototype_1.points, direction=self.direction)
 
                             prototype_2, new_prototypes_ = prototype_2.split(split_indices, axis=self.direction)
                             new_prototypes.extend(new_prototypes_)
 
                             if len(new_prototypes_) > 0:
-                                prototype_2 = FaultPrototype(prototype_2.coords, direction=self.direction)
+                                prototype_2 = FaultPrototype(prototype_2.points, direction=self.direction)
 
                     prototype_2.concat(prototype_1)
                     self.prototypes[prototype_2_idx] = prototype_2
@@ -696,7 +702,7 @@ class FaultExtractor:
             stats['after_connected_concat'][i] = []
             # Concat by depth axis
             _ = self.concat_connected_prototypes(intersection_ratio_threshold=depth_intersection_threshold,
-                                                 axis=-1)
+                                                 axis=2)
             stats['after_connected_concat'][i].append(len(self.prototypes))
 
             # Concat by direction axis
@@ -764,7 +770,7 @@ class FaultExtractor:
 
 class FaultPrototype:
     """ Class for faults prototypes. Provides a necessary API for convenient prototype extraction process. """
-    def __init__(self, coords, direction, last_slide_idx=None, last_component=None, last_component_bbox=None):
+    def __init__(self, points, direction, last_slide_idx=None, last_component=None, last_component_bbox=None):
         """ Fault prototype initialization.
 
         Note, last_* parameters are preferred for prototype extraction and are optional:
@@ -772,8 +778,8 @@ class FaultPrototype:
 
         Parameters
         ----------
-        coords : np.ndarray of (N, 3) shape
-            Prototype coordinates.
+        points : np.ndarray of (N, 4) shape
+            Prototype coordinates and probabilities.
         direction : {0, 1}
             Direction along which the prototype is extracted (the same as prediction direction).
         last_slide_idx : int, optional
@@ -783,7 +789,7 @@ class FaultPrototype:
         last_component_bbox : np.ndarray of (3, 2) shape
             Bounding box of the `last_component`.
         """
-        self.coords = coords
+        self.points = points
         self.direction = direction
 
         self._bbox = None
@@ -796,6 +802,11 @@ class FaultPrototype:
         self._borders = {}
 
     @property
+    def coords(self):
+        """ Spatial coordinates in (ilines, xlines, depth) format. """
+        return self.points[:, :-1]
+
+    @property
     def bbox(self):
         """ Bounding box. """
         if self._bbox is None:
@@ -806,7 +817,7 @@ class FaultPrototype:
     @property
     def height(self):
         """ Height (length along the depth axis). """
-        return self.bbox[-1, 1] - self.bbox[-1, 0]
+        return self.bbox[2, 1] - self.bbox[2, 0]
 
     @property
     def width(self):
@@ -816,21 +827,28 @@ class FaultPrototype:
     @property
     def n_points(self):
         """ Amount of the surface points. """
-        return len(self.coords)
+        return len(self.points)
+
+    @property
+    def proba(self):
+        """ 90% percentile of proba values in [0, 1] interval. """
+        proba_value = np.percentile(self.points[:, 3], 90) # is integer value from 0 to 255
+        proba_value /= 255
+        return proba_value
 
     # For internal needs
     @property
     def last_slide_idx(self):
         """ Index of the slide from which the last added component was extracted. """
         if self._last_slide_idx is None:
-            self._last_slide_idx = self.coords[:, self.direction].max()
+            self._last_slide_idx = self.points[:, self.direction].max()
         return self._last_slide_idx
 
     @property
     def last_component(self):
         """ Coordinates (N, 3) of the last added component. """
         if self._last_component is None:
-            self._last_component = self.coords[self.coords[:, self.direction] == self.last_slide_idx]
+            self._last_component = self.points[self.points[:, self.direction] == self.last_slide_idx]
         return self._last_component
 
     @property
@@ -852,32 +870,32 @@ class FaultPrototype:
             self._contour = find_contour(coords=self.coords, projection_axis=projection_axis)
         return self._contour
 
-    def append(self, coords, bbox, slide_idx=None):
+    def append(self, points, bbox, slide_idx=None):
         """ Append new component into prototype.
 
         Parameters
         ----------
-        coords : np.ndarray of (N, 3) shape
+        points : np.ndarray of (N, 4) shape
             Coordinates of the component to add into the prototype.
         bbox : np.ndarray of (3, 2) shape
             Bounding box of the added component.
         slide_idx : int or None
             The added component slide index.
         """
-        self.coords = np.vstack([self.coords, coords])
+        self.points = np.vstack([self.points, points])
 
         self._contour = None
         self._borders = {}
 
         self._last_slide_idx = slide_idx
-        self._last_component = coords
+        self._last_component = points
         self._last_component_bbox = bbox
 
         self._bbox = self._concat_bbox(self._last_component_bbox)
 
     def concat(self, other):
         """ Concatenate two prototypes. """
-        self.coords = np.vstack([self.coords, other.coords])
+        self.points = np.vstack([self.points, other.points])
 
         self._bbox = self._concat_bbox(other.bbox)
 
@@ -895,38 +913,38 @@ class FaultPrototype:
         bbox[:, 1] = np.max((self.bbox[:, 1], other_bbox[:, 1]), axis=0)
         return bbox
 
-    def _separate_objects(self, coords, axis):
-        """ Separate coords into different object coords depend on their connectedness by axis.
+    def _separate_objects(self, points, axis):
+        """ Separate points into different object points depend on their connectedness by axis.
 
         After split we can have the situation when splitted part has more than one connected component.
         This method separate disconnected parts into different prototypes.
         """
         # Get coordinates along the axis
-        unique_direction_coords = np.unique(coords[:, axis])
+        unique_direction_points = np.unique(points[:, axis])
 
         # Slides distance more than 1 -> different objects
-        split_indices = np.nonzero(unique_direction_coords[1:] - unique_direction_coords[:-1] > 1)[0]
+        split_indices = np.nonzero(unique_direction_points[1:] - unique_direction_points[:-1] > 1)[0]
 
         if len(split_indices) == 0:
-            return [FaultPrototype(coords=coords, direction=self.direction)]
+            return [FaultPrototype(points=points, direction=self.direction)]
 
         # Separate disconnected objects and create new prototypes instances
-        start_indices = unique_direction_coords[split_indices + 1]
+        start_indices = unique_direction_points[split_indices + 1]
         start_indices = np.insert(start_indices, 0, 0)
 
-        end_indices = unique_direction_coords[split_indices]
-        end_indices = np.append(end_indices, unique_direction_coords[-1])
+        end_indices = unique_direction_points[split_indices]
+        end_indices = np.append(end_indices, unique_direction_points[-1])
 
         prototypes = []
 
         for start_idx, end_idx in zip(start_indices, end_indices):
-            coords_ = coords[(start_idx <= coords[:, axis]) & (coords[:, axis] <= end_idx)]
-            prototype = FaultPrototype(coords=coords_, direction=self.direction, last_slide_idx=end_idx)
+            points_ = points[(start_idx <= points[:, axis]) & (points[:, axis] <= end_idx)]
+            prototype = FaultPrototype(points=points_, direction=self.direction, last_slide_idx=end_idx)
             prototypes.append(prototype)
 
         return prototypes
 
-    def split(self, split_indices, axis=-1):
+    def split(self, split_indices, axis=2):
         """ Axis-wise prototypes split by indices.
 
         Returns
@@ -946,25 +964,25 @@ class FaultPrototype:
 
         # Cut upper part and separate disconnected objects
         if (split_indices[0] is not None) and \
-           (np.min(self.coords[:, axis]) < split_indices[0] < np.max(self.coords[:, axis])):
+           (np.min(self.points[:, axis]) < split_indices[0] < np.max(self.points[:, axis])):
 
-            coords_outer = self.coords[self.coords[:, axis] < split_indices[0]]
-            self.coords = self.coords[self.coords[:, axis] >= split_indices[0]]
+            points_outer = self.points[self.points[:, axis] < split_indices[0]]
+            self.points = self.points[self.points[:, axis] >= split_indices[0]]
 
-            if len(coords_outer) > 0:
-                new_prototypes.extend(self._separate_objects(coords_outer, axis=axis_for_objects_separating))
+            if len(points_outer) > 0:
+                new_prototypes.extend(self._separate_objects(points_outer, axis=axis_for_objects_separating))
 
         # Cut lower part and separate disconnected objects
         if (split_indices[1] is not None) and \
-           (np.min(self.coords[:, axis]) < split_indices[1] < np.max(self.coords[:, axis])):
+           (np.min(self.points[:, axis]) < split_indices[1] < np.max(self.points[:, axis])):
 
-            coords_outer = self.coords[self.coords[:, axis] > split_indices[1]]
-            self.coords = self.coords[self.coords[:, axis] <= split_indices[1]]
+            points_outer = self.points[self.points[:, axis] > split_indices[1]]
+            self.points = self.points[self.points[:, axis] <= split_indices[1]]
 
-            if len(coords_outer) > 0:
-                new_prototypes.extend(self._separate_objects(coords_outer, axis=axis_for_objects_separating))
+            if len(points_outer) > 0:
+                new_prototypes.extend(self._separate_objects(points_outer, axis=axis_for_objects_separating))
 
-        new_prototypes.extend(self._separate_objects(self.coords, axis=axis_for_objects_separating))
+        new_prototypes.extend(self._separate_objects(self.points, axis=axis_for_objects_separating))
         return new_prototypes[-1], new_prototypes[:-1]
 
     def get_border(self, border, projection_axis):

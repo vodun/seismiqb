@@ -51,12 +51,15 @@ def thin_coords(coords, values):
     """
     order = np.argsort(coords[:, -1])[::-1]
 
-    output = np.zeros_like(coords)
+    output_coords = np.zeros_like(coords)
+    output_values = np.zeros_like(values)
     position = 0
 
     idx = order[0]
 
     argmax_coord = coords[idx, :]
+    max_value = values[idx]
+
     previous_depth = argmax_coord[-1]
     previous_value = values[idx]
 
@@ -67,23 +70,28 @@ def thin_coords(coords, values):
         if previous_depth == current_depth:
             if previous_value < current_value:
                 argmax_coord = coords[idx, :]
+                max_value = current_value
 
                 previous_value = current_value
 
         else:
-            output[position, :] = argmax_coord
+            output_coords[position, :] = argmax_coord
+            output_values[position] = max_value
 
             position += 1
 
             argmax_coord = coords[idx, :]
+            max_value = current_value
+
             previous_depth = current_depth
             previous_value = current_value
 
     # last depth update
-    output[position, :] = argmax_coord
+    output_coords[position, :] = argmax_coord
+    output_values[position] = max_value
     position += 1
 
-    return output[:position, :]
+    return output_coords[:position, :], output_values[:position]
 
 # Distance evaluation
 @njit
