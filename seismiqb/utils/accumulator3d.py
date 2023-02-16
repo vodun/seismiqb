@@ -1,7 +1,6 @@
 """ Accumulator for 3d volumes. """
 import os
 
-import time
 import h5py
 import hdf5plugin
 import numpy as np
@@ -523,26 +522,50 @@ class RegressionAccumulator(Accumulator3D):
 
 
 class SlidesAccumulator:
-    def __init__(self, *args, shape=None, n_slides=40, n_sources=1, orientation=0, postprocessing=None, padding=0,
-                 origin=(0, 0, 0), **kwargs):
-        """ Accumulator which aggregates whole slices in memory and then write it into file. Can aggregate
-        data from several sources (e.g., predictions from different models).
+    """ Accumulator which aggregates whole slices in memory and then write it into file. Can aggregate
+    data from several sources (e.g., predictions from different models).
 
-        Parameters
-        ----------
-        args : sequence
-            Args for Accumulator3D.from_aggregation.
-        shape : sequence
-            Shape of the placeholder.
-        n_slides : int
-            The number of slides to aggregate in memory.
-        n_sorces : int
-            The number of sources of data.
-        orientation : 0 or 1
-            Orientation of predictions.
-        kwargs : dict
-            Kwargs for  Accumulator3D.from_aggregation.
-        """
+    Parameters
+    ----------
+    args : sequence
+        Args for Accumulator3D.from_aggregation.
+    shape : sequence
+        Shape of the placeholder.
+    n_slides : int
+        The number of slides in chunk to aggregate in memory.
+    n_sorces : int
+        The number of sources of data.
+    orientation : 0 or 1
+        Orientation of predictions.
+    postprocessing : callable or None
+        Function to process chunk with the following signature:
+
+            Parameters
+            ----------
+            chunk : np.ndarray
+                Chunk to process.
+            origin : tuple
+                Origin of chunk as tuple of 3 coordinates.
+            shape : tuple
+                Shape of the whole accumulator.
+            prev_chunk : np.ndarray
+                Previous chunk to use if processing use some kind of padding.
+            global_origin : tuple
+                Origin of the whole accumulator.
+
+            Return
+            ------
+            (np.ndarray, tuple)
+                chunk :
+                    Processed chunk, possibly with a different origin (e.g., if processing includes convolutions).
+                origin :
+                    Origin of the processed chunk.
+
+    kwargs : dict
+        Kwargs for  Accumulator3D.from_aggregation.
+    """
+    def __init__(self, *args, shape=None, n_slides=40, n_sources=1, orientation=0, postprocessing=None,
+                 origin=(0, 0, 0), **kwargs):
         self.args, self.kwargs = args, kwargs
         self.origin = tuple(origin)
         self.orientation = orientation
@@ -553,7 +576,6 @@ class SlidesAccumulator:
 
         self.chunks_queue = JoinableQueue(maxsize=3)
         self.postprocessing = postprocessing
-        self.padding = padding
 
         self.accumulator_process = Process(target=self.collect_chunks, args=(self.chunks_queue, ))
         self.accumulator_process.start()
@@ -561,6 +583,7 @@ class SlidesAccumulator:
         self.chunk_accumulators = [{} for _ in range(n_sources)]
 
     def update(self, crop, location, source_idx=0):
+        """ Update underlying storages in supplied `location` with data from `crop`. """
         origin = location[self.orientation].start - location[self.orientation].start % self.n_slides
         if origin not in self.chunk_accumulators[source_idx]:
             self.aggregate_last(source_idx) # TODO: fix for prefetch
@@ -582,12 +605,14 @@ class SlidesAccumulator:
         self.chunk_accumulators[source_idx][origin] = Accumulator3D.from_aggregation(*self.args, **kwargs)
 
     def aggregate_last(self, source_idx):
+        """ Aggregate last ready chunk. """
         if len(self.chunk_accumulators[source_idx]) > 0:
             origin = list(self.chunk_accumulators[source_idx].keys())[-1]
             chunk = self.chunk_accumulators[source_idx].pop(origin)
             self.chunks_queue.put((origin, chunk))
 
     def aggregate(self):
+        """ Aggregate whole accumulator. """
         for source_idx in range(self.n_sources):
             self.aggregate_last(source_idx)
 
@@ -598,6 +623,7 @@ class SlidesAccumulator:
         return self.data
 
     def collect_chunks(self, chunks_queue):
+        """ Process chunks and put them into chunks accumulator. """
         # TODO: last lines when range is not None
         accumulator = Accumulator3D.from_aggregation(*self.args, shape=self.shape, orientation=self.orientation,
                                                      origin=self.origin, **self.kwargs)
@@ -610,7 +636,10 @@ class SlidesAccumulator:
             chunk = chunk.aggregate()
             if self.postprocessing:
                 origin_[self.orientation] = origin
-                chunk, origin, prev_chunk = (*self.postprocessing(chunk, origin_, self.shape, prev_chunk, global_origin), chunk)
+                chunk, origin, prev_chunk = (
+                    *self.postprocessing(chunk, origin_, self.shape, prev_chunk, global_origin),
+                    chunk
+                )
             location = [slice(loc, loc+length) for loc, length in zip(global_origin, self.shape)]
             location[self.orientation] = slice(origin, origin+chunk.shape[self.orientation])
             accumulator.update(chunk, location)
