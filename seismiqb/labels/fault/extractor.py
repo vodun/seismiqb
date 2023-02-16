@@ -404,7 +404,6 @@ class FaultExtractor:
             intersection_ratio_threshold = 0.5 if axis in (2, -1) else 0.9
 
         overlap_axis = self.direction if axis in (-1, 2) else 2
-        split_axis = overlap_axis
 
         # Under the hood, we check borders connectivity (as puzzles)
         borders_to_check = ('up', 'down') if axis in (-1, 2) else ('left', 'right')
@@ -432,8 +431,8 @@ class FaultExtractor:
                     continue
 
                 # Check that bboxes overlap is enough
-                intersection_threshold = min(prototype_1.bbox[overlap_axis, 1]-prototype_1.bbox[overlap_axis, 0],
-                                             prototype_2.bbox[overlap_axis, 1]-prototype_2.bbox[overlap_axis, 0])
+                intersection_threshold = min(prototype_1.bbox[overlap_axis, 1] - prototype_1.bbox[overlap_axis, 0],
+                                             prototype_2.bbox[overlap_axis, 1] - prototype_2.bbox[overlap_axis, 0])
                 intersection_threshold *= intersection_ratio_threshold
 
                 intersection_length = adjacent_borders[overlap_axis][1] - adjacent_borders[overlap_axis][0]
@@ -477,23 +476,29 @@ class FaultExtractor:
                 # Check that one component contour is inside another (for both)
                 if self._is_contour_inside(contour_1, contour_2, border_threshold=corrected_border_threshold) or \
                    self._is_contour_inside(contour_2, contour_1, border_threshold=corrected_border_threshold):
-                    # Split by split_axis for avoiding wrong prototypes shapes (like C or T-likable, etc.)
-                    if (axis in (-1, 2)) and (width_split_threshold is not None) and \
-                       (np.abs(prototype_1.width - prototype_2.width) > width_split_threshold):
-                        split_indices = (max(prototype_1.bbox[split_axis, 0], prototype_2.bbox[split_axis, 0]),
-                                         min(prototype_1.bbox[split_axis, 1], prototype_2.bbox[split_axis, 1]))
+                    # Split by self.direction for avoiding wrong prototypes shapes (like C or T-likable, etc.)
+                    if axis in (-1, 2):
+                        lower_is_wider = (is_first_upper and prototype_2.width - prototype_1.width > 20) or \
+                                         (not is_first_upper and prototype_1.width - prototype_2.width > 20)
 
-                        prototype_1, new_prototypes_ = prototype_1.split(split_indices, axis=split_axis)
-                        new_prototypes.extend(new_prototypes_)
+                        too_big_width_diff = (width_split_threshold is not None) and \
+                                             (np.abs(prototype_1.width - prototype_2.width) > width_split_threshold)
 
-                        if len(new_prototypes_) > 0:
-                            prototype_1 = FaultPrototype(prototype_1.coords, direction=split_axis)
+                        if (lower_is_wider or too_big_width_diff):
+                            split_indices = (max(prototype_1.bbox[self.direction, 0], prototype_2.bbox[self.direction, 0]),
+                                            min(prototype_1.bbox[self.direction, 1], prototype_2.bbox[self.direction, 1]))
 
-                        prototype_2, new_prototypes_ = prototype_2.split(split_indices, axis=split_axis)
-                        new_prototypes.extend(new_prototypes_)
+                            prototype_1, new_prototypes_ = prototype_1.split(split_indices, axis=self.direction)
+                            new_prototypes.extend(new_prototypes_)
 
-                        if len(new_prototypes_) > 0:
-                            prototype_2 = FaultPrototype(prototype_2.coords, direction=split_axis)
+                            if len(new_prototypes_) > 0:
+                                prototype_1 = FaultPrototype(prototype_1.coords, direction=self.direction)
+
+                            prototype_2, new_prototypes_ = prototype_2.split(split_indices, axis=self.direction)
+                            new_prototypes.extend(new_prototypes_)
+
+                            if len(new_prototypes_) > 0:
+                                prototype_2 = FaultPrototype(prototype_2.coords, direction=self.direction)
 
                     prototype_2.concat(prototype_1)
                     self.prototypes[prototype_2_idx] = prototype_2
@@ -695,7 +700,7 @@ class FaultExtractor:
             stats['after_connected_concat'][i].append(len(self.prototypes))
 
             # Concat by direction axis
-            if prolongate_in_depth and (depth_intersection_threshold <= intersection_ratio_threshold[2][1]):
+            if (not prolongate_in_depth) or (depth_intersection_threshold <= intersection_ratio_threshold[2][1]):
                 _ = self.concat_connected_prototypes(intersection_ratio_threshold=direction_intersection_threshold,
                                                     axis=self.direction)
 
@@ -704,19 +709,17 @@ class FaultExtractor:
             # Early stopping
             if (depth_intersection_threshold <= intersection_ratio_threshold[2][1]) and \
                (direction_intersection_threshold <= intersection_ratio_threshold[self.direction][1]) and \
-               (stats['after_connected_concat'][i][-1] == previous_iter_prototypes_amount):
+               (stats['after_connected_concat'][i][-1] == stats['after_connected_concat'][i-1][-1]):
                 break
-
-            previous_iter_prototypes_amount = stats['after_connected_concat'][i][-1]
 
             depth_intersection_threshold = round(depth_intersection_threshold - intersection_ratio_threshold[2][-1], 2)
             depth_intersection_threshold = max(depth_intersection_threshold, intersection_ratio_threshold[2][1])
 
-            if prolongate_in_depth and (depth_intersection_threshold <= intersection_ratio_threshold[2][1]):
+            if (not prolongate_in_depth) or (depth_intersection_threshold <= intersection_ratio_threshold[2][1]):
                 direction_intersection_threshold = round(direction_intersection_threshold - \
-                                                            intersection_ratio_threshold[self.direction][-1], 2)
+                                                         intersection_ratio_threshold[self.direction][-1], 2)
                 direction_intersection_threshold = max(direction_intersection_threshold,
-                                                        intersection_ratio_threshold[self.direction][1])
+                                                       intersection_ratio_threshold[self.direction][1])
 
         # Filter for speed up
         if additional_filters:
