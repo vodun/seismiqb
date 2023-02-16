@@ -527,7 +527,7 @@ class FaultExtractor:
 
         return len(contour_1_set - contour_2_dilated) < border_threshold
 
-    def concat_embedded_prototypes(self, border_threshold=10):
+    def concat_embedded_prototypes(self, border_threshold=100):
         """ Concat embedded prototypes with 2 or more closed borders.
 
         Under the hood, we compare different prototypes to find pairs in which one prototype is inside
@@ -622,9 +622,8 @@ class FaultExtractor:
         return self.prototypes
 
     # Addons
-    def run(self, concat_iters=20,
-            intersection_ratio_threshold=0.9, min_intersection_ratio_threshold=0.5,
-            **filtering_kwargs):
+    def run(self, concat_iters=20, intersection_ratio_threshold=None,
+            prolongate_in_depth=False, additional_filters=False, **filtering_kwargs):
         """ Recommended full extracting procedure.
 
         The procedure scheme is:
@@ -641,9 +640,15 @@ class FaultExtractor:
         concat_iters : int
             Maximal amount of connected component concatenation operations which are include concat along
             the depth and `self.direction` axes.
-        intersection_ratio_threshold : float
+        intersection_ratio_threshold : dict or None
             Prototype borders intersection ratio to decide that prototypes can be connected.
-            Note, it is decrementally changed.
+            Note, it is decrementally changed. Keys are axes and values are in the (start, stop, step) format.
+        prolongate_in_depth : bool
+            Whether to maximally prolongate faults in depth or not.
+            If True, then surfaces will be tall and thin.
+            If False, then surfaces will be more longer for `self.direction` than for depth axis.
+        additional_filters : bool
+            Whether to apply additional filtering for speed up.
         min_intersection_ratio_threshold : float
             Minimal preferred value of `intersection_ratio_threshold`.
         filtering_kwargs
@@ -658,52 +663,74 @@ class FaultExtractor:
             Amount of prototypes after each proceeding. Helpful for debug.
         """
         stats = {}
+
+        if intersection_ratio_threshold is None:
+            intersection_ratio_threshold = {
+                self.direction: (0.9, 0.7, 0.05), # (start, stop, step)
+                2: (0.9, 0.4, 0.05)
+            }
+
+        depth_intersection_threshold = intersection_ratio_threshold[2][0]
+        direction_intersection_threshold = intersection_ratio_threshold[self.direction][0]
+
         # Extract prototypes from data
         _ = self.extract_prototypes()
         stats['extracted'] = len(self.prototypes)
 
-        # # Filter for speed up
-        # self.prototypes = self.filter_prototypes(min_height=3, min_width=3, min_n_points=10)
-        # stats['filtered_extracted'] = len(self.prototypes)
+        # Filter for speed up
+        if additional_filters:
+            self.prototypes = self.filter_prototypes(min_height=3, min_width=3, min_n_points=10)
+            stats['filtered_extracted'] = len(self.prototypes)
 
         # Concat connected (as puzzles) prototypes
         previous_iter_prototypes_amount = stats['extracted'] + 100 # to avoid stopping after first concat
 
-        stats['after_connected_concat'] = []
+        stats['after_connected_concat'] = {}
 
-        for _ in Notifier('t')(concat_iters):
+        for i in Notifier('t')(concat_iters):
+            stats['after_connected_concat'][i] = []
             # Concat by depth axis
-            _ = self.concat_connected_prototypes(intersection_ratio_threshold=intersection_ratio_threshold,
+            _ = self.concat_connected_prototypes(intersection_ratio_threshold=depth_intersection_threshold,
                                                  axis=-1)
-            stats['after_connected_concat'].append(len(self.prototypes))
+            stats['after_connected_concat'][i].append(len(self.prototypes))
 
             # Concat by direction axis
-            _ = self.concat_connected_prototypes(intersection_ratio_threshold=0.8,
-                                                 axis=self.direction)
+            if prolongate_in_depth and (depth_intersection_threshold <= intersection_ratio_threshold[2][1]):
+                _ = self.concat_connected_prototypes(intersection_ratio_threshold=direction_intersection_threshold,
+                                                    axis=self.direction)
 
-            stats['after_connected_concat'].append(len(self.prototypes))
+                stats['after_connected_concat'][i].append(len(self.prototypes))
 
             # Early stopping
-            if (intersection_ratio_threshold <= min_intersection_ratio_threshold) and \
-               (stats['after_connected_concat'][-1] == previous_iter_prototypes_amount):
+            if (depth_intersection_threshold <= intersection_ratio_threshold[2][1]) and \
+               (direction_intersection_threshold <= intersection_ratio_threshold[self.direction][1]) and \
+               (stats['after_connected_concat'][i][-1] == previous_iter_prototypes_amount):
                 break
 
-            previous_iter_prototypes_amount = stats['after_connected_concat'][-1]
+            previous_iter_prototypes_amount = stats['after_connected_concat'][i][-1]
 
-            intersection_ratio_threshold = max(round(intersection_ratio_threshold - 0.05, 2),
-                                               min_intersection_ratio_threshold)
+            depth_intersection_threshold = round(depth_intersection_threshold - intersection_ratio_threshold[2][-1], 2)
+            depth_intersection_threshold = max(depth_intersection_threshold, intersection_ratio_threshold[2][1])
 
-        # # Filter for speed up
-        # self.prototypes = self.filter_prototypes(min_height=3, min_width=3, min_n_points=10)
-        # stats['filtered_connected_concat'] = len(self.prototypes)
+            if prolongate_in_depth and (depth_intersection_threshold <= intersection_ratio_threshold[2][1]):
+                direction_intersection_threshold = round(direction_intersection_threshold - \
+                                                            intersection_ratio_threshold[self.direction][-1], 2)
+                direction_intersection_threshold = max(direction_intersection_threshold,
+                                                        intersection_ratio_threshold[self.direction][1])
+
+        # Filter for speed up
+        if additional_filters:
+            self.prototypes = self.filter_prototypes(min_height=3, min_width=3, min_n_points=10)
+            stats['filtered_connected_concat'] = len(self.prototypes)
 
         # Concat embedded
         _ = self.concat_embedded_prototypes()
         stats['after_embedded_concat'] = len(self.prototypes)
 
-        # # Filter too small prototypes
-        # self.prototypes = self.filter_prototypes(**filtering_kwargs)
-        # stats['after_last_filtering'] = len(self.prototypes)
+        # Filter too small prototypes
+        if additional_filters or len(filtering_kwargs) > 0:
+            self.prototypes = self.filter_prototypes(**filtering_kwargs)
+            stats['after_last_filtering'] = len(self.prototypes)
         return self.prototypes, stats
 
     def filter_prototypes(self, min_height=40, min_width=20, min_n_points=100):
