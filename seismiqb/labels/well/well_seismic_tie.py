@@ -20,7 +20,8 @@ from ...geometry import GeometrySEGY
 # Mixin class for `Well` to simplify dt-ticks optimization for well-seismic tie
 class WellSeismicMatcher:
     """ Utilities for optimization of match between seismic data and well logs. """
-    def __init__(self, seismic_time=None, well_time=None, seismic_curve=None, impedance_log=None, wavelet=None):
+    def __init__(self, seismic_time=None, well_time=None, seismic_curve=None, impedance_log=None, wavelet=None,
+                 well_coordinates=None):
         """ Store the state of the matcher.
         """
         self.seismic_time = seismic_time
@@ -28,6 +29,7 @@ class WellSeismicMatcher:
         self.seismic_curve = seismic_curve
         self.impedance_log = impedance_log
         self.wavelet = wavelet
+        self.well_coordinates = well_coordinates or (None, None)
 
         self.tie_crosscorrelation = None
         self.well = None
@@ -39,7 +41,7 @@ class WellSeismicMatcher:
         geometry = GeometrySEGY(cube_path)
         self.well = Well(storage=well_path)
 
-        #
+        # Read and convert well-coordinates into iline-xline numbers
         coordinates_df = pd.read_csv(coordinates_path, sep='\s+', encoding='1251')
         coordinates = coordinates_df[['X_utm42', 'Y_utm42']].values
         ordinal_coordinates = geometry.cdp_to_lines(coordinates).astype(np.int32) - geometry.shifts
@@ -47,8 +49,8 @@ class WellSeismicMatcher:
 
         #
         well_name = os.path.basename(well_path)
-        well_coordinates = name_to_coordinate[well_name].tolist()
-        well_slice = (*well_coordinates, slice(0, geometry.shape[-1]))
+        self.well_coordinates = name_to_coordinate[well_name].tolist()
+        well_slice = (*self.well_coordinates, slice(0, geometry.shape[-1]))
 
         #
         self.seismic_curve = geometry[well_slice]
@@ -73,10 +75,10 @@ class WellSeismicMatcher:
 
         # Converting units and filtering for density log
         self.well['RHOB_FILTERED'] = self.lowpass_filter(rhob_log, **filter_kwargs)
-        self.well.gramm_centimeter3_to_kilogramm_meter3(density_log='RHOB_FILTERED', name='RHOB_FILTERED')
+        self.well.gramm_centimeter3_to_kilogramm_meter3(density_log='RHOB_FILTERED', name='RHOB_KG_M3')
 
         # Compute and convert impedance
-        self.well.compute_impedance_log_in_pascal_meter(sonic_log='DT_SECONDS_METER', density_log='RHOB_FILTERED')
+        self.well.compute_impedance_log_in_pascal_meter(sonic_log='DT_SECONDS_METER', density_log='RHOB_KG_M3')
         self.well.pascal_meter_to_kilopascal_meter(name='AI_FILTERED')
 
         # Apply nans to the computed impedance
@@ -431,7 +433,7 @@ class WellSeismicMatcher:
         data = [(seismic_range, (1, 1)), ((well_range), (2, 2))]
 
         # Default plot parameters
-        defaults = {'label': ['SEISMIC TIME RANGE', f'WELL TIME RANGE'], 'curve_linewidth': [4, 4],
+        defaults = {'label': ['SEISMIC TIME RANGE', 'WELL TIME RANGE'], 'curve_linewidth': [4, 4],
                     'curve_marker': 'o', 'curve_markersize': 12,
                     'xlabel': 'TIME, SECONDS', 'ylabel': 'SEISMIC/WELL',
                     'xlabel_fontsize': 22, 'ylabel_fontsize': 22,
@@ -470,8 +472,8 @@ class WellSeismicMatcher:
         correlation = [self.nancorrelation(recreated_, seismic_curve) for recreated_ in recreated]
 
         # Default plot parameters
-        title = f'RECORDED VS RECREATED SEISMIC' + ('' if seismic_time_slice == slice(None, None) else
-                                                    f'\n DEPTH={seismic_time_slice.start}:{seismic_time_slice.stop}')
+        title = 'RECORDED VS RECREATED SEISMIC' + ('' if seismic_time_slice == slice(None, None) else
+                                                   f'\n DEPTH={seismic_time_slice.start}:{seismic_time_slice.stop}')
         synthetic_labels = [f'SYNTHETIC {postfix}, CORR: {correlation_: .3f}'
                             for correlation_, postfix in zip(correlation, synthetic_postfix)]
 
@@ -480,7 +482,8 @@ class WellSeismicMatcher:
                     'figsize': (23, 5), 'curve_alpha': [.8, 1, 1],
                     'curve_linestyle': ['solid', 'dashed', 'solid'],
                     'curve_linewidth': [2.5, 2, 2],
-                    'curve_color': ['sandybrown', 'lightpink', 'cornflowerblue']}
+                    'curve_color': ['sandybrown', 'lightpink', 'cornflowerblue'],
+                    'xlabel': '', 'ylabel': ''}
 
         # Update defaults and plot
         kwargs = {'mode': 'curve', **defaults, **kwargs}
@@ -497,7 +500,9 @@ class WellSeismicMatcher:
         defaults = {'figsize': (23, 7),
                     'label': ['OPTIMIZED DT', 'INITIAL DT', 'LOWER BOUND DT', 'UPPER BOUND DT'],
                     'curve_alpha': [1, 1, .35, .35], 'title': 'DT OPTIMIZED/INITIAL',
-                    'curve_linestyle': ['solid', 'dashed', 'solid', 'solid']}
+                    'curve_linestyle': ['solid', 'dashed', 'solid', 'solid'],
+                    'xlabel': 'TICK NUMBER', 'xlabel_fontsize': 20,
+                    'ylabel': 'DT, Seconds', 'ylabel_fontsize': 20}
 
         # Update defaults and plot
         kwargs = {'mode': 'curve', **defaults, **kwargs}
@@ -513,11 +518,15 @@ class WellSeismicMatcher:
         # Compute relative velocity: shows how far the optimized velocities deviate from the original ones
         relative_velocity = dt_start / dt_final
 
-        defaults = {'figsize': (30, 7), 'label': ['OPTIMIZED VELOCITY/INITIAL VELOCITY'],
-                    'title': 'RELATIVE VELOCITY'}
+        defaults = {'figsize': (25, 7),
+                    'title': 'RELATIVE VELOCITY: OPTIMIZED VELOCITY/INITIAL VELOCITY',
+                    'xlabel': 'TICK NUMBER', 'xlabel_fontsize': 20,
+                    'ylabel': ''}
 
         kwargs = {'mode': 'curve', **defaults, **kwargs}
         plotter = plot(relative_velocity, **kwargs)
+
+        plotter.subplots[0].ax.axhline(1, linestyle='dashed', alpha=.5, color='sandybrown', linewidth=3)
 
         return plotter
 
