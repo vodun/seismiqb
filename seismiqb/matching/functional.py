@@ -1,5 +1,6 @@
 """ Functions used for matching tasks. """
 import numpy as np
+from numba import njit
 
 
 
@@ -55,3 +56,14 @@ def minimize_proxy(x, trace_0, trace_1, metric='correlation'):
     elif metric == 'r2':
         loss = -compute_r2(trace_0, modified_trace_1)
     return loss
+
+
+@njit
+def compute_shifted_traces(trace, shifts):
+    """ !!. """
+    buffer = np.empty((shifts.size, trace.size), dtype=np.float32)
+    arange = np.arange(len(trace), dtype=np.float32)
+
+    for i, shift in enumerate(shifts):
+        buffer[i] = np.interp(arange, arange + shift, trace)
+    return buffer

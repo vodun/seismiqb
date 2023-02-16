@@ -35,17 +35,20 @@ class FieldCollection:
 
 
     # Work with intersections
-    def match_intersections(self, pbar='t', method='analytic', limits=None, pad_width=0, n=1,
-                            max_shift=100, resample_factor=10, metric='correlation',
-                            twostep=False, twostep_margin=10,
-                            apply_correction=False, correction_step=1):
+    def find_intersection(self, name_0, name_1):
+        """ Find intersection by names of shot lines. """
+        for intersection in self.intersections.values():
+            if (name_0 in intersection.field_0.name and name_1 in intersection.field_1.name) or \
+                (name_1 in intersection.field_0.name and name_0 in intersection.field_1.name):
+                return intersection
+        raise KeyError(f'No intersection of `{name_0}` and `{name_1}` in collection!')
+
+    def match_intersections(self, pbar='t', method='analytic', limits=None, pad_width=None, n=1, transform=None,
+                            **kwargs):
         """ Match traces on each intersection. """
         for intersection in Notifier(pbar)(self.intersections.values()):
-            intersection.match_traces(method=method, limits=limits, pad_width=pad_width, n=n,
-                                      max_shift=max_shift, resample_factor=resample_factor,
-                                      metric=metric, twostep=twostep, twostep_margin=twostep_margin,
-                                      apply_correction=apply_correction,
-                                      correction_step=correction_step)
+            intersection.match_traces(method=method, limits=limits, pad_width=pad_width, n=n, transform=transform,
+                                      **kwargs)
 
     def get_matched_value(self, key):
         """ Get required `key` value from each of the intersections. """
@@ -286,8 +289,8 @@ class FieldCollection:
             x, y = (intersection.coordinates_0 + intersection.coordinates_1) // 2
 
             matching_results = intersection.matching_results
-            corr, shift = matching_results ['corr'], matching_results ['shift']
-            angle, gain = matching_results ['angle'], matching_results ['gain']
+            corr, shift = matching_results['corr'], matching_results['shift']
+            angle, gain = matching_results['angle'], matching_results['gain']
 
             # HTML things
             name_ = f'"{field_0.short_name}.sgy" X "{field_1.short_name}.sgy"'
