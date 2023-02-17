@@ -119,11 +119,12 @@ class FieldCollection:
 
         # Gain
         b = np.array(self.get_matched_value('gain'))
+        b = np.log(b)
         x, loss = distribute_misties(a=a, b=b, n=n, skip_index=skip_index,
                                      max_iters=max_iters, alpha=alpha, tolerance=tolerance)
         xk, xl = x[a[:, 0]], x[a[:, 1]]
         errors = b - (xk - xl)
-        self.corrections['gain'] = {'x': x, 'errors': errors, 'loss': loss}
+        self.corrections['gain'] = {'x': np.exp(x), 'errors': errors, 'loss': loss}
 
         # Angle
         b = np.array(self.get_matched_value('angle'))

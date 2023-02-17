@@ -333,9 +333,8 @@ class Intersection2d2d:
 
         # Optional correction: parabolic interpolation in the neighborhood of a maxima
         if apply_correction is False:
-            best_shift = shifts[idx]
-            best_angle = instantaneous_phase[idx]
-            best_gain = 1 # np.linalg.norm(trace_1) / np.linalg.norm(trace_0) #TODO
+            shift = shifts[idx]
+            angle = instantaneous_phase[idx]
         else:
             # TODO: refactor / rethink
             correction = ((metrics[idx-correction_step] - metrics[idx+correction_step]) /
@@ -347,7 +346,7 @@ class Intersection2d2d:
 
             # Shift: correct according to values to the sides of maximum
             corrected_idx = int(idx + correction)
-            best_shift = shifts[corrected_idx]
+            shift = shifts[corrected_idx]
 
             # Angle: correct according to values to the sides of maximum
             p0 = instantaneous_phase[idx]
@@ -357,15 +356,15 @@ class Intersection2d2d:
                 p1 = p1 - 360
             elif p1 - p0 < -180:
                 p1 = p1 + 360
-            best_angle = p0 + ((p1 - p0) * correction if correction >= 0 else (p0 - p1) * correction)
+            angle = p0 + ((p1 - p0) * correction if correction >= 0 else (p0 - p1) * correction)
 
-            # Gain: no correction
-            best_gain = np.linalg.norm(trace_1) / np.linalg.norm(trace_0)
+
+        gain = (trace_1**2).mean() ** (1/2) / (trace_0**2).mean() ** (1/2)
 
         matching_results = {
-            'shift': best_shift,
-            'angle': best_angle,
-            'gain': best_gain,
+            'shift': shift,
+            'angle': angle,
+            'gain': gain,
         }
 
         if return_intermediate:
@@ -380,7 +379,8 @@ class Intersection2d2d:
         return matching_results
 
 
-    def evaluate(self, shift=0, angle=0, gain=1, metric='correlation', pad_width=None, limits=None, n=1, transform=None):
+    def evaluate(self, shift=0, angle=0, gain=1, metric='correlation',
+                 pad_width=None, limits=None, n=1, transform=None):
         """ Compute provided metric with a given mistie parameters. """
         trace_0, trace_1 = self.prepare_traces(pad_width=pad_width, limits=limits, n=n, transform=transform)
         metric_function = compute_correlation if metric == 'correlation' else compute_r2
