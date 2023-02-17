@@ -57,7 +57,7 @@ class FaultExtractor:
         self.component_len_threshold = component_len_threshold
 
         self.container = self._init_container(data=data)
-        self._first_slide_with_mergeable = 0 # variable for internal operations speed up
+        self._unprocessed_slide_idx = 0 # variable for internal operations speed up
 
         self.prototypes_queue = deque() # prototypes for extension
         self.prototypes = [] # extracted prototypes
@@ -81,7 +81,7 @@ class FaultExtractor:
             objects = find_objects(labeled)
 
             # Get components info
-            all_points, bboxes, lengths = [], [], []
+            components, lengths = [], []
 
             for idx, object_bbox in enumerate(objects, start=1):
                 # Refined coords: we refine skeletonize effects by applying it on limited area
@@ -125,7 +125,6 @@ class FaultExtractor:
 
                 probas = np.round(probas * 255).astype(refined_coords.dtype)
                 points = np.hstack((refined_coords, probas.reshape(-1, 1)))
-                all_points.append(points)
 
                 # Bbox
                 bbox = np.empty((3, 2), np.int32)
@@ -134,11 +133,11 @@ class FaultExtractor:
                 bbox[self.orthogonal_direction, :] = dilation_ranges
                 bbox[-1, :] = object_bbox[-1].start, object_bbox[-1].stop - 1
 
-                bboxes.append(bbox)
+                component = Component(points=points, slide_idx=slide_idx, bbox=bbox, length=length, merged=False)
+                components.append(component)
 
             container[slide_idx] = {
-                'points': all_points,
-                'bboxes': bboxes,
+                'components': components,
                 'lengths': lengths
             }
 
@@ -159,69 +158,58 @@ class FaultExtractor:
     def extract_prototype(self):
         """ Extract one fault prototype from the point cloud. """
         if len(self.prototypes_queue) == 0:
-            start_slide_idx, idx = self._find_not_merged_component()
+            component, component_idx = self._find_not_merged_component()
 
-            if idx is None: # No components to concat
+            if component is None:
                 return None
 
-            component = self.container[start_slide_idx]['points'][idx]
-            component_bbox = self.container[start_slide_idx]['bboxes'][idx]
+            component.merged = True
+            self.container[component.slide_idx]['lengths'][component_idx] = -1 # mark as merged
 
-            self.container[start_slide_idx]['lengths'][idx] = -1 # Mark this component as unmergeable
-            prototype = FaultPrototype(points=component, direction=self.direction,
-                                       last_slide_idx=start_slide_idx, last_component=component,
-                                       last_component_bbox=component_bbox)
+            prototype = FaultPrototype(points=component.points, direction=self.direction, last_component=component)
         else:
             prototype = self.prototypes_queue.popleft()
-
-            start_slide_idx = prototype.last_slide_idx
             component = prototype.last_component
-            component_bbox = prototype.last_component_bbox
 
         # Find closest components on next slides
-        for slide_idx_ in range(start_slide_idx+1, self.shape[self.direction]):
+        for _ in range(component.slide_idx + 1, self.shape[self.direction]):
             # Find the closest component on the slide_idx_ to the current
-            component, component_bbox, split_indices = self._find_closest_component(component=component,
-                                                                                    component_bbox=component_bbox,
-                                                                                    slide_idx=slide_idx_)
+            component, split_indices = self._find_closest_component(component=component)
 
             # Postprocess prototype - it need to be splitted if it is out of component ranges
             if component is not None:
                 prototype, new_prototypes = prototype.split(split_indices=split_indices, axis=2)
                 self.prototypes_queue.extend(new_prototypes)
 
-                prototype.append(component, bbox=component_bbox, slide_idx=slide_idx_)
+                prototype.append(component)
             else:
                 break
 
         return prototype
 
     def _find_not_merged_component(self):
-        """ Find the longest not merged item on the minimal slide. """
-        for slide_idx in range(self._first_slide_with_mergeable, self.shape[self.direction]):
+        """ Find the longest not merged component on the minimal slide. """
+        for slide_idx in range(self._unprocessed_slide_idx, self.shape[self.direction]):
             slide_info = self.container[slide_idx]
 
             if len(slide_info['lengths']) > 0:
-                argmax = np.argmax(slide_info['lengths'])
+                max_component_idx = np.argmax(slide_info['lengths'])
 
-                if slide_info['lengths'][argmax] != -1:
-                    self._first_slide_with_mergeable = slide_idx
-                    return slide_idx, argmax
+                if slide_info['lengths'][max_component_idx] != -1:
+                    self._unprocessed_slide_idx = slide_idx
+                    component = self.container[slide_idx]['components'][max_component_idx]
+                    return component, max_component_idx
 
         return None, None
 
-    def _find_closest_component(self, component, component_bbox, slide_idx, distances_threshold=None,
+    def _find_closest_component(self, component, distances_threshold=None,
                                 depth_iteration_step=10, depths_threshold=20):
-        """ Find the closest component to the provided one, get splitting indices for prototype if needed.
+        """ Find the closest component to the provided on next slide, get splitting indices for prototype if needed.
 
         Parameters
         ----------
-        component : np.ndarray of (N, 3) shape
+        component : instance of :class:`~.Component`
             Component coordinates for which to find the closest from the slide.
-        component_bbox : np.ndarray of (3, 2) shape
-            Component bounding box.
-        slide_idx : int
-            Index of the slide on which to find the closest component.
         distances_threshold : int, optional
             Threshold for the max possible axis-wise distance between components.
         depth_iteration_step : int
@@ -236,37 +224,36 @@ class FaultExtractor:
              - another correspond to the different component, which is not allowed for merge to the current prototype.
         """
         # Dilate component bbox for detecting close components: component on next slide can be shifted
-        dilated_bbox = component_bbox[self.orthogonal_direction, :] + (-self.dilation // 2, self.dilation // 2)
-        component_bbox[self.orthogonal_direction, 0] = max(0, dilated_bbox[0])
-        component_bbox[self.orthogonal_direction, 1] = min(dilated_bbox[1], self.shape[self.orthogonal_direction])
+        dilated_bbox = component.bbox.copy()
+        dilated_bbox[self.orthogonal_direction, :] += (-self.dilation // 2, self.dilation // 2)
+        dilated_bbox[self.orthogonal_direction, 0] = max(0, dilated_bbox[self.orthogonal_direction, 0])
+        dilated_bbox[self.orthogonal_direction, 1] = min(dilated_bbox[self.orthogonal_direction, 1],
+                                                         self.shape[self.orthogonal_direction])
 
         min_distance = distances_threshold if distances_threshold is not None else 100
 
         # Init returned values
         closest_component = None
-        closest_component_bbox = None
         prototype_split_indices = [None, None]
 
         component_split_indices = [None, None]
 
         # Iter over components and find the closest one
-        for idx, other_bbox in enumerate(self.container[slide_idx]['bboxes']):
-            if self.container[slide_idx]['lengths'][idx] != -1:
+        for other_component_idx, other_component in enumerate(self.container[component.slide_idx + 1]['components']):
+            if not other_component.merged:
                 # Check bboxes intersection
-                if not bboxes_intersected(component_bbox, other_bbox, axes=(self.orthogonal_direction, 2)):
+                if not bboxes_intersected(dilated_bbox, other_component.bbox, axes=(self.orthogonal_direction, 2)):
                     continue
 
                 # Check closeness of some points (iter over intersection depths with some step)
                 # Faster then component intersection, but not so accurate
-                other_component = self.container[slide_idx]['points'][idx]
-
-                intersection_depths = (max(component_bbox[2, 0], other_bbox[2, 0]),
-                                       min(component_bbox[2, 1], other_bbox[2, 1]))
+                intersection_depths = (max(component.bbox[2, 0], other_component.bbox[2, 0]),
+                                       min(component.bbox[2, 1], other_component.bbox[2, 1]))
 
                 step = min(depth_iteration_step, (intersection_depths[1]-intersection_depths[0])//3)
                 step = max(step, 1)
 
-                components_distances = min_max_depthwise_distances(component[:, :-1], other_component[:, :-1],
+                components_distances = min_max_depthwise_distances(component.coords, other_component.coords,
                                                                    depths_ranges=intersection_depths, step=step,
                                                                    axis=self.orthogonal_direction,
                                                                    max_threshold=min_distance)
@@ -277,11 +264,11 @@ class FaultExtractor:
 
                 if components_distances[1] < min_distance:
                     # The most depthwise distant points in components are close enough -> we can combine components
-                    merged_idx = idx
                     min_distance = components_distances[1]
-                    intersection_borders = intersection_depths
+
                     closest_component = other_component
-                    closest_component_bbox = other_bbox
+                    merged_idx = other_component_idx
+                    intersection_borders = intersection_depths
 
                     if min_distance == 0:
                         # The closest component is founded
@@ -289,90 +276,41 @@ class FaultExtractor:
 
         if closest_component is not None:
             # Process (split if needed) founded component and get split indices for prototype
-            self.container[slide_idx]['lengths'][merged_idx] = -1 # mark component as unmergeable
+            closest_component.merged = True
+            self.container[closest_component.slide_idx]['lengths'][merged_idx] = -1 # mark component as merged
 
             # Get prototype split indices: check that the new component is smaller than the previous one (for each border)
-            if intersection_borders[0] - component_bbox[2, 0] > depths_threshold:
+            if intersection_borders[0] - component.bbox[2, 0] > depths_threshold:
                 prototype_split_indices[0] = intersection_borders[0]
 
-            if component_bbox[2, 1] - intersection_borders[1] > depths_threshold:
+            if component.bbox[2, 1] - intersection_borders[1] > depths_threshold:
                 prototype_split_indices[1] = intersection_borders[1]
 
             # Split new component: check that the new component is bigger than the previous one (for each border)
             # Create splitted items and save them as new elements for merge
-            if intersection_borders[0] - closest_component_bbox[2, 0] > depths_threshold:
+            if intersection_borders[0] - closest_component.bbox[2, 0] > depths_threshold:
                 component_split_indices[0] = intersection_borders[0]
 
-            if closest_component_bbox[2, 1] - intersection_borders[1] > depths_threshold:
+            if closest_component.bbox[2, 1] - intersection_borders[1] > depths_threshold:
                 component_split_indices[1] = intersection_borders[1]
 
-            closest_component, closest_component_bbox = self._split_component(component=closest_component,
-                                                                              bbox=closest_component_bbox,
-                                                                              split_indices=component_split_indices,
-                                                                              slide_idx=slide_idx)
+            closest_component, new_components = closest_component.split(split_indices=component_split_indices)
+            self._add_new_components(new_components)
 
-        return closest_component, closest_component_bbox, prototype_split_indices
+        return closest_component, prototype_split_indices
 
-    def _split_component(self, component, bbox, split_indices, slide_idx):
-        """ Depth-wise prototypes split by indices.
-
-        Parameters
-        ----------
-        component : np.ndarray of (N, 3) shape
-            Component to split.
-        bbox : np.ndarray of (3, 2) shape
-            Component bbox.
-        split_indices : sequence of two ints
-            Depth values to split component into parts.
-        slide_idx : int
-            Component slide index.
-        """
-        # Cut upper part of the component and save it as another item
-        if split_indices[0] is not None:
-            splitted_component = component[component[:, 2] < split_indices[0]]
-
-            splitted_component_bbox = bbox.copy()
-            splitted_component_bbox[2, 1] = max(0, split_indices[0] - 1)
-
-            self._add_new_component(slide_idx=slide_idx, points=splitted_component, bbox=splitted_component_bbox)
-
-            # Extract suitable part
-            component = component[component[:, 2] >= split_indices[0]]
-            bbox[2, 0] = split_indices[0]
-
-        # Cut lower part of the component and save it as another item
-        if split_indices[1] is not None:
-            splitted_component = component[component[:, 2] > split_indices[1]]
-
-            splitted_component_bbox = bbox.copy()
-            splitted_component_bbox[2, 0] = min(split_indices[1] + 1, self.shape[2])
-
-            self._add_new_component(slide_idx=slide_idx, points=splitted_component, bbox=splitted_component_bbox)
-
-            # Extract suitable part
-            component = component[component[:, 2] <= split_indices[1]]
-            bbox[2, 1] = split_indices[1]
-
-        return component, bbox
-
-    def _add_new_component(self, slide_idx, points, bbox):
-        """ Add new item into the container.
+    def _add_new_components(self, components):
+        """ Add new items into the container.
 
         New items are creating after components splitting.
 
         Parameters
         ----------
-        slide_idx : int
-            Number of the slide on which we need to add new component.
-        points : np.ndarray of (N, 4) shape
-            Component coordinates and probabilities.
-        bbox: np.ndarray of (3, 2) shape
-            Component bounding box.
         """
-        if len(points) > self.component_len_threshold:
-            self.container[slide_idx]['bboxes'].append(bbox)
-            self.container[slide_idx]['points'].append(points)
-            self.container[slide_idx]['lengths'].append(len(points))
+        for component in components:
+            if len(component) > self.component_len_threshold:
+                self.container[component.slide_idx]['components'].append(component)
+                self.container[component.slide_idx]['lengths'].append(len(component))
 
 
     def concat_connected_prototypes(self, intersection_ratio_threshold=None, axis=2,
@@ -497,14 +435,8 @@ class FaultExtractor:
                             prototype_1, new_prototypes_ = prototype_1.split(split_indices, axis=self.direction)
                             new_prototypes.extend(new_prototypes_)
 
-                            if len(new_prototypes_) > 0:
-                                prototype_1 = FaultPrototype(prototype_1.points, direction=self.direction)
-
                             prototype_2, new_prototypes_ = prototype_2.split(split_indices, axis=self.direction)
                             new_prototypes.extend(new_prototypes_)
-
-                            if len(new_prototypes_) > 0:
-                                prototype_2 = FaultPrototype(prototype_2.points, direction=self.direction)
 
                     prototype_2.concat(prototype_1)
                     self.prototypes[prototype_2_idx] = prototype_2
@@ -767,10 +699,93 @@ class FaultExtractor:
         faults = [Fault(prototype.coords, field=field) for prototype in self.prototypes]
         return faults
 
+class Component:
+    """ Extracted connected components. """
+    def __init__(self, points, slide_idx, bbox=None, length=None, merged=False):
+        """..!!"""
+        self.points = points
+        self.slide_idx = slide_idx
+
+        self._bbox = bbox
+        self._length = length
+
+        self.merged = merged
+
+    @property
+    def coords(self):
+        """ Component spatial coordinates in the (ilines, xlines, depths) format."""
+        return self.points[:, :-1]
+
+    @property
+    def bbox(self):
+        """ Bounding box. """
+        if self._bbox is None:
+            self._bbox = np.column_stack([np.min(self.coords, axis=0), np.max(self.coords, axis=0)])
+        return self._bbox
+
+    def __len__(self):
+        """ Component length. """
+        if self._length is None:
+            self._length = len(self.points)
+        return self._length
+
+    def split(self, split_indices):
+        """ Depth-wise component split by indices.
+
+        Parameters
+        ----------
+        split_indices : sequence of two ints
+            Depth values to split component into parts.
+        """
+        component_points = self.points
+        component_bbox = self.bbox
+        new_components = []
+
+        # Cut upper part of the component and save it as another item
+        if split_indices[0] is not None:
+            new_component_points = component_points[component_points[:, 2] < split_indices[0]]
+
+            new_component_bbox = component_bbox.copy()
+            new_component_bbox[2, 1] = max(0, split_indices[0] - 1)
+
+            new_component = Component(points=new_component_points, slide_idx=self.slide_idx,
+                                      bbox=new_component_bbox, merged=False)
+
+            new_components.append(new_component)
+
+            # Extract suitable part
+            component_points = component_points[component_points[:, 2] >= split_indices[0]]
+            component_bbox[2, 0] = split_indices[0]
+
+        # Cut lower part of the component and save it as another item
+        if split_indices[1] is not None:
+            new_component_points = component_points[component_points[:, 2] > split_indices[1]]
+
+            new_component_bbox = component_bbox.copy()
+            new_component_bbox[2, 0] = split_indices[1] + 1
+
+            new_component = Component(points=new_component_points, slide_idx=self.slide_idx,
+                                      bbox=new_component_bbox, merged=False)
+
+            new_components.append(new_component)
+
+            # Extract suitable part
+            component_points = component_points[component_points[:, 2] <= split_indices[1]]
+            component_bbox[2, 1] = split_indices[1]
+
+        # The closest component to the splitted
+        if len(new_components) > 0:
+            component = Component(points=component_points, slide_idx=self.slide_idx,
+                                  bbox=component_bbox, merged=True)
+        else:
+            component = self
+
+        return component, new_components
+
 
 class FaultPrototype:
     """ Class for faults prototypes. Provides a necessary API for convenient prototype extraction process. """
-    def __init__(self, points, direction, last_slide_idx=None, last_component=None, last_component_bbox=None):
+    def __init__(self, points, direction, last_component=None):
         """ Fault prototype initialization.
 
         Note, last_* parameters are preferred for prototype extraction and are optional:
@@ -782,21 +797,14 @@ class FaultPrototype:
             Prototype coordinates and probabilities.
         direction : {0, 1}
             Direction along which the prototype is extracted (the same as prediction direction).
-        last_slide_idx : int, optional
-            Index of the slide from which the last added component was extracted.
-        last_component : np.ndarray of (N, 3) shape
-            Coordinates of the last added component.
-        last_component_bbox : np.ndarray of (3, 2) shape
-            Bounding box of the `last_component`.
+        last_component :
         """
         self.points = points
         self.direction = direction
 
         self._bbox = None
 
-        self._last_slide_idx = last_slide_idx
         self._last_component = last_component
-        self._last_component_bbox = last_component_bbox
 
         self._contour = None
         self._borders = {}
@@ -836,28 +844,16 @@ class FaultPrototype:
         proba_value /= 255
         return proba_value
 
-    # For internal needs
-    @property
-    def last_slide_idx(self):
-        """ Index of the slide from which the last added component was extracted. """
-        if self._last_slide_idx is None:
-            self._last_slide_idx = self.points[:, self.direction].max()
-        return self._last_slide_idx
-
+    # Properties for internal needs
     @property
     def last_component(self):
         """ Coordinates (N, 3) of the last added component. """
         if self._last_component is None:
-            self._last_component = self.points[self.points[:, self.direction] == self.last_slide_idx]
-        return self._last_component
+            last_slide_idx = self.points[:, self.direction].max()
 
-    @property
-    def last_component_bbox(self):
-        """ Bounding box of the `self.last_component`. """
-        if self._last_component_bbox is None:
-            self._last_component_bbox = np.column_stack([np.min(self.last_component, axis=0),
-                                                         np.max(self.last_component, axis=0)])
-        return self._last_component_bbox
+            component_points = self.points[self.points[:, self.direction] == last_slide_idx]
+            self._last_component = Component(points=component_points, slide_idx=last_slide_idx, merged=True)
+        return self._last_component
 
     @property
     def contour(self):
@@ -870,28 +866,21 @@ class FaultPrototype:
             self._contour = find_contour(coords=self.coords, projection_axis=projection_axis)
         return self._contour
 
-    def append(self, points, bbox, slide_idx=None):
+    def append(self, component):
         """ Append new component into prototype.
 
         Parameters
         ----------
-        points : np.ndarray of (N, 4) shape
-            Coordinates of the component to add into the prototype.
-        bbox : np.ndarray of (3, 2) shape
-            Bounding box of the added component.
-        slide_idx : int or None
-            The added component slide index.
+        component :
         """
-        self.points = np.vstack([self.points, points])
+        self.points = np.vstack([self.points, component.points])
 
         self._contour = None
         self._borders = {}
 
-        self._last_slide_idx = slide_idx
-        self._last_component = points
-        self._last_component_bbox = bbox
+        self._last_component = component
 
-        self._bbox = self._concat_bbox(self._last_component_bbox)
+        self._bbox = self._concat_bbox(component.bbox)
 
     def concat(self, other):
         """ Concatenate two prototypes. """
@@ -902,9 +891,7 @@ class FaultPrototype:
         self._contour = None
         self._borders = {}
 
-        self._last_slide_idx = None
         self._last_component = None
-        self._last_component_bbox = None
 
     def _concat_bbox(self, other_bbox):
         """ Concat bboxes of two objects into one. """
@@ -939,7 +926,7 @@ class FaultPrototype:
 
         for start_idx, end_idx in zip(start_indices, end_indices):
             points_ = points[(start_idx <= points[:, axis]) & (points[:, axis] <= end_idx)]
-            prototype = FaultPrototype(points=points_, direction=self.direction, last_slide_idx=end_idx)
+            prototype = FaultPrototype(points=points_, direction=self.direction)
             prototypes.append(prototype)
 
         return prototypes
