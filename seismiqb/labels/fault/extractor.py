@@ -47,7 +47,6 @@ class FaultExtractor:
         If more than 0, then extraction will be faster.
     """
     def __init__(self, data, direction, component_len_threshold=0):
-        """ Init data container with components info for each slide. """
         self.shape = data.shape
 
         self.direction = direction
@@ -63,7 +62,7 @@ class FaultExtractor:
         self.prototypes = [] # extracted prototypes
 
     def _init_container(self, data):
-        """ Init data container with info about extracted connected components. """
+        """ Extract connected components on each slide and save them into container. """
         dilation_structure = np.ones((1, self.dilation), np.uint8)
         container = {}
 
@@ -133,7 +132,7 @@ class FaultExtractor:
                 bbox[self.orthogonal_direction, :] = dilation_ranges
                 bbox[-1, :] = object_bbox[-1].start, object_bbox[-1].stop - 1
 
-                component = Component(points=points, slide_idx=slide_idx, bbox=bbox, length=length, merged=False)
+                component = Component(points=points, slide_idx=slide_idx, bbox=bbox)
                 components.append(component)
 
             container[slide_idx] = {
@@ -163,7 +162,6 @@ class FaultExtractor:
             if component is None:
                 return None
 
-            component.merged = True
             self.container[component.slide_idx]['lengths'][component_idx] = -1 # mark as merged
 
             prototype = FaultPrototype(points=component.points, direction=self.direction, last_component=component)
@@ -209,19 +207,19 @@ class FaultExtractor:
         Parameters
         ----------
         component : instance of :class:`~.Component`
-            Component coordinates for which to find the closest from the slide.
+            Component for which find the closest on the next slide.
         distances_threshold : int, optional
-            Threshold for the max possible axis-wise distance between components.
+            Threshold for the max possible depth-wise distance between components.
         depth_iteration_step : int
             The depth iteration step to find distances between components.
             Value 1 is recommended for higher accuracy.
-            Value more than 1 can speed up the finding process.
+            Value more than 1 is less accurate but speeds up the finding.
         depths_threshold : int
             Depth-length threshold to decide to split closest component or prototype.
             If one component is longer than another more than on depths_threshold,
             then we need to split the longest one into parts:
              - one part corresponds to the closest component;
-             - another correspond to the different component, which is not allowed for merge to the current prototype.
+             - another corresponds to the different component, which is not allowed for merge with the current.
         """
         # Dilate component bbox for detecting close components: component on next slide can be shifted
         dilated_bbox = component.bbox.copy()
@@ -240,46 +238,50 @@ class FaultExtractor:
 
         # Iter over components and find the closest one
         for other_component_idx, other_component in enumerate(self.container[component.slide_idx + 1]['components']):
-            if not other_component.merged:
-                # Check bboxes intersection
-                if not bboxes_intersected(dilated_bbox, other_component.bbox, axes=(self.orthogonal_direction, 2)):
-                    continue
+            if self.container[component.slide_idx + 1]['lengths'][other_component_idx] == -1:
+                continue
 
-                # Check closeness of some points (iter over overlapping depths with some step)
-                # Faster then component overlap, but not so accurate
-                overlap_depths = (max(component.bbox[2, 0], other_component.bbox[2, 0]),
-                                       min(component.bbox[2, 1], other_component.bbox[2, 1]))
+            # Check bboxes intersection
+            if not bboxes_intersected(dilated_bbox, other_component.bbox, axes=(self.orthogonal_direction, 2)):
+                continue
 
-                step = min(depth_iteration_step, (overlap_depths[1]-overlap_depths[0])//3)
-                step = max(step, 1)
+            # Check closeness of some points (iter over overlapping depths with some step)
+            # Faster then component overlap, but not so accurate
+            overlap_depths = (max(component.bbox[2, 0], other_component.bbox[2, 0]),
+                                    min(component.bbox[2, 1], other_component.bbox[2, 1]))
 
-                components_distances = min_max_depthwise_distances(component.coords, other_component.coords,
-                                                                   depths_ranges=overlap_depths, step=step,
-                                                                   axis=self.orthogonal_direction,
-                                                                   max_threshold=min_distance)
+            step = min(depth_iteration_step, (overlap_depths[1]-overlap_depths[0])//3)
+            step = max(step, 1)
 
-                if (components_distances[0] is None) or (components_distances[0] > 1):
-                    # Components are not close
-                    continue
+            components_distances = min_max_depthwise_distances(component.coords, other_component.coords,
+                                                                depths_ranges=overlap_depths, step=step,
+                                                                axis=self.orthogonal_direction,
+                                                                max_threshold=min_distance)
 
-                if components_distances[1] < min_distance:
-                    # The most depthwise distant points in components are close enough -> we can combine components
-                    min_distance = components_distances[1]
+            if (components_distances[0] is None) or (components_distances[0] > 1):
+                # Components are not close
+                continue
 
-                    closest_component = other_component
-                    merged_idx = other_component_idx
-                    overlap_borders = overlap_depths
+            if components_distances[1] >= min_distance:
+                continue
 
-                    if min_distance == 0:
-                        # The closest component is founded
-                        break
+            # The most depthwise distant points in components are close enough -> we can combine components
+            min_distance = components_distances[1]
+
+            closest_component = other_component
+            merged_idx = other_component_idx
+            overlap_borders = overlap_depths
+
+            if min_distance == 0:
+                # The closest component is founded
+                break
 
         if closest_component is not None:
             # Process (split if needed) founded component and get split indices for prototype
-            closest_component.merged = True
             self.container[closest_component.slide_idx]['lengths'][merged_idx] = -1 # mark component as merged
 
-            # Get prototype split indices: check that the new component is smaller than the previous one (for each border)
+            # Get prototype split indices:
+            # check that the new component is smaller than the previous one (for each border)
             if overlap_borders[0] - component.bbox[2, 0] > depths_threshold:
                 prototype_split_indices[0] = overlap_borders[0]
 
@@ -303,9 +305,6 @@ class FaultExtractor:
         """ Add new items into the container.
 
         New items are creating after components splitting.
-
-        Parameters
-        ----------
         """
         for component in components:
             if len(component) > self.component_len_threshold:
@@ -317,9 +316,9 @@ class FaultExtractor:
                                     border_threshold=50, width_split_threshold=100):
         """ Concat prototypes which are connected.
 
-        Under the hood we compare prototypes with each other and find which are connected as puzzles.
+        Under the hood, we compare prototypes with each other and find which are connected as puzzles.
         For this we get neighboring borders and compare them.
-        If borders are similar enough then we merge prototypes into one.
+        If borders are almost overlapped after spatial shift then we merge prototypes.
 
         Parameters
         ----------
@@ -331,9 +330,9 @@ class FaultExtractor:
             Axis along which to find prototypes connections.
             Recommended values are 2 (for depths) or self.direction.
         border_threshold : int
-            Minimal amount of different border contour points to decide that prototypes are not close.
+            Minimal amount of points out of border contours overlap to decide that prototypes are not close.
         width_split_threshold : int or None
-            Contour widths (along self.direction axis) difference threshold to decide that prototypes needn't
+            Contour widths (along self.direction axis) difference threshold to decide that prototypes need
             to be splitted by self.direction axis.
             If value is None, then no splitting applied. But there are the risk of interpenetration of
             triangulated surfaces in this case.
@@ -450,16 +449,16 @@ class FaultExtractor:
         return self.prototypes
 
     def _is_contour_inside(self, contour_1, contour_2, border_threshold):
-        """ Check that `contour_1` is almost inside dilated `contour_2`.
+        """ Check that `contour_1` is almost inside the dilated `contour_2`.
 
-        We apply dilation for contour_2 because the fault can be a little shifted on other depths.
+        We apply dilation for `contour_2` because the fault can be a shifted on neighboring slides.
 
         Parameters
         ----------
         contour_1, contour_2 : np.ndarrays of (N, 3) shape
-            Contours for check.
+            Contours coordinates for check.
         border_threshold : int
-            Minimal amount of different points to decide that contours are not close.
+            Minimal amount of points out of contours overlap to decide that `contour_1` is not inside `contour_2`.
         """
         contour_1_set = set(tuple(x) for x in contour_1)
 
@@ -475,13 +474,11 @@ class FaultExtractor:
     def concat_embedded_prototypes(self, border_threshold=100):
         """ Concat embedded prototypes with 2 or more closed borders.
 
-        Under the hood, we compare different prototypes to find pairs in which one prototype is inside
-        another prototype area.
-        If more than two borders of internal prototype is connected with other prototype,
-        then we merge these prototypes into one.
+        Under the hood, we compare different prototypes to find pairs in which one prototype is inside another.
+        If more than two borders of internal prototype is connected with other (main) prototype, then we merge them.
 
         Internal logic looks similar to `.concat_connected_prototypes`,
-        but now we find embedded bboxes and need two borders coincidence.
+        but now we find embedded bboxes and need two borders coincidence instead of one.
 
         Embedded prototypes examples:
 
@@ -495,7 +492,7 @@ class FaultExtractor:
         Parameters
         ----------
         border_threshold : int
-            Minimal amount of different points to decide that contours are not close.
+            Minimal amount of points out of borders overlap to decide that prototypes are not close.
         """
         # Presort objects by other valuable axis for early stopping
         sort_axis = self.direction
@@ -567,8 +564,8 @@ class FaultExtractor:
         return self.prototypes
 
     # Addons
-    def run(self, concat_iters=20, overlap_ratio_threshold=None,
-            prolongate_in_depth=False, additional_filters=False, **filtering_kwargs):
+    def run(self, prolongate_in_depth=False, concat_iters=20, overlap_ratio_threshold=None,
+            additional_filters=False, **filtering_kwargs):
         """ Recommended full extracting procedure.
 
         The procedure scheme is:
@@ -578,34 +575,32 @@ class FaultExtractor:
             with changed `overlap_ratio_threshold`;
             - filter too small prototypes (for speed up);
             - concat embedded prototypes;
-            - filter all unsuitable prototypes
+            - filter all unsuitable prototypes.
 
         Parameters
         ----------
+        prolongate_in_depth : bool
+            Whether to maximally prolongate faults in depth or not.
+            If True, then surfaces will be tall and thin.
+            If False, then surfaces will be more longer for `self.direction` than for depth axis.
         concat_iters : int
             Maximal amount of connected component concatenation operations which are include concat along
             the depth and `self.direction` axes.
         overlap_ratio_threshold : dict or None
             Prototype borders overlap ratio to decide that prototypes can be connected.
-            Note, it is decrementally changed. Keys are axes and values are in the (start, stop, step) format.
-        prolongate_in_depth : bool
-            Whether to maximally prolongate faults in depth or not.
-            If True, then surfaces will be tall and thin.
-            If False, then surfaces will be more longer for `self.direction` than for depth axis.
+            Note, it is decrementally changed. Keys are axes and values in the (start, stop, step) format.
         additional_filters : bool
             Whether to apply additional filtering for speed up.
-        min_overlap_ratio_threshold : float
-            Minimal preferred value of `overlap_ratio_threshold`.
         filtering_kwargs
             kwargs for the `.filter_prototypes` method.
-            This kwargs are applied for filtration after full extraction procedure.
+            These kwargs are applied in the filtration after whole extraction procedure.
 
         Returns
         -------
-        prototypes: list of the FaultPrototype instances
+        prototypes: list of the :class:`~.FaultPrototype` instances
             Resulting prototypes.
         stats : dict
-            Amount of prototypes after each proceeding. Helpful for debug.
+            Amount of prototypes after each proceeding.
         """
         stats = {}
 
@@ -700,20 +695,29 @@ class FaultExtractor:
         return faults
 
 class Component:
-    """ Extracted connected components. """
-    def __init__(self, points, slide_idx, bbox=None, length=None, merged=False):
-        """..!!"""
+    """ Container for extracted connected components.
+
+    Parameters
+    ----------
+    points : np.ndarray of (N, 4) shape
+        Spatial coordinates and probabilities in the (ilines, xlines, depths, proba) format.
+    slide_idx : int
+        Index of the slide from which component was extracted.
+    bbox : np.ndarray of (3, 2) shape
+        Bounding box.
+    length : int
+        Component length.
+    """
+    def __init__(self, points, slide_idx, bbox=None, length=None):
         self.points = points
         self.slide_idx = slide_idx
 
         self._bbox = bbox
         self._length = length
 
-        self.merged = merged
-
     @property
     def coords(self):
-        """ Component spatial coordinates in the (ilines, xlines, depths) format."""
+        """ Spatial coordinates in the (ilines, xlines, depths) format."""
         return self.points[:, :-1]
 
     @property
@@ -724,81 +728,76 @@ class Component:
         return self._bbox
 
     def __len__(self):
-        """ Component length. """
-        if self._length is None:
-            self._length = len(self.points)
-        return self._length
+        """ Length. """
+        return len(self.points)
 
     def split(self, split_indices):
         """ Depth-wise component split by indices.
 
         Parameters
         ----------
-        split_indices : sequence of two ints
-            Depth values to split component into parts.
+        split_indices : sequence of two ints or None
+            Depth values (upper and lower) to split component into parts. If None, the no need in split.
+
+        Returns
+        -------
+        component : `~.Component` instance
+            The most closest component to the splitted.
+        new_components : list of `~.Component` instances
+            Components created from splitted parts.
         """
-        component_points = self.points
-        component_bbox = self.bbox
+        component = self
         new_components = []
 
         # Cut upper part of the component and save it as another item
         if split_indices[0] is not None:
-            new_component_points = component_points[component_points[:, 2] < split_indices[0]]
+            new_component_points = component.points[component.points[:, 2] < split_indices[0]]
 
-            new_component_bbox = component_bbox.copy()
+            new_component_bbox = component.bbox.copy()
             new_component_bbox[2, 1] = max(0, split_indices[0] - 1)
 
-            new_component = Component(points=new_component_points, slide_idx=self.slide_idx,
-                                      bbox=new_component_bbox, merged=False)
+            new_component = Component(points=new_component_points, slide_idx=self.slide_idx, bbox=new_component_bbox)
 
             new_components.append(new_component)
 
             # Extract suitable part
-            component_points = component_points[component_points[:, 2] >= split_indices[0]]
-            component_bbox[2, 0] = split_indices[0]
+            component.points = component.points[component.points[:, 2] >= split_indices[0]]
+            component.bbox[2, 0] = split_indices[0]
 
         # Cut lower part of the component and save it as another item
         if split_indices[1] is not None:
-            new_component_points = component_points[component_points[:, 2] > split_indices[1]]
+            new_component_points = component.points[component.points[:, 2] > split_indices[1]]
 
-            new_component_bbox = component_bbox.copy()
+            new_component_bbox = component.bbox.copy()
             new_component_bbox[2, 0] = split_indices[1] + 1
 
-            new_component = Component(points=new_component_points, slide_idx=self.slide_idx,
-                                      bbox=new_component_bbox, merged=False)
+            new_component = Component(points=new_component_points, slide_idx=self.slide_idx, bbox=new_component_bbox)
 
             new_components.append(new_component)
 
             # Extract suitable part
-            component_points = component_points[component_points[:, 2] <= split_indices[1]]
-            component_bbox[2, 1] = split_indices[1]
-
-        # The closest component to the splitted
-        if len(new_components) > 0:
-            component = Component(points=component_points, slide_idx=self.slide_idx,
-                                  bbox=component_bbox, merged=True)
-        else:
-            component = self
+            component.points = component.points[component.points[:, 2] <= split_indices[1]]
+            component.bbox[2, 1] = split_indices[1]
 
         return component, new_components
 
 
 class FaultPrototype:
-    """ Class for faults prototypes. Provides a necessary API for convenient prototype extraction process. """
+    """ Class for faults prototypes. Provides a necessary API for convenient prototype extraction process.
+    
+    Note, the `last_component` parameter is preferred for prototype extraction and is optional:
+    it is used for finding closest components on next slides.
+
+    Parameters
+    ----------
+    points : np.ndarray of (N, 4) shape
+        Prototype coordinates and probabilities.
+    direction : {0, 1}
+        Direction along which the prototype is extracted (the same as prediction direction).
+    last_component : instance of :class:`~.Component`
+        The last added component into prototype. Needs for prototypes prolongation during extraction.
+    """
     def __init__(self, points, direction, last_component=None):
-        """ Fault prototype initialization.
-
-        Note, last_* parameters are preferred for prototype extraction and are optional:
-        they are used for finding closest components on next slides.
-
-        Parameters
-        ----------
-        points : np.ndarray of (N, 4) shape
-            Prototype coordinates and probabilities.
-        direction : {0, 1}
-            Direction along which the prototype is extracted (the same as prediction direction).
-        last_component :
-        """
         self.points = points
         self.direction = direction
 
@@ -839,7 +838,7 @@ class FaultPrototype:
 
     @property
     def proba(self):
-        """ 90% percentile of proba values in [0, 1] interval. """
+        """ 90% percentile of approximate proba values in [0, 1] interval. """
         proba_value = np.percentile(self.points[:, 3], 90) # is integer value from 0 to 255
         proba_value /= 255
         return proba_value
@@ -847,12 +846,12 @@ class FaultPrototype:
     # Properties for internal needs
     @property
     def last_component(self):
-        """ Coordinates (N, 3) of the last added component. """
+        """ Last added component. """
         if self._last_component is None:
             last_slide_idx = self.points[:, self.direction].max()
 
             component_points = self.points[self.points[:, self.direction] == last_slide_idx]
-            self._last_component = Component(points=component_points, slide_idx=last_slide_idx, merged=True)
+            self._last_component = Component(points=component_points, slide_idx=last_slide_idx)
         return self._last_component
 
     @property
@@ -871,7 +870,8 @@ class FaultPrototype:
 
         Parameters
         ----------
-        component :
+        component : instance of :class:`~.Component`
+            Component to add into the prototype.
         """
         self.points = np.vstack([self.points, component.points])
 
@@ -903,7 +903,7 @@ class FaultPrototype:
     def _separate_objects(self, points, axis):
         """ Separate points into different object points depend on their connectedness by axis.
 
-        After split we can have the situation when splitted part has more than one connected component.
+        After split we can have the situation when splitted part has more than one connected items.
         This method separate disconnected parts into different prototypes.
         """
         # Get coordinates along the axis
@@ -933,6 +933,11 @@ class FaultPrototype:
 
     def split(self, split_indices, axis=2):
         """ Axis-wise prototypes split by indices.
+
+        Parameters
+        ----------
+        split_indices : sequence of two ints or None
+            Axis values (upper and lower) to split component into parts. If None, the no need in split.
 
         Returns
         -------
