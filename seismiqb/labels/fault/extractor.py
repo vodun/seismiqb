@@ -10,8 +10,8 @@ from batchflow import Notifier
 
 from .base import Fault
 from .postprocessing import skeletonize
-from .utils import (bboxes_adjacent, bboxes_embedded, bboxes_intersected, dilate_coords, find_contour,
-                    thin_coords, min_max_depthwise_distances, restore_coords_from_projection)
+from .coords_utils import (bboxes_adjacent, bboxes_embedded, bboxes_intersected, dilate_coords, find_contour,
+                           thin_coords, min_max_depthwise_distances, restore_coords_from_projection)
 from ...utils import groupby_min, groupby_max
 
 
