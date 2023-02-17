@@ -5,15 +5,26 @@ import numpy as np
 import scipy
 import matplotlib.pyplot as plt
 
-from .functional import compute_correlation, compute_r2, modify_trace, minimize_proxy
+from .functional import compute_correlation, compute_r2, modify_trace, minimize_proxy, compute_shifted_traces
 from ..plotters import plot
 
 
+def prepare_field(field):
+    """ Cache CDP values in a field as np.ndarray. """
+    if getattr(field, 'cdp_values', None) is None:
+        field.cdp_values = field.geometry.headers[['CDP_X', 'CDP_Y']].values
+    return field
+
 
 class Intersection:
-    """ Base class to describe an intersection between two fields. """
+    """ Base class to describe an intersection between two fields.
+
+    The usual workflow is to create an instance by :meth:`.new`, which finds one or multiple intersections between
+    two fields, then match extracted traces (that are padded / aggregated across multiple close indices) with either
+    analytic or optimization algorithms. Finally, use visualization tools to diaply interesting properties.
+    """
     @classmethod
-    def new(cls, field_0, field_1, limits=slice(None), pad_width=20, threshold=10, unwrap=True):
+    def new(cls, field_0, field_1, limits=slice(None), pad_width=0, threshold=10, use_std=False, unwrap=True):
         """ Create one or more instances of intersection classes with automatic class selection.
         Preferred over directly instantiating objects.
         """
@@ -21,7 +32,7 @@ class Intersection:
         is_2d_1 = 1 in field_1.spatial_shape
         if is_2d_0 and is_2d_1:
             return Intersection2d2d.new(field_0, field_1, limits=limits, pad_width=pad_width,
-                                        threshold=threshold, unwrap=unwrap)
+                                        threshold=threshold, use_std=use_std, unwrap=unwrap)
 
         return Intersection2d3d(field_0, field_1)
 
@@ -29,12 +40,15 @@ class Intersection:
 class Intersection2d2d:
     """ Intersection between two 2D fields. """
     @classmethod
-    def new(cls, field_0, field_1, limits=slice(None), pad_width=20, threshold=10, unwrap=True):
+    def new(cls, field_0, field_1, limits=slice(None), pad_width=20, threshold=10, use_std=False, unwrap=True):
         """ Create one or more instances of intersection.
         Preferred over directly instantiating objects.
         """
-        values_0 = field_0.geometry.headers[['CDP_X', 'CDP_Y']].values
-        values_1 = field_1.geometry.headers[['CDP_X', 'CDP_Y']].values
+        prepare_field(field_0)
+        prepare_field(field_1)
+
+        values_0 = field_0.cdp_values
+        values_1 = field_1.cdp_values
 
         bbox_0 = np.sort(values_0[[0, -1]].T, axis=-1)
         bbox_1 = np.sort(values_1[[0, -1]].T, axis=-1)
@@ -62,6 +76,11 @@ class Intersection2d2d:
             trace_idx_0 = ((values_0 - point) ** 2).sum(axis=-1).argmin()
             trace_idx_1 = ((values_1 - point) ** 2).sum(axis=-1).argmin()
 
+            trace_idx_0 = cls.adjust_index(field_0, trace_idx_0, use_std=use_std)
+            trace_idx_1 = cls.adjust_index(field_1, trace_idx_1, use_std=use_std)
+            if trace_idx_0 is False or trace_idx_1 is False:
+                continue
+
             instance = cls(field_0=field_0, field_1=field_1,
                            trace_idx_0=trace_idx_0, trace_idx_1=trace_idx_1,
                            limits=limits, pad_width=pad_width)
@@ -73,17 +92,45 @@ class Intersection2d2d:
             return False if unwrap else []
         return result[0] if len(result) == 1 and unwrap else result
 
+    @staticmethod
+    def adjust_index(field, trace_idx, n=3, use_std=False):
+        """ Move the trace index to one of the neighboring in case of dead trace at the `trace_idx`. """
+        nhalf = (n - 1) // 2
+        indices = list(range(max(0, trace_idx - nhalf), min(trace_idx + nhalf + 1, field.n_traces)))
 
-    def __init__(self, field_0, field_1, trace_idx_0, trace_idx_1, limits=slice(None), pad_width=20):
+        if use_std:
+            trace_data = field.geometry.load_by_indices(indices)
+            trace_std = trace_data.std(axis=1)
+            argmax_std = np.argmax(trace_std)
+
+            if trace_std[argmax_std] == 0:
+                return False
+            return indices[argmax_std]
+
+        dead_traces = field.geometry.dead_traces_matrix.reshape(-1)[indices]
+        argmin = np.argmin(dead_traces)
+        if dead_traces[argmin] is True:
+            return False
+        return indices[argmin]
+
+
+    def __init__(self, field_0, field_1, trace_idx_0, trace_idx_1,
+                 limits=slice(None), pad_width=0, n=1, transform=None):
+        prepare_field(field_0)
+        prepare_field(field_1)
+
         self.field_0, self.field_1 = field_0, field_1
         self.trace_idx_0, self.trace_idx_1 = trace_idx_0, trace_idx_1
         self.limits = limits
         self.pad_width = pad_width
-        self.max_depth = max(field_0.depth, field_1.depth)
+        self.n = n
+        self.transform = transform
+        self.max_depth = int(max(field_0.depth * field_0.sample_interval - field_0.delay,
+                                 field_1.depth * field_1.sample_interval - field_1.delay))
 
         # Compute distance
-        self.coordinates_0 = field_0.geometry.headers[['CDP_X', 'CDP_Y']].values[trace_idx_0]
-        self.coordinates_1 = field_1.geometry.headers[['CDP_X', 'CDP_Y']].values[trace_idx_1]
+        self.coordinates_0 = field_0.cdp_values[trace_idx_0]
+        self.coordinates_1 = field_1.cdp_values[trace_idx_1]
         self.distance = ((self.coordinates_0 - self.coordinates_1).astype(np.float64) ** 2).sum() ** (1 / 2)
 
         self.matching_results = None
@@ -99,8 +146,8 @@ class Intersection2d2d:
     def to_dict(self, precision=3):
         """ Represent intersection parameters (including computed matching values) as a dictionary. """
         intersection_dict = {
-            'field_0': self.field_0.name,
-            'field_1': self.field_1.name,
+            'field_0_name': self.field_0.name,
+            'field_1_name': self.field_1.name,
             'distance': self.distance,
         }
 
@@ -114,26 +161,36 @@ class Intersection2d2d:
 
 
     # Data
-    def prepare_traces(self, limits=None, index_shifts=(0, 0), pad_width=0, n=1):
+    def prepare_traces(self, limits=None, index_shifts=(0, 0), pad_width=None, n=1, transform=None):
         """ Prepare traces from both intersecting fields.
         Under the hood, we load traces, pad to max depth, slice with `limits` and add additional `pad_width`.
         Also, we average over `n` traces at loading to reduce noise.
         """
-        limits = limits or self.limits
-        pad_width = pad_width or self.pad_width
+        limits = limits if limits is not None else self.limits
+        pad_width = pad_width if pad_width is not None else self.pad_width
+        n = n if n is not None else self.n
+        transform = transform if transform is not None else self.transform
 
         trace_0 = self._prepare_trace(self.field_0, index=self.trace_idx_0 + index_shifts[0],
-                                      limits=limits, pad_width=pad_width, n=n)
+                                      limits=limits, pad_width=pad_width, n=n, transform=transform)
         trace_1 = self._prepare_trace(self.field_1, index=self.trace_idx_1 + index_shifts[1],
-                                      limits=limits, pad_width=pad_width, n=n)
+                                      limits=limits, pad_width=pad_width, n=n, transform=transform)
         return trace_0, trace_1
 
-    def _prepare_trace(self, field, index, limits=None, pad_width=0, n=1):
+    def _prepare_trace(self, field, index, limits=None, pad_width=None, n=1, transform=None):
         # Load data
         nhalf = (n - 1) // 2
         indices = list(range(index - nhalf, index + nhalf + 1))
         traces = field.geometry.load_by_indices(indices)
         trace = np.mean(traces, axis=0)
+
+        # Resample to ms
+        arange = np.arange(trace.size, dtype=np.float32)
+        arange_ms = np.arange(trace.size, step=(1 / field.sample_interval), dtype=np.float32)
+        trace = np.interp(arange_ms, arange, trace)
+
+        # Adjust for field delay: move the start of the trace to 0ms level
+        trace = np.pad(trace, (field.delay, 0)) if field.delay >= 0 else trace[-field.delay:]
 
         # Pad/slice
         if trace.size < self.max_depth:
@@ -141,6 +198,9 @@ class Intersection2d2d:
         trace = trace[limits]
         if pad_width > 0:
             trace = np.pad(trace, pad_width)
+
+        if transform is not None:
+            trace = transform(trace)
         return trace
 
 
@@ -162,10 +222,10 @@ class Intersection2d2d:
         return matching_results
 
 
-    def match_traces_optimize(self, limits=None, index_shifts=(0, 0), pad_width=0, n=1,
+    def match_traces_optimize(self, limits=None, index_shifts=(0, 0), pad_width=None, n=1, transform=None,
                               init_shifts=range(-100, +100), init_angles=(0,), metric='correlation',
                               bounds_shift=(-150, +150), bounds_angle=None, bounds_gain=(0.9, 1.1),
-                              maxiter=100, eps=1e-6):
+                              maxiter=100, eps=1e-6, **kwargs):
         """ Match traces by iterative optimization of the selected loss function.
         Slower, than :meth:`match_traces_analytic`, but allows for finer control.
 
@@ -173,8 +233,11 @@ class Intersection2d2d:
         the starting point for optimization. This way, we try to avoid local minima, improving the result by a lot.
         The optimization is bounded: `bounds_*` parameters allow to control the spread of possible values.
         """
+        _ = kwargs
+
         # Load data
-        trace_0, trace_1 = self.prepare_traces(limits=limits, index_shifts=index_shifts, pad_width=pad_width, n=n)
+        trace_0, trace_1 = self.prepare_traces(limits=limits, index_shifts=index_shifts,
+                                               pad_width=pad_width, n=n, transform=transform)
 
         # For each element in init, perform optimize
         minimize_results = []
@@ -206,10 +269,10 @@ class Intersection2d2d:
         }
 
 
-    def match_traces_analytic(self, limits=None, index_shifts=(0, 0), pad_width=0, n=1,
+    def match_traces_analytic(self, limits=None, index_shifts=(0, 0), pad_width=None, n=1, transform=None,
                               twostep=False, twostep_margin=10,
-                              max_shift=100, resample_factor=10, metric='correlation',
-                              apply_correction=False, correction_step=3, return_intermediate=False):
+                              max_shift=100, resample_factor=10,
+                              apply_correction=False, correction_step=3, return_intermediate=False, **kwargs):
         """ Match traces by using analytic formulae.
         Bishop, Nunns "`Correcting amplitude, time, and phase mis-ties in seismic data
         <https://www.researchgate.net/publication/249865260>`_"
@@ -221,19 +284,19 @@ class Intersection2d2d:
             - compute envelope and instantaneous phase of the cross-correlation
             - argmax of the envelope is the optimal shift, and the phase at this shift is the optimal angle.
             Essentially, this is equivalent to finding the best combination of the trace and its analytic counterpart.
-
-        # TODO: add optional `fft` to speed up computation; add better `gain` computation
         """
+        _ = kwargs
+
         # Load data
-        trace_0, trace_1 = self.prepare_traces(limits=limits, index_shifts=index_shifts, pad_width=pad_width, n=n)
+        trace_0, trace_1 = self.prepare_traces(limits=limits, index_shifts=index_shifts,
+                                               pad_width=pad_width, n=n, transform=transform)
 
         # Prepare array of tested shifts
         if twostep:
             # Compute approximate `shift` to narrow the interval
             shifts = np.linspace(-max_shift, max_shift, 2*max_shift + 1, dtype=np.float32)
             shift = self._match_traces_analytic(trace_0=trace_0, trace_1=trace_1, shifts=shifts,
-                                                metric=metric, apply_correction=apply_correction,
-                                                correction_step=correction_step,
+                                                apply_correction=apply_correction, correction_step=correction_step,
                                                 return_intermediate=False)['shift']
             shifts = np.linspace(shift - twostep_margin, shift + twostep_margin,
                                  2*twostep_margin*resample_factor + 1, dtype=np.float32)
@@ -242,7 +305,7 @@ class Intersection2d2d:
 
         # Compute `shift` with required precision
         matching_results = self._match_traces_analytic(trace_0=trace_0, trace_1=trace_1, shifts=shifts,
-                                                       metric=metric, apply_correction=apply_correction,
+                                                       apply_correction=apply_correction,
                                                        correction_step=correction_step,
                                                        return_intermediate=return_intermediate)
 
@@ -252,13 +315,12 @@ class Intersection2d2d:
                                                  pad_width=pad_width, limits=limits, n=n)
         return matching_results
 
-    def _match_traces_analytic(self, trace_0, trace_1, shifts, metric='correlation',
+    def _match_traces_analytic(self, trace_0, trace_1, shifts,
                                apply_correction=False, correction_step=3, return_intermediate=False):
         # Compute metrics for each shift on a resampled grid
-        # TODO: can be significantly sped up by hard-coding correlation here
-        metric_function = compute_correlation if metric == 'correlation' else compute_r2
-        metrics = [metric_function(trace_0, modify_trace(trace_1, shift=shift)) for shift in shifts]
-        metrics = np.array(metrics)
+        # TODO: fix nan/inf values in case of short windows and large `max_shift``
+        shifted_traces = compute_shifted_traces(trace=trace_1, shifts=shifts)
+        metrics = (trace_0 * shifted_traces).mean(axis=1) / (trace_0.std() * shifted_traces.std(axis=1))
 
         # Compute envelope and phase of metrics
         analytic_signal = scipy.signal.hilbert(metrics)
@@ -275,6 +337,7 @@ class Intersection2d2d:
             best_angle = instantaneous_phase[idx]
             best_gain = 1 # np.linalg.norm(trace_1) / np.linalg.norm(trace_0) #TODO
         else:
+            # TODO: refactor / rethink
             correction = ((metrics[idx-correction_step] - metrics[idx+correction_step]) /
                           (2*metrics[idx-correction_step] - 4*metrics[idx] + 2*metrics[idx+correction_step]))
             quality = metrics[idx]\
@@ -317,9 +380,9 @@ class Intersection2d2d:
         return matching_results
 
 
-    def evaluate(self, shift=0, angle=0, gain=1, metric='correlation', pad_width=0, limits=None, n=1):
+    def evaluate(self, shift=0, angle=0, gain=1, metric='correlation', pad_width=None, limits=None, n=1, transform=None):
         """ Compute provided metric with a given mistie parameters. """
-        trace_0, trace_1 = self.prepare_traces(pad_width=pad_width, limits=limits, n=n)
+        trace_0, trace_1 = self.prepare_traces(pad_width=pad_width, limits=limits, n=n, transform=transform)
         metric_function = compute_correlation if metric == 'correlation' else compute_r2
         return metric_function(trace_0, modify_trace(trace_1, shift=shift, angle=angle, gain=gain))
 
@@ -335,17 +398,20 @@ class Intersection2d2d:
         coordinates_1                {self.coordinates_1.tolist()}
         """).strip()
 
-    def show_curves(self, method='analytic', limits=None, index_shifts=(0, 0), pad_width=0, n=1,
-                    max_shift=100, resample_factor=10, metric='correlation', apply_correction=False, **kwargs):
+    def show_curves(self, method='analytic', limits=None, index_shifts=(0, 0), pad_width=None, n=1, transform=None,
+                    shift=0, angle=0, gain=1,
+                    max_shift=100, resample_factor=10, apply_correction=False, **kwargs):
         """ Display traces, cross-correlation vs shift and phase vs shift graphs. """
         # Get matching results with all the intermediate variables
         matching_results = self.match_traces(method=method,
-                                             limits=limits, index_shifts=index_shifts, pad_width=pad_width, n=n,
+                                             limits=limits, index_shifts=index_shifts,
+                                             pad_width=pad_width, n=n, transform=transform,
                                              max_shift=max_shift, resample_factor=resample_factor,
-                                             metric=metric, apply_correction=apply_correction,
+                                             apply_correction=apply_correction,
                                              return_intermediate=True)
 
         trace_0, trace_1 = matching_results['trace_0'], matching_results['trace_1']
+        trace_1 = modify_trace(trace_1, shift=shift, angle=angle, gain=gain)
         shifts, metrics, envelope, instantaneous_phase = (matching_results['shifts'],
                                                           matching_results['metrics'],
                                                           matching_results['envelope'],
@@ -358,7 +424,8 @@ class Intersection2d2d:
         ticks = np.arange(start_tick, start_tick + len(trace_0))
 
         kwargs = {
-            'title': ['traces', 'cross-correlation', 'instantaneous phase'],
+            'title': [f'traces\n{shift=:3.3f}  {angle=:3.3f}  {gain=:3.3f}',
+                      'cross-correlation', 'instantaneous phase'],
             'label': [['trace_0', 'trace_1'], ['crosscorrelation', 'envelope'], 'instant phases'],
             'xlabel': ['depth', 'shift', 'shift'], 'xlabel_size': 16,
             'ylabel': ['amplitude', 'metric', 'phase (degrees)'],
@@ -389,7 +456,7 @@ class Intersection2d2d:
         return plotter
 
 
-    def show_lines(self, figsize=(14, 8), colors=('b', 'r'), arrow_step=20, arrow_size=30):
+    def show_lines(self, figsize=(14, 8), colors=('b', 'r'), arrow_step=20, arrow_size=30, savepath=None, show=True):
         """ Display shot lines on a 2d graph in CDP coordinates. """
         fig, ax = plt.subplots(figsize=figsize)
 
@@ -411,15 +478,24 @@ class Intersection2d2d:
         ax.set_ylabel('CDP_Y', fontsize=22)
         ax.legend(prop={'size' : 22})
         ax.grid()
-        fig.show()
+        fig.tight_layout()
+
+        if savepath:
+            fig.savefig(savepath, dpi=100, facecolor='white')
+        if show:
+            fig.show()
+        else:
+            plt.close(fig)
 
 
-    def show_metric_surface(self, metric='correlation', limits=None, index_shifts=(0, 0), pad_width=0, n=1,
+    def show_metric_surface(self, metric='correlation',
+                            limits=None, index_shifts=(0, 0), pad_width=None, n=1, transform=None,
                             shifts=range(-20, +20+1, 1), angles=range(-180, +180+1, 30),
                             figsize=(14, 8), cmap='seismic', levels=7, grid=True):
         """ Display metric values as a function of shift and angle. """
         # Compute metric matrix: metric value for each combination of shift and angle
-        trace_0, trace_1 = self.prepare_traces(limits=limits, index_shifts=index_shifts, pad_width=pad_width, n=n)
+        trace_0, trace_1 = self.prepare_traces(limits=limits, index_shifts=index_shifts,
+                                               pad_width=pad_width, n=n, transform=transform)
         metric_function = compute_correlation if metric == 'correlation' else compute_r2
 
         metric_matrix = np.empty((len(shifts), len(angles)))
@@ -444,7 +520,8 @@ class Intersection2d2d:
         fig.show()
 
 
-    def show_neighborhood(self, max_index_shift=7, limits=None, pad_width=0, n=1, max_shift=10, resample_factor=10):
+    def show_neighborhood(self, max_index_shift=7, limits=None, pad_width=None, n=1, transform=None,
+                          max_shift=10, resample_factor=10):
         """ Compute matching on all neighboring traces. """
         # Prepare data
         k = max_index_shift * 2 + 1
@@ -454,6 +531,7 @@ class Intersection2d2d:
             for j, index_shift_2 in enumerate(iterator):
                 matching_results = self.match_traces_analytic(index_shifts=(index_shift_1, index_shift_2),
                                                               limits=limits, pad_width=pad_width, n=n,
+                                                              transform=transform,
                                                               max_shift=max_shift, resample_factor=resample_factor)
                 matrix[i, j] = matching_results['corr']
 
@@ -469,67 +547,85 @@ class Intersection2d2d:
                             -max_index_shift, +max_index_shift))
 
 
-    def show_composite_slide(self, sides=(0, 0), limits=None, gap_width=1, pad_width=0,
-                             shift=0, angle=0, gain=1, **kwargs):
+    def show_composite_slide(self, sides=(0, 0), limits=None, gap_width=1, pad_width=None, transform=None,
+                             shift=0, angle=0, gain=1, width='auto', **kwargs):
         """ Display sides of shot lines on one plot. """
         side_0, side_1 = sides
-        limits = limits or self.limits
-        pad_width = pad_width or self.pad_width
+        limits = limits if limits is not None else self.limits
+        pad_width = pad_width if pad_width is not None else self.pad_width
+        transform = transform if transform is not None else self.transform
 
-        # Load data
-        slide_0 = self.field_0.load_slide(0)
-        slide_0 = slide_0[:self.trace_idx_0 + 1] if side_0 == 0 else slide_0[self.trace_idx_0:]
+        # Load data and orient it in a correct way
+        slide_0 = self._prepare_slide(self.field_0, self.trace_idx_0, side_0,
+                                      limits=limits, pad_width=pad_width, transform=transform)
+        slide_1 = self._prepare_slide(self.field_1, self.trace_idx_1, side_1,
+                                      limits=limits, pad_width=pad_width, transform=transform)
 
-        slide_1 = self.field_1.load_slide(0)
-        slide_1 = slide_1[:self.trace_idx_1 + 1] if side_1 == 0 else slide_1[self.trace_idx_1:]
-
-        # Pad to adjust for field delays
-        slide_0 = (np.pad(slide_0, ((0, 0), (self.field_0.delay, 0)))
-                   if self.field_0.delay > 0 else slide_0[:, -self.field_0.delay:])
-        slide_1 = (np.pad(slide_1, ((0, 0), (self.field_1.delay, 0)))
-                   if self.field_1.delay > 0 else slide_1[:, -self.field_1.delay:])
-
-        # Pad to the same depth
-        slide_0 = np.pad(slide_0, ((0, 0), (0, self.max_depth - slide_0.shape[1])))
-        slide_1 = np.pad(slide_1, ((0, 0), (0, self.max_depth - slide_1.shape[1])))
-
-        # Slice to limits
-        slide_0 = slide_0[:, limits]
-        slide_1 = slide_1[:, limits]
-
-        # Additional padding
-        slide_0 = np.pad(slide_0, ((0, 0), (pad_width, pad_width)))
-        slide_1 = np.pad(slide_1, ((0, 0), (pad_width, pad_width)))
+        if sides == (0, 0):
+            slide_1 = slide_1[::-1]
+        elif sides == (0, 1):
+            pass
+        elif sides == (1, 0):
+            slide_0 = slide_0[::-1]
+            slide_1 = slide_1[::-1]
+        elif sides == (1, 1):
+            slide_0 = slide_0[::-1]
 
         # Apply modifications to the right side
         for c in range(slide_1.shape[0]):
             slide_1[c] = modify_trace(slide_1[c], shift=shift, angle=angle, gain=gain)
 
-        combined_slide = np.concatenate([slide_0,
-                                         np.zeros((gap_width, slide_0.shape[1])),
-                                         slide_1], axis=0)
+        # Combine slides into one composite
+        width = slide_0.shape[1] if width == 'auto' else width
+        halfwidth = width//2 if width is not None else max(len(slide_0), len(slide_1))
+        fv = min(slide_0.min(), slide_1.min())
+
+        combined_slide = np.concatenate([slide_0[-halfwidth:],
+                                         np.full((gap_width, slide_0.shape[1]), fill_value=fv, dtype=np.float32),
+                                         slide_1[:+halfwidth]], axis=0)
 
         # Compute correlation on traces
-        trace_0 = slide_0[-1] if side_0 == 0 else slide_0[0]
-        trace_1 = slide_1[-1] if side_1 == 0 else slide_1[0]
-        correlation = compute_correlation(trace_0, trace_1)
+        correlation = compute_correlation(slide_0[-1], slide_1[0])
 
         # Prepare plotter parameters
         start_tick = (limits.start or 0) - pad_width
         extent = (0, combined_slide.shape[0], start_tick + combined_slide.shape[1], start_tick)
 
-        title = (f'"{self.field_0.short_name}.sgy" x "{self.field_1.short_name}.sgy"\n'
-                 f'{shift=:3.2f} {angle=:3.1f} {gain=:3.2f}\n'
-                 f'{correlation=:3.2f}\n'
-                 f'corrected_correlation={(1 + correlation)/2:3.2f}')
+        title = (f'"{self.field_0.short_name}.sgy":{sides[0]} x "{self.field_1.short_name}.sgy":{sides[1]}\n'
+                 f'{shift=:3.2f}  {angle=:3.1f}  {gain=:3.2f}\n'
+                 f'{correlation=:3.2f}  corrected_correlation={(1 + correlation)/2:3.2f}')
         kwargs = {
             'cmap': 'Greys_r',
             'colorbar': True,
-            'title': title,
+            'title': title, 'title_fontsize': 14,
             'extent': extent,
             **kwargs
         }
         return plot(combined_slide, **kwargs)
+
+    def _prepare_slide(self, field, trace_idx, side, limits=None, pad_width=None, n=1, transform=None):
+        # Load data
+        slide = field.load_slide(0)
+        slide = slide[:trace_idx + 1] if side == 0 else slide[trace_idx:]
+
+        # Resample to ms
+        arange = np.arange(slide.shape[1], dtype=np.float32)
+        arange_ms = np.arange(slide.shape[1], step=(1 / field.sample_interval), dtype=np.float32)
+        interpolator = lambda trace: np.interp(arange_ms, arange, trace)
+        slide = np.apply_along_axis(interpolator, 1, slide)
+
+        # Pad to adjust for field delays
+        slide = np.pad(slide, ((0, 0), (field.delay, 0))) if field.delay > 0 else slide[:, -field.delay:]
+
+        # Pad to the same depth
+        slide = np.pad(slide, ((0, 0), (0, self.max_depth - slide.shape[1])))
+
+        # Slice to limits
+        slide = slide[:, limits]
+
+        # Additional padding
+        slide = np.pad(slide, ((0, 0), (pad_width, pad_width)))
+        return slide
 
 
 class Intersection2d3d:

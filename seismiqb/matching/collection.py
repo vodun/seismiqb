@@ -54,7 +54,7 @@ class FieldCollection:
         """ Get required `key` value from each of the intersections. """
         return [intersection.matching_results[key] for intersection in self.intersections.values()]
 
-    def intersections_df(self):
+    def intersections_df(self, errors=False, corrections=False, indices=False):
         """ Dataframe with intersections: each row describes quality of matching, mis-tie parameters for every crossing.
         If corrections are available, also use them.
         """
@@ -74,12 +74,23 @@ class FieldCollection:
                           (gains_errors > gains_errors.mean() + 3 * gains_errors.std()) +
                           (angles_errors > angles_errors.mean() + 3 * angles_errors.std()))
 
-            df['shifts_errors'] = shifts_errors
-            df['gains_errors'] = gains_errors
-            df['angles_errors'] = angles_errors
+            if errors:
+                df['shifts_errors'] = shifts_errors
+                df['gains_errors'] = gains_errors
+                df['angles_errors'] = angles_errors
             df['suspicious'] = suspicious
 
-        columns = ['field_0', 'field_1', 'distance', 'corr', 'petrel_corr', 'shift', 'angle', 'gain']
+            if corrections:
+                idx_0 = [key[0] for key in self.intersections]
+                df['shift_correction'] = self.corrections['shift']['x'][idx_0]
+                df['angle_correction'] = self.corrections['angle']['x'][idx_0]
+                df['gain_correction'] = self.corrections['gain']['x'][idx_0]
+
+        columns = [
+            'field_0_name', 'field_1_name', 'distance', 'suspicious',
+            'corr', 'petrel_corr',
+            'shift', 'shift_correction', 'angle', 'angle_correction', 'gain', 'gain_correction',
+        ]
         columns = [c for c in columns if c in df.columns.values]
         columns += list(set(df.columns.values) - set(columns))
         df = df[columns]
