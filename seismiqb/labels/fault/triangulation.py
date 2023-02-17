@@ -49,7 +49,7 @@ def triangle_volume(points, width):
     p = (a + b + c) / 2
     S = (p * (p - a) * (p - b) * (p - c)) ** 0.5
     r = S / p
-    r_ = (r + width)
+    r_ = (r + width + 1)
     p_ = p * r_ / r
     return (p_ * r_) * (width + 1)
 
