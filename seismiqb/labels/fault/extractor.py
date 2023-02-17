@@ -32,7 +32,7 @@ class FaultExtractor:
     - Component is a 2d connected component on some slide.
     - Prototype is a 3d points body of merged components.
     - `coords` are spatial coordinates in format (iline, xline, depth) with (N, 3) shape.
-    - `points` are spatial coordinates and probabilities values in format (iline, xline, depth, proba) with (N, 4) shape.
+    - `points` are coordinates and probabilities values in format (iline, xline, depth, proba) with (N, 4) shape.
       Note, that probabilities are converted into (0, 255) values for applying integer storage for points.
 
     Parameters
@@ -158,7 +158,7 @@ class FaultExtractor:
     def extract_prototype(self):
         """ Extract one fault prototype from the point cloud. """
         if len(self.prototypes_queue) == 0:
-            component, component_idx = self._find_not_merged_component()
+            component, component_idx = self._find_next_component()
 
             if component is None:
                 return None
@@ -187,7 +187,7 @@ class FaultExtractor:
 
         return prototype
 
-    def _find_not_merged_component(self):
+    def _find_next_component(self):
         """ Find the longest not merged component on the minimal slide. """
         for slide_idx in range(self._unprocessed_slide_idx, self.shape[self.direction]):
             slide_info = self.container[slide_idx]
@@ -245,16 +245,16 @@ class FaultExtractor:
                 if not bboxes_intersected(dilated_bbox, other_component.bbox, axes=(self.orthogonal_direction, 2)):
                     continue
 
-                # Check closeness of some points (iter over intersection depths with some step)
-                # Faster then component intersection, but not so accurate
-                intersection_depths = (max(component.bbox[2, 0], other_component.bbox[2, 0]),
+                # Check closeness of some points (iter over overlapping depths with some step)
+                # Faster then component overlap, but not so accurate
+                overlap_depths = (max(component.bbox[2, 0], other_component.bbox[2, 0]),
                                        min(component.bbox[2, 1], other_component.bbox[2, 1]))
 
-                step = min(depth_iteration_step, (intersection_depths[1]-intersection_depths[0])//3)
+                step = min(depth_iteration_step, (overlap_depths[1]-overlap_depths[0])//3)
                 step = max(step, 1)
 
                 components_distances = min_max_depthwise_distances(component.coords, other_component.coords,
-                                                                   depths_ranges=intersection_depths, step=step,
+                                                                   depths_ranges=overlap_depths, step=step,
                                                                    axis=self.orthogonal_direction,
                                                                    max_threshold=min_distance)
 
@@ -268,7 +268,7 @@ class FaultExtractor:
 
                     closest_component = other_component
                     merged_idx = other_component_idx
-                    intersection_borders = intersection_depths
+                    overlap_borders = overlap_depths
 
                     if min_distance == 0:
                         # The closest component is founded
@@ -280,19 +280,19 @@ class FaultExtractor:
             self.container[closest_component.slide_idx]['lengths'][merged_idx] = -1 # mark component as merged
 
             # Get prototype split indices: check that the new component is smaller than the previous one (for each border)
-            if intersection_borders[0] - component.bbox[2, 0] > depths_threshold:
-                prototype_split_indices[0] = intersection_borders[0]
+            if overlap_borders[0] - component.bbox[2, 0] > depths_threshold:
+                prototype_split_indices[0] = overlap_borders[0]
 
-            if component.bbox[2, 1] - intersection_borders[1] > depths_threshold:
-                prototype_split_indices[1] = intersection_borders[1]
+            if component.bbox[2, 1] - overlap_borders[1] > depths_threshold:
+                prototype_split_indices[1] = overlap_borders[1]
 
             # Split new component: check that the new component is bigger than the previous one (for each border)
             # Create splitted items and save them as new elements for merge
-            if intersection_borders[0] - closest_component.bbox[2, 0] > depths_threshold:
-                component_split_indices[0] = intersection_borders[0]
+            if overlap_borders[0] - closest_component.bbox[2, 0] > depths_threshold:
+                component_split_indices[0] = overlap_borders[0]
 
-            if closest_component.bbox[2, 1] - intersection_borders[1] > depths_threshold:
-                component_split_indices[1] = intersection_borders[1]
+            if closest_component.bbox[2, 1] - overlap_borders[1] > depths_threshold:
+                component_split_indices[1] = overlap_borders[1]
 
             closest_component, new_components = closest_component.split(split_indices=component_split_indices)
             self._add_new_components(new_components)
@@ -313,7 +313,7 @@ class FaultExtractor:
                 self.container[component.slide_idx]['lengths'].append(len(component))
 
 
-    def concat_connected_prototypes(self, intersection_ratio_threshold=None, axis=2,
+    def concat_connected_prototypes(self, overlap_ratio_threshold=None, axis=2,
                                     border_threshold=50, width_split_threshold=100):
         """ Concat prototypes which are connected.
 
@@ -323,8 +323,8 @@ class FaultExtractor:
 
         Parameters
         ----------
-        intersection_ratio_threshold : float or None
-            Prototypes contours intersection ratio to decide that prototypes are not close.
+        overlap_ratio_threshold : float or None
+            Prototypes contours overlap ratio to decide that prototypes are not close.
             Possible values are float numbers in the (0, 1] interval or None.
             If None, then default values are used: 0.5 for the depth axis and 0.9 for others.
         axis : {0, 1, 2}
@@ -344,8 +344,8 @@ class FaultExtractor:
         """
         margin = 1 # local constant for code prettifying
 
-        if intersection_ratio_threshold is None:
-            intersection_ratio_threshold = 0.5 if axis in (-1, 2) else 0.9
+        if overlap_ratio_threshold is None:
+            overlap_ratio_threshold = 0.5 if axis in (-1, 2) else 0.9
 
         overlap_axis = self.direction if axis in (-1, 2) else 2
 
@@ -375,13 +375,13 @@ class FaultExtractor:
                     continue
 
                 # Check that bboxes overlap is enough
-                intersection_threshold = min(prototype_1.bbox[overlap_axis, 1] - prototype_1.bbox[overlap_axis, 0],
+                overlap_threshold = min(prototype_1.bbox[overlap_axis, 1] - prototype_1.bbox[overlap_axis, 0],
                                              prototype_2.bbox[overlap_axis, 1] - prototype_2.bbox[overlap_axis, 0])
-                intersection_threshold *= intersection_ratio_threshold
+                overlap_threshold *= overlap_ratio_threshold
 
-                intersection_length = adjacent_borders[overlap_axis][1] - adjacent_borders[overlap_axis][0]
+                overlap_length = adjacent_borders[overlap_axis][1] - adjacent_borders[overlap_axis][0]
 
-                if intersection_length < intersection_threshold:
+                if overlap_length < overlap_threshold:
                     continue
 
                 # Find object contours on close borders
@@ -393,12 +393,12 @@ class FaultExtractor:
                                                    projection_axis=self.orthogonal_direction)
 
                 # Get border contours in the area of interest
-                intersection_range = (min(adjacent_borders[axis]) - margin, max(adjacent_borders[axis]) + margin)
+                overlap_range = (min(adjacent_borders[axis]) - margin, max(adjacent_borders[axis]) + margin)
 
-                contour_1 = contour_1[(contour_1[:, axis] >= intersection_range[0]) & \
-                                      (contour_1[:, axis] <= intersection_range[1])]
-                contour_2 = contour_2[(contour_2[:, axis] >= intersection_range[0]) & \
-                                      (contour_2[:, axis] <= intersection_range[1])]
+                contour_1 = contour_1[(contour_1[:, axis] >= overlap_range[0]) & \
+                                      (contour_1[:, axis] <= overlap_range[1])]
+                contour_2 = contour_2[(contour_2[:, axis] >= overlap_range[0]) & \
+                                      (contour_2[:, axis] <= overlap_range[1])]
 
                 # If one data contour is much longer than other, then we can't connect them as puzzle details
                 if len(contour_1) == 0 or len(contour_2) == 0:
@@ -406,42 +406,44 @@ class FaultExtractor:
 
                 length_ratio = min(len(contour_1), len(contour_2)) / max(len(contour_1), len(contour_2))
 
-                if length_ratio < intersection_ratio_threshold:
+                if length_ratio < overlap_ratio_threshold:
                     continue
 
                 # Correct border_threshold for too short borders
-                max_n_points_out_intersection = (1 - intersection_ratio_threshold) * min(len(contour_1), len(contour_2))
-                corrected_border_threshold = min(border_threshold, max_n_points_out_intersection)
+                max_n_points_out_overlap = (1 - overlap_ratio_threshold) * min(len(contour_1), len(contour_2))
+                corrected_border_threshold = min(border_threshold, max_n_points_out_overlap)
 
                 # Shift one of the objects, making their contours intersected
                 shift = 1 if is_first_upper else -1
                 contour_1[:, axis] += shift
 
                 # Check that one component contour is inside another (for both)
-                if self._is_contour_inside(contour_1, contour_2, border_threshold=corrected_border_threshold) or \
-                   self._is_contour_inside(contour_2, contour_1, border_threshold=corrected_border_threshold):
-                    # Split by self.direction for avoiding wrong prototypes shapes (like C or T-likable, etc.)
-                    if axis in (-1, 2):
-                        lower_is_wider = (is_first_upper and prototype_2.width - prototype_1.width > 20) or \
-                                         (not is_first_upper and prototype_1.width - prototype_2.width > 20)
+                if not (self._is_contour_inside(contour_1, contour_2, border_threshold=corrected_border_threshold) or \
+                        self._is_contour_inside(contour_2, contour_1, border_threshold=corrected_border_threshold)):
+                    continue
 
-                        too_big_width_diff = (width_split_threshold is not None) and \
-                                             (np.abs(prototype_1.width - prototype_2.width) > width_split_threshold)
+                # Split by self.direction for avoiding wrong prototypes shapes (like C or T-likable, etc.)
+                if axis in (-1, 2):
+                    lower_is_wider = (is_first_upper and prototype_2.width - prototype_1.width > 20) or \
+                                        (not is_first_upper and prototype_1.width - prototype_2.width > 20)
 
-                        if (lower_is_wider or too_big_width_diff):
-                            split_indices = (max(prototype_1.bbox[self.direction, 0], prototype_2.bbox[self.direction, 0]),
-                                            min(prototype_1.bbox[self.direction, 1], prototype_2.bbox[self.direction, 1]))
+                    too_big_width_diff = (width_split_threshold is not None) and \
+                                            (np.abs(prototype_1.width - prototype_2.width) > width_split_threshold)
 
-                            prototype_1, new_prototypes_ = prototype_1.split(split_indices, axis=self.direction)
-                            new_prototypes.extend(new_prototypes_)
+                    if (lower_is_wider or too_big_width_diff):
+                        split_indices = (max(prototype_1.bbox[self.direction, 0], prototype_2.bbox[self.direction, 0]),
+                                        min(prototype_1.bbox[self.direction, 1], prototype_2.bbox[self.direction, 1]))
 
-                            prototype_2, new_prototypes_ = prototype_2.split(split_indices, axis=self.direction)
-                            new_prototypes.extend(new_prototypes_)
+                        prototype_1, new_prototypes_ = prototype_1.split(split_indices, axis=self.direction)
+                        new_prototypes.extend(new_prototypes_)
 
-                    prototype_2.concat(prototype_1)
-                    self.prototypes[prototype_2_idx] = prototype_2
-                    self.prototypes[prototype_1_idx] = None
-                    break
+                        prototype_2, new_prototypes_ = prototype_2.split(split_indices, axis=self.direction)
+                        new_prototypes.extend(new_prototypes_)
+
+                prototype_2.concat(prototype_1)
+                self.prototypes[prototype_2_idx] = prototype_2
+                self.prototypes[prototype_1_idx] = None
+                break
 
         self.prototypes = [prototype for prototype in self.prototypes if prototype is not None]
         self.prototypes.extend(new_prototypes)
@@ -565,7 +567,7 @@ class FaultExtractor:
         return self.prototypes
 
     # Addons
-    def run(self, concat_iters=20, intersection_ratio_threshold=None,
+    def run(self, concat_iters=20, overlap_ratio_threshold=None,
             prolongate_in_depth=False, additional_filters=False, **filtering_kwargs):
         """ Recommended full extracting procedure.
 
@@ -573,7 +575,7 @@ class FaultExtractor:
             - extract prototypes from point cloud;
             - filter too small prototypes (for speed up);
             - concat connected prototypes (concat by depth axis, concat by self.direction axis) concat_iters times
-            with changed `intersection_ratio_threshold`;
+            with changed `overlap_ratio_threshold`;
             - filter too small prototypes (for speed up);
             - concat embedded prototypes;
             - filter all unsuitable prototypes
@@ -583,8 +585,8 @@ class FaultExtractor:
         concat_iters : int
             Maximal amount of connected component concatenation operations which are include concat along
             the depth and `self.direction` axes.
-        intersection_ratio_threshold : dict or None
-            Prototype borders intersection ratio to decide that prototypes can be connected.
+        overlap_ratio_threshold : dict or None
+            Prototype borders overlap ratio to decide that prototypes can be connected.
             Note, it is decrementally changed. Keys are axes and values are in the (start, stop, step) format.
         prolongate_in_depth : bool
             Whether to maximally prolongate faults in depth or not.
@@ -592,8 +594,8 @@ class FaultExtractor:
             If False, then surfaces will be more longer for `self.direction` than for depth axis.
         additional_filters : bool
             Whether to apply additional filtering for speed up.
-        min_intersection_ratio_threshold : float
-            Minimal preferred value of `intersection_ratio_threshold`.
+        min_overlap_ratio_threshold : float
+            Minimal preferred value of `overlap_ratio_threshold`.
         filtering_kwargs
             kwargs for the `.filter_prototypes` method.
             This kwargs are applied for filtration after full extraction procedure.
@@ -607,14 +609,14 @@ class FaultExtractor:
         """
         stats = {}
 
-        if intersection_ratio_threshold is None:
-            intersection_ratio_threshold = {
+        if overlap_ratio_threshold is None:
+            overlap_ratio_threshold = {
                 self.direction: (0.9, 0.7, 0.05), # (start, stop, step)
                 2: (0.9, 0.4, 0.05)
             }
 
-        depth_intersection_threshold = intersection_ratio_threshold[2][0]
-        direction_intersection_threshold = intersection_ratio_threshold[self.direction][0]
+        depth_overlap_threshold = overlap_ratio_threshold[2][0]
+        direction_overlap_threshold = overlap_ratio_threshold[self.direction][0]
 
         # Extract prototypes from data
         _ = self.extract_prototypes()
@@ -626,38 +628,36 @@ class FaultExtractor:
             stats['filtered_extracted'] = len(self.prototypes)
 
         # Concat connected (as puzzles) prototypes
-        previous_iter_prototypes_amount = stats['extracted'] + 100 # to avoid stopping after first concat
-
         stats['after_connected_concat'] = {}
 
         for i in Notifier('t')(concat_iters):
             stats['after_connected_concat'][i] = []
             # Concat by depth axis
-            _ = self.concat_connected_prototypes(intersection_ratio_threshold=depth_intersection_threshold,
+            _ = self.concat_connected_prototypes(overlap_ratio_threshold=depth_overlap_threshold,
                                                  axis=2)
             stats['after_connected_concat'][i].append(len(self.prototypes))
 
             # Concat by direction axis
-            if (not prolongate_in_depth) or (depth_intersection_threshold <= intersection_ratio_threshold[2][1]):
-                _ = self.concat_connected_prototypes(intersection_ratio_threshold=direction_intersection_threshold,
+            if (not prolongate_in_depth) or (depth_overlap_threshold <= overlap_ratio_threshold[2][1]):
+                _ = self.concat_connected_prototypes(overlap_ratio_threshold=direction_overlap_threshold,
                                                     axis=self.direction)
 
                 stats['after_connected_concat'][i].append(len(self.prototypes))
 
             # Early stopping
-            if (depth_intersection_threshold <= intersection_ratio_threshold[2][1]) and \
-               (direction_intersection_threshold <= intersection_ratio_threshold[self.direction][1]) and \
+            if (depth_overlap_threshold <= overlap_ratio_threshold[2][1]) and \
+               (direction_overlap_threshold <= overlap_ratio_threshold[self.direction][1]) and \
                (stats['after_connected_concat'][i][-1] == stats['after_connected_concat'][i-1][-1]):
                 break
 
-            depth_intersection_threshold = round(depth_intersection_threshold - intersection_ratio_threshold[2][-1], 2)
-            depth_intersection_threshold = max(depth_intersection_threshold, intersection_ratio_threshold[2][1])
+            depth_overlap_threshold = round(depth_overlap_threshold - overlap_ratio_threshold[2][-1], 2)
+            depth_overlap_threshold = max(depth_overlap_threshold, overlap_ratio_threshold[2][1])
 
-            if (not prolongate_in_depth) or (depth_intersection_threshold <= intersection_ratio_threshold[2][1]):
-                direction_intersection_threshold = round(direction_intersection_threshold - \
-                                                         intersection_ratio_threshold[self.direction][-1], 2)
-                direction_intersection_threshold = max(direction_intersection_threshold,
-                                                       intersection_ratio_threshold[self.direction][1])
+            if (not prolongate_in_depth) or (depth_overlap_threshold <= overlap_ratio_threshold[2][1]):
+                direction_overlap_threshold = round(direction_overlap_threshold - \
+                                                         overlap_ratio_threshold[self.direction][-1], 2)
+                direction_overlap_threshold = max(direction_overlap_threshold,
+                                                       overlap_ratio_threshold[self.direction][1])
 
         # Filter for speed up
         if additional_filters:
