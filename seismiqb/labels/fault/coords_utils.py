@@ -26,17 +26,19 @@ def dilate_coords(coords, dilate=3, axis=0, max_value=None):
         dilated_coords[start_idx:end_idx, axis] += i - dilate//2
 
     # Clip to the valid values
+    mask = dilated_coords[:, axis] >= 0
+
     if max_value is not None:
-        dilated_coords = dilated_coords[(dilated_coords[:, axis] >= 0) & (dilated_coords[:, axis] <= max_value)]
-    else:
-        dilated_coords = dilated_coords[dilated_coords[:, axis] >= 0]
+        mask &= dilated_coords[:, axis] < max_value
+
+    dilated_coords = dilated_coords[mask]
 
     # Get sorted unique values
     dilated_coords = np.unique(dilated_coords, axis=0)
     return dilated_coords
 
 @njit
-def thin_coords(coords, values):
+def depthwise_groupby_max(coords, values):
     """ Thin coordinates depend on values - choose coords corresponding to max values for each coordinate along
     the last axis (depth). Rough approximation of `find_peaks`.
 
@@ -162,7 +164,7 @@ def bboxes_embedded(bbox_1, bbox_2, margin=3):
     return is_embedded, is_second_inside_first
 
 @njit
-def min_max_depthwise_distances(coords_1, coords_2, depths_ranges, step, axis, max_threshold=None):
+def compute_distances(coords_1, coords_2, depths_ranges, step, axis, max_threshold=None):
     """ Find approximate minimal and maximal axis-wise central distances between coordinates.
 
     Parameters
@@ -180,8 +182,7 @@ def min_max_depthwise_distances(coords_1, coords_2, depths_ranges, step, axis, m
         Axis along which to find distances.
     max_threshold : int, float or None
         Early stopping: threshold for max distance value.
-        If the max value is more than this value, then no sense in finding more accurate results
-        because coordinates are too far from each other.
+        If the found distance is more than the `max_threshold`, then we early break.
         If None, then o threshold is applied.
     """
     min_distance = max_threshold or 100

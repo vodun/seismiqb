@@ -11,15 +11,20 @@ from batchflow import Notifier
 from .base import Fault
 from .postprocessing import skeletonize
 from .coords_utils import (bboxes_adjacent, bboxes_embedded, bboxes_intersected, dilate_coords, find_contour,
-                           thin_coords, min_max_depthwise_distances, restore_coords_from_projection)
+                           depthwise_groupby_max, compute_distances, restore_coords_from_projection)
 from ...utils import groupby_min, groupby_max
 
 
-class FaultExtractor:
-    """ Extract fault surfaces from array with fault labels (smoothed probabilities).
 
-    We assume that connected 2d components owned by one prototype are looks the same.
-    Also, the extraction order is the same as the prediction direction: ilines (0) or xlines (1).
+class FaultExtractor:
+    """ Extract fault surfaces from an array with predicted and smoothed fault probabilities.
+
+    Main naming rules, which help to understand what's going on:
+    - Component is a 2d connected component on some slide.
+    - Prototype is a 3d points body of merged components.
+    - `coords` are spatial coordinates in format (iline, xline, depth) with (N, 3) shape.
+    - `points` are coordinates and probabilities values in format (iline, xline, depth, proba) with (N, 4) shape.
+      Note, that probabilities are converted into (0, 255) values for applying integer storage for points.
 
     The extraction algorithm is:
 
@@ -63,19 +68,12 @@ class FaultExtractor:
     If you want to speed up, you can add filtering on any stage.
     As an example, you can use :meth:`~.run`.
 
-    Main naming rules:
-    - Component is a 2d connected component on some slide.
-    - Prototype is a 3d points body of merged components.
-    - `coords` are spatial coordinates in format (iline, xline, depth) with (N, 3) shape.
-    - `points` are coordinates and probabilities values in format (iline, xline, depth, proba) with (N, 4) shape.
-      Note, that probabilities are converted into (0, 255) values for applying integer storage for points.
-
     Parameters
     ----------
     data : np.ndarray or :class:`~.Geometry` instance
         A 3d array with smoothed predictions with shape corresponds to the field shape.
     direction : {0, 1}
-        Prediction direction, can be 0 (ilines) or 1 (xlines).
+        Extraction direction, can be 0 (ilines) or 1 (xlines) and the same as the prediction direction.
     component_len_threshold : int
         Threshold to filter out too small connected components on data slides.
         If 0, then no filter applied (recommended for higher accuracy).
@@ -118,21 +116,19 @@ class FaultExtractor:
             components, lengths = [], []
 
             for idx, object_bbox in enumerate(objects, start=1):
-                # Refined coords: we refine skeletonize effects by applying it on limited area
+                # Extract component coords: we refine skeletonize effects by applying it on limited area
                 dilation_axis = self.orthogonal_direction
                 dilation_ranges = (max(0, object_bbox[0].start - self.dilation // 2),
                                    min(object_bbox[0].stop + self.dilation // 2, self.shape[dilation_axis]))
 
                 object_mask = labeled[dilation_ranges[0]:dilation_ranges[1], object_bbox[-1]] == idx
 
-                # Filter out too little components
                 length = np.count_nonzero(object_mask)
 
                 if length <= self.component_len_threshold:
                     continue
-
-                # Extract refined component coordinates
-                # skeletonize on the full slide is not so accurate than for limited area
+    
+                # Get component neighboring area coords for probabilities extraction
                 object_mask = dilate(object_mask.astype(np.uint8), dilation_structure)
 
                 dilated_coords_2d = np.nonzero(object_mask)
@@ -140,25 +136,25 @@ class FaultExtractor:
                 dilated_coords = np.zeros((len(dilated_coords_2d[0]), 3), dtype=np.int32)
 
                 dilated_coords[:, self.direction] = slide_idx
-                dilated_coords[:, dilation_axis] = dilated_coords_2d[0] + dilation_ranges[0]
-                dilated_coords[:, 2] = dilated_coords_2d[1] + object_bbox[1].start
+                dilated_coords[:, dilation_axis] = dilated_coords_2d[0].astype(np.int32) + dilation_ranges[0]
+                dilated_coords[:, 2] = dilated_coords_2d[1].astype(np.int32) + object_bbox[1].start
 
                 smoothed_values = smoothed[dilated_coords[:, dilation_axis], dilated_coords[:, -1]]
 
-                refined_coords, probas = thin_coords(coords=dilated_coords, values=smoothed_values)
+                coords, probas = depthwise_groupby_max(coords=dilated_coords, values=smoothed_values)
 
-                # Filter out too little components
-                # Previous length and len(refined_coords) are different
-                # because original coords have more than one coord per depth when refined are not
-                length = len(refined_coords)
+                # Previous length and len(coords) are different
+                # because original coords have more than one coord per depth when new are not
+                length = len(coords)
 
                 if length <= self.component_len_threshold:
                     continue
 
                 lengths.append(length)
 
-                probas = np.round(probas * 255).astype(refined_coords.dtype)
-                points = np.hstack((refined_coords, probas.reshape(-1, 1)))
+                # We convert probas to integer values for saving them in points array with 3d-coordinates
+                probas = np.round(probas * 255).astype(coords.dtype)
+                points = np.hstack((coords, probas.reshape(-1, 1)))
 
                 # Bbox
                 bbox = np.empty((3, 2), np.int32)
@@ -288,10 +284,9 @@ class FaultExtractor:
             step = min(depth_iteration_step, (overlap_depths[1]-overlap_depths[0])//3)
             step = max(step, 1)
 
-            components_distances = min_max_depthwise_distances(component.coords, other_component.coords,
-                                                                depths_ranges=overlap_depths, step=step,
-                                                                axis=self.orthogonal_direction,
-                                                                max_threshold=min_distance)
+            components_distances = compute_distances(component.coords, other_component.coords,
+                                                     depths_ranges=overlap_depths, step=step,
+                                                     axis=self.orthogonal_direction, max_threshold=min_distance)
 
             if (components_distances[0] is None) or (components_distances[0] > 1):
                 # Components are not close
@@ -347,6 +342,7 @@ class FaultExtractor:
                 self.container[component.slide_idx]['lengths'].append(len(component))
 
 
+    # Prototypes concatenation
     def concat_connected_prototypes(self, overlap_ratio_threshold=None, axis=2,
                                     border_threshold=50, width_split_threshold=100):
         """ Concat prototypes which are connected.
@@ -500,7 +496,7 @@ class FaultExtractor:
         # Objects can be shifted on `self.orthogonal_direction`, so apply dilation for coords
         contour_2_dilated = dilate_coords(coords=contour_2, dilate=self.dilation,
                                           axis=self.orthogonal_direction,
-                                          max_value=self.shape[self.orthogonal_direction]-1)
+                                          max_value=self.shape[self.orthogonal_direction])
 
         contour_2_dilated = set(tuple(x) for x in contour_2_dilated)
 
@@ -597,6 +593,7 @@ class FaultExtractor:
 
         self.prototypes = [prototype for prototype in self.prototypes if prototype is not None]
         return self.prototypes
+
 
     # Addons
     def run(self, prolongate_in_depth=False, concat_iters=20, overlap_ratio_threshold=None,
@@ -729,8 +726,10 @@ class FaultExtractor:
         faults = [Fault(prototype.coords, field=field) for prototype in self.prototypes]
         return faults
 
+
+
 class Component:
-    """ Container for extracted connected components.
+    """ Container for extracted connected component.
 
     Parameters
     ----------
@@ -739,7 +738,7 @@ class Component:
     slide_idx : int
         Index of the slide from which component was extracted.
     bbox : np.ndarray of (3, 2) shape
-        Bounding box.
+        3D bounding box.
     length : int
         Component length.
     """
@@ -748,7 +747,7 @@ class Component:
         self.slide_idx = slide_idx
 
         self._bbox = bbox
-        self._length = length
+
 
     @property
     def coords(self):
@@ -757,14 +756,15 @@ class Component:
 
     @property
     def bbox(self):
-        """ Bounding box. """
+        """ 3D bounding box. """
         if self._bbox is None:
             self._bbox = np.column_stack([np.min(self.coords, axis=0), np.max(self.coords, axis=0)])
         return self._bbox
 
     def __len__(self):
-        """ Length. """
+        """ Number of points in a component. """
         return len(self.points)
+
 
     def split(self, split_indices):
         """ Depth-wise component split by indices.
@@ -786,7 +786,8 @@ class Component:
 
         # Cut upper part of the component and save it as another item
         if split_indices[0] is not None:
-            new_component_points = component.points[component.points[:, 2] < split_indices[0]]
+            mask = component.points[:, 2] < split_indices[0]
+            new_component_points = component.points[mask]
 
             new_component_bbox = component.bbox.copy()
             new_component_bbox[2, 1] = max(0, split_indices[0] - 1)
@@ -796,12 +797,13 @@ class Component:
             new_components.append(new_component)
 
             # Extract suitable part
-            component.points = component.points[component.points[:, 2] >= split_indices[0]]
+            component.points = component.points[~mask]
             component.bbox[2, 0] = split_indices[0]
 
         # Cut lower part of the component and save it as another item
         if split_indices[1] is not None:
-            new_component_points = component.points[component.points[:, 2] > split_indices[1]]
+            mask = component.points[:, 2] > split_indices[1]
+            new_component_points = component.points[mask]
 
             new_component_bbox = component.bbox.copy()
             new_component_bbox[2, 0] = split_indices[1] + 1
@@ -811,7 +813,7 @@ class Component:
             new_components.append(new_component)
 
             # Extract suitable part
-            component.points = component.points[component.points[:, 2] <= split_indices[1]]
+            component.points = component.points[~mask]
             component.bbox[2, 1] = split_indices[1]
 
         return component, new_components
@@ -850,7 +852,7 @@ class FaultPrototype:
 
     @property
     def bbox(self):
-        """ Bounding box. """
+        """ 3D bounding box. """
         if self._bbox is None:
             self._bbox = np.column_stack([np.min(self.coords, axis=0), np.max(self.coords, axis=0)])
         return self._bbox
@@ -899,6 +901,7 @@ class FaultPrototype:
             projection_axis = 1 - self.direction
             self._contour = find_contour(coords=self.coords, projection_axis=projection_axis)
         return self._contour
+
 
     def append(self, component):
         """ Append new component into prototype.
@@ -966,6 +969,7 @@ class FaultPrototype:
 
         return prototypes
 
+
     def split(self, split_indices, axis=2):
         """ Axis-wise prototypes split by indices.
 
@@ -1011,6 +1015,7 @@ class FaultPrototype:
 
         new_prototypes.extend(self._separate_objects(self.points, axis=axis_for_objects_separating))
         return new_prototypes[-1], new_prototypes[:-1]
+
 
     def get_border(self, border, projection_axis):
         """ Get contour border.
