@@ -16,17 +16,52 @@ from ...utils import groupby_min, groupby_max
 
 
 class FaultExtractor:
-    """ ..!!..
+    """ Extract fault surfaces from array with fault labels (smoothed probabilities).
 
-    Main logic implementation. There are much to do and much to optimize in this code.
+    We assume that connected 2d components owned by one prototype are looks the same.
+    Also, the extraction order is the same as the prediction direction: ilines (0) or xlines (1).
 
-    A few comments about the main idea:
-    We extract connected components on each slide.
-    We take unmerged component and find the closest component on next slide.
-    Merge them into a prototype (3d points body).
-    Repeat this for the last merged component while can.
-    In this way we extract all prototypes.
-    After that we find connected prototypes and concat them.
+    The extraction algorithm is:
+
+    1) Extract first prototype approximation as a set of similar components on neighboring slides on `direction` axis.
+
+    For this we choose initial 2d component (first unmerged and the longest component),
+    find the closest component on the next slide, and save them into one prototype.
+    We repeat this operation for the new founded components until we find any closest components.
+    The closest components are components which has the minimal axis-wise distances.
+
+    We can have the situation, when we have two close components of different lengths:
+    in this case we split component parts out of the overlap, save them as new components
+    in the container and concatenate overlapping parts into one prototype.
+
+    2) Extracted set of prototypes is not the targeted surfaces:
+    sometimes we do extra components splitting (where prediction was lost).
+
+    For the improvement, we concat connected prototypes (which look like puzzle details).
+
+    For more, see the :meth:`~.concat_connected_prototypes`.
+
+    This operation is recommended to be repeated for different axes of concatenation and different overlap thresholds.
+
+    3) We can have the situation when we don't concat all parts of one prototype and internal
+    (embedded) parts are out of the extracted surface.
+
+    For this case we find embedded prototypes and concat them into one.
+    Embedded prototypes are surfaces that are inside bboxes of other surfaces and connected
+    with them at least than 2 sides.
+
+    For more, see the :meth:`~.concat_embedded_prototypes`.
+
+    To sum up, the whole algorithm is:
+
+    1) Initialize container with smoothed probabilities predictions.
+    2) Extract first prototype approximation with :meth:`~.extract_prototypes`.
+    3) Iteratively concat connected prototypes changing concatenation axis and threshold with
+    :meth:`~.concat_connected_prototypes`.
+    3) Concat internal prototypes pieces with :meth:`~.concat_embedded_prototypes`.
+
+    If you want to speed up, you can add filtering on any stage.
+    As an example, you can use :meth:`~.run`.
 
     Main naming rules:
     - Component is a 2d connected component on some slide.
@@ -209,7 +244,7 @@ class FaultExtractor:
         component : instance of :class:`~.Component`
             Component for which find the closest on the next slide.
         distances_threshold : int, optional
-            Threshold for the max possible depth-wise distance between components.
+            Threshold for the max possible axis-wise distance between components.
         depth_iteration_step : int
             The depth iteration step to find distances between components.
             Value 1 is recommended for higher accuracy.
@@ -784,7 +819,7 @@ class Component:
 
 class FaultPrototype:
     """ Class for faults prototypes. Provides a necessary API for convenient prototype extraction process.
-    
+
     Note, the `last_component` parameter is preferred for prototype extraction and is optional:
     it is used for finding closest components on next slides.
 
