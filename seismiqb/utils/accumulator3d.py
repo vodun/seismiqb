@@ -521,7 +521,7 @@ class RegressionAccumulator(Accumulator3D):
         self.remove_placeholder('weights')
 
 
-class SlidesAccumulator:
+class ChunksAccumulator:
     """ Accumulator which aggregates whole slices in memory and then write it into file. Can aggregate
     data from several sources (e.g., predictions from different models).
 
