@@ -12,7 +12,7 @@ def dilate_coords(coords, dilate=3, axis=0, max_value=None):
     Parameters
     ----------
     coords : np.ndarray of (N, 3) shape
-        Coordinates to dilate along the axis.
+        Coordinates to dilate along the axis.  Sorting is not required.
     axis : {0, 1, 2}
         Axis along which to dilate coordinates.
     max_value : None or int, optional
@@ -47,7 +47,7 @@ def depthwise_groupby_max(coords, values):
     Parameters
     ----------
     coords : np.ndarray of (N, 3) shape
-        Coordinates for thinning.
+        Coordinates for thinning. Sorting is not required.
     values : np.ndarray of (N, 1) shape
         Values corresponding to coordinates to decide which one should last for each depth (last column in coords).
     """
@@ -172,7 +172,7 @@ def compute_distances(coords_1, coords_2, max_threshold=10000):
     Parameters
     ----------
     coords_1, coords_2 : np.ndarrays of (N, 1) shape
-        Coords for which find distances.
+        Coords for which find distances. Must be unique values, sorting is not required.
     max_threshold : int, float or None
         Early stopping: threshold for max distance value.
     """
@@ -201,7 +201,7 @@ def find_contour(coords, projection_axis):
     Parameters
     ----------
     coords : np.ndarray of (N, 3) shape
-        3D object coordinates.
+        3D object coordinates. Sorting is not required.
     projection_axis : {0, 1}
         Axis for making 2d projection for which we find contour.
         Note, this function doesn't work for axis = 2.
@@ -237,10 +237,10 @@ def restore_coords_from_projection(coords, buffer, axis):
     Parameters
     ----------
     coords : np.ndarray of (N, 3) shape
-        Original coords from which restore the axis values.
+        Original coords from which restore the axis values. Sorting is not required.
     buffer : np.ndarray
-        Buffer with projection coordinates.
-        Note, t is changed inplace.
+        Buffer with projection coordinates. Sorting is not required.
+        Note, it is changed inplace.
     axis : {0, 1, 2}
         Axis for which restore coordinates.
     """

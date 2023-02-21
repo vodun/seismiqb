@@ -1,6 +1,7 @@
 """ Faults extractor from point cloud. """
 from collections import deque
 import numpy as np
+from shapely import MultiPoint
 
 from cc3d import connected_components
 from cv2 import dilate
@@ -489,7 +490,8 @@ class FaultExtractor:
         Parameters
         ----------
         contour_1, contour_2 : np.ndarrays of (N, 3) shape
-            Contours coordinates for check.
+            Contours coordinates for check. Sorting is not required.
+            Also, contours created by :meth:`.~get_border` will be sorted.
         border_threshold : int
             Minimal amount of points out of contours overlap to decide that `contour_1` is not inside `contour_2`.
         """
@@ -731,6 +733,7 @@ class Component:
     ----------
     points : np.ndarray of (N, 4) shape
         Spatial coordinates and probabilities in the (ilines, xlines, depths, proba) format.
+        Sorting is not required. Also usually `points` created in :class:`.~FaultExtractor` will be unsorted.
     slide_idx : int
         Index of the slide from which component was extracted.
     bbox : np.ndarray of (3, 2) shape
@@ -824,6 +827,7 @@ class FaultPrototype:
     ----------
     points : np.ndarray of (N, 4) shape
         Prototype coordinates and probabilities.
+        Sorting is not required. Also usually `points` created in :class:`.~FaultExtractor` will be unsorted.
     direction : {0, 1}
         Direction along which the prototype is extracted (the same as prediction direction).
     last_component : instance of :class:`~.Component`
@@ -1032,7 +1036,7 @@ class FaultPrototype:
         Returns
         -------
         border : np.ndarray of (N, 3) shape
-            Coordinates of the requested border.
+            Sorted coordinates of the requested border.
         """
         if border not in self._borders:
             # Delete extra border from contour
