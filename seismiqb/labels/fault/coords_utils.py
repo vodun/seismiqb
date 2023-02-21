@@ -150,55 +150,40 @@ def bboxes_embedded(bbox_1, bbox_2, margin=3):
     margin : int
         Possible bboxes difference (on each axis) to decide that one is in another.
     """
-    is_second_inside_first = np.count_nonzero(bbox_1[:, 1] >= bbox_2[:, 1]) > 1
+    swap = np.count_nonzero(bbox_1[:, 1] >= bbox_2[:, 1]) <= 1 # is second not inside first
 
-    if not is_second_inside_first:
-        bbox_1, bbox_2 = bbox_2.copy(), bbox_1.copy()
-    else:
-        bbox_1, bbox_2 = bbox_1.copy(), bbox_2.copy()
+    if swap:
+        bbox_1, bbox_2 = bbox_2, bbox_1
 
-    bbox_1[:, 0] -= margin
-    bbox_1[:, 1] += margin
+    for i in range(3):
+        is_embedded = (bbox_2[i, 0] >= bbox_1[i, 0] - margin) and (bbox_2[i, 1] <= bbox_1[i, 1] + margin)
 
-    is_embedded = (bbox_2[:, 0] >= bbox_1[:, 0]).all() and (bbox_2[:, 1] <= bbox_1[:, 1]).all()
-    return is_embedded, is_second_inside_first
+        if not is_embedded:
+            return is_embedded, swap
+
+    return is_embedded, swap
 
 @njit
-def compute_distances(coords_1, coords_2, depths_ranges, step, axis, max_threshold=None):
-    """ Find approximate minimal and maximal axis-wise central distances between coordinates.
+def compute_distances(coords_1, coords_2, max_threshold=10000):
+    """ Find approximate minimal and maximal distances between coordinates.
+
+    A little bit faster than difference between np.ndarrays with `np.max` and `np.min`.
 
     Parameters
     ----------
-    coords_1, coords_2 : np.ndarrays of (N, 3) shape
-        Coords for which find axis-wise distances.
-    depths_ranges : sequence of two int values
-        Depth ranges along which to find distances.
-        Recommended to provide depth intersection ranges for coords.
-    step : int
-        Depth step to find distances.
-        For speed up we can find distances not for all depths.
-        For results accuracy, provide step = 1.
-    axis : {0, 1}
-        Axis along which to find distances.
+    coords_1, coords_2 : np.ndarrays of (N, 1) shape
+        Coords for which find distances.
     max_threshold : int, float or None
         Early stopping: threshold for max distance value.
-        If the found distance is more than the `max_threshold`, then we early break.
-        If None, then o threshold is applied.
     """
-    min_distance = max_threshold or 100
+    min_distance = max_threshold
     max_distance = 0
 
-    for depth in range(depths_ranges[0], depths_ranges[1]+1, step):
-        # Find distance for the current depth
-        coords_1_depth_slice = coords_1[coords_1[:, -1] == depth, axis]
-        coords_2_depth_slice = coords_2[coords_2[:, -1] == depth, axis]
+    for coord_1, coord_2 in zip(coords_1, coords_2):
+        distance = np.abs(coord_1 - coord_2)
 
-        distance = np.abs(coords_1_depth_slice[len(coords_1_depth_slice)//2] - \
-                          coords_2_depth_slice[len(coords_2_depth_slice)//2])
-
-        # Result processing
-        if (max_threshold is not None) and (distance >= max_threshold):
-            return None, distance
+        if distance >= max_threshold:
+            return -1, distance
 
         if distance > max_distance:
             max_distance = distance
@@ -223,7 +208,7 @@ def find_contour(coords, projection_axis):
     """
     # Make 2d projection
     bbox = np.column_stack([np.min(coords, axis=0), np.max(coords, axis=0)])
-    bbox = np.delete(bbox, projection_axis, 0)
+    bbox = bbox[(1 - projection_axis, 2), :]
 
     # Create object mask
     origin = bbox[:, 0]
