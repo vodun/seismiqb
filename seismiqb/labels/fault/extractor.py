@@ -1,7 +1,6 @@
 """ Faults extractor from point cloud. """
 from collections import deque
 import numpy as np
-from shapely import MultiPoint
 
 from cc3d import connected_components
 from cv2 import dilate
@@ -80,6 +79,7 @@ class FaultExtractor:
         If 0, then no filter applied (recommended for higher accuracy).
         If more than 0, then extraction will be faster.
     """
+    # pylint: disable=protected-access
     def __init__(self, data, direction, component_len_threshold=0):
         self.shape = data.shape
 
@@ -128,7 +128,7 @@ class FaultExtractor:
 
                 if length <= self.component_len_threshold:
                     continue
-    
+
                 # Get component neighboring area coords for probabilities extraction
                 object_mask = dilate(object_mask.astype(np.uint8), dilation_structure)
 
@@ -1016,7 +1016,7 @@ class FaultPrototype:
 
         # Update self
         self.points = new_prototypes[-1].points
-        self._bbox = new_prototypes[-1]._bbox
+        self._bbox = new_prototypes[-1].bbox
         self._contour = None
         self._borders = {}
         self._last_component = None
