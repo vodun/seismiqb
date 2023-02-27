@@ -3,15 +3,15 @@ import batchflow
 
 
 
-class plot(batchflow.plot):
+class plot(batchflow.plotter.plot):
     """ Wrapper over original `plot` with custom defaults. """
     COMMON_DEFAULTS = {
-        **batchflow.plot.COMMON_DEFAULTS,
+        **batchflow.plotter.plot.COMMON_DEFAULTS,
         'suptitle_size': 30,
     }
 
     IMAGE_DEFAULTS = {
-        **batchflow.plot.IMAGE_DEFAULTS,
+        **batchflow.plotter.plot.IMAGE_DEFAULTS,
         'labeltop': True,
         'labelright': True,
         'xlabel_size': 22,
