@@ -33,6 +33,7 @@ extras_test = [
     'py-nbtools>=0.9.5',
     'pytest>=5.3.1',
     'ipython>=7.10.0',
+    'nbconvert>=5.6.1',
 ]
 
 
