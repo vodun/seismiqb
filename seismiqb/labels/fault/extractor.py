@@ -95,7 +95,7 @@ class FaultExtractor:
                  skeleton_data=None, component_len_threshold=0):
         # Check
         if data is None and (prototypes is None or shape is None):
-                raise ValueError("`data` or `prototypes` and `shape` must be provided!")
+            raise ValueError("`data` or `prototypes` and `shape` must be provided!")
 
         # Data parameters
         shape = data.shape if shape is None else shape
