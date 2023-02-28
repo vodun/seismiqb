@@ -1,12 +1,6 @@
 """ Interactive field viewer. """
-try:
-    from ipywidgets import widgets
-except ImportError:
-    widgets = None
-try:
-    from IPython.display import display
-except ImportError:
-    display = None
+from ipywidgets import widgets
+from IPython.display import display
 
 import matplotlib.pyplot as plt
 
@@ -26,10 +20,6 @@ class FieldViewer:
     def __init__(self, field, figsize=(8, 8)):
         # ax[0] is a `base_map` / `base_ax`
         # ax[1] is a `slice_img` / `slice_ax`
-        if widgets is None:
-            raise ImportError('Install `ipywidgets` for using the interactive viewer!')
-        if display is None:
-            raise ImportError('Install `IPython` for using the interactive viewer!')
 
         # Attributes
         self.field = field
