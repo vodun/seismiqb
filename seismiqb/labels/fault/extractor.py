@@ -70,30 +70,46 @@ class FaultExtractor:
 
     Parameters
     ----------
-    data : np.ndarray or :class:`~.Geometry` instance
+    data : np.ndarray or :class:`~.Geometry` instance, optional
         A 3d array with smoothed predictions with shape corresponds to the field shape.
+        Note, that you need to provide `data` argument or `prototypes` and `shape` instead.
     direction : {0, 1}
         Extraction direction, can be 0 (ilines) or 1 (xlines) and the same as the prediction direction.
+    direction_origin : int
+        Data origin for the direction axis.
+    prototypes : list of :class:`~.FaultPrototype` instances, optional
+        Prototypes for applying :class:`~.FaultExtractor` manipulations on.
+    shape : sequence of three ints, optional
+        Data shape from which `prototypes` were extracted.
     component_len_threshold : int
         Threshold to filter out too small connected components on data slides.
         If 0, then no filter applied (recommended for higher accuracy).
         If more than 0, then extraction will be faster.
     """
     # pylint: disable=protected-access
-    def __init__(self, data, direction, component_len_threshold=0):
-        self.shape = data.shape
+    def __init__(self, data=None, direction=0, direction_origin=0, prototypes=None, shape=None, component_len_threshold=0):
+        # Check
+        if data is None and (prototypes is None or shape is None):
+                raise ValueError("`data` or `prototypes` and `shape` must be provided!")
+
+        # Data parameters
+        shape = data.shape if shape is None else shape
+        self.shape = shape
+
+        self.direction_origin = direction_origin
 
         self.direction = direction
         self.orthogonal_direction = 1 - self.direction
 
+        # Internal parameters
         self.dilation = 3 # constant for internal operations
         self.component_len_threshold = component_len_threshold
 
-        self.container = self._init_container(data=data)
-        self._unprocessed_slide_idx = 0 # variable for internal operations speed up
+        self.container = self._init_container(data=data) if data is not None else None
+        self._unprocessed_slide_idx = self.direction_origin # variable for internal operations speed up
 
         self.prototypes_queue = deque() # prototypes for extension
-        self.prototypes = [] # extracted prototypes
+        self.prototypes = [] if prototypes is None else prototypes # extracted prototypes
 
     def _init_container(self, data):
         """ Extract connected components on each slide and save them into container. """
@@ -136,7 +152,7 @@ class FaultExtractor:
 
                 dilated_coords = np.zeros((len(dilated_coords_2d[0]), 3), dtype=np.int32)
 
-                dilated_coords[:, self.direction] = slide_idx
+                dilated_coords[:, self.direction] = slide_idx + self.direction_origin
                 dilated_coords[:, dilation_axis] = dilated_coords_2d[0].astype(np.int32) + dilation_ranges[0]
                 dilated_coords[:, 2] = dilated_coords_2d[1].astype(np.int32) + object_bbox[1].start
 
@@ -160,14 +176,14 @@ class FaultExtractor:
                 # Bbox
                 bbox = np.empty((3, 2), np.int32)
 
-                bbox[self.direction, :] = slide_idx
+                bbox[self.direction, :] = slide_idx + self.direction_origin
                 bbox[self.orthogonal_direction, :] = dilation_ranges
                 bbox[-1, :] = object_bbox[-1].start, object_bbox[-1].stop - 1
 
-                component = Component(points=points, slide_idx=slide_idx, bbox=bbox)
+                component = Component(points=points, slide_idx=slide_idx+self.direction_origin, bbox=bbox)
                 components.append(component)
 
-            container[slide_idx] = {
+            container[slide_idx + self.direction_origin] = {
                 'components': components,
                 'lengths': lengths
             }
@@ -202,7 +218,7 @@ class FaultExtractor:
             component = prototype.last_component
 
         # Find closest components on next slides
-        for _ in range(component.slide_idx + 1, self.shape[self.direction]):
+        for _ in range(component.slide_idx + 1, self.shape[self.direction] + self.direction_origin):
             # Find the closest component on the slide_idx_ to the current
             component, split_indices = self._find_closest_component(component=component)
 
@@ -219,7 +235,7 @@ class FaultExtractor:
 
     def _find_next_component(self):
         """ Find the longest not merged component on the minimal slide. """
-        for slide_idx in range(self._unprocessed_slide_idx, self.shape[self.direction]):
+        for slide_idx in range(self._unprocessed_slide_idx, self.shape[self.direction] + self.direction_origin):
             slide_info = self.container[slide_idx]
 
             if len(slide_info['lengths']) > 0:
@@ -644,7 +660,8 @@ class FaultExtractor:
         direction_overlap_threshold = overlap_ratio_threshold[self.direction][0]
 
         # Extract prototypes from data
-        _ = self.extract_prototypes()
+        if len(self.prototypes) == 0:
+            _ = self.extract_prototypes()
         stats['extracted'] = len(self.prototypes)
 
         # Filter for speed up
