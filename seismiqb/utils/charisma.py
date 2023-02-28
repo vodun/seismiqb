@@ -174,9 +174,9 @@ class CharismaMixin:
         i_mask = np.logical_or(df['INLINE_3D'] < i_bounds[0], df['INLINE_3D'] >= i_bounds[1])
         x_mask = np.logical_or(df['CROSSLINE_3D'] < x_bounds[0], df['CROSSLINE_3D'] >= x_bounds[1])
 
-        _df = df[np.logical_and(i_mask, x_mask)]
+        _df = df[np.logical_or(i_mask, x_mask)]
 
         coords = np.rint(self.field.geometry.cdp_to_lines(_df[['CDP_X', 'CDP_Y']].values)).astype(np.int32)
-        df.loc[np.logical_and(i_mask, x_mask), ['INLINE_3D', 'CROSSLINE_3D']] = coords
+        df.loc[np.logical_or(i_mask, x_mask), ['INLINE_3D', 'CROSSLINE_3D']] = coords
 
         return df
