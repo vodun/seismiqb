@@ -45,8 +45,10 @@ def points_to_sticks(points, sticks_step=10, nodes_step='auto', fault_orientatio
         fault_orientation = 2
 
     points = points[np.argsort(points[:, fault_orientation])]
-    slides = split_array(points, points[:, fault_orientation])
+    if len(points) == 0:
+        return []
 
+    slides = split_array(points, points[:, fault_orientation])
     sticks = []
 
     indices = [i for i, slide_points in enumerate(slides) if slide_points[0, fault_orientation] % sticks_step == 0]
