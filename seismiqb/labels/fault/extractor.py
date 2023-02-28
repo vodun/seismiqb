@@ -81,13 +81,18 @@ class FaultExtractor:
         Prototypes for applying :class:`~.FaultExtractor` manipulations on.
     shape : sequence of three ints, optional
         Data shape from which `prototypes` were extracted.
+    skeleton_data : np.ndarray or :class:`~.Geometry` instance, optional
+        Data received after the `data` skeletonize.
+        Can be used for speed-up: we make skeletonize inside the extractor initialization,
+        but sometimes we have this array outside the extractor for other needs.
     component_len_threshold : int
         Threshold to filter out too small connected components on data slides.
         If 0, then no filter applied (recommended for higher accuracy).
         If more than 0, then extraction will be faster.
     """
     # pylint: disable=protected-access
-    def __init__(self, data=None, direction=0, direction_origin=0, prototypes=None, shape=None, component_len_threshold=0):
+    def __init__(self, data=None, direction=0, direction_origin=0, prototypes=None, shape=None,
+                 skeleton_data=None, component_len_threshold=0):
         # Check
         if data is None and (prototypes is None or shape is None):
                 raise ValueError("`data` or `prototypes` and `shape` must be provided!")
@@ -105,13 +110,13 @@ class FaultExtractor:
         self.dilation = 3 # constant for internal operations
         self.component_len_threshold = component_len_threshold
 
-        self.container = self._init_container(data=data) if data is not None else None
+        self.container = self._init_container(data=data, skeleton_data=skeleton_data) if data is not None else None
         self._unprocessed_slide_idx = self.direction_origin # variable for internal operations speed up
 
         self.prototypes_queue = deque() # prototypes for extension
         self.prototypes = [] if prototypes is None else prototypes # extracted prototypes
 
-    def _init_container(self, data):
+    def _init_container(self, data, skeleton_data=None):
         """ Extract connected components on each slide and save them into container. """
         dilation_structure = np.ones((1, self.dilation), np.uint8)
         container = {}
@@ -122,8 +127,11 @@ class FaultExtractor:
             smoothed = data.take(slide_idx, axis=self.direction)
 
             # Get skeletonized slide
-            mask = skeletonize(smoothed, width=3)
-            mask = dilate(mask, (1, 3))
+            if skeleton_data is None:
+                mask = skeletonize(smoothed, width=3)
+                mask = dilate(mask, (1, 3))
+            else:
+                mask = skeleton_data.take(slide_idx, axis=self.direction)
 
             # Extract connected components from the slide
             labeled = connected_components(mask > 0)
