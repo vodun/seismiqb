@@ -456,7 +456,7 @@ class VisualizationMixin:
     # 2D interactive
     def viewer(self, figsize=(8, 8), **kwargs):
         """ Interactive field viewer. """
-        from .viewer import FieldViewer
+        from .viewer import FieldViewer #pylint: disable=import-outside-toplevel
         return FieldViewer(field=self, figsize=figsize, **kwargs)
 
 
