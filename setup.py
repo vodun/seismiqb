@@ -32,6 +32,7 @@ extras_vis = [
 extras_test = [
     'py-nbtools>=0.9.5',
     'pytest>=5.3.1',
+    'nbformat',
 ]
 
 
