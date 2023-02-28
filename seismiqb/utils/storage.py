@@ -24,7 +24,7 @@ class SQBStorage:
         # Scan all available keys and store them in the instance for faster check
         self.keys = set()
         if self.exists:
-            with h5py.File(self.path, mode='r+', swmr=True) as src:
+            with h5py.File(self.path, mode='r', swmr=True) as src:
                 for key in src:
                     self.keys.add(key)
 
@@ -37,6 +37,11 @@ class SQBStorage:
     def is_storage(path):
         """ True if `path` exists on disk and it is HDF5 file. """
         return os.path.exists(path) and h5py.is_hdf5(path)
+
+    def file_handler(self, mode='r', swmr=True):
+        """ A convenient file handler for using in with-statements. """
+        return h5py.File(self.path, mode=mode, swmr=swmr)
+
 
     # Store
     def store(self, items, overwrite=True):
@@ -217,7 +222,7 @@ class SQBStorage:
                 if key in dst:
                     del dst[key]
 
-    def remove_meta(self):
+    def remove(self):
         """ Remove storage file entirely. """
         os.remove(self.path)
 

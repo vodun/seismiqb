@@ -3,17 +3,21 @@ from warnings import warn
 from textwrap import dedent
 from itertools import zip_longest
 
-
 import numpy as np
+import pandas as pd
+
 try:
     import cupy as cp
     CUPY_AVAILABLE = True
 except ImportError:
     cp = np
     CUPY_AVAILABLE = False
-import bottleneck
-import numexpr
-import pandas as pd
+try:
+    import bottleneck
+    import numexpr
+    BOTTLENECK_NUMEXPR_AVAILABLE = True
+except ImportError:
+    BOTTLENECK_NUMEXPR_AVAILABLE = False
 
 from batchflow.notifier import Notifier
 
@@ -61,7 +65,7 @@ def correlation(array1, array2, std1, std2, **kwargs):
     """ Compute correlation. """
     _ = kwargs
     xp = cp.get_array_module(array1) if CUPY_AVAILABLE else np
-    if xp is np:
+    if xp is np and BOTTLENECK_NUMEXPR_AVAILABLE:
         covariation = bottleneck.nanmean(numexpr.evaluate('array1 * array2'), axis=-1)
         result = numexpr.evaluate('covariation / (std1 * std2)')
     else:
