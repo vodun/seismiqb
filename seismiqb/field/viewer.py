@@ -1,6 +1,6 @@
 """ Interactive field viewer. """
-from IPython.display import display
 from ipywidgets import widgets
+from IPython.display import display
 
 import matplotlib.pyplot as plt
 

@@ -7,6 +7,12 @@ with open('__init__.py', 'r') as f:
     version = re.search(r'^__version__\s*=\s*[\'"]([^\'"]*)[\'"]', f.read(), re.MULTILINE).group(1)
 
 
+extras = [
+    'psutil>=5.6.7',
+    'bottleneck>=1.3',
+    'numexpr>=2.7',
+]
+
 extras_nn = [
     'torch>=1.7.0',
     'torchvision>=0.1.3',
@@ -17,8 +23,14 @@ extras_cupy = [
     'cupy>=8.1.0',
 ]
 
+extras_vis = [
+    'plotly>=4.3.0',
+    'ipython>=7.10.0',
+    'ipywidgets>=7.0',
+]
+
 extras_test = [
-    'py-nbtools>=0.9.5',
+    'py-nbtools[nbrun]>=0.9.8',
     'pytest>=5.3.1',
 ]
 
@@ -38,13 +50,10 @@ setup(
     install_requires=[
         # General Python libraries
         'dill>=0.3.1.1',
-        'psutil>=5.6.7',
         'tqdm>=4.50.0',
 
         # Numerical
         'numpy>=1.16.0',
-        'bottleneck>=1.3',
-        'numexpr>=2.7',
         'numba>=0.43.0',
         'scipy>=1.3.3',
         'scikit-learn>=0.21.3',
@@ -62,19 +71,17 @@ setup(
         # Working with images
         'opencv_python>=4.1.2.30',
         'matplotlib>=3.0.2',
-        'plotly>=4.3.0',
-        'ipython>=7.10.0',
-        'ipywidgets>=7.0',
-        'nbconvert>=5.6.1',
 
         # Our libraries
         'batchflow>=0.8.0',
     ],
     extras_require={
+        'extra': extras,
         'nn': extras_nn,
         'cupy': extras_cupy,
         'test': extras_test,
-        'dev': extras_nn + extras_test,
+        'vis': extras_vis,
+        'dev': extras + extras_nn + extras_test + extras_vis,
     },
     classifiers=[
         'Development Status :: 4 - Beta',

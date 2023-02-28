@@ -108,7 +108,7 @@ class CharismaMixin:
 
         if format != 'points':
             # Convert data to points array
-            idx = np.nonzero(data != np.nan)
+            idx = np.nonzero(~np.isnan(data))
 
             data = np.hstack([idx[0].reshape(-1, 1),
                                 idx[1].reshape(-1, 1),

@@ -60,7 +60,7 @@ class HorizonExtractor:
                 origin[orientation] = slide_idx
 
                 # Label connected components
-                slide = array[locations]
+                slide = array[tuple(locations)]
 
                 # length = 100
                 # locations_zfill = [slice(None)] * 3

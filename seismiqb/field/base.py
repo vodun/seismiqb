@@ -219,6 +219,8 @@ class Field(CharismaMixin, VisualizationMixin):
         if isinstance(paths, str):
             path = paths
         if isinstance(paths, (tuple, list)):
+            if not paths:
+                raise FileNotFoundError('No such file or directory')
             if len(paths) > 1:
                 raise ValueError(f'Path for Geometry loading is non-unique!, {paths}')
             path = paths[0]
