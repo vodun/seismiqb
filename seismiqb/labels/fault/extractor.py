@@ -374,7 +374,7 @@ class FaultExtractor:
 
     # Prototypes concatenation
     def concat_connected_prototypes(self, overlap_ratio_threshold=None, axis=2,
-                                    border_threshold=50, width_split_threshold=100):
+                                    border_threshold=20, width_split_threshold=100):
         """ Concat prototypes which are connected.
 
         Under the hood, we compare prototypes with each other and find which are connected as puzzles.
@@ -433,7 +433,7 @@ class FaultExtractor:
 
                 # Check that bboxes overlap is enough
                 overlap_threshold = min(prototype_1.bbox[overlap_axis, 1] - prototype_1.bbox[overlap_axis, 0],
-                                             prototype_2.bbox[overlap_axis, 1] - prototype_2.bbox[overlap_axis, 0])
+                                        prototype_2.bbox[overlap_axis, 1] - prototype_2.bbox[overlap_axis, 0])
                 overlap_threshold *= overlap_ratio_threshold
 
                 overlap_length = adjacent_borders[overlap_axis][1] - adjacent_borders[overlap_axis][0]
@@ -661,7 +661,7 @@ class FaultExtractor:
         if overlap_ratio_threshold is None:
             overlap_ratio_threshold = {
                 self.direction: (0.9, 0.7, 0.05), # (start, stop, step)
-                2: (0.9, 0.4, 0.05)
+                2: (0.9, 0.5, 0.05)
             }
 
         depth_overlap_threshold = overlap_ratio_threshold[2][0]
