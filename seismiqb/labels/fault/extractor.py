@@ -182,11 +182,7 @@ class FaultExtractor:
                 points = np.hstack((coords, probas.reshape(-1, 1)))
 
                 # Bbox
-                bbox = np.empty((3, 2), np.int32)
-
-                bbox[self.direction, :] = slide_idx + self.direction_origin
-                bbox[self.orthogonal_direction, :] = dilation_ranges
-                bbox[-1, :] = object_bbox[-1].start, object_bbox[-1].stop - 1
+                bbox = np.column_stack([np.min(coords, axis=0), np.max(coords, axis=0)])
 
                 component = Component(points=points, slide_idx=slide_idx+self.direction_origin, bbox=bbox)
                 components.append(component)
@@ -467,14 +463,17 @@ class FaultExtractor:
                     continue
 
                 # Correct border_threshold for too short borders
-                max_n_points_out_overlap = (1 - overlap_ratio_threshold) * min(len(contour_1), len(contour_2))
-                corrected_border_threshold = min(border_threshold, max_n_points_out_overlap)
+                if (1 - overlap_ratio_threshold) * min(len(contour_1), len(contour_2)) < border_threshold:
+                    corrected_border_threshold = 2 * margin
+                else:
+                    corrected_border_threshold = border_threshold
 
                 # Shift one of the objects, making their contours intersected
                 shift = 1 if is_first_upper else -1
                 contour_1[:, axis] += shift
 
                 # Check that one component contour is inside another (for both)
+                # TODO: think about reordering: smaller inside the bigger
                 if not (self._is_contour_inside(contour_1, contour_2, border_threshold=corrected_border_threshold) or \
                         self._is_contour_inside(contour_2, contour_1, border_threshold=corrected_border_threshold)):
                     continue
@@ -528,7 +527,8 @@ class FaultExtractor:
 
         contour_2_dilated = set(tuple(x) for x in contour_2_dilated)
 
-        return len(contour_1_set - contour_2_dilated) < border_threshold
+        contours_intersected = len(contour_1_set.intersection(contour_2_dilated)) > 0
+        return contours_intersected and (len(contour_1_set - contour_2_dilated) < border_threshold)
 
     def concat_embedded_prototypes(self, border_threshold=100):
         """ Concat embedded prototypes with 2 or more closed borders.
@@ -811,7 +811,7 @@ class Component:
         if split_indices[0] is not None:
             # Extract closest part
             mask = self.points[:, 2] >= split_indices[0]
-            self, new_component = self._split(mask=mask, split_index=split_indices[0], boundary_idx=0)
+            self, new_component = self._split(mask=mask, split_index=split_indices[0])
 
             new_components.append(new_component)
 
@@ -819,25 +819,21 @@ class Component:
         if split_indices[1] is not None:
             # Extract closest part
             mask = self.points[:, 2] <= split_indices[1]
-            self, new_component = self._split(mask=mask, split_index=split_indices[1], boundary_idx=1)
+            self, new_component = self._split(mask=mask, split_index=split_indices[1])
 
             new_components.append(new_component)
 
         return self, new_components
 
-    def _split(self, mask, split_index, boundary_idx):
+    def _split(self, mask, split_index):
         """ Split component into parts by mask. """
         # Create new Component from extra part
         new_component_points = self.points[~mask]
-
-        new_component_bbox = self.bbox.copy()
-        new_component_bbox[2, 1 - boundary_idx] = split_index + 1 if boundary_idx == 1 else max(0, split_index - 1)
-
-        new_component = Component(points=new_component_points, slide_idx=self.slide_idx, bbox=new_component_bbox)
+        new_component = Component(points=new_component_points, slide_idx=self.slide_idx)
 
         # Extract suitable part
         self.points = self.points[mask]
-        self.bbox[2, boundary_idx] = split_index
+        self._bbox = None
         return self, new_component
 
 
@@ -872,7 +868,7 @@ class FaultPrototype:
     @property
     def coords(self):
         """ Spatial coordinates in (ilines, xlines, depth) format. """
-        return self.points[:, :-1]
+        return self.points[:, :3]
 
     @property
     def bbox(self):
