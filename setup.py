@@ -31,6 +31,8 @@ extras_vis = [
 
 extras_test = [
     'py-nbtools[nbrun]>=0.9.8',
+    'ipywidgets>=7.0',
+    'plotly>=4.3.0',
     'pytest>=5.3.1',
 ]
 
