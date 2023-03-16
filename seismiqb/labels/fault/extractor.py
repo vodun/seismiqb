@@ -370,7 +370,7 @@ class FaultExtractor:
 
     # Prototypes concatenation
     def concat_connected_prototypes(self, overlap_ratio_threshold=None, axis=2,
-                                    border_threshold=20, width_split_threshold=100):
+                                    border_threshold=5, width_split_threshold=100):
         """ Concat prototypes which are connected.
 
         Under the hood, we compare prototypes with each other and find which are connected as puzzles.
@@ -445,6 +445,24 @@ class FaultExtractor:
                 contour_2 = prototype_2.get_border(border=borders_to_check[~is_first_upper],
                                                    projection_axis=self.orthogonal_direction)
 
+                # Get objects width in area near to overlap for intersection threshold
+                # to avoid concatenation of objects with too little overlap
+                neighborhood_range = (min(adjacent_borders[axis]) - 20, max(adjacent_borders[axis]) + 20)
+
+                neighboring_contour_1 = contour_1[(contour_1[:, axis] >= neighborhood_range[0]) & \
+                                                  (contour_1[:, axis] <= neighborhood_range[1])]
+                neighboring_contour_2 = contour_2[(contour_2[:, axis] >= neighborhood_range[0]) & \
+                                                  (contour_2[:, axis] <= neighborhood_range[1])]
+
+                if len(neighboring_contour_1) == 0 or len(neighboring_contour_2) == 0:
+                    continue
+
+                width_neighboring_1 = np.ptp(neighboring_contour_1[:, overlap_axis])
+                width_neighboring_2 = np.ptp(neighboring_contour_2[:, overlap_axis])
+
+                # TODO: think about more appropriate criteria than proportion
+                overlap_threshold = 0.8*min(width_neighboring_1, width_neighboring_2)
+
                 # Get border contours in the area of interest
                 overlap_range = (min(adjacent_borders[axis]) - margin, max(adjacent_borders[axis]) + margin)
 
@@ -464,7 +482,7 @@ class FaultExtractor:
 
                 # Correct border_threshold for too short borders
                 if (1 - overlap_ratio_threshold) * min(len(contour_1), len(contour_2)) < border_threshold:
-                    corrected_border_threshold = 2 * margin
+                    corrected_border_threshold = min(2*margin, border_threshold)
                 else:
                     corrected_border_threshold = border_threshold
 
@@ -474,14 +492,17 @@ class FaultExtractor:
 
                 # Check that one component contour is inside another (for both)
                 # TODO: think about reordering: smaller inside the bigger
-                if not (self._is_contour_inside(contour_1, contour_2, border_threshold=corrected_border_threshold) or \
-                        self._is_contour_inside(contour_2, contour_1, border_threshold=corrected_border_threshold)):
+                if not (self._is_contour_inside(contour_1, contour_2, border_threshold=corrected_border_threshold,
+                                                overlap_threshold=overlap_threshold) or \
+                        self._is_contour_inside(contour_2, contour_1, border_threshold=corrected_border_threshold,
+                                                overlap_threshold=overlap_threshold)):
                     continue
 
                 # Split by self.direction for avoiding wrong prototypes shapes (like C or T-likable, etc.)
                 if axis in (-1, 2):
-                    lower_is_wider = (is_first_upper and prototype_2.width - prototype_1.width > 20) or \
-                                     (not is_first_upper and prototype_1.width - prototype_2.width > 20)
+                    width_diff = 5
+                    lower_is_wider = (is_first_upper and prototype_2.width - prototype_1.width > width_diff) or \
+                                     (not is_first_upper and prototype_1.width - prototype_2.width > width_diff)
 
                     too_big_width_diff = (width_split_threshold is not None) and \
                                          (np.abs(prototype_1.width - prototype_2.width) > width_split_threshold)
@@ -505,7 +526,7 @@ class FaultExtractor:
         self.prototypes.extend(new_prototypes)
         return self.prototypes
 
-    def _is_contour_inside(self, contour_1, contour_2, border_threshold):
+    def _is_contour_inside(self, contour_1, contour_2, border_threshold, overlap_threshold=0):
         """ Check that `contour_1` is almost inside the dilated `contour_2`.
 
         We apply dilation for `contour_2` because the fault can be a shifted on neighboring slides.
@@ -517,6 +538,8 @@ class FaultExtractor:
             Also, contours created by :meth:`.~get_border` will be sorted.
         border_threshold : int
             Minimal amount of points out of contours overlap to decide that `contour_1` is not inside `contour_2`.
+        overlap_threshold : int
+            Minimal amount of overlapped points to decide that contours are overlapping.
         """
         contour_1_set = set(tuple(x) for x in contour_1)
 
@@ -527,8 +550,8 @@ class FaultExtractor:
 
         contour_2_dilated = set(tuple(x) for x in contour_2_dilated)
 
-        contours_intersected = len(contour_1_set.intersection(contour_2_dilated)) > 0
-        return contours_intersected and (len(contour_1_set - contour_2_dilated) < border_threshold)
+        contours_overlapped = len(contour_1_set.intersection(contour_2_dilated)) > overlap_threshold
+        return contours_overlapped and (len(contour_1_set - contour_2_dilated) < border_threshold)
 
     def concat_embedded_prototypes(self, border_threshold=100):
         """ Concat embedded prototypes with 2 or more closed borders.
@@ -776,7 +799,7 @@ class Component:
     @property
     def coords(self):
         """ Spatial coordinates in the (ilines, xlines, depths) format."""
-        return self.points[:, :-1]
+        return self.points[:, :3]
 
     @property
     def bbox(self):
