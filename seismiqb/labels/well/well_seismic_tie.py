@@ -181,6 +181,14 @@ class WellSeismicMatcher:
         return covariation / (std1 * std2)
 
     @classmethod
+    def torch_nancorrelation(cls, array1, array2):
+        """
+        """
+        finite_mask = torch.isfinite(array1) & torch.isfinite(array2)
+        value = cls.torch_correlation(array1[finite_mask], array2[finite_mask])
+        return value
+
+    @classmethod
     def _measure_tie_quality(cls, seismic_time, well_time, seismic_curve, impedance_log,
                              wavelet, metric='corr'):
         """ Measure the quality of well-seismic tie. Recalculates the synthetic seismic in seismic
@@ -196,6 +204,8 @@ class WellSeismicMatcher:
             # Select quality function: the larger the value, the better.
             if metric in ('corr', 'correlation', 'corrcoeff'):
                 metric_function = cls.torch_correlation
+            elif metric in ('nancorr', 'nancorrelation'):
+                metric_function = cls.torch_nancorrelation
             else:
                 raise ValueError(f'Unknown metric {metric} for `numpy`-version!')
         else:
@@ -232,14 +242,18 @@ class WellSeismicMatcher:
         """
         setattr(self, dst, getattr(self, src) + shift)
 
-    def optimize_well_time(self, src='well_time', dst='well_time', dst_history=None, seismic_time_slice=None,
-                           dt_bounds_multipliers=(.95, 1.05), t0_bounds_addition=(-1e-4, 1e-4), n_iters=5000,
-                           device='cuda:0', optimizer='Adam', optimizer_kwargs=None, flip_wavelet=True):
+    def optimize_well_time(self, src='well_time', dst='well_time', metric='nancorr', dst_history=None,
+                           seismic_time_slice=None, dt_bounds_multipliers=(.95, 1.05),
+                           t0_bounds_addition=(-1e-4, 1e-4), n_iters=5000, device='cuda:0', optimizer='Adam',
+                           optimizer_kwargs=None, flip_wavelet=True, fillna_impedance_log=True, fake_well_time=10.0,
+                           regularizers=None):
         """ Improve seismic tie by optimising well-time ticks. For the procedure consider the wavelet fixed.
         """
         start_well_time, seismic_time, seismic_curve, impedance_log, wavelet = [
             getattr(self, name) for name in (src, 'seismic_time', 'seismic_curve', 'impedance_log', 'wavelet')
             ]
+
+        regularizers = regularizers or {}
 
         if dst_history is not None:
             setattr(self, dst_history, start_well_time)
@@ -250,6 +264,25 @@ class WellSeismicMatcher:
         # Cut needed time slice if requested
         seismic_time_slice = seismic_time_slice or slice(None, None)
         seismic_time, seismic_curve = seismic_time[seismic_time_slice], seismic_curve[seismic_time_slice]
+
+        # # #
+        # Clean-up the data to ensure that interpolation does not yield nan's
+        # in either interpolated values or gradients of interpolated values w.r.t. to dt's:
+        # (i) make sure that there are no nans in impedance-values array
+        # (ii) add a fake `well_time`-value that will always be larger than `seismic_time[-1]`
+        # NOTE: (ii) is necessary, as dt's might contract during the optimization, that will
+        # lead to `well_time[-1]` < `seismic_time[-1]`, that yileds nans in gradients w.r.t. dt's.
+
+        # (i)
+        if fillna_impedance_log:
+            impedance_log = pd.Series(impedance_log).fillna(method='bfill').fillna(method='ffill').values
+
+        # (ii)
+        if fake_well_time is not None:
+            start_well_time = np.append(start_well_time, fake_well_time)
+            impedance_log = np.append(impedance_log, impedance_log[-1])
+
+        # # #
 
         # Make start point of dt's.
         start_x0_dt = np.diff(start_well_time, prepend=0)
@@ -277,6 +310,10 @@ class WellSeismicMatcher:
         optimizer_kwargs = optimizer_kwargs or {}
         optimizer = optimizer((variables, ), **optimizer_kwargs)
 
+        # Get baseline-vector for regularizations
+        baseline_dt = regularizers.pop('baseline_dt', start_x0_dt[1:])
+        baseline_dt = torch.tensor(baseline_dt, device=device, dtype=torch.float32)
+
         # Run train loop.
         loss_history = []
         for _ in range(n_iters):
@@ -288,7 +325,23 @@ class WellSeismicMatcher:
             # NOTE: perhaps implement topK later.
             current_well_time = torch.cumsum(variables, dim=0)
             loss = -self._measure_tie_quality(seismic_time, current_well_time, seismic_curve, impedance_log,
-                                              wavelet, metric='corr')
+                                              wavelet, metric=metric)
+
+            # Add regularizers if needed.
+            for key, value in regularizers.items():
+                key = key.lower()
+                vector = variables[1:] / baseline_dt
+                anchor = 1
+
+                if 'd' in key:
+                    vector = torch.diff(vector)
+                    anchor = 0
+
+                if 'l1' in key:
+                    loss += value * torch.mean(torch.abs(vector - anchor))
+
+                if 'l2' in key:
+                    loss += value * torch.mean((vector - anchor)**2)
 
             loss.backward()
             loss_history.append(float(loss.detach().cpu().numpy()))
@@ -302,6 +355,8 @@ class WellSeismicMatcher:
 
         # Fetch resulting well_time and loss_history.
         final_well_time = np.cumsum(variables.detach().cpu().numpy())
+        if fake_well_time is not None:
+            final_well_time = final_well_time[:-1]
         setattr(self, dst, final_well_time)
 
         return final_well_time, loss_history
