@@ -640,6 +640,57 @@ class FaultExtractor:
         return self.prototypes
 
 
+    def split_horseshoe(self, height_ratio_threshold=0.7, height_diff_threshold=30, axis=2, frequency=5):
+        """ Split prototypes which looks like horseshoe.
+
+        Under the hood, we iter over traces to find sharp drop in their height and after that a sharp increase.
+
+        Parameters
+        ----------
+        height_ratio_threshold : float in [0, 1]
+            Heigts ratio to decide that one is much bigger than other.
+        height_diff_threshold : int
+            Minimal difference between heights to check that one is much bigger than other.
+            We have no need in splitting very small objects.
+        axis : {0, 1, 2}
+            Axis along which to calculate object height.
+        frequency : int
+            Traces iteration frequency for heights comparison.
+        """
+        traces_axis = 2 if axis == self.direction else self.direction
+        new_prototypes = []
+
+        for prototype in self.prototypes:
+            # Skip too small prototypes
+            if prototype.bbox[axis, 1] - prototype.bbox[axis, 0] <= height_diff_threshold:
+                continue
+
+            sign = +1
+            previous_height = 0
+
+            for line in range(prototype.bbox[traces_axis, 0], prototype.bbox[traces_axis, 1] + 1, frequency):
+                # Compare current and previous heights
+                height = np.ptp(prototype.points[prototype.points[:, traces_axis] == line, axis])
+
+                height_ratio = min(height, previous_height) / max(height, previous_height)
+                height_diff = height - previous_height
+
+                if (height_ratio <= height_ratio_threshold) and (np.abs(height_diff) > height_diff_threshold):
+                    if sign > 0 and height_diff < 0:
+                        sign = -1
+                    elif sign < 0 and height_diff > 0:
+                        sign = +1
+
+                        # Split prototype because we found height increase after decrease
+                        prototype, new_prototypes_ = prototype.split(split_indices=(line-frequency, None), axis=traces_axis)
+                        new_prototypes.extend(new_prototypes_)
+
+                previous_height = height
+
+        self.prototypes.extend(new_prototypes)
+        return self.prototypes
+
+
     # Addons
     def run(self, prolongate_in_depth=False, concat_iters=20, overlap_ratio_threshold=None,
             additional_filters=False, **filtering_kwargs):
@@ -834,7 +885,7 @@ class Component:
         if split_indices[0] is not None:
             # Extract closest part
             mask = self.points[:, 2] >= split_indices[0]
-            self, new_component = self._split(mask=mask, split_index=split_indices[0])
+            self, new_component = self._split(mask=mask)
 
             new_components.append(new_component)
 
@@ -842,13 +893,13 @@ class Component:
         if split_indices[1] is not None:
             # Extract closest part
             mask = self.points[:, 2] <= split_indices[1]
-            self, new_component = self._split(mask=mask, split_index=split_indices[1])
+            self, new_component = self._split(mask=mask)
 
             new_components.append(new_component)
 
         return self, new_components
 
-    def _split(self, mask, split_index):
+    def _split(self, mask):
         """ Split component into parts by mask. """
         # Create new Component from extra part
         new_component_points = self.points[~mask]
@@ -888,6 +939,7 @@ class FaultPrototype:
         self._contour = None
         self._borders = {}
 
+    # Properties
     @property
     def coords(self):
         """ Spatial coordinates in (ilines, xlines, depth) format. """
@@ -934,6 +986,8 @@ class FaultPrototype:
             self._last_component = Component(points=component_points, slide_idx=last_slide_idx)
         return self._last_component
 
+
+    # Contouring
     @property
     def contour(self):
         """ Contour of 2d projection on axis, orthogonal to self.direction.
@@ -944,128 +998,6 @@ class FaultPrototype:
             projection_axis = 1 - self.direction
             self._contour = find_contour(coords=self.coords, projection_axis=projection_axis)
         return self._contour
-
-
-    def append(self, component):
-        """ Append new component into prototype.
-
-        Parameters
-        ----------
-        component : instance of :class:`~.Component`
-            Component to add into the prototype.
-        """
-        self.points = np.vstack([self.points, component.points])
-
-        self._contour = None
-        self._borders = {}
-
-        self._last_component = component
-
-        self._bbox = self._concat_bbox(component.bbox)
-
-    def concat(self, other):
-        """ Concatenate two prototypes. """
-        self.points = np.vstack([self.points, other.points])
-
-        self._bbox = self._concat_bbox(other.bbox)
-
-        self._contour = None
-        self._borders = {}
-
-        self._last_component = None
-
-    def _concat_bbox(self, other_bbox):
-        """ Concat bboxes of two objects into one. """
-        bbox = np.empty((3, 2), np.int32)
-        bbox[:, 0] = np.min((self.bbox[:, 0], other_bbox[:, 0]), axis=0)
-        bbox[:, 1] = np.max((self.bbox[:, 1], other_bbox[:, 1]), axis=0)
-        return bbox
-
-    def _separate_objects(self, points, axis):
-        """ Separate points into different object points depend on their connectedness by axis.
-
-        After split we can have the situation when splitted part has more than one connected items.
-        This method separate disconnected parts into different prototypes.
-        """
-        # Get coordinates along the axis
-        unique_direction_points = np.unique(points[:, axis])
-
-        # Slides distance more than 1 -> different objects
-        split_indices = np.nonzero(unique_direction_points[1:] - unique_direction_points[:-1] > 1)[0]
-
-        if len(split_indices) == 0:
-            return [FaultPrototype(points=points, direction=self.direction)]
-
-        # Separate disconnected objects and create new prototypes instances
-        start_indices = unique_direction_points[split_indices + 1]
-        start_indices = np.insert(start_indices, 0, 0)
-
-        end_indices = unique_direction_points[split_indices]
-        end_indices = np.append(end_indices, unique_direction_points[-1])
-
-        prototypes = []
-
-        for start_idx, end_idx in zip(start_indices, end_indices):
-            points_ = points[(start_idx <= points[:, axis]) & (points[:, axis] <= end_idx)]
-            prototype = FaultPrototype(points=points_, direction=self.direction)
-            prototypes.append(prototype)
-
-        return prototypes
-
-
-    def split(self, split_indices, axis=2):
-        """ Axis-wise prototypes split by indices.
-
-        Parameters
-        ----------
-        split_indices : sequence of two ints or None
-            Axis values (upper and lower) to split component into parts. If None, the no need in split.
-
-        Returns
-        -------
-        prototype : `~.FaultPrototype` instance
-            The most closest prototype to the splitted.
-        new_prototypes : list of `~.FaultPrototype` instances
-            Prototypes created from disconnected objects.
-        """
-        new_prototypes = []
-
-        # No splitting applied
-        if (split_indices[0] is None) and (split_indices[1] is None):
-            return self, new_prototypes
-
-        axis_for_objects_separating = self.direction if axis in (-1, 2) else 2
-
-        # Cut upper part and separate disconnected objects
-        if (split_indices[0] is not None) and \
-           (np.min(self.points[:, axis]) < split_indices[0] < np.max(self.points[:, axis])):
-
-            points_outer = self.points[self.points[:, axis] < split_indices[0]]
-            self.points = self.points[self.points[:, axis] >= split_indices[0]]
-
-            if len(points_outer) > 0:
-                new_prototypes.extend(self._separate_objects(points_outer, axis=axis_for_objects_separating))
-
-        # Cut lower part and separate disconnected objects
-        if (split_indices[1] is not None) and \
-           (np.min(self.points[:, axis]) < split_indices[1] < np.max(self.points[:, axis])):
-
-            points_outer = self.points[self.points[:, axis] > split_indices[1]]
-            self.points = self.points[self.points[:, axis] <= split_indices[1]]
-
-            if len(points_outer) > 0:
-                new_prototypes.extend(self._separate_objects(points_outer, axis=axis_for_objects_separating))
-
-        new_prototypes.extend(self._separate_objects(self.points, axis=axis_for_objects_separating))
-
-        # Update self
-        self.points = new_prototypes[-1].points
-        self._bbox = new_prototypes[-1].bbox
-        self._contour = None
-        self._borders = {}
-        self._last_component = None
-        return self, new_prototypes[:-1]
-
 
     def get_border(self, border, projection_axis):
         """ Get contour border.
@@ -1109,3 +1041,134 @@ class FaultPrototype:
             self._borders[border] = border_coords
 
         return self._borders[border]
+
+
+    # Extension operations
+    def append(self, component):
+        """ Append new component into prototype.
+
+        Parameters
+        ----------
+        component : instance of :class:`~.Component`
+            Component to add into the prototype.
+        """
+        self.points = np.vstack([self.points, component.points])
+
+        self._contour = None
+        self._borders = {}
+
+        self._last_component = component
+
+        self._bbox = self._concat_bbox(component.bbox)
+
+    def concat(self, other):
+        """ Concatenate two prototypes. """
+        self.points = np.vstack([self.points, other.points])
+
+        self._bbox = self._concat_bbox(other.bbox)
+
+        self._contour = None
+        self._borders = {}
+
+        self._last_component = None
+
+    def _concat_bbox(self, other_bbox):
+        """ Concat bboxes of two objects into one. """
+        bbox = np.empty((3, 2), np.int32)
+        bbox[:, 0] = np.min((self.bbox[:, 0], other_bbox[:, 0]), axis=0)
+        bbox[:, 1] = np.max((self.bbox[:, 1], other_bbox[:, 1]), axis=0)
+        return bbox
+
+
+    # Split operations
+    def split(self, split_indices, axis=2):
+        """ Axis-wise prototypes split by indices.
+
+        Parameters
+        ----------
+        split_indices : sequence of two ints or None
+            Axis values (upper and lower) to split prototype into parts. If None, then no need in split.
+
+        Returns
+        -------
+        prototype : `~.FaultPrototype` instance
+            The most closest prototype to the splitted.
+        new_prototypes : list of `~.FaultPrototype` instances
+            Prototypes created from disconnected objects.
+        """
+        new_prototypes = []
+
+        # No splitting applied
+        if (split_indices[0] is None) and (split_indices[1] is None):
+            return self, new_prototypes
+
+        axis_for_objects_separating = self.direction if axis in (-1, 2) else 2
+
+        # Cut upper part and separate disconnected objects
+        if (split_indices[0] is not None) and \
+           (np.min(self.points[:, axis]) < split_indices[0] < np.max(self.points[:, axis])):
+            mask = self.points[:, axis] >= split_indices[0]
+
+            self, new_prototypes_ = self._split(mask=mask, axis_for_objects_separating=axis_for_objects_separating)
+            new_prototypes.extend(new_prototypes_)
+
+        # Cut lower part and separate disconnected objects
+        if (split_indices[1] is not None) and \
+           (np.min(self.points[:, axis]) < split_indices[1] < np.max(self.points[:, axis])):
+            mask = self.points[:, axis] <= split_indices[1]
+
+            self, new_prototypes_ = self._split(mask=mask, axis_for_objects_separating=axis_for_objects_separating)
+            new_prototypes.extend(new_prototypes_)
+
+        new_prototypes.extend(self._separate_objects(self.points, axis=axis_for_objects_separating))
+
+        # Update self
+        self.points = new_prototypes[-1].points
+        self._bbox = new_prototypes[-1].bbox
+        self._contour = None
+        self._borders = {}
+        self._last_component = None
+        return self, new_prototypes[:-1]
+
+    def _split(self, mask, axis_for_objects_separating):
+        """ Split prototype into parts by mask. """
+        # Create new prototypes from extra part
+        new_prototype_points = self.points[~mask]
+
+        if len(new_prototype_points) > 0:
+            new_prototypes = self._separate_objects(new_prototype_points, axis=axis_for_objects_separating)
+
+        # Extract suitable part
+        self.points = self.points[mask]
+        return self, new_prototypes
+
+    def _separate_objects(self, points, axis):
+        """ Separate points into different object points depend on their connectedness by axis.
+
+        After split we can have the situation when splitted part has more than one connected items.
+        This method separate disconnected parts into different prototypes.
+        """
+        # Get coordinates along the axis
+        unique_direction_points = np.unique(points[:, axis])
+
+        # Slides distance more than 1 -> different objects
+        split_indices = np.nonzero(unique_direction_points[1:] - unique_direction_points[:-1] > 1)[0]
+
+        if len(split_indices) == 0:
+            return [FaultPrototype(points=points, direction=self.direction)]
+
+        # Separate disconnected objects and create new prototypes instances
+        start_indices = unique_direction_points[split_indices + 1]
+        start_indices = np.insert(start_indices, 0, 0)
+
+        end_indices = unique_direction_points[split_indices]
+        end_indices = np.append(end_indices, unique_direction_points[-1])
+
+        prototypes = []
+
+        for start_idx, end_idx in zip(start_indices, end_indices):
+            points_ = points[(start_idx <= points[:, axis]) & (points[:, axis] <= end_idx)]
+            prototype = FaultPrototype(points=points_, direction=self.direction)
+            prototypes.append(prototype)
+
+        return prototypes
