@@ -4,8 +4,12 @@ import os
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
-import plotly.figure_factory as ff
-import plotly.graph_objects as go
+try:
+    import plotly.figure_factory as ff
+    import plotly.graph_objects as go
+    PLOTLY_AVAILABLE = True
+except ImportError:
+    PLOTLY_AVAILABLE = False
 
 from matplotlib.cm import get_cmap
 
@@ -57,6 +61,9 @@ def show_3d(x, y, z, simplices, title, zoom, colors=None, show_axes=True, aspect
         Other arguments of plot creation.
     """
     #pylint: disable=too-many-arguments
+    if not PLOTLY_AVAILABLE:
+        raise ImportError('Install `plotly` to use 3d interactive viewer!')
+
     # Arguments of graph creation
     kwargs = {
         'title': title,

@@ -8,7 +8,6 @@ from itertools import cycle
 import numpy as np
 from batchflow.plotter.plot import Subplot
 
-from .viewer import FieldViewer
 from ..functional import compute_instantaneous_amplitude, compute_instantaneous_phase, compute_instantaneous_frequency
 from ..utils import DelegatingList, to_list
 from ..plotters import plot, show_3d
@@ -457,6 +456,7 @@ class VisualizationMixin:
     # 2D interactive
     def viewer(self, figsize=(8, 8), **kwargs):
         """ Interactive field viewer. """
+        from .viewer import FieldViewer #pylint: disable=import-outside-toplevel
         return FieldViewer(field=self, figsize=figsize, **kwargs)
 
 

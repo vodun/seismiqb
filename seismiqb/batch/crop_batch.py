@@ -926,11 +926,11 @@ class SeismicCropBatch(Batch, VisualizationMixin):
     @apply_parallel_decorator(init='preallocating_init', post='noop_post', target='for')
     def translate(self, _, buffer, shift=5, scale=0.0, **kwargs):
         """ Add and multiply values by uniformly sampled values. """
-        shift = self.random.uniform(-shift, shift).astype(np.float32)
-        scale = self.random.uniform(1 - scale, 1 + scale).astype(np.float32)
+        shift = self.random.uniform(-shift, shift)
+        scale = self.random.uniform(1 - scale, 1 + scale)
 
-        buffer += shift
-        buffer *= scale
+        buffer += np.float32(shift)
+        buffer *= np.float32(scale)
 
     @apply_parallel_decorator(init='preallocating_init', post='noop_post', target='for')
     def invert(self, _, buffer, **kwargs):

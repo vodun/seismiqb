@@ -393,7 +393,7 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetricM
     def lines_to_ordinals(self, array):
         """ Convert values from inline-crossline coordinate system to their ordinals.
         In the simplest case of regular grid `ordinal = (value - value_min) // value_step`.
-        In the case of irregular spacings between values, we have to manually map values to ordinals.
+        In the case of irregular spacings between values, we have to manually map values to ordinals. TODO.
         """
         # Indexing headers
         if self.regular_structure:
@@ -413,7 +413,7 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetricM
     def ordinals_to_lines(self, array):
         """ Convert ordinals to values in inline-crossline coordinate system.
         In the simplest case of regular grid `value = value_min + ordinal * value_step`.
-        In the case of irregular spacings between values, we have to manually map ordinals to values.
+        In the case of irregular spacings between values, we have to manually map ordinals to values. TODO.
         """
         array = array.astype(np.float32)
 

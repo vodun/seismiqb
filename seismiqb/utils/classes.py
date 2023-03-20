@@ -5,7 +5,11 @@ from collections import OrderedDict
 from functools import wraps
 
 import numpy as np
-import bottleneck as bn
+try:
+    import bottleneck
+    BOTTLENECK_AVAILABLE = True
+except ImportError:
+    BOTTLENECK_AVAILABLE = False
 
 
 from .functions import to_list
@@ -15,7 +19,9 @@ from .functions import to_list
 class AugmentedNumpy:
     """ NumPy with better routines for nan-handling. """
     def __getattr__(self, key):
-        return getattr(bn, key, getattr(np, key))
+        if not BOTTLENECK_AVAILABLE:
+            return getattr(np, key)
+        return getattr(bottleneck, key, getattr(np, key))
 augmented_np = AugmentedNumpy()
 
 
