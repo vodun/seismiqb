@@ -371,7 +371,7 @@ class FaultExtractor:
 
     # Prototypes concatenation
     def concat_connected_prototypes(self, overlap_ratio_threshold=None, axis=2,
-                                    border_threshold=5, width_split_threshold=100):
+                                    border_threshold=20, width_split_threshold=100):
         """ Concat prototypes which are connected.
 
         Under the hood, we compare prototypes with each other and find which are connected as puzzles.
@@ -650,7 +650,7 @@ class FaultExtractor:
                     overlap_axis = self.direction if border in ('up', 'down') else 2
 
                     if  self._is_contour_inside(contour, coords_sliced,
-                                               border_threshold=corrected_border_threshold, overlap_axis=overlap_axis) is not None:
+                                                border_threshold=corrected_border_threshold, overlap_axis=overlap_axis) is not None:
                         close_borders_counter += 1
 
                     if close_borders_counter >= 2:
