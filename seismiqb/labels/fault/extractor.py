@@ -1,6 +1,7 @@
 """ Faults extractor from point cloud. """
 from collections import deque
 import numpy as np
+from numba import njit
 
 from cc3d import connected_components
 from cv2 import dilate
@@ -10,8 +11,8 @@ from batchflow import Notifier
 
 from .base import Fault
 from .postprocessing import skeletonize
-from .coords_utils import (bboxes_adjacent, bboxes_embedded, bboxes_intersected, dilate_coords, find_contour,
-                           depthwise_groupby_max, compute_distances, restore_coords_from_projection)
+from .coords_utils import (bboxes_adjacent, bboxes_embedded, bboxes_intersected, compute_distances, dilate_coords,
+                           find_contour, depthwise_groupby_max, restore_coords_from_projection)
 from ...utils import groupby_min, groupby_max
 
 
@@ -461,7 +462,7 @@ class FaultExtractor:
                 width_neighboring_2 = np.ptp(neighboring_contour_2[:, overlap_axis])
 
                 # TODO: think about more appropriate criteria than proportion
-                overlap_threshold = 0.8*min(width_neighboring_1, width_neighboring_2)
+                overlap_threshold = 0.5*max(width_neighboring_1, width_neighboring_2)
 
                 # Get border contours in the area of interest
                 overlap_range = (min(adjacent_borders[axis]) - margin, max(adjacent_borders[axis]) + margin)
@@ -491,30 +492,49 @@ class FaultExtractor:
                 contour_1[:, axis] += shift
 
                 # Check that one component contour is inside another (for both)
-                # TODO: think about reordering: smaller inside the bigger
-                if not (self._is_contour_inside(contour_1, contour_2, border_threshold=corrected_border_threshold,
-                                                overlap_threshold=overlap_threshold) or \
-                        self._is_contour_inside(contour_2, contour_1, border_threshold=corrected_border_threshold,
-                                                overlap_threshold=overlap_threshold)):
+                contour_1_width = np.ptp(contour_1[:, overlap_axis])
+                contour_2_width = np.ptp(contour_2[:, overlap_axis])
+
+                if contour_1_width <= contour_2_width:
+                    overlap_range = self._is_contour_inside(contour_1, contour_2,
+                                                            border_threshold=corrected_border_threshold,
+                                                            overlap_threshold=overlap_threshold,
+                                                            overlap_axis=overlap_axis)
+                else:
+                    overlap_range = self._is_contour_inside(contour_2, contour_1,
+                                                            border_threshold=corrected_border_threshold,
+                                                            overlap_threshold=overlap_threshold,
+                                                            overlap_axis=overlap_axis)
+
+                if overlap_range is None:
                     continue
 
-                # Split by self.direction for avoiding wrong prototypes shapes (like C or T-likable, etc.)
-                if axis in (-1, 2):
+                # Split for avoiding wrong prototypes shapes:
+                # - concat only overlapped parts
+                # - lower part can't be wider then upper;
+                # - if one prototype is much bigger than it should be splitted.
+                if overlap_range[1] - overlap_range[0] < min(contour_1_width, contour_2_width) - 2*margin:
+                    prototype_2, new_prototypes_ = prototype_2.split(overlap_range, axis=self.direction)
+                    new_prototypes.extend(new_prototypes_)
+
+                    prototype_1, new_prototypes_ = prototype_1.split(overlap_range, axis=self.direction)
+                    new_prototypes.extend(new_prototypes_)
+
+                elif axis in (-1, 2):
                     width_diff = 5
-                    lower_is_wider = (is_first_upper and prototype_2.width - prototype_1.width > width_diff) or \
-                                     (not is_first_upper and prototype_1.width - prototype_2.width > width_diff)
+
+                    lower_is_wider = (is_first_upper and prototype_2.width - contour_1_width > width_diff) or \
+                                     (not is_first_upper and prototype_1.width - contour_2_width > width_diff)
 
                     too_big_width_diff = (width_split_threshold is not None) and \
                                          (np.abs(prototype_1.width - prototype_2.width) > width_split_threshold)
 
                     if (lower_is_wider or too_big_width_diff):
-                        split_indices = (max(prototype_1.bbox[self.direction, 0], prototype_2.bbox[self.direction, 0]),
-                                         min(prototype_1.bbox[self.direction, 1], prototype_2.bbox[self.direction, 1]))
+                        if is_first_upper:
+                            prototype_2, new_prototypes_ = prototype_2.split(overlap_range, axis=self.direction)
+                        else:
+                            prototype_1, new_prototypes_ = prototype_1.split(overlap_range, axis=self.direction)
 
-                        prototype_1, new_prototypes_ = prototype_1.split(split_indices, axis=self.direction)
-                        new_prototypes.extend(new_prototypes_)
-
-                        prototype_2, new_prototypes_ = prototype_2.split(split_indices, axis=self.direction)
                         new_prototypes.extend(new_prototypes_)
 
                 prototype_2.concat(prototype_1)
@@ -526,7 +546,7 @@ class FaultExtractor:
         self.prototypes.extend(new_prototypes)
         return self.prototypes
 
-    def _is_contour_inside(self, contour_1, contour_2, border_threshold, overlap_threshold=0):
+    def _is_contour_inside(self, contour_1, contour_2, border_threshold, overlap_axis, overlap_threshold=0):
         """ Check that `contour_1` is almost inside the dilated `contour_2`.
 
         We apply dilation for `contour_2` because the fault can be a shifted on neighboring slides.
@@ -550,8 +570,13 @@ class FaultExtractor:
 
         contour_2_dilated = set(tuple(x) for x in contour_2_dilated)
 
-        contours_overlapped = len(contour_1_set.intersection(contour_2_dilated)) > overlap_threshold
-        return contours_overlapped and (len(contour_1_set - contour_2_dilated) < border_threshold)
+        overlap = contour_1_set.intersection(contour_2_dilated)
+        contours_overlapped = len(overlap) > overlap_threshold
+
+        if contours_overlapped and (len(contour_1_set - contour_2_dilated) < border_threshold):
+            return get_overlap_range(overlap, axis=overlap_axis)
+
+        return None
 
     def concat_embedded_prototypes(self, border_threshold=100):
         """ Concat embedded prototypes with 2 or more closed borders.
@@ -622,8 +647,10 @@ class FaultExtractor:
                     # Check that the shifted border is inside the main_object area
                     corrected_border_threshold = min(border_threshold, len(contour)//2)
 
-                    if self._is_contour_inside(contour, coords_sliced,
-                                               border_threshold=corrected_border_threshold):
+                    overlap_axis = self.direction if border in ('up', 'down') else 2
+
+                    if  self._is_contour_inside(contour, coords_sliced,
+                                               border_threshold=corrected_border_threshold, overlap_axis=overlap_axis) is not None:
                         close_borders_counter += 1
 
                     if close_borders_counter >= 2:
@@ -791,6 +818,10 @@ class FaultExtractor:
         # Concat embedded
         _ = self.concat_embedded_prototypes()
         stats['after_embedded_concat'] = len(self.prototypes)
+
+        # Split wrong objects
+        _ = self.split_horseshoe()
+        stats['after_split_horseshoe'] = len(self.prototypes)
 
         # Filter too small prototypes
         if additional_filters or len(filtering_kwargs) > 0:
@@ -1172,3 +1203,22 @@ class FaultPrototype:
             prototypes.append(prototype)
 
         return prototypes
+
+
+
+# Helpers
+@njit
+def get_overlap_range(overlap, axis):
+    """ .. """
+    min_overlap = 10000
+    max_overlap = -10000
+
+    for elem in overlap:
+        if elem[axis] < min_overlap:
+            min_overlap = elem[axis]
+            continue
+
+        if elem[axis] > max_overlap:
+            max_overlap = elem[axis]
+
+    return (min_overlap, max_overlap)
