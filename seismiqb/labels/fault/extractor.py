@@ -496,15 +496,15 @@ class FaultExtractor:
                 contour_2_width = np.ptp(contour_2[:, overlap_axis])
 
                 if contour_1_width <= contour_2_width:
-                    overlap_range = self._is_contour_inside(contour_1, contour_2,
-                                                            border_threshold=corrected_border_threshold,
-                                                            overlap_threshold=overlap_threshold,
-                                                            overlap_axis=overlap_axis)
+                    overlap_range = self._contours_overlap(contour_1, contour_2,
+                                                           border_threshold=corrected_border_threshold,
+                                                           overlap_threshold=overlap_threshold,
+                                                           overlap_axis=overlap_axis)
                 else:
-                    overlap_range = self._is_contour_inside(contour_2, contour_1,
-                                                            border_threshold=corrected_border_threshold,
-                                                            overlap_threshold=overlap_threshold,
-                                                            overlap_axis=overlap_axis)
+                    overlap_range = self._contours_overlap(contour_2, contour_1,
+                                                           border_threshold=corrected_border_threshold,
+                                                           overlap_threshold=overlap_threshold,
+                                                           overlap_axis=overlap_axis)
 
                 if overlap_range is None:
                     continue
@@ -546,8 +546,8 @@ class FaultExtractor:
         self.prototypes.extend(new_prototypes)
         return self.prototypes
 
-    def _is_contour_inside(self, contour_1, contour_2, border_threshold, overlap_axis, overlap_threshold=0):
-        """ Check that `contour_1` is almost inside the dilated `contour_2`.
+    def _contours_overlap(self, contour_1, contour_2, border_threshold, overlap_axis, overlap_threshold=0):
+        """ Check that `contour_1` is almost inside the dilated `contour_2` and return their overlap range.
 
         We apply dilation for `contour_2` because the fault can be a shifted on neighboring slides.
 
@@ -574,7 +574,7 @@ class FaultExtractor:
         contours_overlapped = len(overlap) > overlap_threshold
 
         if contours_overlapped and (len(contour_1_set - contour_2_dilated) < border_threshold):
-            return get_overlap_range(overlap, axis=overlap_axis)
+            return get_range(overlap, axis=overlap_axis)
 
         return None
 
@@ -649,8 +649,9 @@ class FaultExtractor:
 
                     overlap_axis = self.direction if border in ('up', 'down') else 2
 
-                    if  self._is_contour_inside(contour, coords_sliced,
-                                                border_threshold=corrected_border_threshold, overlap_axis=overlap_axis) is not None:
+                    if  self._contours_overlap(contour, coords_sliced,
+                                               border_threshold=corrected_border_threshold,
+                                               overlap_axis=overlap_axis) is not None:
                         close_borders_counter += 1
 
                     if close_borders_counter >= 2:
@@ -1208,17 +1209,25 @@ class FaultPrototype:
 
 # Helpers
 @njit
-def get_overlap_range(overlap, axis):
-    """ .. """
-    min_overlap = 10000
-    max_overlap = -10000
+def get_range(coords, axis):
+    """ Get range of coords values on axis.
 
-    for elem in overlap:
-        if elem[axis] < min_overlap:
-            min_overlap = elem[axis]
+    Parameters
+    ----------
+    coords : set of tuples of three ints
+        Coordinates in (iline, xline, depth) format.
+    axis : {0, 1, 2}
+        Axis on which to get coordinates range.
+    """
+    min_ = 10000
+    max_ = -10000
+
+    for elem in coords:
+        if elem[axis] < min_:
+            min_ = elem[axis]
             continue
 
-        if elem[axis] > max_overlap:
-            max_overlap = elem[axis]
+        if elem[axis] > max_:
+            max_ = elem[axis]
 
-    return (min_overlap, max_overlap)
+    return (min_, max_)
