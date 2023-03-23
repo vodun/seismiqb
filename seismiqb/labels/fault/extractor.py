@@ -698,7 +698,12 @@ class FaultExtractor:
 
             for line in range(prototype.bbox[traces_axis, 0], prototype.bbox[traces_axis, 1] + 1, frequency):
                 # Compare current and previous heights
-                height = np.ptp(prototype.points[prototype.points[:, traces_axis] == line, axis])
+                points_ = prototype.points[prototype.points[:, traces_axis] == line, axis]
+
+                if len(points_) == 0:
+                    continue
+
+                height = np.ptp(points_)
 
                 height_ratio = min(height, previous_height) / max(height, previous_height)
                 height_diff = height - previous_height
