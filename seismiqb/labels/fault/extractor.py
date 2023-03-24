@@ -1213,9 +1213,8 @@ class FaultPrototype:
 
 
 # Helpers
-@njit
-def get_range(coords, axis):
-    """ Get range of coords values on axis.
+def get_range(coords, axis, diff_threshold=2):
+    """ Get maximal sequential range of coords values on axis.
 
     Parameters
     ----------
@@ -1223,16 +1222,26 @@ def get_range(coords, axis):
         Coordinates in (iline, xline, depth) format.
     axis : {0, 1, 2}
         Axis on which to get coordinates range.
+    diff_threshold : int
+        Maximal possible difference between points values in one range.
     """
-    min_ = 10000
-    max_ = -10000
+    values = list(set(elem[axis] for elem in coords))
+    values.sort()
+    diff = np.diff(values)
 
-    for elem in coords:
-        if elem[axis] < min_:
-            min_ = elem[axis]
-            continue
+    split_indices = np.argwhere(diff > diff_threshold).reshape(-1)
 
-        if elem[axis] > max_:
-            max_ = elem[axis]
+    if len(split_indices) == 0:
+        return (np.min(values), np.max(values))
 
-    return (min_, max_)
+    ranges = [split_indices[0] + 1, *np.diff(split_indices), len(values) - split_indices[-1] - 1]
+    longest_range_idx = np.argmax(ranges)
+
+    if longest_range_idx == len(ranges) - 1:
+        range_ = (split_indices[-1] + 1, len(values) - 1)
+    elif longest_range_idx == 0:
+        range_ = (0, split_indices[0])
+    else:
+        range_ = (split_indices[longest_range_idx-1] + 1, split_indices[longest_range_idx])
+
+    return (values[range_[0]], values[range_[1]])
