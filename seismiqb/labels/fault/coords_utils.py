@@ -117,7 +117,7 @@ def bboxes_intersected(bbox_1, bbox_2, axes=(0, 1, 2)):
     return True
 
 @njit
-def bboxes_adjacent(bbox_1, bbox_2):
+def bboxes_adjacent(bbox_1, bbox_2, adjacency=1):
     """ Bboxes intersection or adjacency ranges if bboxes are intersected/adjacent.
 
     Bboxes are adjacent if they are distant not more than on 1 point.
@@ -132,7 +132,7 @@ def bboxes_adjacent(bbox_1, bbox_2):
         borders_i_0 = max(bbox_1[i, 0], bbox_2[i, 0])
         borders_i_1 = min(bbox_1[i, 1], bbox_2[i, 1])
 
-        if borders_i_1 - borders_i_0 < -1:
+        if borders_i_1 - borders_i_0 < -adjacency:
             return None
 
         borders[i, 0] = min(borders_i_0, borders_i_1)
