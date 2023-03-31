@@ -12,7 +12,7 @@ from .conversion_mixin import ConversionMixin
 from .export_mixin import ExportMixin
 from .metric_mixin import MetricMixin
 
-from ..utils import SQBStorage, lru_cache, CacheMixin, TransformsMixin, select_printer, transformable
+from ..utils import SQBStorage, lru_cache, CacheMixin, TransformsMixin, select_printer, transformable, extend_line
 from ..plotters import plot
 
 
@@ -777,6 +777,58 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetricM
         }
         return plotter(slide, **kwargs)
 
+    def show_section_map(self, loc_a, loc_b, full=False, linecolor='green', linewidth=3, pointcolor='blue',
+                         pointsize=100, marker='*', **kwargs):
+        """ Show section line on 2D geometry map.
+
+        Parameters
+        ----------
+        loc_a : numpy.ndarray
+
+        loc_b : numpy.ndarray
+
+        full : bool, optional
+            Whether to plot the entire section line through the given locations up to the very bounds of the cube
+            or only between locations, by default False
+        linecolor : str, optional
+            Color of section line, by default 'green'
+        linewidth : int, optional
+            Width of section line, by default 3
+        pointcolor : str, optional
+            Color of points at locations, by default 'blue'
+        pointsize : int, optional
+            Size of points at locations, by default 100
+        marker : str, optional
+            Points marker, by default '*'
+        kwargs : dict
+            kwargs for `show` method to plot geometry map (e.g., 'matrix')
+
+        Returns
+        -------
+        plotter
+            Plot instance
+        """
+        loc_a, loc_b = np.array(loc_a), np.array(loc_b)
+        if full:
+            start, end = extend_line(loc_a, loc_b, self.shape[:2])
+        else:
+            start, end = loc_a, loc_b
+        title = f'Section from {tuple(loc_a)} to {tuple(loc_b)}'
+
+        kwargs = {
+            'title': title,
+            'labeltop': False,
+            'labelright': False,
+            'matrix': 'snr',
+            **kwargs
+        }
+
+        plotter = self.show(show=False, **kwargs)
+        plotter[0].ax.scatter([loc_a[0], loc_b[0]], [loc_a[1], loc_b[1]], c=pointcolor, s=pointsize, marker=marker)
+        plotter[0].ax.plot([start[0], end[0]], [start[1], end[1]], color=linecolor, linewidth=linewidth)
+        plotter.redraw()
+
+        return plotter
 
     # Utilities for 2D slides
     def get_slide_index(self, index, axis=0):

@@ -283,7 +283,9 @@ class MeanAccumulator3D(Accumulator3D):
     """ Accumulator that takes mean value of overlapping crops. """
     def __init__(self, shape=None, origin=None, dtype=np.float32, transform=None, path=None, **kwargs):
         if dtype == np.int8:
-            raise NotImplementedError('`mean` accumulation is unavailable for `dtype=in8`. Use `weighted` aggregation.')
+            raise NotImplementedError(
+                '`mean` accumulation is unavailable for `dtype=int8`. Use `weighted` aggregation.'
+            )
         super().__init__(shape=shape, origin=origin, dtype=dtype, transform=transform, path=path, **kwargs)
 
         self.create_placeholder(name='data', dtype=self.dtype, fill_value=0)
