@@ -159,20 +159,6 @@ def filter_sticked_faults(faults, direction, sticks_step=10, stick_nodes_step=50
         if len(fault.sticks) <= 2:
             continue
 
-        # Sticks should be on multiples of `sticks_step` traces - remove extra edges
-        first_stick_line = fault.sticks[0][0][direction]
-
-        if first_stick_line % sticks_step != 0:
-            fault._sticks = fault._sticks[1:]
-
-        last_stick_line = fault.sticks[-1][0][direction]
-
-        if last_stick_line % sticks_step != 0:
-            fault._sticks = fault._sticks[:-1]
-
-        if len(fault.sticks) <= 2:
-            continue
-
         # Remove too short edges
         # Left edge
         if len(fault.sticks[0]) == 2:
