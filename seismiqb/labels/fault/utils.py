@@ -152,6 +152,7 @@ def filter_sticked_faults(faults, direction, sticks_step=10, stick_nodes_step=50
     stick_nodes_step : int
         A value of `stick_nodes_step` argument with which faults sticks were created.
     """
+    # pylint: disable=protected-access
     selected_faults = []
 
     for fault in faults:

@@ -1,7 +1,6 @@
 """ Faults extractor from point cloud. """
 from collections import deque
 import numpy as np
-from numba import njit
 
 from cc3d import connected_components
 from cv2 import dilate
@@ -108,7 +107,7 @@ class FaultExtractor:
         self.orthogonal_direction = 1 - self.direction
 
         # Internal parameters
-        self.dilation = 3 # constant for internal operations
+        self._dilation = 3 # constant for internal operations
         self.component_len_threshold = component_len_threshold
 
         self.container = self._init_container(data=data, skeleton_data=skeleton_data) if data is not None else None
@@ -119,7 +118,7 @@ class FaultExtractor:
 
     def _init_container(self, data, skeleton_data=None):
         """ Extract connected components on each slide and save them into container. """
-        dilation_structure = np.ones((1, self.dilation), np.uint8)
+        dilation_structure = np.ones((1, self._dilation), np.uint8)
         container = {}
 
         # Process data slides: extract connected components and their info
@@ -144,8 +143,8 @@ class FaultExtractor:
             for idx, object_bbox in enumerate(objects, start=1):
                 # Extract component coords: we refine skeletonize effects by applying it on limited area
                 dilation_axis = self.orthogonal_direction
-                dilation_ranges = (max(0, object_bbox[0].start - self.dilation // 2),
-                                   min(object_bbox[0].stop + self.dilation // 2, self.shape[dilation_axis]))
+                dilation_ranges = (max(0, object_bbox[0].start - self._dilation // 2),
+                                   min(object_bbox[0].stop + self._dilation // 2, self.shape[dilation_axis]))
 
                 object_mask = labeled[dilation_ranges[0]:dilation_ranges[1], object_bbox[-1]] == idx
 
@@ -199,15 +198,15 @@ class FaultExtractor:
     # Prototypes extraction
     def extract_prototypes(self):
         """ Extract all fault prototypes from the point cloud. """
-        prototype = self.extract_prototype()
+        prototype = self.extract_one_prototype()
 
         while prototype is not None:
             self.prototypes.append(prototype)
-            prototype = self.extract_prototype()
+            prototype = self.extract_one_prototype()
 
         return self.prototypes
 
-    def extract_prototype(self):
+    def extract_one_prototype(self):
         """ Extract one fault prototype from the point cloud. """
         if len(self.prototypes_queue) == 0:
             component, component_idx = self._find_next_component()
@@ -276,7 +275,7 @@ class FaultExtractor:
         """
         # Dilate component bbox for detecting close components: component on next slide can be shifted
         dilated_bbox = component.bbox.copy()
-        dilated_bbox[self.orthogonal_direction, :] += (-self.dilation // 2, self.dilation // 2)
+        dilated_bbox[self.orthogonal_direction, :] += (-self._dilation // 2, self._dilation // 2)
         dilated_bbox[self.orthogonal_direction, 0] = max(0, dilated_bbox[self.orthogonal_direction, 0])
         dilated_bbox[self.orthogonal_direction, 1] = min(dilated_bbox[self.orthogonal_direction, 1],
                                                          self.shape[self.orthogonal_direction])
@@ -564,7 +563,7 @@ class FaultExtractor:
         contour_1_set = set(tuple(x) for x in contour_1)
 
         # Objects can be shifted on `self.orthogonal_direction`, so apply dilation for coords
-        contour_2_dilated = dilate_coords(coords=contour_2, dilate=self.dilation,
+        contour_2_dilated = dilate_coords(coords=contour_2, dilate=self._dilation,
                                           axis=self.orthogonal_direction,
                                           max_value=self.shape[self.orthogonal_direction])
 
@@ -715,7 +714,8 @@ class FaultExtractor:
                         sign = +1
 
                         # Split prototype because we found height increase after decrease
-                        prototype, new_prototypes_ = prototype.split(split_indices=(line-frequency, None), axis=traces_axis)
+                        prototype, new_prototypes_ = prototype.split(split_indices=(line-frequency, None),
+                                                                     axis=traces_axis)
                         new_prototypes.extend(new_prototypes_)
 
                 previous_height = height

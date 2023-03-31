@@ -51,7 +51,7 @@ def depthwise_groupby_max(coords, values):
     values : np.ndarray of (N, 1) shape
         Values corresponding to coordinates to decide which one should last for each depth (last column in coords).
     """
-    order = np.argsort(coords[:, -1])[::-1]
+    order = np.argsort(coords[:, -1])
 
     output_coords = np.zeros_like(coords)
     output_values = np.zeros_like(values)
