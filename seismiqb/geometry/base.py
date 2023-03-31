@@ -715,17 +715,18 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetricM
         }
         return plotter(data, bins=bins, mode='histogram', **kwargs)
 
-    def show_slide(self, index, axis=0, zoom=None, plotter=plot, **kwargs):
+    def show_slide(self, index, axis=0, zoom=None, plotter=plot, full=False, **kwargs):
         """ Show seismic slide in desired index.
         Under the hood relies on :meth:`load_slide`, so works with geometries in any formats.
 
         Parameters
         ----------
-        index : int, str
+        index : int, str or tuple
             Index of the slide to show.
             If int, then interpreted as the ordinal along the specified axis.
             If `'random'`, then we generate random index along the axis.
             If string of the `'#XXX'` format, then we interpret it as the exact indexing header value.
+            If tuple of tuples of length 2, locations of traces to construct section.
         axis : int
             Axis of the slide.
         zoom : tuple, None or 'auto'
@@ -734,13 +735,28 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetricM
         plotter : instance of `plot`
             Plotter instance to use.
             Combined with `positions` parameter allows using subplots of already existing plotter.
+        full (applicable for section loading): bool, optional
+            Whether to load the entire section through the given locations up to the very bounds of the cube or only
+            between locations, by default False
         """
-        axis = self.parse_axis(axis)
-        slide = self.load_slide(index=index, axis=axis)
+        if not isinstance(index, tuple):
+            axis = self.parse_axis(axis)
+            slide = self.load_slide(index=index, axis=axis)
+        else:
+            slide = self.load_section(*index, full=full)
+
         xmin, xmax, ymin, ymax = 0, slide.shape[0], slide.shape[1], 0
 
         if zoom == 'auto':
-            zoom = self.compute_auto_zoom(index, axis)
+            if not isinstance(index, tuple):
+                zoom = self.compute_auto_zoom(index, axis)
+            else:
+                nonzero = np.nonzero((slide != 0).any(axis=1))[0]
+                if len(nonzero) > 0:
+                    start, stop = nonzero[[0, -1]]
+                    zoom = (slice(start, stop + 1), slice(None))
+                else:
+                    zoom = None
         if zoom:
             slide = slide[zoom]
             xmin = zoom[0].start or xmin
@@ -749,7 +765,11 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetricM
             ymax = zoom[1].start or ymax
 
         # Plot params
-        if len(self.index_headers) > 1:
+        if isinstance(index, tuple):
+            title = f'Section from {index[0]} to {index[1]}'
+            xlabel = 'TRACES'
+            ylabel = 'DEPTH'
+        elif len(self.index_headers) > 1:
             title = f'{self.axis_names[axis]} {index} out of {self.shape[axis]}'
 
             if axis in [0, 1]:
@@ -874,7 +894,6 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetricM
     def compute_auto_zoom(self, index, axis=0):
         """ Compute zoom for a given slide. """
         return slice(*self.get_slide_bounds(index=index, axis=axis)), slice(None)
-
 
     # General utility methods
     STRING_TO_AXIS = {

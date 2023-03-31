@@ -1,4 +1,5 @@
 """ Class to work with seismic data in SEG-Y format. """
+#pylint: disable=not-an-iterable
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
@@ -557,7 +558,7 @@ class GeometrySEGY(Geometry):
         traces_indices = traces_indices.reshape(-1, 4)
 
         traces = self.load_by_indices(self.index_matrix[unique_support[:, 0], unique_support[:, 1]])
-        section = interpolate(support, weights, traces, traces_indices)
+        section = interpolate(traces, traces_indices, weights)
         if np.issubdtype(dtype, np.integer):
             section = section.astype(dtype)
         return section
@@ -663,20 +664,18 @@ def get_line_support(locations):
     return support, weights
 
 @njit(parallel=True)
-def interpolate(support, weights, traces, traces_indices, dtype='float32'):
+def interpolate(traces, traces_indices, weights, dtype='float32'):
     """ Interpolate traces with float coordinates by traces from support.
 
     Parameters
     ----------
-    support : numpy.ndarray
-        array of shape (N, 4, 3) and dtype int32 with coordinates of support traces.
-    weights : numpy.ndarray
-        array of shape (N, 4) with weights for support traces for interpolation. If some location has integer
-        coordinates, support will have duplicated traces and nan weights.
     traces : numpy.ndarray
         array of shape (M, geometry.shape[2]) with loaded traces from support.
     traces_indices : numpy.ndarray
         array of shape (N, 4) with indices of corresponging traces in `traces` for each support trace.
+    weights : numpy.ndarray
+        array of shape (N, 4) with weights for support traces for interpolation. If some location has integer
+        coordinates, support will have duplicated traces and nan weights.
     dtype : str, optional
         resulting dtype, by default 'float32'
 
@@ -685,9 +684,8 @@ def interpolate(support, weights, traces, traces_indices, dtype='float32'):
     numpy.ndarray
         array of shape (N, geometry.shape[2])
     """
-    image = np.empty((len(support), traces.shape[1]), dtype=dtype)
-    for i in prange(len(support)):
-        trace_support = support[i]
+    image = np.empty((len(traces_indices), traces.shape[1]), dtype=dtype)
+    for i in prange(len(traces_indices)):
         trace_weights = weights[i]
         image[i] = traces[traces_indices[i][0]]
         if not np.isnan(trace_weights[0]):
