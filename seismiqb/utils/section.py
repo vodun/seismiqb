@@ -18,7 +18,6 @@ def extend_line(loc_a, loc_b, shape):
     """ Get bound points for line through `loc_a` and `loc_b`. """
     max_i, max_x = shape
     direction = loc_b - loc_a
-    distance = np.power(direction, 2).sum() ** 0.5
     if direction[0] != 0:
         angle = np.arctan(direction[1] / direction[0])
     else:
