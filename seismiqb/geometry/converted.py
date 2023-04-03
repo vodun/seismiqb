@@ -4,6 +4,7 @@ import numpy as np
 import h5py
 
 from .base import Geometry
+from ..utils import repack_hdf5
 
 
 
@@ -227,3 +228,6 @@ class GeometryHDF5(Geometry):
         # View buffer in original ordering
         buffer = buffer.transpose(from_projection_transposition)
         return buffer
+
+    def repack(self, **kwargs):
+        repack_hdf5(self.path, **kwargs)
