@@ -11,7 +11,6 @@ from batchflow import Notifier
 from .base import Geometry
 from .segyio_loader import SegyioLoader
 from .memmap_loader import MemmapLoader
-from ..utils import extend_line
 
 
 
@@ -540,23 +539,23 @@ class GeometrySEGY(Geometry):
 
         Returns
         -------
-        section, traces, indices: tuple with 3 elements
+        section, indices, nodes: tuple with 3 elements
             section : numpy.ndarray
                 2D array with loaded and interpolated traces of section.
-            traces : numpy.ndarray
-                Float coordinates of section traces.
             indices : numpy.ndarray
+                Float coordinates of section traces.
+            nodes : numpy.ndarray
                 Positions of node traces (from `locations`) in `traces` array.
         """
         dtype = dtype or self.dtype
 
-        traces = []
+        indices = []
         for i in range(1, len(locations)):
             loc_a, loc_b = np.array(locations[i-1]), np.array(locations[i])
-            traces.append(get_line_traces(loc_a, loc_b)[:-1])
-        traces.append(np.array([locations[-1]], dtype='float32'))
+            indices.append(get_line_traces(loc_a, loc_b)[:-1])
+        indices.append(np.array([locations[-1]], dtype='float32'))
 
-        support, weights = get_line_support(np.concatenate(traces))
+        support, weights = get_line_support(np.concatenate(indices))
 
         all_support_traces = np.concatenate(support)
         unique_support, traces_indices = np.unique(all_support_traces, axis=0, return_inverse=True)
@@ -566,9 +565,9 @@ class GeometrySEGY(Geometry):
         section = interpolate(traces, traces_indices, weights)
         if np.issubdtype(dtype, np.integer):
             section = section.astype(dtype)
-        indices = np.cumsum([0] + [len(item) for item in traces[:-1]])
-        traces = np.concatenate(traces)
-        return section, traces, indices
+        nodes = np.cumsum([0] + [len(item) for item in indices[:-1]])
+        indices = np.concatenate(indices)
+        return section, indices, nodes
 
 @njit(nogil=True)
 def _collect_stats_chunk(data,

@@ -12,7 +12,7 @@ from .conversion_mixin import ConversionMixin
 from .export_mixin import ExportMixin
 from .metric_mixin import MetricMixin
 
-from ..utils import SQBStorage, lru_cache, CacheMixin, TransformsMixin, select_printer, transformable, extend_line
+from ..utils import SQBStorage, lru_cache, CacheMixin, TransformsMixin, select_printer, transformable
 from ..plotters import plot
 
 
@@ -796,18 +796,18 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetricM
         linewidth : int
             With of the line.
         """
-        slide, coordinates, node_positions = self.load_section(locations)
-        xmin, xmax, ymin, ymax = 0, slide.shape[0], slide.shape[1], 0
+        section, indices, nodes = self.load_section(locations)
+        xmin, xmax, ymin, ymax = 0, section.shape[0], section.shape[1], 0
 
         if zoom == 'auto':
-            nonzero = np.nonzero((slide != 0).any(axis=1))[0]
+            nonzero = np.nonzero((section != 0).any(axis=1))[0]
             if len(nonzero) > 0:
                 start, stop = nonzero[[0, -1]]
                 zoom = (slice(start, stop + 1), slice(None))
             else:
                 zoom = None
         if zoom:
-            slide = slide[zoom]
+            section = section[zoom]
             xmin = zoom[0].start or xmin
             xmax = zoom[0].stop or xmax
             ymin = zoom[1].stop or ymin
@@ -831,19 +831,19 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetricM
             **kwargs
         }
 
-        plt = plotter(slide, show=False, **kwargs)
+        plt = plotter(section, show=False, **kwargs)
 
         xticks = plt[0].ax.get_xticks().astype('int32')
-        nearest_ticks = np.argmin(np.abs(xticks.reshape(-1, 1) - node_positions.reshape(1, -1)), axis=0)
-        xticks[nearest_ticks] = node_positions
-        labels = np.array(list(map('\n'.join, coordinates.astype('int32').astype(str))))[xticks % slide.shape[0]]
+        nearest_ticks = np.argmin(np.abs(xticks.reshape(-1, 1) - nodes.reshape(1, -1)), axis=0)
+        xticks[nearest_ticks] = nodes
+        labels = np.array(list(map('\n'.join, indices.astype('int32').astype(str))))[xticks % section.shape[0]]
 
         plt[0].ax.set_xticks(xticks[:-1])
         plt[0].ax.set_xticklabels(labels[:-1])
 
         if linecolor:
-            for pos in node_positions:
-                plt[0].ax.plot([pos, pos], [0, slide.shape[1]], color=linecolor, linewidth=linewidth)
+            for pos in nodes:
+                plt[0].ax.plot([pos, pos], [0, section.shape[1]], color=linecolor, linewidth=linewidth)
 
         plt.redraw()
 
