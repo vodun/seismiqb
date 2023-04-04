@@ -4,7 +4,6 @@ import pandas as pd
 
 from scipy.signal import ricker, find_peaks
 from scipy.optimize import minimize
-from scipy.interpolate import interp1d
 from scipy.linalg import toeplitz
 from sklearn.linear_model import Ridge
 
@@ -964,7 +963,9 @@ class WellSeismicMatcher:
 
     # Metrics
     def evaluate_markers(self, markers, state=-1):
-        """ !!. """
+        """ Compare predicted `well_times` on specific horizons to the marked one.
+        TODO: refactor to work with more formats;
+        """
         state = state if isinstance(state, dict) else self.states[state]
 
         if isinstance(markers, str):
@@ -997,7 +998,7 @@ class WellSeismicMatcher:
 
     # Export
     def save_well_times(self, path, state=-1):
-        """ !!. """
+        """ Save `well_times` as the depth-time table. """
         state = self.states[state]
         path = self.field.make_path(path, name=self.well.name)
 
@@ -1010,7 +1011,7 @@ class WellSeismicMatcher:
         df.to_csv(path, header=True, index=False, sep=' ')
 
     def save_wavelet(self, path, state=-1):
-        """ !!. """
+        """ Save wavelet as time-value table. """
         state = self.states[state]
         path = self.field.make_path(path, name=self.well.name)
 
@@ -1023,7 +1024,7 @@ class WellSeismicMatcher:
         df.to_csv(path, header=True, index=False, sep=' ')
 
     def save_las(self, path, state=-1):
-        """ !!. """
+        """ Save well information with all used (possibly, recomputed and filtered) logs. """
         state = self.states[-1]
         path = self.field.make_path(path, name=self.well.name)
 
@@ -1042,7 +1043,7 @@ class WellSeismicMatcher:
         self.well.lasfile.write(path, version=2.0)
 
     def save_synthetic(self, path, state=-1):
-        """ !!. """
+        """ Save synthetic trace in SEG-Y format. """
         state = self.states[state]
         path = self.field.make_path(path, name=self.well.name)
 
@@ -1053,8 +1054,25 @@ class WellSeismicMatcher:
 
 
     # Visualization
-    def show_state(self, state=-1, zoom=slice(None), force_dt=False, **kwargs):
-        """ !!. """
+    def show_state(self, state=-1, limits=slice(None), force_dt=False, **kwargs):
+        """ Show state.
+        Visualizes real-to-synthetic comparison, the wavelet,
+        original and state interval velocity, ratio between original and state velocties.
+
+        If `well_times` are unchanged, the last two graphs are not displayed.
+
+        Parameters
+        ----------
+        force_dt : bool
+            Whether to show the last two graphs even if `well_times` are unchanged in the state.
+        limits : slice or None
+            If provided, then used to slice both seismic trace and synthetic trace to a given range.
+        state : int, dict
+            If int, then the index of previous state to use.
+            If dict, then a state directly.
+        kwargs : dict
+            Other parameters are directly passed to the plotting function.
+        """
         state = len(self.states) - 1 if state == -1 else state
         state_name = '<user_dict>' if isinstance(state, dict) else state
         state = state if isinstance(state, dict) else self.states[state]
@@ -1068,11 +1086,11 @@ class WellSeismicMatcher:
 
         # Seismic to synthetic comparison; wavelet
         well_times = state['well_times'][1:]
-        seismic_times = self.seismic_times[zoom]
+        seismic_times = self.seismic_times[limits]
         wavelet_times = self.seismic_times[:len(wavelet)]
         wavelet_times -= wavelet_times[len(wavelet)//2 + 0]
 
-        data = [[(seismic_times, self.seismic_trace[zoom]), (seismic_times, synthetic_trace[zoom])],
+        data = [[(seismic_times, self.seismic_trace[limits]), (seismic_times, synthetic_trace[limits])],
                 [(wavelet_times, wavelet)]]
 
         # Interval velocities: show only if changed
@@ -1094,9 +1112,9 @@ class WellSeismicMatcher:
                       'interval velocity', 'relative increase in velocity: dt/dt_state'],
             'xlabel': ['seismic time, s', 'time, s',
                        'well time, s', 'well time, s'],
-            'ylabel': ['amplitude', 'amplitude', 
+            'ylabel': ['amplitude', 'amplitude',
                        'velocity, m/s', 'ratio'],
-            'label': [['seismic_trace', 'synthetic_trace'], '', 
+            'label': [['seismic_trace', 'synthetic_trace'], '',
                       ['original IV', 'state IV', 'diff IV'], ''],
             'xlabel_size': 18,
             **kwargs
@@ -1109,7 +1127,7 @@ class WellSeismicMatcher:
 
 
     def show_wavelet(self, state=-1, **kwargs):
-        """ !!. """
+        """ Display wavelet and its power/phase spectra. """
         state = len(self.states) - 1 if state == -1 else state
         state_name = '<user_dict>' if isinstance(state, dict) else state
         state = state if isinstance(state, dict) else self.states[state]
@@ -1133,7 +1151,7 @@ class WellSeismicMatcher:
 
 
     def show_progress(self, start_idx=1, **kwargs):
-        """ !!. """
+        """ Display correlation over the states. """
         data = [[state.get('correlation', self.compute_metric(**state)) for state in self.states[start_idx:]]]
 
         kwargs = {
@@ -1160,10 +1178,12 @@ class WellSeismicMatcher:
 
 
     def show_crosscorrelation(self, state=1, n_peaks=3, **kwargs):
-        """ !!. """
+        """ Display cross-correlation function between real and synthetic trace.
+        Requires for the state to be created by :meth:`compute_t0`.
+        """
         state = state if isinstance(state, dict) else self.states[state]
         if state['type'] not in {'compute_t0'}:
-            raise TypeError('!!.')
+            raise TypeError('State type should be `compute_t0`.')
 
         kwargs = {
             'title': 'correlation VS shift of well data',
@@ -1184,7 +1204,7 @@ class WellSeismicMatcher:
         return plotter
 
     def show_time_shifts(self, zoom=None, **kwargs):
-        """ !!. """
+        """ Display applied stretches. """
         zoom = zoom if zoom is not None else (0, self.seismic_times[-1])
         kwargs = {
             'title': 'Extrema shift visualization',
