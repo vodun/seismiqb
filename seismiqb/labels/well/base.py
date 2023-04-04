@@ -40,7 +40,7 @@ class Well:
             with open(path, mode='r', encoding='utf-8') as file:
                 line = file.readline()
 
-            if 'LAS' in line:
+            if 'LAS' in line or 'version' in line.lower():
                 # LAS format: independent of software written by
                 self.from_las(path, **kwargs)
                 self.format = 'las'
@@ -147,7 +147,7 @@ class Well:
 
         #
         cdp_xy_values = self.data[list(columns[:2])].values
-        ordinal_xy_values = field.cdp_to_lines(cdp_xy_values).astype(np.int32) - field.shifts
+        ordinal_xy_values = field.lines_to_ordinals(field.cdp_to_lines(cdp_xy_values).astype(np.int32))
 
         data = self.data.copy()
         data[['INLINE_3D', 'CROSSLINE_3D']] = ordinal_xy_values
@@ -186,33 +186,53 @@ class Well:
     def compute_reflectivity(self, impedance_log='AI', name='R'):
         """ Compute reflectivity from available impedance log. """
         impedance = self.data[impedance_log].values
-        reflectivity = ((impedance[1:] - impedance[:-1]) /
-                        (impedance[1:] + impedance[:-1]))
-        reflectivity = np.pad(reflectivity, (1, 0), constant_values=np.nan)
+        reflectivity = self._compute_reflectivity(impedance)
         self.data[name] = reflectivity
 
-    def compute_synthetic(self, impulse, reflectivity_log='R', name='SYNTHETIC'):
-        """ Compute synthetic trace from available reflectivity log and provided impulse. """
+    @staticmethod
+    def _compute_reflectivity(impedance, fill_value=0):
+        reflectivity = impedance.copy()
+        reflectivity[1:] = ((impedance[1:] - impedance[:-1]) /
+                            (impedance[1:] + impedance[:-1]))
+        reflectivity[0:1] = fill_value
+        return reflectivity
+
+    def compute_synthetic(self, wavelet, reflectivity_log='R', name='SYNTHETIC'):
+        """ Compute synthetic trace from available reflectivity log and provided wavelet. """
         reflectivity = self.data[reflectivity_log].values
-        reflectivity = np.nan_to_num(reflectivity, nan=0.0)
-        synthetic = np.convolve(reflectivity, impulse, mode='same')
+        synthetic = self._compute_synthetic(reflectivity, wavelet)
         self.data[name] = synthetic
+
+    @staticmethod
+    def _compute_synthetic(reflectivity, wavelet):
+        reflectivity = np.nan_to_num(reflectivity, nan=0.0)
+        synthetic = np.convolve(reflectivity, wavelet, mode='same')
+        return synthetic
 
     def compute_filtered_log(self, log, order=5, frequency=60, btype='lowpass', name=None):
         """ Apply filtration to a given log. """
         array = self.data[log].values
+        filtered_array = self._compute_filtered_log(array, order=order, frequency=frequency,
+                                                    btype=btype, fs=self.field.sample_rate)
+        self.data[name] = filtered_array
 
-        sosfilt = scipy.signal.butter(order, frequency, btype=btype, fs=self.field.sample_rate, output='sos')
+        if log in self.bboxes:
+            bbox = self.bboxes[log].copy()
+            bbox[-1] += [1, -1]
+            filtered_array[:bbox[-1][0]] = np.nan
+            filtered_array[bbox[-1][1]:] = np.nan
+            self.bboxes[name] = bbox
+
+    @staticmethod
+    def _compute_filtered_log(array, order=5, frequency=60, btype='lowpass', fs=500):
+        sosfilt = scipy.signal.butter(order, frequency, btype=btype, fs=fs, output='sos')
         filtered_array = scipy.signal.sosfiltfilt(sosfilt, np.nan_to_num(array))
         filtered_array[filtered_array <= np.nanmin(array)] = np.nan
+        return filtered_array
 
-        bbox = self.bboxes[log].copy()
-        bbox[-1] += [1, -1]
-        filtered_array[:bbox[-1][0]] = np.nan
-        filtered_array[bbox[-1][1]:] = np.nan
-
-        self.data[name] = filtered_array
-        self.bboxes[name] = bbox
+    def compute_sampling_frequency(self):
+        """ Sampling frequency of the well data. Useful for frequency-domain filtrations. """
+        return (1e6 * 0.3048) / self.DT.mean()
 
 
     # Methods for Batch loads
