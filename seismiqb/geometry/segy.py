@@ -527,31 +527,36 @@ class GeometrySEGY(Geometry):
         shape = shape or self.locations_to_shape(locations)
         return np.argsort(shape)[0]
 
-    def load_section(self, loc_a, loc_b, full=False, dtype=None):
-        """ Load section through `loc_a` and `loc_b`.
+    def load_section(self, locations, dtype=None):
+        """ Load section through `locations`.
 
         Parameters
         ----------
-        loc_a : tuple
+        locations : iterable
+            Locations of traces to construct section.
 
-        loc_b : tuple
-
-        full : bool, optional
-            Whether to load the entire section through the given locations up to the very bounds of the cube or only
-            between locations, by default False
         dtype : None or numpy.dtype, optional
             Type of the resulting image, by default None (transforms to self.dtype)
 
         Returns
         -------
-        numpy.ndarray
+        section, traces, indices: tuple with 3 elements
+            section : numpy.ndarray
+                2D array with loaded and interpolated traces of section.
+            traces : numpy.ndarray
+                Float coordinates of section traces.
+            indices : numpy.ndarray
+                Positions of node traces (from `locations`) in `traces` array.
         """
-        loc_a, loc_b = np.array(loc_a), np.array(loc_b)
-        if full:
-            loc_a, loc_b = extend_line(loc_a, loc_b, self.shape[:2])
         dtype = dtype or self.dtype
-        locations = get_line_traces(loc_a, loc_b)
-        support, weights = get_line_support(locations)
+
+        traces = []
+        for i in range(1, len(locations)):
+            loc_a, loc_b = np.array(locations[i-1]), np.array(locations[i])
+            traces.append(get_line_traces(loc_a, loc_b)[:-1])
+        traces.append(np.array([locations[-1]], dtype='float32'))
+
+        support, weights = get_line_support(np.concatenate(traces))
 
         all_support_traces = np.concatenate(support)
         unique_support, traces_indices = np.unique(all_support_traces, axis=0, return_inverse=True)
@@ -561,7 +566,9 @@ class GeometrySEGY(Geometry):
         section = interpolate(traces, traces_indices, weights)
         if np.issubdtype(dtype, np.integer):
             section = section.astype(dtype)
-        return section
+        indices = np.cumsum([0] + [len(item) for item in traces[:-1]])
+        traces = np.concatenate(traces)
+        return section, traces, indices
 
 @njit(nogil=True)
 def _collect_stats_chunk(data,
@@ -643,7 +650,7 @@ def get_line_support(locations):
     support, weights : tuple with two elements
 
         support : numpy.ndarray
-            array of shape (N, 4, 3) and dtype int32 with coordinates of support traces for each location.
+            array of shape (N, 4, 2) and dtype int32 with coordinates of support traces for each location.
         weights : numpy.ndarray
             array of shape (N, 4) with weights for support traces for interpolation. If some location has integer
             coordinates, support will have duplicated traces and nan weights.

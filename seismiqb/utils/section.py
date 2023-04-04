@@ -1,19 +1,15 @@
 """ Functions to get line coordinates by two points. """
 
 import numpy as np
-from numba import njit
 
-@njit
 def _iline_to_xline(x, loc, angle):
     """ Crossline as a function of inline through `loc` with `angle`. """
     return np.tan(angle) * (x - loc[0]) + loc[1]
 
-@njit
 def _xline_to_iline(y, loc, angle):
     """ Inline as a function of crossline through `loc` with `angle`. """
     return np.tan(np.pi / 2 - angle) * (y - loc[1]) + loc[0]
 
-@njit
 def extend_line(loc_a, loc_b, shape):
     """ Get bound points for line through `loc_a` and `loc_b`. """
     max_i, max_x = shape

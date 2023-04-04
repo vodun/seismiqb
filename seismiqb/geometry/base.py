@@ -715,18 +715,16 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetricM
         }
         return plotter(data, bins=bins, mode='histogram', **kwargs)
 
-    def show_slide(self, index, axis=0, zoom=None, plotter=plot, full=False, **kwargs):
+    def show_slide(self, index, axis=0, zoom=None, plotter=plot, **kwargs):
         """ Show seismic slide in desired index.
         Under the hood relies on :meth:`load_slide`, so works with geometries in any formats.
-
         Parameters
         ----------
-        index : int, str or tuple
+        index : int, str
             Index of the slide to show.
             If int, then interpreted as the ordinal along the specified axis.
             If `'random'`, then we generate random index along the axis.
             If string of the `'#XXX'` format, then we interpret it as the exact indexing header value.
-            If tuple of tuples of length 2, locations of traces to construct section.
         axis : int
             Axis of the slide.
         zoom : tuple, None or 'auto'
@@ -735,28 +733,13 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetricM
         plotter : instance of `plot`
             Plotter instance to use.
             Combined with `positions` parameter allows using subplots of already existing plotter.
-        full (applicable for section loading): bool, optional
-            Whether to load the entire section through the given locations up to the very bounds of the cube or only
-            between locations, by default False
         """
-        if not isinstance(index, tuple):
-            axis = self.parse_axis(axis)
-            slide = self.load_slide(index=index, axis=axis)
-        else:
-            slide = self.load_section(*index, full=full)
-
+        axis = self.parse_axis(axis)
+        slide = self.load_slide(index=index, axis=axis)
         xmin, xmax, ymin, ymax = 0, slide.shape[0], slide.shape[1], 0
 
         if zoom == 'auto':
-            if not isinstance(index, tuple):
-                zoom = self.compute_auto_zoom(index, axis)
-            else:
-                nonzero = np.nonzero((slide != 0).any(axis=1))[0]
-                if len(nonzero) > 0:
-                    start, stop = nonzero[[0, -1]]
-                    zoom = (slice(start, stop + 1), slice(None))
-                else:
-                    zoom = None
+            zoom = self.compute_auto_zoom(index, axis)
         if zoom:
             slide = slide[zoom]
             xmin = zoom[0].start or xmin
@@ -765,11 +748,7 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetricM
             ymax = zoom[1].start or ymax
 
         # Plot params
-        if isinstance(index, tuple):
-            title = f'Section from {index[0]} to {index[1]}'
-            xlabel = 'TRACES'
-            ylabel = 'DEPTH'
-        elif len(self.index_headers) > 1:
+        if len(self.index_headers) > 1:
             title = f'{self.axis_names[axis]} {index} out of {self.shape[axis]}'
 
             if axis in [0, 1]:
@@ -797,19 +776,85 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetricM
         }
         return plotter(slide, **kwargs)
 
-    def show_section_map(self, loc_a, loc_b, full=False, linecolor='green', linewidth=3, pointcolor='blue',
+
+    def show_section(self, locations, zoom=None, plotter=plot, linecolor='gray', linewidth=3, **kwargs):
+        """ Show seismic section via desired traces.
+        Under the hood relies on :meth:`load_section`, so works with geometries in any formats.
+
+        Parameters
+        ----------
+        locations : iterable
+            Locations of traces to construct section.
+        zoom : tuple, None or 'auto'
+            Tuple of slices to apply directly to 2d images. If None, slicing is not applied.
+            If 'auto', zero traces on bounds will be dropped.
+        plotter : instance of `plot`
+            Plotter instance to use.
+            Combined with `positions` parameter allows using subplots of already existing plotter.
+        linecolor : str or None
+            Color of line to mark node traces. If None, lines will not be drawn.
+        linewidth : int
+            With of the line.
+        """
+        slide, coordinates, node_positions = self.load_section(locations)
+        xmin, xmax, ymin, ymax = 0, slide.shape[0], slide.shape[1], 0
+
+        if zoom == 'auto':
+            nonzero = np.nonzero((slide != 0).any(axis=1))[0]
+            if len(nonzero) > 0:
+                start, stop = nonzero[[0, -1]]
+                zoom = (slice(start, stop + 1), slice(None))
+            else:
+                zoom = None
+        if zoom:
+            slide = slide[zoom]
+            xmin = zoom[0].start or xmin
+            xmax = zoom[0].stop or xmax
+            ymin = zoom[1].stop or ymin
+            ymax = zoom[1].start or ymax
+
+        # Plot params
+        title = f'Section via {str(locations)[1:-1]}'
+        xlabel = f'{self.index_headers[0]}/{self.index_headers[1]}'
+        ylabel = 'DEPTH'
+
+        kwargs = {
+            'title': title,
+            'suptitle':  f'Field `{self.short_name}`',
+            'xlabel': xlabel,
+            'ylabel': ylabel,
+            'cmap': 'Greys_r',
+            'colorbar': True,
+            'extent': (xmin, xmax, ymin, ymax),
+            'labeltop': False,
+            'labelright': False,
+            **kwargs
+        }
+
+        plt = plotter(slide, show=False, **kwargs)
+
+        xticks = plt[0].ax.get_xticks().astype('int32')
+        nearest_ticks = np.argmin(np.abs(xticks.reshape(-1, 1) - node_positions.reshape(1, -1)), axis=0)
+        xticks[nearest_ticks] = node_positions
+        labels = np.array(list(map('\n'.join, coordinates.astype('int32').astype(str))))[xticks % slide.shape[0]]
+
+        plt[0].ax.set_xticks(xticks[:-1])
+        plt[0].ax.set_xticklabels(labels[:-1])
+
+        if linecolor:
+            for pos in node_positions:
+                plt[0].ax.plot([pos, pos], [0, slide.shape[1]], color=linecolor, linewidth=linewidth)
+
+        plt.redraw()
+
+    def show_section_map(self, locations, linecolor='green', linewidth=3, pointcolor='blue',
                          pointsize=100, marker='*', **kwargs):
         """ Show section line on 2D geometry map.
 
         Parameters
         ----------
-        loc_a : numpy.ndarray
-
-        loc_b : numpy.ndarray
-
-        full : bool, optional
-            Whether to plot the entire section line through the given locations up to the very bounds of the cube
-            or only between locations, by default False
+        locations : iterable
+            Locations of traces to construct section.
         linecolor : str, optional
             Color of section line, by default 'green'
         linewidth : int, optional
@@ -828,12 +873,8 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetricM
         plotter
             Plot instance
         """
-        loc_a, loc_b = np.array(loc_a), np.array(loc_b)
-        if full:
-            start, end = extend_line(loc_a, loc_b, self.shape[:2])
-        else:
-            start, end = loc_a, loc_b
-        title = f'Section from {tuple(loc_a)} to {tuple(loc_b)}'
+        title = f'Section via {str(locations)[1:-1]}'
+        locations = np.array(locations)
 
         kwargs = {
             'title': title,
@@ -844,8 +885,8 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetricM
         }
 
         plotter = self.show(show=False, **kwargs)
-        plotter[0].ax.scatter([loc_a[0], loc_b[0]], [loc_a[1], loc_b[1]], c=pointcolor, s=pointsize, marker=marker)
-        plotter[0].ax.plot([start[0], end[0]], [start[1], end[1]], color=linecolor, linewidth=linewidth)
+        plotter[0].ax.scatter(locations[:, 0], locations[:, 1], c=pointcolor, s=pointsize, marker=marker)
+        plotter[0].ax.plot(locations[:, 0], locations[:, 1], color=linecolor, linewidth=linewidth)
         plotter.redraw()
 
         return plotter
