@@ -15,8 +15,57 @@ from ..plotters import plot
 
 
 class WellSeismicMatcher:
-    """ !!. """
-    # add altitude
+    """ Controller class for the process of well-seismic tie.
+
+    At initialization, we extract `seismic_trace` from the provided `field` and process `well` in a way to obtain
+    values of `well_times`, `well_impedance` and `well_reflectivity`: only this information is required from input data.
+    An initial estimate of a wavelet is computed by :meth:`process_well`.
+
+    After that, we use the concept of `state` to describe the state of well-seismic tie at each given step.
+    Essentially, each state is a dict with required `well_times` and `wavelet` keys: they completely
+    identify matching at any given stage and allow to visualize it or introspect in any other way.
+    Other keys can be used to store important info about operation that created this state.
+
+    The first state should be created manually by :meth:`init_state` that takes an original `well_times`,
+    inferred at initialization, and a wavelet (most probably computed by :meth:`extract_wavelet`).
+    Methods that alter well-seismic tie automatically store their updated state to the `states` attribute,
+    and each subsequent call works of the selected (usually, the last) previous state.
+
+    The usual pipeline of using this class looks like this:
+        - instance initialization, call of :meth:`process_well` with required parameters
+        - wavelet computation: either manual or :meth:`extract_wavelet`
+        - starting state initialization: :meth:`init_state` call with the computed wavelet
+        - t0 computation: :meth:`compute_t0` can be used to analytically compute t0 from elevations and speeds
+        or to guess it by optimizing cross correlation function between synthetic and real traces
+        - stretching and squeezing of `well_times`: by using either method of optimization, we change `well times` to
+        better tie the synthetic and real seismic traces.
+        Currently available methods are :meth:`optimize_extremas` and :meth:`optimize_well_times_pytorch`.
+
+    The last three items create one or more states, that are stored in the instance.
+    At any point, states can be exported or visualized by `save_*` and `show_*` methods.
+
+    Implementation details
+    ----------------------
+    Instance attributes do not change: `well_times` attribute always points to the well times from the LAS file itself.
+    Everything time-related is stored in seconds. Other logs are unchanged.
+    Most of the utility methods are written in a way to accept `(**state)` as an argument.
+
+    TODO: DTW optimization method; rethink resampling; better deterministic wavelet; inclinometry; clean up code;
+
+    Attributes
+    ----------
+    well_times : np.array
+        Initial well times in seconds.
+    well_reflectivity : np.array
+        Well reflectivity values, indexed by MD.
+    seismic_times : np.array
+        Time values in seismic data in seconds.
+    seismic_trace : np.array
+        Seismic amplitudes, indexed by seismic times.
+    states : list
+        States describing well matching after given operation.
+        Each state is a dict with required `well_times` and `wavelet` keys.
+    """
     def __init__(self, well, field, coordinates):
         # Well data
         self.well = well
@@ -40,7 +89,9 @@ class WellSeismicMatcher:
 
 
     def extract_seismic_trace(self, coordinates):
-        """ !!. """
+        """ Get data from a SEG-Y seismic data.
+        Should be overriden for custom algorithm of seismic times / seismic trace acquisition.
+        """
         # TODO: add averaging (copy from 2d matcher), add inclinometry information
         trace = self.field.geometry[coordinates[0], coordinates[1], :]
         self.seismic_trace = trace
@@ -48,11 +99,27 @@ class WellSeismicMatcher:
 
 
     # Extended initialization
-    def process_well(self, impedance_log=None, reflectivity_name='R', recompute_ai=False, recompute_rhob=False,
+    def process_well(self, impedance_log=None, recompute_ai=False, recompute_rhob=False,
                      filter_ai=False, filter_dt=False, filter_rhob=False):
-        """ !!. """
+        """ Get data from a well with optional filtration.
+        Should be overriden for custom algorithm of well times / well reflectivity acquisition.
+
+        Reflectivity is computed from an AI log.
+        If AI   log is unavailable, it is recomputed from RHOB and DT logs.
+        If RHOB log is unavailable, it is recomputed from the DT log by Gardner's equation.
+
+        Parameters
+        ----------
+        impedance_log : str or None
+            If provided, then directly used for computation of reflectivity.
+        filter_* : bool, dict
+            If bool, then whether to apply filtration to a given log.
+            If dict, then parameters of the filtration.
+            `fs` parameter defaults to well sampling frequency.
+        recompute_* : bool
+            Whether to force recompute a given log.
+        """
         #pylint: disable=protected-access
-        # Add Gardner's equation to compute density log
         fs = self.well.compute_sampling_frequency()
 
         # Sonic log, optionally filtered
@@ -103,17 +170,41 @@ class WellSeismicMatcher:
                                                                        **filtration_parameters)
             impedance_log = 'AI_FILTERED'
 
-        self.well.compute_reflectivity(impedance_log=impedance_log, name=reflectivity_name)
+        self.well.compute_reflectivity(impedance_log=impedance_log, name='R_RECOMPUTED')
 
         bounds = self.well.get_bounds(dt_values)
         self.well_bounds = slice(bounds[0]-1, bounds[1])
         self.well_times = np.cumsum(dt_values[self.well_bounds]) * 1e-6                                  # seconds
         self.well_impedance = self.well[impedance_log].values[self.well_bounds]
-        self.well_reflectivity = self.well[reflectivity_name].values[self.well_bounds]
+        self.well_reflectivity = self.well['R_RECOMPUTED'].values[self.well_bounds]
 
 
     def extract_wavelet(self, method='statistical', normalize=False, taper=True, wavelet_length=61, state=-1, **kwargs):
-        """ !!. """
+        """ Compute a wavelet by a chosen method.
+        Available methods are:
+            - `ricker` creates a fixed Ricker wavelet. Additional parameters are `a` for width.
+            - `ricker_f` creates a fixed Ricker wavelet. Additional parameters are `f` for peak frequency.
+            - `stats1` creates a wavelet with the same power spectrum as the one in seismic trace.
+            - `stats2` creates a wavelet with the same power spectrum as the one in autocorrelation of seismic trace.
+            - `division` creates a wavelet with the spectrum of divised spectras of reflectivity and seismic trace.
+            - `lstsq` computes an optimal wavelet by solving system of linear equations (~Wiegner).
+
+        The last two wavelets should be used after initial well-seismic tie is already performed.
+
+        TODO: add better deterministic wavelets.
+
+        Parameters
+        ----------
+        normalize : bool
+            Whether to normalize output wavelet so that max value equals to 1.
+        taper : bool
+            Whether to apply taper to seismic trace / reflectivity before computations.
+        wavelet_length : int
+            Size of the wavelet.
+        state : int, dict
+            If int, then the index of previous state to use.
+            If dict, then a state directly.
+        """
         # Prepare trace and (optionally) reflectivity
         trace = self.seismic_trace.copy()
         if taper:
@@ -181,7 +272,7 @@ class WellSeismicMatcher:
 
 
     def init_state(self, wavelet=None, state=-1):
-        """ !!. """
+        """ Make the first state. By default, uses provided `wavelet` and takes original `well_times`. """
         if isinstance(state, dict):
             previous_state = state
         elif self.states:
@@ -202,7 +293,9 @@ class WellSeismicMatcher:
 
     def change_wavelet(self, keep_bounds=True,
                        method='statistical', normalize=False, taper=True, wavelet_length=61, state=-1, **kwargs):
-        """ !!. """
+        """ Create a state with the computed wavelet.
+        Essentially, an alias to a combination of :meth:`extract_wavelet` and :meth:`init_state`.
+        """
         previous_state = state if isinstance(state, dict) else self.states[state]
         wavelet = self.extract_wavelet(method=method, normalize=normalize, taper=taper,
                                        wavelet_length=wavelet_length, state=state, **kwargs)
@@ -219,7 +312,24 @@ class WellSeismicMatcher:
 
     # Helper functions
     def compute_resampled_synthetic(self, well_times=None, wavelet=None, limits=None, multiply=False, **kwargs):
-        """ !!. """
+        """ Compute synthetic trace in seismic times.
+
+        Uses the following process:
+            reflectivity -> reflectivity_resampled -> synthetic_trace.
+
+        Other way to compute the synthetic trace may be:
+            impedance -> impedance_resampled -> reflectivity -> synthetic_trace
+        but it is less stable computationally.
+
+        TODO: make two methods of computation a parameter
+
+        Parameters
+        ----------
+        limits : slice or None
+            If provided, then used to slice both seismic trace and synthetic trace to a given range.
+        multiply : bool
+            Whether to adjust the mean abs value of synthetic trace to that of seismic trace.
+        """
         #pylint: disable=protected-access
         _ = kwargs
         limits = limits if limits is not None else slice(None)
@@ -229,7 +339,6 @@ class WellSeismicMatcher:
         #                                                well_data=self.well_impedance)
         # reflectivity_resampled = self.well._compute_reflectivity(impedance_resampled)
         # synthetic_trace = self.well._compute_synthetic(reflectivity_resampled, wavelet=wavelet)
-        # return synthetic_trace
 
         reflectivity_resampled = self.resample_to_seismic(seismic_times=self.seismic_times[limits],
                                                           well_times=well_times,
@@ -242,19 +351,27 @@ class WellSeismicMatcher:
 
     @staticmethod
     def resample_to_seismic(seismic_times, well_times, well_data):
-        """ !!. """
+        """ Resample `well_data`, indexed by `well_times`, to `seismic_times`.
+        TODO: better interpolation
+        """
         return np.interp(x=seismic_times, xp=well_times, fp=well_data)
         # return interp1d(x=well_times, y=well_data, kind='slinear',
         #                 bounds_error=False, fill_value=(well_data[0], well_data[-1]))(seismic_times)
 
     @staticmethod
     def compute_multiplier(seismic_trace, synthetic_trace):
-        """ !!. """
+        """ Compute multiplicative difference between abs mean values. """
         return np.abs(seismic_trace).mean() / np.abs(synthetic_trace).mean()
 
     def compute_metric(self, metric='correlation', synthetic_trace=None,
                        well_times=None, wavelet=None, limits=None, **kwargs):
-        """ !!. """
+        """ Compute a given metric between real and synthetic seismic traces.
+
+        Parameters
+        ----------
+        limits : slice or None
+            If provided, then used to slice both seismic trace and synthetic trace to a given range.
+        """
         _ = kwargs
         limits = limits if limits is not None else slice(None)
 
@@ -267,13 +384,34 @@ class WellSeismicMatcher:
 
     @staticmethod
     def correlation(array_0, array_1):
-        """ !!. """
+        """ Compute correlation coefficient between two arrays. """
         return ((array_0 - array_0.mean()) * (array_1 - array_1.mean())).mean() / (array_0.std() * array_1.std())
 
 
     # t0 optimization
     def compute_t0(self, ranges=(-0.5, +1.5), n=1000, limits=None, state=-1, index=0):
-        """ !!. """
+        """ Compute t0.
+
+        Under the hood, uses either analytic formula to estimate t0 by elevations and their velocities or
+        just takes a given extrema on cross-correlation functions between synthetic and real seismic traces.
+
+        TODO: better way to signal that analytic computation is needed; maybe, dont always compute cross correlations;
+
+        Parameters
+        ----------
+        ranges : tuple
+            Ranges of tested shifts for cross-correlation computation.
+        n : int
+            Number of shifts tested.
+        index : int
+            Index of the extrema to take.
+            If equals to -1, then analytic formula is used instead.
+        limits : slice or None
+            If provided, then used to slice both seismic trace and synthetic trace to a given range.
+        state : int, dict
+            If int, then the index of previous state to use.
+            If dict, then a state directly.
+        """
         previous_state = state if isinstance(state, dict) else self.states[state]
         limits = limits if limits is not None else slice(None)
         well_times = previous_state['well_times']
@@ -316,24 +454,36 @@ class WellSeismicMatcher:
 
 
     def optimize_t0(self, state=-1, limits=None, **kwargs):
-        """ !!. """
-        previous_state = state if isinstance(state, dict) else self.states[state]
-        limits = limits if limits is not None else slice(None)
-        wavelet = previous_state['wavelet']
+        """ Optimize the position of t0.
+        Directly minimizes metric in a small neighbourhood of the current (previous state) t0.
 
-        if 't0' in previous_state:
-            t0_start = previous_state['t0']
-        else:
-            t0_start = previous_state['well_times'][0] - self.well_times[0]
-
-        def minimization_proxy(x):
-            return -self.compute_metric(well_times=self.well_times+x, wavelet=wavelet, limits=limits)
-
+        Parameters
+        ----------
+        limits : slice or None
+            If provided, then used to slice both seismic trace and synthetic trace to a given range.
+        state : int, dict
+            If int, then the index of previous state to use.
+            If dict, then a state directly.
+        """
         kwargs = {
             'method': 'SLSQP',
             'options': {'maxiter': 100, 'ftol': 1e-3, 'eps': 1e-6},
             **kwargs
         }
+        previous_state = state if isinstance(state, dict) else self.states[state]
+        limits = limits if limits is not None else slice(None)
+        wavelet = previous_state['wavelet']
+
+        # Select t0
+        if 't0' in previous_state:
+            t0_start = previous_state['t0']
+        else:
+            t0_start = previous_state['well_times'][0] - self.well_times[0]
+
+        # Actual optimization
+        def minimization_proxy(x):
+            return -self.compute_metric(well_times=self.well_times+x, wavelet=wavelet, limits=limits)
+
         optimization_results = minimize(minimization_proxy, x0=t0_start, **kwargs)
         t0 = optimization_results['x']
 
@@ -351,12 +501,18 @@ class WellSeismicMatcher:
     # Extrema optimization
     @staticmethod
     def stretch_well_times(well_times, position, alpha, left_bound, right_bound, **kwargs):
-        """ !!.
+        """ Stretch the `well_times` around `position` by a factor of `alpha`, while having `bounds` fixed.
 
-        |           `left_bound`             `position`              `right_bound`
-        |----------------|------------------------o------------------------|-------------------|
-        |                       <segment x>              <segment y>
+        Stretching by a factor of `alpha` is applied to the left segment (segment x).
+        By having fixed left/right bounds, we can compute stretch factor `beta` for the right segment (segment y),
+        so that the time at the `right_bound` is unchanged.
+        |           `left_bound`                              `position`                        `right_bound`
+        |----------------|-----------------------------------------o----------------------------------|---------------|
+        |                               <segment x>                            <segment y>
+        |                           <stretched by alpha>                   <stretched by alpha>
 
+        This way, the entire stretching process depends only on `alpha` and the positions of fixed/moved points.
+        Out of them only `alpha` should/can be optimized.
         """
         _ = kwargs
 
@@ -374,12 +530,38 @@ class WellSeismicMatcher:
 
     def optimize_extrema(self, topk=20, threshold_max=0.050, threshold_min=0.001, threshold_nearest=0.010,
                          threshold_iv_max=500, alpha_bounds=(0.9, 1.1), state=-1, **kwargs):
-        """ !!. """
-        # `threshold_max` is max amount of SECONDS to shift the extrema position
-        # `threshold_min` is min amount of SECONDS to shift the extrema position
-        # `threshold_nearest` is minimum distance to already-shifted extrema in SECONDS
-        # `threshold_iv_max` is the maximum IV difference in m/s
+        """ Optimize `well_times` by stretching it around some point.
+        Points to stretch about are selected as extremas of synthetic trace: we take `topk` of them based on metric.
+        Each of those extremas is tested against the stretching process: we then select the best one.
 
+        Thresholds regulate how much we allow to stretch each extrema and how close they should be to
+        the already-stretched ones.
+
+        After successfull stretching, we store the `position` to keep it fixed in the next iterations of stretching.
+        This way, already moved extrema points stay in the the positions.
+
+        TODO: explicitly add `limits`; add different strategies for extrema choice;
+
+        Parameters
+        ----------
+        topk : int
+            Number of extremas to test.
+        threshold_max : number
+            Max amount to shift the extrema position in seconds. Useful to constrain the optimization process.
+        threshold_min : number
+            Min amount to shift the extrema position in seconds. Useful to skip tiny shifts.
+        threshold_nearest : number
+            Min distance to already-shifted extrema in seconds. Useful to disallow stretching the same peak twice.
+        threshold_iv_max : number
+            Max difference in interval velocities after the shift in m/s.
+        alpha_bounds : tuple of two numbers
+            Maximum stretch/squeeze allowed.
+        limits : slice or None
+            If provided, then used to slice both seismic trace and synthetic trace to a given range.
+        state : int, dict
+            If int, then the index of previous state to use.
+            If dict, then a state directly.
+        """
         kwargs = {
             'method': 'SLSQP',
             'options': {'maxiter': 100, 'ftol': 1e-3, 'eps': 1e-6},
@@ -495,8 +677,20 @@ class WellSeismicMatcher:
     def optimize_extremas(self, steps=20, threshold_delta=0.01, verbose=True,
                           topk=20, threshold_max=0.050, threshold_min=0.001, threshold_nearest=0.010,
                           threshold_iv_max=500, alpha_bounds=(0.9, 1.1), **kwargs):
-        """ !!. """
-        #
+        """ Optimize `well_times` by stretching multiple times about extrema positions.
+        Simply runs :meth:`optimize_extrema` in a loop with an early-stopping condition.
+
+        Parameters
+        ----------
+        steps : int
+            Number of steps of individual stretching to take.
+        threshold_delta : number
+            Early stop if the metric improves by less than this amount.
+        verbose : bool
+            Whether to print metric values and other info on each step.
+        other parameters : dict
+            Directly passed to :meth:`optimize_extrema`.
+        """
         for i in range(steps):
             success = self.optimize_extrema(topk=topk, threshold_max=threshold_max, threshold_min=threshold_min,
                                             threshold_nearest=threshold_nearest,
@@ -524,8 +718,12 @@ class WellSeismicMatcher:
 
     # Pytorch well times optimization
     @staticmethod
-    def compute_resampled_synthetic_torch(well_times, well_reflectivity, seismic_times, wavelet):
-        """ !!. """
+    def compute_resampled_synthetic_pytorch(well_times, well_reflectivity, seismic_times, wavelet):
+        """ Compute synthetic trace in seismic times.
+        Same as :meth:`compute_resampled_synthetic`, but with `PyTorch` operations instead.
+
+        TODO: replace the interpolation function: the current one is flawed / repo is broken;
+        """
         #pylint: disable=import-outside-toplevel
         import torch
         from xitorch.interpolate import Interp1D
@@ -541,7 +739,32 @@ class WellSeismicMatcher:
     def optimize_well_times_pytorch(self, n_segments=100, n_iters=1000,
                                     optimizer_params=None, regularization_params=None,
                                     limits=None, pbar='t', state=-1):
-        """ !!. """
+        """ Optimize well times by adjusting time values directly.
+        Originally, we allow for each element of `well_times` to be multiplied by a value.
+        Values are computed by optimizing the vector of multipliers with a usual PyTorch training loop.
+
+        To constrain the amount of multipliers, we split the `well_times` into `n_segments`: each segment uses the same
+        multiplier. This way, the number of perturbations is much smaller and, essentially, regularized.
+
+        Parameters
+        ----------
+        n_segments : int
+            Number of segments to split `well_times` into.
+        n_iters : int
+            Number of optimization iterations.
+        optimizer_params : dict
+            Parameters for optimizer initialization.
+        regularization_params : dict
+            Regularization parameters: used keys are 'l1', 'l2', 'dl1', 'dl2'.
+        pbar : bool, str
+            If bool, then whether to display progress bar.
+            If str, then type of progress bar to display: `'t'` for textual, `'n'` for widget.
+        limits : slice or None
+            If provided, then used to slice both seismic trace and synthetic trace to a given range.
+        state : int, dict
+            If int, then the index of previous state to use.
+            If dict, then a state directly.
+        """
         #pylint: disable=import-outside-toplevel
         import torch
         from batchflow import Notifier
@@ -562,7 +785,7 @@ class WellSeismicMatcher:
         dt = torch.from_numpy(np.diff(well_times, prepend=0)).float().clone()
 
         # Prepare variables for optimization: one multiplier for each segment
-        # TODO: figure out a better way to multiplicate values
+        # TODO: figure out a better way to multiplicate values instead of `torch.repeat_interleave`
         if n_segments == len(well_times) or n_segments == 'well':
             multipliers = torch.ones(len(well_times), dtype=torch.float32, requires_grad=True)
             segment_size = 1
@@ -592,10 +815,10 @@ class WellSeismicMatcher:
             multipliers_ = torch.repeat_interleave(multipliers, segment_size)[:len(well_times)]
             multipliers_[0] = 1.0
             new_well_times = torch.cumsum(dt * multipliers_, dim=0)
-            synthetic_trace = self.compute_resampled_synthetic_torch(well_times=new_well_times,
-                                                                     well_reflectivity=well_reflectivity,
-                                                                     seismic_times=seismic_times,
-                                                                     wavelet=wavelet)
+            synthetic_trace = self.compute_resampled_synthetic_pytorch(well_times=new_well_times,
+                                                                       well_reflectivity=well_reflectivity,
+                                                                       seismic_times=seismic_times,
+                                                                       wavelet=wavelet)
             loss = -self.correlation(seismic_trace, synthetic_trace)
 
             # Regularization
@@ -633,7 +856,16 @@ class WellSeismicMatcher:
 
     # Wavelet optimization
     def optimize_wavelet(self, limits=None, state=-1, **kwargs):
-        """ !!. """
+        """ Optimize wavelet's phase by direct minimization.
+
+        Parameters
+        ----------
+        limits : slice or None
+            If provided, then used to slice both seismic trace and synthetic trace to a given range.
+        state : int, dict
+            If int, then the index of previous state to use.
+            If dict, then a state directly.
+        """
         kwargs = {
             'method': 'SLSQP',
             'options': {'maxiter': 100, 'ftol': 1e-4, 'eps': 1e-7},
@@ -667,8 +899,23 @@ class WellSeismicMatcher:
         }
         self.states.append(state)
 
-    def optimize_wavelet_(self, limits=None, n=10, delta=1., state=-1, **kwargs):
-        """ !!. """
+    def optimize_wavelet_(self, n=10, delta=1., limits=None, state=-1, **kwargs):
+        """ Optimize wavelet's phases by directly changing them to maximize metric.
+
+        TODO: explanation, references?
+
+        Parameters
+        ----------
+        n : int
+            Number of (first) frequency phases to optimize.
+        delta : number
+            Additive bound to keep the resulting phase values in.
+        limits : slice or None
+            If provided, then used to slice both seismic trace and synthetic trace to a given range.
+        state : int, dict
+            If int, then the index of previous state to use.
+            If dict, then a state directly.
+        """
         kwargs = {
             'method': 'SLSQP',
             'options': {'maxiter': 100, 'ftol': 1e-4, 'eps': 1e-7},
@@ -711,12 +958,9 @@ class WellSeismicMatcher:
         }
         self.states.append(state)
 
-    # TODO:
+    # TODO
     # SciPy full-vector optimization
-    # PyTorch full-vector optimization
     # DTW full-vector optimization
-    # Wavelet optimization: phase/multiphase
-    # MSE optimization: find wavelet amplitude
 
     # Metrics
     def evaluate_markers(self, markers, state=-1):
