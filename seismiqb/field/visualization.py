@@ -177,6 +177,27 @@ class VisualizationMixin:
 
         return plotter(data=[seismic_slide, mask], **kwargs)
 
+    def show_section(self, locations, zoom=None, plotter=plot, linecolor='gray', linewidth=3, **kwargs):
+        """ Show seismic section via desired traces.
+        Under the hood relies on :meth:`load_section`, so works with geometries in any formats.
+
+        Parameters
+        ----------
+        locations : iterable
+            Locations of traces to construct section.
+        zoom : tuple, None or 'auto'
+            Tuple of slices to apply directly to 2d images. If None, slicing is not applied.
+            If 'auto', zero traces on bounds will be dropped.
+        plotter : instance of `plot`
+            Plotter instance to use.
+            Combined with `positions` parameter allows using subplots of already existing plotter.
+        linecolor : str or None
+            Color of line to mark node traces. If None, lines will not be drawn.
+        linewidth : int
+            With of the line.
+        """
+        self.geometry.show_section(locations, zoom=zoom, plotter=plotter, linecolor=linecolor,
+                                   linewidth=linewidth, **kwargs)
 
     # 2D depth slice
     def show_points(self, src='labels', plotter=plot, **kwargs):
