@@ -393,13 +393,16 @@ class WeightedSumAccumulator3D(Accumulator3D):
         self.create_placeholder(name='data', dtype=self.dtype, fill_value=0)
         self.create_placeholder(name='weights', dtype=np.float32, fill_value=0)
         self.weights_function = weights_function
+        self.crop_weights = None
 
     def _update(self, crop, location):
         # Weights matrix for the incoming crop
-        crop_weights = self.weights_function(crop)
-        self.data[location] = ((crop_weights * crop + self.data[location] * self.weights[location]) /
-                               (crop_weights + self.weights[location]))
-        self.weights[location] += crop_weights
+        if self.crop_weights is None:
+            self.crop_weights = self.weights_function(crop)
+
+        self.data[location] = ((self.crop_weights * crop + self.data[location] * self.weights[location]) /
+                               (self.crop_weights + self.weights[location]))
+        self.weights[location] += self.crop_weights
 
     def _aggregate(self):
         # Cleanup

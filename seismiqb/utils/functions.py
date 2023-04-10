@@ -243,7 +243,7 @@ def make_interior_points_mask(points, cube_shape):
 
 
 @njit(parallel=True)
-def insert_points_into_mask(mask, points, mask_bbox, width, axis):
+def insert_points_into_mask(mask, points, mask_bbox, width, axis, alpha=1):
     """ Add new points into binary mask.
 
     Parameters
@@ -281,10 +281,10 @@ def insert_points_into_mask(mask, points, mask_bbox, width, axis):
 
             if axis == 0:
                 for pos in range(left_bound, right_bound):
-                    mask[pos, point[1], point[2]] = 1
+                    mask[pos, point[1], point[2]] = alpha
             elif axis == 1:
                 for pos in range(left_bound, right_bound):
-                    mask[point[0], pos, point[2]] = 1
+                    mask[point[0], pos, point[2]] = alpha
             elif axis == 2:
                 for pos in range(left_bound, right_bound):
-                    mask[point[0], point[1], pos] = 1
+                    mask[point[0], point[1], pos] = alpha

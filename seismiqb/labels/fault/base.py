@@ -312,7 +312,7 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
         )
 
 
-    def add_to_mask(self, mask, locations=None, width=1, axis=None, sparse=False, **kwargs):
+    def add_to_mask(self, mask, locations=None, width=1, axis=None, sparse=False, alpha=1, **kwargs):
         """ Add fault to background.
 
         Parameters
@@ -355,7 +355,7 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
             slices[self.direction] = unlabeled_slides - mask_bbox[self.direction, 0]
             mask[tuple(slices)] = 0
 
-        insert_points_into_mask(mask, points, mask_bbox, width=width, axis=1-self.direction)
+        insert_points_into_mask(mask, points, mask_bbox, width=width, axis=1-self.direction, alpha=alpha)
         return mask
 
     def __len__(self):

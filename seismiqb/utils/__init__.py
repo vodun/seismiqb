@@ -5,6 +5,7 @@ from .accumulator3d import *
 from .cache import *
 from .charisma import *
 from .classes import *
+from .conversion import *
 from .decorators import *
 from .functions import *
 from .groupby import *

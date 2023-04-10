@@ -45,6 +45,9 @@ def points_to_sticks(points, sticks_step=10, nodes_step='auto', fault_orientatio
         fault_orientation = 2
 
     points = points[np.argsort(points[:, fault_orientation])]
+    if len(points) == 0:
+        return []
+
     slides = split_array(points, points[:, fault_orientation])
 
     sticks = []
@@ -71,7 +74,7 @@ def points_to_sticks(points, sticks_step=10, nodes_step='auto', fault_orientatio
     for slide_points in np.array(slides)[indices]:
         slide_points = slide_points[np.argsort(slide_points[:, stick_orientation])]
         slide_points = thin_line(slide_points, stick_orientation)
-        if len(slide_points) > 2:
+        if len(slide_points) > 5:
             nodes = find_stick_nodes(points=slide_points, fault_orientation=fault_orientation,
                                      stick_orientation=stick_orientation, nodes_step=nodes_step,
                                      threshold=threshold).astype('float32')
@@ -81,7 +84,7 @@ def points_to_sticks(points, sticks_step=10, nodes_step='auto', fault_orientatio
                 normal = 3 - fault_orientation - stick_orientation
                 nodes = nodes[np.unique(remove_redundant_nodes(nodes[:, [normal, stick_orientation]]))]
         else:
-            nodes = slide_points
+            nodes = slide_points[[0, -1]]
         if len(nodes) > 1:
             sticks.append(nodes)
 

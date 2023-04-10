@@ -49,9 +49,9 @@ def triangle_volume(points, width):
     p = (a + b + c) / 2
     S = (p * (p - a) * (p - b) * (p - c)) ** 0.5
     r = S / p
-    r_ = (r + width)
+    r_ = r + width + 1
     p_ = p * r_ / r
-    return (p_ * r_) * (width + 1)
+    return p_ * r_ * (width + 1)
 
 def sticks_to_simplices(sticks, orientation, max_simplices_depth=None, max_nodes_distance=None):
     """ Compute triangulation of the fault.
