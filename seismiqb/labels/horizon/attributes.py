@@ -866,7 +866,7 @@ class AttributesMixin:
     @lru_cache(maxsize=1, apply_by_default=False, copy_on_return=True)
     @transformable
     def get_spikes_mask(self, max_spike_width=7, min_spike_size=5, max_depths_distance=2,
-                        dilation_iterations=0):
+                        dilation_iterations=0, nan_amount_to_ignore=1, points_distance=3):
         """ Get spikes mask for the horizon.
 
         Parameters
@@ -881,6 +881,10 @@ class AttributesMixin:
             assume that depths are almost the same.
         dilation_iterations : int
             Number of iterations for binary dilation algorithm to increase the spikes.
+        nan_amount_to_ignore : int
+            Number of nan values to skip while finding spike start point.
+        points_distance : int
+            Distance between points to compare depths to find spikes. Must be more than 0.
         """
         _ = dilation_iterations # transformable decorator argument
 
@@ -894,9 +898,10 @@ class AttributesMixin:
         for rotation_num in range(1, 5):
             matrix = np.rot90(matrix)
             rotated_spikes = _get_spikes_along_line(matrix=matrix,
-                                                    max_spike_width=max_spike_width,
-                                                    min_spike_size=min_spike_size,
-                                                    max_depths_distance=max_depths_distance)
+                                                    max_spike_width=max_spike_width, min_spike_size=min_spike_size,
+                                                    max_depths_distance=max_depths_distance,
+                                                    nan_amount_to_ignore=nan_amount_to_ignore,
+                                                    points_distance=points_distance)
             spikes += np.rot90(rotated_spikes, k=4-rotation_num)
 
         spikes[spikes > 0] = 1
@@ -904,8 +909,9 @@ class AttributesMixin:
         return spikes
 
 # Helper functions
-@njit(parallel=True)
-def _get_spikes_along_line(matrix, max_spike_width=5, min_spike_size=3, max_depths_distance=2):
+@njit
+def _get_spikes_along_line(matrix, max_spike_width=5, min_spike_size=4, max_depths_distance=2,
+                           nan_amount_to_ignore=1, points_distance=3):
     """ Find spikes on a matrix for the fixed search direction: from up to down, from left to right.
 
     Under the hood, the function iterates over matrix lines and find too huge depth differences on neighboring points.
@@ -918,17 +924,35 @@ def _get_spikes_along_line(matrix, max_spike_width=5, min_spike_size=3, max_dept
     spikes_mask = np.zeros_like(matrix)
     line_length = matrix.shape[1]
 
-    for line_idx in prange(matrix.shape[0]): #pylint: disable=not-an-iterable
+    for line_idx in range(matrix.shape[0]):
         line = matrix[line_idx]
 
-        for previous_idx in range(line_length-1):
-            # Check that point can be a spike's start point: find too huge depth difference
-            current_idx = previous_idx + 1
+        previous_not_nan_idx = -100
+        previous_idx = 0
 
-            if isnan(line[previous_idx]) or isnan(line[current_idx]):
+        while previous_idx < line_length - points_distance:
+            # Check that point can be a spike's start point: find too huge depth difference
+            previous_depth = line[previous_idx]
+
+            current_idx = previous_idx + points_distance
+            current_depth = line[current_idx]
+
+            previous_idx += 1 # for next iter
+
+            if isnan(previous_depth) and isnan(current_depth):
                 continue
 
-            depths_diff = line[current_idx] - line[previous_idx]
+            if (not isnan(previous_depth)) and isnan(current_depth):
+                previous_not_nan_idx = current_idx - points_distance
+                continue
+
+            if isnan(previous_depth) and (not isnan(current_depth)):
+                if current_idx - previous_not_nan_idx < nan_amount_to_ignore + points_distance:
+                    previous_depth = line[previous_not_nan_idx]
+                else:
+                    continue
+
+            depths_diff = current_depth - previous_depth
 
             if np.abs(depths_diff) < min_spike_size:
                 continue
@@ -941,16 +965,17 @@ def _get_spikes_along_line(matrix, max_spike_width=5, min_spike_size=3, max_dept
             if spike_potential_end_idx >= line_length:
                 spike_potential_end_idx = line_length - 1
 
-            standard_depth = line[spike_start_idx-1]
+            standard_depth = previous_depth # depth before the spike
 
-            for spike_potential_point_idx in range(spike_start_idx+1, spike_potential_end_idx):
+            for spike_potential_point_idx in range(spike_start_idx+1, spike_potential_end_idx+1):
                 depth = line[spike_potential_point_idx]
 
                 if not isnan(depth):
                     depths_diff = np.abs(standard_depth - depth)
 
                     if depths_diff <= max_depths_distance:
-                        spikes_mask[line_idx, slice(spike_start_idx, spike_potential_point_idx)] = 1
+                        spikes_mask[line_idx, spike_start_idx:spike_potential_point_idx] = 1
+                        previous_idx = spike_potential_point_idx # we can skip checked and founded spikes area
                         break
 
     return spikes_mask
