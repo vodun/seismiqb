@@ -1,6 +1,5 @@
 """ Helper classes. """
 from ast import literal_eval
-from time import perf_counter
 from collections import OrderedDict
 from functools import wraps
 
@@ -354,52 +353,3 @@ class MetaDict(dict):
             'longitude': None,
             'info': 'дополнительная информация о кубе'
         })
-
-
-
-class timer:
-    """ Context manager for timing the code. """
-    def __init__(self, string=''):
-        self.string = string
-        self.start_time = None
-
-    def __enter__(self):
-        self.start_time = perf_counter()
-        return self
-
-    def __exit__(self, exc_type, exc_value, exc_tb):
-        print(f'{self.string} evaluated in {(perf_counter() - self.start_time):4.4f} seconds')
-
-
-
-class SafeIO:
-    """ Opens the file handler with desired `open` function, closes it at destruction.
-    Can log open and close actions to the `log_file`.
-    getattr, getitem and `in` operator are directed to the `handler`.
-    """
-    def __init__(self, path, opener=open, log_file=None, **kwargs):
-        self.path = path
-        self.log_file = log_file
-        self.handler = opener(path, **kwargs)
-
-        if self.log_file:
-            self._info(self.log_file, f'Opened {self.path}')
-
-    def _info(self, log_file, msg):
-        with open(log_file, 'a', encoding='utf-8') as f:
-            f.write('\n' + msg)
-
-    def __getattr__(self, key):
-        return getattr(self.handler, key)
-
-    def __getitem__(self, key):
-        return self.handler[key]
-
-    def __contains__(self, key):
-        return key in self.handler
-
-    def __del__(self):
-        self.handler.close()
-
-        if self.log_file:
-            self._info(self.log_file, f'Closed {self.path}')
