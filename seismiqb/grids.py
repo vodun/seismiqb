@@ -12,7 +12,7 @@ Each of the classes provides:
     - convenient visualization to explore underlying `locations` structure
 """
 import numpy as np
-from numba import njit
+from numba import njit, prange
 
 from .utils import make_ranges
 
@@ -288,7 +288,12 @@ class RegularGrid(BaseGrid):
             raise ValueError('Only one of `strides`, `overlap` or `overlap_factor` should be specified!')
         overlap_factor = [overlap_factor] * 3 if isinstance(overlap_factor, (int, float)) else overlap_factor
 
-        if strides is None:
+        if strides is not None:
+            strides = strides if isinstance(strides, (tuple, list, np.ndarray)) else [strides] * 3
+            if np.array(strides).dtype == np.float:
+                strides = np.array(crop_shape) * np.array(strides)
+            strides = np.maximum(strides, 1).astype(int)
+        else:
             if overlap is not None:
                 strides = [c - o for c, o in zip(crop_shape, overlap)]
             elif overlap_factor is not None:
@@ -338,14 +343,8 @@ class RegularGrid(BaseGrid):
         order = (1, 2, 3, 0) if self.orientation == 0 else (2, 1, 3, 0)
         points = np.array(np.meshgrid(i_grid, x_grid, d_grid, indexing='ij')).transpose(order).reshape(-1, 3)
 
-        mask = np.ones(len(points), dtype=np.bool_)
         if self.filtering_matrix is not None:
-            for j, (i, x, _) in enumerate(points):
-                sliced = self.filtering_matrix[i:i+self.crop_shape[0], x:x+self.crop_shape[1]]
-                n_alive_traces = sliced.size - sliced.sum()
-                if n_alive_traces <= self.threshold:
-                    mask[j] = False
-        points = points[mask].astype(np.int32)
+            points = filter_points(points, self.filtering_matrix, self.crop_shape, self.threshold)
 
         # Buffer: (cube_id, i_start, x_start, d_start, i_stop, x_stop, d_stop)
         buffer = np.empty((len(points), 9), dtype=np.int32)
@@ -362,6 +361,18 @@ class RegularGrid(BaseGrid):
                f'origin={tuple(self.origin)}, endpoint={tuple(self.endpoint)}, crop_shape={tuple(self.crop_shape)}, '\
                f'orientation={self.orientation}>'
 
+
+@njit
+def filter_points(points, filtering_matrix, crop_shape, threshold):
+    """ Remove locations covering less than `threshold` of present traces. """
+    mask = np.ones(len(points), dtype=np.bool_)
+
+    for j, (i, x, _) in enumerate(points):
+        sliced = filtering_matrix[i:i+crop_shape[0], x:x+crop_shape[1]]
+        n_alive_traces = sliced.size - sliced.sum()
+        if n_alive_traces <= threshold:
+            mask[j] = False
+    return points[mask]
 
 
 class RegularGridChunksIterator:
