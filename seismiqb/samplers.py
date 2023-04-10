@@ -668,7 +668,7 @@ def spatial_check_points(points, matrix, crop_shape, i_mask, x_mask, threshold):
             present_points, running_sum = np.int32(0), np.int32(0)
 
             for value in np.nditer(sliced):
-                if value >= 0:
+                if value > 0:
                     present_points += 1
                     running_sum += value.item()
 
@@ -682,7 +682,7 @@ def spatial_check_points(points, matrix, crop_shape, i_mask, x_mask, threshold):
             present_points, running_sum = np.int32(0), np.int32(0)
 
             for value in np.nditer(sliced):
-                if value >= 0:
+                if value > 0:
                     present_points += 1
                     running_sum += value.item()
 

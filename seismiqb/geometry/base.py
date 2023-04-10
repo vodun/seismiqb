@@ -406,6 +406,7 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetricM
 
         # Depth to units
         if array.shape[1] == self.index_length + 1:
+            array = array.astype(np.float32)
             array[:, self.index_length] -= self.delay
             array[:, self.index_length] /= self.sample_interval
         return array
