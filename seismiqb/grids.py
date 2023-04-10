@@ -12,7 +12,7 @@ Each of the classes provides:
     - convenient visualization to explore underlying `locations` structure
 """
 import numpy as np
-from numba import njit, prange
+from numba import njit
 
 from .utils import make_ranges
 

@@ -1,14 +1,17 @@
 """ Accumulator for 3d volumes. """
 import os
+from copy import copy
 
-import h5py
+import h5pickle as h5py
 import hdf5plugin
 import numpy as np
+from multiprocessing.shared_memory import SharedMemory
+
 from sklearn.linear_model import LinearRegression
 
 from batchflow import Notifier
 
-from .functions import triangular_weights_function_nd
+from .functions import generate_string, triangular_weights_function_nd
 
 
 
@@ -52,8 +55,8 @@ class Accumulator3D:
     kwargs : dict
         Other parameters are passed to HDF5 dataset creation.
     """
-    def __init__(self, shape=None, origin=None, orientation=0, dtype=np.float32, transform=None, path=None,
-                 dataset_kwargs=None, **kwargs):
+    def __init__(self, shape=None, origin=None, orientation=0, dtype=np.float32, transform=None,
+                 type_=None, path=None, dataset_kwargs=None, **kwargs):
         # Dimensionality and location, corrected on `orientation`
         self.orientation = orientation
         self.shape = self.reorder(shape)
@@ -66,15 +69,21 @@ class Accumulator3D:
         self.transform = transform if transform is not None else lambda array: array
 
         # Container definition
-        if path is not None:
+        if type_ is None:
+            type_ = os.path.splitext(path)[1][1:] if path is not None else 'numpy'
+        self.type = type_
+
+        if type_ == 'hdf5':
             if isinstance(path, str) and os.path.exists(path):
                 os.remove(path)
             self.path = path
 
             self.file = h5py.File(path, mode='w-')
             self.dataset_kwargs = dataset_kwargs or {}
+        elif type_ == 'shm':
+            self.shm_data = {} # placeholder name -> shm_instance, dtype
 
-        self.type = os.path.splitext(path)[1][1:] if path is not None else 'numpy'
+        self.placeholders = []
 
         self.aggregated = False
         self.kwargs = kwargs
@@ -85,6 +94,7 @@ class Accumulator3D:
             sequence = np.array([sequence[1], sequence[0], sequence[2]])
         return sequence
 
+
     # Placeholder management
     def create_placeholder(self, name=None, dtype=None, fill_value=None):
         """ Create named storage as a dataset of HDF5 or plain array. """
@@ -93,16 +103,79 @@ class Accumulator3D:
                                                    fillvalue=fill_value, **self.dataset_kwargs)
         elif self.type == 'numpy':
             placeholder = np.full(shape=self.shape, fill_value=fill_value, dtype=dtype)
+        elif self.type == 'shm':
+            size = np.dtype(dtype).itemsize * np.prod(self.shape)
+            shm_name = generate_string(size=10)
 
+            shm = SharedMemory(create=True, size=size, name=shm_name)
+            placeholder = np.ndarray(buffer=shm.buf, shape=self.shape, dtype=dtype)
+            placeholder[:] = fill_value
+
+            self.shm_data[name] = [shm, dtype]
+
+        self.placeholders.append(name)
         setattr(self, name, placeholder)
 
-    def remove_placeholder(self, name=None):
+    def remove_placeholder(self, name=None, unlink=False):
         """ Remove created placeholder. """
         if self.type in ['hdf5', 'qhdf5']:
             del self.file[name]
+        elif self.type == 'shm':
+            shm = self.shm_data[name][0]
+            shm.close()
+            if unlink:
+                shm.unlink()
+            self.shm_data.pop(name)
+
+        self.placeholders.remove(name)
         setattr(self, name, None)
 
+    def clear(self, unlink=False):
+        """ Remove placeholders from memory and disk. """
+        if self.type in ['hdf5', 'qhdf5']:
+            os.remove(self.path)
 
+        if self.type == 'shm':
+            for name in self.placeholders:
+                self.remove_placeholder(name, unlink=unlink)
+
+    def __getstate__(self):
+        """ !!. """
+        state = copy(self.__dict__)
+        if self.type in ['hdf5', 'qhdf5']:
+            for name in self.placeholders:
+                state[name] = None
+
+        if self.type == 'shm':
+            shm_data = {}
+            for name in self.placeholders:
+                shm_instance, dtype = self.shm_data[name]
+                shm_data[name] = [shm_instance.name, dtype]
+                state[name] = None
+            state['shm_data'] = shm_data
+        return state
+
+    def __setstate__(self, state):
+        """ !!. """
+        self.__dict__ = state
+        if self.type in ['hdf5', 'qhdf5']:
+            for name in self.placeholders:
+                setattr(self, name, self.file[name])
+
+        elif self.type == 'shm':
+            for name in self.placeholders:
+                shm_name, dtype = self.shm_data[name]
+                shm = SharedMemory(name=shm_name)
+                placeholder = np.ndarray(buffer=shm.buf, shape=self.shape, dtype=dtype)
+                self.shm_data[name][0] = shm
+                setattr(self, name, placeholder)
+
+    def __del__(self):
+        if self.type == 'shm':
+            self.clear()
+
+
+    # Store data in accumulator
     def update(self, crop, location):
         """ Update underlying storages in supplied `location` with data from `crop`. """
         if self.aggregated:
@@ -162,10 +235,6 @@ class Accumulator3D:
         """ Aggregate placeholders into resulting array. Changes `data` placeholder inplace. """
         raise NotImplementedError
 
-    def clear(self):
-        """ Remove placeholders from memory and disk. """
-        if self.type in ['hdf5', 'qhdf5']:
-            os.remove(self.path)
 
     @property
     def result(self):
@@ -238,9 +307,10 @@ class Accumulator3D:
     # Alternative constructors
     @classmethod
     def from_aggregation(cls, aggregation='max', shape=None, origin=None, dtype=np.float32, fill_value=None,
-                         transform=None, path=None, dataset_kwargs=None, **kwargs):
+                         transform=None, type_=None, path=None, dataset_kwargs=None, **kwargs):
         """ Initialize chosen type of accumulator aggregation. """
         class_to_aggregation = {
+            NoopAccumulator3D: [None, False, 'noop'],
             MaxAccumulator3D: ['max', 'maximum'],
             MeanAccumulator3D: ['mean', 'avg', 'average'],
             GMeanAccumulator3D: ['gmean', 'geometric'],
@@ -251,16 +321,31 @@ class Accumulator3D:
                                 for alias in lst}
 
         return aggregation_to_class[aggregation](shape=shape, origin=origin, dtype=dtype, fill_value=fill_value,
-                                                 transform=transform, path=path,
+                                                 transform=transform, type_=type_, path=path,
                                                  dataset_kwargs=dataset_kwargs, **kwargs)
 
     @classmethod
-    def from_grid(cls, grid, aggregation='max', dtype=np.float32, fill_value=None, transform=None, path=None,
-                  dataset_kwargs=None, **kwargs):
+    def from_grid(cls, grid, aggregation='max', dtype=np.float32, fill_value=None, transform=None,
+                  type_=None, path=None, dataset_kwargs=None, **kwargs):
         """ Infer necessary parameters for accumulator creation from a passed grid. """
         return cls.from_aggregation(aggregation=aggregation, dtype=dtype, fill_value=fill_value,
                                     shape=grid.shape, origin=grid.origin, orientation=grid.orientation,
-                                    transform=transform, path=path, dataset_kwargs=dataset_kwargs, **kwargs)
+                                    transform=transform, type_=type_, path=path, dataset_kwargs=dataset_kwargs,
+                                    **kwargs)
+
+
+class NoopAccumulator3D(Accumulator3D):
+    """ Accumulator that applies no aggregation of overlapping crops. """
+    def __init__(self, shape=None, origin=None, dtype=np.float32, transform=None, path=None, **kwargs):
+        super().__init__(shape=shape, origin=origin, dtype=dtype, transform=transform, path=path, **kwargs)
+
+        self.create_placeholder(name='data', dtype=self.dtype, fill_value=0.0)
+
+    def _update(self, crop, location):
+        self.data[location] = crop
+
+    def _aggregate(self):
+        pass
 
 
 class MaxAccumulator3D(Accumulator3D):
@@ -289,7 +374,7 @@ class MeanAccumulator3D(Accumulator3D):
         super().__init__(shape=shape, origin=origin, dtype=dtype, transform=transform, path=path, **kwargs)
 
         self.create_placeholder(name='data', dtype=self.dtype, fill_value=0)
-        self.create_placeholder(name='counts', dtype=np.int8, fill_value=0)
+        self.create_placeholder(name='counts', dtype=np.uint8, fill_value=0)
 
     def _update(self, crop, location):
         self.data[location] += crop
@@ -307,7 +392,7 @@ class MeanAccumulator3D(Accumulator3D):
                 else:
                     self.data[i] //= counts
 
-        elif self.type == 'numpy':
+        elif self.type in ['numpy', 'shm']:
             self.counts[self.counts == 0] = 1
             if np.issubdtype(self.dtype, np.floating):
                 self.data /= self.counts
@@ -315,7 +400,7 @@ class MeanAccumulator3D(Accumulator3D):
                 self.data //= self.counts
 
         # Cleanup
-        self.remove_placeholder('counts')
+        self.remove_placeholder('counts', unlink=True)
 
 
 class GMeanAccumulator3D(Accumulator3D):
@@ -324,7 +409,7 @@ class GMeanAccumulator3D(Accumulator3D):
         super().__init__(shape=shape, origin=origin, dtype=dtype, transform=transform, path=path, **kwargs)
 
         self.create_placeholder(name='data', dtype=self.dtype, fill_value=1)
-        self.create_placeholder(name='counts', dtype=np.int8, fill_value=0)
+        self.create_placeholder(name='counts', dtype=np.uint8, fill_value=0)
 
     def _update(self, crop, location):
         self.data[location] *= crop
@@ -342,11 +427,11 @@ class GMeanAccumulator3D(Accumulator3D):
                 counts **= -1
                 self.data[i] **= counts
 
-        elif self.type == 'numpy':
+        elif self.type in ['numpy', 'shm']:
             self.counts[self.counts == 0] = 1
 
-            self.counts = self.counts.astype(np.float32)
-            self.counts **= -1
+            counts = self.counts.astype(np.float32)
+            counts **= -1
             self.data **= self.counts
 
         # Cleanup
@@ -379,8 +464,9 @@ class ModeAccumulator3D(Accumulator3D):
             for i in range(self.data.shape[0]):
                 self.data[i] = np.argmax(self.data[i], axis=-1)
 
-        elif self.type == 'numpy':
+        elif self.type in ['numpy', 'shm']:
             self.data = np.argmax(self.data, axis=-1)
+
 
 class WeightedSumAccumulator3D(Accumulator3D):
     """ Accumulator that takes weighted sum of overlapping crops. Accepts `weights_function`
@@ -408,7 +494,8 @@ class WeightedSumAccumulator3D(Accumulator3D):
 
     def _aggregate(self):
         # Cleanup
-        self.remove_placeholder('weights')
+        self.remove_placeholder('weights', unlink=True)
+
 
 class RegressionAccumulator(Accumulator3D):
     """ Accumulator that fits least-squares regression to scale values of
