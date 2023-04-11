@@ -777,7 +777,8 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetricM
         return plotter(slide, **kwargs)
 
 
-    def show_section(self, locations, zoom=None, plotter=plot, linecolor='gray', linewidth=3, **kwargs):
+    def show_section(self, locations, zoom=None, plotter=plot, linecolor='gray', linewidth=3, show=True,
+                     savepath=None, **kwargs):
         """ Show seismic section via desired traces.
         Under the hood relies on :meth:`load_section`, so works with geometries in any formats.
 
@@ -795,6 +796,12 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetricM
             Color of line to mark node traces. If None, lines will not be drawn.
         linewidth : int
             With of the line.
+        show : bool
+            Whether to show created plot or not.
+        savepath : str
+            Path to save the plot to.
+        kwargs : dict
+            kwargs for plotter
         """
         section, indices, nodes = self.load_section(locations)
         xmin, xmax, ymin, ymax = 0, section.shape[0], section.shape[1], 0
@@ -831,7 +838,7 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetricM
             **kwargs
         }
 
-        plt = plotter(section, show=False, **kwargs)
+        plt = plotter(section, show=show, **kwargs)
 
         xticks = plt[0].ax.get_xticks().astype('int32')
         nearest_ticks = np.argmin(np.abs(xticks.reshape(-1, 1) - nodes.reshape(1, -1)), axis=0)
@@ -845,10 +852,13 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetricM
             for pos in nodes:
                 plt[0].ax.plot([pos, pos], [0, section.shape[1]], color=linecolor, linewidth=linewidth)
 
-        plt.redraw()
+        if savepath is not None:
+            plt.save(savepath=savepath)
+
+        return plt
 
     def show_section_map(self, locations, linecolor='green', linewidth=3, pointcolor='blue',
-                         pointsize=100, marker='*', **kwargs):
+                         pointsize=100, marker='*', show=True, savepath=None, **kwargs):
         """ Show section line on 2D geometry map.
 
         Parameters
@@ -865,6 +875,10 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetricM
             Size of points at locations, by default 100
         marker : str, optional
             Points marker, by default '*'
+        show : bool
+            Whether to show created plot or not.
+        savepath : str
+            Path to save the plot to.
         kwargs : dict
             kwargs for `show` method to plot geometry map (e.g., 'matrix')
 
@@ -884,10 +898,12 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetricM
             **kwargs
         }
 
-        plotter = self.show(show=False, **kwargs)
+        plotter = self.show(show=show, **kwargs)
         plotter[0].ax.scatter(locations[:, 0], locations[:, 1], c=pointcolor, s=pointsize, marker=marker)
         plotter[0].ax.plot(locations[:, 0], locations[:, 1], color=linecolor, linewidth=linewidth)
-        plotter.redraw()
+
+        if savepath is not None:
+            plotter.save(savepath=savepath)
 
         return plotter
 

@@ -547,12 +547,12 @@ class GeometrySEGY(Geometry):
             nodes : numpy.ndarray
                 Positions of node traces (from `locations`) in `traces` array.
         """
+        locations = np.array(locations)
         dtype = dtype or self.dtype
 
         indices = []
-        for i in range(1, len(locations)):
-            loc_a, loc_b = np.array(locations[i-1]), np.array(locations[i])
-            indices.append(get_line_traces(loc_a, loc_b)[:-1])
+        for start, stop in zip(locations[:-1], locations[1:]):
+            indices.append(get_line_coordinates(start, stop)[:-1])
         indices.append(np.array([locations[-1]], dtype='float32'))
 
         support, weights = get_line_support(np.concatenate(indices))
@@ -614,25 +614,25 @@ def _collect_stats_chunk(data,
             min_matrix, max_matrix, mean_matrix, var_matrix)
 
 @njit
-def get_line_traces(loc_a, loc_b):
-    """ Get float coordinates of traces for line from `loc_a` to `loc_b`.
+def get_line_coordinates(start, stop):
+    """ Get float coordinates of traces for line from `start` to `stop`.
 
     Parameters
     ----------
-    loc_a : numpy.ndarray
+    start : numpy.ndarray
 
-    loc_b : numpy.ndarray
+    stop : numpy.ndarray
 
     Returns
     -------
     locations : numpy.ndarray
-        array of shape (N, 4) and dtype float32 with coordinates for section traces.
+        array of shape (N, 2) and dtype float32 with coordinates for section traces.
     """
-    direction = loc_b - loc_a
+    direction = stop - start
     distance = np.power(direction, 2).sum() ** 0.5
     locations = np.empty((int(np.ceil(distance)) + 1, 2), dtype=np.float32)
     for i in [0, 1]:
-        locations[:, i] = np.linspace(loc_a[i], loc_b[i], int(np.ceil(distance)) + 1)
+        locations[:, i] = np.linspace(start[i], stop[i], int(np.ceil(distance)) + 1)
     return locations
 
 @njit
@@ -642,7 +642,7 @@ def get_line_support(locations):
     Parameters
     ----------
     locations : numpy.ndarray
-        array of shape (N, 4) and dtype float32
+        array of shape (N, 2) and dtype float32
 
     Returns
     -------
@@ -663,10 +663,10 @@ def get_line_support(locations):
     support[:, 2, 1] = floor[:, 1]
     support[:, 3] = ceil
 
-    weights = np.sum((np.expand_dims(locations, 1) - support) ** 2, axis=-1) ** 0.5
-    weights = 1 / weights
-    for i in prange(len(weights)):
-        weights[i] = weights[i] / sum(weights[i])
+    distances = ((support - np.expand_dims(locations, 1)) ** 2).sum(axis=-1) ** 0.5
+    weights = 1 / distances
+    weights = weights / np.expand_dims(weights.sum(axis=-1), 1)
+
     return support, weights
 
 @njit(parallel=True)
