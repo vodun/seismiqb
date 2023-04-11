@@ -1,11 +1,12 @@
 """ Accumulator for 3d volumes. """
 import os
 from copy import copy
+from multiprocessing.shared_memory import SharedMemory
 
+import shutil
 import h5pickle as h5py
 import hdf5plugin
 import numpy as np
-from multiprocessing.shared_memory import SharedMemory
 
 from sklearn.linear_model import LinearRegression
 
@@ -73,14 +74,21 @@ class Accumulator3D:
             type_ = os.path.splitext(path)[1][1:] if path is not None else 'numpy'
         self.type = type_
 
-        if type_ == 'hdf5':
+        if self.type in ['hdf5', 'zarr']:
             if isinstance(path, str) and os.path.exists(path):
-                os.remove(path)
+                if os.path.isdir(path):
+                    shutil.rmtree(path)
+                else:
+                    os.remove(path)
             self.path = path
-
-            self.file = h5py.File(path, mode='w-')
             self.dataset_kwargs = dataset_kwargs or {}
-        elif type_ == 'shm':
+            if self.type == 'hdf5':
+                self.file = h5py.File(path, mode='w-')
+            else:
+                import zarr
+                self.file = zarr.group(zarr.LMDBStore(path))
+
+        elif self.type == 'shm':
             self.shm_data = {} # placeholder name -> shm_instance, dtype
 
         self.placeholders = []
@@ -99,10 +107,21 @@ class Accumulator3D:
     def create_placeholder(self, name=None, dtype=None, fill_value=None):
         """ Create named storage as a dataset of HDF5 or plain array. """
         if self.type in ['hdf5', 'qhdf5']:
+            print(self.dataset_kwargs)
             placeholder = self.file.create_dataset(name, shape=self.shape, dtype=dtype,
                                                    fillvalue=fill_value, **self.dataset_kwargs)
+        elif self.type == 'zarr':
+            print(self.dataset_kwargs)
+            kwargs = {
+                'chunks': (1, *self.shape[1:]),
+                **self.dataset_kwargs
+            }
+            placeholder = self.file.create_dataset(name, shape=self.shape, dtype=dtype,
+                                                   fill_value=fill_value, **kwargs)
+
         elif self.type == 'numpy':
             placeholder = np.full(shape=self.shape, fill_value=fill_value, dtype=dtype)
+
         elif self.type == 'shm':
             size = np.dtype(dtype).itemsize * np.prod(self.shape)
             shm_name = generate_string(size=10)
@@ -118,7 +137,7 @@ class Accumulator3D:
 
     def remove_placeholder(self, name=None, unlink=False):
         """ Remove created placeholder. """
-        if self.type in ['hdf5', 'qhdf5']:
+        if self.type in ['hdf5', 'qhdf5', 'zarr']:
             del self.file[name]
         elif self.type == 'shm':
             shm = self.shm_data[name][0]
@@ -132,7 +151,7 @@ class Accumulator3D:
 
     def clear(self, unlink=False):
         """ Remove placeholders from memory and disk. """
-        if self.type in ['hdf5', 'qhdf5']:
+        if self.type in ['hdf5', 'qhdf5', 'zarr']:
             os.remove(self.path)
 
         if self.type == 'shm':
@@ -142,7 +161,7 @@ class Accumulator3D:
     def __getstate__(self):
         """ !!. """
         state = copy(self.__dict__)
-        if self.type in ['hdf5', 'qhdf5']:
+        if self.type in ['hdf5', 'qhdf5', 'zarr']:
             for name in self.placeholders:
                 state[name] = None
 
@@ -158,7 +177,7 @@ class Accumulator3D:
     def __setstate__(self, state):
         """ !!. """
         self.__dict__ = state
-        if self.type in ['hdf5', 'qhdf5']:
+        if self.type in ['hdf5', 'qhdf5', 'zarr']:
             for name in self.placeholders:
                 setattr(self, name, self.file[name])
 
@@ -226,6 +245,8 @@ class Accumulator3D:
             self.file.close()
             self.file = h5py.File(self.path, 'r+')
             self.data = self.file['data']
+        elif self.type == 'zarr':
+            self.file.store.flush()
         else:
             if self.orientation == 1:
                 self.data = self.data.transpose(1, 0, 2)
@@ -235,7 +256,6 @@ class Accumulator3D:
         """ Aggregate placeholders into resulting array. Changes `data` placeholder inplace. """
         raise NotImplementedError
 
-
     @property
     def result(self):
         """ Reference to the aggregated result. """
@@ -243,6 +263,8 @@ class Accumulator3D:
             self.aggregate()
         return self.data
 
+
+    # Utilify methods
     def export_to_hdf5(self, path=None, projections=(0,), pbar='t', dtype=None, transform=None, dataset_kwargs=None):
         """ Export `data` attribute to a file. """
         if self.type != 'numpy' or self.orientation != 0:
@@ -275,6 +297,7 @@ class Accumulator3D:
                         progress_bar.update()
         return h5py.File(path, mode='r')
 
+
     # Pre-defined transforms
     @staticmethod
     def prediction_to_int8(array):
@@ -303,6 +326,7 @@ class Accumulator3D:
         array = array.astype(np.float32)
         array /= 255
         return array
+
 
     # Alternative constructors
     @classmethod
