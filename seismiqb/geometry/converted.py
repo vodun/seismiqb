@@ -232,5 +232,5 @@ class GeometryHDF5(Geometry):
     def repack_hdf5(self, dst_path=None, projections = (0, ), transform=None, dtype='float32', pbar='t', inplace=False,
                     **dataset_kwargs):
         """ Recreate hdf5 file with conversion and compression. """
-        repack_hdf5(self.path, dst_path=None, projections = (0, ), transform=None, dtype='float32', pbar='t',
-                    inplace=False, **dataset_kwargs)
+        repack_hdf5(self.path, dst_path=dst_path, projections=projections, transform=transform, dtype=dtype, pbar=pbar,
+                    inplace=inplace, **dataset_kwargs)
