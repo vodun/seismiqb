@@ -5,7 +5,10 @@ from textwrap import dedent
 from contextlib import contextmanager
 
 import numpy as np
+
+import cv2
 from scipy.interpolate import interp1d
+from scipy.ndimage import binary_erosion
 
 from .benchmark_mixin import BenchmarkMixin
 from .conversion_mixin import ConversionMixin
@@ -196,9 +199,8 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetricM
     def __getstate__(self):
         self.reset_cache()
         state = self.__dict__.copy()
-        for name in ['loader', 'axis_to_projection']:
-            if name in state:
-                state.pop(name)
+        for name in ['loader', 'axis_to_projection'] + self.PRESERVED_LAZY_CACHED:
+            state.pop(name, None)
         return state
 
     def __setstate__(self, state):
@@ -597,7 +599,7 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetricM
     @property
     def ngbytes(self):
         """ Size of instance in gigabytes. """
-        return self.nbytes / (1024**3)
+        return self.nbytes / (1024 ** 3)
 
 
     # Attribute retrieval. Used by `Field` instances
@@ -989,3 +991,40 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetricM
     def locations_to_shape(locations):
         """ Compute shape of a location. """
         return tuple(slc.stop - slc.start for slc in locations)
+
+    def get_slide_mask(self, index, axis=0, kernel_size=9, threshold=None, erosion=11):
+        """ Get mask with dead pixels on a given slide.
+        Under the hood, we compute ptp value for each pixel, and deem everything lower than `threshold` be a dead pixel.
+
+        Parameters
+        ----------
+        index : int, str
+            Index of the slide to show.
+            If int, then interpreted as the ordinal along the specified axis.
+            If `'random'`, then we generate random index along the axis.
+            If string of the `'#XXX'` format, then we interpret it as the exact indexing header value.
+        axis : int
+            Axis of the slide.
+        kernel_size : int
+            Window size for computations.
+        threshold : number
+            Minimum ptp value to consider a pixel to be a dead one.
+        erosion : int
+            Amount of binary erosion for postprocessing.
+
+        Returns
+        -------
+        mask : np.ndarray
+            Boolean mask with 1`s at dead pixels and 0`s at alive ones.
+        """
+        threshold = threshold or self.std / 10
+        slide = self.load_slide(index=index, axis=axis,)
+
+        kernel = np.ones((kernel_size, kernel_size), dtype=slide.dtype)
+        ptps = cv2.dilate(slide, kernel) - cv2.erode(slide, kernel)
+        mask = ptps <= threshold
+
+        if erosion:
+            kernel = np.ones((erosion, erosion), dtype=mask.dtype)
+            mask = binary_erosion(mask, structure=kernel, border_value=True)
+        return mask
