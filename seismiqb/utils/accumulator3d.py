@@ -158,7 +158,7 @@ class Accumulator3D:
                 self.remove_placeholder(name, unlink=unlink)
 
     def __getstate__(self):
-        """ !!. """
+        """ Store state of an instance. Remove file handlers and shared memory objects. """
         state = copy(self.__dict__)
         if self.type in ['hdf5', 'qhdf5', 'zarr']:
             for name in self.placeholders:
@@ -174,7 +174,7 @@ class Accumulator3D:
         return state
 
     def __setstate__(self, state):
-        """ !!. """
+        """ Re-create an instance from state. Re-open file handers and shared memory objects. """
         self.__dict__ = state
         if self.type in ['hdf5', 'qhdf5', 'zarr']:
             for name in self.placeholders:
