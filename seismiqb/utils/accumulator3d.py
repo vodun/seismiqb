@@ -82,10 +82,11 @@ class Accumulator3D:
                     os.remove(path)
             self.path = path
             self.dataset_kwargs = dataset_kwargs or {}
+
             if self.type == 'hdf5':
                 self.file = h5py.File(path, mode='w-')
             else:
-                import zarr
+                import zarr #pylint: disable=import-outside-toplevel
                 self.file = zarr.group(zarr.LMDBStore(path))
 
         elif self.type == 'shm':
@@ -107,11 +108,9 @@ class Accumulator3D:
     def create_placeholder(self, name=None, dtype=None, fill_value=None):
         """ Create named storage as a dataset of HDF5 or plain array. """
         if self.type in ['hdf5', 'qhdf5']:
-            print(self.dataset_kwargs)
             placeholder = self.file.create_dataset(name, shape=self.shape, dtype=dtype,
                                                    fillvalue=fill_value, **self.dataset_kwargs)
         elif self.type == 'zarr':
-            print(self.dataset_kwargs)
             kwargs = {
                 'chunks': (1, *self.shape[1:]),
                 **self.dataset_kwargs
