@@ -3,7 +3,6 @@ import os
 import re
 import itertools
 from glob import glob
-from difflib import get_close_matches
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
@@ -62,7 +61,7 @@ class Field(CharismaMixin, VisualizationMixin):
     >>> Field(geometry=..., labels=['paths/1', 'paths/2', 'paths/3'], labels_class='fault')
     """
     #pylint: disable=redefined-builtin
-    def __init__(self, geometry, labels=None, labels_class=None, geometry_kwargs=None, labels_kwargs=None, **kwargs):
+    def __init__(self, geometry, labels=None, **geometry_kwargs):
         # Attributes
         self.labels = []
         self.horizons, self.facies, self.fans, self.channels, self.faults = [], [], [], [], []
@@ -70,14 +69,12 @@ class Field(CharismaMixin, VisualizationMixin):
 
         # Geometry: description and convenient API to a seismic cube
         if isinstance(geometry, str):
-            geometry_kwargs = geometry_kwargs or {}
-            geometry = Geometry.new(geometry, **{**kwargs, **geometry_kwargs})
+            geometry = Geometry.new(geometry, **geometry_kwargs)
         self.geometry = geometry
 
         # Labels: objects on a field
-        if labels:
-            labels_kwargs = labels_kwargs or {}
-            self.load_labels(labels, labels_class, **{**kwargs, **labels_kwargs})
+        if labels is not None:
+            self.load_labels(labels)
 
 
     # Label initialization inner workings
@@ -88,7 +85,7 @@ class Field(CharismaMixin, VisualizationMixin):
     }
     NAME_TO_METHOD = {name: method for method, names in METHOD_TO_NAMES.items() for name in names}
 
-    def load_labels(self, labels=None, labels_class=None, mode='w', **labels_kwargs):
+    def load_labels(self, labels=None, mode='w'):
         """ Load labels and store them in the instance. Refer to the class documentation for details. """
         if isinstance(labels, str):
             labels = self.make_path(labels, makedirs=False)
@@ -98,32 +95,29 @@ class Field(CharismaMixin, VisualizationMixin):
         if not isinstance(labels, dict):
             raise TypeError(f'Labels type should be `str`, `sequence` or `dict`, got {type(labels)} instead!')
 
-        # Labels class: make a dictionary
-        if labels_class is None:
-            labels_class_dict = {label_dst : None for label_dst in labels.keys()}
-        if isinstance(labels_class, (type, str)):
-            labels_class_dict = {label_dst : labels_class for label_dst in labels.keys()}
-        if isinstance(labels_class, dict):
-            labels_class_dict = labels_class
-
-        for label_dst, label_src in labels.items():
-            # Try getting provided `labels_class`, else fallback on NAME_TO_METHOD closest match
-            label_class = labels_class_dict.get(label_dst)
+        for label_dst, label_kwargs in labels.items():
+            # Try getting provided 'class', else try to find the closest match for `label_dst`
+            # label_kwargs is a dict {'src': ..., 'class': ..., **kwargs} or the label reference
+            if isinstance(label_kwargs, dict):
+                label_class = label_kwargs.pop('class', None)
+                label_src = label_kwargs.pop('src')
+            else:
+                label_class = None
+                label_src = label_kwargs
+                label_kwargs = {}
 
             if label_class is None:
-                # Roughly equivalent to ``label_class = self.NAME_TO_METHOD.get(label_dst)``
-                str_names = [name for name in (self.NAME_TO_METHOD.keys())
-                             if isinstance(name, str)]
-                matched = get_close_matches(label_dst, str_names, n=1)
-                if matched:
-                    label_class = matched[0]
+                for names in self.METHOD_TO_NAMES.values():
+                    if any(name in label_dst.lower() for name in names[:-1]):
+                        label_class = names[-1]
+                        break
 
             if label_class is None:
                 raise TypeError(f"Can't determine the label class for `{label_dst}`!")
 
             if isinstance(label_class, str):
-                method = self.NAME_TO_METHOD[label_class]
-                label_class = self.METHOD_TO_NAMES[method][-1]
+                method_name = self.NAME_TO_METHOD[label_class]
+                label_class = self.METHOD_TO_NAMES[method_name][-1]
 
             # Process paths: get rid of service files
             if isinstance(label_src, str):
@@ -136,7 +130,7 @@ class Field(CharismaMixin, VisualizationMixin):
             # Load desired labels, based on class
             method_name = self.NAME_TO_METHOD[label_class]
             method = getattr(self, method_name)
-            result = method(label_src, label_class=label_class, **labels_kwargs)
+            result = method(label_src, label_class=label_class, **label_kwargs)
 
             if mode == 'w':
                 setattr(self, label_dst, result)

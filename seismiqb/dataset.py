@@ -32,7 +32,7 @@ class SeismicDataset(Dataset):
     Named arguments are passed for each field initialization.
     """
     #pylint: disable=keyword-arg-before-vararg
-    def __init__(self, index, batch_class=SeismicCropBatch, *args, **kwargs):
+    def __init__(self, index, batch_class=SeismicCropBatch, *args, **geometry_kwargs):
         if args:
             raise TypeError('Positional args are not allowed for `SeismicDataset` initialization!')
 
@@ -48,9 +48,9 @@ class SeismicDataset(Dataset):
                 if isinstance(field_idx, (Field, SyntheticField)):
                     field = field_idx
                     if labels_idx is not None:
-                        field.load_labels(labels=labels_idx, **kwargs)
+                        field.load_labels(labels=labels_idx)
                 else:
-                    field = Field(geometry=field_idx, labels=labels_idx, **kwargs)
+                    field = Field(geometry=field_idx, labels=labels_idx, **geometry_kwargs)
 
                 self.fields[field.short_name] = field
         else:
