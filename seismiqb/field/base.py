@@ -84,6 +84,7 @@ class Field(CharismaMixin, VisualizationMixin):
         '_load_geometries': ['geometries', 'geometry',  Geometry],
     }
     NAME_TO_METHOD = {name: method for method, names in METHOD_TO_NAMES.items() for name in names}
+    LABEL_CLASSES = tuple(names[-1] for names in METHOD_TO_NAMES.values())
 
     def load_labels(self, labels=None, mode='w'):
         """ Load labels and store them in the instance. Refer to the class documentation for details. """
@@ -107,6 +108,13 @@ class Field(CharismaMixin, VisualizationMixin):
                 label_kwargs = {}
 
             if label_class is None:
+                # For inherited classes or initialized instances
+                if isinstance(label_src, (tuple, list)) and issubclass(type(label_src[0]), self.LABEL_CLASSES):
+                    label_class = label_src[0].__class__
+                elif issubclass(type(label_src), self.LABEL_CLASSES):
+                    label_class = label_src.__class__
+
+            if label_class is None:
                 for names in self.METHOD_TO_NAMES.values():
                     if any(name in label_dst.lower() for name in names[:-1]):
                         label_class = names[-1]
@@ -128,8 +136,12 @@ class Field(CharismaMixin, VisualizationMixin):
             label_src = self._filter_paths(label_src)
 
             # Load desired labels, based on class
-            method_name = self.NAME_TO_METHOD[label_class]
-            method = getattr(self, method_name)
+            if label_class in self.NAME_TO_METHOD.keys():
+                method_name = self.NAME_TO_METHOD[label_class]
+                method = getattr(self, method_name)
+            else:
+                method = self._load_custom_objects
+
             result = method(label_src, label_class=label_class, **label_kwargs)
 
             if mode == 'w':
@@ -219,6 +231,30 @@ class Field(CharismaMixin, VisualizationMixin):
                 raise ValueError(f'Path for Geometry loading is non-unique!, {paths}')
             path = paths[0]
         return constructor_class(path, **kwargs)
+
+    def _load_custom_objects(self, paths, label_class, **kwargs):
+        """ Load custom class objects from paths or re-use already created ones. """
+        # Separate paths from ready-to-use instances
+        objects, paths_to_load = [], []
+        for item in paths:
+            if isinstance(item, str):
+                paths_ = self._filter_paths(glob(item))
+                paths_to_load.extend(paths_)
+
+            elif isinstance(item, label_class):
+                item.field = self
+                objects.append(item)
+
+        # Load from paths in multiple threads
+        if len(paths_to_load) > 0:
+            max_workers = kwargs.pop('max_workers', 1)
+
+            with ThreadPoolExecutor(max_workers=min(max_workers, len(paths_to_load) or 1)) as executor:
+                function = lambda path: label_class(path, field=self, **kwargs)
+                loaded = list(executor.map(function, paths_to_load))
+            objects.extend(loaded)
+
+        return objects
 
 
     # Other methods of initialization
