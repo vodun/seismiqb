@@ -719,7 +719,6 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetricM
     def show_slide(self, index, axis=0, zoom=None, plotter=plot, **kwargs):
         """ Show seismic slide in desired index.
         Under the hood relies on :meth:`load_slide`, so works with geometries in any formats.
-
         Parameters
         ----------
         index : int, str
@@ -779,6 +778,136 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetricM
         return plotter(slide, **kwargs)
 
 
+    def show_section(self, locations, zoom=None, plotter=plot, linecolor='gray', linewidth=3, show=True,
+                     savepath=None, **kwargs):
+        """ Show seismic section via desired traces.
+        Under the hood relies on :meth:`load_section`, so works with geometries in any formats.
+
+        Parameters
+        ----------
+        locations : iterable
+            Locations of traces to construct section.
+        zoom : tuple, None or 'auto'
+            Tuple of slices to apply directly to 2d images. If None, slicing is not applied.
+            If 'auto', zero traces on bounds will be dropped.
+        plotter : instance of `plot`
+            Plotter instance to use.
+            Combined with `positions` parameter allows using subplots of already existing plotter.
+        linecolor : str or None
+            Color of line to mark node traces. If None, lines will not be drawn.
+        linewidth : int
+            With of the line.
+        show : bool
+            Whether to show created plot or not.
+        savepath : str
+            Path to save the plot to.
+        kwargs : dict
+            kwargs for plotter
+        """
+        section, indices, nodes = self.load_section(locations)
+        xmin, xmax, ymin, ymax = 0, section.shape[0], section.shape[1], 0
+
+        if zoom == 'auto':
+            nonzero = np.nonzero((section != 0).any(axis=1))[0]
+            if len(nonzero) > 0:
+                start, stop = nonzero[[0, -1]]
+                zoom = (slice(start, stop + 1), slice(None))
+            else:
+                zoom = None
+        if zoom:
+            section = section[zoom]
+            xmin = zoom[0].start or xmin
+            xmax = zoom[0].stop or xmax
+            ymin = zoom[1].stop or ymin
+            ymax = zoom[1].start or ymax
+
+        # Plot params
+        title = f'Section via {str(locations)[1:-1]}'
+        xlabel = f'{self.index_headers[0]}/{self.index_headers[1]}'
+        ylabel = 'DEPTH'
+
+        kwargs = {
+            'title': title,
+            'suptitle':  f'Field `{self.short_name}`',
+            'xlabel': xlabel,
+            'ylabel': ylabel,
+            'cmap': 'Greys_r',
+            'colorbar': True,
+            'extent': (xmin, xmax, ymin, ymax),
+            'labeltop': False,
+            'labelright': False,
+            **kwargs
+        }
+
+        plt = plotter(section, show=show, **kwargs)
+
+        xticks = plt[0].ax.get_xticks().astype('int32')
+        nearest_ticks = np.argmin(np.abs(xticks.reshape(-1, 1) - nodes.reshape(1, -1)), axis=0)
+        xticks[nearest_ticks] = nodes
+        labels = np.array(list(map('\n'.join, indices.astype('int32').astype(str))))[xticks % section.shape[0]]
+
+        plt[0].ax.set_xticks(xticks[:-1])
+        plt[0].ax.set_xticklabels(labels[:-1])
+
+        if linecolor:
+            for pos in nodes:
+                plt[0].ax.plot([pos, pos], [0, section.shape[1]], color=linecolor, linewidth=linewidth)
+
+        if savepath is not None:
+            plt.save(savepath=savepath)
+
+        return plt
+
+    def show_section_map(self, locations, linecolor='green', linewidth=3, pointcolor='blue',
+                         pointsize=100, marker='*', show=True, savepath=None, **kwargs):
+        """ Show section line on 2D geometry map.
+
+        Parameters
+        ----------
+        locations : iterable
+            Locations of traces to construct section.
+        linecolor : str, optional
+            Color of section line, by default 'green'
+        linewidth : int, optional
+            Width of section line, by default 3
+        pointcolor : str, optional
+            Color of points at locations, by default 'blue'
+        pointsize : int, optional
+            Size of points at locations, by default 100
+        marker : str, optional
+            Points marker, by default '*'
+        show : bool
+            Whether to show created plot or not.
+        savepath : str
+            Path to save the plot to.
+        kwargs : dict
+            kwargs for `show` method to plot geometry map (e.g., 'matrix')
+
+        Returns
+        -------
+        plotter
+            Plot instance
+        """
+        title = f'Section via {str(locations)[1:-1]}'
+        locations = np.array(locations)
+
+        kwargs = {
+            'title': title,
+            'labeltop': False,
+            'labelright': False,
+            'matrix': 'snr',
+            **kwargs
+        }
+
+        plotter = self.show(show=show, **kwargs)
+        plotter[0].ax.scatter(locations[:, 0], locations[:, 1], c=pointcolor, s=pointsize, marker=marker)
+        plotter[0].ax.plot(locations[:, 0], locations[:, 1], color=linecolor, linewidth=linewidth)
+
+        if savepath is not None:
+            plotter.save(savepath=savepath)
+
+        return plotter
+
     # Utilities for 2D slides
     def get_slide_index(self, index, axis=0):
         """ Get the slide index along specified axis.
@@ -823,7 +952,6 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetricM
     def compute_auto_zoom(self, index, axis=0):
         """ Compute zoom for a given slide. """
         return slice(*self.get_slide_bounds(index=index, axis=axis)), slice(None)
-
 
     # General utility methods
     STRING_TO_AXIS = {
