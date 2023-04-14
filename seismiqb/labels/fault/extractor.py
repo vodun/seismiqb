@@ -71,8 +71,9 @@ class FaultExtractor:
     Parameters
     ----------
     data : np.ndarray or :class:`~.Geometry` instance, optional
-        A 3d array with smoothed predictions with shape corresponds to the field shape.
+        A 3d array with smoothed or skeletonized predictions with shape corresponds to the field shape.
         Note, that you need to provide `data` argument or `prototypes` and `shape` instead.
+        Note, by default we process skeletonized data, for smoothed data set `skeletonize_data=True`.
     direction : {0, 1}
         Extraction direction, can be 0 (ilines) or 1 (xlines) and the same as the prediction direction.
     direction_origin : int
@@ -81,10 +82,9 @@ class FaultExtractor:
         Prototypes for applying :class:`~.FaultExtractor` manipulations on.
     shape : sequence of three ints, optional
         Data shape from which `prototypes` were extracted.
-    skeleton_data : np.ndarray or :class:`~.Geometry` instance, optional
-        Data received after the `data` skeletonize.
-        Can be used for speed-up: we make skeletonize inside the extractor initialization,
-        but sometimes we have this array outside the extractor for other needs.
+    skeletonize_data : bool
+        Whether the `data` argument needs skeletonization data or not.
+        Should be True, if data is smoothed model outputs.
     component_len_threshold : int
         Threshold to filter out too small connected components on data slides.
         If 0, then no filter applied (recommended for higher accuracy).
@@ -92,7 +92,7 @@ class FaultExtractor:
     """
     # pylint: disable=protected-access
     def __init__(self, data=None, direction=0, direction_origin=0, prototypes=None, shape=None,
-                 skeleton_data=None, component_len_threshold=0):
+                 skeletonize_data=False, component_len_threshold=0):
         # Check
         if data is None and (prototypes is None or shape is None):
             raise ValueError("`data` or `prototypes` and `shape` must be provided!")
@@ -110,78 +110,64 @@ class FaultExtractor:
         self._dilation = 3 # constant for internal operations
         self.component_len_threshold = component_len_threshold
 
-        self.container = self._init_container(data=data, skeleton_data=skeleton_data) if data is not None else None
+        self.container = self._init_container(data=data, skeletonize_data=skeletonize_data) if data is not None else None
         self._unprocessed_slide_idx = self.direction_origin # variable for internal operations speed up
 
         self.prototypes_queue = deque() # prototypes for extension
         self.prototypes = [] if prototypes is None else prototypes # extracted prototypes
 
-    def _init_container(self, data, skeleton_data=None):
+    def _init_container(self, data, skeletonize_data=False):
         """ Extract connected components on each slide and save them into container. """
         dilation_structure = np.ones((1, self._dilation), np.uint8)
         container = {}
 
         # Process data slides: extract connected components and their info
         for slide_idx in Notifier('t')(range(self.shape[self.direction])):
-            # Get smoothed data slide
-            smoothed = data.take(slide_idx, axis=self.direction)
-
             # Get skeletonized slide
-            if skeleton_data is None:
-                mask = skeletonize(smoothed, width=3)
-                mask = dilate(mask, (1, 3))
-            else:
-                mask = skeleton_data.take(slide_idx, axis=self.direction)
+            slide = data.take(slide_idx, axis=self.direction)
+
+            if skeletonize_data:
+                slide = skeletonize(slide, width=3)
 
             # Extract connected components from the slide
-            labeled = connected_components(mask > 0)
-            objects = find_objects(labeled)
+            labeled_slide = connected_components(slide > 0)
+            objects = find_objects(labeled_slide)
 
             # Get components info
             components, lengths = [], []
 
             for idx, object_bbox in enumerate(objects, start=1):
-                # Extract component coords: we refine skeletonize effects by applying it on limited area
-                dilation_axis = self.orthogonal_direction
-                dilation_ranges = (max(0, object_bbox[0].start - self._dilation // 2),
-                                   min(object_bbox[0].stop + self._dilation // 2, self.shape[dilation_axis]))
+                # Extract component mask
+                object_mask = labeled_slide[object_bbox] == idx
 
-                object_mask = labeled[dilation_ranges[0]:dilation_ranges[1], object_bbox[-1]] == idx
-
+                # Check length
                 length = np.count_nonzero(object_mask)
-
-                if length <= self.component_len_threshold:
-                    continue
-
-                # Get component neighboring area coords for probabilities extraction
-                object_mask = dilate(object_mask.astype(np.uint8), dilation_structure)
-
-                dilated_coords_2d = np.nonzero(object_mask)
-
-                dilated_coords = np.zeros((len(dilated_coords_2d[0]), 3), dtype=np.int32)
-
-                dilated_coords[:, self.direction] = slide_idx + self.direction_origin
-                dilated_coords[:, dilation_axis] = dilated_coords_2d[0].astype(np.int32) + dilation_ranges[0]
-                dilated_coords[:, 2] = dilated_coords_2d[1].astype(np.int32) + object_bbox[1].start
-
-                smoothed_values = smoothed[dilated_coords[:, dilation_axis], dilated_coords[:, -1]]
-
-                coords, probas = depthwise_groupby_max(coords=dilated_coords, values=smoothed_values)
-
-                # Previous length and len(coords) are different
-                # because original coords have more than one coord per depth when new are not
-                length = len(coords)
 
                 if length <= self.component_len_threshold:
                     continue
 
                 lengths.append(length)
 
+                # Extract 3d coords and probabilities
+                coords_2d = np.nonzero(object_mask)
+                coords = np.zeros((len(coords_2d[0]), 3), dtype=np.int32)
+
+                coords[:, self.direction] = slide_idx + self.direction_origin
+                coords[:, self.orthogonal_direction] = coords_2d[0].astype(np.int32) + object_bbox[0].start
+                coords[:, 2] = coords_2d[1].astype(np.int32) + object_bbox[1].start
+
+                probas = slide[coords_2d[0], coords_2d[1]]
+                coords, probas = depthwise_groupby_max(coords=coords, values=probas)
+
                 # We convert probas to integer values for saving them in points array with 3d-coordinates
-                probas = np.round(probas * 255).astype(coords.dtype)
+                if not np.issubdtype(probas.dtype, np.integer):
+                    probas = np.round(probas * 255)
+                if probas.dtype != coords.dtype:
+                    probas = probas.astype(coords.dtype)
+
                 points = np.hstack((coords, probas.reshape(-1, 1)))
 
-                # Bbox
+                # Bbox # TODO: check that we can reuse object_bbox
                 bbox = np.column_stack([np.min(coords, axis=0), np.max(coords, axis=0)])
 
                 component = Component(points=points, slide_idx=slide_idx+self.direction_origin, bbox=bbox)
@@ -829,10 +815,10 @@ class FaultExtractor:
         _ = self.split_horseshoe()
         stats['after_split_horseshoe'] = len(self.prototypes)
 
-        # Filter too small prototypes
-        if additional_filters or len(filtering_kwargs) > 0:
-            self.prototypes = self.filter_prototypes(**filtering_kwargs)
-            stats['after_last_filtering'] = len(self.prototypes)
+        # # Filter too small prototypes
+        # if additional_filters or len(filtering_kwargs) > 0:
+        #     self.prototypes = self.filter_prototypes(**filtering_kwargs)
+        #     stats['after_last_filtering'] = len(self.prototypes)
         return self.prototypes, stats
 
     def filter_prototypes(self, min_height=40, min_width=20, min_n_points=100):
