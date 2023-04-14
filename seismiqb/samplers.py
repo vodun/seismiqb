@@ -38,6 +38,10 @@ class BaseSampler(Sampler):
         crop_shape_t = crop_shape[[1, 0, 2]]
         n_threshold = np.int32(crop_shape[0] * crop_shape[1] * threshold)
 
+        # Apply filtration
+        if filtering_matrix is not None:
+            points = filtering_function(points, filtering_matrix)
+
         # Keep only points, that can be a starting point for a crop of given shape
         i_mask = ((ranges[:2, 0] <= points[:, :2]).all(axis=1) &
                   ((points[:, :2] +   crop_shape[:2]) <= ranges[:2, 1]).all(axis=1))
@@ -48,10 +52,6 @@ class BaseSampler(Sampler):
         points = points[mask]
         i_mask = i_mask[mask]
         x_mask = x_mask[mask]
-
-        # Apply filtration
-        if filtering_matrix is not None:
-            points = filtering_function(points, filtering_matrix)
 
         # Keep only points, that produce crops with horizon larger than threshold; append flag
         # TODO: Implement threshold check via filtering points with matrix obtained by
@@ -668,7 +668,7 @@ def spatial_check_points(points, matrix, crop_shape, i_mask, x_mask, threshold):
             present_points, running_sum = np.int32(0), np.int32(0)
 
             for value in np.nditer(sliced):
-                if value >= 0:
+                if value > 0:
                     present_points += 1
                     running_sum += value.item()
 
@@ -682,7 +682,7 @@ def spatial_check_points(points, matrix, crop_shape, i_mask, x_mask, threshold):
             present_points, running_sum = np.int32(0), np.int32(0)
 
             for value in np.nditer(sliced):
-                if value >= 0:
+                if value > 0:
                     present_points += 1
                     running_sum += value.item()
 

@@ -540,9 +540,10 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
             self, other = other, self
         name = name or f'{self.name}_{other.name}__{int(p * 100)}^100'
 
-        matrix = self.full_matrix + p * (self.full_matrix - other.full_matrix)
+        matrix = self.full_matrix + p * (other.full_matrix - self.full_matrix)
         matrix = np.ceil(matrix)
-        matrix[matrix < 0] = self.FILL_VALUE
+        matrix[self.full_matrix < 0] = self.FILL_VALUE
+        matrix[other.full_matrix < 0] = self.FILL_VALUE
 
         horizon = Horizon(matrix, field=self.field, name=name)
         horizon._proportional = {'p': p, 'name_1': self.name, 'name_2': other.name}

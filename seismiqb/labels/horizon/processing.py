@@ -56,6 +56,9 @@ class ProcessingMixin:
             filtering_matrix = self.load_attribute(filtering_matrix, **kwargs)
             filtering_matrix[np.abs(filtering_matrix) > 1] = 1
 
+        if not issubclass(filtering_matrix.dtype.type, bool):
+            filtering_matrix = filtering_matrix > 0
+
         if margin > 0:
             filtering_matrix = binary_dilation(filtering_matrix, iterations=margin)
 

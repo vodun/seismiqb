@@ -219,6 +219,8 @@ class Field(CharismaMixin, VisualizationMixin):
         if isinstance(paths, str):
             path = paths
         if isinstance(paths, (tuple, list)):
+            if not paths:
+                raise FileNotFoundError('No such file or directory')
             if len(paths) > 1:
                 raise ValueError(f'Path for Geometry loading is non-unique!, {paths}')
             path = paths[0]
@@ -454,7 +456,9 @@ class Field(CharismaMixin, VisualizationMixin):
     def cache_nbytes(self):
         """ Total nbytes of cached data. """
         nbytes = self.geometry.cache_nbytes
-        nbytes += sum(self.attached_instances.cache_nbytes)
+
+        if len(self.attached_instances) > 0:
+            nbytes += sum(self.attached_instances.cache_nbytes)
         return nbytes
 
     # Facies

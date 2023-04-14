@@ -448,16 +448,6 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         label_index = self.get(ix, 'generated')[1]
         src = src.replace('*', str(label_index))
 
-        src_labels = src[:src.find(':')]
-        label = getattr(field, src_labels)[label_index]
-        label_name = self.get(ix, 'label_names')
-        if label.short_name != label_name:
-            msg = f"Name `{label.short_name}` of the label loaded by index {label_index} "\
-                  f"from {src_labels} does not match label name {label_name} from batch."\
-                  f"This might have happened due to items order change in {src_labels} "\
-                  f"in between sampler creation and `make_locations` call."
-            raise ValueError(msg)
-
         result = field.load_attribute(src=src, location=location, atleast_3d=atleast_3d, dtype=dtype, **kwargs)
         return result
 
@@ -937,11 +927,11 @@ class SeismicCropBatch(Batch, VisualizationMixin):
     @apply_parallel_decorator(init='preallocating_init', post='noop_post', target='for')
     def translate(self, _, buffer, shift=5, scale=0.0, **kwargs):
         """ Add and multiply values by uniformly sampled values. """
-        shift = self.random.uniform(-shift, shift).astype(np.float32)
-        scale = self.random.uniform(1 - scale, 1 + scale).astype(np.float32)
+        shift = self.random.uniform(-shift, shift)
+        scale = self.random.uniform(1 - scale, 1 + scale)
 
-        buffer += shift
-        buffer *= scale
+        buffer += np.float32(shift)
+        buffer *= np.float32(scale)
 
     @apply_parallel_decorator(init='preallocating_init', post='noop_post', target='for')
     def invert(self, _, buffer, **kwargs):
@@ -1066,7 +1056,6 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         # Generate locations for erasing
         for _ in range(int(n_patches)):
             starts = rng.integers(upper_bounds)
-            # print(upper_bounds, starts, )
             stops = starts + patch_shape
 
             slices = [slice(start, stop) for start, stop in zip(starts, stops)]

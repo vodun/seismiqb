@@ -283,7 +283,9 @@ class MeanAccumulator3D(Accumulator3D):
     """ Accumulator that takes mean value of overlapping crops. """
     def __init__(self, shape=None, origin=None, dtype=np.float32, transform=None, path=None, **kwargs):
         if dtype == np.int8:
-            raise NotImplementedError('`mean` accumulation is unavailable for `dtype=in8`. Use `weighted` aggregation.')
+            raise NotImplementedError(
+                '`mean` accumulation is unavailable for `dtype=int8`. Use `weighted` aggregation.'
+            )
         super().__init__(shape=shape, origin=origin, dtype=dtype, transform=transform, path=path, **kwargs)
 
         self.create_placeholder(name='data', dtype=self.dtype, fill_value=0)
@@ -393,13 +395,16 @@ class WeightedSumAccumulator3D(Accumulator3D):
         self.create_placeholder(name='data', dtype=self.dtype, fill_value=0)
         self.create_placeholder(name='weights', dtype=np.float32, fill_value=0)
         self.weights_function = weights_function
+        self.crop_weights = None
 
     def _update(self, crop, location):
         # Weights matrix for the incoming crop
-        crop_weights = self.weights_function(crop)
-        self.data[location] = ((crop_weights * crop + self.data[location] * self.weights[location]) /
-                               (crop_weights + self.weights[location]))
-        self.weights[location] += crop_weights
+        if self.crop_weights is None:
+            self.crop_weights = self.weights_function(crop)
+
+        self.data[location] = ((self.crop_weights * crop + self.data[location] * self.weights[location]) /
+                               (self.crop_weights + self.weights[location]))
+        self.weights[location] += self.crop_weights
 
     def _aggregate(self):
         # Cleanup

@@ -34,18 +34,6 @@ def filtering_function(points, filtering_matrix):
     return points[mask == 1, :]
 
 
-
-@njit
-def find_min_max(array):
-    """ Get both min and max values in just one pass through array."""
-    n = array.size
-    max_val = min_val = array[0]
-    for i in range(1, n):
-        min_val = min(array[i], min_val)
-        max_val = max(array[i], max_val)
-    return min_val, max_val
-
-
 @njit
 def filter_simplices(simplices, points, matrix, threshold=5.):
     """ Remove simplices outside of matrix. """
@@ -169,13 +157,6 @@ def triangular_weights_function_nd(array, alpha=.1):
     return result
 
 
-def get_environ_flag(flag_name, defaults=('0', '1'), convert=int):
-    """ Retrive environmental variable, check if it matches expected defaults and optionally convert it. """
-    flag = os.environ.get(flag_name, '0')
-    if flag not in defaults:
-        raise ValueError(f"Expected `{flag_name}` env variable value to be from {defaults}, got {flag} instead.")
-    return convert(flag)
-
 def to_list(obj):
     """ Cast an object to a list.
     When default value provided, cast it instead if object value is None.
@@ -183,10 +164,6 @@ def to_list(obj):
     which won't be split into separate letters but transformed into a list of a single element.
     """
     return np.array(obj, dtype=object).ravel().tolist()
-
-def get_class_methods(cls):
-    """ Get a list of non-private class methods. """
-    return [getattr(cls, func) for func in dir(cls) if not func.startswith("__") and callable(getattr(cls, func))]
 
 def make_savepath(path, name, extension=''):
     """ If given replace asterisk in path with label name and create save dir if it does not already exist. """
@@ -243,7 +220,7 @@ def make_interior_points_mask(points, cube_shape):
 
 
 @njit(parallel=True)
-def insert_points_into_mask(mask, points, mask_bbox, width, axis):
+def insert_points_into_mask(mask, points, mask_bbox, width, axis, alpha=1):
     """ Add new points into binary mask.
 
     Parameters
@@ -281,10 +258,10 @@ def insert_points_into_mask(mask, points, mask_bbox, width, axis):
 
             if axis == 0:
                 for pos in range(left_bound, right_bound):
-                    mask[pos, point[1], point[2]] = 1
+                    mask[pos, point[1], point[2]] = alpha
             elif axis == 1:
                 for pos in range(left_bound, right_bound):
-                    mask[point[0], pos, point[2]] = 1
+                    mask[point[0], pos, point[2]] = alpha
             elif axis == 2:
                 for pos in range(left_bound, right_bound):
-                    mask[point[0], point[1], pos] = 1
+                    mask[point[0], point[1], pos] = alpha

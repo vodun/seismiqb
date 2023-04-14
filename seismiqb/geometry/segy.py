@@ -1,8 +1,9 @@
 """ Class to work with seismic data in SEG-Y format. """
+#pylint: disable=not-an-iterable
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
-from numba import njit
+from numba import njit, prange
 import cv2
 
 from batchflow import Notifier
@@ -525,6 +526,48 @@ class GeometrySEGY(Geometry):
         shape = shape or self.locations_to_shape(locations)
         return np.argsort(shape)[0]
 
+    def load_section(self, locations, dtype=None):
+        """ Load section through `locations`.
+
+        Parameters
+        ----------
+        locations : iterable
+            Locations of traces to construct section.
+
+        dtype : None or numpy.dtype, optional
+            Type of the resulting image, by default None (transforms to self.dtype)
+
+        Returns
+        -------
+        section, indices, nodes: tuple with 3 elements
+            section : numpy.ndarray
+                2D array with loaded and interpolated traces of section.
+            indices : numpy.ndarray
+                Float coordinates of section traces.
+            nodes : numpy.ndarray
+                Positions of node traces (from `locations`) in `traces` array.
+        """
+        locations = np.array(locations)
+        dtype = dtype or self.dtype
+
+        indices = []
+        for start, stop in zip(locations[:-1], locations[1:]):
+            indices.append(get_line_coordinates(start, stop)[:-1])
+        indices.append(np.array([locations[-1]], dtype='float32'))
+
+        support, weights = get_line_support(np.concatenate(indices))
+
+        all_support_traces = np.concatenate(support)
+        unique_support, traces_indices = np.unique(all_support_traces, axis=0, return_inverse=True)
+        traces_indices = traces_indices.reshape(-1, 4)
+
+        traces = self.load_by_indices(self.index_matrix[unique_support[:, 0], unique_support[:, 1]])
+        section = interpolate(traces, traces_indices, weights)
+        if np.issubdtype(dtype, np.integer):
+            section = section.astype(dtype)
+        nodes = np.cumsum([0] + [len(item) for item in indices[:-1]])
+        indices = np.concatenate(indices)
+        return section, indices, nodes
 
 @njit(nogil=True)
 def _collect_stats_chunk(data,
@@ -569,3 +612,90 @@ def _collect_stats_chunk(data,
 
     return (min_vector, max_vector, mean_vector, var_vector,
             min_matrix, max_matrix, mean_matrix, var_matrix)
+
+@njit
+def get_line_coordinates(start, stop):
+    """ Get float coordinates of traces for line from `start` to `stop`.
+
+    Parameters
+    ----------
+    start : numpy.ndarray
+
+    stop : numpy.ndarray
+
+    Returns
+    -------
+    locations : numpy.ndarray
+        array of shape (N, 2) and dtype float32 with coordinates for section traces.
+    """
+    direction = stop - start
+    distance = np.power(direction, 2).sum() ** 0.5
+    locations = np.empty((int(np.ceil(distance)) + 1, 2), dtype=np.float32)
+    for i in [0, 1]:
+        locations[:, i] = np.linspace(start[i], stop[i], int(np.ceil(distance)) + 1)
+    return locations
+
+@njit
+def get_line_support(locations):
+    """ Get support for non-integer locations.
+
+    Parameters
+    ----------
+    locations : numpy.ndarray
+        array of shape (N, 2) and dtype float32
+
+    Returns
+    -------
+    support, weights : tuple with two elements
+
+        support : numpy.ndarray
+            array of shape (N, 4, 2) and dtype int32 with coordinates of support traces for each location.
+        weights : numpy.ndarray
+            array of shape (N, 4) with weights for support traces for interpolation. If some location has integer
+            coordinates, support will have duplicated traces and nan weights.
+    """
+    ceil, floor = np.ceil(locations), np.floor(locations)
+    support = np.empty((len(locations), 4, 2), dtype='int32')
+    support[:, 0] = floor
+    support[:, 1, 0] = floor[:, 0]
+    support[:, 1, 1] = ceil[:, 1]
+    support[:, 2, 0] = ceil[:, 0]
+    support[:, 2, 1] = floor[:, 1]
+    support[:, 3] = ceil
+
+    distances = ((support - np.expand_dims(locations, 1)) ** 2).sum(axis=-1) ** 0.5
+    weights = 1 / distances
+    weights = weights / np.expand_dims(weights.sum(axis=-1), 1)
+
+    return support, weights
+
+@njit(parallel=True)
+def interpolate(traces, traces_indices, weights, dtype='float32'):
+    """ Interpolate traces with float coordinates by traces from support.
+
+    Parameters
+    ----------
+    traces : numpy.ndarray
+        array of shape (M, geometry.shape[2]) with loaded traces from support.
+    traces_indices : numpy.ndarray
+        array of shape (N, 4) with indices of corresponging traces in `traces` for each support trace.
+    weights : numpy.ndarray
+        array of shape (N, 4) with weights for support traces for interpolation. If some location has integer
+        coordinates, support will have duplicated traces and nan weights.
+    dtype : str, optional
+        resulting dtype, by default 'float32'
+
+    Returns
+    -------
+    numpy.ndarray
+        array of shape (N, geometry.shape[2])
+    """
+    image = np.empty((len(traces_indices), traces.shape[1]), dtype=dtype)
+    for i in prange(len(traces_indices)):
+        trace_weights = weights[i]
+        image[i] = traces[traces_indices[i][0]]
+        if not np.isnan(trace_weights[0]):
+            image[i] *= trace_weights[0]
+            for j in range(1, 4):
+                image[i] += traces[traces_indices[i][j]] * trace_weights[j]
+    return image

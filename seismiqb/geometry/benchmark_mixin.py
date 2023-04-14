@@ -1,6 +1,5 @@
 """ Collection of tools for benchmarking and testing array-like geometries. """
 import time
-import psutil
 
 import numpy as np
 
@@ -89,7 +88,9 @@ class BenchmarkMixin:
             If bool, then whether to display progress bar.
             If str, then type of progress bar to display: `'t'` for textual, `'n'` for widget.
         """
-        #pylint: disable=no-self-argument
+        #pylint: disable=no-self-argument, import-outside-toplevel
+        import psutil
+
         # Parse parameters
         bbox = np.array([[0, s] for s in array_like.shape])
 
