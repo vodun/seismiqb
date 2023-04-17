@@ -12,7 +12,7 @@ from .base import Fault
 from .postprocessing import skeletonize
 from .coords_utils import (bboxes_adjacent, bboxes_embedded, bboxes_intersected, compute_distances, dilate_coords,
                            find_contour, depthwise_groupby_max, restore_coords_from_projection)
-from ...utils import groupby_min, groupby_max
+from ...utils import groupby_min, groupby_max, make_ranges
 
 
 
@@ -76,8 +76,6 @@ class FaultExtractor:
         Note, by default we process skeletonized data, for smoothed data set `skeletonize_data=True`.
     direction : {0, 1}
         Extraction direction, can be 0 (ilines) or 1 (xlines) and the same as the prediction direction.
-    direction_origin : int
-        Data origin for the direction axis.
     prototypes : list of :class:`~.FaultPrototype` instances, optional
         Prototypes for applying :class:`~.FaultExtractor` manipulations on.
     shape : sequence of three ints, optional
@@ -85,14 +83,17 @@ class FaultExtractor:
     skeletonize_data : bool
         Whether the `data` argument needs skeletonization data or not.
         Should be True, if data is smoothed model outputs.
+    ranges : sequence
+        Nested sequence, where each element is either None or sequence of two ints.
+        Defines data ranges for faults extraction.
     component_len_threshold : int
         Threshold to filter out too small connected components on data slides.
         If 0, then no filter applied (recommended for higher accuracy).
         If more than 0, then extraction will be faster.
     """
     # pylint: disable=protected-access
-    def __init__(self, data=None, direction=0, direction_origin=0, prototypes=None, shape=None,
-                 skeletonize_data=False, component_len_threshold=0):
+    def __init__(self, data=None, direction=0, prototypes=None, shape=None,
+                 skeletonize_data=True, ranges=None, component_len_threshold=0):
         # Check
         if data is None and (prototypes is None or shape is None):
             raise ValueError("`data` or `prototypes` and `shape` must be provided!")
@@ -101,17 +102,22 @@ class FaultExtractor:
         shape = data.shape if shape is None else shape
         self.shape = shape
 
-        self.direction_origin = direction_origin
-
         self.direction = direction
         self.orthogonal_direction = 1 - self.direction
+
+        # Make ranges
+        ranges = make_ranges(ranges=ranges, shape=shape)
+        ranges = np.array(ranges)
+        self.ranges = ranges
+
+        self.origin = ranges[:, 0]
 
         # Internal parameters
         self._dilation = 3 # constant for internal operations
         self.component_len_threshold = component_len_threshold
 
         self.container = self._init_container(data=data, skeletonize_data=skeletonize_data) if data is not None else None
-        self._unprocessed_slide_idx = self.direction_origin # variable for internal operations speed up
+        self._unprocessed_slide_idx = self.origin[self.direction] # variable for internal operations speed up
 
         self.prototypes_queue = deque() # prototypes for extension
         self.prototypes = [] if prototypes is None else prototypes # extracted prototypes
@@ -122,9 +128,10 @@ class FaultExtractor:
         container = {}
 
         # Process data slides: extract connected components and their info
-        for slide_idx in Notifier('t')(range(self.shape[self.direction])):
+        for slide_idx in Notifier('t')(range(*self.ranges[self.direction])):
             # Get skeletonized slide
             slide = data.take(slide_idx, axis=self.direction)
+            slide = slide[slice(*self.ranges[self.orthogonal_direction]), slice(*self.ranges[2])]
 
             if skeletonize_data:
                 slide = skeletonize(slide, width=3)
@@ -152,14 +159,15 @@ class FaultExtractor:
                 coords_2d = np.nonzero(object_mask)
                 coords = np.zeros((len(coords_2d[0]), 3), dtype=np.int32)
 
-                coords[:, self.direction] = slide_idx + self.direction_origin
-                coords[:, self.orthogonal_direction] = coords_2d[0].astype(np.int32) + object_bbox[0].start
-                coords[:, 2] = coords_2d[1].astype(np.int32) + object_bbox[1].start
+                coords[:, self.direction] = slide_idx
+                coords[:, self.orthogonal_direction] = coords_2d[0].astype(np.int32) + object_bbox[0].start + \
+                                                       self.origin[self.orthogonal_direction]
+                coords[:, 2] = coords_2d[1].astype(np.int32) + object_bbox[1].start + self.origin[2]
 
                 probas = slide[coords_2d[0], coords_2d[1]]
                 coords, probas = depthwise_groupby_max(coords=coords, values=probas)
 
-                # We convert probas to integer values for saving them in points array with 3d-coordinates
+                # Convert probas to integer values for saving them in points array with 3d-coordinates
                 if not np.issubdtype(probas.dtype, np.integer):
                     probas = np.round(probas * 255)
                 if probas.dtype != coords.dtype:
@@ -167,13 +175,22 @@ class FaultExtractor:
 
                 points = np.hstack((coords, probas.reshape(-1, 1)))
 
-                # Bbox # TODO: check that we can reuse object_bbox
-                bbox = np.column_stack([np.min(coords, axis=0), np.max(coords, axis=0)])
+                # Bbox
+                bbox = np.empty((3, 2), dtype=np.int32)
 
-                component = Component(points=points, slide_idx=slide_idx+self.direction_origin, bbox=bbox)
+                bbox[self.direction, :] = slide_idx
+
+                bbox[self.orthogonal_direction, 0] = object_bbox[0].start + self.origin[self.orthogonal_direction]
+                bbox[self.orthogonal_direction, 1] = object_bbox[0].stop + self.origin[self.orthogonal_direction] - 1
+
+                bbox[2, 0] = object_bbox[1].start + self.origin[2]
+                bbox[2, 1] = object_bbox[1].stop + self.origin[2] - 1
+
+                # Save component
+                component = Component(points=points, slide_idx=slide_idx, bbox=bbox)
                 components.append(component)
 
-            container[slide_idx + self.direction_origin] = {
+            container[slide_idx] = {
                 'components': components,
                 'lengths': lengths
             }
@@ -208,7 +225,7 @@ class FaultExtractor:
             component = prototype.last_component
 
         # Find closest components on next slides
-        for _ in range(component.slide_idx + 1, self.shape[self.direction] + self.direction_origin):
+        for _ in range(component.slide_idx + 1, self.ranges[self.direction][1]):
             # Find the closest component on the slide_idx_ to the current
             component, split_indices = self._find_closest_component(component=component)
 
@@ -225,7 +242,7 @@ class FaultExtractor:
 
     def _find_next_component(self):
         """ Find the longest not merged component on the minimal slide. """
-        for slide_idx in range(self._unprocessed_slide_idx, self.shape[self.direction] + self.direction_origin):
+        for slide_idx in range(self._unprocessed_slide_idx, self.ranges[self.direction][1]):
             slide_info = self.container[slide_idx]
 
             if len(slide_info['lengths']) > 0:
@@ -814,11 +831,6 @@ class FaultExtractor:
         # Split wrong objects
         _ = self.split_horseshoe()
         stats['after_split_horseshoe'] = len(self.prototypes)
-
-        # # Filter too small prototypes
-        # if additional_filters or len(filtering_kwargs) > 0:
-        #     self.prototypes = self.filter_prototypes(**filtering_kwargs)
-        #     stats['after_last_filtering'] = len(self.prototypes)
         return self.prototypes, stats
 
     def filter_prototypes(self, min_height=40, min_width=20, min_n_points=100):
