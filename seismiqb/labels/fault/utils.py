@@ -133,6 +133,76 @@ def _group_adjacent_faults(faults, adjacency=5, adjacent_points_threshold=5):
 
     return groups, owners
 
+def get_groups_for_biggest_faults(faults, height_threshold=None, groups_num=None, adjacency=5, adjacent_points_threshold=5):
+    """ Get faults which can be merged in groups with the biggest faults.
+
+    The biggest faults are faults with height more than `height_threshold` or
+    which have topK-height, where K is `groups_num`.
+    Note, that one of `height_threshold` or `groups_num` should be provided.
+
+    Parameters
+    ----------
+    faults : sequence of :class:`~.Fault` or :class:`~.FaultPrototype` instances
+        Faults for filtering.
+    height_threshold : int or None
+        Height threshold to consider that fault is big enough for finding its group.
+        Group is a set of faults, adjoint with the biggest fault.
+    groups_num : int or None
+        Amount of groups to return.
+        Under the hood, we find `groups_num` biggest faults and use the minimal height as threshold.
+    adjacency : int
+        Axis-wise distance between two faults to consider them to be in one group.
+    adjacent_points_threshold : int
+        Minimal amount of fault points into adjacency area to consider two faults are in one group.
+    """
+    if (groups_num is None) and (height_threshold is None):
+        raise ValueError(f"One of `groups_num` or `height_threshold` must be not None!")
+
+    # Get height threshold from groups num
+    if height_threshold is None:
+        heights = [fault.bbox[-1][1]-fault.bbox[-1][0]+1 for fault in faults]
+        height_threshold = np.sort(heights)[-groups_num:-groups_num+1]
+
+    # Find neighbors for the biggest faults and faults, that are included in groups with the biggest faults
+    filtered_faults = []
+
+    for i, fault_1 in enumerate(faults):
+        if (fault_1 not in filtered_faults) and (fault_1.bbox[-1][1] - fault_1.bbox[-1][0] + 1 < height_threshold):
+            continue
+
+        if fault_1 not in filtered_faults:
+            filtered_faults.append(fault_1)
+
+        for j, fault_2 in enumerate(faults):
+            if fault_2 in filtered_faults:
+                continue
+
+            adjacent_borders = bboxes_adjacent(fault_1.bbox, fault_2.bbox, adjacency=adjacency)
+
+            if adjacent_borders is None:
+                continue
+
+            # Check points amount in the adjacency area
+            for fault in (fault_1, fault_2):
+                adjacent_points = fault.points[(fault.points[:, 0] >= adjacent_borders[0][0]) & \
+                                               (fault.points[:, 0] <= adjacent_borders[0][1]) & \
+                                               (fault.points[:, 1] >= adjacent_borders[1][0]) & \
+                                               (fault.points[:, 1] <= adjacent_borders[1][1]) & \
+                                               (fault.points[:, 2] >= adjacent_borders[2][0]) & \
+                                               (fault.points[:, 2] <= adjacent_borders[2][1])]
+
+                if len(adjacent_points) < adjacent_points_threshold:
+                    adjacent_borders = None
+                    break
+
+            if adjacent_borders is None:
+                continue
+
+            if fault_2 not in filtered_faults:
+                filtered_faults.append(fault_2)
+
+    return filtered_faults
+
 
 def filter_sticked_faults(faults, direction, sticks_step=10, stick_nodes_step=50):
     """ Filter fault with too small sticks amount and filter edge sticks if needed.
