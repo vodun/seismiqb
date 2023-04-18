@@ -444,7 +444,7 @@ class FaultExtractor:
                 is_first_upper = prototype_1.bbox[axis, 0] < prototype_2.bbox[axis, 0]
 
                 contour_1 = prototype_1.get_border(border=borders_to_check[is_first_upper],
-                                                   projection_axis=self.orthogonal_direction)
+                                                   projection_axis=self.orthogonal_direction).copy() # will be shifted
                 contour_2 = prototype_2.get_border(border=borders_to_check[~is_first_upper],
                                                    projection_axis=self.orthogonal_direction)
 
@@ -630,7 +630,7 @@ class FaultExtractor:
 
                 for border in ('up', 'down', 'left', 'right'): # TODO: get more optimal order depend on bboxes
                     # Find internal object border contour
-                    contour = other.get_border(border=border, projection_axis=self.orthogonal_direction)
+                    contour = other.get_border(border=border, projection_axis=self.orthogonal_direction).copy() # will be shifted
 
                     # Shift contour to make it intersected with another object
                     shift = -1 if border in ('up', 'left') else 1
