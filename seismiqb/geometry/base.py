@@ -999,7 +999,7 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetricM
         Parameters
         ----------
         index : int, str
-            Index of the slide to show.
+            Index of the slide to load.
             If int, then interpreted as the ordinal along the specified axis.
             If `'random'`, then we generate random index along the axis.
             If string of the `'#XXX'` format, then we interpret it as the exact indexing header value.
@@ -1018,7 +1018,8 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetricM
             Boolean mask with 1`s at dead pixels and 0`s at alive ones.
         """
         threshold = threshold or self.std / 10
-        slide = self.load_slide(index=index, axis=axis,)
+        slide = self.load_slide(index=index, axis=axis)
+        slide = slide if slide.dtype == np.float32 else slide.astype(np.uint8)
 
         kernel = np.ones((kernel_size, kernel_size), dtype=slide.dtype)
         ptps = cv2.dilate(slide, kernel) - cv2.erode(slide, kernel)
