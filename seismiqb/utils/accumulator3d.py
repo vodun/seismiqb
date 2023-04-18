@@ -67,7 +67,7 @@ class Accumulator3D:
 
         # Properties of storages
         self.dtype = dtype
-        self.transform = transform if transform is not None else lambda array: array
+        self.transform = getattr(self, transform) if isinstance(transform, str) else transform
 
         # Container definition
         if type_ is None:
@@ -217,11 +217,11 @@ class Accumulator3D:
         for xmin, slc, xmax in zip(self.origin, location, self.shape):
             loc.append(slice(max(0, slc.start - xmin), min(xmax, slc.stop - xmin)))
             loc_crop.append(slice(max(0, xmin - slc.start), min(xmax + xmin - slc.start , slc.stop - slc.start)))
+        loc, loc_crop = tuple(loc), tuple(loc_crop)
 
         # Actual update
-        crop = self.transform(crop[tuple(loc_crop)])
-        location = tuple(loc)
-        self._update(crop, location)
+        crop = self.transform(crop[loc_crop]) if self.transform is not None else crop[loc_crop]
+        self._update(crop, loc)
 
     def _update(self, crop, location):
         """ Update placeholders with data from `crop` at `locations`. """
@@ -315,16 +315,24 @@ class Accumulator3D:
 
     @staticmethod
     def prediction_to_uint8(array):
-        """ Convert a float array with values in [0.0, 1.0] to an int8 array with values in [0, 255]. """
+        """ Convert a float array with values in [0.0, 1.0] to an uint8 array with values in [0, 255]. """
         array *= 255
         return array.astype(np.uint8)
 
     @staticmethod
     def uint8_to_prediction(array):
-        """ Convert an int8 array with values in [0, 255] to a float array with values in [0.0, 1.0]. """
+        """ Convert an uint8 array with values in [0, 255] to a float array with values in [0.0, 1.0]. """
         array = array.astype(np.float32)
         array /= 255
         return array
+
+    @staticmethod
+    def prediction_to_uint16(array):
+        """ Convert a float array with values in [0.0, 1.0] to an uint16 array with values in [0, 255].
+        Useful for accumulators that need to keep track of sum of values.
+        """
+        array *= 255
+        return array.astype(np.uint16)
 
 
     # Alternative constructors
@@ -336,6 +344,7 @@ class Accumulator3D:
             NoopAccumulator3D: [None, False, 'noop'],
             MaxAccumulator3D: ['max', 'maximum'],
             MeanAccumulator3D: ['mean', 'avg', 'average'],
+            StdAccumulator3D: ['std'],
             GMeanAccumulator3D: ['gmean', 'geometric'],
             WeightedSumAccumulator3D: ['weighted'],
             ModeAccumulator3D: ['mode']
@@ -424,6 +433,48 @@ class MeanAccumulator3D(Accumulator3D):
 
         # Cleanup
         self.remove_placeholder('counts', unlink=True)
+
+
+class StdAccumulator3D(Accumulator3D):
+    """ Accumulator that takes std value of overlapping crops. """
+    def __init__(self, shape=None, origin=None, dtype=np.float32, transform=None, path=None, **kwargs):
+        if dtype not in [np.float32, np.float64]:
+            raise ValueError('Dtype should be floating for STD accumulator!')
+        super().__init__(shape=shape, origin=origin, dtype=dtype, transform=transform, path=path, **kwargs)
+
+        self.create_placeholder(name='data', dtype=self.dtype, fill_value=0)                 # sum of squared values
+        self.create_placeholder(name='sum', dtype=self.dtype, fill_value=0)                  # sum of values
+        self.create_placeholder(name='counts', dtype=np.uint8, fill_value=0)
+
+    def _update(self, crop, location):
+        self.data[location] += crop ** 2
+        self.sum[location] += crop
+        self.counts[location] += 1
+
+    def _aggregate(self):
+        #pylint: disable=access-member-before-definition
+        if self.type == 'hdf5':
+            # Amortized updates for HDF5
+            for i in range(self.data.shape[0]):
+                counts = self.counts[i]
+                counts[counts == 0] = 1
+                self.data[i] /= counts
+                self.sum[i] /= counts
+
+                self.data[i] -= self.sum[i] ** 2
+                self.data[i] **= 1/2
+
+        elif self.type in ['numpy', 'shm']:
+            self.counts[self.counts == 0] = 1
+            self.data /= self.counts
+            self.sum /= self.counts
+
+            self.data -= self.sum ** 2
+            self.data **= 1/2
+
+        # Cleanup
+        self.remove_placeholder('counts', unlink=True)
+        self.remove_placeholder('sum', unlink=True)
 
 
 class GMeanAccumulator3D(Accumulator3D):
