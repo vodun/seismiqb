@@ -444,7 +444,7 @@ class FaultExtractor:
                 is_first_upper = prototype_1.bbox[axis, 0] < prototype_2.bbox[axis, 0]
 
                 contour_1 = prototype_1.get_border(border=borders_to_check[is_first_upper],
-                                                   projection_axis=self.orthogonal_direction).copy() # will be shifted
+                                                   projection_axis=self.orthogonal_direction)
                 contour_2 = prototype_2.get_border(border=borders_to_check[~is_first_upper],
                                                    projection_axis=self.orthogonal_direction)
 
