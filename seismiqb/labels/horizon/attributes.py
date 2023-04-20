@@ -36,7 +36,7 @@ class AttributesMixin:
             fill_value = self.FILL_VALUE
         elif dtype == np.float32:
             fill_value = np.nan
-        elif np.issubdtype(dtype, np.bool):
+        elif np.issubdtype(dtype, np.bool_):
             fill_value = False
         else:
             raise TypeError(f'Incorrect dtype: `{dtype}`')
@@ -171,7 +171,7 @@ class AttributesMixin:
     @lru_cache(maxsize=1, apply_by_default=True, copy_on_return=True)
     def binary_matrix(self):
         """ Boolean matrix with `True` values at places where horizon is present and `False` everywhere else. """
-        return (self.matrix != self.FILL_VALUE).astype(np.bool)
+        return (self.matrix != self.FILL_VALUE).astype(np.bool_)
 
     @property
     @lru_cache(maxsize=1, apply_by_default=True, copy_on_return=True)

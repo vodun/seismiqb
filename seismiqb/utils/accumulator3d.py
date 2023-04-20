@@ -57,7 +57,7 @@ class Accumulator3D:
         Other parameters are passed to HDF5 dataset creation.
     """
     def __init__(self, shape=None, origin=None, orientation=0, dtype=np.float32, transform=None,
-                 type_=None, path=None, dataset_kwargs=None, **kwargs):
+                 format=None, path=None, dataset_kwargs=None, **kwargs):
         # Dimensionality and location, corrected on `orientation`
         self.orientation = orientation
         self.shape = self.reorder(shape)
@@ -70,9 +70,9 @@ class Accumulator3D:
         self.transform = getattr(self, transform) if isinstance(transform, str) else transform
 
         # Container definition
-        if type_ is None:
-            type_ = os.path.splitext(path)[1][1:] if path is not None else 'numpy'
-        self.type = type_
+        if format is None:
+            format = os.path.splitext(path)[1][1:] if path is not None else 'numpy'
+        self.type = format
 
         if self.type in ['hdf5', 'zarr']:
             if isinstance(path, str) and os.path.exists(path):
@@ -338,7 +338,7 @@ class Accumulator3D:
     # Alternative constructors
     @classmethod
     def from_aggregation(cls, aggregation='max', shape=None, origin=None, dtype=np.float32, fill_value=None,
-                         transform=None, type_=None, path=None, dataset_kwargs=None, **kwargs):
+                         transform=None, format=None, path=None, dataset_kwargs=None, **kwargs):
         """ Initialize chosen type of accumulator aggregation. """
         class_to_aggregation = {
             NoopAccumulator3D: [None, False, 'noop'],
@@ -353,16 +353,16 @@ class Accumulator3D:
                                 for alias in lst}
 
         return aggregation_to_class[aggregation](shape=shape, origin=origin, dtype=dtype, fill_value=fill_value,
-                                                 transform=transform, type_=type_, path=path,
+                                                 transform=transform, format=format, path=path,
                                                  dataset_kwargs=dataset_kwargs, **kwargs)
 
     @classmethod
     def from_grid(cls, grid, aggregation='max', dtype=np.float32, fill_value=None, transform=None,
-                  type_=None, path=None, dataset_kwargs=None, **kwargs):
+                  format=None, path=None, dataset_kwargs=None, **kwargs):
         """ Infer necessary parameters for accumulator creation from a passed grid. """
         return cls.from_aggregation(aggregation=aggregation, dtype=dtype, fill_value=fill_value,
                                     shape=grid.shape, origin=grid.origin, orientation=grid.orientation,
-                                    transform=transform, type_=type_, path=path, dataset_kwargs=dataset_kwargs,
+                                    transform=transform, format=format, path=path, dataset_kwargs=dataset_kwargs,
                                     **kwargs)
 
 
@@ -399,10 +399,8 @@ class MaxAccumulator3D(Accumulator3D):
 class MeanAccumulator3D(Accumulator3D):
     """ Accumulator that takes mean value of overlapping crops. """
     def __init__(self, shape=None, origin=None, dtype=np.float32, transform=None, path=None, **kwargs):
-        if dtype == np.int8:
-            raise NotImplementedError(
-                '`mean` accumulation is unavailable for `dtype=int8`. Use `weighted` aggregation.'
-            )
+        if np.issubdtype(dtype, np.integer):
+            raise NotImplementedError('`mean` accumulation is unavailable for integer dtypes.')
         super().__init__(shape=shape, origin=origin, dtype=dtype, transform=transform, path=path, **kwargs)
 
         self.create_placeholder(name='data', dtype=self.dtype, fill_value=0)
@@ -439,7 +437,7 @@ class StdAccumulator3D(Accumulator3D):
     """ Accumulator that takes std value of overlapping crops. """
     def __init__(self, shape=None, origin=None, dtype=np.float32, transform=None, path=None, **kwargs):
         if dtype not in [np.float32, np.float64]:
-            raise ValueError('Dtype should be floating for STD accumulator!')
+            raise ValueError('Dtype should be float32 or float64 for `std` accumulator!')
         super().__init__(shape=shape, origin=origin, dtype=dtype, transform=transform, path=path, **kwargs)
 
         self.create_placeholder(name='data', dtype=self.dtype, fill_value=0)                 # sum of squared values
@@ -550,6 +548,8 @@ class WeightedSumAccumulator3D(Accumulator3D):
     """
     def __init__(self, shape=None, origin=None, dtype=np.float32, transform=None, path=None,
                  weights_function=triangular_weights_function_nd, **kwargs):
+        if np.issubdtype(dtype, np.integer):
+            raise NotImplementedError('`weighted` accumulation is unavailable for integer dtypes.')
         super().__init__(shape=shape, origin=origin, dtype=dtype, transform=transform, path=path, **kwargs)
 
         self.create_placeholder(name='data', dtype=self.dtype, fill_value=0)
