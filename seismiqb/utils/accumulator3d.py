@@ -56,6 +56,7 @@ class Accumulator3D:
     kwargs : dict
         Other parameters are passed to HDF5 dataset creation.
     """
+    #pylint: disable=redefined-builtin
     def __init__(self, shape=None, origin=None, orientation=0, dtype=np.float32, transform=None,
                  format=None, path=None, dataset_kwargs=None, **kwargs):
         # Dimensionality and location, corrected on `orientation`
