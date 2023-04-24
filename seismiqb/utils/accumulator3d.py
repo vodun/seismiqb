@@ -1,9 +1,10 @@
 """ Accumulator for 3d volumes. """
 import os
+import shutil
 from copy import copy
 from multiprocessing.shared_memory import SharedMemory
 
-import shutil
+import blosc
 import h5pickle as h5py
 import hdf5plugin
 import numpy as np
@@ -165,13 +166,19 @@ class Accumulator3D:
             for name in self.placeholders:
                 state[name] = None
 
-        if self.type == 'shm':
+        elif self.type == 'shm':
             shm_data = {}
             for name in self.placeholders:
                 shm_instance, dtype = self.shm_data[name]
                 shm_data[name] = [shm_instance.name, dtype]
                 state[name] = None
             state['shm_data'] = shm_data
+
+        elif self.type == 'numpy':
+            for name in self.placeholders:
+                array = state[name]
+                compressed = blosc.compress_ptr(array.__array_interface__['data'][0], array.size, array.dtype.itemsize)
+                state[name] = (array.dtype, array.shape, compressed)
         return state
 
     def __setstate__(self, state):
@@ -187,6 +194,12 @@ class Accumulator3D:
                 shm = SharedMemory(name=shm_name)
                 placeholder = np.ndarray(buffer=shm.buf, shape=self.shape, dtype=dtype)
                 self.shm_data[name][0] = shm
+                setattr(self, name, placeholder)
+
+        elif self.type == 'numpy':
+            for name in self.placeholders:
+                dtype, shape, compressed = state[name]
+                placeholder = np.frombuffer(blosc.decompress(compressed, True), dtype=dtype).reshape(shape)
                 setattr(self, name, placeholder)
 
     def __del__(self):
@@ -400,8 +413,8 @@ class MaxAccumulator3D(Accumulator3D):
 class MeanAccumulator3D(Accumulator3D):
     """ Accumulator that takes mean value of overlapping crops. """
     def __init__(self, shape=None, origin=None, dtype=np.float32, transform=None, path=None, **kwargs):
-        if np.issubdtype(dtype, np.integer):
-            raise NotImplementedError('`mean` accumulation is unavailable for integer dtypes.')
+        if dtype in [np.int8, np.uint8]:
+            raise NotImplementedError('`mean` accumulation is unavailable for one-byte dtypes.')
         super().__init__(shape=shape, origin=origin, dtype=dtype, transform=transform, path=path, **kwargs)
 
         self.create_placeholder(name='data', dtype=self.dtype, fill_value=0)
@@ -549,8 +562,8 @@ class WeightedSumAccumulator3D(Accumulator3D):
     """
     def __init__(self, shape=None, origin=None, dtype=np.float32, transform=None, path=None,
                  weights_function=triangular_weights_function_nd, **kwargs):
-        if np.issubdtype(dtype, np.integer):
-            raise NotImplementedError('`weighted` accumulation is unavailable for integer dtypes.')
+        if dtype in [np.int8, np.uint8]:
+            raise NotImplementedError('`weighted` accumulation is unavailable for one-byte dtypes.')
         super().__init__(shape=shape, origin=origin, dtype=dtype, transform=transform, path=path, **kwargs)
 
         self.create_placeholder(name='data', dtype=self.dtype, fill_value=0)
