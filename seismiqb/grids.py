@@ -21,7 +21,8 @@ from .utils import make_ranges
 class BaseGrid:
     """ Deterministic generator of crop locations. """
     def __init__(self, crop_shape=None, batch_size=64,
-                 locations=None, orientation=None, origin=None, endpoint=None, field=None, label_name='unknown'):
+                 locations=None, orientation=None, origin=None, endpoint=None, field=None, label_name='unknown',
+                 **kwargs):
         self._iterator = None
         self.crop_shape = np.array(crop_shape)
         self.batch_size = batch_size
@@ -263,7 +264,7 @@ class RegularGrid(BaseGrid):
     """
     def __init__(self, field, ranges, crop_shape, orientation=0, strides=None, overlap=None, overlap_factor=None,
                  filtering_matrix='dead_traces_matrix', threshold=0, batch_size=64,
-                 field_id=-1, label_id=-1, label_name='unknown', locations=None):
+                 field_id=-1, label_id=-1, label_name='unknown', locations=None, **kwargs):
         # Make correct crop shape
         orientation = field.geometry.parse_axis(orientation)
         crop_shape = np.array(crop_shape)
@@ -290,7 +291,7 @@ class RegularGrid(BaseGrid):
 
         if strides is not None:
             strides = strides if isinstance(strides, (tuple, list, np.ndarray)) else [strides] * 3
-            if np.array(strides).dtype == np.float:
+            if np.issubdtype(np.array(strides).dtype, np.floating):
                 strides = np.array(crop_shape) * np.array(strides)
             strides = np.maximum(strides, 1).astype(int)
         else:
@@ -393,14 +394,15 @@ class RegularGridChunksIterator:
 
         size_i, size_x = size
         overlap_i, overlap_x = overlap
+        float_types = (float, np.float16, np.float32, np.float64, np.float128)
 
         if size_i is not None:
-            step_i = int(size_i * (1 - overlap_i)) if isinstance(overlap_i, (float, np.float)) else size_i - overlap_i
+            step_i = int(size_i * (1 - overlap_i)) if isinstance(overlap_i, float_types) else size_i - overlap_i
         else:
             step_i = size_i = self.grid.shape[0]
 
         if size_x is not None:
-            step_x = int(size_x * (1 - overlap_x)) if isinstance(overlap_x, (float, np.float)) else size_x - overlap_x
+            step_x = int(size_x * (1 - overlap_x)) if isinstance(overlap_x, float_types) else size_x - overlap_x
         else:
             step_x = size_x = self.grid.shape[1]
 
@@ -492,7 +494,7 @@ class ExtensionGrid(BaseGrid):
         Number of the best directions to keep for each point. Relevant only in `best_*` modes.
     """
     def __init__(self, horizon, crop_shape, stride=16, batch_size=64,
-                 top=1, threshold=4, prior_threshold=8, randomize=True, mode='best_for_each'):
+                 top=1, threshold=4, prior_threshold=8, randomize=True, mode='best_for_each', **kwargs):
         self.top = top
         self.stride = stride
         self.threshold = threshold

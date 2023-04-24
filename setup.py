@@ -69,6 +69,7 @@ setup(
         'h5py>=2.10.0',
         'h5pickle>=0.2.0',
         'hdf5plugin>=3.3.0',
+        'blosc>=1.11',
 
         # Working with images
         'opencv_python>=4.1.2.30',
