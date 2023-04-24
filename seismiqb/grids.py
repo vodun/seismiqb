@@ -394,15 +394,14 @@ class RegularGridChunksIterator:
 
         size_i, size_x = size
         overlap_i, overlap_x = overlap
-        float_types = (float, np.float16, np.float32, np.float64, np.float128)
 
         if size_i is not None:
-            step_i = int(size_i * (1 - overlap_i)) if isinstance(overlap_i, float_types) else size_i - overlap_i
+            step_i = int(size_i*(1 - overlap_i)) if np.issubdtype(type(overlap_i), np.floating) else size_i - overlap_i
         else:
             step_i = size_i = self.grid.shape[0]
 
         if size_x is not None:
-            step_x = int(size_x * (1 - overlap_x)) if isinstance(overlap_x, float_types) else size_x - overlap_x
+            step_x = int(size_x*(1 - overlap_x)) if np.issubdtype(type(overlap_x), np.floating) else size_x - overlap_x
         else:
             step_x = size_x = self.grid.shape[1]
 
