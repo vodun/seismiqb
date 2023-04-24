@@ -1,8 +1,10 @@
 """ Utils for set of faults, e.g. filtering. """
+from collections import defaultdict
 import numpy as np
-from .coords_utils import bboxes_adjacent
+from .coords_utils import bboxes_adjacent, dilate_coords
 
 
+# Filters
 def filter_faults(faults, min_fault_len=2000, min_height=20, **sticks_kwargs):
     """ Filter too small faults.
 
@@ -260,3 +262,171 @@ def filter_sticked_faults(faults, direction, sticks_step=10, stick_nodes_step=50
         selected_faults.append(fault)
 
     return selected_faults
+
+# Grouping
+def group_prototypes(prototypes, connectivity_stats=None, ratio_threshold=0.0):
+    """ Group connected prototypes.
+
+    Connected prototypes are prototypes where at least one prototype has overlap on another more than `ratio_threshold`.
+
+    Parameters
+    ----------
+    prototypes : sequence of :class:`~.FaultPrototype` instances
+        Prototypes for grouping.
+        You can use this method with :class:`~.Fault` instances after conversion.
+    connectivity_stats : dict or None, optional
+        Output of :meth:`.eval_connectivity_stats`.
+        Can be useful for multiple calls with different `ratio_threshold` values.
+    ratio_threshold : float
+        Overlap ratio to consider that prototypes are connected and can be grouped together.
+    """
+    # Eval connectivity stats
+    if connectivity_stats is None:
+        connectivity_stats = eval_connectivity_stats(prototypes)
+
+    # Unpack connectivity graph info
+    owners = {} # item -> owner
+    groups = defaultdict(set) # owner -> set(items)
+
+    for axis in (2, prototypes[0].direction):
+        connectivity_stats_axis = connectivity_stats[axis]
+
+        for prototype_1_idx, connect in connectivity_stats_axis.items():
+            for prototype_2_idx, stat_values in connect.items():
+
+                if stat_values['overlap_ratio'] > ratio_threshold:
+                    owners, groups = _add_connected_pair(prototype_1_idx, prototype_2_idx, owners=owners, groups=groups)
+
+    # Add group prototypes
+    for idx, label in enumerate(prototypes):
+        label.group_idx = idx
+
+    for group_owner_idx, group_items in groups.items():
+        prototypes[group_owner_idx].group_idx = group_owner_idx
+
+        for item_idx in group_items:
+            prototypes[item_idx].group_idx = group_owner_idx
+
+    return prototypes
+
+def eval_connectivity_stats(prototypes):
+    """ Evaluation of overlap length and ratio for each prototypes pair.
+
+    Note, zero-overlapping stats are omitted.
+    """
+    direction = prototypes[0].direction
+    orthogonal_direction = 1 - direction
+
+    margin = 1 # local constant for code prettifying
+    borders_to_check = {2: ('up', 'down'), direction: ('left', 'right')}
+
+    connectivity_stats = {2: defaultdict(dict), direction: defaultdict(dict)}
+
+    for i, prototype_1 in enumerate(prototypes):
+        for j, prototype_2 in enumerate(prototypes[i+1:]):
+            # Check prototypes adjacency
+            adjacent_borders = bboxes_adjacent(prototype_1.bbox, prototype_2.bbox)
+
+            if adjacent_borders is None:
+                continue
+
+            for axis in (2, direction):
+                overlap_axis = direction if axis == 2 else 2
+                check_borders = borders_to_check[axis]
+
+                # Find object contours on close borders
+                is_first_upper = prototype_1.bbox[axis, 0] < prototype_2.bbox[axis, 0]
+
+                contour_1 = prototype_1.get_border(border=check_borders[is_first_upper],
+                                                   projection_axis=orthogonal_direction)
+                contour_2 = prototype_2.get_border(border=check_borders[~is_first_upper],
+                                                   projection_axis=orthogonal_direction)
+
+                # Get border contours in the area of interest
+                overlap_range = (min(adjacent_borders[axis]) - margin, max(adjacent_borders[axis]) + margin)
+
+                contour_1 = contour_1[(contour_1[:, axis] >= overlap_range[0]) & \
+                                      (contour_1[:, axis] <= overlap_range[1])]
+                contour_2 = contour_2[(contour_2[:, axis] >= overlap_range[0]) & \
+                                      (contour_2[:, axis] <= overlap_range[1])]
+
+                # If one data contour is much longer than other, then we can't connect them as puzzle details
+                if len(contour_1) == 0 or len(contour_2) == 0:
+                    continue
+
+                # Shift one of the objects, making their contours intersected
+                shift = 1 if is_first_upper else -1
+                contour_1[:, axis] += shift
+
+                # Save stats
+                overlap_1, overlap_1_ratio = _contours_overlap_stats(contour_1, contour_2,
+                                                                     dilation_direction=orthogonal_direction)
+                overlap_2, overlap_2_ratio = _contours_overlap_stats(contour_2, contour_1,
+                                                                     dilation_direction=orthogonal_direction)
+
+                if overlap_1 > 0:
+                    connectivity_stats[axis][i][j+i+1] = {'overlap_length': overlap_1, 'overlap_ratio': overlap_1_ratio}
+                    connectivity_stats[axis][j+i+1][i] = {'overlap_length': overlap_2, 'overlap_ratio': overlap_2_ratio}
+
+    return connectivity_stats
+
+def _contours_overlap_stats(contour_1, contour_2, dilation_direction, dilation=3):
+    """ Evaluate contours overlap.
+
+    Under the hood, we eval `contour_1` overlap statistics with dilated `contour_2`,
+    because we suppsose that prototypes in one group can be little shifted relative to each other.
+    """
+    contour_1_set = set(tuple(x) for x in contour_1)
+
+    # Objects can be shifted on `dilation_direction`, so apply dilation for coords
+    contour_2_dilated = dilate_coords(coords=contour_2, dilate=dilation,
+                                      axis=dilation_direction)
+
+    contour_2_dilated = set(tuple(x) for x in contour_2_dilated)
+
+    # Eval stats
+    overlap = contour_1_set.intersection(contour_2_dilated)
+    return len(overlap), len(overlap)/len(contour_1_set)
+
+def _add_connected_pair(prototype_1_idx, prototype_2_idx, owners, groups):
+    """ Add prototypes pair into group.
+
+    We save connectivity info into two dicts:
+    - owners (item -> owner) - information about which group the item belongs to;
+    - groups (owner -> [items]) - information about which items are in the group;
+    where items and owners are prototypes indices.
+    """
+    if (prototype_1_idx not in owners) and (prototype_2_idx not in owners):
+        # Add both, because they are new
+        owners[prototype_1_idx] = prototype_1_idx
+        owners[prototype_2_idx] = prototype_1_idx
+
+        groups[prototype_1_idx].add(prototype_2_idx)
+
+    elif (prototype_1_idx not in owners) and (prototype_2_idx in owners):
+        # Add first into second
+        owners[prototype_1_idx] = owners[prototype_2_idx]
+
+        groups[owners[prototype_2_idx]].add(prototype_1_idx)
+
+    elif (prototype_1_idx in owners) and (prototype_2_idx not in owners):
+        # Add second into first
+        owners[prototype_2_idx] = owners[prototype_1_idx]
+
+        groups[owners[prototype_1_idx]].add(prototype_2_idx)
+
+    else:
+        # Merge two groups
+        main_owner = owners[prototype_1_idx]
+        other_owner = owners[prototype_2_idx]
+
+        if main_owner != other_owner:
+            for item in groups[other_owner]:
+                owners[item] = main_owner
+
+            groups[main_owner].update(groups[other_owner])
+            groups[main_owner].add(other_owner)
+
+            del groups[other_owner]
+
+    return owners, groups
