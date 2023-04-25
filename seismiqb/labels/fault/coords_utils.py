@@ -38,63 +38,6 @@ def dilate_coords(coords, dilate=3, axis=0, max_value=None):
     dilated_coords = np.unique(dilated_coords, axis=0)
     return dilated_coords
 
-@njit
-def depthwise_groupby_max(coords, values):
-    """ Thin coordinates depend on values - choose coords corresponding to max values for each coordinate along
-    the last axis (depth). Rough approximation of `find_peaks`.
-
-    Under the hood, this function is a groupby max along the depth axis.
-
-    Parameters
-    ----------
-    coords : np.ndarray of (N, 3) shape
-        Coordinates for thinning. Sorting is not required.
-    values : np.ndarray of (N, 1) shape
-        Values corresponding to coordinates to decide which one should last for each depth (last column in coords).
-    """
-    order = np.argsort(coords[:, -1])
-
-    output_coords = np.zeros_like(coords)
-    output_values = np.zeros_like(values)
-    position = 0
-
-    idx = order[0]
-
-    argmax_coord = coords[idx, :]
-    max_value = values[idx]
-
-    previous_depth = argmax_coord[-1]
-    previous_value = values[idx]
-
-    for idx in order[1:]:
-        current_depth = coords[idx, -1]
-        current_value = values[idx]
-
-        if previous_depth == current_depth:
-            if previous_value < current_value:
-                argmax_coord = coords[idx, :]
-                max_value = current_value
-
-                previous_value = current_value
-
-        else:
-            output_coords[position, :] = argmax_coord
-            output_values[position] = max_value
-
-            position += 1
-
-            argmax_coord = coords[idx, :]
-            max_value = current_value
-
-            previous_depth = current_depth
-            previous_value = current_value
-
-    # last depth update
-    output_coords[position, :] = argmax_coord
-    output_values[position] = max_value
-    position += 1
-
-    return output_coords[:position, :], output_values[:position]
 
 # Distance evaluation
 @njit

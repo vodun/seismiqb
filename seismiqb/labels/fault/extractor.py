@@ -10,7 +10,7 @@ from batchflow import Notifier
 from .base import Fault
 from .postprocessing import skeletonize
 from .coords_utils import (bboxes_adjacent, bboxes_embedded, bboxes_intersected, compute_distances, dilate_coords,
-                           find_contour, depthwise_groupby_max, restore_coords_from_projection)
+                           find_contour, restore_coords_from_projection)
 from ...utils import groupby_min, groupby_max, make_ranges
 
 
@@ -24,7 +24,7 @@ class FaultExtractor:
     Instances of :class:`~.FaultPrototype` are essentially the same as :class:`~.Fault` instances,
     but with their own processing methods such as concat, split, etc.
     - `coords` are spatial coordinates ndarray in format (iline, xline, depth) with (N, 3) shape.
-    - `points` are coordinates and probabilities values ndarray in format (iline, xline, depth, proba) with (N, 4) shape.
+    - `points` are coords and probabilities values ndarray in format (iline, xline, depth, proba) with (N, 4) shape.
     Note, that probabilities are converted into (0, 255) values for applying integer storage for points.
 
     The extraction algorithm is:
@@ -116,13 +116,13 @@ class FaultExtractor:
         self._dilation = 3 # constant for internal operations
         self.component_len_threshold = component_len_threshold
 
-        self.container = self._init_container(data=data, skeletonize_data=skeletonize_data) if data is not None else None
+        self.container = self._init_container(data=data, skeletonize=skeletonize_data) if data is not None else None
         self._unprocessed_slide_idx = self.origin[self.direction] # variable for internal operations speed up
 
         self.prototypes_queue = deque() # prototypes for extension
         self.prototypes = [] if prototypes is None else prototypes # extracted prototypes
 
-    def _init_container(self, data, skeletonize_data=False):
+    def _init_container(self, data, skeletonize=False):
         """ Extract connected components on each slide and save them into container.
 
         Returns
@@ -140,7 +140,7 @@ class FaultExtractor:
             slide = data.take(slide_idx, axis=self.direction)
             slide = slide[slice(*self.ranges[self.orthogonal_direction]), slice(*self.ranges[2])]
 
-            if skeletonize_data:
+            if skeletonize:
                 slide = skeletonize(slide, width=3)
 
             # Extract connected components from the slide
@@ -172,7 +172,6 @@ class FaultExtractor:
                 coords[:, 2] = coords_2D[1].astype(np.int32) + object_bbox[1].start + self.origin[2]
 
                 probas = slide[coords_2D[0], coords_2D[1]]
-                coords, probas = depthwise_groupby_max(coords=coords, values=probas)
 
                 # Convert probas to integer values for saving them in points array with 3D-coordinates
                 if not np.issubdtype(probas.dtype, np.integer):
@@ -688,7 +687,8 @@ class FaultExtractor:
 
                 for border in ('up', 'down', 'left', 'right'): # TODO: get more optimal order depend on bboxes
                     # Find internal object border contour
-                    contour = other.get_border(border=border, projection_axis=self.orthogonal_direction).copy() # will be shifted
+                    contour = other.get_border(border=border, projection_axis=self.orthogonal_direction)
+                    contour = contour.copy() # will be shifted
 
                     # Shift contour to make it intersected with another object
                     shift = -1 if border in ('up', 'left') else 1
@@ -775,6 +775,7 @@ class FaultExtractor:
                 height_diff = height - previous_height
 
                 if (height_ratio <= height_ratio_threshold) and (np.abs(height_diff) > height_diff_threshold):
+                    #pylint: disable=chained-comparison
                     if sign > 0 and height_diff < 0:
                         sign = -1
                     elif sign < 0 and height_diff > 0:
@@ -1218,14 +1219,14 @@ class FaultPrototype:
         if (split_indices[0] is None) and (split_indices[1] is None):
             return self, new_prototypes
 
-        axis_for_objects_separating = self.direction if axis in (-1, 2) else 2
+        objects_separating_axis = self.direction if axis in (-1, 2) else 2
 
         # Cut upper part and separate disconnected objects
         if (split_indices[0] is not None) and \
            (np.min(self.points[:, axis]) < split_indices[0] < np.max(self.points[:, axis])):
             mask = self.points[:, axis] >= split_indices[0]
 
-            self, new_prototypes_ = self._split_by_mask(mask=mask, axis_for_objects_separating=axis_for_objects_separating)
+            self, new_prototypes_ = self._split_by_mask(mask=mask, objects_separating_axis=objects_separating_axis)
             new_prototypes.extend(new_prototypes_)
 
         # Cut lower part and separate disconnected objects
@@ -1233,10 +1234,10 @@ class FaultPrototype:
            (np.min(self.points[:, axis]) < split_indices[1] < np.max(self.points[:, axis])):
             mask = self.points[:, axis] <= split_indices[1]
 
-            self, new_prototypes_ = self._split_by_mask(mask=mask, axis_for_objects_separating=axis_for_objects_separating)
+            self, new_prototypes_ = self._split_by_mask(mask=mask, objects_separating_axis=objects_separating_axis)
             new_prototypes.extend(new_prototypes_)
 
-        new_prototypes.extend(self._separate_objects(self.points, axis=axis_for_objects_separating))
+        new_prototypes.extend(self._separate_objects(self.points, axis=objects_separating_axis))
 
         # Update self
         self.points = new_prototypes[-1].points
@@ -1246,7 +1247,7 @@ class FaultPrototype:
         self._last_component = None
         return self, new_prototypes[:-1]
 
-    def _split_by_mask(self, mask, axis_for_objects_separating):
+    def _split_by_mask(self, mask, objects_separating_axis):
         """ Split prototype into parts by boolean mask.
 
         Returns
@@ -1260,7 +1261,7 @@ class FaultPrototype:
         new_prototype_points = self.points[~mask]
 
         if len(new_prototype_points) > 0:
-            new_prototypes = self._separate_objects(new_prototype_points, axis=axis_for_objects_separating)
+            new_prototypes = self._separate_objects(new_prototype_points, axis=objects_separating_axis)
 
         # Extract suitable part
         self.points = self.points[mask]
@@ -1323,7 +1324,7 @@ def get_range(coords, axis, diff_threshold=2):
     -------
     overlap_range : tuple of two ints
         The longest sequential range on the `axis` for provided coords.
-        Sequential range here is the orderly sequence of coords with difference in values not more than `diff_threshold`.
+        Sequential range is the orderly sequence of coords with difference in values not more than `diff_threshold`.
     """
     # Extract values
     values = list(set(elem[axis] for elem in coords))
