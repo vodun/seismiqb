@@ -116,13 +116,17 @@ class FaultExtractor:
         self._dilation = 3 # constant for internal operations
         self.component_len_threshold = component_len_threshold
 
-        self.container = self._init_container(data=data, skeletonize=skeletonize_data) if data is not None else None
+        if data is not None:
+            self.container = self._init_container(data=data, skeletonize_data=skeletonize_data)
+        else:
+            self.container = None
+
         self._unprocessed_slide_idx = self.origin[self.direction] # variable for internal operations speed up
 
         self.prototypes_queue = deque() # prototypes for extension
         self.prototypes = [] if prototypes is None else prototypes # extracted prototypes
 
-    def _init_container(self, data, skeletonize=False):
+    def _init_container(self, data, skeletonize_data=False):
         """ Extract connected components on each slide and save them into container.
 
         Returns
@@ -140,7 +144,7 @@ class FaultExtractor:
             slide = data.take(slide_idx, axis=self.direction)
             slide = slide[slice(*self.ranges[self.orthogonal_direction]), slice(*self.ranges[2])]
 
-            if skeletonize:
+            if skeletonize_data:
                 slide = skeletonize(slide, width=3)
 
             # Extract connected components from the slide
@@ -486,73 +490,73 @@ class FaultExtractor:
                 if overlap_length < overlap_threshold:
                     continue
 
-                # Find object contours on close borders
+                # Find object borders on close borders
                 is_first_upper = prototype_1.bbox[axis, 0] < prototype_2.bbox[axis, 0]
 
-                contour_1 = prototype_1.get_border(border=borders_to_check[is_first_upper],
-                                                   projection_axis=self.orthogonal_direction)
-                contour_2 = prototype_2.get_border(border=borders_to_check[~is_first_upper],
-                                                   projection_axis=self.orthogonal_direction)
+                border_1 = prototype_1.get_border(border=borders_to_check[is_first_upper],
+                                                  projection_axis=self.orthogonal_direction)
+                border_2 = prototype_2.get_border(border=borders_to_check[~is_first_upper],
+                                                  projection_axis=self.orthogonal_direction)
 
                 # Get objects width in area near to overlap for intersection threshold
                 # to avoid concatenation of objects with too little overlap
                 neighborhood_range = (min(adjacent_borders[axis]) - 20, max(adjacent_borders[axis]) + 20)
 
-                neighboring_contour_1 = contour_1[(contour_1[:, axis] >= neighborhood_range[0]) & \
-                                                  (contour_1[:, axis] <= neighborhood_range[1])]
-                neighboring_contour_2 = contour_2[(contour_2[:, axis] >= neighborhood_range[0]) & \
-                                                  (contour_2[:, axis] <= neighborhood_range[1])]
+                neighboring_border_1 = border_1[(border_1[:, axis] >= neighborhood_range[0]) & \
+                                                (border_1[:, axis] <= neighborhood_range[1])]
+                neighboring_border_2 = border_2[(border_2[:, axis] >= neighborhood_range[0]) & \
+                                                (border_2[:, axis] <= neighborhood_range[1])]
 
-                if len(neighboring_contour_1) == 0 or len(neighboring_contour_2) == 0:
+                if len(neighboring_border_1) == 0 or len(neighboring_border_2) == 0:
                     continue
 
-                width_neighboring_1 = np.ptp(neighboring_contour_1[:, overlap_axis])
-                width_neighboring_2 = np.ptp(neighboring_contour_2[:, overlap_axis])
+                width_neighboring_1 = np.ptp(neighboring_border_1[:, overlap_axis])
+                width_neighboring_2 = np.ptp(neighboring_border_2[:, overlap_axis])
 
                 # TODO: think about more appropriate criteria than proportion
                 overlap_threshold = 0.5*max(width_neighboring_1, width_neighboring_2)
 
-                # Get border contours in the area of interest
+                # Get borders in the area of interest
                 overlap_range = (min(adjacent_borders[axis]) - margin, max(adjacent_borders[axis]) + margin)
 
-                contour_1 = contour_1[(contour_1[:, axis] >= overlap_range[0]) & \
-                                      (contour_1[:, axis] <= overlap_range[1])]
-                contour_2 = contour_2[(contour_2[:, axis] >= overlap_range[0]) & \
-                                      (contour_2[:, axis] <= overlap_range[1])]
+                border_1 = border_1[(border_1[:, axis] >= overlap_range[0]) & \
+                                    (border_1[:, axis] <= overlap_range[1])]
+                border_2 = border_2[(border_2[:, axis] >= overlap_range[0]) & \
+                                    (border_2[:, axis] <= overlap_range[1])]
 
-                # If one data contour is much longer than other, then we can't connect them as puzzle details
-                if len(contour_1) == 0 or len(contour_2) == 0:
+                # If one data border is much longer than other, then we can't connect them as puzzle details
+                if len(border_1) == 0 or len(border_2) == 0:
                     continue
 
-                length_ratio = min(len(contour_1), len(contour_2)) / max(len(contour_1), len(contour_2))
+                length_ratio = min(len(border_1), len(border_2)) / max(len(border_1), len(border_2))
 
                 if length_ratio < overlap_ratio_threshold:
                     continue
 
                 # Correct border_threshold for too short borders
-                if (1 - overlap_ratio_threshold) * min(len(contour_1), len(contour_2)) < border_threshold:
+                if (1 - overlap_ratio_threshold) * min(len(border_1), len(border_2)) < border_threshold:
                     corrected_border_threshold = min(2*margin, border_threshold)
                 else:
                     corrected_border_threshold = border_threshold
 
-                # Shift one of the objects, making their contours intersected
+                # Shift one of the objects, making their borders intersected
                 shift = 1 if is_first_upper else -1
-                contour_1[:, axis] += shift
+                border_1[:, axis] += shift
 
-                # Check that one component contour is inside another (for both)
-                contour_1_width = np.ptp(contour_1[:, overlap_axis])
-                contour_2_width = np.ptp(contour_2[:, overlap_axis])
+                # Check that one component border is inside another (for both)
+                border_1_width = np.ptp(border_1[:, overlap_axis])
+                border_2_width = np.ptp(border_2[:, overlap_axis])
 
-                if contour_1_width <= contour_2_width:
-                    overlap_range = self._contours_overlap(contour_1, contour_2,
-                                                           border_threshold=corrected_border_threshold,
-                                                           overlap_threshold=overlap_threshold,
-                                                           overlap_axis=overlap_axis)
+                if border_1_width <= border_2_width:
+                    overlap_range = self._borders_overlap(border_1, border_2,
+                                                          border_threshold=corrected_border_threshold,
+                                                          overlap_threshold=overlap_threshold,
+                                                          overlap_axis=overlap_axis)
                 else:
-                    overlap_range = self._contours_overlap(contour_2, contour_1,
-                                                           border_threshold=corrected_border_threshold,
-                                                           overlap_threshold=overlap_threshold,
-                                                           overlap_axis=overlap_axis)
+                    overlap_range = self._borders_overlap(border_2, border_1,
+                                                          border_threshold=corrected_border_threshold,
+                                                          overlap_threshold=overlap_threshold,
+                                                          overlap_axis=overlap_axis)
 
                 if overlap_range is None:
                     continue
@@ -561,7 +565,7 @@ class FaultExtractor:
                 # - concat only overlapped parts
                 # - lower part can't be wider then upper;
                 # - if one prototype is much bigger than it should be splitted.
-                if overlap_range[1] - overlap_range[0] < min(contour_1_width, contour_2_width) - 2*margin:
+                if overlap_range[1] - overlap_range[0] < min(border_1_width, border_2_width) - 2*margin:
                     prototype_2, new_prototypes_ = prototype_2.split(overlap_range, axis=self.direction)
                     new_prototypes.extend(new_prototypes_)
 
@@ -571,8 +575,8 @@ class FaultExtractor:
                 elif axis in (-1, 2):
                     width_diff = 5
 
-                    lower_is_wider = (is_first_upper and prototype_2.width - contour_1_width > width_diff) or \
-                                     (not is_first_upper and prototype_1.width - contour_2_width > width_diff)
+                    lower_is_wider = (is_first_upper and prototype_2.width - border_1_width > width_diff) or \
+                                     (not is_first_upper and prototype_1.width - border_2_width > width_diff)
 
                     too_big_width_diff = (width_split_threshold is not None) and \
                                          (np.abs(prototype_1.width - prototype_2.width) > width_split_threshold)
@@ -594,40 +598,40 @@ class FaultExtractor:
         self.prototypes.extend(new_prototypes)
         return self.prototypes
 
-    def _contours_overlap(self, contour_1, contour_2, border_threshold, overlap_axis, overlap_threshold=0):
-        """ Check that `contour_1` is almost inside the dilated `contour_2` and return their overlap range.
+    def _borders_overlap(self, border_1, border_2, border_threshold, overlap_axis, overlap_threshold=0):
+        """ Check that `border_1` is almost inside the dilated `border_2` and return their overlap range.
 
-        We apply dilation for `contour_2` because the fault can be shifted on neighboring slides.
+        We apply dilation for `border_2` because the fault can be shifted on neighboring slides.
 
         Parameters
         ----------
-        contour_1, contour_2 : np.ndarrays of (N, 3) shape
+        border_1, border_2 : np.ndarrays of (N, 3) shape
             Contours coordinates for check.
         border_threshold : int
-            Minimal amount of points out of overlap to decide that `contour_1` is not inside `contour_2`.
+            Minimal amount of points out of overlap to decide that `border_1` is not inside `border_2`.
         overlap_threshold : int
-            Minimal amount of overlapped points to decide that contours are overlapping.
+            Minimal amount of overlapped points to decide that borders are overlapping.
 
         Returns
         -------
         overlap_range : tuple of two ints or None
-            The longest overlap range on the `overlap_axis` for provided contours.
+            The longest overlap range on the `overlap_axis` for provided borders.
             None, if there are no overlap.
-            Note, that two contours can have more than one overlapping area, we choose the longest one.
+            Note, that two borders can have more than one overlapping area, we choose the longest one.
         """
-        contour_1_set = set(tuple(x) for x in contour_1)
+        border_1_set = set(tuple(x) for x in border_1)
 
         # Objects can be shifted on `self.orthogonal_direction`, so apply dilation for coords
-        contour_2_dilated = dilate_coords(coords=contour_2, dilate=self._dilation,
-                                          axis=self.orthogonal_direction,
-                                          max_value=self.shape[self.orthogonal_direction])
+        border_2_dilated = dilate_coords(coords=border_2, dilate=self._dilation,
+                                         axis=self.orthogonal_direction,
+                                         max_value=self.shape[self.orthogonal_direction])
 
-        contour_2_dilated = set(tuple(x) for x in contour_2_dilated)
+        border_2_dilated = set(tuple(x) for x in border_2_dilated)
 
-        overlap = contour_1_set.intersection(contour_2_dilated)
-        contours_overlapped = len(overlap) > overlap_threshold
+        overlap = border_1_set.intersection(border_2_dilated)
+        borders_overlapped = len(overlap) > overlap_threshold
 
-        if contours_overlapped and (len(contour_1_set - contour_2_dilated) < border_threshold):
+        if borders_overlapped and (len(border_1_set - border_2_dilated) < border_threshold):
             return get_range(overlap, axis=overlap_axis)
 
         return None
@@ -685,15 +689,15 @@ class FaultExtractor:
                 # Check borders connections
                 close_borders_counter = 0
 
-                for border in ('up', 'down', 'left', 'right'): # TODO: get more optimal order depend on bboxes
-                    # Find internal object border contour
-                    contour = other.get_border(border=border, projection_axis=self.orthogonal_direction)
-                    contour = contour.copy() # will be shifted
+                for border_position in ('up', 'down', 'left', 'right'): # TODO: get more optimal order depend on bboxes
+                    # Find internal object border
+                    border = other.get_border(border=border_position, projection_axis=self.orthogonal_direction)
+                    border = border.copy() # will be shifted
 
-                    # Shift contour to make it intersected with another object
-                    shift = -1 if border in ('up', 'left') else 1
-                    shift_axis = self.direction if border in ('left', 'right') else 2
-                    contour[:, shift_axis] += shift
+                    # Shift border to make it intersected with another object
+                    shift = -1 if border_position in ('up', 'left') else 1
+                    shift_axis = self.direction if border_position in ('left', 'right') else 2
+                    border[:, shift_axis] += shift
 
                     # Get main object coords in the area of the interest for speeding up evaluations
                     slices = other.bbox.copy()
@@ -705,13 +709,13 @@ class FaultExtractor:
                                            (coords[:, 2] >= slices[2, 0]) & (coords[:, 2] <= slices[2, 1])]
 
                     # Check that the shifted border is inside the main_object area
-                    corrected_border_threshold = min(border_threshold, len(contour)//2)
+                    corrected_border_threshold = min(border_threshold, len(border)//2)
 
                     overlap_axis = self.direction if border in ('up', 'down') else 2
 
-                    if  self._contours_overlap(contour, coords_sliced,
-                                               border_threshold=corrected_border_threshold,
-                                               overlap_axis=overlap_axis) is not None:
+                    if  self._borders_overlap(border, coords_sliced,
+                                              border_threshold=corrected_border_threshold,
+                                              overlap_axis=overlap_axis) is not None:
                         close_borders_counter += 1
 
                     if close_borders_counter >= 2:
@@ -1309,7 +1313,7 @@ class FaultPrototype:
 def get_range(coords, axis, diff_threshold=2):
     """ Get maximal sequential range of coords on axis.
 
-    Helper for the :meth:`~.FaultExtractor._contours_overlap`.
+    Helper for the :meth:`~.FaultExtractor._borders_overlap`.
 
     Parameters
     ----------
