@@ -37,7 +37,7 @@ def modify_trace(trace, shift=0, angle=0, gain=1):
 
     # Depth shift
     arange = np.arange(len(trace), dtype=np.float32)
-    trace = np.interp(arange, arange+shift, trace)
+    trace = np.interp(arange, arange+shift, trace, left=0, right=0)
 
     # Gain: multiplier
     trace = trace * gain

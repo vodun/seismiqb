@@ -21,7 +21,7 @@ class Intersection:
 
     The usual workflow is to create an instance by :meth:`.new`, which finds one or multiple intersections between
     two fields, then match extracted traces (that are padded / aggregated across multiple close indices) with either
-    analytic or optimization algorithms. Finally, use visualization tools to diaply interesting properties.
+    analytic or optimization algorithms. Finally, use visualization tools to display interesting properties.
     """
     @classmethod
     def new(cls, field_0, field_1, limits=slice(None), pad_width=0, threshold=10, use_std=False, unwrap=True):
@@ -187,7 +187,7 @@ class Intersection2d2d:
         # Resample to ms
         arange = np.arange(trace.size, dtype=np.float32)
         arange_ms = np.arange(trace.size, step=(1 / field.sample_interval), dtype=np.float32)
-        trace = np.interp(arange_ms, arange, trace)
+        trace = np.interp(arange_ms, arange, trace, left=0, right=0)
 
         # Adjust for field delay: move the start of the trace to 0ms level
         trace = np.pad(trace, (field.delay, 0)) if field.delay >= 0 else trace[-field.delay:]
@@ -202,6 +202,21 @@ class Intersection2d2d:
         if transform is not None:
             trace = transform(trace)
         return trace
+
+
+    def prepare_horizons(self):
+        """ Prepare mappings from horizon name to its depth on intersection for both fields. """
+        return (self._prepare_horizons(field=self.field_0, coordinates=self.coordinates_0),
+                self._prepare_horizons(field=self.field_1, coordinates=self.coordinates_1))
+
+    @staticmethod
+    def _prepare_horizons(field, coordinates):
+        horizon_to_depth = {}
+        for horizon_name, horizon_ixd in field.horizons.items():
+            distances = ((horizon_ixd[:, :2] - coordinates) ** 2).sum(axis=1) ** (1 / 2)
+            idx = np.argmin(distances)
+            horizon_to_depth[horizon_name] = horizon_ixd[idx, -1]
+        return horizon_to_depth
 
 
     # Matching algorithms
@@ -280,10 +295,11 @@ class Intersection2d2d:
 
         Under the hood, the algorithm works as follows:
             - we compute possible shifts with possibly non-whole numbers (`resample_factor`)
-            - compute correlation for each possible shift
+            - compute correlation for each possible shift, resulting in cross-correlation function
             - compute envelope and instantaneous phase of the cross-correlation
             - argmax of the envelope is the optimal shift, and the phase at this shift is the optimal angle.
-            Essentially, this is equivalent to finding the best combination of the trace and its analytic counterpart.
+            Essentially, this is equivalent to finding the best combination of the trace and its analytic counterpart,
+            which conveniently coincide with vertical and phase shifts.
         """
         _ = kwargs
 
@@ -358,8 +374,7 @@ class Intersection2d2d:
                 p1 = p1 + 360
             angle = p0 + ((p1 - p0) * correction if correction >= 0 else (p0 - p1) * correction)
 
-
-        gain = (trace_1**2).mean() ** (1/2) / (trace_0**2).mean() ** (1/2)
+        gain = self.compute_gain(data_0=trace_0, data_1=trace_1)
 
         matching_results = {
             'shift': shift,
@@ -379,8 +394,35 @@ class Intersection2d2d:
         return matching_results
 
 
+    def match_on_horizon(self, horizon_name=None):
+        """ !!. """
+        horizon_to_depth_0, horizon_to_depth_1 = self.prepare_horizons()
+
+        if horizon_name is None:
+            common_horizons = set(horizon_to_depth_0.keys()) & set(horizon_to_depth_1.keys())
+            if len(common_horizons) == 1:
+                horizon_name = common_horizons.pop()
+            else:
+                raise ValueError('Provide horizon name for matching!')
+
+        depth_0 = horizon_to_depth_0[horizon_name]
+        depth_1 = horizon_to_depth_1[horizon_name]
+
+        return {
+            'shift': depth_1 - depth_0,
+            'angle': 0.0,
+            'gain': self.compute_gain()
+        }
+
+    def compute_gain(self, data_0=None, data_1=None, **kwargs):
+        """ Compute gain by as ratio between RMS data values. """
+        if data_0 is None and data_1 is None:
+            data_0, data_1 = self.prepare_traces(**kwargs)
+        return (data_0**2).mean() ** (1/2) / (data_1**2).mean() ** (1/2)
+
+
     def evaluate(self, shift=0, angle=0, gain=1, metric='correlation',
-                 pad_width=None, limits=None, n=1, transform=None):
+                 pad_width=None, limits=None, n=1, transform=None, **kwargs):
         """ Compute provided metric with a given mistie parameters. """
         trace_0, trace_1 = self.prepare_traces(pad_width=pad_width, limits=limits, n=n, transform=transform)
         metric_function = compute_correlation if metric == 'correlation' else compute_r2
@@ -388,6 +430,10 @@ class Intersection2d2d:
 
 
     # Visualization
+    def __repr__(self):
+        return (f'<Intersection of "{self.field_0.short_name}.sgy"'
+                f' and "{self.field_1.short_name}.sgy" at {hex(id(self))}>')
+
     def __str__(self):
         return dedent(f"""
         Intersection of "{self.field_0.short_name}.sgy" and "{self.field_1.short_name}.sgy"
@@ -396,6 +442,7 @@ class Intersection2d2d:
         trace_idx_1                  {self.trace_idx_1}
         coordinates_0                {self.coordinates_0.tolist()}
         coordinates_1                {self.coordinates_1.tolist()}
+        key                          {getattr(self, 'key', None)}
         """).strip()
 
     def show_curves(self, method='analytic', limits=None, index_shifts=(0, 0), pad_width=None, n=1, transform=None,
@@ -547,19 +594,57 @@ class Intersection2d2d:
                             -max_index_shift, +max_index_shift))
 
 
-    def show_composite_slide(self, sides=(0, 0), limits=None, gap_width=1, pad_width=None, transform=None,
+    def show_composite_slide(self, sides=(0, 0), horizon_width=5,
+                             limits=None, gap_width=1, pad_width=None, transform=None,
                              shift=0, angle=0, gain=1, width='auto', **kwargs):
         """ Display sides of shot lines on one plot. """
-        side_0, side_1 = sides
         limits = limits if limits is not None else self.limits
         pad_width = pad_width if pad_width is not None else self.pad_width
         transform = transform if transform is not None else self.transform
 
+        # Make combined slide
+        combined_slide, slide_0, slide_1 = self._prepare_combined_slide(sides=sides, data='field',
+                                                                        shift=shift, angle=angle, gain=gain,
+                                                                        limits=limits, gap_width=gap_width, width=width,
+                                                                        pad_width=pad_width, transform=transform)
+        data = [combined_slide]
+        cmap = ['Greys_r']
+
+        mask_slide = self._prepare_combined_slide(sides=sides, data='labels',
+                                                  shift=shift, angle=0, gain=1.,
+                                                  horizon_width=horizon_width,
+                                                  limits=limits, gap_width=gap_width, width=width,
+                                                  pad_width=pad_width, transform=transform)[0].astype(np.bool_)
+        data.append(mask_slide)
+        cmap.append('goldenrod')
+
+        # Compute correlation on traces
+        correlation = compute_correlation(slide_0[-1], slide_1[0])
+
+        # Prepare plotter parameters
+        start_tick = (limits.start or 0) - pad_width
+        extent = (0, combined_slide.shape[0], start_tick + combined_slide.shape[1], start_tick)
+
+        title = (f'"{self.field_0.short_name}.sgy":{sides[0]} x "{self.field_1.short_name}.sgy":{sides[1]}\n'
+                 f'{shift=:3.2f}  {angle=:3.1f}  {gain=:3.2f}\n'
+                 f'{correlation=:3.2f}  corrected_correlation={(1 + correlation)/2:3.2f}')
+        kwargs = {
+            'cmap': cmap,
+            'colorbar': True,
+            'title': title, 'title_fontsize': 14,
+            'extent': extent,
+            'augment_mask': True,
+            **kwargs
+        }
+        return plot(data, **kwargs)
+
+    def _prepare_combined_slide(self, sides, data='field', horizon_width=5, shift=0, angle=0, gain=1,
+                                limits=None, width='auto', gap_width=1, pad_width=None, n=1, transform=None):
         # Load data and orient it in a correct way
-        slide_0 = self._prepare_slide(self.field_0, self.trace_idx_0, side_0,
-                                      limits=limits, pad_width=pad_width, transform=transform)
-        slide_1 = self._prepare_slide(self.field_1, self.trace_idx_1, side_1,
-                                      limits=limits, pad_width=pad_width, transform=transform)
+        slide_0 = self._prepare_slide(self.field_0, self.trace_idx_0, sides[0], horizon_width=horizon_width,
+                                      data=data, limits=limits, pad_width=pad_width, transform=transform)
+        slide_1 = self._prepare_slide(self.field_1, self.trace_idx_1, sides[1], horizon_width=horizon_width,
+                                      data=data, limits=limits, pad_width=pad_width, transform=transform)
 
         if sides == (0, 0):
             slide_1 = slide_1[::-1]
@@ -583,35 +668,25 @@ class Intersection2d2d:
         combined_slide = np.concatenate([slide_0[-halfwidth:],
                                          np.full((gap_width, slide_0.shape[1]), fill_value=fv, dtype=np.float32),
                                          slide_1[:+halfwidth]], axis=0)
+        return combined_slide, slide_0, slide_1
 
-        # Compute correlation on traces
-        correlation = compute_correlation(slide_0[-1], slide_1[0])
-
-        # Prepare plotter parameters
-        start_tick = (limits.start or 0) - pad_width
-        extent = (0, combined_slide.shape[0], start_tick + combined_slide.shape[1], start_tick)
-
-        title = (f'"{self.field_0.short_name}.sgy":{sides[0]} x "{self.field_1.short_name}.sgy":{sides[1]}\n'
-                 f'{shift=:3.2f}  {angle=:3.1f}  {gain=:3.2f}\n'
-                 f'{correlation=:3.2f}  corrected_correlation={(1 + correlation)/2:3.2f}')
-        kwargs = {
-            'cmap': 'Greys_r',
-            'colorbar': True,
-            'title': title, 'title_fontsize': 14,
-            'extent': extent,
-            **kwargs
-        }
-        return plot(combined_slide, **kwargs)
-
-    def _prepare_slide(self, field, trace_idx, side, limits=None, pad_width=None, n=1, transform=None):
+    def _prepare_slide(self, field, trace_idx, side, data='field', horizon_width=5,
+                       limits=None, pad_width=None, n=1, transform=None):
         # Load data
-        slide = field.load_slide(0)
+        if data == 'field':
+            slide = field.load_slide(0)
+        else:
+            slide = np.zeros(field.shape[1:], dtype=np.float32)
+            for horizon in field.horizon_instances.values():
+                slide += horizon.load_slide(0, width=horizon_width)
+
         slide = slide[:trace_idx + 1] if side == 0 else slide[trace_idx:]
 
         # Resample to ms
         arange = np.arange(slide.shape[1], dtype=np.float32)
         arange_ms = np.arange(slide.shape[1], step=(1 / field.sample_interval), dtype=np.float32)
-        interpolator = lambda trace: np.interp(arange_ms, arange, trace)
+        arange_ms += field.delay / field.sample_interval if data != 'field' else 0
+        interpolator = lambda trace: np.interp(arange_ms, arange, trace, left=0, right=0)
         slide = np.apply_along_axis(interpolator, 1, slide)
 
         # Pad to adjust for field delays

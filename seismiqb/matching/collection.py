@@ -1,4 +1,8 @@
 """ Collection of multiple intersecting fields. """
+import os
+from glob import glob
+from concurrent.futures import ThreadPoolExecutor
+
 import numpy as np
 import pandas as pd
 from numba import njit
@@ -8,30 +12,101 @@ import plotly.graph_objects as go
 
 from batchflow.notifier import Notifier
 from .intersection import Intersection
+from ..field import Field
+from ..labels import Horizon
 from ..plotters import plot
 
 
 
 class FieldCollection:
     """ Collection of 2D fields and their intersections. """
-    def __init__(self, fields, limits=None, pad_width=0, threshold=10, n_intersections=np.inf):
-        self.fields = fields
+    def __init__(self, fields, limits=slice(None), pad_width=0, threshold=10, n_intersections=np.inf, geometry_kwargs=None):
+        self.fields = self.load_fields(fields, geometry_kwargs=geometry_kwargs)
         self.n_fields = len(fields)
 
-        self.intersections = {}
-        for i, field_0 in enumerate(fields[:-1]):
-            for j, field_1 in enumerate(fields[i+1:], start=i+1):
+        self.intersections = self.compute_intersections(limits=limits, pad_width=pad_width,
+                                                        threshold=threshold, n_intersections=n_intersections)
+
+        self.corrections = {}
+
+    # Instance initialization
+    DEFAULT_GEOMETRY_KWARGS = {
+        'index_headers': ['FieldRecord', 'CDP'],
+        'additional_headers': ['CDP', 'CDP_X', 'CDP_Y'],
+        'collect_stats': False, 'collect_stats_params': {'pbar': False},
+        'dump_headers': True, 'dump_meta': True
+    }
+
+    def load_fields(self, fields, geometry_kwargs=None):
+        """ !!. """
+        # TODO: try to remove ~duplicate fields?
+        if isinstance(fields, str):
+            fields = sorted(list(glob(fields)))
+
+        geometry_kwargs = geometry_kwargs if geometry_kwargs is not None else self.DEFAULT_GEOMETRY_KWARGS
+        return [Field(item, geometry_kwargs=geometry_kwargs) if isinstance(item, str) else item for item in fields]
+
+    def compute_intersections(self, limits=slice(None), pad_width=0, threshold=10, n_intersections=np.inf):
+        """ !!. """
+        result = {}
+        for i, field_0 in enumerate(self.fields[:-1]):
+            for j, field_1 in enumerate(self.fields[i+1:], start=i+1):
                 intersections = Intersection.new(field_0=field_0, field_1=field_1,
-                                                 limits=limits, pad_width=pad_width, threshold=threshold, unwrap=False)
+                                                 limits=limits, pad_width=pad_width, threshold=threshold,
+                                                 unwrap=False)
 
                 for k, intersection in enumerate(intersections):
                     if k > n_intersections:
                         break
                     key = (i, j, k)
-                    self.intersections[key] = intersection
+                    result[key] = intersection
                     intersection.key = (i, j, k)
 
-        self.corrections = {}
+        return result
+
+    def load_horizon(self, path, add_instances=True, verbose=True):
+        """ !!. """
+        horizon_name = os.path.basename(path)
+
+        df = pd.read_csv(path, sep=r'\s+', index_col=False, skiprows=[0],
+                        names=['FIELD_NAME', '_', 'CDP_X', 'CDP_Y', 'DEPTH', '__'],
+                        usecols=['FIELD_NAME', 'CDP_X', 'CDP_Y', 'DEPTH'],
+                        dtype={'FIELD_NAME': str, })
+        unique_field_names = df['FIELD_NAME'].unique()
+
+        for field in self.fields:
+            if field.short_name not in unique_field_names:
+                if verbose:
+                    print(f'Field "{field.short_name}" is not labeled in horizon')
+                continue
+            subdf = df[df['FIELD_NAME'] == field.short_name]
+
+            # Prepare horizon points: (N, 3) array
+            horizon_ixd = subdf[['CDP_X', 'CDP_Y', 'DEPTH']].values
+            if not getattr(field, 'horizons'):
+                field.horizons = {horizon_name : horizon_ixd}
+            else:
+                field.horizons[horizon_name] = horizon_ixd
+
+            # Prepare horizon instances
+            if add_instances: #TODO: refactor
+                indices = []
+                for value in horizon_ixd[:, :2]:
+                    index = np.argmin(np.abs(field.cdp_values - value).sum(axis=1))
+                    indices.append(index)
+                indices = np.array(indices)
+
+                depths = (subdf['DEPTH'].values - field.delay) / field.sample_interval
+                points = np.array([np.zeros(len(indices), dtype=np.int32),
+                                   indices,
+                                   np.round(depths).astype(np.int32)]).T
+                horizon_instance = Horizon(points, field=field, name=horizon_name)
+
+                if not hasattr(field, 'horizon_instances'):
+                    field.horizon_instances = {horizon_name : horizon_instance}
+                else:
+                    field.horizon_instances[horizon_name] = horizon_instance
+
 
 
     # Work with intersections
@@ -43,12 +118,30 @@ class FieldCollection:
                 return intersection
         raise KeyError(f'No intersection of `{name_0}` and `{name_1}` in collection!')
 
+    def find_intersections(self, name):
+        """ Find all intersections of a given show with other lines. """
+        return [intersection for intersection in self.intersections.values()
+                if name in intersection.field_0.name or name in intersection.field_1.name]
+
     def match_intersections(self, pbar='t', method='analytic', limits=None, pad_width=None, n=1, transform=None,
                             **kwargs):
         """ Match traces on each intersection. """
         for intersection in Notifier(pbar)(self.intersections.values()):
             intersection.match_traces(method=method, limits=limits, pad_width=pad_width, n=n, transform=transform,
                                       **kwargs)
+
+    # def match_intersections_(self, pbar='t', method='analytic', limits=None, pad_width=None, n=1, transform=None,
+    #                         **kwargs):
+    #     """ Match traces on each intersection. """
+    #     with Notifier(pbar, total=len(self.intersections)) as progress_bar:
+    #         def callback(future):
+    #             progress_bar.update(1)
+    #         with ThreadPoolExecutor(max_workers=8) as executor:
+    #             for intersection in self.intersections.values():
+    #                 future = executor.submit(intersection.match_traces,
+    #                                         method=method, limits=limits, pad_width=pad_width,
+    #                                         n=n, transform=transform, **kwargs)
+    #                 future.add_done_callback(callback)
 
     def get_matched_value(self, key):
         """ Get required `key` value from each of the intersections. """
@@ -211,8 +304,8 @@ class FieldCollection:
             correction_results = {
                 'name': field.name,
                 'shift': shifts[i],
-                'gain': gains[i],
                 'angle': angles[i],
+                'gain': gains[i],
 
                 'mean_recomputed_corr': np.mean(recomputed_corrs).round(3),
                 'std_recomputed_corr': np.std(recomputed_corrs).round(3),
@@ -224,7 +317,13 @@ class FieldCollection:
             field.correction_results = correction_results
             df.append(correction_results)
 
-        df = pd.DataFrame(df)
+        columns = [
+            'shift', 'angle', 'gain',
+            'mean_recomputed_corr', 'std_recomputed_corr',
+            'n_intersections', 'mean_corr_intersections', 'std_corr_intersections'
+        ]
+
+        df = pd.DataFrame(df).set_index('name')[columns]
         return df
 
     # Visualize
@@ -336,7 +435,8 @@ class FieldCollection:
 
     def show_histogram(self, keys=('corr', 'shift', 'angle', 'gain'), **kwargs):
         """ Display histogram of mis-tie values across all intersections. """
-        data = [self.get_matched_value(key) for key in keys]
+        data = [np.array(self.get_matched_value(key)) for key in keys]
+        data = [item[~np.isnan(item)] for item in data]
 
         kwargs = {
             'title': list(keys),
