@@ -334,7 +334,7 @@ def get_groups_for_biggest_faults(faults, height_threshold=None, groups_num=None
     adjacent_points_threshold : int
         Minimal amount of fault points into adjacency area to consider that two faults are in one group.
     """
-    #pylint disable=invalid-unary-operand-type
+    #pylint: disable=invalid-unary-operand-type
     if (groups_num is None) and (height_threshold is None):
         raise ValueError("One of `groups_num` or `height_threshold` must be not None!")
 
