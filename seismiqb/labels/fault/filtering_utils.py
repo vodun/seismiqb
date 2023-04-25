@@ -1,4 +1,4 @@
-""" Utils for set of faults, e.g. filtering. """
+""" Faults utils: filterings, groupings. """
 from collections import defaultdict
 import numpy as np
 from .coords_utils import bboxes_adjacent, dilate_coords
@@ -211,7 +211,6 @@ def eval_connectivity_stats(prototypes):
                 continue
 
             for axis in (2, direction):
-                overlap_axis = direction if axis == 2 else 2
                 check_borders = borders_to_check[axis]
 
                 # Find object contours on close borders
@@ -312,7 +311,8 @@ def _add_connected_pair(prototype_1_idx, prototype_2_idx, owners, groups):
     return owners, groups
 
 # Group faults with topK biggest faults and filter faults out of groups
-def get_groups_for_biggest_faults(faults, height_threshold=None, groups_num=None, adjacency=5, adjacent_points_threshold=5):
+def get_groups_for_biggest_faults(faults, height_threshold=None, groups_num=None,
+                                  adjacency=5, adjacent_points_threshold=5):
     """ Get faults which can be merged in groups with the biggest faults.
 
     The biggest faults are faults with height more than `height_threshold` or
@@ -334,8 +334,9 @@ def get_groups_for_biggest_faults(faults, height_threshold=None, groups_num=None
     adjacent_points_threshold : int
         Minimal amount of fault points into adjacency area to consider that two faults are in one group.
     """
+    #pylint disable=invalid-unary-operand-type
     if (groups_num is None) and (height_threshold is None):
-        raise ValueError(f"One of `groups_num` or `height_threshold` must be not None!")
+        raise ValueError("One of `groups_num` or `height_threshold` must be not None!")
 
     # Get height threshold from groups num
     if height_threshold is None:
@@ -345,14 +346,14 @@ def get_groups_for_biggest_faults(faults, height_threshold=None, groups_num=None
     # Find neighbors for the biggest faults and faults, that are included in groups with the biggest faults
     filtered_faults = []
 
-    for i, fault_1 in enumerate(faults):
+    for fault_1 in faults:
         if (fault_1 not in filtered_faults) and (fault_1.bbox[-1][1] - fault_1.bbox[-1][0] + 1 < height_threshold):
             continue
 
         if fault_1 not in filtered_faults:
             filtered_faults.append(fault_1)
 
-        for j, fault_2 in enumerate(faults):
+        for fault_2 in faults:
             if fault_2 in filtered_faults:
                 continue
 
