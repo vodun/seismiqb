@@ -16,9 +16,9 @@ def filter_faults(faults, min_fault_len=2000, min_height=20, **sticks_kwargs):
     faults : sequence of :class:`~.Fault` instances
         Faults for filtering.
     min_fault_len : int
-        Filtering value: filter out faults with length less than `min_fault_len`.
+        Filter out faults with length less than `min_fault_len`.
     min_height : int
-        Filtering value: filter out faults with height less than `min_height`.
+        Filter out faults with height less than `min_height`.
         Note, that height is evaluated from sticks.
     sticks_kwargs : dict, optional
         Arguments for fault conversion into sticks view.
@@ -52,7 +52,7 @@ def filter_faults(faults, min_fault_len=2000, min_height=20, **sticks_kwargs):
 
 # Filter small disconnected faults
 def filter_disconnected_faults(faults, direction=0, height_threshold=200, width_threshold=40, **kwargs):
-    """ Filter small enough faults whithout neighbors.
+    """ Filter small enough faults without neighbors.
 
     Parameters
     ----------
@@ -61,9 +61,9 @@ def filter_disconnected_faults(faults, direction=0, height_threshold=200, width_
     direction : {0, 1}
         Faults direction.
     height_threshold : int
-        Filter out faults disconnected with height less than `height_threshold`.
+        Filter out disconnected faults with height less than `height_threshold`.
     width_threshold : int
-        Filter out faults disconnected with width less than `width_threshold`.
+        Filter out disconnected faults with width less than `width_threshold`.
     **kwargs : dict
         Adjacency kwargs for :func:`._group_adjacent_faults`.
     """
@@ -92,14 +92,16 @@ def filter_disconnected_faults(faults, direction=0, height_threshold=200, width_
 def _group_adjacent_faults(faults, adjacency=5, adjacent_points_threshold=5):
     """ Add faults into groups by adjacency criterion.
 
+    Helper for the :func:`~.filter_disconnected_faults`.
+
     Parameters
     ----------
     faults : sequence of :class:`~.Fault` or :class:`~.FaultPrototype` instances
         Faults for filtering.
     adjacency : int
-        Axis-wise distance between two faults to consider them to be in one group.
+        Axis-wise distance between two faults to consider them to be grouped.
     adjacent_points_threshold : int
-        Minimal amount of fault points into adjacency area to consider two faults are in one group.
+        Minimal amount of points into adjacency area to consider two faults are in one group.
     """
     groups = {} # owner -> items
     owners = {} # item -> owner
@@ -144,7 +146,8 @@ def _group_adjacent_faults(faults, adjacency=5, adjacent_points_threshold=5):
 def group_prototypes(prototypes, connectivity_stats=None, ratio_threshold=0.0):
     """ Group connected prototypes.
 
-    Connected prototypes are prototypes where at least one prototype has overlap on another more than `ratio_threshold`.
+    Connected prototypes are prototypes where at least one prototype has overlap
+    with another more than `ratio_threshold`.
 
     Parameters
     ----------
@@ -251,7 +254,7 @@ def _contours_overlap_stats(contour_1, contour_2, dilation_direction, dilation=3
     """ Evaluate contours overlap.
 
     Under the hood, we eval `contour_1` overlap statistics with dilated `contour_2`,
-    because we suppsose that prototypes in one group can be little shifted relative to each other.
+    because we suppsose that connected prototypes can be shifted to each other.
     """
     contour_1_set = set(tuple(x) for x in contour_1)
 
@@ -270,8 +273,8 @@ def _add_connected_pair(prototype_1_idx, prototype_2_idx, owners, groups):
 
     We save connectivity info into two dicts:
     - owners (item -> owner) - information about which group the item belongs to;
-    - groups (owner -> [items]) - information about which items are in the group;
-    where items and owners are prototypes indices.
+    - groups (owner -> [items]) - information about which items are in the group.
+    Items and owners here are prototypes indices.
     """
     if (prototype_1_idx not in owners) and (prototype_2_idx not in owners):
         # Add both, because they are new
@@ -321,15 +324,15 @@ def get_groups_for_biggest_faults(faults, height_threshold=None, groups_num=None
     faults : sequence of :class:`~.Fault` or :class:`~.FaultPrototype` instances
         Faults for filtering.
     height_threshold : int or None
-        Height threshold to consider that fault is big enough for finding its group.
+        Height threshold to consider that fault is big enough for being the biggest fault in the group.
         Group is a set of faults, adjoint with the biggest fault.
     groups_num : int or None
         Amount of groups to return.
         Under the hood, we find `groups_num` biggest faults and use the minimal height as threshold.
     adjacency : int
-        Axis-wise distance between two faults to consider them to be in one group.
+        Axis-wise distance between two faults to consider them to be grouped.
     adjacent_points_threshold : int
-        Minimal amount of fault points into adjacency area to consider two faults are in one group.
+        Minimal amount of fault points into adjacency area to consider that two faults are in one group.
     """
     if (groups_num is None) and (height_threshold is None):
         raise ValueError(f"One of `groups_num` or `height_threshold` must be not None!")
