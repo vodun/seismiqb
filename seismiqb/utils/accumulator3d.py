@@ -225,7 +225,7 @@ class Accumulator3D:
         location = self.reorder(location)
         if self.orientation == 1:
             crop = crop.transpose(1, 0, 2)
-            
+
         # Compute correct shapes
         loc, loc_crop = [], []
         for xmin, slc, xmax in zip(self.origin, location, self.shape):
