@@ -1,7 +1,7 @@
 """ Collection of multiple intersecting fields. """
 import os
 from glob import glob
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor
 
 import numpy as np
 import pandas as pd
@@ -12,20 +12,25 @@ import plotly.graph_objects as go
 
 from batchflow.notifier import Notifier
 from .intersection import Intersection
+from .functional import modify_trace
+
 from ..field import Field
 from ..labels import Horizon
 from ..plotters import plot
+from ..geometry.memmap_loader import MemmapLoader
 
 
 
 class FieldCollection:
     """ Collection of 2D fields and their intersections. """
-    def __init__(self, fields, limits=slice(None), pad_width=0, threshold=10, n_intersections=np.inf, geometry_kwargs=None):
+    def __init__(self, fields, limits=slice(None), pad_width=0, threshold=10,
+                 n_intersections=np.inf, geometry_kwargs=None):
         self.fields = self.load_fields(fields, geometry_kwargs=geometry_kwargs)
-        self.n_fields = len(fields)
+        self.n_fields = len(self.fields)
 
         self.intersections = self.compute_intersections(limits=limits, pad_width=pad_width,
                                                         threshold=threshold, n_intersections=n_intersections)
+        self.horizons = {}
 
         self.corrections = {}
 
@@ -70,8 +75,8 @@ class FieldCollection:
 
         df = pd.read_csv(path, sep=r'\s+', index_col=False, skiprows=[0],
                         names=['FIELD_NAME', '_', 'CDP_X', 'CDP_Y', 'DEPTH', '__'],
-                        usecols=['FIELD_NAME', 'CDP_X', 'CDP_Y', 'DEPTH'],
                         dtype={'FIELD_NAME': str, })
+        self.horizons[horizon_name] = df
         unique_field_names = df['FIELD_NAME'].unique()
 
         for field in self.fields:
@@ -108,7 +113,6 @@ class FieldCollection:
                     field.horizon_instances[horizon_name] = horizon_instance
 
 
-
     # Work with intersections
     def find_intersection(self, name_0, name_1):
         """ Find intersection by names of shot lines. """
@@ -130,18 +134,22 @@ class FieldCollection:
             intersection.match_traces(method=method, limits=limits, pad_width=pad_width, n=n, transform=transform,
                                       **kwargs)
 
-    # def match_intersections_(self, pbar='t', method='analytic', limits=None, pad_width=None, n=1, transform=None,
-    #                         **kwargs):
-    #     """ Match traces on each intersection. """
-    #     with Notifier(pbar, total=len(self.intersections)) as progress_bar:
-    #         def callback(future):
-    #             progress_bar.update(1)
-    #         with ThreadPoolExecutor(max_workers=8) as executor:
-    #             for intersection in self.intersections.values():
-    #                 future = executor.submit(intersection.match_traces,
-    #                                         method=method, limits=limits, pad_width=pad_width,
-    #                                         n=n, transform=transform, **kwargs)
-    #                 future.add_done_callback(callback)
+    def match_intersections_p(self, pbar='t', method='analytic', limits=None, pad_width=None, n=1, transform=None,
+                              **kwargs):
+        """ Match traces on each intersection. """
+        with Notifier(pbar, total=len(self.intersections)) as progress_bar:
+            def callback(future):
+                matching_results = future.result()
+                key = matching_results.pop('key')
+                self.intersections[key].matching_results = matching_results
+                progress_bar.update(1)
+
+            with ProcessPoolExecutor(max_workers=8) as executor:
+                for intersection in self.intersections.values():
+                    future = executor.submit(intersection.match_traces,
+                                             method=method, limits=limits, pad_width=pad_width,
+                                             n=n, transform=transform, **kwargs)
+                    future.add_done_callback(callback)
 
     def get_matched_value(self, key):
         """ Get required `key` value from each of the intersections. """
@@ -189,6 +197,24 @@ class FieldCollection:
         df = df[columns]
         return df
 
+    def compute_horizon_metric(self, horizon_name=None):
+        """ !!. """
+        shifts = self.corrections['shift']['x']
+
+        metrics = []
+        for key, intersection in self.intersections.items():
+            metric_0 = intersection.compute_horizon_metric(horizon_name=horizon_name, shift=0)
+            metric_1 = intersection.compute_horizon_metric(horizon_name=horizon_name,
+                                                           shift=shifts[key[0]] - shifts[key[1]])
+            metric_2 = intersection.compute_horizon_metric(horizon_name=horizon_name,
+                                                           shift=intersection.matching_results['shift'])
+
+            metrics.append((metric_0, metric_1, metric_2))
+
+        names = ['mean_horizon_shift', 'mean_horizon_to_correction_shift', 'mean_horizon_to_intersection_shift']
+        values = np.array(metrics).mean(axis=0).round(4)
+        return dict(zip(names, values))
+
 
     # Work with fields
     def distribute_corrections(self, skip_index=-1, max_iters=100, alpha=0.75, tolerance=0.00001):
@@ -208,7 +234,7 @@ class FieldCollection:
                                      max_iters=max_iters, alpha=alpha, tolerance=tolerance)
         xk, xl = x[a[:, 0]], x[a[:, 1]]
         errors = b - (xk - xl)
-        self.corrections['shift'] = {'x': x, 'errors': errors, 'loss': loss}
+        self.corrections['shift'] = {'x': x, 'errors': errors, 'loss': loss, 'b': b}
 
         # Gain
         b = np.array(self.get_matched_value('gain'))
@@ -217,7 +243,7 @@ class FieldCollection:
                                      max_iters=max_iters, alpha=alpha, tolerance=tolerance)
         xk, xl = x[a[:, 0]], x[a[:, 1]]
         errors = b - (xk - xl)
-        self.corrections['gain'] = {'x': np.exp(x), 'errors': errors, 'loss': loss}
+        self.corrections['gain'] = {'x': np.exp(x), 'errors': errors, 'loss': loss, 'b': b}
 
         # Angle
         b = np.array(self.get_matched_value('angle'))
@@ -246,8 +272,20 @@ class FieldCollection:
         self.corrections['angle'] = {'x': x, 'errors': errors, 'loss': loss, 'b': b}
         # TODO: add return with info about the process
 
+        # Store correction info in fields as well
+        for i, field in enumerate(self.fields):
+            field.correction_results = {
+                'shift': self.corrections['shift']['x'][i],
+                'angle': self.corrections['angle']['x'][i],
+                'gain': self.corrections['gain']['x'][i],
+            }
 
-    def compute_suspicious(self):
+        return (self.corrections['shift']['loss'][-1],
+                self.corrections['angle']['loss'][-1],
+                self.corrections['gain']['loss'][-1])
+
+
+    def compute_suspicious_intersections(self):
         """ For each intersection, compute whether it is suspicious.
         # TODO: add more checks
         """
@@ -261,17 +299,35 @@ class FieldCollection:
                       (angles_errors > angles_errors.mean() + 3 * angles_errors.std()))
         return suspicious
 
-    def remove_suspicious(self, skip_index=-1, max_iters=100, alpha=0.75, tolerance=0.00001):
+    def remove_intersections(self, indices=None, skip_index=-1, max_iters=100, alpha=0.75, tolerance=0.00001):
         """ Remove all suspicious intersections and re-distribute corrections. """
-        suspicious = self.compute_suspicious()
-        indices = np.nonzero(suspicious)[0]
+        if indices is None:
+            suspicious = self.compute_suspicious()
+            indices = np.nonzero(suspicious)[0]
         keys = list(self.intersections.keys())
-        for idx in indices[::-1]:
+        for idx in np.sort(indices)[::-1]:
             key = keys[idx]
             self.intersections.pop(key)
 
         self.distribute_corrections(skip_index=skip_index, max_iters=max_iters, alpha=alpha, tolerance=tolerance)
         return indices
+
+    def remove_fields(self, indices):
+        """ !!. """
+        for idx in np.sort(indices)[::-1]:
+            self.fields.pop(idx)
+
+        new_intersections = {}
+        for key, intersection in self.intersections.items():
+            if key[0] in indices or key[1] in indices:
+                continue
+
+            new_key = (key[0] - (indices > key[0]).sum(),
+                        key[1] - (indices > key[1]).sum(),
+                        key[2])
+            intersection.key = new_key
+            new_intersections[new_key] = intersection
+        self.intersections = new_intersections
 
 
     def fields_df(self):
@@ -280,7 +336,7 @@ class FieldCollection:
         gains = self.corrections['gain']['x']
         angles = self.corrections['angle']['x']
 
-        df = []
+        df, bad_intersections_keys = [], []
         for i, field in enumerate(self.fields):
             intersections = []
             recomputed_corrs = []
@@ -293,6 +349,13 @@ class FieldCollection:
                     recomputed_corrs.append(recomputed_corr)
 
                     intersections.append(intersection)
+
+            min_, mean_, std_ = np.min(recomputed_corrs), np.mean(recomputed_corrs), np.std(recomputed_corrs)
+
+            for j, intersection in enumerate(intersections):
+                recomputed_corr = recomputed_corrs[j]
+                if recomputed_corr < 0.5 or abs(mean_ - recomputed_corr) > 0.25:
+                    bad_intersections_keys.append(intersection.key)
 
             # Stats on intersections: no distribution of corrections
             dicts = [intersection.matching_results for intersection in intersections]
@@ -307,24 +370,136 @@ class FieldCollection:
                 'angle': angles[i],
                 'gain': gains[i],
 
-                'mean_recomputed_corr': np.mean(recomputed_corrs).round(3),
-                'std_recomputed_corr': np.std(recomputed_corrs).round(3),
+                'mean_recomputed_corr': mean_.round(3),
+                'std_recomputed_corr': std_.round(3),
+                'min_recomputed_corr': min_.round(3),
 
                 'n_intersections': len(intersections),
                 'mean_corr_intersections': np.mean(corrs).round(3),
                 'std_corr_intersections': np.std(corrs).round(3),
             }
+
             field.correction_results = correction_results
             df.append(correction_results)
 
+        # Compute potential bad fields
+        n_bad_intersections = np.zeros(self.n_fields, dtype=np.int8)
+        if bad_intersections_keys:
+            bad_fields = np.array(bad_intersections_keys)[:, :2].flatten()
+            u, c = np.unique(bad_fields, return_counts=True)
+            argsort = np.argsort(c)[::-1]
+            u, c = u[argsort], c[argsort]
+            n_bad_intersections[u] = c
+
+        df = pd.DataFrame(df).set_index('name')
+        df['n_bad_intersections'] = n_bad_intersections
+
         columns = [
-            'shift', 'angle', 'gain',
-            'mean_recomputed_corr', 'std_recomputed_corr',
-            'n_intersections', 'mean_corr_intersections', 'std_corr_intersections'
+            'shift', 'angle', 'gain', 'n_bad_intersections',
+            'mean_recomputed_corr', 'min_recomputed_corr',# 'std_recomputed_corr',
+            'n_intersections', 'mean_corr_intersections',# 'std_corr_intersections'
         ]
 
-        df = pd.DataFrame(df).set_index('name')[columns]
-        return df
+        return df[columns]
+
+
+    # Export: SEG-Y
+    def export_segy(self, path, method='traces', apply_angle=True, apply_gain=True, pad_width=10, pbar='t'):
+        """ method='headers'/'traces'. """
+        for field in Notifier(pbar, desc='Exporting SEG-Y files')(self.fields):
+            self._export_segy(field=field, path=path, method=method,
+                              apply_angle=apply_angle, apply_gain=apply_gain, pad_width=pad_width)
+
+    @staticmethod
+    def _export_segy(field, path, method='traces', apply_angle=True, apply_gain=True, pad_width=10):
+        """ !!. """
+        #pylint: disable=protected-access, unnecessary-lambda-assignment
+        # Prepare correction
+        shift = -field.correction_results['shift']
+        angle = -field.correction_results['angle'] if apply_angle else 0.0
+        gain = 1/field.correction_results['gain'] if apply_gain else 1.0
+
+        # Make a copy of a file. To make sure that it is not IBM floats, we copy data and headers separately
+        path = field.make_path(path, name=field.name)
+        FieldCollection._copy_segy(field, path)
+
+        # Prepare dst memory map
+        dst_loader = MemmapLoader(path)
+        mmap_trace_headers_dtype = dst_loader._make_mmap_headers_dtype(['DelayRecordingTime'],
+                                                                       endian_symbol=dst_loader.endian_symbol)
+        mmap_trace_dtype = np.dtype([*mmap_trace_headers_dtype,
+                                     ('data', dst_loader.mmap_trace_data_dtype, dst_loader.mmap_trace_data_size)])
+
+        mmap = np.memmap(filename=path, mode='r+', shape=dst_loader.n_traces,
+                         offset=dst_loader.file_traces_offset, dtype=mmap_trace_dtype)
+
+        # Modify copied file
+        if method == 'headers':
+            added_delay = np.round(shift).astype(np.int16)
+            mmap['DelayRecordingTime'] += added_delay
+            mmap['data'] *= gain
+
+        elif method == 'traces':
+            data = field.load_slide(0)
+
+            # Resample to MS
+            arange = np.arange(data.shape[1], dtype=np.float32)
+            arange_ms = np.arange(data.shape[1], step=(1 / field.sample_interval), dtype=np.float32)
+            interpolator = lambda trace: np.interp(arange_ms, arange, trace)
+            data = np.apply_along_axis(interpolator, 1, data)
+
+            # Apply modifications
+            data = np.pad(data, ((0, 0), (pad_width, pad_width)))
+            for c in range(data.shape[0]):
+                data[c] = modify_trace(data[c], shift=shift, angle=angle, gain=gain)
+            data = data[:, pad_width:-pad_width]
+
+            # Resample back to samples
+            interpolator = lambda trace: np.interp(arange, arange_ms, trace)
+            data = np.apply_along_axis(interpolator, 1, data)
+            mmap['data'] = data
+        return path
+
+    @staticmethod
+    def _copy_segy(field, path):
+        data = field.geometry[:, :, :]
+        field.geometry.array_to_segy(data, path=path, format=5, pbar=False)
+
+        src_loader = field.geometry.loader
+        src_mmap = np.memmap(field.path, mode='r', shape=src_loader.n_traces,
+                             offset=src_loader.file_traces_offset, dtype=src_loader.mmap_trace_dtype)
+
+        dst_loader = MemmapLoader(path)
+        dst_mmap = np.memmap(path, mode='r+', shape=dst_loader.n_traces,
+                             offset=dst_loader.file_traces_offset, dtype=dst_loader.mmap_trace_dtype)
+
+        dst_mmap['headers'] = src_mmap['headers']
+        return path
+
+    # Export: horizons
+    def export_horizons(self, path):
+        """ !!. """
+        for horizon_name in self.horizons:
+            self.export_horizon(horizon_name=horizon_name, path=path)
+
+    def export_horizon(self, path, horizon_name=None):
+        """ !!. """
+        path = path.replace('$', horizon_name)
+        df = self.horizons[horizon_name]
+
+        depth_column = df['DEPTH'].copy()
+        for field in self.fields:
+            mask = df['FIELD_NAME'] == field.short_name
+            depth_column[mask] += -field.correction_results['shift'] # TODO: adjust z-shift on angle
+
+        out_df = df.copy()
+        out_df['DEPTH'] = depth_column
+
+        with open(path,'w+') as file:
+            file.write(horizon_name + '\n')
+        out_df.to_csv(path, mode='a', index=False, header=False, sep='\t')
+        return path
+
 
     # Visualize
     def show_lines(self, arrow_step=10, arrow_size=20):
@@ -468,6 +643,20 @@ def distribute_misties(a, b, n, skip_index=-1, max_iters=100, alpha=0.75, tolera
     n : int
         Number of lines in the intersections.
         For each of them, we compute a distributed mistie as a result of this function.
+
+    Example
+    -------
+    To reproduce example from the original paper, one can use::
+        a = np.array([
+            [1, 2],
+            [0, 2],
+            [0, 1],
+            [0, 3],
+            [1, 3],
+            [2, 3],
+        ])
+        b = np.array([21, 1, -19, 1, 20, -2])
+        n = 4
     """
     x = np.zeros(n)
     errors = np.empty(max_iters)
@@ -479,6 +668,9 @@ def distribute_misties(a, b, n, skip_index=-1, max_iters=100, alpha=0.75, tolera
         if iteration != 0:
             stop_condition = (errors[iteration - 1] - errors[iteration]) / errors[iteration - 1]
             if stop_condition < tolerance or errors[iteration] == 0.0:
+                break
+        else:
+            if errors[0] == 0:
                 break
 
         # Compute next iteration of solution

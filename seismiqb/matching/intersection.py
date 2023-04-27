@@ -178,6 +178,7 @@ class Intersection2d2d:
         return trace_0, trace_1
 
     def _prepare_trace(self, field, index, limits=None, pad_width=None, n=1, transform=None):
+        # TODO: add taper
         # Load data
         nhalf = (n - 1) // 2
         indices = list(range(index - nhalf, index + nhalf + 1))
@@ -229,16 +230,20 @@ class Intersection2d2d:
         """
         if method in {'analytic'}:
             matching_results = self.match_traces_analytic(**kwargs)
-        else:
+        elif method in {'optimize'}:
             matching_results = self.match_traces_optimize(**kwargs)
+        else:
+            matching_results = self.match_on_horizon(**kwargs)
 
         matching_results['petrel_corr'] = (matching_results['corr'] + 1) / 2
+        if getattr(self, 'key'):
+            matching_results['key'] = self.key
         self.matching_results = matching_results
         return matching_results
 
 
     def match_traces_optimize(self, limits=None, index_shifts=(0, 0), pad_width=None, n=1, transform=None,
-                              init_shifts=range(-100, +100), init_angles=(0,), metric='correlation',
+                              init_shifts=range(-100, +100), init_angles=(0,), metric='r2',
                               bounds_shift=(-150, +150), bounds_angle=None, bounds_gain=(0.9, 1.1),
                               maxiter=100, eps=1e-6, **kwargs):
         """ Match traces by iterative optimization of the selected loss function.
@@ -394,7 +399,7 @@ class Intersection2d2d:
         return matching_results
 
 
-    def match_on_horizon(self, horizon_name=None):
+    def match_on_horizon(self, horizon_name=None, **kwargs):
         """ !!. """
         horizon_to_depth_0, horizon_to_depth_1 = self.prepare_horizons()
 
@@ -408,10 +413,15 @@ class Intersection2d2d:
         depth_0 = horizon_to_depth_0[horizon_name]
         depth_1 = horizon_to_depth_1[horizon_name]
 
+        shift = depth_0 - depth_1
+        angle = 0.0
+        gain = self.compute_gain()
+        corr = self.evaluate(shift=shift, angle=angle, gain=gain)
         return {
-            'shift': depth_1 - depth_0,
-            'angle': 0.0,
-            'gain': self.compute_gain()
+            'shift': shift,
+            'angle': angle,
+            'gain': gain,
+            'corr': corr
         }
 
     def compute_gain(self, data_0=None, data_1=None, **kwargs):
@@ -427,6 +437,15 @@ class Intersection2d2d:
         trace_0, trace_1 = self.prepare_traces(pad_width=pad_width, limits=limits, n=n, transform=transform)
         metric_function = compute_correlation if metric == 'correlation' else compute_r2
         return metric_function(trace_0, modify_trace(trace_1, shift=shift, angle=angle, gain=gain))
+
+    def compute_horizon_metric(self, horizon_name=None, shift=0, **kwargs):
+        """ Compute the difference between horizon matching and suggested shift. """
+        horizon_matching = self.match_on_horizon(horizon_name=horizon_name)
+        return np.abs(horizon_matching['shift'] - shift)
+
+    def get_correction(self):
+        dict_0 = self.field_0.correction_results
+        dict_1= self.field_0.correction_results
 
 
     # Visualization
@@ -447,7 +466,7 @@ class Intersection2d2d:
 
     def show_curves(self, method='analytic', limits=None, index_shifts=(0, 0), pad_width=None, n=1, transform=None,
                     shift=0, angle=0, gain=1,
-                    max_shift=100, resample_factor=10, apply_correction=False, **kwargs):
+                    max_shift=100, resample_factor=10, apply_correction=False, n_plots=3, **kwargs):
         """ Display traces, cross-correlation vs shift and phase vs shift graphs. """
         # Get matching results with all the intermediate variables
         matching_results = self.match_traces(method=method,
@@ -471,7 +490,8 @@ class Intersection2d2d:
         ticks = np.arange(start_tick, start_tick + len(trace_0))
 
         kwargs = {
-            'title': [f'traces\n{shift=:3.3f}  {angle=:3.3f}  {gain=:3.3f}',
+            'title': [f'traces of "{self.field_0.short_name}.sgy" x "{self.field_1.short_name}.sgy"'
+                      f'\n{shift=:3.3f}  {angle=:3.3f}  {gain=:3.3f}',
                       'cross-correlation', 'instantaneous phase'],
             'label': [['trace_0', 'trace_1'], ['crosscorrelation', 'envelope'], 'instant phases'],
             'xlabel': ['depth', 'shift', 'shift'], 'xlabel_size': 16,
@@ -485,21 +505,23 @@ class Intersection2d2d:
 
         plotter = plot([[(ticks, trace_0), (ticks, trace_1)],
                         [(shifts, metrics), (shifts, envelope)],
-                        [(shifts, instantaneous_phase)]],
+                        [(shifts, instantaneous_phase)]][:n_plots],
                        mode='curve', **kwargs)
 
         # Add more annotations
         shift = matching_results['shift']
         angle = matching_results['angle']
         corr = matching_results['corr']
-        plotter[1].ax.axvline(shift, linestyle='--', alpha=0.9, color='green')
-        plotter[1].add_legend(mode='curve', label=f'optimal shift: {shift:4.3f}',
-                              alpha=0.9, color='green')
-        plotter[1].ax.axhline(corr, linestyle='--', alpha=0.9, color='red')
-        plotter[1].add_legend(mode='curve', label=f'max correlation: {corr:4.3f}',
-                              alpha=0.9, color='red')
-        plotter[2].ax.axvline(shift, linestyle='--', alpha=0.9, color='green')
-        plotter[2].add_legend(mode='curve', label=f'optimal angle: {angle:4.3f}')
+        if n_plots >= 2:
+            plotter[1].ax.axvline(shift, linestyle='--', alpha=0.9, color='green')
+            plotter[1].add_legend(mode='curve', label=f'optimal shift: {shift:4.3f}',
+                                alpha=0.9, color='green')
+            plotter[1].ax.axhline(corr, linestyle='--', alpha=0.9, color='red')
+            plotter[1].add_legend(mode='curve', label=f'max correlation: {corr:4.3f}',
+                                alpha=0.9, color='red')
+        if n_plots >= 3:
+            plotter[2].ax.axvline(shift, linestyle='--', alpha=0.9, color='green')
+            plotter[2].add_legend(mode='curve', label=f'optimal angle: {angle:4.3f}')
         return plotter
 
 
@@ -594,7 +616,7 @@ class Intersection2d2d:
                             -max_index_shift, +max_index_shift))
 
 
-    def show_composite_slide(self, sides=(0, 0), horizon_width=5,
+    def show_composite_slide(self, sides=(0, 0), horizon_width=3,
                              limits=None, gap_width=1, pad_width=None, transform=None,
                              shift=0, angle=0, gain=1, width='auto', **kwargs):
         """ Display sides of shot lines on one plot. """
@@ -616,7 +638,7 @@ class Intersection2d2d:
                                                   limits=limits, gap_width=gap_width, width=width,
                                                   pad_width=pad_width, transform=transform)[0].astype(np.bool_)
         data.append(mask_slide)
-        cmap.append('goldenrod')
+        cmap.append('magenta')
 
         # Compute correlation on traces
         correlation = compute_correlation(slide_0[-1], slide_1[0])
@@ -626,7 +648,7 @@ class Intersection2d2d:
         extent = (0, combined_slide.shape[0], start_tick + combined_slide.shape[1], start_tick)
 
         title = (f'"{self.field_0.short_name}.sgy":{sides[0]} x "{self.field_1.short_name}.sgy":{sides[1]}\n'
-                 f'{shift=:3.2f}  {angle=:3.1f}  {gain=:3.2f}\n'
+                 f'{shift=:3.2f}  {angle=:3.1f}  {gain=:3.3f}\n'
                  f'{correlation=:3.2f}  corrected_correlation={(1 + correlation)/2:3.2f}')
         kwargs = {
             'cmap': cmap,
@@ -677,7 +699,7 @@ class Intersection2d2d:
             slide = field.load_slide(0)
         else:
             slide = np.zeros(field.shape[1:], dtype=np.float32)
-            for horizon in field.horizon_instances.values():
+            for horizon in getattr(field, 'horizon_instances', {}).values():
                 slide += horizon.load_slide(0, width=horizon_width)
 
         slide = slide[:trace_idx + 1] if side == 0 else slide[trace_idx:]
@@ -701,6 +723,23 @@ class Intersection2d2d:
         # Additional padding
         slide = np.pad(slide, ((0, 0), (pad_width, pad_width)))
         return slide
+
+    def compare_composite_slides(self, sides=(0, 0), horizon_width=5,
+                                 limits=None, gap_width=1, pad_width=None, transform=None,
+                                 shift=0, angle=0, gain=1, width='auto', figsize=(14, 20), **kwargs):
+        """ !!. """
+        _, ax = plt.subplots(1, 2, figsize=figsize)
+        self.show_composite_slide(sides=sides, horizon_width=horizon_width,
+                                  limits=limits, gap_width=gap_width, pad_width=pad_width, transform=transform,
+                                  width=width, axes=ax[0], adjust_figsize=False, **kwargs)
+
+        self.show_composite_slide(sides=sides, horizon_width=horizon_width,
+                                  limits=limits, gap_width=gap_width, pad_width=pad_width, transform=transform,
+                                  shift=shift, angle=angle, gain=gain,
+                                  width=width, axes=ax[1], adjust_figsize=False, **kwargs)
+        plt.show()
+
+
 
 
 class Intersection2d3d:
