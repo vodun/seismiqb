@@ -43,7 +43,9 @@ class FieldCollection:
     }
 
     def load_fields(self, fields, geometry_kwargs=None):
-        """ !!. """
+        """ Load field instances from their paths.
+        If an element of `fields` is already an instance of Field, it is left untouched.
+        """
         # TODO: try to remove ~duplicate fields?
         if isinstance(fields, str):
             fields = sorted(list(glob(fields)))
@@ -52,7 +54,7 @@ class FieldCollection:
         return [Field(item, geometry_kwargs=geometry_kwargs) if isinstance(item, str) else item for item in fields]
 
     def compute_intersections(self, limits=slice(None), pad_width=0, threshold=10, n_intersections=np.inf):
-        """ !!. """
+        """ Compute intersections over the present fields. """
         result = {}
         for i, field_0 in enumerate(self.fields[:-1]):
             for j, field_1 in enumerate(self.fields[i+1:], start=i+1):
@@ -70,7 +72,7 @@ class FieldCollection:
         return result
 
     def load_horizon(self, path, add_instances=True, verbose=True):
-        """ !!. """
+        """ Load horizon: save into dict for each field. """
         horizon_name = os.path.basename(path)
 
         df = pd.read_csv(path, sep=r'\s+', index_col=False, skiprows=[0],
@@ -198,7 +200,10 @@ class FieldCollection:
         return df
 
     def compute_horizon_metric(self, horizon_name=None):
-        """ !!. """
+        """ Compute the difference between horizon and proposed shifts.
+        The first metric adds no shift, measuring the difference on horizon picks in the original file.
+        The second uses field corrections, and the last applies shifts from the intersections.
+        """
         shifts = self.corrections['shift']['x']
 
         metrics = []
@@ -313,7 +318,9 @@ class FieldCollection:
         return indices
 
     def remove_fields(self, indices):
-        """ !!. """
+        """ Remove fields (and their intersections) by indices.
+        TODO: test
+        """
         for idx in np.sort(indices)[::-1]:
             self.fields.pop(idx)
 
@@ -405,15 +412,21 @@ class FieldCollection:
 
     # Export: SEG-Y
     def export_segy(self, path, method='traces', apply_angle=True, apply_gain=True, pad_width=10, pbar='t'):
-        """ method='headers'/'traces'. """
+        """ Export present fields with suggested corrections.
+        Uses either trace headers or trace values to introduce corrections.
+        In the first case, only vertical and gain corrections are applied.
+        The second one uses interpolation and FFT-shift under the hood.
+
+        `path` can contain the '$' symbol, which is replaced by the field name. Useful to save a lot of files.
+        """
         for field in Notifier(pbar, desc='Exporting SEG-Y files')(self.fields):
             self._export_segy(field=field, path=path, method=method,
                               apply_angle=apply_angle, apply_gain=apply_gain, pad_width=pad_width)
 
     @staticmethod
     def _export_segy(field, path, method='traces', apply_angle=True, apply_gain=True, pad_width=10):
-        """ !!. """
-        #pylint: disable=protected-access, unnecessary-lambda-assignment
+        """ Export one SEG-Y file. """
+        #pylint: disable=protected-access
         # Prepare correction
         shift = -field.correction_results['shift']
         angle = -field.correction_results['angle'] if apply_angle else 0.0
@@ -462,6 +475,7 @@ class FieldCollection:
 
     @staticmethod
     def _copy_segy(field, path):
+        """ Copy the data of SEG-Y file in float32 format, then copy trace headers. """
         data = field.geometry[:, :, :]
         field.geometry.array_to_segy(data, path=path, format=5, pbar=False)
 
@@ -478,12 +492,12 @@ class FieldCollection:
 
     # Export: horizons
     def export_horizons(self, path):
-        """ !!. """
+        """ Save horizons with applied corrections. """
         for horizon_name in self.horizons:
             self.export_horizon(horizon_name=horizon_name, path=path)
 
-    def export_horizon(self, path, horizon_name=None):
-        """ !!. """
+    def export_horizon(self, path, horizon_name=None, encoding=None):
+        """ Save one horizon with applied corrections. """
         path = path.replace('$', horizon_name)
         df = self.horizons[horizon_name]
 
@@ -495,9 +509,9 @@ class FieldCollection:
         out_df = df.copy()
         out_df['DEPTH'] = depth_column
 
-        with open(path,'w+') as file:
+        with open(path, 'w+', encoding=encoding) as file:
             file.write(horizon_name + '\n')
-        out_df.to_csv(path, mode='a', index=False, header=False, sep='\t')
+        out_df.to_csv(path, mode='a', index=False, header=False, sep='\t', encoding=encoding)
         return path
 
 

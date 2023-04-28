@@ -60,7 +60,7 @@ def minimize_proxy(x, trace_0, trace_1, metric='correlation'):
 
 @njit
 def compute_shifted_traces(trace, shifts):
-    """ !!. """
+    """ Make an array with shifted `trace` for each `shift`. """
     buffer = np.empty((shifts.size, trace.size), dtype=np.float32)
     arange = np.arange(len(trace), dtype=np.float32)
 

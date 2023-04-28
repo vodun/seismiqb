@@ -400,7 +400,9 @@ class Intersection2d2d:
 
 
     def match_on_horizon(self, horizon_name=None, **kwargs):
-        """ !!. """
+        """ Use horizon picks to determine necessary corrections on intersection.
+        Note that it actually computes only the vertical mistie; angle is left at 0 and gain is the RMS ratio.
+        """
         horizon_to_depth_0, horizon_to_depth_1 = self.prepare_horizons()
 
         if horizon_name is None:
@@ -444,8 +446,14 @@ class Intersection2d2d:
         return np.abs(horizon_matching['shift'] - shift)
 
     def get_correction(self):
+        """ Get corrections from field. Used to see how intersection would behave after field corrections applied. """
         dict_0 = self.field_0.correction_results
-        dict_1= self.field_0.correction_results
+        dict_1 = self.field_1.correction_results
+        return {
+            'shift': dict_0['shift'] - dict_1['shift'],
+            'angle': dict_0['angle'] - dict_1['angle'],
+            'gain': np.exp(np.log(dict_0['gain']) - np.log(dict_1['gain'])),
+        }
 
 
     # Visualization
@@ -727,7 +735,7 @@ class Intersection2d2d:
     def compare_composite_slides(self, sides=(0, 0), horizon_width=5,
                                  limits=None, gap_width=1, pad_width=None, transform=None,
                                  shift=0, angle=0, gain=1, width='auto', figsize=(14, 20), **kwargs):
-        """ !!. """
+        """ Display composite slides over intersection with and without corrections side-by-side. """
         _, ax = plt.subplots(1, 2, figsize=figsize)
         self.show_composite_slide(sides=sides, horizon_width=horizon_width,
                                   limits=limits, gap_width=gap_width, pad_width=pad_width, transform=transform,
