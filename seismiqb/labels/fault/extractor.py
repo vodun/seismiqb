@@ -148,7 +148,7 @@ class FaultExtractor:
                 slide = skeletonize(slide, width=3)
 
             # Extract connected components from the slide
-            labeled_slide = connected_components(slide > 0)
+            labeled_slide = connected_components(slide > np.min(slide)) # for signed dtypes
             objects = find_objects(labeled_slide)
 
             # Get components info
