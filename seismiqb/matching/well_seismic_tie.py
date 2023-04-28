@@ -130,6 +130,7 @@ class WellSeismicMatcher:
                 **(filter_dt if isinstance(filter_dt, dict) else {}),
             }
             dt_values = self.well._compute_filtered_log(dt_values, **filtration_parameters)
+            dt_values = np.nan_to_num(dt_values)
             self.well['DT_FILTERED'] = dt_values
 
         # Prepare impedance log
@@ -178,7 +179,8 @@ class WellSeismicMatcher:
         self.well_reflectivity = self.well['R_RECOMPUTED'].values[self.well_bounds]
 
 
-    def extract_wavelet(self, method='statistical', normalize=False, taper=True, wavelet_length=61, state=-1, **kwargs):
+    def extract_wavelet(self, method='statistical', normalize=False, limits=slice(None),
+                        taper=True, wavelet_length=61, state=-1, **kwargs):
         """ Compute a wavelet by a chosen method.
         Available methods are:
             - `ricker` creates a fixed Ricker wavelet. Additional parameters are `a` for width.
@@ -205,7 +207,7 @@ class WellSeismicMatcher:
             If dict, then a state directly.
         """
         # Prepare trace and (optionally) reflectivity
-        trace = self.seismic_trace.copy()
+        trace = self.seismic_trace.copy()[limits]
         if taper:
             trace *= np.blackman(len(trace)) # TODO: taper selection, maybe?
         lenhalf, wlenhalf, wlenflag = len(trace) // 2, wavelet_length // 2, wavelet_length % 2
@@ -214,7 +216,7 @@ class WellSeismicMatcher:
             state = state if isinstance(state, dict) else self.states[state]
             reflectivity = self.resample_to_seismic(seismic_times=self.seismic_times,
                                                     well_times=state['well_times'],
-                                                    well_data=np.nan_to_num(self.well_reflectivity))
+                                                    well_data=np.nan_to_num(self.well_reflectivity))[limits]
             if taper:
                 reflectivity *= np.blackman(len(trace))
 
@@ -244,7 +246,7 @@ class WellSeismicMatcher:
             operator  = np.dot(reflectivity_toeplitz, projection)
 
             # wavelet = np.linalg.lstsq(op, trace)[0]
-            model = Ridge(alpha=0.5, fit_intercept=False)
+            model = Ridge(alpha=0.1, fit_intercept=False)
             model.fit(operator, trace)
             wavelet = model.coef_[:wlenhalf + wlenflag]
             wavelet = np.concatenate((wavelet[::-1], wavelet[wlenflag:]), axis=0)
@@ -582,7 +584,7 @@ class WellSeismicMatcher:
 
         # For each extrema, check the potential correlation gain by stretching left/right side of it
         results = []
-        for index in range(topk):
+        for index in range(min(topk, len(peak_indices))):
             #pylint: disable=cell-var-from-loop
             # Locate extreme in well times
             peak_index = peak_indices[index]
@@ -727,7 +729,7 @@ class WellSeismicMatcher:
         import torch
         from xitorch.interpolate import Interp1D
         reflectivity_resampled = Interp1D(well_times, well_reflectivity,
-                                        method='linear', assume_sorted=True, extrap=0.0)(seismic_times)
+                                          method='linear', assume_sorted=True, extrap=0.0)(seismic_times)
 
         synthetic_trace = torch.nn.functional.conv1d(input=reflectivity_resampled.reshape(1, 1, -1),
                                                     weight=wavelet.reshape(1, 1, -1),
@@ -736,7 +738,7 @@ class WellSeismicMatcher:
 
 
     def optimize_well_times_pytorch(self, n_segments=100, n_iters=1000,
-                                    optimizer_params=None, regularization_params=None,
+                                    optimizer_params=None, regularization_params=None, bounds=None,
                                     limits=None, pbar='t', state=-1):
         """ Optimize well times by adjusting time values directly.
         Originally, we allow for each element of `well_times` to be multiplied by a value.
@@ -774,6 +776,38 @@ class WellSeismicMatcher:
         previous_state = state if isinstance(state, dict) else self.states[state]
         well_times, wavelet = previous_state['well_times'], previous_state['wavelet']
 
+        # Prepare variables for optimization: one multiplier for each segment
+        # TODO: figure out a better way to multiplicate values instead of `torch.repeat_interleave`
+        if n_segments == len(well_times) or n_segments == 'well':
+            multipliers = torch.ones(len(well_times), dtype=torch.float32, requires_grad=True)
+            segment_size = 1
+        else:
+            if isinstance(n_segments, str) and n_segments.startswith('top'):
+                # TODO: very dirty, refactor
+                n_segments = int(n_segments[3:])
+
+                synthetic_trace = self.compute_resampled_synthetic(**previous_state)
+                dt = np.diff(well_times, prepend=0)
+
+                values = np.abs(synthetic_trace)
+                peak_indices = find_peaks(values, distance=5)[0]
+                peak_indices = peak_indices[np.argsort(values[peak_indices])[::-1]]
+                peak_positions = []
+                for index in range(n_segments):
+                    peak_index = peak_indices[index]
+                    peak_time = self.seismic_times[peak_index]
+                    peak_position = np.searchsorted(well_times, peak_time)
+                    peak_positions.append(peak_position)
+                peak_positions = np.sort(np.array(peak_positions))
+
+                segment_size = np.diff(peak_positions, prepend=0)
+                segment_size[-1] += len(well_times) - segment_size.sum()
+                segment_size = torch.from_numpy(segment_size)
+            else:
+                segment_size = len(well_times) // n_segments + 1
+            multipliers = torch.ones(n_segments, dtype=torch.float32, requires_grad=True)
+
+
         # Convert data to PyTorch. Clone everything, as CPU tensors share data with numpy arrays
         seismic_times = torch.from_numpy(self.seismic_times).float().clone()
         seismic_trace = torch.from_numpy(self.seismic_trace).float().clone()
@@ -782,15 +816,6 @@ class WellSeismicMatcher:
         well_times = torch.from_numpy(well_times).float().clone()
         wavelet = torch.from_numpy(wavelet).float().clone()
         dt = torch.from_numpy(np.diff(well_times, prepend=0)).float().clone()
-
-        # Prepare variables for optimization: one multiplier for each segment
-        # TODO: figure out a better way to multiplicate values instead of `torch.repeat_interleave`
-        if n_segments == len(well_times) or n_segments == 'well':
-            multipliers = torch.ones(len(well_times), dtype=torch.float32, requires_grad=True)
-            segment_size = 1
-        else:
-            multipliers = torch.ones(n_segments, dtype=torch.float32, requires_grad=True)
-            segment_size = len(well_times) // n_segments + 1
 
         # Prepare infrastructure for train
         optimizer_params = {
@@ -1100,7 +1125,7 @@ class WellSeismicMatcher:
             iv_diff = np.abs(iv - iv_state)
             data.append([(well_times, iv), (well_times, iv_state), (well_times, iv_diff)])
 
-            relative_iv = np.round(dt / dt_state, 2)
+            relative_iv = np.round(dt / dt_state, 6)
             data.append([(well_times, relative_iv)])
 
         kwargs = {
@@ -1188,7 +1213,7 @@ class WellSeismicMatcher:
         kwargs = {
             'title': 'correlation VS shift of well data',
             'xlabel': 'shift, seconds', 'ylabel': 'correlation',
-            'fontsize': 18, 'title_size': 22,
+            'size': 18, 'title_size': 22,
             **kwargs
         }
 

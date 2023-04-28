@@ -333,7 +333,7 @@ class Well:
 
             kwargs = {
                 'xlabel': index_label,
-                'xlabel_fontsize': 20,
+                'xlabel_size': 20,
                 'xlim': [index_lim] * n_subplots if combine == 'separate' else index_lim,
                 'ylabel': '',
                 'window': 100, 'alpha': 0.7,
@@ -347,7 +347,7 @@ class Well:
 
             kwargs = {
                 'ylabel': index_label,
-                'ylabel_fontsize': 20,
+                'ylabel_size': 20,
                 'ylim': [index_lim] * n_subplots if combine == 'separate' else index_lim,
                 'xlabel': '',
                 'ratio': 0.4,
