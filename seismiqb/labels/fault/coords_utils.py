@@ -1,4 +1,4 @@
-""" Helpers for the natural 3-dimensional space coordinates processing. """
+""" Faults extraction helpers for 3D coordinates processing. """
 import numpy as np
 from numba import njit
 import cv2 as cv
@@ -112,7 +112,7 @@ def bboxes_embedded(bbox_1, bbox_2, margin=3):
 
 @njit
 def compute_distances(coords_1, coords_2, max_threshold=10000):
-    """ Find approximate minimal and maximal distances between two arrays of coordinates.
+    """ Find approximate minimum and maximum distance between two arrays of coordinates.
 
     A little bit faster than difference between np.ndarrays with `np.max` and `np.min`.
 
@@ -180,7 +180,7 @@ def find_contour(coords, projection_axis):
 
 @njit
 def restore_coords_from_projection(coords, projection_buffer, axis):
-    """ Restore `axis` coordinates for 2D projection from original coordinates.
+    """ Get `axis` values for 2D projection coordinates from 3D coords.
 
     Parameters
     ----------

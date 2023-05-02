@@ -20,7 +20,7 @@ class FaultExtractor:
 
     Main naming rules, which help to understand what's going on:
     - Component is a 2D connected component on slide (corresponds to :class:`~.Component` instance).
-    - Prototype is a 3D points body of merged components (corresponds to :class:`~.FaultPrototype` instance).
+    - Prototype is a 3D points cloud of merged components (corresponds to :class:`~.FaultPrototype` instance).
     Instances of :class:`~.FaultPrototype` are essentially the same as :class:`~.Fault` instances,
     but with their own processing methods such as concat, split, etc.
     - `coords` are spatial coordinates ndarray in format (iline, xline, depth) with (N, 3) shape.
@@ -125,7 +125,7 @@ class FaultExtractor:
 
         self._unprocessed_slide_idx = self.origin[self.direction] # variable for internal operations speed up
 
-        self.prototypes_queue = deque() # prototypes for extension
+        self.prototypes_queue = [] # prototypes for extension
         self.prototypes = [] if prototypes is None else prototypes # extracted prototypes
 
     def _init_container(self, data, skeletonize_data=False):
@@ -252,7 +252,7 @@ class FaultExtractor:
             prototype = FaultPrototype(points=component.points, direction=self.direction, last_component=component,
                                        proba_transform=self.proba_transform)
         else:
-            prototype = self.prototypes_queue.popleft()
+            prototype = self.prototypes_queue.pop(0)
             component = prototype.last_component
 
         # Find closest components on next slides
@@ -353,7 +353,7 @@ class FaultExtractor:
             # Check closeness of some points (as depth-wise distances)
             # Faster then component overlap, but not so accurate
             overlap_depths = (max(component.bbox[2, 0], other_component.bbox[2, 0]),
-                                    min(component.bbox[2, 1], other_component.bbox[2, 1]))
+                              min(component.bbox[2, 1], other_component.bbox[2, 1]))
 
             step = min(depth_iteration_step, (overlap_depths[1]-overlap_depths[0])//3)
             step = max(step, 1)
