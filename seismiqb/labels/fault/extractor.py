@@ -105,6 +105,8 @@ class FaultExtractor:
         self.direction = direction
         self.orthogonal_direction = 1 - self.direction
 
+        self.proba_transform = None
+
         # Make ranges
         ranges = make_ranges(ranges=ranges, shape=shape)
         ranges = np.array(ranges)
@@ -178,8 +180,9 @@ class FaultExtractor:
                 probas = slide[coords_2D[0], coords_2D[1]]
 
                 # Convert probas to integer values for saving them in points array with 3D-coordinates
-                if not np.issubdtype(probas.dtype, np.integer):
+                if not np.issubdtype(data.dtype, np.integer):
                     probas = np.round(probas * 255)
+                    self.proba_transform = lambda x: x / 255
                 if probas.dtype != coords.dtype:
                     probas = probas.astype(coords.dtype)
 
@@ -246,7 +249,8 @@ class FaultExtractor:
 
             self.container[component.slide_idx]['lengths'][component_idx] = -1 # Mark component as merged
 
-            prototype = FaultPrototype(points=component.points, direction=self.direction, last_component=component)
+            prototype = FaultPrototype(points=component.points, direction=self.direction, last_component=component,
+                                       proba_transform=self.proba_transform)
         else:
             prototype = self.prototypes_queue.popleft()
             component = prototype.last_component
@@ -1049,9 +1053,10 @@ class FaultPrototype:
     last_component : instance of :class:`~.Component`
         The last added component into prototype. Useful during the extraction from 3D data volume.
     """
-    def __init__(self, points, direction, last_component=None):
+    def __init__(self, points, direction, last_component=None, proba_transform=None):
         self.points = points
         self.direction = direction
+        self.proba_transform = proba_transform
 
         self._bbox = None
 
@@ -1093,7 +1098,16 @@ class FaultPrototype:
     def proba(self):
         """ 90% percentile of approximate proba values in [0, 1] interval. """
         proba_value = np.percentile(self.points[:, 3], 90) # is integer value from 0 to 255
-        proba_value /= 255
+        if self.proba_transform is not None:
+            proba_value = self.proba_transform(proba_value)
+        return proba_value
+
+    @property
+    def max_proba(self):
+        """ Maximum of approximate proba values in [0, 1] interval. """
+        proba_value = np.max(self.points[:, 3])
+        if self.proba_transform is not None:
+            proba_value = self.proba_transform(proba_value)
         return proba_value
 
     # Properties for internal needs
@@ -1289,7 +1303,7 @@ class FaultPrototype:
         split_indices = np.nonzero(unique_direction_points[1:] - unique_direction_points[:-1] > 1)[0]
 
         if len(split_indices) == 0:
-            return [FaultPrototype(points=points, direction=self.direction)]
+            return [FaultPrototype(points=points, direction=self.direction, proba_transform=self.proba_transform)]
 
         # Separate disconnected objects and create new prototypes instances
         start_indices = unique_direction_points[split_indices + 1]
@@ -1302,7 +1316,7 @@ class FaultPrototype:
 
         for start_idx, end_idx in zip(start_indices, end_indices):
             points_ = points[(start_idx <= points[:, axis]) & (points[:, axis] <= end_idx)]
-            prototype = FaultPrototype(points=points_, direction=self.direction)
+            prototype = FaultPrototype(points=points_, direction=self.direction, proba_transform=self.proba_transform)
             prototypes.append(prototype)
 
         return prototypes
