@@ -68,39 +68,30 @@ class FaultExtractor:
 
     Parameters
     ----------
-    data : np.ndarray or :class:`~.Geometry` instance
+    data : np.ndarray or :class:`~.Geometry` instance, optional
         A 3D volume with smoothed or skeletonized predictions.
         Note, that you need to provide `data` argument or `prototypes` and `shape` instead.
         Note, by default we process skeletonized data, for smoothed data set `skeletonize_data=True`.
+    ranges : sequence, optional
+        Nested sequence, where each element is either None or sequence of two ints.
+        Defines data ranges for faults extraction.
+    skeletonize_data : bool, optional
+        Whether the `data` argument needs to be skeletonized or not.
+        Should be True, if data is smoothed model outputs.
     direction : {0, 1}
         Extraction direction, can be 0 (ilines) or 1 (xlines).
         It is the same as the prediction direction.
-    prototypes : list of :class:`~.FaultPrototype` instances, optional
-        Prototypes for applying :class:`~.FaultExtractor` methods on.
-        Useful for processing prototypes extracted from separate chunks.
-    shape : sequence of three ints, optional
-        Field shape from which the `prototypes` were extracted.
-    skeletonize_data : bool
-        Whether the `data` argument needs to be skeletonized or not.
-        Should be True, if data is smoothed model outputs.
-    ranges : sequence
-        Nested sequence, where each element is either None or sequence of two ints.
-        Defines data ranges for faults extraction.
-    component_len_threshold : int
+    component_len_threshold : int, optional
         Threshold to filter out too small connected components on data slides.
         If 0, then no filter applied (recommended for higher accuracy).
         If more than 0, then extraction will be faster but some small prototypes can be not extracted.
+    shape : sequence of three ints, optional
+        Field shape.
     """
     # pylint: disable=protected-access
-    def __init__(self, data=None, direction=0, prototypes=None, shape=None,
-                 skeletonize_data=True, ranges=None, component_len_threshold=0):
-        # Check
-        if data is None and (prototypes is None or shape is None):
-            raise ValueError("`data` or `prototypes` and `shape` must be provided!")
-
+    def __init__(self, data=None, ranges=None, skeletonize_data=True, direction=0, component_len_threshold=0, shape=None):
         # Data parameters
-        shape = data.shape if shape is None else shape
-        self.shape = shape
+        self.shape = data.shape if data is not None else shape
 
         self.direction = direction
         self.orthogonal_direction = 1 - self.direction
@@ -108,7 +99,7 @@ class FaultExtractor:
         self.proba_transform = None
 
         # Make ranges
-        ranges = make_ranges(ranges=ranges, shape=shape)
+        ranges = make_ranges(ranges=ranges, shape=self.shape)
         ranges = np.array(ranges)
         self.ranges = ranges
 
@@ -118,15 +109,16 @@ class FaultExtractor:
         self._dilation = 3 # constant for internal operations
         self.component_len_threshold = component_len_threshold
 
+        self._unprocessed_slide_idx = self.origin[self.direction] # variable for internal operations speed up
+
+        # Containers
+        self.prototypes_queue = [] # prototypes for extraction
+        self.prototypes = [] # extracted prototypes
+
         if data is not None:
             self.container = self._init_container(data=data, skeletonize_data=skeletonize_data)
         else:
             self.container = None
-
-        self._unprocessed_slide_idx = self.origin[self.direction] # variable for internal operations speed up
-
-        self.prototypes_queue = [] # prototypes for extension
-        self.prototypes = [] if prototypes is None else prototypes # extracted prototypes
 
     def _init_container(self, data, skeletonize_data=False):
         """ Extract connected components on each slide and save them into container.
@@ -210,6 +202,24 @@ class FaultExtractor:
 
         return container
 
+    @classmethod
+    def from_prototypes(cls, prototypes, shape):
+        """Initialize extractor from prototypes.
+
+        Useful for applying operations on prototypes from different data chunks.
+
+        Parameters
+        ----------
+        prototypes : list of :class:`~.FaultPrototype` instances, optional
+            Prototypes for applying :class:`~.FaultExtractor` methods on.
+        shape : sequence of three ints, optional
+            Field shape from which the `prototypes` were extracted.
+        """
+        instance = cls(direction=prototypes[0].direction, shape=shape)
+
+        instance.prototypes = prototypes
+        instance.shape = shape
+        return instance
 
     # Prototypes extraction from the data volume
     def extract_prototypes(self):
