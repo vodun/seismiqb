@@ -1029,3 +1029,24 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetricM
             kernel = np.ones((erosion, erosion), dtype=mask.dtype)
             mask = binary_erosion(mask, structure=kernel, border_value=True)
         return mask
+
+    def get_crop_mask(self, locations, axis=0, kernel_size=9, threshold=None, erosion=11):
+        threshold = threshold or self.std / 10
+        array = self.load_crop(locations)
+        array = array if array.dtype == np.float32 else array.astype(np.uint8)
+        mask = np.zeros_like(array, dtype=np.bool_)
+
+        ptp_kernel = np.ones((kernel_size, kernel_size), dtype=array.dtype)
+        erosion_kernel = np.ones((erosion, erosion), dtype=mask.dtype) if erosion else None
+
+        for i in range(array.shape[axis]):
+            slide = array.take(i, axis=axis)
+            ptps = cv2.dilate(slide, ptp_kernel) - cv2.erode(slide, ptp_kernel)
+            mask_ = ptps <= threshold
+            if erosion:
+                mask_ = binary_erosion(mask_, structure=erosion_kernel, border_value=True)
+            slc = [slice(None)] * 3
+            slc[axis] = i
+            mask[tuple(slc)] = mask_
+
+        return mask
