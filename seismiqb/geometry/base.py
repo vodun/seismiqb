@@ -1030,14 +1030,15 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetricM
             mask = binary_erosion(mask, structure=kernel, border_value=True)
         return mask
 
-    def get_crop_mask(self, locations, axis=0, kernel_size=9, threshold=None, erosion=11):
+    def get_crop_mask(self, locations, axis=0, kernel_size=9, threshold=None, erosion=11, dilation=60):
         threshold = threshold or self.std / 10
         array = self.load_crop(locations)
         array = array if array.dtype == np.float32 else array.astype(np.uint8)
         mask = np.zeros_like(array, dtype=np.bool_)
 
         ptp_kernel = np.ones((kernel_size, kernel_size), dtype=array.dtype)
-        erosion_kernel = np.ones((erosion, erosion), dtype=mask.dtype) if erosion else None
+        erosion_kernel = np.ones((erosion, erosion), dtype=array.dtype) if erosion else None
+        dilation_kernel = np.ones((dilation, dilation), dtype=array.dtype)
 
         for i in range(array.shape[axis]):
             slide = array.take(i, axis=axis)
@@ -1045,6 +1046,8 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetricM
             mask_ = ptps <= threshold
             if erosion:
                 mask_ = binary_erosion(mask_, structure=erosion_kernel, border_value=True)
+            if dilation:
+                mask_ = cv2.dilate(mask_.astype('uint8'), dilation_kernel).astype('bool')
             slc = [slice(None)] * 3
             slc[axis] = i
             mask[tuple(slc)] = mask_
