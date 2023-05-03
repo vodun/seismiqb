@@ -484,6 +484,9 @@ class FaultExtractor:
         new_prototypes = []
 
         for i, prototype_1 in enumerate(reodered_prototypes):
+            prototype_for_merge = None
+            best_overlap = -1
+
             for prototype_2 in reodered_prototypes[i+1:]:
                 # Exit if we out of sort_axis ranges for prototype_1
                 if (prototype_1.bbox[sort_axis, 1] < prototype_2.bbox[sort_axis, 0]):
@@ -575,37 +578,57 @@ class FaultExtractor:
                 if overlap_range is None:
                     continue
 
-                # Split for avoiding wrong prototypes shapes:
-                # - concat only overlapped parts
-                # - lower part can't be wider then upper;
-                # - if one prototype is much bigger than it should be splitted.
-                if overlap_range[1] - overlap_range[0] < min(border_1_width, border_2_width) - 2*margin:
-                    prototype_2, new_prototypes_ = prototype_2.split(overlap_range, axis=self.direction)
+                # Select the best one prototype for merge
+                border_length = border_1[:, axis].max() - border_1[:, axis].min() + 1
+                overlap_ratio = (overlap_range[1] - overlap_range[0]) / border_length
+
+                if best_overlap < overlap_ratio:
+                    best_overlap_range = overlap_range
+                    best_overlap = overlap_ratio
+                    prototype_for_merge = prototype_2
+
+                    best_border_1_width = border_1_width
+                    best_border_2_width = border_2_width
+
+                    is_first_upper_than_best = is_first_upper
+
+            # Split for avoiding wrong prototypes shapes:
+            # - concat only overlapped parts
+            # - lower part can't be wider then upper;
+            # - if one prototype is much bigger than it should be splitted.
+            if prototype_for_merge is None:
+                continue
+
+            width_threshold = min(best_border_1_width, best_border_2_width) - 2*margin
+
+            if (best_overlap_range[1] - best_overlap_range[0]) < width_threshold:
+                prototype_for_merge, new_prototypes_ = prototype_for_merge.split(best_overlap_range, axis=self.direction)
+                new_prototypes.extend(new_prototypes_)
+
+                prototype_1, new_prototypes_ = prototype_1.split(best_overlap_range, axis=self.direction)
+                new_prototypes.extend(new_prototypes_)
+
+            elif axis in (-1, 2):
+                width_diff = 5
+
+                lower_is_wider = (is_first_upper_than_best and \
+                                  prototype_for_merge.width - best_border_1_width > width_diff) or \
+                                 (not is_first_upper_than_best and prototype_1.width - best_border_2_width > width_diff)
+
+                too_big_width_diff = (width_split_threshold is not None) and \
+                                     (np.abs(prototype_1.width - prototype_for_merge.width) > width_split_threshold)
+
+                if (lower_is_wider or too_big_width_diff):
+                    if is_first_upper_than_best:
+                        prototype_for_merge, new_prototypes_ = prototype_for_merge.split(best_overlap_range,
+                                                                                         axis=self.direction)
+                    else:
+                        prototype_1, new_prototypes_ = prototype_1.split(best_overlap_range, axis=self.direction)
+
                     new_prototypes.extend(new_prototypes_)
 
-                    prototype_1, new_prototypes_ = prototype_1.split(overlap_range, axis=self.direction)
-                    new_prototypes.extend(new_prototypes_)
-
-                elif axis in (-1, 2):
-                    width_diff = 5
-
-                    lower_is_wider = (is_first_upper and prototype_2.width - border_1_width > width_diff) or \
-                                     (not is_first_upper and prototype_1.width - border_2_width > width_diff)
-
-                    too_big_width_diff = (width_split_threshold is not None) and \
-                                         (np.abs(prototype_1.width - prototype_2.width) > width_split_threshold)
-
-                    if (lower_is_wider or too_big_width_diff):
-                        if is_first_upper:
-                            prototype_2, new_prototypes_ = prototype_2.split(overlap_range, axis=self.direction)
-                        else:
-                            prototype_1, new_prototypes_ = prototype_1.split(overlap_range, axis=self.direction)
-
-                        new_prototypes.extend(new_prototypes_)
-
-                prototype_2.concat(prototype_1)
-                prototype_1._already_merged = True
-                break
+            prototype_for_merge.concat(prototype_1)
+            prototype_1._already_merged = True
 
         self.prototypes = [prototype for prototype in self.prototypes
                            if not getattr(prototype, '_already_merged', False)]
