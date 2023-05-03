@@ -1,5 +1,7 @@
 """ Utility functions. """
 import os
+import string
+import random
 
 import numpy as np
 from numba import njit, prange
@@ -19,6 +21,10 @@ def select_printer(printer):
         return printer
     return print
 
+
+def generate_string(size=10, chars=string.ascii_uppercase + string.digits):
+    """ Generate random string of given size. """
+    return ''.join(random.choice(chars) for _ in range(size))
 
 
 @njit(parallel=True)

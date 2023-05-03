@@ -267,10 +267,10 @@ class GaussianLayer(nn.Module):
             kernel_size = [kernel_size] * 3
         kernel_size = np.array(kernel_size)
 
-        if isinstance(sigma, int):
+        if isinstance(sigma, (int, float)):
             sigma = [sigma] * 3
         elif sigma is None:
-            sigma = kernel_size // 3
+            sigma = kernel_size // 6
         sigma = np.array(sigma)
 
         kernel = self.gaussian_kernel(kernel_size, sigma)
