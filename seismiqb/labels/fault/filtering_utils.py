@@ -10,6 +10,7 @@ def filter_faults(faults, min_fault_len=2000, min_height=20, **sticks_kwargs):
     """ Filter too small faults.
 
     Faults are filtered by amount of points, length and height.
+    Used as default filtering after prototypes extraction.
 
     Parameters
     ----------
@@ -43,16 +44,17 @@ def filter_faults(faults, min_fault_len=2000, min_height=20, **sticks_kwargs):
         if np.concatenate([item[:, 2] for item in fault.sticks]).ptp() < min_height:
             continue
 
-        if len(fault.sticks) <= 2: # 2 sticks - not enough
+        if len(fault.sticks) <= 2: # two sticks are not enough
             continue
 
         filtered_faults.append(fault)
 
     return filtered_faults
 
+
 # Filter small disconnected faults
 def filter_disconnected_faults(faults, direction=0, height_threshold=200, width_threshold=40, **kwargs):
-    """ Filter small enough faults without neighbors.
+    """ Filter small enough faults without any adjacent neighbors.
 
     Parameters
     ----------
@@ -67,6 +69,7 @@ def filter_disconnected_faults(faults, direction=0, height_threshold=200, width_
     **kwargs : dict
         Adjacency kwargs for :func:`._group_adjacent_faults`.
     """
+    # Create groups of adjacent faults
     groups, _ = _group_adjacent_faults(faults, **kwargs)
 
     grouped_faults_indices = set(groups.keys())
@@ -74,6 +77,7 @@ def filter_disconnected_faults(faults, direction=0, height_threshold=200, width_
     for group_members in groups.values():
         grouped_faults_indices = grouped_faults_indices.union(group_members)
 
+    # Filtering
     filtered_faults = []
 
     for i, fault in enumerate(faults):
@@ -103,8 +107,9 @@ def _group_adjacent_faults(faults, adjacency=5, adjacent_points_threshold=5):
     adjacent_points_threshold : int
         Minimal amount of points into adjacency area to consider two faults are in one group.
     """
-    groups = {} # owner -> items
-    owners = {} # item -> owner
+    # Containers for adjacency graph
+    groups = {} # group owner -> items
+    owners = {} # item -> group owner
 
     for i, fault_1 in enumerate(faults):
         if i not in owners.keys():
@@ -119,11 +124,11 @@ def _group_adjacent_faults(faults, adjacency=5, adjacent_points_threshold=5):
             # Check points amount in the adjacency area
             for fault in (fault_1, fault_2):
                 adjacent_points = fault.points[(fault.points[:, 0] >= adjacent_borders[0][0]) & \
-                                                (fault.points[:, 0] <= adjacent_borders[0][1]) & \
-                                                (fault.points[:, 1] >= adjacent_borders[1][0]) & \
-                                                (fault.points[:, 1] <= adjacent_borders[1][1]) & \
-                                                (fault.points[:, 2] >= adjacent_borders[2][0]) & \
-                                                (fault.points[:, 2] <= adjacent_borders[2][1])]
+                                               (fault.points[:, 0] <= adjacent_borders[0][1]) & \
+                                               (fault.points[:, 1] >= adjacent_borders[1][0]) & \
+                                               (fault.points[:, 1] <= adjacent_borders[1][1]) & \
+                                               (fault.points[:, 2] >= adjacent_borders[2][0]) & \
+                                               (fault.points[:, 2] <= adjacent_borders[2][1])]
 
                 if len(adjacent_points) < adjacent_points_threshold:
                     adjacent_borders = None
@@ -132,6 +137,7 @@ def _group_adjacent_faults(faults, adjacency=5, adjacent_points_threshold=5):
             if adjacent_borders is None:
                 continue
 
+            # Graph update
             owners[i+1+j] = owners[i]
 
             if owners[i] not in groups.keys():
@@ -141,12 +147,14 @@ def _group_adjacent_faults(faults, adjacency=5, adjacent_points_threshold=5):
 
     return groups, owners
 
+
+
 # Groupings
 # Group connected faults
-def group_prototypes(prototypes, connectivity_stats=None, ratio_threshold=0.0):
+def group_connected_prototypes(prototypes, connectivity_stats=None, ratio_threshold=0.0):
     """ Group connected prototypes.
 
-    Connected prototypes are prototypes where at least one prototype has overlap
+    Connected prototypes are prototypes where at least one prototype has border overlap
     with another more than `ratio_threshold`.
 
     Parameters
@@ -177,7 +185,7 @@ def group_prototypes(prototypes, connectivity_stats=None, ratio_threshold=0.0):
                 if stat_values['overlap_ratio'] > ratio_threshold:
                     owners, groups = _add_connected_pair(prototype_1_idx, prototype_2_idx, owners=owners, groups=groups)
 
-    # Add group prototypes
+    # Label prototypes group
     for idx, label in enumerate(prototypes):
         label.group_idx = idx
 
@@ -193,6 +201,8 @@ def eval_connectivity_stats(prototypes):
     """ Evaluation of overlap length and ratio for each prototypes pair.
 
     Note, zero-overlapping stats are omitted.
+
+    It is a simplified version of `~.FaultExtractor.concat_connected_prototypes`.
     """
     direction = prototypes[0].direction
     orthogonal_direction = 1 - direction
@@ -310,13 +320,17 @@ def _add_connected_pair(prototype_1_idx, prototype_2_idx, owners, groups):
 
     return owners, groups
 
+
 # Group faults with topK biggest faults and filter faults out of groups
-def get_groups_for_biggest_faults(faults, height_threshold=None, groups_num=None,
+def groups_with_biggest_faults(faults, height_threshold=None, groups_num=None,
                                   adjacency=5, adjacent_points_threshold=5):
     """ Get faults which can be merged in groups with the biggest faults.
 
     The biggest faults are faults with height more than `height_threshold` or
     which have topK-height, where K is `groups_num`.
+
+    Groups are formed with adjacent faults.
+
     Note, that one of `height_threshold` or `groups_num` should be provided.
 
     Parameters
