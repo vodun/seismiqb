@@ -74,7 +74,7 @@ class FaultVisualizationMixin(VisualizationMixin):
                 axis_labels=axis_labels, margin=margin, colors=colors, **kwargs)
 
     def make_triangulation(self, slices=None, sticks_step=None, stick_nodes_step=None,
-                           stick_orientation=2, sticks=False, **kwargs):
+                           stick_orientation=None, sticks=False, **kwargs):
         """ Return triangulation of the fault. It will created if needed. """
         # pylint: disable=too-many-boolean-expressions
         if ((sticks_step is not None and sticks_step != self.sticks_step) or
