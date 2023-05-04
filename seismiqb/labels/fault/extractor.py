@@ -96,7 +96,8 @@ class FaultExtractor:
         Field shape.
     """
     # pylint: disable=protected-access
-    def __init__(self, data=None, ranges=None, do_skeletonize=False, direction=0, component_len_threshold=0, shape=None):
+    def __init__(self, data=None, ranges=None, do_skeletonize=False, direction=0,
+                 component_len_threshold=0, shape=None):
         # Data parameters
         self.shape = data.shape if data is not None else shape
 
