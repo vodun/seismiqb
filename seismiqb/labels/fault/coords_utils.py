@@ -1,4 +1,4 @@
-""" Helpers for the natural 3-dimensional space coordinates processing. """
+""" Faults extraction helpers for 3D coordinates processing. """
 import numpy as np
 from numba import njit
 import cv2 as cv
@@ -12,11 +12,12 @@ def dilate_coords(coords, dilate=3, axis=0, max_value=None):
     Parameters
     ----------
     coords : np.ndarray of (N, 3) shape
-        Coordinates to dilate along the axis.  Sorting is not required.
+        Coordinates to dilate along the axis. Sorting is not required.
     axis : {0, 1, 2}
         Axis along which to dilate coordinates.
     max_value : None or int, optional
         The maximum possible value for coordinates along the provided axis.
+        Used for values clipping into valid range.
     """
     dilated_coords = np.tile(coords, (dilate, 1))
 
@@ -37,68 +38,11 @@ def dilate_coords(coords, dilate=3, axis=0, max_value=None):
     dilated_coords = np.unique(dilated_coords, axis=0)
     return dilated_coords
 
-@njit
-def depthwise_groupby_max(coords, values):
-    """ Thin coordinates depend on values - choose coords corresponding to max values for each coordinate along
-    the last axis (depth). Rough approximation of `find_peaks`.
-
-    Under the hood, this function is a groupby max along the depth axis.
-
-    Parameters
-    ----------
-    coords : np.ndarray of (N, 3) shape
-        Coordinates for thinning. Sorting is not required.
-    values : np.ndarray of (N, 1) shape
-        Values corresponding to coordinates to decide which one should last for each depth (last column in coords).
-    """
-    order = np.argsort(coords[:, -1])
-
-    output_coords = np.zeros_like(coords)
-    output_values = np.zeros_like(values)
-    position = 0
-
-    idx = order[0]
-
-    argmax_coord = coords[idx, :]
-    max_value = values[idx]
-
-    previous_depth = argmax_coord[-1]
-    previous_value = values[idx]
-
-    for idx in order[1:]:
-        current_depth = coords[idx, -1]
-        current_value = values[idx]
-
-        if previous_depth == current_depth:
-            if previous_value < current_value:
-                argmax_coord = coords[idx, :]
-                max_value = current_value
-
-                previous_value = current_value
-
-        else:
-            output_coords[position, :] = argmax_coord
-            output_values[position] = max_value
-
-            position += 1
-
-            argmax_coord = coords[idx, :]
-            max_value = current_value
-
-            previous_depth = current_depth
-            previous_value = current_value
-
-    # last depth update
-    output_coords[position, :] = argmax_coord
-    output_values[position] = max_value
-    position += 1
-
-    return output_coords[:position, :], output_values[:position]
 
 # Distance evaluation
 @njit
 def bboxes_intersected(bbox_1, bbox_2, axes=(0, 1, 2)):
-    """ Check bboxes intersection on preferred axes.
+    """ Check bounding boxes intersection on preferred axes.
 
     Bboxes are intersected if they have at least 1 overlapping point.
 
@@ -118,13 +62,16 @@ def bboxes_intersected(bbox_1, bbox_2, axes=(0, 1, 2)):
 
 @njit
 def bboxes_adjacent(bbox_1, bbox_2, adjacency=1):
-    """ Bboxes intersection or adjacency ranges if bboxes are intersected/adjacent.
+    """ Bounding boxes adjacency ranges.
 
-    Bboxes are adjacent if they are distant not more than on 1 point.
+    Bboxes are adjacent if they are distant not more than on `adjacency` points.
 
     Parameters
     ----------
     bbox_1, bbox_2 : np.ndarrays of (3, 2) shape.
+        Objects bboxes.
+    adjacency : int
+        Amount of points between two bboxes to decide that they are adjacent.
     """
     borders = np.empty((3, 2), dtype=np.int32)
 
@@ -141,14 +88,14 @@ def bboxes_adjacent(bbox_1, bbox_2, adjacency=1):
     return borders
 
 def bboxes_embedded(bbox_1, bbox_2, margin=3):
-    """ Check that one bbox is embedded in another.
+    """ Check that one bounding box is inside the other (embedded).
 
     Parameters
     ----------
     bbox_1, bbox_2 : np.ndarrays of (3, 2) shape.
         Objects bboxes.
     margin : int
-        Possible bboxes difference (on each axis) to decide that one is in another.
+        Possible bboxes difference (on each axis) to decide that one is inside another.
     """
     swap = np.count_nonzero(bbox_1[:, 1] >= bbox_2[:, 1]) <= 1 # is second not inside first
 
@@ -165,14 +112,14 @@ def bboxes_embedded(bbox_1, bbox_2, margin=3):
 
 @njit
 def compute_distances(coords_1, coords_2, max_threshold=10000):
-    """ Find approximate minimal and maximal distances between coordinates.
-
+    """ Find approximate minimum and maximum distances between two arrays of coordinates.
+    We assume coords to have the same length and compare only corresponding points.
     A little bit faster than difference between np.ndarrays with `np.max` and `np.min`.
 
     Parameters
     ----------
     coords_1, coords_2 : np.ndarrays of (N, 1) shape
-        Coords for which find distances. Must be unique values, sorting is not required.
+        Coords for which find distances.
     max_threshold : int, float or None
         Early stopping: threshold for max distance value.
     """
@@ -194,7 +141,9 @@ def compute_distances(coords_1, coords_2, max_threshold=10000):
     return min_distance, max_distance
 
 def find_contour(coords, projection_axis):
-    """ Find closed contour of 2d projection.
+    """ Find closed contour of coords projection.
+
+    Under the hood, we make a 2D coords projection and find its contour.
 
     Note, returned contour coordinates are equal to 0 for the projection axis.
 
@@ -203,14 +152,13 @@ def find_contour(coords, projection_axis):
     coords : np.ndarray of (N, 3) shape
         3D object coordinates. Sorting is not required.
     projection_axis : {0, 1}
-        Axis for making 2d projection for which we find contour.
+        Axis for making 2D projection.
         Note, this function doesn't work for axis = 2.
     """
-    # Make 2d projection
     bbox = np.column_stack([np.min(coords, axis=0), np.max(coords, axis=0)])
     bbox = bbox[(1 - projection_axis, 2), :]
 
-    # Create object mask
+    # Create object image mask
     origin = bbox[:, 0]
     image_shape = bbox[:, 1] - bbox[:, 0] + 1
 
@@ -231,27 +179,37 @@ def find_contour(coords, projection_axis):
     return contour_coords
 
 @njit
-def restore_coords_from_projection(coords, buffer, axis):
-    """ Restore `axis` coordinates for 2d projection from original coordinates.
+def restore_coords_from_projection(coords, projection_buffer, axis):
+    """ Get values along `axis` for 2D projection coordinates from 3D coords.
+
+    Example
+    -------
+    Useful, where we have subsetted original `coords` and zero-out the result along some axis::
+        coords, indices, axis
+        subset = coords[indices]
+        subset[:, axis] = 0
+
+        restore_coords_from_projection(coords, subset, axis) # change zeros back to original values from `coords`
+
 
     Parameters
     ----------
     coords : np.ndarray of (N, 3) shape
         Original coords from which restore the axis values. Sorting is not required.
-    buffer : np.ndarray
-        Buffer with projection coordinates. Sorting is not required.
-        Note, it is changed inplace.
+    projection_buffer : np.ndarray of (N, 3) shape
+        Buffer with projection coordinates. Initially, values along `axis` are zeros. Sorting is not required.
+        Changed inplace.
     axis : {0, 1, 2}
         Axis for which restore coordinates.
     """
     known_axes = np.array([i for i in range(3) if i != axis])
 
-    for i, buffer_line in enumerate(buffer):
+    for i, buffer_line in enumerate(projection_buffer):
         values =  coords[(coords[:, known_axes[0]] == buffer_line[known_axes[0]]) & \
                          (coords[:, known_axes[1]] == buffer_line[known_axes[1]]),
                          axis]
 
-        buffer[i, axis] = min(values) if len(values) > 0 else -1
+        projection_buffer[i, axis] = min(values) if len(values) > 0 else -1
 
-    buffer = buffer[buffer[:, axis] != -1]
-    return buffer
+    projection_buffer = projection_buffer[projection_buffer[:, axis] != -1]
+    return projection_buffer

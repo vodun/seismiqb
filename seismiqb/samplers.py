@@ -611,7 +611,7 @@ class WellSampler(Sampler):
                 sampled = self._sample(size*2)
                 condition = np.array([self.well.compute_overlap_size(mask_bbox=location[1:].reshape(2, 3).T,
                                                                      log=self.log) >= self.threshold
-                                      for location in sampled], dtype=np.bool)
+                                      for location in sampled], dtype=np.bool_)
 
                 sampled_list.append(sampled[condition])
                 accumulated += condition.sum()

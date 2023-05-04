@@ -80,7 +80,10 @@ class MovingNormalizationLayer(nn.Module):
         self.window = window
         self.fill_value = fill_value
         self.ndim = inputs.ndim
-        self.kernel = torch.ones((1, 1, *window), dtype=inputs.dtype, requires_grad=False).to(inputs.device)
+
+        self.kernel = torch.nn.Parameter(
+            torch.ones((1, 1, *window), dtype=inputs.dtype).cuda(), requires_grad=False
+        )
 
         if padding == 'same':
             pad = [(w // 2, w - w // 2 - 1) for w in self.window]
@@ -267,10 +270,10 @@ class GaussianLayer(nn.Module):
             kernel_size = [kernel_size] * 3
         kernel_size = np.array(kernel_size)
 
-        if isinstance(sigma, int):
+        if isinstance(sigma, (int, float)):
             sigma = [sigma] * 3
         elif sigma is None:
-            sigma = kernel_size // 3
+            sigma = kernel_size // 6
         sigma = np.array(sigma)
 
         kernel = self.gaussian_kernel(kernel_size, sigma)
@@ -283,7 +286,9 @@ class GaussianLayer(nn.Module):
             self.padding = None
         else:
             self.padding = padding
-        self.kernel = torch.tensor(kernel, dtype=inputs.dtype, requires_grad=False).to(inputs.device)
+        self.kernel = torch.nn.parameter.Parameter(
+            torch.tensor(kernel, dtype=inputs.dtype), requires_grad=False
+        ).to(inputs.device)
 
     def forward(self, x):
         """ Forward pass. """

@@ -5,7 +5,10 @@ from textwrap import dedent
 from contextlib import contextmanager
 
 import numpy as np
+
+import cv2
 from scipy.interpolate import interp1d
+from scipy.ndimage import binary_erosion
 
 from .benchmark_mixin import BenchmarkMixin
 from .conversion_mixin import ConversionMixin
@@ -196,9 +199,8 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetricM
     def __getstate__(self):
         self.reset_cache()
         state = self.__dict__.copy()
-        for name in ['loader', 'axis_to_projection']:
-            if name in state:
-                state.pop(name)
+        for name in ['loader', 'axis_to_projection'] + self.PRESERVED_LAZY_CACHED:
+            state.pop(name, None)
         return state
 
     def __setstate__(self, state):
@@ -599,7 +601,7 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetricM
     @property
     def ngbytes(self):
         """ Size of instance in gigabytes. """
-        return self.nbytes / (1024**3)
+        return self.nbytes / (1024 ** 3)
 
 
     # Attribute retrieval. Used by `Field` instances
@@ -991,3 +993,81 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetricM
     def locations_to_shape(locations):
         """ Compute shape of a location. """
         return tuple(slc.stop - slc.start for slc in locations)
+
+    def get_slide_mask(self, index, axis=0, kernel_size=9, threshold=None, erosion=11, dilation=60):
+        """ Get mask with dead pixels on a given slide.
+        Under the hood, we compute ptp value for each pixel, and deem everything lower than `threshold` be a dead pixel.
+
+        Parameters
+        ----------
+        index : int, str
+            Index of the slide to load.
+            If int, then interpreted as the ordinal along the specified axis.
+            If `'random'`, then we generate random index along the axis.
+            If string of the `'#XXX'` format, then we interpret it as the exact indexing header value.
+        axis : int
+            Axis of the slide.
+        kernel_size : int
+            Window size for computations.
+        threshold : number
+            Minimum ptp value to consider a pixel to be a dead one.
+        erosion : int
+            Amount of binary erosion for postprocessing.
+        dilation : int
+            Amount of binary dilataion for postprocessing.
+
+        Returns
+        -------
+        mask : np.ndarray
+            Boolean mask with 1`s at dead pixels and 0`s at alive ones.
+        """
+        locations = [slice(None)]
+        locations[axis] = slice(index, index+1)
+        return self.get_crop_mask(tuple(locations), axis, kernel_size, threshold, erosion, dilation)
+
+    def get_crop_mask(self, locations, axis=0, kernel_size=9, threshold=None, erosion=11, dilation=60):
+        """ Get mask with dead pixels on a given crop.
+        Under the hood, we compute ptp value for each pixel, and deem everything lower than `threshold` be a dead pixel.
+
+        Parameters
+        ----------
+        locations : tuple of slices
+            Slices of the crop to load.
+        axis : int
+            Direction to split crop into slides to process.
+        kernel_size : int
+            Window size for computations.
+        threshold : number
+            Minimum ptp value to consider a pixel to be a dead one.
+        erosion : int
+            Amount of binary erosion for postprocessing.
+        dilation : int
+            Amount of binary dilataion for postprocessing.
+
+        Returns
+        -------
+        mask : np.ndarray
+            Boolean mask with 1`s at dead pixels and 0`s at alive ones.
+        """
+        threshold = threshold or self.std / 10
+        array = self.load_crop(locations)
+        array = array if array.dtype == np.float32 else array.astype(np.uint8)
+        mask = np.zeros_like(array, dtype=np.bool_)
+
+        ptp_kernel = np.ones((kernel_size, kernel_size), dtype=array.dtype)
+        erosion_kernel = np.ones((erosion, erosion), dtype=array.dtype) if erosion else None
+        dilation_kernel = np.ones((dilation, dilation), dtype=array.dtype)
+
+        for i in range(array.shape[axis]):
+            slide = array.take(i, axis=axis)
+            ptps = cv2.dilate(slide, ptp_kernel) - cv2.erode(slide, ptp_kernel)
+            mask_ = ptps <= threshold
+            if erosion:
+                mask_ = binary_erosion(mask_, structure=erosion_kernel, border_value=True)
+            if dilation:
+                mask_ = cv2.dilate(mask_.astype('uint8'), dilation_kernel).astype('bool')
+            slc = [slice(None)] * 3
+            slc[axis] = i
+            mask[tuple(slc)] = mask_
+
+        return mask
