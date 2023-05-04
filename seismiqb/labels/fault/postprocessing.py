@@ -7,7 +7,7 @@ from ...functional import make_gaussian_kernel
 
 
 @njit(parallel=True)
-def skeletonize(slide, width=5, rel_height=0.5, prominence=0.05, threshold=0.05, distance=None, mode=0):
+def skeletonize(slide, width=5, rel_height=0.5, prominence=0.05, threshold=0.05, distance=None, mode=0, axis=1):
     """ Perform skeletonize of faults on 2D slide
 
     Parameters
@@ -34,21 +34,26 @@ def skeletonize(slide, width=5, rel_height=0.5, prominence=0.05, threshold=0.05,
     numpy.ndarray
         skeletonized slide
     """
-    skeletonized_slide = np.zeros_like(slide)
-    for i in prange(slide.shape[1]): #pylint: disable=not-an-iterable
-        x = slide[:, i]
+    skeletonized_slide = np.zeros_like(slide, dtype='float32')
+    for i in prange(slide.shape[axis]): #pylint: disable=not-an-iterable
+        x = slide[:, i] if axis == 1 else slide[i]
         peaks, prominences = find_peaks(x, width=width, prominence=prominence,
                                         rel_height=rel_height, threshold=threshold, distance=distance)
         if mode == 0:
-            skeletonized_slide[peaks, i] = 1
+            values = np.ones(len(peaks), dtype='float32')
         elif mode == 1:
-            skeletonized_slide[peaks, i] = prominences
+            values = prominences
         elif mode == 2:
-            skeletonized_slide[peaks, i] = x[peaks]
+            values = x[peaks]
         elif mode == 3:
-            skeletonized_slide[peaks, i] = x[peaks] * prominences
+            values = x[peaks] * prominences
         elif mode == 4:
-            skeletonized_slide[peaks, i] = (x[peaks] + prominences) / 2
+            values = (x[peaks] + prominences) / 2
+
+        if axis == 1:
+            skeletonized_slide[peaks, i] = values
+        else:
+            skeletonized_slide[i, peaks] = values
     return skeletonized_slide
 
 @njit

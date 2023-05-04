@@ -573,7 +573,7 @@ class WeightedSumAccumulator3D(Accumulator3D):
 
     def _update(self, crop, location):
         # Weights matrix for the incoming crop
-        if self.crop_weights is None:
+        if self.crop_weights is None or self.crop_weights.shape != crop.shape:
             self.crop_weights = self.weights_function(crop)
 
         self.data[location] = ((self.crop_weights * crop + self.data[location] * self.weights[location]) /

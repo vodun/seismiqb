@@ -994,7 +994,7 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetricM
         """ Compute shape of a location. """
         return tuple(slc.stop - slc.start for slc in locations)
 
-    def get_slide_mask(self, index, axis=0, kernel_size=9, threshold=None, erosion=11):
+    def get_slide_mask(self, index, axis=0, kernel_size=9, threshold=None, erosion=11, dilation=60):
         """ Get mask with dead pixels on a given slide.
         Under the hood, we compute ptp value for each pixel, and deem everything lower than `threshold` be a dead pixel.
 
@@ -1013,6 +1013,36 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetricM
             Minimum ptp value to consider a pixel to be a dead one.
         erosion : int
             Amount of binary erosion for postprocessing.
+        dilation : int
+            Amount of binary dilataion for postprocessing.
+
+        Returns
+        -------
+        mask : np.ndarray
+            Boolean mask with 1`s at dead pixels and 0`s at alive ones.
+        """
+        locations = [slice(None)]
+        locations[axis] = slice(index, index+1)
+        return self.get_crop_mask(tuple(locations), axis, kernel_size, threshold, erosion, dilation)
+
+    def get_crop_mask(self, locations, axis=0, kernel_size=9, threshold=None, erosion=11, dilation=60):
+        """ Get mask with dead pixels on a given crop.
+        Under the hood, we compute ptp value for each pixel, and deem everything lower than `threshold` be a dead pixel.
+
+        Parameters
+        ----------
+        locations : tuple of slices
+            Slices of the crop to load.
+        axis : int
+            Direction to split crop into slides to process.
+        kernel_size : int
+            Window size for computations.
+        threshold : number
+            Minimum ptp value to consider a pixel to be a dead one.
+        erosion : int
+            Amount of binary erosion for postprocessing.
+        dilation : int
+            Amount of binary dilataion for postprocessing.
 
         Returns
         -------
@@ -1020,14 +1050,24 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetricM
             Boolean mask with 1`s at dead pixels and 0`s at alive ones.
         """
         threshold = threshold or self.std / 10
-        slide = self.load_slide(index=index, axis=axis)
-        slide = slide if slide.dtype == np.float32 else slide.astype(np.uint8)
+        array = self.load_crop(locations)
+        array = array if array.dtype == np.float32 else array.astype(np.uint8)
+        mask = np.zeros_like(array, dtype=np.bool_)
 
-        kernel = np.ones((kernel_size, kernel_size), dtype=slide.dtype)
-        ptps = cv2.dilate(slide, kernel) - cv2.erode(slide, kernel)
-        mask = ptps <= threshold
+        ptp_kernel = np.ones((kernel_size, kernel_size), dtype=array.dtype)
+        erosion_kernel = np.ones((erosion, erosion), dtype=array.dtype) if erosion else None
+        dilation_kernel = np.ones((dilation, dilation), dtype=array.dtype)
 
-        if erosion:
-            kernel = np.ones((erosion, erosion), dtype=mask.dtype)
-            mask = binary_erosion(mask, structure=kernel, border_value=True)
+        for i in range(array.shape[axis]):
+            slide = array.take(i, axis=axis)
+            ptps = cv2.dilate(slide, ptp_kernel) - cv2.erode(slide, ptp_kernel)
+            mask_ = ptps <= threshold
+            if erosion:
+                mask_ = binary_erosion(mask_, structure=erosion_kernel, border_value=True)
+            if dilation:
+                mask_ = cv2.dilate(mask_.astype('uint8'), dilation_kernel).astype('bool')
+            slc = [slice(None)] * 3
+            slc[axis] = i
+            mask[tuple(slc)] = mask_
+
         return mask

@@ -71,7 +71,8 @@ def points_to_sticks(points, sticks_step=10, nodes_step='auto', fault_orientatio
 
     indices = sorted(list(set(indices)))
 
-    for slide_points in np.array(slides, dtype='object')[indices]:
+    for idx in indices:
+        slide_points = slides[idx]
         slide_points = slide_points[np.argsort(slide_points[:, stick_orientation])]
         slide_points = thin_line(slide_points, stick_orientation)
         if len(slide_points) > 5:
