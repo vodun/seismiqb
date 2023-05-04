@@ -726,7 +726,7 @@ class HorizonMetrics(BaseMetrics):
                 **kwargs,
             }
 
-            plotter = plot([matrix, bounds], **kwargs)
+            plotter = plot([matrix, bounds], show=False, **kwargs)
 
             legend_kwargs = {
                 'color': ('white', 'blue', 'red', 'black', 'lightgray'),
