@@ -137,7 +137,7 @@ class FieldCollection:
                                       **kwargs)
 
     def match_intersections_p(self, pbar='t', method='analytic', limits=None, pad_width=None, n=1, transform=None,
-                              **kwargs):
+                              max_workers=8, **kwargs):
         """ Match traces on each intersection. """
         with Notifier(pbar, total=len(self.intersections)) as progress_bar:
             def callback(future):
@@ -146,7 +146,7 @@ class FieldCollection:
                 self.intersections[key].matching_results = matching_results
                 progress_bar.update(1)
 
-            with ProcessPoolExecutor(max_workers=8) as executor:
+            with ProcessPoolExecutor(max_workers=max_workers) as executor:
                 for intersection in self.intersections.values():
                     future = executor.submit(intersection.match_traces,
                                              method=method, limits=limits, pad_width=pad_width,
@@ -357,19 +357,22 @@ class FieldCollection:
 
                     intersections.append(intersection)
 
-            min_, mean_, std_ = np.min(recomputed_corrs), np.mean(recomputed_corrs), np.std(recomputed_corrs)
+            if intersections:
+                min_, mean_, std_ = np.min(recomputed_corrs), np.mean(recomputed_corrs), np.std(recomputed_corrs)
 
-            for j, intersection in enumerate(intersections):
-                recomputed_corr = recomputed_corrs[j]
-                if recomputed_corr < 0.5 or abs(mean_ - recomputed_corr) > 0.25:
-                    bad_intersections_keys.append(intersection.key)
+                for j, intersection in enumerate(intersections):
+                    recomputed_corr = recomputed_corrs[j]
+                    if recomputed_corr < 0.5 or abs(mean_ - recomputed_corr) > 0.25:
+                        bad_intersections_keys.append(intersection.key)
 
-            # Stats on intersections: no distribution of corrections
-            dicts = [intersection.matching_results for intersection in intersections]
-            corrs = [d['petrel_corr'] for d in dicts]
+                # Stats on intersections: no distribution of corrections
+                dicts = [intersection.matching_results for intersection in intersections]
+                corrs = [d['petrel_corr'] for d in dicts]
+                mean_intersection, std_intersection = np.mean(corrs), np.std(corrs)
+            else:
+                # field has no intersections
+                min_ = mean_ = std_ = mean_intersection = std_intersection = np.float64(-1)
 
-            # Stats on distributed corrections
-            # TODO
 
             correction_results = {
                 'name': field.name,
@@ -382,8 +385,8 @@ class FieldCollection:
                 'min_recomputed_corr': min_.round(3),
 
                 'n_intersections': len(intersections),
-                'mean_corr_intersections': np.mean(corrs).round(3),
-                'std_corr_intersections': np.std(corrs).round(3),
+                'mean_corr_intersections': mean_intersection.round(3),
+                'std_corr_intersections': std_intersection.round(3),
             }
 
             field.correction_results = correction_results
@@ -516,12 +519,12 @@ class FieldCollection:
 
 
     # Visualize
-    def show_lines(self, arrow_step=10, arrow_size=20):
+    def show_lines(self, arrow_step=10, arrow_size=20, annotate_index=True):
         """ Display annotated shot lines on a 2d graph in CDP coordinates. """
         fig, ax = plt.subplots(figsize=(14, 8))
 
         depths = np.array([field.depth for field in self.fields])
-        colors = ['black', 'firebrick', 'gold', 'limegreen', 'magenta'] * 5
+        colors = ['black', 'firebrick', 'gold', 'limegreen', 'magenta'] * 25
         depth_to_color = dict(zip(sorted(np.unique(depths)), colors))
 
         # Data
@@ -537,7 +540,8 @@ class FieldCollection:
                             xy=(x[idx+arrow_step], y[idx+arrow_step]),
                         arrowprops=dict(arrowstyle="->", color=color))
 
-            ax.annotate(i, xy=(x[0], y[0]), size=12)
+            if annotate_index:
+                ax.annotate(i, xy=(x[0], y[0]), size=12)
 
         # Annotations
         ax.set_title('2D profiles', fontsize=26)
@@ -552,7 +556,7 @@ class FieldCollection:
         fig = go.Figure()
 
         depths = np.array([field.depth for field in self.fields])
-        colors = ['black', 'firebrick', 'gold', 'limegreen', 'magenta'] * 5
+        colors = ['black', 'firebrick', 'gold', 'limegreen', 'magenta'] * 25
         depth_to_color = dict(zip(sorted(np.unique(depths)), colors))
 
         intersections_df = self.intersections_df()
@@ -604,7 +608,7 @@ class FieldCollection:
                               f' ANGLE       : {angle:3.3f} <br>'
                               f' GAIN        : {gain:3.3f} <extra></extra>')
 
-            size_ = 7 + (1 - corr) * 10
+            size_ = 4 + (1 - corr) * 5
             color_ = 'red' if intersections_df.loc[[key]]['suspicious'].all() else 'green'
 
             fig.add_trace(go.Scatter(x=[x], y=[y], mode='markers',
