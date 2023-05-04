@@ -30,7 +30,7 @@ class FaultExtractor:
     ----------------------
     The extraction algorithm is:
 
-    0) Label connected components for each 2D slide of the input array. 
+    0) Label connected components for each 2D slide of the input array.
 
     1) Create prototypes.
     We extract prototype approximations as a set of similar components on neighboring slides on `direction` axis:
@@ -474,6 +474,7 @@ class FaultExtractor:
         prototypes: list of the :class:`~.FaultPrototype` instances
             Prototypes instances after concatenation.
         """
+        #pylint: disable=too-many-branches
         margin = 1 # local constant for code prettifying
 
         if overlap_ratio_threshold is None:
@@ -611,7 +612,8 @@ class FaultExtractor:
             width_threshold = min(best_border_1_width, best_border_2_width) - 2*margin
 
             if (best_overlap_range[1] - best_overlap_range[0]) < width_threshold:
-                prototype_for_merge, new_prototypes_ = prototype_for_merge.split(best_overlap_range, axis=self.direction)
+                prototype_for_merge, new_prototypes_ = prototype_for_merge.split(best_overlap_range,
+                                                                                 axis=self.direction)
                 new_prototypes.extend(new_prototypes_)
 
                 prototype_1, new_prototypes_ = prototype_1.split(best_overlap_range, axis=self.direction)
