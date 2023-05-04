@@ -1,4 +1,5 @@
 """ !!. """
+from copy import deepcopy
 import numpy as np
 import pandas as pd
 
@@ -155,6 +156,7 @@ class WellSeismicMatcher:
                     **(filter_rhob if isinstance(filter_rhob, dict) else {}),
                 }
                 rhob_values = self.well._compute_filtered_log(rhob_values, **filtration_parameters)
+                self.well['RHOB_FILTERED'] = rhob_values
 
             # Recomputed AI. Can omit unit conversions as they dont influence the reflectivity
             self.well['AI_RECOMPUTED'] = rhob_values / (dt_values * 1e-6 / 0.3048)                       # kPa.s/m
@@ -180,7 +182,8 @@ class WellSeismicMatcher:
 
 
     def extract_wavelet(self, method='statistical', normalize=False, limits=slice(None),
-                        taper=True, wavelet_length=61, state=-1, **kwargs):
+                        taper=True, wavelet_length=61, state=-1,
+                        smoothing=False, smoothing_length=11, smoothing_order=3, **kwargs):
         """ Compute a wavelet by a chosen method.
         Available methods are:
             - `ricker` creates a fixed Ricker wavelet. Additional parameters are `a` for width.
@@ -261,14 +264,35 @@ class WellSeismicMatcher:
                 autocorrelation = autocorrelation[lenhalf - wlenhalf : lenhalf + wlenhalf + wlenflag]
                 power_spectrum = np.sqrt(np.abs(np.fft.rfft(autocorrelation)))
 
+                # from scipy.signal import hilbert
+                # minphase = hilbert(np.log(power_spectrum))
+
+                # frequencies = np.fft.rfftfreq(len(autocorrelation), d=self.field.sample_interval * 1e-3)
+                # power_spectrum[0] = 0.0
+
+            elif method in {'stats3'}:
+                autocorrelation = np.correlate(trace, trace, mode='same')
+                autocorrelation = autocorrelation[lenhalf - wlenhalf : lenhalf + wlenhalf + wlenflag]
+                autocorrelation *= np.hanning(autocorrelation.size)
+                power_spectrum = np.sqrt(np.abs(np.fft.rfft(autocorrelation)))
+
+                # frequencies = np.fft.rfftfreq(len(autocorrelation), d=self.field.sample_interval * 1e-3)
+                # power_spectrum[0] = 0.0
+
             elif method in {'division'}:
                 power_spectrum = np.fft.rfft(trace) / np.fft.rfft(reflectivity)
+
+            if smoothing:
+                from scipy.signal import savgol_filter # pylint: disable=import-outside-toplevel
+                power_spectrum = savgol_filter(power_spectrum, smoothing_length, smoothing_order)
 
             wavelet = np.real(np.fft.irfft(power_spectrum)[:wlenhalf + wlenflag])
             wavelet = np.concatenate((wavelet[::-1], wavelet[wlenflag:]), axis=0)
 
         if normalize:
             wavelet /= wavelet.max()
+        # if True: #post_taper
+        #     wavelet *= np.hanning(wavelet.size)
         return wavelet
 
 
@@ -1062,10 +1086,18 @@ class WellSeismicMatcher:
             dt_optimized = np.pad(dt_optimized, pad_width=pad_width, constant_values=np.nan)
             well_impedance = np.pad(well_impedance, pad_width=pad_width, constant_values=np.nan)
 
+        lasfile = deepcopy(self.well.lasfile)
+        lasfile.append_curve('DT_OPTIMIZED', dt_optimized, unit='us/ft', descr='DT_OPTIMIZED')
+        lasfile.append_curve('AI_USED', well_impedance, unit='kPa.s/m', descr='AI_USED')
 
-        self.well.lasfile.append_curve('DT_OPTIMIZED', dt_optimized, unit='us/ft', descr='DT_OPTIMIZED')
-        self.well.lasfile.append_curve('AI_USED', well_impedance, unit='kPa.s/m', descr='AI_USED')
-        self.well.lasfile.write(path, version=2.0)
+        if 'RHOB_FILTERED' in self.well.keys:
+            rhob_values = self.well['RHOB_FILTERED']
+            if well_times.size != self.well.shape[0]:
+                rhob_values = np.pad(rhob_values, pad_width=pad_width, constant_values=np.nan)
+            lasfile.append_curve('RHOB_FILTERED', rhob_values, unit='kg/m^3', descr='RHOB_FILTERED')
+
+
+        lasfile.write(path, version=2.0)
 
     def save_synthetic(self, path, state=-1):
         """ Save synthetic trace in SEG-Y format. """
@@ -1158,9 +1190,11 @@ class WellSeismicMatcher:
         state = state if isinstance(state, dict) else self.states[state]
         wavelet = state['wavelet']
         correlation = state['correlation']
+        times = np.arange(len(wavelet)) * self.field.sample_interval
+        times -= times[-1] / 2
 
         spectrum = np.fft.rfft(wavelet)
-        power_spectrum = np.abs(spectrum)
+        power_spectrum = 20 * np.log10(np.abs(spectrum))
         phase_spectrum = np.angle(spectrum)
         frequencies = np.fft.rfftfreq(len(wavelet), d=self.field.sample_interval * 1e-3)
 
@@ -1170,9 +1204,11 @@ class WellSeismicMatcher:
             'ratio': 0.25,
             'suptitle': f'well `{self.well.name}`\nstate={state_name}; {correlation=:3.3f}',
             'title': ['wavelet', 'power spectrum', 'phase spectrum'],
+            'xlabel': ['time, ms', 'Hz', 'Hz'],
             **kwargs
         }
-        return plot([wavelet, (frequencies, power_spectrum), (frequencies, phase_spectrum)], mode='curve', **kwargs)
+        return plot([(times, wavelet), (frequencies, power_spectrum), (frequencies, phase_spectrum)],
+                    mode='curve', **kwargs)
 
 
     def show_progress(self, start_idx=1, **kwargs):

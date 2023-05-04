@@ -224,7 +224,10 @@ class Well:
             self.bboxes[name] = bbox
 
     @staticmethod
-    def _compute_filtered_log(array, order=5, frequency=60, btype='lowpass', fs=500):
+    def _compute_filtered_log(array, despike=None, order=5, frequency=60, btype='lowpass', fs=500):
+        if despike is not None:
+            array = scipy.signal.medfilt(array, despike)
+
         sosfilt = scipy.signal.butter(order, frequency, btype=btype, fs=fs, output='sos')
         filtered_array = scipy.signal.sosfiltfilt(sosfilt, np.nan_to_num(array))
         filtered_array[filtered_array <= np.nanmin(array)] = np.nan
