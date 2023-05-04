@@ -1,5 +1,4 @@
 """ Faults extractor from point cloud. """
-from collections import deque
 import numpy as np
 
 from cc3d import connected_components
@@ -25,61 +24,69 @@ class FaultExtractor:
     but with their own processing methods such as concat, split, etc.
     - `coords` are spatial coordinates ndarray in format (iline, xline, depth) with (N, 3) shape.
     - `points` are coords and probabilities values ndarray in format (iline, xline, depth, proba) with (N, 4) shape.
-    Note, that probabilities are converted into (0, 255) values for applying integer storage for points.
+    Note, that probabilities can be converted into (0, 255) values for applying integer storage for points.
 
+    Implementation details
+    ----------------------
     The extraction algorithm is:
 
-    1) Extract prototype approximations as a set of similar components on neighboring slides on `direction` axis.
+    0) Label connected components for each 2D slide of the input array. 
 
-    For this we choose initial 2D component (first unmerged and the longest connected component),
-    find the closest one on the next slide, and save them into one prototype.
-    We repeat this operation while we find close enough objects.
-    The closest components are components which has the minimal axis-wise distances less than the threshold value.
+    1) Create prototypes.
+    We extract prototype approximations as a set of similar components on neighboring slides on `direction` axis:
+        - first, we select one of the unmerged 2D component, prioritizing the longest component
+        - find the closest one on the next slide, and save them into one prototype.
+        We repeat this until we fail to find close enough objects.
 
-    We can have the situation, when we have two close components with different lengths:
-    in this case we split parts out of the depth-wise overlap, save them as new objects (components and prototypes)
-    and concatenate overlapping parts into one surface.
+    Distance between components is computed axis-wise and further optimized by early exits on thresholds.
+
+    We can have a situation, where two components are considered to be close, but have different lengths:
+    in this case, we split (depth-wise) each component into up to three parts:
+        - one on the overlap with the second component
+        - one above the overlap and one below it: may be absent if not required
+    The overlapping parts are then merged as usual.
 
     For more, see the :meth:`~.extract_one_prototype`.
 
-    2) Extracted surfaces are not the final faults: we did some extra splitting (where prediction was accidently lost).
+    2) Merge connected prototypes.
+    As we potentially did some splitting of components during the prototype creation,
+    we concat them back where we need.
 
-    For the improvement, we concat prototypes which can be connected as puzzle details.
-
+    For this, we find prototypes which are connected as puzzle details.
     For more, see the :meth:`~.concat_connected_prototypes`.
 
-    This operation is recommended to be repeated for depth and `self.direction` axes and different overlap thresholds.
+    This operation is recommended to be repeated for both `depth` and `self.direction` axes,
+    and also for multiple prototype overlap thresholds.
     You can see the recommended operations sequence in the :meth:`~.run`.
 
-    3) We can have the situation when we didn't concat all parts of one prototype and internal
-    (embedded) parts are out of the extracted surface. That's caused by prototypes concatenation order.
+    3) Merge embedded prototypes.
+    We can have a situation where one prototype is completely inside the other.
+    That is caused by prototypes concatenation order.
 
-    This can be easily improved by calling the :meth:`~.concat_embedded_prototypes`.
+    For more, see the :meth:`~.concat_embedded_prototypes`.
+    -------------------------------------------------------
 
-    To sum up, the whole algorithm is:
 
-    1) Initialize container with smoothed probabilities predictions.
-    2) Extract first prototype approximation with :meth:`~.extract_prototypes`.
-    3) Iteratively concat connected prototypes changing concatenation axis and threshold with
-    :meth:`~.concat_connected_prototypes`.
+    To sum up, the algorithm is:
+    0) Initialize container with smoothed probabilities predictions.
+    1) Extract first prototype approximations with :meth:`~.extract_prototypes`.
+    2) Iteratively concat close prototypes with :meth:`~.concat_connected_prototypes`.
     3) Concat internal prototypes pieces with :meth:`~.concat_embedded_prototypes`.
+    As an example of the overall pipeline, see the :meth:`~.run`.
 
-    As an example, you can use :meth:`~.run`.
 
     Parameters
     ----------
     data : np.ndarray or :class:`~.Geometry` instance, optional
-        A 3D volume with smoothed or skeletonized predictions.
-        Note, that you need to provide `data` argument or `prototypes` and `shape` instead.
-        Note, by default we process skeletonized data, for smoothed data set `skeletonize_data=True`.
+        A 3D volume with smoothed or skeletonized predictions. By default we assume the data to be already skeletonized.
     ranges : sequence, optional
         Nested sequence, where each element is either None or sequence of two ints.
         Defines data ranges for faults extraction.
-    skeletonize_data : bool, optional
-        Whether the `data` argument needs to be skeletonized or not.
-        Should be True, if data is smoothed model outputs.
+    do_skeletonize : bool, optional
+        Whether the `data` argument needs to be skeletonized.
+        Should be True, if the data is smoothed model output.
     direction : {0, 1}
-        Extraction direction, can be 0 (ilines) or 1 (xlines).
+        Extraction direction, 0 for ilines and 1 for crosslines.
         It is the same as the prediction direction.
     component_len_threshold : int, optional
         Threshold to filter out too small connected components on data slides.
@@ -89,7 +96,7 @@ class FaultExtractor:
         Field shape.
     """
     # pylint: disable=protected-access
-    def __init__(self, data=None, ranges=None, skeletonize_data=True, direction=0, component_len_threshold=0, shape=None):
+    def __init__(self, data=None, ranges=None, do_skeletonize=True, direction=0, component_len_threshold=0, shape=None):
         # Data parameters
         self.shape = data.shape if data is not None else shape
 
@@ -109,18 +116,18 @@ class FaultExtractor:
         self._dilation = 3 # constant for internal operations
         self.component_len_threshold = component_len_threshold
 
-        self._unprocessed_slide_idx = self.origin[self.direction] # variable for internal operations speed up
+        self._unprocessed_slide_idx = self.origin[self.direction] # first index of the slide with unmerged components
 
         # Containers
         self.prototypes_queue = [] # prototypes for extraction
         self.prototypes = [] # extracted prototypes
 
         if data is not None:
-            self.container = self._init_container(data=data, skeletonize_data=skeletonize_data)
+            self.container = self._init_container(data=data, do_skeletonize=do_skeletonize)
         else:
             self.container = None
 
-    def _init_container(self, data, skeletonize_data=False):
+    def _init_container(self, data, do_skeletonize=False):
         """ Extract connected components on each slide and save them into container.
 
         Returns
@@ -138,7 +145,7 @@ class FaultExtractor:
             slide = data.take(slide_idx, axis=self.direction)
             slide = slide[slice(*self.ranges[self.orthogonal_direction]), slice(*self.ranges[2])]
 
-            if skeletonize_data:
+            if do_skeletonize:
                 slide = skeletonize(slide, width=3)
 
             # Extract connected components from the slide
@@ -204,7 +211,7 @@ class FaultExtractor:
 
     @classmethod
     def from_prototypes(cls, prototypes, shape):
-        """Initialize extractor from prototypes.
+        """ Initialize extractor from prototypes.
 
         Useful for applying operations on prototypes from different data chunks.
 
@@ -241,9 +248,9 @@ class FaultExtractor:
     def extract_one_prototype(self):
         """ Extract one fault prototype from the point cloud.
 
-        Under the hood, we find not merged 2D component and find the closest one on the next slide.
+        Under the hood, we find unmerged 2D component and find the closest one on the next slide.
         If components are close enough, they are merged into one 3D surface - fault prototype.
-        Merging repeats while we find close enough components on next slides.
+        Merging repeats until we are unable to find close enough components on next slides.
 
         Returns
         -------
@@ -252,7 +259,7 @@ class FaultExtractor:
         """
         # Get intial 2D component and init prototype (or get from queue)
         if len(self.prototypes_queue) == 0:
-            component, component_idx = self._find_not_merged_component()
+            component, component_idx = self._find_unmerged_component()
 
             if component is None: # Nothing to merge
                 return None
@@ -281,8 +288,10 @@ class FaultExtractor:
 
         return prototype
 
-    def _find_not_merged_component(self):
-        """ Find the longest not merged component on the minimal slide.
+    def _find_unmerged_component(self):
+        """ Find the longest unmerged component on the first slide with unmerged components.
+        Under the hood, we start from the very first slide, use all of its components, and then move to the next slides
+        while keeping track of the index of slide with not all merged components.
 
         Returns
         -------
@@ -307,7 +316,7 @@ class FaultExtractor:
 
     def _find_closest_component(self, component, distances_threshold=None,
                                 depth_iteration_step=10, depths_threshold=20):
-        """ Find the closest component to the provided on next slide, get splitting indices for prototype if needed.
+        """ Find the closest component to the provided on next slide, get splitting indices for prototype.
 
         Parameters
         ----------
@@ -437,7 +446,7 @@ class FaultExtractor:
         """ Concat prototypes which are connected as puzzle details.
 
         Under the hood, we compare prototypes with each other and find connected pairs.
-        For this we get neighboring borders and compare them:
+        For this, we get neighboring borders and compare them:
         if they are almost overlapped after spatial shift then we merge corresponding prototypes.
 
         Parameters
@@ -686,7 +695,7 @@ class FaultExtractor:
 
         ||||||  or  |||||||  or  ||||||  etc.
         ...|||      |...|||      |||...
-           |||      ||||||
+           |||      |||||||
         ||||||
 
          - where | means one prototype points, and . - other prototype points.
@@ -772,8 +781,12 @@ class FaultExtractor:
     def split_horseshoe(self, height_ratio_threshold=0.7, height_diff_threshold=30, axis=2, frequency=5):
         """ Split prototypes which looks like horseshoe.
 
-        Under the hood, we iter over prototype components to find sharp drop in their
-        height and after that a sharp increase.
+        Under the hood, we iterate over prototype components to find sharp drop in their
+        height and after that a sharp increase. For example:
+
+        |||||||||||
+        |||    ||||
+        |||    ||||
 
         Parameters
         ----------
@@ -839,7 +852,7 @@ class FaultExtractor:
         """ Recommended extracting procedure.
 
         The procedure is:
-         - extract prototypes from point cloud;
+         - extract prototypes from the point cloud;
          - filter too small prototypes (for speed up, optional);
          - concat connected prototypes (concat by depth axis, concat by `self.direction` axis) `concat_iters` times
         with changed `overlap_ratio_threshold`;
@@ -1358,7 +1371,7 @@ class FaultPrototype:
 
 # Helpers
 def get_range(coords, axis, diff_threshold=2):
-    """ Get maximal sequential range of coords on axis.
+    """ Get the longest sequential range of coords on axis.
 
     Helper for the :meth:`~.FaultExtractor._borders_overlap`.
 

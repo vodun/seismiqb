@@ -88,7 +88,7 @@ def bboxes_adjacent(bbox_1, bbox_2, adjacency=1):
     return borders
 
 def bboxes_embedded(bbox_1, bbox_2, margin=3):
-    """ Check that one bounding box is inside in another (embedded).
+    """ Check that one bounding box is inside the other (embedded).
 
     Parameters
     ----------
@@ -112,14 +112,14 @@ def bboxes_embedded(bbox_1, bbox_2, margin=3):
 
 @njit
 def compute_distances(coords_1, coords_2, max_threshold=10000):
-    """ Find approximate minimum and maximum distance between two arrays of coordinates.
-
+    """ Find approximate minimum and maximum distances between two arrays of coordinates.
+    We assume coords to have the same length and compare only corresponding points.
     A little bit faster than difference between np.ndarrays with `np.max` and `np.min`.
 
     Parameters
     ----------
     coords_1, coords_2 : np.ndarrays of (N, 1) shape
-        Coords for which find distances. Must be unique values, sorting is not required.
+        Coords for which find distances.
     max_threshold : int, float or None
         Early stopping: threshold for max distance value.
     """
@@ -180,15 +180,25 @@ def find_contour(coords, projection_axis):
 
 @njit
 def restore_coords_from_projection(coords, projection_buffer, axis):
-    """ Get `axis` values for 2D projection coordinates from 3D coords.
+    """ Get values along `axis` for 2D projection coordinates from 3D coords.
+
+    Example
+    -------
+    Useful, where we have subsetted original `coords` and zero-out the result along some axis::
+        coords, indices, axis
+        subset = coords[indices]
+        subset[:, axis] = 0
+
+        restore_coords_from_projection(coords, subset, axis) # change zeros back to original values from `coords`
+
 
     Parameters
     ----------
     coords : np.ndarray of (N, 3) shape
         Original coords from which restore the axis values. Sorting is not required.
-    projection_buffer : np.ndarray
-        Buffer with projection coordinates. Sorting is not required.
-        Note, it is changed inplace.
+    projection_buffer : np.ndarray of (N, 3) shape
+        Buffer with projection coordinates. Initially, values along `axis` are zeros. Sorting is not required.
+        Changed inplace.
     axis : {0, 1, 2}
         Axis for which restore coordinates.
     """
