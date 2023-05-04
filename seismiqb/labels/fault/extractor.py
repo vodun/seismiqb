@@ -147,10 +147,12 @@ class FaultExtractor:
             slide = slide[slice(*self.ranges[self.orthogonal_direction]), slice(*self.ranges[2])]
 
             if do_skeletonize:
-                slide = skeletonize(slide, width=3)
+                skeletonized_slide = skeletonize(slide, width=3).astype(bool)
+            else:
+                skeletonized_slide = slide > np.min(slide) # for signed dtypes
 
             # Extract connected components from the slide
-            labeled_slide = connected_components(slide > np.min(slide)) # for signed dtypes
+            labeled_slide = connected_components(skeletonized_slide)
             objects = find_objects(labeled_slide)
 
             # Get components info
@@ -177,7 +179,7 @@ class FaultExtractor:
                                                        self.origin[self.orthogonal_direction]
                 coords[:, 2] = coords_2D[1].astype(np.int32) + object_bbox[1].start + self.origin[2]
 
-                probas = slide[coords_2D[0], coords_2D[1]]
+                probas = slide[object_bbox][coords_2D[0], coords_2D[1]]
 
                 # Convert probas to integer values for saving them in points array with 3D-coordinates
                 if not np.issubdtype(data.dtype, np.integer):
