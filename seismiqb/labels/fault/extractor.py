@@ -162,6 +162,15 @@ class FaultExtractor:
                 # Extract component mask
                 object_mask = labeled_slide[object_bbox] == idx
 
+                # Filter by proba
+                object_proba = slide[object_bbox][object_mask].max() # TODO: think about percentile
+
+                dtype_info = np.iinfo(data.dtype) # convert into [0, 1] values
+                object_proba = (object_proba-dtype_info.min)/(dtype_info.max-dtype_info.min)
+
+                if object_proba < 0.1: # TODO: think about more appropriate threshold
+                    continue
+
                 # Check length
                 length = np.count_nonzero(object_mask)
 
