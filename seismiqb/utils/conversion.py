@@ -1,6 +1,7 @@
 """ Utils for conversion. """
 
 import os
+import numpy as np
 import h5py
 import hdf5plugin
 
@@ -34,3 +35,15 @@ def repack_hdf5(path, dst_path=None, projections = (0, ), transform=None, dtype=
     if inplace:
         os.remove(path)
         os.rename(dst_path, path)
+
+def proba_to_int(x, dtype='int8'):
+    """ Convert float probability values in interval [0, 1] to integer values of defined type. """
+    min = np.iinfo(dtype).min
+    ptp = np.iinfo(dtype).max - min
+    return (x * ptp + min).astype(dtype)
+
+def int_to_proba(x):
+    """ Convert integer values to float probability values in interval [0, 1]. """
+    min = np.iinfo(x.dtype).min
+    ptp = np.iinfo(x.dtype).max - min
+    return (x.astype('float32') - min) / ptp
