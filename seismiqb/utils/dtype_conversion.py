@@ -1,5 +1,7 @@
-import numpy as np
+""" Utils for dtype conversion. """
+
 from functools import partial
+import numpy as np
 
 def proba_to_int(x, dtype='int8'):
     """ Convert float probability values in interval [0, 1] to integer values of defined type. """
