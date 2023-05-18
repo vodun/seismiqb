@@ -329,7 +329,7 @@ class FaultExtractor:
         return None, None
 
     def _find_closest_component(self, component, distances_threshold=None,
-                                depth_iteration_step=10, depths_threshold=20):
+                                depth_iteration_step=10, depths_threshold=20, slide_increment=1):
         """ Find the closest component to the provided on next slide, get splitting indices for prototype.
 
         Parameters
@@ -374,9 +374,13 @@ class FaultExtractor:
 
         component_split_indices = [None, None]
 
+        next_slide_idx = component.slide_idx + slide_increment
+
+        selected_component_length = -1
+
         # Iter over components and find the closest one
-        for other_component_idx, other_component in enumerate(self.container[component.slide_idx + 1]['components']):
-            if self.container[component.slide_idx + 1]['lengths'][other_component_idx] == -1:
+        for other_component_idx, other_component in enumerate(self.container[next_slide_idx]['components']):
+            if self.container[next_slide_idx]['lengths'][other_component_idx] == -1:
                 continue
 
             # Check bboxes intersection
@@ -397,26 +401,29 @@ class FaultExtractor:
             coords_1 = component.coords[indices_1, self.orthogonal_direction]
             coords_2 = other_component.coords[indices_2, self.orthogonal_direction]
 
-            components_distances = compute_distances(coords_1, coords_2, max_threshold=min_distance)
+            components_distances = compute_distances(coords_1, coords_2, max_threshold=min_distance+3)
 
-            if (components_distances[0] == -1) or (components_distances[0] > 1):
+            if (components_distances[0] == -1) or (components_distances[0] > 3):
                 # Components are not close
                 continue
 
-            if components_distances[1] >= min_distance:
+            if components_distances[1] >= min_distance + 3:
                 # `other_component` is not the closest
                 continue
 
             # The most depthwise distant points in components are close enough -> we can combine components
-            min_distance = components_distances[1]
+            # min_distance = components_distances[1]
 
-            closest_component = other_component
-            merged_idx = other_component_idx
-            overlap_borders = overlap_depths
+            if selected_component_length < len(other_component):
+                min_distance = components_distances[1]
+                selected_component_length = len(other_component)
+                closest_component = other_component
+                merged_idx = other_component_idx
+                overlap_borders = overlap_depths
 
-            if min_distance == 0:
-                # The closest component is founded
-                break
+            # if min_distance == 0:
+            #     # The closest component is founded
+            #     break
 
         if closest_component is not None:
             # Process (split if needed) founded component and get split indices for prototype
