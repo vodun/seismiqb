@@ -356,6 +356,11 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetricM
         buffer = buffer.transpose(from_projection_transposition)
         return buffer
 
+    def add_to_mask(self, mask, locations=None, **kwargs):
+        """ !!. """
+        mask[:] = self.load_crop(locations)
+        return mask
+
     def enable_cache(self):
         """ Enable cache for loaded slides. """
         self.use_cache = True

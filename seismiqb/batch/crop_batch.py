@@ -357,12 +357,11 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         name = '_normalize__stats' if normalization_stats is None else normalization_stats
         mode = mode if mode is not None else getattr(self, name)[ix][0]
         normalization_stats = normalization_stats if normalization_stats is not None else getattr(self, name)[ix][1]
-        print(name, mode)
         if callable(mode):
             buffer[:] = mode(buffer, normalization_stats)
         else:
             if 'std' in mode:
-                buffer *= normalization_stats['std']
+                buffer *= normalization_stats['std'] # TODO: eps to normalize/denormalize?
             if 'mean' in mode:
                 buffer += normalization_stats['mean']
             if 'min' in mode and 'max' in mode:
