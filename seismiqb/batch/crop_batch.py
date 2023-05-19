@@ -164,10 +164,12 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         return self
 
     def store_stats_post(self, all_results, func, store_stats, **kwargs):
-        data = [item[1:] for item in all_results]
-        name = func.__name__ + '_stats' if store_stats is True else  store_stats
-        self.add_components(name, data)
-        return self.noop_post(all_results, **kwargs)
+        self.noop_post(all_results, **kwargs)
+        if store_stats:
+            data = [item[1] for item in all_results]
+            name = func.__name__ + '_stats' if store_stats is True else  store_stats
+            self.add_components(name, data)
+        return self
 
     # Core actions
     @action
@@ -303,6 +305,9 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         field = self.get(ix, 'fields')
 
         # Prepare normalization stats
+        if isinstance(normalization_stats, (list, tuple, np.ndarray)):
+            normalization_stats = normalization_stats[ix]
+
         if isinstance(normalization_stats, dict):
             if field.short_name in normalization_stats:
                 normalization_stats = normalization_stats[field.short_name]
@@ -349,7 +354,7 @@ class SeismicCropBatch(Batch, VisualizationMixin):
                     buffer /= normalization_stats['max'] - normalization_stats['min']
                 else:
                     buffer -= normalization_stats['min']
-        return buffer, mode, normalization_stats
+        return buffer, normalization_stats
 
     @apply_parallel_decorator(init='preallocating_init', post='noop_post', target='for')
     def denormalize(self, ix, buffer, src, dst=None, mode=None, normalization_stats=None):
