@@ -163,6 +163,11 @@ class SeismicCropBatch(Batch, VisualizationMixin):
             raise RuntimeError("Could not assemble the batch!") from all_errors[0]
         return self
 
+    def store_stats_post(self, all_results, func, store_stats, **kwargs):
+        data = [item[1:] for item in all_results]
+        name = func.__name__ + '_stats' if store_stats is True else  store_stats
+        self.add_components(name, data)
+        return self.noop_post(all_results, **kwargs)
 
     # Core actions
     @action
@@ -271,9 +276,9 @@ class SeismicCropBatch(Batch, VisualizationMixin):
     load_cubes = load_crops = load_seismic
 
 
-    @apply_parallel_decorator(init='preallocating_init', post='noop_post', target='for')
+    @apply_parallel_decorator(init='preallocating_init', post='store_stats_post', target='for')
     def normalize(self, ix, buffer, src, dst=None, mode='meanstd', normalization_stats='field',
-                  clip_to_quantiles=False, q=(0.01, 0.99)):
+                  clip_to_quantiles=False, q=(0.01, 0.99), store_stats=False):
         """ Normalize `src` with provided stats.
         Depending on the parameters, stats for normalization will be taken from (in order of priority):
             - supplied `normalization_stats`, if provided
@@ -344,6 +349,28 @@ class SeismicCropBatch(Batch, VisualizationMixin):
                     buffer /= normalization_stats['max'] - normalization_stats['min']
                 else:
                     buffer -= normalization_stats['min']
+        return buffer, mode, normalization_stats
+
+    @apply_parallel_decorator(init='preallocating_init', post='noop_post', target='for')
+    def denormalize(self, ix, buffer, src, dst=None, mode=None, normalization_stats=None):
+        """ !!. """
+        name = '_normalize__stats' if normalization_stats is None else normalization_stats
+        mode = mode if mode is not None else getattr(self, name)[ix][0]
+        normalization_stats = normalization_stats if normalization_stats is not None else getattr(self, name)[ix][1]
+        print(name, mode)
+        if callable(mode):
+            buffer[:] = mode(buffer, normalization_stats)
+        else:
+            if 'std' in mode:
+                buffer *= normalization_stats['std']
+            if 'mean' in mode:
+                buffer += normalization_stats['mean']
+            if 'min' in mode and 'max' in mode:
+                if normalization_stats['max'] != normalization_stats['min']:
+                    buffer *= normalization_stats['max'] - normalization_stats['min']
+                    buffer += normalization_stats['min']
+                else:
+                    buffer += normalization_stats['min']
         return buffer
 
 
