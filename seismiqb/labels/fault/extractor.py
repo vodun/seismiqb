@@ -328,14 +328,16 @@ class FaultExtractor:
 
         return None, None
 
-    def _find_closest_component(self, component, distances_threshold=None,
-                                depth_iteration_step=10, depths_threshold=20, slide_increment=1):
+    def _find_closest_component(self, component, slide_step=1, distances_threshold=None,
+                                depth_iteration_step=10, depths_threshold=20):
         """ Find the closest component to the provided on next slide, get splitting indices for prototype.
 
         Parameters
         ----------
         component : instance of :class:`~.Component`
             Component for which find the closest one on the next slide.
+        slide_step : int
+            Amount of slides between the component slide and the next one.
         distances_threshold : int, optional
             Threshold for the max possible axis-wise distance between components,
             where axis is `self.orthogonal_direction`.
@@ -374,7 +376,7 @@ class FaultExtractor:
 
         component_split_indices = [None, None]
 
-        next_slide_idx = component.slide_idx + slide_increment
+        next_slide_idx = component.slide_idx + slide_step
 
         selected_component_length = -1
 
@@ -412,18 +414,13 @@ class FaultExtractor:
                 continue
 
             # The most depthwise distant points in components are close enough -> we can combine components
-            # min_distance = components_distances[1]
-
+            # Also, we want to find the longest close enough component
             if selected_component_length < len(other_component):
                 min_distance = components_distances[1]
                 selected_component_length = len(other_component)
                 closest_component = other_component
                 merged_idx = other_component_idx
                 overlap_borders = overlap_depths
-
-            # if min_distance == 0:
-            #     # The closest component is founded
-            #     break
 
         if closest_component is not None:
             # Process (split if needed) founded component and get split indices for prototype
