@@ -125,8 +125,8 @@ class Intersection2d2d:
         self.pad_width = pad_width
         self.n = n
         self.transform = transform
-        self.max_depth = int(max(field_0.depth * field_0.sample_interval - field_0.delay,
-                                 field_1.depth * field_1.sample_interval - field_1.delay))
+        self.max_depth = int(max(field_0.depth * field_0.sample_interval + field_0.delay,
+                                 field_1.depth * field_1.sample_interval + field_1.delay) + 1)
 
         # Compute distance
         self.coordinates_0 = field_0.cdp_values[trace_idx_0]
@@ -277,6 +277,9 @@ class Intersection2d2d:
         # Find the best result
         argmin = np.argmin(minimize_results[:, 0])
         best_loss, best_shift, best_angle, best_gain = minimize_results[argmin]
+        if metric == 'correlation':
+            best_gain = self.compute_gain(data_0=trace_0, data_1=trace_1)
+
         best_corr = compute_correlation(trace_0,
                                         modify_trace(trace_1, shift=best_shift, angle=best_angle, gain=best_gain))
 
@@ -291,7 +294,7 @@ class Intersection2d2d:
 
     def match_traces_analytic(self, limits=None, index_shifts=(0, 0), pad_width=None, n=1, transform=None,
                               twostep=False, twostep_margin=10,
-                              max_shift=100, resample_factor=10,
+                              max_shift=100, resample_factor=10, taper=True,
                               apply_correction=False, correction_step=3, return_intermediate=False, **kwargs):
         """ Match traces by using analytic formulae.
         Bishop, Nunns "`Correcting amplitude, time, and phase mis-ties in seismic data
@@ -316,7 +319,7 @@ class Intersection2d2d:
         if twostep:
             # Compute approximate `shift` to narrow the interval
             shifts = np.linspace(-max_shift, max_shift, 2*max_shift + 1, dtype=np.float32)
-            shift = self._match_traces_analytic(trace_0=trace_0, trace_1=trace_1, shifts=shifts,
+            shift = self._match_traces_analytic(trace_0=trace_0, trace_1=trace_1, shifts=shifts, taper=taper,
                                                 apply_correction=apply_correction, correction_step=correction_step,
                                                 return_intermediate=False)['shift']
             shifts = np.linspace(shift - twostep_margin, shift + twostep_margin,
@@ -326,7 +329,7 @@ class Intersection2d2d:
 
         # Compute `shift` with required precision
         matching_results = self._match_traces_analytic(trace_0=trace_0, trace_1=trace_1, shifts=shifts,
-                                                       apply_correction=apply_correction,
+                                                       taper=taper, apply_correction=apply_correction,
                                                        correction_step=correction_step,
                                                        return_intermediate=return_intermediate)
 
@@ -337,7 +340,7 @@ class Intersection2d2d:
         return matching_results
 
     def _match_traces_analytic(self, trace_0, trace_1, shifts,
-                               apply_correction=False, correction_step=3, return_intermediate=False):
+                               taper=True, apply_correction=False, correction_step=3, return_intermediate=False):
         # Compute metrics for each shift on a resampled grid
         # TODO: fix nan/inf values in case of short windows and large `max_shift``
         shifted_traces = compute_shifted_traces(trace=trace_1, shifts=shifts)
@@ -348,6 +351,15 @@ class Intersection2d2d:
         envelope = np.abs(analytic_signal)
         instantaneous_phase = np.angle(analytic_signal)
         instantaneous_phase = np.rad2deg(instantaneous_phase)
+
+        # Optional taper
+        if taper:
+            taper = 0.1 if taper is True else taper
+            lentaper = int(taper * envelope.size)
+            taper = np.hanning(lentaper)
+            envelope[:lentaper // 2] *= taper[:lentaper // 2]
+            envelope[-lentaper // 2:] *= taper[-lentaper // 2:]
+            # envelope *= np.hanning(envelope.size)
 
         # Find the best shift and compute its relative quality
         idx = np.argmax(envelope)
@@ -664,6 +676,7 @@ class Intersection2d2d:
             'title': title, 'title_fontsize': 14,
             'extent': extent,
             'augment_mask': True,
+            'labelright': False, 'labeltop': False,
             **kwargs
         }
         return plot(data, **kwargs)

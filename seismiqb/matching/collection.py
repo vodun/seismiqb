@@ -519,7 +519,7 @@ class FieldCollection:
 
 
     # Visualize
-    def show_lines(self, arrow_step=10, arrow_size=20, annotate_index=True):
+    def show_lines(self, arrow_step=10, arrow_size=20, annotate_index=True, annotate_name=False):
         """ Display annotated shot lines on a 2d graph in CDP coordinates. """
         fig, ax = plt.subplots(figsize=(14, 8))
 
@@ -535,13 +535,15 @@ class FieldCollection:
             ax.plot(x, y, color)
 
             idx = x.size // 2
+            arrow_step_ = min(arrow_step, idx - 0, x.size - idx - 1)
             ax.annotate('', size=arrow_size,
-                        xytext=(x[idx-arrow_step], y[idx-arrow_step]),
-                            xy=(x[idx+arrow_step], y[idx+arrow_step]),
+                        xytext=(x[idx-arrow_step_], y[idx-arrow_step_]),
+                            xy=(x[idx+arrow_step_], y[idx+arrow_step_]),
                         arrowprops=dict(arrowstyle="->", color=color))
 
-            if annotate_index:
-                ax.annotate(i, xy=(x[0], y[0]), size=12)
+            if annotate_index or annotate_name:
+                annotation = field.short_name if annotate_name else i
+                ax.annotate(annotation, xy=(x[0], y[0]), size=12)
 
         # Annotations
         ax.set_title('2D profiles', fontsize=26)

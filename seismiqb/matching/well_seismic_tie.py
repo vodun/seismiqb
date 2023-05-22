@@ -3,7 +3,7 @@ from copy import deepcopy
 import numpy as np
 import pandas as pd
 
-from scipy.signal import ricker, find_peaks
+from scipy.signal import ricker, find_peaks, fftconvolve
 from scipy.optimize import minimize
 from scipy.linalg import toeplitz
 from sklearn.linear_model import Ridge
@@ -181,9 +181,9 @@ class WellSeismicMatcher:
         self.well_reflectivity = self.well['R_RECOMPUTED'].values[self.well_bounds]
 
 
-    def extract_wavelet(self, method='statistical', normalize=False, limits=slice(None),
+    def extract_wavelet(self, method='statistical', window=(1, 1), normalize=False, limits=slice(None),
                         taper=True, wavelet_length=61, state=-1,
-                        smoothing=False, smoothing_length=11, smoothing_order=3, **kwargs):
+                        smoothing=False, smoothing_length=7, smoothing_order=3, **kwargs):
         """ Compute a wavelet by a chosen method.
         Available methods are:
             - `ricker` creates a fixed Ricker wavelet. Additional parameters are `a` for width.
@@ -209,12 +209,20 @@ class WellSeismicMatcher:
             If int, then the index of previous state to use.
             If dict, then a state directly.
         """
-        # Prepare trace and (optionally) reflectivity
-        trace = self.seismic_trace.copy()[limits]
+        # Prepare traces
+        c0, c1 = self.coordinates
+        window = np.clip(window, 0, self.field.spatial_shape)
+        k0, k1 = window
+        traces = self.field.geometry[c0 - k0//2 : c0 + (k0 - k0//2), c1 - k1//2 : c1 + (k1 - k1//2)]
+        traces = traces.reshape(-1, traces.shape[-1])
+        traces = traces[:, limits]
+        trace = np.mean(traces, axis=0)
+
         if taper:
-            trace *= np.blackman(len(trace)) # TODO: taper selection, maybe?
+            traces *= np.blackman(len(trace)) # TODO: taper selection, maybe?
         lenhalf, wlenhalf, wlenflag = len(trace) // 2, wavelet_length // 2, wavelet_length % 2
 
+        # Optionally, prepare reflectivity
         if method in {'lstsq', 'division'}:
             state = state if isinstance(state, dict) else self.states[state]
             reflectivity = self.resample_to_seismic(seismic_times=self.seismic_times,
@@ -260,21 +268,15 @@ class WellSeismicMatcher:
                 power_spectrum = np.abs(np.fft.rfft(trace))
 
             elif method in {'stats2', 'autocorrelation'}:
-                autocorrelation = np.correlate(trace, trace, mode='same')
-                autocorrelation = autocorrelation[lenhalf - wlenhalf : lenhalf + wlenhalf + wlenflag]
-                power_spectrum = np.sqrt(np.abs(np.fft.rfft(autocorrelation)))
-
-                # from scipy.signal import hilbert
-                # minphase = hilbert(np.log(power_spectrum))
-
-                # frequencies = np.fft.rfftfreq(len(autocorrelation), d=self.field.sample_interval * 1e-3)
-                # power_spectrum[0] = 0.0
+                autocorrelation = fftconvolve(traces, traces[:, ::-1], mode='same', axes=-1)
+                autocorrelation = autocorrelation[:, lenhalf - wlenhalf : lenhalf + wlenhalf + wlenflag]
+                power_spectrum = np.sqrt(np.abs(np.fft.rfft(autocorrelation, axis=-1))).mean(axis=0)
 
             elif method in {'stats3'}:
-                autocorrelation = np.correlate(trace, trace, mode='same')
-                autocorrelation = autocorrelation[lenhalf - wlenhalf : lenhalf + wlenhalf + wlenflag]
-                autocorrelation *= np.hanning(autocorrelation.size)
-                power_spectrum = np.sqrt(np.abs(np.fft.rfft(autocorrelation)))
+                autocorrelation = fftconvolve(traces, traces[:, ::-1], mode='same', axes=-1)
+                autocorrelation = autocorrelation[:, lenhalf - wlenhalf : lenhalf + wlenhalf + wlenflag]
+                autocorrelation *= np.hanning(autocorrelation.shape[1])
+                power_spectrum = np.sqrt(np.abs(np.fft.rfft(autocorrelation, axis=-1))).mean(axis=0)
 
                 # frequencies = np.fft.rfftfreq(len(autocorrelation), d=self.field.sample_interval * 1e-3)
                 # power_spectrum[0] = 0.0
@@ -285,6 +287,9 @@ class WellSeismicMatcher:
             if smoothing:
                 from scipy.signal import savgol_filter # pylint: disable=import-outside-toplevel
                 power_spectrum = savgol_filter(power_spectrum, smoothing_length, smoothing_order)
+
+            # from scipy.signal import hilbert
+            # minphase = hilbert(np.log(power_spectrum))
 
             wavelet = np.real(np.fft.irfft(power_spectrum)[:wlenhalf + wlenflag])
             wavelet = np.concatenate((wavelet[::-1], wavelet[wlenflag:]), axis=0)
