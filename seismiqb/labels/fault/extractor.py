@@ -1010,11 +1010,20 @@ class FromComponentExtractor(FaultExtractor):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-    def extract_one_prototype(self, component):
+    def extract_one_prototype(self, component, height_threshold=0.6):
         """ Extract one prototype from the point cloud starting from the provided component.
 
         Similar to the :meth:`.FaultExtractor.extract_one_prototype`, but this one finds prototype components to
         the left and right sides of the provided one, while the original one finds only to the right.
+
+        Parameters
+        ----------
+        height_threshold : float in [0, 1] range, None
+            Neighboring components height ratio threshold.
+            If ratio more than threshold, then components are from one prototype. Otherwise not.
+            If None, then no threshold is applied.
+            On some slides component can be splitted into separate parts and these parts have a significant height
+            decrease (most frequently in Y areas).
         """
         component_idx = np.argwhere(np.array(self.container[component.slide_idx]['components']) == component)[0][0]
         self.container[component.slide_idx]['lengths'][component_idx] = -1 # Mark component as merged
@@ -1023,24 +1032,36 @@ class FromComponentExtractor(FaultExtractor):
                                    proba_transform=self.proba_transform)
 
         # Find closest components on further slides
-        self._find_prototype_components(prototype=prototype, component=component, slide_step=1)
+        self._find_prototype_components(prototype=prototype, component=component, slide_step=1,
+                                        height_threshold=height_threshold)
 
         # Find closest components on previous slides
         first_slide_idx = prototype.bbox[self.direction, 0]
-        firts_slide_points = prototype.points[prototype.points[:, self.direction] == first_slide_idx]
-        component = Component(points=firts_slide_points, slide_idx=first_slide_idx)
+        first_slide_points = prototype.points[prototype.points[:, self.direction] == first_slide_idx]
+        component = Component(points=first_slide_points, slide_idx=first_slide_idx)
 
-        self._find_prototype_components(prototype=prototype, component=component, slide_step=-1)
+        self._find_prototype_components(prototype=prototype, component=component, slide_step=-1,
+                                        height_threshold=height_threshold)
 
         self.prototypes.append(prototype)
         return prototype
 
-    def _find_prototype_components(self, prototype, component, slide_step):
+    def _find_prototype_components(self, prototype, component, slide_step, height_threshold=0.6):
         """ Find prototype components starting from the provided and going on `slide_step`.
 
         Similar to the :meth:`.FaultExtractor.extract_one_prototype`, but without split.
+
+        Parameters
+        ----------
+        height_threshold : float in [0, 1] range, optional
+            Neighboring components height ratio threshold.
+            If ratio more than threshold, then components are from one prototype. Otherwise not.
+            If None, then no threshold is applied.
+            On some slides component can be splitted into separate parts and these parts have a significant height
+            decrease (most frequently in Y areas).
         """
         stop_slide = self.ranges[self.direction][0] if slide_step < 0 else self.ranges[self.direction][1]
+        previous_height = component.bbox[-2][1] - component.bbox[-2][0] + 1
 
         for next_slide in range(component.slide_idx + slide_step, stop_slide, slide_step):
             # Find the closest component on the the next slide to the current
@@ -1048,7 +1069,14 @@ class FromComponentExtractor(FaultExtractor):
 
             if component is not None:
                 # TODO: think about splitting necessity
-                prototype.append(component)
+                height = component.bbox[-2][1] - component.bbox[-2][0] + 1
+                heights_ratio = min(height, previous_height)/max(height, previous_height)
+
+                if (height_threshold is not None) and (heights_ratio > height_threshold):
+                    prototype.append(component)
+                    previous_height = height
+                else:
+                    break
             else:
                 break
 
