@@ -271,7 +271,7 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         locations = self.get(ix, 'locations')
         orientation = self.get(ix, 'orientations')
 
-        if orientation == 1:
+        if orientation == 1: #TODO orientation 2
             buffer = buffer.transpose(1, 0, 2)
         field.load_seismic(locations=locations, src=src_geometry, buffer=buffer, **kwargs)
 
@@ -347,7 +347,7 @@ class SeismicCropBatch(Batch, VisualizationMixin):
             if 'mean' in mode:
                 buffer -= normalization_stats['mean']
             if 'std' in mode:
-                buffer /= normalization_stats['std']
+                buffer /= normalization_stats['std'] + 1e-6
             if 'min' in mode and 'max' in mode:
                 if normalization_stats['max'] != normalization_stats['min']:
                     buffer -= normalization_stats['min']
@@ -360,8 +360,7 @@ class SeismicCropBatch(Batch, VisualizationMixin):
     def denormalize(self, ix, buffer, src, dst=None, mode=None, normalization_stats=None):
         """ !!. """
         name = '_normalize__stats' if normalization_stats is None else normalization_stats
-        mode = mode if mode is not None else getattr(self, name)[ix][0]
-        normalization_stats = normalization_stats if normalization_stats is not None else getattr(self, name)[ix][1]
+        normalization_stats = normalization_stats if normalization_stats is not None else getattr(self, name)[ix]
         if callable(mode):
             buffer[:] = mode(buffer, normalization_stats)
         else:
@@ -511,6 +510,8 @@ class SeismicCropBatch(Batch, VisualizationMixin):
             condition = self._compute_mask_area
         elif condition == 'discontinuity_size':
             condition = self._compute_discontinuity_size
+        elif condition == 'crop_area':
+            condition = self._compute_crop_area
 
         # Compute indices to keep
         data = self.get(component=src)
@@ -543,6 +544,12 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         labeled_traces = array.max(axis=axis)
         area = labeled_traces.sum() / labeled_traces.size
         return area
+
+    @staticmethod
+    def _compute_crop_area(array, axis=(1, 2), **kwargs):
+        """ Compute the area of a projection (along the `axis`, by default depth), of a horizon mask. """
+        _ = kwargs
+        return 1 - np.isnan(array).sum(axis=axis) / array.size
 
     @staticmethod
     def _compute_discontinuity_size(array, **kwargs):
@@ -750,8 +757,10 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         """
         crop = self.get(ix, src)
         location = self.get(ix, 'locations')
-        if self.get(ix, 'orientations'):
+        if self.get(ix, 'orientations') == 1:
             crop = crop.transpose(1, 0, 2)
+        elif self.get(ix, 'orientations') == 2:
+            crop = crop.transpose(1, 2, 0)
         accumulator.update(crop, location)
         return self
 
@@ -923,7 +932,7 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         dst = [dst] if isinstance(dst, str) else dst
 
         for src_, dst_ in zip(src, dst):
-            data = data = self.get(component=src_)
+            data = self.get(component=src_)
             if data.ndim == 5 and data.shape[axis] == 1:
                 data = np.squeeze(data, axis=axis)
                 self.name_to_order[src_] = np.delete(self.name_to_order[src_], axis-1)
