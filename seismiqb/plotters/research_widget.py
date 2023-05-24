@@ -1,6 +1,7 @@
 import ipywidgets as widgets
 from IPython.display import display, Image
 import os
+import re
 
 class WidgetForResearch:
     def __init__(self, cubes, research_name, df_with_research_results, feature, repetition, width=700, height=700):
@@ -11,8 +12,8 @@ class WidgetForResearch:
 
         # Gather images from the directory, parse research dataframe and create dict,
         # where key is a feature (e.g. 'blovasz/0/001_YETYPUR/((0,_1000),_(500,_501),_(100,_1100))_1') and value is its path
-        self.image_paths = self.gather_images(self.cubes)
         self.df_ids = self.get_ids_from_df(df_with_research_results, repetition)
+        self.image_paths = self.gather_images(self.cubes, self.df_ids)
         self.features = self.find_feature_in_df(feature)
         self.dict_of_images_and_paths = dict(zip(self.features, self.image_paths))
 
@@ -36,12 +37,19 @@ class WidgetForResearch:
 
         display(result_box)
 
-    def gather_images(self, cubes):
+    def find_id_in_string(self, image_path):
+
+        pattern = r"\b[\dA-Fa-f]+_[\dA-Fa-f]+_[\dA-Fa-f]+\b"
+        output = re.findall(pattern, image_path)[0]
+
+        return output
+
+    def gather_images(self, cubes, df_ids):
 
         image_paths = []
         for cube_path in cubes:
             for root, dirs, files in os.walk(f'{self.research_name}/experiments'):
-                if root.endswith('inference'):
+                if root.endswith('inference') and self.find_id_in_string(root) in df_ids:
                     img = os.path.join(root, cube_path)
                     image_paths.append(img)
 
