@@ -98,7 +98,7 @@ def show_3d(x, y, z, simplices, title, zoom, colors=None, show_axes=True, aspect
             image = image[::-1]
             if bounds:
                 bounds = int(bounds)
-                fill = image.max()
+                fill = image.max() or 1
                 image[:bounds, :] = fill
                 image[-bounds:, :] = fill
                 image[:, :bounds] = fill

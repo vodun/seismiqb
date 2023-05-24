@@ -163,7 +163,7 @@ class SeismicCropBatch(Batch, VisualizationMixin):
             raise RuntimeError("Could not assemble the batch!") from all_errors[0]
         return self
 
-    def store_stats_post(self, all_results, func, store_stats, **kwargs):
+    def store_stats_post(self, all_results, func, store_stats=False, **kwargs):
         self.noop_post(all_results, **kwargs)
         if store_stats:
             data = [item[1] for item in all_results]
