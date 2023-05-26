@@ -163,12 +163,11 @@ class SeismicCropBatch(Batch, VisualizationMixin):
             raise RuntimeError("Could not assemble the batch!") from all_errors[0]
         return self
 
-    def store_stats_post(self, all_results, func, store_stats=False, **kwargs):
+    def normalize_post(self, all_results, func, src=None, mode='meanstd', **kwargs):
         self.noop_post(all_results, **kwargs)
-        if store_stats:
-            data = [item[1] for item in all_results]
-            name = func.__name__ + '_stats' if store_stats is True else  store_stats
-            self.add_components(name, data)
+        normalization_stats = [item[1] for item in all_results]
+        self.add_components(f'normalization_stats_{src}', normalization_stats)
+        self.add_components(f'normalization_mode_{src}', normalization_stats)
         return self
 
     # Core actions
@@ -278,9 +277,9 @@ class SeismicCropBatch(Batch, VisualizationMixin):
     load_cubes = load_crops = load_seismic
 
 
-    @apply_parallel_decorator(init='preallocating_init', post='store_stats_post', target='for')
+    @apply_parallel_decorator(init='preallocating_init', post='normalize_post', target='for')
     def normalize(self, ix, buffer, src, dst=None, mode='meanstd', normalization_stats='field',
-                  clip_to_quantiles=False, q=(0.01, 0.99), store_stats=False):
+                  clip_to_quantiles=False, q=(0.01, 0.99)):
         """ Normalize `src` with provided stats.
         Depending on the parameters, stats for normalization will be taken from (in order of priority):
             - supplied `normalization_stats`, if provided
@@ -313,6 +312,8 @@ class SeismicCropBatch(Batch, VisualizationMixin):
                 normalization_stats = normalization_stats[field.short_name]
         elif normalization_stats in {'field', True}:
             normalization_stats = field.normalization_stats
+        elif isinstance(normalization_stats, str):
+            normalization_stats = getattr(self, f'normalization_stats_{normalization_stats}')[ix]
         else:
             if clip_to_quantiles:
                 buffer = np.clip(buffer, *np.quantile(buffer, q))
@@ -354,13 +355,29 @@ class SeismicCropBatch(Batch, VisualizationMixin):
                     buffer /= normalization_stats['max'] - normalization_stats['min']
                 else:
                     buffer -= normalization_stats['min']
+            print(src, ix, normalization_stats, buffer.mean(), buffer.std())
         return buffer, normalization_stats
 
     @apply_parallel_decorator(init='preallocating_init', post='noop_post', target='for')
     def denormalize(self, ix, buffer, src, dst=None, mode=None, normalization_stats=None):
         """ !!. """
-        name = '_normalize__stats' if normalization_stats is None else normalization_stats
-        normalization_stats = normalization_stats if normalization_stats is not None else getattr(self, name)[ix]
+        field = self.get(ix, 'fields')
+
+        # Prepare normalization stats
+        if isinstance(normalization_stats, (list, tuple, np.ndarray)):
+            normalization_stats = normalization_stats[ix]
+
+        if isinstance(normalization_stats, dict):
+            if field.short_name in normalization_stats:
+                normalization_stats = normalization_stats[field.short_name]
+        elif normalization_stats in {'field', True}:
+            normalization_stats = field.normalization_stats
+        elif normalization_stats is False:
+            normalization_stats = getattr(self, f'normalization_stats_{src}')[ix]
+        elif isinstance(normalization_stats, str):
+            normalization_stats = getattr(self, f'normalization_stats_{normalization_stats}')[ix]
+            mode = getattr(self, f'normalization_mode_{normalization_stats}')[ix]
+
         if callable(mode):
             buffer[:] = mode(buffer, normalization_stats)
         else:
