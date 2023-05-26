@@ -972,9 +972,9 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         axis : int
             Axis to flip along
         """
-        locations = [None] * buffer.ndim
+        locations = [slice(None)] * buffer.ndim
         locations[axis] = slice(None, None, -1)
-        buffer[:] = buffer[locations]
+        buffer[:] = buffer[tuple(locations)]
 
     @apply_parallel_decorator(init='data', post='_assemble')
     def center_crop(self, crop, shape, **kwargs):

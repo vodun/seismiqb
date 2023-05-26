@@ -1,4 +1,4 @@
-""" Utils for conversion. """
+""" Utils for format conversion. """
 
 import os
 import h5py
