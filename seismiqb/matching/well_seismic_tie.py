@@ -50,7 +50,7 @@ class WellSeismicMatcher:
     Everything time-related is stored in seconds. Other logs are unchanged.
     Most of the utility methods are written in a way to accept `(**state)` as an argument.
 
-    TODO: DTW optimization method; rethink resampling; better deterministic wavelet; inclinometry; clean up code;
+    TODO: DTW optimization method; rethink resampling; better deterministic wavelet;
 
     Attributes
     ----------
@@ -92,7 +92,7 @@ class WellSeismicMatcher:
         """ Get data from a SEG-Y seismic data.
         Should be overriden for custom algorithm of seismic times / seismic trace acquisition.
         """
-        # TODO: add averaging (copy from 2d matcher), add inclinometry information
+        # TODO: add averaging (copy from 2d matcher), add inclinometry warning
         trace = self.field.geometry[coordinates[0], coordinates[1], :]
         self.seismic_trace = trace
         self.coordinates = coordinates
@@ -190,6 +190,8 @@ class WellSeismicMatcher:
             - `ricker_f` creates a fixed Ricker wavelet. Additional parameters are `f` for peak frequency.
             - `stats1` creates a wavelet with the same power spectrum as the one in seismic trace.
             - `stats2` creates a wavelet with the same power spectrum as the one in autocorrelation of seismic trace.
+            - `stats3` creates a wavelet with the same power spectrum as the one in autocorrelation of seismic trace
+            with additional tapering.
             - `division` creates a wavelet with the spectrum of divised spectras of reflectivity and seismic trace.
             - `lstsq` computes an optimal wavelet by solving system of linear equations (~Wiegner).
 
@@ -199,12 +201,26 @@ class WellSeismicMatcher:
 
         Parameters
         ----------
+        method : str
+            Which method to use for wavelet extraction.
         normalize : bool
             Whether to normalize output wavelet so that max value equals to 1.
         taper : bool
             Whether to apply taper to seismic trace / reflectivity before computations.
         wavelet_length : int
             Size of the wavelet.
+        smoothing : bool
+            Whether to apply smoothing to the power spectrum before IRFFT for statistical wavelets.
+        smoothing_length : int
+            Length of the smoothing kernel.
+        smoothing_order : int
+            Order of polynomial used for smoothing.
+        window : tuple of ints
+            Number of traces along each (inline/crossline) direction to use.
+            (1, 1) means that only the trace directly at well coordinates is used.
+            (3, 3) means that total of 9 traces centering at well coordinates are used.
+        limits : slice or None
+            If provided, then used to slice seismic trace(s) along depth dimension.
         state : int, dict
             If int, then the index of previous state to use.
             If dict, then a state directly.
@@ -364,6 +380,7 @@ class WellSeismicMatcher:
         _ = kwargs
         limits = limits if limits is not None else slice(None)
 
+        # # Alternative way of computations
         # impedance_resampled = self.resample_to_seismic(seismic_times=self.seismic_times[limits],
         #                                                well_times=well_times,
         #                                                well_data=self.well_impedance)
@@ -864,7 +881,6 @@ class WellSeismicMatcher:
         notifier = Notifier(pbar, frequency=min(50, n_iters),
                             monitors=[{'source': loss_history, 'format': 'correlation={:5.4f}'}])
         for _ in notifier(n_iters):
-            # Loss # TODO: check that dt_tensor[0] is ~not updated!
             multipliers_ = torch.repeat_interleave(multipliers, segment_size)[:len(well_times)]
             multipliers_[0] = 1.0
             new_well_times = torch.cumsum(dt * multipliers_, dim=0)
@@ -1011,9 +1027,6 @@ class WellSeismicMatcher:
         }
         self.states.append(state)
 
-    # TODO
-    # SciPy full-vector optimization
-    # DTW full-vector optimization
 
     # Metrics
     def evaluate_markers(self, markers, state=-1):

@@ -461,10 +461,16 @@ class Intersection2d2d:
         """ Get corrections from field. Used to see how intersection would behave after field corrections applied. """
         dict_0 = self.field_0.correction_results
         dict_1 = self.field_1.correction_results
+
+        shift = dict_0['shift'] - dict_1['shift']
+        angle = dict_0['angle'] - dict_1['angle']
+        gain = np.exp(np.log(dict_0['gain']) - np.log(dict_1['gain']))
+        corr = self.evaluate(shift=shift, angle=angle, gain=gain)
         return {
-            'shift': dict_0['shift'] - dict_1['shift'],
-            'angle': dict_0['angle'] - dict_1['angle'],
-            'gain': np.exp(np.log(dict_0['gain']) - np.log(dict_1['gain'])),
+            'shift': shift,
+            'angle': angle,
+            'gain': gain,
+            'corr': corr
         }
 
 
@@ -637,8 +643,8 @@ class Intersection2d2d:
 
 
     def show_composite_slide(self, sides=(0, 0), horizon_width=3,
-                             limits=None, gap_width=1, pad_width=None, transform=None,
-                             shift=0, angle=0, gain=1, width='auto', **kwargs):
+                             limits=None, gap_width=1, gap_value=None, pad_width=None, transform=None,
+                             shift=0, angle=0, gain=1, width='auto', title_prefix='', **kwargs):
         """ Display sides of shot lines on one plot. """
         limits = limits if limits is not None else self.limits
         pad_width = pad_width if pad_width is not None else self.pad_width
@@ -647,7 +653,8 @@ class Intersection2d2d:
         # Make combined slide
         combined_slide, slide_0, slide_1 = self._prepare_combined_slide(sides=sides, data='field',
                                                                         shift=shift, angle=angle, gain=gain,
-                                                                        limits=limits, gap_width=gap_width, width=width,
+                                                                        limits=limits, gap_width=gap_width,
+                                                                        gap_value=gap_value, width=width,
                                                                         pad_width=pad_width, transform=transform)
         data = [combined_slide]
         cmap = ['Greys_r']
@@ -655,13 +662,13 @@ class Intersection2d2d:
         mask_slide = self._prepare_combined_slide(sides=sides, data='labels',
                                                   shift=shift, angle=0, gain=1.,
                                                   horizon_width=horizon_width,
-                                                  limits=limits, gap_width=gap_width, width=width,
+                                                  limits=limits, gap_width=gap_width, gap_value=gap_value, width=width,
                                                   pad_width=pad_width, transform=transform)[0].astype(np.bool_)
         data.append(mask_slide)
         cmap.append('magenta')
 
         # Compute correlation on traces
-        correlation = compute_correlation(slide_0[-1], slide_1[0])
+        correlation = kwargs.get('corr', compute_correlation(slide_0[-1], slide_1[0]))
 
         # Prepare plotter parameters
         start_tick = (limits.start or 0) - pad_width
@@ -670,6 +677,9 @@ class Intersection2d2d:
         title = (f'"{self.field_0.short_name}.sgy":{sides[0]} x "{self.field_1.short_name}.sgy":{sides[1]}\n'
                  f'{shift=:3.2f}  {angle=:3.1f}  {gain=:3.3f}\n'
                  f'{correlation=:3.2f}  corrected_correlation={(1 + correlation)/2:3.2f}')
+        if title_prefix is not None:
+            title = title_prefix + '\n' + title
+
         kwargs = {
             'cmap': cmap,
             'colorbar': True,
@@ -682,7 +692,8 @@ class Intersection2d2d:
         return plot(data, **kwargs)
 
     def _prepare_combined_slide(self, sides, data='field', horizon_width=5, shift=0, angle=0, gain=1,
-                                limits=None, width='auto', gap_width=1, pad_width=None, n=1, transform=None):
+                                limits=None, width='auto', gap_width=1, gap_value=None, pad_width=None,
+                                n=1, transform=None):
         # Load data and orient it in a correct way
         slide_0 = self._prepare_slide(self.field_0, self.trace_idx_0, sides[0], horizon_width=horizon_width,
                                       data=data, limits=limits, pad_width=pad_width, transform=transform)
@@ -703,10 +714,14 @@ class Intersection2d2d:
         for c in range(slide_1.shape[0]):
             slide_1[c] = modify_trace(slide_1[c], shift=shift, angle=angle, gain=gain)
 
+        # Slice to limits. Done after the modification so that there is no empty areas on top/bottom of the image
+        slide_0 = slide_0[:, limits]
+        slide_1 = slide_1[:, limits]
+
         # Combine slides into one composite
         width = slide_0.shape[1] if width == 'auto' else width
         halfwidth = width//2 if width is not None else max(len(slide_0), len(slide_1))
-        fv = min(slide_0.min(), slide_1.min())
+        fv = gap_value if gap_value is not None else min(slide_0.min(), slide_1.min())
 
         combined_slide = np.concatenate([slide_0[-halfwidth:],
                                          np.full((gap_width, slide_0.shape[1]), fill_value=fv, dtype=np.float32),
@@ -738,26 +753,74 @@ class Intersection2d2d:
         # Pad to the same depth
         slide = np.pad(slide, ((0, 0), (0, self.max_depth - slide.shape[1])))
 
-        # Slice to limits
-        slide = slide[:, limits]
 
         # Additional padding
         slide = np.pad(slide, ((0, 0), (pad_width, pad_width)))
         return slide
 
     def compare_composite_slides(self, sides=(0, 0), horizon_width=5,
-                                 limits=None, gap_width=1, pad_width=None, transform=None,
+                                 limits=None, gap_width=1, gap_value=None, pad_width=None, transform=None,
                                  shift=0, angle=0, gain=1, width='auto', figsize=(14, 20), **kwargs):
         """ Display composite slides over intersection with and without corrections side-by-side. """
         _, ax = plt.subplots(1, 2, figsize=figsize)
         self.show_composite_slide(sides=sides, horizon_width=horizon_width,
-                                  limits=limits, gap_width=gap_width, pad_width=pad_width, transform=transform,
+                                  limits=limits, gap_width=gap_width, gap_value=gap_value,
+                                  pad_width=pad_width, transform=transform,
                                   width=width, axes=ax[0], adjust_figsize=False, **kwargs)
 
         self.show_composite_slide(sides=sides, horizon_width=horizon_width,
-                                  limits=limits, gap_width=gap_width, pad_width=pad_width, transform=transform,
+                                  limits=limits, gap_width=gap_width, gap_value=gap_value,
+                                  pad_width=pad_width, transform=transform,
                                   shift=shift, angle=angle, gain=gain,
                                   width=width, axes=ax[1], adjust_figsize=False, **kwargs)
+        plt.show()
+
+    def compare_methods(self, sides=(0, 0), horizon_width=5, limits=None, gap_width=1, gap_value=None,
+                        analytic_kwargs=None, optimize_kwargs=None,
+                        pad_width=None, transform=None, width='auto', layout=None, figsize=(14, 20), **kwargs):
+        """ !!. """
+        if getattr(self.field_0, 'correction_results', None) and getattr(self.field_1, 'correction_results', None):
+            n_plots = 4
+        else:
+            n_plots = 3
+
+        layout = layout if layout is not None else (1, n_plots)
+        _, ax = plt.subplots(*layout, figsize=figsize)
+        ax = np.array(ax).flatten()
+
+        # Graph 1: original slides
+        self.show_composite_slide(sides=sides, horizon_width=horizon_width,
+                                  limits=limits, gap_width=gap_width, gap_value=gap_value,
+                                  pad_width=pad_width, transform=transform,
+                                  title_prefix='original data',
+                                  width=width, axes=ax[0], adjust_figsize=False, **kwargs)
+
+        # Graph 2: analytic method
+        analytic_kwargs = analytic_kwargs if analytic_kwargs is not None else {}
+        matching_dict = self.match_traces_analytic(**analytic_kwargs)
+        self.show_composite_slide(sides=sides, horizon_width=horizon_width,
+                                  limits=limits, gap_width=gap_width, gap_value=gap_value,
+                                  pad_width=pad_width, transform=transform,
+                                  **matching_dict, title_prefix='method=`analytic`',
+                                  width=width, axes=ax[1], adjust_figsize=False, **kwargs)
+
+        # Graph 3: optimize method
+        optimize_kwargs = optimize_kwargs if optimize_kwargs is not None else {}
+        matching_dict = self.match_traces_optimize(**optimize_kwargs)
+        self.show_composite_slide(sides=sides, horizon_width=horizon_width,
+                                  limits=limits, gap_width=gap_width, gap_value=gap_value,
+                                  pad_width=pad_width, transform=transform,
+                                  **matching_dict, title_prefix='method=`optimize`',
+                                  width=width, axes=ax[2], adjust_figsize=False, **kwargs)
+
+        if n_plots == 4:
+            matching_dict = self.get_correction()
+            self.show_composite_slide(sides=sides, horizon_width=horizon_width,
+                                    limits=limits, gap_width=gap_width, gap_value=gap_value,
+                                    pad_width=pad_width, transform=transform,
+                                    **matching_dict, title_prefix='method=`corrections`',
+                                    width=width, axes=ax[3], adjust_figsize=False, **kwargs)
+
         plt.show()
 
 
