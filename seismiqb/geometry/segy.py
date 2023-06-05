@@ -197,7 +197,7 @@ class GeometrySEGY(Geometry):
         slices = self.loader.load_depth_slices(list(range(0, self.depth, frequency)))
 
         if slices.shape[-1] == np.prod(self.lengths):
-            slices.reshape(slices.shape[0], *self.lengths)
+            slices = slices.reshape(slices.shape[0], *self.lengths)
             std_matrix = np.std(slices, axis=0)
 
             self.dead_traces_matrix = (std_matrix == 0).astype(np.bool_)
