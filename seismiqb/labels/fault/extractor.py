@@ -329,7 +329,7 @@ class FaultExtractor:
         return None, None
 
     def _find_closest_component(self, component, slide_step=1, distances_threshold=None,
-                                depth_iteration_step=10, depths_threshold=20):
+                                depth_iteration_step=10, depths_threshold=20, distance_threshold=3):
         """ Find the closest component to the provided on next slide, get splitting indices for prototype.
 
         Parameters
@@ -352,6 +352,8 @@ class FaultExtractor:
              - one part is the closest component;
              - another parts corresponds to the other components,
              which are not allowed to merge into the current prototype.
+        distance_threshold : int
+            Maximal permissable distance for close components.
 
         Returns
         -------
@@ -403,14 +405,14 @@ class FaultExtractor:
             coords_1 = component.coords[indices_1, self.orthogonal_direction]
             coords_2 = other_component.coords[indices_2, self.orthogonal_direction]
 
-            components_distances = compute_distances(coords_1, coords_2, max_threshold=min_distance+3)
+            components_distances = compute_distances(coords_1, coords_2, max_threshold=min_distance+distance_threshold)
 
-            if (components_distances[0] == -1) or (components_distances[0] > 3):
+            if (components_distances[0] == -1) or (components_distances[0] > distance_threshold):
                 # Components are not close
                 continue
 
-            if components_distances[1] >= min_distance + 3:
-                # `other_component` is not the closest
+            if components_distances[1] >= min_distance + distance_threshold:
+                # `other_component` is not close enough
                 continue
 
             # The most depthwise distant points in components are close enough -> we can combine components

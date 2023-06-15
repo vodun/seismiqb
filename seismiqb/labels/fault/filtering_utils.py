@@ -6,7 +6,8 @@ from .coords_utils import bboxes_adjacent, dilate_coords
 
 # Filters
 # Filter too small faults
-def filter_faults(faults, min_fault_len=2000, min_height=20, **sticks_kwargs):
+def filter_faults(faults, min_length_threshold=2000, min_height_threshold=20, min_n_points_threshold=30,
+                  **sticks_kwargs):
     """ Filter too small faults.
 
     Faults are filtered by amount of points, length and height.
@@ -16,10 +17,10 @@ def filter_faults(faults, min_fault_len=2000, min_height=20, **sticks_kwargs):
     ----------
     faults : sequence of :class:`~.Fault` instances
         Faults for filtering.
-    min_fault_len : int
-        Filter out faults with length less than `min_fault_len`.
-    min_height : int
-        Filter out faults with height less than `min_height`.
+    min_length_threshold : int
+        Filter out faults with length less than `min_length_threshold`.
+    min_height_threshold : int
+        Filter out faults with height less than `min_height_threshold`.
         Note, that height is evaluated from sticks.
     sticks_kwargs : dict, optional
         Arguments for fault conversion into sticks view.
@@ -34,17 +35,17 @@ def filter_faults(faults, min_fault_len=2000, min_height=20, **sticks_kwargs):
     filtered_faults = []
 
     for fault in faults:
-        if (len(fault.points) < 30) or (len(fault) < min_fault_len):
+        if (len(fault.points) < min_n_points_threshold) or (len(fault) < min_length_threshold):
             continue
 
         fault.points_to_sticks(sticks_step=config_sticks['sticks_step'],
                                stick_nodes_step=config_sticks['stick_nodes_step'],
                                move_bounds=config_sticks['move_bounds'])
 
-        if np.concatenate([item[:, 2] for item in fault.sticks]).ptp() < min_height:
+        if len(fault.sticks) <= 2: # two sticks are not enough
             continue
 
-        if len(fault.sticks) <= 2: # two sticks are not enough
+        if np.concatenate([item[:, 2] for item in fault.sticks]).ptp() < min_height_threshold:
             continue
 
         filtered_faults.append(fault)
