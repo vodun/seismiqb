@@ -355,7 +355,6 @@ class SeismicCropBatch(Batch, VisualizationMixin):
                     buffer /= normalization_stats['max'] - normalization_stats['min']
                 else:
                     buffer -= normalization_stats['min']
-            print(src, ix, normalization_stats, buffer.mean(), buffer.std())
         return buffer, normalization_stats
 
     @apply_parallel_decorator(init='preallocating_init', post='noop_post', target='for')
@@ -376,7 +375,6 @@ class SeismicCropBatch(Batch, VisualizationMixin):
             normalization_stats = getattr(self, f'normalization_stats_{src}')[ix]
         elif isinstance(normalization_stats, str):
             normalization_stats = getattr(self, f'normalization_stats_{normalization_stats}')[ix]
-            mode = getattr(self, f'normalization_mode_{normalization_stats}')[ix]
 
         if callable(mode):
             buffer[:] = mode(buffer, normalization_stats)
