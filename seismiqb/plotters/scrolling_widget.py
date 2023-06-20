@@ -37,11 +37,18 @@ class GatherImagesFromResearch:
         image_paths = self.gather_images(cubes, research_name)
         self.figures = self.make_figures(image_paths)
 
-    def find_id_in_string(self, image_path):
+    def find_repetition_in_id(self, id):
+        """ Find repetition in id """
+        pattern = r'_(.*?)_'
+        matches = re.findall(pattern, id)
+        return matches[0]
+
+    def find_id_in_path(self, image_path):
         """ Find id pattern in a file name of the research experiment corresponding to the given repetition """
         pattern = r"\b[\dA-Fa-f]+_[\dA-Fa-f]+_[\dA-Fa-f]+\b"
         output = re.findall(pattern, image_path)[0]
-        return output[2] == self.repetition
+        repetition = self.find_repetition_in_id(output)
+        return repetition == self.repetition
 
     def gather_images(self, cubes, research_name):
         """ Get images from the directory and put them into list """
@@ -49,7 +56,7 @@ class GatherImagesFromResearch:
         for cube_path in cubes:
             images = glob.glob(pathname=f'./{research_name}/**/inference/{cube_path}', recursive=True)
             image_paths.extend(images)
-        image_paths = list(filter(self.find_id_in_string, image_paths))
+        image_paths = list(filter(self.find_id_in_path, image_paths))
         return image_paths
 
     def make_figures(self, image_paths):
