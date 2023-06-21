@@ -82,7 +82,7 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
 
         self.create_stats()
 
-        if len(self) > 0 and self.direction is None:
+        if self.direction is None:
             self.set_direction(direction)
 
     def interpolate(self):
@@ -125,7 +125,7 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
         """ Find azimuth of the fault. """
         if self.direction is not None:
             return
-        if direction is None:
+        if direction is None and len(self) > 0:
             if self.has_component('sticks') and len(self.sticks) > 0:
                 ptp = np.abs([item[:, :2].ptp(axis=0) for item in self.sticks]) # pylint: disable=invalid-sequence-index
                 self.direction = int((ptp == 0).sum(axis=0).argmax())

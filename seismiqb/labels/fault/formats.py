@@ -229,6 +229,37 @@ class FaultSticksMixin(CharismaMixin):
                 if verbose:
                     print(filename, ': OK')
 
+    def add_stick(self, stick, force_update=True):
+        """ Add new stick. """
+        stick = np.array([[], np.array(stick)], dtype='object')[1:]
+        if self._sticks is None:
+            self._sticks = stick
+        else:
+            locations = np.array([item[0][self.direction] for item in self.sticks])
+            pos = np.where(stick[0][0][self.direction] < locations)[0]
+            if len(pos) == 0:
+                self._sticks = np.concatenate([self._sticks, stick], axis=0)
+            else:
+                pos = pos[0]
+                self._sticks = np.insert(self._sticks, pos, stick, axis=0)
+
+        self.create_stats()
+        if force_update:
+            self.reset_storage('simplices')
+            self.reset_storage('nodes')
+            self.reset_storage('points')
+
+    def update_sticks(self, sticks, force_update=True):
+        """ Add several sticks. """
+        for stick in sticks:
+            self.add_stick(stick, force_update=False)
+
+        self.create_stats()
+        if force_update:
+            self.reset_storage('simplices')
+            self.reset_storage('nodes')
+            self.reset_storage('points')
+
     @classmethod
     def split_charisma(cls, path):
         """ Split file with multiple faults (indexed by 'name' column) into separate dataframes. """
