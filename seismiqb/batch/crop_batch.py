@@ -339,7 +339,7 @@ class SeismicCropBatch(Batch, VisualizationMixin):
 
         # Clip
         if clip_to_quantiles:
-            buffer = np.clip(buffer, normalization_stats['q_01'], normalization_stats['q_99'])
+            np.clip(buffer, normalization_stats['q_01'], normalization_stats['q_99'], out=buffer)
 
         # Actual normalization
         if callable(mode):
@@ -350,7 +350,10 @@ class SeismicCropBatch(Batch, VisualizationMixin):
             if 'std' in mode:
                 buffer /= normalization_stats['std'] + 1e-6
             if 'min' in mode and 'max' in mode:
-                if normalization_stats['max'] != normalization_stats['min']:
+                if clip_to_quantiles:
+                    buffer -= normalization_stats['q_01']
+                    buffer /= normalization_stats['q_99'] - normalization_stats['q_01']
+                elif normalization_stats['max'] != normalization_stats['min']:
                     buffer -= normalization_stats['min']
                     buffer /= normalization_stats['max'] - normalization_stats['min']
                 else:
