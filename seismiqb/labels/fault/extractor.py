@@ -10,7 +10,7 @@ from .base import Fault
 from .postprocessing import skeletonize
 from .coords_utils import (bboxes_adjacent, bboxes_embedded, bboxes_intersected, compute_distances, dilate_coords,
                            find_contour, restore_coords_from_projection)
-from ...utils import groupby_min, groupby_max, make_ranges
+from ...utils import groupby_min, groupby_max, make_ranges, int_to_proba
 
 
 
@@ -163,12 +163,10 @@ class FaultExtractor:
                 object_mask = labeled_slide[object_bbox] == idx
 
                 # Filter by proba
-                object_proba = slide[object_bbox][object_mask].max() # TODO: think about percentile
+                object_proba = slide[object_bbox][object_mask].max().astype(data.dtype) # TODO: think about percentile
 
                 if np.issubdtype(data.dtype, np.integer):
-                    # Convert into [0, 1] float values
-                    dtype_info = np.iinfo(data.dtype)
-                    object_proba = (object_proba-dtype_info.min)/(dtype_info.max-dtype_info.min)
+                    object_proba = int_to_proba(object_proba)
 
                 if object_proba < 0.1: # TODO: think about more appropriate threshold
                     continue
