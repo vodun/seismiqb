@@ -298,6 +298,7 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
             for i in range(3):
                 points = points[points[:, i] <= slices[i].stop]
                 points = points[points[:, i] >= slices[i].start]
+        stick_orientation = stick_orientation if stick_orientation is not None else 2
         self._sticks = points_to_sticks(points=points, sticks_step=sticks_step, nodes_step=stick_nodes_step,
                                         fault_orientation=self.direction, stick_orientation=stick_orientation,
                                         threshold=nodes_threshold, move_bounds=move_bounds)

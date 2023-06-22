@@ -8,6 +8,7 @@ import numpy as np
 
 import cv2
 from scipy.interpolate import interp1d
+from scipy.signal import savgol_filter
 from scipy.ndimage import binary_erosion
 
 from .benchmark_mixin import BenchmarkMixin
@@ -781,6 +782,38 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetricM
         }
         return plotter(slide, **kwargs)
 
+    def show_spectrum(self, n_traces=1000, seed=42, frequency_threshold=150,
+                      filter_length=31, filter_order=3, **kwargs):
+        """ Show power and phase spectrums of a random subset of a cube data. """
+        data = self.load_subset(n_traces=n_traces, seed=seed)
+        spectrum = np.fft.rfft(data, axis=-1)
+
+        power_spectrum = np.abs(spectrum).mean(axis=0)
+        phase_spectrum = np.angle(spectrum).mean(axis=0)
+        frequencies = np.fft.rfftfreq(n=self.depth, d=self.sample_interval * 1e-3)
+
+        if frequency_threshold is not None:
+            mask = frequencies <= frequency_threshold
+            frequencies = frequencies[mask]
+            power_spectrum = power_spectrum[mask]
+            phase_spectrum = phase_spectrum[mask]
+
+        power_spectrum_smoothed = savgol_filter(power_spectrum, filter_length, filter_order)
+        f1, f2 = frequencies[[np.argmax(power_spectrum), np.argmax(power_spectrum_smoothed)]]
+
+        kwargs = {
+            'combine': 'separate',
+            'ncols': 2,
+            'suptitle': f'Spectrum on `{self.short_name}`',
+            'title': ['power spectrum', 'phase spectrum'],
+            'label': [[f'power spectrum: max at {f1:3.1f} Hz', f'power spectrum smoothed: max at {f2:3.1f} Hz'], ''],
+            **kwargs
+        }
+        plotter = plot([[(frequencies, power_spectrum), (frequencies, power_spectrum_smoothed)],
+                        (frequencies, phase_spectrum)], mode='curve', **kwargs)
+        plotter.subplots[0].ax.axvline(f1, color='cornflowerblue', linewidth=1)
+        plotter.subplots[0].ax.axvline(f2, color='goldenrod', linewidth=1)
+        return plotter
 
     def show_section(self, locations, zoom=None, plotter=plot, linecolor='gray', linewidth=3, show=True,
                      savepath=None, **kwargs):
