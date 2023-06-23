@@ -1,10 +1,10 @@
 """ Useful functions, related to geometry. """
 
 
-def time_to_depth(time, geometry):
-    """ Convert time (in ms) into geometry depth value. """
+def time_to_sample(time, geometry):
+    """ Convert time (in ms) into geometry sample value. """
     return round((time - geometry.delay) / geometry.sample_rate)
 
-def depth_to_time(depth, geometry):
-    """ Convert geometry depth value into time. """
-    return round(depth * geometry.sample_rate + geometry.delay)
+def sample_to_time(sample, geometry):
+    """ Convert geometry sample value into time. """
+    return round(sample * geometry.sample_rate + geometry.delay)
