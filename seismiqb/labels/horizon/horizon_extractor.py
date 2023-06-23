@@ -30,8 +30,9 @@ class HorizonExtractor:
         - repeat the last three steps to get more prototypes.
         Optionally, convert prototypes to Horizon instances by iteratively merging lines with additional thresholds.
     """
-    def __init__(self, array, step=10):
+    def __init__(self, array, origin=None, step=10):
         self.array = array
+        self.origin = [0] * 3 if origin is None else origin
         self.step = step
 
         # Create a mapping:
@@ -172,7 +173,7 @@ class HorizonExtractor:
 
     def init_prototype(self, orientation, slide_idx, item_idx):
         """ Given orientation, slide and item index, extract line points and create a prototype instance out of it. """
-        prototype = HorizonPrototype()
+        prototype = HorizonPrototype(origin=self.origin)
         points = self.get_points(orientation=orientation, slide_idx=slide_idx, item_idx=item_idx)
         prototype.add_points(points=points, orientation=orientation, slide_idx=slide_idx)
         return prototype
@@ -244,13 +245,14 @@ class HorizonExtractor:
 
 class HorizonPrototype:
     """ Collection of lines along axes. """
-    def __init__(self):
+    def __init__(self, origin):
         # Mapping:
         # orientation ⟶ {
         #   slide_index ⟶ {
         #       start coordinate ⟶ line points (N, 3) ndarray
         #   }
         # }
+        self.origin = origin
         self.container = {0: defaultdict(dict), 1: defaultdict(dict)}
 
     def add_points(self, points, orientation, slide_idx):
@@ -324,6 +326,8 @@ class HorizonPrototype:
         """ Naive conversion of prototype to horizon instance: no correction on overlapping lines.
         Should not be used other for debugging/introspection purposes.
         """
+        points = self.unique_flat_points
+        points += self.origin
         return Horizon(self.unique_flat_points, field=field, name=name)
 
     def to_horizons(self, field, reduction=3, d_ptp_threshold=20, size_threshold=40, max_iters=100, n=3, pbar=False):
@@ -364,7 +368,10 @@ class HorizonPrototype:
                     if len(points) <= 2*reduction + 1:
                         continue
 
-                    line_horizon = Horizon(points[reduction:-reduction], field=field,
+                    points = points[reduction:-reduction]
+                    points += self.origin
+
+                    line_horizon = Horizon(points, field=field,
                                            name=f'line_{orientation}_{slide_idx}_{start}')
                     line_horizons.append(line_horizon)
         line_horizons.sort(key=len, reverse=True)
