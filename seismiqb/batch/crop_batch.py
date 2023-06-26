@@ -394,6 +394,13 @@ class SeismicCropBatch(Batch, VisualizationMixin):
                     buffer += normalization_stats['min']
         return buffer
 
+    @apply_parallel_decorator(init='preallocating_init', post='noop_post', target='for')
+    def quantize(self, ix, buffer, src, dst=None):
+        """ !!. """
+        field = self.get(ix, 'fields')
+        transform = field.quantization_stats['transform']
+        buffer = transform(buffer)
+        return buffer
 
     @apply_parallel_decorator(init='indices', post='_assemble', target='for')
     def compute_attribute(self, ix, dst, src='images', attribute='semblance', window=10, stride=1, device='cpu'):

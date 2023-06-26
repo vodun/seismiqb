@@ -12,7 +12,7 @@ from scipy.signal import savgol_filter
 from scipy.ndimage import binary_erosion
 
 from .benchmark_mixin import BenchmarkMixin
-from .conversion_mixin import ConversionMixin
+from .conversion_mixin import ConversionMixin, Quantizer
 from .export_mixin import ExportMixin
 from .metric_mixin import MetricMixin
 
@@ -148,6 +148,7 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetricM
         # Lazy properties
         self._quantile_interpolator = None
         self._normalization_stats = None
+        self.quantization_stats = None
 
         # Init from subclasses
         if init:
@@ -483,6 +484,13 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetricM
                 'q_99': q_99,
             }
         return self._normalization_stats
+
+    def make_quantization_stats(self, ranges=0.99, clip=True, center=False, dtype=np.int8,
+                                n_quantile_traces=100_000, seed=42):
+        """ !!. """
+        self.quantization_stats = self.compute_quantization_parameters(ranges=ranges, clip=clip, center=center,
+                                                                        dtype=dtype,
+                                                                        n_quantile_traces=n_quantile_traces, seed=seed)
 
     def estimate_impulse(self, wavelet_length=40, n_traces=10_000, seed=42):
         """ Estimate impulse on a random subset of data.
