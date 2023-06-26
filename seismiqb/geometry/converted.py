@@ -1,7 +1,7 @@
 """ Converted geometry: optimized storage. """
 
 import numpy as np
-import h5py
+import h5pickle as h5py
 
 from .base import Geometry
 from ..utils import repack_hdf5

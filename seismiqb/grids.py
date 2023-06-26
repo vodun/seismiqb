@@ -217,15 +217,17 @@ class BaseGrid:
                 orientation = self.orientation
 
         if not isinstance(size, (tuple, list)):
-            size = [size, size]
+            size_ = [None, None, None]
 
             if orientation is not None:
                 orientation = self.field.geometry.parse_axis(orientation)
-                size[1 - orientation] = None
+                size_[orientation] = size
+        else:
+            size_ = size
 
         if not isinstance(overlap, (tuple, list)):
-            overlap = [overlap, overlap]
-        return RegularGridChunksIterator(grid=self, size=size, overlap=overlap)
+            overlap = [overlap, overlap, overlap]
+        return RegularGridChunksIterator(grid=self, size=size_, overlap=overlap)
 
 
 class RegularGrid(BaseGrid):
@@ -392,8 +394,8 @@ class RegularGridChunksIterator:
     def __init__(self, grid, size, overlap):
         self.grid = grid
 
-        size_i, size_x = size
-        overlap_i, overlap_x = overlap
+        size_i, size_x, size_d = size
+        overlap_i, overlap_x, overlap_d = overlap
 
         if size_i is not None:
             step_i = int(size_i*(1 - overlap_i)) if np.issubdtype(type(overlap_i), np.floating) else size_i - overlap_i
@@ -405,8 +407,13 @@ class RegularGridChunksIterator:
         else:
             step_x = size_x = self.grid.shape[1]
 
-        self.size_i, self.size_x = size_i, size_x
-        self.step_i, self.step_x = step_i, step_x
+        if size_d is not None:
+            step_d = int(size_d*(1 - overlap_d)) if np.issubdtype(type(overlap_d), np.floating) else size_d - overlap_d
+        else:
+            step_d = size_d = self.grid.shape[2]
+
+        self.size_i, self.size_x, self.size_d = size_i, size_x, size_d
+        self.step_i, self.step_x, self.step_d = step_i, step_x, step_d
 
         self._iterator = None
 
@@ -420,26 +427,31 @@ class RegularGridChunksIterator:
 
             grid_i = RegularGrid._arange(*grid.ranges[0], self.step_i, max(0, grid.endpoint[0] - self.size_i))
             grid_x = RegularGrid._arange(*grid.ranges[1], self.step_x, max(0, grid.endpoint[1] - self.size_x))
+            grid_d = RegularGrid._arange(*grid.ranges[2], self.step_d, max(0, grid.endpoint[2] - self.size_d))
 
             for start_i in grid_i:
                 stop_i = start_i + self.size_i
                 for start_x in grid_x:
                     stop_x = start_x + self.size_x
+                    for start_d in grid_d:
+                        stop_d = start_d + self.size_d
 
-                    chunk_origin = np.array([start_i, start_x, grid.origin[2]])
-                    chunk_endpoint = np.array([stop_i, stop_x, grid.endpoint[2]])
+                        chunk_origin = np.array([start_i, start_x, start_d])
+                        chunk_endpoint = np.array([stop_i, stop_x, stop_d])
 
-                    # Filter points beyond chunk ranges along `orientation` axis
-                    mask = ((grid.locations[:, 3] >= start_i) &
-                            (grid.locations[:, 6] <= stop_i)  &
-                            (grid.locations[:, 4] >= start_x) &
-                            (grid.locations[:, 7] <= stop_x))
-                    chunk_locations = grid.locations[mask]
+                        # Filter points beyond chunk ranges along `orientation` axis
+                        mask = ((grid.locations[:, 3] >= start_i) &
+                                (grid.locations[:, 6] <= stop_i)  &
+                                (grid.locations[:, 4] >= start_x) &
+                                (grid.locations[:, 7] <= stop_x) &
+                                (grid.locations[:, 5] >= start_d) &
+                                (grid.locations[:, 8] <= stop_d))
+                        chunk_locations = grid.locations[mask]
 
-                    if len(chunk_locations):
-                        chunk_grid = BaseGrid(field=grid.field, locations=chunk_locations,
-                                              origin=chunk_origin, endpoint=chunk_endpoint, batch_size=grid.batch_size)
-                        iterator.append(chunk_grid)
+                        if len(chunk_locations):
+                            chunk_grid = BaseGrid(field=grid.field, locations=chunk_locations,
+                                                origin=chunk_origin, endpoint=chunk_endpoint, batch_size=grid.batch_size)
+                            iterator.append(chunk_grid)
             self._iterator = iterator
         return self._iterator
 
