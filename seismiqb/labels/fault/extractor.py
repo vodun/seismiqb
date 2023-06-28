@@ -1007,9 +1007,6 @@ class FromComponentExtractor(FaultExtractor):
     """ Extractor for finding prototypes from provided components.
 
     All you need is just to run the :meth:`~.extract_from_component`."""
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
     def extract_one_prototype(self, component, height_threshold=0.6):
         """ Extract one prototype from the point cloud starting from the provided component.
 
