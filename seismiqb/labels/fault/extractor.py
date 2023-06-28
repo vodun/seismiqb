@@ -10,7 +10,7 @@ from .base import Fault
 from .postprocessing import skeletonize
 from .coords_utils import (bboxes_adjacent, bboxes_embedded, bboxes_intersected, compute_distances, dilate_coords,
                            find_contour, restore_coords_from_projection)
-from ...utils import groupby_min, groupby_max, make_ranges
+from ...utils import groupby_min, groupby_max, make_ranges, int_to_proba
 
 
 
@@ -163,12 +163,10 @@ class FaultExtractor:
                 object_mask = labeled_slide[object_bbox] == idx
 
                 # Filter by proba
-                object_proba = slide[object_bbox][object_mask].max() # TODO: think about percentile
+                object_proba = slide[object_bbox][object_mask].max().astype(data.dtype) # TODO: think about percentile
 
                 if np.issubdtype(data.dtype, np.integer):
-                    # Convert into [0, 1] float values
-                    dtype_info = np.iinfo(data.dtype)
-                    object_proba = (object_proba-dtype_info.min)/(dtype_info.max-dtype_info.min)
+                    object_proba = int_to_proba(object_proba)
 
                 if object_proba < 0.1: # TODO: think about more appropriate threshold
                     continue
@@ -352,6 +350,8 @@ class FaultExtractor:
              - one part is the closest component;
              - another parts corresponds to the other components,
              which are not allowed to merge into the current prototype.
+        distance_threshold : int
+            Maximal permissable distance for close components.
 
         Returns
         -------
@@ -399,14 +399,14 @@ class FaultExtractor:
             coords_1 = component.coords[indices_1, self.orthogonal_direction]
             coords_2 = other_component.coords[indices_2, self.orthogonal_direction]
 
-            components_distances = compute_distances(coords_1, coords_2, max_threshold=min_distance+3)
+            components_distances = compute_distances(coords_1, coords_2, max_threshold=min_distance+distance_threshold)
 
-            if (components_distances[0] == -1) or (components_distances[0] > 3):
+            if (components_distances[0] == -1) or (components_distances[0] > distance_threshold):
                 # Components are not close
                 continue
 
-            if components_distances[1] >= min_distance + 3:
-                # `other_component` is not the closest
+            if components_distances[1] >= min_distance + distance_threshold:
+                # `other_component` is not close enough
                 continue
 
             # The most depthwise distant points in components are close enough -> we can combine components
