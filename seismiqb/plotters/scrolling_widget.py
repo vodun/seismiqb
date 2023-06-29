@@ -16,8 +16,16 @@ class GatherImagesFromResearch:
     """ Auxiliary class gathering images corresponding to the research experiments, making
     the metainformation about each image and preparing figures from the images
     """
-    def __init__(self, cubes, research_name, repetition):
+    def __init__(self, research_name, repetition, combine=False):
         self.repetition = repetition
+
+        # Find cube paths 
+        subdir = os.listdir(f'./{research_name}/experiments')[0]
+        if not combine:
+            cube_paths = glob.glob(f'./{research_name}/experiments/{subdir}/inference/*/[!combine]*.png', recursive=True)
+        else:
+            cube_paths = glob.glob(f'./{research_name}/experiments/{subdir}/inference/*/*.png', recursive=True)
+        cubes = list(map(self.find_cube_path, cube_paths))
 
         # Open research dataframe and find ids corresponding to the repetition
         df_path = glob.glob(f'./{research_name}/*.csv')[0]
@@ -34,8 +42,13 @@ class GatherImagesFromResearch:
         self.meta_info = self.make_metainfo(feature, cubes, df_ids, research_df)
 
         # Gather images from the research files
-        image_paths = self.gather_images(cubes, research_name)
-        self.figures = self.make_figures(image_paths)
+        self.image_paths = self.gather_images(cubes, research_name)
+
+    def find_cube_path(self, string):
+        """ Find cube path in a filename """
+        pattern = r'inference(.*)'
+        match = re.search(pattern, string)
+        return match.group(1)[1:]
 
     def find_repetition_in_id(self, id):
         """ Find repetition in id """
@@ -59,20 +72,6 @@ class GatherImagesFromResearch:
         image_paths = list(filter(self.find_id_in_path, image_paths))
         return image_paths
 
-    def make_figures(self, image_paths):
-        """ Iterate over image paths and make the list with figures from the images """
-        figures = []
-        for i, file in enumerate(image_paths):
-            fig, ax = plt.subplots(figsize=(20, 20))
-            handles = mpatches.Patch(color='salmon', label=self.meta_info[i])
-            ax.imshow(Image.open(file))
-            ax.axis('off')
-            ax.legend(handles=[handles], bbox_to_anchor=(0.0, 0.0), loc='upper left')
-            figures.append(fig)
-            plt.close()
-
-        return figures
-
     def make_metainfo(self, feature, cubes, df_ids, df):
         """ Form the metainformation about each image """
         meta_info = []
@@ -80,30 +79,29 @@ class GatherImagesFromResearch:
             for id_ in df_ids:
                 meta_info_ = '/'.join([f"{df.loc[id_, feature]}", f"{self.repetition}", cube])
                 meta_info.append(meta_info_)
-
         return meta_info
 
     @property
-    def get_figures(self):
-        """ Return list of figures and list with their meta info """
-        return self.figures, self.meta_info
+    def get_paths(self):
+        """ Return list of paths and list with their meta info """
+        return self.image_paths, self.meta_info
 
 class ScrollingImagesWidget:
     """ Interactive widget for scrolling images """
-    def __init__(self, image_figures, dropdown_list):
+    def __init__(self, paths, names, figsize=(20, 20)):
         self.idx = 0
-        self.image_figures = image_figures
-        self.dropdown_list = dropdown_list
-        self.figures_with_info = dict(zip(dropdown_list, image_figures))
+        self.dropdown_list = names
+        self.figures = self.make_figures(paths, figsize)
+        self.figures_with_info = dict(zip(names, self.figures))
 
         # Make widgets
         self.out = widgets.Output()
         with self.out:
-            display(self.image_figures[self.idx])
-        self.next_button = widgets.Button(description='Next')
-        self.prev_button = widgets.Button(description='Prev')
-        self.dropdown = widgets.Dropdown(options=dropdown_list, value=dropdown_list[self.idx],
-                                    layout=widgets.Layout(width='400px', height='30px', left='43%'))
+            display(self.figures[self.idx])
+        self.next_button = widgets.Button(description='Next', layout=widgets.Layout(width='20%'))
+        self.prev_button = widgets.Button(description='Prev', layout=widgets.Layout(width='20%'))
+        self.dropdown = widgets.Dropdown(options=names, value=names[self.idx],
+                                    layout=widgets.Layout(width='400px', height='30px', left='30%'))
 
         # Setup widgets
         self.next_button.on_click(self.next_button_click)
@@ -115,23 +113,37 @@ class ScrollingImagesWidget:
         vbox = widgets.VBox([hbox, self.out])
         display(vbox)
 
+    def make_figures(self, paths, figsize):
+        """ Iterate over image paths and make the list with figures from the images """
+        figures = []
+        for i, file in enumerate(paths):
+            fig, ax = plt.subplots(figsize=figsize)
+            handles = mpatches.Patch(color='salmon', label=self.dropdown_list[i])
+            ax.imshow(Image.open(file))
+            ax.axis('off')
+            ax.legend(handles=[handles], bbox_to_anchor=(0.0, 0.0), loc='upper left')
+            figures.append(fig)
+            plt.close()
+
+        return figures
+
     def next_button_click(self, button):
         """ Change path to image if the `next` button is clicked """
-        self.idx = (self.idx + 1) % len(self.image_figures)
-        self.update(self.idx, self.image_figures[self.idx])
+        self.idx = (self.idx + 1) % len(self.figures)
+        self.refresh(self.idx, self.figures[self.idx])
 
     def prev_button_click(self, button):
         """ Change path to image if the `prev` button is clicked """
         self.idx -= 1
-        self.update(self.idx, self.image_figures[self.idx])
+        self.refresh(self.idx, self.figures[self.idx])
 
     def dropdown_callback(self, change):
         """ Change path to image while changing the value in dropdown """
         figure = self.figures_with_info[change.new]
         self.idx = self.dropdown_list.index(change.new)
-        self.update(self.idx, figure)
+        self.refresh(self.idx, figure)
 
-    def update(self, idx, figure):
+    def refresh(self, idx, figure):
         """ Clear the current figure and display the new one with new value in dropdown """
         with self.out:
             self.out.clear_output(wait=True)
