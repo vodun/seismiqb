@@ -784,6 +784,38 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
         n_missing = max(info['present_at_1_absent_at_2'], info['present_at_2_absent_at_1'])
         return info['difference_mean'] == 0 and n_missing < threshold_missing
 
+    # Concat
+    def concat(self, others, mode='mean', inplace=True, add_prefix=True):
+        """ Concat horizon with `others`.
+
+        Parameters
+        ----------
+        mode : str, {'mean', 'min', 'max'}
+            Method used for finding the point of a horizon for each trace in each connected component.
+            If `mean/min/max`, then we take mean/min/max value of labeled points on a trace.
+        """
+        if not isinstance(others, (list, tuple)):
+            others = [others]
+
+        if 'mean' in mode:
+            group_function = groupby_mean
+        elif 'min' in mode:
+            group_function = groupby_min
+        elif 'max' in mode:
+            group_function = groupby_max
+
+        points = np.vstack((self.points, *(other.points for other in others)))
+        order = np.lexsort((points[:, 1], points[:, 0]))
+        points = points[order]
+        points = group_function(points)
+
+        if inplace:
+            self.points = points
+            self.reset_storage('matrix')
+            return self
+
+        name = f"concated_{self.name}" if add_prefix else self.name
+        return type(self)(storage=points, field=self.field, name=name)
 
     # Save horizon to disk
     def dump_sqb(self, data, path, format='points', transform=None, name=None, attributes=None):

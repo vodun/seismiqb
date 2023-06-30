@@ -75,10 +75,7 @@ class ProcessingMixin:
             self.reset_storage('matrix')
             return self
 
-        if self.name is not None:
-            name = 'filtered_' + self.name if add_prefix else self.name
-        else:
-            name = None
+        name = 'filtered_' + self.name if add_prefix else self.name
         return type(self)(storage=points, field=self.field, name=name)
 
     despike = partialmethod(filter, filtering_matrix='spikes')
@@ -202,10 +199,7 @@ class ProcessingMixin:
             self.reset_storage('points')
             return self
 
-        if self.name is not None:
-            name = 'smoothed_' + self.name if add_prefix else self.name
-        else:
-            name = None
+        name = 'smoothed_' + self.name if add_prefix else self.name
         return type(self)(storage=result, i_min=self.i_min, x_min=self.x_min, field=self.field, name=name, dtype=dtype)
 
     def interpolate(self, iters=1, kernel_size=(3, 3), sigma=0.8, kernel=None,
@@ -268,10 +262,7 @@ class ProcessingMixin:
             self.reset_storage('points')
             return self
 
-        if self.name is not None:
-            name = 'interpolated_' + self.name if add_prefix else self.name
-        else:
-            name = None
+        name = 'interpolated_' + self.name if add_prefix else self.name
         return type(self)(storage=result, i_min=self.i_min, x_min=self.x_min, field=self.field, name=name)
 
     def inpaint(self, inpaint_radius=1, neighbors_radius=1, method=0, inplace=False, add_prefix=True):
@@ -330,10 +321,7 @@ class ProcessingMixin:
             self.reset_storage('points')
             return self
 
-        if self.name is not None:
-            name = 'inpainted_' + self.name if add_prefix else self.name
-        else:
-            name = None
+        name = 'inpainted_' + self.name if add_prefix else self.name
         return type(self)(storage=result, i_min=self.i_min, x_min=self.x_min, field=self.field, name=name)
 
     # Horizon distortions
@@ -375,10 +363,7 @@ class ProcessingMixin:
             self.reset_storage('matrix')
             return self
 
-        if self.name is not None:
-            name = 'thinned_' + self.name if add_prefix else self.name
-        else:
-            name = None
+        name = 'thinned_' + self.name if add_prefix else self.name
         return type(self)(storage=points, field=self.field, name=name)
 
     def make_carcass(self, frequencies=100, margin=50, interpolate=False, add_prefix=True, inplace=False, **kwargs):
