@@ -22,7 +22,7 @@ class GeometryHDF5(Geometry):
     """
     FILE_OPENER = h5py.File
 
-    def init(self, path, mode='r+', **kwargs):
+    def init(self, path, mode='r', **kwargs):
         """ Init for HDF5 geometry. The sequence of actions:
             - open file handler
             - check available projections in the file
