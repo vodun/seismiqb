@@ -28,7 +28,8 @@ class GeometryHDF5(Geometry):
             - check available projections in the file
             - add attributes from file: meta and info about shapes/dtypes.
 
-        Default mode is r+ to allow other file opens for both read/write.
+        Default mode is r to multiple opens for reading.
+        If you want to allow other file opens for both read/write, provide 'r+' mode.
         """
         # Open the file
         self.file = self.FILE_OPENER(path, mode, swmr=True)
