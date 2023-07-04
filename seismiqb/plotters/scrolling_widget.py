@@ -1,6 +1,5 @@
 import ipywidgets as widgets
 import os
-import re
 import glob
 
 import matplotlib.pyplot as plt
@@ -10,81 +9,38 @@ from IPython.display import display
 
 import pandas as pd
 
-from batchflow.research.results import ResearchResults
-
-class GatherImagesFromResearch:
-    """ Auxiliary class gathering images corresponding to the research experiments, making
-    the metainformation about each image and preparing figures from the images
+def gather_images_from_research(research_name, cubes, get_all=True, **kwargs):
+    """ Auxiliary function gathering images corresponding to the research experiments and making
+    the metainformation about each image
     """
-    def __init__(self, research_name, repetition, combine=False):
-        self.repetition = repetition
+    # Open research dataframe
+    df_path = glob.glob(f'./{research_name}/*.csv')[0]
+    research_df = pd.read_csv(df_path)
+    df_with_idx = research_df.set_index('id')
+    feature = research_df.columns[1]
 
-        # Find cube paths 
-        subdir = os.listdir(f'./{research_name}/experiments')[0]
-        if not combine:
-            cube_paths = glob.glob(f'./{research_name}/experiments/{subdir}/inference/*/[!combine]*.png', recursive=True)
-        else:
-            cube_paths = glob.glob(f'./{research_name}/experiments/{subdir}/inference/*/*.png', recursive=True)
-        cubes = list(map(self.find_cube_path, cube_paths))
-
-        # Open research dataframe and find ids corresponding to the repetition
-        df_path = glob.glob(f'./{research_name}/*.csv')[0]
-        research_df = pd.read_csv(df_path)
-        research_df = research_df.set_index('id')
-        df_ids = list(research_df[research_df['repetition'] == int(repetition)].index)
-
-        # Find the research feature in the research configs
-        res = ResearchResults(research_name)
-        res.load_configs()
-        feature = list(list(res.configs.values())[0].keys())[0]
-
-        # Make metainformation from the research dataframe
-        self.meta_info = self.make_metainfo(feature, cubes, df_ids, research_df)
-
-        # Gather images from the research files
-        self.image_paths = self.gather_images(cubes, research_name)
-
-    def find_cube_path(self, string):
-        """ Find cube path in a filename """
-        pattern = r'inference(.*)'
-        match = re.search(pattern, string)
-        return match.group(1)[1:]
-
-    def find_repetition_in_id(self, id):
-        """ Find repetition in id """
-        pattern = r'_(.*?)_'
-        matches = re.findall(pattern, id)
-        return matches[0]
-
-    def find_id_in_path(self, image_path):
-        """ Find id pattern in a file name of the research experiment corresponding to the given repetition """
-        pattern = r"\b[\dA-Fa-f]+_[\dA-Fa-f]+_[\dA-Fa-f]+\b"
-        output = re.findall(pattern, image_path)[0]
-        repetition = self.find_repetition_in_id(output)
-        return repetition == self.repetition
-
-    def gather_images(self, cubes, research_name):
-        """ Get images from the directory and put them into list """
-        image_paths = []
-        for cube_path in cubes:
-            images = glob.glob(pathname=f'./{research_name}/**/inference/{cube_path}', recursive=True)
-            image_paths.extend(images)
-        image_paths = list(filter(self.find_id_in_path, image_paths))
-        return image_paths
-
-    def make_metainfo(self, feature, cubes, df_ids, df):
-        """ Form the metainformation about each image """
-        meta_info = []
+    # Iterate over repetetitions and cubes, and gather images from the research files
+    # with making metainformation about them
+    cube_paths = './{research_name}/experiments/{experiment_id}/inference/{cube}'
+    images = []
+    meta_info = []
+    repetitions = range(research_df['repetition'].max() + 1) if get_all else [kwargs.get('repetition', 0)]
+    for repetition in repetitions:
         for cube in cubes:
-            for id_ in df_ids:
-                meta_info_ = '/'.join([f"{df.loc[id_, feature]}", f"{self.repetition}", cube])
-                meta_info.append(meta_info_)
-        return meta_info
+            for _, row in research_df.iterrows():
+                experiment_id, repetition_ = row['id'], row['repetition']
+                if repetition_ == repetition:
+                    experiment_images = cube_paths.format(research_name=research_name,
+                                                          experiment_id=experiment_id,
+                                                          cube=cube)
+                    experiment_images = glob.glob(experiment_images, recursive=True)
+                    images.extend(experiment_images)
 
-    @property
-    def get_paths(self):
-        """ Return list of paths and list with their meta info """
-        return self.image_paths, self.meta_info
+                    meta_info_ = '/'.join([f"{df_with_idx.loc[experiment_id, feature]}",
+                                           f"{repetition_}", cube])
+                    meta_info.append(meta_info_)
+
+    return images, meta_info
 
 class ScrollingImagesWidget:
     """ Interactive widget for scrolling images """
@@ -98,10 +54,11 @@ class ScrollingImagesWidget:
         self.out = widgets.Output()
         with self.out:
             display(self.figures[self.idx])
-        self.next_button = widgets.Button(description='Next', layout=widgets.Layout(width='20%'))
-        self.prev_button = widgets.Button(description='Prev', layout=widgets.Layout(width='20%'))
+        self.next_button = widgets.Button(description='Next', layout=widgets.Layout(width='18%'))
+        self.prev_button = widgets.Button(description='Prev', layout=widgets.Layout(width='18%'))
+        dropdown_layout = widgets.Layout(width='28%', height='30px', left='33%', align_items='center')
         self.dropdown = widgets.Dropdown(options=names, value=names[self.idx],
-                                    layout=widgets.Layout(width='400px', height='30px', left='30%'))
+                                         layout=dropdown_layout)
 
         # Setup widgets
         self.next_button.on_click(self.next_button_click)
@@ -128,17 +85,17 @@ class ScrollingImagesWidget:
         return figures
 
     def next_button_click(self, button):
-        """ Change path to image if the `next` button is clicked """
+        """ Change a figure if the `next` button is clicked """
         self.idx = (self.idx + 1) % len(self.figures)
         self.refresh(self.idx, self.figures[self.idx])
 
     def prev_button_click(self, button):
-        """ Change path to image if the `prev` button is clicked """
+        """ Change a figure if the `prev` button is clicked """
         self.idx -= 1
         self.refresh(self.idx, self.figures[self.idx])
 
     def dropdown_callback(self, change):
-        """ Change path to image while changing the value in dropdown """
+        """ Switch a figure while changing the value in dropdown """
         figure = self.figures_with_info[change.new]
         self.idx = self.dropdown_list.index(change.new)
         self.refresh(self.idx, figure)
