@@ -3,7 +3,7 @@ import numpy as np
 
 
 
-class _IRAPHandler:
+class IRAPHandler:
     """ IRAP ASCII files handler for reading and dumping matrices. """
     # File format constants
     fill_value = 9999900.0
@@ -21,7 +21,7 @@ class _IRAPHandler:
             Geometry that the file corresponds to.
         """
         # Extract data from file
-        with open(path, mode='r') as irap_file:
+        with open(path, mode='r', encoding='utf-8') as irap_file:
             data = irap_file.read()
 
         values = data.split() # We can't use `np.loadtxt` because some lines can be less than 6 elements
@@ -102,7 +102,7 @@ class _IRAPHandler:
 
         irap_data = irap_data.reshape(-1, 6)
 
-        with open(path, mode='w') as dst:
+        with open(path, mode='w', encoding='utf-8') as dst:
             np.savetxt(dst, irap_data, fmt='%.6f', delimiter=' ', newline='\n', header=header, comments='')
 
     @staticmethod
@@ -147,5 +147,3 @@ class _IRAPHandler:
             "0   0   0   0   0   0   0"
         )
         return header
-
-IRAPHandler = _IRAPHandler
