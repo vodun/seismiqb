@@ -1,4 +1,5 @@
 """ IRAP ASCII files handler. """
+#pylint: disable=redefined-builtin
 import numpy as np
 import pandas as pd
 
@@ -189,7 +190,7 @@ class IRAPHandler:
     @staticmethod
     def _extract_step(geometry, format='cdp', header=None):
         """ Extract step in cdp/ordinal coordinate system.
-        
+
         Parameters
         ----------
         geometry : instance of :class:`~.Geometry`
