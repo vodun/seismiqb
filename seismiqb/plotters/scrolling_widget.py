@@ -9,13 +9,16 @@ from IPython.display import display
 
 import pandas as pd
 
+from batchflow.research.results import ResearchResults
+
 def gather_images_from_research(research_name, cubes, get_all=True, **kwargs):
     """ Auxiliary function gathering images corresponding to the research experiments and making
     the metainformation about each image
     """
     # Open research dataframe
-    df_path = glob.glob(f'./{research_name}/*.csv')[0]
-    research_df = pd.read_csv(df_path)
+    results = ResearchResults(name=research_name)
+    research_df = results.to_df(use_alias=True, remove_auxilary=False)
+    research_df.repetition = pd.to_numeric(research_df.repetition)
     df_with_idx = research_df.set_index('id')
     feature = research_df.columns[1]
 
