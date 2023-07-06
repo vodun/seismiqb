@@ -11,3 +11,4 @@ from .format_conversion import *
 from .functions import *
 from .groupby import *
 from .storage import SQBStorage
+from .irap_handler import IRAPHandler
