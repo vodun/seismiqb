@@ -15,7 +15,7 @@ def gather_images_from_research(research_name, cubes, get_all=True, **kwargs):
     """ Auxiliary function gathering images corresponding to the research experiments and making
     the metainformation about each image
     """
-    # Open research dataframe
+    # Make research dataframe
     results = ResearchResults(name=research_name)
     research_df = results.to_df(use_alias=True, remove_auxilary=False)
     research_df.repetition = pd.to_numeric(research_df.repetition)
