@@ -784,15 +784,15 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
         n_missing = max(info['present_at_1_absent_at_2'], info['present_at_2_absent_at_1'])
         return info['difference_mean'] == 0 and n_missing < threshold_missing
 
-    # Concat
-    def concat(self, others, mode='mean', inplace=True, add_prefix=True):
-        """ Concat horizon with `others`.
+    # Merging
+    def merge_points(self, others, mode='mean', inplace=True, add_prefix=True):
+        """ Merge horizon with `others`.
 
         Parameters
         ----------
         mode : str, {'mean', 'min', 'max'}
-            Method used for finding the point of a horizon for each trace in each connected component.
-            If `mean/min/max`, then we take mean/min/max value of labeled points on a trace.
+            Method used for evaluating point depth in overlapping areas.
+            If `mean/min/max`, then we take mean/min/max depth value on a trace.
         """
         if not isinstance(others, (list, tuple)):
             others = [others]
