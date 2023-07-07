@@ -327,7 +327,7 @@ class FaultExtractor:
         return None, None
 
     def _find_closest_component(self, component, slide_idx, distances_threshold=None,
-                                depth_iteration_step=10, depths_threshold=20):
+                                depth_iteration_step=10, depths_threshold=20, distance_neighborhood=3):
         """ Find the closest component to the provided on next slide, get splitting indices for prototype.
 
         Parameters
@@ -350,8 +350,13 @@ class FaultExtractor:
              - one part is the closest component;
              - another parts corresponds to the other components,
              which are not allowed to merge into the current prototype.
-        distance_threshold : int
-            Maximal permissable distance for close components.
+        distance_neighborhood : int
+            Area in which to find close components to choose the closest and longest one.
+            For example, if we have two close enough components with distances 0 and 0 + distance_neighborhood and
+            the second is longer than the closest, then we will choose it.
+            We make this because one component on the next slide can be splitted into two parts and we want to concat it
+            with the longest one. In this case distance_neighborhood is allowable error for finding the close enough
+            components.
 
         Returns
         -------
@@ -399,13 +404,14 @@ class FaultExtractor:
             coords_1 = component.coords[indices_1, self.orthogonal_direction]
             coords_2 = other_component.coords[indices_2, self.orthogonal_direction]
 
-            components_distances = compute_distances(coords_1, coords_2, max_threshold=min_distance+distance_threshold)
+            components_distances = compute_distances(coords_1, coords_2,
+                                                     max_threshold=min_distance+distance_neighborhood)
 
-            if (components_distances[0] == -1) or (components_distances[0] > distance_threshold):
+            if (components_distances[0] == -1) or (components_distances[0] > distance_neighborhood):
                 # Components are not close
                 continue
 
-            if components_distances[1] >= min_distance + distance_threshold:
+            if components_distances[1] >= min_distance + distance_neighborhood:
                 # `other_component` is not close enough
                 continue
 
