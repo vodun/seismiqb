@@ -1004,6 +1004,7 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         skeletonized = skeletonized_max - skeletonized_min
         return skeletonized.reshape(1, *skeletonized.shape)
 
+
     # Augmentations: geologic. `compute_instantaneous_amplitude/phase/frequency` are added by decorator
     @apply_parallel_decorator(init='preallocating_init', post='noop_post', target='for')
     def sign_transform(self, _, buffer, **kwargs):
