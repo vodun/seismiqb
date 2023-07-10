@@ -23,6 +23,7 @@ from .. import functional
 from ..labels.fault import skeletonize
 
 
+
 def add_methods(method_names):
     """ Add augmentations to batch class. """
     def _add_methods(cls):
@@ -410,6 +411,7 @@ class SeismicCropBatch(Batch, VisualizationMixin):
             buffer = buffer.transpose(1, 0, 2)
         field.make_mask(locations=locations, orientation=orientation, buffer=buffer,
                         width=width, indices=indices, src=src_labels, sparse=sparse, **kwargs)
+
 
     @action
     @apply_parallel_decorator(init='indices', post='_assemble', target='for')
