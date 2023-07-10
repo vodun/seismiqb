@@ -23,7 +23,6 @@ from .. import functional
 from ..labels.fault import skeletonize
 
 
-
 def add_methods(method_names):
     """ Add augmentations to batch class. """
     def _add_methods(cls):
@@ -411,53 +410,6 @@ class SeismicCropBatch(Batch, VisualizationMixin):
             buffer = buffer.transpose(1, 0, 2)
         field.make_mask(locations=locations, orientation=orientation, buffer=buffer,
                         width=width, indices=indices, src=src_labels, sparse=sparse, **kwargs)
-
-    # @action
-    # def modify_mask(self, src='masks', dst=None, width=100):
-    #     masks = self.get(None, src)
-    #     import kornia
-    #     import torch
-    #     masks = torch.tensor(masks)
-    #     buffer = masks.clone()
-    #     buffer[buffer == 0] = -1
-    #     kernel = torch.ones((1, width))
-    #     dilated_mask = kornia.morphology.dilation(buffer, kernel, engine='convolution').float()
-    #     diff = dilated_mask - masks
-    #     zeros = np.where(diff == 0)
-    #     ones = np.where(diff == 1)
-    #     diff[zeros] = 1
-    #     diff[ones] = 0
-    #     diff = diff.numpy()
-    #     setattr(self, dst, diff)
-
-    #     return self
-
-    @action
-    def scipy_mask(self, src='masks', dst=None, iterations=20):
-        from scipy.ndimage import binary_dilation
-        masks = self.get(None, src)
-        struct = np.ones((1, 1, 3, 3), dtype=bool)
-        #struct1 = ndimage.generate_binary_structure(2, 1)
-        dilated_mask = binary_dilation(masks, structure=struct, iterations=iterations)
-        dilated_mask.dtype = 'int8'
-        #buffer = dilated_mask.copy()
-        dilated_mask[dilated_mask == 0] = -1
-        diff = dilated_mask - masks
-        zeros = np.where(diff == 0)
-        ones = np.where(diff == 1)
-        diff[zeros] = 1
-        diff[ones] = 0
-        setattr(self, dst, diff)
-
-        return self
-
-    @action
-    def get_pos_channel(self, src='prediction', dst=None):
-        prediction = self.get(None, src)
-        prediction = prediction[:, 1, ...]
-        prediction = prediction[:, None, ...]
-        setattr(self, dst, prediction)
-        return self
 
     @action
     @apply_parallel_decorator(init='indices', post='_assemble', target='for')
@@ -1042,6 +994,7 @@ class SeismicCropBatch(Batch, VisualizationMixin):
 
     @apply_parallel_decorator(init='data', post='_assemble', target='for')
     def skeletonize_seismic(self, crop, smooth=True, axis=0, width=3, sigma=3, **kwargs):
+        """ Perform skeletonize of seismic on 2D slide """
         if smooth:
             from scipy.ndimage import gaussian_filter
             crop = gaussian_filter(crop, sigma=sigma, mode='nearest')
