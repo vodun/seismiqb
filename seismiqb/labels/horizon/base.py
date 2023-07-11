@@ -784,6 +784,38 @@ class Horizon(AttributesMixin, CacheMixin, CharismaMixin, ExtractionMixin, Proce
         n_missing = max(info['present_at_1_absent_at_2'], info['present_at_2_absent_at_1'])
         return info['difference_mean'] == 0 and n_missing < threshold_missing
 
+    # Merging
+    def merge_points(self, others, mode='mean', inplace=True, add_prefix=True):
+        """ Merge horizon with `others`.
+
+        Parameters
+        ----------
+        mode : str, {'mean', 'min', 'max'}
+            Method used for evaluating point depth in overlapping areas.
+            If `mean/min/max`, then we take mean/min/max depth value on a trace.
+        """
+        if not isinstance(others, (list, tuple)):
+            others = [others]
+
+        if 'mean' in mode:
+            group_function = groupby_mean
+        elif 'min' in mode:
+            group_function = groupby_min
+        elif 'max' in mode:
+            group_function = groupby_max
+
+        points = np.vstack((self.points, *(other.points for other in others)))
+        order = np.lexsort((points[:, 1], points[:, 0]))
+        points = points[order]
+        points = group_function(points)
+
+        if inplace:
+            self.points = points
+            self.reset_storage('matrix')
+            return self
+
+        name = f"concated_{self.name}" if add_prefix else self.name
+        return type(self)(storage=points, field=self.field, name=name)
 
     # Save horizon to disk
     def dump_sqb(self, data, path, format='points', transform=None, name=None, attributes=None):
