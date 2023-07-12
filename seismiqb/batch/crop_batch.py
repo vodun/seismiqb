@@ -278,8 +278,7 @@ class SeismicCropBatch(Batch, VisualizationMixin):
 
 
     @apply_parallel_decorator(init='preallocating_init', post='normalize_post', target='for')
-    def normalize(self, ix, buffer, src, dst=None, mode='meanstd', normalization_stats='field',
-                  clip_to_quantiles=False, q=(0.01, 0.99)):
+    def normalize(self, ix, buffer, src, dst=None, mode='meanstd', stats=None):
         """ Normalize `src` with provided stats.
         Depending on the parameters, stats for normalization will be taken from (in order of priority):
             - supplied `normalization_stats`, if provided
@@ -304,102 +303,47 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         field = self.get(ix, 'fields')
 
         # Prepare normalization stats
-        if isinstance(normalization_stats, (list, tuple, np.ndarray)):
-            normalization_stats = normalization_stats[ix]
+        if isinstance(stats, dict):
+            if field.short_name in stats:
+                stats = stats[field.short_name]
+        elif stats in {'field', True}:
+            stats = field.normalization_stats
+        elif isinstance(stats, str):
+            stats = getattr(self, f'normalization_stats_{stats}')[ix]
 
-        if isinstance(normalization_stats, dict):
-            if field.short_name in normalization_stats:
-                normalization_stats = normalization_stats[field.short_name]
-        elif normalization_stats in {'field', True}:
-            normalization_stats = field.normalization_stats
-        elif isinstance(normalization_stats, str):
-            normalization_stats = getattr(self, f'normalization_stats_{normalization_stats}')[ix]
-        else:
-            if clip_to_quantiles:
-                buffer = np.clip(buffer, *np.quantile(buffer, q))
-                clip_to_quantiles = False
-
-            if callable(mode):
-                normalization_stats = {
-                    'mean': np.mean(buffer),
-                    'std': np.std(buffer),
-                    'min': np.min(buffer),
-                    'max': np.max(buffer),
-                }
-            else:
-                normalization_stats = {}
-                if 'mean' in mode:
-                    normalization_stats['mean'] = np.mean(buffer)
-                if 'std' in mode:
-                    normalization_stats['std'] = np.std(buffer)
-                if 'min' in mode:
-                    normalization_stats['min'] = np.min(buffer)
-                if 'max' in mode:
-                    normalization_stats['max'] = np.max(buffer)
-
-        # Clip
-        if clip_to_quantiles:
-            np.clip(buffer, normalization_stats['q_01'], normalization_stats['q_99'], out=buffer)
-
-        # Actual normalization
-        if callable(mode):
-            buffer[:] = mode(buffer, normalization_stats)
-        else:
-            if 'mean' in mode:
-                buffer -= normalization_stats['mean']
-            if 'std' in mode:
-                buffer /= normalization_stats['std'] + 1e-6
-            if 'min' in mode and 'max' in mode:
-                if clip_to_quantiles:
-                    buffer -= normalization_stats['q_01']
-                    buffer /= normalization_stats['q_99'] - normalization_stats['q_01']
-                elif normalization_stats['max'] != normalization_stats['min']:
-                    buffer -= normalization_stats['min']
-                    buffer /= normalization_stats['max'] - normalization_stats['min']
-                else:
-                    buffer -= normalization_stats['min']
-        return buffer, normalization_stats
+        buffer, stats = field.normalizer.normalize(buffer, normalization_stats=stats, mode=mode,
+                                                   return_stats=True, inplace=True)
+        return buffer, stats
 
     @apply_parallel_decorator(init='preallocating_init', post='noop_post', target='for')
-    def denormalize(self, ix, buffer, src, dst=None, mode=None, normalization_stats=None):
+    def denormalize(self, ix, buffer, src, dst=None, mode=None, stats=None):
         """ !!. """
         field = self.get(ix, 'fields')
 
         # Prepare normalization stats
-        if isinstance(normalization_stats, (list, tuple, np.ndarray)):
-            normalization_stats = normalization_stats[ix]
+        if isinstance(stats, dict):
+            if field.short_name in stats:
+                stats = stats[field.short_name]
+        elif stats in {'field', True}:
+            stats = field.normalization_stats
+        elif isinstance(stats, str):
+            stats = getattr(self, f'normalization_stats_{stats}')[ix]
 
-        if isinstance(normalization_stats, dict):
-            if field.short_name in normalization_stats:
-                normalization_stats = normalization_stats[field.short_name]
-        elif normalization_stats in {'field', True}:
-            normalization_stats = field.normalization_stats
-        elif normalization_stats is False:
-            normalization_stats = getattr(self, f'normalization_stats_{src}')[ix]
-        elif isinstance(normalization_stats, str):
-            normalization_stats = getattr(self, f'normalization_stats_{normalization_stats}')[ix]
-
-        if callable(mode):
-            buffer[:] = mode(buffer, normalization_stats)
-        else:
-            if 'std' in mode:
-                buffer *= normalization_stats['std'] # TODO: eps to normalize/denormalize?
-            if 'mean' in mode:
-                buffer += normalization_stats['mean']
-            if 'min' in mode and 'max' in mode:
-                if normalization_stats['max'] != normalization_stats['min']:
-                    buffer *= normalization_stats['max'] - normalization_stats['min']
-                    buffer += normalization_stats['min']
-                else:
-                    buffer += normalization_stats['min']
+        buffer = field.normalizer.denormalize(buffer, normalization_stats=stats, mode=mode, inplace=True)
         return buffer
 
     @apply_parallel_decorator(init='preallocating_init', post='noop_post', target='for')
     def quantize(self, ix, buffer, src, dst=None):
         """ !!. """
         field = self.get(ix, 'fields')
-        transform = field.quantization_stats['transform']
-        buffer = transform(buffer)
+        buffer[:] = field.quantizer.quantize(buffer)
+        return buffer
+
+    @apply_parallel_decorator(init='preallocating_init', post='noop_post', target='for')
+    def dequantize(self, ix, buffer, src, dst=None):
+        """ !!. """
+        field = self.get(ix, 'fields')
+        buffer[:] = field.quantizer.dequantize(buffer)
         return buffer
 
     @apply_parallel_decorator(init='indices', post='_assemble', target='for')

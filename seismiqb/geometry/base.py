@@ -11,6 +11,8 @@ from scipy.interpolate import interp1d
 from scipy.signal import savgol_filter
 from scipy.ndimage import binary_erosion
 
+from batchflow import Normalizer
+
 from .benchmark_mixin import BenchmarkMixin
 from .conversion_mixin import ConversionMixin, Quantizer
 from .export_mixin import ExportMixin
@@ -148,7 +150,7 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetricM
         # Lazy properties
         self._quantile_interpolator = None
         self._normalization_stats = None
-        self.quantization_stats = None
+        self._quantization_stats = None
 
         # Init from subclasses
         if init:
@@ -468,29 +470,52 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetricM
         #pylint: disable=not-callable
         return self.quantile_interpolator(q).astype(np.float32)
 
+    def make_normalization_stats(self):
+        """ Values for performing normalization of data from the cube. """
+        q_01, q_05, q_95, q_99 = self.get_quantile(q=[0.01, 0.05, 0.95, 0.99])
+        self._normalization_stats = {
+            'mean': self.mean,
+            'std': self.std,
+            'min': self.min,
+            'max': self.max,
+            'q_01': q_01,
+            'q_05': q_05,
+            'q_95': q_95,
+            'q_99': q_99,
+        }
+
     @property
     def normalization_stats(self):
-        """ Values for performing normalization of data from the cube. """
+        """ Property with default normalization stats for synthetic images. """
         if self._normalization_stats is None:
-            q_01, q_05, q_95, q_99 = self.get_quantile(q=[0.01, 0.05, 0.95, 0.99])
-            self._normalization_stats = {
-                'mean': self.mean,
-                'std': self.std,
-                'min': self.min,
-                'max': self.max,
-                'q_01': q_01,
-                'q_05': q_05,
-                'q_95': q_95,
-                'q_99': q_99,
-            }
+            self.make_normalization_stats()
         return self._normalization_stats
+
+    def make_normalizer(self, mode='meanstd', clip_to_quantiles=False, q=(0.01, 0.99), normalization_stats=None):
+        if normalization_stats == 'field':
+            normalization_stats = self.normalization_stats
+        self.normalizer = Normalizer(mode=mode, clip_to_quantiles=clip_to_quantiles, q=q,
+                                     normalization_stats=normalization_stats)
 
     def make_quantization_stats(self, ranges=0.99, clip=True, center=False, dtype=np.int8,
                                 n_quantile_traces=100_000, seed=42):
         """ !!. """
-        self.quantization_stats = self.compute_quantization_parameters(ranges=ranges, clip=clip, center=center,
+        self._quantization_stats = self.compute_quantization_parameters(ranges=ranges, clip=clip, center=center,
                                                                         dtype=dtype,
                                                                         n_quantile_traces=n_quantile_traces, seed=seed)
+
+    @property
+    def quantization_stats(self):
+        """ Property with default normalization stats for synthetic images. """
+        if self._quantization_stats is None:
+            self.make_quantization_stats()
+        return self._quantization_stats
+
+    def make_quantizer(self, ranges=0.99, clip=True, center=False, dtype=np.int8,
+                       n_quantile_traces=100_000, seed=42):
+        self.make_quantization_stats(ranges=ranges, clip=clip, center=center, dtype=dtype,
+                                     n_quantile_traces=n_quantile_traces, seed=seed)
+        self.quantizer = self.quantization_stats['quantizer']
 
     def estimate_impulse(self, wavelet_length=40, n_traces=10_000, seed=42):
         """ Estimate impulse on a random subset of data.

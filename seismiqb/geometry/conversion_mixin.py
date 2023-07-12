@@ -6,42 +6,7 @@ import numpy as np
 import h5pickle as h5py
 import hdf5plugin
 
-from batchflow import Notifier
-
-
-class Quantizer:
-    """ Class to hold parameters and methods for (de)quantization. """
-    def __init__(self, ranges, clip=True, center=False, mean=None, dtype=np.int8):
-        self.ranges = ranges
-        self.clip, self.center = clip, center
-        self.mean = mean
-        self.dtype = dtype
-
-        self.bins = np.histogram_bin_edges(None, bins=254, range=ranges).astype(np.float32)
-
-    def quantize(self, array):
-        """ Quantize data: find the index of each element in the pre-computed bins and use it as the new value.
-        Converts `array` to int8 dtype. Lossy.
-        """
-        if self.center:
-            array -= self.mean
-        if self.clip:
-            array = np.clip(array, *self.ranges)
-        array = np.digitize(array, self.bins) - 128
-        return array.astype(self.dtype)
-
-    def dequantize(self, array):
-        """ Dequantize data: use each element as the index in the array of pre-computed bins.
-        Converts `array` to float32 dtype. Unable to recover full information.
-        """
-        array += 128
-        array = self.bins[array]
-        if self.center:
-            array += self.mean
-        return array.astype(np.float32)
-
-    def __call__(self, array):
-        return self.quantize(array)
+from batchflow import Notifier, Quantizer
 
 
 def resize_3D(array, factor):
@@ -97,14 +62,14 @@ class ConversionMixin:
             Dictionary with keys for stats and methods of data transformation.
             `'quantizer'` key is the instance, which can be `called` to quantize arbitrary array.
         """
-        # Parse parameters
         if isinstance(ranges, float):
-            qleft, qright = self.get_quantile([ranges, 1 - ranges])
+            qleft, qright = self.get_quantile([1 - ranges, ranges])
             value = min(abs(qleft), abs(qright))
             ranges = (-value, +value)
 
         if center:
             ranges = tuple(item - self.v_mean for item in ranges)
+
         quantizer = Quantizer(ranges=ranges, clip=clip, center=center, mean=self.mean, dtype=dtype)
 
         # Load subset of data to compute quantiles
@@ -122,7 +87,7 @@ class ConversionMixin:
         quantization_error = np.mean(np.abs(dequantized_data - data)) / self.std
 
         return {
-            'ranges': ranges, 'center': center, 'clip': clip,
+            'ranges': quantizer.ranges, 'center': quantizer.center, 'clip': clip,
 
             'quantizer': quantizer,
             'transform': quantizer.quantize,

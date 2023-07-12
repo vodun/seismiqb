@@ -204,22 +204,25 @@ def split_array(array, labels):
     return np.split(array, positions)
 
 @njit
-def thin_line(points, axis=0):
-    """ Make thick line. """
+def thin_line(points, column=0):
+    """ Make thick line. Works with sorted arrays by the axis of interest. """
     line = np.zeros_like(points)
     p = points[0].copy()
     n = 1
     pos = 0
     for i in range(1, len(points)):
-        if points[i, axis] == points[i-1, axis]:
+        if points[i, column] == points[i-1, column]:
             p += points[i]
             n += 1
-        if (i == len(points) - 1) or (points[i, axis] != points[i-1, axis]):
+        if (i == len(points) - 1):
+            line[pos] = p / n
+            break
+        if (points[i, column] != points[i-1, column]):
             line[pos] = p / n
             n = 1
             pos += 1
             p = points[i].copy()
-    line[pos] = p / n
+
     return line[:pos+1]
 
 # Bilateral filtering
