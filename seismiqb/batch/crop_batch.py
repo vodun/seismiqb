@@ -278,7 +278,7 @@ class SeismicCropBatch(Batch, VisualizationMixin):
 
 
     @apply_parallel_decorator(init='preallocating_init', post='normalize_post', target='for')
-    def normalize(self, ix, buffer, src, dst=None, mode='meanstd', stats=None):
+    def normalize(self, ix, buffer, src, dst=None, mode='meanstd', stats=None, clip_to_quantiles=None):
         """ Normalize `src` with provided stats.
         Depending on the parameters, stats for normalization will be taken from (in order of priority):
             - supplied `normalization_stats`, if provided
