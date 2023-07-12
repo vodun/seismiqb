@@ -1060,9 +1060,9 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetricM
 
         for i in range(array.shape[axis]):
             if axis == 0:
-                slide = array[i, ...]
+                slide = array[i, :]
             elif axis == 1:
-                slide = array[:, i, :]
+                slide = array[:, i]
             else:
                 raise ValueError('axis should be either 0 (iline) or 1 (xline)')
             ptps = cv2.dilate(slide, ptp_kernel) - cv2.erode(slide, ptp_kernel)
