@@ -204,10 +204,7 @@ class IRAPHandler:
         # Eval step in cdp coordinates format
         rotation_matrix = geometry.rotation_matrix
 
-        if rotation_matrix[0, 0] > rotation_matrix[0, 1]: # Choose main diagonal
-            step = (rotation_matrix[0, 0], rotation_matrix[1, 1]) # Need to be properly checked
-        else:
-            step = (rotation_matrix[1, 0], rotation_matrix[0, 1])
+        step = (rotation_matrix[:, :2] ** 2).sum(axis=1) ** 0.5
 
         # Convert if needed
         if 'ordinal' in format:
