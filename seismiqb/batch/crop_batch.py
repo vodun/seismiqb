@@ -8,7 +8,7 @@ from inspect import signature
 import numpy as np
 import cv2
 from scipy.interpolate import interp1d
-from scipy.ndimage import gaussian_filter1d
+from scipy.ndimage import gaussian_filter1d, gaussian_filter
 from scipy.signal import butter, sosfiltfilt
 
 from batchflow import DatasetIndex, Batch
@@ -998,7 +998,6 @@ class SeismicCropBatch(Batch, VisualizationMixin):
     def skeletonize_seismic(self, crop, smooth=True, axis=0, width=3, sigma=3, **kwargs):
         """ Perform skeletonize of seismic on 2D slide """
         if smooth:
-            from scipy.ndimage import gaussian_filter
             crop = gaussian_filter(crop, sigma=sigma, mode='nearest')
         crop = crop.squeeze()
         skeletonized_max = skeletonize(crop, axis=axis, width=width)
