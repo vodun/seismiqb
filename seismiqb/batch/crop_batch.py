@@ -281,24 +281,27 @@ class SeismicCropBatch(Batch, VisualizationMixin):
     def normalize(self, ix, buffer, src, dst=None, mode='meanstd', stats=None, clip_to_quantiles=None):
         """ Normalize `src` with provided stats.
         Depending on the parameters, stats for normalization will be taken from (in order of priority):
-            - supplied `normalization_stats`, if provided
-            - the field that created this `src`, if `normalization_stats=True`
+            - supplied `stats`, if provided
+            - the field that created this `src`, if `stats=True` or `stats='field'`
+            - from `normalization_stats_{stats}` component (each `normalize` action put used statistics into
+              normalization_stats_{src} component)
             - computed from `src` data directly
-
-        TODO: streamline the entire process of normalization.
 
         Parameters
         ----------
-        mode : {'mean', 'std', 'meanstd', 'minmax'} or callable
+        mode : {'mean', 'std', 'meanstd', 'minmax'}, callable or None
             If str, then normalization description.
-            If callable, then it will be called on `src` data with additional `normalization_stats` argument.
-        normalization_stats : dict, optional
+            If callable, then it will be called on `src` data with additional `stats` argument.
+            If None, `mode` from normalizer instance will be used.
+        stats : dict or str, optional
             If provided, then used to get statistics for normalization.
+            If dict, stats for each field.
+            If 'field', field normalization statistics will be used.
+            If other str, `normalization_stats_{stats}` will be used.
+            If None, item statistics will be used.
         clip_to_quantiles : bool
             Whether to clip the data to quantiles, specified by `q` parameter.
-            Quantile values are taken from `normalization_stats`, provided by either of the ways.
-        q : tuple of numbers
-            Quantiles for clipping. Used as keys to `normalization_stats`, provided by either of the ways.
+            Quantile values are taken from `stats`, provided by either of the ways.
         """
         field = self.get(ix, 'fields')
 
@@ -317,7 +320,20 @@ class SeismicCropBatch(Batch, VisualizationMixin):
 
     @apply_parallel_decorator(init='preallocating_init', post='noop_post', target='for')
     def denormalize(self, ix, buffer, src, dst=None, mode=None, stats=None):
-        """ !!. """
+        """ Denormalize images using.
+
+        Parameters
+        ----------
+        mode : {'mean', 'std', 'meanstd', 'minmax'}, callable or None
+            If str, then normalization description.
+            If callable, then it will be called on `src` data with additional `stats` argument.
+            If None, `mode` from normalizer instance will be used.
+        stats : dict or str, optional
+            If provided, then used to get statistics for normalization.
+            If dict, stats for each field.
+            If 'field', field normalization statistics will be used.
+            If other str, `normalization_stats_{stats}` will be used.
+        """        
         field = self.get(ix, 'fields')
 
         # Prepare normalization stats
@@ -334,14 +350,14 @@ class SeismicCropBatch(Batch, VisualizationMixin):
 
     @apply_parallel_decorator(init='preallocating_init', post='noop_post', target='for')
     def quantize(self, ix, buffer, src, dst=None):
-        """ !!. """
+        """ Quantize image. """
         field = self.get(ix, 'fields')
         buffer[:] = field.quantizer.quantize(buffer)
         return buffer
 
     @apply_parallel_decorator(init='preallocating_init', post='noop_post', target='for')
     def dequantize(self, ix, buffer, src, dst=None):
-        """ !!. """
+        """ Dequantize image (lossy). """
         field = self.get(ix, 'fields')
         buffer[:] = field.quantizer.dequantize(buffer)
         return buffer
