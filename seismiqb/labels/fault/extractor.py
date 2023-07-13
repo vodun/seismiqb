@@ -10,7 +10,7 @@ from .base import Fault
 from .postprocessing import skeletonize
 from .coords_utils import (bboxes_adjacent, bboxes_embedded, bboxes_intersected, compute_distances, dilate_coords,
                            find_contour, restore_coords_from_projection)
-from ...utils import groupby_min, groupby_max, make_ranges
+from ...utils import groupby_min, groupby_max, make_ranges, int_to_proba
 
 
 
@@ -147,10 +147,12 @@ class FaultExtractor:
             slide = slide[slice(*self.ranges[self.orthogonal_direction]), slice(*self.ranges[2])]
 
             if do_skeletonize:
-                slide = skeletonize(slide, width=3)
+                skeletonized_slide = skeletonize(slide, width=3).astype(bool)
+            else:
+                skeletonized_slide = slide > np.min(slide) # for signed dtypes
 
             # Extract connected components from the slide
-            labeled_slide = connected_components(slide > np.min(slide)) # for signed dtypes
+            labeled_slide = connected_components(skeletonized_slide)
             objects = find_objects(labeled_slide)
 
             # Get components info
@@ -159,6 +161,15 @@ class FaultExtractor:
             for idx, object_bbox in enumerate(objects, start=1):
                 # Extract component mask
                 object_mask = labeled_slide[object_bbox] == idx
+
+                # Filter by proba
+                object_proba = slide[object_bbox][object_mask].max().astype(data.dtype) # TODO: think about percentile
+
+                if np.issubdtype(data.dtype, np.integer):
+                    object_proba = int_to_proba(object_proba)
+
+                if object_proba < 0.1: # TODO: think about more appropriate threshold
+                    continue
 
                 # Check length
                 length = np.count_nonzero(object_mask)
@@ -177,7 +188,7 @@ class FaultExtractor:
                                                        self.origin[self.orthogonal_direction]
                 coords[:, 2] = coords_2D[1].astype(np.int32) + object_bbox[1].start + self.origin[2]
 
-                probas = slide[coords_2D[0], coords_2D[1]]
+                probas = slide[object_bbox][coords_2D[0], coords_2D[1]]
 
                 # Convert probas to integer values for saving them in points array with 3D-coordinates
                 if not np.issubdtype(data.dtype, np.integer):
@@ -315,14 +326,16 @@ class FaultExtractor:
 
         return None, None
 
-    def _find_closest_component(self, component, distances_threshold=None,
-                                depth_iteration_step=10, depths_threshold=20):
+    def _find_closest_component(self, component, slide_step=1, distances_threshold=None,
+                                depth_iteration_step=10, depths_threshold=20, distance_threshold=3):
         """ Find the closest component to the provided on next slide, get splitting indices for prototype.
 
         Parameters
         ----------
         component : instance of :class:`~.Component`
             Component for which find the closest one on the next slide.
+        slide_step : int
+            Amount of slides between the component slide and the next one.
         distances_threshold : int, optional
             Threshold for the max possible axis-wise distance between components,
             where axis is `self.orthogonal_direction`.
@@ -337,6 +350,8 @@ class FaultExtractor:
              - one part is the closest component;
              - another parts corresponds to the other components,
              which are not allowed to merge into the current prototype.
+        distance_threshold : int
+            Maximal permissable distance for close components.
 
         Returns
         -------
@@ -361,9 +376,13 @@ class FaultExtractor:
 
         component_split_indices = [None, None]
 
+        next_slide_idx = component.slide_idx + slide_step
+
+        selected_component_length = -1
+
         # Iter over components and find the closest one
-        for other_component_idx, other_component in enumerate(self.container[component.slide_idx + 1]['components']):
-            if self.container[component.slide_idx + 1]['lengths'][other_component_idx] == -1:
+        for other_component_idx, other_component in enumerate(self.container[next_slide_idx]['components']):
+            if self.container[next_slide_idx]['lengths'][other_component_idx] == -1:
                 continue
 
             # Check bboxes intersection
@@ -384,26 +403,24 @@ class FaultExtractor:
             coords_1 = component.coords[indices_1, self.orthogonal_direction]
             coords_2 = other_component.coords[indices_2, self.orthogonal_direction]
 
-            components_distances = compute_distances(coords_1, coords_2, max_threshold=min_distance)
+            components_distances = compute_distances(coords_1, coords_2, max_threshold=min_distance+distance_threshold)
 
-            if (components_distances[0] == -1) or (components_distances[0] > 1):
+            if (components_distances[0] == -1) or (components_distances[0] > distance_threshold):
                 # Components are not close
                 continue
 
-            if components_distances[1] >= min_distance:
-                # `other_component` is not the closest
+            if components_distances[1] >= min_distance + distance_threshold:
+                # `other_component` is not close enough
                 continue
 
             # The most depthwise distant points in components are close enough -> we can combine components
-            min_distance = components_distances[1]
-
-            closest_component = other_component
-            merged_idx = other_component_idx
-            overlap_borders = overlap_depths
-
-            if min_distance == 0:
-                # The closest component is founded
-                break
+            # Also, we want to find the longest close enough component
+            if selected_component_length < len(other_component):
+                min_distance = components_distances[1]
+                selected_component_length = len(other_component)
+                closest_component = other_component
+                merged_idx = other_component_idx
+                overlap_borders = overlap_depths
 
         if closest_component is not None:
             # Process (split if needed) founded component and get split indices for prototype
