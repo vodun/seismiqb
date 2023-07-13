@@ -14,7 +14,7 @@ from scipy.ndimage import binary_erosion
 from batchflow import Normalizer
 
 from .benchmark_mixin import BenchmarkMixin
-from .conversion_mixin import ConversionMixin, Quantizer
+from .conversion_mixin import ConversionMixin
 from .export_mixin import ExportMixin
 from .metric_mixin import MetricMixin
 
@@ -492,6 +492,7 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetricM
         return self._normalization_stats
 
     def make_normalizer(self, mode='meanstd', clip_to_quantiles=False, q=(0.01, 0.99), normalization_stats=None):
+        """ Create normalizer. """
         if normalization_stats == 'field':
             normalization_stats = self.normalization_stats
         self.normalizer = Normalizer(mode=mode, clip_to_quantiles=clip_to_quantiles, q=q,
@@ -499,7 +500,7 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetricM
 
     def make_quantization_stats(self, ranges=0.99, clip=True, center=False, dtype=np.int8,
                                 n_quantile_traces=100_000, seed=42):
-        """ !!. """
+        """ Compute quantization statistics. """
         self._quantization_stats = self.compute_quantization_parameters(ranges=ranges, clip=clip, center=center,
                                                                         dtype=dtype,
                                                                         n_quantile_traces=n_quantile_traces, seed=seed)
@@ -513,6 +514,7 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetricM
 
     def make_quantizer(self, ranges=0.99, clip=True, center=False, dtype=np.int8,
                        n_quantile_traces=100_000, seed=42):
+        """ Compute quantization statistics and create quantizer. """
         self.make_quantization_stats(ranges=ranges, clip=clip, center=center, dtype=dtype,
                                      n_quantile_traces=n_quantile_traces, seed=seed)
         self.quantizer = self.quantization_stats['quantizer']

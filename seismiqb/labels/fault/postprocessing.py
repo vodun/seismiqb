@@ -214,7 +214,7 @@ def thin_line(points, column=0):
         if points[i, column] == points[i-1, column]:
             p += points[i]
             n += 1
-        if (i == len(points) - 1):
+        if i == len(points) - 1:
             line[pos] = p / n
             break
         if (points[i, column] != points[i-1, column]):

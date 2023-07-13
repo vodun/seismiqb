@@ -164,10 +164,10 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         return self
 
     def normalize_post(self, all_results, func, src=None, mode='meanstd', **kwargs):
+        """ Post function to store"""
         self.noop_post(all_results, **kwargs)
         normalization_stats = [item[1] for item in all_results]
         self.add_components(f'normalization_stats_{src}', normalization_stats)
-        self.add_components(f'normalization_mode_{src}', normalization_stats)
         return self
 
     # Core actions

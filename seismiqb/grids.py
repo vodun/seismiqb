@@ -450,7 +450,8 @@ class RegularGridChunksIterator:
 
                         if len(chunk_locations):
                             chunk_grid = BaseGrid(field=grid.field, locations=chunk_locations,
-                                                origin=chunk_origin, endpoint=chunk_endpoint, batch_size=grid.batch_size)
+                                                  origin=chunk_origin, endpoint=chunk_endpoint,
+                                                  batch_size=grid.batch_size)
                             iterator.append(chunk_grid)
             self._iterator = iterator
         return self._iterator
