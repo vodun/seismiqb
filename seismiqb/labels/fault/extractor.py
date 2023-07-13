@@ -285,9 +285,9 @@ class FaultExtractor:
             component = prototype.last_component
 
         # Find closest components on next slides
-        for _ in range(component.slide_idx + 1, self.ranges[self.direction][1]):
+        for next_slide in range(component.slide_idx + 1, self.ranges[self.direction][1]):
             # Find the closest component on the slide_idx_ to the current
-            component, split_indices = self._find_closest_component(component=component)
+            component, split_indices = self._find_closest_component(component=component, slide_idx=next_slide)
 
             # Postprocess prototype - it need to be splitted if it is out of component ranges
             if component is not None:
@@ -326,16 +326,16 @@ class FaultExtractor:
 
         return None, None
 
-    def _find_closest_component(self, component, slide_step=1, distances_threshold=None,
-                                depth_iteration_step=10, depths_threshold=20, distance_threshold=3):
+    def _find_closest_component(self, component, slide_idx, distances_threshold=None,
+                                depth_iteration_step=10, depths_threshold=20, distance_neighborhood=3):
         """ Find the closest component to the provided on next slide, get splitting indices for prototype.
 
         Parameters
         ----------
         component : instance of :class:`~.Component`
             Component for which find the closest one on the next slide.
-        slide_step : int
-            Amount of slides between the component slide and the next one.
+        slide_idx : int
+            Slide num on which to find the closest component.
         distances_threshold : int, optional
             Threshold for the max possible axis-wise distance between components,
             where axis is `self.orthogonal_direction`.
@@ -350,8 +350,13 @@ class FaultExtractor:
              - one part is the closest component;
              - another parts corresponds to the other components,
              which are not allowed to merge into the current prototype.
-        distance_threshold : int
-            Maximal permissable distance for close components.
+        distance_neighborhood : int
+            Area in which to find close components to choose the closest and longest one.
+            For example, if we have two close enough components with distances 0 and 0 + distance_neighborhood and
+            the second is longer than the closest, then we will choose it.
+            We make this because one component on the next slide can be splitted into two parts and we want to concat it
+            with the longest one. In this case distance_neighborhood is allowable error for finding the close enough
+            components.
 
         Returns
         -------
@@ -372,17 +377,13 @@ class FaultExtractor:
 
         # Init returned values
         closest_component = None
+        selected_component_length = -1
         prototype_split_indices = [None, None]
-
         component_split_indices = [None, None]
 
-        next_slide_idx = component.slide_idx + slide_step
-
-        selected_component_length = -1
-
         # Iter over components and find the closest one
-        for other_component_idx, other_component in enumerate(self.container[next_slide_idx]['components']):
-            if self.container[next_slide_idx]['lengths'][other_component_idx] == -1:
+        for other_component_idx, other_component in enumerate(self.container[slide_idx]['components']):
+            if self.container[slide_idx]['lengths'][other_component_idx] == -1:
                 continue
 
             # Check bboxes intersection
@@ -403,13 +404,14 @@ class FaultExtractor:
             coords_1 = component.coords[indices_1, self.orthogonal_direction]
             coords_2 = other_component.coords[indices_2, self.orthogonal_direction]
 
-            components_distances = compute_distances(coords_1, coords_2, max_threshold=min_distance+distance_threshold)
+            components_distances = compute_distances(coords_1, coords_2,
+                                                     max_threshold=min_distance+distance_neighborhood)
 
-            if (components_distances[0] == -1) or (components_distances[0] > distance_threshold):
+            if (components_distances[0] == -1) or (components_distances[0] > distance_neighborhood):
                 # Components are not close
                 continue
 
-            if components_distances[1] >= min_distance + distance_threshold:
+            if components_distances[1] >= min_distance + distance_neighborhood:
                 # `other_component` is not close enough
                 continue
 
@@ -1006,6 +1008,141 @@ class FaultExtractor:
         faults = [Fault(prototype.coords, field=field) for prototype in self.prototypes]
         return faults
 
+
+class FromComponentExtractor(FaultExtractor):
+    """ Extractor for finding prototypes from provided components.
+
+    All you need is just to run the :meth:`~.extract_from_component`."""
+    def extract_one_prototype(self, component, height_threshold=0.6):
+        """ Extract one prototype from the point cloud starting from the provided component.
+
+        Similar to the :meth:`.FaultExtractor.extract_one_prototype`, but this one finds prototype components to
+        the left and right sides of the provided one, while the original one finds only to the right.
+
+        Parameters
+        ----------
+        height_threshold : float in [0, 1] range, None
+            Neighboring components height ratio threshold.
+            If ratio more than threshold, then components are from one prototype. Otherwise not.
+            If None, then no threshold is applied.
+            On some slides component can be splitted into separate parts and these parts have a significant height
+            decrease (most frequently in Y areas).
+        """
+        component_idx = np.argwhere(np.array(self.container[component.slide_idx]['components']) == component)[0][0]
+        self.container[component.slide_idx]['lengths'][component_idx] = -1 # Mark component as merged
+
+        prototype = FaultPrototype(points=component.points, direction=self.direction, last_component=component,
+                                   proba_transform=self.proba_transform)
+
+        # Find closest components on further slides
+        self._find_prototype_components(prototype=prototype, component=component, slide_step=1,
+                                        height_threshold=height_threshold)
+
+        # Find closest components on previous slides
+        first_slide_idx = prototype.bbox[self.direction, 0]
+        first_slide_points = prototype.points[prototype.points[:, self.direction] == first_slide_idx]
+        component = Component(points=first_slide_points, slide_idx=first_slide_idx)
+
+        self._find_prototype_components(prototype=prototype, component=component, slide_step=-1,
+                                        height_threshold=height_threshold)
+
+        self.prototypes.append(prototype)
+        return prototype
+
+    def _find_prototype_components(self, prototype, component, slide_step, height_threshold=0.6):
+        """ Find prototype components starting from the provided and going on `slide_step`.
+
+        Similar to the :meth:`.FaultExtractor.extract_one_prototype`, but without split.
+
+        Parameters
+        ----------
+        height_threshold : float in [0, 1] range, optional
+            Neighboring components height ratio threshold.
+            If ratio more than threshold, then components are from one prototype. Otherwise not.
+            If None, then no threshold is applied.
+            On some slides component can be splitted into separate parts and these parts have a significant height
+            decrease (most frequently in Y areas).
+        """
+        stop_slide = self.ranges[self.direction][0] if slide_step < 0 else self.ranges[self.direction][1]
+        previous_height = component.bbox[-2][1] - component.bbox[-2][0] + 1
+
+        for next_slide in range(component.slide_idx + slide_step, stop_slide, slide_step):
+            # Find the closest component on the the next slide to the current
+            component, _ = self._find_closest_component(component=component, slide_idx=next_slide, depths_threshold=20)
+
+            if component is not None:
+                # TODO: think about splitting necessity
+                height = component.bbox[-2][1] - component.bbox[-2][0] + 1
+                heights_ratio = min(height, previous_height)/max(height, previous_height)
+
+                if (height_threshold is not None) and (heights_ratio > height_threshold):
+                    prototype.append(component)
+                    previous_height = height
+                else:
+                    break
+            else:
+                break
+
+        return prototype
+
+    def find_similar_components(self, component):
+        """ Find components similar to the provided one in the data container.
+
+        Similar component is the closest component on the same slide as the provided.
+
+        Similar to the :meth:`.FaultExtractor._find_closest_component`, but finds all close components,
+        not the longest one.
+        """
+        # Dilate component bbox for detecting close components
+        dilated_bbox = component.bbox.copy()
+        dilated_bbox[self.orthogonal_direction, :] += (-self._dilation // 2, self._dilation // 2)
+        dilated_bbox[self.orthogonal_direction, 0] = max(0, dilated_bbox[self.orthogonal_direction, 0])
+        dilated_bbox[self.orthogonal_direction, 1] = min(dilated_bbox[self.orthogonal_direction, 1],
+                                                         self.shape[self.orthogonal_direction])
+
+        closest_components = []
+
+        # Iter over components and find the closest one
+        for other_component in self.container[component.slide_idx]['components']:
+            # Check bboxes intersection
+            if not bboxes_intersected(dilated_bbox, other_component.bbox, axes=(self.orthogonal_direction, 2)):
+                continue
+
+            # Check closeness of some points (as depth-wise distances)
+            # Faster then component overlap, but not so accurate
+            overlap_depths = (max(component.bbox[2, 0], other_component.bbox[2, 0]),
+                              min(component.bbox[2, 1], other_component.bbox[2, 1]))
+
+            # Select valid coords for distances finding
+            valid_depths = component.coords[(component.coords[:, -1] >= overlap_depths[0]) & \
+                                            (component.coords[:, -1] <= overlap_depths[1]), -1]
+
+            indices_1 = np.in1d(component.coords[:, -1], valid_depths)
+            indices_2 = np.in1d(other_component.coords[:, -1], valid_depths)
+
+            coords_1 = component.coords[indices_1, self.orthogonal_direction]
+            coords_2 = other_component.coords[indices_2, self.orthogonal_direction]
+
+            components_distances = compute_distances(coords_1, coords_2, max_threshold=100)
+
+            if (components_distances[0] == -1) or (components_distances[0] > 1):
+                # Components are not close
+                continue
+
+            closest_components.append(other_component)
+
+        return closest_components
+
+    def extract_from_component(self, component):
+        """ Extract prototypes which conclude the provided component. """
+        prototypes = []
+        closest_components = self.find_similar_components(component=component)
+
+        for component_ in closest_components:
+            prototype = self.extract_one_prototype(component=component_)
+            prototypes.append(prototype)
+
+        return prototypes
 
 
 class Component:
