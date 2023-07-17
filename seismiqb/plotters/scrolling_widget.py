@@ -11,7 +11,9 @@ import pandas as pd
 
 from batchflow.research.results import ResearchResults
 
-def gather_images_from_research(research_name, cubes, get_all=True, **kwargs):
+def gather_images_from_research(research_name, cubes,
+                                cube_paths='./{research_name}/experiments/{experiment_id}/inference/{cube}',
+                                repetition=None):
     """ Auxiliary function gathering images corresponding to the research experiments and making
     the metainformation about each image
     """
@@ -24,23 +26,21 @@ def gather_images_from_research(research_name, cubes, get_all=True, **kwargs):
 
     # Iterate over repetetitions and cubes, and gather images from the research files
     # with making metainformation about them
-    cube_paths = './{research_name}/experiments/{experiment_id}/inference/{cube}'
     images = []
     meta_info = []
-    repetitions = range(research_df['repetition'].max() + 1) if get_all else [kwargs.get('repetition', 0)]
+    repetitions = [repetition] if repetition is not None else range(research_df.repetition.max() + 1)
     for repetition in repetitions:
         for cube in cubes:
-            for _, row in research_df.iterrows():
-                experiment_id, repetition_ = row['id'], row['repetition']
-                if repetition_ == repetition:
-                    experiment_images = cube_paths.format(research_name=research_name,
-                                                          experiment_id=experiment_id,
-                                                          cube=cube)
-                    experiment_images = glob.glob(experiment_images, recursive=True)
+            for _, row in research_df[research_df.repetition == repetition].iterrows():
+                experiment_id = row['id']
+                experiment_images = cube_paths.format(research_name=research_name,
+                                                      experiment_id=experiment_id,
+                                                      cube=cube)
+                experiment_images = glob.glob(experiment_images, recursive=True)
+                if experiment_images:
                     images.extend(experiment_images)
-
                     meta_info_ = '/'.join([f"{df_with_idx.loc[experiment_id, feature]}",
-                                           f"{repetition_}", cube])
+                                           f"{repetition}", cube])
                     meta_info.append(meta_info_)
 
     return images, meta_info
