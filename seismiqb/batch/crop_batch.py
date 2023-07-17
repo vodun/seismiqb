@@ -984,15 +984,17 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         return functional.center_crop(crop, shape)
 
     @apply_parallel_decorator(init='data', post='_assemble', target='for')
-    def resize(self, crop, size, interpolation=1, **kwargs):
+    def resize(self, crop, size=None, factor=2, interpolation=1, **kwargs):
         """ Resize image. By default uses a bilinear interpolation."""
+        if size is None:
+            # for 2D crop
+            if crop.shape[0] == 1:
+                h, w = int(crop.shape[1] // factor), int(crop.shape[2] // factor)
+            # for 3D crop
+            else:
+                h, w = int(crop.shape[0] // factor), int(crop.shape[1] // factor)
+            size = (h, w)
         return functional.resize(array=crop, size=size, interpolation=interpolation)
-
-    @apply_parallel_decorator(init='data', post='_assemble', target='for')
-    def resize_with_reduction(self, crop, reduction=2, interpolation=2, **kwargs):
-        """ Resize image using the reduction parameter """
-        h, w = int(crop.shape[1] // reduction), int(crop.shape[2] // reduction)
-        return functional.resize(array=crop, size=(h, w), interpolation=interpolation)
 
     @apply_parallel_decorator(init='data', post='_assemble', target='for')
     def skeletonize_seismic(self, crop, smooth=True, axis=0, width=3, sigma=3, **kwargs):
