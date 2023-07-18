@@ -333,7 +333,7 @@ class SeismicCropBatch(Batch, VisualizationMixin):
             If dict, stats for each field.
             If 'field', field normalization statistics will be used.
             If other str, `normalization_stats_{stats}` will be used.
-        """        
+        """
         field = self.get(ix, 'fields')
 
         # Prepare normalization stats
