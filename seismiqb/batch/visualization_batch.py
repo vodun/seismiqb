@@ -184,17 +184,18 @@ class VisualizationMixin:
                             y_stop = y_stop + y_zoom.stop
                         else:
                             y_stop = y_stop + y_zoom.stop + 1
+
+                config['xlabel'] = x_label
+                config['ylabel'] = y_label
+                if 'ticks' in add_location:
+                    config['extent'] = (x_start, x_stop, y_stop, y_start)
+
+                location_info = [f"{z_label}={z_start}",
+                                 f"{x_label} <{x_start}:{x_stop}>",
+                                 f"{y_label} <{y_start}:{y_stop}>"]
                 break
         else:
-            raise ValueError("Data must be 2D or pseudo-3D.")
-
-        # Annotate x and y axes
-        config['xlabel'] = x_label
-        config['ylabel'] = y_label
-        if 'ticks' in add_location:
-            config['extent'] = (x_start, x_stop, y_stop, y_start)
-
-        location_info = f"{z_label}={z_start}", f"{x_label} <{x_start}:{x_stop}>", f"{y_label} <{y_start}:{y_stop}>"
+            location_info = [f'{label} <{slc.start}:{slc.stop}>' for slc, label in zip(location, labels)]
 
         # Construct suptitle
         if add_suptitle:

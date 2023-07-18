@@ -48,8 +48,7 @@ class SeismicCropBatch(Batch, VisualizationMixin):
     """ Batch with ability to generate 3d-crops of various shapes.
 
     The first action in any pipeline with this class should be `make_locations` to transform batch index from
-    individual cubes into crop-based indices. The transformation uses randomly generated postfix (see `:meth:.salt`)
-    to obtain unique elements.
+    individual cubes into crop-based indices.
     """
     apply_defaults = {
         'init': 'preallocating_init',
@@ -83,8 +82,11 @@ class SeismicCropBatch(Batch, VisualizationMixin):
 
     def __setattr__(self, name, value):
         super().__setattr__(name, value)
-        if isinstance(value, np.ndarray) and value.ndim == 4 and name not in self.name_to_order:
-            self.name_to_order[name] = np.array(['i', 'x', 'd'])
+        if isinstance(value, np.ndarray) and name not in self.name_to_order:
+            if value.ndim == 4:
+                self.name_to_order[name] = np.array(['i', 'x', 'd'])
+            if value.ndim == 5:
+                self.name_to_order[name] = np.array(['c', 'i', 'x', 'd'])
 
     def get(self, item=None, component=None):
         """ Custom access for batch attributes.
@@ -166,7 +168,7 @@ class SeismicCropBatch(Batch, VisualizationMixin):
 
     # Core actions
     @action
-    def make_locations(self, generator, batch_size=None, keep_attributes=None):
+    def make_locations(self, generator, batch_size=None, parse_label_names=True, keep_attributes=None):
         """ Use `generator` to create `batch_size` locations.
         Each location defines position in a cube and can be used to retrieve data/create masks at this place.
 
@@ -189,7 +191,7 @@ class SeismicCropBatch(Batch, VisualizationMixin):
             - `field_names`
             - `label_names`
             - `generated` with originally generated data
-        If `generator` creates more than 9 columns, they are not used, but still stored in the  `generated` attribute.
+        If `generator` creates more than 9 columns, they are not used, but still stored in the `generated` attribute.
 
         Parameters
         ----------
@@ -197,6 +199,9 @@ class SeismicCropBatch(Batch, VisualizationMixin):
             Sampler or Grid to retrieve locations. Must be a callable that works off of a positive integer.
         batch_size : int
             Number of locations to generate.
+        parse_label_names : bool
+            Whether to try parsing label names, relying on `labels` attribute of dataset.
+            Used only if `generator` is np.ndarray.
         keep_attributes : str or sequence of str
             Components to keep in a newly created batch.
 
@@ -211,7 +216,12 @@ class SeismicCropBatch(Batch, VisualizationMixin):
             field_names, label_names = generator.to_names(generated[:, [0, 1]]).T
         elif isinstance(generator, np.ndarray):
             generated = generator
-            field_names, label_names = self.dataset.to_names(generated[:, [0, 1]]).T
+
+            if parse_label_names:
+                field_names, label_names = self.dataset.to_names(generated[:, [0, 1]]).T
+            else:
+                field_names = self.dataset.to_field_names(generated[:, 0])
+                label_names = None
         else:
             raise ValueError(f'`generator` should either be callable or ndarray, got {type(generator)} instead!')
 
@@ -237,17 +247,29 @@ class SeismicCropBatch(Batch, VisualizationMixin):
 
         # Set all freshly computed attributes. Manually keep the reference to the `pipeline`
         # Note: `pipeline` would be set by :meth:`~.Pipeline._exec_one_action` anyway, so this is not necessary.
+        new_batch.name_to_order = {}
+        new_batch.crop_shape = crop_shape
+        new_batch.pipeline = self.pipeline
         new_batch.add_components(('locations', 'generated', 'shapes', 'orientations', 'field_names', 'label_names'),
                                  (locations, generated, shapes, orientations, field_names, label_names))
-        new_batch.crop_shape = crop_shape
-        new_batch.name_to_order = {}
-        new_batch.pipeline = self.pipeline
         return new_batch
+
+
+    @action
+    def make_shifted_locations(self, shifts, dst, src_locations='locations'):
+        """ !!. """
+        locations = getattr(self, src_locations)
+        shifts = [*shifts, 0] if len(shifts) == 2 else list(shifts)
+        shifted_locations = [[slice(slc.start + shift, slc.stop + shift)
+                              for slc, shift in zip(location, shifts)]
+                             for location in locations]
+        setattr(self, dst, shifted_locations)
+        return self
 
 
     # Loading of cube data and its derivatives
     @apply_parallel_decorator(init='preallocating_init', post='noop_post', buffer_type='empty', target='for')
-    def load_seismic(self, ix, buffer, dst, src=None, src_geometry='geometry', **kwargs):
+    def load_seismic(self, ix, buffer, dst, src=None, src_locations='locations', src_geometry='geometry', **kwargs):
         """ Load data from cube for stored `locations`.
 
         Parameters
@@ -259,13 +281,12 @@ class SeismicCropBatch(Batch, VisualizationMixin):
             if 'native', crop will be loaded as a slice of geometry. Preferred for 3D crops to speed up loading.
         src_geometry : str
             Field attribute with desired geometry.
+        src_locations : str
+            Batch attribute with locations.
         """
         field = self.get(ix, 'fields')
-        locations = self.get(ix, 'locations')
-        orientation = self.get(ix, 'orientations')
+        locations = self.get(ix, src_locations)
 
-        if orientation == 1:
-            buffer = buffer.transpose(1, 0, 2)
         field.load_seismic(locations=locations, src=src_geometry, buffer=buffer, **kwargs)
 
     load_cubes = load_crops = load_seismic
@@ -383,7 +404,8 @@ class SeismicCropBatch(Batch, VisualizationMixin):
     # Loading of labels
     @action
     @apply_parallel_decorator(init='preallocating_init', post='noop_post', buffer_type='zeros', target='for')
-    def create_masks(self, ix, buffer, dst, src=None, indices='all', width=3, src_labels='labels',
+    def create_masks(self, ix, buffer, dst, src=None, src_locations='locations',
+                     indices='all', width=3, src_labels='labels',
                      sparse=False, **kwargs):
         """ Create masks from labels in stored `locations`.
 
@@ -391,6 +413,8 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         ----------
         dst : str
             Component of batch to put loaded masks in.
+        src_locations : str
+            Batch attribute with locations.
         indices : str, int or sequence of ints
             Which labels to use in mask creation.
             If 'all', then use all labels.
@@ -405,7 +429,7 @@ class SeismicCropBatch(Batch, VisualizationMixin):
             slides will be filled with -1.
         """
         field = self.get(ix, 'fields')
-        locations = self.get(ix, 'locations')
+        locations = self.get(ix, src_locations)
         orientation = self.get(ix, 'orientations')
 
         if orientation == 1:
@@ -416,22 +440,26 @@ class SeismicCropBatch(Batch, VisualizationMixin):
 
     @action
     @apply_parallel_decorator(init='indices', post='_assemble', target='for')
-    def create_regression_masks(self, ix, dst, src=None, indices='all', src_labels='labels', scale=False):
+    def create_regression_masks(self, ix, dst, src=None, src_locations='locations',
+                                indices='all', src_labels='labels', scale=False):
         """ Create masks with relative depth. """
         field = self.get(ix, 'fields')
-        location = self.get(ix, 'locations')
+        location = self.get(ix, src_locations)
         return field.make_regression_mask(location=location, indices=indices, src=src_labels, scale=scale)
 
 
     @action
     @apply_parallel_decorator(init='indices', post='_assemble', target='for')
-    def compute_label_attribute(self, ix, dst, src='amplitudes', atleast_3d=True, dtype=np.float32, **kwargs):
+    def compute_label_attribute(self, ix, dst, src='amplitudes', src_locations='locations',
+                                atleast_3d=True, dtype=np.float32, **kwargs):
         """ Compute requested attribute along label surface. Target labels are defined by sampled locations.
 
         Parameters
         ----------
         src : str
             Keyword that defines label attribute to compute.
+        src_locations : str
+            Batch attribute with locations.
         atleast_3d : bool
             Whether add one more dimension to 2d result or not.
         dtype : valid dtype compatible with requested attribute
@@ -447,7 +475,7 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         TODO: can be improved with `preallocating_init`
         """
         field = self.get(ix, 'fields')
-        location = self.get(ix, 'locations')
+        location = self.get(ix, src_locations)
         label_index = self.get(ix, 'generated')[1]
         src = src.replace('*', str(label_index))
 
@@ -708,7 +736,7 @@ class SeismicCropBatch(Batch, VisualizationMixin):
     # Predictions
     @action
     @apply_parallel_decorator(init='indices', post=None, target='for')
-    def update_accumulator(self, ix, src, accumulator, dst=None):
+    def update_accumulator(self, ix, src, accumulator, src_locations='locations', dst=None):
         """ Update accumulator with data from crops.
         Allows to gradually accumulate predictions in a single instance, instead of
         keeping all of them and assembling later.
@@ -719,9 +747,11 @@ class SeismicCropBatch(Batch, VisualizationMixin):
             Component with crops.
         accumulator : Accumulator3D
             Container for aggregation.
+        src_locations : str
+            Batch attribute with locations.
         """
         crop = self.get(ix, src)
-        location = self.get(ix, 'locations')
+        location = self.get(ix, src_locations)
         if self.get(ix, 'orientations'):
             crop = crop.transpose(1, 0, 2)
         accumulator.update(crop, location)
@@ -729,7 +759,8 @@ class SeismicCropBatch(Batch, VisualizationMixin):
 
     @action
     @apply_parallel_decorator(init='indices', post='_masks_to_horizons_post', target='for')
-    def masks_to_horizons(self, ix, src, dst, threshold=0.5, mode='mean', minsize=0, prefix='predict'):
+    def masks_to_horizons(self, ix, src, dst, src_locations='locations',
+                          threshold=0.5, mode='mean', minsize=0, prefix='predict'):
         """ Convert predicted segmentation mask to a list of Horizon instances.
 
         Parameters
@@ -749,7 +780,7 @@ class SeismicCropBatch(Batch, VisualizationMixin):
             mask = mask.transpose(1, 0, 2)
 
         field = self.get(ix, 'fields')
-        origin = [self.get(ix, 'locations')[k].start for k in range(3)]
+        origin = [self.get(ix, src_locations)[k].start for k in range(3)]
         horizons = Horizon.from_mask(mask, field=field, origin=origin, threshold=threshold,
                                      mode=mode, minsize=minsize, prefix=prefix)
         return horizons
@@ -768,7 +799,7 @@ class SeismicCropBatch(Batch, VisualizationMixin):
 
     @action
     @apply_parallel_decorator(init='indices', target='for')
-    def save_masks(self, ix, src, dst=None, save_to=None, savemode='numpy',
+    def save_masks(self, ix, src, dst=None, src_locations='locations', save_to=None, savemode='numpy',
                    threshold=0.5, mode='mean', minsize=0, prefix='predict'):
         """ Save extracted horizons to disk. """
         os.makedirs(save_to, exist_ok=True)
@@ -780,8 +811,9 @@ class SeismicCropBatch(Batch, VisualizationMixin):
 
         # Get meta parameters of the mask
         field = self.get(ix, 'fields')
-        origin = [self.get(ix, 'locations')[k].start for k in range(3)]
-        endpoint = [self.get(ix, 'locations')[k].stop for k in range(3)]
+        locations = self.get(ix, src_locations)
+        origin = [locations[k].start for k in range(3)]
+        endpoint = [locations[k].stop for k in range(3)]
 
         # Extract surfaces
         horizons = Horizon.from_mask(mask, field=field, origin=origin, mode=mode,

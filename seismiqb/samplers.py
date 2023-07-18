@@ -555,26 +555,27 @@ class WellSampler(Sampler):
 
         if ranges is None:
             depth_ranges = [max(bbox[-1][0] - crop_shape[-1] * depth_randomization[0], 0),
-                            min(bbox[-1][1] + crop_shape[-1] * depth_randomization[1], well.field.depth - crop_shape[-1])]
+                            min(bbox[-1][1] + crop_shape[-1] * depth_randomization[1],
+                                well.field.depth - crop_shape[-1])]
 
             if depth_ranges[1] <= depth_ranges[0]:
                 depth_ranges[0] = max(depth_ranges[1] - 1, 0)
             ranges = [None, None, depth_ranges]
 
         # inline-oriented
-        arange_i = np.arange(max(location[0] - crop_shape[0]*spatial_randomization[1] + 1, 0),
+        arange_i = np.arange(max(location[0] - int(crop_shape[0]*spatial_randomization[1]) + 1, 0),
                              location[0] - crop_shape[0]*spatial_randomization[0] + 1)
-        arange_x = np.arange(max(location[1] - crop_shape[1]*spatial_randomization[1] + 1, 0),
-                             location[1] - crop_shape[1]*spatial_randomization[0] + 1)
+        arange_x = np.arange(max(location[1] - int(crop_shape[1]*spatial_randomization[1]) + 1, 0),
+                             location[1] - int(crop_shape[1]*spatial_randomization[0]) + 1)
 
         m_i, m_x = np.meshgrid(arange_i, arange_x, indexing='ij')
         points_i = np.stack([m_i.reshape(-1), m_x.reshape(-1)]).T
 
         # crossline-oriented
-        arange_i = np.arange(max(location[0] - crop_shape_t[0]*spatial_randomization[1] + 1, 0),
-                             location[0] - crop_shape_t[0]*spatial_randomization[0] + 1)
-        arange_x = np.arange(max(location[1] - crop_shape_t[1]*spatial_randomization[1] + 1, 0),
-                             location[1] - crop_shape_t[1]*spatial_randomization[0] + 1)
+        arange_i = np.arange(max(location[0] - int(crop_shape_t[0]*spatial_randomization[1]) + 1, 0),
+                             location[0] - int(crop_shape_t[0]*spatial_randomization[0]) + 1)
+        arange_x = np.arange(max(location[1] - int(crop_shape_t[1]*spatial_randomization[1]) + 1, 0),
+                             location[1] - int(crop_shape_t[1]*spatial_randomization[0]) + 1)
 
         m_i, m_x = np.meshgrid(arange_i, arange_x, indexing='ij')
         points_x = np.stack([m_i.reshape(-1), m_x.reshape(-1)]).T
@@ -976,7 +977,7 @@ class SeismicSampler(Sampler):
         data = []
         title = []
 
-        field_ids = np.unique(sampled[:, 0])
+        field_ids = np.unique(sampled[:, 0]).tolist()
         for field_id in field_ids:
             field = self.samplers[field_id][0].field
 
@@ -1023,6 +1024,15 @@ class SeismicSampler(Sampler):
         }
 
         plotter[-1].add_legend(**legend_config)
+
+        for field_id in field_ids:
+            field = self.samplers[field_id][0].field
+
+            for sampler in self.samplers[field_id]:
+                if isinstance(sampler, WellSampler):
+                    well = sampler.well
+                    plotter[field_id].ax.scatter(*well.location, c='k', marker='x', s=50)
+                    plotter[field_id].ax.annotate('  '+well.name, tuple(well.location), fontsize=12)
 
         if savepath is not None:
             plotter.save(savepath=savepath)

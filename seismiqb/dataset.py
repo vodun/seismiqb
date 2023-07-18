@@ -105,6 +105,11 @@ class SeismicDataset(Dataset):
         """ Convert the first two columns of sampled locations into field and label string names. """
         return np.array([self.names[tuple(ids)] for ids in id_array])
 
+    def to_field_names(self, id_array):
+        """ Convert the first column of sampled locations into field string names. """
+        field_names_dict = list(self.fields.keys())
+        return np.array([field_names_dict[idx] for idx in id_array])
+
 
     def gen_batch(self, batch_size=None, shuffle=False, n_iters=None, n_epochs=None, drop_last=False, **kwargs):
         """ Remove `n_epochs`  and `drop_last` from passed arguments.
