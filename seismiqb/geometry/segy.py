@@ -211,9 +211,13 @@ class GeometrySEGY(Geometry):
         index_ordinals = self.lines_to_ordinals(index_values)
         idx_0, idx_1 = index_ordinals[:, 0], index_ordinals[:, 1]
 
-        dtype = self.headers[header].dtype
-        matrix = np.full(self.lengths, -1, dtype=dtype)
-        matrix[idx_0, idx_1] = self.headers[header]
+        if header in self.headers:
+            values = self.headers[header]
+        else:
+            values = self.loader.load_headers([header], reconstruct_tsf=False, pbar=False)[header]
+
+        matrix = np.full(self.lengths, -1, dtype=values.dtype)
+        matrix[idx_0, idx_1] = values
         return matrix
 
 

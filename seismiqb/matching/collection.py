@@ -36,9 +36,10 @@ class FieldCollection:
 
     # Instance initialization
     DEFAULT_GEOMETRY_KWARGS = {
-        'index_headers': ['FieldRecord', 'CDP'],
-        'additional_headers': ['CDP', 'CDP_X', 'CDP_Y'],
-        'collect_stats': False, 'collect_stats_params': {'pbar': False},
+        # 'index_headers': ['FieldRecord', 'CDP'],
+        'index_headers': ['FieldRecord', 'TraceNumber'],
+        'additional_headers': ['CDP', 'CDP_X', 'CDP_Y', 'EnergySourcePoint'],
+        'collect_stats': True, 'collect_stats_params': {'pbar': False},
         'dump_headers': True, 'dump_meta': True
     }
 
@@ -71,12 +72,12 @@ class FieldCollection:
 
         return result
 
-    def load_horizon(self, path, add_instances=True, verbose=True):
+    def load_horizon(self, path, add_instances=True, verbose=True, minlength=10):
         """ Load horizon: save into dict for each field. """
         horizon_name = os.path.basename(path)
 
         df = pd.read_csv(path, sep=r'\s+', index_col=False, skiprows=[0],
-                        names=['FIELD_NAME', '_', 'CDP_X', 'CDP_Y', 'DEPTH', '__'],
+                        names=['FIELD_NAME', 'EnergySourcePoint', 'CDP_X', 'CDP_Y', 'DEPTH', 'LABEL'],
                         dtype={'FIELD_NAME': str, })
         self.horizons[horizon_name] = df
         unique_field_names = df['FIELD_NAME'].unique()
@@ -87,6 +88,11 @@ class FieldCollection:
                     print(f'Field "{field.short_name}" is not labeled in horizon')
                 continue
             subdf = df[df['FIELD_NAME'] == field.short_name]
+
+            if len(subdf) < minlength:
+                if verbose:
+                    print(f'Field "{field.short_name}" labeling is too short!')
+                continue
 
             # Prepare horizon points: (N, 3) array
             horizon_ixd = subdf[['CDP_X', 'CDP_Y', 'DEPTH']].values

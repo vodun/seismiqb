@@ -87,7 +87,7 @@ class Well:
         self.data['TWT'] = -self.data['TWT']
         self.data['Z'] = -self.data['Z']
 
-    def from_field(self, field, location=None, column_name='DATA', **kwargs):
+    def from_field(self, field, location=None, column_name='SEISMIC_TRACE', **kwargs):
         """ Initialize instance from a known field geometry: available pseudo-logs are `TIME` and `SAMPLES`. """
         samples = np.arange(0, field.depth, 1, dtype=np.int32)
         seismic_time = samples * field.sample_interval

@@ -407,7 +407,8 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetricM
                 if self.increments[i] != 1:
                     array[:, i] //= self.increments[i]
         else:
-            raise NotImplementedError
+            for i in range(self.index_length):
+                array[:, i] = np.array([self.index_value_to_ordinal[i][v] for v in array[:, i]])
 
         # Depth to units
         if array.shape[1] == self.index_length + 1:
@@ -430,7 +431,9 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetricM
                     array[:, i] *= self.increments[i]
                 array[:, i] += self.shifts[i]
         else:
-            raise NotImplementedError
+            for i in range(self.index_length):
+                inverted_dict = {v:k for k, v in self.index_value_to_ordinal[i].items()}
+                array[:, i] = np.array([inverted_dict[v] for v in array[:, i]])
 
         # Units to depth
         if array.shape[1] == self.index_length + 1:

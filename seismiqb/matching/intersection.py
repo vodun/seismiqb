@@ -211,12 +211,12 @@ class Intersection2d2d:
                 self._prepare_horizons(field=self.field_1, coordinates=self.coordinates_1))
 
     @staticmethod
-    def _prepare_horizons(field, coordinates):
+    def _prepare_horizons(field, coordinates, threshold=1.):
         horizon_to_depth = {}
         for horizon_name, horizon_ixd in field.horizons.items():
             distances = ((horizon_ixd[:, :2] - coordinates) ** 2).sum(axis=1) ** (1 / 2)
             idx = np.argmin(distances)
-            horizon_to_depth[horizon_name] = horizon_ixd[idx, -1]
+            horizon_to_depth[horizon_name] = horizon_ixd[idx, -1] if distances[idx] < threshold else np.nan
         return horizon_to_depth
 
 
@@ -428,6 +428,7 @@ class Intersection2d2d:
         depth_1 = horizon_to_depth_1[horizon_name]
 
         shift = depth_0 - depth_1
+        shift = 0.0 if np.isnan(shift) else shift
         angle = 0.0
         gain = self.compute_gain()
         corr = self.evaluate(shift=shift, angle=angle, gain=gain)

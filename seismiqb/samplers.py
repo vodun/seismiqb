@@ -527,7 +527,7 @@ class SyntheticSampler(Sampler):
 
 class WellSampler(Sampler):
     """ !!. """
-    def __init__(self, well, crop_shape, log='AI', field_id=None, label_id=None, threshold=0.0,
+    def __init__(self, well, crop_shape, log='AI', field_id=None, label_id=None, threshold=0.0, ranges=None,
                  spatial_randomization=(0.0, 1.0), depth_randomization=(0.0, 0.0), **kwargs):
         self.well = well
         self.crop_shape = crop_shape
@@ -539,24 +539,27 @@ class WellSampler(Sampler):
         self.name = self.short_name = well.name
         self.field = well.field
         super().__init__()
-        self.locations = self._make_locations(well, crop_shape=crop_shape, log=log,
+        self.locations = self._make_locations(well, crop_shape=crop_shape, log=log, ranges=ranges,
                                               spatial_randomization=spatial_randomization,
                                               depth_randomization=depth_randomization)
         self.threshold = self.crop_shape[-1] * threshold
 
 
-    def _make_locations(self, well, crop_shape, log, spatial_randomization, depth_randomization):
+    def _make_locations(self, well, crop_shape, log, ranges, spatial_randomization, depth_randomization):
         location = well.location
         crop_shape = np.array(crop_shape)
         crop_shape_t = crop_shape[[1, 0, 2]]
 
         bbox = well.bboxes[log]
         mean_depth = bbox[-1].mean().astype(np.int32)
-        depth_ranges = [max(bbox[-1][0] - crop_shape[-1] * depth_randomization[0], 0),
-                        min(bbox[-1][1] + crop_shape[-1] * depth_randomization[1], well.field.depth - crop_shape[-1])]
 
-        if depth_ranges[1] <= depth_ranges[0]:
-            depth_ranges[0] = max(depth_ranges[1] - 1, 0)
+        if ranges is None:
+            depth_ranges = [max(bbox[-1][0] - crop_shape[-1] * depth_randomization[0], 0),
+                            min(bbox[-1][1] + crop_shape[-1] * depth_randomization[1], well.field.depth - crop_shape[-1])]
+
+            if depth_ranges[1] <= depth_ranges[0]:
+                depth_ranges[0] = max(depth_ranges[1] - 1, 0)
+            ranges = [None, None, depth_ranges]
 
         # inline-oriented
         arange_i = np.arange(max(location[0] - crop_shape[0]*spatial_randomization[1] + 1, 0),
@@ -593,7 +596,7 @@ class WellSampler(Sampler):
         self.crop_shape = crop_shape
         self.crop_shape_t = crop_shape_t
         self.crop_depth = crop_shape[2]
-        self.ranges = [None, None, depth_ranges]
+        self.ranges = ranges
         return buffer
 
     def sample(self, size):

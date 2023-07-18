@@ -168,7 +168,7 @@ def local_similarity_map(image, prediction, map_to='pred', lamb=0.5, window_size
     image_view = image_view.reshape(straighten)
     image_noise_view = image_noise_view.reshape(straighten)
 
-    H = np.eye(window_size**n_dims, dtype=np.float) * lamb
+    H = np.eye(window_size**n_dims, dtype=np.float32) * lamb
     H = np.lib.stride_tricks.as_strided(H, shape=(image_view.shape[0], window_size**n_dims, window_size**n_dims),
                                         strides=(0, 8 * window_size**n_dims, 8))
 
