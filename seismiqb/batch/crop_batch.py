@@ -270,7 +270,7 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         locations = self.get(ix, 'locations')
         orientation = self.get(ix, 'orientations')
 
-        if orientation == 1: #TODO orientation 2
+        if orientation == 1:
             buffer = buffer.transpose(1, 0, 2)
         field.load_seismic(locations=locations, src=src_geometry, buffer=buffer, **kwargs)
 
@@ -320,7 +320,7 @@ class SeismicCropBatch(Batch, VisualizationMixin):
 
     @apply_parallel_decorator(init='preallocating_init', post='noop_post', target='for')
     def denormalize(self, ix, buffer, src, dst=None, mode=None, stats=None):
-        """ Denormalize images using.
+        """ Denormalize images using provided statistics.
 
         Parameters
         ----------
