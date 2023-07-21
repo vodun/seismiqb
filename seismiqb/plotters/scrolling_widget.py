@@ -1,6 +1,6 @@
 import ipywidgets as widgets
-import os
 import glob
+import re
 
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
@@ -11,11 +11,10 @@ import pandas as pd
 
 from batchflow.research.results import ResearchResults
 
-def gather_images_from_research(research_name, cubes,
-                                cube_paths='./{research_name}/experiments/{experiment_id}/inference/{cube}',
-                                repetition=None):
-    """ Auxiliary function gathering images corresponding to the research experiments and making
-    the metainformation about each image
+def gather_files_from_research(research_name, paths='./{research_name}/experiments/{experiment_id}/inference/**/[!combine]*.png',
+                               pattern=r'inference(.*)', repetition=None):
+    """ Auxiliary function gathering files corresponding to the research experiments and making
+    the metainformation about each file
     """
     # Make research dataframe
     results = ResearchResults(name=research_name)
@@ -24,26 +23,31 @@ def gather_images_from_research(research_name, cubes,
     df_with_idx = research_df.set_index('id')
     feature = research_df.columns[1]
 
-    # Iterate over repetetitions and cubes, and gather images from the research files
+    # Iterate over repetetitions and cubes, and gather files from the research 
     # with making metainformation about them
-    images = []
+    files = []
     meta_info = []
     repetitions = [repetition] if repetition is not None else range(research_df.repetition.max() + 1)
     for repetition in repetitions:
-        for cube in cubes:
-            for _, row in research_df[research_df.repetition == repetition].iterrows():
-                experiment_id = row['id']
-                experiment_images = cube_paths.format(research_name=research_name,
-                                                      experiment_id=experiment_id,
-                                                      cube=cube)
-                experiment_images = glob.glob(experiment_images, recursive=True)
-                if experiment_images:
-                    images.extend(experiment_images)
+        for _, row in research_df[research_df.repetition == repetition].iterrows():
+            experiment_id = row['id']
+            experiment_files = paths.format(research_name=research_name,
+                                            experiment_id=experiment_id)
+            experiment_files = glob.glob(experiment_files, recursive=True)
+            if experiment_files:
+                files.extend(experiment_files)
+                for file in experiment_files:
+                    file_description = get_file_description(file, pattern)
                     meta_info_ = '/'.join([f"{df_with_idx.loc[experiment_id, feature]}",
-                                           f"{repetition}", cube])
+                                           file_description, f"repetition_{repetition}"])
                     meta_info.append(meta_info_)
 
-    return images, meta_info
+    return files, meta_info
+
+def get_file_description(path, pattern=r'inference(.*)'):
+    """ Get the file description as a substring in the path followed after the `pattern` """
+    match = re.search(pattern, path)
+    return match.group(1)[1:]
 
 class ScrollingImagesWidget:
     """ Interactive widget for scrolling images """
