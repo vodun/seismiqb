@@ -271,3 +271,12 @@ def insert_points_into_mask(mask, points, mask_bbox, width, axis, alpha=1):
             elif axis == 2:
                 for pos in range(left_bound, right_bound):
                     mask[point[0], point[1], pos] = alpha
+
+
+def take_along_axis(array, index, axis):
+    """ As np.take but creates view of array guaranteed """
+    if axis == 0:
+        slide = array[index, :]
+    elif axis == 1:
+        slide = array[:, index]
+    return slide
