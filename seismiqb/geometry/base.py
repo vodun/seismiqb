@@ -151,6 +151,8 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetricM
         self._quantile_interpolator = None
         self._normalization_stats = None
         self._quantization_stats = None
+        self._quantizer = None
+        self._normalizer = None
 
         # Init from subclasses
         if init:
