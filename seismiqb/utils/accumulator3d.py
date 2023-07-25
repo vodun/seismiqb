@@ -103,6 +103,8 @@ class Accumulator3D:
         """ Reorder `sequence` with the `orientation` of accumulator. """
         if self.orientation == 1:
             sequence = np.array([sequence[1], sequence[0], sequence[2]])
+        if self.orientation == 2:
+            sequence = np.array([sequence[2], sequence[0], sequence[1]])
         return sequence
 
 
@@ -225,6 +227,8 @@ class Accumulator3D:
         location = self.reorder(location)
         if self.orientation == 1:
             crop = crop.transpose(1, 0, 2)
+        elif self.orientation == 2:
+            crop = crop.transpose(2, 0, 1)
 
         # Compute correct shapes
         loc, loc_crop = [], []
@@ -253,7 +257,13 @@ class Accumulator3D:
         # TODO: open resulting HDF5 file with `Geometry` and return it instead?
         self.aggregated = True
         if self.type in ['hdf5', 'qhdf5']:
-            projection_name = 'projection_i' if self.orientation == 0 else 'projection_x'
+            if self.orientation == 0:
+                projection_name = 'projection_i'
+            elif self.orientation == 1:
+                projection_name = 'projection_x'
+            else:
+                projection_name = 'projection_d'
+
             self.file[projection_name] = self.file['data']
             self.file.close()
             self.file = h5py.File(self.path, 'r+')
@@ -263,6 +273,8 @@ class Accumulator3D:
         else:
             if self.orientation == 1:
                 self.data = self.data.transpose(1, 0, 2)
+            elif self.orientation == 2:
+                self.data = self.data.transpose(1, 2, 0)
         return self.data
 
     def _aggregate(self):

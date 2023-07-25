@@ -73,7 +73,7 @@ def scale_2d(array, scale, adjust=False):
     adjust : bool
         If True, then image is upscaled prior to rotation to avoid padding.
     """
-    scale = scale if isinstance(scale, (list, tuple)) else [scale] * 2
+    scale = scale if isinstance(scale, (list, tuple, np.ndarray)) else [scale] * 2
 
     if adjust:
         array, initial_shape = adjust_shape(array, angle=0, scale=(*scale, 1))

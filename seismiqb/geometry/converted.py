@@ -1,7 +1,7 @@
 """ Converted geometry: optimized storage. """
 
 import numpy as np
-import h5py
+import h5pickle as h5py
 
 from .base import Geometry
 from ..utils import repack_hdf5
@@ -135,9 +135,6 @@ class GeometryHDF5(Geometry):
 
         # Load data
         slide = self.axis_to_projection[loading_axis][locations]
-        if self.quantized:
-            if buffer is None or buffer.dtype != slide.dtype:
-                slide = slide.astype(np.float32)
 
         # Re-order and squeeze the requested axis
         slide = slide.transpose(from_projection_transposition)
@@ -199,9 +196,6 @@ class GeometryHDF5(Geometry):
 
         # Load data
         crop = self.axis_to_projection[axis][locations]
-        if self.quantized:
-            if buffer is None or buffer.dtype != crop.dtype:
-                crop = crop.astype(np.float32)
 
         # Re-order back from projections' ordering
         crop = crop.transpose(from_projection_transposition)

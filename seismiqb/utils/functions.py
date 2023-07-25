@@ -209,7 +209,7 @@ def make_slices(slices, shape):
     if slices is None:
         ranges = None
     else:
-        ranges = [slice(None) if item is None else (item.start, item.stop) for item in slices]
+        ranges = [None if item is None else (item.start, item.stop) for item in slices]
 
     ranges = make_ranges(ranges, shape)
     return tuple(slice(*item) for item in ranges)

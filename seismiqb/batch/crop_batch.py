@@ -163,6 +163,12 @@ class SeismicCropBatch(Batch, VisualizationMixin):
             raise RuntimeError("Could not assemble the batch!") from all_errors[0]
         return self
 
+    def normalize_post(self, all_results, func, src=None, mode='meanstd', **kwargs):
+        """ Post function to store"""
+        self.noop_post(all_results, **kwargs)
+        normalization_stats = [item[1] for item in all_results]
+        self.add_components(f'normalization_stats_{src}', normalization_stats)
+        return self
 
     # Core actions
     @action
@@ -271,84 +277,90 @@ class SeismicCropBatch(Batch, VisualizationMixin):
     load_cubes = load_crops = load_seismic
 
 
-    @apply_parallel_decorator(init='preallocating_init', post='noop_post', target='for')
-    def normalize(self, ix, buffer, src, dst=None, mode='meanstd', normalization_stats='field',
-                  clip_to_quantiles=False, q=(0.01, 0.99)):
+    @apply_parallel_decorator(init='preallocating_init', post='normalize_post', target='for')
+    def normalize(self, ix, buffer, src, dst=None, mode='meanstd', stats=None, clip_to_quantiles=None):
         """ Normalize `src` with provided stats.
         Depending on the parameters, stats for normalization will be taken from (in order of priority):
-            - supplied `normalization_stats`, if provided
-            - the field that created this `src`, if `normalization_stats=True`
+            - supplied `stats`, if provided
+            - the field that created this `src`, if `stats=True` or `stats='field'`
+            - from `normalization_stats_{stats}` component (each `normalize` action put used statistics into
+              normalization_stats_{src} component)
             - computed from `src` data directly
-
-        TODO: streamline the entire process of normalization.
 
         Parameters
         ----------
-        mode : {'mean', 'std', 'meanstd', 'minmax'} or callable
+        mode : {'mean', 'std', 'meanstd', 'minmax'}, callable or None
             If str, then normalization description.
-            If callable, then it will be called on `src` data with additional `normalization_stats` argument.
-        normalization_stats : dict, optional
+            If callable, then it will be called on `src` data with additional `stats` argument.
+            If None, `mode` from normalizer instance will be used.
+        stats : dict or str, optional
             If provided, then used to get statistics for normalization.
+            If dict, stats for each field.
+            If 'field', field normalization statistics will be used.
+            If other str, `normalization_stats_{stats}` will be used.
+            If None, item statistics will be used.
         clip_to_quantiles : bool
             Whether to clip the data to quantiles, specified by `q` parameter.
-            Quantile values are taken from `normalization_stats`, provided by either of the ways.
-        q : tuple of numbers
-            Quantiles for clipping. Used as keys to `normalization_stats`, provided by either of the ways.
+            Quantile values are taken from `stats`, provided by either of the ways.
         """
         field = self.get(ix, 'fields')
 
         # Prepare normalization stats
-        if isinstance(normalization_stats, dict):
-            if field.short_name in normalization_stats:
-                normalization_stats = normalization_stats[field.short_name]
-        elif normalization_stats in {'field', True}:
-            normalization_stats = field.normalization_stats
-        else:
-            if clip_to_quantiles:
-                buffer = np.clip(buffer, *np.quantile(buffer, q))
-                clip_to_quantiles = False
+        if isinstance(stats, dict):
+            if field.short_name in stats:
+                stats = stats[field.short_name]
+        elif stats in {'field', True}:
+            stats = field.normalization_stats
+        elif isinstance(stats, str):
+            stats = getattr(self, f'normalization_stats_{stats}')[ix]
 
-            if callable(mode):
-                normalization_stats = {
-                    'mean': np.mean(buffer),
-                    'std': np.std(buffer),
-                    'min': np.min(buffer),
-                    'max': np.max(buffer),
-                }
-            else:
-                normalization_stats = {}
-                if 'mean' in mode:
-                    normalization_stats['mean'] = np.mean(buffer)
-                if 'std' in mode:
-                    normalization_stats['std'] = np.std(buffer)
-                if 'min' in mode:
-                    normalization_stats['min'] = np.min(buffer)
-                if 'max' in mode:
-                    normalization_stats['max'] = np.max(buffer)
+        buffer, stats = field.normalizer.normalize(buffer, normalization_stats=stats, mode=mode,
+                                                   return_stats=True, inplace=True)
+        return buffer, stats
 
-        # Clip
-        if clip_to_quantiles:
-            np.clip(buffer, normalization_stats['q_01'], normalization_stats['q_99'], out=buffer)
+    @apply_parallel_decorator(init='preallocating_init', post='noop_post', target='for')
+    def denormalize(self, ix, buffer, src, dst=None, mode=None, stats=None):
+        """ Denormalize images using provided statistics.
 
-        # Actual normalization
-        if callable(mode):
-            buffer[:] = mode(buffer, normalization_stats)
-        else:
-            if 'mean' in mode:
-                buffer -= normalization_stats['mean']
-            if 'std' in mode:
-                buffer /= normalization_stats['std']
-            if 'min' in mode and 'max' in mode:
-                if clip_to_quantiles:
-                    buffer -= normalization_stats['q_01']
-                    buffer /= normalization_stats['q_99'] - normalization_stats['q_01']
-                elif normalization_stats['max'] != normalization_stats['min']:
-                    buffer -= normalization_stats['min']
-                    buffer /= normalization_stats['max'] - normalization_stats['min']
-                else:
-                    buffer -= normalization_stats['min']
+        Parameters
+        ----------
+        mode : {'mean', 'std', 'meanstd', 'minmax'}, callable or None
+            If str, then normalization description.
+            If callable, then it will be called on `src` data with additional `stats` argument.
+            If None, `mode` from normalizer instance will be used.
+        stats : dict or str, optional
+            If provided, then used to get statistics for normalization.
+            If dict, stats for each field.
+            If 'field', field normalization statistics will be used.
+            If other str, `normalization_stats_{stats}` will be used.
+        """
+        field = self.get(ix, 'fields')
+
+        # Prepare normalization stats
+        if isinstance(stats, dict):
+            if field.short_name in stats:
+                stats = stats[field.short_name]
+        elif stats in {'field', True}:
+            stats = field.normalization_stats
+        elif isinstance(stats, str):
+            stats = getattr(self, f'normalization_stats_{stats}')[ix]
+
+        buffer = field.normalizer.denormalize(buffer, normalization_stats=stats, mode=mode, inplace=True)
         return buffer
 
+    @apply_parallel_decorator(init='preallocating_init', post='noop_post', target='for')
+    def quantize(self, ix, buffer, src, dst=None):
+        """ Quantize image. """
+        field = self.get(ix, 'fields')
+        buffer[:] = field.quantizer.quantize(buffer)
+        return buffer
+
+    @apply_parallel_decorator(init='preallocating_init', post='noop_post', target='for')
+    def dequantize(self, ix, buffer, src, dst=None):
+        """ Dequantize image (lossy). """
+        field = self.get(ix, 'fields')
+        buffer[:] = field.quantizer.dequantize(buffer)
+        return buffer
 
     @apply_parallel_decorator(init='indices', post='_assemble', target='for')
     def compute_attribute(self, ix, dst, src='images', attribute='semblance', window=10, stride=1, device='cpu'):
@@ -483,6 +495,8 @@ class SeismicCropBatch(Batch, VisualizationMixin):
             condition = self._compute_mask_area
         elif condition == 'discontinuity_size':
             condition = self._compute_discontinuity_size
+        elif condition == 'crop_area':
+            condition = self._compute_crop_area
 
         # Compute indices to keep
         data = self.get(component=src)
@@ -515,6 +529,12 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         labeled_traces = array.max(axis=axis)
         area = labeled_traces.sum() / labeled_traces.size
         return area
+
+    @staticmethod
+    def _compute_crop_area(array, axis=(1, 2), **kwargs):
+        """ Compute the area of a projection (along the `axis`, by default depth), of a horizon mask. """
+        _ = kwargs
+        return 1 - np.isnan(array).sum(axis=axis) / array.size
 
     @staticmethod
     def _compute_discontinuity_size(array, **kwargs):
@@ -722,8 +742,10 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         """
         crop = self.get(ix, src)
         location = self.get(ix, 'locations')
-        if self.get(ix, 'orientations'):
+        if self.get(ix, 'orientations') == 1:
             crop = crop.transpose(1, 0, 2)
+        elif self.get(ix, 'orientations') == 2:
+            crop = crop.transpose(1, 2, 0)
         accumulator.update(crop, location)
         return self
 
@@ -895,7 +917,7 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         dst = [dst] if isinstance(dst, str) else dst
 
         for src_, dst_ in zip(src, dst):
-            data = data = self.get(component=src_)
+            data = self.get(component=src_)
             if data.ndim == 5 and data.shape[axis] == 1:
                 data = np.squeeze(data, axis=axis)
                 self.name_to_order[src_] = np.delete(self.name_to_order[src_], axis-1)

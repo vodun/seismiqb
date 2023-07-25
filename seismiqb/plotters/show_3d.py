@@ -75,6 +75,7 @@ def show_3d(x, y, z, simplices, title, zoom, colors=None, show_axes=True, aspect
         'aspectratio': {'x': aspect_ratio[0], 'y': aspect_ratio[1], 'z': aspect_ratio[2]},
         **kwargs
     }
+    cmin, cmax = kwargs.pop('cmin', None), kwargs.pop('cmax', None)
     if isinstance(colorscale, str) and colorscale in plt.colormaps():
         cmap = get_cmap(colorscale)
         levels = np.arange(0, 256, 1) / 255
@@ -98,7 +99,7 @@ def show_3d(x, y, z, simplices, title, zoom, colors=None, show_axes=True, aspect
             image = image[::-1]
             if bounds:
                 bounds = int(bounds)
-                fill = image.max()
+                fill = cmax if cmax is not None else image.max()
                 image[:bounds, :] = fill
                 image[-bounds:, :] = fill
                 image[:, :bounds] = fill
@@ -114,7 +115,8 @@ def show_3d(x, y, z, simplices, title, zoom, colors=None, show_axes=True, aspect
                 y, x, z = loc * np.ones_like(image), grid[0].T + zoom[0].start, grid[1].T + zoom[2].start
             else:
                 z, x, y = loc * np.ones_like(image), grid[0].T + zoom[0].start, grid[1].T + zoom[1].start
-            fig.add_surface(x=x, y=y, z=z, surfacecolor=np.flipud(image),
+
+            fig.add_surface(x=x, y=y, z=z, surfacecolor=np.flipud(image), cmin=cmin, cmax=cmax,
                             showscale=False, colorscale=colorscale)
     # Update scene with title, labels and axes
     fig.update_layout(

@@ -78,6 +78,9 @@ notebooks_params = (
     *[(os.path.join(TESTS_NOTEBOOKS_DIR, 'geometry_test_02_data_format.ipynb'),
        {'inputs': {'FORMAT': data_format}, 'outputs': 'timings'}) for data_format in geometry_formats],
 
+    (os.path.join(TESTS_NOTEBOOKS_DIR, 'geometry_test_03_transforms.ipynb'),
+     {'inputs': {'FORMATS': 'sgy'}}),
+
     # Horizon tests
     (os.path.join(TESTS_NOTEBOOKS_DIR, 'horizon_test_01_preparation.ipynb'), {}),
     (os.path.join(TESTS_NOTEBOOKS_DIR, 'horizon_test_02_base.ipynb'), {}),
