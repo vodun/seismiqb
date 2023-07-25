@@ -1,6 +1,6 @@
 """ Triangulation functions. """
 import numpy as np
-from numba import njit
+from numba import njit, prange
 from scipy.spatial import Delaunay
 
 
@@ -11,14 +11,14 @@ def triangle_rasterization(points, width=1):
     Parameters
     ----------
     points : numpy.ndarray
-        array of size 3 x 3: each row is a vertex of triangle
+        Array of size 3 x 3: each row is a vertex of triangle
     width : int
-        thicc
+        Thickness
 
     Return
     ------
     numpy.ndarray
-        array of size N x 3 where N is a number of points in rasterization.
+        Array of size N x 3 where N is a number of points in rasterization.
     """
     max_n_points = np.int32(triangle_volume(points, width))
     _points = np.empty((max_n_points, 3))
@@ -33,6 +33,78 @@ def triangle_rasterization(points, width=1):
                     _points[i] = node
                     i += 1
     return _points[:i]
+
+@njit(parallel=True)
+def triangle_rasterization_with_plane(points, width=1):
+    """ Transform triangle points to surface of the fixed thickness. The main idea:
+    1) consider a plane through three points,
+    2) find two coordinate axes to consider a plane as a function (as shallow as possible) of that two coordinates,
+    3) iterate points of that plane with some margin,
+    4) compute the distance from that point to the triangle
+    5) leave points which are closer then `width`.
+
+    Parameters
+    ----------
+    points : numpy.ndarray
+        Array of size 3 x 3: each row is a vertex of triangle
+    width : int
+        Thickness
+
+    Return
+    ------
+    numpy.ndarray
+        Array of size N x 3 where N is a number of points in rasterization.
+    """
+    # Propose that value axis of the function is the closest (in cosine metric) to the perpendicular of the plane
+    values_axis = np.argmax(np.abs(np.cross(points[1] - points[0], points[2] - points[0])))
+    coordinate_axes = [0, 1, 2]
+    coordinate_axes.pop(values_axis)
+    coordinate_axes = np.array(coordinate_axes)
+
+    x_axis, y_axis = coordinate_axes
+    z_axis = values_axis
+
+    # Find coefficients of the plane function as a solution of a system of linear equations
+    matrix = np.empty_like(points)
+    matrix[:, :2] = points[:, coordinate_axes]
+    matrix[:, 2] = 1
+    coef = np.linalg.solve(matrix, points[:, values_axis])
+
+    # Compute margins and ranges to iterate over surface
+    r_margin = width - width // 2
+    l_margin = width // 2
+    z_margin = np.abs(coef[0]) + np.abs(coef[1])
+
+    x_range = (int(np.min(points[:, x_axis])) - l_margin, int(np.max(points[:, x_axis])) + r_margin)
+    y_range = (int(np.min(points[:, y_axis])) - l_margin, int(np.max(points[:, y_axis])) + r_margin)
+    z_range = (int((-z_margin - l_margin))-1, int((z_margin + r_margin))+1)
+
+    # Binary mask for points to include into result
+    mask = np.zeros((x_range[1] - x_range[0], y_range[1] - y_range[0], z_range[1] - z_range[0]), dtype='bool')
+
+    for i in prange(x_range[1] - x_range[0]): # pylint: disable=not-an-iterable
+        x = i + x_range[0]
+        for j in range(y_range[1] - y_range[0]):
+            y = j + y_range[0]
+            # Compute rounded coordinate of the points on the plane
+            z_pos = int(coef[0] * x + coef[1] * y + coef[2])
+            for k, z in enumerate(range(z_pos + z_range[0], z_pos + z_range[1])):
+                node = np.zeros(3, dtype='int32')
+                node[np.array([x_axis, y_axis, z_axis], dtype='int32')] = [x, y, z]
+                if distance_to_triangle(points, node) <= width / 2:
+                    mask[i, j, k] = True
+
+    i, j, k = np.where(mask)
+    _points = np.empty((len(i), 3), dtype='int32')
+
+    _points[:, x_axis] = i + x_range[0]
+    _points[:, y_axis] = j + y_range[0]
+    _points[:, z_axis] = (
+        (coef[0] * (i + x_range[0]) + coef[1] * (j + y_range[0]) + coef[2]).astype('int32') + (z_range[0] + k)
+    )
+    # TODO: lexsort?
+
+    return _points
 
 @njit
 def triangle_volume(points, width):
