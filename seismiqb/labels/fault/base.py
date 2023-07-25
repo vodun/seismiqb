@@ -89,6 +89,13 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
         """ Create points of fault surface from sticks or nodes and simplices. """
         _ = self.points
 
+    def interpolate_sticks(self):
+        """ Create points of fault surface from sticks or nodes and simplices. """
+        _ = self.points
+        if self.points is not None and len(self.points) > 0:
+            mask = np.isin(self.points[:, self.direction], np.unique(self.nodes[:, self.direction]))
+            self._points = self._points[mask]
+
     def has_component(self, component):
         """ Check if faults has points, sticks, simplices or nodes. """
         return getattr(self, '_'+component) is not None
@@ -156,9 +163,12 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
         else:
             faults = [cls(df, field=field, name=name, **kwargs) for name, df in cls.split_charisma(path).items()]
 
-        if interpolate:
+        if interpolate is True:
             for fault in faults:
                 fault.interpolate()
+        elif interpolate == 'sticks':
+            for fault in faults:
+                fault.interpolate_sticks()
 
         return faults
 

@@ -5,7 +5,7 @@ from scipy.spatial import Delaunay
 
 
 @njit
-def triangle_rasterization(points, width=1):
+def triangle_rasterization_(points, width=1):
     """ Transform triangle to surface of the fixed thickness.
 
     Parameters
@@ -35,7 +35,7 @@ def triangle_rasterization(points, width=1):
     return _points[:i]
 
 @njit(parallel=True)
-def triangle_rasterization_with_plane(points, width=1):
+def triangle_rasterization(points, width=1):
     """ Transform triangle points to surface of the fixed thickness. The main idea:
     1) consider a plane through three points,
     2) find two coordinate axes to consider a plane as a function (as shallow as possible) of that two coordinates,
