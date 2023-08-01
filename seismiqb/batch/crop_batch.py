@@ -8,7 +8,7 @@ from inspect import signature
 import numpy as np
 import cv2
 from scipy.interpolate import interp1d
-from scipy.ndimage import gaussian_filter1d
+from scipy.ndimage import gaussian_filter1d, gaussian_filter
 from scipy.signal import butter, sosfiltfilt
 
 from batchflow import DatasetIndex, Batch
@@ -19,6 +19,8 @@ from .visualization_batch import VisualizationMixin
 from ..labels import Horizon
 from ..utils import to_list, groupby_all
 from .. import functional
+
+from ..labels.fault import skeletonize
 
 
 
@@ -1007,9 +1009,29 @@ class SeismicCropBatch(Batch, VisualizationMixin):
         return functional.center_crop(crop, shape)
 
     @apply_parallel_decorator(init='data', post='_assemble', target='for')
-    def resize(self, crop, size, interpolation=1, **kwargs):
+    def resize(self, crop, size=None, factor=2, interpolation=1, **kwargs):
         """ Resize image. By default uses a bilinear interpolation."""
+        if size is None:
+            # for 2D crop
+            if crop.shape[0] == 1:
+                h, w = int(crop.shape[1] // factor), int(crop.shape[2] // factor)
+            # for 3D crop
+            else:
+                h, w = int(crop.shape[0] // factor), int(crop.shape[1] // factor)
+            size = (h, w)
         return functional.resize(array=crop, size=size, interpolation=interpolation)
+
+    @apply_parallel_decorator(init='data', post='_assemble', target='for')
+    def skeletonize_seismic(self, crop, smooth=True, axis=0, width=3, sigma=3, **kwargs):
+        """ Perform skeletonize of seismic on 2D slide """
+        if smooth:
+            crop = gaussian_filter(crop, sigma=sigma, mode='nearest')
+        crop = crop.squeeze()
+        skeletonized_max = skeletonize(crop, axis=axis, width=width)
+        skeletonized_min = skeletonize(-crop, axis=axis, width=width)
+        skeletonized = skeletonized_max - skeletonized_min
+        return skeletonized.reshape(1, *skeletonized.shape)
+
 
     # Augmentations: geologic. `compute_instantaneous_amplitude/phase/frequency` are added by decorator
     @apply_parallel_decorator(init='preallocating_init', post='noop_post', target='for')

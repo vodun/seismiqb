@@ -59,8 +59,12 @@ def _rotate_2d(array, angle, fill_value=0):
 def resize(array, size, interpolation=1):
     """ Resize image. """
     # interpolation=1 means bilinear
-    resized = cv2.resize(src=array.squeeze(), dsize=(size[1], size[0]), interpolation=interpolation)
-    return resized.reshape(1, *resized.shape)
+    if array.shape[0] == 1:
+        resized = cv2.resize(src=array.squeeze(), dsize=(size[1], size[0]), interpolation=interpolation)
+        resized = resized.reshape(1, *resized.shape)
+    else:
+        resized = cv2.resize(src=array, dsize=(size[1], size[0]), interpolation=interpolation)
+    return resized
 
 # Scale
 def scale_2d(array, scale, adjust=False):
