@@ -8,7 +8,7 @@ from .triangulation import sticks_to_simplices, triangle_rasterization
 from .approximation import points_to_sticks
 from .visualization import FaultVisualizationMixin, get_fake_one_stick_fault
 from .formats import FaultSticksMixin, FaultSerializationMixin
-from ...utils import insert_points_into_mask
+from ...utils import insert_points_into_mask, take_along_axis
 
 class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
     """ Class to represent Fault object.
@@ -349,7 +349,7 @@ class Fault(FaultSticksMixin, FaultSerializationMixin, FaultVisualizationMixin):
 
             points = points[np.isin(points[:, self.direction], loc)]
 
-            unlabeled_slides = np.take(mask, loc - mask_bbox[self.direction, 0], self.direction)
+            unlabeled_slides = take_along_axis(mask, loc - mask_bbox[self.direction, 0], self.direction)
             unlabeled_slides = loc[unlabeled_slides[:, 0, 0] == -1]
 
             slices = [slice(None)] * 3

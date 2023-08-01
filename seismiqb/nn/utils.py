@@ -11,7 +11,7 @@ from batchflow import Pipeline, B
 from batchflow.models.torch import TorchModel
 
 from .. import SeismicDataset, RegularGrid
-from ..utils import Accumulator3D
+from ..utils import Accumulator3D, take_along_axis
 
 
 def make_slide_prediction(field, model_or_path, index, axis=0,
@@ -97,7 +97,7 @@ def make_slide_prediction(field, model_or_path, index, axis=0,
             trace = prediction[i, x, :]
             peaks, _ = find_peaks(trace, prominence=0.15, width=2)
             peaked[i, x, peaks] = 1
-    prediction = np.take(peaked, indices=inference_width, axis=axis)
+    prediction = take_along_axis(peaked, index=inference_width, axis=axis)
 
     # Filter small objects
     labeled = label(prediction, connectivity=2)

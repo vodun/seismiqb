@@ -18,7 +18,7 @@ from .conversion_mixin import ConversionMixin
 from .export_mixin import ExportMixin
 from .metric_mixin import MetricMixin
 
-from ..utils import SQBStorage, lru_cache, CacheMixin, TransformsMixin, select_printer, transformable
+from ..utils import SQBStorage, lru_cache, CacheMixin, TransformsMixin, select_printer, transformable, take_along_axis
 from ..plotters import plot
 
 
@@ -1041,7 +1041,7 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetricM
         axis : int
             Axis of the slide.
         """
-        dead_traces = np.take(self.dead_traces_matrix, indices=index, axis=axis)
+        dead_traces = take_along_axis(self.dead_traces_matrix, index=index, axis=axis)
         left_bound = np.argmin(dead_traces)
         right_bound = len(dead_traces) - np.argmin(dead_traces[::-1]) # the first dead trace
         return left_bound, right_bound
@@ -1152,7 +1152,7 @@ class Geometry(BenchmarkMixin, CacheMixin, ConversionMixin, ExportMixin, MetricM
         dilation_kernel = np.ones((dilation, dilation), dtype=array.dtype)
 
         for i in range(array.shape[axis]):
-            slide = array.take(i, axis=axis)
+            slide = take_along_axis(array, i, axis)
             ptps = cv2.dilate(slide, ptp_kernel) - cv2.erode(slide, ptp_kernel)
             mask_ = ptps <= threshold
             if erosion:

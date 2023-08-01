@@ -13,7 +13,7 @@ from sklearn.linear_model import LinearRegression
 
 from batchflow import Notifier
 
-from .functions import generate_string, triangular_weights_function_nd
+from .functions import generate_string, triangular_weights_function_nd, take_along_axis
 
 
 
@@ -318,7 +318,7 @@ class Accumulator3D:
                                                     **dataset_kwargs_)
 
                     for i in range(data.shape[axis]):
-                        projection[i] = transform(np.take(data, i, axis=axis))
+                        projection[i] = transform(take_along_axis(data, i, axis=axis))
                         progress_bar.update()
         return h5py.File(path, mode='r')
 
